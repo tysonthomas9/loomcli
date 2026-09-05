@@ -156,6 +156,125 @@ describe("agentStore", () => {
     vi.useRealTimers();
   });
 
+  describe("refreshForRecovery", () => {
+    it("rejects a coordinator workspace different from the configured store before fetching", async () => {
+      setupSuccessfulMocks();
+      store.getState().startPolling({ workspaceId: "old", pollInterval: 0 });
+      await vi.advanceTimersByTimeAsync(0);
+      mockFetchStatus.mockClear();
+      await expect(
+        store
+          .getState()
+          .refreshForRecovery(new AbortController().signal, "new"),
+      ).rejects.toThrow("workspace mismatch");
+      expect(mockFetchStatus).not.toHaveBeenCalled();
+      await expect(
+        store
+          .getState()
+          .refreshForRecovery(new AbortController().signal, "old"),
+      ).resolves.toBeUndefined();
+      expect(mockFetchStatus).toHaveBeenCalledWith("old");
+    });
+    it("rejects API failure while legacy fetchData still reports it through state", async () => {
+      const failure = new Error("status unavailable");
+      mockFetchStatus.mockRejectedValue(failure);
+      await expect(
+        store.getState().refreshForRecovery(new AbortController().signal),
+      ).rejects.toBe(failure);
+      expect(store.getState().error).toBe(failure);
+      await expect(store.getState().fetchData()).resolves.toBeUndefined();
+    });
+
+    it("starts a new request and never accepts an older in-flight success", async () => {
+      const old = deferred<FetchStatusResult>();
+      const fresh = deferred<FetchStatusResult>();
+      mockFetchStatus
+        .mockReturnValueOnce(old.promise)
+        .mockReturnValueOnce(fresh.promise);
+      const legacy = store.getState().fetchData();
+      const recovered = vi.fn();
+      const recovery = store
+        .getState()
+        .refreshForRecovery(new AbortController().signal)
+        .then(recovered);
+      expect(mockFetchStatus).toHaveBeenCalledTimes(2);
+      old.resolve(makeStatusResult({ agents: [makeAgent({ name: "old" })] }));
+      await legacy;
+      expect(recovered).not.toHaveBeenCalled();
+      expect(store.getState().agents).toEqual([]);
+      fresh.resolve(
+        makeStatusResult({ agents: [makeAgent({ name: "fresh" })] }),
+      );
+      await recovery;
+      expect(recovered).toHaveBeenCalledOnce();
+      expect(store.getState().agents[0]?.name).toBe("fresh");
+    });
+
+    it("rejects immediately on workspace changes and ignores the old response", async () => {
+      setupSuccessfulMocks();
+      store.getState().startPolling({ workspaceId: "old", pollInterval: 0 });
+      await vi.advanceTimersByTimeAsync(0);
+      const old = deferred<FetchStatusResult>();
+      mockFetchStatus
+        .mockReturnValueOnce(old.promise)
+        .mockResolvedValueOnce(
+          makeStatusResult({ agents: [makeAgent({ name: "new" })] }),
+        );
+      const recovery = store
+        .getState()
+        .refreshForRecovery(new AbortController().signal);
+      const rejected = expect(recovery).rejects.toThrow("workspace changed");
+      store.getState().startPolling({ workspaceId: "new", pollInterval: 0 });
+      await rejected;
+      await vi.advanceTimersByTimeAsync(0);
+      old.resolve(makeStatusResult({ agents: [makeAgent({ name: "old" })] }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(store.getState().agents[0]?.name).toBe("new");
+      expect(mockFetchStatus).toHaveBeenLastCalledWith("new");
+    });
+
+    it("rejects an aborted recovery without waiting for the API and cannot commit later", async () => {
+      const request = deferred<FetchStatusResult>();
+      mockFetchStatus.mockReturnValue(request.promise);
+      const controller = new AbortController();
+      const recovery = store.getState().refreshForRecovery(controller.signal);
+      const reason = new Error("repo scope changed");
+      const rejected = expect(recovery).rejects.toBe(reason);
+      controller.abort(reason);
+      await rejected;
+      expect(store.getState().isLoading).toBe(false);
+      request.resolve(makeStatusResult());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(store.getState().lastUpdated).toBeNull();
+      expect(store.getState().agents).toEqual([]);
+    });
+
+    it("rejects superseded recovery even if the older request later succeeds", async () => {
+      const old = deferred<FetchStatusResult>();
+      mockFetchStatus
+        .mockReturnValueOnce(old.promise)
+        .mockResolvedValueOnce(makeStatusResult());
+      const first = store
+        .getState()
+        .refreshForRecovery(new AbortController().signal);
+      const rejected = expect(first).rejects.toThrow("superseded");
+      await store.getState().refreshForRecovery(new AbortController().signal);
+      await rejected;
+      old.resolve(makeStatusResult({ agents: [] }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(store.getState().agents).toHaveLength(1);
+    });
+
+    it("does not start or supersede a request with an already aborted signal", async () => {
+      const controller = new AbortController();
+      controller.abort(new Error("cancelled"));
+      await expect(
+        store.getState().refreshForRecovery(controller.signal),
+      ).rejects.toThrow("cancelled");
+      expect(mockFetchStatus).not.toHaveBeenCalled();
+    });
+  });
+
   // -----------------------------------------------------------------------
   // 1. Initial state
   // -----------------------------------------------------------------------

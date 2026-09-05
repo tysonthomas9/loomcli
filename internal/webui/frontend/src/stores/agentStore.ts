@@ -113,6 +113,10 @@ export interface AgentStoreState {
 
 export interface AgentStoreActions {
   fetchData: () => Promise<void>;
+  refreshForRecovery: (
+    signal: AbortSignal,
+    expectedWorkspaceId?: string,
+  ) => Promise<void>;
   startPolling: (options?: PollingOptions) => void;
   stopPolling: () => void;
   retryNow: () => void;
@@ -153,6 +157,7 @@ async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
   label: string,
+  signal: AbortSignal,
 ): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
@@ -162,9 +167,16 @@ async function withTimeout<T>(
     }, timeoutMs);
   });
 
+  let onAbort = (): void => {};
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason ?? new Error("Status fetch aborted"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
   try {
-    return await Promise.race([promise, timeoutPromise]);
+    return await Promise.race([promise, timeoutPromise, aborted]);
   } finally {
+    signal.removeEventListener("abort", onAbort);
     if (timeoutId !== null) {
       clearTimeout(timeoutId);
     }
@@ -203,6 +215,7 @@ export function createAgentStore(
   let staleBannerTimeoutId: ReturnType<typeof setTimeout> | null = null;
   let fetchInProgress = false;
   let generation = 0;
+  let activeRequest: AbortController | null = null;
   let currentRetryDelay = INITIAL_RETRY_DELAY_S;
   let consecutiveFailuresAtCeiling = 0;
   let visibilityHandler: (() => void) | null = null;
@@ -315,6 +328,107 @@ export function createAgentStore(
     }
   }
 
+  // A recovery fetch always supersedes older work. The status endpoint is
+  // workspace-wide; callers abort the recovery signal if their repo scope changes.
+  async function runFetch(
+    set: (partial: Partial<AgentStore>) => void,
+    get: () => AgentStore,
+    externalSignal?: AbortSignal,
+  ): Promise<void> {
+    externalSignal?.throwIfAborted();
+    activeRequest?.abort(new Error("Status fetch superseded"));
+    const controller = new AbortController();
+    activeRequest = controller;
+    const onAbort = (): void => controller.abort(externalSignal?.reason);
+    externalSignal?.addEventListener("abort", onAbort, { once: true });
+    generation++;
+    fetchInProgress = true;
+    const fetchGeneration = generation;
+    const workspaceId = activeWorkspaceId;
+    const assertCurrent = (): void => {
+      controller.signal.throwIfAborted();
+      if (fetchGeneration !== generation)
+        throw new Error("Status fetch superseded");
+    };
+    set({ isLoading: true });
+
+    try {
+      assertCurrent();
+      const statusResult = await withTimeout(
+        fetchStatus(workspaceId),
+        FETCH_TIMEOUT_MS,
+        "Status fetch",
+        controller.signal,
+      );
+
+      assertCurrent();
+
+      // Primary success
+      const now = Date.now();
+      set({
+        agents: statusResult.agents,
+        tasks: statusResult.tasks,
+        taskLists: statusResult.taskLists,
+        agentTasks: statusResult.agentTasks,
+        sync: statusResult.sync,
+        stats: statusResult.stats,
+        isConnected: true,
+        error: null,
+        lastUpdated: now,
+        isLoading: false,
+      });
+
+      assertCurrent();
+      reportSuccess(set);
+      assertCurrent();
+
+      // Derive connection state
+      const state = get();
+      set({
+        connectionState: deriveConnectionState(
+          true,
+          false,
+          state.wasEverConnected,
+          state.retryCountdown,
+        ),
+      });
+      assertCurrent();
+    } catch (err) {
+      assertCurrent();
+
+      // Primary failure
+      const error = err instanceof Error ? err : new Error(String(err));
+      set({
+        error,
+        isConnected: false,
+        isLoading: false,
+      });
+
+      assertCurrent();
+      reportFailure(set, get);
+      assertCurrent();
+
+      // Derive connection state
+      const state = get();
+      set({
+        connectionState: deriveConnectionState(
+          false,
+          false,
+          state.wasEverConnected,
+          state.retryCountdown,
+        ),
+      });
+      throw error;
+    } finally {
+      externalSignal?.removeEventListener("abort", onAbort);
+      if (fetchGeneration === generation) {
+        fetchInProgress = false;
+        activeRequest = null;
+        if (controller.signal.aborted) set({ isLoading: false });
+      }
+    }
+  }
+
   // --- Store ---
 
   const store = createStore<AgentStore>((set, get) => ({
@@ -322,75 +436,21 @@ export function createAgentStore(
 
     async fetchData(): Promise<void> {
       if (fetchInProgress) return;
+      // Legacy polling callers observe failures through store state.
+      await runFetch(set, get).catch(() => {});
+    },
 
-      fetchInProgress = true;
-      const fetchGeneration = generation;
-      set({ isLoading: true });
-
-      try {
-        const statusResult = await withTimeout(
-          fetchStatus(activeWorkspaceId),
-          FETCH_TIMEOUT_MS,
-          "Status fetch",
-        );
-
-        if (fetchGeneration !== generation) return;
-
-        // Primary success
-        const now = Date.now();
-        set({
-          agents: statusResult.agents,
-          tasks: statusResult.tasks,
-          taskLists: statusResult.taskLists,
-          agentTasks: statusResult.agentTasks,
-          sync: statusResult.sync,
-          stats: statusResult.stats,
-          isConnected: true,
-          error: null,
-          lastUpdated: now,
-          isLoading: false,
-        });
-
-        reportSuccess(set);
-
-        // Derive connection state
-        const state = get();
-        set({
-          connectionState: deriveConnectionState(
-            true,
-            false,
-            state.wasEverConnected,
-            state.retryCountdown,
-          ),
-        });
-      } catch (err) {
-        if (fetchGeneration !== generation) return;
-
-        // Primary failure
-        const error = err instanceof Error ? err : new Error(String(err));
-        set({
-          error,
-          isConnected: false,
-          isLoading: false,
-        });
-
-        reportFailure(set, get);
-
-        // Derive connection state
-        const state = get();
-        set({
-          connectionState: deriveConnectionState(
-            false,
-            false,
-            state.wasEverConnected,
-            state.retryCountdown,
-          ),
-        });
-      } finally {
-        if (fetchGeneration === generation) {
-          fetchInProgress = false;
-        }
+    refreshForRecovery(
+      signal: AbortSignal,
+      expectedWorkspaceId?: string,
+    ): Promise<void> {
+      if (
+        expectedWorkspaceId !== undefined &&
+        expectedWorkspaceId !== activeWorkspaceId
+      ) {
+        return Promise.reject(new Error("Status recovery workspace mismatch"));
       }
+      return runFetch(set, get, signal);
     },
 
     startPolling(options?: PollingOptions): void {
@@ -403,6 +463,7 @@ export function createAgentStore(
       }
 
       if (workspaceChanged) {
+        activeRequest?.abort(new Error("Status workspace changed"));
         generation++;
         fetchInProgress = false;
       }
@@ -480,6 +541,7 @@ export function createAgentStore(
     reset(): void {
       get().stopPolling();
 
+      activeRequest?.abort(new Error("Status store reset"));
       generation++;
       fetchInProgress = false;
       currentRetryDelay = INITIAL_RETRY_DELAY_S;

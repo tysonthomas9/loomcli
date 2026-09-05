@@ -144,6 +144,60 @@ class InvalidatedQueryEntry<T> {
   private trailing = false;
   private trailingForce = false;
   private pendingRefetches: Array<() => void> = [];
+  private recovery: {
+    request: InFlight | null;
+    settle: (error?: unknown) => void;
+  } | null = null;
+
+  recoveryIdentity(): string {
+    return [...this.registrations.values()]
+      .filter((registration) => registration.committed && registration.enabled)
+      .map((registration) => registration.id)
+      .join(",");
+  }
+
+  refreshForRecovery(signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return Promise.reject(recoveryAbort());
+    this.recovery?.settle(recoveryAbort());
+    // An older request cannot certify reads begun after the recovery fence.
+    this.generation += 1;
+    this.inFlight?.controller.abort();
+    this.inFlight = null;
+    this.clearDebounce();
+    this.trailing = false;
+    this.trailingForce = false;
+    return new Promise<void>((resolve, reject) => {
+      const recovery = {
+        request: null as InFlight | null,
+        settle: (error?: unknown) => {
+          if (this.recovery !== recovery) return;
+          this.recovery = null;
+          signal.removeEventListener("abort", abort);
+          if (error === undefined) resolve();
+          else reject(error);
+        },
+      };
+      const abort = () => {
+        if (this.recovery !== recovery) return;
+        recovery.request?.controller.abort();
+        if (this.inFlight === recovery.request) {
+          this.inFlight = null;
+          this.generation += 1;
+          this.setSnapshot({ loading: false });
+        }
+        recovery.settle(recoveryAbort());
+        this.settlePendingRefetches();
+      };
+      this.recovery = recovery;
+      signal.addEventListener("abort", abort, { once: true });
+      this.startFetch(true);
+      if (!recovery.request) {
+        recovery.settle(
+          new Error(`No committed enabled fetcher for ${this.key}`),
+        );
+      }
+    });
+  }
 
   constructor(
     key: string,
@@ -258,6 +312,7 @@ class InvalidatedQueryEntry<T> {
   }
 
   private deactivate(): void {
+    this.recovery?.settle(recoveryAbort());
     this.generation += 1;
     if (this.inFlight) this.inFlight.controller.abort();
     this.inFlight = null;
@@ -352,18 +407,22 @@ class InvalidatedQueryEntry<T> {
     );
   }
 
-  private findFetcher(): Fetcher<T> | undefined {
+  private findFetcher(enabledOnly = false): Fetcher<T> | undefined {
     for (const registration of this.registrations.values()) {
-      if (registration.committed && registration.fetcherRef.current) {
+      if (
+        registration.committed &&
+        (!enabledOnly || registration.enabled) &&
+        registration.fetcherRef.current
+      ) {
         return registration.fetcherRef.current;
       }
     }
     return undefined;
   }
 
-  private startFetch(): void {
+  private startFetch(enabledOnly = false): void {
     if (this.inFlight) return;
-    const fetcher = this.findFetcher();
+    const fetcher = this.findFetcher(enabledOnly);
     if (!fetcher) return;
 
     const controller = new AbortController();
@@ -374,10 +433,12 @@ class InvalidatedQueryEntry<T> {
       token,
     };
     this.inFlight = current;
+    if (enabledOnly && this.recovery) this.recovery.request = current;
     this.fetchEpoch = this.latestEpoch;
     this.dirty = false;
     this.setSnapshot({ loading: true });
 
+    if (controller.signal.aborted) return;
     let request: Promise<T>;
     try {
       request = fetcher(controller.signal);
@@ -386,7 +447,12 @@ class InvalidatedQueryEntry<T> {
     }
     void request.then(
       (data) => this.finishFetch(current, data, null),
-      (error: unknown) => this.finishFetch(current, null, error),
+      (error: unknown) =>
+        this.finishFetch(
+          current,
+          null,
+          error ?? new Error("Query fetch rejected without an error"),
+        ),
     );
   }
 
@@ -405,6 +471,10 @@ class InvalidatedQueryEntry<T> {
       });
     } else {
       this.setSnapshot({ loading: false });
+    }
+
+    if (this.recovery?.request === current) {
+      this.recovery.settle(error === null ? undefined : error);
     }
 
     const shouldTrail = this.trailing;
@@ -483,8 +553,129 @@ export interface InvalidatedQueryRegistration<T> {
   dispose(): void;
 }
 
+function recoveryAbort(): DOMException {
+  return new DOMException(
+    "Query recovery canceled or superseded",
+    "AbortError",
+  );
+}
+
+interface RegistryRecovery {
+  signal: AbortSignal;
+  members: Map<
+    InvalidatedQueryEntry<unknown>,
+    {
+      identity: string;
+      controller: AbortController;
+      done: boolean;
+    }
+  >;
+  finish: (error?: unknown) => void;
+}
+
 export class InvalidatedQueryRegistry {
   private readonly entries = new Map<string, InvalidatedQueryEntry<unknown>>();
+  private recovery: RegistryRecovery | null = null;
+  private recoveryRevision = 0;
+  private requiredIdentities = new Map<
+    InvalidatedQueryEntry<unknown>,
+    string
+  >();
+
+  /** Changes when the committed enabled query membership changes, even idle. */
+  getRecoveryRevision(): number {
+    return this.recoveryRevision;
+  }
+
+  private updateRecoveryRevision(): void {
+    const next = new Map<InvalidatedQueryEntry<unknown>, string>();
+    for (const entry of this.entries.values()) {
+      const identity = entry.recoveryIdentity();
+      if (identity) next.set(entry, identity);
+    }
+    if (
+      next.size !== this.requiredIdentities.size ||
+      [...next].some(
+        ([entry, identity]) => this.requiredIdentities.get(entry) !== identity,
+      )
+    ) {
+      this.requiredIdentities = next;
+      this.recoveryRevision += 1;
+    }
+  }
+
+  /** Resolve only after fresh successful reads for every active query identity. */
+  refreshForRecovery(signal: AbortSignal): Promise<void> {
+    this.recovery?.finish(recoveryAbort());
+    if (signal.aborted) return Promise.reject(recoveryAbort());
+    return new Promise<void>((resolve, reject) => {
+      const attempt: RegistryRecovery = {
+        signal,
+        members: new Map(),
+        finish: (error?: unknown) => {
+          if (this.recovery !== attempt) return;
+          this.recovery = null;
+          signal.removeEventListener("abort", abort);
+          for (const member of attempt.members.values())
+            member.controller.abort();
+          if (error === undefined) resolve();
+          else reject(error);
+        },
+      };
+      const abort = () => attempt.finish(recoveryAbort());
+      this.recovery = attempt;
+      signal.addEventListener("abort", abort, { once: true });
+      this.syncRecovery();
+    });
+  }
+
+  private syncRecovery(): void {
+    this.updateRecoveryRevision();
+    const attempt = this.recovery;
+    if (!attempt) return;
+    const active = new Set(this.entries.values());
+    for (const [entry, member] of attempt.members) {
+      if (!active.has(entry) || entry.recoveryIdentity() !== member.identity) {
+        attempt.members.delete(entry);
+        member.controller.abort();
+      }
+    }
+    for (const entry of active) {
+      const identity = entry.recoveryIdentity();
+      if (!identity || attempt.members.has(entry)) continue;
+      const member = {
+        identity,
+        controller: new AbortController(),
+        done: false,
+      };
+      attempt.members.set(entry, member);
+      void entry.refreshForRecovery(member.controller.signal).then(
+        () => {
+          if (
+            this.recovery !== attempt ||
+            attempt.members.get(entry) !== member
+          )
+            return;
+          member.done = true;
+          this.syncRecovery();
+        },
+        (error: unknown) => {
+          if (
+            this.recovery === attempt &&
+            attempt.members.get(entry) === member
+          )
+            attempt.finish(error);
+        },
+      );
+    }
+    // Let synchronous React commit/cleanup work enroll or withdraw members
+    // before deciding that this attempt's active set is complete.
+    queueMicrotask(() => {
+      if (this.recovery !== attempt) return;
+      if ([...attempt.members.values()].every((member) => member.done))
+        attempt.finish();
+    });
+  }
 
   private getOrCreateEntry<T>(
     key: string,
@@ -519,18 +710,26 @@ export class InvalidatedQueryRegistry {
       key,
       getSnapshot: () => entry.getSnapshot(),
       subscribe: (listener) => entry.subscribe(listener),
-      commit: (nextFetcher) => entry.commit(registration, nextFetcher),
+      commit: (nextFetcher) => {
+        entry.commit(registration, nextFetcher);
+        this.syncRecovery();
+      },
       revive: (nextFetcher, nextEpoch) => {
         if (!disposed) {
           entry.commit(registration, nextFetcher);
+          this.syncRecovery();
           return;
         }
         entry = this.getOrCreateEntry<T>(key, options, nextEpoch);
         registration = entry.register(nextFetcher);
         entry.commit(registration, nextFetcher);
         disposed = false;
+        this.syncRecovery();
       },
-      setEnabled: (enabled) => entry.setEnabled(registration, enabled),
+      setEnabled: (enabled) => {
+        entry.setEnabled(registration, enabled);
+        this.syncRecovery();
+      },
       onEpoch: (epoch) => entry.onEpoch(epoch),
       invalidate: (mutation) => entry.invalidate(mutation),
       refetch: () => entry.refetch(),
@@ -541,6 +740,7 @@ export class InvalidatedQueryRegistry {
           entry.destroy();
           this.entries.delete(key);
         }
+        this.syncRecovery();
       },
     };
   }
