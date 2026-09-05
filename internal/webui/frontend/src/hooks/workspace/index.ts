@@ -106,6 +106,9 @@ export type {
   UseWorkspaceStateParams,
 } from "./useWorkspaceState";
 
+export { useWorkspaceStats } from "./useWorkspaceStats";
+export type { UseWorkspaceStatsReturn } from "./useWorkspaceStats";
+
 export { useWorkspaceTree } from "./useWorkspaceTree";
 export type { EpicWithTasks, UseWorkspaceTreeReturn } from "./useWorkspaceTree";
 

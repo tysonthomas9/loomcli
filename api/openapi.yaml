@@ -199,7 +199,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Statistics"
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/Statistics"
 
   # ── Workspaces ──────────────────────────────────────────────────────────
   /api/workspaces/active:
@@ -5482,6 +5488,8 @@ components:
         - blocked_issues
         - deferred_issues
         - ready_issues
+        - review_issues
+        - status_blocked_issues
         - tombstone_issues
         - pinned_issues
         - epics_eligible_for_closure
@@ -5500,6 +5508,12 @@ components:
         deferred_issues:
           type: integer
         ready_issues:
+          type: integer
+        # Per-STATUS count. Distinct from blocked_issues, which is the computed
+        # dependency-blocked view.
+        review_issues:
+          type: integer
+        status_blocked_issues:
           type: integer
         tombstone_issues:
           type: integer

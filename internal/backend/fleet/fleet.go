@@ -432,9 +432,19 @@ func (b *FleetBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
 		ReadyIssues:      len(ready),
 		TombstoneIssues:  int(groups[string(types.StatusTombstone)]),
 		PinnedIssues:     int(groups[string(types.StatusPinned)]),
+		// ReviewIssues and StatusBlockedIssues are the per-STATUS counts, read from
+		// the same groups map. StatusBlockedIssues is deliberately distinct from
+		// BlockedIssues above, which is fleet-db's computed dependency-blocked view.
+		ReviewIssues:        int(groups[string(types.StatusReview)]),
+		StatusBlockedIssues: int(groups[string(types.StatusBlocked)]),
 		// EpicsEligibleForClosure, AverageLeadTime: 0 (fleet-08yg).
-		// StatusReview and StatusHooked counts are included in TotalIssues but have
-		// no dedicated StatsData field; they are silently omitted from per-status counts.
+		// StatusHooked counts are included in TotalIssues but have no dedicated
+		// StatsData field; they are silently omitted from per-status counts.
+		//
+		// TotalIssues itself OMITS deferred issues: fleet-db's grouped status count
+		// skips the deferred index unless the filter opts in, and /issues/count
+		// exposes no such param. DeferredIssues above is the only route to that
+		// count, which is why it is a status count while BlockedIssues is not.
 	}, nil
 }
 
