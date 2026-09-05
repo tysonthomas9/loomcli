@@ -569,7 +569,13 @@ func (s *agentOwnershipLeaseStore) Acquire(_ context.Context, in store.AgentOwne
 	}
 	now := time.Now().UTC()
 	if existing := s.items[in.WorkspaceKey][in.AgentID]; existing != nil && existing.Status == domain.AgentLeaseActive && existing.ExpiresAt.After(now) {
-		return nil, fmt.Errorf("agent ownership lease %q in workspace %q: %w", in.AgentID, in.WorkspaceKey, domain.ErrAlreadyExists)
+		// Compare-and-steal: a takeover naming the live lease's current
+		// owner falls through and re-issues the lease under the new owner.
+		// Any other request (including a takeover naming a stale owner)
+		// is rejected as before.
+		if in.TakeoverFromOwnerID == "" || in.TakeoverFromOwnerID != existing.OwnerID {
+			return nil, fmt.Errorf("agent ownership lease %q in workspace %q: %w", in.AgentID, in.WorkspaceKey, domain.ErrAlreadyExists)
+		}
 	}
 	s.next++
 	ttl := in.TTL
