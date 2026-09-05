@@ -125,3 +125,43 @@ func TestNewRequiresCredentialsAndPinning(t *testing.T) {
 		})
 	}
 }
+
+// TestVMSSHRouteUsesServiceResponse covers both routing shapes returned by
+// exe.dev accounts. The VM record, not a hardcoded hostname, is authoritative.
+func TestVMSSHRouteUsesServiceResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		vm       vm
+		wantHost string
+		wantUser string
+	}{
+		{
+			name:     "direct hostname",
+			vm:       vm{Name: "loom-p1", SSHDest: "loom-p1.exe.xyz", SSHHost: "loom-p1.exe.xyz"},
+			wantHost: "loom-p1.exe.xyz", wantUser: "exedev",
+		},
+		{
+			name:     "shared gateway",
+			vm:       vm{Name: "loom-p1", SSHDest: "vm+loom-p1@vm.exe.xyz", SSHHost: "vm.exe.xyz", SSHUser: "vm+loom-p1"},
+			wantHost: "vm.exe.xyz", wantUser: "vm+loom-p1",
+		},
+		{
+			name:     "destination fallback",
+			vm:       vm{Name: "loom-p1", SSHDest: "vm+loom-p1@vm.exe.xyz"},
+			wantHost: "vm.exe.xyz", wantUser: "vm+loom-p1",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			route, err := sshRouteForVM(tc.vm)
+			if err != nil {
+				t.Fatalf("sshRouteForVM: %v", err)
+			}
+			if route.host != tc.wantHost || route.user != tc.wantUser {
+				t.Fatalf("route = %#v, want host=%q user=%q", route, tc.wantHost, tc.wantUser)
+			}
+			if route.pinIdentity != "vm:loom-p1" {
+				t.Fatalf("pin identity = %q, want stable VM identity", route.pinIdentity)
+			}
+		})
+	}
+}

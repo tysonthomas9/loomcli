@@ -12,7 +12,9 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/placement"
+	"github.com/tysonthomas9/loomcli/internal/placement/daytona"
 	webuiterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -113,11 +115,51 @@ func TestBuildExeProviderFullyConfigured(t *testing.T) {
 	}
 }
 
+// TestBuildSupportsExeWithoutDaytona proves the provider registry is the
+// construction seam, not a Daytona-owned feature with exe nested beneath it.
+// An operator who configures only exe.dev must get a usable placement broker.
+func TestBuildSupportsExeWithoutDaytona(t *testing.T) {
+	configureExe(t)
+	t.Setenv(daytona.APIKeyEnv, "")
+	t.Setenv("LOOM_DEPLOYMENT_ID", "test-deployment")
+
+	broker, providers := Build(memstore.New(), []byte("0123456789abcdef0123456789abcdef"))
+	if broker == nil {
+		t.Fatal("Build() broker = nil for complete exe-only configuration")
+	}
+	if providers[domain.RuntimeProviderExe] == nil {
+		t.Fatalf("Build() providers = %#v, want registered exe provider", providers)
+	}
+	if _, ok := providers[domain.RuntimeProviderDaytona]; ok {
+		t.Fatalf("Build() providers = %#v, Daytona registered without credentials", providers)
+	}
+}
+
+func TestBuildFailureDoesNotRegisterExeTerminalAttach(t *testing.T) {
+	configureExe(t)
+	t.Setenv(daytona.APIKeyEnv, "")
+	t.Setenv("LOOM_DEPLOYMENT_ID", "")
+	restoreExisting := webuiterminal.RegisterRemoteUpstreamFactory(domain.RuntimeProviderExe, nil)
+	t.Cleanup(restoreExisting)
+
+	broker, providers := Build(memstore.New(), []byte("0123456789abcdef0123456789abcdef"))
+	if broker != nil || providers != nil {
+		t.Fatalf("Build() = (%#v, %#v), want disabled broker for missing deployment id", broker, providers)
+	}
+	if webuiterminal.SupportsRemoteProvider(domain.RuntimeProviderExe) {
+		t.Fatal("failed Build left exe terminal attach registered")
+	}
+}
+
 // TestRegisterExeTerminalAttachMakesExeAttachable is the check that "registered
 // as a provider" and "openable in the UI" cannot drift apart. Before the
 // registry existed the attach path switched on a literal "daytona", so a second
 // provider provisioned fine and then could not be opened.
 func TestRegisterExeTerminalAttachMakesExeAttachable(t *testing.T) {
+	// Establish the precondition locally rather than depending on no earlier
+	// test having exercised Build, which registers configured providers.
+	restoreExisting := webuiterminal.RegisterRemoteUpstreamFactory(domain.RuntimeProviderExe, nil)
+	t.Cleanup(restoreExisting)
 	if webuiterminal.SupportsRemoteProvider(domain.RuntimeProviderExe) {
 		t.Fatal("exe was already attachable before registration; test cannot prove anything")
 	}

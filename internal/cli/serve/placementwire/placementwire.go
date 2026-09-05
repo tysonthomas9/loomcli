@@ -40,34 +40,34 @@ const (
 )
 
 // Build constructs the placement broker and its provider registry when this
-// deployment is configured to place leads in sandboxes. It returns nil (and
-// logs once) unless DAYTONA_API_KEY, LOOM_DEPLOYMENT_ID, and an occupant-token
-// signing key are all present -- the broker mints occupant tokens with the same
-// key the leadapi module verifies (DriverRunTokenKey), so a mismatch would make
-// every sandboxed lead's API call fail. Callers treat nil as "sandbox placement
-// disabled".
+// deployment configures at least one sandbox provider. It returns nil when no
+// provider is configured or a shared broker prerequisite is absent. The broker
+// mints occupant tokens with the same key the leadapi module verifies
+// (DriverRunTokenKey), so a mismatch would make every sandboxed lead's API call
+// fail. Callers treat nil as "sandbox placement disabled".
 //
-// Daytona gates the whole broker because it is still the default provider;
-// exe.dev is added to the registry when separately configured. The returned
-// registry -- not any single provider -- is what every later routing decision
-// keys off, since a sandbox id is unique only within its provider.
+// Providers are independent: Daytona, exe.dev, or both may be configured. The
+// returned registry -- not any single provider -- is what every later routing
+// decision keys off, since a sandbox id is unique only within its provider.
 func Build(st store.Store, tokenKey []byte) (*placement.Broker, placement.ProviderRegistry) {
-	if strings.TrimSpace(os.Getenv(daytona.APIKeyEnv)) == "" {
-		return nil, nil
-	}
 	if len(tokenKey) == 0 {
 		slog.Warn("placement broker disabled: no occupant-token signing key (set LOOM_RUN_TOKEN_SIGNING_KEY)")
 		return nil, nil
 	}
-	provider, err := daytona.New(daytona.Config{})
-	if err != nil {
-		slog.Error("placement broker disabled: construct Daytona provider", "err", err)
-		return nil, nil
+	providers := make(placement.ProviderRegistry)
+	if strings.TrimSpace(os.Getenv(daytona.APIKeyEnv)) != "" {
+		provider, err := daytona.New(daytona.Config{})
+		if err != nil {
+			slog.Error("Daytona provider not registered", "err", err)
+		} else {
+			providers[domain.RuntimeProviderDaytona] = provider
+		}
 	}
-	providers := placement.ProviderRegistry{domain.RuntimeProviderDaytona: provider}
 	if exeProvider := buildExeProvider(); exeProvider != nil {
 		providers[domain.RuntimeProviderExe] = exeProvider
-		registerExeTerminalAttach(exeProvider)
+	}
+	if len(providers) == 0 {
+		return nil, nil
 	}
 	broker, err := newBroker(st, providers, tokenKey)
 	if err != nil {
@@ -75,6 +75,9 @@ func Build(st store.Store, tokenKey []byte) (*placement.Broker, placement.Provid
 		// sandboxes carry the loom-env label the reaper scopes to).
 		slog.Error("placement broker disabled: construct broker", "err", err)
 		return nil, nil
+	}
+	if exeProvider, ok := providers[domain.RuntimeProviderExe].(*exe.Provider); ok {
+		registerExeTerminalAttach(exeProvider)
 	}
 	slog.Info("Placement broker enabled", "providers", registeredProviderNames(providers))
 	return broker, providers

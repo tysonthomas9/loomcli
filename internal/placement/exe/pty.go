@@ -82,7 +82,7 @@ func (p *Provider) AttachPTY(ctx context.Context, sandboxID, ptySessionID string
 		return nil, err
 	}
 
-	client, err := p.dialer.dial(ctx, sandboxID)
+	client, err := p.dial(ctx, sandboxID)
 	if err != nil {
 		return nil, err
 	}

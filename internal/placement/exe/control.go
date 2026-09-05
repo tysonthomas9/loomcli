@@ -165,9 +165,12 @@ type vm struct {
 	// Tags is ABSENT (not []) on an untagged VM -- live-verified, evidence 61.
 	// It decodes to nil, which every label match must tolerate.
 	Tags []string `json:"tags"`
-	// The API exposes no ssh_user or ssh_port; those are provider constants,
-	// not read values. An earlier draft invented both fields.
+	// SSHDest is the ready-to-use destination returned by the service.
+	// SSHHost and SSHUser are its structured equivalents; current exe.dev may
+	// route multiple VMs through one gateway by encoding the VM in SSHUser.
+	SSHDest   string `json:"ssh_dest"`
 	SSHHost   string `json:"ssh_host"`
+	SSHUser   string `json:"ssh_user"`
 	TermURL   string `json:"terminal_url"`
 	Image     string `json:"image"`
 	Region    string `json:"region"`

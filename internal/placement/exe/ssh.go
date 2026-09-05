@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -17,15 +18,10 @@ import (
 )
 
 const (
-	// sshUser and sshPort are provider constants. The control-plane API
-	// exposes neither -- an earlier draft invented ssh_user/ssh_port fields
-	// that do not exist, and the compile error was the only thing that caught
-	// it. Do not "read" these from a VM record.
-	sshUser = "exedev"
-	sshPort = 22
-
-	// vmHostSuffix is how a VM name becomes an SSH host.
-	vmHostSuffix = ".exe.xyz"
+	// sshDefaultUser is used when exe.dev says any username works for a direct
+	// VM hostname. Some accounts instead return vm+<name> for a shared gateway.
+	sshDefaultUser = "exedev"
+	sshPort        = 22
 
 	// tmuxSocket namespaces loom's tmux server so it cannot collide with a
 	// user's own tmux inside the VM.
@@ -104,8 +100,18 @@ func (s *hostKeyStore) persistLocked() error {
 // callback returns an ssh.HostKeyCallback that pins on first sight and
 // verifies afterwards.
 func (s *hostKeyStore) callback() ssh.HostKeyCallback {
+	return s.callbackFor("")
+}
+
+// callbackFor pins a key under a stable per-VM identity. exe.dev routes every
+// VM through one gateway hostname, so the callback hostname alone cannot
+// distinguish VM keys.
+func (s *hostKeyStore) callbackFor(identity string) ssh.HostKeyCallback {
 	return func(hostname string, _ net.Addr, key ssh.PublicKey) error {
 		host := strings.TrimSuffix(hostname, ":22")
+		if identity != "" {
+			host = identity
+		}
 		presented := string(ssh.MarshalAuthorizedKey(key))
 		presented = strings.TrimSpace(presented)
 
@@ -157,23 +163,61 @@ func newSSHDialer(keyPEM []byte, hostKeys *hostKeyStore, timeout time.Duration) 
 	return &sshDialer{signer: signer, hostKeys: hostKeys, timeout: timeout}, nil
 }
 
-func vmHost(name string) string { return name + vmHostSuffix }
+type sshRoute struct {
+	host        string
+	user        string
+	pinIdentity string
+}
 
-func (d *sshDialer) dial(ctx context.Context, vmName string) (*ssh.Client, error) {
-	host := vmHost(vmName)
-	addr := net.JoinHostPort(host, fmt.Sprint(sshPort))
+var (
+	reSSHHost = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$`)
+	reSSHUser = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+._-]{0,127}$`)
+)
+
+func sshRouteForVM(found vm) (sshRoute, error) {
+	host := strings.TrimSpace(found.SSHHost)
+	user := strings.TrimSpace(found.SSHUser)
+	if host == "" {
+		dest := strings.TrimSpace(found.SSHDest)
+		if parsedUser, parsedHost, ok := strings.Cut(dest, "@"); ok {
+			user, host = parsedUser, parsedHost
+		} else {
+			host = dest
+		}
+	}
+	if user == "" {
+		user = sshDefaultUser
+	}
+	if !reSSHHost.MatchString(host) {
+		return sshRoute{}, fmt.Errorf("exe: invalid ssh_host %q for VM %q", host, found.Name)
+	}
+	if !reSSHUser.MatchString(user) {
+		return sshRoute{}, fmt.Errorf("exe: invalid ssh_user %q for VM %q", user, found.Name)
+	}
+	if err := checkArg("name", found.Name, reVMName); err != nil {
+		return sshRoute{}, err
+	}
+	return sshRoute{host: host, user: user, pinIdentity: vmHost(found.Name)}, nil
+}
+
+// vmHost is the durable host-key identity. It stays stable when exe.dev moves
+// a VM between a direct hostname and a shared SSH gateway.
+func vmHost(name string) string { return "vm:" + name }
+
+func (d *sshDialer) dial(ctx context.Context, vmName string, route sshRoute) (*ssh.Client, error) {
+	addr := net.JoinHostPort(route.host, fmt.Sprint(sshPort))
 	dialer := net.Dialer{Timeout: d.timeout}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("dial exe vm %q: %w", vmName, err)
 	}
 	cfg := &ssh.ClientConfig{
-		User:            sshUser,
+		User:            route.user,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(d.signer)},
-		HostKeyCallback: d.hostKeys.callback(),
+		HostKeyCallback: d.hostKeys.callbackFor(route.pinIdentity),
 		Timeout:         d.timeout,
 	}
-	sc, chans, reqs, err := ssh.NewClientConn(conn, host, cfg)
+	sc, chans, reqs, err := ssh.NewClientConn(conn, route.host, cfg)
 	if err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("ssh handshake with exe vm %q: %w", vmName, err)

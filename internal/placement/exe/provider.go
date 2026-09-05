@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/tysonthomas9/loomcli/internal/placement"
 )
 
@@ -158,6 +160,21 @@ func (p *Provider) pointRead(ctx context.Context, name string) (*vm, error) {
 	return nil, fmt.Errorf("exe sandbox %q: %w", name, placement.ErrSandboxNotFound)
 }
 
+// dial resolves the service-returned SSH route on every connection. exe.dev
+// may expose a direct per-VM hostname or a shared gateway with routing encoded
+// in the SSH user; the VM record is authoritative for the current account.
+func (p *Provider) dial(ctx context.Context, sandboxID string) (*ssh.Client, error) {
+	found, err := p.pointRead(ctx, sandboxID)
+	if err != nil {
+		return nil, err
+	}
+	route, err := sshRouteForVM(*found)
+	if err != nil {
+		return nil, err
+	}
+	return p.dialer.dial(ctx, sandboxID, route)
+}
+
 // EnsureRunning reports whether the sandbox is usable.
 //
 // exe.dev has no stop/start, so there is nothing to resume: a VM is either
@@ -217,7 +234,7 @@ func (p *Provider) SetAutostopInterval(context.Context, string, time.Duration) e
 
 // PrepareLeadBoot materializes the lead's working state before the PTY starts.
 func (p *Provider) PrepareLeadBoot(ctx context.Context, sandboxID string, prep placement.LeadBootPrep) error {
-	client, err := p.dialer.dial(ctx, sandboxID)
+	client, err := p.dial(ctx, sandboxID)
 	if err != nil {
 		return err
 	}
@@ -250,7 +267,7 @@ func (p *Provider) PrepareLeadBoot(ctx context.Context, sandboxID string, prep p
 
 // CreatePty starts the durable tmux session that backs the lead PTY.
 func (p *Provider) CreatePty(ctx context.Context, sandboxID string, spec placement.ProcessSpec) error {
-	client, err := p.dialer.dial(ctx, sandboxID)
+	client, err := p.dial(ctx, sandboxID)
 	if err != nil {
 		return err
 	}
@@ -270,7 +287,7 @@ func (p *Provider) CreatePty(ctx context.Context, sandboxID string, spec placeme
 
 // ListPtySessions returns the live tmux sessions.
 func (p *Provider) ListPtySessions(ctx context.Context, sandboxID string) ([]placement.PtySession, error) {
-	client, err := p.dialer.dial(ctx, sandboxID)
+	client, err := p.dial(ctx, sandboxID)
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +315,7 @@ func (p *Provider) ListPtySessions(ctx context.Context, sandboxID string) ([]pla
 // KillPtySession is absent-safe: killing a session that is already gone is the
 // desired state, not an error.
 func (p *Provider) KillPtySession(ctx context.Context, sandboxID, sessionID string) error {
-	client, err := p.dialer.dial(ctx, sandboxID)
+	client, err := p.dial(ctx, sandboxID)
 	if err != nil {
 		return err
 	}

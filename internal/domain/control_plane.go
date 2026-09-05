@@ -178,8 +178,8 @@ func ClientSelectableRuntimeProvider(p RuntimeProvider) bool {
 //
 // Distinct from ClientSelectableRuntimeProvider (whether a CALLER may ask for
 // it) and from a broker's ProviderRegistry (whether an adapter is wired in this
-// process). A provider can be sandbox-placed while remaining unselectable and
-// unregistered -- which is exactly RuntimeProviderExe's state today.
+// process). A provider can be sandbox-placed while remaining unselectable or
+// unregistered; those axes must not be inferred from one another.
 func SandboxPlacedRuntimeProvider(p RuntimeProvider) bool {
 	switch p {
 	case RuntimeProviderDaytona, RuntimeProviderExe:
