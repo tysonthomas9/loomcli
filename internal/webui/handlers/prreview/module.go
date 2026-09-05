@@ -2,7 +2,6 @@ package prreview
 
 import (
 	"context"
-	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -12,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -92,7 +92,7 @@ func (m *Module) InvalidateCredentialSeeds() {
 }
 
 // Register adds the workspace-scoped pull request review routes.
-func (m *Module) Register(mux *http.ServeMux) {
+func (m *Module) Register(mux route.Router) {
 	if m == nil || m.store == nil {
 		return
 	}

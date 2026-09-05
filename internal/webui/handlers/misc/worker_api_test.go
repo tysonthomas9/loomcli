@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -1008,9 +1009,19 @@ func TestSetupWorkerAPIRoutes(t *testing.T) {
 	resolveEvt := func(ws string) string { return tmpDir }
 	resolveLog := func(ws, ag string) string { return filepath.Join(tmpDir, "agent.log") }
 
-	reg := SetupWorkerAPIRoutes(mux, "test-token", resolveWT, resolveEvt, resolveLog, nil)
+	reg, patterns := SetupWorkerAPIRoutes(mux, "test-token", resolveWT, resolveEvt, resolveLog, nil)
 	if reg == nil {
 		t.Fatal("SetupWorkerAPIRoutes returned nil registry")
+	}
+	wantPatterns := []string{
+		"DELETE /api/internal/workers/{id}",
+		"POST /api/internal/workers/register",
+		"POST /api/internal/workers/{id}/events",
+		"POST /api/internal/workers/{id}/logs",
+		"POST /api/internal/workers/{id}/state",
+	}
+	if !reflect.DeepEqual(patterns, wantPatterns) {
+		t.Errorf("inner worker mux patterns = %v, want %v", patterns, wantPatterns)
 	}
 
 	ts := httptest.NewServer(mux)
@@ -1054,7 +1065,7 @@ func TestSetupWorkerAPIRoutes(t *testing.T) {
 func TestSetupWorkerAPIRoutes_RejectsWithoutAuth(t *testing.T) {
 	mux := http.NewServeMux()
 	tmpDir := t.TempDir()
-	SetupWorkerAPIRoutes(mux, "secret", func(_, _ string) string { return tmpDir }, func(_ string) string { return tmpDir }, func(_, _ string) string { return filepath.Join(tmpDir, "a.log") }, nil)
+	_, _ = SetupWorkerAPIRoutes(mux, "secret", func(_, _ string) string { return tmpDir }, func(_ string) string { return tmpDir }, func(_, _ string) string { return filepath.Join(tmpDir, "a.log") }, nil)
 
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
@@ -2058,7 +2069,7 @@ func TestResolveWorktreePath_UsesWorkspaceUUID(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	SetupWorkerAPIRoutes(mux, "test-token", resolveWT, resolveEvt, resolveLog, validator)
+	_, _ = SetupWorkerAPIRoutes(mux, "test-token", resolveWT, resolveEvt, resolveLog, validator)
 
 	ts := httptest.NewServer(mux)
 	defer ts.Close()

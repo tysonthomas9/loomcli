@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 )
 
 // maxWebhookPayloadBytes caps the inbound webhook body. GitHub deliveries are
@@ -38,7 +39,7 @@ func NewModule(st store.Store) *Module {
 	return &Module{store: st, adapters: defaultRegistry(), awaits: &trigger.AwaitMatcher{Store: st}}
 }
 
-func (m *Module) Register(mux *http.ServeMux) {
+func (m *Module) Register(mux route.Router) {
 	if m.store == nil {
 		return
 	}

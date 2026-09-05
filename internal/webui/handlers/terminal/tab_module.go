@@ -1,8 +1,7 @@
 package terminal
 
 import (
-	"net/http"
-
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -22,7 +21,7 @@ func NewTabModule(termSvc service.TerminalService) *TabModule {
 }
 
 // Register implements [Module] by registering terminal tab, state, and setup routes.
-func (m *TabModule) Register(mux *http.ServeMux) {
+func (m *TabModule) Register(mux route.Router) {
 	// Tab metadata CRUD
 	mux.HandleFunc("GET /api/workspaces/{ws}/terminal/tabs", HandleListTerminalTabs(m.termSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/terminal/tabs/{session}", HandleGetTerminalTab(m.termSvc))

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -14,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -465,7 +465,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.buildModules()
 
 	// Create mux and register all routes.
-	app.mux = http.NewServeMux()
+	app.mux = route.NewRecorder()
 	app.registerRoutes()
 	app.registerWorkerAPIRoutes()
 
