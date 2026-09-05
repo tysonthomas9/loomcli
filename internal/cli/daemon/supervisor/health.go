@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/agent"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
@@ -368,5 +369,45 @@ func (s *Supervisor) checkAgentHealth() {
 	// Emit health_check summary event
 	if evt, err := events.NewEvent(events.HealthCheck, "", "", "", events.HealthCheckData{AgentCount: totalAgents, HealthyCount: healthyAgents}); err == nil {
 		s.EmitEvent(evt)
+	}
+}
+
+// sharedWorktreeScan is the seam tests replace; production reads the
+// workspace's integration.yaml through the agent package, which the supervisor
+// already depends on.
+var sharedWorktreeScan = agent.StalledSharedWorktrees
+
+// reportSharedWorktreeState logs any shared `local/union` worktree left
+// mid-merge, once, every time an agent exits.
+//
+// It is unconditional on purpose. The 2026-09-05 incident went unreported
+// precisely because every conditional path missed it: postMortemRecovery
+// returns early for a yield escalation (which that exit was), and the next
+// cycle chose checkpoint recovery, which skips recoverAgent entirely. A
+// detector that only ran inside recovery would not have fired.
+//
+// It reports and never aborts. A live sibling integrator may own that merge,
+// and ownership is unprovable from a worktree alone — the sanctioned repair is
+// an operator running `loom doctor --fix`.
+func (s *Supervisor) reportSharedWorktreeState(ap *AgentProcess) {
+	agentName := ""
+	if ap != nil {
+		agentName = ap.Entry.Worktree
+	}
+	for _, sw := range sharedWorktreeScan() {
+		age := "unknown"
+		if sw.AgeKnown {
+			age = sw.Age.String()
+		}
+		slog.Warn("shared integration worktree is stuck mid-operation",
+			"repo", sw.Repo,
+			"path", sw.Path,
+			"branch", sw.Branch,
+			"op", sw.Op,
+			"head", sw.Head,
+			"unmerged", sw.Unmerged,
+			"age", age,
+			"after_exit_of", agentName,
+			"fix", "loom doctor --fix")
 	}
 }
