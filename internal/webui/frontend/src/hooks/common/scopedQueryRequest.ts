@@ -1,6 +1,7 @@
 interface QueryOptions<T> {
   load: (signal: AbortSignal) => Promise<T>;
   commit: (data: T) => void;
+  validateRecovery?: (data: T) => void;
   onError?: (error: Error) => void;
   onLoading?: (loading: boolean) => void;
 }
@@ -82,6 +83,8 @@ export class ScopedQueryRequest<T> {
         return this.options.load(signal);
       });
       const data = await Promise.race([request, aborted]);
+      this.assertCurrent(current, signal);
+      if (current.recovery) this.options.validateRecovery?.(data);
       this.assertCurrent(current, signal);
       this.options.commit(data);
       this.assertCurrent(current, signal);

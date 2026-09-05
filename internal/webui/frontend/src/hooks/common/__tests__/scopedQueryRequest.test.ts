@@ -106,4 +106,20 @@ describe("ScopedQueryRequest", () => {
     await firstRejected;
     expect(commit).toHaveBeenCalledExactlyOnceWith("nested");
   });
+  it("allows ordinary partial data but validates strict recovery before commit", async () => {
+    const commit = vi.fn();
+    const request = new ScopedQueryRequest({
+      load: async () => ({ partial: true }),
+      commit,
+      validateRecovery: (data) => {
+        if (data.partial) throw new Error("incomplete");
+      },
+    });
+    await request.run();
+    expect(commit).toHaveBeenCalledTimes(1);
+    await expect(
+      request.run({ signal: new AbortController().signal, fresh: true }),
+    ).rejects.toThrow("incomplete");
+    expect(commit).toHaveBeenCalledTimes(1);
+  });
 });

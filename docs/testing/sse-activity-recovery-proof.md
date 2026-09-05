@@ -1,5 +1,8 @@
 # Bounded recent-activity recovery
 
+The subsequent [file query proof](sse-file-query-recovery-proof.md) covers
+Git status and file metadata. The scope below describes the activity milestone.
+
 Home recent activity now participates in the query recovery coordinator. A
 recovery attempt reads the issue store synchronously, selects the five most
 recently updated non-epic issues and requests fifteen events per issue. Every

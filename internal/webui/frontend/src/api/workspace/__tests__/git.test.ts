@@ -35,6 +35,18 @@ vi.mock("@/api/common", async (importOriginal) => {
   };
 });
 
+const validStatus = {
+  branch: "main",
+  target_branch: "main",
+  ahead: 0,
+  behind: 0,
+  stash_count: 0,
+  is_clean: true,
+  has_conflicts: false,
+  changed_files: [],
+  conflicted_files: [],
+};
+
 describe("git API functions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -42,7 +54,7 @@ describe("git API functions", () => {
 
   describe("fetchGitStatus", () => {
     it("calls GET with correct URL", async () => {
-      const mockStatus = { branch: "main", ahead: 0, behind: 0 };
+      const mockStatus = validStatus;
       mockGet.mockResolvedValue(mockStatus);
 
       const result = await fetchGitStatus("test-ws-id", "nova");
@@ -54,7 +66,7 @@ describe("git API functions", () => {
     });
 
     it("encodes agent name in URL", async () => {
-      mockGet.mockResolvedValue({});
+      mockGet.mockResolvedValue(validStatus);
 
       await fetchGitStatus("test-ws-id", "my agent");
 
@@ -64,7 +76,7 @@ describe("git API functions", () => {
     });
 
     it("does not pass timeout options", async () => {
-      mockGet.mockResolvedValue({});
+      mockGet.mockResolvedValue(validStatus);
 
       await fetchGitStatus("test-ws-id", "nova");
 
@@ -263,4 +275,31 @@ describe("git API functions", () => {
       expect(mockPatch.mock.calls[0]).toHaveLength(2);
     });
   });
+});
+
+it.each([
+  null,
+  {},
+  [],
+  { ...validStatus, ahead: -1 },
+  { ...validStatus, behind: 0.5 },
+  { ...validStatus, changed_files: null },
+  { ...validStatus, conflicted_files: [1] },
+  { ...validStatus, is_clean: "true" },
+])("rejects malformed git status %j", async (data) => {
+  mockGet.mockResolvedValue(data);
+  await expect(fetchGitStatus("ws", "agent")).rejects.toThrow(
+    "Invalid git status response",
+  );
+});
+it("forwards status cancellation and API failures", async () => {
+  const controller = new AbortController();
+  mockGet.mockRejectedValueOnce(new Error("unavailable"));
+  await expect(
+    fetchGitStatus("ws", "agent", { signal: controller.signal }),
+  ).rejects.toThrow("unavailable");
+  expect(mockGet).toHaveBeenLastCalledWith(
+    "/api/workspaces/ws/agents/agent/git/status",
+    { signal: controller.signal },
+  );
 });
