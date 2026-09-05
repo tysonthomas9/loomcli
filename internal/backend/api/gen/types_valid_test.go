@@ -35,7 +35,7 @@ func TestGeneratedEnumValidMethods(t *testing.T) {
 		{"SessionHistoryRecordStatus", Active, SessionHistoryRecordStatus("invalid")},
 		{"TranscriptEntryRole", TranscriptEntryRoleAssistant, TranscriptEntryRole("invalid")},
 		{"TranscriptEntryType", Text, TranscriptEntryType("invalid")},
-		{"TreeNodeAgentState", Running, TreeNodeAgentState("invalid")},
+		{"TreeNodeAgentState", TreeNodeAgentStateRunning, TreeNodeAgentState("invalid")},
 		{"TreeNodeIssueType", TreeNodeIssueTypeEpic, TreeNodeIssueType("invalid")},
 		{"TreeNodeStatus", TreeNodeStatusClosed, TreeNodeStatus("invalid")},
 		{"ListBlockedParamsType", ListBlockedParamsTypeTask, ListBlockedParamsType("invalid")},
