@@ -4,9 +4,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
@@ -339,5 +343,67 @@ func TestSaveYieldCheckpoint_NoYieldFile_DefaultsToUnknown(t *testing.T) {
 	}
 	if cp.ErrorClass != "Yielded" {
 		t.Errorf("ErrorClass: got %q, want %q", cp.ErrorClass, "Yielded")
+	}
+}
+
+// TestClassifyAgentExit_LogStartOffsetSkipsPriorRunAuthBanner reproduces the
+// fleet incident: a watchdog SIGKILL was classified from the append-only
+// per-role log, so a "Not logged in" banner an earlier run left behind became
+// this run's verdict — an AuthFailure that stops the agent fatally and reads,
+// fleet-wide, as an account wall. With the run's own start offset recorded, only
+// this run's bytes are considered.
+func TestClassifyAgentExit_LogStartOffsetSkipsPriorRunAuthBanner(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeLockFile(t, tmpDir, &cli.LockInfo{
+		PID:       os.Getpid(),
+		Command:   "task",
+		AgentName: "falcon",
+		TaskID:    "PUPPET-2",
+		StartedAt: time.Now(),
+	})
+
+	priorRun := "[loom] starting task PUPPET-1\n" +
+		agenterr.AuthRequiredMarker + ": Not logged in · Run /login\n" +
+		"Not logged in · Run /login\n"
+	thisRun := "[loom] starting task PUPPET-2\n[loom] working...\n"
+
+	logPath := filepath.Join(tmpDir, "worker-falcon.log")
+	if err := os.WriteFile(logPath, []byte(priorRun+thisRun), 0600); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	newAP := func(offset int64) *AgentProcess {
+		return &AgentProcess{
+			Entry:          config.AgentEntry{Worktree: "falcon", Backend: "claude"},
+			WorktreePath:   tmpDir,
+			LogFilePath:    logPath,
+			LogStartOffset: offset,
+			StopReason:     StopReasonWatchdog,
+		}
+	}
+
+	s := newTestSupervisor()
+
+	// Control: offset 0 is the pre-fix behavior that produced the false verdict.
+	whole := newAP(0)
+	s.classifyAgentExit(whole, 137)
+	if whole.LastError == nil || whole.LastError.Class != agenterr.OutcomeFromHarness(wrapper.ErrAuth) {
+		t.Fatalf("control: class = %v, want AuthFailure", whole.LastError)
+	}
+
+	scoped := newAP(int64(len(priorRun)))
+	s.classifyAgentExit(scoped, 137)
+	if scoped.LastError == nil {
+		t.Fatal("LastError = nil, want a classified error")
+	}
+	if scoped.LastError.Class == agenterr.OutcomeFromHarness(wrapper.ErrAuth) {
+		t.Fatalf("class = AuthFailure, want the prior run's banner to be out of scope (raw: %q)",
+			scoped.LastError.RawOutput)
+	}
+	if want := agenterr.OutcomeFromHarness(wrapper.ErrTimeout); scoped.LastError.Class != want {
+		t.Errorf("class = %s, want %s (SIGKILL exit-code fallback)", scoped.LastError.Class, want)
+	}
+	if strings.Contains(scoped.LastError.RawOutput, "Not logged in") {
+		t.Errorf("raw output still carries the prior run's banner:\n%s", scoped.LastError.RawOutput)
 	}
 }

@@ -2,6 +2,8 @@ package supervisor
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"sync"
@@ -137,4 +139,70 @@ func TestAppendSessionEnvConcurrentLeaseAccess(t *testing.T) {
 	}()
 
 	wg.Wait()
+}
+
+// TestSetupAgentLogFile_LogStartOffset pins the recording side of the per-run
+// classification window. The daemon log is opened O_APPEND and outlives every
+// run in it, so "where does this run start" is only knowable at spawn time.
+func TestSetupAgentLogFile_LogStartOffset(t *testing.T) {
+	// not parallel: mutates HOME so the agent archive sink stays in a temp dir
+	t.Setenv("HOME", t.TempDir())
+
+	logDir := t.TempDir()
+	cfg := &cfgpkg.DaemonConfig{}
+	cfg.Daemon.LogDir = logDir
+	s := &Supervisor{
+		ConfigSnapshot: func() *cfgpkg.DaemonConfig { return cfg },
+		WorkspaceID:    "ws",
+		ProjectDir:     logDir,
+	}
+
+	newAP := func() *AgentProcess {
+		return &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "falcon", Role: "worker"}}
+	}
+
+	t.Run("empty log starts at zero", func(t *testing.T) {
+		ap := newAP()
+		// A bare Cmd is enough: setupAgentLogFile only assigns its
+		// Stdout/Stderr, and nothing here is ever started.
+		s.setupAgentLogFile(ap, &exec.Cmd{})
+		t.Cleanup(func() { _ = ap.LogFile.Close() })
+
+		if ap.LogFilePath == "" {
+			t.Fatal("LogFilePath is empty; the daemon log sink did not open")
+		}
+		if ap.LogStartOffset != 0 {
+			t.Errorf("LogStartOffset = %d, want 0 for a fresh log", ap.LogStartOffset)
+		}
+	})
+
+	t.Run("append picks up the pre-existing size", func(t *testing.T) {
+		first := newAP()
+		s.setupAgentLogFile(first, &exec.Cmd{})
+		prior := []byte("a previous run's output\nNot logged in · Run /login\n")
+		if _, err := first.LogFile.Write(prior); err != nil {
+			t.Fatalf("write prior run output: %v", err)
+		}
+		if err := first.LogFile.Close(); err != nil {
+			t.Fatalf("close: %v", err)
+		}
+
+		second := newAP()
+		s.setupAgentLogFile(second, &exec.Cmd{})
+		t.Cleanup(func() { _ = second.LogFile.Close() })
+
+		if second.LogFilePath != first.LogFilePath {
+			t.Fatalf("log path changed between runs: %q then %q", first.LogFilePath, second.LogFilePath)
+		}
+		info, err := os.Stat(second.LogFilePath)
+		if err != nil {
+			t.Fatalf("stat: %v", err)
+		}
+		if second.LogStartOffset != info.Size() {
+			t.Errorf("LogStartOffset = %d, want %d (pre-existing log size)", second.LogStartOffset, info.Size())
+		}
+		if second.LogStartOffset != int64(len(prior)) {
+			t.Errorf("LogStartOffset = %d, want %d", second.LogStartOffset, len(prior))
+		}
+	})
 }

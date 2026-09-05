@@ -376,6 +376,15 @@ func (s *Supervisor) setupAgentLogFile(ap *AgentProcess, cmd *exec.Cmd) {
 	if f := s.openDaemonLogFile(ap); f != nil {
 		ap.LogFile = f
 		sinks = append(sinks, f)
+		// Remember where THIS run starts in the append-only daemon log, so the
+		// exit classifier reads only the bytes this run wrote. Without it, a
+		// days-old tail — a stale "Not logged in" banner, say — is read as this
+		// run's verdict. A stat failure leaves the offset at 0, which is the
+		// pre-existing whole-file behavior.
+		ap.LogStartOffset = 0
+		if info, err := f.Stat(); err == nil {
+			ap.LogStartOffset = info.Size()
+		}
 	}
 	if af := s.openAgentArchiveLog(ap); af != nil {
 		ap.ArchiveLogFile = af
