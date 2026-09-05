@@ -16,9 +16,11 @@ jobs:
     # server revision operators will deploy with it rather than an old pin.
     uses: ./.github/workflows/skills-compatibility.yml
     with:
-      loom_ref: ${{ github.ref }}
+      loom_ref: ${{ github.sha }}
       fleetdb_ref: main
-    secrets: inherit
+    secrets:
+      LOOMCLI_TOKEN: ${{ secrets.LOOMCLI_TOKEN }}
+      FLEET_DB_TOKEN: ${{ secrets.FLEET_DB_TOKEN }}
 
   goreleaser:
     needs: skills-compatibility

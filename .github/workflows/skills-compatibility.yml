@@ -35,10 +35,14 @@ permissions:
   contents: read
 
 jobs:
-  proof:
-    name: LoomCLI / FleetDB compatibility
+  resolve:
+    name: Resolve compatibility revision pair
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
+    outputs:
+      loom_sha: ${{ steps.revisions.outputs.loom_sha }}
+      fleetdb_sha: ${{ steps.revisions.outputs.fleetdb_sha }}
+      corpus_sha: ${{ steps.revisions.outputs.corpus_sha }}
     steps:
       - name: Checkout LoomCLI
         uses: actions/checkout@v4
@@ -48,6 +52,17 @@ jobs:
           path: loomcli
           token: ${{ secrets.LOOMCLI_TOKEN || github.token }}
           persist-credentials: false
+
+      - name: Require private FleetDB checkout token
+        if: github.repository == 'tysonthomas9/loomcli'
+        shell: bash
+        env:
+          PRIVATE_FLEET_TOKEN: ${{ secrets.FLEET_DB_TOKEN }}
+        run: |
+          if [[ -z "$PRIVATE_FLEET_TOKEN" ]]; then
+            echo "::error::FLEET_DB_TOKEN is required to read private FleetDB from a LoomCLI workflow"
+            exit 1
+          fi
 
       - name: Checkout FleetDB
         uses: actions/checkout@v4
@@ -66,28 +81,111 @@ jobs:
           path: vercel-agent-skills
           persist-credentials: false
 
-      - name: Record resolved revision pair
+      - name: Resolve and record revision pair
+        id: revisions
         shell: bash
         env:
           REQUESTED_LOOM_REF: ${{ inputs.loom_ref }}
           REQUESTED_FLEETDB_REF: ${{ inputs.fleetdb_ref }}
         run: |
+          set -euo pipefail
           loom_sha="$(git -C loomcli rev-parse HEAD)"
           fleetdb_sha="$(git -C fleet-db rev-parse HEAD)"
           corpus_sha="$(git -C vercel-agent-skills rev-parse HEAD)"
           {
+            echo "loom_sha=$loom_sha"
+            echo "fleetdb_sha=$fleetdb_sha"
+            echo "corpus_sha=$corpus_sha"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "requested_loom_ref=$REQUESTED_LOOM_REF"
+            echo "requested_fleetdb_ref=$REQUESTED_FLEETDB_REF"
             echo "loomcli_sha=$loom_sha"
             echo "fleetdb_sha=$fleetdb_sha"
             echo "vercel_skills_sha=$corpus_sha"
+          } | tee skills-compatibility-resolved-revisions.txt
+
+      - name: Upload resolved revision evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: skills-compatibility-resolved-revisions-${{ github.run_id }}-${{ github.run_attempt }}
+          path: skills-compatibility-resolved-revisions.txt
+          if-no-files-found: error
+          retention-days: 90
+
+  proof:
+    name: LoomCLI / FleetDB compatibility (${{ matrix.storage }})
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        storage: [local, s3]
+    steps:
+      - name: Checkout LoomCLI
+        uses: actions/checkout@v4
+        with:
+          repository: tysonthomas9/loomcli
+          ref: ${{ needs.resolve.outputs.loom_sha }}
+          path: loomcli
+          token: ${{ secrets.LOOMCLI_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Checkout FleetDB
+        uses: actions/checkout@v4
+        with:
+          repository: tysonthomas9/fleet-db
+          ref: ${{ needs.resolve.outputs.fleetdb_sha }}
+          path: fleet-db
+          token: ${{ secrets.FLEET_DB_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Checkout pinned Vercel Agent Skills corpus
+        uses: actions/checkout@v4
+        with:
+          repository: vercel-labs/agent-skills
+          ref: ${{ needs.resolve.outputs.corpus_sha }}
+          path: vercel-agent-skills
+          persist-credentials: false
+
+      - name: Record resolved revision pair
+        shell: bash
+        env:
+          REQUESTED_LOOM_REF: ${{ inputs.loom_ref }}
+          REQUESTED_FLEETDB_REF: ${{ inputs.fleetdb_ref }}
+          EXPECTED_LOOM_SHA: ${{ needs.resolve.outputs.loom_sha }}
+          EXPECTED_FLEETDB_SHA: ${{ needs.resolve.outputs.fleetdb_sha }}
+          EXPECTED_CORPUS_SHA: ${{ needs.resolve.outputs.corpus_sha }}
+          STORAGE_MODE: ${{ matrix.storage }}
+        run: |
+          set -euo pipefail
+          loom_sha="$(git -C loomcli rev-parse HEAD)"
+          fleetdb_sha="$(git -C fleet-db rev-parse HEAD)"
+          corpus_sha="$(git -C vercel-agent-skills rev-parse HEAD)"
+          if [[ "$loom_sha" != "$EXPECTED_LOOM_SHA" ||
+            "$fleetdb_sha" != "$EXPECTED_FLEETDB_SHA" ||
+            "$corpus_sha" != "$EXPECTED_CORPUS_SHA" ]]; then
+            echo "::error::Compatibility checkout drifted from the resolved revision pair"
+            exit 1
+          fi
+          {
+            echo "requested_loom_ref=$REQUESTED_LOOM_REF"
+            echo "requested_fleetdb_ref=$REQUESTED_FLEETDB_REF"
+            echo "loomcli_sha=$loom_sha"
+            echo "fleetdb_sha=$fleetdb_sha"
+            echo "vercel_skills_sha=$corpus_sha"
+            echo "storage_mode=$STORAGE_MODE"
           } | tee skills-compatibility-revisions.txt
           {
             echo '### Skills compatibility revision pair'
             echo
-            echo '| Repository | Requested ref | Resolved commit |'
+            echo '| Input | Requested ref | Resolved value |'
             echo '| --- | --- | --- |'
             echo "| LoomCLI | \`$REQUESTED_LOOM_REF\` | \`$loom_sha\` |"
             echo "| FleetDB | \`$REQUESTED_FLEETDB_REF\` | \`$fleetdb_sha\` |"
             echo "| Vercel Agent Skills | pinned | \`$corpus_sha\` |"
+            echo "| Workspace-file storage | matrix | \`$STORAGE_MODE\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Go
@@ -95,18 +193,136 @@ jobs:
         with:
           go-version-file: loomcli/go.mod
 
+      - name: Configure workspace-file storage
+        shell: bash
+        env:
+          STORAGE_MODE: ${{ matrix.storage }}
+        run: |
+          set -euo pipefail
+          transfer_secret="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
+          echo "::add-mask::$transfer_secret"
+          echo "FLEET_WORKSPACE_FILE_TOKEN_SECRET=$transfer_secret" >> "$GITHUB_ENV"
+          # The corpus intentionally exercises hundreds of file-transfer
+          # requests in one short burst. Rate limiting has its own FleetDB
+          # coverage and would make this storage/compatibility proof timing
+          # dependent rather than test either adapter.
+          echo "FLEET_RATE_LIMIT_ENABLED=false" >> "$GITHUB_ENV"
+
+          if [[ "$STORAGE_MODE" == "local" ]]; then
+            local_dir="$RUNNER_TEMP/skills-workspace-files-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+            mkdir -p "$local_dir"
+            echo "FLEET_WORKSPACE_FILE_LOCAL_DIR=$local_dir" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          minio_password="$(openssl rand -hex 24)"
+          echo "::add-mask::$minio_password"
+          echo "MINIO_ROOT_USER=loom-skills" >> "$GITHUB_ENV"
+          echo "MINIO_ROOT_PASSWORD=$minio_password" >> "$GITHUB_ENV"
+          echo "MINIO_CONTAINER=loom-skills-minio-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+          echo "MINIO_NETWORK=loom-skills-net-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+          echo "MINIO_BUCKET=loom-skills-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+          echo "FLEET_WORKSPACE_FILE_S3_BUCKET=loom-skills-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+          echo "FLEET_WORKSPACE_FILE_S3_PREFIX=release-proof/$GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+          echo "FLEET_WORKSPACE_FILE_S3_REGION=us-east-1" >> "$GITHUB_ENV"
+          echo "FLEET_WORKSPACE_FILE_S3_ENDPOINT=http://127.0.0.1:9000" >> "$GITHUB_ENV"
+          echo "FLEET_WORKSPACE_FILE_S3_PATH_STYLE=true" >> "$GITHUB_ENV"
+          echo "FLEET_WORKSPACE_FILE_S3_ACCESS_KEY_ID=loom-skills" >> "$GITHUB_ENV"
+          echo "FLEET_WORKSPACE_FILE_S3_SECRET_ACCESS_KEY=$minio_password" >> "$GITHUB_ENV"
+
+      - name: Start isolated MinIO storage
+        if: matrix.storage == 's3'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker network create "$MINIO_NETWORK"
+          docker run --detach \
+            --name "$MINIO_CONTAINER" \
+            --network "$MINIO_NETWORK" \
+            --publish 127.0.0.1:9000:9000 \
+            --env MINIO_ROOT_USER \
+            --env MINIO_ROOT_PASSWORD \
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e \
+            server /data --address :9000
+
+          ready=false
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:9000/minio/health/ready >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$ready" != "true" ]]; then
+            docker logs "$MINIO_CONTAINER" >&2
+            exit 1
+          fi
+
+          docker run --rm \
+            --network "$MINIO_NETWORK" \
+            --env "MC_HOST_release=http://$MINIO_ROOT_USER:$MINIO_ROOT_PASSWORD@$MINIO_CONTAINER:9000" \
+            quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727 \
+            mb "release/$MINIO_BUCKET"
+
       - name: Run release skills compatibility proof
         working-directory: loomcli
+        shell: bash
         env:
           FLEET_DB_REPO: ${{ github.workspace }}/fleet-db
           VERCEL_SKILLS_REPO: ${{ github.workspace }}/vercel-agent-skills
-        run: make test-skills-release-compat
+          FLEET_WORKSPACE_FILE_STORE: ${{ matrix.storage }}
+          STORAGE_MODE: ${{ matrix.storage }}
+        run: |
+          set -o pipefail
+          make test-skills-release-compat 2>&1 | tee "../skills-compatibility-$STORAGE_MODE.log"
+
+      - name: Capture and stop MinIO
+        if: always() && matrix.storage == 's3'
+        shell: bash
+        run: |
+          set -u
+          diagnostics="skills-compatibility-s3-diagnostics.txt"
+          {
+            echo "storage_mode=s3"
+            echo "bucket=${MINIO_BUCKET:-not-configured}"
+            echo "prefix=${FLEET_WORKSPACE_FILE_S3_PREFIX:-not-configured}"
+            echo
+            echo "### Stored objects"
+            if [[ -n "${MINIO_CONTAINER:-}" && -n "${MINIO_NETWORK:-}" && -n "${MINIO_BUCKET:-}" ]] &&
+              docker inspect "$MINIO_CONTAINER" >/dev/null 2>&1; then
+              docker run --rm \
+                --network "$MINIO_NETWORK" \
+                --env "MC_HOST_release=http://$MINIO_ROOT_USER:$MINIO_ROOT_PASSWORD@$MINIO_CONTAINER:9000" \
+                quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727 \
+                ls --recursive "release/$MINIO_BUCKET" 2>&1 || echo "Unable to list MinIO objects"
+            else
+              echo "MinIO object listing unavailable"
+            fi
+            echo
+            echo "### MinIO server log"
+            if [[ -n "${MINIO_CONTAINER:-}" ]] && docker inspect "$MINIO_CONTAINER" >/dev/null 2>&1; then
+              docker logs "$MINIO_CONTAINER" 2>&1
+            else
+              echo "MinIO container was not created"
+            fi
+          } > "$diagnostics"
+
+          if [[ -n "${MINIO_CONTAINER:-}" ]] && docker inspect "$MINIO_CONTAINER" >/dev/null 2>&1; then
+            docker stop "$MINIO_CONTAINER"
+            docker rm "$MINIO_CONTAINER"
+          fi
+          if [[ -n "${MINIO_NETWORK:-}" ]] && docker network inspect "$MINIO_NETWORK" >/dev/null 2>&1; then
+            docker network rm "$MINIO_NETWORK"
+          fi
 
       - name: Upload revision evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: skills-compatibility-revisions-${{ github.run_id }}-${{ github.run_attempt }}
-          path: skills-compatibility-revisions.txt
+          name: skills-compatibility-${{ matrix.storage }}-revisions-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            skills-compatibility-revisions.txt
+            skills-compatibility-${{ matrix.storage }}.log
+            skills-compatibility-${{ matrix.storage }}-diagnostics.txt
           if-no-files-found: error
           retention-days: 90

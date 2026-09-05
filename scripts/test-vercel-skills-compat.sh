@@ -126,14 +126,14 @@ compare_skill() {
     fi
   done < <(find "$source_dir" -type f ! -name SKILL.md -print0)
 
-  source_body="$tmp/$source_name-source-body"
-  target_body="$tmp/$source_name-target-body"
-  awk 'BEGIN { delimiters=0 } /^---[[:space:]]*$/ { delimiters++; next } delimiters >= 2 { print }' \
-    "$source_dir/SKILL.md" >"$source_body"
-  awk 'BEGIN { delimiters=0 } /^---[[:space:]]*$/ { delimiters++; next } delimiters >= 2 { print }' \
-    "$target_dir/SKILL.md" >"$target_body"
-  if ! cmp -s "$source_body" "$target_body"; then
-    echo "$source_name SKILL.md body mismatch" >&2
+  if ! cmp -s "$source_dir/SKILL.md" "$target_dir/SKILL.md"; then
+    source_size="$(wc -c <"$source_dir/SKILL.md" | tr -d ' ')"
+    target_size="$(wc -c <"$target_dir/SKILL.md" | tr -d ' ')"
+    source_hash="$(sha256_file "$source_dir/SKILL.md")"
+    target_hash="$(sha256_file "$target_dir/SKILL.md")"
+    echo "$source_name SKILL.md byte mismatch" >&2
+    echo "source size=$source_size sha256=$source_hash" >&2
+    echo "materialized size=$target_size sha256=$target_hash" >&2
     exit 1
   fi
 }
