@@ -103,10 +103,14 @@ type RoleConfig struct {
 //
 // An agent with neither repos nor repo_groups can work on any repo.
 type AgentEntry struct {
-	Worktree         string                   `yaml:"worktree"`
-	Role             string                   `yaml:"role"`
-	Repo             string                   `yaml:"repo,omitempty"`
-	Auto             bool                     `yaml:"auto,omitempty"`
+	Worktree string `yaml:"worktree"`
+	Role     string `yaml:"role"`
+	Repo     string `yaml:"repo,omitempty"`
+	// Auto durably enables daemon supervision. An explicit false disables the
+	// agent: the daemon will not supervise it and `agent start` refuses it.
+	// Absent (nil) means unset, which stays enabled so pre-auto configs keep
+	// working. Read it through AutoEnabled, never by dereferencing directly.
+	Auto             *bool                    `yaml:"auto,omitempty"`
 	Backend          string                   `yaml:"backend,omitempty"`
 	FallbackBackends []string                 `yaml:"fallback_backends,omitempty"`
 	PathPatterns     []string                 `yaml:"path_patterns,omitempty"`
@@ -125,7 +129,7 @@ type AgentEntry struct {
 // Equal compares persisted config fields only (excludes SourceRepos). Update when adding fields.
 func (a AgentEntry) Equal(b AgentEntry) bool {
 	return a.Worktree == b.Worktree && a.Role == b.Role && a.Repo == b.Repo &&
-		a.Auto == b.Auto && a.Backend == b.Backend && a.CrossRepo == b.CrossRepo && a.Parent == b.Parent &&
+		a.AutoEnabled() == b.AutoEnabled() && a.Backend == b.Backend && a.CrossRepo == b.CrossRepo && a.Parent == b.Parent &&
 		a.Mode == b.Mode &&
 		a.DesiredState == b.DesiredState &&
 		a.Hooks.Equal(b.Hooks) &&
@@ -133,9 +137,17 @@ func (a AgentEntry) Equal(b AgentEntry) bool {
 		slices.Equal(a.Repos, b.Repos) && slices.Equal(a.RepoGroups, b.RepoGroups)
 }
 
+// AutoEnabled reports whether the daemon may supervise this agent. A nil Auto
+// is "unset", which stays enabled so pre-auto configs and agents created
+// without an explicit flag keep working; only an explicit false disables.
+func (a AgentEntry) AutoEnabled() bool { return a.Auto == nil || *a.Auto }
+
 // ShouldSupervise reports whether the local daemon should run this agent.
 // Empty desired_state preserves legacy behavior for existing agent definitions.
 func (a AgentEntry) ShouldSupervise() bool {
+	if !a.AutoEnabled() {
+		return false
+	}
 	if domain.IsInteractiveRoleName(a.Role) {
 		return false
 	}
@@ -145,6 +157,9 @@ func (a AgentEntry) ShouldSupervise() bool {
 // ShouldSuperviseWithRoles reports whether the local daemon should run this
 // agent, using role kind metadata when the merged daemon config is available.
 func (a AgentEntry) ShouldSuperviseWithRoles(roles map[string]RoleConfig) bool {
+	if !a.AutoEnabled() {
+		return false
+	}
 	if rc, ok := roles[a.Role]; ok {
 		role := &domain.Role{Kind: domain.RoleKind(rc.Kind)}
 		if domain.ResolveRoleKind(role, a.Role) == domain.RoleKindInteractive {
@@ -348,10 +363,13 @@ func agentEntryFromDomain(a *domain.Agent) AgentEntry {
 	if a == nil {
 		return AgentEntry{}
 	}
+	// A fleet-db row always carries an explicit value; copy it into a local so
+	// the pointer never aliases the caller's agent.
+	auto := a.Auto
 	return AgentEntry{
 		Worktree:         a.Name,
 		Role:             a.RoleName,
-		Auto:             a.Auto,
+		Auto:             &auto,
 		Backend:          a.Backend,
 		FallbackBackends: append([]string(nil), a.FallbackBackends...),
 		Repos:            append([]string(nil), a.Repos...),

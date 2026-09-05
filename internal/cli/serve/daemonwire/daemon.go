@@ -335,10 +335,13 @@ func agentEntryFromDomain(a *domain.Agent) config.AgentEntry {
 	if a == nil {
 		return config.AgentEntry{}
 	}
+	// A fleet-db row always carries an explicit value; copy it into a local so
+	// the pointer never aliases the caller's agent.
+	auto := a.Auto
 	return config.AgentEntry{
 		Worktree:         a.Name,
 		Role:             a.RoleName,
-		Auto:             a.Auto,
+		Auto:             &auto,
 		Backend:          a.Backend,
 		FallbackBackends: append([]string(nil), a.FallbackBackends...),
 		Repos:            append([]string(nil), a.Repos...),

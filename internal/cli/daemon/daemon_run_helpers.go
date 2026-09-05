@@ -109,7 +109,11 @@ func printDryRunInfo(config *config.DaemonConfig, pidFile, logDir, stateFile str
 	fmt.Println("")
 	fmt.Println("Agents to supervise:")
 	for _, a := range config.Agents {
-		fmt.Printf("  - %s (role: %s, auto: %v)\n", a.Worktree, a.Role, a.Auto)
+		auto := "auto: true"
+		if !a.AutoEnabled() {
+			auto = "auto: DISABLED"
+		}
+		fmt.Printf("  - %s (role: %s, %s)\n", a.Worktree, a.Role, auto)
 	}
 	fmt.Println("")
 	fmt.Println("Recommended systemd resource controls:")
