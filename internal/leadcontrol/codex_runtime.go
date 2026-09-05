@@ -33,10 +33,17 @@ type CodexLeadRuntimeConfig struct {
 	WorkDir   string
 	Prompt    string
 	CodexPath string
-	Stdin     io.Reader
-	Stdout    io.Writer
-	Stderr    io.Writer
-	Logger    *slog.Logger
+	// ResumeThreadID reopens a specific codex thread (`codex resume <id>`).
+	// Preferred over ResumeLast: it is the thread loom itself recorded.
+	ResumeThreadID string
+	// ResumeLast falls back to `codex resume --last` when loom has no thread
+	// id for the session. Codex picks its own most recent thread, which is not
+	// necessarily one loom launched — the caller warns about that.
+	ResumeLast bool
+	Stdin      io.Reader
+	Stdout     io.Writer
+	Stderr     io.Writer
+	Logger     *slog.Logger
 }
 
 func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error {
@@ -141,16 +148,23 @@ func codexAppServerLogPath(runtimeHome string) string {
 }
 
 func runCodexRemoteTUI(ctx context.Context, cfg CodexLeadRuntimeConfig, endpoint string) error {
-	_, _ = fmt.Fprintln(cfg.Stdout, "Launching controlled Codex lead session...")
+	if id := strings.TrimSpace(cfg.ResumeThreadID); id != "" {
+		_, _ = fmt.Fprintf(cfg.Stdout, "Resuming controlled Codex lead session (thread %s)...\n", id)
+	} else if cfg.ResumeLast {
+		_, _ = fmt.Fprintln(cfg.Stdout, "Resuming controlled Codex lead session (codex's most recent thread)...")
+	} else {
+		_, _ = fmt.Fprintln(cfg.Stdout, "Launching controlled Codex lead session...")
+	}
 	_, _ = fmt.Fprintln(cfg.Stdout, "")
-	// #nosec G204 -- cfg.CodexPath/workDir/prompt are the same trusted inputs used by interactive agent launch.
-	tuiCmd := exec.CommandContext(ctx, cfg.CodexPath,
+	args := append(codexResumeArgs(cfg),
 		"--remote", endpoint,
 		"--no-alt-screen",
 		"--dangerously-bypass-approvals-and-sandbox",
 		"-C", cfg.WorkDir,
 		cfg.Prompt,
 	)
+	// #nosec G204 -- cfg.CodexPath/workDir/prompt are the same trusted inputs used by interactive agent launch.
+	tuiCmd := exec.CommandContext(ctx, cfg.CodexPath, args...)
 	tuiCmd.Dir = cfg.WorkDir
 	tuiCmd.Env = os.Environ()
 	tuiCmd.Stdin = cfg.Stdin
@@ -159,11 +173,26 @@ func runCodexRemoteTUI(ctx context.Context, cfg CodexLeadRuntimeConfig, endpoint
 	return tuiCmd.Run()
 }
 
+// codexResumeArgs returns the leading `resume` tokens for a resumed lead, or
+// nil for a fresh one. `codex resume [SESSION_ID] [PROMPT]` takes the prompt
+// positionally exactly as bare `codex` does, so fresh and resumed argv differ
+// only in this prefix — every other flag keeps its position.
+func codexResumeArgs(cfg CodexLeadRuntimeConfig) []string {
+	if id := strings.TrimSpace(cfg.ResumeThreadID); id != "" {
+		return []string{"resume", id}
+	}
+	if cfg.ResumeLast {
+		return []string{"resume", "--last"}
+	}
+	return nil
+}
+
 func normalizeCodexLeadRuntimeConfig(cfg CodexLeadRuntimeConfig) CodexLeadRuntimeConfig {
 	cfg.Workspace = strings.TrimSpace(cfg.Workspace)
 	cfg.LeadName = strings.TrimSpace(cfg.LeadName)
 	cfg.SessionID = strings.TrimSpace(cfg.SessionID)
 	cfg.WorkDir = strings.TrimSpace(cfg.WorkDir)
+	cfg.ResumeThreadID = strings.TrimSpace(cfg.ResumeThreadID)
 	if cfg.CodexPath == "" {
 		cfg.CodexPath = defaultCodexBinary
 	}
