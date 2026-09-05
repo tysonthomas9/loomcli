@@ -19,7 +19,7 @@ import styles from "./CreateAgentModal.module.css";
 
 type AgentKind = "background" | "interactive";
 type BackgroundRole = "plan" | "task";
-type RuntimeProvider = "" | "local" | "daytona";
+type RuntimeProvider = "" | "local" | "daytona" | "exe";
 
 const CUSTOM_PROMPT_ID = "custom";
 
@@ -563,6 +563,7 @@ export function CreateAgentModal({
                 <option value="">Workspace default</option>
                 <option value="local">Local</option>
                 <option value="daytona">Daytona sandbox</option>
+                <option value="exe">exe.dev VM</option>
               </select>
             </div>
           </div>

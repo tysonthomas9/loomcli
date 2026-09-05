@@ -362,6 +362,33 @@ describe("AgentsPage", () => {
     ).toBeTruthy();
   });
 
+  it("renders exe.dev placement details in the Info tab", async () => {
+    mocks.agents = [
+      {
+        name: "lead-1",
+        role: "lead",
+        status: "ready",
+        branch: "agent/lead-1",
+        runtime_provider: "exe",
+        runtime_status: "ready",
+        runtime_placement: {
+          sandbox_id: "loom-lead-123",
+          placement_id: "placement-789",
+          state: "active",
+          generation: 2,
+        },
+      },
+    ];
+
+    render(<AgentsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+
+    expect(await screen.findByText("exe.dev VM")).toBeTruthy();
+    expect(screen.getByText("VM ID")).toBeTruthy();
+    expect(screen.getByText("loom-lead-123")).toBeTruthy();
+    expect(screen.getByText("Ready")).toBeTruthy();
+  });
+
   it("does not leave the retired legacy file editor module in source", () => {
     const retiredModule = ["File", "Editor", "Panel"].join("");
     expect(

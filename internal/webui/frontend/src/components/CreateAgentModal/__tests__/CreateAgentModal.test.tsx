@@ -140,7 +140,7 @@ describe("CreateAgentModal: default prop seeding", () => {
     expect(screen.getByTestId("create-agent-backend")).toHaveValue("codex");
   });
 
-  it("defaults runtime to Workspace default and offers local and Daytona", () => {
+  it("defaults runtime to Workspace default and offers every selectable provider", () => {
     renderModal();
     expect(screen.getByTestId("create-agent-runtime-provider")).toHaveValue("");
     expect(
@@ -149,6 +149,9 @@ describe("CreateAgentModal: default prop seeding", () => {
     expect(screen.getByRole("option", { name: "Local" })).toBeInTheDocument();
     expect(
       screen.getByRole("option", { name: "Daytona sandbox" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "exe.dev VM" }),
     ).toBeInTheDocument();
   });
 
@@ -336,6 +339,23 @@ describe("CreateAgentModal: submission", () => {
     await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
     expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
       runtime_provider: "daytona",
+    });
+  });
+
+  it("submits exe.dev as the explicit runtime provider", async () => {
+    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+    renderModal({ defaultName: "exe-lead", defaultKind: "interactive" });
+    fireEvent.click(screen.getByTestId("create-agent-template-lead"));
+    fireEvent.change(screen.getByTestId("create-agent-runtime-provider"), {
+      target: { value: "exe" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+
+    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
+    expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+      name: "exe-lead",
+      role_name: "lead",
+      runtime_provider: "exe",
     });
   });
 

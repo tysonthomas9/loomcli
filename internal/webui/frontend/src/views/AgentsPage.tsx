@@ -478,7 +478,8 @@ function AgentsPageInner(): JSX.Element {
               <section className={styles.card}>
                 <h2 className={styles.cardLabel}>Agent Info</h2>
                 <dl className={styles.configGrid}>
-                  {selected.runtime_provider !== "daytona" ? (
+                  {selected.runtime_provider !== "daytona" &&
+                  selected.runtime_provider !== "exe" ? (
                     <div>
                       <dt>Status</dt>
                       <dd>{formatStatusLabel(statusType)}</dd>
@@ -514,13 +515,18 @@ function AgentsPageInner(): JSX.Element {
                   ) : null}
                 </dl>
               </section>
-              {selected.runtime_provider === "daytona" ? (
+              {selected.runtime_provider === "daytona" ||
+              selected.runtime_provider === "exe" ? (
                 <section className={styles.card}>
                   <h2 className={styles.cardLabel}>Runtime</h2>
                   <dl className={styles.configGrid}>
                     <div>
                       <dt>Runtime provider</dt>
-                      <dd>Daytona sandbox</dd>
+                      <dd>
+                        {selected.runtime_provider === "exe"
+                          ? "exe.dev VM"
+                          : "Daytona sandbox"}
+                      </dd>
                     </div>
                     <div>
                       <dt>Runtime status</dt>
@@ -539,15 +545,25 @@ function AgentsPageInner(): JSX.Element {
                     {selected.runtime_placement ? (
                       <>
                         <div>
-                          <dt>Sandbox ID</dt>
+                          <dt>
+                            {selected.runtime_provider === "exe"
+                              ? "VM ID"
+                              : "Sandbox ID"}
+                          </dt>
                           <dd>
                             {selected.runtime_placement.sandbox_id ? (
                               <CopyableRuntimeID
-                                label="Sandbox ID"
+                                label={
+                                  selected.runtime_provider === "exe"
+                                    ? "VM ID"
+                                    : "Sandbox ID"
+                                }
                                 value={selected.runtime_placement.sandbox_id}
                                 onCopy={() =>
                                   void copyRuntimeID(
-                                    "Sandbox ID",
+                                    selected.runtime_provider === "exe"
+                                      ? "VM ID"
+                                      : "Sandbox ID",
                                     selected.runtime_placement!.sandbox_id,
                                   )
                                 }

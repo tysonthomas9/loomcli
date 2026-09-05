@@ -2327,7 +2327,7 @@ paths:
                     type: string
                 runtime_provider:
                   type: string
-                  enum: [local, e2b, kubernetes, daytona, ci, other]
+                  enum: [local, e2b, kubernetes, daytona, exe, ci, other]
                 repos:
                   type: array
                   items:
@@ -6403,7 +6403,7 @@ components:
             yet or agent isn't daemon-managed.
         runtime_provider:
           type: string
-          enum: [local, e2b, kubernetes, daytona, ci, other]
+          enum: [local, e2b, kubernetes, daytona, exe, ci, other]
           description: Effective provider for interactive remote runtimes.
         runtime_placement:
           $ref: "#/components/schemas/MonitorRuntimePlacement"
@@ -6412,7 +6412,7 @@ components:
         runtime_status:
           $ref: "#/components/schemas/LeadRuntimeStatus"
           description: >-
-            Daytona interactive lead runtime readiness projected from placement,
+            Remote interactive lead runtime readiness projected from placement,
             durable lead-boot evidence, and the latest provision attempt.
         runtime_error:
           type: string

@@ -646,6 +646,7 @@ const (
 	MonitorAgentStatusRuntimeProviderCi         MonitorAgentStatusRuntimeProvider = "ci"
 	MonitorAgentStatusRuntimeProviderDaytona    MonitorAgentStatusRuntimeProvider = "daytona"
 	MonitorAgentStatusRuntimeProviderE2b        MonitorAgentStatusRuntimeProvider = "e2b"
+	MonitorAgentStatusRuntimeProviderExe        MonitorAgentStatusRuntimeProvider = "exe"
 	MonitorAgentStatusRuntimeProviderKubernetes MonitorAgentStatusRuntimeProvider = "kubernetes"
 	MonitorAgentStatusRuntimeProviderLocal      MonitorAgentStatusRuntimeProvider = "local"
 	MonitorAgentStatusRuntimeProviderOther      MonitorAgentStatusRuntimeProvider = "other"
@@ -659,6 +660,8 @@ func (e MonitorAgentStatusRuntimeProvider) Valid() bool {
 	case MonitorAgentStatusRuntimeProviderDaytona:
 		return true
 	case MonitorAgentStatusRuntimeProviderE2b:
+		return true
+	case MonitorAgentStatusRuntimeProviderExe:
 		return true
 	case MonitorAgentStatusRuntimeProviderKubernetes:
 		return true
@@ -1207,6 +1210,7 @@ const (
 	CreateAgentJSONBodyRuntimeProviderCi         CreateAgentJSONBodyRuntimeProvider = "ci"
 	CreateAgentJSONBodyRuntimeProviderDaytona    CreateAgentJSONBodyRuntimeProvider = "daytona"
 	CreateAgentJSONBodyRuntimeProviderE2b        CreateAgentJSONBodyRuntimeProvider = "e2b"
+	CreateAgentJSONBodyRuntimeProviderExe        CreateAgentJSONBodyRuntimeProvider = "exe"
 	CreateAgentJSONBodyRuntimeProviderKubernetes CreateAgentJSONBodyRuntimeProvider = "kubernetes"
 	CreateAgentJSONBodyRuntimeProviderLocal      CreateAgentJSONBodyRuntimeProvider = "local"
 	CreateAgentJSONBodyRuntimeProviderOther      CreateAgentJSONBodyRuntimeProvider = "other"
@@ -1220,6 +1224,8 @@ func (e CreateAgentJSONBodyRuntimeProvider) Valid() bool {
 	case CreateAgentJSONBodyRuntimeProviderDaytona:
 		return true
 	case CreateAgentJSONBodyRuntimeProviderE2b:
+		return true
+	case CreateAgentJSONBodyRuntimeProviderExe:
 		return true
 	case CreateAgentJSONBodyRuntimeProviderKubernetes:
 		return true

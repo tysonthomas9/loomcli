@@ -3358,11 +3358,12 @@ export interface components {
         | "e2b"
         | "kubernetes"
         | "daytona"
+        | "exe"
         | "ci"
         | "other";
       /** @description Newest matching store placement by generation, then update time. */
       runtime_placement?: components["schemas"]["MonitorRuntimePlacement"];
-      /** @description Daytona interactive lead runtime readiness projected from placement, durable lead-boot evidence, and the latest provision attempt. */
+      /** @description Remote interactive lead runtime readiness projected from placement, durable lead-boot evidence, and the latest provision attempt. */
       runtime_status?: components["schemas"]["LeadRuntimeStatus"];
       /** @description Human-readable detail when the projected runtime is degraded or failed. */
       runtime_error?: string;
@@ -6088,6 +6089,7 @@ export interface operations {
             | "e2b"
             | "kubernetes"
             | "daytona"
+            | "exe"
             | "ci"
             | "other";
           repos?: string[];
