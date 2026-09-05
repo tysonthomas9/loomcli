@@ -89,7 +89,7 @@ func runSweep(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	if err := printReport(cmd.OutOrStdout(), report); err != nil {
+	if err := printReport(cmd.OutOrStdout(), report, contract.Labels()); err != nil {
 		return err
 	}
 	if report.Errors > 0 {
@@ -138,7 +138,7 @@ func resolveContractPath(explicit string) (string, error) {
 	return "", fmt.Errorf("integration.yaml not found (looked in %v); pass --contract", candidates)
 }
 
-func printReport(w io.Writer, rep *Report) error {
+func printReport(w io.Writer, rep *Report, lbl LabelSet) error {
 	if sweepOutput == "json" {
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
@@ -146,7 +146,7 @@ func printReport(w io.Writer, rep *Report) error {
 	}
 
 	if len(rep.Items) == 0 {
-		_, err := fmt.Fprintf(w, "No %s items found — the ledger is empty.\n", MarkerLabel)
+		_, err := fmt.Fprintf(w, "No %s items found — the ledger is empty.\n", lbl.Marker)
 		return err
 	}
 	for _, it := range rep.Items {
