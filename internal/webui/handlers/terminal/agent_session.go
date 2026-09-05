@@ -101,7 +101,7 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 		return nil, err
 	}
 	existing := selectAgentTerminalTab(tabs, agentName)
-	livePTYPresent := existing != nil && existing.PTYAlive
+	livePTYPresent := existing != nil && existing.Attachable
 	if livePTYPresent {
 		// Cache-validity check: if the agent's effective backend/role has
 		// changed since the existing tab was built, the cached launch spec
@@ -323,7 +323,7 @@ func selectAgentTerminalTab(tabs []tabmeta.TabMetadata, agentName string) *tabme
 		if tab.Kind != terminalKindAgent || tab.AgentID != agentName {
 			continue
 		}
-		if tab.PTYAlive {
+		if tab.Attachable {
 			return tab
 		}
 		if newest == nil || tab.UpdatedAt.After(newest.UpdatedAt) {
@@ -336,7 +336,7 @@ func selectAgentTerminalTab(tabs []tabmeta.TabMetadata, agentName string) *tabme
 func pruneStaleAgentTerminalTabs(ctx context.Context, svc service.TerminalService, workspace, agentName, keepSession string, tabs []tabmeta.TabMetadata) {
 	for i := range tabs {
 		tab := tabs[i]
-		if tab.SessionName == keepSession || tab.Kind != terminalKindAgent || tab.AgentID != agentName || tab.PTYAlive {
+		if tab.SessionName == keepSession || tab.Kind != terminalKindAgent || tab.AgentID != agentName || tab.Attachable {
 			continue
 		}
 		if err := svc.DeleteTab(ctx, workspace, tab.SessionName); err != nil {

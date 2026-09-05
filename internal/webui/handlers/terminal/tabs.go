@@ -58,12 +58,29 @@ func HandleGetTerminalTab(svc service.TerminalService) http.HandlerFunc {
 }
 
 // tabPatchRequest represents the partial update body for PATCH.
+//
+// ReplacedAt is client-settable only to DISMISS the session-replacement
+// marker: "" clears it. replaced_reason is deliberately absent — it is
+// server-written, so a client cannot widen its enum.
 type tabPatchRequest struct {
-	Label     *string `json:"label"`
-	Notes     *string `json:"notes"`
-	SortOrder *int    `json:"sort_order"`
-	Pinned    *bool   `json:"pinned"`
-	IssueID   *string `json:"issue_id"`
+	Label      *string `json:"label"`
+	Notes      *string `json:"notes"`
+	SortOrder  *int    `json:"sort_order"`
+	Pinned     *bool   `json:"pinned"`
+	IssueID    *string `json:"issue_id"`
+	ReplacedAt *string `json:"replaced_at"`
+}
+
+// validatePatchRequest rejects a body that would store an unparseable
+// timestamp. "" is the dismiss operation and is always accepted.
+func validatePatchRequest(req tabPatchRequest) error {
+	if req.ReplacedAt == nil || *req.ReplacedAt == "" {
+		return nil
+	}
+	if _, err := time.Parse(time.RFC3339, *req.ReplacedAt); err != nil {
+		return fmt.Errorf("replaced_at must be an RFC3339 timestamp or an empty string")
+	}
+	return nil
 }
 
 // buildPatchFields converts a tabPatchRequest into a partial fields map for store.Patch.
@@ -84,6 +101,9 @@ func buildPatchFields(req tabPatchRequest) map[string]string {
 	if req.IssueID != nil {
 		fields["issue_id"] = *req.IssueID
 	}
+	if req.ReplacedAt != nil {
+		fields["replaced_at"] = *req.ReplacedAt
+	}
 	return fields
 }
 
@@ -99,6 +119,14 @@ func HandlePatchTerminalTab(svc service.TerminalService) http.HandlerFunc {
 			handler.WriteJSON(w, http.StatusBadRequest, tabMetadataResponse{
 				Success: false,
 				Error:   "invalid request body",
+			})
+			return
+		}
+
+		if err := validatePatchRequest(req); err != nil {
+			handler.WriteJSON(w, http.StatusBadRequest, tabMetadataResponse{
+				Success: false,
+				Error:   err.Error(),
 			})
 			return
 		}

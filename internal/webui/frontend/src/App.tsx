@@ -99,6 +99,7 @@ import { useSearchScope } from "@/hooks/issues/useSearchScope";
 import { useToast } from "@/hooks/ui/useToast";
 import { useTheme } from "@/hooks/ui/useTheme";
 import { useTerminalFont } from "@/hooks/terminal/useTerminalFont";
+import { useWorkspaceSessionCount } from "@/hooks/terminal/useWorkspaceSessionCount";
 import { usePanelManager } from "@/hooks/ui/usePanelManager";
 import { KeyboardShortcutProvider } from "@/hooks/ui/useKeyboardShortcuts";
 import { useWorkspaceContext } from "@/hooks/workspace/useWorkspaceContext";
@@ -493,8 +494,9 @@ function App() {
     undefined,
   );
 
-  // Active terminal session count for badge display
-  const [activeSessionCount, setActiveSessionCount] = useState(0);
+  // Live terminal session count for badge display. Server-backed and always
+  // on, so the badge is correct on every route and survives workspace switches.
+  const { sessionCount } = useWorkspaceSessionCount();
 
   // Terminal unread output indicator
   const [hasTerminalUnread, setHasTerminalUnread] = useState(false);
@@ -620,6 +622,35 @@ function App() {
     }
   }, [issueDetails, issuesMap, updateIssueDetails]);
 
+  // Force-resync the open detail surface when an optimistic update SETTLES.
+  //
+  // The effect above intentionally refuses staler data via its `updated_at`
+  // guard, which is right for SSE races but wrong here: `updateIssueStatus`
+  // stamps its optimistic issue with a fabricated `updated_at: now`, and a
+  // rollback restores the snapshot's ORIGINAL (older) timestamp. The guard
+  // therefore filters the revert out and the detail view keeps showing a
+  // status the server rejected until a full reload (PUPPET-146).
+  //
+  // Keyed on the pending -> settled edge instead of on timestamps. This relies
+  // on the store writing `issuesMap` BEFORE it clears `pendingIds` (both the
+  // rollback and the auto-rollback-timeout paths in issueStore.ts do); if that
+  // order is ever swapped, an intermediate render would see the settle edge
+  // while the map still holds the optimistic value and this would silently
+  // become a no-op.
+  const prevPendingIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const prev = prevPendingIdsRef.current;
+    prevPendingIdsRef.current = new Set(pendingIds);
+    if (!issueDetails) return;
+    const id = issueDetails.id;
+    // Still pending, or never was pending — nothing settled for this issue.
+    if (!prev.has(id) || pendingIds.has(id)) return;
+    const latest = issuesMap.get(id);
+    if (!latest) return;
+    // Status only: widening this would churn against the effect above.
+    if (latest.status !== issueDetails.status) updateIssueDetails(latest);
+  }, [pendingIds, issuesMap, issueDetails, updateIssueDetails]);
+
   // Deep-link error: toast + navigate away when a deep-linked issue fails to load
   useEffect(() => {
     if (!detailError || activeView !== "issue-detail" || !selectedIssueId)
@@ -713,91 +744,82 @@ function App() {
     }, 300);
   }, [closePanel, clearIssue]);
 
-  // Handle approve button click on review cards
+  // Handle approve button click on review cards.
+  //
+  // Failures are NOT caught here: every caller is a review surface that owns
+  // its own reporting (inline message, spinner release, disabled-with-reason).
+  // Toasting here as well put two identical toasts in the same corner of the
+  // screen for one failure (PUPPET-146).
   const handleApprove = useCallback(
     async (issue: Issue) => {
-      try {
-        const reviewType = getReviewType(issue);
+      const reviewType = getReviewType(issue);
 
-        if (reviewType === "code") {
-          // Code review: Close the issue (PR was reviewed and approved)
-          await closeIssue(
-            workspaceId,
-            issue.id,
-            "PR approved after code review",
-          );
-          await refetch();
-        } else if (reviewType === "plan") {
-          // Plan review: move to open AND clear the rejection marker.
-          //
-          // Removing the label is what makes the review workflow terminate.
-          // Reject stamps `needs-revision`; the planner selects on it
-          // (taskfilter.go: NeedsPlan = !HasDesign || HasNeedsRevision) and the
-          // worker is excluded by it (ReadyToImplement = HasDesign &&
-          // !HasNeedsRevision). Approving status-only leaves the label on, so
-          // the planner immediately re-claims the issue and the human is asked
-          // to approve the same plan again, forever — independent of how good
-          // the plan is.
-          //
-          // Uses updateIssue + refetch rather than the optimistic
-          // updateIssueStatus path (which carries status only), mirroring
-          // handleReject below. Removal is unconditional and idempotent, so
-          // approving a never-rejected issue is a no-op server-side.
-          await updateIssue(workspaceId, issue.id, {
-            status: "open",
-            remove_labels: [NEEDS_REVISION_LABEL],
-          });
-          await refetch();
-        } else if (reviewType === "help") {
-          // Needs help: Move to in_progress (unblock)
-          await updateIssueStatus(issue.id, "in_progress");
-        }
-
-        // Close the detail panel and clean up after successful approve
-        handlePanelClose();
-      } catch (err) {
-        // updateIssueStatus errors are handled by useOptimisticUpdate rollback,
-        // so the "help" branch stays silent here. The "code" (closeIssue) and
-        // "plan" (updateIssue) branches do NOT go through that path, so without
-        // a toast a failed approve would look identical to a successful one.
-        if (!mountedRef.current) return;
-        const reviewType = getReviewType(issue);
-        if (reviewType === "code" || reviewType === "plan") {
-          const message =
-            err instanceof Error ? err.message : "Failed to approve";
-          showToast(message, { type: "error" });
-        }
-      }
-    },
-    [workspaceId, updateIssueStatus, refetch, handlePanelClose, showToast],
-  );
-
-  // Handle reject button submission on review cards
-  const handleReject = useCallback(
-    async (issue: Issue, comment: string) => {
-      try {
-        const reviewType = getReviewType(issue);
-
-        // Add feedback comment
-        const prefix = reviewType === "code" ? "CODE REVIEW" : "FEEDBACK";
-        await addComment(workspaceId, issue.id, `${prefix}: ${comment}`);
-
-        // Add needs-revision label and set status to open
+      if (reviewType === "code") {
+        // Code review: Close the issue (PR was reviewed and approved)
+        await closeIssue(
+          workspaceId,
+          issue.id,
+          "PR approved after code review",
+        );
+        await refetch();
+      } else if (reviewType === "plan") {
+        // Plan review: move to open AND clear the rejection marker.
+        //
+        // Removing the label is what makes the review workflow terminate.
+        // Reject stamps `needs-revision`; the planner selects on it
+        // (taskfilter.go: NeedsPlan = !HasDesign || HasNeedsRevision) and the
+        // worker is excluded by it (ReadyToImplement = HasDesign &&
+        // !HasNeedsRevision). Approving status-only leaves the label on, so
+        // the planner immediately re-claims the issue and the human is asked
+        // to approve the same plan again, forever — independent of how good
+        // the plan is.
+        //
+        // Uses updateIssue + refetch rather than the optimistic
+        // updateIssueStatus path (which carries status only), mirroring
+        // handleReject below. Removal is unconditional and idempotent, so
+        // approving a never-rejected issue is a no-op server-side.
         await updateIssue(workspaceId, issue.id, {
           status: "open",
-          add_labels: [NEEDS_REVISION_LABEL],
+          remove_labels: [NEEDS_REVISION_LABEL],
         });
-
-        // Refetch to reflect label/status changes and close panel
         await refetch();
-        handlePanelClose();
-      } catch (err) {
-        if (!mountedRef.current) return;
-        const message = err instanceof Error ? err.message : "Failed to reject";
-        showToast(message, { type: "error" });
+      } else if (reviewType === "help") {
+        // Needs help: Move to in_progress (unblock). The store's rollback
+        // toast is suppressed: the caller shows this same message, and the
+        // error still propagates. The auto-rollback-timeout toast, which no
+        // caller ever sees, is untouched.
+        await storeUpdateIssueStatus(issue.id, "in_progress", workspaceId, {
+          toastOnRollback: false,
+        });
       }
+
+      // Close the detail panel and clean up after successful approve
+      handlePanelClose();
     },
-    [workspaceId, refetch, handlePanelClose, showToast],
+    [workspaceId, storeUpdateIssueStatus, refetch, handlePanelClose],
+  );
+
+  // Handle reject button submission on review cards. Errors propagate for the
+  // same reason as handleApprove above: the caller owns the surface.
+  const handleReject = useCallback(
+    async (issue: Issue, comment: string) => {
+      const reviewType = getReviewType(issue);
+
+      // Add feedback comment
+      const prefix = reviewType === "code" ? "CODE REVIEW" : "FEEDBACK";
+      await addComment(workspaceId, issue.id, `${prefix}: ${comment}`);
+
+      // Add needs-revision label and set status to open
+      await updateIssue(workspaceId, issue.id, {
+        status: "open",
+        add_labels: [NEEDS_REVISION_LABEL],
+      });
+
+      // Refetch to reflect label/status changes and close panel
+      await refetch();
+      handlePanelClose();
+    },
+    [workspaceId, refetch, handlePanelClose],
   );
 
   // Close all panels synchronously (no animation) for workspace switch
@@ -1431,7 +1453,7 @@ function App() {
             <NavRail
               activeView={activeView}
               onChange={handleNavChange}
-              sessionCount={activeSessionCount}
+              sessionCount={sessionCount}
               operatorQueueCount={operatorQueue.length}
               badges={{ terminal: hasTerminalUnread }}
               workspaces={(workspace?.workspaces ?? []).map((ws) => ({
@@ -1481,7 +1503,6 @@ function App() {
                       onIssueContextConsumed={handleIssueContextConsumed}
                       pendingAgentName={pendingAgentName}
                       onAgentNameConsumed={handleAgentNameConsumed}
-                      onActiveSessionCountChange={setActiveSessionCount}
                       onUnreadChange={setHasTerminalUnread}
                       onTabLimitReached={(message) =>
                         showToast(message, { type: "error" })

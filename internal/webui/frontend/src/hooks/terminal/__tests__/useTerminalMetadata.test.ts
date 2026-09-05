@@ -19,6 +19,7 @@ import {
 } from "@/api/terminal";
 import type { TabMetadata } from "@/api/terminal";
 import type { MutationPayload } from "@/api/common";
+import { ApiError } from "@/types/common";
 
 import { useTerminalMetadata } from "../useTerminalMetadata";
 
@@ -117,7 +118,11 @@ describe("useTerminalMetadata", () => {
 
       expect(result.current.error).toBeInstanceOf(Error);
       expect(result.current.error?.message).toBe("Network error");
-      expect(result.current.isLoading).toBe(false);
+      // PUPPET-125: a failed load must NOT advance the workspace stamp, so the
+      // hook stays loading. Reporting "ready with zero tabs" here would make
+      // useTabInit auto-create a terminal session off a network error.
+      expect(result.current.isLoading).toBe(true);
+      expect(result.current.tabs).toEqual([]);
     });
 
     it("wraps non-Error thrown values", async () => {
@@ -170,6 +175,49 @@ describe("useTerminalMetadata", () => {
 
       expect(result.current.tabs).toEqual([]);
       expect(result.current.error?.message).toBe("Create failed");
+    });
+
+    it("rolls back on a non-409 ApiError", async () => {
+      mockList.mockResolvedValueOnce([]);
+      mockPut.mockRejectedValueOnce(new ApiError(500, "Internal Server Error"));
+
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
+      await flushPromises();
+
+      await act(async () => {
+        await result.current.createTab("new-sess", "New Tab", 0);
+      });
+
+      expect(result.current.tabs).toEqual([]);
+      expect(result.current.error).toBeInstanceOf(ApiError);
+    });
+
+    it("keeps the tab and refetches on 409 instead of erroring", async () => {
+      mockList.mockResolvedValueOnce([]);
+      mockPut.mockRejectedValueOnce(
+        new ApiError(409, "Conflict", {
+          error:
+            "tab metadata already exists with a live PTY; use PATCH to update",
+        }),
+      );
+      // The reconciling refetch the 409 branch issues.
+      mockList.mockResolvedValueOnce([
+        createMockTab({ session_name: "new-sess", label: "Server Label" }),
+      ]);
+
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
+      await flushPromises();
+      expect(mockList).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await result.current.createTab("new-sess", "New Tab", 0);
+      });
+      await flushPromises();
+
+      expect(result.current.error).toBeNull();
+      expect(mockList).toHaveBeenCalledTimes(2);
+      expect(result.current.tabs).toHaveLength(1);
+      expect(result.current.tabs[0].session_name).toBe("new-sess");
     });
   });
 
@@ -550,6 +598,288 @@ describe("useTerminalMetadata", () => {
       await flushPromises();
 
       expect(mockList).toHaveBeenLastCalledWith("ws2");
+    });
+  });
+
+  // PUPPET-125: `tabs`/`isLoading` describe the currently requested workspace
+  // only. A consumer seeing isLoading === false may treat tabs as authoritative
+  // for that workspace — an empty list then really means "no terminal tabs".
+  describe("workspace-stamped readiness", () => {
+    it("reports loading, not empty, when the workspace changed while disabled", async () => {
+      mockList.mockResolvedValueOnce([createMockTab({ label: "WS1" })]);
+
+      const { result, rerender } = renderHook(
+        ({ ws, enabled }: { ws: string; enabled: boolean }) =>
+          useTerminalMetadata(ws, { enabled }),
+        { initialProps: { ws: "ws1", enabled: true } },
+      );
+
+      await flushPromises();
+      expect(result.current.tabs).toHaveLength(1);
+
+      // Navigate away (view inactive) and switch workspace.
+      rerender({ ws: "ws2", enabled: false });
+      await flushPromises();
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.tabs).toEqual([]);
+
+      // Re-entering the Terminal view: the very first render must already say
+      // "loading", not "ws2 has zero tabs" — otherwise useTabInit auto-creates
+      // a default tab whose PUT is rejected 409 by a live PTY.
+      let pending: (value: TabMetadata[]) => void = () => {};
+      mockList.mockImplementationOnce(
+        () =>
+          new Promise<TabMetadata[]>((resolve) => {
+            pending = resolve;
+          }),
+      );
+      rerender({ ws: "ws2", enabled: true });
+
+      expect(result.current.isLoading).toBe(true);
+      expect(result.current.tabs).toEqual([]);
+
+      await act(async () => {
+        pending([createMockTab({ session_name: "sess-2", label: "WS2" })]);
+        await Promise.resolve();
+      });
+
+      expect(mockList).toHaveBeenLastCalledWith("ws2");
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.tabs[0].label).toBe("WS2");
+    });
+
+    it("never exposes another workspace's tabs while its fetch is pending", async () => {
+      mockList.mockResolvedValueOnce([createMockTab({ label: "WS1" })]);
+
+      const { result, rerender } = renderHook(
+        ({ ws }: { ws: string }) => useTerminalMetadata(ws),
+        { initialProps: { ws: "ws1" } },
+      );
+
+      await flushPromises();
+      expect(result.current.tabs[0].label).toBe("WS1");
+
+      mockList.mockImplementationOnce(
+        () => new Promise<TabMetadata[]>(() => {}),
+      );
+      rerender({ ws: "ws2" });
+
+      expect(result.current.tabs).toEqual([]);
+      expect(result.current.isLoading).toBe(true);
+    });
+
+    it("ignores an out-of-order response for a previous workspace", async () => {
+      let resolveWs1: (value: TabMetadata[]) => void = () => {};
+      mockList.mockImplementationOnce(
+        () =>
+          new Promise<TabMetadata[]>((resolve) => {
+            resolveWs1 = resolve;
+          }),
+      );
+
+      const { result, rerender } = renderHook(
+        ({ ws }: { ws: string }) => useTerminalMetadata(ws),
+        { initialProps: { ws: "ws1" } },
+      );
+      await flushPromises();
+
+      let resolveWs2: (value: TabMetadata[]) => void = () => {};
+      mockList.mockImplementationOnce(
+        () =>
+          new Promise<TabMetadata[]>((resolve) => {
+            resolveWs2 = resolve;
+          }),
+      );
+      rerender({ ws: "ws2" });
+      await flushPromises();
+
+      // ws2 lands first, then the stale ws1 response arrives.
+      await act(async () => {
+        resolveWs2([createMockTab({ session_name: "sess-2", label: "WS2" })]);
+        await Promise.resolve();
+      });
+      await act(async () => {
+        resolveWs1([createMockTab({ session_name: "sess-1", label: "WS1" })]);
+        await Promise.resolve();
+      });
+
+      expect(result.current.tabs).toHaveLength(1);
+      expect(result.current.tabs[0].label).toBe("WS2");
+    });
+
+    it("clears the error when the workspace changes", async () => {
+      mockList.mockRejectedValueOnce(new Error("Network error"));
+
+      const { result, rerender } = renderHook(
+        ({ ws }: { ws: string }) => useTerminalMetadata(ws),
+        { initialProps: { ws: "ws1" } },
+      );
+      await flushPromises();
+      expect(result.current.error?.message).toBe("Network error");
+
+      mockList.mockResolvedValueOnce([]);
+      rerender({ ws: "ws2" });
+      await flushPromises();
+
+      expect(result.current.error).toBeNull();
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.tabs).toEqual([]);
+    });
+
+    it("stays loading with no fetch while the workspace is unresolved", async () => {
+      const { result } = renderHook(() => useTerminalMetadata(""));
+      await flushPromises();
+
+      expect(mockList).not.toHaveBeenCalled();
+      expect(result.current.isLoading).toBe(true);
+      expect(result.current.tabs).toEqual([]);
+    });
+
+    it("does not strand the new workspace loading when a stale PUT 409s", async () => {
+      mockList.mockResolvedValueOnce([
+        createMockTab({ session_name: "a-1", label: "WS1" }),
+      ]);
+
+      const { result, rerender } = renderHook(
+        ({ ws }: { ws: string }) => useTerminalMetadata(ws),
+        { initialProps: { ws: "ws1" } },
+      );
+      await flushPromises();
+      expect(result.current.tabs[0].label).toBe("WS1");
+
+      // A PUT for ws1 still on the wire when the workspace switches.
+      let rejectPut: (err: unknown) => void = () => {};
+      mockPut.mockImplementationOnce(
+        () =>
+          new Promise<TabMetadata>((_resolve, reject) => {
+            rejectPut = reject;
+          }),
+      );
+      let creating: Promise<void> = Promise.resolve();
+      act(() => {
+        creating = result.current.createTab("a-2", "New Tab", 1);
+      });
+
+      // Switch to ws2 and let its list land.
+      mockList.mockResolvedValueOnce([
+        createMockTab({ session_name: "b-1", label: "WS2" }),
+      ]);
+      rerender({ ws: "ws2" });
+      await flushPromises();
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.tabs[0].label).toBe("WS2");
+
+      const listCalls = mockList.mock.calls.length;
+
+      // Only now does the ws1 PUT come back 409. Its reconciling refetch is
+      // for ws1 — running it would flip isFetching for ws2 and never reset it,
+      // pinning the view on the loading skeleton.
+      await act(async () => {
+        rejectPut(new ApiError(409, "Conflict"));
+        await creating;
+      });
+
+      expect(mockList).toHaveBeenCalledTimes(listCalls);
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.error).toBeNull();
+      expect(result.current.tabs).toHaveLength(1);
+      expect(result.current.tabs[0].label).toBe("WS2");
+    });
+
+    it("does not roll a failed ws1 mutation back over ws2's tabs", async () => {
+      mockList.mockResolvedValueOnce([
+        createMockTab({ session_name: "a-1", label: "WS1" }),
+      ]);
+
+      const { result, rerender } = renderHook(
+        ({ ws }: { ws: string }) => useTerminalMetadata(ws),
+        { initialProps: { ws: "ws1" } },
+      );
+      await flushPromises();
+
+      let rejectPatch: (err: unknown) => void = () => {};
+      mockPatch.mockImplementationOnce(
+        () =>
+          new Promise<TabMetadata>((_resolve, reject) => {
+            rejectPatch = reject;
+          }),
+      );
+      let renaming: Promise<void> = Promise.resolve();
+      act(() => {
+        renaming = result.current.updateLabel("a-1", "Renamed");
+      });
+      expect(result.current.tabs[0].label).toBe("Renamed");
+
+      mockList.mockResolvedValueOnce([
+        createMockTab({ session_name: "b-1", label: "WS2" }),
+      ]);
+      rerender({ ws: "ws2" });
+      await flushPromises();
+      expect(result.current.tabs[0].label).toBe("WS2");
+
+      await act(async () => {
+        rejectPatch(new Error("Patch failed"));
+        await renaming;
+      });
+
+      // The rollback belongs to ws1; ws2's list must survive it untouched.
+      expect(result.current.tabs).toHaveLength(1);
+      expect(result.current.tabs[0].session_name).toBe("b-1");
+      expect(result.current.tabs[0].label).toBe("WS2");
+      expect(result.current.error).toBeNull();
+    });
+
+    it("does not clear the list when a mutation issued before the load fails", async () => {
+      let resolveList: (value: TabMetadata[]) => void = () => {};
+      mockList.mockImplementationOnce(
+        () =>
+          new Promise<TabMetadata[]>((resolve) => {
+            resolveList = resolve;
+          }),
+      );
+
+      const { result } = renderHook(() => useTerminalMetadata("ws1"));
+      await flushPromises();
+
+      // Issued while no workspace-fresh list is held, so the optimistic apply
+      // is skipped and there is nothing to roll back to.
+      let rejectPatch: (err: unknown) => void = () => {};
+      mockPatch.mockImplementationOnce(
+        () =>
+          new Promise<TabMetadata>((_resolve, reject) => {
+            rejectPatch = reject;
+          }),
+      );
+      let renaming: Promise<void> = Promise.resolve();
+      act(() => {
+        renaming = result.current.updateLabel("sess-1", "Renamed");
+      });
+
+      await act(async () => {
+        resolveList([createMockTab()]);
+        await Promise.resolve();
+      });
+      expect(result.current.tabs).toHaveLength(1);
+
+      await act(async () => {
+        rejectPatch(new Error("Patch failed"));
+        await renaming;
+      });
+
+      expect(result.current.tabs).toHaveLength(1);
+      expect(result.current.tabs[0].session_name).toBe("sess-1");
+      expect(result.current.error?.message).toBe("Patch failed");
+    });
+
+    it("reports not-loading with empty tabs while disabled", async () => {
+      const { result } = renderHook(() =>
+        useTerminalMetadata("ws1", { enabled: false }),
+      );
+      await flushPromises();
+
+      expect(mockList).not.toHaveBeenCalled();
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.tabs).toEqual([]);
     });
   });
 });

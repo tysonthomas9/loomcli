@@ -112,6 +112,17 @@ export interface IssueStoreState {
   mutationCount: number;
 }
 
+/** Options for {@link IssueStoreActions.updateIssueStatus}. */
+export interface UpdateIssueStatusOptions {
+  /**
+   * Whether a failed update toasts its rollback message (default `true`).
+   *
+   * Callers that render the rejection themselves pass `false` so one failure
+   * does not stack two identical toasts in the same corner of the screen.
+   */
+  toastOnRollback?: boolean;
+}
+
 export interface IssueStoreActions {
   fetchIssues: (params: FetchIssuesParams) => Promise<void>;
   refetch: () => Promise<void>;
@@ -121,6 +132,7 @@ export interface IssueStoreActions {
     issueId: string,
     newStatus: Status,
     workspaceId: string,
+    options?: UpdateIssueStatusOptions,
   ) => Promise<void>;
   setConnectionState: (state: ConnectionState) => void;
   setReconnectAttempts: (attempts: number) => void;
