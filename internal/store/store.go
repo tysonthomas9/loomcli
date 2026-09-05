@@ -50,6 +50,7 @@ type Store interface {
 	Workers() WorkerStore
 	Roles() RoleStore
 	Skills() SkillStore
+	WorkspaceFiles() WorkspaceFileStore
 	SkillMaterializationLeases() SkillMaterializationLeaseStore
 	SkillPacks() SkillPackStore
 	Daemon() DaemonProfileStore
