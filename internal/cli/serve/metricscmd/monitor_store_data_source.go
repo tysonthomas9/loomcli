@@ -130,6 +130,7 @@ func collectMonitorStoreData(ctx context.Context, st store.Store, workspaceHint 
 		return data
 	}
 	data.Workspace.Name = wsName
+	data.Workspace.Resolved = true
 
 	assignments, err := st.Agents().List(ctx, wsKey)
 	if err != nil {
