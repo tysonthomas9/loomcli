@@ -54,8 +54,9 @@ type frameWriter interface {
 }
 
 type preparedMutation struct {
-	id      string
-	payload *MutationPayload
+	id         string
+	payload    *MutationPayload
+	checkpoint bool
 }
 
 type resyncInstruction struct {
@@ -225,6 +226,7 @@ func (h *Handler) fetchCatchUp(
 	ctx, cancel := context.WithTimeout(requestCtx, h.catchUpTimeout)
 	defer cancel()
 	cursor := since
+	pageCursors := map[string]struct{}{since: {}}
 	mutations := make([]preparedMutation, 0, catchUpPageLimit)
 	for pageNumber := 1; pageNumber <= h.catchUpMaxPages; pageNumber++ {
 		page, err := h.getMutationPage(ctx, workspaceID, cursor, catchUpPageLimit)
@@ -235,9 +237,15 @@ func (h *Handler) fetchCatchUp(
 		if err := ctx.Err(); err != nil {
 			return mutations, seen, &resyncInstruction{cursor: cursor, reason: "cap"}, fmt.Errorf("catch-up exceeded time budget: %w", err)
 		}
-		if page.Cursor == "" {
+		if page.Cursor == "" && !page.HasMore && len(page.Events) == 0 {
 			page.Cursor = cursor
 		}
+		_, repeated := pageCursors[page.Cursor]
+		idle := !page.HasMore && len(page.Events) == 0 && page.Cursor == cursor
+		if page.Cursor == "" || (repeated && !idle) {
+			return mutations, seen, &resyncInstruction{cursor: since, reason: "error"}, fmt.Errorf("catch-up page %d did not advance its cursor", pageNumber)
+		}
+		pageCursors[page.Cursor] = struct{}{}
 		for _, mutation := range page.Events {
 			payload := BackendMutationToPayload(mutation, workspaceID)
 			if !MatchesSourceRepoFilter(sourceRepos, payload.SourceRepo) {
@@ -251,6 +259,11 @@ func (h *Handler) fetchCatchUp(
 		}
 		cursor = page.Cursor
 		if !page.HasMore {
+			// The authoritative page cursor includes filtered-out records. Only
+			// completed replay can publish this checkpoint; failures use resync.
+			if cursor != since && (len(mutations) == 0 || mutations[len(mutations)-1].id != cursor) {
+				mutations = append(mutations, preparedMutation{id: cursor, checkpoint: true})
+			}
 			return mutations, seen, nil, nil
 		}
 		if pageNumber == h.catchUpMaxPages {
@@ -409,6 +422,9 @@ drained:
 }
 
 func writePreparedMutation(sw frameWriter, mutation preparedMutation) error {
+	if mutation.checkpoint {
+		return sw.WriteEventID(mutation.id, "checkpoint", "{}")
+	}
 	data, err := json.Marshal(mutation.payload)
 	if err != nil {
 		return nil
