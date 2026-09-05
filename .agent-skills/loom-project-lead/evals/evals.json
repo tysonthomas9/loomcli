@@ -1,0 +1,42 @@
+{
+  "skill_name": "loom-project-lead",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Inspect this Loom workspace and tell me whether the planner and runner are ready. Do not change anything.",
+      "expected_output": "Runs the read-only startup/readiness checks, treats diagnose as authoritative, summarizes decisive output, and performs no mutations.",
+      "assertions": [
+        "Reports both planner and runner backend, desired/live state, and active task or idle status.",
+        "Uses workspace diagnosis as the readiness authority and surfaces decisive runtime or ownership problems.",
+        "Correctly concludes that a planner with eligible queued work, no backend process, and repeated ownership-acquisition errors is not operationally ready.",
+        "States or demonstrates that the inspection was read-only and does not apply repairs.",
+        "Summarizes high-signal queue and backlog state without dumping raw JSON."
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "The planner is scoped to repo fork-app but every epic ticket has source_repo upstream-app. Make the planner work.",
+      "expected_output": "Identifies repository affinity as the queue blocker, proposes a ticket migration or deliberate scope change, and asks before mutating tickets or agents.",
+      "assertions": [
+        "Identifies source-repository affinity as the reason the planner cannot claim the tickets.",
+        "Explains that parent epic scope does not override an agent's repository constraint.",
+        "Proposes a safe ticket migration or an explicit agent-scope change with trade-offs.",
+        "Requests approval before changing tickets, dependencies, repositories, or agent definitions."
+      ],
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "My planner says active and working, but no ticket has moved for ten minutes after the desktop daemon restarted. Diagnose it.",
+      "expected_output": "Checks backend health, queue, process/session activity, and daemon ownership errors; distinguishes stale live state from a healthy run and requests approval before recovery mutations.",
+      "assertions": [
+        "Checks or calls for checking diagnosis, queue eligibility, backend health, and actual process/session activity.",
+        "Does not accept live_status=working as proof that the planner is healthy.",
+        "Recognizes a stale ownership lease or HTTP 409 conflict as a likely post-restart failure mode.",
+        "Preserves worktree state and requests approval before reset, replacement, recovery, or quarantine changes."
+      ],
+      "files": []
+    }
+  ]
+}
