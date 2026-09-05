@@ -282,6 +282,21 @@ func (t *tracedIssueBackend) ReleaseClaim(ctx context.Context, id, actor string)
 	return err
 }
 
+// ConfiguredActor forwards the inner backend's authenticated identity when it
+// exposes one. Capability-detected, like ReleaseClaim above, and for the same
+// reason: this decorator is applied unconditionally in deps.go, so a method it
+// does not forward is invisible to every caller that type-asserts on the
+// resolved IssueBackend — including the supervisor's claimActorFor. Returns ""
+// when the inner backend has no configured actor. Not span-wrapped: it is a
+// local accessor, not a backend call.
+func (t *tracedIssueBackend) ConfiguredActor() string {
+	c, ok := t.inner.(interface{ ConfiguredActor() string })
+	if !ok {
+		return ""
+	}
+	return c.ConfiguredActor()
+}
+
 func (t *tracedIssueBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
 	ctx, span := t.startSpan(ctx, "DeferIssue",
 		attribute.String("loom.task_id", id),
