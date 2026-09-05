@@ -324,9 +324,10 @@ func splitAndTrim(s string) []string {
 func parseBlockedParams(r *http.Request) (*rpc.BlockedArgs, error) {
 	q := r.URL.Query()
 	args := &rpc.BlockedArgs{
-		ParentID: q.Get("parent_id"),
-		Assignee: q.Get("assignee"),
-		Type:     q.Get("type"),
+		ParentID:    q.Get("parent_id"),
+		Assignee:    q.Get("assignee"),
+		Type:        q.Get("type"),
+		SourceRepos: handler.ParseArrayParam(q, "source_repos"),
 	}
 	if p := q.Get("priority"); p != "" {
 		v, err := strconv.Atoi(p)
