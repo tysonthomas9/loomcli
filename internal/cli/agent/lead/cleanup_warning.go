@@ -16,7 +16,7 @@ const claudeSettingsFile = "settings.json"
 // transcript before deleting it. Absent, claude's own default applies.
 const claudeCleanupPeriodKey = "cleanupPeriodDays"
 
-// claudeDefaultCleanupPeriodDays is claude's behaviour when the key is unset.
+// claudeDefaultCleanupPeriodDays is claude's behavior when the key is unset.
 // It is claude's number, not loom's, and it is quoted only in the warning.
 const claudeDefaultCleanupPeriodDays = 30
 
@@ -36,7 +36,7 @@ const claudeSettingsMaxBytes = 1 << 20
 // default belongs to the provisioning script, which does not live in this repo.
 func warnClaudeTranscriptCleanup(out io.Writer) {
 	if warning := claudeCleanupWarning(os.Getenv("CLAUDE_CONFIG_DIR")); warning != "" {
-		fmt.Fprintln(out, warning)
+		_, _ = fmt.Fprintln(out, warning)
 	}
 }
 

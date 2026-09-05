@@ -45,6 +45,8 @@ var leadMessage string
 var leadPromptFile string
 var leadResume string
 var leadContinue bool
+var leadListSessions bool
+var leadListOutput = leadListOutputText
 var materializeLeadSkillsAtStart = materializeLeadSkills
 
 var leadCmd = &cobra.Command{
@@ -63,6 +65,9 @@ management mode, where the AI agent helps you:
 
 Pass --prompt to replace the default lead prompt with a role prompt_file while
 keeping terminal-agent guardrails and orchestration behavior.
+
+Use --list-sessions to see this agent's previous lead sessions (with the codex
+thread name where codex recorded one) and exit without starting a new one.
 
 Use --continue to reopen this agent's most recent lead conversation, or
 --resume <id> to reopen a specific one (a loom session id, or the harness
@@ -91,6 +96,10 @@ func init() {
 	leadCmd.Flags().Lookup("resume").NoOptDefVal = leadcontrol.ResumeLatestSentinel
 	leadCmd.Flags().BoolVar(&leadContinue, "continue", false,
 		"Resume this agent's most recent lead session")
+	leadCmd.Flags().BoolVar(&leadListSessions, "list-sessions", false,
+		"List this agent's previous lead sessions and exit without starting one")
+	leadCmd.Flags().StringVarP(&leadListOutput, "output", "o", leadListOutputText,
+		"Output format for --list-sessions: text|json")
 }
 
 // leadStartupPrompt picks the lead runtime's boot prompt. A role prompt_file
@@ -116,6 +125,18 @@ func runLead(cmd *cobra.Command, args []string) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
 		os.Exit(1)
+	}
+
+	// --list-sessions is a query, not a launch: it answers and returns before
+	// anything is registered, generated or materialized. It sits ahead of the
+	// resume resolution below so its usage errors are raised from the flags
+	// alone, without touching the store.
+	if leadListSessions {
+		if err := runLeadListSessions(context.Background(), os.Stdout, workDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	backendName := cli.GetBackendName()
