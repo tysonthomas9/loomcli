@@ -424,6 +424,20 @@ func processReadyIssues(issues []backend.IssueData, err error, summary *TaskSumm
 	if err != nil {
 		return nil, nil
 	}
+	// Priority histogram for the loom_ready_tasks gauge. Built here, from the
+	// same scoped Ready() result the summary counts come from: it used to have
+	// its own unscoped Ready() call, which is exactly how the gauge drifted
+	// away from `loom data ready`.
+	//
+	// Note the deliberate divergence documented on TaskSummary.ReadyByPriority:
+	// ReadyToImplement/NeedsPlanning below do NOT exclude needs-revision issues,
+	// this histogram does, preserving today's gauge semantics.
+	readyByPriority := make(map[int]int, 5)
+	for p := 0; p <= 4; p++ {
+		readyByPriority[p] = 0
+	}
+	summary.ReadyByPriority = readyByPriority
+
 	var needsPlanning, readyToImpl []TaskInfo
 	for _, issue := range issues {
 		if !cli.IsOpen(issue) {
@@ -440,6 +454,13 @@ func processReadyIssues(issues []backend.IssueData, err error, summary *TaskSumm
 		// blocked, even if the ready query returned them.
 		if blockedIDs != nil && blockedIDs[issue.ID] {
 			continue
+		}
+		if !cli.HasNeedsRevision(issue) {
+			p := issue.Priority
+			if p < 0 || p > 4 {
+				p = 4
+			}
+			readyByPriority[p]++
 		}
 		ti := TaskInfo{ID: issue.ID, Title: issue.Title, Priority: issue.Priority}
 		if cli.ReadyToImplement(issue) {
@@ -598,43 +619,4 @@ func collectStatisticsDeps(deps *cli.Deps) MonitorStats {
 	}
 
 	return stats
-}
-
-// collectReadyTasksByPriority returns counts of ready tasks grouped by priority (0-4).
-// It iterates ready tasks (excluding epics, in_progress, and review) and returns
-// a map of priority -> count for Prometheus metrics.
-func CollectReadyTasksByPriority(readyLimit int) map[int]int {
-	counts := make(map[int]int)
-	// Initialize all priorities to 0
-	for i := 0; i <= 4; i++ {
-		counts[i] = 0
-	}
-
-	issues, err := cli.DefaultIssueBackend().Ready(cmdstore.RootContext(), backend.ReadyOpts{Limit: readyLimit})
-	if err != nil {
-		return counts
-	}
-
-	for _, issue := range issues {
-		if !cli.IsOpen(issue) {
-			continue
-		}
-		if cli.IsEpic(issue) {
-			continue
-		}
-		if cli.IsNonWorkType(issue) {
-			continue
-		}
-		// Skip tasks with needs-revision label (these are being re-planned)
-		if cli.HasNeedsRevision(issue) {
-			continue
-		}
-		p := issue.Priority
-		if p < 0 || p > 4 {
-			p = 4
-		}
-		counts[p]++
-	}
-
-	return counts
 }
