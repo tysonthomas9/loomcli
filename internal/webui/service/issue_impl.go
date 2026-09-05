@@ -724,6 +724,9 @@ func (s *issueServiceImpl) ListEventHistory(ctx context.Context, params EventLis
 		slog.Error("backend error in ListEventHistory", "err", err)
 		return nil, translateBackendError(err)
 	}
+	if data == nil {
+		return nil, ErrInternal("event history result missing", nil)
+	}
 	return eventHistoryResult(data), nil
 }
 
@@ -742,9 +745,6 @@ func (s *issueServiceImpl) legacyEventTail(ctx context.Context, params EventList
 }
 
 func eventHistoryResult(data *backend.EventHistoryData) *EventListResult {
-	if data == nil {
-		return &EventListResult{Events: []*types.Event{}}
-	}
 	events := make([]*types.Event, 0, len(data.Events))
 	for _, event := range data.Events {
 		events = append(events, eventDataToTypesEvent(event))
