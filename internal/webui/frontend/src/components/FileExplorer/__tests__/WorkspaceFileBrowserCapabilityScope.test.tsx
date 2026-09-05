@@ -187,7 +187,9 @@ describe("WorkspaceFileBrowser capability scoping", () => {
     expect(screen.queryByText(/File permissions unavailable/)).toBeNull();
     // It did load the skill capabilities it is gated by; the checkout-shaped
     // section below must load neither those nor a notice about them.
-    expect(requestsMatching("/skill-capabilities")).not.toHaveLength(0);
+    await waitFor(() =>
+      expect(requestsMatching("/skill-capabilities")).not.toHaveLength(0),
+    );
     unmount();
     requested.length = 0;
 

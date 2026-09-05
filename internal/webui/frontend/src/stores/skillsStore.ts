@@ -1,3 +1,4 @@
+import { ScopedQueryRequest } from "@/utils/scopedQueryRequest";
 import {
   createSkill as createSkillRequest,
   deleteSkill as deleteSkillRequest,
@@ -186,9 +187,38 @@ function presentSkillMutationError(error: unknown): unknown {
   );
 }
 
+// A directory waiter may leave without canceling a read shared by other views.
+async function waitForCatalog(
+  promise: Promise<void>,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!signal) return promise;
+  signal.throwIfAborted();
+  let onAbort = () => {};
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+  try {
+    await Promise.race([promise, aborted]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
 export class SkillsStore {
   private readonly catalogs = new Map<string, SkillsCatalogSnapshot>();
-  private readonly catalogGeneration = new Map<string, number>();
+  private readonly catalogReads = new Map<
+    string,
+    ScopedQueryRequest<SkillCatalogGroup[]>
+  >();
+  private readonly capabilityReads = new Map<
+    string,
+    ScopedQueryRequest<SkillCapabilitiesResponse>
+  >();
+  private readonly catalogPending = new Map<string, Promise<void>>();
+  private readonly capabilityPending = new Map<string, Promise<void>>();
   private readonly capabilities = new Map<string, SkillCapabilitiesSnapshot>();
   private readonly listeners = new Set<() => void>();
   private readonly fileMetadata = new Map<string, { executable: boolean }>();
@@ -207,46 +237,127 @@ export class SkillsStore {
     return this.capabilities.get(workspaceId) ?? EMPTY_CAPABILITIES;
   }
 
+  private catalogReader(
+    workspaceId: string,
+  ): ScopedQueryRequest<SkillCatalogGroup[]> {
+    let reader = this.catalogReads.get(workspaceId);
+    if (!reader) {
+      reader = new ScopedQueryRequest({
+        load: async (signal) =>
+          normalizeCatalog(await listSkills(workspaceId, { signal })),
+        commit: (groups) => {
+          const current = this.catalog(workspaceId);
+          this.setCatalog(workspaceId, {
+            ...current,
+            status: "loaded",
+            revision: current.revision + 1,
+            groups,
+            error: null,
+            ...shadowMaps(groups),
+          });
+        },
+        onError: (error) => {
+          const current = this.catalog(workspaceId);
+          this.setCatalog(workspaceId, {
+            ...current,
+            status: "error",
+            revision: current.revision + 1,
+            error: error.message,
+          });
+        },
+        onLoading: (loading) => {
+          const current = this.catalog(workspaceId);
+          if (loading)
+            this.setCatalog(workspaceId, {
+              ...current,
+              status: "loading",
+              error: null,
+            });
+          else if (current.status === "loading")
+            this.setCatalog(workspaceId, { ...current, status: "idle" });
+        },
+      });
+      this.catalogReads.set(workspaceId, reader);
+    }
+    return reader;
+  }
+
+  private capabilityReader(
+    workspaceId: string,
+  ): ScopedQueryRequest<SkillCapabilitiesResponse> {
+    let reader = this.capabilityReads.get(workspaceId);
+    if (!reader) {
+      reader = new ScopedQueryRequest({
+        load: (signal) => getSkillCapabilities(workspaceId, { signal }),
+        commit: (data) =>
+          this.setCapabilities(workspaceId, {
+            status: "loaded",
+            data,
+            error: null,
+          }),
+        onError: (error) =>
+          this.setCapabilities(workspaceId, {
+            status: "error",
+            data: null,
+            error: error.message,
+          }),
+        onLoading: (loading) => {
+          const current = this.capability(workspaceId);
+          if (loading)
+            this.setCapabilities(workspaceId, {
+              status: "loading",
+              data: null,
+              error: null,
+            });
+          else if (current.status === "loading")
+            this.setCapabilities(workspaceId, { ...current, status: "idle" });
+        },
+      });
+      this.capabilityReads.set(workspaceId, reader);
+    }
+    return reader;
+  }
+
+  private trackRead(
+    pending: Map<string, Promise<void>>,
+    workspaceId: string,
+    promise: Promise<void>,
+  ): Promise<void> {
+    pending.set(workspaceId, promise);
+    const finish = () => {
+      if (pending.get(workspaceId) === promise) pending.delete(workspaceId);
+    };
+    void promise.then(finish, finish);
+    return promise;
+  }
+
   async loadCatalog(workspaceId: string, force = false): Promise<void> {
-    const current = this.catalog(workspaceId);
     if (
       !force &&
-      (current.status === "loading" || current.status === "loaded")
-    ) {
+      this.catalog(workspaceId).status === "loaded" &&
+      !this.catalogPending.has(workspaceId)
+    )
       return;
-    }
-    const generation = (this.catalogGeneration.get(workspaceId) ?? 0) + 1;
-    this.catalogGeneration.set(workspaceId, generation);
-    this.setCatalog(workspaceId, {
-      ...current,
-      status: "loading",
-      error: null,
-    });
-    try {
-      const groups = normalizeCatalog(await listSkills(workspaceId));
-      if (this.catalogGeneration.get(workspaceId) !== generation) return;
-      const latest = this.catalog(workspaceId);
-      this.setCatalog(workspaceId, {
-        ...latest,
-        status: "loaded",
-        revision: latest.revision + 1,
-        groups,
-        error: null,
-        ...shadowMaps(groups),
-      });
-    } catch (error) {
-      if (this.catalogGeneration.get(workspaceId) !== generation) return;
-      const latest = this.catalog(workspaceId);
-      this.setCatalog(workspaceId, {
-        ...latest,
-        status: "error",
-        revision: latest.revision + 1,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+    await this.trackRead(
+      this.catalogPending,
+      workspaceId,
+      this.catalogReader(workspaceId).run({ fresh: force }),
+    ).catch(() => {});
+  }
+
+  refreshCatalogForRecovery(
+    workspaceId: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    return this.trackRead(
+      this.catalogPending,
+      workspaceId,
+      this.catalogReader(workspaceId).run({ signal, fresh: true }),
+    );
   }
 
   invalidate(workspaceId: string): void {
+    this.catalogReads.get(workspaceId)?.cancel();
     const current = this.catalog(workspaceId);
     this.setCatalog(workspaceId, {
       ...current,
@@ -257,32 +368,28 @@ export class SkillsStore {
   }
 
   async loadCapabilities(workspaceId: string, force = false): Promise<void> {
-    const current = this.capability(workspaceId);
     if (
       !force &&
-      (current.status === "loading" || current.status === "loaded")
-    ) {
+      this.capability(workspaceId).status === "loaded" &&
+      !this.capabilityPending.has(workspaceId)
+    )
       return;
-    }
-    this.setCapabilities(workspaceId, {
-      ...current,
-      status: "loading",
-      error: null,
-    });
-    try {
-      const data = await getSkillCapabilities(workspaceId);
-      this.setCapabilities(workspaceId, {
-        status: "loaded",
-        data,
-        error: null,
-      });
-    } catch (error) {
-      this.setCapabilities(workspaceId, {
-        status: "error",
-        data: null,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+    await this.trackRead(
+      this.capabilityPending,
+      workspaceId,
+      this.capabilityReader(workspaceId).run({ fresh: force }),
+    ).catch(() => {});
+  }
+
+  refreshCapabilitiesForRecovery(
+    workspaceId: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    return this.trackRead(
+      this.capabilityPending,
+      workspaceId,
+      this.capabilityReader(workspaceId).run({ signal, fresh: true }),
+    );
   }
 
   canEdit(workspaceId: string, group: SkillsScopeGroup): boolean {
@@ -322,11 +429,22 @@ export class SkillsStore {
       if (options.signal?.aborted)
         throw new DOMException("Aborted", "AbortError");
       const snapshot = this.catalog(workspaceId);
-      if (snapshot.status === "idle") await this.loadCatalog(workspaceId);
+      if (
+        snapshot.status === "idle" ||
+        snapshot.status === "loading" ||
+        this.catalogPending.has(workspaceId)
+      ) {
+        const loading = this.trackRead(
+          this.catalogPending,
+          workspaceId,
+          this.catalogReader(workspaceId).run(),
+        );
+        await waitForCatalog(loading, options.signal);
+      }
       if (options.signal?.aborted)
         throw new DOMException("Aborted", "AbortError");
       const loaded = this.catalog(workspaceId);
-      if (loaded.status === "error")
+      if (loaded.status !== "loaded")
         throw new Error(loaded.error ?? "Skills failed to load");
       return synthesizeSkillDirectory(loaded.groups, group, path);
     };

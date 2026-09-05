@@ -12,7 +12,7 @@ import type { MutationPayload } from "@/api/common";
 import { useEventSubscription, useEventContext } from "@/hooks/common";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import { QueryRecoveryContext } from "@/hooks/common/queryRecovery";
-import { ScopedQueryRequest } from "@/hooks/common/scopedQueryRequest";
+import { ScopedQueryRequest } from "@/utils/scopedQueryRequest";
 
 export interface UseIssueSessionMapReturn {
   /** Map of issue_id to session_name[] */

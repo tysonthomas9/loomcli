@@ -159,6 +159,7 @@ describe("skillsStore", () => {
       .mockReturnValueOnce(newer.promise);
     const store = new SkillsStore();
     const olderLoad = store.loadCatalog("ws-generation");
+    await vi.waitFor(() => expect(mockList).toHaveBeenCalledTimes(1));
     store.invalidate("ws-generation");
     const newerLoad = store.loadCatalog("ws-generation");
     const olderGroups = groups();
@@ -329,5 +330,145 @@ describe("skillsStore", () => {
     ).rejects.toThrow(
       "the skill is owned by another actor (owner: pack-sync, source: pack:standards)",
     );
+  });
+  it("starts fresh recovery after ordinary work and ordinary force joins recovery", async () => {
+    const old = deferred<SkillsCatalogResponse>();
+    const fresh = deferred<SkillsCatalogResponse>();
+    mockList
+      .mockReturnValueOnce(old.promise)
+      .mockReturnValueOnce(fresh.promise);
+    const store = new SkillsStore();
+    const ordinary = store.loadCatalog("ws");
+    await vi.waitFor(() => expect(mockList).toHaveBeenCalledTimes(1));
+    const recovery = store.refreshCatalogForRecovery(
+      "ws",
+      new AbortController().signal,
+    );
+    const joined = store.loadCatalog("ws", true);
+    await vi.waitFor(() => expect(mockList).toHaveBeenCalledTimes(2));
+    old.resolve({ groups: [] });
+    await ordinary;
+    expect(store.catalog("ws").status).toBe("loading");
+    fresh.resolve({ groups: groups() });
+    await Promise.all([recovery, joined]);
+    expect(store.catalog("ws").groups).toHaveLength(2);
+    expect(mockList).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects aborted recovery promptly and ignores a loader that ignores abort", async () => {
+    const response = deferred<SkillsCatalogResponse>();
+    mockList.mockReturnValue(response.promise);
+    const store = new SkillsStore();
+    const controller = new AbortController();
+    const recovery = store.refreshCatalogForRecovery("ws", controller.signal);
+    const rejected = expect(recovery).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    await vi.waitFor(() => expect(mockList).toHaveBeenCalledTimes(1));
+    controller.abort();
+    await rejected;
+    response.resolve({ groups: groups() });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(store.catalog("ws").status).toBe("idle");
+    expect(store.catalog("ws").groups).toEqual([]);
+  });
+
+  it("propagates recovery failure and retries successfully", async () => {
+    mockList
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ groups: groups() });
+    const store = new SkillsStore();
+    await expect(
+      store.refreshCatalogForRecovery("ws", new AbortController().signal),
+    ).rejects.toThrow("offline");
+    expect(store.catalog("ws").status).toBe("error");
+    await store.refreshCatalogForRecovery("ws", new AbortController().signal);
+    expect(store.catalog("ws").status).toBe("loaded");
+  });
+
+  it("waits for an in-flight catalog before synthesizing a directory", async () => {
+    const response = deferred<SkillsCatalogResponse>();
+    mockList.mockReturnValue(response.promise);
+    const store = new SkillsStore();
+    const ordinary = store.loadCatalog("ws");
+    await vi.waitFor(() => expect(mockList).toHaveBeenCalledTimes(1));
+    const finished = vi.fn();
+    const tree = store.loader("ws", { kind: "workspace" })("").then(finished);
+    await Promise.resolve();
+    expect(finished).not.toHaveBeenCalled();
+    expect(mockList).toHaveBeenCalledTimes(1);
+    response.resolve({ groups: groups() });
+    await Promise.all([ordinary, tree]);
+    expect(finished).toHaveBeenCalledWith([
+      expect.objectContaining({ name: "audit", is_dir: true }),
+    ]);
+  });
+
+  it("invalidation rejects a pending recovery and cannot commit its stale result", async () => {
+    const response = deferred<SkillsCatalogResponse>();
+    mockList.mockReturnValue(response.promise);
+    const store = new SkillsStore();
+    const recovery = store.refreshCatalogForRecovery(
+      "ws",
+      new AbortController().signal,
+    );
+    const rejected = expect(recovery).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    await vi.waitFor(() => expect(mockList).toHaveBeenCalledTimes(1));
+    store.invalidate("ws");
+    await rejected;
+    response.resolve({ groups: groups() });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(store.catalog("ws").status).toBe("idle");
+    expect(store.catalog("ws").groups).toEqual([]);
+  });
+
+  it("capability recovery supersedes older permissions and propagates failure", async () => {
+    const old = deferred<{
+      can_edit_role_scope: boolean;
+      workspace_scope: "read_only";
+    }>();
+    mockCapabilities
+      .mockReturnValueOnce(old.promise)
+      .mockResolvedValueOnce({
+        can_edit_role_scope: false,
+        workspace_scope: "read_only",
+      })
+      .mockRejectedValueOnce(new Error("denied"));
+    const store = new SkillsStore();
+    const ordinary = store.loadCapabilities("ws");
+    await vi.waitFor(() => expect(mockCapabilities).toHaveBeenCalledTimes(1));
+    await store.refreshCapabilitiesForRecovery(
+      "ws",
+      new AbortController().signal,
+    );
+    old.resolve({ can_edit_role_scope: true, workspace_scope: "read_only" });
+    await ordinary;
+    expect(store.capability("ws").data?.can_edit_role_scope).toBe(false);
+    await expect(
+      store.refreshCapabilitiesForRecovery("ws", new AbortController().signal),
+    ).rejects.toThrow("denied");
+    expect(store.capability("ws").data).toBeNull();
+  });
+  it("cancels a directory waiter promptly without aborting another catalog consumer", async () => {
+    const response = deferred<SkillsCatalogResponse>();
+    mockList.mockReturnValue(response.promise);
+    const store = new SkillsStore();
+    const ordinary = store.loadCatalog("ws");
+    await vi.waitFor(() => expect(mockList).toHaveBeenCalledTimes(1));
+    const controller = new AbortController();
+    const tree = store.loader("ws", { kind: "workspace" })("", {
+      signal: controller.signal,
+    });
+    const rejected = expect(tree).rejects.toMatchObject({ name: "AbortError" });
+    controller.abort();
+    await rejected;
+    expect(mockList.mock.calls[0]?.[1]?.signal?.aborted).toBe(false);
+    response.resolve({ groups: groups() });
+    await ordinary;
+    expect(store.catalog("ws").status).toBe("loaded");
   });
 });

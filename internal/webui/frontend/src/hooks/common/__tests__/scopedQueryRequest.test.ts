@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ScopedQueryRequest } from "../scopedQueryRequest";
+import { ScopedQueryRequest } from "@/utils/scopedQueryRequest";
 
 function deferred<T>() {
   let resolve!: (data: T) => void;
