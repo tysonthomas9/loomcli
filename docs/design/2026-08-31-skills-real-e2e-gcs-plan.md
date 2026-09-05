@@ -2,6 +2,35 @@
 
 Status: accepted for implementation
 
+## Implemented publication protocol
+
+The original single-request publication design was replaced by an actor-bound,
+whole-tree upload session:
+
+1. Loom synchronously sends the complete path/hash/size/mode manifest to Fleet.
+2. Fleet persists the canonical manifest and returns one transfer grant per
+   path.
+3. Loom uploads each file and calls the public completion endpoint for that
+   path. Fleet independently reads the provider object, verifies its exact size
+   and SHA-256, and records a short-lived receipt.
+4. Loom calls the public publish endpoint. Fleet atomically verifies every
+   receipt and appends the immutable tree event using one Redis script or one
+   PostgreSQL transaction. Publication performs no GCS reads, so a maximum
+   257-file tree remains inside the configured 15-second HTTP write timeout.
+5. Loom treats the command as synchronous. A `202 projection_pending` response
+   triggers bounded polling until the selected tree is readable.
+
+The old `file-uploads` and direct `file-trees` publication endpoints are not
+retained. This is a strict pre-launch cutover with no compatibility or migration
+path.
+
+The GCS XML upload uses a content-addressed key, a signed payload hash, and the
+signed create-only `x-goog-if-generation-match: 0` precondition. S3/MinIO use
+the corresponding signed `If-None-Match: *` condition. A precondition failure
+for an already-present content address proceeds only to Fleet's independent
+completion verification; provider generations remain recovery metadata and are
+not part of Fleet's logical identity.
+
 Test-suite structure and edge-case accountability are defined in
 [Skills Edge-Case Test Architecture](2026-08-31-skills-edge-case-test-architecture.md).
 
@@ -26,6 +55,9 @@ Stack placement:
 5. The existing Google Cloud Storage test bucket is the production-provider
    target. GCS is exercised through the same XML/S3-compatible path used by
    Fleet in production.
+   Loom declares CRC32C for GCS transport validation; Fleet signs
+   `x-goog-hash` and `x-goog-if-generation-match: 0`, then independently
+   verifies the canonical SHA-256 before recording a receipt.
 6. Deterministic failure controls are allowed when the system under test remains
    real. A network proxy or a test-only failpoint may delay, drop, or fail a
    boundary; it must not replace the real implementation.

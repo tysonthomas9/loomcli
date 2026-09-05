@@ -119,13 +119,15 @@ func TestSkillMaterializeStoreUnavailableReturnsBlockingExitCode(t *testing.T) {
 
 func TestSkillMaterializeRefusalReturnsBlockingExitCode(t *testing.T) {
 	st := materializeTestStore(t)
-	createMaterializeTestSkill(t, st, domain.WorkspaceSkillRef("collision"), "Collision test", "# Managed\n")
 	withMaterializeStore(t, st)
 	t.Setenv(bootstrap.EnvWorkspace, testWorkspace)
 	t.Setenv("LOOM_AGENT_ROLE", "")
 	t.Setenv(bootstrap.EnvAgentName, "")
 	target := t.TempDir()
 	t.Chdir(target)
+	if output, err := executeSkillCommand(t, "", "materialize"); err != nil {
+		t.Fatalf("initial materialize error = %v; output = %s", err, output)
+	}
 	collision := filepath.Join(target, ".agents", "skills", "collision", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(collision), 0o755); err != nil {
 		t.Fatal(err)
@@ -133,6 +135,7 @@ func TestSkillMaterializeRefusalReturnsBlockingExitCode(t *testing.T) {
 	if err := os.WriteFile(collision, []byte("user owned"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	createMaterializeTestSkill(t, st, domain.WorkspaceSkillRef("collision"), "Collision test", "# Managed\n")
 
 	output, err := executeSkillCommand(t, "", "materialize")
 	if err == nil {

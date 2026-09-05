@@ -49,7 +49,11 @@ func ensureGitExcludes(ctx context.Context, targetDir string) error {
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	wanted := []string{AgentsSkillsDir + "/", ClaudeSkillsDir + "/"}
+	wanted := []string{
+		AgentsSkillsDir, AgentsSkillsDir + "/",
+		ClaudeSkillsDir, ClaudeSkillsDir + "/",
+		projectionStateDir + "/",
+	}
 	present := make(map[string]bool, len(wanted))
 	for _, line := range strings.Split(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n") {
 		present[line] = true

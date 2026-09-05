@@ -83,25 +83,52 @@ func runSkillImport(cmd *cobra.Command, directory string, flags skillImportFlags
 				WorkspaceKey: ws, Ref: ref, Description: local.Description,
 				FileTreeRevision: revision, Source: source,
 			})
-		} else if flags.force {
-			// Fleet's privileged force-upsert route intentionally has no CAS
-			// form; it is the explicit operator override.
-			sk, _, err = h.Store.Skills().Upsert(ctx, store.SkillUpsert{Force: true, Skill: store.SkillCreate{
-				WorkspaceKey: ws, Ref: ref, Description: local.Description,
-				FileTreeRevision: revision, Source: source,
-			}})
+			if errors.Is(err, domain.ErrAlreadyExists) {
+				// Another importer may create the same Skill after our initial
+				// read. Re-enter the ordinary guarded-update path so identical
+				// imports converge while provenance and CAS checks still apply.
+				created = false
+				sk, err = updateImportedSkill(ctx, h.Store.Skills(), ws, ref, local.Description, revision, source, flags.force, nil)
+			}
 		} else {
-			description := local.Description
-			sk, err = h.Store.Skills().Update(ctx, ws, ref, store.SkillUpdate{
-				Description: &description, FileTreeRevision: &revision,
-				ExpectedFileTreeRevision: existing.FileTreeRevision, Source: source,
-			})
+			sk, err = updateImportedSkill(ctx, h.Store.Skills(), ws, ref, local.Description, revision, source, flags.force, existing)
 		}
 		if err != nil {
 			return skillWriteError("import", err, true)
 		}
 		writeSkillImportResult(cmd, sk, created)
 		return nil
+	})
+}
+
+func updateImportedSkill(
+	ctx context.Context,
+	skills store.SkillStore,
+	workspace string,
+	ref domain.SkillRef,
+	description, revision, source string,
+	force bool,
+	existing *domain.Skill,
+) (*domain.Skill, error) {
+	if force {
+		// Fleet's privileged force-upsert route intentionally has no CAS
+		// form; it is the explicit operator override.
+		skill, _, err := skills.Upsert(ctx, store.SkillUpsert{Force: true, Skill: store.SkillCreate{
+			WorkspaceKey: workspace, Ref: ref, Description: description,
+			FileTreeRevision: revision, Source: source,
+		}})
+		return skill, err
+	}
+	if existing == nil {
+		var err error
+		existing, err = skills.Get(ctx, workspace, ref)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return skills.Update(ctx, workspace, ref, store.SkillUpdate{
+		Description: &description, FileTreeRevision: &revision,
+		ExpectedFileTreeRevision: existing.FileTreeRevision, Source: source,
 	})
 }
 

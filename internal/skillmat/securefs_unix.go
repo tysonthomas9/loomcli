@@ -3,12 +3,14 @@
 package skillmat
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -176,6 +178,81 @@ func (r *unixSecureRoot) CreateFile(name string, content []byte, perm os.FileMod
 	return nil
 }
 
+func (r *unixSecureRoot) CopyFile(sourceName, destinationName string, perm os.FileMode, maxBytes int64) (written int64, retErr error) {
+	source, err := r.openBoundedRegularFile(sourceName, maxBytes)
+	if err != nil {
+		return 0, err
+	}
+	defer source.Close()
+
+	destinationParent, destinationBase, err := r.openParent(destinationName)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = unix.Close(destinationParent) }()
+	destinationFD, err := unix.Openat(destinationParent, destinationBase, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC|unix.O_NOFOLLOW, uint32(perm.Perm()))
+	if err != nil {
+		return 0, securePathError(destinationName, err)
+	}
+	destination := os.NewFile(uintptr(destinationFD), destinationName)
+	created := true
+	defer func() {
+		if created {
+			_ = unix.Unlinkat(destinationParent, destinationBase, 0)
+		}
+	}()
+	if err := destination.Chmod(perm.Perm()); err != nil {
+		_ = destination.Close()
+		return 0, err
+	}
+	reader := io.Reader(source)
+	if maxBytes >= 0 {
+		reader = io.LimitReader(source, maxBytes+1)
+	}
+	written, err = io.Copy(destination, reader)
+	if err == nil && maxBytes >= 0 && written > maxBytes {
+		err = fmt.Errorf("%s exceeds clone limit of %d bytes", sourceName, maxBytes)
+	}
+	if err == nil {
+		err = destination.Sync()
+	}
+	if closeErr := destination.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return written, err
+	}
+	created = false
+	return written, nil
+}
+
+func (r *unixSecureRoot) openBoundedRegularFile(name string, maxBytes int64) (*os.File, error) {
+	sourceParent, sourceBase, err := r.openParent(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = unix.Close(sourceParent) }()
+	sourceFD, err := unix.Openat(sourceParent, sourceBase, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, securePathError(name, err)
+	}
+	source := os.NewFile(uintptr(sourceFD), name)
+	info, err := source.Stat()
+	if err != nil {
+		_ = source.Close()
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = source.Close()
+		return nil, fmt.Errorf("%s is not a regular file", name)
+	}
+	if maxBytes >= 0 && info.Size() > maxBytes {
+		_ = source.Close()
+		return nil, fmt.Errorf("%s exceeds clone limit of %d bytes", name, maxBytes)
+	}
+	return source, nil
+}
+
 func (r *unixSecureRoot) AppendFile(name string, content []byte, perm os.FileMode) error {
 	parent, base, err := r.openParent(name)
 	if err != nil {
@@ -230,6 +307,57 @@ func (r *unixSecureRoot) Rename(oldName, newName string) error {
 		return securePathError(newName, err)
 	}
 	return nil
+}
+
+func (r *unixSecureRoot) Swap(firstName, secondName string) error {
+	firstParent, firstBase, err := r.openParent(firstName)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = unix.Close(firstParent) }()
+	secondParent, secondBase, err := r.openParent(secondName)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = unix.Close(secondParent) }()
+	if err := swapAt(firstParent, firstBase, secondParent, secondBase); err != nil {
+		return securePathError(secondName, err)
+	}
+	return nil
+}
+
+type advisoryLock struct{ file *os.File }
+
+func (l *advisoryLock) Close() error {
+	unlockErr := unix.Flock(int(l.file.Fd()), unix.LOCK_UN)
+	return errors.Join(unlockErr, l.file.Close())
+}
+
+func (r *unixSecureRoot) Lock(ctx context.Context, name string) (io.Closer, error) {
+	parent, base, err := r.openParent(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = unix.Close(parent) }()
+	fd, err := unix.Openat(parent, base, unix.O_RDWR|unix.O_CREAT|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return nil, securePathError(name, err)
+	}
+	file := os.NewFile(uintptr(fd), name)
+	for {
+		if err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB); err == nil {
+			return &advisoryLock{file: file}, nil
+		} else if !errors.Is(err, unix.EWOULDBLOCK) {
+			_ = file.Close()
+			return nil, securePathError(name, err)
+		}
+		select {
+		case <-ctx.Done():
+			_ = file.Close()
+			return nil, ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }
 
 func (r *unixSecureRoot) Remove(name string) error {

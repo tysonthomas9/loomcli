@@ -66,6 +66,19 @@ treats unspecified required dimensions as irrelevant, and adds only catalog
 N/A decisions 72-77; there
 is no unresolved disposition that can produce a release-ready result.
 
+## Generated workspace-file contract
+
+Fleet owns `contracts/workspace-file-v1.json`, the sole authored source for
+shared limits and revision encoding. Loom consumes
+`internal/domain/workspace_file_contract_gen.go`; it does not maintain a
+handwritten copy of the algorithm. `TestGeneratedWorkspaceFileContractOwnsLimitsAndRevisionEncoding`
+pins literal limits and identities while the paired compatibility workflow
+regenerates from the exact Fleet SHA and rejects drift in either repository.
+
+The two Git repositories cannot be committed or pushed atomically. Review and
+release must therefore use the exact paired SHAs checked by that workflow; no
+compatibility shim is used when the artifacts disagree.
+
 Pull requests run Redis/MinIO and PostgreSQL/MinIO. Releases additionally use
 the existing GCS test bucket through Fleet's production S3-compatible XML
 configuration. Each GCS run receives a unique prefix, records every returned

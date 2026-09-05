@@ -188,6 +188,15 @@ func TestCanonicalCatalogPinsSecurityWordingAndSelectedCoordinates(t *testing.T)
 	if got := catalog[80].RequiredEvidence; !slices.Equal(got, []EvidenceCoordinate{loomMinIO(), loomGCS()}) {
 		t.Fatalf("case 81 coordinates = %#v", got)
 	}
+	retentionParity := []EvidenceCoordinate{redisFleet(), postgresFleet()}
+	for _, id := range []int{85, 86, 87} {
+		if got := catalog[id-1].RequiredEvidence; !slices.Equal(got, retentionParity) {
+			t.Fatalf("case %d coordinates = %#v, want %#v", id, got, retentionParity)
+		}
+	}
+	if got, want := requiredEvidenceCount(catalog), 141; got != want {
+		t.Fatalf("required evidence coordinates = %d, want %d", got, want)
+	}
 }
 
 func validEvidenceReport(repository Repository, revision string, evidence ...Evidence) EvidenceReport {

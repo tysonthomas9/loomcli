@@ -10,10 +10,11 @@ import (
 // SkillMaterializationLeaseAcquire is the input for acquiring one target's
 // short-lived materialization lease.
 type SkillMaterializationLeaseAcquire struct {
-	WorkspaceKey string
-	Holder       string
-	TargetKey    string
-	TTL          time.Duration
+	WorkspaceKey  string
+	Holder        string
+	TargetKey     string
+	TreeRevisions []string
+	TTL           time.Duration
 }
 
 // SkillMaterializationLeaseStore serializes writers of one host-local skill

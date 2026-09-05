@@ -20,15 +20,20 @@ import (
 type ResponseDrop struct {
 	t         *testing.T
 	activated atomic.Bool
+	mu        sync.Mutex
+	paths     []string
+	statuses  []int
 }
 
 type CorruptDownload struct {
 	t          *testing.T
 	env        *Environment
+	upstream   *url.URL
 	activated  atomic.Bool
 	sameLength bool
 	mu         sync.Mutex
 	target     *fileDownloadGrant
+	fleetAuth  http.Header
 }
 
 type SkillCASTrace struct {
@@ -125,7 +130,7 @@ func (t *SkillCASTrace) RequireSingleDescriptionAndPointerCAS(expectedPrior, des
 }
 
 // DropNextTreePublicationResponse routes the next Loom command through a real
-// forwarding proxy and drops its successful POST /file-trees response.
+// forwarding proxy and drops its successful upload-session publication response.
 func (e *Environment) DropNextTreePublicationResponse() *ResponseDrop {
 	e.t.Helper()
 	upstream, err := url.Parse(requireEnv(e.t, "LOOM_FLEET_DB_URL"))
@@ -141,7 +146,10 @@ func (e *Environment) DropNextTreePublicationResponse() *ResponseDrop {
 		}
 		defer response.Body.Close()
 
-		isTreePublish := request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/file-trees")
+		isTreePublish := request.Method == http.MethodPost && strings.Contains(request.URL.Path, "/file-tree-uploads/") && strings.HasSuffix(request.URL.Path, "/publish")
+		if isTreePublish && response.StatusCode >= 200 && response.StatusCode < 300 {
+			fault.record(request.URL.Path, response.StatusCode)
+		}
 		if isTreePublish && response.StatusCode >= 200 && response.StatusCode < 300 && fault.activated.CompareAndSwap(false, true) {
 			_, _ = io.Copy(io.Discard, response.Body)
 			hijacker, ok := w.(http.Hijacker)
@@ -175,6 +183,28 @@ func (f *ResponseDrop) RequireActivated() {
 	}
 }
 
+func (f *ResponseDrop) record(path string, status int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.paths = append(f.paths, path)
+	f.statuses = append(f.statuses, status)
+}
+
+// RequireSingleCreationReplay proves one public import retried the identical
+// session publication and Fleet replayed it without a second durable create.
+func (f *ResponseDrop) RequireSingleCreationReplay() {
+	f.t.Helper()
+	f.RequireActivated()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.paths) != 2 || f.paths[0] != f.paths[1] {
+		f.t.Fatalf("tree publication paths = %v, want exactly two identical session paths", f.paths)
+	}
+	if f.statuses[0] != http.StatusCreated || f.statuses[1] != http.StatusOK {
+		f.t.Fatalf("tree publication statuses = %v, want [201 200] for one create and one replay", f.statuses)
+	}
+}
+
 // CorruptNextFileDownload rewrites one real Fleet download grant to a proxy
 // that fetches the signed provider URL and truncates the successful response.
 func (e *Environment) CorruptNextFileDownload(revision string) *CorruptDownload {
@@ -193,7 +223,7 @@ func (e *Environment) corruptNextFileDownload(revision string, sameLength bool) 
 	if err != nil {
 		e.t.Fatalf("parse LOOM_FLEET_DB_URL: %v", err)
 	}
-	fault := &CorruptDownload{t: e.t, env: e, sameLength: sameLength}
+	fault := &CorruptDownload{t: e.t, env: e, upstream: upstream, sameLength: sameLength}
 	downloadProxy := httptest.NewServer(http.HandlerFunc(fault.serveCorruptDownload))
 	e.t.Cleanup(downloadProxy.Close)
 
@@ -211,17 +241,31 @@ func (e *Environment) corruptNextFileDownload(revision string, sameLength bool) 
 func (f *CorruptDownload) serveCorruptDownload(w http.ResponseWriter, _ *http.Request) {
 	f.mu.Lock()
 	target := f.target
+	fleetAuth := f.fleetAuth.Clone()
 	f.mu.Unlock()
 	if target == nil {
 		http.Error(w, "download grant unavailable", http.StatusBadGateway)
 		return
 	}
-	request, err := http.NewRequestWithContext(f.t.Context(), target.Method, target.URL, nil)
+	targetURL, err := url.Parse(target.URL)
 	if err != nil {
 		http.Error(w, "invalid download grant", http.StatusBadGateway)
 		return
 	}
-	request.Header = http.Header(target.Headers).Clone()
+	isFleetDownload := !targetURL.IsAbs()
+	if isFleetDownload {
+		targetURL = f.upstream.ResolveReference(targetURL)
+	}
+	request, err := http.NewRequestWithContext(f.t.Context(), target.Method, targetURL.String(), nil)
+	if err != nil {
+		http.Error(w, "invalid download grant", http.StatusBadGateway)
+		return
+	}
+	request.Header = make(http.Header)
+	copyResponseHeaders(request.Header, http.Header(target.Headers))
+	if isFleetDownload {
+		copyResponseHeaders(request.Header, fleetAuth)
+	}
 	response, err := http.DefaultTransport.RoundTrip(request)
 	if err != nil {
 		http.Error(w, "provider download failed", http.StatusBadGateway)
@@ -260,7 +304,7 @@ func (f *CorruptDownload) serveFleetDownloadGrant(w http.ResponseWriter, request
 	}
 	selected := strings.Contains(request.URL.Path, "/file-trees/"+url.PathEscape(revision)+"/downloads/")
 	if request.Method == http.MethodPost && selected && response.StatusCode == http.StatusOK {
-		body, err = f.rewriteDownloadGrant(body, downloadURL)
+		body, err = f.rewriteDownloadGrant(body, downloadURL, request.Header)
 		if err != nil {
 			http.Error(w, "rewrite download grant", http.StatusBadGateway)
 			return
@@ -272,7 +316,7 @@ func (f *CorruptDownload) serveFleetDownloadGrant(w http.ResponseWriter, request
 	_, _ = io.Copy(w, bytes.NewReader(body))
 }
 
-func (f *CorruptDownload) rewriteDownloadGrant(body []byte, downloadURL string) ([]byte, error) {
+func (f *CorruptDownload) rewriteDownloadGrant(body []byte, downloadURL string, fleetAuth http.Header) ([]byte, error) {
 	var grant fileDownloadGrant
 	if err := json.Unmarshal(body, &grant); err != nil || grant.URL == "" {
 		return body, nil
@@ -284,6 +328,7 @@ func (f *CorruptDownload) rewriteDownloadGrant(body []byte, downloadURL string) 
 	}
 	original := grant
 	f.target = &original
+	f.fleetAuth = selectFleetAuthHeaders(fleetAuth)
 	grant.URL = downloadURL + "/download"
 	grant.Headers = nil
 	return json.Marshal(grant)
@@ -295,8 +340,25 @@ func (f *CorruptDownload) RequireActivated() {
 		f.mu.Lock()
 		target := f.target
 		f.mu.Unlock()
-		f.t.Fatalf("download-corruption proxy did not activate (captured grant: %+v)\nmaterialize stderr:\n%s", target, f.env.lastStderr)
+		method := ""
+		relative := false
+		if target != nil {
+			method = target.Method
+			parsed, err := url.Parse(target.URL)
+			relative = err == nil && !parsed.IsAbs()
+		}
+		f.t.Fatalf("download-corruption proxy did not activate (method=%q relative=%t)\nmaterialize stderr:\n%s", method, relative, f.env.lastStderr)
 	}
+}
+
+func selectFleetAuthHeaders(source http.Header) http.Header {
+	target := make(http.Header)
+	for _, key := range []string{"Authorization", "X-API-Key", "X-Fleet-API-Key", "X-Actor"} {
+		for _, value := range source.Values(key) {
+			target.Add(key, value)
+		}
+	}
+	return target
 }
 
 func forwardRequest(request *http.Request, upstream *url.URL) (*http.Response, error) {

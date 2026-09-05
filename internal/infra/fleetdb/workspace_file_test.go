@@ -21,6 +21,12 @@ import (
 	"github.com/tysonthomas9/loomcli/test/skills-e2e/registry"
 )
 
+func TestWorkspaceFileCRC32C(t *testing.T) {
+	if got, want := workspaceFileCRC32C([]byte("123456789")), "4waSgw=="; got != want {
+		t.Fatalf("workspaceFileCRC32C() = %q, want %q", got, want)
+	}
+}
+
 func TestWorkspaceFileStorePublishesAndDownloadsBinaryTree(t *testing.T) {
 	t.Parallel()
 
@@ -28,38 +34,27 @@ func TestWorkspaceFileStorePublishesAndDownloadsBinaryTree(t *testing.T) {
 	digest := workspaceFileTestDigest(content)
 	createdAt := time.Now().UTC()
 	var uploaded []byte
+	var declared workspaceFileSpecWire
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Actor") != "alice" {
 			t.Errorf("X-Actor = %q, want alice", r.Header.Get("X-Actor"))
 		}
 		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/FLEET/file-uploads":
-			var request workspaceFileUploadRequestWire
-			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-				t.Error(err)
-				return
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/FLEET/file-tree-uploads":
+			declared = readWorkspaceFileTestSpec(t, r)
+			if declared.ContentHash != digest || declared.SizeBytes != int64(len(content)) || declared.MediaType != "application/octet-stream" {
+				t.Errorf("upload request = %#v", declared)
 			}
-			if request.ContentHash != digest || request.SizeBytes != int64(len(content)) || request.MediaType != "application/octet-stream" {
-				t.Errorf("upload request = %#v", request)
-			}
-			writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
-				"upload_token": "opaque-upload", "method": http.MethodPut,
-				"url":        "/api/v1/FLEET/file-transfers/opaque-capability",
-				"headers":    map[string][]string{"Content-Type": {"application/octet-stream"}},
-				"expires_at": createdAt.Add(15 * time.Minute),
-			})
+			writeWorkspaceFileTestSession(w, declared.Path, "opaque-upload", "/api/v1/FLEET/file-transfers/opaque-capability", "wft1_binary", createdAt.Add(15*time.Minute))
 		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/FLEET/file-transfers/opaque-capability":
 			uploaded, _ = io.ReadAll(r.Body)
 			w.WriteHeader(http.StatusNoContent)
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/FLEET/file-trees":
-			var request publishWorkspaceFileTreeRequestWire
-			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-				t.Error(err)
-				return
-			}
-			if len(request.Files) != 1 || request.Files[0].Path != "bin/archive.zip" || !request.Files[0].Executable || request.Files[0].ContentHash != digest {
-				t.Errorf("publish request = %#v", request)
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/complete/"):
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/publish"):
+			if declared.Path != "bin/archive.zip" || !declared.Executable || declared.ContentHash != digest {
+				t.Errorf("declared tree = %#v", declared)
 			}
 			w.Header().Set("ETag", `"wft1_binary"`)
 			w.Header().Set("Location", "/api/v1/FLEET/file-trees/wft1_binary")
@@ -110,6 +105,71 @@ func TestWorkspaceFileStorePublishesAndDownloadsBinaryTree(t *testing.T) {
 	}
 }
 
+func TestWorkspaceFileStoreRenameCreatesNewTreeAndReusesBlob(t *testing.T) {
+	registry.MarkEvidence(t, 22)
+
+	content := []byte("shared bytes")
+	digest := workspaceFileTestDigest(content)
+	createdAt := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
+	var declared workspaceFileSpecWire
+	var declaredRevision string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-tree-uploads"):
+			declared = readWorkspaceFileTestSpec(t, r)
+			declaredRevision = "wft1_original"
+			if declared.Path == "docs/new.md" {
+				declaredRevision = "wft1_renamed"
+			}
+			writeWorkspaceFileTestSession(w, declared.Path, "upload", "/transfer", declaredRevision, time.Now().Add(time.Minute))
+		case r.Method == http.MethodPut && r.URL.Path == "/transfer":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/complete/"):
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/publish"):
+			if declared.ContentHash != digest {
+				t.Errorf("publication = %#v, want shared content", declared)
+				return
+			}
+			writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
+				"workspace_key": "FLEET", "revision": declaredRevision, "created_by": "alice", "created_at": createdAt,
+				"files": []map[string]any{{
+					"path": declared.Path, "blob_ref": "blob_shared_bytes", "content_hash": digest,
+					"size_bytes": len(content), "media_type": "text/plain", "revision": "wff1_shared",
+				}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	files := newWorkspaceFileTestStore(t, server.URL, "alice", "")
+	original, err := files.Publish(t.Context(), "FLEET", []domain.WorkspaceFileInput{{Path: "docs/old.md", Bytes: content, MediaType: "text/plain"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamed, err := files.Publish(t.Context(), "FLEET", []domain.WorkspaceFileInput{{Path: "docs/new.md", Bytes: content, MediaType: "text/plain"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if original.Tree.Revision == renamed.Tree.Revision {
+		t.Fatalf("rename retained tree revision %q", original.Tree.Revision)
+	}
+	if got, want := original.Tree.Files[0].Path, "docs/old.md"; got != want {
+		t.Fatalf("original path = %q, want %q", got, want)
+	}
+	if got, want := renamed.Tree.Files[0].Path, "docs/new.md"; got != want {
+		t.Fatalf("renamed path = %q, want %q", got, want)
+	}
+	if got, want := renamed.Tree.Files[0].BlobRef, original.Tree.Files[0].BlobRef; got != want {
+		t.Fatalf("rename blob ref = %q, want reused %q", got, want)
+	}
+	if got, want := renamed.Tree.Files[0].ContentHash, original.Tree.Files[0].ContentHash; got != want {
+		t.Fatalf("rename content hash = %q, want reused %q", got, want)
+	}
+}
+
 func TestWorkspaceFileStorePreservesPublishStatuses(t *testing.T) {
 	t.Parallel()
 
@@ -128,13 +188,14 @@ func TestWorkspaceFileStorePreservesPublishStatuses(t *testing.T) {
 			digest := workspaceFileTestDigest(content)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
-				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-uploads"):
-					writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
-						"upload_token": "upload", "method": http.MethodPut, "url": "/transfer", "expires_at": time.Now().Add(time.Minute),
-					})
+				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-tree-uploads"):
+					spec := readWorkspaceFileTestSpec(t, r)
+					writeWorkspaceFileTestSession(w, spec.Path, "upload", "/transfer", "wft1_status", time.Now().Add(time.Minute))
 				case r.Method == http.MethodPut && r.URL.Path == "/transfer":
 					w.WriteHeader(http.StatusNoContent)
-				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-trees"):
+				case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/complete/"):
+					w.WriteHeader(http.StatusNoContent)
+				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/publish"):
 					w.Header().Set("ETag", `"tree"`)
 					w.Header().Set("Location", "/tree")
 					writeWorkspaceFileTestJSON(w, tc.httpStatus, map[string]any{
@@ -158,6 +219,54 @@ func TestWorkspaceFileStorePreservesPublishStatuses(t *testing.T) {
 	}
 }
 
+func TestWorkspaceFileStoreReplaysSameSessionWhenSuccessfulPublishBodyIsLost(t *testing.T) {
+	t.Parallel()
+
+	content := []byte("lost publication response")
+	digest := workspaceFileTestDigest(content)
+	createdAt := time.Now().UTC()
+	var begins atomic.Int64
+	var publishes atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-tree-uploads"):
+			begins.Add(1)
+			spec := readWorkspaceFileTestSpec(t, r)
+			writeWorkspaceFileTestSession(w, spec.Path, "same-session", "/transfer", "wft1_replayed", createdAt.Add(time.Minute))
+		case r.Method == http.MethodPut && r.URL.Path == "/transfer":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/complete/"):
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/FLEET/file-tree-uploads/session/publish":
+			if publishes.Add(1) == 1 {
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte("{"))
+				return
+			}
+			writeWorkspaceFileTestJSON(w, http.StatusOK, map[string]any{
+				"workspace_key": "FLEET", "revision": "wft1_replayed", "created_by": "alice", "created_at": createdAt,
+				"files": []map[string]any{{"path": "a", "blob_ref": "blob", "content_hash": digest, "size_bytes": len(content), "revision": "wff1_replayed"}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	result, err := newWorkspaceFileTestStore(t, server.URL, "alice", "").Publish(
+		t.Context(), "FLEET", []domain.WorkspaceFileInput{{Path: "a", Bytes: content}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != domain.WorkspaceFileTreeExisting || result.Tree.Revision != "wft1_replayed" {
+		t.Fatalf("result = %#v, want replayed existing tree", result)
+	}
+	if begins.Load() != 1 || publishes.Load() != 2 {
+		t.Fatalf("requests: begin=%d publish=%d, want begin=1 publish=2", begins.Load(), publishes.Load())
+	}
+}
+
 func TestWorkspaceFileStoreWaitsUntilPendingTreeIsReadable(t *testing.T) {
 	t.Parallel()
 
@@ -167,13 +276,14 @@ func TestWorkspaceFileStoreWaitsUntilPendingTreeIsReadable(t *testing.T) {
 	var reads atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-uploads"):
-			writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
-				"upload_token": "upload", "method": http.MethodPut, "url": "/transfer", "expires_at": createdAt.Add(time.Minute),
-			})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-tree-uploads"):
+			spec := readWorkspaceFileTestSpec(t, r)
+			writeWorkspaceFileTestSession(w, spec.Path, "upload", "/transfer", "wft1_pending", createdAt.Add(time.Minute))
 		case r.Method == http.MethodPut && r.URL.Path == "/transfer":
 			w.WriteHeader(http.StatusNoContent)
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-trees"):
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/complete/"):
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/publish"):
 			w.Header().Set("ETag", `"wft1_pending"`)
 			w.Header().Set("Location", "/api/v1/FLEET/file-trees/wft1_pending")
 			writeWorkspaceFileTestJSON(w, http.StatusAccepted, map[string]any{
@@ -244,13 +354,14 @@ func TestWorkspaceFileStorePendingWaitHonorsCancellationAndDeadline(t *testing.T
 			var signalOnce atomic.Bool
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
-				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-uploads"):
-					writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
-						"upload_token": "upload", "method": http.MethodPut, "url": "/transfer", "expires_at": time.Now().Add(time.Minute),
-					})
+				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-tree-uploads"):
+					spec := readWorkspaceFileTestSpec(t, r)
+					writeWorkspaceFileTestSession(w, spec.Path, "upload", "/transfer", "wft1_pending", time.Now().Add(time.Minute))
 				case r.Method == http.MethodPut && r.URL.Path == "/transfer":
 					w.WriteHeader(http.StatusNoContent)
-				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-trees"):
+				case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/complete/"):
+					w.WriteHeader(http.StatusNoContent)
+				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/publish"):
 					writeWorkspaceFileTestJSON(w, http.StatusAccepted, map[string]any{
 						"workspace_key": "FLEET", "revision": "wft1_pending", "created_by": "alice", "created_at": time.Now(),
 						"files": []map[string]any{{"path": "a", "blob_ref": "blob", "content_hash": digest, "size_bytes": len(content), "revision": "wff1_pending"}},
@@ -348,12 +459,12 @@ func TestWorkspaceFileStoreSupportsAbsoluteProviderGrantsWithoutCredentialLeak(t
 			t.Errorf("Fleet credentials = Authorization %q, X-API-Key %q, X-Fleet-API-Key %q, X-Actor %q", r.Header.Get("Authorization"), r.Header.Get("X-API-Key"), r.Header.Get("X-Fleet-API-Key"), r.Header.Get("X-Actor"))
 		}
 		switch {
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-uploads"):
-			writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
-				"upload_token": "upload", "method": http.MethodPut, "url": provider.URL + "/object",
-				"headers": map[string][]string{"X-Capability": {"provider-only"}}, "expires_at": time.Now().Add(time.Minute),
-			})
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-trees"):
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-tree-uploads"):
+			spec := readWorkspaceFileTestSpec(t, r)
+			writeWorkspaceFileTestSession(w, spec.Path, "upload", provider.URL+"/object", "wft1_absolute", time.Now().Add(time.Minute), map[string][]string{"X-Capability": {"provider-only"}})
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/complete/"):
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/publish"):
 			writeWorkspaceFileTestJSON(w, http.StatusCreated, workspaceFileAbsoluteTree(digest, len(content)))
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/files/"):
 			writeWorkspaceFileTestJSON(w, http.StatusOK, workspaceFileAbsoluteFile(digest, len(content)))
@@ -504,13 +615,12 @@ func TestWorkspaceFileStoreUploadFailurePublishesNoTree(t *testing.T) {
 	var publicationRequests atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-uploads"):
-			writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
-				"upload_token": "upload", "method": http.MethodPut, "url": "/transfer", "expires_at": time.Now().Add(time.Minute),
-			})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-tree-uploads"):
+			spec := readWorkspaceFileTestSpec(t, r)
+			writeWorkspaceFileTestSession(w, spec.Path, "upload", "/transfer", "unused", time.Now().Add(time.Minute))
 		case r.Method == http.MethodPut && r.URL.Path == "/transfer":
 			http.Error(w, "upload failed", http.StatusServiceUnavailable)
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-trees"):
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/publish"):
 			publicationRequests.Add(1)
 			w.WriteHeader(http.StatusCreated)
 		default:
@@ -647,13 +757,14 @@ func TestWorkspaceFileStoreRejectsPublishedWorkspaceMismatch(t *testing.T) {
 	digest := workspaceFileTestDigest(nil)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case strings.HasSuffix(r.URL.Path, "/file-uploads"):
-			writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
-				"upload_token": "upload", "method": http.MethodPut, "url": "/transfer", "expires_at": time.Now().Add(time.Minute),
-			})
+		case strings.HasSuffix(r.URL.Path, "/file-tree-uploads"):
+			spec := readWorkspaceFileTestSpec(t, r)
+			writeWorkspaceFileTestSession(w, spec.Path, "upload", "/transfer", "opaque-tree", time.Now().Add(time.Minute))
 		case r.URL.Path == "/transfer":
 			w.WriteHeader(http.StatusNoContent)
-		case strings.HasSuffix(r.URL.Path, "/file-trees"):
+		case strings.Contains(r.URL.Path, "/complete/"):
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/publish"):
 			writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
 				"workspace_key": "OTHER", "revision": "opaque-tree",
 				"files": []map[string]any{{"path": "file", "blob_ref": "blob", "content_hash": digest}},
@@ -666,6 +777,59 @@ func TestWorkspaceFileStoreRejectsPublishedWorkspaceMismatch(t *testing.T) {
 	_, err := newWorkspaceFileTestStore(t, server.URL, "alice", "").Publish(t.Context(), "FLEET", []domain.WorkspaceFileInput{{Path: "file"}})
 	if !errors.Is(err, domain.ErrIntegrity) {
 		t.Fatalf("Publish error = %v, want ErrIntegrity", err)
+	}
+}
+
+func TestWorkspaceFileStoreRejectsDuplicateUploadGrantPaths(t *testing.T) {
+	t.Parallel()
+	expires := time.Now().Add(time.Minute)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/file-tree-uploads") {
+			http.NotFound(w, r)
+			return
+		}
+		writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
+			"id": "session", "revision": "declared-tree", "expires_at": expires,
+			"files": []map[string]any{
+				{"path": "a", "transfer": map[string]any{"method": http.MethodPut, "url": "/transfer/a", "expires_at": expires}},
+				{"path": "a", "transfer": map[string]any{"method": http.MethodPut, "url": "/transfer/a-again", "expires_at": expires}},
+			},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	_, err := newWorkspaceFileTestStore(t, server.URL, "alice", "").Publish(t.Context(), "FLEET", []domain.WorkspaceFileInput{
+		{Path: "a", Bytes: []byte("a")},
+		{Path: "b", Bytes: []byte("b")},
+	})
+	if !errors.Is(err, domain.ErrIntegrity) || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("Publish error = %v, want duplicate-grant integrity error", err)
+	}
+}
+
+func TestWorkspaceFileStoreRejectsPublishedRevisionDifferentFromSession(t *testing.T) {
+	t.Parallel()
+	digest := workspaceFileTestDigest(nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/file-tree-uploads"):
+			spec := readWorkspaceFileTestSpec(t, r)
+			writeWorkspaceFileTestSession(w, spec.Path, "upload", "/transfer", "declared-tree", time.Now().Add(time.Minute))
+		case r.URL.Path == "/transfer", strings.Contains(r.URL.Path, "/complete/"):
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/publish"):
+			writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
+				"workspace_key": "FLEET", "revision": "different-tree",
+				"files": []map[string]any{{"path": "file", "blob_ref": "blob", "content_hash": digest}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	_, err := newWorkspaceFileTestStore(t, server.URL, "alice", "").Publish(t.Context(), "FLEET", []domain.WorkspaceFileInput{{Path: "file"}})
+	if !errors.Is(err, domain.ErrIntegrity) || !strings.Contains(err.Error(), "session revision") {
+		t.Fatalf("Publish error = %v, want session-revision integrity error", err)
 	}
 }
 
@@ -705,6 +869,13 @@ func TestWorkspaceFileTransfersRejectRedirectsAndNon2xx(t *testing.T) {
 	if err := client.executeWorkspaceFileTransfer(t.Context(), &workspaceFileTransferGrantWire{Method: http.MethodPut, URL: provider.URL, ExpiresAt: time.Now().Add(time.Minute)}, bytes.NewReader(nil)); err == nil || !strings.Contains(err.Error(), "HTTP 503") {
 		t.Fatalf("provider non-2xx error = %v", err)
 	}
+	alreadyExists := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusPreconditionFailed)
+	}))
+	t.Cleanup(alreadyExists.Close)
+	if err := client.executeWorkspaceFileTransfer(t.Context(), &workspaceFileTransferGrantWire{Method: http.MethodPut, URL: alreadyExists.URL, ExpiresAt: time.Now().Add(time.Minute)}, bytes.NewReader(nil)); err != nil {
+		t.Fatalf("create-only existing object was not deferred to Fleet verification: %v", err)
+	}
 }
 
 func TestWorkspaceFileStoreRejectsUnsafeUploadGrantsBeforeTransfer(t *testing.T) {
@@ -728,7 +899,10 @@ func TestWorkspaceFileStoreRejectsUnsafeUploadGrantsBeforeTransfer(t *testing.T)
 			client := newWorkspaceFileTestClientWithHTTP(t, "https://fleet.example", "alice", "", &http.Client{Transport: workspaceFileRoundTripper(func(request *http.Request) (*http.Response, error) {
 				if request.URL.Host == "fleet.example" {
 					return workspaceFileHTTPJSON(http.StatusCreated, map[string]any{
-						"upload_token": "upload", "method": tc.method, "url": tc.target, "expires_at": tc.expires,
+						"id": "session", "revision": "tree", "expires_at": time.Now().Add(time.Minute),
+						"files": []map[string]any{{"path": "file", "transfer": map[string]any{
+							"upload_token": "upload", "method": tc.method, "url": tc.target, "expires_at": tc.expires,
+						}}},
 					}), nil
 				}
 				providerCalls.Add(1)
@@ -788,11 +962,14 @@ func TestWorkspaceFileStoreUsesDynamicFleetCredentials(t *testing.T) {
 			t.Errorf("stale credentials on %s: Authorization=%q X-API-Key=%q X-Fleet-API-Key=%q", r.URL.Path, r.Header.Get("Authorization"), r.Header.Get("X-API-Key"), r.Header.Get("X-Fleet-API-Key"))
 		}
 		switch {
-		case strings.HasSuffix(r.URL.Path, "/file-uploads"):
-			writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{"upload_token": "upload", "method": http.MethodPut, "url": "/transfer", "expires_at": time.Now().Add(time.Minute)})
+		case strings.HasSuffix(r.URL.Path, "/file-tree-uploads"):
+			spec := readWorkspaceFileTestSpec(t, r)
+			writeWorkspaceFileTestSession(w, spec.Path, "upload", "/transfer", "opaque-tree", time.Now().Add(time.Minute))
 		case r.URL.Path == "/transfer":
 			w.WriteHeader(http.StatusNoContent)
-		case strings.HasSuffix(r.URL.Path, "/file-trees"):
+		case strings.Contains(r.URL.Path, "/complete/"):
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/publish"):
 			writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
 				"workspace_key": "FLEET", "revision": "opaque-tree", "files": []map[string]any{{"path": "file", "blob_ref": "blob", "content_hash": digest, "size_bytes": len(content), "revision": "opaque-file"}},
 			})
@@ -830,6 +1007,34 @@ func writeWorkspaceFileTestJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+func readWorkspaceFileTestSpec(t *testing.T, r *http.Request) workspaceFileSpecWire {
+	t.Helper()
+	var request struct {
+		Files []workspaceFileSpecWire `json:"files"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		t.Fatalf("decode file-tree upload: %v", err)
+	}
+	if len(request.Files) != 1 {
+		t.Fatalf("file-tree upload declared %d files, want 1", len(request.Files))
+	}
+	return request.Files[0]
+}
+
+func writeWorkspaceFileTestSession(w http.ResponseWriter, path, token, transferURL, revision string, expires time.Time, optionalHeaders ...map[string][]string) {
+	headers := map[string][]string(nil)
+	if len(optionalHeaders) > 0 {
+		headers = optionalHeaders[0]
+	}
+	writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
+		"id": "session", "revision": revision, "expires_at": expires,
+		"files": []map[string]any{{
+			"path":     path,
+			"transfer": map[string]any{"upload_token": token, "method": http.MethodPut, "url": transferURL, "headers": headers, "expires_at": expires},
+		}},
+	})
 }
 
 func newWorkspaceFileTestStore(t *testing.T, serverURL, actor, apiKey string) store.WorkspaceFileStore {

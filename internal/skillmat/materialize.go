@@ -2,7 +2,6 @@
 package skillmat
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -19,9 +18,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
-
-	"golang.org/x/text/cases"
-	"golang.org/x/text/unicode/norm"
+	"syscall"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -86,20 +83,29 @@ type desiredEntry struct {
 	SourcePath string
 }
 
-type desiredNode struct {
-	Path  string
-	Entry desiredEntry
-	Dir   bool
+type plannedSkillTree struct {
+	Skill *domain.Skill
+	Tree  *domain.WorkspaceFileTree
 }
 
-// StoreUnavailableError reports that the skill listing could not be loaded.
-// Callers use it to preserve the existing spawn-time degraded-mode behavior
-// without hiding local collision or filesystem failures.
+// materializationPlan freezes the selected Skill metadata and exact immutable
+// manifests before any lease is acquired or provider bytes are downloaded.
+type materializationPlan struct {
+	Resolved      []domain.ResolvedSkill
+	Skills        []plannedSkillTree
+	TreeRevisions []string
+}
+
+// StoreUnavailableError reports that an authoritative remote dependency could
+// not be read or fenced before the local projection was touched. Callers may
+// preserve the last safe projection without hiding integrity/filesystem bugs.
 type StoreUnavailableError struct {
 	Err error
 }
 
-func (e *StoreUnavailableError) Error() string { return fmt.Sprintf("load skills: %v", e.Err) }
+func (e *StoreUnavailableError) Error() string {
+	return fmt.Sprintf("materialize skills: dependency unavailable: %v", e.Err)
+}
 func (e *StoreUnavailableError) Unwrap() error { return e.Err }
 
 // IsStoreUnavailable reports whether materialization stopped before touching
@@ -109,40 +115,58 @@ func IsStoreUnavailable(err error) bool {
 	return errors.As(err, &unavailable)
 }
 
-// materialize resolves workspace and role skills and reconciles targetDir's
-// Loom-managed skill projection. A matching marker is a no-op. Store read
-// failures are returned as StoreUnavailableError before the filesystem is
-// touched; every other error is a fail-closed local preparation failure.
+// materialize resolves workspace and role skills and atomically replaces
+// targetDir's Loom-managed skill projection. A matching marker is a no-op.
+// Store read failures are returned as StoreUnavailableError before the
+// filesystem is touched; every other error leaves the current generation
+// selected and is a fail-closed local preparation failure.
 //
-//nolint:cyclop,funlen // The reconcile pipeline reads as one ordered sequence of gates.
+//nolint:cyclop,funlen,unparam // Workspace is semantic input; current fixtures intentionally share one workspace.
 func materialize(ctx context.Context, st store.Store, workspace, roleName, targetDir string) error {
 	return materializeWithRootOpener(ctx, st, workspace, roleName, targetDir, openSecureRoot)
 }
 
 type secureRootOpener func(string) (secureRoot, error)
 
-//nolint:cyclop,funlen // The reconcile pipeline reads as one ordered sequence of gates.
+//nolint:cyclop,funlen,gocognit // The reconcile pipeline reads as one ordered sequence of gates.
 func materializeWithRootOpener(
 	ctx context.Context, st store.Store, workspace, roleName, targetDir string, openRoot secureRootOpener,
+) error {
+	if err := validateMaterializationInputs(st, targetDir); err != nil {
+		return err
+	}
+	plan, err := resolveMaterializationPlan(ctx, st, workspace, roleName)
+	if err != nil {
+		return err
+	}
+	return materializePlanWithRootOpener(ctx, st, workspace, targetDir, plan, openRoot, nil)
+}
+
+type beforeMaterializationCommit func(context.Context) error
+
+//nolint:cyclop,funlen,gocognit // The reconcile pipeline reads as one ordered sequence of gates.
+func materializePlanWithRootOpener(
+	ctx context.Context,
+	st store.Store,
+	workspace string,
+	targetDir string,
+	plan *materializationPlan,
+	openRoot secureRootOpener,
+	beforeCommit beforeMaterializationCommit,
 ) error {
 	if err := ensurePlatformSupported(); err != nil {
 		return err
 	}
-	if st == nil || st.Skills() == nil {
-		return fmt.Errorf("materialize skills: skill store is not configured")
+	if err := ensureAtomicProjectionSupported(); err != nil {
+		return err
 	}
-	if strings.TrimSpace(targetDir) == "" {
-		return fmt.Errorf("materialize skills: target directory is required")
+	if err := validateMaterializationInputs(st, targetDir); err != nil {
+		return err
 	}
-
-	skills, err := st.Skills().List(ctx, workspace, store.SkillFilter{})
-	if err != nil {
-		if isUnavailableStoreError(err) {
-			return &StoreUnavailableError{Err: err}
-		}
-		return fmt.Errorf("load skills: %w", err)
+	if plan == nil {
+		return fmt.Errorf("materialize skills: immutable plan is required")
 	}
-	entries, err := desiredEntries(ctx, st.WorkspaceFiles(), workspace, domain.ResolveSkillChainDetail(skills, roleName))
+	entries, err := hydrateMaterializationPlan(ctx, st.WorkspaceFiles(), workspace, plan)
 	if err != nil {
 		return err
 	}
@@ -158,14 +182,45 @@ func materializeWithRootOpener(
 	}
 	defer root.Close()
 
-	previous, err := readMarker(root)
+	if err := root.MkdirAll(projectionStateDir, 0o700); err != nil {
+		return fmt.Errorf("create skill projection state directory: %w", err)
+	}
+	projectionLock, err := root.Lock(ctx, projectionLockPath)
+	if err != nil {
+		return fmt.Errorf("lock skill projection target: %w", err)
+	}
+	defer func() { _ = projectionLock.Close() }()
+
+	if err := ensureProjectionAliases(root, targetDir, entries); err != nil {
+		return err
+	}
+	if err := cleanupAbandonedGenerations(root); err != nil {
+		return err
+	}
+	currentGenerationPath, err := currentGeneration(root)
 	if err != nil {
 		return err
 	}
-	if err := sweepTemporaryFiles(root); err != nil {
-		return fmt.Errorf("sweep skill materialization temporaries: %w", err)
+	var currentRoot secureRoot
+	if currentGenerationPath != "" {
+		currentRoot = generationRoot{secureRoot: root, prefix: currentGenerationPath}
 	}
-	current, err := projectionIsCurrent(root, previous, projectionHash, paths, entries)
+	var previous *marker
+	if currentRoot != nil {
+		previous, err = readMarker(currentRoot)
+		if err != nil {
+			return err
+		}
+	}
+	if currentRoot != nil {
+		if err := sweepTemporaryFiles(currentRoot); err != nil {
+			return fmt.Errorf("sweep skill materialization temporaries: %w", err)
+		}
+	}
+	current := false
+	if currentRoot != nil {
+		current, err = projectionIsCurrent(currentRoot, previous, projectionHash, paths, entries)
+	}
 	if err != nil {
 		return err
 	}
@@ -176,48 +231,45 @@ func materializeWithRootOpener(
 	if err := detectDesiredCollisions(entries); err != nil {
 		return err
 	}
-	if err := detectExistingCollisions(root, targetDir, entries, previous); err != nil {
-		return err
+	if currentRoot != nil {
+		physicalTarget := filepath.Join(targetDir, filepath.FromSlash(currentGenerationPath))
+		if err := detectExistingCollisions(currentRoot, physicalTarget, entries, previous); err != nil {
+			return err
+		}
 	}
 	if err := ensureSkillGitExcludes(ctx, targetDir); err != nil {
 		return err
-	}
-	previousEntries, err := snapshotManagedEntries(root, previous)
-	if err != nil {
-		return fmt.Errorf("snapshot previous skill projection: %w", err)
 	}
 	markerBytes, err := json.MarshalIndent(marker{Version: markerVersion, Hash: projectionHash, Paths: paths}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode skill marker: %w", err)
 	}
 	markerBytes = append(markerBytes, '\n')
-	// Rollback materially reduces partial projections for transient local
-	// failures, but it is deliberately best-effort: a persistent filesystem
-	// failure can also prevent restoration. The old marker is not replaced
-	// until every projection mutation succeeds, so a later invocation will
-	// detect and reconcile any mixed tree rather than accepting it as current.
-	rollback := func(cause error) error {
-		if err := restoreProjection(root, previousEntries, paths); err != nil {
-			return errors.Join(cause, fmt.Errorf("restore previous skill projection: %w", err))
-		}
-		return cause
+
+	stagedGeneration, err := prepareGeneration(root, currentGenerationPath, previous, entries, paths, markerBytes)
+	if err != nil {
+		return err
 	}
-	stalePaths := findStalePaths(previous, paths)
-	preDeleted := make(map[string]bool)
-	if err := writeProjection(root, entries, stalePaths, preDeleted); err != nil {
-		return rollback(err)
-	}
-	remainingStale := stalePaths[:0]
-	for _, stale := range stalePaths {
-		if !preDeleted[stale] {
-			remainingStale = append(remainingStale, stale)
+	if beforeCommit != nil {
+		if err := beforeCommit(ctx); err != nil {
+			return cleanupFailedGeneration(root, stagedGeneration, fmt.Errorf("verify skill materialization lease before commit: %w", err))
 		}
 	}
-	if err := cleanupStale(root, remainingStale); err != nil {
-		return rollback(err)
+	if err := commitGeneration(root, stagedGeneration); err != nil {
+		return cleanupFailedGeneration(root, stagedGeneration, err)
 	}
-	if err := writeMarkerAtomically(root, markerBytes); err != nil {
-		return rollback(fmt.Errorf("write skill marker: %w", err))
+	if err := removeProjectionTree(root, stagedGeneration); err != nil {
+		return fmt.Errorf("skill projection committed but remove displaced generation: %w", err)
+	}
+	return nil
+}
+
+func validateMaterializationInputs(st store.Store, targetDir string) error {
+	if st == nil || st.Skills() == nil {
+		return fmt.Errorf("materialize skills: skill store is not configured")
+	}
+	if strings.TrimSpace(targetDir) == "" {
+		return fmt.Errorf("materialize skills: target directory is required")
 	}
 	return nil
 }
@@ -268,54 +320,6 @@ func findStalePaths(previous *marker, desiredPaths []string) []string {
 	return paths
 }
 
-func snapshotManagedEntries(root secureRoot, previous *marker) ([]desiredEntry, error) {
-	if previous == nil {
-		return nil, nil
-	}
-	entries := make([]desiredEntry, 0, len(previous.Paths))
-	for _, recorded := range previous.Paths {
-		info, err := root.Lstat(recorded)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		entry := desiredEntry{Path: recorded, Mode: info.Mode.Perm(), Skill: "rollback", SourcePath: recorded}
-		switch {
-		case info.Mode.IsRegular():
-			entry.Kind = entryFile
-			entry.Content, _, err = root.ReadFile(recorded, info.Size+1)
-		case info.Mode&os.ModeSymlink != 0:
-			entry.Kind = entrySymlink
-			entry.LinkTarget = info.LinkTarget
-		default:
-			// Structural drift is repaired by the normal projection writer. It
-			// is not a prior readable entry that rollback can restore.
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		entries = append(entries, entry)
-	}
-	return entries, nil
-}
-
-func restoreProjection(root secureRoot, previousEntries []desiredEntry, attemptedPaths []string) error {
-	preDeleted := make(map[string]bool)
-	if err := writeProjection(root, previousEntries, attemptedPaths, preDeleted); err != nil {
-		return err
-	}
-	remaining := make([]string, 0, len(attemptedPaths))
-	for _, attempted := range attemptedPaths {
-		if !preDeleted[attempted] {
-			remaining = append(remaining, attempted)
-		}
-	}
-	return cleanupStale(root, remaining)
-}
-
 func cleanupStale(root secureRoot, paths []string) error {
 	sort.Slice(paths, func(i, j int) bool {
 		if pathDepth(paths[i]) != pathDepth(paths[j]) {
@@ -328,8 +332,7 @@ func cleanupStale(root secureRoot, paths []string) error {
 			return fmt.Errorf("remove stale materialized path %q: %w", recorded, err)
 		}
 	}
-	removeEmptyParents(root, paths)
-	return nil
+	return removeEmptyParents(root, paths)
 }
 
 func writeProjection(root secureRoot, entries []desiredEntry, stalePaths []string, preDeleted map[string]bool) error {
@@ -459,16 +462,74 @@ func isUnavailableStoreError(err error) bool {
 	return isTransportError(err) || fleetDBServerErrorPattern.MatchString(err.Error())
 }
 
-// The complete desired projection is fetched and validated before any local
-// mutation. A missing byte or integrity failure therefore leaves the previous
-// materialization intact instead of replacing it with a partial projection.
-func desiredEntries(ctx context.Context, files store.WorkspaceFileStore, workspace string, resolved []domain.ResolvedSkill) ([]desiredEntry, error) {
-	entries := make([]desiredEntry, 0, len(resolved)*2+3)
+func resolveMaterializationPlan(ctx context.Context, st store.Store, workspace, roleName string) (*materializationPlan, error) {
+	if st == nil || st.Skills() == nil || st.WorkspaceFiles() == nil {
+		return nil, fmt.Errorf("materialize skills: Skill and workspace-file stores are required")
+	}
+	skills, err := st.Skills().List(ctx, workspace, store.SkillFilter{})
+	if err != nil {
+		if isUnavailableStoreError(err) {
+			return nil, &StoreUnavailableError{Err: err}
+		}
+		return nil, fmt.Errorf("load skills: %w", err)
+	}
+	resolved := domain.ResolveSkillChainDetail(skills, roleName)
+	for index := range resolved {
+		resolved[index].Skill = resolved[index].Skill.Clone()
+		resolved[index].Shadowed = resolved[index].Shadowed.Clone()
+	}
+	plan := &materializationPlan{Resolved: resolved}
+	revisions := make(map[string]struct{})
 	for _, item := range resolved {
 		if item.Skill == nil {
 			continue
 		}
-		snapshot, err := loadMaterializedSkillTree(ctx, files, workspace, item.Skill)
+		tree, err := loadMaterializationManifest(ctx, st.WorkspaceFiles(), workspace, item.Skill)
+		if err != nil {
+			if isUnavailableStoreError(err) {
+				return nil, &StoreUnavailableError{Err: err}
+			}
+			return nil, err
+		}
+		plan.Skills = append(plan.Skills, plannedSkillTree{Skill: item.Skill, Tree: tree})
+		revisions[tree.Revision] = struct{}{}
+	}
+	plan.TreeRevisions = make([]string, 0, len(revisions))
+	for revision := range revisions {
+		plan.TreeRevisions = append(plan.TreeRevisions, revision)
+	}
+	sort.Strings(plan.TreeRevisions)
+	return plan, nil
+}
+
+func loadMaterializationManifest(ctx context.Context, files store.WorkspaceFileStore, workspace string, skill *domain.Skill) (*domain.WorkspaceFileTree, error) {
+	if files == nil || skill == nil || skill.FileTreeRevision == "" {
+		return nil, fmt.Errorf("load skill tree: %w", domain.ErrIntegrity)
+	}
+	tree, err := files.GetTree(ctx, workspace, skill.FileTreeRevision)
+	if err != nil {
+		return nil, fmt.Errorf("load skill %q tree %q: %w", skill.Name, skill.FileTreeRevision, err)
+	}
+	if tree == nil || tree.Revision != skill.FileTreeRevision || tree.WorkspaceKey != workspace {
+		return nil, fmt.Errorf("skill %q tree identity mismatch: %w", skill.Name, domain.ErrIntegrity)
+	}
+	canonical, err := domain.CanonicalWorkspaceFileManifest(tree.Files)
+	if err != nil || domain.WorkspaceFileTreeRevision(canonical) != tree.Revision {
+		return nil, fmt.Errorf("skill %q tree manifest is not canonical: %w", skill.Name, domain.ErrIntegrity)
+	}
+	clone := tree.Clone()
+	clone.Files = canonical
+	return clone, nil
+}
+
+// The complete desired projection is hydrated and validated from the exact
+// manifests frozen in plan. A missing byte or integrity failure therefore
+// leaves the previous materialization intact instead of replacing it with a
+// partial projection.
+func hydrateMaterializationPlan(ctx context.Context, files store.WorkspaceFileStore, workspace string, plan *materializationPlan) ([]desiredEntry, error) {
+	entries := make([]desiredEntry, 0, len(plan.Resolved)*2+3)
+	for _, item := range plan.Skills {
+		snapshot, err := hydrateMaterializedSkillTree(ctx, files, workspace, item.Skill, item.Tree)
 		if err != nil {
 			if isUnavailableStoreError(err) {
 				return nil, &StoreUnavailableError{Err: err}
@@ -481,9 +542,24 @@ func desiredEntries(ctx context.Context, files store.WorkspaceFileStore, workspa
 		}
 		entries = append(entries, skillEntries...)
 	}
-	entries = append(entries, catalogEntries(resolved)...)
+	entries = append(entries, catalogEntries(plan.Resolved)...)
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 	return entries, nil
+}
+
+func desiredEntries(ctx context.Context, files store.WorkspaceFileStore, workspace string, resolved []domain.ResolvedSkill) ([]desiredEntry, error) {
+	plan := &materializationPlan{Resolved: resolved}
+	for _, item := range resolved {
+		if item.Skill == nil {
+			continue
+		}
+		tree, err := loadMaterializationManifest(ctx, files, workspace, item.Skill)
+		if err != nil {
+			return nil, err
+		}
+		plan.Skills = append(plan.Skills, plannedSkillTree{Skill: item.Skill, Tree: tree})
+	}
+	return hydrateMaterializationPlan(ctx, files, workspace, plan)
 }
 
 // entriesForSkill derives the projection entries for one skill: its SKILL.md,
@@ -527,16 +603,9 @@ func entriesForSkill(skill *domain.Skill, snapshot domain.SkillFileTreeSnapshot)
 	return entries, nil
 }
 
-func loadMaterializedSkillTree(ctx context.Context, files store.WorkspaceFileStore, workspace string, skill *domain.Skill) (domain.SkillFileTreeSnapshot, error) {
-	if files == nil || skill.FileTreeRevision == "" {
-		return domain.SkillFileTreeSnapshot{}, fmt.Errorf("load skill %q tree: %w", skill.Name, domain.ErrIntegrity)
-	}
-	tree, err := files.GetTree(ctx, workspace, skill.FileTreeRevision)
-	if err != nil {
-		return domain.SkillFileTreeSnapshot{}, fmt.Errorf("load skill %q tree %q: %w", skill.Name, skill.FileTreeRevision, err)
-	}
-	if tree == nil || tree.Revision != skill.FileTreeRevision || tree.WorkspaceKey != workspace {
-		return domain.SkillFileTreeSnapshot{}, fmt.Errorf("skill %q tree identity mismatch: %w", skill.Name, domain.ErrIntegrity)
+func hydrateMaterializedSkillTree(ctx context.Context, files store.WorkspaceFileStore, workspace string, skill *domain.Skill, tree *domain.WorkspaceFileTree) (domain.SkillFileTreeSnapshot, error) {
+	if files == nil || skill == nil || tree == nil || tree.Revision != skill.FileTreeRevision || tree.WorkspaceKey != workspace {
+		return domain.SkillFileTreeSnapshot{}, fmt.Errorf("hydrate skill tree: %w", domain.ErrIntegrity)
 	}
 	manifest := make([]domain.SkillFileTreeFile, 0, len(tree.Files))
 	for _, file := range tree.Files {
@@ -558,6 +627,14 @@ func loadMaterializedSkillTree(ctx context.Context, files store.WorkspaceFileSto
 		return domain.SkillFileTreeSnapshot{}, fmt.Errorf("skill %q metadata does not match SKILL.md: %w", skill.Name, domain.ErrIntegrity)
 	}
 	return *snapshot, nil
+}
+
+func loadMaterializedSkillTree(ctx context.Context, files store.WorkspaceFileStore, workspace string, skill *domain.Skill) (domain.SkillFileTreeSnapshot, error) {
+	tree, err := loadMaterializationManifest(ctx, files, workspace, skill)
+	if err != nil {
+		return domain.SkillFileTreeSnapshot{}, err
+	}
+	return hydrateMaterializedSkillTree(ctx, files, workspace, skill, tree)
 }
 
 func catalogEntries(resolved []domain.ResolvedSkill) []desiredEntry {
@@ -754,41 +831,6 @@ func sweepTemporaryDir(root secureRoot, dir string) error {
 	return nil
 }
 
-func collisionKey(name string) string {
-	return cases.Fold().String(norm.NFC.String(name))
-}
-
-func detectDesiredCollisions(entries []desiredEntry) error {
-	files := make(map[string]desiredEntry, len(entries))
-	dirs := make(map[string]desiredEntry, len(entries)*2)
-	for _, entry := range entries {
-		key := collisionKey(entry.Path)
-		if previous, ok := files[key]; ok {
-			return collisionError(entry.Skill, previous.SourcePath, entry.SourcePath)
-		}
-		if child, ok := dirs[key]; ok {
-			return collisionError(entry.Skill, entry.SourcePath, child.SourcePath)
-		}
-		files[key] = entry
-		parent := path.Dir(entry.Path)
-		for parent != "." && parent != "/" {
-			parentKey := collisionKey(parent)
-			if file, ok := files[parentKey]; ok {
-				return collisionError(entry.Skill, file.SourcePath, entry.SourcePath)
-			}
-			if _, ok := dirs[parentKey]; !ok {
-				dirs[parentKey] = entry
-			}
-			parent = path.Dir(parent)
-		}
-	}
-	return nil
-}
-
-func collisionError(skill, first, second string) error {
-	return fmt.Errorf("materialize skill %q: paths %q and %q collide when written", skill, first, second)
-}
-
 func writeMarkerAtomically(root secureRoot, markerBytes []byte) (retErr error) {
 	suffix, err := randomTempSuffix()
 	if err != nil {
@@ -809,7 +851,7 @@ func writeMarkerAtomically(root secureRoot, markerBytes []byte) (retErr error) {
 	return nil
 }
 
-func removeEmptyParents(root secureRoot, names []string) {
+func removeEmptyParents(root secureRoot, names []string) error {
 	dirs := make(map[string]bool)
 	for _, name := range names {
 		for parent := path.Dir(name); parent != "." && parent != AgentsSkillsDir && parent != ClaudeSkillsDir; parent = path.Dir(parent) {
@@ -822,8 +864,11 @@ func removeEmptyParents(root secureRoot, names []string) {
 	}
 	sort.Slice(ordered, func(i, j int) bool { return pathDepth(ordered[i]) > pathDepth(ordered[j]) })
 	for _, dir := range ordered {
-		_ = root.RemoveDir(dir)
+		if err := root.RemoveDir(dir); err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTEMPTY) && !errors.Is(err, syscall.EEXIST) {
+			return fmt.Errorf("remove empty materialized directory %q: %w", dir, err)
+		}
 	}
+	return nil
 }
 
 func pathDepth(name string) int { return strings.Count(name, "/") }
@@ -864,131 +909,4 @@ func projectionMatches(root secureRoot, entries []desiredEntry) (bool, error) {
 		}
 	}
 	return true, nil
-}
-
-func entryExactlyMatches(root secureRoot, entry desiredEntry) (bool, error) {
-	switch entry.Kind {
-	case entryFile:
-		info, err := root.Lstat(entry.Path)
-		if errors.Is(err, fs.ErrNotExist) {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		if !info.Mode.IsRegular() || info.Mode.Perm() != entry.Mode.Perm() {
-			return false, nil
-		}
-		if info.Size != int64(len(entry.Content)) {
-			return false, nil
-		}
-		content, mode, err := root.ReadFile(entry.Path, int64(len(entry.Content))+1)
-		if errors.Is(err, fs.ErrNotExist) {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		return mode.IsRegular() && mode.Perm() == entry.Mode.Perm() && bytes.Equal(content, entry.Content), nil
-	case entrySymlink:
-		info, err := root.Lstat(entry.Path)
-		if errors.Is(err, fs.ErrNotExist) {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		return info.Mode&os.ModeSymlink != 0 && info.LinkTarget == entry.LinkTarget, nil
-	default:
-		return false, fmt.Errorf("materialized path %q has unknown kind %q", entry.Path, entry.Kind)
-	}
-}
-
-//nolint:gocognit,cyclop,funlen // The collision matrix (file/dir/symlink × managed/foreign) is deliberately exhaustive in one place.
-func detectExistingCollisions(root secureRoot, targetDir string, entries []desiredEntry, previous *marker) error {
-	managed := map[string]bool{}
-	managedDirs := map[string]bool{}
-	if previous != nil {
-		for _, recorded := range previous.Paths {
-			managed[recorded] = true
-			for parent := path.Dir(recorded); parent != "."; parent = path.Dir(parent) {
-				managedDirs[parent] = true
-			}
-		}
-	}
-	desired := make(map[string]desiredNode, len(entries)*2)
-	for _, entry := range entries {
-		desired[collisionKey(entry.Path)] = desiredNode{Path: entry.Path, Entry: entry}
-		for parent := path.Dir(entry.Path); parent != "."; parent = path.Dir(parent) {
-			key := collisionKey(parent)
-			if _, ok := desired[key]; !ok {
-				desired[key] = desiredNode{Path: parent, Entry: entry, Dir: true}
-			}
-		}
-	}
-	for _, rootName := range []string{AgentsSkillsDir, ClaudeSkillsDir} {
-		absoluteRoot := filepath.Join(targetDir, filepath.FromSlash(rootName))
-		err := filepath.WalkDir(absoluteRoot, func(name string, item fs.DirEntry, walkErr error) error {
-			if errors.Is(walkErr, fs.ErrNotExist) {
-				return nil
-			}
-			if walkErr != nil {
-				return walkErr
-			}
-			rel, err := filepath.Rel(targetDir, name)
-			if err != nil {
-				return err
-			}
-			rel = filepath.ToSlash(rel)
-			if rel == rootName {
-				if item.Type()&os.ModeSymlink != 0 || !item.IsDir() {
-					return fmt.Errorf("materialized directory %q collides with existing path %q", rootName, rel)
-				}
-				return nil
-			}
-			want, exactCollision := desired[collisionKey(rel)]
-			if exactCollision {
-				realDir := item.IsDir() && item.Type()&os.ModeSymlink == 0
-				switch {
-				case want.Dir && realDir && managed[rel]:
-					return fmt.Errorf("materialize skill %q: previously managed path %q was replaced by a directory", want.Entry.Skill, rel)
-				case want.Dir && realDir:
-					return nil
-				case want.Dir && managed[rel]:
-					return nil
-				case !want.Dir && managed[rel]:
-					return nil
-				case !want.Dir && realDir && managedDirs[rel]:
-					return nil
-				}
-				if !want.Dir {
-					matches, err := entryExactlyMatches(root, want.Entry)
-					if err != nil {
-						return fmt.Errorf("inspect existing path %q: %w", rel, err)
-					}
-					if matches {
-						return nil
-					}
-				}
-				return fmt.Errorf("materialize skill %q: desired path %q collides with existing unrecorded path %q", want.Entry.Skill, want.Entry.Path, rel)
-			}
-			if ancestor, ok := desiredFileAncestor(desired, rel); ok && !managed[rel] && !managedDirs[rel] {
-				return fmt.Errorf("materialize skill %q: desired path %q collides with existing unrecorded path %q", ancestor.Entry.Skill, ancestor.Entry.Path, rel)
-			}
-			return nil
-		})
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return err
-		}
-	}
-	return nil
-}
-
-func desiredFileAncestor(desired map[string]desiredNode, name string) (desiredNode, bool) {
-	for current := path.Dir(name); current != "." && current != "/"; current = path.Dir(current) {
-		if node, ok := desired[collisionKey(current)]; ok && !node.Dir {
-			return node, true
-		}
-	}
-	return desiredNode{}, false
 }

@@ -51,6 +51,7 @@ type Store struct {
 	roles      *roleStore
 	skills     *skillStore
 	files      *workspaceFileStore
+	matLeases  *skillMaterializationLeaseStore
 	skillPacks *skillPackStore
 	daemon     *daemonStore
 	conns      *connectorStore
@@ -70,14 +71,7 @@ func New() *Store {
 	drivers, versions, profiles, roles, services, bindings, skills := newCatalogGraph(files)
 	nodes := newNodeStore()
 	artifacts := newArtifactStore()
-	runs := newDriverRunStore(versions, bindings)
-	steps := newDriverStepStore(runs)
-	taskRuns := newTaskRunStore(runs, steps, artifacts, profiles, nodes)
-	events := newTriggerEventStore()
-	deliveries := newTriggerDeliveryStore(bindings)
-	routes := &triggerRouteStore{bindings: bindings, events: events, deliveries: deliveries, runs: runs}
-	awaits := newAwaitStore(events)
-	linkRunGraph(runs, steps, taskRuns, awaits)
+	runGraph := newRunGraph(versions, bindings, artifacts, profiles, nodes)
 	return &Store{
 		workspaces: newWorkspaceStore(),
 		repos:      newRepoStore(),
@@ -95,24 +89,61 @@ func New() *Store {
 		profiles:   profiles,
 		services:   services,
 		bindings:   bindings,
+		events:     runGraph.events,
+		deliveries: runGraph.deliveries,
+		routes:     runGraph.routes,
+		runs:       runGraph.runs,
+		steps:      runGraph.steps,
+		taskRuns:   runGraph.taskRuns,
+		taskEvents: newTaskRunEventStore(),
+		outbox:     newOutboxStore(),
+		awaits:     runGraph.awaits,
+		workers:    newWorkerStore(),
+		roles:      roles,
+		skills:     skills,
+		files:      files,
+		matLeases:  newSkillMaterializationLeaseStore(files),
+		skillPacks: newSkillPackStore(),
+		daemon:     newDaemonStore(),
+		conns:      newConnectorStore(),
+		grants:     newConnectorGrantStore(),
+		audits:     newConnectorAuditStore(),
+	}
+}
+
+type runGraph struct {
+	events     *triggerEventStore
+	deliveries *triggerDeliveryStore
+	routes     *triggerRouteStore
+	runs       *driverRunStore
+	steps      *driverStepStore
+	taskRuns   *taskRunStore
+	awaits     *awaitStore
+}
+
+func newRunGraph(
+	versions *driverVersionStore,
+	bindings *triggerBindingStore,
+	artifacts *artifactStore,
+	profiles *workerProfileStore,
+	nodes *nodeStore,
+) runGraph {
+	runs := newDriverRunStore(versions, bindings)
+	steps := newDriverStepStore(runs)
+	taskRuns := newTaskRunStore(runs, steps, artifacts, profiles, nodes)
+	events := newTriggerEventStore()
+	deliveries := newTriggerDeliveryStore(bindings)
+	routes := &triggerRouteStore{bindings: bindings, events: events, deliveries: deliveries, runs: runs}
+	awaits := newAwaitStore(events)
+	linkRunGraph(runs, steps, taskRuns, awaits)
+	return runGraph{
 		events:     events,
 		deliveries: deliveries,
 		routes:     routes,
 		runs:       runs,
 		steps:      steps,
 		taskRuns:   taskRuns,
-		taskEvents: newTaskRunEventStore(),
-		outbox:     newOutboxStore(),
 		awaits:     awaits,
-		workers:    newWorkerStore(),
-		roles:      roles,
-		skills:     skills,
-		files:      files,
-		skillPacks: newSkillPackStore(),
-		daemon:     newDaemonStore(),
-		conns:      newConnectorStore(),
-		grants:     newConnectorGrantStore(),
-		audits:     newConnectorAuditStore(),
 	}
 }
 
@@ -250,9 +281,11 @@ func (s *Store) Skills() store.SkillStore { return s.skills }
 // WorkspaceFiles returns the provider-neutral immutable file-tree store.
 func (s *Store) WorkspaceFiles() store.WorkspaceFileStore { return s.files }
 
-// SkillMaterializationLeases is nil because memstore is process-local and
-// production materialization coordination belongs to fleet-db's Redis lease.
-func (s *Store) SkillMaterializationLeases() store.SkillMaterializationLeaseStore { return nil }
+// SkillMaterializationLeases returns the process-local test double for
+// fleet-db's materialization lease service.
+func (s *Store) SkillMaterializationLeases() store.SkillMaterializationLeaseStore {
+	return s.matLeases
+}
 
 // SkillPacks returns the SkillPackStore.
 func (s *Store) SkillPacks() store.SkillPackStore { return s.skillPacks }

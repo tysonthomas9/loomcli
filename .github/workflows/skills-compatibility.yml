@@ -132,9 +132,49 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  generated-contract:
+    name: Generated workspace-file contract pair
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout LoomCLI
+        uses: actions/checkout@v4
+        with:
+          repository: tysonthomas9/loomcli
+          ref: ${{ needs.resolve.outputs.loom_sha }}
+          path: loomcli
+          token: ${{ secrets.LOOMCLI_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Checkout FleetDB
+        uses: actions/checkout@v4
+        with:
+          repository: tysonthomas9/fleet-db
+          ref: ${{ needs.resolve.outputs.fleetdb_sha }}
+          path: fleet-db
+          # ID 79 executes both immutable release stages from Fleet history.
+          fetch-depth: 0
+          token: ${{ secrets.FLEET_DB_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: fleet-db/go.mod
+
+      - name: Reject generated contract drift in either repository
+        working-directory: fleet-db
+        shell: bash
+        run: >-
+          go run ./cmd/gen-workspace-file-contract -check
+          -contract contracts/workspace-file-v1.json
+          -fleet-out internal/models/workspace_file_contract_gen.go
+          -loom-out ../loomcli/internal/domain/workspace_file_contract_gen.go
+
   proof:
     name: LoomCLI / FleetDB compatibility (${{ matrix.backend }}-${{ matrix.storage }})
-    needs: resolve
+    needs: [resolve, generated-contract]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -165,6 +205,10 @@ jobs:
           path: fleet-db
           token: ${{ secrets.FLEET_DB_TOKEN || github.token }}
           persist-credentials: false
+          # Fleet's additive-release proof compares the staged revision with
+          # its parent. A shallow checkout makes that real compatibility test
+          # fail before it can inspect the release boundary.
+          fetch-depth: 0
 
       - name: Checkout pinned Vercel Agent Skills corpus
         uses: actions/checkout@v4
@@ -302,11 +346,12 @@ jobs:
         run: |
           set -euo pipefail
           docker run --detach \
+            --platform linux/amd64 \
             --name "$POSTGRES_CONTAINER" \
             --publish 127.0.0.1:5432:5432 \
             --env POSTGRES_PASSWORD \
             --env POSTGRES_DB=fleetdb \
-            postgres:16-alpine@sha256:738d1359df5aa0b6d50a9071e989c49fdd39152a2a805c6ff131bf5e2243e0b3
+            postgres:16-alpine@sha256:075f7ba66bc9b3ce7d6b8b635208ff61cd7cf1a67d71ec530eec5d7ae0cbe571
 
           ready=false
           for _ in $(seq 1 60); do
@@ -365,6 +410,7 @@ jobs:
           STORAGE_MODE: ${{ matrix.storage }}
           FLEET_E2E_BACKEND: ${{ matrix.backend }}
           E2E_COVERAGE_OUTPUT: ${{ github.workspace }}/e2e-coverage-${{ matrix.backend }}-${{ matrix.storage }}.json
+          SKILLS_E2E_REVISION_MANIFEST: ${{ github.workspace }}/skills-compatibility-revisions.txt
         run: |
           set -o pipefail
           make test-skills-release-compat 2>&1 | tee "../skills-compatibility-$FLEET_E2E_BACKEND-$STORAGE_MODE.log"
@@ -378,11 +424,11 @@ jobs:
         run: |
           set -euo pipefail
           export GOCACHE="$RUNNER_TEMP/loom-edge-coverage-cache"
-          go test -json ./internal/domain ./internal/cli/skill ./internal/infra/fleetdb ./internal/skillmat ./test/skills-e2e |
+          go test -json ./internal/domain ./internal/cli/skill ./internal/cireport ./internal/infra/fleetdb ./internal/skillmat ./test/skills-e2e |
             go run ./cmd/skills-edge-coverage extract -repository=loom -revision "$LOOM_SHA" \
               > "$GITHUB_WORKSPACE/loom-domain-evidence-v2.json"
 
-      - name: Extract Fleet API evidence
+      - name: Extract Fleet ordinary evidence
         if: inputs.edge_readiness && matrix.backend == 'redis' && matrix.storage == 'local'
         working-directory: fleet-db
         shell: bash
@@ -390,11 +436,53 @@ jobs:
           FLEET_SHA: ${{ needs.resolve.outputs.fleetdb_sha }}
         run: |
           set -euo pipefail
-          export GOCACHE="$RUNNER_TEMP/fleet-edge-api-cache"
-          go test -json ./pkg/client ./internal/api \
-            -run 'Test(WorkspaceFileAPIRejectsMutatedTransferTokensWithDeliberateStatus|WorkspaceFileAPIConformance_ProjectionPendingIsAccepted|HTTPClientWorkspaceFileTransfer.*)$' |
+          export GOCACHE="$RUNNER_TEMP/fleet-edge-ordinary-cache"
+          marked_tests='^Test(HTTPClientWorkspaceFileTransfer.*|SkillTreePointerUpdateDistinguishesMissingAndStalePreconditions|WorkspaceFileAPIRenameCreatesNewTreeAndReusesBlob|WorkspaceFileAPIConformance_(InvalidTransfersDoNotPublishEvents|ProjectionPendingIsAccepted|AppendFailureLeavesOnlyStagedBytes)|WorkspaceFileAPIRejectsMutatedTransferTokensWithDeliberateStatus|WorkspaceFileTreeRevisionCanonicalAndSensitive|WorkspaceFileTreeRevisionMatchesCrossRepositoryVectors|WorkspaceFileIdentitySeparatesMediaTypeAndExecutableFromSharedContent|SkillService_(UpdateValidatesRootSkillDocumentBeforeCAS|UpdateSourceMetadataDoesNotRequireFileTree)|WorkspaceFileService(ReplayRetriesProjectionAfterLostPendingResponse|CompletesUploadsBeforeDatabaseOnlyPublish|UploadTokenBindsEveryTransferClaim)|RedisStorage_Contract|ObjectStoreConformance|LocalObjectStoreRejectsWorkspaceSymlinkEscape|ObjectReferenceBindsWorkspaceHashAndSize|InfrastructureFailureObserverIsExternalAndLeastPrivilege|FleetPublicationCannotBypassPairedCompatibility|DeploymentRequiresSuccessfulProofForExactFleetImage)$'
+          go test -json ./pkg/client ./internal/api ./internal/models ./internal/service \
+            ./internal/storage ./internal/storage/blob ./internal/releasegate -run "$marked_tests" |
             go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
-              > "$GITHUB_WORKSPACE/fleet-api-evidence-v2.json"
+              > "$GITHUB_WORKSPACE/fleet-ordinary-evidence-v2.json"
+
+      - name: Extract Fleet release-architecture evidence
+        if: inputs.edge_readiness && matrix.backend == 'redis' && matrix.storage == 'local'
+        working-directory: fleet-db
+        shell: bash
+        env:
+          FLEET_SHA: ${{ needs.resolve.outputs.fleetdb_sha }}
+          FLEET_RELEASE_STAGE_EVIDENCE: "1"
+        run: |
+          set -euo pipefail
+          export GOCACHE="$RUNNER_TEMP/fleet-edge-release-cache"
+          go test -json ./internal/releasegate -run '^TestWorkspaceFileRoutesDeployBeforeStrictSkillShape$' |
+            go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
+              > "$GITHUB_WORKSPACE/fleet-release-evidence-v2.json"
+
+      - name: Extract Fleet operational evidence
+        if: inputs.edge_readiness && matrix.backend == 'redis' && matrix.storage == 'local'
+        working-directory: fleet-db
+        shell: bash
+        env:
+          FLEET_SHA: ${{ needs.resolve.outputs.fleetdb_sha }}
+        run: |
+          set -euo pipefail
+          export GOCACHE="$RUNNER_TEMP/fleet-edge-operations-cache"
+          marked_tests='^Test(WorkspaceFileMetricsHaveFixedNamesLabelsAndCardinality|OperationalMetricsObserveProviderAndRetentionSeams|ApplyReportsOnlySafeBoundedDurableFailureDetails|ScrubDoesNotQuarantineTransientProviderFailure|OperatorCommandPlansThenAppliesThroughTheReconcileInterface|SkillService_Attach(FileTreeUsesConditionalAppender|FileTreeMapsAuthoritativeMismatch|SameTreeStalePreconditionRecordsStaleCAS)|WorkspaceFileService(RecordsPublicationAndOperationSeams|DirectDownloadUsesPublicationVerifiedMetadataWithoutReread))$'
+          go test -json ./internal/service ./internal/workspacefilemetrics ./internal/workspaceobjects ./cmd/fleet-workspace-objects -run "$marked_tests" |
+            go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
+              > "$GITHUB_WORKSPACE/fleet-operations-evidence-v2.json"
+
+      - name: Extract Fleet generated-contract evidence
+        if: inputs.edge_readiness && matrix.backend == 'redis' && matrix.storage == 'local'
+        working-directory: fleet-db
+        shell: bash
+        env:
+          FLEET_SHA: ${{ needs.resolve.outputs.fleetdb_sha }}
+        run: |
+          set -euo pipefail
+          export GOCACHE="$RUNNER_TEMP/fleet-edge-contract-cache"
+          go test -json ./internal/models -run '^TestGeneratedWorkspaceFileContractOwnsLimitsAndRevisionEncoding$' |
+            go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
+              > "$GITHUB_WORKSPACE/fleet-generated-contract-evidence-v2.json"
 
       - name: Extract Fleet Redis evidence
         if: inputs.edge_readiness && matrix.backend == 'redis' && matrix.storage == 'local'
@@ -407,7 +495,8 @@ jobs:
           set -euo pipefail
           export GOCACHE="$RUNNER_TEMP/fleet-edge-redis-cache"
           go test -json -tags integration ./internal/storage/integrationtest ./internal/projection \
-            -run 'Test(RedisWorkspaceFilePublicationAcceptsOneConcurrentCreation|RedisWorkspaceFilePublicationRetryAfterLostResponse|WorkspaceFileProjectionRestartRetriesFailedEvent)$' |
+            ./internal/workspaceobjects \
+            -run '^(TestRedisSkillDescriptionAndTreeCASIsAtomic|TestRedisWorkspaceFilePublication.*|TestRedisWorkspaceFileTreeIsAtomicallyVisibleOrAbsent|TestWorkspaceFileProjectionRestartRetriesFailedEvent|TestTypedWorkspaceObjectRootsPersistInRealRedis)$' |
             go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
               > "$GITHUB_WORKSPACE/fleet-redis-evidence-v2.json"
 
@@ -422,7 +511,8 @@ jobs:
           set -euo pipefail
           export GOCACHE="$RUNNER_TEMP/fleet-edge-postgres-cache"
           go test -json -tags integration ./internal/storage/postgres ./internal/projection \
-            -run 'Test(PostgresWorkspaceFilePublicationAcceptsOneConcurrentCreation|PostgresWorkspaceFilePublicationRetryAfterLostResponse|PostgresWorkspaceFileProjectionRestartRetriesFailedEvent)$' |
+            ./internal/workspaceobjects \
+            -run '^(TestPostgresStorage_Contract|TestPostgresSkillDescriptionAndTreeCASIsAtomic|TestPostgresWorkspaceFilePublication.*|TestPostgresWorkspaceFileTreeIsAtomicallyVisibleOrAbsent|TestPostgresWorkspaceFileProjectionRestartRetriesFailedEvent|TestPostgresWorkspaceObjectRetentionParity)$' |
             go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
               > "$GITHUB_WORKSPACE/fleet-postgres-evidence-v2.json"
 
@@ -436,7 +526,9 @@ jobs:
         run: |
           set -euo pipefail
           export GOCACHE="$RUNNER_TEMP/fleet-edge-minio-cache"
-          go test -json ./internal/api -run '^TestWorkspaceFileAPIConformance_S3Compatible$' |
+          go test -json -tags integration ./internal/api ./internal/storage/blob ./internal/service \
+            ./internal/workspacefileconfig ./internal/workspaceobjects ./cmd/fleet-workspace-objects \
+            -run '^(TestWorkspaceFileS3SignedUploadBindsLengthTypeAndChecksum|TestWorkspaceFileMinIOOutageBeforeVerificationPublishesNoEvent|TestS3ProviderUsesWorkspaceContentAddressedKey|TestMinIOVersioningRemainsRecoveryMetadataNotSkillIdentity|TestWorkspaceFileDirectDownloadRealProviderHasZeroFleetProviderBandwidth|TestRealMinIOLifecycleIsLongerThanFleetRootsAndGrace|TestWorkspaceObjectOperationsRealProvider|TestWorkspaceObjectScrubRealProviderCorruptionQuarantinesTree|TestWorkspaceObjectRetentionAndPublicationFenceRealProvider|TestOperatorCommandRealProviderPlansAndCollectsInterruptedUpload)$' |
             go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
               > "$GITHUB_WORKSPACE/fleet-minio-evidence-v2.json"
 
@@ -449,7 +541,10 @@ jobs:
             e2e-coverage-${{ matrix.backend }}-${{ matrix.storage }}.json
             e2e-coverage-${{ matrix.backend }}-${{ matrix.storage }}-projection.json
             loom-domain-evidence-v2.json
-            fleet-api-evidence-v2.json
+            fleet-ordinary-evidence-v2.json
+            fleet-release-evidence-v2.json
+            fleet-operations-evidence-v2.json
+            fleet-generated-contract-evidence-v2.json
             fleet-redis-evidence-v2.json
             fleet-postgres-evidence-v2.json
             fleet-minio-evidence-v2.json
@@ -666,6 +761,7 @@ jobs:
           FLEET_E2E_BACKEND: redis
           SKILLS_E2E_PROVIDER: gcs
           E2E_COVERAGE_OUTPUT: ${{ github.workspace }}/e2e-coverage-redis-gcs.json
+          SKILLS_E2E_REVISION_MANIFEST: ${{ github.workspace }}/gcs-provider-revisions.txt
         run: |
           set -o pipefail
           make test-skills-release-compat 2>&1 | tee ../skills-compatibility-redis-gcs.log
@@ -673,6 +769,8 @@ jobs:
       - name: Run real GCS signed-grant enforcement
         working-directory: fleet-db
         shell: bash
+        env:
+          FLEET_WORKSPACE_FILE_EVIDENCE_PROVIDER: gcs
         run: |
           set -o pipefail
           go test -count=1 -v ./internal/api \
@@ -689,7 +787,9 @@ jobs:
         run: |
           set -euo pipefail
           export GOCACHE="$RUNNER_TEMP/fleet-edge-gcs-cache"
-          go test -json ./internal/api -run '^TestWorkspaceFileAPIConformance_S3Compatible$' |
+          go test -json -tags integration ./internal/api ./internal/storage/blob ./internal/service \
+            ./internal/workspacefileconfig ./internal/workspaceobjects \
+            -run '^(TestWorkspaceFileS3SignedUploadBindsLengthTypeAndChecksum|TestS3ProviderUsesWorkspaceContentAddressedKey|TestWorkspaceFileGCSOutageBeforeVerificationPublishesNoEvent|TestWorkspaceObjectOperationsRealProvider|TestRealGCSLifecycleIsLongerThanFleetRootsAndGrace|TestGCSVersioningRemainsRecoveryMetadataNotSkillIdentity|TestWorkspaceFileDirectDownloadRealProviderHasZeroFleetProviderBandwidth|TestWorkspaceObjectScrubRealProviderCorruptionQuarantinesTree)$' |
             go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
               > "$GITHUB_WORKSPACE/fleet-gcs-evidence-v2.json"
 
@@ -705,35 +805,17 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Record and delete only run-owned GCS generations
+      - name: Delete only run-owned GCS generations
         if: always()
+        working-directory: fleet-db
         shell: bash
+        env:
+          FLEET_GCS_CLEANUP_RUN_OWNED: "1"
+          FLEET_WORKSPACE_FILE_EVIDENCE_PROVIDER: gcs
         run: |
           set -euo pipefail
-          if [[ ! "${FLEET_WORKSPACE_FILE_S3_PREFIX:-}" =~ ^loom-skills-e2e/[0-9]+/[0-9]+/[0-9a-f]{16}$ ]]; then
-            echo "Refused cleanup: unresolved GCS prefix" > gcs-cleanup.txt
-            exit 1
-          fi
-          aws --endpoint-url https://storage.googleapis.com s3api list-object-versions \
-            --bucket "$FLEET_WORKSPACE_FILE_S3_BUCKET" \
-            --prefix "$FLEET_WORKSPACE_FILE_S3_PREFIX/" > gcs-created-objects.json
-          : > gcs-cleanup.txt
-          jq -r '(.Versions // []) + (.DeleteMarkers // []) | .[] | [.Key, (.VersionId // "")] | @tsv' \
-            gcs-created-objects.json |
-          while IFS=$'\t' read -r key version; do
-            [[ "$key" == "$FLEET_WORKSPACE_FILE_S3_PREFIX/"* ]] || {
-              echo "Refused out-of-prefix key: $key" >> gcs-cleanup.txt
-              exit 1
-            }
-            if [[ -n "$version" && "$version" != "null" ]]; then
-              aws --endpoint-url https://storage.googleapis.com s3api delete-object \
-                --bucket "$FLEET_WORKSPACE_FILE_S3_BUCKET" --key "$key" --version-id "$version" >/dev/null
-            else
-              aws --endpoint-url https://storage.googleapis.com s3api delete-object \
-                --bucket "$FLEET_WORKSPACE_FILE_S3_BUCKET" --key "$key" >/dev/null
-            fi
-            printf 'deleted key=%s version=%s\n' "$key" "${version:-current}" >> gcs-cleanup.txt
-          done
+          go test -count=1 -v ./internal/storage/blob \
+            -run '^TestCleanupRunOwnedGCSPrefix$' 2>&1 | tee ../gcs-cleanup.txt
 
       - name: Capture and stop GCS Redis
         if: always()
@@ -757,7 +839,6 @@ jobs:
             gcs-provider-revisions.txt
             skills-compatibility-redis-gcs.log
             gcs-signed-grants.log
-            gcs-created-objects.json
             gcs-cleanup.txt
             gcs-redis-diagnostics.txt
             e2e-coverage-redis-gcs.json
