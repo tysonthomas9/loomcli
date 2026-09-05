@@ -280,7 +280,9 @@ func TestDispatchHookEvent_SyncsSubagentTranscript(t *testing.T) {
 	if err := os.WriteFile(parent, []byte(`{"type":"user","uuid":"u1","message":{"content":"hi"}}`+"\n"), 0o600); err != nil {
 		t.Fatalf("write parent: %v", err)
 	}
-	subDir := filepath.Join(parentDir, "subagents")
+	// Claude writes the sidecar under a directory named after the session
+	// FILE (parent.jsonl -> parent/), not alongside it.
+	subDir := filepath.Join(parentDir, "parent", "subagents")
 	if err := os.MkdirAll(subDir, 0o700); err != nil {
 		t.Fatalf("mkdir subagents: %v", err)
 	}
@@ -331,5 +333,46 @@ func TestDispatchHookEvent_NoSessionRefSkipsSync(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(sessDir, sessions.NativeTranscriptFile)); !os.IsNotExist(err) {
 		t.Errorf("expected no native transcript file, got err=%v", err)
+	}
+}
+
+func TestDeriveSubagentPath(t *testing.T) {
+	root := t.TempDir()
+	parent := filepath.Join(root, "proj", "11111111-2222-3333-4444-555555555555.jsonl")
+
+	tests := []struct {
+		name       string
+		parentPath string
+		subagentID string
+		want       string
+	}{
+		{
+			name:       "sidecar directory named after the session file",
+			parentPath: parent,
+			subagentID: "abc",
+			want: filepath.Join(root, "proj", "11111111-2222-3333-4444-555555555555",
+				"subagents", "agent-abc.jsonl"),
+		},
+		{
+			name:       "empty parent path",
+			parentPath: "",
+			subagentID: "abc",
+			want:       "",
+		},
+		{
+			name:       "empty subagent id",
+			parentPath: parent,
+			subagentID: "",
+			want:       "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := deriveSubagentPath(tt.parentPath, tt.subagentID); got != tt.want {
+				t.Errorf("deriveSubagentPath(%q, %q) = %q, want %q",
+					tt.parentPath, tt.subagentID, got, tt.want)
+			}
+		})
 	}
 }
