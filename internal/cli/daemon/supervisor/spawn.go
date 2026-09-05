@@ -46,7 +46,8 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	cmd.Dir = ap.WorktreePath
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	cmd.Env = append(cli.FilteredEnv(),
+	cmd.Env = appendGitTerminalPrompt(cli.FilteredEnv())
+	cmd.Env = append(cmd.Env,
 		fmt.Sprintf("LOOM_AGENT_NAME=%s", ap.Entry.Worktree),
 		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.WorktreePath),
 		fmt.Sprintf("LOOM_EVENTS_DIR=%s", ResolveDaemonPath(s.ProjectDir, cfg.Daemon.EventsDir)),
@@ -86,6 +87,19 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	}
 
 	return cmd, nil
+}
+
+// appendGitTerminalPrompt pins GIT_TERMINAL_PROMPT=0 for agent subprocesses, so
+// a git operation with no usable credential fails fast instead of hanging on a
+// prompt no one can answer. An explicit operator setting that survived the env
+// filter wins.
+func appendGitTerminalPrompt(env []string) []string {
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "GIT_TERMINAL_PROMPT=") {
+			return env
+		}
+	}
+	return append(env, "GIT_TERMINAL_PROMPT=0")
 }
 
 // buildAgentExecCmd creates the exec.Cmd with the correct arguments for the agent role.
