@@ -21,9 +21,20 @@ package agentprofile
 // .provisioned/, byte-hashes THAT, and the live file is checked against it
 // semantically: every key the baseline declares must still be present and
 // deep-equal. Extra keys are the harness's business.
+//
+// The scheme was born JSON-only, which quietly excluded the harness that needed
+// it most: codex writes its own [hooks.state] and [tui.model_availability_nux]
+// tables into config.toml on essentially every run, so a byte-hashed
+// config.toml bricks the next lead launch — and because enforceLeadProfile
+// iterates every harness and exits on the first failure, a drifted CODEX
+// profile also blocks `loom lead --backend claude`. Decoding is therefore keyed
+// on the managed file's EXTENSION (see decodeManaged), so config.toml can move
+// out of `files` and into `managed` and be verified semantically like
+// settings.json always was.
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,6 +42,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	toml "github.com/pelletier/go-toml/v2"
 )
 
 // ProvisionedDirName is the subdirectory of a profile root holding the pristine
@@ -69,13 +82,28 @@ func verifyManaged(dir string, managed []string) error {
 				ErrManagedContentDrift, dir, rel, err)
 		}
 
-		var want, got any
-		if err := json.Unmarshal(baseRaw, &want); err != nil {
-			return fmt.Errorf("%w: %s: %s: provisioned baseline is not valid JSON: %v (re-provision the profile)",
+		// Both sides go through decodeManaged with the SAME rel. That is the
+		// whole invariant subsetOf rests on — see its doc comment.
+		want, err := decodeManaged(rel, baseRaw)
+		if err != nil {
+			if errors.Is(err, errUnsupportedManagedExt) {
+				return fmt.Errorf("%w: %s: %s: %v (fix the provisioner, then re-provision the profile)",
+					ErrManifestUnreadable, dir, rel, err)
+			}
+			return fmt.Errorf("%w: %s: %s: provisioned baseline %v (re-provision the profile)",
 				ErrManagedContentDrift, dir, rel, err)
 		}
-		if err := json.Unmarshal(liveRaw, &got); err != nil {
-			return fmt.Errorf("%w: %s: %s: on-disk file is not valid JSON: %v (re-provision the profile)",
+		got, err := decodeManaged(rel, liveRaw)
+		if err != nil {
+			// The extension case cannot reach here: decodeManaged already
+			// rejected it on the baseline above, before the live file was
+			// considered. Keep the branch anyway so a future caller reordering
+			// the two cannot silently reclassify a manifest fault as drift.
+			if errors.Is(err, errUnsupportedManagedExt) {
+				return fmt.Errorf("%w: %s: %s: %v (fix the provisioner, then re-provision the profile)",
+					ErrManifestUnreadable, dir, rel, err)
+			}
+			return fmt.Errorf("%w: %s: %s: on-disk file %v (re-provision the profile)",
 				ErrManagedContentDrift, dir, rel, err)
 		}
 
@@ -95,6 +123,41 @@ func verifyManaged(dir string, managed []string) error {
 	return nil
 }
 
+// errUnsupportedManagedExt marks the one decodeManaged failure that is NOT
+// content drift: the manifest names a managed file in a format the verifier
+// cannot read at all. Nothing the agent did causes that, and re-provisioning
+// alone does not repair it — the provisioner has to learn the format first.
+// verifyManaged translates it to ErrManifestUnreadable for exactly that reason.
+var errUnsupportedManagedExt = errors.New("unsupported managed file extension")
+
+// decodeManaged parses a managed file according to its extension.
+//
+// Both sides of a comparison MUST be decoded by this function with the SAME
+// rel; see the decoder-mixing note on subsetOf for why that is load-bearing and
+// not merely tidy.
+//
+// The extension set here and the one in the provisioner's managed-file
+// validation (scripts/provision-profile.sh) must stay in step: the provisioner
+// decides which files land in `managed`, and a file it accepts that this
+// rejects is a profile that cannot be verified. They are traceable to one
+// another the way ProvisionedDirName already is.
+func decodeManaged(rel string, raw []byte) (any, error) {
+	var v any
+	switch ext := strings.ToLower(filepath.Ext(rel)); ext {
+	case ".json":
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return nil, fmt.Errorf("is not valid JSON: %w", err)
+		}
+	case ".toml":
+		if err := toml.Unmarshal(raw, &v); err != nil {
+			return nil, fmt.Errorf("is not valid TOML: %w", err)
+		}
+	default:
+		return nil, fmt.Errorf("%w %q", errUnsupportedManagedExt, ext)
+	}
+	return v, nil
+}
+
 // subsetOf reports whether want is contained in got, and on failure the dotted
 // JSON path of the FIRST divergence — the path is the operator-facing value, so
 // it is part of the contract, not a debugging aid.
@@ -102,8 +165,15 @@ func verifyManaged(dir string, managed []string) error {
 // Containment is asymmetric only for objects: every key want declares must
 // exist in got and recurse. Arrays are exact, order significant — appending to
 // permissions.allow is a real change to what the agent may do, not an
-// extension. Everything else is reflect.DeepEqual; both sides come out of
-// encoding/json so numbers are float64 on both and compare stably.
+// extension. Everything else is reflect.DeepEqual.
+//
+// DeepEqual is stable here only because both sides are produced by the same
+// decodeManaged call for the same rel, so their number types agree — NOT
+// because there is one number type. encoding/json decodes 1 into float64;
+// go-toml decodes it into int64; reflect.DeepEqual(int64(1), float64(1)) is
+// false. Never compare values produced by two different decoders, and do not
+// "fix" that by normalizing one side: the shared decoder is the guarantee, and
+// normalizing would weaken a comparison the trust_level entries depend on.
 func subsetOf(want, got any) (string, bool) {
 	switch w := want.(type) {
 	case map[string]any:
@@ -204,9 +274,15 @@ func splitPath(path string) []string {
 	return steps
 }
 
-// renderValue quotes a decoded JSON value compactly for the operator-facing
-// error. Absent values read as "(absent)" rather than "null", which is a value
-// a settings file can legitimately hold.
+// renderValue quotes a decoded value compactly for the operator-facing error.
+// Absent values read as "(absent)" rather than "null", which is a value a
+// settings file can legitimately hold.
+//
+// It marshals as JSON even for TOML documents: every value shape codex writes
+// (string, int64, nested table) renders readably. TOML's local date/time
+// literals decode into go-toml types that carry MarshalText but not
+// MarshalJSON, so they would render structurally; no managed key uses them, and
+// this is error-path cosmetics only.
 func renderValue(v any) string {
 	if v == nil {
 		return "(absent)"
