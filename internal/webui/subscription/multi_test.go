@@ -321,3 +321,7 @@ func waitForMultiCondition(t *testing.T, cond func() bool) {
 func (s *trackingWorkspaceSubscriber) GetMutationPageThrough(ctx context.Context, since, _ string, limit int) (backend.MutationPage, error) {
 	return s.GetMutationPage(ctx, since, limit)
 }
+
+func (s *trackingWorkspaceSubscriber) GetMutationHead(ctx context.Context) (backend.MutationPage, error) {
+	return s.GetMutationPage(ctx, "$", 1)
+}

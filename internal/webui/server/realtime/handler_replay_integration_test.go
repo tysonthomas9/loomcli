@@ -88,17 +88,17 @@ func TestHandler_FleetHTTPReplay201BeforeConnectedWithQueuedOverlap(t *testing.T
 	require.NoError(t, err)
 	writer := newRecordingFrameWriter()
 	writer.written = make(chan recordedFrame, 256)
-	handler := NewHandler(HandlerConfig{Hub: hub, WorkspaceFromCtx: func(context.Context) string { return workspace }, GetMutationPage: func(ctx context.Context, ws, since string, limit int) (backend.MutationPage, error) {
+	handler := NewHandler(HandlerConfig{Hub: hub, WorkspaceFromCtx: func(context.Context) string { return workspace }, OpenMutationSource: openFixtureMutationSource(func(ctx context.Context, ws, since string, limit int) (backend.MutationPage, error) {
 		if ws != workspace {
 			return backend.MutationPage{}, fmt.Errorf("wrong workspace %s", ws)
 		}
 		return fleetBackend.GetMutationsAfter(ctx, since, limit)
-	}, GetMutationPageThrough: func(ctx context.Context, ws, since, through string, limit int) (backend.MutationPage, error) {
+	}, func(ctx context.Context, ws, since, through string, limit int) (backend.MutationPage, error) {
 		if ws != workspace {
 			return backend.MutationPage{}, fmt.Errorf("wrong workspace %s", ws)
 		}
 		return fleetBackend.GetMutationsThrough(ctx, since, through, limit)
-	}})
+	})})
 	handler.writerFactory = func(http.ResponseWriter) (frameWriter, error) { return writer, nil }
 	handler.heartbeatInterval = time.Hour
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

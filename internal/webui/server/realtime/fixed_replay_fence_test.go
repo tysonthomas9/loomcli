@@ -16,13 +16,13 @@ func fenceSession(h *Handler, writer frameWriter) *authoritativeSession {
 func TestFixedReplayFenceGrowingTailEndsCapturedPass(t *testing.T) {
 	headCalls, pageCalls := 0, 0
 	head := "opaque-a"
-	h := NewHandler(HandlerConfig{Hub: NewHub(), GetMutationPage: func(_ context.Context, ws, since string, limit int) (backend.MutationPage, error) {
+	h := NewHandler(HandlerConfig{Hub: NewHub(), OpenMutationSource: openFixtureMutationSource(func(_ context.Context, ws, since string, limit int) (backend.MutationPage, error) {
 		headCalls++
 		if ws != "ws" || since != "$" || limit != 1 {
 			t.Fatalf("head arguments: %s %s %d", ws, since, limit)
 		}
 		return backend.MutationPage{Cursor: head}, nil
-	}, GetMutationPageThrough: func(_ context.Context, _ string, since, through string, _ int) (backend.MutationPage, error) {
+	}, func(_ context.Context, _ string, since, through string, _ int) (backend.MutationPage, error) {
 		pageCalls++
 		head = "newer-tail" // The source keeps growing while the captured pass runs.
 		switch since {
@@ -46,7 +46,7 @@ func TestFixedReplayFenceGrowingTailEndsCapturedPass(t *testing.T) {
 			t.Fatalf("unexpected cursor %q", since)
 			return backend.MutationPage{}, nil
 		}
-	}})
+	})})
 	writer := &readerTestWriter{}
 	s := fenceSession(h, writer)
 	if err := s.initialize("start"); err != nil {
@@ -76,9 +76,9 @@ func TestFixedReplayFenceRejectsTerminalDisagreementBeforeWrites(t *testing.T) {
 	} {
 		t.Run(page.Cursor, func(t *testing.T) {
 			writer := &readerTestWriter{}
-			h := NewHandler(HandlerConfig{Hub: NewHub(), GetMutationPage: func(context.Context, string, string, int) (backend.MutationPage, error) {
+			h := NewHandler(HandlerConfig{Hub: NewHub(), OpenMutationSource: openFixtureMutationSource(func(context.Context, string, string, int) (backend.MutationPage, error) {
 				return backend.MutationPage{Cursor: "fence"}, nil
-			}, GetMutationPageThrough: func(context.Context, string, string, string, int) (backend.MutationPage, error) { return page, nil }})
+			}, func(context.Context, string, string, string, int) (backend.MutationPage, error) { return page, nil })})
 			s := fenceSession(h, writer)
 			if err := s.initialize("start"); err != nil {
 				t.Fatal(err)
@@ -97,11 +97,11 @@ func TestFixedReplayFenceExpiryDoesNotWriteFreshHeadOrResetResume(t *testing.T) 
 	for _, start := range []string{"", "accepted"} {
 		t.Run("start="+start, func(t *testing.T) {
 			writer := &readerTestWriter{}
-			h := NewHandler(HandlerConfig{Hub: NewHub(), GetMutationPage: func(context.Context, string, string, int) (backend.MutationPage, error) {
+			h := NewHandler(HandlerConfig{Hub: NewHub(), OpenMutationSource: openFixtureMutationSource(func(context.Context, string, string, int) (backend.MutationPage, error) {
 				return backend.MutationPage{Cursor: "head"}, nil
-			}, GetMutationPageThrough: func(context.Context, string, string, string, int) (backend.MutationPage, error) {
+			}, func(context.Context, string, string, string, int) (backend.MutationPage, error) {
 				return backend.MutationPage{}, backend.ErrMutationCursorExpired
-			}})
+			})})
 			s := fenceSession(h, writer)
 			if err := s.initialize(start); err != nil {
 				t.Fatal(err)
@@ -122,10 +122,10 @@ func TestFixedReplayFenceExpiryDoesNotWriteFreshHeadOrResetResume(t *testing.T) 
 func TestFixedReplayFenceWriteFailureResumesWithinSameFence(t *testing.T) {
 	heads := 0
 	writeErr := errors.New("write failed")
-	h := NewHandler(HandlerConfig{Hub: NewHub(), GetMutationPage: func(context.Context, string, string, int) (backend.MutationPage, error) {
+	h := NewHandler(HandlerConfig{Hub: NewHub(), OpenMutationSource: openFixtureMutationSource(func(context.Context, string, string, int) (backend.MutationPage, error) {
 		heads++
 		return backend.MutationPage{Cursor: "tail"}, nil
-	}, GetMutationPageThrough: func(_ context.Context, _ string, since, through string, _ int) (backend.MutationPage, error) {
+	}, func(_ context.Context, _ string, since, through string, _ int) (backend.MutationPage, error) {
 		if through != "tail" {
 			t.Fatalf("fence %s", through)
 		}
@@ -136,7 +136,7 @@ func TestFixedReplayFenceWriteFailureResumesWithinSameFence(t *testing.T) {
 			t.Fatalf("since %s", since)
 		}
 		return backend.MutationPage{Cursor: through, Events: events}, nil
-	}})
+	})})
 	writer := &readerTestWriter{failAt: 2, writeError: writeErr}
 	s := fenceSession(h, writer)
 	if err := s.initialize("start"); err != nil {
@@ -159,10 +159,10 @@ func TestFixedReplayFenceWriteFailureResumesWithinSameFence(t *testing.T) {
 
 func TestFixedReplayFenceRequiresBoundedSource(t *testing.T) {
 	headCalls := 0
-	h := NewHandler(HandlerConfig{Hub: NewHub(), GetMutationPage: func(context.Context, string, string, int) (backend.MutationPage, error) {
+	h := NewHandler(HandlerConfig{Hub: NewHub(), OpenMutationSource: openFixtureMutationSource(func(context.Context, string, string, int) (backend.MutationPage, error) {
 		headCalls++
 		return backend.MutationPage{Cursor: "head"}, nil
-	}})
+	}, nil)})
 	writer := &readerTestWriter{}
 	s := fenceSession(h, writer)
 	if err := s.initialize("start"); err == nil {

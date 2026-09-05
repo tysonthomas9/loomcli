@@ -92,12 +92,11 @@ required queries refresh, explicit acknowledgment after success, and attempt
 invalidation on expiry or scope change. Until then, reconnect can repeat the
 same expired checkpoint. The full streaming goal remains incomplete.
 
-Subscriber identity is checked per request, not pinned across head capture and
-all pages. Replacing a subscriber between requests can select a new source.
-Fleet validates fence membership, but existing cursor tokens lack durable
-workspace/incarnation identity; Redis ID collisions or recreation require a
-stronger source lease or generation contract. This PR does not claim to close
-that race, pin retention, or prove completeness before a retained origin `0`.
+The follow-on [source binding](sse-source-binding-proof.md) now pins subscriber
+identity across head capture and every page/live pass for one connection.
+Fleet validates fence membership, but existing cursor tokens still lack durable
+workspace/incarnation identity across reconnects or source recreation. Source
+binding does not pin retention or prove completeness before a retained origin `0`.
 
 Paired fetch-SSE browser proof and cross-repository CI remain required. The
 backend and handler fixtures are not a substitute for those proofs. No merge
