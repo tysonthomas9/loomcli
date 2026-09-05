@@ -4,7 +4,7 @@
  * Deliberately independent of the Terminal view being mounted or active: the
  * count comes from the server's per-workspace tab metadata, so it is correct on
  * every route and survives switching workspaces away and back. It counts
- * non-agent tabs whose PTY is attachable (`pty_alive`), i.e. *live sessions in
+ * non-agent tabs whose PTY is attachable, i.e. *live sessions in
  * this workspace*, not sockets this browser tab currently holds open.
  *
  * Freshness: refetches on workspace change, on SSE terminal mutations
@@ -65,7 +65,7 @@ export function useWorkspaceSessionCount(
       if (!mountedRef.current) return;
       if (currentWorkspaceRef.current !== workspaceId) return; // stale response
       setSessionCount(
-        tabs.filter((meta) => !isAgentMetadata(meta) && meta.pty_alive).length,
+        tabs.filter((meta) => !isAgentMetadata(meta) && meta.attachable).length,
       );
     } catch {
       // Silently fail — the badge is a non-critical UI enhancement, and keeping

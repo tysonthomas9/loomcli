@@ -417,23 +417,24 @@ export function useTerminalMetadata(
 
   const dismissRestartNotice = useCallback(
     async (session: string) => {
-      let prev: TabMetadata[] = [];
-      setTabs((current) => {
+      const issued = workspace;
+      let prev: TabMetadata[] | null = null;
+      updateTabs(issued, (current) => {
         prev = current;
         return current.map((t) =>
           t.session_name === session ? { ...t, replaced_at: "" } : t,
         );
       });
       try {
-        await dismissTabRestartNotice(workspace, session);
+        await dismissTabRestartNotice(issued, session);
       } catch (err) {
-        if (mountedRef.current) {
-          setTabs(prev);
+        if (mountedRef.current && requestedWorkspaceRef.current === issued) {
+          updateTabs(issued, (current) => prev ?? current);
           setError(err instanceof Error ? err : new Error(String(err)));
         }
       }
     },
-    [workspace],
+    [workspace, updateTabs],
   );
 
   const handleMutation = useCallback(
