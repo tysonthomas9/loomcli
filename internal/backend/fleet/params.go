@@ -326,6 +326,7 @@ func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interfac
 	setStrField(req, "description", params.Description)
 	setIntField(req, "priority", params.Priority)
 	setStrField(req, "design", params.Design)
+	setStrField(req, "acceptance_criteria", params.AcceptanceCriteria)
 	setStrField(req, "design_format", params.DesignFormat)
 	setStrField(req, "notes", params.Notes)
 	setStrField(req, "owner", params.Owner)

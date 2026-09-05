@@ -515,8 +515,10 @@ func (b *FleetBackend) SearchIssues(ctx context.Context, query string, limit int
 
 func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
 	result, err := b.createIssueOnce(ctx, params)
-	if err != nil && params.ExternalRef != "" && isCreateExternalRefUnsupported(err) {
-		result, err = b.createWithoutExternalRef(ctx, params)
+	if err != nil {
+		if rejected := unsupportedCreateField(err, params); rejected != nil {
+			result, err = b.createWithoutUnsupportedFields(ctx, params, rejected)
+		}
 	}
 	if err != nil {
 		return result, err

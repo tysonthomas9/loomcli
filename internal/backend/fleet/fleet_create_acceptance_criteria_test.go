@@ -1,0 +1,235 @@
+package fleet
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/types"
+)
+
+// A current fleet-db accepts acceptance_criteria on create, so the value must
+// ride the single POST — no shim, no follow-up PATCH.
+func TestCreateAcceptanceCriteriaSupportedUsesSinglePost(t *testing.T) {
+	posts := 0
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/issues") {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		posts++
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode create body: %v", err)
+		}
+		if body["acceptance_criteria"] != acceptanceCriteriaText {
+			t.Errorf("acceptance_criteria = %v, want %q", body["acceptance_criteria"], acceptanceCriteriaText)
+		}
+		respondOK(w, types.Issue{ID: "issue-10", Title: "Ship it"})
+	})
+	defer ts.Close()
+
+	issue, err := fb.Create(context.Background(), acceptanceCriteriaCreateParams())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if issue == nil || issue.ID != "issue-10" {
+		t.Fatalf("issue = %#v, want issue-10", issue)
+	}
+	if posts != 1 {
+		t.Fatalf("POST count = %d, want 1", posts)
+	}
+}
+
+// An older fleet-db rejects the whole body with disallowUnknownFields. The
+// shim must retry without the field — under a key derived from the bytes
+// actually sent — and then PATCH the value back.
+func TestCreateAcceptanceCriteriaUnsupportedRetriesThenPatches(t *testing.T) {
+	var postBodies []map[string]any
+	var postKeys []string
+	var patchBody map[string]any
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/issues"):
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode create body: %v", err)
+			}
+			postBodies = append(postBodies, body)
+			postKeys = append(postKeys, r.Header.Get("X-Idempotency-Key"))
+			if len(postBodies) == 1 {
+				respondErr(w, http.StatusInternalServerError, unsupportedCreateFieldMessage("acceptance_criteria"))
+				return
+			}
+			respondOK(w, types.Issue{ID: "issue-11", Title: "Ship it"})
+		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/issues/issue-11"):
+			if err := json.NewDecoder(r.Body).Decode(&patchBody); err != nil {
+				t.Errorf("decode patch body: %v", err)
+			}
+			respondOK(w, map[string]any{})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	defer ts.Close()
+
+	params := acceptanceCriteriaCreateParams()
+	params.IdempotencyKey = "original-key"
+	issue, err := fb.Create(context.Background(), params)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if issue == nil || issue.ID != "issue-11" {
+		t.Fatalf("issue = %#v, want issue-11", issue)
+	}
+	if len(postBodies) != 2 {
+		t.Fatalf("POST bodies = %d, want 2", len(postBodies))
+	}
+	if postBodies[0]["acceptance_criteria"] != acceptanceCriteriaText {
+		t.Errorf("first POST acceptance_criteria = %v, want %q",
+			postBodies[0]["acceptance_criteria"], acceptanceCriteriaText)
+	}
+	if _, present := postBodies[1]["acceptance_criteria"]; present {
+		t.Errorf("retry POST unexpectedly included acceptance_criteria: %v", postBodies[1])
+	}
+	if postKeys[0] == postKeys[1] || postKeys[1] == "" {
+		t.Errorf("POST idempotency keys = %q, %q; want distinct non-empty retry key", postKeys[0], postKeys[1])
+	}
+	if patchBody["acceptance_criteria"] != acceptanceCriteriaText {
+		t.Errorf("PATCH acceptance_criteria = %v, want %q", patchBody["acceptance_criteria"], acceptanceCriteriaText)
+	}
+}
+
+// When even the PATCH fails the user must see a loud partial-create error
+// naming both the issue and the field — the point of the shim is that a
+// failure is visible, never silent.
+func TestCreateAcceptanceCriteriaPatchFailureReportsField(t *testing.T) {
+	posts := 0
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/issues"):
+			posts++
+			if posts == 1 {
+				respondErr(w, http.StatusInternalServerError, unsupportedCreateFieldMessage("acceptance_criteria"))
+				return
+			}
+			respondOK(w, types.Issue{ID: "issue-12", Title: "Ship it"})
+		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/issues/issue-12"):
+			respondErr(w, http.StatusBadRequest, `unknown field "acceptance_criteria"`)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	defer ts.Close()
+
+	issue, err := fb.Create(context.Background(), acceptanceCriteriaCreateParams())
+	if err == nil {
+		t.Fatal("Create error = nil, want PATCH failure")
+	}
+	if issue == nil || issue.ID != "issue-12" {
+		t.Fatalf("issue = %#v, want partially-created issue-12", issue)
+	}
+	if !strings.Contains(err.Error(), "issue issue-12 was created") ||
+		!strings.Contains(err.Error(), "acceptance_criteria") {
+		t.Fatalf("error = %q, want partial-create context naming the field", err)
+	}
+}
+
+// A server may reject only the first unknown field it meets, so the shim
+// keeps stripping and re-keying until the create succeeds, then PATCHes
+// every stripped value back in one request.
+func TestCreateStripsSeveralUnsupportedFields(t *testing.T) {
+	posts := 0
+	var lastPost map[string]any
+	var patchBody map[string]any
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/issues"):
+			posts++
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode create body: %v", err)
+			}
+			lastPost = body
+			switch posts {
+			case 1:
+				respondErr(w, http.StatusInternalServerError, unsupportedCreateFieldMessage("external_ref"))
+			case 2:
+				respondErr(w, http.StatusInternalServerError, unsupportedCreateFieldMessage("acceptance_criteria"))
+			default:
+				respondOK(w, types.Issue{ID: "issue-13", Title: "Ship it"})
+			}
+		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/issues/issue-13"):
+			if err := json.NewDecoder(r.Body).Decode(&patchBody); err != nil {
+				t.Errorf("decode patch body: %v", err)
+			}
+			respondOK(w, map[string]any{})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	defer ts.Close()
+
+	params := acceptanceCriteriaCreateParams()
+	params.ExternalRef = "https://github.com/acme/api/pull/7"
+	issue, err := fb.Create(context.Background(), params)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if issue == nil || issue.ID != "issue-13" || issue.ExternalRef != params.ExternalRef {
+		t.Fatalf("issue = %#v, want issue-13 with external_ref", issue)
+	}
+	if posts != 3 {
+		t.Fatalf("POST count = %d, want 3", posts)
+	}
+	for _, k := range []string{"external_ref", "acceptance_criteria"} {
+		if _, present := lastPost[k]; present {
+			t.Errorf("final POST still carried %q: %v", k, lastPost)
+		}
+		if patchBody[k] == nil {
+			t.Errorf("PATCH missing %q: %v", k, patchBody)
+		}
+	}
+}
+
+// The shim only fires for a field this request actually set: an unknown-field
+// rejection naming something else must surface as-is, with no retry.
+func TestCreateUnsupportedFieldNotSetDoesNotRetry(t *testing.T) {
+	posts := 0
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		posts++
+		respondErr(w, http.StatusInternalServerError, unsupportedCreateFieldMessage("external_ref"))
+	})
+	defer ts.Close()
+
+	issue, err := fb.Create(context.Background(), acceptanceCriteriaCreateParams())
+	if err == nil {
+		t.Fatal("Create error = nil, want validation failure")
+	}
+	if issue != nil {
+		t.Fatalf("issue = %#v, want nil", issue)
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Fatalf("error = %v, want KindValidation", err)
+	}
+	if posts != 1 {
+		t.Fatalf("POST count = %d, want 1", posts)
+	}
+}
+
+const acceptanceCriteriaText = "given X, when Y, then Z"
+
+func acceptanceCriteriaCreateParams() backend.CreateParams {
+	return backend.CreateParams{
+		Title:              "Ship it",
+		IssueType:          "task",
+		AcceptanceCriteria: acceptanceCriteriaText,
+	}
+}

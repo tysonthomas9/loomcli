@@ -57,7 +57,7 @@ func TestCreateExternalRefUnsupportedRetriesThenPatches(t *testing.T) {
 			postBodies = append(postBodies, body)
 			postKeys = append(postKeys, r.Header.Get("X-Idempotency-Key"))
 			if len(postBodies) == 1 {
-				respondErr(w, http.StatusInternalServerError, unsupportedCreateExternalRefMessage)
+				respondErr(w, http.StatusInternalServerError, unsupportedCreateFieldMessage("external_ref"))
 				return
 			}
 			respondOK(w, types.Issue{ID: "issue-2", Title: "Review PR"})
@@ -106,7 +106,7 @@ func TestCreateExternalRefPatchFailureReturnsCreatedIssue(t *testing.T) {
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/issues"):
 			posts++
 			if posts == 1 {
-				respondErr(w, http.StatusInternalServerError, unsupportedCreateExternalRefMessage)
+				respondErr(w, http.StatusInternalServerError, unsupportedCreateFieldMessage("external_ref"))
 				return
 			}
 			respondOK(w, types.Issue{ID: "issue-3", Title: "Review PR"})
