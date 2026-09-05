@@ -56,6 +56,9 @@ func MergeRoleConstraints(rc config.RoleConfig, ae config.AgentEntry) RoleConstr
 	}
 
 	// config.AgentEntry overrides
+	if ae.TaskFilter != "" {
+		c.TaskFilter = ae.TaskFilter
+	}
 	if ae.PathPatterns != nil {
 		c.PathPatterns = ae.PathPatterns
 	}
@@ -237,10 +240,33 @@ func AgentEntryFromEnv() config.AgentEntry {
 	if v := os.Getenv("LOOM_AGENT_REPO"); v != "" {
 		ae.Repo = v
 	}
+	if v := os.Getenv("LOOM_AGENT_TASK_FILTER"); v != "" {
+		ae.TaskFilter = v
+	}
 	if v := os.Getenv("LOOM_SOURCE_REPOS"); v != "" {
 		ae.SourceRepos = strings.Split(v, ",")
 	}
 	return ae
+}
+
+// TaskFilterAliases is the single vocabulary accepted at CLI/config ingress.
+// The user-facing agent flag says needs_design while the router's historical
+// spelling is needs_plan; both map to the same canonical filter.
+var TaskFilterAliases = map[string]string{
+	"needs_design": "needs_plan",
+	"needs_plan":   "needs_plan",
+	"has_design":   "has_design",
+	"any":          "any",
+	"":             "",
+}
+
+// ValidateTaskFilter returns the canonical spelling of a task filter.
+func ValidateTaskFilter(filter string) (string, error) {
+	canonical, ok := TaskFilterAliases[filter]
+	if !ok {
+		return "", fmt.Errorf("invalid task filter: %s (must be needs_design, has_design, or any)", filter)
+	}
+	return canonical, nil
 }
 
 // applyTaskFilter checks if the issue passes the given task filter.
@@ -248,6 +274,9 @@ func AgentEntryFromEnv() config.AgentEntry {
 func applyTaskFilter(issue backend.IssueData, filter string) string {
 	if filter == "" {
 		filter = "has_design"
+	}
+	if filter == "needs_design" {
+		filter = "needs_plan"
 	}
 	switch filter {
 	case "needs_plan":

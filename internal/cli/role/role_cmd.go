@@ -237,6 +237,9 @@ func runRoleShow(_ *cobra.Command, args []string) error {
 		if r.Executor != "" {
 			fmt.Printf("Executor:     %s\n", r.Executor)
 		}
+		if r.TaskFilter != "" {
+			fmt.Printf("Task filter:  %s\n", r.TaskFilter)
+		}
 		if len(r.Skills) > 0 {
 			fmt.Printf("Skills:       %s\n", strings.Join(r.Skills, ", "))
 		}
