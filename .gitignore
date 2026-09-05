@@ -38,6 +38,8 @@ loom.yaml
 # Runtime / dev artifacts
 .agent.lock
 .beads/
+# Wayfinder maps and local planning scratch
+.scratch/
 .loom-dev.log
 .loom-dev.pid
 .make-dev.log
