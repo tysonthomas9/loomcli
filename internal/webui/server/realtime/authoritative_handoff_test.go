@@ -22,7 +22,16 @@ func TestAuthoritativeWakeDuringFinalEmptyReadTriggersNextRead(t *testing.T) {
 	h := NewHandler(HandlerConfig{
 		Hub:              hub,
 		WorkspaceFromCtx: func(context.Context) string { return "ws" },
-		GetMutationPage: func(ctx context.Context, ws, since string, limit int) (backend.MutationPage, error) {
+		GetMutationPage: func(_ context.Context, _ string, since string, limit int) (backend.MutationPage, error) {
+			if since != "$" || limit != 1 {
+				t.Errorf("invalid head query")
+			}
+			if calls.Load() == 0 {
+				return backend.MutationPage{Cursor: "c1.start"}, nil
+			}
+			return backend.MutationPage{Cursor: "c1.committed"}, nil
+		},
+		GetMutationPageThrough: func(ctx context.Context, ws, since, through string, limit int) (backend.MutationPage, error) {
 			if calls.Add(1) == 1 {
 				if since != "c1.start" {
 					t.Errorf("initial cursor = %q", since)

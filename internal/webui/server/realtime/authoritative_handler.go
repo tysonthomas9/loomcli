@@ -13,11 +13,14 @@ import (
 )
 
 type authoritativeSession struct {
-	handler *Handler
-	client  *Client
-	writer  frameWriter
-	reader  *authoritativeReader
-	ctx     context.Context
+	handler   *Handler
+	client    *Client
+	writer    frameWriter
+	reader    *authoritativeReader
+	ctx       context.Context
+	fence     string
+	passReady bool
+	fresh     bool
 }
 
 // serveAuthoritative uses one source cursor for replay and live reconciliation.
@@ -70,29 +73,45 @@ func (h *Handler) serveAuthoritative(w http.ResponseWriter, r *http.Request, cli
 	}
 }
 
+func (s *authoritativeSession) captureFence() error {
+	ctx, cancel := context.WithTimeout(s.ctx, s.handler.catchUpTimeout)
+	defer cancel()
+	page, err := s.handler.getMutationPage(ctx, s.client.workspaceID, "$", 1)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if page.Cursor == "" || page.Cursor == "$" || page.HasMore || len(page.Events) != 0 {
+		return errors.New("invalid authoritative head")
+	}
+	if err := validateFrame(&page.Cursor, nil, nil); err != nil {
+		return err
+	}
+	s.fence = page.Cursor
+	s.passReady = true
+	return nil
+}
+
 func (s *authoritativeSession) initialize(cursor string) error {
 	if s.client.workspaceID == "" {
 		return errors.New("missing workspace")
 	}
-	if cursor == "" {
-		ctx, cancel := context.WithTimeout(s.ctx, s.handler.catchUpTimeout)
-		defer cancel()
-		page, err := s.handler.getMutationPage(ctx, s.client.workspaceID, "$", 1)
-		if err != nil {
-			return err
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if page.Cursor == "" || page.Cursor == "$" || page.HasMore || len(page.Events) != 0 {
-			return errors.New("invalid authoritative head")
-		}
-		cursor = page.Cursor
-		if err := s.writer.WriteEventID(cursor, "checkpoint", "{}"); err != nil {
-			return &authoritativeWriteError{cause: err}
-		}
+	if s.handler.getMutationPage == nil || s.handler.getMutationPageThrough == nil {
+		return errors.New("bounded authoritative mutation source required")
 	}
-	reader, err := newAuthoritativeReader(s.client.workspaceID, cursor, s.client.sourceRepos, s.handler.getMutationPage)
+	if err := s.captureFence(); err != nil {
+		return err
+	}
+	s.fresh = cursor == ""
+	if s.fresh {
+		cursor = s.fence
+	}
+	reader, err := newAuthoritativeReader(s.client.workspaceID, cursor, s.client.sourceRepos,
+		func(ctx context.Context, workspace, since string, limit int) (backend.MutationPage, error) {
+			return s.handler.getMutationPageThrough(ctx, workspace, since, s.fence, limit)
+		})
 	s.reader = reader
 	return err
 }
@@ -109,6 +128,12 @@ func (s *authoritativeSession) fail(err error) {
 }
 
 func (s *authoritativeSession) catchUp(ticks <-chan time.Time) error {
+	if !s.passReady {
+		if err := s.captureFence(); err != nil {
+			return err
+		}
+	}
+	s.reader.through = s.fence
 	for {
 		ctx, cancel := context.WithTimeout(s.ctx, s.handler.catchUpTimeout)
 		more, err := s.reader.readPage(ctx, s.writer, catchUpPageLimit)
@@ -117,6 +142,13 @@ func (s *authoritativeSession) catchUp(ticks <-chan time.Time) error {
 			return err
 		}
 		if !more {
+			if s.fresh {
+				if err := s.writer.WriteEventID(s.reader.cursor, "checkpoint", "{}"); err != nil {
+					return &authoritativeWriteError{cause: err}
+				}
+				s.fresh = false
+			}
+			s.passReady = false
 			return nil
 		}
 		// Each bounded page yields to control and transient work without skipping.

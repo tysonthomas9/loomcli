@@ -528,7 +528,7 @@ func formatFleetCursor(sinceMs int64) string {
 
 func normalizeFleetCursor(cursor string) (string, error) {
 	if cursor == "$" {
-		return cursor, nil
+		return fleetOpaqueCursorPrefix + base64.RawURLEncoding.EncodeToString([]byte(cursor)), nil
 	}
 	if strings.HasPrefix(cursor, fleetOpaqueCursorPrefix) {
 		token := strings.TrimPrefix(cursor, fleetOpaqueCursorPrefix)
@@ -604,7 +604,7 @@ func (b *FleetBackend) WaitForMutationsAfter(ctx context.Context, since string, 
 // only condition reported as an unsupported probe.
 func (b *FleetBackend) ProbeHead(ctx context.Context) (string, bool, error) {
 	params := url.Values{}
-	params.Set("since", "$")
+	params.Set("since", fleetOpaqueCursorPrefix+base64.RawURLEncoding.EncodeToString([]byte("$")))
 	params.Set("timeout", "0")
 	params.Set("limit", "1")
 	rawURL := b.baseWorkspaceV2 + "/events/mutations?" + params.Encode()

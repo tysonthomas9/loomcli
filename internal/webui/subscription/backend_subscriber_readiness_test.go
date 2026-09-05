@@ -152,7 +152,7 @@ func TestBackendMutationSubscriber_OldFleetHTTPDrainsPagedHead(t *testing.T) {
 		requests <- since + ":" + query.Get("limit") + ":" + query.Get("timeout")
 		w.Header().Set("Content-Type", "application/json")
 		switch {
-		case since == "$":
+		case since == "c1.JA":
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{
 				"code": "invalid_parameter", "message": "invalid since parameter: expected opaque cursor token",
@@ -184,7 +184,7 @@ func TestBackendMutationSubscriber_OldFleetHTTPDrainsPagedHead(t *testing.T) {
 		t.Fatalf("Ready = (%q, %v), want paged head c1.cGFnZTI", head, err)
 	}
 
-	want := []string{"$:1:0", "0:100:", "c1.cGFnZTI:100:"}
+	want := []string{"c1.JA:1:0", "0:100:", "c1.cGFnZTI:100:"}
 	for i, expected := range want {
 		if got := <-requests; got != expected {
 			t.Fatalf("request %d = %q, want %q", i+1, got, expected)
@@ -195,7 +195,7 @@ func TestBackendMutationSubscriber_OldFleetHTTPDrainsPagedHead(t *testing.T) {
 func TestBackendMutationSubscriber_OldFleetHTTPDrainCapFailsReadiness(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Query().Get("since") == "$" {
+		if r.URL.Query().Get("since") == "c1.JA" {
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{
 				"code": "invalid_parameter", "message": "invalid since parameter: expected opaque cursor token",

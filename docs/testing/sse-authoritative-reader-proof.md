@@ -62,10 +62,10 @@ reconnect keeps the old checkpoint and can repeat expiry until a successful
 snapshot/reset contract is implemented. This deliberately exposes the missing
 recovery transition instead of silently advancing past unobserved state.
 
-A fixed replay upper boundary still needs a source contract. Under continuously
-advancing pages, the initial drain can remain unconnected while delivering
-records; the page size and memory are bounded, but total catch-up time is not.
-Do not call this a completed snapshot/live fence.
+The follow-on [fixed replay boundary](sse-fixed-replay-fence-proof.md) now consumes
+FleetDB's bounded raw-page contract, so continuously advancing source pages
+cannot extend the initial pass beyond its captured head. Snapshot acknowledgment
+and cross-pass source incarnation still require separate contracts.
 
 The current page source remains FleetDB's mutation API. The staged committed
 projection prefix must replace raw append visibility before notifications can

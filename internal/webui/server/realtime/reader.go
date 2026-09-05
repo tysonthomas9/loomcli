@@ -26,6 +26,7 @@ func isAuthoritativeWriteError(err error) bool {
 // The caller serializes reads and owns polling, retries, and resync policy.
 type authoritativeReader struct {
 	workspace   string
+	through     string
 	cursor      string
 	sourceRepos []string
 	getPage     mutationPageFn
@@ -56,6 +57,9 @@ func (r *authoritativeReader) readPage(ctx context.Context, sw frameWriter, limi
 	}
 	if err := ctx.Err(); err != nil {
 		return false, err
+	}
+	if r.through != "" && ((page.Cursor == r.through) == page.HasMore) {
+		return false, fmt.Errorf("bounded mutation page disagrees with replay fence")
 	}
 	if err := validateAuthoritativePage(r.cursor, page, limit); err != nil {
 		return false, err

@@ -195,6 +195,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	// Bridge per-workspace backend mutations to SSE clients.
 	app.multiSub = appstores.NewMultiSub(ctx, app.hub, config.Logger)
 	app.getMutationPage = appstores.GetMutationPageFn(app.multiSub)
+	app.getMutationPageThrough = appstores.GetMutationPageThroughFn(app.multiSub)
 	cleanups = append(cleanups, func() { app.multiSub.Stop() })
 
 	// Main web terminal manager: one *PTYManager per workspace, dispatched by

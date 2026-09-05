@@ -266,7 +266,7 @@ func TestMutationCursorNormalizationPreservesSupportedClasses(t *testing.T) {
 		cursor    string
 		wantSince string
 	}{
-		{cursor: "$", wantSince: "$"},
+		{cursor: "$", wantSince: "c1.JA"},
 		{cursor: "c1.b3BhcXVl", wantSince: "c1.b3BhcXVl"},
 		{cursor: "1700000000000", wantSince: "c1.MTcwMDAwMDAwMDAwMC0w"},
 		{cursor: "0", wantSince: "0"},
@@ -308,7 +308,7 @@ func TestMutationCursorNormalizationRejectsMalformedCursor(t *testing.T) {
 func TestProbeHead(t *testing.T) {
 	t.Run("supported", func(t *testing.T) {
 		fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-			if got := r.URL.Query(); got.Get("since") != "$" || got.Get("timeout") != "0" || got.Get("limit") != "1" {
+			if got := r.URL.Query(); got.Get("since") != "c1.JA" || got.Get("timeout") != "0" || got.Get("limit") != "1" {
 				t.Fatalf("query = %q, want since=$ timeout=0 limit=1", got.Encode())
 			}
 			respondOK(w, fleetMutationsResponse{Events: []fleetMutationEvent{}, Cursor: "c1.head", HasMore: false})
