@@ -573,7 +573,9 @@ func initUsageStore() {
 	if dir == "" {
 		dir = "."
 	}
-	usageHandler = usagecmd.HandleUsage(usagecmd.InitStore(dir))
+	// The session index is the authoritative ledger; usage.jsonl is legacy and
+	// is no longer written by real fleet runs.
+	usageHandler = usagecmd.HandleUsage(usagecmd.InitSessionsReader(dir))
 }
 
 func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorHandler http.HandlerFunc, st store.Store, issueBackendFn metricscmd.IssueBackendFn, defaultWorkspace string) webui.MonitorHandlers {

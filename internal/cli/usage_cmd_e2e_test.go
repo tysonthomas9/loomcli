@@ -89,6 +89,14 @@ func runLoomUsage(t *testing.T, dir string, args ...string) (stdout, stderr stri
 	return stdoutBuf.String(), stderrBuf.String(), exitCode
 }
 
+// runLoomUsageLegacy runs `loom usage --source legacy <args...>`. These fixtures
+// are usage.jsonl records, and since PUPPET-259 that ledger is no longer the
+// default source — `--source legacy` is what still reads it.
+func runLoomUsageLegacy(t *testing.T, dir string, args ...string) (stdout, stderr string, exitCode int) {
+	t.Helper()
+	return runLoomUsage(t, dir, append([]string{"--source", "legacy"}, args...)...)
+}
+
 // sampleRecords returns a reusable fixture set of 4 usage records.
 func sampleRecords() []usageRecord {
 	return []usageRecord{
@@ -176,8 +184,12 @@ func TestE2E_UsageNoData(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("expected exit 0 with no data, got %d", exitCode)
 	}
-	if !strings.Contains(stdout, "No usage data found. Run agents in auto-mode to generate usage data.") {
-		t.Errorf("expected 'No usage data found' message, got:\n%s", stdout)
+	// The default source is the session ledger; the message names the file it
+	// looked in and points at --source legacy for historical auto-mode data.
+	for _, want := range []string{"No usage data found in", "sessions/index.jsonl", "--source legacy"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("expected %q in no-data message, got:\n%s", want, stdout)
+		}
 	}
 }
 
@@ -188,7 +200,7 @@ func TestE2E_UsageExitCode(t *testing.T) {
 	dir := t.TempDir()
 	writeUsageFixture(t, dir, sampleRecords())
 
-	_, _, exitCode := runLoomUsage(t, dir)
+	_, _, exitCode := runLoomUsageLegacy(t, dir)
 	if exitCode != 0 {
 		t.Fatalf("expected exit 0, got %d", exitCode)
 	}
@@ -203,7 +215,7 @@ func TestE2E_UsageTableOutput(t *testing.T) {
 	dir := t.TempDir()
 	writeUsageFixture(t, dir, sampleRecords())
 
-	stdout, _, exitCode := runLoomUsage(t, dir)
+	stdout, _, exitCode := runLoomUsageLegacy(t, dir)
 	if exitCode != 0 {
 		t.Fatalf("expected exit 0, got %d", exitCode)
 	}
@@ -245,7 +257,7 @@ func TestE2E_UsageTableVerbose(t *testing.T) {
 	dir := t.TempDir()
 	writeUsageFixture(t, dir, sampleRecords())
 
-	stdout, _, exitCode := runLoomUsage(t, dir, "--verbose")
+	stdout, _, exitCode := runLoomUsageLegacy(t, dir, "--verbose")
 	if exitCode != 0 {
 		t.Fatalf("expected exit 0, got %d", exitCode)
 	}
@@ -270,7 +282,7 @@ func TestE2E_UsageTableSingleRecord(t *testing.T) {
 	dir := t.TempDir()
 	writeUsageFixture(t, dir, sampleRecords()[:1])
 
-	stdout, _, exitCode := runLoomUsage(t, dir)
+	stdout, _, exitCode := runLoomUsageLegacy(t, dir)
 	if exitCode != 0 {
 		t.Fatalf("expected exit 0, got %d", exitCode)
 	}
@@ -315,7 +327,7 @@ func TestE2E_UsageJSONOutput(t *testing.T) {
 	dir := t.TempDir()
 	writeUsageFixture(t, dir, sampleRecords())
 
-	stdout, _, exitCode := runLoomUsage(t, dir, "--format", "json")
+	stdout, _, exitCode := runLoomUsageLegacy(t, dir, "--format", "json")
 	if exitCode != 0 {
 		t.Fatalf("expected exit 0, got %d", exitCode)
 	}
@@ -355,7 +367,7 @@ func TestE2E_UsageJSONAgentOrder(t *testing.T) {
 	dir := t.TempDir()
 	writeUsageFixture(t, dir, sampleRecords())
 
-	stdout, _, exitCode := runLoomUsage(t, dir, "--format", "json")
+	stdout, _, exitCode := runLoomUsageLegacy(t, dir, "--format", "json")
 	if exitCode != 0 {
 		t.Fatalf("expected exit 0, got %d", exitCode)
 	}
@@ -383,7 +395,7 @@ func TestE2E_UsageFilterByAgent(t *testing.T) {
 	dir := t.TempDir()
 	writeUsageFixture(t, dir, sampleRecords())
 
-	stdout, _, exitCode := runLoomUsage(t, dir, "--format", "json", "--agent", "nova")
+	stdout, _, exitCode := runLoomUsageLegacy(t, dir, "--format", "json", "--agent", "nova")
 	if exitCode != 0 {
 		t.Fatalf("expected exit 0, got %d", exitCode)
 	}
@@ -405,7 +417,7 @@ func TestE2E_UsageFilterByBackend(t *testing.T) {
 	dir := t.TempDir()
 	writeUsageFixture(t, dir, sampleRecords())
 
-	stdout, _, exitCode := runLoomUsage(t, dir, "--format", "json", "--backend", "codex")
+	stdout, _, exitCode := runLoomUsageLegacy(t, dir, "--format", "json", "--backend", "codex")
 	if exitCode != 0 {
 		t.Fatalf("expected exit 0, got %d", exitCode)
 	}
@@ -427,7 +439,7 @@ func TestE2E_UsageFilterByEpic(t *testing.T) {
 	dir := t.TempDir()
 	writeUsageFixture(t, dir, sampleRecords())
 
-	stdout, _, exitCode := runLoomUsage(t, dir, "--format", "json", "--epic", "epic-1")
+	stdout, _, exitCode := runLoomUsageLegacy(t, dir, "--format", "json", "--epic", "epic-1")
 	if exitCode != 0 {
 		t.Fatalf("expected exit 0, got %d", exitCode)
 	}
@@ -449,7 +461,7 @@ func TestE2E_UsageFilterBySince(t *testing.T) {
 	dir := t.TempDir()
 	writeUsageFixture(t, dir, sampleRecords())
 
-	stdout, _, exitCode := runLoomUsage(t, dir, "--format", "json", "--since", "2026-02-27")
+	stdout, _, exitCode := runLoomUsageLegacy(t, dir, "--format", "json", "--since", "2026-02-27")
 	if exitCode != 0 {
 		t.Fatalf("expected exit 0, got %d", exitCode)
 	}
@@ -472,7 +484,7 @@ func TestE2E_UsageFilterByUntil(t *testing.T) {
 	dir := t.TempDir()
 	writeUsageFixture(t, dir, sampleRecords())
 
-	stdout, _, exitCode := runLoomUsage(t, dir, "--format", "json", "--until", "2026-02-26")
+	stdout, _, exitCode := runLoomUsageLegacy(t, dir, "--format", "json", "--until", "2026-02-26")
 	if exitCode != 0 {
 		t.Fatalf("expected exit 0, got %d", exitCode)
 	}
@@ -496,7 +508,7 @@ func TestE2E_UsageFilterByDateRange(t *testing.T) {
 	dir := t.TempDir()
 	writeUsageFixture(t, dir, sampleRecords())
 
-	stdout, _, exitCode := runLoomUsage(t, dir, "--format", "json", "--since", "2026-02-26", "--until", "2026-02-27")
+	stdout, _, exitCode := runLoomUsageLegacy(t, dir, "--format", "json", "--since", "2026-02-26", "--until", "2026-02-27")
 	if exitCode != 0 {
 		t.Fatalf("expected exit 0, got %d", exitCode)
 	}
