@@ -65,7 +65,7 @@ func (app *Server) buildModules() {
 	// SSE subscription
 	if app.hub != nil {
 		app.wsModules = append(app.wsModules,
-			appstores.NewSubscriptionModule(app.hub, app.getMutationsSince,
+			appstores.NewSubscriptionModule(app.hub, app.getMutationPage,
 				middleware.WorkspaceFromContext, app.activateSSESubscriber, app.sseTokens))
 	}
 

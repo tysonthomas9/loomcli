@@ -135,8 +135,8 @@ func TestBroadcastAgentRefreshEmitsGenericAgentEvent(t *testing.T) {
 
 	client := realtime.NewClient(1, realtime.ClientSendBuf, "0", nil, "ws-1")
 	otherWorkspace := realtime.NewClient(2, realtime.ClientSendBuf, "0", nil, "ws-2")
-	hub.RegisterClient(client)
-	hub.RegisterClient(otherWorkspace)
+	_ = hub.RegisterClient(context.Background(), client)
+	_ = hub.RegisterClient(context.Background(), otherWorkspace)
 	waitForAgentHubClients(t, hub, 2)
 
 	broadcastAgentRefresh(hub, "ws-1", "agent-alpha", "tester")

@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -173,7 +174,7 @@ func TestFleetDBAgentRoutesBroadcastMonitorRefresh(t *testing.T) {
 	setupTestRoutes(t, app)
 
 	client := realtime.NewClient(1, realtime.ClientSendBuf, "", nil, "PARITY")
-	hub.RegisterClient(client)
+	_ = hub.RegisterClient(context.Background(), client)
 	waitForHubClient(t, hub)
 
 	serveAgentRequest(t, app, http.MethodPost, "/api/workspaces/PARITY/agents", `{"name":"worker-one","role_name":"builder","auto":true,"backend":"claude"}`, http.StatusCreated)

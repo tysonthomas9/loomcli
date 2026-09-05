@@ -18,22 +18,17 @@ import (
 // successful disabled response so browser clients do not treat open mode as a
 // missing static/API resource.
 func HandleSSEToken(store *realtime.TokenStore) http.HandlerFunc {
-	return HandleSSETokenWithActivation(store, middleware.WorkspaceFromContext, nil)
+	return handleSSEToken(store, middleware.WorkspaceFromContext)
 }
 
-// HandleSSETokenWithActivation is HandleSSEToken plus an optional callback that
-// runs only after the token request is authorized. In open mode, the disabled
-// response still represents a successful SSE token exchange.
-func HandleSSETokenWithActivation(
+func handleSSEToken(
 	store *realtime.TokenStore,
 	workspaceFromCtx func(context.Context) string,
-	activateWorkspace func(context.Context, string),
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 
 		if store == nil {
-			activateSSEWorkspace(r.Context(), workspaceFromCtx, activateWorkspace)
 			handler.WriteJSON(w, http.StatusOK, map[string]bool{"disabled": true})
 			return
 		}
@@ -53,25 +48,8 @@ func HandleSSETokenWithActivation(
 			return
 		}
 
-		activateSSEWorkspace(r.Context(), workspaceFromCtx, activateWorkspace)
 		handler.WriteJSON(w, http.StatusOK, map[string]string{"token": token})
 	}
-}
-
-func activateSSEWorkspace(
-	ctx context.Context,
-	workspaceFromCtx func(context.Context) string,
-	activateWorkspace func(context.Context, string),
-) {
-	if activateWorkspace == nil {
-		return
-	}
-	workspaceID := sseWorkspaceFromContext(ctx, workspaceFromCtx)
-	if workspaceID == "" {
-		slog.Warn("SSE route activation skipped: empty workspace_id")
-		return
-	}
-	activateWorkspace(ctx, workspaceID)
 }
 
 func sseWorkspaceFromContext(ctx context.Context, workspaceFromCtx func(context.Context) string) string {

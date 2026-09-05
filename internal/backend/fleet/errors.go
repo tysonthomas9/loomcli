@@ -76,6 +76,8 @@ func classifyErrorCode(op, code, msg string) error {
 		return backend.ErrConflict(op, msg)
 	case "not_found":
 		return backend.ErrNotFound(op, msg)
+	case "cursor_expired":
+		return backend.NewBackendError(backend.KindValidation, op, msg, backend.ErrMutationCursorExpired)
 	default:
 		return nil
 	}

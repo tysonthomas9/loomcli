@@ -204,12 +204,22 @@ type MutationData struct {
 	StepCount  int       `json:"step_count,omitempty"`
 }
 
+// MutationPage is one cursor-addressed page from the durable mutation stream.
+// Cursor is the position after Events and HasMore reports whether the backend
+// had another raw page available when this page was read.
+type MutationPage struct {
+	Events  []MutationData `json:"events"`
+	Cursor  string         `json:"cursor"`
+	HasMore bool           `json:"has_more"`
+}
+
 // CursorMutationBackend is an optional IssueBackend extension for durable
 // stream cursors. Backends that implement it can round-trip opaque event IDs
 // instead of lossy millisecond timestamps for reconnect catch-up.
 type CursorMutationBackend interface {
-	GetMutationsAfter(ctx context.Context, since string) ([]MutationData, error)
-	WaitForMutationsAfter(ctx context.Context, since string, timeoutMs int64) ([]MutationData, error)
+	GetMutationsAfter(ctx context.Context, since string, limit int) (MutationPage, error)
+	WaitForMutationsAfter(ctx context.Context, since string, timeoutMs int64, limit int) (MutationPage, error)
+	ProbeHead(ctx context.Context) (cursor string, supported bool, err error)
 }
 
 // EventHistoryBackend is an optional IssueBackend extension for honest issue

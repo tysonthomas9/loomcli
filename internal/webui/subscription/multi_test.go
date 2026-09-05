@@ -28,15 +28,18 @@ func TestGetMutationsSinceForWorkspace_KnownWorkspace(t *testing.T) {
 		}, nil
 	}})
 
-	got := multi.GetMutationsSinceForWorkspace("ws-1", "0")
-	if len(got) != 2 {
-		t.Fatalf("expected 2 mutations, got %d", len(got))
+	page, err := multi.GetMutationPageForWorkspace(context.Background(), "ws-1", "0", mutationPageLimit)
+	if err != nil {
+		t.Fatalf("GetMutationPageForWorkspace: %v", err)
 	}
-	if got[0].IssueID != "fleet-ws1-1" {
-		t.Errorf("expected first mutation IssueID fleet-ws1-1, got %s", got[0].IssueID)
+	if len(page.Events) != 2 {
+		t.Fatalf("expected 2 mutations, got %d", len(page.Events))
 	}
-	if got[1].IssueID != "fleet-ws1-2" {
-		t.Errorf("expected second mutation IssueID fleet-ws1-2, got %s", got[1].IssueID)
+	if page.Events[0].IssueID != "fleet-ws1-1" {
+		t.Errorf("expected first mutation IssueID fleet-ws1-1, got %s", page.Events[0].IssueID)
+	}
+	if page.Events[1].IssueID != "fleet-ws1-2" {
+		t.Errorf("expected second mutation IssueID fleet-ws1-2, got %s", page.Events[1].IssueID)
 	}
 }
 
@@ -49,9 +52,8 @@ func TestGetMutationsSinceForWorkspace_UnknownWorkspace(t *testing.T) {
 
 	multi := NewMultiWorkspaceSubscriber(hub, nil)
 
-	got := multi.GetMutationsSinceForWorkspace("no-such-ws", "0")
-	if got != nil {
-		t.Errorf("expected nil for unknown workspace, got %v", got)
+	if _, err := multi.GetMutationPageForWorkspace(context.Background(), "no-such-ws", "0", mutationPageLimit); err == nil {
+		t.Fatal("expected error for unknown workspace")
 	}
 }
 
@@ -74,21 +76,21 @@ func TestGetMutationsSinceForWorkspace_OnlyQueriesCorrectSubscriber(t *testing.T
 	}})
 
 	// Query ws-1 only
-	got := multi.GetMutationsSinceForWorkspace("ws-1", "0")
-	if len(got) != 1 {
-		t.Fatalf("expected 1 mutation from ws-1, got %d", len(got))
+	page, err := multi.GetMutationPageForWorkspace(context.Background(), "ws-1", "0", mutationPageLimit)
+	if err != nil || len(page.Events) != 1 {
+		t.Fatalf("expected 1 mutation from ws-1, got page=%+v err=%v", page, err)
 	}
-	if got[0].IssueID != "fleet-from-ws1" {
-		t.Errorf("expected fleet-from-ws1, got %s", got[0].IssueID)
+	if page.Events[0].IssueID != "fleet-from-ws1" {
+		t.Errorf("expected fleet-from-ws1, got %s", page.Events[0].IssueID)
 	}
 
 	// Query ws-2 only
-	got = multi.GetMutationsSinceForWorkspace("ws-2", "0")
-	if len(got) != 1 {
-		t.Fatalf("expected 1 mutation from ws-2, got %d", len(got))
+	page, err = multi.GetMutationPageForWorkspace(context.Background(), "ws-2", "0", mutationPageLimit)
+	if err != nil || len(page.Events) != 1 {
+		t.Fatalf("expected 1 mutation from ws-2, got page=%+v err=%v", page, err)
 	}
-	if got[0].IssueID != "fleet-from-ws2" {
-		t.Errorf("expected fleet-from-ws2, got %s", got[0].IssueID)
+	if page.Events[0].IssueID != "fleet-from-ws2" {
+		t.Errorf("expected fleet-from-ws2, got %s", page.Events[0].IssueID)
 	}
 }
 
@@ -201,7 +203,7 @@ func TestStart_ManagerLifecycleOnlyAndRunsIdleDeactivation(t *testing.T) {
 	}
 
 	waitForMultiCondition(t, func() bool {
-		return !multi.HasSubscriber("ws-idle")
+		return !multi.HasSubscriber("ws-idle") && sub.stopCalls.Load() == 1
 	})
 	if got := sub.stopCalls.Load(); got != 1 {
 		t.Fatalf("idle deactivation should stop subscriber once, got %d stops", got)
@@ -216,7 +218,7 @@ func TestEnsureActive_AfterStopErrors(t *testing.T) {
 	multi := NewStartedMultiWorkspaceSubscriber(context.Background(), hub, nil)
 	multi.Stop()
 
-	err := multi.EnsureActive(context.Background(), "ws-stopped", &fakeBackend{}, ActivationReasonHTTP)
+	_, err := multi.EnsureActive(context.Background(), "ws-stopped", &fakeBackend{}, ActivationReasonHTTP)
 	if err == nil {
 		t.Fatal("expected EnsureActive after Stop to error")
 	}
@@ -234,24 +236,26 @@ func TestGetMutationsSinceForWorkspace_ConcurrentStop(t *testing.T) {
 	getStarted := make(chan struct{})
 	releaseGet := make(chan struct{})
 	var signalStarted sync.Once
-	fb := &fakeBackend{getFn: func(ctx context.Context, _ int64) ([]backend.MutationData, error) {
+	fb := newScriptedCursorBackend()
+	fb.getPageFn = func(ctx context.Context, _ string, _ int) (backend.MutationPage, error) {
 		signalStarted.Do(func() { close(getStarted) })
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return backend.MutationPage{}, ctx.Err()
 		case <-releaseGet:
-			return []backend.MutationData{{Type: "create", IssueID: "fleet-stop-race", Timestamp: ts}}, nil
+			return backend.MutationPage{Events: []backend.MutationData{{Type: "create", IssueID: "fleet-stop-race", Timestamp: ts}}, Cursor: "c1.catchup"}, nil
 		}
-	}}
+	}
 
 	multi := NewStartedMultiWorkspaceSubscriber(context.Background(), hub, nil)
-	if err := multi.EnsureActive(context.Background(), "ws-stop-race", fb, ActivationReasonHTTP); err != nil {
+	if _, err := multi.EnsureActive(context.Background(), "ws-stop-race", fb, ActivationReasonHTTP); err != nil {
 		t.Fatalf("EnsureActive: %v", err)
 	}
 
 	gotLen := make(chan int, 1)
 	go func() {
-		gotLen <- len(multi.GetMutationsSinceForWorkspace("ws-stop-race", "0"))
+		page, _ := multi.GetMutationPageForWorkspace(context.Background(), "ws-stop-race", "0", mutationPageLimit)
+		gotLen <- len(page.Events)
 	}()
 	<-getStarted
 
@@ -291,9 +295,15 @@ func (s *trackingWorkspaceSubscriber) Stop() {
 	s.stopCalls.Add(1)
 }
 
-func (s *trackingWorkspaceSubscriber) GetMutationDataSince(string) []backend.MutationData {
+func (s *trackingWorkspaceSubscriber) Ready(context.Context) (string, error) {
+	return "0", nil
+}
+
+func (s *trackingWorkspaceSubscriber) Head() string { return "0" }
+
+func (s *trackingWorkspaceSubscriber) GetMutationPage(context.Context, string, int) (backend.MutationPage, error) {
 	s.getCalls.Add(1)
-	return nil
+	return backend.MutationPage{Events: []backend.MutationData{}}, nil
 }
 
 func waitForMultiCondition(t *testing.T, cond func() bool) {

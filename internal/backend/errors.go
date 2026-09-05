@@ -12,6 +12,11 @@ import (
 // specific unsupported field names.
 var ErrFilterNotSupported = errors.New("filter not supported by backend")
 
+// ErrMutationCursorExpired marks a mutation cursor that fell behind the
+// backend's retention floor. A wrapping BackendError may carry that floor in
+// Meta["cursor"].
+var ErrMutationCursorExpired = errors.New("mutation cursor expired")
+
 // ErrorKind categorizes backend-layer errors into domain-level failure modes.
 // The service layer maps these to service.ErrorKind for HTTP status mapping.
 type ErrorKind string
