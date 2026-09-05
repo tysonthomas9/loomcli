@@ -325,8 +325,16 @@ paths:
                 $ref: "#/components/schemas/WorkspaceReposResponse"
         "400":
           description: Workspace ID is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
         "404":
           description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
     post:
       operationId: addWorkspaceRepos
       tags: [workspaces]
@@ -352,10 +360,22 @@ paths:
                 $ref: "#/components/schemas/WorkspaceResponse"
         "400":
           description: Workspace ID is required, or invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
         "404":
           description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
         "413":
           description: Request body too large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
 
   /api/workspaces/{ws}/monitor/status:
     get:
@@ -777,6 +797,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Issue backend unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
 
   /api/workspaces/{ws}/issues/{id}:
     get:
@@ -917,6 +943,10 @@ paths:
                 $ref: "#/components/schemas/ReopenResponse"
         "404":
           description: Issue not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
         "413":
           description: Request body too large (max 1MB)
           content:
@@ -1129,6 +1159,10 @@ paths:
                 $ref: "#/components/schemas/CommentListResponse"
         "404":
           description: Issue not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
     post:
       operationId: addComment
       tags: [comments]
@@ -1201,6 +1235,10 @@ paths:
                     type: string
         "404":
           description: Issue not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
     post:
       operationId: addDependency
       tags: [dependencies]
@@ -2473,13 +2511,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: "#/components/schemas/ServiceErrorResponse"
         "404":
           description: Agent or role not found
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: "#/components/schemas/ServiceErrorResponse"
         "503":
           description: Terminal service or agent store not initialized
           content:
@@ -2737,13 +2775,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: "#/components/schemas/ServiceErrorResponse"
         "404":
           description: Agent not found
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: "#/components/schemas/ServiceErrorResponse"
     delete:
       operationId: deleteAgent
       tags: [agent-control]
@@ -2763,7 +2801,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: "#/components/schemas/ServiceErrorResponse"
 
   /api/workspaces/{ws}/agents/{name}/queue:
     get:
@@ -2805,7 +2843,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: "#/components/schemas/ServiceErrorResponse"
         "503":
           description: Daemon unavailable
           content:
@@ -3197,17 +3235,15 @@ paths:
                   error:
                     type: string
         "502":
-          description: Listing failed for the workspace
+          description: |
+            Listing failed for the workspace. A service error carries its
+            kind; anything else is reported as a bare message.
           content:
             application/json:
               schema:
-                type: object
-                required: [success]
-                properties:
-                  success:
-                    type: boolean
-                  error:
-                    type: string
+                oneOf:
+                  - $ref: "#/components/schemas/ServiceErrorResponse"
+                  - $ref: "#/components/schemas/SimpleErrorResponse"
 
   /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}:
     get:
@@ -5009,6 +5045,45 @@ components:
         details:
           type: object
 
+    ServiceErrorResponse:
+      type: object
+      description: |
+        The error wire written by handler.HandleServiceError: the service
+        error's message plus its structured kind, so a client can branch on
+        the kind instead of substring-matching the English message. Note it
+        carries NO `success` field.
+      required: [error]
+      properties:
+        error:
+          type: string
+        kind:
+          type: string
+          enum:
+            - not_found
+            - validation_error
+            - unavailable
+            - timeout
+            - conflict
+            - internal
+            - forbidden
+            - unauthorized
+            - locked
+            - payload_too_large
+            - rate_limited
+            - bad_gateway
+            - not_implemented
+            - starting
+            - precondition_failed
+            - precondition_required
+
+    SimpleErrorResponse:
+      type: object
+      description: The bare error wire written by handler.RespondError.
+      required: [error]
+      properties:
+        error:
+          type: string
+
     MessageResponse:
       type: object
       required: [success, message]
@@ -6537,12 +6612,16 @@ components:
           type: string
         default_branch:
           type: string
+        current_branch:
+          type: string
         remote:
           type: string
         remote_url:
           type: string
         source_repo_id:
           type: string
+        is_linked_worktree:
+          type: boolean
         groups:
           type: array
           items:

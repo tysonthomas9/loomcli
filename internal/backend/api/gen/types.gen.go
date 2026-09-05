@@ -184,25 +184,25 @@ func (e AgentStatusResponseAgentState) Valid() bool {
 
 // Defines values for ApprovalErrorErrorCode.
 const (
-	AwaitActorForbidden ApprovalErrorErrorCode = "await_actor_forbidden"
-	Internal            ApprovalErrorErrorCode = "internal"
-	Invalid             ApprovalErrorErrorCode = "invalid"
-	Unauthenticated     ApprovalErrorErrorCode = "unauthenticated"
-	Unsupported         ApprovalErrorErrorCode = "unsupported"
+	ApprovalErrorErrorCodeAwaitActorForbidden ApprovalErrorErrorCode = "await_actor_forbidden"
+	ApprovalErrorErrorCodeInternal            ApprovalErrorErrorCode = "internal"
+	ApprovalErrorErrorCodeInvalid             ApprovalErrorErrorCode = "invalid"
+	ApprovalErrorErrorCodeUnauthenticated     ApprovalErrorErrorCode = "unauthenticated"
+	ApprovalErrorErrorCodeUnsupported         ApprovalErrorErrorCode = "unsupported"
 )
 
 // Valid indicates whether the value is a known member of the ApprovalErrorErrorCode enum.
 func (e ApprovalErrorErrorCode) Valid() bool {
 	switch e {
-	case AwaitActorForbidden:
+	case ApprovalErrorErrorCodeAwaitActorForbidden:
 		return true
-	case Internal:
+	case ApprovalErrorErrorCodeInternal:
 		return true
-	case Invalid:
+	case ApprovalErrorErrorCodeInvalid:
 		return true
-	case Unauthenticated:
+	case ApprovalErrorErrorCodeUnauthenticated:
 		return true
-	case Unsupported:
+	case ApprovalErrorErrorCodeUnsupported:
 		return true
 	default:
 		return false
@@ -1058,6 +1058,66 @@ func (e RuntimeReadyResponseMode) Valid() bool {
 	case Daemon:
 		return true
 	case Fleet:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ServiceErrorResponseKind.
+const (
+	ServiceErrorResponseKindBadGateway           ServiceErrorResponseKind = "bad_gateway"
+	ServiceErrorResponseKindConflict             ServiceErrorResponseKind = "conflict"
+	ServiceErrorResponseKindForbidden            ServiceErrorResponseKind = "forbidden"
+	ServiceErrorResponseKindInternal             ServiceErrorResponseKind = "internal"
+	ServiceErrorResponseKindLocked               ServiceErrorResponseKind = "locked"
+	ServiceErrorResponseKindNotFound             ServiceErrorResponseKind = "not_found"
+	ServiceErrorResponseKindNotImplemented       ServiceErrorResponseKind = "not_implemented"
+	ServiceErrorResponseKindPayloadTooLarge      ServiceErrorResponseKind = "payload_too_large"
+	ServiceErrorResponseKindPreconditionFailed   ServiceErrorResponseKind = "precondition_failed"
+	ServiceErrorResponseKindPreconditionRequired ServiceErrorResponseKind = "precondition_required"
+	ServiceErrorResponseKindRateLimited          ServiceErrorResponseKind = "rate_limited"
+	ServiceErrorResponseKindStarting             ServiceErrorResponseKind = "starting"
+	ServiceErrorResponseKindTimeout              ServiceErrorResponseKind = "timeout"
+	ServiceErrorResponseKindUnauthorized         ServiceErrorResponseKind = "unauthorized"
+	ServiceErrorResponseKindUnavailable          ServiceErrorResponseKind = "unavailable"
+	ServiceErrorResponseKindValidationError      ServiceErrorResponseKind = "validation_error"
+)
+
+// Valid indicates whether the value is a known member of the ServiceErrorResponseKind enum.
+func (e ServiceErrorResponseKind) Valid() bool {
+	switch e {
+	case ServiceErrorResponseKindBadGateway:
+		return true
+	case ServiceErrorResponseKindConflict:
+		return true
+	case ServiceErrorResponseKindForbidden:
+		return true
+	case ServiceErrorResponseKindInternal:
+		return true
+	case ServiceErrorResponseKindLocked:
+		return true
+	case ServiceErrorResponseKindNotFound:
+		return true
+	case ServiceErrorResponseKindNotImplemented:
+		return true
+	case ServiceErrorResponseKindPayloadTooLarge:
+		return true
+	case ServiceErrorResponseKindPreconditionFailed:
+		return true
+	case ServiceErrorResponseKindPreconditionRequired:
+		return true
+	case ServiceErrorResponseKindRateLimited:
+		return true
+	case ServiceErrorResponseKindStarting:
+		return true
+	case ServiceErrorResponseKindTimeout:
+		return true
+	case ServiceErrorResponseKindUnauthorized:
+		return true
+	case ServiceErrorResponseKindUnavailable:
+		return true
+	case ServiceErrorResponseKindValidationError:
 		return true
 	default:
 		return false
@@ -3262,6 +3322,18 @@ type SeedRequest struct {
 	Title       string  `json:"title"`
 }
 
+// ServiceErrorResponse The error wire written by handler.HandleServiceError: the service
+// error's message plus its structured kind, so a client can branch on
+// the kind instead of substring-matching the English message. Note it
+// carries NO `success` field.
+type ServiceErrorResponse struct {
+	Error string                    `json:"error"`
+	Kind  *ServiceErrorResponseKind `json:"kind,omitempty"`
+}
+
+// ServiceErrorResponseKind defines model for ServiceErrorResponse.Kind.
+type ServiceErrorResponseKind string
+
 // SessionHistoryRecord Session history record (Redis-backed, per-issue)
 type SessionHistoryRecord struct {
 	Backend        string                       `json:"backend"`
@@ -3310,6 +3382,11 @@ type SessionResponse struct {
 	StartedAt        time.Time  `json:"started_at"`
 	Status           string     `json:"status"`
 	TaskId           string     `json:"task_id"`
+}
+
+// SimpleErrorResponse The bare error wire written by handler.RespondError.
+type SimpleErrorResponse struct {
+	Error string `json:"error"`
 }
 
 // StaleDetectorStatus defines model for StaleDetectorStatus.
@@ -3625,13 +3702,15 @@ type WorkspaceRenameRequest struct {
 
 // WorkspaceRepo defines model for WorkspaceRepo.
 type WorkspaceRepo struct {
-	DefaultBranch string   `json:"default_branch"`
-	Groups        []string `json:"groups"`
-	Name          string   `json:"name"`
-	Path          string   `json:"path"`
-	Remote        string   `json:"remote"`
-	RemoteUrl     *string  `json:"remote_url,omitempty"`
-	SourceRepoId  *string  `json:"source_repo_id,omitempty"`
+	CurrentBranch    *string  `json:"current_branch,omitempty"`
+	DefaultBranch    string   `json:"default_branch"`
+	Groups           []string `json:"groups"`
+	IsLinkedWorktree *bool    `json:"is_linked_worktree,omitempty"`
+	Name             string   `json:"name"`
+	Path             string   `json:"path"`
+	Remote           string   `json:"remote"`
+	RemoteUrl        *string  `json:"remote_url,omitempty"`
+	SourceRepoId     *string  `json:"source_repo_id,omitempty"`
 }
 
 // WorkspaceReposResponse defines model for WorkspaceReposResponse.
