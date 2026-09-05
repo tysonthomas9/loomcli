@@ -80,7 +80,15 @@ CLAUDE.md. Generate one with:
 
 A session whose profile carries that CLAUDE.md should then be launched with
 --prompt builtin:lead-profile, a minimal pointer prompt that leaves the role
-instructions to the profile instead of repeating them every session.`,
+instructions to the profile instead of repeating them every session.
+
+--prompt builtin:none goes one step further and suppresses the argv persona
+entirely: the prompt is empty and no positional prompt argument is passed to
+the backend at all, so the role instructions must already reach the model as
+ambient context. Suppression is absolute - it ignores a ./loom-prompts/none.md
+override and drops the LOOM_READ_ONLY preamble (a warning is logged; hard
+read-only enforcement stays on the backend flags). With --print-prompt it
+prints nothing and exits 0.`,
 	Args: cobra.NoArgs,
 	Run:  runLead,
 }
@@ -209,6 +217,12 @@ func printLeadPrompt() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading terminal prompt: %v\n", err)
 		os.Exit(1)
+	}
+	// A suppressed persona (--prompt builtin:none) must print 0 bytes, not the
+	// bare newline fmt.Println would add: the output is redirected straight
+	// into a profile's CLAUDE.md.
+	if prompt == "" {
+		return
 	}
 	fmt.Println(prompt)
 }

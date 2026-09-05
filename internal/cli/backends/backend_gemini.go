@@ -35,13 +35,34 @@ var geminiNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown
 // buildGeminiInteractiveCmd constructs the exec.Cmd for interactive Gemini invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildGeminiInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
-	cmd := exec.Command("gemini", geminiApprovalModeArg(), prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
+	cmd := exec.Command("gemini", geminiInteractiveArgs(prompt)...) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
 	cmd.Dir = workDir
 	cmd.Env = buildGeminiEnv(workDir, agentName)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd
+}
+
+// geminiInteractiveArgs builds the interactive argv. An empty prompt means the
+// persona is suppressed (--prompt builtin:none) and no positional is passed:
+// `gemini ""` is not the same as `gemini`.
+func geminiInteractiveArgs(prompt string) []string {
+	args := []string{geminiApprovalModeArg()}
+	if prompt != "" {
+		args = append(args, prompt)
+	}
+	return args
+}
+
+// geminiNonInteractiveArgs builds the headless argv, omitting `-p` together
+// with its value when the prompt is suppressed.
+func geminiNonInteractiveArgs(prompt string) []string {
+	args := []string{geminiApprovalModeArg()}
+	if prompt != "" {
+		args = append(args, "-p", prompt)
+	}
+	return args
 }
 
 // buildGeminiEnv constructs the environment variables for Gemini subprocess invocations.
@@ -63,7 +84,7 @@ func defaultGeminiInvoker(workDir, prompt, agentName string) error {
 		fmt.Println("Launching Gemini agent (non-interactive, no TTY)...")
 		fmt.Println("")
 
-		cmd := exec.Command("gemini", geminiApprovalModeArg(), "-p", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
+		cmd := exec.Command("gemini", geminiNonInteractiveArgs(prompt)...) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
 		cmd.Dir = workDir
 		cmd.Env = buildGeminiEnv(workDir, agentName)
 		cmd.Stdout = os.Stdout
