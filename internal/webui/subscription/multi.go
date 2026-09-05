@@ -34,6 +34,7 @@ type workspaceSubscriber interface {
 	Ready(context.Context) (string, error)
 	Head() string
 	GetMutationPage(context.Context, string, int) (backend.MutationPage, error)
+	GetMutationPageThrough(context.Context, string, string, int) (backend.MutationPage, error)
 }
 
 type subscriberEntry struct {
@@ -194,6 +195,33 @@ func (m *MultiWorkspaceSubscriber) GetMutationPageForWorkspace(
 		return backend.MutationPage{}, fmt.Errorf("workspace %q has no active subscriber", wsID)
 	}
 	return entry.sub.GetMutationPage(ctx, since, limit)
+}
+
+// GetMutationPageThroughForWorkspace keeps the subscriber identity fixed for
+// the entire request, rejecting results from a retired or replaced workspace.
+func (m *MultiWorkspaceSubscriber) GetMutationPageThroughForWorkspace(ctx context.Context, wsID, since, through string, limit int) (backend.MutationPage, error) {
+	m.mu.RLock()
+	entry, ok := m.subscribers[wsID]
+	closed := m.closed
+	m.mu.RUnlock()
+	if !ok || closed {
+		return backend.MutationPage{}, fmt.Errorf("workspace %q has no active subscriber", wsID)
+	}
+	page, err := entry.sub.GetMutationPageThrough(ctx, since, through, limit)
+	if err != nil {
+		return backend.MutationPage{}, err
+	}
+	m.mu.RLock()
+	current := m.subscribers[wsID]
+	closed = m.closed
+	m.mu.RUnlock()
+	if current != entry || closed {
+		return backend.MutationPage{}, fmt.Errorf("workspace %q subscriber changed during bounded replay", wsID)
+	}
+	if err := ctx.Err(); err != nil {
+		return backend.MutationPage{}, err
+	}
+	return page, nil
 }
 
 // HasSubscriber reports whether a workspace has an active or starting entry.

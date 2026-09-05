@@ -46,6 +46,9 @@ type SessionRecord = sessionhistory.SessionRecord
 // MutationPageFn is the type for a workspace-scoped mutation-page callback.
 type MutationPageFn = func(context.Context, string, string, int) (backend.MutationPage, error)
 
+// MutationPageThroughFn reads a workspace-scoped fixed replay interval.
+type MutationPageThroughFn = func(context.Context, string, string, string, int) (backend.MutationPage, error)
+
 // Hub is a type alias for realtime.Hub.
 type Hub = realtime.Hub
 
@@ -76,6 +79,14 @@ func GetMutationPageFn(sub *MultiWorkspaceSubscriber) MutationPageFn {
 		return nil
 	}
 	return sub.GetMutationPageForWorkspace
+}
+
+// GetMutationPageThroughFn returns the fixed replay callback.
+func GetMutationPageThroughFn(sub *MultiWorkspaceSubscriber) MutationPageThroughFn {
+	if sub == nil {
+		return nil
+	}
+	return sub.GetMutationPageThroughForWorkspace
 }
 
 // InitTabMeta creates the tab metadata store from Redis config.
@@ -117,9 +128,10 @@ type SubscriptionModule = subscription.Module
 func NewSubscriptionModule(
 	hub *realtime.Hub,
 	getMutationPage MutationPageFn,
+	getMutationPageThrough MutationPageThroughFn,
 	wsFromCtx func(context.Context) string,
 	activateWorkspace func(context.Context, string) (string, error),
 	sseTokens *realtime.TokenStore,
 ) *SubscriptionModule {
-	return subscription.NewModule(hub, getMutationPage, wsFromCtx, activateWorkspace, sseTokens)
+	return subscription.NewModule(hub, getMutationPage, getMutationPageThrough, wsFromCtx, activateWorkspace, sseTokens)
 }

@@ -45,17 +45,22 @@ func TestAuthoritativeHandlerFreshHeadAndPeriodicReconciliation(t *testing.T) {
 			mu.Lock()
 			defer mu.Unlock()
 			calls = append(calls, since)
-			switch len(calls) {
-			case 1:
-				if since != "$" || limit != 1 {
-					t.Errorf("head request = %q/%d", since, limit)
-				}
-				return backend.MutationPage{Cursor: "head"}, nil
-			case 2:
-				return backend.MutationPage{Cursor: "head"}, nil
-			default:
-				return backend.MutationPage{Events: []backend.MutationData{{Cursor: "next", Type: "update", IssueID: "issue", Timestamp: time.Now()}}, Cursor: "next"}, nil
+			if since != "$" || limit != 1 {
+				t.Errorf("invalid head query")
 			}
+			if len(calls) == 1 {
+				return backend.MutationPage{Cursor: "head"}, nil
+			}
+			return backend.MutationPage{Cursor: "next"}, nil
+		},
+		GetMutationPageThrough: func(_ context.Context, _ string, since, through string, _ int) (backend.MutationPage, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			calls = append(calls, since)
+			if since == through {
+				return backend.MutationPage{Cursor: since}, nil
+			}
+			return backend.MutationPage{Events: []backend.MutationData{{Cursor: "next", Type: "update", IssueID: "issue", Timestamp: time.Now()}}, Cursor: "next"}, nil
 		}})
 	h.heartbeatInterval = time.Millisecond
 	writer := newRecordingFrameWriter()
@@ -68,7 +73,7 @@ func TestAuthoritativeHandlerFreshHeadAndPeriodicReconciliation(t *testing.T) {
 				<-done
 				mu.Lock()
 				defer mu.Unlock()
-				if len(calls) < 3 || calls[1] != "head" || calls[2] != "head" {
+				if len(calls) < 3 || calls[1] != "head" || calls[2] != "$" {
 					t.Fatalf("read chain %v", calls)
 				}
 				return
@@ -81,7 +86,7 @@ func TestAuthoritativeHandlerFreshHeadAndPeriodicReconciliation(t *testing.T) {
 
 func TestAuthoritativeHandlerPagesContinueBeforeConnected(t *testing.T) {
 	calls := 0
-	h := NewHandler(HandlerConfig{Hub: NewHub(), WorkspaceFromCtx: func(context.Context) string { return "ws" }, GetMutationPage: func(_ context.Context, _ string, since string, _ int) (backend.MutationPage, error) {
+	h := NewHandler(HandlerConfig{Hub: NewHub(), WorkspaceFromCtx: func(context.Context) string { return "ws" }, GetMutationPage: fixedReplayHead(t, "two"), GetMutationPageThrough: func(_ context.Context, _ string, since, through string, _ int) (backend.MutationPage, error) {
 		calls++
 		if calls == 1 {
 			return backend.MutationPage{Events: []backend.MutationData{{Cursor: "one", Type: "update", IssueID: "one", Timestamp: time.Now()}}, Cursor: "one", HasMore: true}, nil
@@ -110,7 +115,7 @@ func TestAuthoritativeHandlerPagesContinueBeforeConnected(t *testing.T) {
 func TestAuthoritativeHandlerSourceFailureNeverAdvancesCheckpoint(t *testing.T) {
 	for _, sourceErr := range []error{errors.New("source failed"), backend.ErrMutationCursorExpired} {
 		t.Run(sourceErr.Error(), func(t *testing.T) {
-			h := NewHandler(HandlerConfig{Hub: NewHub(), WorkspaceFromCtx: func(context.Context) string { return "ws" }, GetMutationPage: func(context.Context, string, string, int) (backend.MutationPage, error) {
+			h := NewHandler(HandlerConfig{Hub: NewHub(), WorkspaceFromCtx: func(context.Context) string { return "ws" }, GetMutationPage: fixedReplayHead(t, "end"), GetMutationPageThrough: func(context.Context, string, string, string, int) (backend.MutationPage, error) {
 				return backend.MutationPage{}, sourceErr
 			}})
 			writer := newRecordingFrameWriter()
@@ -132,7 +137,17 @@ func TestAuthoritativeHandlerSourceFailureNeverAdvancesCheckpoint(t *testing.T) 
 func TestAuthoritativeHandlerReorderedNotificationsOnlyWakeSource(t *testing.T) {
 	var mu sync.Mutex
 	published := false
-	h := NewHandler(HandlerConfig{Hub: NewHub(), WorkspaceFromCtx: func(context.Context) string { return "ws" }, GetMutationPage: func(_ context.Context, _ string, since string, _ int) (backend.MutationPage, error) {
+	h := NewHandler(HandlerConfig{Hub: NewHub(), WorkspaceFromCtx: func(context.Context) string { return "ws" }, GetMutationPage: func(_ context.Context, _ string, since string, limit int) (backend.MutationPage, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if since != "$" || limit != 1 {
+			t.Errorf("invalid head query")
+		}
+		if published {
+			return backend.MutationPage{Cursor: "two"}, nil
+		}
+		return backend.MutationPage{Cursor: "start"}, nil
+	}, GetMutationPageThrough: func(_ context.Context, _ string, since, through string, _ int) (backend.MutationPage, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		if !published || since == "two" {
@@ -181,7 +196,10 @@ func TestAuthoritativeHandlerRejectsMalformedFreshHead(t *testing.T) {
 		"empty": {}, "selector": {Cursor: "$"}, "more": {Cursor: "head", HasMore: true}, "events": {Cursor: "head", Events: []backend.MutationData{{Cursor: "head"}}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			h := NewHandler(HandlerConfig{Hub: NewHub(), WorkspaceFromCtx: func(context.Context) string { return "ws" }, GetMutationPage: func(context.Context, string, string, int) (backend.MutationPage, error) { return page, nil }})
+			h := NewHandler(HandlerConfig{Hub: NewHub(), WorkspaceFromCtx: func(context.Context) string { return "ws" }, GetMutationPage: func(context.Context, string, string, int) (backend.MutationPage, error) { return page, nil }, GetMutationPageThrough: func(context.Context, string, string, string, int) (backend.MutationPage, error) {
+				t.Error("malformed head reached bounded read")
+				return backend.MutationPage{}, nil
+			}})
 			writer := newRecordingFrameWriter()
 			_, done := runAuthoritativeHandler(t, h, "", writer)
 			select {

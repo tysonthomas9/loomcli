@@ -194,7 +194,13 @@ func parseMutationPayload(data string) (*realtime.MutationPayload, error) {
 func newLiveSSEServer(t *testing.T, hub *realtime.Hub, getMutationPage func(context.Context, string, string, int) (backend.MutationPage, error)) *httptest.Server {
 	t.Helper()
 
-	handler := realtime.NewHandler(realtime.HandlerConfig{Hub: hub, GetMutationPage: getMutationPage, WorkspaceFromCtx: middleware.WorkspaceFromContext})
+	var getThrough func(context.Context, string, string, string, int) (backend.MutationPage, error)
+	if getMutationPage != nil {
+		getThrough = func(ctx context.Context, ws, since, through string, limit int) (backend.MutationPage, error) {
+			return getMutationPage(ctx, ws, since, limit)
+		}
+	}
+	handler := realtime.NewHandler(realtime.HandlerConfig{Hub: hub, GetMutationPage: getMutationPage, GetMutationPageThrough: getThrough, WorkspaceFromCtx: middleware.WorkspaceFromContext})
 	wsMux := http.NewServeMux()
 	wsMux.Handle("GET /api/workspaces/{ws}/events", handler)
 	// Wrap with a simple workspace existence check that always passes in tests
@@ -261,6 +267,14 @@ func TestSSELive_MutationDelivery(t *testing.T) {
 
 	committed := make(chan struct{})
 	server := newLiveSSEServer(t, hub, func(_ context.Context, _ string, since string, _ int) (backend.MutationPage, error) {
+		if since == "$" {
+			select {
+			case <-committed:
+				return backend.MutationPage{Cursor: "c1.live-durable"}, nil
+			default:
+				return backend.MutationPage{Cursor: "c1.start"}, nil
+			}
+		}
 		if since == "c1.live-durable" {
 			return backend.MutationPage{Cursor: since}, nil
 		}
@@ -474,6 +488,9 @@ func TestSSELive_CatchUpOnReconnect(t *testing.T) {
 	}
 
 	getMutationPage := func(_ context.Context, _ string, since string, _ int) (backend.MutationPage, error) {
+		if since == "$" {
+			return backend.MutationPage{Cursor: "c1.last"}, nil
+		}
 		if since == "c1.last" {
 			return backend.MutationPage{Cursor: since}, nil
 		}
@@ -531,6 +548,9 @@ func TestSSELive_LastEventIDHeader(t *testing.T) {
 
 	var capturedSince string
 	getMutationPage := func(_ context.Context, _ string, since string, _ int) (backend.MutationPage, error) {
+		if since == "$" {
+			return backend.MutationPage{Cursor: "9876543210"}, nil
+		}
 		capturedSince = since
 		return backend.MutationPage{Events: []backend.MutationData{}, Cursor: since}, nil
 	}

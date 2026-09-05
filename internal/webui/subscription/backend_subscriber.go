@@ -178,6 +178,36 @@ func (s *BackendMutationSubscriber) GetMutationPage(ctx context.Context, since s
 	return s.getMutationPage(ctx, since, limit)
 }
 
+// GetMutationPageThrough reads a fixed interval without falling back to an
+// unbounded backend. Both caller cancellation and subscriber retirement apply.
+func (s *BackendMutationSubscriber) GetMutationPageThrough(ctx context.Context, since, through string, limit int) (backend.MutationPage, error) {
+	reader, ok := s.backend.(backend.BoundedCursorMutationBackend)
+	if !ok {
+		return backend.MutationPage{}, fmt.Errorf("backend does not support bounded mutation replay")
+	}
+	requestCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := context.AfterFunc(s.ctx, cancel)
+	defer stop()
+	if err := s.ctx.Err(); err != nil {
+		return backend.MutationPage{}, err
+	}
+	if err := requestCtx.Err(); err != nil {
+		return backend.MutationPage{}, err
+	}
+	page, err := reader.GetMutationsThrough(requestCtx, since, through, limit)
+	if err != nil {
+		return backend.MutationPage{}, err
+	}
+	if err := s.ctx.Err(); err != nil {
+		return backend.MutationPage{}, err
+	}
+	if err := requestCtx.Err(); err != nil {
+		return backend.MutationPage{}, err
+	}
+	return page, nil
+}
+
 func (s *BackendMutationSubscriber) loop() {
 	defer s.wg.Done()
 
