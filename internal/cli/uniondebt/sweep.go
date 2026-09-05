@@ -10,21 +10,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
-const (
-	// MarkerLabel is the ledger marker this sweep drains.
-	MarkerLabel = "union-pending"
-	// UnreachableLabel replaces the marker when no branch exists to merge.
-	UnreachableLabel = "union-unreachable"
-	// DebtLabel marks a derived, claimable debt ticket.
-	DebtLabel = "union-debt"
-	// DebtOfPrefix + originID is the per-original dedupe label.
-	DebtOfPrefix = "union-debt-of:"
-	// ApprovedLabel routes the derived ticket to the integrator role. Per the
-	// deployed pipeline.yaml, `approved` is claimed by integrator and excluded
-	// by every other role, so it needs no routing change.
-	ApprovedLabel = "approved"
-)
-
 // ledgerStatuses is enumerated one at a time on purpose: fleet-db clamps list
 // responses (200 rows), so a single unfiltered list-and-filter loses most of
 // the board. Each status is queried separately with an explicit limit and the
@@ -122,6 +107,10 @@ func NewSweeper(issues issueClient, p prober, opts Options) *Sweeper {
 	return &Sweeper{issues: issues, probe: p, opts: opts}
 }
 
+// labels is the workspace's label vocabulary, read from the contract on every
+// use so the sweep never carries a second, stale copy of it.
+func (s *Sweeper) labels() LabelSet { return s.opts.Contract.Labels() }
+
 // Run performs the sweep and returns a report. A single item's failure never
 // aborts the run: errors are accumulated into the report and counted.
 func (s *Sweeper) Run(ctx context.Context) (*Report, error) {
@@ -145,15 +134,16 @@ func (s *Sweeper) Run(ctx context.Context) (*Report, error) {
 // ledger enumerates every issue still carrying the marker, one status at a
 // time, deduplicated by ID and ordered for stable output.
 func (s *Sweeper) ledger(ctx context.Context) ([]backend.IssueData, error) {
+	marker := s.labels().Marker
 	seen := map[string]backend.IssueData{}
 	for _, status := range ledgerStatuses {
 		found, err := s.issues.List(ctx, backend.ListOpts{
 			Status: status,
-			Labels: []string{MarkerLabel},
+			Labels: []string{marker},
 			Limit:  ledgerLimit,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("list %s issues labeled %s: %w", status, MarkerLabel, err)
+			return nil, fmt.Errorf("list %s issues labeled %s: %w", status, marker, err)
 		}
 		for _, iss := range found {
 			if _, dup := seen[iss.ID]; !dup {
@@ -228,7 +218,7 @@ func (s *Sweeper) handle(ctx context.Context, iss backend.IssueData, filed *int)
 	case ClassNoBranch:
 		item.Action = ActionUnreachable
 		item.Detail = fmt.Sprintf("neither origin/loom/%s nor loom/%s exists in %s", iss.ID, iss.ID, li.Clone)
-		s.apply(ctx, &item, func() error { return s.retire(ctx, iss.ID, UnreachableLabel, item) })
+		s.apply(ctx, &item, func() error { return s.retire(ctx, iss.ID, s.labels().Unreachable, item) })
 		return item
 
 	case ClassClean, ClassConflict:
@@ -259,7 +249,7 @@ func (s *Sweeper) apply(_ context.Context, item *Item, write func() error) {
 func (s *Sweeper) retire(ctx context.Context, id, replacement string, item Item) error {
 	if _, err := s.issues.AddComment(ctx, backend.CommentAddParams{
 		IssueID: id,
-		Text:    retireComment(item, replacement),
+		Text:    retireComment(item, replacement, s.labels()),
 	}); err != nil {
 		return fmt.Errorf("comment on %s: %w", id, err)
 	}
@@ -268,8 +258,9 @@ func (s *Sweeper) retire(ctx context.Context, id, replacement string, item Item)
 			return fmt.Errorf("add %s to %s: %w", replacement, id, err)
 		}
 	}
-	if err := s.issues.RemoveLabel(ctx, id, MarkerLabel); err != nil {
-		return fmt.Errorf("remove %s from %s: %w", MarkerLabel, id, err)
+	marker := s.labels().Marker
+	if err := s.issues.RemoveLabel(ctx, id, marker); err != nil {
+		return fmt.Errorf("remove %s from %s: %w", marker, id, err)
 	}
 	return nil
 }
@@ -279,7 +270,8 @@ func (s *Sweeper) retire(ctx context.Context, id, replacement string, item Item)
 // the integrator once the merge actually lands, which is what makes the ledger
 // drain reflect union content rather than sweeper activity.
 func (s *Sweeper) file(ctx context.Context, iss backend.IssueData, res ProbeResult, li LocalIntegration, item Item, filed *int) Item {
-	debtOf := DebtOfPrefix + iss.ID
+	lbl := s.labels()
+	debtOf := lbl.DebtOfPrefix + iss.ID
 
 	existing, err := s.existingDebt(ctx, debtOf)
 	if err != nil {
@@ -305,7 +297,7 @@ func (s *Sweeper) file(ctx context.Context, iss backend.IssueData, res ProbeResu
 		return item
 	}
 
-	created, err := s.issues.Create(ctx, debtParams(iss, res, li, item.ProbedAt, debtOf))
+	created, err := s.issues.Create(ctx, debtParams(iss, res, li, item.ProbedAt, debtOf, lbl))
 	if err != nil {
 		item.Action = ActionError
 		item.ErrMessage = fmt.Sprintf("create debt ticket for %s: %v", iss.ID, err)
@@ -316,7 +308,7 @@ func (s *Sweeper) file(ctx context.Context, iss backend.IssueData, res ProbeResu
 
 	if _, err := s.issues.AddComment(ctx, backend.CommentAddParams{
 		IssueID: iss.ID,
-		Text:    filedComment(item, li),
+		Text:    filedComment(item, li, lbl),
 	}); err != nil {
 		item.Action = ActionError
 		item.ErrMessage = fmt.Sprintf("comment on %s after filing %s: %v", iss.ID, created.ID, err)
@@ -326,9 +318,9 @@ func (s *Sweeper) file(ctx context.Context, iss backend.IssueData, res ProbeResu
 
 // debtParams builds the derived ticket. Every field here is chosen to clear the
 // four gates that make the closed original unreachable: open status, no
-// assignee, a plain task type, a design body, and `approved` with none of the
-// excluded labels.
-func debtParams(iss backend.IssueData, res ProbeResult, li LocalIntegration, probedAt, debtOf string) backend.CreateParams {
+// assignee, a plain task type, a design body, and the contract's route label
+// with none of the excluded labels.
+func debtParams(iss backend.IssueData, res ProbeResult, li LocalIntegration, probedAt, debtOf string, lbl LabelSet) backend.CreateParams {
 	return backend.CreateParams{
 		Title:     fmt.Sprintf("union debt: merge %s %s into %s (from %s)", iss.SourceRepo, res.Ref, li.Branch, iss.ID),
 		IssueType: "task",
@@ -336,9 +328,9 @@ func debtParams(iss backend.IssueData, res ProbeResult, li LocalIntegration, pro
 		Priority:  debtPriority(iss.Priority),
 		// No Assignee: /ready is unassigned-only, so a stamped assignee hides
 		// the ticket from the very queue this routes it through.
-		Labels:     []string{ApprovedLabel, DebtLabel, debtOf},
+		Labels:     []string{lbl.Route, lbl.Debt, debtOf},
 		SourceRepo: iss.SourceRepo,
-		Design:     designBody(iss, res, li, probedAt),
+		Design:     designBody(iss, res, li, probedAt, lbl),
 		// No Dependencies on the original: AddDependency rejects a closed
 		// target ("dependency target is closed"), and every original here is
 		// closed. The link lives in the design body and in the debtOf label —
@@ -351,10 +343,11 @@ func debtParams(iss backend.IssueData, res ProbeResult, li LocalIntegration, pro
 // or "". Closed debt tickets count: refiling one that was deliberately
 // abandoned would loop forever.
 func (s *Sweeper) existingDebt(ctx context.Context, debtOf string) (string, error) {
+	debt := s.labels().Debt
 	for _, status := range ledgerStatuses {
 		found, err := s.issues.List(ctx, backend.ListOpts{
 			Status: status,
-			Labels: []string{DebtLabel, debtOf},
+			Labels: []string{debt, debtOf},
 			Limit:  ledgerLimit,
 		})
 		if err != nil {
@@ -376,12 +369,12 @@ func debtPriority(orig int) int {
 	return orig
 }
 
-func retireComment(item Item, replacement string) string {
+func retireComment(item Item, replacement string, lbl LabelSet) string {
 	var b strings.Builder
 	if replacement == "" {
-		fmt.Fprintf(&b, "union-debt sweep: %s marker retired — already in union.\n\n", MarkerLabel)
+		fmt.Fprintf(&b, "union-debt sweep: %s marker retired — already in union.\n\n", lbl.Marker)
 	} else {
-		fmt.Fprintf(&b, "union-debt sweep: %s marker replaced with %s.\n\n", MarkerLabel, replacement)
+		fmt.Fprintf(&b, "union-debt sweep: %s marker replaced with %s.\n\n", lbl.Marker, replacement)
 	}
 	writeProbeFacts(&b, item)
 	if item.Detail != "" {
@@ -390,11 +383,11 @@ func retireComment(item Item, replacement string) string {
 	return b.String()
 }
 
-func filedComment(item Item, li LocalIntegration) string {
+func filedComment(item Item, li LocalIntegration, lbl LabelSet) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "union-debt sweep: filed %s to merge this branch into %s.\n\n", item.DerivedID, li.Branch)
 	writeProbeFacts(&b, item)
-	fmt.Fprintf(&b, "\nThe %s marker stays until the merge lands; the integrator removes it.\n", MarkerLabel)
+	fmt.Fprintf(&b, "\nThe %s marker stays until the merge lands; the integrator removes it.\n", lbl.Marker)
 	return b.String()
 }
 
@@ -412,7 +405,7 @@ func writeProbeFacts(b *strings.Builder, item Item) {
 
 // designBody is the derived ticket's design: everything the integrator needs to
 // do the merge without re-deriving any of it.
-func designBody(iss backend.IssueData, res ProbeResult, li LocalIntegration, probedAt string) string {
+func designBody(iss backend.IssueData, res ProbeResult, li LocalIntegration, probedAt string, lbl LabelSet) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Original: %s\n\n", iss.ID)
 	fmt.Fprintf(&b, "# Union debt: %s %s -> %s\n\n", iss.SourceRepo, res.Ref, li.Branch)
@@ -443,12 +436,12 @@ func designBody(iss backend.IssueData, res ProbeResult, li LocalIntegration, pro
 
 	fmt.Fprintf(&b, "## Completion contract\n\n")
 	fmt.Fprintf(&b, "On success:\n")
-	fmt.Fprintf(&b, "  1. Remove `%s` from %s and comment there with the repo, ref and merge SHA.\n", MarkerLabel, iss.ID)
+	fmt.Fprintf(&b, "  1. Remove `%s` from %s and comment there with the repo, ref and merge SHA.\n", lbl.Marker, iss.ID)
 	fmt.Fprintf(&b, "  2. Close THIS ticket.\n")
 	fmt.Fprintf(&b, "  3. Never stamp `delivered` on this ticket — ci-verifier claims `delivered`\n")
 	fmt.Fprintf(&b, "     and there is no PR for it to verify.\n\n")
 	fmt.Fprintf(&b, "If the conflict is genuinely unresolvable (the union/trunk-conflict case your\n")
 	fmt.Fprintf(&b, "prompt says belongs to a human): add `integration-blocked` to THIS ticket, swap\n")
-	fmt.Fprintf(&b, "%s's `%s` for `union-abandoned` with a comment saying why, and stop.\n", iss.ID, MarkerLabel)
+	fmt.Fprintf(&b, "%s's `%s` for `union-abandoned` with a comment saying why, and stop.\n", iss.ID, lbl.Marker)
 	return b.String()
 }
