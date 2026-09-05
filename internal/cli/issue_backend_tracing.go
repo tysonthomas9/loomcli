@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -270,6 +272,8 @@ func (t *tracedIssueBackend) ReleaseClaim(ctx context.Context, id, actor string)
 	)
 	r, ok := t.inner.(backend.ClaimReleaser)
 	if !ok {
+		slog.Warn("claim release unsupported by issue backend",
+			"issue", id, "backend_type", fmt.Sprintf("%T", t.inner))
 		endSpan(span, nil)
 		return nil
 	}

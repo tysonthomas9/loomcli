@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -669,13 +670,27 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 }
 
 // ReleaseClaim releases the claim held by actor. If the issue is still
-// in_progress and assigned to actor, it uses /release so the task becomes
+// in_progress and owned by actor, it uses /release so the task becomes
 // open/unassigned and immediately claimable. If the issue already moved out of
 // in_progress, it drops only the operational lock via /release-lock.
 //
-// The actor is caller-supplied from the completing agent's identity. Do not
-// derive it from current.Assignee: a stale completion could otherwise release a
-// newer agent's active lock after the old lock expires and the task is reclaimed.
+// Ownership is proven by EITHER the caller-supplied actor (the completing
+// agent's identity, e.g. its worktree name) OR this backend's configured actor.
+// The second identity is the one that matters in practice: fleet-db's auth
+// middleware strips the X-Actor override header whenever an API key
+// authenticates the request, so every claim this process makes lands under
+// b.actor — never under the agent name the caller passes here. Matching only
+// the caller's name made this an unconditional no-op on every hand-off, and
+// the claim then leaked until fleet-db's claim reaper reverted it on lock-TTL
+// expiry (~5 min). See PUPPET-467.
+//
+// The ownership gate itself is still required: it is what stops a stale
+// completion from releasing a newer agent's active claim after a reclaim. The
+// supervisor adds a same-daemon reclaim check on top (releaseAssignedTaskClaim).
+//
+// The release is issued as current.Assignee rather than as actor. Under an API
+// key that is decorative (the header is stripped); under --auth-dev-mode, where
+// X-Actor IS honored, it is what makes fleet-db's assignee check pass.
 func (b *FleetBackend) ReleaseClaim(ctx context.Context, id, actor string) error {
 	if id == "" {
 		return backend.ErrValidation("ReleaseClaim", "id must not be empty")
@@ -687,14 +702,21 @@ func (b *FleetBackend) ReleaseClaim(ctx context.Context, id, actor string) error
 	if err != nil {
 		return err
 	}
-	if current == nil || current.Assignee != actor {
+	if current == nil || current.Assignee == "" {
+		return nil
+	}
+	configured := b.ConfiguredActor()
+	if current.Assignee != actor && current.Assignee != configured {
+		slog.Warn("claim release skipped: issue is assigned to someone else",
+			"issue", id, "assignee", current.Assignee, "actor", actor,
+			"configured_actor", configured)
 		return nil
 	}
 	if current.Status == "in_progress" {
 		return b.execAsActor(ctx, "ReleaseClaim", "POST",
-			"/issues/"+url.PathEscape(id)+"/release", nil, actor)
+			"/issues/"+url.PathEscape(id)+"/release", nil, current.Assignee)
 	}
-	return b.releaseIssueLock(ctx, "ReleaseClaim", id, actor, false)
+	return b.releaseIssueLock(ctx, "ReleaseClaim", id, current.Assignee, false)
 }
 
 // transitionToBlockedOrReview drops the claim lock (lock-only) before changing

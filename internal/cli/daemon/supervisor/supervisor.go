@@ -755,19 +755,20 @@ func (s *Supervisor) uploadTranscriptArtifact(ctx context.Context, sessionID, ta
 }
 
 // deregisterWorker removes the agent's fleet-db worker registration on exit,
-// keyed by the claim actor (ap.Entry.Worktree). This is the graceful fast path:
-// it collapses the common stop/drain case to instant board cleanup and releases
-// any issue lock the worker still holds. Best-effort and idempotent — the
-// server-side worker TTL + sweeper are the backstop for non-graceful death.
+// keyed by the CLAIM ACTOR (claimActorFor): ClaimIssue auto-registers the worker
+// under the authenticated actor, so the old ap.Entry.Worktree key always targeted
+// a worker that never existed (PUPPET-467). Graceful fast path for instant board
+// cleanup; the server-side worker TTL + sweeper remain the backstop.
 func (s *Supervisor) deregisterWorker(ap *AgentProcess) {
 	if s.ControlStore == nil || s.WorkspaceID == "" || ap.Entry.Worktree == "" {
 		return
 	}
+	workerID := s.claimActorFor(ap)
 	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
 	defer cancel()
-	if err := s.ControlStore.Workers().Deregister(ctx, s.WorkspaceID, ap.Entry.Worktree); err != nil {
-		slog.Debug("supervisor worker deregister failed",
-			"workspace", s.WorkspaceID, "worker_id", ap.Entry.Worktree, "err", err)
+	if err := s.ControlStore.Workers().Deregister(ctx, s.WorkspaceID, workerID); err != nil {
+		slog.Warn("supervisor worker deregister failed",
+			"workspace", s.WorkspaceID, "worker_id", workerID, "err", err)
 	}
 }
 

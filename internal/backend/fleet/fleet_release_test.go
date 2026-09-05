@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -481,5 +482,157 @@ func TestUpdate_QuarantineShape_OpenToBlockedWithLabelAndUnassign(t *testing.T) 
 	}
 	if assignedTo != "" {
 		t.Errorf("assigned to = %q, want explicit empty (unassign)", assignedTo)
+	}
+}
+
+// PUPPET-467 regression tests: the release actor must be the identity fleet-db
+// attributes the call to, not the completing agent's worktree name.
+
+// newActorTestServer is newTestServer with a configured actor — the shape every
+// real deployment has, and the one the PUPPET-467 tests need.
+func newActorTestServer(t *testing.T, actor string, handler http.HandlerFunc) (*FleetBackend, *httptest.Server) {
+	t.Helper()
+	ts := httptest.NewServer(handler)
+	fb, err := New(Config{
+		BaseURL:     ts.URL,
+		WorkspaceID: "test-ws",
+		AuthToken:   "test-token",
+		Actor:       actor,
+	})
+	if err != nil {
+		ts.Close()
+		t.Fatalf("New: %v", err)
+	}
+	return fb, ts
+}
+
+// releaseClaimIssueHandler answers the Get() fan-out (issue + deps + comments)
+// with an issue in the given status/assignee, and records POSTs.
+func releaseClaimIssueHandler(t *testing.T, status types.Status, assignee string, seen *[]string, gotActor *string) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
+			respondOK(w, types.Issue{
+				ID: "test-1", Title: "T", Status: status, Assignee: assignee,
+				CreatedAt: time.Now(), UpdatedAt: time.Now(),
+			})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/deps"):
+			respondOK(w, map[string]interface{}{"dependencies": []interface{}{}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/comments"):
+			respondOK(w, []interface{}{})
+		case r.Method == "POST":
+			*seen = append(*seen, r.URL.Path)
+			*gotActor = r.Header.Get("X-Actor")
+			respondOK(w, json.RawMessage(`{}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}
+}
+
+// TestReleaseClaim_ConfiguredActorReleasesForeignAgentName is THE regression
+// test for PUPPET-467. fleet-db strips X-Actor under an API key, so the claim
+// landed under the configured actor ("loom") while the completing agent knows
+// itself as "decomposer". The old assignee==actor guard made this an
+// unconditional no-op and every hand-off leaked its claim for ~5 minutes.
+func TestReleaseClaim_ConfiguredActorReleasesForeignAgentName(t *testing.T) {
+	var seen []string
+	var gotActor string
+	fb, ts := newActorTestServer(t, "loom",
+		releaseClaimIssueHandler(t, types.StatusInProgress, "loom", &seen, &gotActor))
+	defer ts.Close()
+
+	if err := fb.ReleaseClaim(context.Background(), "test-1", "decomposer"); err != nil {
+		t.Fatalf("ReleaseClaim: %v", err)
+	}
+	if len(seen) != 1 || !strings.HasSuffix(seen[0], "/issues/test-1/release") {
+		t.Fatalf("POSTs = %v, want exactly one /issues/test-1/release", seen)
+	}
+}
+
+// TestReleaseClaim_ReleasesAsAssignee pins the outgoing actor: the release must
+// be issued as the issue's assignee, not as the caller's agent name. Decorative
+// under an API key (the header is stripped), load-bearing under --auth-dev-mode
+// where fleet-db honors X-Actor and checks it against the assignee.
+func TestReleaseClaim_ReleasesAsAssignee(t *testing.T) {
+	var seen []string
+	var gotActor string
+	fb, ts := newActorTestServer(t, "loom",
+		releaseClaimIssueHandler(t, types.StatusInProgress, "loom", &seen, &gotActor))
+	defer ts.Close()
+
+	if err := fb.ReleaseClaim(context.Background(), "test-1", "decomposer"); err != nil {
+		t.Fatalf("ReleaseClaim: %v", err)
+	}
+	if gotActor != "loom" {
+		t.Errorf("X-Actor = %q, want %q (the assignee, not the caller's agent name)", gotActor, "loom")
+	}
+}
+
+// TestReleaseClaim_ConfiguredActorNonInProgressReleasesLockOnly guards edge case
+// 2: a task the agent already moved to review keeps lock-only semantics, so the
+// 23s review hand-off does not regress into a status change.
+func TestReleaseClaim_ConfiguredActorNonInProgressReleasesLockOnly(t *testing.T) {
+	var seen []string
+	var gotActor string
+	fb, ts := newActorTestServer(t, "loom",
+		releaseClaimIssueHandler(t, types.StatusReview, "loom", &seen, &gotActor))
+	defer ts.Close()
+
+	if err := fb.ReleaseClaim(context.Background(), "test-1", "decomposer"); err != nil {
+		t.Fatalf("ReleaseClaim: %v", err)
+	}
+	if len(seen) != 1 || !strings.HasSuffix(seen[0], "/issues/test-1/release-lock") {
+		t.Fatalf("POSTs = %v, want exactly one /issues/test-1/release-lock", seen)
+	}
+	if gotActor != "loom" {
+		t.Errorf("X-Actor = %q, want loom", gotActor)
+	}
+}
+
+// TestReleaseClaim_TrulyForeignAssigneeStillNoop: widening the guard to accept
+// the configured actor must not widen it to accept everyone. A human who took
+// the task keeps it.
+func TestReleaseClaim_TrulyForeignAssigneeStillNoop(t *testing.T) {
+	fb, ts := newActorTestServer(t, "loom", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
+			respondOK(w, types.Issue{
+				ID: "test-1", Title: "T", Status: types.StatusInProgress, Assignee: "alice",
+				CreatedAt: time.Now(), UpdatedAt: time.Now(),
+			})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/deps"):
+			respondOK(w, map[string]interface{}{"dependencies": []interface{}{}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/comments"):
+			respondOK(w, []interface{}{})
+		case r.Method == "POST":
+			t.Fatalf("must not release an issue assigned to a third party: %s", r.URL.Path)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	})
+	defer ts.Close()
+
+	if err := fb.ReleaseClaim(context.Background(), "test-1", "decomposer"); err != nil {
+		t.Fatalf("ReleaseClaim: %v", err)
+	}
+}
+
+func TestConfiguredActor(t *testing.T) {
+	fb, ts := newActorTestServer(t, "loom", func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+	})
+	defer ts.Close()
+	if got := fb.ConfiguredActor(); got != "loom" {
+		t.Errorf("ConfiguredActor() = %q, want %q", got, "loom")
+	}
+
+	bare, ts2 := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+	})
+	defer ts2.Close()
+	if got := bare.ConfiguredActor(); got != "" {
+		t.Errorf("ConfiguredActor() = %q, want empty when unconfigured", got)
 	}
 }
