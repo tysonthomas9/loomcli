@@ -105,6 +105,7 @@ export class WorkspaceSSEClient {
   private state: ConnectionState = "disconnected";
   private reconnectAttempts = 0;
   private lastEventId: string | undefined;
+  private resumeHeaders: HeadersInit | undefined;
   private manualDisconnect = false;
   private currentSourceRepos?: string[] | undefined;
   private workspaceId: string;
@@ -159,9 +160,9 @@ export class WorkspaceSSEClient {
       return;
     }
 
-    if (since !== undefined) {
-      this.lastEventId = String(since);
-    }
+    this.lastEventId =
+      since !== undefined ? String(since) : this.getLastEventId();
+    this.resumeHeaders = undefined;
 
     this.manualDisconnect = false;
     this.setState("connecting");
@@ -181,6 +182,10 @@ export class WorkspaceSSEClient {
 
     void fetchEventSource(url, {
       signal: abortController.signal,
+      // The library owns resume state from the first attempt, including token
+      // and HTTP failures before any wire ID, and explicit empty-ID resets.
+      headers:
+        sinceParam === undefined ? {} : { "last-event-id": String(sinceParam) },
       openWhenHidden: true,
       fetch: (input, init) =>
         this.fetchStream(
@@ -259,6 +264,8 @@ export class WorkspaceSSEClient {
   disconnect(): void {
     if (this.destroyed) return;
 
+    this.lastEventId = this.getLastEventId();
+    this.resumeHeaders = undefined;
     this.manualDisconnect = true;
 
     this.connectionGeneration++;
@@ -283,12 +290,14 @@ export class WorkspaceSSEClient {
   }
 
   /**
-   * Get the last event ID received from the server.
-   * This is the durable cursor used for catch-up on reconnection.
-   * Returns undefined if no events have been received yet.
+   * Get the observed transport checkpoint, including ID-only frames and resets.
+   * This is resume state, not an acknowledgment that query state was applied.
+   * Returns undefined if no checkpoint is held or the server explicitly reset it.
    */
   getLastEventId(): string | undefined {
-    return this.lastEventId;
+    return this.resumeHeaders === undefined
+      ? this.lastEventId
+      : new Headers(this.resumeHeaders).get("last-event-id") || undefined;
   }
 
   /**
@@ -389,8 +398,9 @@ export class WorkspaceSSEClient {
   }
 
   private handleMessage(event: EventSourceMessage): void {
+    const previousEventId = this.lastEventId;
+    this.lastEventId = this.getLastEventId();
     if (event.event === "resync") {
-      const from = this.lastEventId;
       let reason: ResyncReason = "error";
       try {
         const parsed = JSON.parse(event.data) as { reason?: unknown };
@@ -407,9 +417,8 @@ export class WorkspaceSSEClient {
         console.warn("[SSE] Received malformed resync event");
       }
 
-      this.lastEventId = event.id || undefined;
       this.callSafely("onResync", this.onResync, {
-        from,
+        from: previousEventId,
         to: event.id,
         reason,
       });
@@ -427,15 +436,12 @@ export class WorkspaceSSEClient {
     try {
       mutation = JSON.parse(event.data) as MutationPayload;
     } catch {
-      // Invalid JSON - log and skip
+      // The parser has already advanced its transport header. Stop this loop
+      // and retain the prior checkpoint so reconnect cannot silently skip it.
+      this.lastEventId = previousEventId;
+      this.resumeHeaders = undefined;
       console.warn("[SSE] Received malformed mutation event");
-      return;
-    }
-
-    // Track the server-provided event ID for reconnection catch-up. Fleet-db
-    // emits opaque durable cursors here, so preserve the value as-is.
-    if (event.id) {
-      this.lastEventId = event.id;
+      throw new FatalSSEError("Malformed SSE mutation payload");
     }
 
     this.callSafely("onMutation", this.onMutation, mutation);
@@ -448,6 +454,12 @@ export class WorkspaceSSEClient {
     generation: number,
     isRetry: boolean,
   ): Promise<Response> {
+    this.throwIfInactive(abortController, generation);
+    // fetch-event-source 2.x passes its live headers object to custom fetch.
+    // Its parser updates/deletes last-event-id on explicit ID fields, while
+    // onmessage.id cannot distinguish an absent ID from an empty reset. Keep
+    // this reference (not a Headers copy), including during token failures.
+    this.resumeHeaders = init?.headers;
     let tokenResult: SseTokenResult;
     try {
       tokenResult = await this.fetchTokenFn();
@@ -481,8 +493,8 @@ export class WorkspaceSSEClient {
     requestUrl.searchParams.delete("token");
 
     // The input URL is reused by fetch-event-source. `since` belongs only to
-    // the first request; retries use the library's Last-Event-ID header, which
-    // may also have been explicitly cleared by an empty `id:` line.
+    // the first request; retries use the library's seeded Last-Event-ID header,
+    // which may also have been explicitly cleared by an empty `id:` line.
     if (isRetry) {
       requestUrl.searchParams.delete("since");
     }
