@@ -75,14 +75,17 @@ func listDirectoryAt(ctx context.Context, store *rootedFileStore, path string, h
 		return dirEntries[i].Name() < dirEntries[j].Name()
 	})
 
-	entries := convertDirEntries(ctx, cleanPath, dirEntries, hidden, skillPolicy)
+	entries, err := convertDirEntries(ctx, cleanPath, dirEntries, hidden, skillPolicy)
+	if err != nil {
+		return nil, err
+	}
 
 	return &service.FileTreeResult{Path: cleanPath, Entries: entries}, nil
 }
 
 // convertDirEntries converts os.DirEntry items to service.FileTreeEntry,
 // skipping symlinks and any entry whose name is in hidden (pass nil to keep all).
-func convertDirEntries(ctx context.Context, parent string, dirEntries []os.DirEntry, hidden map[string]bool, skillPolicy skillpaths.Policy) []service.FileTreeEntry {
+func convertDirEntries(ctx context.Context, parent string, dirEntries []os.DirEntry, hidden map[string]bool, skillPolicy skillpaths.Policy) ([]service.FileTreeEntry, error) {
 	entries := make([]service.FileTreeEntry, 0, len(dirEntries))
 	for _, de := range dirEntries {
 		if de.Type()&os.ModeSymlink != 0 {
@@ -99,8 +102,11 @@ func convertDirEntries(ctx context.Context, parent string, dirEntries []os.DirEn
 			continue
 		}
 		info, err := de.Info()
-		if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
 			continue
+		}
+		if err != nil {
+			return nil, service.ErrInternal("failed to stat directory entry", err)
 		}
 		entries = append(entries, service.FileTreeEntry{
 			Name:    de.Name(),
@@ -109,7 +115,7 @@ func convertDirEntries(ctx context.Context, parent string, dirEntries []os.DirEn
 			ModTime: info.ModTime().UTC().Format(time.RFC3339),
 		})
 	}
-	return entries
+	return entries, nil
 }
 
 func isHiddenEntry(name string, hidden map[string]bool) bool {

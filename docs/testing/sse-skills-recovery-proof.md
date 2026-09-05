@@ -1,5 +1,8 @@
 # Skills catalog recovery
 
+The subsequent [file content proof](sse-file-content-recovery-proof.md) covers
+expanded trees and mounted documents.
+
 Skills catalog and capability hooks now enroll through workspace-qualified
 invalidated-query keys. Duplicate consumers share a query; disabled and
 actions-only consumers do not initiate reads. Skill, role and pack invalidation

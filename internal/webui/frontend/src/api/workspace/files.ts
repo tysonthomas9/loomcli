@@ -5,6 +5,7 @@
  */
 
 import { del, get, patch, post, put, wsUrl } from "@/api/common";
+import { validateDirectoryRead, validateFileRead } from "./fileReadValidation";
 import type { components } from "@/types/generated/openapi";
 
 // ============= Types =============
@@ -219,9 +220,11 @@ export async function listScopedDir(
   requestOptions: { signal?: AbortSignal } = {},
 ): Promise<DirListData> {
   const url = scopedUrl(workspaceId, "/files/tree", scopeRef, path);
-  return requestOptions.signal
+  const data = await (requestOptions.signal
     ? get<DirListData>(url, requestOptions)
-    : get<DirListData>(url);
+    : get<DirListData>(url));
+  validateDirectoryRead(data, path);
+  return data;
 }
 
 /**
@@ -242,9 +245,11 @@ export async function readScopedFile(
     path,
     rev ? { rev } : undefined,
   );
-  return requestOptions.signal
+  const data = await (requestOptions.signal
     ? get<FileReadData>(url, requestOptions)
-    : get<FileReadData>(url);
+    : get<FileReadData>(url));
+  validateFileRead(data, path, !!rev);
+  return data;
 }
 
 /** Get the strong mutation version for a file or bounded directory manifest. */

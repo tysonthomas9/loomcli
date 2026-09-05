@@ -112,7 +112,21 @@ describe("skills API", () => {
   });
 
   it("reads, conditionally writes, creates, and deletes bundled files", async () => {
-    mockGet.mockResolvedValue({});
+    mockGet
+      .mockResolvedValueOnce({
+        path: "SKILL.md",
+        content: "",
+        executable: false,
+        revision: "r",
+        skill_ref: "workspace:audit",
+      })
+      .mockResolvedValueOnce({
+        path: "scripts/run.sh",
+        content: "",
+        executable: false,
+        revision: "r",
+        skill_ref: "role:code reviewer:audit",
+      });
     mockPut.mockResolvedValue({});
     mockDel.mockResolvedValue(undefined);
 
