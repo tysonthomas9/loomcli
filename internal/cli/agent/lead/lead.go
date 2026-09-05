@@ -286,14 +286,25 @@ func loadLeadRolePrompt(ctx context.Context, registration leadSessionRegistratio
 // applyLeadPromptContext appends the backend assignment context and the
 // optional --message initial request onto the base terminal-agent prompt.
 func applyLeadPromptContext(prompt string) string {
-	if assignment := currentLeadAssignmentPrompt(context.Background()); assignment != "" {
-		prompt += "\n\n## Loom Backend Assignment\n\n" + assignment
+	return composeLeadPrompt(prompt, currentLeadAssignmentPrompt(context.Background()), leadMessage)
+}
+
+// composeLeadPrompt joins the base prompt with the per-session sections. It is
+// the pure half of applyLeadPromptContext, so the exact bytes it produces are
+// pinned by the argv_golden testdata.
+func composeLeadPrompt(base, assignment, message string) string {
+	sections := make([]string, 0, 3)
+	if base != "" {
+		sections = append(sections, base)
 	}
-	if leadMessage != "" {
-		prompt += "\n\n## User's Initial Request\n\n" + leadMessage +
-			"\n\nAddress this request using the lead mode conventions above."
+	if assignment != "" {
+		sections = append(sections, "## Loom Backend Assignment\n\n"+assignment)
 	}
-	return prompt
+	if message != "" {
+		sections = append(sections, "## User's Initial Request\n\n"+message+
+			"\n\nAddress this request using the lead mode conventions above.")
+	}
+	return strings.Join(sections, "\n\n")
 }
 
 func currentLeadAssignmentPrompt(ctx context.Context) string {
