@@ -1581,3 +1581,68 @@ func TestGenerateTerminalPromptEmptyStillFullLeadPrompt(t *testing.T) {
 		}
 	}
 }
+
+// TestBuiltinNoneTemplateEmbedsEmpty proves prompts/none.md is embedded and
+// empty. loadTemplate panics on a missing embedded template, so the file must
+// exist even though the render path short-circuits before reaching it.
+func TestBuiltinNoneTemplateEmbedsEmpty(t *testing.T) {
+	content, isOverride, err := loadTemplate(BuiltinPromptNone)
+	if err != nil {
+		t.Fatalf("loadTemplate(%q): %v", BuiltinPromptNone, err)
+	}
+	if isOverride {
+		t.Fatalf("loadTemplate(%q) resolved to an override, want the embedded template", BuiltinPromptNone)
+	}
+	if content != "" {
+		t.Fatalf("prompts/none.md is %d bytes, want 0: %q", len(content), content)
+	}
+}
+
+func TestGenerateTerminalPromptBuiltinNoneIsEmpty(t *testing.T) {
+	prompt, err := GenerateTerminalPrompt("builtin:none")
+	if err != nil {
+		t.Fatalf("GenerateTerminalPrompt builtin:none: %v", err)
+	}
+	if prompt != "" {
+		t.Fatalf("GenerateTerminalPrompt builtin:none = %q, want empty", prompt)
+	}
+}
+
+// TestGenerateTerminalPromptBuiltinNoneIgnoresReadOnlyAndOverride pins that the
+// suppression is absolute: neither the read-only preamble nor a per-project
+// ./loom-prompts/none.md can put text back on argv.
+func TestGenerateTerminalPromptBuiltinNoneIgnoresReadOnlyAndOverride(t *testing.T) {
+	t.Setenv("LOOM_READ_ONLY", "1")
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "loom-prompts"), 0o750); err != nil {
+		t.Fatalf("mkdir override dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "loom-prompts", "none.md"), []byte("SNEAKY PERSONA"), 0o600); err != nil {
+		t.Fatalf("write override: %v", err)
+	}
+	oldDir := promptOverrideDir
+	promptOverrideDir = dir
+	t.Cleanup(func() { promptOverrideDir = oldDir })
+
+	prompt, err := GenerateTerminalPrompt("builtin:none")
+	if err != nil {
+		t.Fatalf("GenerateTerminalPrompt builtin:none: %v", err)
+	}
+	if prompt != "" {
+		t.Fatalf("suppression was defeated: %q", prompt)
+	}
+}
+
+// TestBuiltinNoneIsHidden keeps `none` out of operator-facing prompt pickers.
+func TestBuiltinNoneIsHidden(t *testing.T) {
+	for _, p := range BuiltinInteractivePrompts() {
+		if p.ID == BuiltinPromptNone {
+			if !p.Hidden {
+				t.Fatalf("builtin %q must stay hidden from the prompt picker", p.ID)
+			}
+			return
+		}
+	}
+	t.Fatalf("builtin %q is not registered", BuiltinPromptNone)
+}
