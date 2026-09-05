@@ -35,10 +35,14 @@ const defaultMaxRetriesBlockInterval = 60 * time.Second
 
 // agentAuthStoppedLabel marks the task an agent was holding when it
 // fatal-stopped on an AuthFailure. It is the durable, queryable half of the
-// signal (`loom data list --label agent-auth-stopped`): the daemon only ever
-// ADDS it, never removes it. Whoever fixes the auth and confirms the agent
+// signal (`loom data list --label loom:agent-auth-stopped`): the daemon only
+// ever ADDS it, never removes it. Whoever fixes the auth and confirms the agent
 // healthy again is the one who clears it.
-const agentAuthStoppedLabel = "agent-auth-stopped"
+//
+// Namespaced like attemptLabelPrefix and quarantineLabel: a label the
+// supervisor writes about its own runs shares the board with the vocabulary a
+// pipeline defines, and only the prefix says which layer owns the word.
+const agentAuthStoppedLabel = "loom:agent-auth-stopped"
 
 // authStopWriteTimeout bounds the two best-effort board writes that report an
 // auth fatal stop. The supervisor is on its way out either way, so a slow or
@@ -157,7 +161,7 @@ func (s *Supervisor) applyFatalStop(ap *AgentProcess, outcome agenterr.Outcome) 
 }
 
 // reportAuthFatalStop turns an auth fatal stop into a board-level signal on the
-// task the agent was holding: the durable agent-auth-stopped label plus a
+// task the agent was holding: the durable loom:agent-auth-stopped label plus a
 // comment naming the remediation. Without it the only trace is a line in the
 // daemon log, and the task sits at in_progress looking abandoned rather than
 // explicitly blocked on an operator.
