@@ -194,13 +194,13 @@ func parseMutationPayload(data string) (*realtime.MutationPayload, error) {
 func newLiveSSEServer(t *testing.T, hub *realtime.Hub, getMutationPage func(context.Context, string, string, int) (backend.MutationPage, error)) *httptest.Server {
 	t.Helper()
 
-	var getThrough func(context.Context, string, string, string, int) (backend.MutationPage, error)
+	var openSource func(context.Context, string) (realtime.MutationSource, error)
 	if getMutationPage != nil {
-		getThrough = func(ctx context.Context, ws, since, through string, limit int) (backend.MutationPage, error) {
-			return getMutationPage(ctx, ws, since, limit)
+		openSource = func(_ context.Context, ws string) (realtime.MutationSource, error) {
+			return liveMutationSource{read: getMutationPage, workspace: ws}, nil
 		}
 	}
-	handler := realtime.NewHandler(realtime.HandlerConfig{Hub: hub, GetMutationPage: getMutationPage, GetMutationPageThrough: getThrough, WorkspaceFromCtx: middleware.WorkspaceFromContext})
+	handler := realtime.NewHandler(realtime.HandlerConfig{Hub: hub, OpenMutationSource: openSource, WorkspaceFromCtx: middleware.WorkspaceFromContext})
 	wsMux := http.NewServeMux()
 	wsMux.Handle("GET /api/workspaces/{ws}/events", handler)
 	// Wrap with a simple workspace existence check that always passes in tests
@@ -722,4 +722,16 @@ func TestSSELive_RetryFieldInStream(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for retry field and connected event in raw stream")
 	}
+}
+
+type liveMutationSource struct {
+	read      func(context.Context, string, string, int) (backend.MutationPage, error)
+	workspace string
+}
+
+func (s liveMutationSource) ReadHead(ctx context.Context) (backend.MutationPage, error) {
+	return s.read(ctx, s.workspace, "$", 1)
+}
+func (s liveMutationSource) ReadPage(ctx context.Context, since, through string, limit int) (backend.MutationPage, error) {
+	return s.read(ctx, s.workspace, since, limit)
 }

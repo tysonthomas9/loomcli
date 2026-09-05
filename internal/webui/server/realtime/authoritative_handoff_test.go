@@ -22,7 +22,7 @@ func TestAuthoritativeWakeDuringFinalEmptyReadTriggersNextRead(t *testing.T) {
 	h := NewHandler(HandlerConfig{
 		Hub:              hub,
 		WorkspaceFromCtx: func(context.Context) string { return "ws" },
-		GetMutationPage: func(_ context.Context, _ string, since string, limit int) (backend.MutationPage, error) {
+		OpenMutationSource: openFixtureMutationSource(func(_ context.Context, _ string, since string, limit int) (backend.MutationPage, error) {
 			if since != "$" || limit != 1 {
 				t.Errorf("invalid head query")
 			}
@@ -30,8 +30,7 @@ func TestAuthoritativeWakeDuringFinalEmptyReadTriggersNextRead(t *testing.T) {
 				return backend.MutationPage{Cursor: "c1.start"}, nil
 			}
 			return backend.MutationPage{Cursor: "c1.committed"}, nil
-		},
-		GetMutationPageThrough: func(ctx context.Context, ws, since, through string, limit int) (backend.MutationPage, error) {
+		}, func(ctx context.Context, ws, since, through string, limit int) (backend.MutationPage, error) {
 			if calls.Add(1) == 1 {
 				if since != "c1.start" {
 					t.Errorf("initial cursor = %q", since)
@@ -49,7 +48,7 @@ func TestAuthoritativeWakeDuringFinalEmptyReadTriggersNextRead(t *testing.T) {
 				return backend.MutationPage{Cursor: "c1.committed", Events: []backend.MutationData{{Cursor: "c1.committed", Type: "update", IssueID: "source-event"}}}, nil
 			}
 			return backend.MutationPage{Cursor: since}, nil
-		},
+		}),
 	})
 	h.writerFactory = func(http.ResponseWriter) (frameWriter, error) { return writer, nil }
 	ctx, cancel := context.WithCancel(context.Background())

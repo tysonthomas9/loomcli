@@ -178,6 +178,16 @@ func (s *BackendMutationSubscriber) GetMutationPage(ctx context.Context, since s
 	return s.getMutationPage(ctx, since, limit)
 }
 
+// GetMutationHead requires an authoritative cursor backend and binds the read
+// to both the caller and this subscriber's lifetime.
+func (s *BackendMutationSubscriber) GetMutationHead(ctx context.Context) (backend.MutationPage, error) {
+	reader, ok := s.backend.(backend.CursorMutationBackend)
+	if !ok {
+		return backend.MutationPage{}, fmt.Errorf("backend does not support authoritative mutation head")
+	}
+	return s.readWithLifetime(ctx, func(ctx context.Context) (backend.MutationPage, error) { return reader.GetMutationsAfter(ctx, "$", 1) })
+}
+
 // GetMutationPageThrough reads a fixed interval without falling back to an
 // unbounded backend. Both caller cancellation and subscriber retirement apply.
 func (s *BackendMutationSubscriber) GetMutationPageThrough(ctx context.Context, since, through string, limit int) (backend.MutationPage, error) {
@@ -185,6 +195,13 @@ func (s *BackendMutationSubscriber) GetMutationPageThrough(ctx context.Context, 
 	if !ok {
 		return backend.MutationPage{}, fmt.Errorf("backend does not support bounded mutation replay")
 	}
+	return s.readWithLifetime(ctx, func(ctx context.Context) (backend.MutationPage, error) {
+		return reader.GetMutationsThrough(ctx, since, through, limit)
+	})
+}
+
+// readWithLifetime is the shared cancellation boundary for authoritative reads.
+func (s *BackendMutationSubscriber) readWithLifetime(ctx context.Context, read func(context.Context) (backend.MutationPage, error)) (backend.MutationPage, error) {
 	requestCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stop := context.AfterFunc(s.ctx, cancel)
@@ -195,7 +212,7 @@ func (s *BackendMutationSubscriber) GetMutationPageThrough(ctx context.Context, 
 	if err := requestCtx.Err(); err != nil {
 		return backend.MutationPage{}, err
 	}
-	page, err := reader.GetMutationsThrough(requestCtx, since, through, limit)
+	page, err := read(requestCtx)
 	if err != nil {
 		return backend.MutationPage{}, err
 	}

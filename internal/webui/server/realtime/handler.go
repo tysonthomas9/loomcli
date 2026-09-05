@@ -32,15 +32,20 @@ const (
 )
 
 type mutationPageFn func(context.Context, string, string, int) (backend.MutationPage, error)
-type boundedMutationPageFn func(context.Context, string, string, string, int) (backend.MutationPage, error)
+
+// MutationSource binds every head and bounded page read to one source identity.
+// A retired source must fail instead of selecting its replacement.
+type MutationSource interface {
+	ReadHead(context.Context) (backend.MutationPage, error)
+	ReadPage(context.Context, string, string, int) (backend.MutationPage, error)
+}
 
 // HandlerConfig configures the SSE Handler.
 type HandlerConfig struct {
-	Hub                    *Hub
-	GetMutationPage        func(context.Context, string, string, int) (backend.MutationPage, error)
-	GetMutationPageThrough boundedMutationPageFn
-	WorkspaceFromCtx       func(context.Context) string
-	TokenStore             *TokenStore // nil = open mode (no auth required)
+	Hub                *Hub
+	OpenMutationSource func(context.Context, string) (MutationSource, error)
+	WorkspaceFromCtx   func(context.Context) string
+	TokenStore         *TokenStore // nil = open mode (no auth required)
 	// OnAuthenticated activates the workspace subscriber and returns its
 	// ready head. It runs only after the client has been synchronously registered.
 	OnAuthenticated func(context.Context, string) (string, error)
@@ -56,14 +61,13 @@ type frameWriter interface {
 
 // Handler is an http.Handler for the SSE endpoint with configurable heartbeat.
 type Handler struct {
-	hub                    *Hub
-	getMutationPage        mutationPageFn
-	getMutationPageThrough boundedMutationPageFn
-	heartbeatInterval      time.Duration
-	tokenStore             *TokenStore
-	workspaceFromCtx       func(context.Context) string
-	onAuthenticated        func(context.Context, string) (string, error)
-	clientIDCounter        atomic.Int64
+	hub                *Hub
+	openMutationSource func(context.Context, string) (MutationSource, error)
+	heartbeatInterval  time.Duration
+	tokenStore         *TokenStore
+	workspaceFromCtx   func(context.Context) string
+	onAuthenticated    func(context.Context, string) (string, error)
+	clientIDCounter    atomic.Int64
 
 	catchUpTimeout time.Duration
 	writerFactory  func(http.ResponseWriter) (frameWriter, error)
@@ -72,14 +76,13 @@ type Handler struct {
 // NewHandler creates an SSE Handler from the given config.
 func NewHandler(cfg HandlerConfig) *Handler {
 	return &Handler{
-		hub:                    cfg.Hub,
-		getMutationPage:        cfg.GetMutationPage,
-		getMutationPageThrough: cfg.GetMutationPageThrough,
-		heartbeatInterval:      HeartbeatInterval,
-		tokenStore:             cfg.TokenStore,
-		workspaceFromCtx:       cfg.WorkspaceFromCtx,
-		onAuthenticated:        cfg.OnAuthenticated,
-		catchUpTimeout:         defaultCatchUpTimeout,
+		hub:                cfg.Hub,
+		openMutationSource: cfg.OpenMutationSource,
+		heartbeatInterval:  HeartbeatInterval,
+		tokenStore:         cfg.TokenStore,
+		workspaceFromCtx:   cfg.WorkspaceFromCtx,
+		onAuthenticated:    cfg.OnAuthenticated,
+		catchUpTimeout:     defaultCatchUpTimeout,
 		writerFactory: func(w http.ResponseWriter) (frameWriter, error) {
 			return NewWriter(w)
 		},
@@ -116,7 +119,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		),
 	)
 	client := NewClient(clientID, ClientSendBuf, lastSince, sourceRepos, workspaceID)
-	client.authoritative = h.getMutationPage != nil || h.getMutationPageThrough != nil
+	client.authoritative = h.openMutationSource != nil
 	if err := h.hub.RegisterClient(r.Context(), client); err != nil {
 		handshakeSpan.RecordError(err)
 		handshakeSpan.SetStatus(codes.Error, "registration")

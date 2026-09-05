@@ -17,6 +17,7 @@ type authoritativeSession struct {
 	client    *Client
 	writer    frameWriter
 	reader    *authoritativeReader
+	source    MutationSource
 	ctx       context.Context
 	fence     string
 	passReady bool
@@ -76,7 +77,7 @@ func (h *Handler) serveAuthoritative(w http.ResponseWriter, r *http.Request, cli
 func (s *authoritativeSession) captureFence() error {
 	ctx, cancel := context.WithTimeout(s.ctx, s.handler.catchUpTimeout)
 	defer cancel()
-	page, err := s.handler.getMutationPage(ctx, s.client.workspaceID, "$", 1)
+	page, err := s.source.ReadHead(ctx)
 	if err != nil {
 		return err
 	}
@@ -98,9 +99,23 @@ func (s *authoritativeSession) initialize(cursor string) error {
 	if s.client.workspaceID == "" {
 		return errors.New("missing workspace")
 	}
-	if s.handler.getMutationPage == nil || s.handler.getMutationPageThrough == nil {
+	if s.handler.openMutationSource == nil {
 		return errors.New("bounded authoritative mutation source required")
 	}
+	ctx, cancel := context.WithTimeout(s.ctx, s.handler.catchUpTimeout)
+	source, err := s.handler.openMutationSource(ctx, s.client.workspaceID)
+	contextErr := ctx.Err()
+	cancel()
+	if err != nil {
+		return err
+	}
+	if contextErr != nil {
+		return contextErr
+	}
+	if source == nil {
+		return errors.New("authoritative mutation source is nil")
+	}
+	s.source = source
 	if err := s.captureFence(); err != nil {
 		return err
 	}
@@ -109,8 +124,8 @@ func (s *authoritativeSession) initialize(cursor string) error {
 		cursor = s.fence
 	}
 	reader, err := newAuthoritativeReader(s.client.workspaceID, cursor, s.client.sourceRepos,
-		func(ctx context.Context, workspace, since string, limit int) (backend.MutationPage, error) {
-			return s.handler.getMutationPageThrough(ctx, workspace, since, s.fence, limit)
+		func(ctx context.Context, _ string, since string, limit int) (backend.MutationPage, error) {
+			return s.source.ReadPage(ctx, since, s.fence, limit)
 		})
 	s.reader = reader
 	return err
