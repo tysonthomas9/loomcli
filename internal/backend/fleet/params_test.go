@@ -68,10 +68,15 @@ var fleetUpdateIssueFields = map[string]bool{
 	"type":          true,
 	"design":        true,
 	"design_format": true,
-	"notes":         true,
-	"owner":         true,
-	"due_at":        true,
-	"external_ref":  true,
+
+	// fleet-db gained this on UpdateIssueRequest with PUPPET-414; loomcli
+	// stripped it until PUPPET-415.
+	"acceptance_criteria": true,
+
+	"notes":        true,
+	"owner":        true,
+	"due_at":       true,
+	"external_ref": true,
 }
 
 // TestUpdateParamsToPatchRequest_SendsOnlyServerFields is the guard the
@@ -117,6 +122,9 @@ func TestUpdateParamsToPatchRequest_ForwardsEachSupportedField(t *testing.T) {
 		{"external_ref", backend.UpdateParams{
 			ExternalRef: strPtr("https://github.com/owner/repo/pull/42"),
 		}, "https://github.com/owner/repo/pull/42"},
+		{"acceptance_criteria", backend.UpdateParams{
+			AcceptanceCriteria: strPtr("given X, when Y, then Z"),
+		}, "given X, when Y, then Z"},
 	}
 
 	unset := updateParamsToPatchRequest(backend.UpdateParams{})
@@ -240,17 +248,15 @@ func TestCreateParamsToBody_RenamesFields(t *testing.T) {
 func TestCreateParamsToBody_DropsLoomOnlyFields(t *testing.T) {
 	estim := 30
 	req := createParamsToBody(backend.CreateParams{
-		Title:              "T",
-		IssueType:          "task",
-		ID:                 "explicit-id",
-		AcceptanceCriteria: "AC",
-		CreatedBy:          "bob",
-		EstimatedMinutes:   &estim,
-		Dependencies:       []string{"loom-2"},
+		Title:            "T",
+		IssueType:        "task",
+		ID:               "explicit-id",
+		CreatedBy:        "bob",
+		EstimatedMinutes: &estim,
+		Dependencies:     []string{"loom-2"},
 	})
 	for _, k := range []string{
-		"id", "acceptance_criteria", "created_by",
-		"estimated_minutes", "dependencies",
+		"id", "created_by", "estimated_minutes", "dependencies",
 	} {
 		if _, ok := req[k]; ok {
 			t.Errorf("field %q must be dropped — not on fleet-db CreateIssueRequest", k)
@@ -267,6 +273,25 @@ func TestCreateParamsToBody_KeepsExternalRef(t *testing.T) {
 	})
 	if got, ok := req["external_ref"]; !ok || got != ref {
 		t.Errorf("external_ref = %v, want %q", got, ref)
+	}
+}
+
+// TestCreateParamsToBody_KeepsAcceptanceCriteria guards the PUPPET-415 fix:
+// fleet-db's CreateIssueRequest accepts acceptance_criteria, so loomcli must
+// stop stripping it. FleetBackend.Create carries a compat shim for servers
+// that predate the field (see create_compat.go).
+func TestCreateParamsToBody_KeepsAcceptanceCriteria(t *testing.T) {
+	ac := "given X, when Y, then Z"
+	req := createParamsToBody(backend.CreateParams{
+		Title:              "T",
+		IssueType:          "task",
+		AcceptanceCriteria: ac,
+	})
+	if got, ok := req["acceptance_criteria"]; !ok || got != ac {
+		t.Errorf("acceptance_criteria = %v, want %q", got, ac)
+	}
+	if _, ok := createParamsToBody(backend.CreateParams{Title: "T"})["acceptance_criteria"]; ok {
+		t.Error("acceptance_criteria present for an unset value — omitempty semantics lost")
 	}
 }
 

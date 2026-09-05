@@ -404,8 +404,9 @@ type CreateParams struct {
 // fleet-db's CreateIssueRequest expects. fleet-db's strict JSON validation
 // rejects unknown fields, so loom-only fields are dropped rather than
 // shipped as-is.
-// FleetBackend.Create retries without external_ref for deployed fleet-dbs
-// whose create schema predates that field, then applies it via PATCH.
+// FleetBackend.Create retries without external_ref or acceptance_criteria
+// for deployed fleet-dbs whose create schema predates those fields, then
+// applies them via PATCH.
 //
 // Field renames vs CreateParams:
 //   - "issue_type"  → "type"
@@ -415,8 +416,7 @@ type CreateParams struct {
 //   - "source_repo" → "repo"
 //
 // Dropped (no equivalent on fleet-db's CreateIssueRequest):
-//   - id, acceptance_criteria, created_by,
-//     estimated_minutes, dependencies
+//   - id, created_by, estimated_minutes, dependencies
 //
 // If any of those need round-tripping, file a fleet-db ticket to extend
 // the CreateIssueRequest schema rather than smuggling them through here.
@@ -444,6 +444,7 @@ func (p CreateParams) FleetCreateBody() map[string]interface{} {
 	setNonEmptyMapStr(req, "parent_id", p.Parent)
 	setNonEmptyMapStr(req, "repo", p.SourceRepo)
 	setNonEmptyMapStr(req, "design", p.Design)
+	setNonEmptyMapStr(req, "acceptance_criteria", p.AcceptanceCriteria)
 	setNonEmptyMapStr(req, "notes", p.Notes)
 	setNonEmptyMapStr(req, "external_ref", p.ExternalRef)
 	setNonEmptyMapStr(req, "defer_until", p.DeferUntil)
