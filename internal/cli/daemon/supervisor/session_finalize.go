@@ -18,6 +18,28 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
+// clearAgentSessionState resets session state between supervision cycles.
+func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
+	ap.Mu.Lock()
+	ap.Session = nil
+	ap.AgentSessionID = ""
+	ap.AgentLeaseID = ""
+	ap.AgentLeaseToken = ""
+	ap.TranscriptPath = ""
+	ap.BeforeRef = ""
+	ap.AssignedTaskID = ""
+	ap.ResumeTaskID = ""          // per-cycle; re-detected in preFlightSetup (ResumeFailures persists)
+	ap.RecoveryMode = recoverCold // per-cycle; re-classified in preFlightSetup
+	ap.LastActivity = time.Time{}
+	// A child that died while parked on an interactive prompt never sends its
+	// "end", so the in-flight count must not survive into the next cycle: a
+	// stale pending count would suspend the output-timeout watchdog for an
+	// agent that is no longer waiting on anything.
+	ap.InputWaitPending = 0
+	ap.InputWaitSince = time.Time{}
+	ap.Mu.Unlock()
+}
+
 // leafUsage is the token/cost usage recovered from a leaf transcript. Prefer the
 // TS leaf's terminal `result.output`; fall back to Codex rollout token_count /
 // turn.completed events for the Go leaf.
