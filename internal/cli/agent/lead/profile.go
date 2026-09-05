@@ -164,6 +164,14 @@ func leadProfileRepair(err error, configDir string) string {
 		// while minting an identity is an interactive flow a human completes.
 		return fmt.Sprintf("scripts/setup-profile-token.sh %s", profileAgentName(configDir))
 	}
+	if errors.Is(err, supervisor.ErrProfileCodexAuthMissing) {
+		// Names the DIRECTORY, not the agent, and no script: unlike claude
+		// there is nothing to mint and copy. codex writes its own auth.json,
+		// so the only repair is to run the interactive login with CODEX_HOME
+		// pointed at this exact root — and copying another root's auth.json
+		// instead is the sharing that produces refresh_token_reused 401s.
+		return fmt.Sprintf("CODEX_HOME=%s codex login", configDir)
+	}
 	return fmt.Sprintf("scripts/provision-profile.sh %s", profileAgentName(configDir))
 }
 

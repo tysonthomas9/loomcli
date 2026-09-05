@@ -9,6 +9,9 @@ package supervisor
 // changing them.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -57,6 +60,13 @@ var (
 	ErrProfileTokenMissing    = errors.New("profile harness token missing")
 )
 
+// ErrProfileCodexAuthMissing is the codex counterpart, and deliberately ONE
+// sentinel where claude has two: absent, unreadable, unparseable and
+// tokens-less auth.json all have the same repair — a dedicated `codex login`
+// into that root. Splitting it would produce four repair lines that all say
+// the same command.
+var ErrProfileCodexAuthMissing = errors.New("profile codex auth missing")
+
 // profileHarnessEnvVar maps a profile harness root to the environment variable
 // that points the harness at it. Together with agentprofile.HarnessBinary this
 // is the whole export vocabulary; a new harness is one entry in each map.
@@ -87,6 +97,16 @@ var profileHarnesses = []string{"claude", "codex"}
 // The token file is deliberately NOT in the manifest's file list: that list is
 // an allowlist of files the fingerprint covers, and a credential must not be
 // hashed into a value that is written down, compared and reported.
+//
+// codex is ABSENT from both maps and must stay absent. It authenticates with
+// ChatGPT OAuth (`auth_mode: chatgpt`), whose refresh_token ROTATES: codex
+// rewrites auth.json for itself as it refreshes. There is no static
+// per-profile codex secret to inject, and wiring a rotating credential into an
+// env var pinned at spawn is how a profile ends up presenting a token codex
+// has already spent — the `refresh_token_reused` 401. API-key mode, which
+// would give codex a static secret, is a rejected option and not a fallback.
+// codex's identity is therefore the FILE, not an injection: see
+// profileAuthFile and CheckProfileAuth below.
 var (
 	profileTokenFile = map[string]string{
 		"claude": "oauth-token",
@@ -180,9 +200,123 @@ func ProfileTokenPath(dir, harness string) string {
 	return filepath.Join(dir, name)
 }
 
-// ProfileSecretEnv returns the assignments exporting the credential a harness
-// profile root carries of its own, or nothing when the harness has no
-// credential file at all (codex, and anything absent from profileTokenFile).
+// profileAuthFile names the file inside a harness profile root that IS that
+// profile's identity — the login codex writes and refreshes for itself. The
+// distinction from profileTokenFile above is the whole point of two tables:
+// profileTokenFile names a credential loom INJECTS into the child's
+// environment, while profileAuthFile names a file loom only ever reads to
+// answer "does this profile have a login of its own?". Nothing here is
+// exported into any environment.
+//
+// Only codex has one. A harness absent from this table short-circuits every
+// check below, which is what keeps claude's path byte-identical.
+var profileAuthFile = map[string]string{
+	"codex": "auth.json",
+}
+
+// ProfileAuthPath returns the path to the login file a harness profile root
+// owns, or "" for a harness that has none (claude, and anything absent from
+// profileAuthFile). Exported for the same reason as ProfileTokenPath: `loom
+// doctor` must not carry a second copy of the filename.
+func ProfileAuthPath(dir, harness string) string {
+	name := profileAuthFile[harness]
+	if name == "" || dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, name)
+}
+
+// codexAuth is the slice of codex's auth.json this package reads. It is
+// deliberately partial: everything else in that file is codex's business, and
+// a struct that named more fields would start to look like a schema loom owns.
+type codexAuth struct {
+	Tokens *struct {
+		AccountID    string `json:"account_id"`
+		RefreshToken string `json:"refresh_token"`
+	} `json:"tokens"`
+}
+
+// CheckProfileAuth reports why a harness profile root has no login of its own,
+// or nil when it has one — or when the harness carries no login file at all
+// (claude, and anything absent from profileAuthFile, which returns here).
+//
+// This is the codex half of "a profile is an IDENTITY, not a copy of one". A
+// codex root with no auth.json is not a legacy profile falling back to
+// ~/.codex: the supervisor exports CODEX_HOME at it, so codex sees an empty
+// home, and the agent boots logged-OUT — it claims a task and dies on its
+// first call, exactly the four-second exit-0 loop the claude token check was
+// added to stop.
+//
+// Deliberately NOT checked: token expiry, `last_refresh`, or anything else
+// time-based. codex refreshes its own tokens whenever it runs, so an access
+// token that expired an hour ago and a `last_refresh` from three months back
+// both describe a perfectly working profile. Refusing on a timestamp would
+// ground a profile that is fine, which is a worse failure than the one this
+// check exists to catch.
+//
+// Every check is a file read. No network call is made on any path.
+func CheckProfileAuth(dir, harness string) error {
+	path := ProfileAuthPath(dir, harness)
+	if path == "" {
+		return nil // this harness owns no login file
+	}
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: path derived from the workspace profile layout, not user input
+	if err != nil {
+		if os.IsNotExist(err) {
+			// A dangling symlink lands here too, and "missing" is the right
+			// reading: the identity is not there.
+			return fmt.Errorf("%w: %s: profile has no codex login (run CODEX_HOME=%s codex login)",
+				ErrProfileCodexAuthMissing, path, dir)
+		}
+		return fmt.Errorf("%w: %s: unreadable: %v", ErrProfileCodexAuthMissing, path, err)
+	}
+	var auth codexAuth
+	if err := json.Unmarshal(raw, &auth); err != nil {
+		// %v of a json error can quote the offending input, so this must never
+		// be handed the raw bytes: encoding/json reports offsets, not content.
+		return fmt.Errorf("%w: %s: unparseable: %v", ErrProfileCodexAuthMissing, path, err)
+	}
+	if auth.Tokens == nil || auth.Tokens.RefreshToken == "" {
+		// `auth_mode: apikey` with a null `tokens` lands here, and refusing is
+		// right: API-key mode is not how this fleet runs codex, and a profile
+		// in it has no ChatGPT identity of its own.
+		return fmt.Errorf("%w: %s: no tokens object (run CODEX_HOME=%s codex login)",
+			ErrProfileCodexAuthMissing, path, dir)
+	}
+	return nil
+}
+
+// ProfileAuthIdentity returns the account the login at path belongs to and a
+// short fingerprint of its refresh token, for `loom doctor`'s cross-profile
+// pass. The raw refresh token never leaves this function: the fingerprint is
+// the first 8 hex characters of its SHA-256, which is enough to tell two roots
+// sharing one credential from two independent logins and useless for anything
+// else.
+func ProfileAuthIdentity(path string) (accountID, refreshFingerprint string, err error) {
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: path derived from the workspace profile layout, not user input
+	if err != nil {
+		return "", "", fmt.Errorf("%w: %s: %v", ErrProfileCodexAuthMissing, path, err)
+	}
+	var auth codexAuth
+	if err := json.Unmarshal(raw, &auth); err != nil {
+		return "", "", fmt.Errorf("%w: %s: unparseable: %v", ErrProfileCodexAuthMissing, path, err)
+	}
+	if auth.Tokens == nil || auth.Tokens.RefreshToken == "" {
+		return "", "", fmt.Errorf("%w: %s: no tokens object", ErrProfileCodexAuthMissing, path)
+	}
+	sum := sha256.Sum256([]byte(auth.Tokens.RefreshToken))
+	return auth.Tokens.AccountID, hex.EncodeToString(sum[:])[:8], nil
+}
+
+// ProfileSecretEnv is the single credential gate every boot path funnels
+// through, and it now covers BOTH shapes a profile identity comes in: the
+// injected token claude carries (below) and the owned login codex writes for
+// itself (CheckProfileAuth, first). A harness with neither returns nothing.
+//
+// Both shapes are checked here rather than in the two callers because there
+// are exactly two of them — ProfileHarnessEnv and lead.applyLeadProfile's
+// inherited arm — and a check added to one of them is a check the other
+// silently does not have.
 //
 // For a harness that DOES have one, an absent token file is a boot failure —
 // ErrProfileTokenMissing — exactly as a present-but-empty one already was.
@@ -215,6 +349,11 @@ func ProfileTokenPath(dir, harness string) string {
 // Neither the token nor any prefix of it appears in the returned error, and it
 // is never logged: the only place the value may go is the child's environment.
 func ProfileSecretEnv(dir, harness string) ([]string, error) {
+	// codex's identity is a file it owns, not a value loom injects, so this
+	// gate runs first and returns nothing to export when it passes.
+	if err := CheckProfileAuth(dir, harness); err != nil {
+		return nil, err
+	}
 	name, envVar := profileTokenFile[harness], profileTokenEnvVar[harness]
 	if name == "" || envVar == "" || dir == "" {
 		return nil, nil
