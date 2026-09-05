@@ -4,7 +4,7 @@
 #
 #   docker build -f e2e/Dockerfile.base -t loomcli-e2e-base .
 #
-ARG GO_VERSION=1.25.6
+ARG GO_VERSION=1.26.0
 
 FROM golang:${GO_VERSION}-bookworm
 
