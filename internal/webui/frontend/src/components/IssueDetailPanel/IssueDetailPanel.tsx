@@ -41,6 +41,7 @@ import type {
   Comment,
   Event,
 } from "@/types";
+import { ApiError } from "@/types";
 import type { Status } from "@/types/issue";
 import { formatStatusLabel, getReviewType, isPRUrl } from "@/utils/issue";
 import {
@@ -462,6 +463,16 @@ function DefaultContent({
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
   const [rejectError, setRejectError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  // Latched from a server 409: the issue is not claimable, so approving it will
+  // keep failing until the record changes (PUPPET-146). The revision the
+  // refusal was issued against is latched alongside it — see the clearing
+  // effect below for why the reason alone is not enough.
+  const [approveBlocked, setApproveBlocked] = useState<{
+    reason: string;
+    revision: string;
+  } | null>(null);
+  const approveBlockedReason = approveBlocked?.reason ?? null;
   const [showMoveDialog, setShowMoveDialog] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [isStartingEpicRun, setIsStartingEpicRun] = useState(false);
@@ -1048,14 +1059,26 @@ function DefaultContent({
 
   // Approve handler
   const handleApprove = useCallback(async () => {
-    if (!issue || !onApprove || isApproving) return;
+    if (!issue || !onApprove || isApproving || approveBlockedReason !== null)
+      return;
+    // The revision the server is about to refuse — read before the optimistic
+    // update rewrites it, because that is the revision the rollback restores.
+    const attemptedRevision = `${issue.id}@${issue.updated_at ?? ""}`;
     setIsApproving(true);
+    setActionError(null);
     try {
       await onApprove(issue as Issue);
-    } catch {
+    } catch (err) {
       setIsApproving(false);
+      const message = err instanceof Error ? err.message : "Failed to approve";
+      setActionError(message);
+      // A 409 means the server refuses to claim this issue; retrying without a
+      // re-fetch can only fail the same way, so latch the reason and disable.
+      if (err instanceof ApiError && err.status === 409) {
+        setApproveBlocked({ reason: message, revision: attemptedRevision });
+      }
     }
-  }, [issue, onApprove, isApproving]);
+  }, [issue, onApprove, isApproving, approveBlockedReason]);
 
   // Reject button click - show form
   const handleRejectClick = useCallback(() => {
@@ -1112,10 +1135,31 @@ function DefaultContent({
     setIsApproving(false);
     setIsRejecting(false);
     setRejectError(null);
+    setActionError(null);
     setShowMoveDialog(false);
     setMoveError(null);
     setIsStartingEpicRun(false);
   }, [issue?.id]);
+
+  // Identity plus revision: an SSE update (the agent released its claim, the
+  // status moved) can make the very same issue claimable again.
+  const issueRevision = `${issue?.id ?? ""}@${issue?.updated_at ?? ""}`;
+
+  // Clear the latch on any new revision of the record, not just a different
+  // issue, or the operator stays stuck looking at a disabled Approve button
+  // until they navigate away.
+  //
+  // Except the revision the refusal itself was issued against. The optimistic
+  // status update stamps a fabricated `updated_at`, and the 409 rollback
+  // restores the original one, so the panel lands back on the pre-approve
+  // revision a beat AFTER the catch above latches the reason. Clearing
+  // unconditionally therefore erased the message it had just set and
+  // re-enabled Approve, which is the whole bug (PUPPET-146).
+  useEffect(() => {
+    setApproveBlocked((current) =>
+      current && current.revision === issueRevision ? current : null,
+    );
+  }, [issueRevision]);
 
   // Loading state
   if (isLoading) {
@@ -1274,12 +1318,16 @@ function DefaultContent({
             type="button"
             className={`${decisionButtonStyles.button} ${decisionButtonStyles.approve}`}
             onClick={handleApprove}
-            disabled={isApproving}
+            disabled={isApproving || approveBlockedReason !== null}
+            title={approveBlockedReason ?? undefined}
             aria-label="Approve"
             data-testid="panel-approve-button"
           >
             {isApproving ? "..." : "\u2713"} Approve
           </button>
+          {/* Not disabled by an approve 409: reject is a different transition
+              (PATCH status=open) that the claim guard does not cover, and
+              sending the task back is often the way out. */}
           <button
             type="button"
             className={`${decisionButtonStyles.button} ${decisionButtonStyles.reject}`}
@@ -1289,6 +1337,15 @@ function DefaultContent({
           >
             {"\u2717"} Reject
           </button>
+          {/* Inline so the reason outlives the toast's auto-dismiss. */}
+          {approveBlockedReason && (
+            <span
+              className={styles.reviewBlockedReason}
+              data-testid="panel-approve-blocked-reason"
+            >
+              {approveBlockedReason}
+            </span>
+          )}
         </div>
       )}
 
@@ -1566,6 +1623,15 @@ function DefaultContent({
           message={statusError}
           onDismiss={() => setStatusError(null)}
           testId="status-error-toast"
+        />
+      )}
+
+      {/* Error toast for approve/reject failures */}
+      {actionError && (
+        <ErrorToast
+          message={actionError}
+          onDismiss={() => setActionError(null)}
+          testId="action-error-toast"
         />
       )}
 

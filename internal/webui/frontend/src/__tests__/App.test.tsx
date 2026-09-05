@@ -28,6 +28,7 @@ import {
   ONBOARDING_ISSUE_DESCRIPTION,
   ONBOARDING_ISSUE_TITLE,
 } from "@/utils/onboardingDefaults";
+import { ApiError } from "@/types";
 import type { Issue, Status } from "@/types";
 
 import App from "../App";
@@ -2244,6 +2245,127 @@ describe("App", () => {
       });
     });
 
+    // PUPPET-146 regression. `updateIssueStatus` stamps its optimistic issue
+    // with a fabricated fresh `updated_at`, but a rollback restores the
+    // snapshot's ORIGINAL (older) one — so the sync effect above filters the
+    // revert out and the detail surface keeps a status the server rejected.
+    // The settle-sync effect keys on the pending -> settled edge instead.
+    it("reverts loaded issue details when an optimistic update rolls back", async () => {
+      const updateIssueDetails = vi.fn();
+      const snapshot = createMockIssue({
+        id: "issue-1",
+        title: "Blocked Issue",
+        status: "blocked",
+        updated_at: "2024-01-01T00:00:00Z",
+      });
+      // Mid-flight: the map holds the optimistic value with a fresher stamp.
+      const optimistic = createMockIssue({
+        id: "issue-1",
+        title: "Blocked Issue",
+        status: "in_progress",
+        updated_at: "2024-01-01T00:05:00Z",
+      });
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [optimistic],
+        pendingIds: new Set(["issue-1"]),
+      });
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            id: "issue-1",
+            title: "Blocked Issue",
+            priority: 2,
+            status: "blocked",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+          updateIssueDetails,
+        }),
+      );
+
+      const { rerender } = render(<App />);
+
+      // The optimistic flip reaches the detail surface (fresher timestamp).
+      await waitFor(() => {
+        expect(updateIssueDetails).toHaveBeenCalledWith(optimistic);
+      });
+      updateIssueDetails.mockClear();
+
+      // Settle: the store rolls the map back to the snapshot (older stamp)
+      // and clears pendingIds in the same synchronous block. `issueDetails`
+      // now carries the optimistic value the flip above wrote into it — which
+      // is exactly the state the user is looking at when the 409 lands.
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            id: "issue-1",
+            title: "Blocked Issue",
+            priority: 2,
+            status: "in_progress",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:05:00Z",
+          },
+          updateIssueDetails,
+        }),
+      );
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [snapshot],
+        pendingIds: new Set<string>(),
+      });
+      rerender(<App />);
+
+      await waitFor(() => {
+        expect(updateIssueDetails).toHaveBeenCalledWith(snapshot);
+      });
+    });
+
+    // The settle edge fires on every pending -> settled transition, including
+    // the successful ones, so the effect narrows to a status difference. Left
+    // unguarded it would write on every settle and churn against the
+    // timestamp-guarded effect above.
+    it("does not resync details when the settled issue's status is unchanged", async () => {
+      const updateIssueDetails = vi.fn();
+      const settled = createMockIssue({
+        id: "issue-1",
+        title: "Blocked Issue",
+        status: "blocked",
+        updated_at: "2024-01-01T00:00:00Z",
+      });
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [settled],
+        pendingIds: new Set(["issue-1"]),
+      });
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            id: "issue-1",
+            title: "Blocked Issue",
+            priority: 2,
+            status: "blocked",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+          updateIssueDetails,
+        }),
+      );
+
+      const { rerender } = render(<App />);
+      updateIssueDetails.mockClear();
+
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [settled],
+        pendingIds: new Set<string>(),
+      });
+      rerender(<App />);
+
+      await waitFor(() => {
+        expect(updateIssueDetails).not.toHaveBeenCalled();
+      });
+    });
+
     it("passes error state to IssueDetailPanel when fetch fails", () => {
       const issues = [
         createMockIssue({
@@ -3329,6 +3451,8 @@ describe("App", () => {
           "help-issue",
           "in_progress",
           "test-ws-id",
+          // The caller renders the rejection itself (PUPPET-146).
+          { toastOnRollback: false },
         );
       });
 
@@ -3503,7 +3627,10 @@ describe("App", () => {
       });
     });
 
-    it("approve shows error toast on failure for code review type", async () => {
+    // PUPPET-146: App re-throws instead of toasting. The detail view's own
+    // ErrorToast is the single surface — App toasting as well stacked two
+    // identical toasts in the same corner for one failure.
+    it("code approve failure surfaces once, on the detail view", async () => {
       const mockCloseIssueFn = mockCloseIssue.mockRejectedValue(
         new Error("Network error"),
       );
@@ -3542,18 +3669,75 @@ describe("App", () => {
       fireEvent.click(approveButton);
 
       await waitFor(() => {
-        expect(showToast).toHaveBeenCalledWith("Network error", {
-          type: "error",
-        });
+        expect(screen.getByTestId("action-error-toast")).toHaveTextContent(
+          "Network error",
+        );
+      });
+      expect(showToast).not.toHaveBeenCalledWith("Network error", {
+        type: "error",
       });
       mockCloseIssueFn.mockReset();
     });
 
+    // PUPPET-146: the "help" branch used to SWALLOW the error — so the promise
+    // handleApprove returns resolved on failure, the caller's catch never
+    // ran, and the detail view stayed silent with its Approve button stuck
+    // on the "..." spinner. The re-throw is what makes both observable, and
+    // the store's own rollback toast is opted out of so the message appears
+    // exactly once.
+    it("help approve re-throws so the detail view surfaces the failure", async () => {
+      const updateIssueStatus = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      mockStoreState = createMockUseIssuesReturn({ updateIssueStatus });
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            id: "help-issue",
+            title: "Help Review Issue",
+            priority: 2,
+            status: "blocked",
+            notes: "I need help with this task",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+        }),
+      );
+      vi.mocked(useRouteView).mockReturnValue(
+        createViewStateReturn("issue-detail"),
+      );
+
+      render(<App />);
+
+      fireEvent.click(screen.getByTestId("detail-approve-button"));
+
+      // The component's own error surface only appears if the promise rejected.
+      await waitFor(() => {
+        expect(screen.getByTestId("action-error-toast")).toHaveTextContent(
+          "issue is not claimable",
+        );
+      });
+      // ...and the spinner was released rather than latched forever.
+      expect(screen.getByTestId("detail-approve-button")).not.toHaveTextContent(
+        "...",
+      );
+      expect(updateIssueStatus).toHaveBeenCalledWith(
+        "help-issue",
+        "in_progress",
+        expect.anything(),
+        { toastOnRollback: false },
+      );
+    });
+
     // Plan approve no longer goes through the optimistic path (it has to carry
-    // a label delta), so nothing rolls back or surfaces the error for it.
-    // Without a toast a failed approve is indistinguishable from a successful
-    // one — and the issue silently stays in review carrying needs-revision.
-    it("approve shows error toast on failure for plan review type", async () => {
+    // a label delta), so nothing in the store rolls back or reports for it.
+    // The failure has to reach the detail view, or a failed approve is
+    // indistinguishable from a successful one — and the issue silently stays
+    // in review carrying needs-revision.
+    it("plan approve failure surfaces once, on the detail view", async () => {
       mockUpdateIssue.mockRejectedValueOnce(new Error("Network error"));
       const updateIssueStatus = vi.fn();
       const showToast = vi.fn();
@@ -3598,9 +3782,12 @@ describe("App", () => {
 
       // The failure must surface: nothing else reports it for this branch.
       await waitFor(() => {
-        expect(showToast).toHaveBeenCalledWith("Network error", {
-          type: "error",
-        });
+        expect(screen.getByTestId("action-error-toast")).toHaveTextContent(
+          "Network error",
+        );
+      });
+      expect(showToast).not.toHaveBeenCalledWith("Network error", {
+        type: "error",
       });
       expect(updateIssueStatus).not.toHaveBeenCalled();
     });

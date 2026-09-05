@@ -1379,6 +1379,83 @@ describe("issueStore", () => {
       expect(toastFn).toHaveBeenCalledWith("API Error", { type: "error" });
     });
 
+    // PUPPET-146: the caller that renders the rejection itself opts out, so
+    // one failure does not stack two identical toasts. The rollback and the
+    // re-throw are unaffected.
+    it("skips the rollback toast when toastOnRollback is false", async () => {
+      const toastFn = vi.fn();
+      store.getState().configure({ onToast: toastFn });
+
+      const issue = makeIssue({ id: "a", status: "open" });
+      store.setState({ issuesMap: new Map([["a", issue]]) });
+      mockUpdateIssue.mockRejectedValue(new Error("API Error"));
+
+      await expect(
+        store.getState().updateIssueStatus("a", "in_progress", "ws1", {
+          toastOnRollback: false,
+        }),
+      ).rejects.toThrow("API Error");
+
+      const s = store.getState();
+      expect(s.issuesMap.get("a")!.status).toBe("open");
+      expect(s.pendingIds.size).toBe(0);
+      expect(toastFn).not.toHaveBeenCalled();
+    });
+
+    // PUPPET-146: the whole detail-view bug rests on this. The optimistic
+    // issue carries a FABRICATED fresh `updated_at`, and the rollback restores
+    // the snapshot's ORIGINAL one — which reads as "stale" to any consumer
+    // ordering by timestamp, so the revert gets filtered out. App.tsx's
+    // settle-sync effect works around it by keying on `pendingIds` instead.
+    // If this ever changes, that effect deserves a second look.
+    it("restores the snapshot's original updated_at on rollback", async () => {
+      const issue = makeIssue({
+        id: "a",
+        status: "blocked",
+        updated_at: "2024-01-01T00:00:00Z",
+      });
+      store.setState({ issuesMap: new Map([["a", issue]]) });
+      mockUpdateIssue.mockRejectedValue(new Error("issue is not claimable"));
+
+      await expect(
+        store.getState().updateIssueStatus("a", "in_progress", "ws1"),
+      ).rejects.toThrow("issue is not claimable");
+
+      const rolledBack = store.getState().issuesMap.get("a")!;
+      expect(rolledBack.status).toBe("blocked");
+      expect(rolledBack.updated_at).toBe("2024-01-01T00:00:00Z");
+      expect(rolledBack).toEqual(issue);
+    });
+
+    // The settle-sync effect in App.tsx relies on the map being written BEFORE
+    // pendingIds is cleared: an intermediate render between the two would see
+    // the settle edge while the map still held the optimistic value, and the
+    // revert would silently never reach the detail surface.
+    it("writes the rolled-back map before clearing pendingIds", async () => {
+      const issue = makeIssue({ id: "a", status: "blocked" });
+      store.setState({ issuesMap: new Map([["a", issue]]) });
+      mockUpdateIssue.mockRejectedValue(new Error("API Error"));
+
+      const seen: Array<{ status?: string; pending: boolean }> = [];
+      const unsubscribe = store.subscribe((state) => {
+        seen.push({
+          status: state.issuesMap.get("a")?.status,
+          pending: state.pendingIds.has("a"),
+        });
+      });
+
+      await expect(
+        store.getState().updateIssueStatus("a", "in_progress", "ws1"),
+      ).rejects.toThrow("API Error");
+      unsubscribe();
+
+      // No observed state ever has the entry settled while the map still
+      // holds the optimistic value.
+      expect(seen.some((s) => !s.pending && s.status === "in_progress")).toBe(
+        false,
+      );
+    });
+
     it("throws if issue not found", async () => {
       await expect(
         store.getState().updateIssueStatus("nonexistent", "in_progress", "ws1"),
@@ -1459,6 +1536,9 @@ describe("issueStore", () => {
 
       const s = store.getState();
       expect(s.issuesMap.get("a")!.status).toBe("open");
+      // Same original-timestamp restore as the rejection path, which is why
+      // the settle-sync effect covers this route for free (PUPPET-146).
+      expect(s.issuesMap.get("a")!.updated_at).toBe(issue.updated_at);
       expect(s.pendingIds.size).toBe(0);
       expect(toastFn).toHaveBeenCalledWith(
         "Update timed out — changes reverted",

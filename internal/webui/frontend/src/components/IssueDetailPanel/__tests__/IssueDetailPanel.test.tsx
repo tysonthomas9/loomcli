@@ -17,6 +17,7 @@ import {
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
+import { ApiError } from "@/types";
 import type {
   Event,
   Issue,
@@ -1307,6 +1308,266 @@ describe("IssueDetailPanel", () => {
         expect(onApprove).toHaveBeenCalledTimes(1);
         expect(onApprove).toHaveBeenCalledWith(mockIssue);
       });
+    });
+
+    // PUPPET-146. The panel is the same review UI reached from kanban / list /
+    // agents, and had the identical swallowed-error defect as IssueDetailView:
+    // no message and an Approve button stuck on "..." until reload.
+    it("shows the server message verbatim when approve fails", async () => {
+      const mockIssue = createTestIssueDetails({
+        title: "Some task",
+        status: "review",
+      });
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("panel-approve-button"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("action-error-toast")).toHaveTextContent(
+          "issue is not claimable",
+        );
+      });
+      // Spinner released.
+      expect(screen.getByTestId("panel-approve-button")).not.toHaveTextContent(
+        "...",
+      );
+    });
+
+    it("disables only Approve, with the reason, after a 409", async () => {
+      const mockIssue = createTestIssueDetails({
+        title: "Some task",
+        status: "review",
+      });
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("panel-approve-button"));
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("panel-approve-blocked-reason"),
+        ).toHaveTextContent("issue is not claimable");
+      });
+      const approve = screen.getByTestId("panel-approve-button");
+      expect(approve).toBeDisabled();
+      expect(approve).toHaveAttribute("title", "issue is not claimable");
+      // Reject is a different transition (PATCH status=open) that the claim
+      // guard does not cover, so the 409 must not take it away.
+      expect(screen.getByTestId("panel-reject-button")).not.toBeDisabled();
+    });
+
+    // A network error is not the server refusing: retrying is legitimate.
+    it("leaves the buttons enabled after a non-409 failure", async () => {
+      const mockIssue = createTestIssueDetails({
+        title: "Some task",
+        status: "review",
+      });
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(new ApiError(0, "Network error"));
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("panel-approve-button"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("action-error-toast")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("panel-approve-button")).not.toBeDisabled();
+      expect(screen.getByTestId("panel-reject-button")).not.toBeDisabled();
+      expect(
+        screen.queryByTestId("panel-approve-blocked-reason"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("clears the error and the blocked latch when the issue changes", async () => {
+      const mockIssue = createTestIssueDetails({
+        title: "Some task",
+        status: "review",
+      });
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      const { rerender } = render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("panel-approve-button"));
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("panel-approve-blocked-reason"),
+        ).toBeInTheDocument();
+      });
+
+      rerender(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssueDetails({
+            id: "other-issue",
+            title: "Another task",
+            status: "review",
+          })}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("panel-approve-blocked-reason"),
+        ).not.toBeInTheDocument();
+      });
+      expect(
+        screen.queryByTestId("action-error-toast"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("panel-approve-button")).not.toBeDisabled();
+    });
+
+    // An SSE update can make the same issue claimable again, so the latch has
+    // to key on the record, not just on its identity.
+    it("clears the blocked latch when the same issue is updated", async () => {
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      const { rerender } = render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssueDetails({
+            title: "Some task",
+            status: "review",
+            updated_at: "2026-01-23T00:00:00Z",
+          })}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("panel-approve-button"));
+      await waitFor(() => {
+        expect(screen.getByTestId("panel-approve-button")).toBeDisabled();
+      });
+
+      rerender(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssueDetails({
+            title: "Some task",
+            status: "review",
+            updated_at: "2026-01-23T00:05:00Z",
+          })}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("panel-approve-blocked-reason"),
+        ).not.toBeInTheDocument();
+      });
+      expect(screen.getByTestId("panel-approve-button")).not.toBeDisabled();
+    });
+
+    // The optimistic status update stamps a fabricated `updated_at` and the
+    // rollback restores the original, so the panel lands back on the
+    // pre-approve revision just after the 409 latches. That revert is not a
+    // new revision and must not re-arm Approve (PUPPET-146).
+    it("keeps the blocked latch when the failed update rolls back", async () => {
+      const original = createTestIssueDetails({
+        title: "Some task",
+        status: "review",
+        updated_at: "2026-01-23T00:00:00Z",
+      });
+      const optimistic = createTestIssueDetails({
+        title: "Some task",
+        status: "in_progress",
+        updated_at: "2026-01-23T00:00:01Z",
+      });
+
+      let rejectApprove: (err: unknown) => void = () => {};
+      const onApprove = vi.fn(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectApprove = reject;
+          }),
+      );
+      const renderPanel = (issue: IssueDetails) => (
+        <IssueDetailPanel
+          isOpen={true}
+          issue={issue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />
+      );
+
+      const { rerender } = render(renderPanel(original));
+
+      fireEvent.click(screen.getByTestId("panel-approve-button"));
+
+      // The optimistic write reaches the panel while the PATCH is in flight,
+      // then the server refuses it.
+      rerender(renderPanel(optimistic));
+      await act(async () => {
+        rejectApprove(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      });
+
+      // The rollback puts the original revision back.
+      rerender(renderPanel(original));
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("panel-approve-blocked-reason"),
+        ).toHaveTextContent("issue is not claimable");
+      });
+      expect(screen.getByTestId("panel-approve-button")).toBeDisabled();
     });
 
     it("clicking Reject button shows the reject comment form", () => {
