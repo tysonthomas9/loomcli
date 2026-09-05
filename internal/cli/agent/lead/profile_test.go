@@ -95,7 +95,30 @@ func writeLeadHarnessProfile(t *testing.T, runtimeDir, agent, harness, version s
 		// not enter the fingerprint above.
 		writeLeadProfileToken(t, dir, "sk-ant-oat01-fixture")
 	}
+	if harness == "codex" {
+		// The codex counterpart, and the same reasoning in the other shape:
+		// the login is the identity, so a root without one refuses to boot.
+		// It is written, never injected, and never fingerprinted.
+		writeLeadCodexAuth(t, dir, "rt-"+agent)
+	}
 	return dir
+}
+
+// writeLeadCodexAuth writes (or, given "", removes) a codex root's own login.
+func writeLeadCodexAuth(t *testing.T, dir, refreshToken string) {
+	t.Helper()
+	path := filepath.Join(dir, "auth.json")
+	if refreshToken == "" {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		return
+	}
+	body := `{"tokens":{"id_token":"eyJhbGciOiJub25lIn0.e30.","access_token":"at-` + refreshToken +
+		`","refresh_token":"` + refreshToken + `","account_id":"acct"},"last_refresh":"2026-09-05T00:00:00Z"}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // writeLeadProfileToken writes (or, given "", removes) a profile's oauth-token.
@@ -654,5 +677,48 @@ func TestRunLeadPrintPromptSkipsProfileEnforcement(t *testing.T) {
 	output, _ := capturePrintPromptRun(t, "")
 	if !strings.Contains(output, "INTERACTIVE MODE: Project Lead") {
 		t.Fatalf("--print-prompt did not print the built-in prompt: %q", output)
+	}
+}
+
+// A codex root with no login of its own must refuse the lead's boot for the
+// same reason a claude root with no token does: CODEX_HOME points at it, so
+// codex sees an empty home and the lead runs logged out.
+func TestApplyLeadProfile_MissingCodexLoginRefuses(t *testing.T) {
+	clearProfileEnv(t)
+	clearLeadToken(t)
+	stubHarnessesOnPath(t, "codex")
+	runtimeDir := t.TempDir()
+	dir := writeLeadHarnessProfile(t, runtimeDir, "lead", "codex", fakeHarnessVersion, map[string]string{})
+	writeLeadCodexAuth(t, dir, "")
+
+	failed, err := applyLeadProfile(runtimeDir, "lead", "codex")
+	if !errors.Is(err, supervisor.ErrProfileCodexAuthMissing) {
+		t.Fatalf("a codex root with no login must refuse, got %v", err)
+	}
+	want := "CODEX_HOME=" + dir + " codex login"
+	if got := leadProfileRepair(err, failed); got != want {
+		t.Errorf("repair = %q, want %q", got, want)
+	}
+}
+
+// The repair names the DIRECTORY, not the agent: unlike claude there is no
+// script to run and nothing to copy — codex writes auth.json itself, and the
+// only thing that decides WHICH root gets the login is CODEX_HOME.
+func TestLeadProfileRepair_CodexAuthNamesTheDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agent-profiles", "lead", "codex")
+	got := leadProfileRepair(supervisor.ErrProfileCodexAuthMissing, dir)
+	if want := "CODEX_HOME=" + dir + " codex login"; got != want {
+		t.Fatalf("repair = %q, want %q", got, want)
+	}
+	// The claude repairs must be untouched by the new branch.
+	if got := leadProfileRepair(supervisor.ErrProfileTokenMissing, dir); got !=
+		"scripts/setup-profile-token.sh lead && scripts/provision-profile.sh lead" {
+		t.Errorf("claude missing-token repair changed: %q", got)
+	}
+	if got := leadProfileRepair(supervisor.ErrProfileTokenUnreadable, dir); got != "scripts/setup-profile-token.sh lead" {
+		t.Errorf("claude unreadable-token repair changed: %q", got)
+	}
+	if got := leadProfileRepair(supervisor.ErrProfileVersionDrift, dir); got != "loom doctor --fix" {
+		t.Errorf("drift repair changed: %q", got)
 	}
 }

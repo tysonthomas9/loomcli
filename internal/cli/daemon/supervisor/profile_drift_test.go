@@ -85,6 +85,7 @@ func TestProfileHarnessEnv_CodexMinorDriftBoots(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeManifestFor(t, dir, "codex-cli 0.144.5")
+	writeCodexAuth(t, dir, "rt-lead")
 
 	if _, _, err := ProfileHarnessEnv(projectDir, "lead", "codex"); err != nil {
 		t.Fatalf("codex minor drift must boot, got %v", err)

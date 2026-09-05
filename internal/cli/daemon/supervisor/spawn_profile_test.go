@@ -123,6 +123,7 @@ func TestAppendProfileEnv_InjectsVerifiedProfileRoots(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(codexDir, "sessions"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	writeCodexAuth(t, codexDir, "rt-worker")
 	raw, err := json.Marshal(agentprofile.Manifest{
 		Files:          []string{},
 		Fingerprint:    hex.EncodeToString(sha256.New().Sum(nil)),
@@ -339,6 +340,10 @@ func writeCodexProfile(t *testing.T, projectDir, agent, version string) string {
 	if err := os.WriteFile(filepath.Join(dir, ProfileManifestName), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// A codex root's identity is its own login, so a fixture without one is
+	// not a provisioned profile any more — it is the fault CheckProfileAuth
+	// exists to refuse.
+	writeCodexAuth(t, dir, "rt-"+agent)
 	return dir
 }
 
@@ -504,7 +509,8 @@ func TestAppendProfileEnv_MissingTokenFileRefusesBoot(t *testing.T) {
 
 // The missing-token refusal must not become a refusal for harnesses that never
 // had a credential file. Without this, the fix silently bricks every codex
-// agent: codex roots carry no oauth-token by design.
+// agent: codex roots carry no oauth-token by design — their identity is the
+// auth.json they own, which is checked separately and injected nowhere.
 func TestAppendProfileEnv_CodexRootWithoutTokenStillBoots(t *testing.T) {
 	stubHarnessVersion(t, map[string]string{"codex": "codex-cli 0.147.0"})
 	projectDir := t.TempDir()
@@ -512,6 +518,7 @@ func TestAppendProfileEnv_CodexRootWithoutTokenStillBoots(t *testing.T) {
 	if err := os.MkdirAll(codexDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	writeCodexAuth(t, codexDir, "rt-worker")
 	raw, err := json.Marshal(agentprofile.Manifest{
 		Files:          []string{},
 		Fingerprint:    hex.EncodeToString(sha256.New().Sum(nil)),
@@ -628,13 +635,15 @@ func TestProfileSecretEnv_ErrorNeverCarriesTheToken(t *testing.T) {
 	}
 }
 
-// codex has no setup-token equivalent, so its root gets a config variable and
-// nothing else even if a stray file of that name is sitting there.
+// codex has no setup-token equivalent, so a root with a valid login of its own
+// gets a config variable and nothing else even if a stray oauth-token is
+// sitting there.
 func TestProfileSecretEnv_HarnessWithoutTokenInjectsNothing(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "oauth-token"), []byte("sk-ant-oat01-stray"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	writeCodexAuth(t, dir, "rt-stray")
 	for _, harness := range []string{"codex", "unknown"} {
 		got, err := ProfileSecretEnv(dir, harness)
 		if err != nil || len(got) != 0 {

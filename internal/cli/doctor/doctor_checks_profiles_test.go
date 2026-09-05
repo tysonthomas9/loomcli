@@ -17,6 +17,10 @@ import (
 func stageProfileWorkspace(t *testing.T, reported string) string {
 	t.Helper()
 	runtimeDir := t.TempDir()
+	// A private HOME as well: the codex sharing pass reads ~/.codex/auth.json,
+	// and a test that saw the operator's real one would depend on this
+	// machine's login state.
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
 	ResetWorkspaceRuntimeDirCache()
 	t.Cleanup(ResetWorkspaceRuntimeDirCache)
@@ -67,8 +71,9 @@ func writeProfileToken(t *testing.T, dir, token string) {
 	}
 }
 
-// stageCodexProfile provisions a codex profile, which has no credential file of
-// its own and must never be reported for lacking one.
+// stageCodexProfile provisions a codex profile: no injected credential of its
+// own — it must never be reported for lacking an oauth-token — but a login it
+// owns, which is what its identity actually is.
 func stageCodexProfile(t *testing.T, runtimeDir, agent, pinnedVersion string) string {
 	t.Helper()
 	dir := filepath.Join(runtimeDir, ".loom", "agent-profiles", agent, "codex")
@@ -84,6 +89,9 @@ func stageCodexProfile(t *testing.T, runtimeDir, agent, pinnedVersion string) st
 		t.Fatalf("fingerprint: %v", err)
 	}
 	writeManifest(t, dir, agentprofile.Manifest{Files: files, Fingerprint: sum, HarnessVersion: pinnedVersion})
+	// Outside the manifest's file list, as codex leaves it: it rewrites this
+	// file as it refreshes, so hashing it would make every refresh a drift.
+	writeCodexAuth(t, dir, "rt-"+agent, "acct-"+agent)
 	return dir
 }
 
