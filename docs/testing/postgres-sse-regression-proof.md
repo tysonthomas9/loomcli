@@ -114,3 +114,28 @@ After recovery, remove only `loomcli-pg-browser-regression-0905` with
 PostgreSQL container and foreign lifecycle services must not be included in that
 cleanup. Preserve the reported failures and rerun the exact final PostgreSQL HTTP
 proof before treating the paired fix as fully validated.
+
+## App HTTP fixture repair after hosted CI
+
+At `beff9556c`, Linux Go coverage and macOS tests exposed three stale app-level
+SSE fixtures: mutation delivery, catch-up and Last-Event-ID. Their c1/numeric
+cursors and absent source identity correctly triggered the current handler's
+resync path before page delivery. The repair supplies explicit c2/s1 fixtures,
+checks exact replay IDs, and replaces unsynchronized header capture with a
+channel. Negative cases preserve rejection of c1/numeric cursors and absent
+identity; production validation is unchanged. The header test uses no query,
+matching browser reconnect. The endpoint's established opaque-query precedence
+is unchanged.
+
+The original three failures were reproduced locally. The repaired `TestSSELive`
+selector passed with race detection (1.754s), and the full affected app package
+passed (13.288s):
+
+```sh
+GOCACHE=/private/tmp/loom-sse-integration-go-cache go test -race -p 1 ./internal/webui/app -run TestSSELive -count=1 -timeout=90s
+GOCACHE=/private/tmp/loom-sse-integration-go-cache go test -race -p 1 ./internal/webui/app -count=1 -timeout=120s
+```
+
+This is real local HTTP with deterministic mutation-source fixtures, not a
+PostgreSQL or browser proof. Independent review covers the final fixture repair;
+new hosted results and the paired browser gate remain separate requirements.

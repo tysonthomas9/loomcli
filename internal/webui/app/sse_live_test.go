@@ -270,29 +270,32 @@ func TestSSELive_MutationDelivery(t *testing.T) {
 		if since == "$" {
 			select {
 			case <-committed:
-				return backend.MutationPage{Cursor: "c1.live-durable"}, nil
+				return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "c2.bGl2ZS1kdXJhYmxl"}, nil
 			default:
-				return backend.MutationPage{Cursor: "c1.start"}, nil
+				return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "c2.c3RhcnQ"}, nil
 			}
 		}
-		if since == "c1.live-durable" {
-			return backend.MutationPage{Cursor: since}, nil
+		if since == "c2.bGl2ZS1kdXJhYmxl" {
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: since}, nil
 		}
 		select {
 		case <-committed:
-			return backend.MutationPage{Events: []backend.MutationData{{Type: "create", IssueID: "loom-live-1", Cursor: "c1.live-durable", Title: "Live Test Issue", Timestamp: time.Now().UTC()}}, Cursor: "c1.live-durable"}, nil
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: []backend.MutationData{{Type: "create", IssueID: "loom-live-1", Cursor: "c2.bGl2ZS1kdXJhYmxl", Title: "Live Test Issue", Timestamp: time.Now().UTC()}}, Cursor: "c2.bGl2ZS1kdXJhYmxl"}, nil
 		default:
-			return backend.MutationPage{Cursor: since}, nil
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: since}, nil
 		}
 	})
 
-	client := connectSSE(t, server.URL, map[string]string{"Last-Event-ID": "c1.start"})
+	client := connectSSE(t, server.URL, map[string]string{"Last-Event-ID": "c2.c3RhcnQ"})
 	defer client.close()
 
 	// Read and discard the connected event
-	_, err := client.readEvent(3 * time.Second)
+	connected, err := client.readEvent(3 * time.Second)
 	if err != nil {
 		t.Fatalf("failed to read connected event: %v", err)
+	}
+	if connected.Event != "connected" {
+		t.Fatalf("expected connected event, got %q", connected.Event)
 	}
 
 	// Wait for client to be registered in hub
@@ -309,7 +312,7 @@ func TestSSELive_MutationDelivery(t *testing.T) {
 	hub.Broadcast(&realtime.MutationPayload{
 		Type:        "create",
 		IssueID:     "loom-live-1",
-		Cursor:      "c1.live-durable",
+		Cursor:      "c2.bGl2ZS1kdXJhYmxl",
 		Title:       "untrusted notification title",
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 		WorkspaceID: testWorkspaceID,
@@ -323,7 +326,7 @@ func TestSSELive_MutationDelivery(t *testing.T) {
 	if evt.Event != "mutation" {
 		t.Errorf("expected event type 'mutation', got %q", evt.Event)
 	}
-	if evt.ID != "c1.live-durable" {
+	if evt.ID != "c2.bGl2ZS1kdXJhYmxl" {
 		t.Errorf("expected durable cursor, got %q", evt.ID)
 	}
 
@@ -474,14 +477,14 @@ func TestSSELive_CatchUpOnReconnect(t *testing.T) {
 		{
 			Type:      "create",
 			IssueID:   "loom-catchup-1",
-			Cursor:    "c1.first",
+			Cursor:    "c2.Zmlyc3Q",
 			Title:     "Catchup Issue 1",
 			Timestamp: time.Now().UTC().Add(-2 * time.Minute),
 		},
 		{
 			Type:      "update",
 			IssueID:   "loom-catchup-2",
-			Cursor:    "c1.last",
+			Cursor:    "c2.bGFzdA",
 			Title:     "Catchup Issue 2",
 			Timestamp: time.Now().UTC().Add(-1 * time.Minute),
 		},
@@ -489,18 +492,18 @@ func TestSSELive_CatchUpOnReconnect(t *testing.T) {
 
 	getMutationPage := func(_ context.Context, _ string, since string, _ int) (backend.MutationPage, error) {
 		if since == "$" {
-			return backend.MutationPage{Cursor: "c1.last"}, nil
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "c2.bGFzdA"}, nil
 		}
-		if since == "c1.last" {
-			return backend.MutationPage{Cursor: since}, nil
+		if since == "c2.bGFzdA" {
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: since}, nil
 		}
-		return backend.MutationPage{Events: catchUpEvents, Cursor: "c1.last"}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: catchUpEvents, Cursor: "c2.bGFzdA"}, nil
 	}
 
 	server := newLiveSSEServer(t, hub, getMutationPage)
 
 	// Connect with since= to trigger catch-up
-	client := connectSSEWithQuery(t, server.URL, "since=1000", nil)
+	client := connectSSEWithQuery(t, server.URL, "since=c2.c3RhcnQ", nil)
 	defer client.close()
 
 	// Should receive catch-up mutation events BEFORE the connected event.
@@ -511,6 +514,9 @@ func TestSSELive_CatchUpOnReconnect(t *testing.T) {
 	}
 	if evt1.Event != "mutation" {
 		t.Errorf("expected first event to be 'mutation' (catch-up), got %q", evt1.Event)
+	}
+	if evt1.ID != "c2.Zmlyc3Q" {
+		t.Fatalf("first replay cursor = %q", evt1.ID)
 	}
 	p1, _ := parseMutationPayload(evt1.Data)
 	if p1 == nil || p1.IssueID != "loom-catchup-1" {
@@ -523,6 +529,9 @@ func TestSSELive_CatchUpOnReconnect(t *testing.T) {
 	}
 	if evt2.Event != "mutation" {
 		t.Errorf("expected second event to be 'mutation' (catch-up), got %q", evt2.Event)
+	}
+	if evt2.ID != "c2.bGFzdA" {
+		t.Fatalf("second replay cursor = %q", evt2.ID)
 	}
 	p2, _ := parseMutationPayload(evt2.Data)
 	if p2 == nil || p2.IssueID != "loom-catchup-2" {
@@ -546,33 +555,84 @@ func TestSSELive_LastEventIDHeader(t *testing.T) {
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
-	var capturedSince string
+	capturedSince := make(chan string, 1)
 	getMutationPage := func(_ context.Context, _ string, since string, _ int) (backend.MutationPage, error) {
 		if since == "$" {
-			return backend.MutationPage{Cursor: "9876543210"}, nil
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "c2.aGVhZA"}, nil
 		}
-		capturedSince = since
-		return backend.MutationPage{Events: []backend.MutationData{}, Cursor: since}, nil
+		select {
+		case capturedSince <- since:
+		default:
+		}
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: []backend.MutationData{}, Cursor: since}, nil
 	}
 
 	server := newLiveSSEServer(t, hub, getMutationPage)
 
 	client := connectSSE(t, server.URL, map[string]string{
-		"Last-Event-ID": "9876543210",
+		"Last-Event-ID": "c2.aGVhZA",
 	})
 	defer client.close()
 
 	// Read connected event to ensure the handler has fully processed
-	_, err := client.readEvent(3 * time.Second)
+	connected, err := client.readEvent(3 * time.Second)
 	if err != nil {
 		t.Fatalf("failed to read connected event: %v", err)
 	}
+	if connected.Event != "connected" {
+		t.Fatalf("expected connected event, got %q", connected.Event)
+	}
 
-	if capturedSince != "9876543210" {
-		t.Errorf("expected getMutationsSince called with 9876543210, got %s", capturedSince)
+	select {
+	case since := <-capturedSince:
+		if since != "c2.aGVhZA" {
+			t.Errorf("expected exact opaque Last-Event-ID, got %q", since)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("bounded mutation source was not called")
 	}
 }
 
+// Legacy positions and missing source identity must fail closed before page delivery.
+func TestSSELive_InvalidAuthoritativeSource(t *testing.T) {
+	for _, tc := range []struct{ name, since, identity string }{
+		{"legacy cursor", "c1.c3RhcnQ", "s1.Zml4dHVyZQ"},
+		{"numeric cursor", "9876543210", "s1.Zml4dHVyZQ"},
+		{"missing source identity", "c2.c3RhcnQ", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hub := realtime.NewHub()
+			go hub.Run()
+			t.Cleanup(hub.Stop)
+			pages := make(chan struct{}, 1)
+			server := newLiveSSEServer(t, hub, func(_ context.Context, _ string, since string, _ int) (backend.MutationPage, error) {
+				if since != "$" {
+					select {
+					case pages <- struct{}{}:
+					default:
+					}
+				}
+				return backend.MutationPage{Cursor: "c2.c3RhcnQ", SourceIdentity: tc.identity}, nil
+			})
+			client := connectSSE(t, server.URL, map[string]string{"Last-Event-ID": tc.since})
+			defer client.close()
+			event, err := client.readEvent(3 * time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if event.Event != "resync" || event.ID != "" {
+				t.Fatalf("expected resync without checkpoint, got %#v", event)
+			}
+			select {
+			case <-pages:
+				t.Fatal("invalid source reached page delivery")
+			default:
+			}
+		})
+	}
+}
+
+// This nil-source legacy hub test checks framing only, not authoritative source validation.
 // TestSSELive_SourceCursorIDs preserves opaque durable cursors and omits
 // IDs for interleaved transient notifications.
 func TestSSELive_SourceCursorIDs(t *testing.T) {
