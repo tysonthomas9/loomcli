@@ -6,6 +6,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -29,11 +30,13 @@ func (app *Server) registerRoutes() {
 	// handlers. Non-/api paths fall through to Go's default text 404 — the
 	// frontend is served externally (reverse proxy / Vite preview), not by
 	// this server.
-	app.mux.Handle("/api/", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":"not found"}`))
-	}))
+	//
+	// This catch-all only covers the outer mux. Nested sub-muxes (the
+	// workspace mux below, the worker mux in handlers/misc) get the same
+	// envelope via handler.JSONFallbackMux, because once the outer mux
+	// dispatches into one of them an unmatched path would otherwise be
+	// answered by Go's built-in text/plain handler.
+	app.mux.HandleFunc("/api/", handler.JSONNotFound)
 	app.registerFrontendRoutes()
 }
 
@@ -179,10 +182,15 @@ func (app *Server) registerWorkspaceRoutes() {
 	// (a cheap trie lookup) and write it into the shared promRouteStore so
 	// metrics show granular routes (e.g., /api/workspaces/{ws}/issues) instead
 	// of the lumped prefix bucket.
+	// Unmatched paths under the sub-mux get the JSON error envelope instead of
+	// Go's text/plain 404/405. SetPromRoutePattern no-ops on an empty pattern,
+	// so unknown paths keep bucketing under the outer prefix label — do not
+	// label them individually or a scanner can explode the metric cardinality.
+	wsFallback := handler.JSONFallbackMux(wsMux)
 	wsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, pattern := wsMux.Handler(r)
 		webui.SetPromRoutePattern(r.Context(), pattern)
-		wsMux.ServeHTTP(w, r)
+		wsFallback.ServeHTTP(w, r)
 	})
 	app.mux.Handle("/api/workspaces/{ws}/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// /readyz is a runtime readiness probe consumed by ensure-runtime.
