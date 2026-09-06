@@ -1122,3 +1122,70 @@ func TestBuildAgentLaunchSpecFallsBackToWorkspaceBackend(t *testing.T) {
 		t.Fatalf("launch argv missing --backend codex: %v", launch.Argv)
 	}
 }
+
+// Acceptance criterion 1: a persona_source: profile interactive role launches
+// with --prompt builtin:none EVEN WHEN role.PromptFile is set. Without the
+// explicit flag the prompt-file branch would win here and re-introduce the
+// argv persona the role asked to suppress.
+func TestAgentLaunchCommandArgsPersonaSourceProfileSuppresses(t *testing.T) {
+	agent := &domain.Agent{Name: "lead-1", RoleName: "lead"}
+	role := &domain.Role{
+		Name:          "lead",
+		Kind:          domain.RoleKindInteractive,
+		PersonaSource: domain.PersonaSourceProfile,
+		PromptFile:    "prompts/lead.md",
+	}
+
+	args, err := agentLaunchCommandArgs(domain.RoleKindInteractive, agent, role)
+	if err != nil {
+		t.Fatalf("agentLaunchCommandArgs: %v", err)
+	}
+	want := []string{"lead", "--prompt", "builtin:none"}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+}
+
+// The pre-existing branches are untouched: a prompt-file-only role still gets
+// its file, and a role with neither still launches a bare `lead`.
+func TestAgentLaunchCommandArgsPersonaSourceArgvIsUnchanged(t *testing.T) {
+	agent := &domain.Agent{Name: "lead-1", RoleName: "lead"}
+
+	tests := []struct {
+		name string
+		role *domain.Role
+		want []string
+	}{
+		{
+			name: "prompt file, persona source unset",
+			role: &domain.Role{Name: "lead", Kind: domain.RoleKindInteractive, PromptFile: "prompts/lead.md"},
+			want: []string{"lead", "--prompt", "prompts/lead.md"},
+		},
+		{
+			name: "prompt file, persona source argv",
+			role: &domain.Role{Name: "lead", Kind: domain.RoleKindInteractive, PersonaSource: domain.PersonaSourceArgv, PromptFile: "prompts/lead.md"},
+			want: []string{"lead", "--prompt", "prompts/lead.md"},
+		},
+		{
+			name: "inline prompt keeps the file off argv",
+			role: &domain.Role{Name: "lead", Kind: domain.RoleKindInteractive, Prompt: "inline", PromptFile: "prompts/lead.md"},
+			want: []string{"lead"},
+		},
+		{
+			name: "no role at all",
+			role: nil,
+			want: []string{"lead"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, err := agentLaunchCommandArgs(domain.RoleKindInteractive, agent, tt.role)
+			if err != nil {
+				t.Fatalf("agentLaunchCommandArgs: %v", err)
+			}
+			if strings.Join(args, " ") != strings.Join(tt.want, " ") {
+				t.Fatalf("args = %v, want %v", args, tt.want)
+			}
+		})
+	}
+}
