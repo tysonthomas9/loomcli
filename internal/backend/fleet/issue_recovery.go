@@ -16,7 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 )
 
-const recoveryManifest = "fleet.issue-workspace.v2"
+const recoveryManifest = "fleet.issue-workspace.v3"
 const recoveryBodyLimit = 16 << 20
 const recoveryOp = "ReadIssueRecovery"
 
@@ -83,14 +83,15 @@ func classifyRecoveryHTTPError(resp *http.Response) error {
 }
 
 type recoveryWire struct {
-	Manifest  string             `json:"manifest"`
-	Workspace string             `json:"workspace"`
-	Through   string             `json:"through"`
-	Issues    *[]json.RawMessage `json:"issues"`
-	Total     *int64             `json:"total"`
-	Ready     *[]json.RawMessage `json:"ready"`
-	Blocked   *[]json.RawMessage `json:"blocked"`
-	Deferred  *[]json.RawMessage `json:"deferred"`
+	Manifest     string             `json:"manifest"`
+	Workspace    string             `json:"workspace"`
+	Through      string             `json:"through"`
+	Issues       *[]json.RawMessage `json:"issues"`
+	Total        *int64             `json:"total"`
+	Ready        *[]json.RawMessage `json:"ready"`
+	Blocked      *[]json.RawMessage `json:"blocked"`
+	Deferred     *[]json.RawMessage `json:"deferred"`
+	Dependencies *[]json.RawMessage `json:"dependencies"`
 }
 
 func validateRecoveryDocument(data []byte, ws string) (backend.IssueRecoverySnapshot, error) {
@@ -119,6 +120,9 @@ func validateRecoveryDocument(data []byte, ws string) (backend.IssueRecoverySnap
 				return backend.IssueRecoverySnapshot{}, err
 			}
 		}
+	}
+	if err := validateRecoveryDependencies(*wire.Dependencies, issues); err != nil {
+		return backend.IssueRecoverySnapshot{}, err
 	}
 	if err := validateRecoveryBlocked(*wire.Blocked, ws, issues); err != nil {
 		return backend.IssueRecoverySnapshot{}, err
@@ -374,19 +378,19 @@ func decodeRecoveryManifest(data []byte, ws string) (recoveryWire, error) {
 	if err := json.Unmarshal(data, &shape); err != nil {
 		return recoveryWire{}, err
 	}
-	for _, key := range []string{"manifest", "workspace", "through", "issues", "total", "ready", "blocked", "deferred"} {
+	for _, key := range []string{"manifest", "workspace", "through", "issues", "total", "ready", "blocked", "deferred", "dependencies"} {
 		if _, ok := shape[key]; !ok {
 			return recoveryWire{}, fmt.Errorf("missing %s", key)
 		}
 	}
-	if len(shape) != 8 {
+	if len(shape) != 9 {
 		return recoveryWire{}, fmt.Errorf("unexpected manifest fields")
 	}
 	var wire recoveryWire
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return recoveryWire{}, err
 	}
-	if wire.Manifest != recoveryManifest || wire.Workspace != ws || !strings.HasPrefix(wire.Through, fleetOpaqueCursorPrefix) || !isFixedFleetCursor(wire.Through) || wire.Issues == nil || wire.Total == nil || wire.Ready == nil || wire.Blocked == nil || wire.Deferred == nil || *wire.Total != int64(len(*wire.Issues)) {
+	if wire.Manifest != recoveryManifest || wire.Workspace != ws || !strings.HasPrefix(wire.Through, fleetOpaqueCursorPrefix) || !isFixedFleetCursor(wire.Through) || wire.Issues == nil || wire.Total == nil || wire.Ready == nil || wire.Blocked == nil || wire.Deferred == nil || wire.Dependencies == nil || *wire.Total != int64(len(*wire.Issues)) {
 		return recoveryWire{}, fmt.Errorf("incomplete manifest")
 	}
 

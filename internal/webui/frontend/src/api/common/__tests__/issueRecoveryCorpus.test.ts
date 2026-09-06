@@ -21,7 +21,7 @@ const offer: RecoveryHandle = {
   workspace: "WS",
   source_repos: [],
   expires_at: "2026-09-05T00:01:00Z",
-  manifest: "fleet.issue-workspace.v2",
+  manifest: "fleet.issue-workspace.v3",
 };
 
 describe("shared native recovery corpus", () => {
