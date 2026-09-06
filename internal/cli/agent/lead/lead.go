@@ -134,6 +134,10 @@ func runLead(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	// After the profile is settled and the backend is known: say so when this
+	// session's start state is not pinned to the provisioned baseline.
+	warnUnpinnedLeadModel(backendName)
+
 	// Best-effort: register this lead as an orchestrator session so workers
 	// the AI spawns via `loom agentdef add` are attributed back to it. Skips
 	// silently if there is no active workspace or fleet-db is unreachable.

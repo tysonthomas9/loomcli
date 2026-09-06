@@ -111,14 +111,26 @@ var newHarnessSessionID = uuid.NewString
 // the same role launched through RunControlledLeadRuntime. The knobs are
 // resolved through the same helpers the other builders use — keep it that way,
 // and add new backends by calling a helper rather than writing the flag out.
+//
+// The model pin is now part of what this builder must mirror: claude's
+// `--model` comes from pinnedClaudeModel(), the same resolver
+// buildClaudeInteractiveCmd uses, so a lead launched through here and one
+// launched through the LOOM_LEAD_CONTROLLED=0 fallback boot on the same model.
+// See model_pin.go for the precedence ladder.
 func harnessLeadInvocation(backend, workDir string) (harnessLeadLaunch, bool) {
 	switch backend {
 	case "claude":
 		sessionID := newHarnessSessionID()
 		env := append(buildClaudeEnv(workDir, ""), claudeVirtualScrollEnv)
+		args := []string{"--session-id", sessionID, "--dangerously-skip-permissions"}
+		if model := pinnedClaudeModel(); model != "" {
+			args = append(args, "--model", model)
+		}
+		// Safety args stay LAST, matching buildClaudeInteractiveCmd's ordering.
+		args = appendClaudeSafetyArgs(args)
 		return harnessLeadLaunch{
 			binary:           "claude",
-			args:             appendClaudeSafetyArgs([]string{"--session-id", sessionID, "--dangerously-skip-permissions"}),
+			args:             args,
 			env:              env,
 			harnessSessionID: sessionID,
 		}, true

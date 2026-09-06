@@ -354,6 +354,9 @@ func TestDefaultClaudeNonInteractiveInvoker_UsesWrapperWithClaudeHarness(t *test
 }
 
 func TestDefaultCodexNonInteractiveInvoker_UsesWrapperWithCodexHarness(t *testing.T) {
+	// See the note in backend_cmd_construction_test.go: agent shells export
+	// LOOM_AGENT_MODEL, which this argv assertion would otherwise inherit.
+	t.Setenv("LOOM_AGENT_MODEL", "")
 	requireBinaryOnPath(t, "codex")
 	fake := &fakeWrapperRun{result: wrapper.Result{Status: wrapper.StatusIdle}}
 	installWrapperRunMock(t, fake.Run)
