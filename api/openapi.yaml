@@ -4993,6 +4993,14 @@ paths:
           $ref: "#/components/responses/SkillAccessUnauthorized"
         "403":
           $ref: "#/components/responses/SkillAccessForbidden"
+        "404":
+          description: |
+            The workspace or the role does not exist in the skill store
+            (`code: skill_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillErrorResponse"
         "409":
           $ref: "#/components/responses/SkillConflict"
         "422":

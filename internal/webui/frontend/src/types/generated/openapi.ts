@@ -10182,6 +10182,18 @@ export interface operations {
       400: components["responses"]["SkillBadRequestPath"];
       401: components["responses"]["SkillAccessUnauthorized"];
       403: components["responses"]["SkillAccessForbidden"];
+      /**
+       * @description The workspace or the role does not exist in the skill store
+       *     (`code: skill_not_found`).
+       */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillErrorResponse"];
+        };
+      };
       409: components["responses"]["SkillConflict"];
       422: components["responses"]["SkillValidationFailed"];
       500: components["responses"]["SkillInternalError"];
