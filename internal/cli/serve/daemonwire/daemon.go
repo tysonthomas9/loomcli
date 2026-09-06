@@ -90,7 +90,12 @@ func BuildClaimHoldFn() agentcontrol.ClaimHoldFn {
 func sendControlRequestArgs(socketPath, op, agentName string, args json.RawMessage, readDeadline time.Duration) (*agentcontrol.AgentControlResult, error) {
 	conn, err := net.DialTimeout("unix", socketPath, 5*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("daemon is not running (no control socket at %s)", socketPath)
+		// Wrapped so the webui can tell "no socket at all" from "socket did not
+		// answer": a claim-hold *read* is answerable without a supervisor, and
+		// answering it 200 is what stops the dashboard's 10 s poll from being a
+		// permanent 503 stream (PUPPET-529). The operator-visible text of a
+		// write's 503 is written by writeDaemonError, not by this string.
+		return nil, fmt.Errorf("%w (no control socket at %s)", agentcontrol.ErrSupervisorUnavailable, socketPath)
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -147,7 +152,12 @@ func resolveControlSocketPath(projectDir string) string {
 func sendControlRequest(socketPath, op, agentName string, force bool, readDeadline time.Duration) (*agentcontrol.AgentControlResult, error) {
 	conn, err := net.DialTimeout("unix", socketPath, 5*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("daemon is not running (no control socket at %s)", socketPath)
+		// Wrapped so the webui can tell "no socket at all" from "socket did not
+		// answer": a claim-hold *read* is answerable without a supervisor, and
+		// answering it 200 is what stops the dashboard's 10 s poll from being a
+		// permanent 503 stream (PUPPET-529). The operator-visible text of a
+		// write's 503 is written by writeDaemonError, not by this string.
+		return nil, fmt.Errorf("%w (no control socket at %s)", agentcontrol.ErrSupervisorUnavailable, socketPath)
 	}
 	defer func() { _ = conn.Close() }()
 
