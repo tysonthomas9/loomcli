@@ -17,7 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 )
 
-const recoveryManifest = "fleet.issue-workspace.v1"
+const recoveryManifest = "fleet.issue-workspace.v2"
 const recoveryBodyLimit = 16 << 20
 const recoveryOp = "ReadIssueRecovery"
 

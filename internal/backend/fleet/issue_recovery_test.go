@@ -70,6 +70,7 @@ func TestReadIssueRecoveryRejectsInvalidDocument(t *testing.T) {
 		mutate func(map[string]any)
 		suffix string
 	}{
+		{name: "legacy lower-bound v1 manifest", mutate: func(d map[string]any) { d["manifest"] = "fleet.issue-workspace.v1" }},
 		{name: "case alias manifest", mutate: func(d map[string]any) { d["Manifest"] = d["manifest"]; delete(d, "manifest") }},
 
 		{name: "missing manifest", mutate: func(d map[string]any) { delete(d, "manifest") }},

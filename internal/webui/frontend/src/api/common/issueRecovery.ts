@@ -39,7 +39,7 @@ export interface NativeRecoveryBlocked {
 export interface PreparedIssueRecovery {
   readonly offer: RecoveryHandle;
   readonly document: string;
-  readonly manifest: "fleet.issue-workspace.v1";
+  readonly manifest: "fleet.issue-workspace.v2";
   readonly workspace: string;
   readonly through: string;
   readonly total: number;
@@ -352,7 +352,7 @@ export function prepareIssueRecovery(
   return freeze({
     document,
     offer: validatedOffer,
-    manifest: "fleet.issue-workspace.v1",
+    manifest: "fleet.issue-workspace.v2",
     workspace: validatedOffer.workspace,
     through,
     total: issues.length,
