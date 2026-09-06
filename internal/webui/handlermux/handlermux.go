@@ -16,12 +16,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workspace"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // Module is the interface for an HTTP route group that registers on a mux.
 type Module interface {
-	Register(mux *http.ServeMux)
+	Register(mux route.Router)
 }
 
 // WorkspaceOpsModule registers workspace-scoped operations routes.
@@ -82,7 +83,7 @@ func (m *WorkspaceOpsModule) WithLocalWorkspacePathFn(fn healthhandlers.Workspac
 }
 
 // Register implements Module.
-func (m *WorkspaceOpsModule) Register(mux *http.ServeMux) {
+func (m *WorkspaceOpsModule) Register(mux route.Router) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/repos", workspace.HandleListWorkspaceRepos(m.workspaceSvc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/repos", workspace.HandleAddWorkspaceRepos(m.workspaceSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/stats",
@@ -149,7 +150,9 @@ func HandleActiveWorkspace(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleActiveWorkspace(svc)
 }
 
-// SetupWorkerAPIRoutes re-exports misc.SetupWorkerAPIRoutes.
-func SetupWorkerAPIRoutes(mux *http.ServeMux, token string, resolveWorktree func(string, string) string, resolveEventsDir func(string) string, resolveLogPath func(string, string) string, validateWorkspace func(string) bool) {
-	misc.SetupWorkerAPIRoutes(mux, token, resolveWorktree, resolveEventsDir, resolveLogPath, validateWorkspace)
+// SetupWorkerAPIRoutes re-exports misc.SetupWorkerAPIRoutes, returning the
+// patterns registered on the inner worker sub-mux.
+func SetupWorkerAPIRoutes(mux route.Router, token string, resolveWorktree func(string, string) string, resolveEventsDir func(string) string, resolveLogPath func(string, string) string, validateWorkspace func(string) bool) []string {
+	_, patterns := misc.SetupWorkerAPIRoutes(mux, token, resolveWorktree, resolveEventsDir, resolveLogPath, validateWorkspace)
+	return patterns
 }

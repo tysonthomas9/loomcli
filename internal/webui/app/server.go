@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -47,8 +48,10 @@ type Server struct {
 	corsConfig middleware.CORSConfig
 
 	// HTTP routing
-	mux                 *http.ServeMux
-	wsModules           []wsModule // workspace-scoped route modules (registered on wsMux)
+	mux                 *route.Recorder
+	wsModules           []wsModule      // workspace-scoped route modules (registered on wsMux)
+	wsMuxRec            *route.Recorder // the wsMux built in registerRoutes; kept for route enumeration
+	workerRoutes        []string        // patterns mounted on the internal worker API sub-mux
 	connectorDispatcher *connector.Dispatcher
 
 	// Connection pools

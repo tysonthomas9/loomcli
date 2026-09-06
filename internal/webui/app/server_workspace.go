@@ -127,7 +127,7 @@ func (app *Server) registerWorkerAPIRoutes() {
 		return
 	}
 
-	handlermux.SetupWorkerAPIRoutes(app.mux, workerToken,
+	app.workerRoutes = handlermux.SetupWorkerAPIRoutes(app.mux, workerToken,
 		workerResolveWorktree(app.config.Store),
 		workerResolveEventsDir(app.config.Store),
 		workerResolveLogPath(app.config.Store),
