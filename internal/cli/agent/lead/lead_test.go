@@ -400,7 +400,7 @@ func TestRunLeadPrintPromptOmitsDynamicSections(t *testing.T) {
 }
 
 func TestRunLeadPrintPromptWorksWithoutWorkspace(t *testing.T) {
-	// No workspace and no LOOM_* pointers: loadLeadRolePrompt must fall through
+	// No workspace and no LOOM_* pointers: loadLeadRole must fall through
 	// to the built-in prompt instead of failing.
 	t.Setenv("LOOM_WORKSPACE", "")
 	t.Setenv("LOOM_AGENT_ROLE", "")

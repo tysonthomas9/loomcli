@@ -205,7 +205,7 @@ func leadRuntimePreflight() (workDir, backendName string, dedicated, ok bool) {
 }
 
 // printLeadPrompt writes the static lead prompt to stdout. The zero
-// registration is deliberate: loadLeadRolePrompt then opens its own short-lived
+// registration is deliberate: loadLeadRole then opens its own short-lived
 // read-only store handle, or returns "" when there is no workspace, so this
 // works outside a workspace and with fleet-db down.
 //
@@ -237,6 +237,19 @@ func printLeadPrompt() {
 // session under its own CLAUDE_CONFIG_DIR gets its persona: from the profile's
 // CLAUDE.md, not from a file in the workdir.
 //
+// A role with persona_source: profile suppresses the argv persona entirely -
+// the same end state as --prompt builtin:none, reached from durable config
+// instead of a flag. It is checked AFTER the explicit --prompt (an operator
+// naming a prompt is overriding their own config) and BEFORE the inline role
+// prompt, so a role can carry a persona for other consumers and still keep it
+// off this argv.
+//
+// seedAndShrink stays FALSE under suppression. Seeding exists for the codex
+// case where argv shrinks to the safety block and the persona has to land
+// somewhere; persona_source: profile is the operator asserting the ambient file
+// is already authoritative, so writing an AGENTS.md nobody asked for would be
+// loom overruling that assertion.
+//
 // The built-in lead prompt shrinks to the safety guardrails ONLY in a dedicated
 // workdir. Shrinking in the os.Getwd fallback would boot a lead with no persona
 // at all, or - worse, since seeding never overwrites - let it silently adopt an
@@ -246,8 +259,12 @@ func generateLeadTerminalPrompt(ctx context.Context, registration leadSessionReg
 		prompt, err := agent.GenerateTerminalPrompt(leadPromptFile)
 		return prompt, false, err
 	}
-	if prompt := loadLeadRolePrompt(ctx, registration); strings.TrimSpace(prompt) != "" {
-		prompt, err := agent.GenerateTerminalPromptText(prompt)
+	role := loadLeadRole(ctx, registration)
+	if role != nil && role.PersonaSource == domain.PersonaSourceProfile {
+		return "", false, nil
+	}
+	if role != nil && strings.TrimSpace(role.Prompt) != "" {
+		prompt, err := agent.GenerateTerminalPromptText(role.Prompt)
 		return prompt, false, err
 	}
 	if dedicated {
@@ -257,7 +274,14 @@ func generateLeadTerminalPrompt(ctx context.Context, registration leadSessionReg
 	return prompt, false, err
 }
 
-func loadLeadRolePrompt(ctx context.Context, registration leadSessionRegistration) string {
+// loadLeadRole fetches the role this lead session runs as, or nil.
+//
+// Every failure mode - no workspace, fleet-db unreachable, role absent -
+// returns nil, which is the fail-safe direction: the caller then falls through
+// to today's default and the lead boots with MORE persona rather than none. A
+// transport failure is logged at Warn so a lead that unexpectedly kept its argv
+// persona is diagnosable rather than merely puzzling.
+func loadLeadRole(ctx context.Context, registration leadSessionRegistration) *domain.Role {
 	roleName := strings.TrimSpace(os.Getenv("LOOM_AGENT_ROLE"))
 	if roleName == "" {
 		roleName = "lead"
@@ -272,29 +296,26 @@ func loadLeadRolePrompt(ctx context.Context, registration leadSessionRegistratio
 		var ok bool
 		handle, ws, ok = openLeadSessionStore(openCtx)
 		if !ok {
-			return ""
+			return nil
 		}
 		defer func() { _ = handle.Close() }()
 		st = handle.Store
 	}
 	if st == nil || st.Roles() == nil || ws == "" {
-		return ""
+		return nil
 	}
 
 	loadCtx, cancel := context.WithTimeout(ctx, leadStoreOpTimeout)
 	defer cancel()
 	role, err := st.Roles().Get(loadCtx, ws, roleName)
 	if errors.Is(err, domain.ErrNotFound) {
-		return ""
+		return nil
 	}
 	if err != nil {
-		slog.Warn("lead inline prompt lookup failed, using default prompt", "workspace", ws, "role", roleName, "err", err)
-		return ""
+		slog.Warn("lead role lookup failed, using default prompt", "workspace", ws, "role", roleName, "err", err)
+		return nil
 	}
-	if role == nil {
-		return ""
-	}
-	return role.Prompt
+	return role
 }
 
 // applyLeadPromptContext appends the backend assignment context and the
