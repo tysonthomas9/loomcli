@@ -121,8 +121,10 @@ function StoreWiring({
   const queryRecovery = useContext(QueryRecoveryContext);
   useEffect(() => {
     if (!queryRecovery) return;
-    const removeIssues = queryRecovery.register("issues", (signal) =>
-      issueStore.getState().refreshForRecovery(signal, workspaceId),
+    const removeIssues = queryRecovery.register(
+      "issues",
+      (signal) => issueStore.getState().refreshForRecovery(signal, workspaceId),
+      () => issueStore.getState().getRecoveryRevision(),
     );
     const removeAgents = queryRecovery.register("agents", (signal) =>
       agentStore.getState().refreshForRecovery(signal, workspaceId),

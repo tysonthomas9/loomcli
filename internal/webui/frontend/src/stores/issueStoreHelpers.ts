@@ -124,6 +124,8 @@ export interface UpdateIssueStatusOptions {
 }
 
 export interface IssueStoreActions {
+  /** Changes when scope, commands or accepted events invalidate recovery. */
+  getRecoveryRevision: () => number;
   /** Resolves only after a new request commits to the still-current scope. */
   refreshForRecovery: (
     signal: AbortSignal,
