@@ -22,9 +22,26 @@ func TestClaudeInteractiveArgs_CarryModel(t *testing.T) {
 
 func TestClaudeInteractiveArgs_NoModelWhenUnset(t *testing.T) {
 	t.Setenv("LOOM_AGENT_MODEL", "")
+	// The builder now falls back to the profile's provisioned baseline, so
+	// "unset" means both inputs — otherwise this asserts on whatever profile
+	// the shell running the suite happens to be pointed at.
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	cmd := buildClaudeInteractiveCmd("/tmp/wd", "p", "a")
 	if got := strings.Join(cmd.Args, " "); strings.Contains(got, "--model") {
 		t.Fatalf("claude interactive args = %q, want no --model", got)
+	}
+}
+
+// The interactive builder also serves the lead's LOOM_LEAD_CONTROLLED=0
+// fallback, so it must reach the same launch state as harnessLeadInvocation.
+func TestClaudeInteractiveArgs_CarryProvisionedModel(t *testing.T) {
+	t.Setenv("LOOM_AGENT_MODEL", "")
+	t.Setenv("LOOM_AGENT_EFFORT", "")
+	t.Setenv("LOOM_CLAUDE_EFFORT", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", writePinnedProfile(t, "settings.json", `{"model":"opus[1m]"}`))
+	cmd := buildClaudeInteractiveCmd("/tmp/wd", "p", "a")
+	if got := strings.Join(cmd.Args, " "); !strings.Contains(got, "--model opus[1m]") {
+		t.Fatalf("claude interactive args = %q, want --model opus[1m]", got)
 	}
 }
 
