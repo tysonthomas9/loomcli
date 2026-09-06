@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
@@ -33,7 +34,7 @@ import (
 // Cleans up rate limiter goroutines when the test finishes.
 func setupTestRoutes(t *testing.T, app *Server) {
 	t.Helper()
-	app.mux = http.NewServeMux()
+	app.mux = route.NewRecorder()
 	app.buildHandlers()
 	app.buildModules()
 	app.registerRoutes()

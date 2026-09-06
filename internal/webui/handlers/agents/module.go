@@ -1,8 +1,7 @@
 package agents
 
 import (
-	"net/http"
-
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -17,7 +16,7 @@ func NewModule(agentSvc service.AgentService, hub *realtime.Hub) *Module {
 	return &Module{agentSvc: agentSvc, hub: hub}
 }
 
-func (m *Module) Register(mux *http.ServeMux) {
+func (m *Module) Register(mux route.Router) {
 	if m.agentSvc == nil {
 		return
 	}

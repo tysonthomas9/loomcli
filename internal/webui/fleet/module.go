@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -43,7 +44,7 @@ func NewModule(
 // Register implements [Module] by registering 4 fleet routes.
 // Claim, done, and heartbeat routes are wrapped with FleetAuthMiddleware
 // when tokenCfg has a signing key.
-func (m *Module) Register(mux *http.ServeMux) {
+func (m *Module) Register(mux route.Router) {
 	// Register — no auth middleware (self-registration)
 	mux.HandleFunc("POST /api/workspaces/{ws}/fleet/register",
 		FleetWSHandler(m.fleetStoreFn, func(s *Store) http.HandlerFunc {
