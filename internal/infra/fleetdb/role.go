@@ -28,6 +28,7 @@ type roleWire struct {
 	Model          string                  `json:"model,omitempty"`
 	TaskFilter     string                  `json:"task_filter,omitempty"`
 	Executor       string                  `json:"executor,omitempty"`
+	PersonaSource  string                  `json:"persona_source,omitempty"`
 	Backend        string                  `json:"backend,omitempty"`
 	Effort         string                  `json:"effort,omitempty"`
 	PathPatterns   []string                `json:"path_patterns,omitempty"`
@@ -55,6 +56,7 @@ func (r roleWire) toDomain() *domain.Role {
 		Model:          r.Model,
 		TaskFilter:     r.TaskFilter,
 		Executor:       r.Executor,
+		PersonaSource:  r.PersonaSource,
 		Backend:        r.Backend,
 		Effort:         r.Effort,
 		PathPatterns:   r.PathPatterns,
@@ -82,6 +84,7 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 		Model          string                  `json:"model,omitempty"`
 		TaskFilter     string                  `json:"task_filter,omitempty"`
 		Executor       string                  `json:"executor,omitempty"`
+		PersonaSource  string                  `json:"persona_source,omitempty"`
 		Backend        string                  `json:"backend,omitempty"`
 		Effort         string                  `json:"effort,omitempty"`
 		PathPatterns   []string                `json:"path_patterns,omitempty"`
@@ -103,6 +106,7 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 		Model:          in.Model,
 		TaskFilter:     in.TaskFilter,
 		Executor:       in.Executor,
+		PersonaSource:  in.PersonaSource,
 		Backend:        in.Backend,
 		Effort:         in.Effort,
 		PathPatterns:   in.PathPatterns,
@@ -160,6 +164,7 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 		Model               *string                 `json:"model,omitempty"`
 		TaskFilter          *string                 `json:"task_filter,omitempty"`
 		Executor            *string                 `json:"executor,omitempty"`
+		PersonaSource       *string                 `json:"persona_source,omitempty"`
 		Backend             *string                 `json:"backend,omitempty"`
 		Effort              *string                 `json:"effort,omitempty"`
 		PathPatterns        *[]string               `json:"path_patterns,omitempty"`
@@ -178,20 +183,21 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 		MaxRunDuration      *int                    `json:"max_run_duration,omitempty"`
 		ClearMaxRunDuration bool                    `json:"clear_max_run_duration,omitempty"`
 	}{
-		Description:  patch.Description,
-		Kind:         patch.Kind,
-		Prompt:       patch.Prompt,
-		PromptFile:   patch.PromptFile,
-		Model:        patch.Model,
-		TaskFilter:   patch.TaskFilter,
-		Executor:     patch.Executor,
-		Backend:      patch.Backend,
-		Effort:       patch.Effort,
-		PathPatterns: patch.PathPatterns,
-		Skills:       patch.Skills,
-		ReadOnly:     patch.ReadOnly,
-		AllowedTools: patch.AllowedTools,
-		DeniedTools:  patch.DeniedTools,
+		Description:   patch.Description,
+		Kind:          patch.Kind,
+		Prompt:        patch.Prompt,
+		PromptFile:    patch.PromptFile,
+		Model:         patch.Model,
+		TaskFilter:    patch.TaskFilter,
+		Executor:      patch.Executor,
+		PersonaSource: patch.PersonaSource,
+		Backend:       patch.Backend,
+		Effort:        patch.Effort,
+		PathPatterns:  patch.PathPatterns,
+		Skills:        patch.Skills,
+		ReadOnly:      patch.ReadOnly,
+		AllowedTools:  patch.AllowedTools,
+		DeniedTools:   patch.DeniedTools,
 	}
 	// input_policy is `omitempty` on a pointer, so a &nil patch would serialize
 	// to nothing at all and read on the server as "leave it alone" — silently
