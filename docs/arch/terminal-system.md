@@ -438,6 +438,28 @@ Caveats:
   takes effect silently. The only mitigation today is the pointer prompt's instruction to
   stop and report when the role instructions are absent.
 
+### Safety-block drift (`internal/cli/agent/lead/safety_drift.go`)
+
+`--prompt builtin:none` suppresses the argv persona entirely, which also takes the
+multi-agent safety block off argv — and that block is rendered per run and per backend
+precisely so it cannot become a static file that silently goes stale (see
+`LeadAgentsFileText`). A suppressed lead therefore has to prove the block is still in the
+ambient file the harness will actually read:
+
+| Harness | File checked |
+|---|---|
+| claude | `$CLAUDE_CONFIG_DIR/CLAUDE.md` — the profile's own copy; the workdir is irrelevant, that is what `CLAUDE_CONFIG_DIR` relocates |
+| codex | `<lead workdir>/AGENTS.md`, and only when the workdir is **dedicated** |
+
+`CheckAmbientSafetyBlock` normalises CRLF and per-line trailing whitespace on both sides and
+then requires the file to *contain* `agent.LeadSafetyPrompt()`. Anything else — a stale file,
+a missing file, no `CLAUDE_CONFIG_DIR`, a non-dedicated workdir — is a refusal with a repair
+recipe, never a degraded launch. `loom doctor` runs the same check (`lead_safety_drift`) and
+**skips** entirely for a lead whose persona is on argv, where nothing can go stale.
+
+The check sits *after* the `--print-prompt` early return in `runLead`, because
+`--print-prompt` is how the ambient file is generated in the first place.
+
 ---
 
 ## 9. Crash Recovery and Staleness Detection
