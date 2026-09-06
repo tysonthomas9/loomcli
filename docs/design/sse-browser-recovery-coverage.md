@@ -16,6 +16,8 @@ The authenticated handle bridge supplies a source-bound issue read. Browser offe
 
 FleetDB's `fleet.issue-workspace.v1` contains complete issue rows, total, ready, blocked and deferred collections. It contains no graph edges, detail relationship collections, comments or history. The fixed read is useful but cannot satisfy the table above by itself.
 
+The [native preparation and HTTP API](../testing/sse-native-recovery-preparation-proof.md) now implement the off-store read/validation seam. They remain disconnected from EventProvider and cache publication.
+
 ## Chosen next implementation
 
 1. Prepare the native manifest off-store. Preserve original records and metadata, validate scope/handle echo/manifest/through and derived-record consistency, and record explicit supported coverage. Do not fabricate missing graph edges or detail collections.
