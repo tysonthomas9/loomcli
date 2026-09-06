@@ -53,7 +53,7 @@ function offer(): RecoveryHandle {
     workspace: mocks.workspace,
     source_repos: repos ?? [],
     expires_at: new Date(Date.now() + 60_000).toISOString(),
-    manifest: "fleet.issue-workspace.v2",
+    manifest: "fleet.issue-workspace.v3",
   };
 }
 function prepared(input: RecoveryHandle) {
@@ -67,6 +67,7 @@ function prepared(input: RecoveryHandle) {
       ready: [],
       blocked: [],
       deferred: [],
+      dependencies: [],
     }),
     input,
     input.handle,
