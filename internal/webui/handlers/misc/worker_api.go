@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -436,18 +437,21 @@ func appendToLogFile(logPath string, data []byte) error {
 // resolveEventsDir maps workspace UUID to its events directory.
 // resolveLogPath maps (workspace UUID, agent) to the agent's log file path.
 // validateWorkspace checks whether a workspace UUID is known; nil skips validation.
+//
+// The returned patterns are those of the INNER worker sub-mux, which the caller
+// cannot otherwise see: only the two mount points land on the mux passed in.
 func SetupWorkerAPIRoutes(
-	mux *http.ServeMux,
+	mux route.Router,
 	workerToken string,
 	resolveWorktreePath func(workspace, agent string) string,
 	resolveEventsDir func(workspace string) string,
 	resolveLogPath func(workspace, agent string) string,
 	validateWorkspace func(id string) bool,
-) *WorkerRegistry {
+) (*WorkerRegistry, []string) {
 	registry := NewWorkerRegistry()
 
 	// Create an inner mux for worker API routes
-	workerMux := http.NewServeMux()
+	workerMux := route.NewRecorder()
 	workerMux.HandleFunc("POST /api/internal/workers/register", HandleWorkerRegister(registry, validateWorkspace))
 	workerMux.HandleFunc("DELETE /api/internal/workers/{id}", handleWorkerDeregister(registry))
 	workerMux.HandleFunc("POST /api/internal/workers/{id}/state", handleWorkerState(registry, resolveWorktreePath))
@@ -459,5 +463,5 @@ func SetupWorkerAPIRoutes(
 	mux.Handle("/api/internal/workers/", authed)
 	mux.Handle("POST /api/internal/workers/register", authed)
 
-	return registry
+	return registry, workerMux.Patterns()
 }

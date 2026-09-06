@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/backends"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
@@ -28,7 +29,7 @@ var logger = slog.Default()
 
 // module is a local interface matching webui.Module for compile-time assertions.
 type module interface {
-	Register(mux *http.ServeMux)
+	Register(mux route.Router)
 }
 
 // FileModule → Module (struct alias)

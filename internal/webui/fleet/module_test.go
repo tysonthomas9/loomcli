@@ -4,10 +4,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 )
 
 // Compile-time assertion: *Module implements the Register method.
-var _ interface{ Register(*http.ServeMux) } = (*Module)(nil)
+var _ interface{ Register(route.Router) } = (*Module)(nil)
 
 func TestFleetModule_RegisterRoutes(t *testing.T) {
 	storeFn := func(_ string) (*Store, bool) { return nil, false }

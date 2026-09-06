@@ -1,9 +1,8 @@
 package issues
 
 import (
-	"net/http"
-
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -32,7 +31,7 @@ func NewIssueModule(svc service.IssueService, st store.Store) *IssueModule {
 }
 
 // Register implements [Module] by registering the workspace-scoped issue routes.
-func (m *IssueModule) Register(mux *http.ServeMux) {
+func (m *IssueModule) Register(mux route.Router) {
 	// Search — must register alongside {id} because Go 1.22+ ServeMux prefers
 	// the literal "search" segment over the {id} wildcard, so this will route
 	// correctly even though both patterns share the same prefix.

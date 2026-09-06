@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 )
 
 // testModule is a simple Module that registers a single GET route.
@@ -13,7 +15,7 @@ type testModule struct {
 	body    string
 }
 
-func (m *testModule) Register(mux *http.ServeMux) {
+func (m *testModule) Register(mux route.Router) {
 	body := m.body
 	mux.HandleFunc(m.pattern, func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprint(w, body)
@@ -23,7 +25,7 @@ func (m *testModule) Register(mux *http.ServeMux) {
 // emptyModule is a Module with a no-op Register.
 type emptyModule struct{}
 
-func (emptyModule) Register(_ *http.ServeMux) {}
+func (emptyModule) Register(_ route.Router) {}
 
 func TestModuleInterface_RegisterAddsRoutes(t *testing.T) {
 	mod := &testModule{pattern: "GET /test-ping", body: "pong"}

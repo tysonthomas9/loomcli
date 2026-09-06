@@ -1,8 +1,7 @@
 package git
 
 import (
-	"net/http"
-
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -26,7 +25,7 @@ func NewModule(agentSvc service.AgentService, diffSvc service.DiffService) *Modu
 }
 
 // Register implements [Module] by registering 13 git and diff routes.
-func (m *Module) Register(mux *http.ServeMux) {
+func (m *Module) Register(mux route.Router) {
 	// Git operations (agent-scoped)
 	mux.HandleFunc("POST /api/workspaces/{ws}/git/push-all", HandleGitPushAll(m.agentSvc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/push", HandleGitPush(m.agentSvc))
