@@ -1,0 +1,19 @@
+
+Running 7 tests using 1 worker
+
+(node:68077) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:68077) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1/7] [integration] › tests/e2e/integration/sse-multiclient.integration.spec.ts:142:1 › create and status frames reach two independent clients once @regression
+[2/7] [integration] › tests/e2e/integration/sse-multiclient.integration.spec.ts:189:1 › real proxy disconnect resumes both accepted cursors without replay gaps or duplicates @regression
+[3/7] [integration] › tests/e2e/integration/sse-updates.integration.spec.ts:134:1 › fetch SSE establishes with a connected frame @smoke
+[4/7] [integration] › tests/e2e/integration/sse-updates.integration.spec.ts:153:1 › API-created issue renders before projection refresh then converges @smoke
+[5/7] [integration] › tests/e2e/integration/sse-updates.integration.spec.ts:176:1 › status moves before projection refresh then converges @smoke
+[6/7] [integration] › tests/e2e/integration/sse-updates.integration.spec.ts:214:1 › rapid creates each reach the browser exactly once in the observed interval @regression
+[7/7] [integration] › tests/e2e/integration/sse-updates.integration.spec.ts:238:1 › close leaves Open through the observed stream without reload @regression
+  7 passed (32.2s)

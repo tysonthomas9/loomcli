@@ -156,8 +156,8 @@ PostgreSQL port is not published; its fixed credentials are disposable local
 fixture credentials, not deployment configuration.
 
 This path uses `localdogfood`, not a paid AI backend. Successful startup is not
-proof of SSE delivery or autonomous task completion. Enrolled public claim/release
-routing remains incomplete; report daemon failures rather than substituting
+proof of SSE delivery or autonomous task completion. Use the paired public issue routing changes for claim/release; other lifecycle
+routing remains incomplete. Report daemon failures rather than substituting
 manual locks or synthetic outcomes. Browser verification must record actual
 stream requests and UI updates separately from startup.
 
@@ -216,3 +216,14 @@ report at `internal/webui/frontend/test-results/pg-sse-report.json`; set
 `PLAYWRIGHT_JSON_OUTPUT_FILE` to preserve it elsewhere. Do not publish general
 HAR files or host credentials. No reload fallback, retry-on-failure test rerun or
 manual database enrollment is permitted to turn a failure into a pass.
+
+The SSE gate creates fresh workspaces through actual POST201 responses and verifies
+that they have no agents. Existing localdogfood agents remain in their original
+workspace; they cannot claim the suite's tasks. Each spec uses explicit workspace
+IDs and the existing source repository (`LOOM_SSE_TEST_SOURCE_REPO`, default
+`/workspace/source-repo`). Tests close their tasks; matching owned-project teardown
+removes the temporary workspaces and volumes. Do not substitute arbitrary issue
+types or relax event-count assertions to avoid autonomous-worker interference.
+
+The [final paired proof](../../docs/testing/postgres-sse-regression-proof.md) records
+seven real browser passes, exact traces and remaining architecture limits.
