@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Search failures must not masquerade as a clean architecture check.
+if ! command -v rg >/dev/null 2>&1; then
+  echo "Error: ripgrep (rg) is required for the control-plane path guard." >&2
+  exit 127
+fi
+
+# ripgrep uses 1 for no matches and 2 for errors. Only no matches is benign.
+run_rg() {
+  local status=0
+  rg "$@" || status=$?
+  if [[ $status -ne 0 && $status -ne 1 ]]; then
+    echo "Error: control-plane ripgrep search failed (exit $status)." >&2
+    return "$status"
+  fi
+}
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
@@ -38,13 +54,13 @@ fail_with_matches() {
 # flag other packages named memstore (e.g. harness-wrapper's chat/memstore,
 # an in-process chat turn-metadata store), and any use of the loomcli
 # memstore requires importing it.
-rg -n \
+run_rg -n \
   -e 'github\.com/tysonthomas9/loomcli/internal/infra/memstore' \
   cmd internal \
   --glob '*.go' \
   --glob '!**/*_test.go' \
   --glob '!internal/infra/memstore/**' \
-  >"$tmp" || true
+  >"$tmp"
 
 if [[ -s "$tmp" ]]; then
   fail_with_matches \
@@ -55,14 +71,14 @@ fi
 # Runtime code outside bootstrap should not import the fleet-db store client
 # directly. Bootstrap owns local/cloud selection and returns the store.Store
 # handle callers should use.
-rg -n \
+run_rg -n \
   -e 'github\.com/tysonthomas9/loomcli/internal/infra/fleetdb' \
   cmd internal \
   --glob '*.go' \
   --glob '!**/*_test.go' \
   --glob '!internal/bootstrap/openstore.go' \
   --glob '!internal/infra/fleetdb/**' \
-  >"$tmp" || true
+  >"$tmp"
 
 if [[ -s "$tmp" ]]; then
   fail_with_matches \
@@ -73,11 +89,11 @@ fi
 # The fleet-db store client should be constructed by the bootstrap opener only.
 # That keeps local/cloud selection centralized and prevents alternate runtime
 # control-plane paths from growing in command or UI code.
-rg -n 'fleetdb\.New\(' \
+run_rg -n 'fleetdb\.New\(' \
   cmd internal \
   --glob '*.go' \
   --glob '!**/*_test.go' \
-  >"$tmp" || true
+  >"$tmp"
 
 if [[ -s "$tmp" ]]; then
   disallowed="$(mktemp)"
@@ -98,9 +114,10 @@ if [[ -s "$tmp" ]]; then
 fi
 
 # The deployment mode enum is intentionally closed over local/cloud.
-rg -o 'Mode[A-Z][A-Za-z0-9_]*' internal/bootstrap/mode.go \
+modes="$(run_rg -o 'Mode[A-Z][A-Za-z0-9_]*' internal/bootstrap/mode.go)"
+printf '%s\n' "$modes" \
   | sort -u \
-  | grep -vxE 'ModeLocal|ModeCloud' \
+  | grep -vxE 'ModeLocal|ModeCloud|^$' \
   >"$tmp" || true
 
 if [[ -s "$tmp" ]]; then
