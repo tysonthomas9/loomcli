@@ -14,7 +14,7 @@ const offer: RecoveryHandle = {
   workspace: "WS",
   source_repos: [],
   expires_at: "2026-09-05T12:01:00Z",
-  manifest: "fleet.issue-workspace.v4",
+  manifest: "fleet.issue-workspace.v5",
 };
 const document = JSON.stringify({
   manifest: offer.manifest,
@@ -27,6 +27,7 @@ const document = JSON.stringify({
   deferred: [],
   dependencies: [],
   comments: [],
+  history: null,
 });
 const headers = {
   "X-Loom-Recovery-Source": offer.source_identity,
@@ -59,6 +60,22 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 describe("readIssueRecovery", () => {
+  it("rejects a selected-history document on the unselected HTTP read", async () => {
+    const selected = JSON.stringify({
+      ...JSON.parse(document),
+      history: {
+        issue_id: "WS-absent",
+        present: false,
+        events: [],
+        has_older: false,
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(response([encoder.encode(selected)])),
+    );
+    await expect(read()).rejects.toThrow();
+  });
   it("preserves document and sends authenticated bodyless POST", async () => {
     const raw = ` ${document}\n`;
     const bytes = encoder.encode(raw);

@@ -8,7 +8,7 @@ const offer: RecoveryHandle = {
   workspace: "WS",
   source_repos: [],
   expires_at: "2026-09-05T12:01:00Z",
-  manifest: "fleet.issue-workspace.v4",
+  manifest: "fleet.issue-workspace.v5",
 };
 function issue(id = "WS-1"): Record<string, unknown> {
   return {
@@ -39,6 +39,7 @@ function document(): Record<string, unknown> {
     deferred: [],
     dependencies: [],
     comments: [],
+    history: null,
   };
 }
 function prepare(value: unknown) {
