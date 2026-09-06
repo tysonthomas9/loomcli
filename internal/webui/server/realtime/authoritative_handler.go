@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -22,11 +23,12 @@ type authoritativeSession struct {
 	fence     string
 	passReady bool
 	fresh     bool
+	principal string
 }
 
 // serveAuthoritative uses one source cursor for replay and live reconciliation.
 // A fresh head means subscribe-from, not acknowledgment of a query snapshot.
-func (h *Handler) serveAuthoritative(w http.ResponseWriter, r *http.Request, client *Client, cursor string, handshake trace.Span) {
+func (h *Handler) serveAuthoritative(w http.ResponseWriter, r *http.Request, client *Client, cursor, principal string, handshake trace.Span) {
 	sw, err := h.writerFactory(w)
 	if err != nil {
 		handshake.End()
@@ -37,7 +39,7 @@ func (h *Handler) serveAuthoritative(w http.ResponseWriter, r *http.Request, cli
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
-	session := authoritativeSession{handler: h, client: client, writer: sw, ctx: r.Context()}
+	session := authoritativeSession{handler: h, client: client, writer: sw, ctx: r.Context(), principal: principal}
 	if err := session.initialize(cursor); err != nil {
 		session.fail(err)
 		handshake.End()
@@ -139,7 +141,19 @@ func (s *authoritativeSession) fail(err error) {
 	if errors.Is(err, backend.ErrMutationCursorExpired) {
 		reason = "expired"
 	}
-	_ = s.writer.WriteEventNoID("resync", fmt.Sprintf(`{"reason":%q}`, reason))
+	payload := struct {
+		Reason   string          `json:"reason"`
+		Recovery *RecoveryHandle `json:"recovery,omitempty"`
+	}{Reason: reason}
+	if reason == "expired" && s.principal != "" && s.handler.recoveryRegistry != nil {
+		if reader, ok := s.source.(backend.IssueRecoveryBackend); ok {
+			if handle, err := s.handler.recoveryRegistry.Register(s.principal, s.client.workspaceID, s.client.sourceRepos, reader); err == nil {
+				payload.Recovery = &handle
+			}
+		}
+	}
+	data, _ := json.Marshal(payload)
+	_ = s.writer.WriteEventNoID("resync", string(data))
 }
 
 func (s *authoritativeSession) catchUp(ticks <-chan time.Time) error {
