@@ -254,7 +254,7 @@ func serveStatsViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 	if err != nil {
 		// A throttle is not an outage. Every other backend error keeps the
 		// historical blanket 500 on this endpoint — widening that to
-		// handler.StatusForKind is a separate behaviour change.
+		// handler.StatusForKind is a separate behavior change.
 		if svcErr := service.FromBackendError(err); svcErr.Kind == service.KindRateLimited {
 			if svcErr.RetryAfter != "" {
 				w.Header().Set("Retry-After", svcErr.RetryAfter)
