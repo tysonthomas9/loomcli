@@ -25,7 +25,13 @@ func resolvePath(baseDir, path string) string {
 type DaemonRuntimeInfo struct {
 	Running bool   // true if a live daemon process was confirmed
 	PID     int    // PID of the daemon (0 if unknown)
-	Source  string // which source confirmed liveness: "lock", "state", ""
+	Source  string // which source confirmed liveness: "lock", "state", "workspace-lock", ""
+	// Cwd and Socket are the daemon's own project dir and control socket
+	// path, when the confirming source knows them. Only the workspace-lock
+	// sidecar carries them today; other sources leave them empty, and an
+	// empty value means "unknown", not "none".
+	Cwd    string
+	Socket string
 }
 
 // DetectDaemonRuntime resolves daemon liveness from authoritative sources in

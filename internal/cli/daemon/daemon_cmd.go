@@ -48,6 +48,7 @@ type DaemonAgentStatus struct {
 	OwnershipFencingToken  int64     `json:"ownership_fencing_token,omitempty"`
 	OwnershipLastHeartbeat time.Time `json:"ownership_last_heartbeat,omitempty"`
 	LastActivity           time.Time `json:"last_activity,omitempty"`
+	ClaimsGated            bool      `json:"claims_gated,omitempty"` // cycling but gated by an active claim hold
 }
 
 // DaemonState represents the complete daemon state in daemon-agents.json
@@ -59,6 +60,9 @@ type DaemonState struct {
 	// no-progress kills (plus pending retries when the write is failing).
 	// Display-only: never hydrated back into supervision across restarts.
 	QuarantinedTasks []supervisor.QuarantinedTaskInfo `json:"quarantined_tasks,omitempty"`
+	// ClaimHold is the workspace-level refusal to START new work, when one is
+	// active. Runs already in flight are unaffected by it.
+	ClaimHold *supervisor.ClaimHold `json:"claim_hold,omitempty"`
 }
 
 // Cobra command variables
@@ -87,6 +91,8 @@ Commands:
   loom daemon start <agent>        Start a previously stopped agent
   loom daemon restart <agent>      Restart a single agent with fresh state
   loom daemon queue <agent>        Preview an agent's filtered work queue
+  loom daemon hold                 Stop claiming new work (running agents untouched)
+  loom daemon release              Release the claim hold
 
 Configuration is managed with FleetDB-backed daemon, role, and agent commands.`,
 	Run: runDaemon,
@@ -154,6 +160,8 @@ func init() {
 	daemonCmd.AddCommand(daemonQueueCmd)
 	daemonCmd.AddCommand(daemonAnswerCmd)
 	daemonCmd.AddCommand(daemonConfigCmd)
+	daemonCmd.AddCommand(daemonHoldCmd)
+	daemonCmd.AddCommand(daemonReleaseCmd)
 	cli.RegisterCommand(daemonCmd)
 }
 
@@ -257,9 +265,26 @@ func runDaemonBody() int {
 	// keep that invariant so this deferred cleanup cannot race a state write.
 	defer os.Remove(paths.stateFile)
 
+	recordDaemonPaths(wsLock, config, projectDir, paths)
+
 	shutdown, daemon := initDaemonServices(config, projectDir, paths)
+	// Hydrate the hold BEFORE any agent can cycle, and wire persistence so
+	// socket operations reach the file.
+	hydrateClaimHold(daemon, paths.claimHoldFile)
 
 	return runDaemonMainLoop(config, projectDir, paths, shutdown, daemon, lockFile)
+}
+
+// recordDaemonPaths annotates the workspace PID sidecar with this daemon's
+// project dir, control socket and claim-hold file, before any service starts,
+// so `loom daemon hold`/`release` can find the socket from any cwd as early as
+// possible. Best-effort: a daemon that cannot annotate its sidecar still runs,
+// and callers just fall back to the cwd-derived socket.
+func recordDaemonPaths(wsLock *workspaceDaemonLock, config *cfgpkg.DaemonConfig, projectDir string, paths daemonPaths) {
+	socketPath := resolveDaemonSocketPath(projectDir, config.Daemon.PIDFile)
+	if err := wsLock.UpdatePaths(projectDir, socketPath, paths.claimHoldFile); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: recording daemon paths in workspace lock: %v\n", err)
+	}
 }
 
 // awaitDaemonExit blocks until the daemon's main loop should exit. Returns 0
@@ -285,6 +310,10 @@ type daemonPaths struct {
 	stateFile string
 	lockFile  string
 	eventsDir string
+	// claimHoldFile persists the workspace claim hold. Unlike pidFile and
+	// stateFile it is NOT removed on shutdown — surviving a daemon restart is
+	// the entire point of the hold.
+	claimHoldFile string
 }
 
 // resolveDaemonPaths resolves all daemon-related filesystem paths.
@@ -296,6 +325,8 @@ func resolveDaemonPaths(projectDir string, config *cfgpkg.DaemonConfig) daemonPa
 		stateFile: cfgpkg.ResolveDaemonStatePath(projectDir),
 		lockFile:  filepath.Join(filepath.Dir(pidFile), "daemon.lock"),
 		eventsDir: supervisor.ResolveDaemonPath(projectDir, config.Daemon.EventsDir),
+
+		claimHoldFile: resolveClaimHoldPath(pidFile),
 	}
 }
 
@@ -355,7 +386,8 @@ func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths dae
 	}
 
 	startedAt := time.Now()
-	if err := writeStateFile(paths.stateFile, startedAt, daemon.Agents(), daemon.QuarantinedTasks(), maxRetries); err != nil {
+	if err := writeStateFile(paths.stateFile, startedAt, daemon.Agents(), daemon.QuarantinedTasks(), maxRetries,
+		daemon.sup.ClaimHoldSnapshot()); err != nil {
 		fmt.Printf("Warning: failed to write initial state file: %v\n", err)
 	}
 
@@ -506,6 +538,8 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 
 	fmt.Printf("Started: %s\n", state.StartedAt.Format(time.RFC3339))
 	fmt.Printf("Agents: %d\n", len(state.Agents))
+	printClaimHoldBanner(state.ClaimHold)
+	printClaimHoldReleaseHint(state.ClaimHold)
 	fmt.Println("")
 
 	// Pending interactive prompts come from the live daemon, not the state

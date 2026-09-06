@@ -16,6 +16,7 @@ import {
   putTabMetadata,
   patchTabMetadata,
   deleteTabMetadata,
+  dismissTabRestartNotice,
 } from "@/api/terminal";
 import type { TabMetadata } from "@/api/terminal";
 import type { MutationPayload } from "@/api/common";
@@ -28,12 +29,14 @@ vi.mock("@/api/terminal", () => ({
   putTabMetadata: vi.fn(),
   patchTabMetadata: vi.fn(),
   deleteTabMetadata: vi.fn(),
+  dismissTabRestartNotice: vi.fn(),
 }));
 
 const mockList = vi.mocked(listTabMetadata);
 const mockPut = vi.mocked(putTabMetadata);
 const mockPatch = vi.mocked(patchTabMetadata);
 const mockDelete = vi.mocked(deleteTabMetadata);
+const mockDismissRestartNotice = vi.mocked(dismissTabRestartNotice);
 
 function createMockTab(overrides?: Partial<TabMetadata>): TabMetadata {
   return {
@@ -44,6 +47,8 @@ function createMockTab(overrides?: Partial<TabMetadata>): TabMetadata {
     pinned: false,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
+    attachable: true,
+    attached_clients: 0,
     ...overrides,
   };
 }
@@ -417,6 +422,48 @@ describe("useTerminalMetadata", () => {
       expect(mockPatch).toHaveBeenCalledWith("test-ws", "sess-1", {
         issue_id: "",
       });
+    });
+  });
+
+  describe("dismissRestartNotice", () => {
+    it("optimistically clears the replacement marker", async () => {
+      mockList.mockResolvedValueOnce([
+        createMockTab({ replaced_at: "2026-09-04T01:04:23Z" }),
+      ]);
+      mockDismissRestartNotice.mockResolvedValueOnce(
+        createMockTab({ replaced_at: "" }),
+      );
+
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
+      await flushPromises();
+
+      await act(async () => {
+        await result.current.dismissRestartNotice("sess-1");
+      });
+
+      expect(result.current.tabs[0].replaced_at).toBe("");
+      expect(mockDismissRestartNotice).toHaveBeenCalledWith(
+        "test-ws",
+        "sess-1",
+      );
+    });
+
+    it("rolls back the marker and reports an API failure", async () => {
+      const tab = createMockTab({ replaced_at: "2026-09-04T01:04:23Z" });
+      mockList.mockResolvedValueOnce([tab]);
+      mockDismissRestartNotice.mockRejectedValueOnce(
+        new Error("Dismiss failed"),
+      );
+
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
+      await flushPromises();
+
+      await act(async () => {
+        await result.current.dismissRestartNotice("sess-1");
+      });
+
+      expect(result.current.tabs[0].replaced_at).toBe(tab.replaced_at);
+      expect(result.current.error?.message).toBe("Dismiss failed");
     });
   });
 
