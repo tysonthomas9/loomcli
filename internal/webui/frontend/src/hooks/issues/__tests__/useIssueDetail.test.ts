@@ -1,8 +1,21 @@
 /**
  * @vitest-environment jsdom
  */
-import { renderHook, act, waitFor as _waitFor } from "@testing-library/react";
+import {
+  render,
+  renderHook,
+  act,
+  waitFor as _waitFor,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+import {
+  createElement,
+  Suspense,
+  startTransition,
+  useLayoutEffect,
+  useState,
+} from "react";
 
 import { getIssue } from "@/api/issues";
 import type { Issue, IssueDetails } from "@/types";
@@ -23,11 +36,12 @@ vi.mock("@/hooks/workspace", async () => {
     );
   return {
     ...actual,
-    useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+    useWorkspaceContext: () => ({ workspaceId: workspace.id }),
   };
 });
 
 const mockGetIssue = vi.mocked(getIssue);
+const workspace = vi.hoisted(() => ({ id: "test-ws-id" }));
 
 /**
  * Helper to create a minimal valid IssueDetails for testing.
@@ -62,10 +76,128 @@ function createIssue(overrides: Partial<Issue> = {}): Issue {
 describe("useIssueDetail", () => {
   beforeEach(() => {
     mockGetIssue.mockReset();
+    workspace.id = "test-ws-id";
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("keeps visible workspace callbacks valid after a suspended speculative switch", async () => {
+    const neverResolves = new Promise<void>(() => {});
+    let switchWorkspace!: (id: string) => void;
+    let visible!: ReturnType<typeof useIssueDetail>;
+    let speculativeRenders = 0;
+    function Detail({ id }: { id: string }) {
+      workspace.id = id;
+      const detail = useIssueDetail();
+      useLayoutEffect(() => {
+        visible = detail;
+      });
+      if (id === "speculative") {
+        speculativeRenders++;
+        throw neverResolves;
+      }
+      return createElement(
+        "div",
+        null,
+        `${id}:${detail.issueDetails?.title ?? "empty"}`,
+      );
+    }
+    function Harness() {
+      const [id, setId] = useState("test-ws-id");
+      switchWorkspace = setId;
+      return createElement(
+        Suspense,
+        { fallback: createElement("div", null, "loading") },
+        createElement(Detail, { id }),
+      );
+    }
+    mockGetIssue.mockResolvedValue(
+      createIssueDetails({ title: "still current" }),
+    );
+    const view = render(createElement(Harness));
+    const savedFetch = visible.fetchIssue;
+    await act(async () => {
+      startTransition(() => switchWorkspace("speculative"));
+    });
+    expect(speculativeRenders).toBeGreaterThan(0);
+    expect(view.container.textContent).toBe("test-ws-id:empty");
+    expect(visible.fetchIssue).toBe(savedFetch);
+    await act(async () => {
+      await savedFetch("issue-1");
+    });
+    expect(mockGetIssue).toHaveBeenCalledExactlyOnceWith(
+      "test-ws-id",
+      "issue-1",
+    );
+    expect(view.container.textContent).toBe("test-ws-id:still current");
+    view.unmount();
+  });
+
+  it("rejects a late detail result across workspace A-B-A", async () => {
+    let finish!: (value: IssueDetails) => void;
+    mockGetIssue.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { result, rerender } = renderHook(() => useIssueDetail());
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.fetchIssue("same-id");
+    });
+    workspace.id = "other";
+    rerender();
+    workspace.id = "test-ws-id";
+    rerender();
+    await act(async () => {
+      finish(createIssueDetails({ id: "same-id", title: "retired" }));
+      await pending;
+    });
+    expect(result.current.issueDetails).toBeNull();
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("clears loaded details on workspace change and rejects old fetch callbacks", async () => {
+    mockGetIssue.mockResolvedValue(createIssueDetails());
+    const { result, rerender } = renderHook(() => useIssueDetail());
+    const oldFetch = result.current.fetchIssue;
+    await act(async () => {
+      await oldFetch("issue-1");
+    });
+    workspace.id = "other";
+    rerender();
+    expect(result.current.issueDetails).toBeNull();
+    await act(async () => {
+      await oldFetch("issue-1");
+    });
+    expect(mockGetIssue).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects old workspace edit and clear callbacks against new details", async () => {
+    mockGetIssue.mockResolvedValue(createIssueDetails({ title: "current" }));
+    const { result, rerender } = renderHook(() => useIssueDetail());
+    const oldUpdate = result.current.updateIssueDetails;
+    const oldClear = result.current.clearIssue;
+    workspace.id = "other";
+    rerender();
+    await act(async () => {
+      await result.current.fetchIssue("issue-1");
+    });
+    act(() => {
+      oldUpdate(createIssue({ title: "retired" }));
+      oldClear();
+    });
+    expect(result.current.issueDetails?.title).toBe("current");
+    act(() => {
+      result.current.updateIssueDetails(
+        createIssue({ id: "different", title: "wrong issue" }),
+      );
+    });
+    expect(result.current.issueDetails?.title).toBe("current");
   });
 
   describe("Initial state", () => {

@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -51,13 +52,16 @@ func registryError(t *testing.T, done <-chan error) error {
 func TestRecoveryRegistryScopeRetryAndCopies(t *testing.T) {
 	r := NewRecoveryRegistry()
 	defer r.Close()
-	now := time.Now()
+	now := time.Now().In(time.FixedZone("test-local", -7*60*60))
 	registryClock(r, now)
 	repos := []string{"repo"}
 	handle, err := r.Register("alice", "WS", repos, registrySource())
 	require.NoError(t, err)
 	require.True(t, ValidRecoveryHandle(handle.Handle))
-	require.Equal(t, now.Add(time.Minute), handle.ExpiresAt)
+	require.Equal(t, now.Add(time.Minute).UTC(), handle.ExpiresAt)
+	wire, err := json.Marshal(handle)
+	require.NoError(t, err)
+	require.Contains(t, string(wire), `"expires_at":"`+now.Add(time.Minute).UTC().Format(time.RFC3339Nano)+`"`)
 	repos[0] = "changed"
 	handle.SourceRepos[0] = "also changed"
 	require.Equal(t, []string{"repo"}, r.entries[handle.Handle].handle.SourceRepos)
