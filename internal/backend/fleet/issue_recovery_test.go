@@ -19,7 +19,7 @@ func recoveryTestIssue(id string) map[string]any {
 	return map[string]any{"workspace": "WS", "id": id, "title": "title", "status": "custom-review", "priority": 2, "type": "task", "created_at": "2026-09-05T00:00:00Z", "created_by": "alice", "updated_at": "2026-09-05T00:00:00Z", "metadata": map[string]string{"owner": "retained"}, "estimated_minutes": 42, "labels": []string{}, "future_field": map[string]any{"value": true}}
 }
 func recoveryTestDocument() map[string]any {
-	return map[string]any{"manifest": recoveryManifest, "workspace": "WS", "through": "c1.MTAtMA", "issues": []any{}, "total": 0, "ready": []any{}, "blocked": []any{}, "deferred": []any{}}
+	return map[string]any{"manifest": recoveryManifest, "workspace": "WS", "through": "c2.MTAtMA", "issues": []any{}, "total": 0, "ready": []any{}, "blocked": []any{}, "deferred": []any{}}
 }
 func recoveryTestBackend(t *testing.T, h http.HandlerFunc) *FleetBackend {
 	t.Helper()
@@ -54,13 +54,14 @@ func TestReadIssueRecoveryNativeDocument(t *testing.T) {
 				require.NoError(t, err)
 				require.Empty(t, body)
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				w.Header().Set("X-Fleet-Source-Identity", "s1.Zml4dHVyZQ")
 				_, _ = w.Write(raw)
 			})
 			result, err := b.ReadIssueRecovery(context.Background())
 			require.NoError(t, err)
 			require.Equal(t, json.RawMessage(raw), result.Document)
 			require.Equal(t, "WS", result.Workspace)
-			require.Equal(t, "c1.MTAtMA", result.Through)
+			require.Equal(t, "c2.MTAtMA", result.Through)
 		})
 	}
 }
@@ -78,8 +79,8 @@ func TestReadIssueRecoveryRejectsInvalidDocument(t *testing.T) {
 		{name: "missing issues", mutate: func(d map[string]any) { delete(d, "issues") }},
 		{name: "null ready", mutate: func(d map[string]any) { d["ready"] = nil }},
 		{name: "wrong total", mutate: func(d map[string]any) { d["total"] = 1 }},
-		{name: "zero cursor", mutate: func(d map[string]any) { d["through"] = "c1.MA" }},
-		{name: "head cursor", mutate: func(d map[string]any) { d["through"] = "c1.JA" }},
+		{name: "zero cursor", mutate: func(d map[string]any) { d["through"] = "0" }},
+		{name: "head cursor", mutate: func(d map[string]any) { d["through"] = "$" }},
 		{name: "malformed cursor", mutate: func(d map[string]any) { d["through"] = "10-0" }},
 		{name: "trailing JSON", suffix: "{}"},
 		{name: "missing required issue field", mutate: func(d map[string]any) {
@@ -174,6 +175,7 @@ func TestReadIssueRecoveryRejectsInvalidDocument(t *testing.T) {
 			require.NoError(t, err)
 			b := recoveryTestBackend(t, func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Fleet-Source-Identity", "s1.Zml4dHVyZQ")
 				_, _ = w.Write(append(raw, tc.suffix...))
 			})
 			result, err := b.ReadIssueRecovery(context.Background())
@@ -261,6 +263,7 @@ func TestReadIssueRecoveryParentBlockerSentinel(t *testing.T) {
 			require.NoError(t, err)
 			b := recoveryTestBackend(t, func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Fleet-Source-Identity", "s1.Zml4dHVyZQ")
 				_, _ = w.Write(raw)
 			})
 			result, err := b.ReadIssueRecovery(context.Background())

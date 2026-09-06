@@ -49,6 +49,7 @@ func handleIssueRecovery(registry *realtime.RecoveryRegistry, workspaceFromCtx f
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set(recoveryHandleHeader, values[0])
+		w.Header().Set("X-Loom-Recovery-Source", result.SourceIdentity)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(result.Document)
 	}

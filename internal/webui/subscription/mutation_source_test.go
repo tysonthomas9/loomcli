@@ -27,17 +27,17 @@ func TestMutationSourcePinsAcrossReads(t *testing.T) {
 			oldCalls, newCalls := 0, 0
 			old := &sourceBindingSubscriber{head: func(context.Context) (backend.MutationPage, error) {
 				oldCalls++
-				return backend.MutationPage{Cursor: "same"}, nil
+				return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "same"}, nil
 			}, page: func(context.Context, string, string, int) (backend.MutationPage, error) {
 				oldCalls++
-				return backend.MutationPage{Cursor: "same"}, nil
+				return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "same"}, nil
 			}}
 			replacement := &sourceBindingSubscriber{head: func(context.Context) (backend.MutationPage, error) {
 				newCalls++
-				return backend.MutationPage{Cursor: "same"}, nil
+				return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "same"}, nil
 			}, page: func(context.Context, string, string, int) (backend.MutationPage, error) {
 				newCalls++
-				return backend.MutationPage{Cursor: "same"}, nil
+				return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "same"}, nil
 			}}
 			m := &MultiWorkspaceSubscriber{subscribers: map[string]*subscriberEntry{"ws": {sub: old}}}
 			openCtx, cancel := context.WithCancel(t.Context())
@@ -75,7 +75,7 @@ func TestMutationSourceRejectsInFlightReplacement(t *testing.T) {
 	old := &sourceBindingSubscriber{head: func(context.Context) (backend.MutationPage, error) {
 		close(started)
 		<-release
-		return backend.MutationPage{Cursor: "same"}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "same"}, nil
 	}}
 	m := &MultiWorkspaceSubscriber{subscribers: map[string]*subscriberEntry{"ws": {sub: old}}}
 	source, err := m.OpenMutationSource(t.Context(), "ws")
@@ -136,7 +136,7 @@ func TestMutationHeadRejectsLegacyAndRetiredBackend(t *testing.T) {
 		}
 		close(started)
 		<-release
-		return backend.MutationPage{Cursor: "same"}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "same"}, nil
 	}
 	sub := NewBackendMutationSubscriber(b, nil, "ws")
 	done := make(chan error, 1)

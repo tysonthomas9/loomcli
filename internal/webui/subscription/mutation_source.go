@@ -2,7 +2,9 @@ package subscription
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -25,12 +27,21 @@ func (m *MultiWorkspaceSubscriber) OpenMutationSource(ctx context.Context, works
 }
 
 type boundMutationSource struct {
-	manager   *MultiWorkspaceSubscriber
-	entry     *subscriberEntry
-	workspace string
+	manager    *MultiWorkspaceSubscriber
+	entry      *subscriberEntry
+	workspace  string
+	identityMu sync.Mutex
+	identity   string
+	retired    bool
 }
 
 func (s *boundMutationSource) check(ctx context.Context) error {
+	s.identityMu.Lock()
+	retired := s.retired
+	s.identityMu.Unlock()
+	if retired {
+		return backend.ErrMutationSourceChanged
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -52,6 +63,11 @@ func readBoundSource[T any](s *boundMutationSource, ctx context.Context, fn func
 	defer cancel()
 	result, err := fn(requestCtx)
 	if err != nil {
+		if errors.Is(err, backend.ErrMutationSourceChanged) {
+			s.identityMu.Lock()
+			s.retired = true
+			s.identityMu.Unlock()
+		}
 		return zero, err
 	}
 	if err := s.check(requestCtx); err != nil {
@@ -72,6 +88,9 @@ func (s *boundMutationSource) ReadIssueRecovery(ctx context.Context) (backend.Is
 		if err != nil {
 			return backend.IssueRecoverySnapshot{}, err
 		}
+		if err := s.checkIdentity(result.SourceIdentity, false); err != nil {
+			return backend.IssueRecoverySnapshot{}, err
+		}
 		if result.Workspace != s.workspace {
 			return backend.IssueRecoverySnapshot{}, fmt.Errorf("recovery workspace differs from captured source")
 		}
@@ -80,10 +99,43 @@ func (s *boundMutationSource) ReadIssueRecovery(ctx context.Context) (backend.Is
 }
 
 func (s *boundMutationSource) ReadHead(ctx context.Context) (backend.MutationPage, error) {
-	return readBoundSource(s, ctx, func(ctx context.Context) (backend.MutationPage, error) { return s.entry.sub.GetMutationHead(ctx) })
+	return readBoundSource(s, ctx, func(ctx context.Context) (backend.MutationPage, error) {
+		page, err := s.entry.sub.GetMutationHead(ctx)
+		if err != nil {
+			return backend.MutationPage{}, err
+		}
+		if err := s.checkIdentity(page.SourceIdentity, true); err != nil {
+			return backend.MutationPage{}, err
+		}
+		return page, nil
+	})
 }
 func (s *boundMutationSource) ReadPage(ctx context.Context, since, through string, limit int) (backend.MutationPage, error) {
 	return readBoundSource(s, ctx, func(ctx context.Context) (backend.MutationPage, error) {
-		return s.entry.sub.GetMutationPageThrough(ctx, since, through, limit)
+		page, err := s.entry.sub.GetMutationPageThrough(ctx, since, through, limit)
+		if err != nil {
+			return backend.MutationPage{}, err
+		}
+		if err := s.checkIdentity(page.SourceIdentity, false); err != nil {
+			return backend.MutationPage{}, err
+		}
+		return page, nil
 	})
+}
+
+func (s *boundMutationSource) checkIdentity(identity string, establish bool) error {
+	s.identityMu.Lock()
+	defer s.identityMu.Unlock()
+	if s.retired || !backend.ValidSourceIdentity(identity) {
+		s.retired = true
+		return backend.ErrMutationSourceChanged
+	}
+	if s.identity == "" && establish {
+		s.identity = identity
+	}
+	if s.identity != identity {
+		s.retired = true
+		return backend.ErrMutationSourceChanged
+	}
+	return nil
 }

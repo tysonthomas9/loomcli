@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -117,7 +116,7 @@ func TestHandler_RegistersBeforeActivationAndReturnsActivationErrors(t *testing.
 				if got := hub.ClientCount(); got != 1 {
 					t.Fatalf("client count during activation = %d, want 1", got)
 				}
-				return "c1.head", nil
+				return "c2.head", nil
 			},
 			WorkspaceFromCtx: func(context.Context) string { return "ws-1" },
 		})
@@ -167,16 +166,16 @@ func TestHandler_CatchUpPagesAndDeduplicatesEveryQueuedCursor(t *testing.T) {
 	h := NewHandler(HandlerConfig{
 		Hub: hub,
 		OnAuthenticated: func(context.Context, string) (string, error) {
-			return "c1.head", nil
+			return "c2.head", nil
 		},
 		OpenMutationSource: openFixtureMutationSource(func(_ context.Context, _ string, since string, limit int) (backend.MutationPage, error) {
 			if since != "$" || limit != 1 {
 				t.Errorf("invalid head request")
 			}
 			if calls < 2 {
-				return backend.MutationPage{Cursor: "c1.b"}, nil
+				return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "c2.YzIuYg"}, nil
 			}
-			return backend.MutationPage{Cursor: "c1.live"}, nil
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "c2.live"}, nil
 		}, func(_ context.Context, wsID, since, through string, limit int) (backend.MutationPage, error) {
 			if wsID != "ws-1" || limit != catchUpPageLimit {
 				t.Fatalf("catch-up request workspace/limit = %q/%d", wsID, limit)
@@ -184,37 +183,37 @@ func TestHandler_CatchUpPagesAndDeduplicatesEveryQueuedCursor(t *testing.T) {
 			calls++
 			switch calls {
 			case 1:
-				if since != "c1.start" {
-					t.Fatalf("first since = %q, want c1.start", since)
+				if since != "c2.YzIuc3RhcnQ" {
+					t.Fatalf("first since = %q, want c2.start", since)
 				}
-				return backend.MutationPage{
-					Events:  []backend.MutationData{{Cursor: "c1.a", Type: backend.MutationUpdate, IssueID: "catch-a"}},
-					Cursor:  "c1.a",
+				return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ",
+					Events:  []backend.MutationData{{Cursor: "c2.YzIuYQ", Type: backend.MutationUpdate, IssueID: "catch-a"}},
+					Cursor:  "c2.YzIuYQ",
 					HasMore: true,
 				}, nil
 			case 2:
-				if since != "c1.a" {
-					t.Fatalf("second since = %q, want c1.a", since)
+				if since != "c2.YzIuYQ" {
+					t.Fatalf("second since = %q, want c2.a", since)
 				}
 				for _, mutation := range []*MutationPayload{
-					{Cursor: "c1.a", Type: backend.MutationUpdate, IssueID: "live-duplicate-a", WorkspaceID: "ws-1"},
+					{Cursor: "c2.YzIuYQ", Type: backend.MutationUpdate, IssueID: "live-duplicate-a", WorkspaceID: "ws-1"},
 					{Type: "terminal_session_change", IssueID: "interleaved-terminal", WorkspaceID: "ws-1"},
-					{Cursor: "c1.b", Type: backend.MutationUpdate, IssueID: "live-duplicate-b", WorkspaceID: "ws-1"},
-					{Cursor: "c1.live", Type: backend.MutationUpdate, IssueID: "live-sentinel", WorkspaceID: "ws-1"},
+					{Cursor: "c2.YzIuYg", Type: backend.MutationUpdate, IssueID: "live-duplicate-b", WorkspaceID: "ws-1"},
+					{Cursor: "c2.live", Type: backend.MutationUpdate, IssueID: "live-sentinel", WorkspaceID: "ws-1"},
 				} {
 					hub.Broadcast(mutation)
 				}
-				return backend.MutationPage{
-					Events: []backend.MutationData{{Cursor: "c1.b", Type: backend.MutationUpdate, IssueID: "catch-b"}},
-					Cursor: "c1.b",
+				return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ",
+					Events: []backend.MutationData{{Cursor: "c2.YzIuYg", Type: backend.MutationUpdate, IssueID: "catch-b"}},
+					Cursor: "c2.YzIuYg",
 				}, nil
 			case 3:
-				if since != "c1.b" {
+				if since != "c2.YzIuYg" {
 					t.Fatalf("live since = %q", since)
 				}
-				return backend.MutationPage{Events: []backend.MutationData{{Cursor: "c1.live", Type: backend.MutationUpdate, IssueID: "live-sentinel"}}, Cursor: "c1.live"}, nil
+				return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: []backend.MutationData{{Cursor: "c2.live", Type: backend.MutationUpdate, IssueID: "live-sentinel"}}, Cursor: "c2.live"}, nil
 			default:
-				return backend.MutationPage{Cursor: since}, nil
+				return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: since}, nil
 			}
 		}),
 
@@ -224,7 +223,8 @@ func TestHandler_CatchUpPagesAndDeduplicatesEveryQueuedCursor(t *testing.T) {
 	h.heartbeatInterval = time.Hour
 
 	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest(http.MethodGet, "/events?since=c1.start", nil).WithContext(ctx)
+	t.Cleanup(cancel)
+	req := httptest.NewRequest(http.MethodGet, "/events?since=c2.YzIuc3RhcnQ", nil).WithContext(ctx)
 	done := make(chan struct{})
 	go func() {
 		h.ServeHTTP(httptest.NewRecorder(), req)
@@ -232,8 +232,13 @@ func TestHandler_CatchUpPagesAndDeduplicatesEveryQueuedCursor(t *testing.T) {
 	}()
 
 	for {
-		frame := <-writer.written
-		if frame.id == "c1.live" {
+		var frame recordedFrame
+		select {
+		case frame = <-writer.written:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("missing live sentinel; frames=%+v", writer.snapshot())
+		}
+		if frame.id == "c2.live" {
 			break
 		}
 	}
@@ -246,11 +251,11 @@ func TestHandler_CatchUpPagesAndDeduplicatesEveryQueuedCursor(t *testing.T) {
 			counts[frame.id]++
 		}
 	}
-	if counts["c1.a"] != 1 || counts["c1.b"] != 1 {
-		t.Fatalf("deduplicated catch-up cursor counts = %v, want c1.a=1 c1.b=1", counts)
+	if counts["c2.YzIuYQ"] != 1 || counts["c2.YzIuYg"] != 1 {
+		t.Fatalf("deduplicated catch-up cursor counts = %v, want c2.a=1 c2.b=1", counts)
 	}
-	if counts["c1.live"] != 1 {
-		t.Fatalf("live sentinel count = %d, want 1", counts["c1.live"])
+	if counts["c2.live"] != 1 {
+		t.Fatalf("live sentinel count = %d, want 1", counts["c2.live"])
 	}
 }
 
@@ -267,7 +272,7 @@ func TestHandler_OverflowResyncDrainsToHighestOfferedFrameAndKeepsClient(t *test
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
-	client := NewClient(1, ClientSendBuf, "c1.start", nil, "ws-1")
+	client := NewClient(1, ClientSendBuf, "c2.YzIuc3RhcnQ", nil, "ws-1")
 	if err := hub.RegisterClient(context.Background(), client); err != nil {
 		t.Fatalf("RegisterClient: %v", err)
 	}
@@ -284,7 +289,7 @@ func TestHandler_OverflowResyncDrainsToHighestOfferedFrameAndKeepsClient(t *test
 	dispatch := func(n int) {
 		t.Helper()
 		hub.Broadcast(&MutationPayload{
-			Cursor:      fmt.Sprintf("c1.%03d", n),
+			Cursor:      testScopedCursor(fmt.Sprintf("c2.%03d", n)),
 			Type:        "update",
 			IssueID:     fmt.Sprintf("F%d", n),
 			WorkspaceID: "ws-1",
@@ -300,13 +305,13 @@ func TestHandler_OverflowResyncDrainsToHighestOfferedFrameAndKeepsClient(t *test
 
 	// Holding the next hub dispatch proves F300 has completed fan-out without
 	// polling or sleeping, while ensuring F301 cannot enter the client queue.
-	hub.Broadcast(&MutationPayload{Cursor: "c1.301", Type: "update", IssueID: "F301", WorkspaceID: "ws-1"})
+	hub.Broadcast(&MutationPayload{Cursor: "c2.YzIuMzAx", Type: "update", IssueID: "F301", WorkspaceID: "ws-1"})
 	<-dispatchStarted
 	client.resyncMu.Lock()
 	dropped := client.dropped
 	client.resyncMu.Unlock()
-	if !client.pendingResync.Load() || dropped.seq != 300 || dropped.cursor != "c1.300" {
-		t.Fatalf("pending drop = (%v, %d, %q), want (true, 300, c1.300)", client.pendingResync.Load(), dropped.seq, dropped.cursor)
+	if !client.pendingResync.Load() || dropped.seq != 300 || dropped.cursor != testScopedCursor("c2.300") {
+		t.Fatalf("pending drop = (%v, %d, %q), want (true, 300, c2.300)", client.pendingResync.Load(), dropped.seq, dropped.cursor)
 	}
 	if got := hub.ClientCount(); got != 1 {
 		t.Fatalf("client count during burst = %d, want 1", got)
@@ -315,15 +320,15 @@ func TestHandler_OverflowResyncDrainsToHighestOfferedFrameAndKeepsClient(t *test
 	close(writer.release)
 	for frame := range writer.written {
 		if frame.event == "resync" {
-			if frame.id != "c1.300" || frame.data != `{"reason":"overflow"}` {
-				t.Fatalf("resync frame = %#v, want overflow at c1.300", frame)
+			if frame.id != testScopedCursor("c2.300") || frame.data != `{"reason":"overflow"}` {
+				t.Fatalf("resync frame = %#v, want overflow at c2.300", frame)
 			}
 			break
 		}
 	}
 	releaseDispatch <- struct{}{}
 	for frame := range writer.written {
-		if frame.id == "c1.301" {
+		if frame.id == "c2.YzIuMzAx" {
 			break
 		}
 	}
@@ -340,7 +345,7 @@ func TestHandler_OverflowResyncDrainsToHighestOfferedFrameAndKeepsClient(t *test
 			resyncIndex = i
 			continue
 		}
-		if resyncIndex >= 0 && frame.event == "mutation" && frame.id != "c1.301" {
+		if resyncIndex >= 0 && frame.event == "mutation" && frame.id != "c2.YzIuMzAx" {
 			t.Fatalf("stale frame written after resync: %#v", frame)
 		}
 	}
@@ -422,7 +427,7 @@ func TestHandler_WriterDeadlineTimeoutEndsStreamAndUnregisters(t *testing.T) {
 	if got := <-controller.flushed; got != 2 {
 		t.Fatalf("second flush = %d, want connected frame", got)
 	}
-	hub.Broadcast(&MutationPayload{Cursor: "c1.timeout", Type: "update", IssueID: "timeout", WorkspaceID: "ws-1"})
+	hub.Broadcast(&MutationPayload{Cursor: "c2.YzIudGltZW91dA", Type: "update", IssueID: "timeout", WorkspaceID: "ws-1"})
 	if got := <-controller.flushed; got != 3 {
 		t.Fatalf("third flush = %d, want live mutation", got)
 	}
@@ -460,19 +465,19 @@ func TestHandler_SourceFailuresResyncWithoutAdvancingOrConnected(t *testing.T) {
 			if expired {
 				reason = "expired"
 			}
-			h := NewHandler(HandlerConfig{Hub: hub, WorkspaceFromCtx: func(context.Context) string { return "ws-1" }, OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "c1.head"), func(context.Context, string, string, string, int) (backend.MutationPage, error) {
+			h := NewHandler(HandlerConfig{Hub: hub, WorkspaceFromCtx: func(context.Context) string { return "ws-1" }, OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "c2.head"), func(context.Context, string, string, string, int) (backend.MutationPage, error) {
 				if expired {
 					err := backend.NewBackendError(backend.KindValidation, "catchup", "expired", backend.ErrMutationCursorExpired)
-					err.Meta = map[string]string{"cursor": "c1.floor"}
-					return backend.MutationPage{}, err
+					err.Meta = map[string]string{"cursor": "c2.YzIuZmxvb3I"}
+					return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ"}, err
 				}
-				return backend.MutationPage{}, errors.New("unavailable")
+				return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ"}, errors.New("unavailable")
 			})})
 			writer := newRecordingFrameWriter()
 			h.writerFactory = func(http.ResponseWriter) (frameWriter, error) { return writer, nil }
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/events?since=c1.old", nil).WithContext(ctx))
+			h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/events?since=c2.YzIub2xk", nil).WithContext(ctx))
 			frames := writer.snapshot()
 			if len(frames) != 1 || frames[0] != (recordedFrame{event: "resync", data: fmt.Sprintf(`{"reason":%q}`, reason)}) {
 				t.Fatalf("source failure must preserve cursor and never report connected: %#v", frames)
@@ -486,9 +491,9 @@ func TestHandler_PageBudgetSchedulesRemainingSource(t *testing.T) {
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 	calls := 0
-	h := NewHandler(HandlerConfig{Hub: hub, WorkspaceFromCtx: func(context.Context) string { return "ws-1" }, OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "c1.start"+strings.Repeat(".next", 12)), func(_ context.Context, _ string, since, through string, _ int) (backend.MutationPage, error) {
+	h := NewHandler(HandlerConfig{Hub: hub, WorkspaceFromCtx: func(context.Context) string { return "ws-1" }, OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, testScopedCursor("budget-12")), func(_ context.Context, _ string, since, through string, _ int) (backend.MutationPage, error) {
 		calls++
-		return backend.MutationPage{Cursor: since + ".next", HasMore: calls < 12}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: testScopedCursor(fmt.Sprintf("budget-%d", calls)), HasMore: calls < 12}, nil
 	})})
 	writer := newRecordingFrameWriter()
 	h.writerFactory = func(http.ResponseWriter) (frameWriter, error) { return writer, nil }
@@ -498,7 +503,7 @@ func TestHandler_PageBudgetSchedulesRemainingSource(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/events?since=c1.start", nil).WithContext(ctx))
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/events?since=c2.YzIuc3RhcnQ", nil).WithContext(ctx))
 	}()
 	select {
 	case <-writer.connected:
@@ -517,7 +522,7 @@ func TestHandler_PageBudgetSchedulesRemainingSource(t *testing.T) {
 	}
 }
 
-func TestHandler_NumericHeaderLargerThanNumericQueryWinsCatchUp(t *testing.T) {
+func TestHandler_NumericHeaderAndQueryFailBeforeSourceRead(t *testing.T) {
 	hub := NewHub()
 	go hub.Run()
 	t.Cleanup(hub.Stop)
@@ -525,9 +530,9 @@ func TestHandler_NumericHeaderLargerThanNumericQueryWinsCatchUp(t *testing.T) {
 	h := NewHandler(HandlerConfig{
 		Hub:             hub,
 		OnAuthenticated: func(context.Context, string) (string, error) { return "1000", nil },
-		OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "300"), func(_ context.Context, _ string, since, through string, _ int) (backend.MutationPage, error) {
+		OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, testScopedCursor("300")), func(_ context.Context, _ string, since, through string, _ int) (backend.MutationPage, error) {
 			gotSince = since
-			return backend.MutationPage{Events: []backend.MutationData{}, Cursor: since}, nil
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: []backend.MutationData{}, Cursor: since}, nil
 		}),
 		WorkspaceFromCtx: func(context.Context) string { return "ws-1" },
 	})
@@ -543,25 +548,32 @@ func TestHandler_NumericHeaderLargerThanNumericQueryWinsCatchUp(t *testing.T) {
 		h.ServeHTTP(httptest.NewRecorder(), req)
 		close(done)
 	}()
-	<-writer.connected
-	cancel()
-	<-done
-	if gotSince != "300" {
-		t.Fatalf("catch-up since = %q, want larger numeric header 300", gotSince)
+	defer cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("numeric resume did not close")
+	}
+	if gotSince != "" {
+		t.Fatalf("numeric resume reached source: %q", gotSince)
+	}
+	frames := writer.snapshot()
+	if len(frames) != 1 || frames[0].event != "resync" || frames[0].id != "" {
+		t.Fatalf("unexpected rejection frames: %+v", frames)
 	}
 }
 
 func TestHandler_NumericLastEventIDFailsClosedForBoundedFleetReplay(t *testing.T) {
 	const (
 		numericCursor = "1700000000000"
-		opaqueCursor  = "c1.MTcwMDAwMDAwMDAwMC0w"
+		opaqueCursor  = "c2.MTcwMDAwMDAwMDAwMC0w"
 	)
 	requestedSince := make(chan string, 1)
 	fleetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		since := r.URL.Query().Get("since")
-		if since == "c1.JA" {
+		if since == "$" {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"events": []any{}, "cursor": opaqueCursor, "has_more": false})
+			_ = json.NewEncoder(w).Encode(map[string]any{"source_identity": "s1.Zml4dHVyZQ", "events": []any{}, "cursor": opaqueCursor, "has_more": false})
 			return
 		}
 		if r.URL.Query().Get("through") != opaqueCursor {
@@ -577,7 +589,8 @@ func TestHandler_NumericLastEventIDFailsClosedForBoundedFleetReplay(t *testing.T
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"events": []any{}, "cursor": opaqueCursor, "has_more": false,
+			"source_identity": "s1.Zml4dHVyZQ",
+			"events":          []any{}, "cursor": opaqueCursor, "has_more": false,
 		})
 	}))
 	t.Cleanup(fleetServer.Close)

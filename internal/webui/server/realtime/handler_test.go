@@ -14,7 +14,7 @@ import (
 
 func TestHandler_FleetDBOnlyReconnectCatchUpUsesLastEventID(t *testing.T) {
 	const workspaceID = "ws-fleet"
-	const cursor = "1700000000000-0"
+	const cursor = "c2.MTcwMDAwMDAwMDAwMC0w"
 
 	var (
 		mu       sync.Mutex
@@ -23,18 +23,18 @@ func TestHandler_FleetDBOnlyReconnectCatchUpUsesLastEventID(t *testing.T) {
 	)
 	h := NewHandler(HandlerConfig{
 		Hub: NewHub(),
-		OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "1700000000100-0"), func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
+		OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "c2.MTcwMDAwMDAwMDEwMC0w"), func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
 			mu.Lock()
 			gotWS = wsID
 			gotSince = since
 			mu.Unlock()
-			return backend.MutationPage{Events: []backend.MutationData{{
-				Cursor:    "1700000000100-0",
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: []backend.MutationData{{
+				Cursor:    "c2.MTcwMDAwMDAwMDEwMC0w",
 				Type:      "update",
 				IssueID:   "task-1",
 				Title:     "missed mutation",
 				Timestamp: time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC),
-			}}, Cursor: "1700000000100-0"}, nil
+			}}, Cursor: "c2.MTcwMDAwMDAwMDEwMC0w"}, nil
 		}),
 
 		WorkspaceFromCtx: func(context.Context) string { return workspaceID },
@@ -53,7 +53,7 @@ func TestHandler_FleetDBOnlyReconnectCatchUpUsesLastEventID(t *testing.T) {
 	if gotSince != cursor {
 		t.Fatalf("since = %q, want durable Last-Event-ID cursor %q", gotSince, cursor)
 	}
-	if !strings.Contains(body, "id: 1700000000100-0\n") {
+	if !strings.Contains(body, "id: c2.MTcwMDAwMDAwMDEwMC0w\n") {
 		t.Fatalf("catch-up event did not preserve fleet-db cursor as SSE id:\n%s", body)
 	}
 	if !strings.Contains(body, `"issue_id":"task-1"`) {
@@ -63,20 +63,20 @@ func TestHandler_FleetDBOnlyReconnectCatchUpUsesLastEventID(t *testing.T) {
 
 func TestHandler_FleetDBOnlyReconnectCatchUpUsesSinceQuery(t *testing.T) {
 	const workspaceID = "ws-fleet"
-	const queryCursor = "1700000000200-0"
+	const queryCursor = "c2.MTcwMDAwMDAwMDIwMC0w"
 
 	var gotSince string
 	h := NewHandler(HandlerConfig{
 		Hub: NewHub(),
-		OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "1700000000400-0"), func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
+		OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "c2.MTcwMDAwMDAwMDQwMC0w"), func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
 			if wsID != workspaceID {
 				t.Errorf("workspace = %q, want %q", wsID, workspaceID)
 			}
 			gotSince = since
-			return backend.MutationPage{Events: []backend.MutationData{
-				{Cursor: "1700000000300-0", Type: "update", IssueID: "task-2", Timestamp: time.Date(2026, 5, 1, 12, 1, 0, 0, time.UTC)},
-				{Cursor: "1700000000400-0", Type: "status", IssueID: "task-3", Timestamp: time.Date(2026, 5, 1, 12, 2, 0, 0, time.UTC)},
-			}, Cursor: "1700000000400-0"}, nil
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: []backend.MutationData{
+				{Cursor: "c2.MTcwMDAwMDAwMDMwMC0w", Type: "update", IssueID: "task-2", Timestamp: time.Date(2026, 5, 1, 12, 1, 0, 0, time.UTC)},
+				{Cursor: "c2.MTcwMDAwMDAwMDQwMC0w", Type: "status", IssueID: "task-3", Timestamp: time.Date(2026, 5, 1, 12, 2, 0, 0, time.UTC)},
+			}, Cursor: "c2.MTcwMDAwMDAwMDQwMC0w"}, nil
 		}),
 
 		WorkspaceFromCtx: func(context.Context) string { return workspaceID },
@@ -95,7 +95,7 @@ func TestHandler_FleetDBOnlyReconnectCatchUpUsesSinceQuery(t *testing.T) {
 	if strings.Count(body, "event: mutation\n") != 2 {
 		t.Fatalf("expected two missed catch-up mutations, got body:\n%s", body)
 	}
-	if !strings.Contains(body, "id: 1700000000300-0\n") || !strings.Contains(body, "id: 1700000000400-0\n") {
+	if !strings.Contains(body, "id: c2.MTcwMDAwMDAwMDMwMC0w\n") || !strings.Contains(body, "id: c2.MTcwMDAwMDAwMDQwMC0w\n") {
 		t.Fatalf("catch-up mutations did not preserve durable fleet-db cursors:\n%s", body)
 	}
 }
@@ -103,11 +103,11 @@ func TestHandler_FleetDBOnlyReconnectCatchUpUsesSinceQuery(t *testing.T) {
 func TestHandler_FleetDBOnlyCatchUpAppliesSourceRepoFilter(t *testing.T) {
 	h := NewHandler(HandlerConfig{
 		Hub: NewHub(),
-		OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "1700000000600-0"), func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
-			return backend.MutationPage{Events: []backend.MutationData{
-				{Cursor: "1700000000500-0", Type: "update", IssueID: "repo-a-task", SourceRepo: "repo-a", Timestamp: time.Date(2026, 5, 1, 12, 3, 0, 0, time.UTC)},
-				{Cursor: "1700000000600-0", Type: "update", IssueID: "repo-b-task", SourceRepo: "repo-b", Timestamp: time.Date(2026, 5, 1, 12, 4, 0, 0, time.UTC)},
-			}, Cursor: "1700000000600-0"}, nil
+		OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "c2.MTcwMDAwMDAwMDYwMC0w"), func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: []backend.MutationData{
+				{Cursor: "c2.MTcwMDAwMDAwMDUwMC0w", Type: "update", IssueID: "repo-a-task", SourceRepo: "repo-a", Timestamp: time.Date(2026, 5, 1, 12, 3, 0, 0, time.UTC)},
+				{Cursor: "c2.MTcwMDAwMDAwMDYwMC0w", Type: "update", IssueID: "repo-b-task", SourceRepo: "repo-b", Timestamp: time.Date(2026, 5, 1, 12, 4, 0, 0, time.UTC)},
+			}, Cursor: "c2.MTcwMDAwMDAwMDYwMC0w"}, nil
 		}),
 
 		WorkspaceFromCtx: func(context.Context) string { return "ws-fleet" },
@@ -116,7 +116,7 @@ func TestHandler_FleetDBOnlyCatchUpAppliesSourceRepoFilter(t *testing.T) {
 
 	body := serveSSEOnce(t, h, func(req *http.Request) {
 		q := req.URL.Query()
-		q.Set("since", "1700000000400-0")
+		q.Set("since", "c2.MTcwMDAwMDAwMDQwMC0w")
 		q.Set("source_repos", "repo-a")
 		req.URL.RawQuery = q.Encode()
 	})
@@ -133,11 +133,11 @@ func TestHandler_FleetDBOnlyCatchUpFailsClosedWithoutWorkspace(t *testing.T) {
 	called := false
 	h := NewHandler(HandlerConfig{
 		Hub: NewHub(),
-		OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "1700000000700-0"), func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
+		OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "c2.MTcwMDAwMDAwMDcwMC0w"), func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
 			called = true
-			return backend.MutationPage{Events: []backend.MutationData{
-				{Cursor: "1700000000700-0", Type: "update", IssueID: "leaked-task", Timestamp: time.Date(2026, 5, 1, 12, 5, 0, 0, time.UTC)},
-			}, Cursor: "1700000000700-0"}, nil
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: []backend.MutationData{
+				{Cursor: "c2.MTcwMDAwMDAwMDcwMC0w", Type: "update", IssueID: "leaked-task", Timestamp: time.Date(2026, 5, 1, 12, 5, 0, 0, time.UTC)},
+			}, Cursor: "c2.MTcwMDAwMDAwMDcwMC0w"}, nil
 		}),
 
 		WorkspaceFromCtx: func(context.Context) string { return "" },
@@ -146,7 +146,7 @@ func TestHandler_FleetDBOnlyCatchUpFailsClosedWithoutWorkspace(t *testing.T) {
 
 	body := serveSSEOnce(t, h, func(req *http.Request) {
 		q := req.URL.Query()
-		q.Set("since", "1700000000600-0")
+		q.Set("since", "c2.MTcwMDAwMDAwMDYwMC0w")
 		req.URL.RawQuery = q.Encode()
 	})
 
@@ -161,29 +161,33 @@ func TestHandler_FleetDBOnlyCatchUpFailsClosedWithoutWorkspace(t *testing.T) {
 func TestHandler_FleetDBOnlyReconnectCanMoveBetweenServeProcesses(t *testing.T) {
 	const workspaceID = "ws-fleet"
 	durableEvents := []backend.MutationData{
-		{Cursor: "1700000000800-0", Type: "update", IssueID: "before-disconnect", Timestamp: time.Date(2026, 5, 1, 12, 6, 0, 0, time.UTC)},
-		{Cursor: "1700000000900-0", Type: "update", IssueID: "missed-on-other-process", Timestamp: time.Date(2026, 5, 1, 12, 7, 0, 0, time.UTC)},
+		{Cursor: "c2.MTcwMDAwMDAwMDgwMC0w", Type: "update", IssueID: "before-disconnect", Timestamp: time.Date(2026, 5, 1, 12, 6, 0, 0, time.UTC)},
+		{Cursor: "c2.MTcwMDAwMDAwMDkwMC0w", Type: "update", IssueID: "missed-on-other-process", Timestamp: time.Date(2026, 5, 1, 12, 7, 0, 0, time.UTC)},
 	}
 	getSince := func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
 		if wsID != workspaceID {
 			t.Errorf("workspace = %q, want %q", wsID, workspaceID)
 		}
 		var out []backend.MutationData
-		for _, event := range durableEvents {
-			if event.Cursor > since {
-				out = append(out, event)
-			}
+		switch since {
+		case "c2.MTcwMDAwMDAwMDAwMC0w":
+			out = durableEvents
+		case durableEvents[0].Cursor:
+			out = durableEvents[1:]
+		case durableEvents[1].Cursor:
+		default:
+			t.Fatalf("unknown opaque fixture cursor %q", since)
 		}
 		cursor := since
 		if len(out) > 0 {
 			cursor = out[len(out)-1].Cursor
 		}
-		return backend.MutationPage{Events: out, Cursor: cursor}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: out, Cursor: cursor}, nil
 	}
 	newProcess := func() *Handler {
 		h := NewHandler(HandlerConfig{
 			Hub:                NewHub(),
-			OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "1700000000900-0"), getSince),
+			OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "c2.MTcwMDAwMDAwMDkwMC0w"), getSince),
 
 			WorkspaceFromCtx: func(context.Context) string { return workspaceID },
 		})
@@ -193,15 +197,15 @@ func TestHandler_FleetDBOnlyReconnectCanMoveBetweenServeProcesses(t *testing.T) 
 
 	firstProcessBody := serveSSEOnce(t, newProcess(), func(req *http.Request) {
 		q := req.URL.Query()
-		q.Set("since", "1700000000000-0")
+		q.Set("since", "c2.MTcwMDAwMDAwMDAwMC0w")
 		req.URL.RawQuery = q.Encode()
 	})
-	if !strings.Contains(firstProcessBody, "id: 1700000000800-0\n") {
+	if !strings.Contains(firstProcessBody, "id: c2.MTcwMDAwMDAwMDgwMC0w\n") {
 		t.Fatalf("first process did not emit durable cursor:\n%s", firstProcessBody)
 	}
 
 	secondProcessBody := serveSSEOnce(t, newProcess(), func(req *http.Request) {
-		req.Header.Set("Last-Event-ID", "1700000000800-0")
+		req.Header.Set("Last-Event-ID", "c2.MTcwMDAwMDAwMDgwMC0w")
 	})
 	if strings.Contains(secondProcessBody, "before-disconnect") {
 		t.Fatalf("second process replayed already-acknowledged mutation:\n%s", secondProcessBody)
@@ -209,7 +213,7 @@ func TestHandler_FleetDBOnlyReconnectCanMoveBetweenServeProcesses(t *testing.T) 
 	if !strings.Contains(secondProcessBody, `"issue_id":"missed-on-other-process"`) {
 		t.Fatalf("second process did not catch up missed durable mutation:\n%s", secondProcessBody)
 	}
-	if !strings.Contains(secondProcessBody, "id: 1700000000900-0\n") {
+	if !strings.Contains(secondProcessBody, "id: c2.MTcwMDAwMDAwMDkwMC0w\n") {
 		t.Fatalf("second process did not preserve fleet-db cursor id:\n%s", secondProcessBody)
 	}
 }
@@ -247,6 +251,6 @@ func fixedReplayHead(t *testing.T, head string) mutationPageFn {
 		if since != "$" || limit != 1 {
 			t.Errorf("head query since=%q limit=%d", since, limit)
 		}
-		return backend.MutationPage{Cursor: head}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: head}, nil
 	}
 }

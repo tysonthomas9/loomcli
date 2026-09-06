@@ -40,7 +40,7 @@ func TestAuthoritativeReaderWritesSourceOrderAndFilterCheckpoint(t *testing.T) {
 		if ws != "WS" || since != "start" || limit != 5 {
 			t.Fatalf("read args %s/%s/%d", ws, since, limit)
 		}
-		return backend.MutationPage{Events: []backend.MutationData{readerMutation("opaque-z", "wanted"), readerMutation("opaque-a", "wanted"), readerMutation("opaque-tail", "excluded")}, Cursor: "opaque-tail", HasMore: true}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: []backend.MutationData{readerMutation("opaque-z", "wanted"), readerMutation("opaque-a", "wanted"), readerMutation("opaque-tail", "excluded")}, Cursor: "opaque-tail", HasMore: true}, nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +70,7 @@ func TestAuthoritativeReaderWriterFailureResumesSuccessfulPrefix(t *testing.T) {
 				} else if since != "start" {
 					t.Fatalf("unexpected retry cursor %q", since)
 				}
-				return backend.MutationPage{Events: events, Cursor: "tail"}, nil
+				return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: events, Cursor: "tail"}, nil
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -121,7 +121,7 @@ func TestAuthoritativeReaderRejectsPageBeforeAnyWrite(t *testing.T) {
 func TestAuthoritativeReaderBackendFailureAndIdleDoNotAdvance(t *testing.T) {
 	backendErr := errors.New("source unavailable")
 	reader, _ := newAuthoritativeReader("WS", "start", nil, func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{Cursor: "unsafe", Events: []backend.MutationData{readerMutation("unsafe", "")}}, backendErr
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "unsafe", Events: []backend.MutationData{readerMutation("unsafe", "")}}, backendErr
 	})
 	writer := &readerTestWriter{}
 	if _, err := reader.readPage(context.Background(), writer, 2); !errors.Is(err, backendErr) {
@@ -131,7 +131,7 @@ func TestAuthoritativeReaderBackendFailureAndIdleDoNotAdvance(t *testing.T) {
 		t.Fatal("backend failure advanced checkpoint")
 	}
 	reader.getPage = func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{Cursor: "start"}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "start"}, nil
 	}
 	more, err := reader.readPage(context.Background(), writer, 2)
 	if err != nil || more || len(writer.frames) > 0 || reader.cursor != "start" {
@@ -147,7 +147,7 @@ func TestAuthoritativeReaderRejectsRecentPageCycle(t *testing.T) {
 		if calls > 1 {
 			cursor = "A"
 		}
-		return backend.MutationPage{Cursor: cursor, HasMore: true}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: cursor, HasMore: true}, nil
 	})
 	writer := &readerTestWriter{}
 	if _, err := reader.readPage(context.Background(), writer, 1); err != nil {
@@ -165,7 +165,7 @@ func TestAuthoritativeReaderHealthyPagesOutliveBoundedHistory(t *testing.T) {
 	calls := 0
 	reader, _ := newAuthoritativeReader("WS", "start", nil, func(context.Context, string, string, int) (backend.MutationPage, error) {
 		calls++
-		return backend.MutationPage{Cursor: fmt.Sprintf("opaque-%d", calls), HasMore: true}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: fmt.Sprintf("opaque-%d", calls), HasMore: true}, nil
 	})
 	writer := &readerTestWriter{}
 	for range authoritativeCursorHistory * 2 {

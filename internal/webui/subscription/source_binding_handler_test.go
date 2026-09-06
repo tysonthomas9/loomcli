@@ -22,7 +22,7 @@ type bindingHandlerSubscriber struct {
 
 func (s *bindingHandlerSubscriber) GetMutationHead(context.Context) (backend.MutationPage, error) {
 	s.headReads++
-	return backend.MutationPage{Cursor: "fence"}, nil
+	return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "c2.ZmVuY2U"}, nil
 }
 
 func (s *bindingHandlerSubscriber) GetMutationPageThrough(context.Context, string, string, int) (backend.MutationPage, error) {
@@ -52,20 +52,20 @@ func TestBoundSourceHandlerNeverAdoptsReplacementWithEqualCursors(t *testing.T) 
 			hub := realtime.NewHub()
 			go hub.Run()
 			t.Cleanup(hub.Stop)
-			cursor := "first"
+			cursor := "c2.Zmlyc3Q"
 			more := true
 			if boundary == "between passes" {
-				cursor, more = "fence", false
+				cursor, more = "c2.ZmVuY2U", false
 			}
-			old := &bindingHandlerSubscriber{page: backend.MutationPage{Cursor: cursor, HasMore: more, Events: []backend.MutationData{{Cursor: cursor, Type: backend.MutationUpdate, IssueID: "old-issue"}}}}
+			old := &bindingHandlerSubscriber{page: backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: cursor, HasMore: more, Events: []backend.MutationData{{Cursor: cursor, Type: backend.MutationUpdate, IssueID: "old-issue"}}}}
 			// Both identities advertise the same fence; cursor equality cannot
 			// distinguish them. The replacement's payload must never be fetched.
-			replacement := &bindingHandlerSubscriber{page: backend.MutationPage{Cursor: "fence", Events: []backend.MutationData{{Cursor: "fence", Type: backend.MutationUpdate, IssueID: "replacement-issue"}}}}
+			replacement := &bindingHandlerSubscriber{page: backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "c2.ZmVuY2U", Events: []backend.MutationData{{Cursor: "c2.ZmVuY2U", Type: backend.MutationUpdate, IssueID: "replacement-issue"}}}}
 			multi := &MultiWorkspaceSubscriber{subscribers: map[string]*subscriberEntry{"ws": {sub: old}}}
 			handler := realtime.NewHandler(realtime.HandlerConfig{Hub: hub, WorkspaceFromCtx: func(context.Context) string { return "ws" }, OpenMutationSource: multi.OpenMutationSource})
 			swapped := false
 			writer := &sourceSwapWriter{ResponseRecorder: httptest.NewRecorder(), onFrame: func(frame string) {
-				trigger := strings.Contains(frame, "id: first\n")
+				trigger := strings.Contains(frame, "id: c2.Zmlyc3Q\n")
 				if boundary == "between passes" {
 					trigger = strings.Contains(frame, "event: connected\n")
 				}
@@ -76,12 +76,12 @@ func TestBoundSourceHandlerNeverAdoptsReplacementWithEqualCursors(t *testing.T) 
 				multi.mu.Lock()
 				multi.subscribers["ws"] = &subscriberEntry{sub: replacement}
 				multi.mu.Unlock()
-				hub.Broadcast(&realtime.MutationPayload{WorkspaceID: "ws", Cursor: "fence", Type: backend.MutationUpdate, IssueID: "replacement-issue"})
+				hub.Broadcast(&realtime.MutationPayload{WorkspaceID: "ws", Cursor: "c2.ZmVuY2U", Type: backend.MutationUpdate, IssueID: "replacement-issue"})
 			}}
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 			defer cancel()
 			req := httptest.NewRequest(http.MethodGet, "/events", nil).WithContext(ctx)
-			req.Header.Set("Last-Event-ID", "start")
+			req.Header.Set("Last-Event-ID", "c2.c3RhcnQ")
 			handler.ServeHTTP(writer, req)
 			require.NoError(t, ctx.Err(), "source retirement must end the request before its timeout")
 			require.True(t, swapped)

@@ -10,6 +10,7 @@ vi.mock("../client", () => ({
 const now = Date.parse("2026-09-05T12:00:00Z");
 const offer: RecoveryHandle = {
   handle: "A".repeat(43),
+  source_identity: "s1.Zml4dHVyZQ",
   workspace: "WS",
   source_repos: [],
   expires_at: "2026-09-05T12:01:00Z",
@@ -18,7 +19,7 @@ const offer: RecoveryHandle = {
 const document = JSON.stringify({
   manifest: offer.manifest,
   workspace: "WS",
-  through: "c1.MTAtMA",
+  through: "c2.Zml4dHVyZQ",
   issues: [],
   total: 0,
   ready: [],
@@ -26,6 +27,7 @@ const document = JSON.stringify({
   deferred: [],
 });
 const headers = {
+  "X-Loom-Recovery-Source": offer.source_identity,
   "Content-Type": "application/json",
   "X-Loom-Recovery-Handle": offer.handle,
 };
@@ -253,3 +255,21 @@ describe("readIssueRecovery", () => {
     await expect(read()).rejects.toThrow("expired");
   });
 });
+
+it.each([undefined, "s1.b3RoZXI"])(
+  "rejects missing or foreign source identity header %s",
+  async (identity) => {
+    const changed: Record<string, string> = { ...headers };
+    if (identity === undefined) delete changed["X-Loom-Recovery-Source"];
+    else changed["X-Loom-Recovery-Source"] = identity;
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          response([encoder.encode(document)], { headers: changed }),
+        ),
+    );
+    await expect(read()).rejects.toThrow("Invalid recovery response");
+  },
+);

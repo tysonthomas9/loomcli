@@ -22,19 +22,19 @@ import (
 func TestHandler_FleetHTTPReplay201BeforeConnectedWithQueuedOverlap(t *testing.T) {
 	const workspace = "ws-replay"
 	cursor := func(n int) string {
-		return "c1." + base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf("700-%d", n)))
+		return "c2." + base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf("700-%d", n)))
 	}
 	hub := NewHub()
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 	var calls atomic.Int32
 	fleetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("since") == "c1.JA" {
+		if r.URL.Query().Get("since") == "$" {
 			head := 201
 			if calls.Load() >= 3 {
 				head = 202
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"events": []any{}, "cursor": cursor(head), "has_more": false})
+			_ = json.NewEncoder(w).Encode(map[string]any{"source_identity": "s1.Zml4dHVyZQ", "events": []any{}, "cursor": cursor(head), "has_more": false})
 			return
 		}
 		page := int(calls.Add(1))
@@ -76,10 +76,10 @@ func TestHandler_FleetHTTPReplay201BeforeConnectedWithQueuedOverlap(t *testing.T
 		}
 		events := make([]map[string]any, 0, end-start)
 		for n := start + 1; n <= end; n++ {
-			events = append(events, map[string]any{"id": cursor(n), "action": "issue.update", "entity_type": "issue", "entity_id": fmt.Sprintf("issue-%d", n), "timestamp": "2026-09-05T00:00:00Z", "after": `{"title":"replay"}`})
+			events = append(events, map[string]any{"workspace_id": workspace, "id": cursor(n), "action": "issue.update", "entity_type": "issue", "entity_id": fmt.Sprintf("issue-%d", n), "timestamp": "2026-09-05T00:00:00Z", "after": `{"title":"replay"}`})
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]any{"events": events, "cursor": cursor(end), "has_more": end < 201}); err != nil {
+		if err := json.NewEncoder(w).Encode(map[string]any{"source_identity": "s1.Zml4dHVyZQ", "events": events, "cursor": cursor(end), "has_more": end < 201}); err != nil {
 			t.Error(err)
 		}
 	}))
@@ -90,12 +90,12 @@ func TestHandler_FleetHTTPReplay201BeforeConnectedWithQueuedOverlap(t *testing.T
 	writer.written = make(chan recordedFrame, 256)
 	handler := NewHandler(HandlerConfig{Hub: hub, WorkspaceFromCtx: func(context.Context) string { return workspace }, OpenMutationSource: openFixtureMutationSource(func(ctx context.Context, ws, since string, limit int) (backend.MutationPage, error) {
 		if ws != workspace {
-			return backend.MutationPage{}, fmt.Errorf("wrong workspace %s", ws)
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ"}, fmt.Errorf("wrong workspace %s", ws)
 		}
 		return fleetBackend.GetMutationsAfter(ctx, since, limit)
 	}, func(ctx context.Context, ws, since, through string, limit int) (backend.MutationPage, error) {
 		if ws != workspace {
-			return backend.MutationPage{}, fmt.Errorf("wrong workspace %s", ws)
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ"}, fmt.Errorf("wrong workspace %s", ws)
 		}
 		return fleetBackend.GetMutationsThrough(ctx, since, through, limit)
 	})})

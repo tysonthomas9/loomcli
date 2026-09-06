@@ -35,7 +35,7 @@ func TestBoundedPageCapabilityAndContext(t *testing.T) {
 		if got.Value(contextKey{}) != "caller" || since != "opaque-a" || through != "opaque-b" || limit != 3 {
 			t.Error("request identity changed")
 		}
-		return backend.MutationPage{}, sentinel
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ"}, sentinel
 	}}
 	sub2 := NewBackendMutationSubscriber(b, nil, "ws")
 	defer sub2.Stop()
@@ -49,7 +49,7 @@ func TestBoundedPageRejectsLateResultAfterRetirement(t *testing.T) {
 	b := &boundedBackend{fakeBackend: newFakeBackend(), read: func(context.Context, string, string, int) (backend.MutationPage, error) {
 		close(started)
 		<-release
-		return backend.MutationPage{Cursor: "opaque-b"}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "opaque-b"}, nil
 	}}
 	sub := NewBackendMutationSubscriber(b, nil, "ws")
 	done := make(chan error, 1)
@@ -76,7 +76,7 @@ func TestBoundedMultiRejectsWorkspaceReplacement(t *testing.T) {
 	sub := &boundedWorkspace{read: func(context.Context, string, string, int) (backend.MutationPage, error) {
 		close(started)
 		<-release
-		return backend.MutationPage{Cursor: "fence"}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "fence"}, nil
 	}}
 	multi := &MultiWorkspaceSubscriber{subscribers: map[string]*subscriberEntry{"ws": {sub: sub}}}
 	done := make(chan error, 1)
@@ -121,7 +121,7 @@ func TestBoundedPageRejectsCallerCancellation(t *testing.T) {
 	b := &boundedBackend{fakeBackend: newFakeBackend(), read: func(got context.Context, _, _ string, _ int) (backend.MutationPage, error) {
 		cancel()
 		<-got.Done()
-		return backend.MutationPage{Cursor: "fence"}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "fence"}, nil
 	}}
 	sub := NewBackendMutationSubscriber(b, nil, "ws")
 	defer sub.Stop()
