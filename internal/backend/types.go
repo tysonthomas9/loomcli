@@ -208,9 +208,10 @@ type MutationData struct {
 // Cursor is the position after Events and HasMore reports whether the backend
 // had another raw page available when this page was read.
 type MutationPage struct {
-	Events  []MutationData `json:"events"`
-	Cursor  string         `json:"cursor"`
-	HasMore bool           `json:"has_more"`
+	SourceIdentity string
+	Events         []MutationData `json:"events"`
+	Cursor         string         `json:"cursor"`
+	HasMore        bool           `json:"has_more"`
 }
 
 // CursorMutationBackend is an optional IssueBackend extension for durable

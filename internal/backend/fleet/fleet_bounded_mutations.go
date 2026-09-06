@@ -2,13 +2,11 @@ package fleet
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
@@ -32,21 +30,14 @@ func (b *FleetBackend) GetMutationsThrough(ctx context.Context, since, through s
 	if status != http.StatusOK || !hasData(resp) {
 		return backend.MutationPage{}, backend.ErrInternal(op, "missing bounded mutation page", nil)
 	}
-	return decodeBoundedMutationPage(resp.Data, since, through, limit)
+	return decodeBoundedMutationPage(resp.Data, since, through, limit, b.workspaceID)
 }
 
-func decodeBoundedMutationPage(data json.RawMessage, since, through string, limit int) (backend.MutationPage, error) {
+func decodeBoundedMutationPage(data json.RawMessage, since, through string, limit int, workspace string) (backend.MutationPage, error) {
 	const op = "GetMutationsThrough"
-	var wire struct {
-		Events  *[]fleetMutationEvent `json:"events"`
-		Cursor  *string               `json:"cursor"`
-		HasMore *bool                 `json:"has_more"`
-	}
-	if err := json.Unmarshal(data, &wire); err != nil {
-		return backend.MutationPage{}, backend.ErrInternal(op, "invalid bounded mutation page", err)
-	}
-	if wire.Events == nil || wire.Cursor == nil || wire.HasMore == nil || !isFixedFleetCursor(*wire.Cursor) || len(*wire.Events) > limit {
-		return backend.MutationPage{}, backend.ErrInternal(op, "incomplete bounded mutation page", nil)
+	wire, err := decodeMutationWire(data, limit, workspace)
+	if err != nil {
+		return backend.MutationPage{}, err
 	}
 	if (*wire.Cursor == through) == *wire.HasMore || (*wire.Cursor == since && (*wire.HasMore || len(*wire.Events) > 0)) {
 		return backend.MutationPage{}, backend.ErrInternal(op, "bounded mutation page did not honor replay fence", nil)
@@ -59,18 +50,40 @@ func decodeBoundedMutationPage(data json.RawMessage, since, through string, limi
 		}
 		seen[event.ID] = true
 	}
-	return backend.MutationPage{Events: fleetEventsToMutationData(*wire.Events), Cursor: *wire.Cursor, HasMore: *wire.HasMore}, nil
+	return backend.MutationPage{Events: fleetEventsToMutationData(*wire.Events), Cursor: *wire.Cursor, HasMore: *wire.HasMore, SourceIdentity: *wire.SourceIdentity}, nil
 }
 
 // Validate the token envelope without imposing order on opaque source IDs.
-func isFixedFleetCursor(value string) bool {
-	if value == "0" {
-		return true
+func isFixedFleetCursor(value string) bool { return value == "0" || backend.ValidMutationCursor(value) }
+
+type mutationWire struct {
+	Events         *[]fleetMutationEvent `json:"events"`
+	Cursor         *string               `json:"cursor"`
+	HasMore        *bool                 `json:"has_more"`
+	SourceIdentity *string               `json:"source_identity"`
+}
+
+func decodeMutationWire(data json.RawMessage, limit int, workspace string) (mutationWire, error) {
+	var wire mutationWire
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return wire, backend.ErrInternal("mutations", "invalid mutation page", err)
 	}
-	if !strings.HasPrefix(value, fleetOpaqueCursorPrefix) {
-		return false
+	if wire.Events == nil || wire.Cursor == nil || *wire.Cursor == "0" || !isFixedFleetCursor(*wire.Cursor) || wire.HasMore == nil || wire.SourceIdentity == nil || !backend.ValidSourceIdentity(*wire.SourceIdentity) || len(*wire.Events) > limit {
+		return wire, backend.ErrInternal("mutations", "incomplete mutation page", nil)
 	}
-	payload := strings.TrimPrefix(value, fleetOpaqueCursorPrefix)
-	decoded, err := base64.RawURLEncoding.DecodeString(payload)
-	return err == nil && len(decoded) > 0 && string(decoded) != "$" && base64.RawURLEncoding.EncodeToString(decoded) == payload
+	seen := map[string]bool{}
+	for _, e := range *wire.Events {
+		if e.WorkspaceID != workspace || e.ID == "0" || !isFixedFleetCursor(e.ID) || seen[e.ID] {
+			return wire, backend.ErrInternal("mutations", "invalid event cursor", nil)
+		}
+		seen[e.ID] = true
+	}
+	return wire, nil
+}
+func decodeMutationPage(data json.RawMessage, limit int, workspace string) (backend.MutationPage, error) {
+	wire, err := decodeMutationWire(data, limit, workspace)
+	if err != nil {
+		return backend.MutationPage{}, err
+	}
+	return backend.MutationPage{Events: fleetEventsToMutationData(*wire.Events), Cursor: *wire.Cursor, HasMore: *wire.HasMore, SourceIdentity: *wire.SourceIdentity}, nil
 }

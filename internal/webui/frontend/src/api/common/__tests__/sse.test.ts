@@ -269,6 +269,7 @@ describe("WorkspaceSSEClient", () => {
       await expectRequestCount(1);
       const recovery = {
         handle: "A".repeat(43),
+        source_identity: "s1.Zml4dHVyZQ",
         workspace: mode === "foreign" ? "other" : "test-ws",
         source_repos: mode === "wrong scope" ? ["other"] : ["b", "a"],
         expires_at: new Date(
@@ -303,6 +304,7 @@ describe("WorkspaceSSEClient", () => {
     await expectRequestCount(1);
     const recovery = {
       handle: "A".repeat(43),
+      source_identity: "s1.Zml4dHVyZQ",
       workspace: "test-ws",
       source_repos: ["a"],
       expires_at: new Date(Date.now() + 60000).toISOString(),
@@ -332,6 +334,7 @@ describe("WorkspaceSSEClient", () => {
     await expectRequestCount(1);
     const recovery = {
       handle: "A".repeat(43),
+      source_identity: "s1.Zml4dHVyZQ",
       workspace: "test-ws",
       source_repos: ["b"],
       expires_at: new Date(Date.now() + 60000).toISOString(),

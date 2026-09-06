@@ -27,28 +27,28 @@ func TestMutationSourceBindsAcrossPagesAndLivePasses(t *testing.T) {
 	old := &bindingTestSource{head: func(context.Context) (backend.MutationPage, error) {
 		heads++
 		if retired {
-			return backend.MutationPage{}, retireErr
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ"}, retireErr
 		}
-		return backend.MutationPage{Cursor: "old-tail"}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "c2.b2xkLXRhaWw"}, nil
 	}, page: func(_ context.Context, since, through string, _ int) (backend.MutationPage, error) {
 		pages++
 		if retired {
-			return backend.MutationPage{}, retireErr
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ"}, retireErr
 		}
-		if through != "old-tail" {
+		if through != "c2.b2xkLXRhaWw" {
 			t.Fatalf("wrong fence %s", through)
 		}
-		if since == "start" {
-			return backend.MutationPage{Cursor: "middle", HasMore: true, Events: []backend.MutationData{readerMutation("middle", "wanted")}}, nil
+		if since == "c2.c3RhcnQ" {
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "c2.bWlkZGxl", HasMore: true, Events: []backend.MutationData{readerMutation("c2.bWlkZGxl", "wanted")}}, nil
 		}
-		return backend.MutationPage{Cursor: through, Events: []backend.MutationData{readerMutation(through, "wanted")}}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: through, Events: []backend.MutationData{readerMutation(through, "wanted")}}, nil
 	}}
 	replacement := &bindingTestSource{head: func(context.Context) (backend.MutationPage, error) {
 		t.Fatal("replacement head used by established connection")
-		return backend.MutationPage{}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ"}, nil
 	}, page: func(context.Context, string, string, int) (backend.MutationPage, error) {
 		t.Fatal("replacement page used")
-		return backend.MutationPage{}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ"}, nil
 	}}
 	var current MutationSource = old
 	h := NewHandler(HandlerConfig{Hub: NewHub(), OpenMutationSource: func(_ context.Context, ws string) (MutationSource, error) {
@@ -60,21 +60,21 @@ func TestMutationSourceBindsAcrossPagesAndLivePasses(t *testing.T) {
 	}})
 	writer := &readerTestWriter{}
 	s := fenceSession(h, writer)
-	if err := s.initialize("start"); err != nil {
+	if err := s.initialize("c2.c3RhcnQ"); err != nil {
 		t.Fatal(err)
 	}
 	current = replacement
 	if err := s.catchUp(nil); err != nil {
 		t.Fatal(err)
 	}
-	if opens != 1 || heads != 1 || pages != 2 || s.reader.cursor != "old-tail" {
+	if opens != 1 || heads != 1 || pages != 2 || s.reader.cursor != "c2.b2xkLXRhaWw" {
 		t.Fatalf("opens=%d heads=%d pages=%d cursor=%s", opens, heads, pages, s.reader.cursor)
 	}
 	retired = true
 	if err := s.catchUp(nil); !errors.Is(err, retireErr) {
 		t.Fatalf("error %v", err)
 	}
-	if opens != 1 || pages != 2 || s.reader.cursor != "old-tail" || len(writer.frames) != 2 {
+	if opens != 1 || pages != 2 || s.reader.cursor != "c2.b2xkLXRhaWw" || len(writer.frames) != 2 {
 		t.Fatal("retirement replaced source or advanced checkpoint")
 	}
 }
@@ -97,7 +97,7 @@ func TestMutationSourceOpenFailureNeverReadsOrWrites(t *testing.T) {
 			writer := &readerTestWriter{}
 			s := fenceSession(h, writer)
 			s.ctx = ctx
-			err := s.initialize("accepted")
+			err := s.initialize("c2.YWNjZXB0ZWQ")
 			if err == nil {
 				t.Fatal("accepted failed source binding")
 			}

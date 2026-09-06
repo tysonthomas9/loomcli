@@ -37,7 +37,7 @@ func (b *scriptedCursorBackend) GetMutationsAfter(ctx context.Context, since str
 	if b.getPageFn != nil {
 		return b.getPageFn(ctx, since, limit)
 	}
-	return backend.MutationPage{Events: []backend.MutationData{}, Cursor: since}, nil
+	return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: []backend.MutationData{}, Cursor: since}, nil
 }
 
 func (b *scriptedCursorBackend) WaitForMutationsAfter(ctx context.Context, since string, timeoutMs int64, limit int) (backend.MutationPage, error) {
@@ -45,7 +45,7 @@ func (b *scriptedCursorBackend) WaitForMutationsAfter(ctx context.Context, since
 		return b.waitPageFn(ctx, since, timeoutMs, limit)
 	}
 	<-ctx.Done()
-	return backend.MutationPage{}, ctx.Err()
+	return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ"}, ctx.Err()
 }
 
 func TestBackendMutationSubscriber_StartReturnsBeforeSupportedProbeAndReadyReturnsHead(t *testing.T) {
@@ -65,7 +65,7 @@ func TestBackendMutationSubscriber_StartReturnsBeforeSupportedProbeAndReadyRetur
 		}
 		waitStarted <- since
 		<-ctx.Done()
-		return backend.MutationPage{}, ctx.Err()
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ"}, ctx.Err()
 	}
 	sub := NewBackendMutationSubscriber(b, hub, "ws-test")
 	t.Cleanup(sub.Stop)
@@ -106,22 +106,22 @@ func TestBackendMutationSubscriber_UnsupportedProbeDrainsPagesWithoutLosingEmpty
 		mu.Unlock()
 		switch since {
 		case "c1.previous":
-			return backend.MutationPage{
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ",
 				Events:  []backend.MutationData{{Cursor: "c1.event", Type: backend.MutationUpdate}},
 				Cursor:  "c1.next",
 				HasMore: true,
 			}, nil
 		case "c1.next":
-			return backend.MutationPage{Events: []backend.MutationData{}, Cursor: "", HasMore: false}, nil
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: []backend.MutationData{}, Cursor: "", HasMore: false}, nil
 		default:
-			return backend.MutationPage{}, errors.New("unexpected cursor " + since)
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ"}, errors.New("unexpected cursor " + since)
 		}
 	}
 	liveWait := make(chan string, 1)
 	b.waitPageFn = func(ctx context.Context, since string, _ int64, _ int) (backend.MutationPage, error) {
 		liveWait <- since
 		<-ctx.Done()
-		return backend.MutationPage{}, ctx.Err()
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ"}, ctx.Err()
 	}
 	sub := newBackendMutationSubscriber(b, hub, "ws-test", "c1.previous", defaultSubscriberBudgets())
 	t.Cleanup(sub.Stop)
@@ -144,51 +144,28 @@ func TestBackendMutationSubscriber_UnsupportedProbeDrainsPagesWithoutLosingEmpty
 	}
 }
 
-func TestBackendMutationSubscriber_OldFleetHTTPDrainsPagedHead(t *testing.T) {
-	requests := make(chan string, 4)
+func TestBackendMutationSubscriber_OldFleetHTTPFailsReadiness(t *testing.T) {
+	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		query := r.URL.Query()
-		since := query.Get("since")
-		requests <- since + ":" + query.Get("limit") + ":" + query.Get("timeout")
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case since == "c1.JA":
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{
-				"code": "invalid_parameter", "message": "invalid since parameter: expected opaque cursor token",
-			}})
-		case since == "0":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"events": []map[string]any{{"id": "c1.ZXZlbnQx", "action": "issue.update", "entity_type": "issue", "entity_id": "task-1"}},
-				"cursor": "c1.cGFnZTI", "has_more": true,
-			})
-		case since == "c1.cGFnZTI" && query.Get("timeout") == "":
-			_ = json.NewEncoder(w).Encode(map[string]any{"events": []any{}, "cursor": "", "has_more": false})
-		case since == "c1.cGFnZTI" && query.Get("timeout") == "10000":
-			<-r.Context().Done()
-		default:
-			http.Error(w, "unexpected request", http.StatusInternalServerError)
+		calls++
+		if r.URL.Query().Get("since") != "$" {
+			t.Error("unexpected fallback request")
 		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": "invalid_parameter", "message": "invalid since parameter: expected opaque cursor token"}})
 	}))
 	t.Cleanup(server.Close)
-
-	fleetBackend, err := backendfleet.New(backendfleet.Config{BaseURL: server.URL, WorkspaceID: "ws-test"})
+	fb, err := backendfleet.New(backendfleet.Config{BaseURL: server.URL, WorkspaceID: "ws-test"})
 	if err != nil {
-		t.Fatalf("fleet.New: %v", err)
+		t.Fatal(err)
 	}
-	sub := NewBackendMutationSubscriber(fleetBackend, realtime.NewHub(), "ws-test")
+	sub := NewBackendMutationSubscriber(fb, realtime.NewHub(), "ws-test")
 	t.Cleanup(sub.Stop)
 	sub.Start()
 	head, err := sub.Ready(context.Background())
-	if err != nil || head != "c1.cGFnZTI" {
-		t.Fatalf("Ready = (%q, %v), want paged head c1.cGFnZTI", head, err)
-	}
-
-	want := []string{"c1.JA:1:0", "0:100:", "c1.cGFnZTI:100:"}
-	for i, expected := range want {
-		if got := <-requests; got != expected {
-			t.Fatalf("request %d = %q, want %q", i+1, got, expected)
-		}
+	if err == nil || head != "" || calls != 1 {
+		t.Fatalf("legacy source readiness = %q %v calls=%d", head, err, calls)
 	}
 }
 
@@ -227,7 +204,7 @@ func TestBackendMutationSubscriber_DrainCapFailsReadinessAndNeverStartsLivePolli
 	b := newScriptedCursorBackend()
 	b.probeFn = func(context.Context) (string, bool, error) { return "", false, nil }
 	b.getPageFn = func(_ context.Context, since string, _ int) (backend.MutationPage, error) {
-		return backend.MutationPage{
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ",
 			Events:  []backend.MutationData{{Cursor: "c1.event"}},
 			Cursor:  "c1.partial",
 			HasMore: true,
@@ -236,7 +213,7 @@ func TestBackendMutationSubscriber_DrainCapFailsReadinessAndNeverStartsLivePolli
 	liveCalled := make(chan struct{}, 1)
 	b.waitPageFn = func(context.Context, string, int64, int) (backend.MutationPage, error) {
 		liveCalled <- struct{}{}
-		return backend.MutationPage{}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ"}, nil
 	}
 	budgets := defaultSubscriberBudgets()
 	budgets.maxDrainPages = 1
@@ -266,16 +243,16 @@ func TestBackendMutationSubscriber_HasMoreRepollsImmediately(t *testing.T) {
 			if since != "c1.head" || timeoutMs != int64(backendWaitTimeout/time.Millisecond) || limit != mutationPageLimit {
 				t.Fatalf("first wait = (%q, %d, %d)", since, timeoutMs, limit)
 			}
-			return backend.MutationPage{Events: []backend.MutationData{{Cursor: "c1.event"}}, Cursor: "c1.next", HasMore: true}, nil
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: []backend.MutationData{{Cursor: "c1.event"}}, Cursor: "c1.next", HasMore: true}, nil
 		case 2:
 			if since != "c1.next" || timeoutMs != 0 || limit != mutationPageLimit {
 				t.Fatalf("second wait = (%q, %d, %d), want (c1.next, 0, %d)", since, timeoutMs, limit, mutationPageLimit)
 			}
 			close(secondWait)
 			<-ctx.Done()
-			return backend.MutationPage{}, ctx.Err()
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ"}, ctx.Err()
 		default:
-			return backend.MutationPage{}, errors.New("unexpected extra wait")
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ"}, errors.New("unexpected extra wait")
 		}
 	}
 	sub := NewBackendMutationSubscriber(b, hub, "ws-test")

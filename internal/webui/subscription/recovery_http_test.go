@@ -37,20 +37,20 @@ func httpRecoveryRequest(principal, workspace, handle string) *http.Request {
 func TestRecoveryHTTPUsesCapturedSourceAndPreservesDocument(t *testing.T) {
 	registry := realtime.NewRecoveryRegistry()
 	defer registry.Close()
-	raw := []byte(`{ "manifest":"fleet.issue-workspace.v2", "workspace":"WS", "through":"c1.MS0w", "issues":[], "total":0, "ready":[], "blocked":[], "deferred":[], "future":{"keep":"verbatim"} }`)
+	raw := []byte(`{ "manifest":"fleet.issue-workspace.v2", "workspace":"WS", "through":"c2.MS0w", "issues":[], "total":0, "ready":[], "blocked":[], "deferred":[], "future":{"keep":"verbatim"} }`)
 	oldCalls, newCalls := 0, 0
 	var selected backend.IssueRecoveryBackend = httpRecoverySource(func(ctx context.Context) (backend.IssueRecoverySnapshot, error) {
 		oldCalls++
 		deadline, ok := ctx.Deadline()
 		require.True(t, ok)
 		require.LessOrEqual(t, time.Until(deadline), 15*time.Second)
-		return backend.IssueRecoverySnapshot{Manifest: "fleet.issue-workspace.v2", Workspace: "WS", Through: "c1.MS0w", Document: raw}, nil
+		return backend.IssueRecoverySnapshot{SourceIdentity: "s1.Zml4dHVyZQ", Manifest: "fleet.issue-workspace.v2", Workspace: "WS", Through: "c2.MS0w", Document: raw}, nil
 	})
-	handle, err := registry.Register("user", "WS", nil, selected)
+	handle, err := registry.Register("user", "WS", nil, selected, "s1.Zml4dHVyZQ")
 	require.NoError(t, err)
 	selected = httpRecoverySource(func(context.Context) (backend.IssueRecoverySnapshot, error) {
 		newCalls++
-		return backend.IssueRecoverySnapshot{}, errors.New("replacement must not be selected")
+		return backend.IssueRecoverySnapshot{SourceIdentity: "s1.Zml4dHVyZQ"}, errors.New("replacement must not be selected")
 	})
 	require.NotNil(t, selected)
 	recorder := httptest.NewRecorder()
@@ -75,8 +75,8 @@ func TestRecoveryHTTPRejectsUnscopedAndMalformedRequestsWithoutReading(t *testin
 	calls := 0
 	handle, err := registry.Register("user", "WS", nil, httpRecoverySource(func(context.Context) (backend.IssueRecoverySnapshot, error) {
 		calls++
-		return backend.IssueRecoverySnapshot{}, errors.New("must not read")
-	}))
+		return backend.IssueRecoverySnapshot{SourceIdentity: "s1.Zml4dHVyZQ"}, errors.New("must not read")
+	}), "s1.Zml4dHVyZQ")
 	require.NoError(t, err)
 	tests := []struct {
 		name   string
@@ -130,8 +130,8 @@ func TestRecoveryHTTPErrorsNeverExposeSourceData(t *testing.T) {
 			registry := realtime.NewRecoveryRegistry()
 			defer registry.Close()
 			handle, err := registry.Register("user", "WS", nil, httpRecoverySource(func(context.Context) (backend.IssueRecoverySnapshot, error) {
-				return backend.IssueRecoverySnapshot{Document: []byte("secret")}, test.err
-			}))
+				return backend.IssueRecoverySnapshot{SourceIdentity: "s1.Zml4dHVyZQ", Document: []byte("secret")}, test.err
+			}), "s1.Zml4dHVyZQ")
 			require.NoError(t, err)
 			rec := httptest.NewRecorder()
 			handleIssueRecovery(registry, nil)(rec, httpRecoveryRequest("user", "WS", handle.Handle))
@@ -153,8 +153,8 @@ func TestRecoveryHTTPBusyAndClosedRegistry(t *testing.T) {
 		case <-release:
 		case <-ctx.Done():
 		}
-		return backend.IssueRecoverySnapshot{}, errors.New("released")
-	}))
+		return backend.IssueRecoverySnapshot{SourceIdentity: "s1.Zml4dHVyZQ"}, errors.New("released")
+	}), "s1.Zml4dHVyZQ")
 	require.NoError(t, err)
 	done := make(chan struct{})
 	go func() { defer close(done); _, _ = registry.Read(t.Context(), "user", "WS", handle.Handle) }()
@@ -178,8 +178,8 @@ func TestRecoveryHTTPCanceledReadCannotPublishSuccess(t *testing.T) {
 	defer cancel()
 	handle, err := registry.Register("user", "WS", nil, httpRecoverySource(func(context.Context) (backend.IssueRecoverySnapshot, error) {
 		cancel()
-		return backend.IssueRecoverySnapshot{Manifest: "fleet.issue-workspace.v2", Workspace: "WS", Through: "c1.MS0w", Document: []byte(`{"secret":"late success"}`)}, nil
-	}))
+		return backend.IssueRecoverySnapshot{SourceIdentity: "s1.Zml4dHVyZQ", Manifest: "fleet.issue-workspace.v2", Workspace: "WS", Through: "c2.MS0w", Document: []byte(`{"secret":"late success"}`)}, nil
+	}), "s1.Zml4dHVyZQ")
 	require.NoError(t, err)
 	req := httpRecoveryRequest("user", "WS", handle.Handle)
 	req = req.WithContext(middleware.WithUserIdentity(middleware.WithWorkspace(ctx, "WS"), middleware.UserIdentity{UserID: "user"}))

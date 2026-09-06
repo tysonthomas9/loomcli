@@ -30,15 +30,15 @@ func TestRecoveryBridgeSurvivesExpiredStreamAndRejectsReplacement(t *testing.T) 
 	sub := &recoverySubscriber{
 		sourceBindingSubscriber: sourceBindingSubscriber{
 			head: func(context.Context) (backend.MutationPage, error) {
-				return backend.MutationPage{Cursor: "c1.MTAtMA"}, nil
+				return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "c2.MTAtMA"}, nil
 			},
 			page: func(context.Context, string, string, int) (backend.MutationPage, error) {
-				return backend.MutationPage{}, backend.ErrMutationCursorExpired
+				return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ"}, backend.ErrMutationCursorExpired
 			},
 		},
 		recover: func(context.Context) (backend.IssueRecoverySnapshot, error) {
 			calls++
-			return backend.IssueRecoverySnapshot{Manifest: "fleet.issue-workspace.v2", Workspace: "ws", Through: "c1.MTAtMA", Document: []byte(`{"manifest":"fleet.issue-workspace.v2","workspace":"ws","through":"c1.MTAtMA","issues":[],"total":0,"ready":[],"blocked":[],"deferred":[]}`)}, nil
+			return backend.IssueRecoverySnapshot{SourceIdentity: "s1.Zml4dHVyZQ", Manifest: "fleet.issue-workspace.v2", Workspace: "ws", Through: "c2.MTAtMA", Document: []byte(`{"manifest":"fleet.issue-workspace.v2","workspace":"ws","through":"c2.MTAtMA","issues":[],"total":0,"ready":[],"blocked":[],"deferred":[]}`)}, nil
 		},
 	}
 	multi := &MultiWorkspaceSubscriber{subscribers: map[string]*subscriberEntry{"ws": {sub: sub}}}
@@ -49,7 +49,7 @@ func TestRecoveryBridgeSurvivesExpiredStreamAndRejectsReplacement(t *testing.T) 
 	ctx, cancel := context.WithTimeout(middleware.WithWorkspace(t.Context(), "ws"), time.Second)
 	defer cancel()
 	request := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws/events?source_repos=repo-a&token="+url.QueryEscape(token), nil).WithContext(ctx)
-	request.Header.Set("Last-Event-ID", "c1.MS0w")
+	request.Header.Set("Last-Event-ID", "c2.MS0w")
 	stream := httptest.NewRecorder()
 	protected := middleware.Auth(middleware.AuthConfig{JWKSCache: &middleware.JWKSCache{}})(mux)
 	protected.ServeHTTP(stream, request)

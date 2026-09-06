@@ -4,6 +4,7 @@ const now = Date.parse("2026-09-05T12:00:00Z");
 function offer() {
   return {
     handle: "A".repeat(43),
+    source_identity: "s1.Zml4dHVyZQ",
     workspace: "WS",
     source_repos: ["a", "b"],
     expires_at: "2026-09-05T12:01:00Z",
@@ -23,6 +24,11 @@ describe("decodeRecoveryHandle", () => {
   });
   it.each([
     ["missing", { handle: undefined }],
+    ["missing source", { source_identity: undefined }],
+    ["oversized source", { source_identity: "s1." + "A".repeat(1024) }],
+    ["legacy source", { source_identity: "c1.Zml4dHVyZQ" }],
+    ["noncanonical source", { source_identity: "s1.Zml4dHVyZR" }],
+    ["padded source", { source_identity: "s1.Zml4dHVyZQ==" }],
     ["noncanonical", { handle: "A".repeat(42) + "B" }],
     ["foreign", { workspace: "OTHER" }],
     ["manifest", { manifest: "other" }],

@@ -20,7 +20,7 @@ func (s registryRecoverySource) ReadIssueRecovery(ctx context.Context) (backend.
 	return s(ctx)
 }
 func registrySnapshot() backend.IssueRecoverySnapshot {
-	return backend.IssueRecoverySnapshot{Manifest: issueRecoveryManifest, Workspace: "WS", Through: "c1.MTAtMA", Document: []byte(`{"native":"preserved"}`)}
+	return backend.IssueRecoverySnapshot{SourceIdentity: "s1.Zml4dHVyZQ", Manifest: issueRecoveryManifest, Workspace: "WS", Through: "c2.MTAtMA", Document: []byte(`{"native":"preserved"}`)}
 }
 func registrySource() registryRecoverySource {
 	return func(context.Context) (backend.IssueRecoverySnapshot, error) { return registrySnapshot(), nil }
@@ -55,7 +55,7 @@ func TestRecoveryRegistryScopeRetryAndCopies(t *testing.T) {
 	now := time.Now().In(time.FixedZone("test-local", -7*60*60))
 	registryClock(r, now)
 	repos := []string{"repo"}
-	handle, err := r.Register("alice", "WS", repos, registrySource())
+	handle, err := r.Register("alice", "WS", repos, registrySource(), "s1.Zml4dHVyZQ")
 	require.NoError(t, err)
 	require.True(t, ValidRecoveryHandle(handle.Handle))
 	require.Equal(t, now.Add(time.Minute).UTC(), handle.ExpiresAt)
@@ -91,20 +91,20 @@ func TestRecoveryRegistryCapacityAndLazyExpiry(t *testing.T) {
 	now := time.Now()
 	registryClock(r, now)
 	for i := 0; i < recoveryPrincipalCapacity; i++ {
-		_, err := r.Register("alice", "WS", nil, registrySource())
+		_, err := r.Register("alice", "WS", nil, registrySource(), "s1.Zml4dHVyZQ")
 		require.NoError(t, err)
 	}
-	_, err := r.Register("alice", "OTHER", nil, registrySource())
+	_, err := r.Register("alice", "OTHER", nil, registrySource(), "s1.Zml4dHVyZQ")
 	require.ErrorIs(t, err, ErrRecoveryUnavailable)
 	for i := recoveryPrincipalCapacity; i < recoveryHandleCapacity; i++ {
-		_, err := r.Register(fmt.Sprintf("owner-%d", i), "WS", nil, registrySource())
+		_, err := r.Register(fmt.Sprintf("owner-%d", i), "WS", nil, registrySource(), "s1.Zml4dHVyZQ")
 		require.NoError(t, err)
 	}
-	_, err = r.Register("new-owner", "WS", nil, registrySource())
+	_, err = r.Register("new-owner", "WS", nil, registrySource(), "s1.Zml4dHVyZQ")
 	require.ErrorIs(t, err, ErrRecoveryUnavailable)
 	require.Len(t, r.entries, recoveryHandleCapacity)
 	registryClock(r, now.Add(time.Minute))
-	_, err = r.Register("alice", "WS", nil, registrySource())
+	_, err = r.Register("alice", "WS", nil, registrySource(), "s1.Zml4dHVyZQ")
 	require.NoError(t, err)
 	require.Len(t, r.entries, 1)
 }
@@ -120,7 +120,7 @@ func TestRecoveryRegistryBusyDoesNotHoldRegistryLock(t *testing.T) {
 		<-release
 		return registrySnapshot(), nil
 	})
-	handle, err := r.Register("alice", "WS", nil, source)
+	handle, err := r.Register("alice", "WS", nil, source, "s1.Zml4dHVyZQ")
 	require.NoError(t, err)
 	done := make(chan error, 1)
 	go func() { _, err := r.Read(context.Background(), "alice", "WS", handle.Handle); done <- err }()
@@ -128,7 +128,7 @@ func TestRecoveryRegistryBusyDoesNotHoldRegistryLock(t *testing.T) {
 	result, err := r.Read(context.Background(), "alice", "WS", handle.Handle)
 	require.ErrorIs(t, err, ErrRecoveryBusy)
 	require.Empty(t, result.Document)
-	other, err := r.Register("bob", "WS", nil, registrySource())
+	other, err := r.Register("bob", "WS", nil, registrySource(), "s1.Zml4dHVyZQ")
 	require.NoError(t, err)
 	_, err = r.Read(context.Background(), "bob", "WS", other.Handle)
 	require.NoError(t, err)
@@ -155,7 +155,7 @@ func TestRecoveryRegistryDiscardsLateSuccess(t *testing.T) {
 				<-release // Deliberately return success after cancellation.
 				return registrySnapshot(), nil
 			})
-			handle, err := r.Register("alice", "WS", nil, source)
+			handle, err := r.Register("alice", "WS", nil, source, "s1.Zml4dHVyZQ")
 			require.NoError(t, err)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -190,7 +190,7 @@ func TestRecoveryRegistryDiscardsLateSuccess(t *testing.T) {
 	}
 }
 func TestRecoveryRegistryResultAndSourceErrors(t *testing.T) {
-	for _, mode := range []string{"workspace", "manifest", "legacy-v1", "document", "source"} {
+	for _, mode := range []string{"workspace", "manifest", "legacy-v1", "legacy-cursor", "source-identity", "document", "source"} {
 		t.Run(mode, func(t *testing.T) {
 			r := NewRecoveryRegistry()
 			defer r.Close()
@@ -204,6 +204,10 @@ func TestRecoveryRegistryResultAndSourceErrors(t *testing.T) {
 					result.Manifest = "other"
 				case "legacy-v1":
 					result.Manifest = "fleet.issue-workspace.v1"
+				case "legacy-cursor":
+					result.Through = "c1.MTAtMA"
+				case "source-identity":
+					result.SourceIdentity = "s1.b3RoZXI"
 				case "document":
 					result.Document = nil
 				case "source":
@@ -211,7 +215,7 @@ func TestRecoveryRegistryResultAndSourceErrors(t *testing.T) {
 				}
 				return result, nil
 			})
-			handle, err := r.Register("alice", "WS", nil, source)
+			handle, err := r.Register("alice", "WS", nil, source, "s1.Zml4dHVyZQ")
 			require.NoError(t, err)
 			result, err := r.Read(context.Background(), "alice", "WS", handle.Handle)
 			require.Empty(t, result.Document)
@@ -224,11 +228,11 @@ func TestRecoveryRegistryResultAndSourceErrors(t *testing.T) {
 		})
 	}
 	r := NewRecoveryRegistry()
-	handle, err := r.Register("alice", "WS", nil, registrySource())
+	handle, err := r.Register("alice", "WS", nil, registrySource(), "s1.Zml4dHVyZQ")
 	require.NoError(t, err)
 	r.Close()
 	r.Close()
-	_, err = r.Register("alice", "WS", nil, registrySource())
+	_, err = r.Register("alice", "WS", nil, registrySource(), "s1.Zml4dHVyZQ")
 	require.ErrorIs(t, err, ErrRecoveryUnavailable)
 	_, err = r.Read(context.Background(), "alice", "WS", handle.Handle)
 	require.ErrorIs(t, err, ErrRecoveryUnavailable)
@@ -242,7 +246,7 @@ func TestRecoveryRegistryDeadlineIsMintBound(t *testing.T) {
 		deadline, _ = ctx.Deadline()
 		return registrySnapshot(), nil
 	})
-	handle, err := r.Register("alice", "WS", nil, source)
+	handle, err := r.Register("alice", "WS", nil, source, "s1.Zml4dHVyZQ")
 	require.NoError(t, err)
 	_, err = r.Read(context.Background(), "alice", "WS", handle.Handle)
 	require.NoError(t, err)
@@ -262,7 +266,7 @@ func TestRecoveryRegistryCanceledCallerDoesNotReadSource(t *testing.T) {
 		t.Fatal("canceled caller reached source")
 		return registrySnapshot(), nil
 	})
-	handle, err := r.Register("alice", "WS", nil, source)
+	handle, err := r.Register("alice", "WS", nil, source, "s1.Zml4dHVyZQ")
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -284,9 +288,9 @@ func TestRecoveryRegistryBoundShutdownIsSynchronous(t *testing.T) {
 		<-release
 		return registrySnapshot(), nil
 	})
-	handle, err := r.Register("alice", "WS", nil, source)
+	handle, err := r.Register("alice", "WS", nil, source, "s1.Zml4dHVyZQ")
 	require.NoError(t, err)
-	other, err := r.Register("bob", "WS", nil, registrySource())
+	other, err := r.Register("bob", "WS", nil, registrySource(), "s1.Zml4dHVyZQ")
 	require.NoError(t, err)
 	done := make(chan error, 1)
 	go func() {
@@ -300,7 +304,7 @@ func TestRecoveryRegistryBoundShutdownIsSynchronous(t *testing.T) {
 	registryWait(t, started)
 	close(shutdown) // No Close watcher has run: every decision must inspect done.
 	require.False(t, r.closed)
-	_, err = r.Register("carol", "WS", nil, registrySource())
+	_, err = r.Register("carol", "WS", nil, registrySource(), "s1.Zml4dHVyZQ")
 	require.ErrorIs(t, err, ErrRecoveryUnavailable)
 	result, err := r.Read(context.Background(), "bob", "WS", other.Handle)
 	require.ErrorIs(t, err, ErrRecoveryUnavailable)

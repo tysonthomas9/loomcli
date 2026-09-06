@@ -13,6 +13,13 @@ import (
 // *backend.BackendError. For 2xx responses with success=false, the error
 // string in the body is matched against known patterns.
 func classifyHTTPError(op string, statusCode int, body apiResponse) error {
+	if statusCode == 409 && body.Code == "mutation_source_changed" {
+		return backend.ErrMutationSourceChanged
+	}
+	return classifyFleetHTTPError(op, statusCode, body)
+}
+
+func classifyFleetHTTPError(op string, statusCode int, body apiResponse) error {
 	// 2xx with success=true: no error.
 	if statusCode >= 200 && statusCode < 300 && body.Success {
 		return nil

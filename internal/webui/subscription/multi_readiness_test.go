@@ -96,7 +96,7 @@ func TestEnsureActive_ReactivationDrainsFromLastHead(t *testing.T) {
 		if since != "0" {
 			t.Fatalf("first activation since = %q, want 0", since)
 		}
-		return backend.MutationPage{Events: []backend.MutationData{}, Cursor: "c1.first-head"}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: []backend.MutationData{}, Cursor: "c1.first-head"}, nil
 	}
 	head, err := multi.EnsureActive(context.Background(), "ws-reuse", first, ActivationReasonSSE)
 	if err != nil || head != "c1.first-head" {
@@ -110,7 +110,7 @@ func TestEnsureActive_ReactivationDrainsFromLastHead(t *testing.T) {
 		if since != "c1.first-head" {
 			t.Fatalf("reactivation since = %q, want c1.first-head", since)
 		}
-		return backend.MutationPage{Events: []backend.MutationData{}, Cursor: "c1.second-head"}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: []backend.MutationData{}, Cursor: "c1.second-head"}, nil
 	}
 	head, err = multi.EnsureActive(context.Background(), "ws-reuse", second, ActivationReasonSSE)
 	if err != nil || head != "c1.second-head" {

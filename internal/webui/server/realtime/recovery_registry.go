@@ -27,11 +27,12 @@ const issueRecoveryManifest = "fleet.issue-workspace.v2"
 // RecoveryHandle identifies a captured source for bounded retries. SourceRepos
 // records subscription filters, not repository authorization or snapshot scope.
 type RecoveryHandle struct {
-	Handle      string    `json:"handle"`
-	Workspace   string    `json:"workspace"`
-	SourceRepos []string  `json:"source_repos"`
-	ExpiresAt   time.Time `json:"expires_at"`
-	Manifest    string    `json:"manifest"`
+	SourceIdentity string    `json:"source_identity"`
+	Handle         string    `json:"handle"`
+	Workspace      string    `json:"workspace"`
+	SourceRepos    []string  `json:"source_repos"`
+	ExpiresAt      time.Time `json:"expires_at"`
+	Manifest       string    `json:"manifest"`
 }
 
 type recoveryRegistration struct {
@@ -70,8 +71,8 @@ func ValidRecoveryHandle(value string) bool {
 	return err == nil && len(raw) == 32 && base64.RawURLEncoding.EncodeToString(raw) == value
 }
 
-func (r *RecoveryRegistry) Register(principal, workspace string, repos []string, source backend.IssueRecoveryBackend) (RecoveryHandle, error) {
-	if strings.TrimSpace(principal) == "" || strings.TrimSpace(workspace) == "" || source == nil {
+func (r *RecoveryRegistry) Register(principal, workspace string, repos []string, source backend.IssueRecoveryBackend, sourceIdentity string) (RecoveryHandle, error) {
+	if strings.TrimSpace(principal) == "" || strings.TrimSpace(workspace) == "" || source == nil || !backend.ValidSourceIdentity(sourceIdentity) {
 		return RecoveryHandle{}, ErrRecoveryUnavailable
 	}
 	r.mu.Lock()
@@ -101,7 +102,7 @@ func (r *RecoveryRegistry) Register(principal, workspace string, repos []string,
 	if _, exists := r.entries[token]; exists {
 		return RecoveryHandle{}, ErrRecoveryUnavailable
 	}
-	handle := RecoveryHandle{Handle: token, Workspace: workspace, SourceRepos: append([]string{}, repos...), ExpiresAt: now.Add(recoveryHandleTTL).UTC(), Manifest: issueRecoveryManifest}
+	handle := RecoveryHandle{SourceIdentity: sourceIdentity, Handle: token, Workspace: workspace, SourceRepos: append([]string{}, repos...), ExpiresAt: now.Add(recoveryHandleTTL).UTC(), Manifest: issueRecoveryManifest}
 	r.entries[token] = &recoveryRegistration{handle: handle, principal: principal, source: source}
 	// Both the caller and registry own their filter slices.
 	handle.SourceRepos = append([]string{}, handle.SourceRepos...)
@@ -137,7 +138,7 @@ func (r *RecoveryRegistry) Read(ctx context.Context, principal, workspace, handl
 	r.mu.Lock()
 	valid := !r.stoppedLocked() && r.entries[handle] == entry && r.now().Before(entry.handle.ExpiresAt)
 	r.mu.Unlock()
-	if !valid || result.Workspace != entry.handle.Workspace || result.Manifest != issueRecoveryManifest || result.Through == "" || len(result.Document) == 0 {
+	if !valid || result.SourceIdentity != entry.handle.SourceIdentity || result.Workspace != entry.handle.Workspace || result.Manifest != issueRecoveryManifest || !backend.ValidMutationCursor(result.Through) || len(result.Document) == 0 {
 		return backend.IssueRecoverySnapshot{}, ErrRecoveryUnavailable
 	}
 	return result, nil

@@ -62,7 +62,7 @@ func TestSubscriberLiveRejectsBeforeCursorOrBroadcast(t *testing.T) {
 	sub := newBackendMutationSubscriber(newScriptedCursorBackend(), hub, "WS", "start", defaultSubscriberBudgets())
 	defer sub.Stop()
 	event := backend.MutationData{Cursor: "next", Type: "update", Timestamp: time.Now()}
-	if _, err := sub.handlePage("start", backend.MutationPage{Cursor: "next", HasMore: true, Events: []backend.MutationData{event}}); err != nil {
+	if _, err := sub.handlePage("start", backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "next", HasMore: true, Events: []backend.MutationData{event}}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -72,7 +72,7 @@ func TestSubscriberLiveRejectsBeforeCursorOrBroadcast(t *testing.T) {
 	}
 	for _, cursor := range []string{"", "next", "start"} {
 		event.Cursor = cursor
-		if _, err := sub.handlePage("next", backend.MutationPage{Cursor: cursor, HasMore: true, Events: []backend.MutationData{event}}); err == nil {
+		if _, err := sub.handlePage("next", backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: cursor, HasMore: true, Events: []backend.MutationData{event}}); err == nil {
 			t.Fatalf("accepted invalid live cursor %q", cursor)
 		}
 		if got := sub.Head(); got != "next" {
@@ -82,7 +82,7 @@ func TestSubscriberLiveRejectsBeforeCursorOrBroadcast(t *testing.T) {
 	// A valid page following rejected responses still resumes from the last
 	// accepted head, without poisoning the cursor set with failed responses.
 	event.Cursor = "terminal"
-	if _, err := sub.handlePage("next", backend.MutationPage{Cursor: "terminal", Events: []backend.MutationData{event}}); err != nil {
+	if _, err := sub.handlePage("next", backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "terminal", Events: []backend.MutationData{event}}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -99,7 +99,7 @@ func TestSubscriberLiveRejectsBeforeCursorOrBroadcast(t *testing.T) {
 	// Cancellation removes the ordinary idle delay without changing semantics.
 	sub.cancel()
 	for _, cursor := range []string{"terminal", ""} {
-		timeout, err := sub.handlePage("terminal", backend.MutationPage{Cursor: cursor})
+		timeout, err := sub.handlePage("terminal", backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: cursor})
 		if err != nil || timeout != int64(backendWaitTimeout/time.Millisecond) {
 			t.Fatalf("idle page rejected: timeout=%d err=%v", timeout, err)
 		}
@@ -117,7 +117,7 @@ func TestSubscriberLiveHistoryBoundDoesNotCapHealthyBurst(t *testing.T) {
 	previous := "start"
 	for i := 0; i < 12; i++ {
 		next := fmt.Sprintf("opaque-%d", i)
-		if _, err := sub.handlePage(previous, backend.MutationPage{Cursor: next, HasMore: true}); err != nil {
+		if _, err := sub.handlePage(previous, backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: next, HasMore: true}); err != nil {
 			t.Fatalf("healthy page%d rejected: %v", i, err)
 		}
 		if len(sub.livePageCursors) > 3 || len(sub.livePageOrder) > 3 {
@@ -125,7 +125,7 @@ func TestSubscriberLiveHistoryBoundDoesNotCapHealthyBurst(t *testing.T) {
 		}
 		previous = next
 	}
-	if _, err := sub.handlePage(previous, backend.MutationPage{Cursor: "opaque-10", HasMore: true}); err == nil {
+	if _, err := sub.handlePage(previous, backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "opaque-10", HasMore: true}); err == nil {
 		t.Fatal("recent cycle accepted")
 	}
 	if sub.Head() != previous {
