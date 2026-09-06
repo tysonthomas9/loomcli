@@ -1,0 +1,18 @@
+{
+  "events": [
+    {
+      "id": "c2.WyJjOGRhOTY0MC1kZTcyLTQ1M2EtYTBkMy1jMTZmNDc1NmJkN2IiLCJMT0NBTE1PREUiLCJiOWIxNGQzNi01NDEyLTQ2YTYtYjY0YS1mODM3OWEwM2FlNWUiLCIyNS0wIl0",
+      "timestamp": "2026-09-06T06:19:53.624952Z",
+      "actor": "operator@local",
+      "action": "issue.update",
+      "entity_type": "issue",
+      "entity_id": "LOCALMODE-5",
+      "workspace_id": "LOCALMODE",
+      "before": "{\"title\":\"Exercise epic swimlane UI \u2014 reconnect proof\"}",
+      "after": "{\"title\":\"Exercise epic swimlane UI \u2014 disconnected replay\",\"updated_at\":\"2026-09-06T06:19:53.624945725Z\"}"
+    }
+  ],
+  "cursor": "c2.WyJjOGRhOTY0MC1kZTcyLTQ1M2EtYTBkMy1jMTZmNDc1NmJkN2IiLCJMT0NBTE1PREUiLCJiOWIxNGQzNi01NDEyLTQ2YTYtYjY0YS1mODM3OWEwM2FlNWUiLCIyNS0wIl0",
+  "has_more": false,
+  "source_identity": "s1.WyJjOGRhOTY0MC1kZTcyLTQ1M2EtYTBkMy1jMTZmNDc1NmJkN2IiLCJMT0NBTE1PREUiLCJiOWIxNGQzNi01NDEyLTQ2YTYtYjY0YS1mODM3OWEwM2FlNWUiXQ"
+}

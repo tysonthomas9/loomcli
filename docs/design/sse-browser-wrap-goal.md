@@ -2,7 +2,9 @@
 
 Updated at the user's request on 2026-09-05. This is the current execution scope; it supersedes the delivery order in earlier architecture plans for this wrap-up.
 
-Finish the existing Loom/FleetDB recovery timeline patch, verify the reachable behavior through the real browser and service workflows, and publish the paired review branches with reproducible evidence and explicit remaining gaps. Do not expand the architecture in this pass.
+The v6 recovery timeline pair is published as Loom #679 and FleetDB #285. The active next step is to make fresh PostgreSQL workspaces reachable through normal product bootstrap, verify the current fetch-based SSE transport in the real browser, and publish the narrow prerequisite fixes with reproducible evidence and explicit remaining gaps. Do not expand into whole-client recovery architecture in this pass.
+
+The prerequisite patch covers atomic opt-in workspace genesis, exact-receipt confirmation after foreground/background projection races, and separation of local source repository membership from global catalog bindings. These were exposed by actual local-mode startup. Their focused tests and independent reviews are complete; real PostgreSQL browser startup, stream HTTP200, cursor-bearing reconnect, UI convergence and comment persistence are now recorded in [the browser proof](../testing/postgres-sse-browser-proof.md). Collection refetches prevent replay-only/exactly-once claims; multiclient, expiry, source replacement and whole-client publication remain follow-up work. The immediate delivery step is paired draft PRs and run-owned cleanup.
 
 ## Acceptance criteria
 
