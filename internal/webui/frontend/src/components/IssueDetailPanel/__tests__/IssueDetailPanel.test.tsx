@@ -34,6 +34,10 @@ import {
 import { createAgentStore } from "@/stores/agentStore";
 
 import { IssueDetailPanel } from "../IssueDetailPanel";
+import {
+  QueryRecoveryContext,
+  QueryRecoveryCoordinator,
+} from "@/hooks/common/queryRecovery";
 
 // Create hoisted mocks
 const {
@@ -582,6 +586,82 @@ describe("IssueDetailPanel", () => {
   });
 
   describe("event history", () => {
+    it("holds recovery for intended B history while detail still contains A", async () => {
+      const recovery = new QueryRecoveryCoordinator("test");
+      const before = deferred<Event[]>(),
+        fresh = deferred<Event[]>();
+      vi.mocked(getIssueEvents)
+        .mockReturnValueOnce(before.promise)
+        .mockReturnValueOnce(fresh.promise);
+      render(
+        <QueryRecoveryContext.Provider value={recovery}>
+          <IssueDetailPanel
+            isOpen
+            selectedIssueId="issue-b"
+            issue={createTestIssueDetails()}
+            onClose={() => {}}
+          />
+        </QueryRecoveryContext.Provider>,
+      );
+      await waitFor(() =>
+        expect(getIssueEvents).toHaveBeenCalledWith(
+          expect.any(String),
+          "issue-b",
+          200,
+          { signal: expect.any(AbortSignal) },
+        ),
+      );
+      let finished = false;
+      let run!: Promise<void>;
+      await act(async () => {
+        run = recovery.refresh();
+        void run.then(() => {
+          finished = true;
+        });
+      });
+      await waitFor(() => expect(getIssueEvents).toHaveBeenCalledTimes(2));
+      await act(async () => {
+        before.resolve([]);
+        await Promise.resolve();
+      });
+      expect(finished).toBe(false);
+      await act(async () => {
+        fresh.resolve([]);
+        await run;
+      });
+      expect(finished).toBe(true);
+    });
+
+    it("shows history failure without replacing existing Journey rows with empty success", async () => {
+      vi.mocked(getIssueEvents)
+        .mockResolvedValueOnce([createTestEvent()])
+        .mockRejectedValueOnce(new Error("history unavailable"));
+      const issue = createTestIssueDetails();
+      const { rerender } = render(
+        <IssueDetailPanel isOpen issue={issue} onClose={() => {}} />,
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId("journey-tail")).toBeInTheDocument(),
+      );
+      // A new complete detail object invalidates history even with equal updated_at.
+      rerender(
+        <IssueDetailPanel isOpen issue={{ ...issue }} onClose={() => {}} />,
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByText(/Could not refresh issue history/),
+        ).toBeInTheDocument(),
+      );
+      expect(screen.getByTestId("journey-tail")).toBeInTheDocument();
+      vi.mocked(getIssueEvents).mockResolvedValueOnce([]);
+      fireEvent.click(screen.getByRole("button", { name: "Retry history" }));
+      await waitFor(() =>
+        expect(
+          screen.queryByText(/Could not refresh issue history/),
+        ).not.toBeInTheDocument(),
+      );
+    });
+
     it("requests the full event window explicitly", async () => {
       const mockGetIssueEvents = vi.mocked(getIssueEvents);
       mockGetIssueEvents.mockResolvedValue([]);
@@ -602,6 +682,7 @@ describe("IssueDetailPanel", () => {
           "workspace-1",
           "test-123",
           200,
+          { signal: expect.any(AbortSignal) },
         );
       });
     });

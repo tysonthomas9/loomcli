@@ -11,7 +11,6 @@ import {
   updateIssue,
   addDependency,
   removeDependency,
-  getIssueEvents,
   moveIssue,
   deleteTabMetadata,
   getTaskLogPhases,
@@ -33,13 +32,14 @@ import { useStore } from "zustand";
 import { useAgentStoreInstance, useIssueStoreInstance } from "@/hooks/common";
 import { useLocalSettings, useWorkspaceContext } from "@/hooks/workspace";
 import { useIssueTabPersistence } from "@/hooks/issues";
+import { useIssueHistory } from "@/hooks/issues/useIssueHistory";
+import { useDetailComments } from "@/hooks/issues/useDetailComments";
 import type {
   Issue,
   IssueDetails,
   IssueWithDependencyMetadata,
   DependencyType,
   Comment,
-  Event,
 } from "@/types";
 import type { Status } from "@/types/issue";
 import { formatStatusLabel, getReviewType, isPRUrl } from "@/utils/issue";
@@ -130,6 +130,8 @@ function BlockingBanner({
  * Props for the IssueDetailPanel component.
  */
 export interface IssueDetailPanelProps {
+  /** Intended selection, independent of the last loaded detail response. */
+  selectedIssueId?: string | null;
   /** Whether the panel is open */
   isOpen: boolean;
   /** The issue to display (null when closed or loading) */
@@ -225,6 +227,7 @@ function renderDependencyChip(
  * Props for the DefaultContent component.
  */
 interface DefaultContentProps {
+  selectedIssueId?: string | null;
   issue: Issue | IssueDetails | null;
   isLoading: boolean;
   error: string | null;
@@ -431,6 +434,7 @@ function TaskPhaseLogPanel({
  * Default content renderer for issue details.
  */
 function DefaultContent({
+  selectedIssueId,
   issue,
   isLoading,
   error,
@@ -759,59 +763,28 @@ function DefaultContent({
     [],
   );
 
-  // Local state for comments to enable optimistic updates
-  const hasDetails = issue && isIssueDetails(issue);
-  const initialComments = hasDetails ? issue.comments : undefined;
-  const [localComments, setLocalComments] = useState<Comment[] | undefined>(
-    initialComments,
+  const {
+    events,
+    error: historyError,
+    isLoading: historyLoading,
+    refetch: refetchHistory,
+  } = useIssueHistory(
+    selectedIssueId === undefined ? (issue?.id ?? null) : selectedIssueId,
+    issue,
   );
-
-  // Local state for events (activity log)
-  const [events, setEvents] = useState<Event[]>([]);
-  const eventsRequestIdRef = useRef(0);
-
-  // Sync local comments when issue changes (e.g., different issue selected)
-  useEffect(() => {
-    if (issue && isIssueDetails(issue)) {
-      setLocalComments(issue.comments);
-    } else {
-      setLocalComments(undefined);
-    }
-  }, [issue]);
-
-  // Fetch one shared event list for Journey and Activity. The parent merges
-  // live issue mutations into this prop, including updated_at, so the revision
-  // is the same signal that refreshes the status pill.
-  const eventIssueId = issue?.id;
-  const eventIssueRevision = issue?.updated_at;
-  useEffect(() => {
-    const requestId = ++eventsRequestIdRef.current;
-    if (!eventIssueId) {
-      setEvents([]);
-      return;
-    }
-    getIssueEvents(workspaceId, eventIssueId, ISSUE_EVENT_LIMIT).then(
-      (data) => {
-        if (requestId === eventsRequestIdRef.current) setEvents(data ?? []);
-      },
-      () => {
-        if (requestId === eventsRequestIdRef.current) setEvents([]);
-      },
+  const hasDetails = issue && isIssueDetails(issue);
+  const { comments: localComments, add: addConfirmedComment } =
+    useDetailComments(
+      workspaceId,
+      issue?.id ?? null,
+      issue && isIssueDetails(issue) ? issue.comments : undefined,
     );
-    return () => {
-      if (requestId === eventsRequestIdRef.current) {
-        eventsRequestIdRef.current += 1;
-      }
-    };
-  }, [eventIssueId, eventIssueRevision, workspaceId]);
-
-  // Handler for when a new comment is added
-  const handleCommentAdded = useCallback((newComment: Comment) => {
-    setLocalComments((prev) => {
-      if (!prev) return [newComment];
-      return [...prev, newComment];
-    });
-  }, []);
+  const handleCommentAdded = useCallback(
+    (comment: Comment) => {
+      if (addConfirmedComment(comment)) void refetchHistory();
+    },
+    [addConfirmedComment, refetchHistory],
+  );
 
   const handleTitleSave = useCallback(
     async (newTitle: string) => {
@@ -1529,7 +1502,18 @@ function DefaultContent({
               </section>
             )}
 
-            <Journey events={events} eventLimit={ISSUE_EVENT_LIMIT} />
+            {historyError && (
+              <div role="alert">
+                Could not refresh issue history. {historyError.message}
+                <button type="button" onClick={() => void refetchHistory()}>
+                  Retry history
+                </button>
+              </div>
+            )}
+            {historyLoading && <div role="status">Loading issue history…</div>}
+            {(events.length > 0 || (!historyError && !historyLoading)) && (
+              <Journey events={events} eventLimit={ISSUE_EVENT_LIMIT} />
+            )}
 
             {/* Comments (audit events are nested in Journey spans) */}
             <ActivityLog comments={localComments ?? []} issueId={issue.id} />
@@ -1621,6 +1605,7 @@ function DefaultContent({
  * - Default content rendering with loading/error states
  */
 export function IssueDetailPanel({
+  selectedIssueId,
   isOpen,
   issue,
   onClose,
@@ -1672,6 +1657,7 @@ export function IssueDetailPanel({
   // Determine content: children override default, otherwise render default content
   const content = children ?? (
     <DefaultContent
+      {...(selectedIssueId !== undefined && { selectedIssueId })}
       issue={issue}
       isLoading={isLoading ?? false}
       error={error ?? null}

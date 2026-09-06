@@ -19,6 +19,9 @@ import "@testing-library/jest-dom";
 import { addComment } from "@/api";
 import type { Comment } from "@/types";
 
+import { Suspense, startTransition, useState } from "react";
+import { useWorkspaceContext } from "@/hooks/workspace";
+
 import { CommentForm } from "../CommentForm";
 
 // Import the mocked function for use in tests
@@ -35,7 +38,7 @@ vi.mock("@/hooks/workspace", async () => {
     );
   return {
     ...actual,
-    useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+    useWorkspaceContext: vi.fn(() => ({ workspaceId: "test-ws-id" })),
   };
 });
 const mockAddComment = vi.mocked(addComment);
@@ -46,7 +49,7 @@ const mockAddComment = vi.mocked(addComment);
 function createTestComment(overrides: Partial<Comment> = {}): Comment {
   return {
     id: 1,
-    issue_id: "test-issue",
+    issue_id: "test-issue-123",
     author: "Test Author",
     text: "Test comment text",
     created_at: "2026-01-20T10:00:00Z",
@@ -62,6 +65,9 @@ describe("CommentForm", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(useWorkspaceContext).mockReturnValue({
+      workspaceId: "test-ws-id",
+    } as ReturnType<typeof useWorkspaceContext>);
     mockAddComment.mockResolvedValue(createTestComment());
   });
 
@@ -509,5 +515,159 @@ describe("CommentForm", () => {
 
       expect(preventDefault).toHaveBeenCalled();
     });
+  });
+  describe("committed selection ownership", () => {
+    it.each([false, true])(
+      "ignores stale A result after A-B-A (failure=%s)",
+      async (failure) => {
+        let resolve!: (c: Comment) => void;
+        let reject!: (e: Error) => void;
+        mockAddComment.mockReturnValue(
+          new Promise((yes, no) => {
+            resolve = yes;
+            reject = no;
+          }),
+        );
+        const onCommentAdded = vi.fn();
+        const { rerender } = render(
+          <CommentForm {...defaultProps} onCommentAdded={onCommentAdded} />,
+        );
+        fireEvent.change(screen.getByTestId("comment-textarea"), {
+          target: { value: "old draft" },
+        });
+        fireEvent.submit(screen.getByTestId("comment-form"));
+        rerender(
+          <CommentForm issueId="other" onCommentAdded={onCommentAdded} />,
+        );
+        expect(screen.getByTestId("comment-textarea")).toHaveValue("");
+        rerender(
+          <CommentForm {...defaultProps} onCommentAdded={onCommentAdded} />,
+        );
+        fireEvent.change(screen.getByTestId("comment-textarea"), {
+          target: { value: "new draft" },
+        });
+        await act(async () => {
+          if (failure) reject(new Error("stale failure"));
+          else resolve(createTestComment());
+        });
+        expect(onCommentAdded).not.toHaveBeenCalled();
+        expect(screen.getByTestId("comment-textarea")).toHaveValue("new draft");
+        expect(screen.queryByText("stale failure")).not.toBeInTheDocument();
+        expect(screen.getByTestId("comment-submit")).not.toBeDisabled();
+      },
+    );
+    it("does not invoke a completion callback after unmount", async () => {
+      let resolve!: (c: Comment) => void;
+      mockAddComment.mockReturnValue(
+        new Promise((r) => {
+          resolve = r;
+        }),
+      );
+      const onCommentAdded = vi.fn();
+      const { unmount } = render(
+        <CommentForm {...defaultProps} onCommentAdded={onCommentAdded} />,
+      );
+      fireEvent.change(screen.getByTestId("comment-textarea"), {
+        target: { value: "draft" },
+      });
+      fireEvent.submit(screen.getByTestId("comment-form"));
+      unmount();
+      await act(async () => resolve(createTestComment()));
+      expect(onCommentAdded).not.toHaveBeenCalled();
+    });
+    it("rejects a mismatched comment identity and retains the draft", async () => {
+      mockAddComment.mockResolvedValue(
+        createTestComment({ issue_id: "foreign" }),
+      );
+      const onCommentAdded = vi.fn();
+      render(<CommentForm {...defaultProps} onCommentAdded={onCommentAdded} />);
+      fireEvent.change(screen.getByTestId("comment-textarea"), {
+        target: { value: "draft" },
+      });
+      await act(async () =>
+        fireEvent.submit(screen.getByTestId("comment-form")),
+      );
+      expect(onCommentAdded).not.toHaveBeenCalled();
+      expect(screen.getByTestId("comment-textarea")).toHaveValue("draft");
+      expect(
+        screen.getByText("Comment response belongs to another issue"),
+      ).toBeInTheDocument();
+    });
+    it("preserves draft on same-owner rerender and rejects synchronous duplicate submits", () => {
+      mockAddComment.mockReturnValue(new Promise(() => {}));
+      const { rerender } = render(<CommentForm {...defaultProps} />);
+      fireEvent.change(screen.getByTestId("comment-textarea"), {
+        target: { value: "draft" },
+      });
+      rerender(<CommentForm {...defaultProps} />);
+      expect(screen.getByTestId("comment-textarea")).toHaveValue("draft");
+      act(() => {
+        fireEvent.submit(screen.getByTestId("comment-form"));
+        fireEvent.submit(screen.getByTestId("comment-form"));
+      });
+      expect(mockAddComment).toHaveBeenCalledTimes(1);
+    });
+  });
+  it("ignores an old workspace completion with the same issue ID", async () => {
+    let resolve!: (c: Comment) => void;
+    mockAddComment.mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    );
+    const onCommentAdded = vi.fn();
+    const { rerender } = render(
+      <CommentForm {...defaultProps} onCommentAdded={onCommentAdded} />,
+    );
+    fireEvent.change(screen.getByTestId("comment-textarea"), {
+      target: { value: "old" },
+    });
+    fireEvent.submit(screen.getByTestId("comment-form"));
+    vi.mocked(useWorkspaceContext).mockReturnValue({
+      workspaceId: "other-ws",
+    } as ReturnType<typeof useWorkspaceContext>);
+    rerender(<CommentForm {...defaultProps} onCommentAdded={onCommentAdded} />);
+    fireEvent.change(screen.getByTestId("comment-textarea"), {
+      target: { value: "new" },
+    });
+    await act(async () => resolve(createTestComment()));
+    expect(onCommentAdded).not.toHaveBeenCalled();
+    expect(screen.getByTestId("comment-textarea")).toHaveValue("new");
+  });
+  it("does not retire the committed owner for an abandoned speculative render", async () => {
+    let resolve!: (c: Comment) => void;
+    mockAddComment.mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    );
+    const onCommentAdded = vi.fn();
+    let select!: (id: string) => void;
+    const never = new Promise<void>(() => {});
+    function Suspend({ id }: { id: string }) {
+      if (id === "other") throw never;
+      return null;
+    }
+    function Harness() {
+      const [id, setId] = useState(defaultProps.issueId);
+      select = setId;
+      return (
+        <Suspense fallback={<span>pending</span>}>
+          <CommentForm issueId={id} onCommentAdded={onCommentAdded} />
+          <Suspend id={id} />
+        </Suspense>
+      );
+    }
+    render(<Harness />);
+    fireEvent.change(screen.getByTestId("comment-textarea"), {
+      target: { value: "draft" },
+    });
+    fireEvent.submit(screen.getByTestId("comment-form"));
+    await act(async () => {
+      startTransition(() => select("other"));
+    });
+    await act(async () => resolve(createTestComment()));
+    expect(onCommentAdded).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("comment-textarea")).toHaveValue("");
   });
 });
