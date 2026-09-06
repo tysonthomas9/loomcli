@@ -7,6 +7,8 @@ import {
   useState,
   useRef,
   useCallback,
+  useMemo,
+  useLayoutEffect,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
@@ -47,32 +49,60 @@ export function CommentForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const owner = useMemo(
+    () => ({ workspaceId, issueId, pending: null as object | null }),
+    [workspaceId, issueId],
+  );
+  const committedOwner = useRef<typeof owner | null>(null);
+  useLayoutEffect(() => {
+    committedOwner.current = owner;
+    setText("");
+    setError(null);
+    setIsSubmitting(false);
+    return () => {
+      if (committedOwner.current === owner) committedOwner.current = null;
+      owner.pending = null;
+    };
+  }, [owner]);
 
   const handleSubmit = useCallback(
     async (e?: FormEvent) => {
       e?.preventDefault();
 
       const trimmedText = text.trim();
-      if (!trimmedText || isSubmitting) return;
+      if (!trimmedText || committedOwner.current !== owner || owner.pending)
+        return;
+      const attempt = {};
+      owner.pending = attempt;
+      const current = () =>
+        committedOwner.current === owner && owner.pending === attempt;
 
       setError(null);
       setIsSubmitting(true);
 
       try {
         const newComment = await addComment(workspaceId, issueId, trimmedText);
+        if (!current()) return;
+        if (newComment.issue_id !== owner.issueId)
+          throw new Error("Comment response belongs to another issue");
         setText("");
         onCommentAdded(newComment);
+        if (!current()) return;
         // Keep focus in textarea for follow-up comments
         textareaRef.current?.focus();
       } catch (err) {
+        if (!current()) return;
         const message =
           err instanceof Error ? err.message : "Failed to add comment";
         setError(message);
       } finally {
-        setIsSubmitting(false);
+        if (current()) {
+          owner.pending = null;
+          setIsSubmitting(false);
+        }
       }
     },
-    [text, isSubmitting, workspaceId, issueId, onCommentAdded],
+    [text, workspaceId, issueId, onCommentAdded, owner],
   );
 
   const handleKeyDown = useCallback(
