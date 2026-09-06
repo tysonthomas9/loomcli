@@ -54,12 +54,30 @@ export interface NativeRecoveryComment {
   readonly body: string;
   readonly created_at: string;
 }
+export interface NativeRecoveryEvent {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly timestamp: string;
+  readonly actor: string;
+  readonly action: string;
+  readonly entity_type: string;
+  readonly entity_id: string;
+  readonly before: string;
+  readonly after: string;
+  readonly metadata: Readonly<Record<string, string>>;
+}
+export interface NativeRecoveryHistory {
+  readonly issue_id: string;
+  readonly present: boolean;
+  readonly events: readonly NativeRecoveryEvent[];
+  readonly has_older: boolean;
+}
 /** Prepared native data only. Coverage names identify this fixed manifest, not
  * mounted UI query coverage, a cache commit, or permission to acknowledge SSE. */
 export interface PreparedIssueRecovery {
   readonly offer: RecoveryHandle;
   readonly document: string;
-  readonly manifest: "fleet.issue-workspace.v4";
+  readonly manifest: "fleet.issue-workspace.v5";
   readonly workspace: string;
   readonly through: string;
   readonly offerSourceIdentity: string;
@@ -70,6 +88,7 @@ export interface PreparedIssueRecovery {
   readonly deferred: readonly NativeRecoveryIssue[];
   readonly dependencies: readonly NativeRecoveryDependency[];
   readonly comments: readonly NativeRecoveryComment[];
+  readonly history: NativeRecoveryHistory | null;
   readonly coverage: readonly [
     "issues",
     "ready",
@@ -77,6 +96,7 @@ export interface PreparedIssueRecovery {
     "deferred",
     "dependencies",
     "comments",
+    "history"?,
   ];
 }
 function fail(): never {
@@ -379,6 +399,119 @@ function comments(
     return row as unknown as NativeRecoveryComment;
   });
 }
+// Canonical Fleet action/entity contract; parity-tested against the generated
+// Fleet action fixture. These history record IDs never become SSE checkpoints.
+const historyActionEntities = new Map<string, string>([
+  ...[
+    "create",
+    "update",
+    "close",
+    "reopen",
+    "delete",
+    "claim",
+    "release",
+    "assign",
+    "defer",
+    "undefer",
+  ].map((op): [string, string] => [`issue.${op}`, "issue"]),
+  ...["add", "remove"].map((op): [string, string] => [
+    `dep.${op}`,
+    "dependency",
+  ]),
+  ...["add", "remove"].map((op): [string, string] => [`label.${op}`, "label"]),
+  ...["set", "remove"].map((op): [string, string] => [
+    `metadata.${op}`,
+    "metadata",
+  ]),
+  ["comment.add", "comment"],
+  ...["workspace", "repo", "agent", "role", "skill", "skill_pack"].flatMap(
+    (entity) =>
+      ["create", "update", "delete"].map((op): [string, string] => [
+        `${entity}.${op}`,
+        entity,
+      ]),
+  ),
+  ...[
+    "create",
+    "claim",
+    "heartbeat",
+    "finish",
+    "recover",
+    "suspend",
+    "resume",
+  ].map((op): [string, string] => [`driver_run.${op}`, "driver_run"]),
+  ["daemon.update", "daemon_profile"],
+]);
+function selectedHistoryIdentity(value: unknown): string {
+  const identity = nonblank(value);
+  if (
+    /[\uD800-\uDFFF]/u.test(identity) ||
+    new TextEncoder().encode(identity).length > 1024
+  )
+    fail();
+  return identity;
+}
+function history(
+  value: unknown,
+  workspace: string,
+  all: Map<string, NativeRecoveryIssue>,
+  expectedIssueId: string | undefined,
+): NativeRecoveryHistory | null {
+  if (expectedIssueId === undefined) {
+    if (value !== null) fail();
+    return null;
+  }
+  selectedHistoryIdentity(expectedIssueId);
+  const row = object(value);
+  exact(row, ["issue_id", "present", "events", "has_older"]);
+  if (
+    selectedHistoryIdentity(row.issue_id) !== expectedIssueId ||
+    typeof row.present !== "boolean" ||
+    typeof row.has_older !== "boolean" ||
+    row.present !== all.has(expectedIssueId)
+  )
+    fail();
+  const events = array(row.events);
+  if (
+    events.length > 200 ||
+    (row.has_older && events.length !== 200) ||
+    (!row.present && (events.length !== 0 || row.has_older))
+  )
+    fail();
+  let previous = 0n;
+  for (const value of events) {
+    const event = object(value);
+    exact(event, [
+      "id",
+      "workspace_id",
+      "timestamp",
+      "actor",
+      "action",
+      "entity_type",
+      "entity_id",
+      "before",
+      "after",
+      "metadata",
+    ]);
+    const id = text(event.id);
+    if (!/^[1-9][0-9]{0,18}-0$/.test(id)) fail();
+    const position = BigInt(id.slice(0, -2));
+    if (position > 9223372036854775807n || position <= previous) fail();
+    previous = position;
+    if (
+      event.workspace_id !== workspace ||
+      event.entity_id !== expectedIssueId ||
+      historyActionEntities.get(text(event.action)) !== text(event.entity_type)
+    )
+      fail();
+    nonzeroTimestamp(event.timestamp);
+    text(event.actor);
+    text(event.before, true);
+    text(event.after, true);
+    for (const item of Object.values(object(event.metadata))) text(item, true);
+  }
+  return row as unknown as NativeRecoveryHistory;
+}
 function freeze<T>(value: T): T {
   if (value !== null && typeof value === "object") {
     for (const child of Object.values(value)) freeze(child);
@@ -392,6 +525,7 @@ export function prepareIssueRecovery(
   offer: RecoveryHandle,
   echoHandle: string,
   now = Date.now(),
+  expectedIssueId?: string,
 ): PreparedIssueRecovery {
   if (
     typeof document !== "string" ||
@@ -415,6 +549,7 @@ export function prepareIssueRecovery(
     "deferred",
     "dependencies",
     "comments",
+    "history",
   ]);
   if (
     root.manifest !== validatedOffer.manifest ||
@@ -438,10 +573,16 @@ export function prepareIssueRecovery(
     validatedOffer.workspace,
     all,
   );
+  const selectedHistory = history(
+    root.history,
+    validatedOffer.workspace,
+    all,
+    expectedIssueId,
+  );
   return freeze({
     document,
     offer: validatedOffer,
-    manifest: "fleet.issue-workspace.v4",
+    manifest: "fleet.issue-workspace.v5",
     workspace: validatedOffer.workspace,
     through,
     offerSourceIdentity: validatedOffer.source_identity,
@@ -452,6 +593,7 @@ export function prepareIssueRecovery(
     deferred,
     dependencies: dependencies(array(root.dependencies), all),
     comments: comments(array(root.comments), all),
+    history: selectedHistory,
     coverage: [
       "issues",
       "ready",
@@ -459,6 +601,7 @@ export function prepareIssueRecovery(
       "deferred",
       "dependencies",
       "comments",
+      ...(selectedHistory ? (["history"] as const) : ([] as const)),
     ],
   }) as PreparedIssueRecovery;
 }

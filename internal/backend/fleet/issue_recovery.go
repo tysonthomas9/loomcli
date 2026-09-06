@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strings"
 	"time"
@@ -16,17 +17,33 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 )
 
-const recoveryManifest = "fleet.issue-workspace.v4"
+const recoveryManifest = "fleet.issue-workspace.v5"
 const recoveryBodyLimit = 16 << 20
 const recoveryOp = "ReadIssueRecovery"
 
 var _ backend.IssueRecoveryBackend = (*FleetBackend)(nil)
+var _ backend.IssueRecoverySelectedBackend = (*FleetBackend)(nil)
 
 func (b *FleetBackend) ReadIssueRecovery(ctx context.Context) (backend.IssueRecoverySnapshot, error) {
+	return b.readIssueRecovery(ctx, "")
+}
+
+func (b *FleetBackend) ReadIssueRecoveryForIssue(ctx context.Context, issueID string) (backend.IssueRecoverySnapshot, error) {
+	if !validRecoveryIssueSelection(issueID) {
+		return backend.IssueRecoverySnapshot{}, backend.ErrInternal(recoveryOp, "selected issue is required", nil)
+	}
+	return b.readIssueRecovery(ctx, issueID)
+}
+
+func (b *FleetBackend) readIssueRecovery(ctx context.Context, issueID string) (backend.IssueRecoverySnapshot, error) {
 	b.mu.RLock()
 	auth := fleethttp.Auth{BearerToken: b.authToken, APIKey: b.apiKey, Actor: b.actor}
 	b.mu.RUnlock()
-	req, err := fleethttp.BuildJSONRequest(ctx, http.MethodPost, b.baseWorkspaceV2+"/issues/recovery-snapshot", auth, nil)
+	path := b.baseWorkspaceV2 + "/issues/recovery-snapshot"
+	if issueID != "" {
+		path += "?" + url.Values{"issue_id": []string{issueID}}.Encode()
+	}
+	req, err := fleethttp.BuildJSONRequest(ctx, http.MethodPost, path, auth, nil)
 	if err != nil {
 		return backend.IssueRecoverySnapshot{}, classifyTransportError(recoveryOp, err)
 	}
@@ -59,6 +76,9 @@ func (b *FleetBackend) ReadIssueRecovery(ctx context.Context) (backend.IssueReco
 	result.SourceIdentity = identity
 	if err != nil {
 		return backend.IssueRecoverySnapshot{}, backend.ErrInternal(recoveryOp, "invalid recovery manifest", err)
+	}
+	if err := validateRecoveryHistoryScope(data, issueID); err != nil {
+		return backend.IssueRecoverySnapshot{}, backend.ErrInternal(recoveryOp, "history selection mismatch", err)
 	}
 	if err := ctx.Err(); err != nil {
 		return backend.IssueRecoverySnapshot{}, classifyTransportError(recoveryOp, err)
@@ -93,6 +113,7 @@ type recoveryWire struct {
 	Deferred     *[]json.RawMessage `json:"deferred"`
 	Dependencies *[]json.RawMessage `json:"dependencies"`
 	Comments     *[]json.RawMessage `json:"comments"`
+	History      json.RawMessage    `json:"history"`
 }
 
 func validateRecoveryDocument(data []byte, ws string) (backend.IssueRecoverySnapshot, error) {
@@ -121,6 +142,9 @@ func validateRecoveryDocument(data []byte, ws string) (backend.IssueRecoverySnap
 				return backend.IssueRecoverySnapshot{}, err
 			}
 		}
+	}
+	if err := validateRecoveryHistory(wire.History, ws, issues); err != nil {
+		return backend.IssueRecoverySnapshot{}, err
 	}
 	if err := validateRecoveryComments(*wire.Comments, issues); err != nil {
 		return backend.IssueRecoverySnapshot{}, err
@@ -382,12 +406,12 @@ func decodeRecoveryManifest(data []byte, ws string) (recoveryWire, error) {
 	if err := json.Unmarshal(data, &shape); err != nil {
 		return recoveryWire{}, err
 	}
-	for _, key := range []string{"manifest", "workspace", "through", "issues", "total", "ready", "blocked", "deferred", "dependencies", "comments"} {
+	for _, key := range []string{"manifest", "workspace", "through", "issues", "total", "ready", "blocked", "deferred", "dependencies", "comments", "history"} {
 		if _, ok := shape[key]; !ok {
 			return recoveryWire{}, fmt.Errorf("missing %s", key)
 		}
 	}
-	if len(shape) != 10 {
+	if len(shape) != 11 {
 		return recoveryWire{}, fmt.Errorf("unexpected manifest fields")
 	}
 	var wire recoveryWire

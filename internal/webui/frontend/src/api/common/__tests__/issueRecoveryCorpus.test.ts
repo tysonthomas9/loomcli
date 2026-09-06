@@ -13,7 +13,12 @@ const corpus = JSON.parse(
     ),
     "utf8",
   ),
-) as Array<{ name: string; valid: boolean; document: string }>;
+) as Array<{
+  name: string;
+  valid: boolean;
+  document: string;
+  selected_issue_id?: string;
+}>;
 const now = Date.parse("2026-09-05T00:00:00Z");
 const offer: RecoveryHandle = {
   handle: "A".repeat(43),
@@ -21,14 +26,20 @@ const offer: RecoveryHandle = {
   workspace: "WS",
   source_repos: [],
   expires_at: "2026-09-05T00:01:00Z",
-  manifest: "fleet.issue-workspace.v4",
+  manifest: "fleet.issue-workspace.v5",
 };
 
 describe("shared native recovery corpus", () => {
   for (const entry of corpus) {
     it(entry.name, () => {
       const read = () =>
-        prepareIssueRecovery(entry.document, offer, offer.handle, now);
+        prepareIssueRecovery(
+          entry.document,
+          offer,
+          offer.handle,
+          now,
+          entry.selected_issue_id,
+        );
       if (entry.valid) {
         const result = read();
         expect(result.document).toBe(entry.document);
