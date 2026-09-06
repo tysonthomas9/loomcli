@@ -38,19 +38,37 @@ func enforceLeadProfile() {
 	}
 }
 
+// errRelativeProfileRoot rejects an inherited config root that is not
+// absolute. The harness resolves it against ITS cwd, so the same value names
+// a different directory from every worktree — which is how a lead ends up
+// bound to a root nothing provisioned while every check reads as green.
+var errRelativeProfileRoot = errors.New("harness config root must be an absolute path")
+
 // applyLeadProfile settles one harness's config root for this lead, returning
 // the profile directory the failure is about so the caller can name a repair.
 //
 // An inherited value wins and is only verified. That is deliberate: an operator
 // who exported a config root of their own has made a choice nothing here
 // provisioned, and the injection below must not override it — verifyLeadProfile
-// then leaves anything outside the workspace's agent-profiles tree alone.
+// then leaves anything outside the workspace's agent-profiles tree alone. The
+// boundary between "ours" and "theirs" is filesystem identity, not path
+// spelling; see underAgentProfiles. An inherited value that is not absolute is
+// refused outright rather than classified.
 func applyLeadProfile(runtimeDir, agent, harness string) (string, error) {
 	envVar := supervisor.ProfileEnvVar(harness)
 	if envVar == "" {
 		return "", nil
 	}
 	if inherited := os.Getenv(envVar); inherited != "" {
+		// A relative config root is never a deliberate choice: the harness
+		// resolves it against ITS cwd, so the same value names a different
+		// directory from every worktree — which is how a lead ends up bound
+		// to a root nothing provisioned while every check reads as green.
+		// Refused before any harness probe, so an unprofiled machine does not
+		// pay a --version fork to be told about a bad env value.
+		if !filepath.IsAbs(inherited) {
+			return inherited, fmt.Errorf("%w: %s=%s", errRelativeProfileRoot, envVar, inherited)
+		}
 		if err := verifyLeadProfile(runtimeDir, inherited, harness); err != nil {
 			return inherited, err
 		}
@@ -116,6 +134,9 @@ func leadProfileDir(runtimeDir, agent, harness string) string {
 // and a configDir outside the workspace's agent-profiles root (an operator
 // pointing lead at their own alternate config root is not this check's
 // business — nothing here provisioned it and nothing here can repair it).
+//
+// "Outside" is decided by filesystem identity, not by comparing path strings:
+// a second spelling of a provisioned root is still that root.
 func verifyLeadProfile(runtimeDir, configDir, harness string) error {
 	if configDir == "" || !underAgentProfiles(runtimeDir, configDir) {
 		return nil
@@ -123,22 +144,59 @@ func verifyLeadProfile(runtimeDir, configDir, harness string) error {
 	return supervisor.VerifyProfileManifest(configDir, supervisor.ProfileHarnessBinary(harness))
 }
 
+// UnderAgentProfiles reports whether configDir sits inside
+// <runtimeDir>/.loom/agent-profiles/. It is exported so `loom doctor` can
+// report the binding a lead WOULD get using the same predicate the lead
+// itself decides by — two answers to this one question is the whole class of
+// bug this function has already produced once.
+func UnderAgentProfiles(runtimeDir, configDir string) bool {
+	return underAgentProfiles(runtimeDir, configDir)
+}
+
 // underAgentProfiles reports whether configDir sits inside
 // <runtimeDir>/.loom/agent-profiles/. The root itself does not count: a
 // profile is always at least <agent>/<harness> below it.
+//
+// The comparison is by FILESYSTEM IDENTITY, not by path spelling. Two
+// spellings of one directory are routine here — a case-insensitive macOS
+// volume renders the workspace as both `puppet` and `PUPPET`, /tmp is a
+// symlink to /private/tmp, and a relative env value resolves against the
+// caller's cwd rather than the runtime dir. A prefix comparison read all
+// three as "an operator's own config root", which silently disabled both
+// manifest verification AND credential injection for a root this workspace
+// had provisioned (PUPPET-523).
 func underAgentProfiles(runtimeDir, configDir string) bool {
-	if runtimeDir == "" {
+	if runtimeDir == "" || configDir == "" {
 		return false
 	}
-	root, err := filepath.Abs(filepath.Join(runtimeDir, ".loom", agentprofile.DirName))
+	rootInfo, err := os.Stat(filepath.Join(runtimeDir, ".loom", agentprofile.DirName))
 	if err != nil {
+		// No agent-profiles tree at all: nothing here provisioned anything,
+		// so no config root can be ours.
 		return false
 	}
 	dir, err := filepath.Abs(configDir)
 	if err != nil {
 		return false
 	}
-	return strings.HasPrefix(dir, root+string(filepath.Separator))
+	// Walk up from configDir's PARENT: reaching the root means configDir is
+	// at least one level below it, which is the "root itself does not count"
+	// rule the callers and their tests depend on.
+	for {
+		parent := filepath.Dir(dir)
+		if parent == dir { // converged on "/" (or a volume root)
+			return false
+		}
+		// Stat follows symlinks and the kernel folds case on a
+		// case-insensitive volume, so this is true for every spelling of the
+		// same directory and false for a genuinely different one. An
+		// unreadable intermediate directory is skipped, never fatal: it must
+		// not flip a real profile to "an operator's own".
+		if info, err := os.Stat(parent); err == nil && os.SameFile(info, rootInfo) {
+			return true
+		}
+		dir = parent
+	}
 }
 
 // leadProfileRepair names the one command that fixes this failure. The split
@@ -147,6 +205,12 @@ func underAgentProfiles(runtimeDir, configDir string) bool {
 // profile's CONTENT is the operator's provisioning script — which is also the
 // only thing that touches the keychain.
 func leadProfileRepair(err error, configDir string) string {
+	// First, because profileAgentName on a relative path yields junk. The
+	// variable's name is already in the error text, so this stays generic
+	// across harnesses.
+	if errors.Is(err, errRelativeProfileRoot) {
+		return "export an absolute path (CLAUDE_CONFIG_DIR=$(cd <dir> && pwd)), or unset it and let `loom lead` resolve its own profile"
+	}
 	if errors.Is(err, supervisor.ErrProfileVersionDrift) {
 		return "loom doctor --fix"
 	}

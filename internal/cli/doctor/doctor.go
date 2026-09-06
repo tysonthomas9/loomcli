@@ -143,7 +143,7 @@ func collectDoctorChecks(cmd *cobra.Command) []checkFunc {
 	}
 	checks = append(checks, checkBackendCLI, checkProjectConfig, checkGlobalConfig,
 		checkWorktrees, checkStaleLocks, checkStaleSignalFiles, checkStaleSessionRecords,
-		checkOrphanedTranscripts, checkAgentProfiles, checkOrphanedTmuxSessions, checkLoomDaemon, checkDaemonStuck, checkRedis,
+		checkOrphanedTranscripts, checkAgentProfiles, checkLeadProfileBinding, checkOrphanedTmuxSessions, checkLoomDaemon, checkDaemonStuck, checkRedis,
 		func() CheckResult { return checkOrphanedFleetLocks(deps) })
 	return checks
 }
