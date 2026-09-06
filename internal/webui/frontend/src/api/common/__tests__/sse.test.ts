@@ -440,7 +440,7 @@ describe("WorkspaceSSEClient", () => {
         expires_at: new Date(
           Date.now() + (mode === "stale" ? -1000 : 60000),
         ).toISOString(),
-        manifest: mode === "malformed" ? "wrong" : "fleet.issue-workspace.v3",
+        manifest: mode === "malformed" ? "wrong" : "fleet.issue-workspace.v4",
       };
       const reason = mode === "non-expired" ? "overflow" : "expired";
       streamRequests[0].push(
@@ -473,7 +473,7 @@ describe("WorkspaceSSEClient", () => {
       workspace: "test-ws",
       source_repos: ["a"],
       expires_at: new Date(Date.now() + 60000).toISOString(),
-      manifest: "fleet.issue-workspace.v3",
+      manifest: "fleet.issue-workspace.v4",
     };
     streamRequests[0].push(
       `event: resync\ndata: ${JSON.stringify({ reason: "expired", recovery })}\n\n`,
@@ -503,7 +503,7 @@ describe("WorkspaceSSEClient", () => {
       workspace: "test-ws",
       source_repos: ["b"],
       expires_at: new Date(Date.now() + 60000).toISOString(),
-      manifest: "fleet.issue-workspace.v3",
+      manifest: "fleet.issue-workspace.v4",
     };
     streamRequests[0].push(
       `event: resync\ndata: {"reason":"expired"}\n\nevent: resync\ndata: ${JSON.stringify({ reason: "expired", recovery })}\n\n`,

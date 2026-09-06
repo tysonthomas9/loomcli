@@ -19,7 +19,7 @@ func recoveryTestIssue(id string) map[string]any {
 	return map[string]any{"workspace": "WS", "id": id, "title": "title", "status": "custom-review", "priority": 2, "type": "task", "created_at": "2026-09-05T00:00:00Z", "created_by": "alice", "updated_at": "2026-09-05T00:00:00Z", "metadata": map[string]string{"owner": "retained"}, "estimated_minutes": 42, "labels": []string{}, "future_field": map[string]any{"value": true}}
 }
 func recoveryTestDocument() map[string]any {
-	return map[string]any{"manifest": recoveryManifest, "workspace": "WS", "through": "c2.MTAtMA", "issues": []any{}, "total": 0, "ready": []any{}, "blocked": []any{}, "deferred": []any{}, "dependencies": []any{}}
+	return map[string]any{"manifest": recoveryManifest, "workspace": "WS", "through": "c2.MTAtMA", "issues": []any{}, "total": 0, "ready": []any{}, "blocked": []any{}, "deferred": []any{}, "dependencies": []any{}, "comments": []any{}}
 }
 func recoveryTestBackend(t *testing.T, h http.HandlerFunc) *FleetBackend {
 	t.Helper()
@@ -71,6 +71,7 @@ func TestReadIssueRecoveryRejectsInvalidDocument(t *testing.T) {
 		mutate func(map[string]any)
 		suffix string
 	}{
+		{name: "legacy v3 manifest", mutate: func(d map[string]any) { d["manifest"] = "fleet.issue-workspace.v3" }},
 		{name: "legacy v2 manifest", mutate: func(d map[string]any) { d["manifest"] = "fleet.issue-workspace.v2" }},
 		{name: "legacy lower-bound v1 manifest", mutate: func(d map[string]any) { d["manifest"] = "fleet.issue-workspace.v1" }},
 		{name: "case alias manifest", mutate: func(d map[string]any) { d["Manifest"] = d["manifest"]; delete(d, "manifest") }},
