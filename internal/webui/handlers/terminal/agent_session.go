@@ -402,7 +402,15 @@ func agentLaunchCommandArgs(kind domain.RoleKind, agent *domain.Agent, role *dom
 	roleName := strings.ToLower(strings.TrimSpace(agent.RoleName))
 	if kind == domain.RoleKindInteractive {
 		args := []string{"lead"}
-		if role != nil && strings.TrimSpace(role.Prompt) == "" && strings.TrimSpace(role.PromptFile) != "" {
+		switch {
+		// The spawned CLI re-reads the role (LOOM_AGENT_ROLE is in its env) and
+		// would suppress the persona by itself — except that the prompt-file
+		// branch below wins there too. Emitting the flag explicitly settles it,
+		// and it keeps suppression working when the spawned CLI cannot reach
+		// fleet-db to re-read the role at all.
+		case role != nil && role.PersonaSource == domain.PersonaSourceProfile:
+			args = append(args, "--prompt", "builtin:none")
+		case role != nil && strings.TrimSpace(role.Prompt) == "" && strings.TrimSpace(role.PromptFile) != "":
 			args = append(args, "--prompt", role.PromptFile)
 		}
 		return args, nil
