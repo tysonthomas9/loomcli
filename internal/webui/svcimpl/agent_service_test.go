@@ -2,7 +2,9 @@ package svcimpl
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -28,6 +30,140 @@ func (s alreadyExistsAfterWinnerRoleStore) Create(ctx context.Context, _ store.R
 		return nil, err
 	}
 	return nil, fmt.Errorf("concurrent role create: %w", domain.ErrAlreadyExists)
+}
+
+// roleGetErrorStore swaps in a RoleStore whose Get always fails, so the role
+// lookup in ensureAgentRole/loadAgentRoleForKind can be driven with a chosen
+// sentinel. memstore never returns domain.ErrInvalid on its own.
+type roleGetErrorStore struct {
+	store.Store
+	roles store.RoleStore
+}
+
+func (s roleGetErrorStore) Roles() store.RoleStore { return s.roles }
+
+type invalidGetRoleStore struct {
+	store.RoleStore
+}
+
+func (s invalidGetRoleStore) Get(context.Context, string, string) (*domain.Role, error) {
+	return nil, fmt.Errorf("get role: %w", domain.ErrInvalid)
+}
+
+type failingGetRoleStore struct {
+	store.RoleStore
+}
+
+func (s failingGetRoleStore) Get(context.Context, string, string) (*domain.Role, error) {
+	return nil, errors.New("boom")
+}
+
+func newRoleGetErrorStore(t *testing.T, roles func(store.RoleStore) store.RoleStore) store.Store {
+	t.Helper()
+	ctx := context.Background()
+	base := memstore.New()
+	if _, err := base.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key:           "TEST2",
+		Name:          "Test 2",
+		DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	return roleGetErrorStore{Store: base, roles: roles(base.Roles())}
+}
+
+// A role name fleet-db rejects on charset (a capital, a space, punctuation)
+// comes back as domain.ErrInvalid and must read as a 400, not a 500.
+func TestCreateAgentInvalidRoleNameReturnsValidation(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	st := newRoleGetErrorStore(t, func(rs store.RoleStore) store.RoleStore {
+		return invalidGetRoleStore{RoleStore: rs}
+	})
+
+	svc := NewAgentService(nil, nil, nil, st)
+	_, err := svc.CreateAgent(context.Background(), service.AgentCreateInput{
+		WorkspaceKey: "TEST2",
+		Name:         "a1",
+		RoleName:     "UPPER",
+		Backend:      "codex",
+	})
+	var serr *service.ServiceError
+	if !errors.As(err, &serr) || serr.Kind != service.KindValidation {
+		t.Fatalf("CreateAgent err = %v, want validation ServiceError", err)
+	}
+	if !strings.Contains(serr.Error(), "UPPER") {
+		t.Fatalf("error %q does not name the offending role", serr.Error())
+	}
+}
+
+// A real server fault must stay a 500 — the ErrInvalid arm must not blanket
+// downgrade every store error to a client error.
+func TestEnsureAgentRoleServerErrorStaysInternal(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	st := newRoleGetErrorStore(t, func(rs store.RoleStore) store.RoleStore {
+		return failingGetRoleStore{RoleStore: rs}
+	})
+
+	svc := NewAgentService(nil, nil, nil, st)
+	_, err := svc.CreateAgent(context.Background(), service.AgentCreateInput{
+		WorkspaceKey: "TEST2",
+		Name:         "a1",
+		RoleName:     "reviewer",
+		Backend:      "codex",
+	})
+	var serr *service.ServiceError
+	if !errors.As(err, &serr) || serr.Kind != service.KindInternal {
+		t.Fatalf("CreateAgent err = %v, want internal ServiceError", err)
+	}
+}
+
+func TestLoadAgentRoleForKindInvalidRoleNameReturnsValidation(t *testing.T) {
+	st := newRoleGetErrorStore(t, func(rs store.RoleStore) store.RoleStore {
+		return invalidGetRoleStore{RoleStore: rs}
+	})
+
+	svc, ok := NewAgentService(nil, nil, nil, st).(*agentServiceImpl)
+	if !ok {
+		t.Fatal("NewAgentService did not return *agentServiceImpl")
+	}
+	_, err := svc.loadAgentRoleForKind(context.Background(), "TEST2", "role with space")
+	var serr *service.ServiceError
+	if !errors.As(err, &serr) || serr.Kind != service.KindValidation {
+		t.Fatalf("loadAgentRoleForKind err = %v, want validation ServiceError", err)
+	}
+}
+
+// Regression guard for the ErrNotFound fall-through the switch rewrite could
+// break: a well-formed but unknown role must NOT become an internal error.
+// Against memstore this lands on the worker-must-exist validation; against
+// fleet-db the same fall-through reaches Agents().Create, which 404s.
+func TestCreateAgentUnknownWorkerRoleStaysValidationNotInternal(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key:           "TEST2",
+		Name:          "Test 2",
+		DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	svc := NewAgentService(nil, nil, nil, st)
+	_, err := svc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey: "TEST2",
+		Name:         "a2",
+		RoleName:     "nosuchrole",
+		Kind:         string(domain.RoleKindWorker),
+		Backend:      "codex",
+	})
+	var serr *service.ServiceError
+	if !errors.As(err, &serr) || serr.Kind != service.KindValidation {
+		t.Fatalf("CreateAgent err = %v, want validation ServiceError", err)
+	}
 }
 
 func TestCreateAgentAllowsDistributedWorkspaceWithoutLocalPath(t *testing.T) {
