@@ -507,9 +507,10 @@ type fleetMutationEvent struct {
 
 // fleetMutationsResponse mirrors fleet-db's MutationsResponse envelope.
 type fleetMutationsResponse struct {
-	Events  []fleetMutationEvent `json:"events"`
-	Cursor  string               `json:"cursor"`
-	HasMore bool                 `json:"has_more"`
+	SourceIdentity string               `json:"source_identity"`
+	Events         []fleetMutationEvent `json:"events"`
+	Cursor         string               `json:"cursor"`
+	HasMore        bool                 `json:"has_more"`
 }
 
 // actionToMutationType maps fleet-db Action values (issue.create, ...) to the

@@ -2,7 +2,6 @@ package fleet
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -511,8 +510,7 @@ func (b *FleetBackend) runSingleDelete(ctx context.Context, op backend.BatchOp) 
 // full event history. fleet-db's `since` validator accepts "0" or a Redis
 // Stream ID of the form "<ms>-<seq>"; zero is the only special-case form.
 const fleetCursorZero = "0"
-const fleetOpaqueCursorPrefix = "c1."
-const legacyProbeUnsupportedMessage = "invalid since parameter: expected opaque cursor token"
+const fleetOpaqueCursorPrefix = "c2."
 
 // formatFleetCursor renders an int64 millisecond epoch into the Redis-stream
 // ID shape that fleet-db's `since` validator accepts. Zero stays "0"; any
@@ -527,29 +525,8 @@ func formatFleetCursor(sinceMs int64) string {
 }
 
 func normalizeFleetCursor(cursor string) (string, error) {
-	if cursor == "$" {
-		return fleetOpaqueCursorPrefix + base64.RawURLEncoding.EncodeToString([]byte(cursor)), nil
-	}
-	if strings.HasPrefix(cursor, fleetOpaqueCursorPrefix) {
-		token := strings.TrimPrefix(cursor, fleetOpaqueCursorPrefix)
-		if decoded, err := base64.RawURLEncoding.DecodeString(token); err == nil && len(decoded) > 0 {
-			return cursor, nil
-		}
-		return "", fmt.Errorf("invalid fleet mutation cursor %q", cursor)
-	}
-	if cursor == fleetCursorZero {
+	if cursor == "$" || cursor == "0" || isFixedFleetCursor(cursor) {
 		return cursor, nil
-	}
-	digitsOnly := cursor != ""
-	for i := 0; i < len(cursor); i++ {
-		if cursor[i] < '0' || cursor[i] > '9' {
-			digitsOnly = false
-			break
-		}
-	}
-	if _, err := strconv.ParseInt(cursor, 10, 64); digitsOnly && err == nil {
-		streamCursor := cursor + "-0"
-		return fleetOpaqueCursorPrefix + base64.RawURLEncoding.EncodeToString([]byte(streamCursor)), nil
 	}
 	return "", fmt.Errorf("invalid fleet mutation cursor %q", cursor)
 }
@@ -568,25 +545,18 @@ func (b *FleetBackend) getMutationsAfter(ctx context.Context, op string, since s
 		params.Set("timeout", strconv.FormatInt(timeoutMs, 10))
 	}
 	rawURL := b.baseWorkspaceV2 + "/events/mutations?" + params.Encode()
-	resp, err := b.execURL(ctx, op, "GET", rawURL, nil)
+	resp, status, err := b.doRequestURL(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
+		return backend.MutationPage{}, classifyTransportError(op, err)
+	}
+	if err := classifyHTTPError(op, status, *resp); err != nil {
 		return backend.MutationPage{}, err
 	}
-	if !hasData(resp) {
-		return backend.MutationPage{Events: []backend.MutationData{}, Cursor: since}, nil
+	if status != http.StatusOK || !hasData(resp) {
+		return backend.MutationPage{}, backend.ErrInternal(op, "missing mutation page", nil)
 	}
-	var fresp fleetMutationsResponse
-	if err := json.Unmarshal(resp.Data, &fresp); err != nil {
-		return backend.MutationPage{}, backend.ErrInternal(op, "unmarshal response", err)
-	}
-	if fresp.Cursor == "" {
-		fresp.Cursor = since
-	}
-	return backend.MutationPage{
-		Events:  fleetEventsToMutationData(fresp.Events),
-		Cursor:  fresp.Cursor,
-		HasMore: fresp.HasMore,
-	}, nil
+	return decodeMutationPage(resp.Data, limit, b.workspaceID)
+
 }
 
 // GetMutationsAfter returns one mutation page after a fleet-db cursor.
@@ -599,36 +569,17 @@ func (b *FleetBackend) WaitForMutationsAfter(ctx context.Context, since string, 
 	return b.getMutationsAfter(ctx, "WaitForMutationsAfter", since, timeoutMs, limit, true)
 }
 
-// ProbeHead asks fleet-db for its concrete mutation-stream head. Old fleet-db
-// versions reject "$" with one exact validation error; that response is the
-// only condition reported as an unsupported probe.
+// ProbeHead requires an authoritative source-bound head. Unsupported servers
+// fail readiness instead of falling back to unscoped history.
 func (b *FleetBackend) ProbeHead(ctx context.Context) (string, bool, error) {
-	params := url.Values{}
-	params.Set("since", fleetOpaqueCursorPrefix+base64.RawURLEncoding.EncodeToString([]byte("$")))
-	params.Set("timeout", "0")
-	params.Set("limit", "1")
-	rawURL := b.baseWorkspaceV2 + "/events/mutations?" + params.Encode()
-	resp, statusCode, err := b.doRequestURL(ctx, "GET", rawURL, nil)
+	page, err := b.getMutationsAfter(ctx, "ProbeHead", "$", 0, 1, true)
 	if err != nil {
-		return "", false, classifyTransportError("ProbeHead", err)
-	}
-	if statusCode == http.StatusBadRequest && resp.Code == "invalid_parameter" && resp.Error == legacyProbeUnsupportedMessage {
-		return "", false, nil
-	}
-	if err := classifyHTTPError("ProbeHead", statusCode, *resp); err != nil {
 		return "", false, err
 	}
-	if statusCode != http.StatusOK {
-		return "", false, backend.ErrInternal("ProbeHead", fmt.Sprintf("unexpected HTTP status %d", statusCode), nil)
+	if len(page.Events) != 0 || page.HasMore {
+		return "", false, backend.ErrInternal("ProbeHead", "invalid head response", nil)
 	}
-	if !hasData(resp) {
-		return "", true, nil
-	}
-	var fresp fleetMutationsResponse
-	if err := json.Unmarshal(resp.Data, &fresp); err != nil {
-		return "", false, backend.ErrInternal("ProbeHead", "unmarshal response", err)
-	}
-	return fresp.Cursor, true, nil
+	return page.Cursor, true, nil
 }
 
 // GetMutations returns mutation events from fleet-db's cursor-based events

@@ -4,6 +4,7 @@ import type { RecoveryHandle } from "../recoveryHandle";
 const now = Date.parse("2026-09-05T12:00:00Z");
 const offer: RecoveryHandle = {
   handle: "A".repeat(43),
+  source_identity: "s1.Zml4dHVyZQ",
   workspace: "WS",
   source_repos: [],
   expires_at: "2026-09-05T12:01:00Z",
@@ -30,7 +31,7 @@ function document(): Record<string, unknown> {
   return {
     manifest: offer.manifest,
     workspace: "WS",
-    through: "c1.MTAtMA",
+    through: "c2.Zml4dHVyZQ",
     issues: [],
     total: 0,
     ready: [],
@@ -46,6 +47,7 @@ describe("prepareIssueRecovery", () => {
     const raw = JSON.stringify(document());
     const result = prepareIssueRecovery(raw, offer, offer.handle, now);
     expect(result.document).toBe(raw);
+    expect(result.offerSourceIdentity).toBe(offer.source_identity);
     expect(result.coverage).toEqual(["issues", "ready", "blocked", "deferred"]);
     expect(result.issues).toEqual([]);
     expect(Object.isFrozen(result)).toBe(true);
@@ -151,12 +153,17 @@ describe("prepareIssueRecovery", () => {
       ),
     ).toThrow();
   });
-  it.each(["0", "c1.MA", "c1.JA", "c1.!"])(
-    "rejects invalid through %s",
-    (through) => {
-      expect(() => prepare({ ...document(), through })).toThrow();
-    },
-  );
+  it.each([
+    "0",
+    "c1.MTAtMA",
+    "c1.MA",
+    "c1.JA",
+    "c2.!",
+    "c2.Zml4dHVyZR",
+    "c2.Zml4dHVyZQ==",
+  ])("rejects invalid through %s", (through) => {
+    expect(() => prepare({ ...document(), through })).toThrow();
+  });
   it.each([
     '{"a":1,"a":2}',
     '{"a":{"x":1,"\\u0078":2}}',

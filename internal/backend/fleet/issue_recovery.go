@@ -3,7 +3,6 @@ package fleet
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -39,7 +38,11 @@ func (b *FleetBackend) ReadIssueRecovery(ctx context.Context) (backend.IssueReco
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return backend.IssueRecoverySnapshot{}, backend.ErrUnavailable(recoveryOp, fmt.Sprintf("recovery HTTP status %d", resp.StatusCode), nil)
+		return backend.IssueRecoverySnapshot{}, classifyRecoveryHTTPError(resp)
+	}
+	identity := resp.Header.Get("X-Fleet-Source-Identity")
+	if len(resp.Header.Values("X-Fleet-Source-Identity")) != 1 || !backend.ValidSourceIdentity(identity) {
+		return backend.IssueRecoverySnapshot{}, backend.ErrInternal(recoveryOp, "missing source identity", nil)
 	}
 	media, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil || media != "application/json" {
@@ -53,6 +56,7 @@ func (b *FleetBackend) ReadIssueRecovery(ctx context.Context) (backend.IssueReco
 		return backend.IssueRecoverySnapshot{}, backend.ErrInternal(recoveryOp, "recovery response exceeds size limit", nil)
 	}
 	result, err := validateRecoveryDocument(data, b.workspaceID)
+	result.SourceIdentity = identity
 	if err != nil {
 		return backend.IssueRecoverySnapshot{}, backend.ErrInternal(recoveryOp, "invalid recovery manifest", err)
 	}
@@ -60,6 +64,22 @@ func (b *FleetBackend) ReadIssueRecovery(ctx context.Context) (backend.IssueReco
 		return backend.IssueRecoverySnapshot{}, classifyTransportError(recoveryOp, err)
 	}
 	return result, nil
+}
+
+// Only the explicit source-change response retires a captured source. Error
+// documents have their own small bound; malformed or unrelated errors remain unavailable.
+func classifyRecoveryHTTPError(resp *http.Response) error {
+	const errorBodyLimit = 64 << 10
+	if resp.StatusCode == http.StatusConflict {
+		data, err := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit+1))
+		if err == nil && len(data) <= errorBodyLimit {
+			parsed, err := parseFleetResponse(data, resp.StatusCode)
+			if err == nil && parsed.Code == "mutation_source_changed" {
+				return classifyHTTPError(recoveryOp, resp.StatusCode, *parsed)
+			}
+		}
+	}
+	return backend.ErrUnavailable(recoveryOp, fmt.Sprintf("recovery HTTP status %d", resp.StatusCode), nil)
 }
 
 type recoveryWire struct {
@@ -366,8 +386,7 @@ func decodeRecoveryManifest(data []byte, ws string) (recoveryWire, error) {
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return recoveryWire{}, err
 	}
-	decoded, _ := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(wire.Through, fleetOpaqueCursorPrefix))
-	if wire.Manifest != recoveryManifest || wire.Workspace != ws || !strings.HasPrefix(wire.Through, fleetOpaqueCursorPrefix) || !isFixedFleetCursor(wire.Through) || string(decoded) == "0" || wire.Issues == nil || wire.Total == nil || wire.Ready == nil || wire.Blocked == nil || wire.Deferred == nil || *wire.Total != int64(len(*wire.Issues)) {
+	if wire.Manifest != recoveryManifest || wire.Workspace != ws || !strings.HasPrefix(wire.Through, fleetOpaqueCursorPrefix) || !isFixedFleetCursor(wire.Through) || wire.Issues == nil || wire.Total == nil || wire.Ready == nil || wire.Blocked == nil || wire.Deferred == nil || *wire.Total != int64(len(*wire.Issues)) {
 		return recoveryWire{}, fmt.Errorf("incomplete manifest")
 	}
 

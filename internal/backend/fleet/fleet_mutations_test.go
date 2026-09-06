@@ -20,7 +20,7 @@ func TestGetMutations_HappyPath(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotQuery = r.URL.RawQuery
-		respondOK(w, fleetMutationsResponse{
+		respondOK(w, fleetMutationsResponse{SourceIdentity: "s1.Zml4dHVyZQ",
 			Events: []fleetMutationEvent{
 				{
 					ID:         "1708000000000-0",
@@ -80,7 +80,7 @@ func TestGetMutations_HappyPath(t *testing.T) {
 
 func TestGetMutations_EmptyResponse(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		respondOK(w, fleetMutationsResponse{Events: []fleetMutationEvent{}, Cursor: "0", HasMore: false})
+		respondOK(w, fleetMutationsResponse{SourceIdentity: "s1.Zml4dHVyZQ", Events: []fleetMutationEvent{}, Cursor: "0", HasMore: false})
 	})
 	defer ts.Close()
 
@@ -115,7 +115,7 @@ func TestGetMutations_NullDataReturnsEmpty(t *testing.T) {
 func TestGetMutations_ActionFolding(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		respondOK(w, fleetMutationsResponse{
+		respondOK(w, fleetMutationsResponse{SourceIdentity: "s1.Zml4dHVyZQ",
 			Events: []fleetMutationEvent{
 				{Timestamp: now, Action: "issue.update", EntityType: "issue", EntityID: "a"},
 				{Timestamp: now, Action: "issue.delete", EntityType: "issue", EntityID: "b"},
@@ -161,7 +161,7 @@ func TestWaitForMutations_TimeoutEmpty(t *testing.T) {
 	var gotQuery string
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
-		respondOK(w, fleetMutationsResponse{Events: []fleetMutationEvent{}, Cursor: "0"})
+		respondOK(w, fleetMutationsResponse{SourceIdentity: "s1.Zml4dHVyZQ", Events: []fleetMutationEvent{}, Cursor: "0"})
 	})
 	defer ts.Close()
 
@@ -180,7 +180,7 @@ func TestWaitForMutations_TimeoutEmpty(t *testing.T) {
 func TestWaitForMutations_DeliversEvents(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		respondOK(w, fleetMutationsResponse{
+		respondOK(w, fleetMutationsResponse{SourceIdentity: "s1.Zml4dHVyZQ",
 			Events: []fleetMutationEvent{
 				{Timestamp: now, Action: "issue.update", EntityType: "issue", EntityID: "x"},
 			},
@@ -217,47 +217,40 @@ func TestGetMutationsAfter_ReturnsPageAndSendsExplicitLimit(t *testing.T) {
 	var gotQuery url.Values
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.Query()
-		respondOK(w, fleetMutationsResponse{
-			Events:  []fleetMutationEvent{{ID: "c1.event", Timestamp: now, Action: "issue.update", EntityType: "issue", EntityID: "task-1"}},
-			Cursor:  "c1.next",
+		respondOK(w, fleetMutationsResponse{SourceIdentity: "s1.Zml4dHVyZQ",
+			Events:  []fleetMutationEvent{{WorkspaceID: "test-ws", ID: "c2.ZXZlbnQ", Timestamp: now, Action: "issue.update", EntityType: "issue", EntityID: "task-1"}},
+			Cursor:  "c2.next",
 			HasMore: true,
 		})
 	})
 	defer ts.Close()
 
-	page, err := fb.GetMutationsAfter(context.Background(), "c1.c3RhcnQ", 100)
+	page, err := fb.GetMutationsAfter(context.Background(), "c2.c3RhcnQ", 100)
 	if err != nil {
 		t.Fatalf("GetMutationsAfter: %v", err)
 	}
-	if got := gotQuery.Get("since"); got != "c1.c3RhcnQ" {
+	if got := gotQuery.Get("since"); got != "c2.c3RhcnQ" {
 		t.Fatalf("since = %q, want opaque token preserved", got)
 	}
 	if got := gotQuery.Get("limit"); got != "100" {
 		t.Fatalf("limit = %q, want 100", got)
 	}
-	if len(page.Events) != 1 || page.Events[0].Cursor != "c1.event" {
-		t.Fatalf("events = %+v, want cursor c1.event", page.Events)
+	if len(page.Events) != 1 || page.Events[0].Cursor != "c2.ZXZlbnQ" {
+		t.Fatalf("events = %+v, want cursor c2.ZXZlbnQ", page.Events)
 	}
-	if page.Cursor != "c1.next" || !page.HasMore {
-		t.Fatalf("page = %+v, want cursor c1.next with has_more", page)
+	if page.Cursor != "c2.next" || !page.HasMore {
+		t.Fatalf("page = %+v, want cursor c2.next with has_more", page)
 	}
 }
 
-func TestGetMutationsAfter_EmptyTerminalPageKeepsPreviousCursor(t *testing.T) {
+func TestGetMutationsAfter_RejectsMissingCursor(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		respondOK(w, fleetMutationsResponse{Events: []fleetMutationEvent{}, Cursor: "", HasMore: false})
+		respondOK(w, fleetMutationsResponse{SourceIdentity: "s1.Zml4dHVyZQ", Events: []fleetMutationEvent{}, Cursor: ""})
 	})
 	defer ts.Close()
-
-	page, err := fb.GetMutationsAfter(context.Background(), "c1.previous", 100)
-	if err != nil {
-		t.Fatalf("GetMutationsAfter: %v", err)
-	}
-	if page.Cursor != "c1.previous" {
-		t.Fatalf("cursor = %q, want previous cursor", page.Cursor)
-	}
-	if page.Events == nil {
-		t.Fatal("events = nil, want non-nil empty slice")
+	page, err := fb.GetMutationsAfter(context.Background(), "c2.cHJldmlvdXM", 100)
+	if err == nil || page.Cursor != "" || len(page.Events) != 0 {
+		t.Fatalf("missing cursor accepted: %+v %v", page, err)
 	}
 }
 
@@ -266,9 +259,8 @@ func TestMutationCursorNormalizationPreservesSupportedClasses(t *testing.T) {
 		cursor    string
 		wantSince string
 	}{
-		{cursor: "$", wantSince: "c1.JA"},
-		{cursor: "c1.b3BhcXVl", wantSince: "c1.b3BhcXVl"},
-		{cursor: "1700000000000", wantSince: "c1.MTcwMDAwMDAwMDAwMC0w"},
+		{cursor: "$", wantSince: "$"},
+		{cursor: "c2.b3BhcXVl", wantSince: "c2.b3BhcXVl"},
 		{cursor: "0", wantSince: "0"},
 	}
 	for _, tt := range tests {
@@ -276,7 +268,7 @@ func TestMutationCursorNormalizationPreservesSupportedClasses(t *testing.T) {
 			var gotSince string
 			fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 				gotSince = r.URL.Query().Get("since")
-				respondOK(w, fleetMutationsResponse{Events: []fleetMutationEvent{}, Cursor: tt.cursor})
+				respondOK(w, fleetMutationsResponse{SourceIdentity: "s1.Zml4dHVyZQ", Events: []fleetMutationEvent{}, Cursor: "c2.aGVhZA"})
 			})
 			defer ts.Close()
 
@@ -291,7 +283,7 @@ func TestMutationCursorNormalizationPreservesSupportedClasses(t *testing.T) {
 }
 
 func TestMutationCursorNormalizationRejectsMalformedCursor(t *testing.T) {
-	for _, cursor := range []string{"", "+1", "-1", "1700000000000-0", "not-a-cursor", " c1.token", "c1.", "c1.not*opaque"} {
+	for _, cursor := range []string{"", "1700000000000", "c1.MA", "+1", "-1", "1700000000000-0", "not-a-cursor", " c2.token", "c2.", "c2.not*opaque"} {
 		t.Run(strconv.Quote(cursor), func(t *testing.T) {
 			fb, ts := newTestServer(t, func(http.ResponseWriter, *http.Request) {
 				t.Fatal("malformed cursor must be rejected before sending a request")
@@ -308,20 +300,20 @@ func TestMutationCursorNormalizationRejectsMalformedCursor(t *testing.T) {
 func TestProbeHead(t *testing.T) {
 	t.Run("supported", func(t *testing.T) {
 		fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-			if got := r.URL.Query(); got.Get("since") != "c1.JA" || got.Get("timeout") != "0" || got.Get("limit") != "1" {
+			if got := r.URL.Query(); got.Get("since") != "$" || got.Get("timeout") != "0" || got.Get("limit") != "1" {
 				t.Fatalf("query = %q, want since=$ timeout=0 limit=1", got.Encode())
 			}
-			respondOK(w, fleetMutationsResponse{Events: []fleetMutationEvent{}, Cursor: "c1.head", HasMore: false})
+			respondOK(w, fleetMutationsResponse{SourceIdentity: "s1.Zml4dHVyZQ", Events: []fleetMutationEvent{}, Cursor: "c2.head", HasMore: false})
 		})
 		defer ts.Close()
 
 		cursor, supported, err := fb.ProbeHead(context.Background())
-		if err != nil || !supported || cursor != "c1.head" {
-			t.Fatalf("ProbeHead = (%q, %v, %v), want (c1.head, true, nil)", cursor, supported, err)
+		if err != nil || !supported || cursor != "c2.head" {
+			t.Fatalf("ProbeHead = (%q, %v, %v), want (c2.head, true, nil)", cursor, supported, err)
 		}
 	})
 
-	t.Run("old fleet exact error is unsupported", func(t *testing.T) {
+	t.Run("old fleet errors remain errors", func(t *testing.T) {
 		fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
@@ -330,8 +322,8 @@ func TestProbeHead(t *testing.T) {
 		defer ts.Close()
 
 		cursor, supported, err := fb.ProbeHead(context.Background())
-		if err != nil || supported || cursor != "" {
-			t.Fatalf("ProbeHead = (%q, %v, %v), want (empty, false, nil)", cursor, supported, err)
+		if err == nil || supported || cursor != "" {
+			t.Fatalf("ProbeHead = (%q, %v, %v), want (empty, false, error)", cursor, supported, err)
 		}
 	})
 
@@ -364,17 +356,17 @@ func TestGetMutationsAfter_CursorExpiredPreservesTypedReasonAndFloor(t *testing.
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusGone)
-		_, _ = w.Write([]byte(`{"error":{"code":"cursor_expired","message":"cursor expired","meta":{"cursor":"c1.floor"}}}`))
+		_, _ = w.Write([]byte(`{"error":{"code":"cursor_expired","message":"cursor expired","meta":{"cursor":"c2.floor"}}}`))
 	})
 	defer ts.Close()
 
-	_, err := fb.GetMutationsAfter(context.Background(), "c1.old", 100)
+	_, err := fb.GetMutationsAfter(context.Background(), "c2.b2xk", 100)
 	if !errors.Is(err, backend.ErrMutationCursorExpired) {
 		t.Fatalf("error = %v, want ErrMutationCursorExpired", err)
 	}
 	var be *backend.BackendError
-	if !errors.As(err, &be) || be.Meta["cursor"] != "c1.floor" {
-		t.Fatalf("error meta = %#v, want cursor floor c1.floor", be)
+	if !errors.As(err, &be) || be.Meta["cursor"] != "c2.floor" {
+		t.Fatalf("error meta = %#v, want cursor floor c2.floor", be)
 	}
 }
 

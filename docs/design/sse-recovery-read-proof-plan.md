@@ -34,6 +34,8 @@ For Redis and unenrolled PostgreSQL, the current mutation head represents raw so
 
 ### 1. Define source identity before defining a durable ticket
 
+Implemented source contract: enrolled PostgreSQL now persists a database UUID and binds each `c2` mutation cursor to that UUID, the workspace key, and its projection incarnation. Responses carry an opaque `s1` identity; Loom pins it to the captured backend registration and checks subsequent heads, pages, and recovery reads. See [the source identity proof](../testing/sse-durable-source-identity-proof.md). Normal restarts preserve this identity; a clone or destructive restore requires an operator to rotate the database UUID while traffic is fenced. Recovery handles remain process-local and short-lived. This does not yet authorize browser publication or reset acknowledgment.
+
 The first implementation must identify an enrolled PostgreSQL authority, workspace, lane incarnation, and committed head. Loom must additionally bind the request to its selected backend registration and authorization/repository scope.
 
 Do not serialize the current subscriber pointer and call it a durable identity. Backend registration epochs across replacement and process restart are not yet a defined protocol. Until they are, a server-local recovery attempt may be explicitly short-lived, bound to a process and registration, and rejected on replacement or restart. A durable or cross-instance ticket requires a separately specified stable authority identity and verification mechanism.
@@ -125,4 +127,4 @@ The [browser coverage audit](sse-browser-recovery-coverage.md) records the concr
 
 ## Scope of this document
 
-This plan records the remaining whole-client recovery protocol. Certified Fleet issue reads, the Loom handle bridge, browser offer decoding and native preparation/HTTP API now exist; durable incarnation, cache-generation publication and acknowledgment do not. Existing registered-query recovery remains useful and intentionally weaker. Fixed replay fences and connection-bound mutation sources are prerequisites, not substitutes for complete read coverage.
+This plan records the remaining whole-client recovery protocol. Certified Fleet issue reads, the Loom handle bridge, browser offer decoding and native preparation/HTTP API now exist; durable PostgreSQL source/incarnation binding now exists. Cache-generation publication, browser recovery attempt ownership, and acknowledgment remain unimplemented. Existing registered-query recovery remains useful and intentionally weaker. Fixed replay fences and connection-bound mutation sources are prerequisites, not substitutes for complete read coverage.

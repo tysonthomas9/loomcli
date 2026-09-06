@@ -1,6 +1,9 @@
+import { isRecoveryEnvelope } from "./recoveryEnvelope";
+
 /** A source-bound retry offer, not a snapshot or permission to reset SSE. */
 export interface RecoveryHandle {
   readonly handle: string;
+  readonly source_identity: string;
   readonly workspace: string;
   readonly source_repos: readonly string[];
   readonly expires_at: string;
@@ -32,6 +35,7 @@ export function decodeRecoveryHandle(
   const offer = value as Record<string, unknown>;
   const keys = [
     "handle",
+    "source_identity",
     "workspace",
     "source_repos",
     "expires_at",
@@ -42,6 +46,7 @@ export function decodeRecoveryHandle(
     keys.some((key) => !Object.prototype.hasOwnProperty.call(offer, key))
   )
     return undefined;
+  if (!isRecoveryEnvelope(offer.source_identity, "s1.")) return undefined;
   if (
     typeof offer.handle !== "string" ||
     !/^[A-Za-z0-9_-]{43}$/.test(offer.handle)
@@ -100,6 +105,7 @@ export function decodeRecoveryHandle(
     return undefined;
   return Object.freeze({
     handle: offer.handle,
+    source_identity: offer.source_identity,
     workspace,
     source_repos: Object.freeze([...repos]),
     expires_at: offer.expires_at,
