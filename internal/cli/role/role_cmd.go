@@ -26,6 +26,7 @@ var (
 	roleAddModel          string
 	roleAddBackend        string
 	roleAddEffort         string
+	roleAddPersonaSource  string
 	roleAddSkills         []string
 	roleAddMaxConc        int
 	roleAddReadOnly       bool
@@ -81,6 +82,7 @@ var roleSetCmd = &cobra.Command{
   model           string
   task_filter     string
   executor        string (turn/conversation)
+  persona_source  string (argv/profile)
   backend         string
   effort          string (low/medium/high/xhigh/max)
   read_only       bool ("true"/"false")
@@ -115,6 +117,7 @@ var roleUnsetCmd = &cobra.Command{
   max_run_duration *int    (clear — the role falls back to the daemon default)
   input_policy    (clear — the role then auto-answers no harness prompt)
   description / kind / prompt / prompt_file / model / task_filter / backend / effort  (set to "")
+  persona_source  (set to "", i.e. back to argv)
   skills / path_patterns / allowed_tools / denied_tools      (set to empty list)
   read_only                                                 (set to false)`,
 	Args: cobra.ExactArgs(2),
@@ -129,6 +132,7 @@ func init() {
 	roleAddCmd.Flags().StringVar(&roleAddModel, "model", "", "Model identifier")
 	roleAddCmd.Flags().StringVar(&roleAddBackend, "backend", "", "AI backend (e.g., claude, codex)")
 	roleAddCmd.Flags().StringVar(&roleAddEffort, "effort", "", "Agent effort (low, medium, high, xhigh, max)")
+	roleAddCmd.Flags().StringVar(&roleAddPersonaSource, "persona-source", "", "Where an interactive role's instructions come from: argv (default) or profile (the harness's own ambient file)")
 	roleAddCmd.Flags().StringSliceVar(&roleAddSkills, "skills", nil, "Skills (comma-separated or repeat flag)")
 	roleAddCmd.Flags().IntVar(&roleAddMaxConc, "max-concurrency", 0, "Max concurrent agents (0 = unlimited)")
 	roleAddCmd.Flags().BoolVar(&roleAddReadOnly, "read-only", false, "Read-only role (hard on claude/codex/gemini; prompt-only elsewhere, and the daemon logs which one you get)")
@@ -146,24 +150,28 @@ func runRoleAdd(_ *cobra.Command, args []string) error {
 	if err := validateRoleKindValue(roleAddKind); err != nil {
 		return err
 	}
+	if err := validateRolePersonaSourceValue(roleAddPersonaSource); err != nil {
+		return err
+	}
 	inputPolicy, err := buildAddInputPolicy(roleAddInputPolicyDef, roleAddInputPolicy)
 	if err != nil {
 		return err
 	}
 	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		in := store.RoleCreate{
-			WorkspaceKey: ws,
-			Name:         args[0],
-			Kind:         normalizeRoleKindValue(roleAddKind),
-			Description:  roleAddDescription,
-			Prompt:       roleAddPrompt,
-			PromptFile:   roleAddPromptFile,
-			Model:        roleAddModel,
-			Backend:      roleAddBackend,
-			Effort:       roleAddEffort,
-			Skills:       roleAddSkills,
-			ReadOnly:     roleAddReadOnly,
-			InputPolicy:  inputPolicy,
+			WorkspaceKey:  ws,
+			Name:          args[0],
+			Kind:          normalizeRoleKindValue(roleAddKind),
+			Description:   roleAddDescription,
+			Prompt:        roleAddPrompt,
+			PromptFile:    roleAddPromptFile,
+			Model:         roleAddModel,
+			Backend:       roleAddBackend,
+			Effort:        roleAddEffort,
+			PersonaSource: normalizeRolePersonaSourceValue(roleAddPersonaSource),
+			Skills:        roleAddSkills,
+			ReadOnly:      roleAddReadOnly,
+			InputPolicy:   inputPolicy,
 		}
 		if roleAddMaxConc > 0 {
 			v := roleAddMaxConc
@@ -211,50 +219,60 @@ func runRoleShow(_ *cobra.Command, args []string) error {
 		if roleShowJSON {
 			return cmdstore.WriteJSON(r)
 		}
-		fmt.Printf("Workspace:    %s\n", r.WorkspaceKey)
-		fmt.Printf("Name:         %s\n", r.Name)
-		if r.Description != "" {
-			fmt.Printf("Description:  %s\n", r.Description)
-		}
-		if r.Kind != "" {
-			fmt.Printf("Kind:         %s\n", r.Kind)
-		}
-		if r.Model != "" {
-			fmt.Printf("Model:        %s\n", r.Model)
-		}
-		if r.Backend != "" {
-			fmt.Printf("Backend:      %s\n", r.Backend)
-		}
-		if r.Effort != "" {
-			fmt.Printf("Effort:       %s\n", r.Effort)
-		}
-		if r.Prompt != "" {
-			fmt.Printf("Prompt:       %s\n", r.Prompt)
-		}
-		if r.PromptFile != "" {
-			fmt.Printf("Prompt file:  %s\n", r.PromptFile)
-		}
-		if r.Executor != "" {
-			fmt.Printf("Executor:     %s\n", r.Executor)
-		}
-		if len(r.Skills) > 0 {
-			fmt.Printf("Skills:       %s\n", strings.Join(r.Skills, ", "))
-		}
-		if r.MaxConcurrency != nil {
-			fmt.Printf("Max concurrency: %d\n", *r.MaxConcurrency)
-		}
-		if r.ReadOnly {
-			fmt.Printf("Read-only:    true\n")
-		}
-		// Printed only when set. A role with no policy denies every prompt,
-		// which is also what the whole rest of the fleet does, so a line on
-		// every role would be noise; the interesting state is a role that has
-		// opted something in.
-		if r.InputPolicy != nil {
-			fmt.Printf("Input policy: %s\n", formatInputPolicy(r.InputPolicy))
-		}
+		printRoleDetails(r)
 		return nil
 	})
+}
+
+// printRoleDetails renders the human-readable `role show`. Every field beyond
+// the identity pair is printed only when set: a role that says nothing about a
+// knob behaves like the rest of the fleet, so a line for it would be noise.
+func printRoleDetails(r *domain.Role) {
+	fmt.Printf("Workspace:    %s\n", r.WorkspaceKey)
+	fmt.Printf("Name:         %s\n", r.Name)
+	if r.Description != "" {
+		fmt.Printf("Description:  %s\n", r.Description)
+	}
+	if r.Kind != "" {
+		fmt.Printf("Kind:         %s\n", r.Kind)
+	}
+	if r.Model != "" {
+		fmt.Printf("Model:        %s\n", r.Model)
+	}
+	if r.Backend != "" {
+		fmt.Printf("Backend:      %s\n", r.Backend)
+	}
+	if r.Effort != "" {
+		fmt.Printf("Effort:       %s\n", r.Effort)
+	}
+	if r.Prompt != "" {
+		fmt.Printf("Prompt:       %s\n", r.Prompt)
+	}
+	if r.PromptFile != "" {
+		fmt.Printf("Prompt file:  %s\n", r.PromptFile)
+	}
+	if r.Executor != "" {
+		fmt.Printf("Executor:     %s\n", r.Executor)
+	}
+	if r.PersonaSource != "" {
+		fmt.Printf("Persona source: %s\n", r.PersonaSource)
+	}
+	if len(r.Skills) > 0 {
+		fmt.Printf("Skills:       %s\n", strings.Join(r.Skills, ", "))
+	}
+	if r.MaxConcurrency != nil {
+		fmt.Printf("Max concurrency: %d\n", *r.MaxConcurrency)
+	}
+	if r.ReadOnly {
+		fmt.Printf("Read-only:    true\n")
+	}
+	// Printed only when set. A role with no policy denies every prompt,
+	// which is also what the whole rest of the fleet does, so a line on
+	// every role would be noise; the interesting state is a role that has
+	// opted something in.
+	if r.InputPolicy != nil {
+		fmt.Printf("Input policy: %s\n", formatInputPolicy(r.InputPolicy))
+	}
 }
 
 func runRoleRemove(_ *cobra.Command, args []string) error {
@@ -328,6 +346,11 @@ func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 			return store.RoleUpdate{}, fmt.Errorf("executor must be %q or %q (empty clears it)", "turn", "conversation")
 		}
 		patch.Executor = strPtr(value)
+	// Both spellings are accepted because the flag on `role add` is
+	// --persona-source and a key that only answered to the underscore would
+	// make the two commands disagree about the field's name.
+	case "persona_source", "persona-source":
+		return rolePersonaSourcePatch(value)
 	case "backend":
 		patch.Backend = strPtr(value)
 	case "effort":
@@ -438,6 +461,33 @@ func validateRoleKindValue(value string) error {
 	default:
 		return fmt.Errorf("kind must be interactive or worker")
 	}
+}
+
+func normalizeRolePersonaSourceValue(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+// rolePersonaSourcePatch validates and normalizes a persona_source value into
+// its own patch. It is a function rather than an inline case body so
+// buildRolePatch's branch count does not grow with every closed vocabulary the
+// role surface acquires.
+func rolePersonaSourcePatch(value string) (store.RoleUpdate, error) {
+	if err := validateRolePersonaSourceValue(value); err != nil {
+		return store.RoleUpdate{}, err
+	}
+	return store.RoleUpdate{PersonaSource: strPtr(normalizeRolePersonaSourceValue(value))}, nil
+}
+
+// validateRolePersonaSourceValue rejects anything outside the closed vocabulary
+// client-side, so a typo fails here naming both accepted values instead of
+// traveling to fleet-db and coming back as a 400. Empty is accepted: it is how
+// the field is cleared, and it means argv.
+func validateRolePersonaSourceValue(value string) error {
+	if domain.ValidateRolePersonaSource(normalizeRolePersonaSourceValue(value)) {
+		return nil
+	}
+	return fmt.Errorf("persona_source must be %q or %q (empty clears it, which means %q)",
+		domain.PersonaSourceArgv, domain.PersonaSourceProfile, domain.PersonaSourceArgv)
 }
 
 // sliceCSVPtr returns a non-nil *[]string for the patch. Empty input
