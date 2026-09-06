@@ -1,6 +1,9 @@
 package agentcontrol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"errors"
+)
 
 // AgentControlResult is the webui-local mirror of cli/daemon.DaemonControlResponse.
 // Same JSON wire format, different Go package — intentional duplication to maintain
@@ -62,6 +65,14 @@ type answerRequest struct {
 	Decline   bool   `json:"decline,omitempty"`
 }
 
+// ErrSupervisorUnavailable is returned by an AgentControlFn/ClaimHoldFn whose
+// control socket is simply not there — no daemon on this host, or a server
+// whose working directory is not the workspace. It is distinct from a socket
+// that exists and did not answer (timeout), because a *read* of the claim hold
+// can be answered truthfully without a daemon ("nothing holds claims") while a
+// write cannot.
+var ErrSupervisorUnavailable = errors.New("agent supervisor is not running")
+
 // ClaimHoldFn sends a claim-hold control command to the daemon.
 // op: "claims_hold_get" (args nil) or "claims_hold_set" (args carries the
 // held/actor/reason/ttl/force body). Same transport and failure contract as
@@ -95,6 +106,10 @@ type ClaimHoldStatusView struct {
 	Hold    *ClaimHoldView         `json:"hold"`
 	Running []ClaimHoldRunningView `json:"running"`
 	Gated   int                    `json:"gated"`
+	// SupervisorAvailable is set (to false) only on the no-supervisor GET
+	// answer. It is omitted — i.e. treated as true — on every daemon-sourced
+	// response, so the wire shape a client already parses never changes.
+	SupervisorAvailable *bool `json:"supervisor_available,omitempty"`
 }
 
 // claimHoldSetRequest is the POST body for taking a hold.
