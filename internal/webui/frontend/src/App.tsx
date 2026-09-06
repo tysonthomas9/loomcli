@@ -1527,6 +1527,7 @@ function App() {
           </div>
           <ToastContainer toasts={toasts} onDismiss={dismissToast} />
           <IssueDetailPanel
+            selectedIssueId={detailId}
             isOpen={isPanelOpen}
             issue={issueDetails}
             isLoading={isLoadingDetails}
