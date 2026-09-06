@@ -26,6 +26,11 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
+      - name: Install Go gate prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ripgrep
+
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
