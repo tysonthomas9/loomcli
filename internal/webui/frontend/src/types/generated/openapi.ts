@@ -2471,6 +2471,207 @@ export interface paths {
     patch: operations["patchLocalSettings"];
     trace?: never;
   };
+  "/api/workspaces/{ws}/skill-capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Report what the caller may edit in the skill catalog
+     * @description Answers the two questions the skill editor needs before it renders a
+     *     write affordance: whether this session may write role-scoped skills,
+     *     and what the workspace scope permits. `workspace_scope` is always
+     *     `read_only` — workspace skills are owned by the pack sync and are
+     *     editable only through `loom skill update`.
+     */
+    get: operations["getSkillCapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/skills": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List every skill in the workspace, grouped by scope and role
+     * @description Returns the whole catalog in one read: the workspace-scoped group first,
+     *     then one group per role in role-name order, each group's skills sorted
+     *     by name. Entries carry file metadata (path, revision, executable) but
+     *     not file contents — fetch a body with the skill detail or file route.
+     */
+    get: operations["listSkills"];
+    put?: never;
+    /**
+     * Refused — workspace-scoped skills are read-only here
+     * @description Registered so the workspace lane answers with an explicit refusal rather
+     *     than a generic 405. Nothing about the request is read: no body, path or
+     *     precondition is ever parsed. Create role-scoped skills with
+     *     `POST /api/workspaces/{ws}/roles/{role}/skills`, or edit a
+     *     workspace-scoped skill with `loom skill update`.
+     */
+    post: operations["createWorkspaceSkill"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/skills/{name}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Fetch one workspace-scoped skill with its SKILL.md body
+     * @description The response carries the rendered `content` alongside the catalog
+     *     metadata. `ETag` is set to the skill's `content_revision`; send it back
+     *     as `If-Match` on a role-scoped mutation.
+     */
+    get: operations["getWorkspaceSkill"];
+    put?: never;
+    post?: never;
+    /**
+     * Refused — workspace-scoped skills are read-only here
+     * @description See `createWorkspaceSkill`. The request is refused unread.
+     */
+    delete: operations["deleteWorkspaceSkill"];
+    options?: never;
+    head?: never;
+    /**
+     * Refused — workspace-scoped skills are read-only here
+     * @description See `createWorkspaceSkill`. The request is refused unread.
+     */
+    patch: operations["patchWorkspaceSkill"];
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/skills/{name}/files/{path}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read one file bundled with a workspace-scoped skill
+     * @description `path` is multi-segment: it is the file's path inside the skill bundle
+     *     and may contain `/`. The literal `SKILL.md` is accepted as the skill
+     *     body; every other path is validated as a bundled file path. `ETag`
+     *     carries the document revision.
+     */
+    get: operations["getWorkspaceSkillFile"];
+    /**
+     * Refused — workspace-scoped skills are read-only here
+     * @description See `createWorkspaceSkill`. The request is refused unread.
+     */
+    put: operations["putWorkspaceSkillFile"];
+    post?: never;
+    /**
+     * Refused — workspace-scoped skills are read-only here
+     * @description See `createWorkspaceSkill`. The request is refused unread.
+     */
+    delete: operations["deleteWorkspaceSkillFile"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/roles/{role}/skills": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create a role-scoped skill
+     * @description Creates `role:{role}:{name}`. The new skill records `source: "webui"`;
+     *     a later mutation from a different actor is refused with
+     *     `skill_provenance_conflict`. `content` is optional — omit it to create
+     *     the skill with an empty SKILL.md and fill it in through the file route.
+     */
+    post: operations["createRoleSkill"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/roles/{role}/skills/{name}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Fetch one role-scoped skill with its SKILL.md body */
+    get: operations["getRoleSkill"];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a role-scoped skill and every file bundled with it
+     * @description `If-Match` is mandatory. Send the skill's `content_revision`, or `*` to
+     *     delete whatever revision is current.
+     */
+    delete: operations["deleteRoleSkill"];
+    options?: never;
+    head?: never;
+    /**
+     * Update a role-scoped skill's description or provenance ref
+     * @description Only `description` and `source_ref` are patchable; the SKILL.md body is
+     *     written through the file route. `If-Match` is mandatory and is compared
+     *     against the skill's stored `content_revision` before the update is
+     *     attempted, so a stale editor is rejected rather than silently winning.
+     */
+    patch: operations["patchRoleSkill"];
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/roles/{role}/skills/{name}/files/{path}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read one file bundled with a role-scoped skill */
+    get: operations["getRoleSkillFile"];
+    /**
+     * Create or overwrite one file bundled with a role-scoped skill
+     * @description Send exactly one precondition: `If-Match` with the document's current
+     *     revision to overwrite it (answered `200`), or `If-None-Match: *` to
+     *     create a file that must not already exist (answered `201`). Sending
+     *     both, or an `If-None-Match` that is not exactly `*`, is a `400`.
+     *
+     *     Writing `SKILL.md` through this route always stores the document
+     *     non-executable; the `executable` field in the body is ignored for it.
+     */
+    put: operations["putRoleSkillFile"];
+    post?: never;
+    /**
+     * Delete one file bundled with a role-scoped skill
+     * @description `If-Match` is mandatory. `SKILL.md` cannot be deleted here — it is the
+     *     skill body, so the request is answered `422`; delete the whole skill
+     *     instead.
+     */
+    delete: operations["deleteRoleSkillFile"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4238,8 +4439,286 @@ export interface components {
       local_task_runner?: components["schemas"]["LocalSettingsTaskRunnerPatch"];
       runtime_credentials?: components["schemas"]["LocalSettingsCredentialsPatch"];
     };
+    /**
+     * @description Which lane owns the skill. `workspace` skills come from the pack sync
+     *     and are read-only over HTTP; `role` skills are editable.
+     * @enum {string}
+     */
+    SkillScope: "workspace" | "role";
+    /** @description One bundled document, without its content. */
+    SkillFileMeta: {
+      /** @description Path inside the skill bundle. */
+      path: string;
+      /** @description Opaque document revision, usable as an `If-Match` value. */
+      revision: string;
+      executable: boolean;
+    };
+    /** @description A catalog entry — everything but the SKILL.md body. */
+    SkillSummary: {
+      name: string;
+      scope: components["schemas"]["SkillScope"];
+      /** @description Owning role. Absent on workspace-scoped skills. */
+      role?: string;
+      description: string;
+      /** @description Revision of the SKILL.md body; the value served as `ETag`. */
+      content_revision: string;
+      /** @description Bundled documents, sorted by path. */
+      files: components["schemas"]["SkillFileMeta"][];
+      created_by?: string;
+      updated_by?: string;
+      /** @description Actor that last wrote the skill; `webui` for this API. */
+      source?: string;
+      /** @description Free-form provenance pointer set by the writing actor. */
+      source_ref?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    SkillDetail: components["schemas"]["SkillSummary"] & {
+      /** @description The SKILL.md body. */
+      content: string;
+    };
+    /**
+     * @description One scope/role bucket. The workspace group sorts first, then role
+     *     groups by role name.
+     */
+    SkillCatalogGroup: {
+      scope: components["schemas"]["SkillScope"];
+      /** @description Owning role. Absent on the workspace group. */
+      role?: string;
+      skills: components["schemas"]["SkillSummary"][];
+    };
+    SkillCatalogResponse: {
+      groups: components["schemas"]["SkillCatalogGroup"][];
+    };
+    /** @description One bundled document with its content. */
+    SkillFileDocument: {
+      path: string;
+      content: string;
+      executable: boolean;
+      revision: string;
+      /**
+       * @description The owning skill's canonical ref — `workspace:<name>` or
+       *     `role:<role>:<name>`.
+       */
+      skill_ref: string;
+    };
+    SkillFileWriteRequest: {
+      content: string;
+      /**
+       * @description Ignored when the target document is `SKILL.md`.
+       * @default false
+       */
+      executable: boolean;
+    };
+    SkillCreateRequest: {
+      /** @description Skill name, unique within the role. */
+      name: string;
+      description: string;
+      /** @description Initial SKILL.md body. Optional. */
+      content?: string;
+      /** @description Optional provenance pointer recorded with the skill. */
+      source_ref?: string;
+    };
+    /**
+     * @description A field left out is left alone. The SKILL.md body is not patchable
+     *     here — write it through the file route.
+     */
+    SkillPatchRequest: {
+      description?: string;
+      source_ref?: string;
+    };
+    SkillCapabilities: {
+      /** @description Whether this session may write role-scoped skills. */
+      can_edit_role_scope: boolean;
+      /**
+       * @description Always `read_only` in this build.
+       * @enum {string}
+       */
+      workspace_scope: "read_only";
+    };
+    /**
+     * @description The error wire the skills handlers write. `code` is the stable machine
+     *     signal; the other fields appear only on the failures that carry them.
+     *
+     *     `code` is absent when the file-browser access boundary refuses the
+     *     request before the handler runs — that middleware writes the bare
+     *     `{"error": ...}` wire.
+     */
+    SkillErrorResponse: {
+      /** @enum {string} */
+      code?:
+        | "skill_validation_failed"
+        | "skill_not_found"
+        | "skill_conflict"
+        | "skill_forbidden"
+        | "skill_provenance_conflict"
+        | "workspace_scope_readonly"
+        | "precondition_required"
+        | "precondition_failed"
+        | "invalid_precondition";
+      error: string;
+      /** @description Present on validation and forbidden failures. */
+      detail?: string;
+      /** @description Present on `precondition_failed` — the stored revision. */
+      revision?: string;
+      /** @description Present on `skill_provenance_conflict`. */
+      owner?: string;
+      /** @description Present on `skill_provenance_conflict`. */
+      source?: string;
+    };
   };
-  responses: never;
+  responses: {
+    /** @description The skill, with its SKILL.md body */
+    SkillDetailResponse: {
+      headers: {
+        /** @description The skill's content revision, quoted. */
+        ETag?: string;
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillDetail"];
+      };
+    };
+    /** @description One document from the skill bundle */
+    SkillFileResponse: {
+      headers: {
+        /** @description The document's revision, quoted. */
+        ETag?: string;
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillFileDocument"];
+      };
+    };
+    /**
+     * @description The skill name, role name or file path in the URL is not valid
+     *     (`code: skill_validation_failed`).
+     */
+    SkillBadRequestPath: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillErrorResponse"];
+      };
+    };
+    /**
+     * @description The precondition headers are unusable — both `If-Match` and
+     *     `If-None-Match` were sent, `If-None-Match` was not exactly `*`, or
+     *     `If-Match` carried an ETag list or an unparseable revision
+     *     (`code: invalid_precondition`). A bad path segment is also answered
+     *     here with `code: skill_validation_failed`.
+     */
+    SkillBadPrecondition: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillErrorResponse"];
+      };
+    };
+    /** @description Authentication required by the file-browser access boundary */
+    SkillAccessUnauthorized: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SimpleErrorResponse"];
+      };
+    };
+    /**
+     * @description The file-browser access boundary refused the session, or the backing
+     *     skill service refused the operation (`code: skill_forbidden`).
+     */
+    SkillAccessForbidden: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillErrorResponse"];
+      };
+    };
+    /**
+     * @description Workspace-scoped skills are read-only through this API
+     *     (`code: workspace_scope_readonly`). The access boundary may also refuse
+     *     the session first, with the bare `{"error": ...}` wire.
+     */
+    WorkspaceScopeReadonly: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillErrorResponse"];
+      };
+    };
+    /** @description No such skill or skill file (`code: skill_not_found`) */
+    SkillNotFound: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillErrorResponse"];
+      };
+    };
+    /**
+     * @description The skill already exists, the operation conflicted with current state
+     *     (`code: skill_conflict`), or the skill is owned by another actor
+     *     (`code: skill_provenance_conflict`, with `owner` and `source`).
+     */
+    SkillConflict: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillErrorResponse"];
+      };
+    };
+    /**
+     * @description The document changed since it was read (`code: precondition_failed`).
+     *     `revision` carries the stored revision to retry against.
+     */
+    SkillPreconditionFailed: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillErrorResponse"];
+      };
+    };
+    /** @description No usable precondition was sent (`code: precondition_required`). */
+    SkillPreconditionRequired: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillErrorResponse"];
+      };
+    };
+    /**
+     * @description The request body failed validation (`code: skill_validation_failed`);
+     *     `detail` names the offending field. A malformed or oversized JSON body
+     *     is reported here too.
+     */
+    SkillValidationFailed: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillErrorResponse"];
+      };
+    };
+    /** @description The skill store failed */
+    SkillInternalError: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SimpleErrorResponse"];
+      };
+    };
+  };
   parameters: {
     /** @description Workspace identifier */
     WorkspaceId: string;
@@ -4251,6 +4730,33 @@ export interface components {
     RunId: string;
     /** @description Workflow name */
     WorkflowName: string;
+    /** @description Role name that owns the skill */
+    RoleName: string;
+    /** @description Skill name, unique within its scope */
+    SkillName: string;
+    /**
+     * @description Path of the document inside the skill bundle. This is a multi-segment
+     *     wildcard on the server (`{path...}`), so it may contain `/` and must be
+     *     sent unescaped. The literal `SKILL.md` addresses the skill body.
+     * @example references/checklist.md
+     */
+    SkillFilePath: string;
+    /**
+     * @description The document revision this mutation was written against, or `*` to
+     *     accept whatever revision is current. A quoted ETag is accepted; a list
+     *     of ETags is not. Omitting the header is a `428`.
+     */
+    SkillIfMatch: string;
+    /**
+     * @description The overwrite lane. Mutually exclusive with `If-None-Match`; exactly one
+     *     of the two must be sent.
+     */
+    SkillIfMatchOptional: string;
+    /**
+     * @description The create lane. Must be exactly `*`. Mutually exclusive with
+     *     `If-Match`; exactly one of the two must be sent.
+     */
+    SkillIfNoneMatch: "*";
   };
   requestBodies: never;
   headers: never;
@@ -9438,6 +9944,498 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
+    };
+  };
+  getSkillCapabilities: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The caller's skill-editing capabilities */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillCapabilities"];
+        };
+      };
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+    };
+  };
+  listSkills: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The skill catalog */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillCatalogResponse"];
+        };
+      };
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      500: components["responses"]["SkillInternalError"];
+    };
+  };
+  createWorkspaceSkill: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["WorkspaceScopeReadonly"];
+    };
+  };
+  getWorkspaceSkill: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: components["responses"]["SkillDetailResponse"];
+      400: components["responses"]["SkillBadRequestPath"];
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      404: components["responses"]["SkillNotFound"];
+      500: components["responses"]["SkillInternalError"];
+    };
+  };
+  deleteWorkspaceSkill: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["WorkspaceScopeReadonly"];
+    };
+  };
+  patchWorkspaceSkill: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["WorkspaceScopeReadonly"];
+    };
+  };
+  getWorkspaceSkillFile: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+        /**
+         * @description Path of the document inside the skill bundle. This is a multi-segment
+         *     wildcard on the server (`{path...}`), so it may contain `/` and must be
+         *     sent unescaped. The literal `SKILL.md` addresses the skill body.
+         * @example references/checklist.md
+         */
+        path: components["parameters"]["SkillFilePath"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: components["responses"]["SkillFileResponse"];
+      400: components["responses"]["SkillBadRequestPath"];
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      404: components["responses"]["SkillNotFound"];
+      500: components["responses"]["SkillInternalError"];
+    };
+  };
+  putWorkspaceSkillFile: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+        /**
+         * @description Path of the document inside the skill bundle. This is a multi-segment
+         *     wildcard on the server (`{path...}`), so it may contain `/` and must be
+         *     sent unescaped. The literal `SKILL.md` addresses the skill body.
+         * @example references/checklist.md
+         */
+        path: components["parameters"]["SkillFilePath"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["WorkspaceScopeReadonly"];
+    };
+  };
+  deleteWorkspaceSkillFile: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+        /**
+         * @description Path of the document inside the skill bundle. This is a multi-segment
+         *     wildcard on the server (`{path...}`), so it may contain `/` and must be
+         *     sent unescaped. The literal `SKILL.md` addresses the skill body.
+         * @example references/checklist.md
+         */
+        path: components["parameters"]["SkillFilePath"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["WorkspaceScopeReadonly"];
+    };
+  };
+  createRoleSkill: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Role name that owns the skill */
+        role: components["parameters"]["RoleName"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description The created skill */
+      201: {
+        headers: {
+          /** @description The skill's content revision, quoted. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillDetail"];
+        };
+      };
+      400: components["responses"]["SkillBadRequestPath"];
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      409: components["responses"]["SkillConflict"];
+      422: components["responses"]["SkillValidationFailed"];
+      500: components["responses"]["SkillInternalError"];
+    };
+  };
+  getRoleSkill: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Role name that owns the skill */
+        role: components["parameters"]["RoleName"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: components["responses"]["SkillDetailResponse"];
+      400: components["responses"]["SkillBadRequestPath"];
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      404: components["responses"]["SkillNotFound"];
+      500: components["responses"]["SkillInternalError"];
+    };
+  };
+  deleteRoleSkill: {
+    parameters: {
+      query?: never;
+      header: {
+        /**
+         * @description The document revision this mutation was written against, or `*` to
+         *     accept whatever revision is current. A quoted ETag is accepted; a list
+         *     of ETags is not. Omitting the header is a `428`.
+         */
+        "If-Match": components["parameters"]["SkillIfMatch"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Role name that owns the skill */
+        role: components["parameters"]["RoleName"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted; no body */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["SkillBadPrecondition"];
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      404: components["responses"]["SkillNotFound"];
+      412: components["responses"]["SkillPreconditionFailed"];
+      428: components["responses"]["SkillPreconditionRequired"];
+      500: components["responses"]["SkillInternalError"];
+    };
+  };
+  patchRoleSkill: {
+    parameters: {
+      query?: never;
+      header: {
+        /**
+         * @description The document revision this mutation was written against, or `*` to
+         *     accept whatever revision is current. A quoted ETag is accepted; a list
+         *     of ETags is not. Omitting the header is a `428`.
+         */
+        "If-Match": components["parameters"]["SkillIfMatch"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Role name that owns the skill */
+        role: components["parameters"]["RoleName"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillPatchRequest"];
+      };
+    };
+    responses: {
+      200: components["responses"]["SkillDetailResponse"];
+      400: components["responses"]["SkillBadPrecondition"];
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      404: components["responses"]["SkillNotFound"];
+      409: components["responses"]["SkillConflict"];
+      412: components["responses"]["SkillPreconditionFailed"];
+      422: components["responses"]["SkillValidationFailed"];
+      428: components["responses"]["SkillPreconditionRequired"];
+      500: components["responses"]["SkillInternalError"];
+    };
+  };
+  getRoleSkillFile: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Role name that owns the skill */
+        role: components["parameters"]["RoleName"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+        /**
+         * @description Path of the document inside the skill bundle. This is a multi-segment
+         *     wildcard on the server (`{path...}`), so it may contain `/` and must be
+         *     sent unescaped. The literal `SKILL.md` addresses the skill body.
+         * @example references/checklist.md
+         */
+        path: components["parameters"]["SkillFilePath"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: components["responses"]["SkillFileResponse"];
+      400: components["responses"]["SkillBadRequestPath"];
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      404: components["responses"]["SkillNotFound"];
+      500: components["responses"]["SkillInternalError"];
+    };
+  };
+  putRoleSkillFile: {
+    parameters: {
+      query?: never;
+      header?: {
+        /**
+         * @description The overwrite lane. Mutually exclusive with `If-None-Match`; exactly one
+         *     of the two must be sent.
+         */
+        "If-Match"?: components["parameters"]["SkillIfMatchOptional"];
+        /**
+         * @description The create lane. Must be exactly `*`. Mutually exclusive with
+         *     `If-Match`; exactly one of the two must be sent.
+         */
+        "If-None-Match"?: components["parameters"]["SkillIfNoneMatch"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Role name that owns the skill */
+        role: components["parameters"]["RoleName"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+        /**
+         * @description Path of the document inside the skill bundle. This is a multi-segment
+         *     wildcard on the server (`{path...}`), so it may contain `/` and must be
+         *     sent unescaped. The literal `SKILL.md` addresses the skill body.
+         * @example references/checklist.md
+         */
+        path: components["parameters"]["SkillFilePath"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillFileWriteRequest"];
+      };
+    };
+    responses: {
+      /** @description Overwritten (the `If-Match` lane) */
+      200: {
+        headers: {
+          /** @description The document's new revision, quoted. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillFileDocument"];
+        };
+      };
+      /** @description Created (the `If-None-Match: *` lane) */
+      201: {
+        headers: {
+          /** @description The document's revision, quoted. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillFileDocument"];
+        };
+      };
+      400: components["responses"]["SkillBadPrecondition"];
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      404: components["responses"]["SkillNotFound"];
+      409: components["responses"]["SkillConflict"];
+      412: components["responses"]["SkillPreconditionFailed"];
+      422: components["responses"]["SkillValidationFailed"];
+      428: components["responses"]["SkillPreconditionRequired"];
+      500: components["responses"]["SkillInternalError"];
+    };
+  };
+  deleteRoleSkillFile: {
+    parameters: {
+      query?: never;
+      header: {
+        /**
+         * @description The document revision this mutation was written against, or `*` to
+         *     accept whatever revision is current. A quoted ETag is accepted; a list
+         *     of ETags is not. Omitting the header is a `428`.
+         */
+        "If-Match": components["parameters"]["SkillIfMatch"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Role name that owns the skill */
+        role: components["parameters"]["RoleName"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+        /**
+         * @description Path of the document inside the skill bundle. This is a multi-segment
+         *     wildcard on the server (`{path...}`), so it may contain `/` and must be
+         *     sent unescaped. The literal `SKILL.md` addresses the skill body.
+         * @example references/checklist.md
+         */
+        path: components["parameters"]["SkillFilePath"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted; no body */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["SkillBadPrecondition"];
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      404: components["responses"]["SkillNotFound"];
+      412: components["responses"]["SkillPreconditionFailed"];
+      422: components["responses"]["SkillValidationFailed"];
+      428: components["responses"]["SkillPreconditionRequired"];
+      500: components["responses"]["SkillInternalError"];
     };
   };
 }

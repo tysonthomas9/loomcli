@@ -80,6 +80,8 @@ tags:
     description: Daemon supervisor state and effective config
   - name: local-settings
     description: Desktop-local runtime settings
+  - name: skills
+    description: Workspace and role-scoped skill catalog, bodies and bundled files
   - name: runs
     description: Driver (workflow) run reads and event streaming
   - name: observability
@@ -4773,6 +4775,447 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  # ── Skills ──────────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/skill-capabilities:
+    get:
+      operationId: getSkillCapabilities
+      tags: [skills]
+      summary: Report what the caller may edit in the skill catalog
+      description: |
+        Answers the two questions the skill editor needs before it renders a
+        write affordance: whether this session may write role-scoped skills,
+        and what the workspace scope permits. `workspace_scope` is always
+        `read_only` — workspace skills are owned by the pack sync and are
+        editable only through `loom skill update`.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The caller's skill-editing capabilities
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillCapabilities"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+
+  /api/workspaces/{ws}/skills:
+    get:
+      operationId: listSkills
+      tags: [skills]
+      summary: List every skill in the workspace, grouped by scope and role
+      description: |
+        Returns the whole catalog in one read: the workspace-scoped group first,
+        then one group per role in role-name order, each group's skills sorted
+        by name. Entries carry file metadata (path, revision, executable) but
+        not file contents — fetch a body with the skill detail or file route.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The skill catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillCatalogResponse"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+    post:
+      operationId: createWorkspaceSkill
+      tags: [skills]
+      summary: Refused — workspace-scoped skills are read-only here
+      description: |
+        Registered so the workspace lane answers with an explicit refusal rather
+        than a generic 405. Nothing about the request is read: no body, path or
+        precondition is ever parsed. Create role-scoped skills with
+        `POST /api/workspaces/{ws}/roles/{role}/skills`, or edit a
+        workspace-scoped skill with `loom skill update`.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/WorkspaceScopeReadonly"
+
+  /api/workspaces/{ws}/skills/{name}:
+    get:
+      operationId: getWorkspaceSkill
+      tags: [skills]
+      summary: Fetch one workspace-scoped skill with its SKILL.md body
+      description: |
+        The response carries the rendered `content` alongside the catalog
+        metadata. `ETag` is set to the skill's `content_revision`; send it back
+        as `If-Match` on a role-scoped mutation.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SkillName"
+      responses:
+        "200":
+          $ref: "#/components/responses/SkillDetailResponse"
+        "400":
+          $ref: "#/components/responses/SkillBadRequestPath"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "404":
+          $ref: "#/components/responses/SkillNotFound"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+    patch:
+      operationId: patchWorkspaceSkill
+      tags: [skills]
+      summary: Refused — workspace-scoped skills are read-only here
+      description: |
+        See `createWorkspaceSkill`. The request is refused unread.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SkillName"
+      responses:
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/WorkspaceScopeReadonly"
+    delete:
+      operationId: deleteWorkspaceSkill
+      tags: [skills]
+      summary: Refused — workspace-scoped skills are read-only here
+      description: |
+        See `createWorkspaceSkill`. The request is refused unread.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SkillName"
+      responses:
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/WorkspaceScopeReadonly"
+
+  /api/workspaces/{ws}/skills/{name}/files/{path}:
+    get:
+      operationId: getWorkspaceSkillFile
+      tags: [skills]
+      summary: Read one file bundled with a workspace-scoped skill
+      description: |
+        `path` is multi-segment: it is the file's path inside the skill bundle
+        and may contain `/`. The literal `SKILL.md` is accepted as the skill
+        body; every other path is validated as a bundled file path. `ETag`
+        carries the document revision.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SkillName"
+        - $ref: "#/components/parameters/SkillFilePath"
+      responses:
+        "200":
+          $ref: "#/components/responses/SkillFileResponse"
+        "400":
+          $ref: "#/components/responses/SkillBadRequestPath"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "404":
+          $ref: "#/components/responses/SkillNotFound"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+    put:
+      operationId: putWorkspaceSkillFile
+      tags: [skills]
+      summary: Refused — workspace-scoped skills are read-only here
+      description: |
+        See `createWorkspaceSkill`. The request is refused unread.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SkillName"
+        - $ref: "#/components/parameters/SkillFilePath"
+      responses:
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/WorkspaceScopeReadonly"
+    delete:
+      operationId: deleteWorkspaceSkillFile
+      tags: [skills]
+      summary: Refused — workspace-scoped skills are read-only here
+      description: |
+        See `createWorkspaceSkill`. The request is refused unread.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SkillName"
+        - $ref: "#/components/parameters/SkillFilePath"
+      responses:
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/WorkspaceScopeReadonly"
+
+  /api/workspaces/{ws}/roles/{role}/skills:
+    post:
+      operationId: createRoleSkill
+      tags: [skills]
+      summary: Create a role-scoped skill
+      description: |
+        Creates `role:{role}:{name}`. The new skill records `source: "webui"`;
+        a later mutation from a different actor is refused with
+        `skill_provenance_conflict`. `content` is optional — omit it to create
+        the skill with an empty SKILL.md and fill it in through the file route.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RoleName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkillCreateRequest"
+      responses:
+        "201":
+          description: The created skill
+          headers:
+            ETag:
+              description: The skill's content revision, quoted.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillDetail"
+        "400":
+          $ref: "#/components/responses/SkillBadRequestPath"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "409":
+          $ref: "#/components/responses/SkillConflict"
+        "422":
+          $ref: "#/components/responses/SkillValidationFailed"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+
+  /api/workspaces/{ws}/roles/{role}/skills/{name}:
+    get:
+      operationId: getRoleSkill
+      tags: [skills]
+      summary: Fetch one role-scoped skill with its SKILL.md body
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RoleName"
+        - $ref: "#/components/parameters/SkillName"
+      responses:
+        "200":
+          $ref: "#/components/responses/SkillDetailResponse"
+        "400":
+          $ref: "#/components/responses/SkillBadRequestPath"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "404":
+          $ref: "#/components/responses/SkillNotFound"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+    patch:
+      operationId: patchRoleSkill
+      tags: [skills]
+      summary: Update a role-scoped skill's description or provenance ref
+      description: |
+        Only `description` and `source_ref` are patchable; the SKILL.md body is
+        written through the file route. `If-Match` is mandatory and is compared
+        against the skill's stored `content_revision` before the update is
+        attempted, so a stale editor is rejected rather than silently winning.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RoleName"
+        - $ref: "#/components/parameters/SkillName"
+        - $ref: "#/components/parameters/SkillIfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkillPatchRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/SkillDetailResponse"
+        "400":
+          $ref: "#/components/responses/SkillBadPrecondition"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "404":
+          $ref: "#/components/responses/SkillNotFound"
+        "409":
+          $ref: "#/components/responses/SkillConflict"
+        "412":
+          $ref: "#/components/responses/SkillPreconditionFailed"
+        "422":
+          $ref: "#/components/responses/SkillValidationFailed"
+        "428":
+          $ref: "#/components/responses/SkillPreconditionRequired"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+    delete:
+      operationId: deleteRoleSkill
+      tags: [skills]
+      summary: Delete a role-scoped skill and every file bundled with it
+      description: |
+        `If-Match` is mandatory. Send the skill's `content_revision`, or `*` to
+        delete whatever revision is current.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RoleName"
+        - $ref: "#/components/parameters/SkillName"
+        - $ref: "#/components/parameters/SkillIfMatch"
+      responses:
+        "204":
+          description: Deleted; no body
+        "400":
+          $ref: "#/components/responses/SkillBadPrecondition"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "404":
+          $ref: "#/components/responses/SkillNotFound"
+        "412":
+          $ref: "#/components/responses/SkillPreconditionFailed"
+        "428":
+          $ref: "#/components/responses/SkillPreconditionRequired"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+
+  /api/workspaces/{ws}/roles/{role}/skills/{name}/files/{path}:
+    get:
+      operationId: getRoleSkillFile
+      tags: [skills]
+      summary: Read one file bundled with a role-scoped skill
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RoleName"
+        - $ref: "#/components/parameters/SkillName"
+        - $ref: "#/components/parameters/SkillFilePath"
+      responses:
+        "200":
+          $ref: "#/components/responses/SkillFileResponse"
+        "400":
+          $ref: "#/components/responses/SkillBadRequestPath"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "404":
+          $ref: "#/components/responses/SkillNotFound"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+    put:
+      operationId: putRoleSkillFile
+      tags: [skills]
+      summary: Create or overwrite one file bundled with a role-scoped skill
+      description: |
+        Send exactly one precondition: `If-Match` with the document's current
+        revision to overwrite it (answered `200`), or `If-None-Match: *` to
+        create a file that must not already exist (answered `201`). Sending
+        both, or an `If-None-Match` that is not exactly `*`, is a `400`.
+
+        Writing `SKILL.md` through this route always stores the document
+        non-executable; the `executable` field in the body is ignored for it.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RoleName"
+        - $ref: "#/components/parameters/SkillName"
+        - $ref: "#/components/parameters/SkillFilePath"
+        - $ref: "#/components/parameters/SkillIfMatchOptional"
+        - $ref: "#/components/parameters/SkillIfNoneMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkillFileWriteRequest"
+      responses:
+        "200":
+          description: Overwritten (the `If-Match` lane)
+          headers:
+            ETag:
+              description: The document's new revision, quoted.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillFileDocument"
+        "201":
+          description: "Created (the `If-None-Match: *` lane)"
+          headers:
+            ETag:
+              description: The document's revision, quoted.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillFileDocument"
+        "400":
+          $ref: "#/components/responses/SkillBadPrecondition"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "404":
+          $ref: "#/components/responses/SkillNotFound"
+        "409":
+          $ref: "#/components/responses/SkillConflict"
+        "412":
+          $ref: "#/components/responses/SkillPreconditionFailed"
+        "422":
+          $ref: "#/components/responses/SkillValidationFailed"
+        "428":
+          $ref: "#/components/responses/SkillPreconditionRequired"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+    delete:
+      operationId: deleteRoleSkillFile
+      tags: [skills]
+      summary: Delete one file bundled with a role-scoped skill
+      description: |
+        `If-Match` is mandatory. `SKILL.md` cannot be deleted here — it is the
+        skill body, so the request is answered `422`; delete the whole skill
+        instead.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RoleName"
+        - $ref: "#/components/parameters/SkillName"
+        - $ref: "#/components/parameters/SkillFilePath"
+        - $ref: "#/components/parameters/SkillIfMatch"
+      responses:
+        "204":
+          description: Deleted; no body
+        "400":
+          $ref: "#/components/responses/SkillBadPrecondition"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "404":
+          $ref: "#/components/responses/SkillNotFound"
+        "412":
+          $ref: "#/components/responses/SkillPreconditionFailed"
+        "422":
+          $ref: "#/components/responses/SkillValidationFailed"
+        "428":
+          $ref: "#/components/responses/SkillPreconditionRequired"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+
 components:
   securitySchemes:
     BearerAuth:
@@ -4847,6 +5290,190 @@ components:
       description: Workflow name
       schema:
         type: string
+
+    RoleName:
+      name: role
+      in: path
+      required: true
+      description: Role name that owns the skill
+      schema:
+        type: string
+
+    SkillName:
+      name: name
+      in: path
+      required: true
+      description: Skill name, unique within its scope
+      schema:
+        type: string
+
+    SkillFilePath:
+      name: path
+      in: path
+      required: true
+      description: |
+        Path of the document inside the skill bundle. This is a multi-segment
+        wildcard on the server (`{path...}`), so it may contain `/` and must be
+        sent unescaped. The literal `SKILL.md` addresses the skill body.
+      schema:
+        type: string
+      example: references/checklist.md
+
+    SkillIfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: |
+        The document revision this mutation was written against, or `*` to
+        accept whatever revision is current. A quoted ETag is accepted; a list
+        of ETags is not. Omitting the header is a `428`.
+      schema:
+        type: string
+
+    SkillIfMatchOptional:
+      name: If-Match
+      in: header
+      required: false
+      description: |
+        The overwrite lane. Mutually exclusive with `If-None-Match`; exactly one
+        of the two must be sent.
+      schema:
+        type: string
+
+    SkillIfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      description: |
+        The create lane. Must be exactly `*`. Mutually exclusive with
+        `If-Match`; exactly one of the two must be sent.
+      schema:
+        type: string
+        const: "*"
+
+  responses:
+    # ── Skills ────────────────────────────────────────────────────────────
+    SkillDetailResponse:
+      description: The skill, with its SKILL.md body
+      headers:
+        ETag:
+          description: The skill's content revision, quoted.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillDetail"
+
+    SkillFileResponse:
+      description: One document from the skill bundle
+      headers:
+        ETag:
+          description: The document's revision, quoted.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillFileDocument"
+
+    SkillBadRequestPath:
+      description: |
+        The skill name, role name or file path in the URL is not valid
+        (`code: skill_validation_failed`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillErrorResponse"
+
+    SkillBadPrecondition:
+      description: |
+        The precondition headers are unusable — both `If-Match` and
+        `If-None-Match` were sent, `If-None-Match` was not exactly `*`, or
+        `If-Match` carried an ETag list or an unparseable revision
+        (`code: invalid_precondition`). A bad path segment is also answered
+        here with `code: skill_validation_failed`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillErrorResponse"
+
+    SkillAccessUnauthorized:
+      description: Authentication required by the file-browser access boundary
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SimpleErrorResponse"
+
+    SkillAccessForbidden:
+      description: |
+        The file-browser access boundary refused the session, or the backing
+        skill service refused the operation (`code: skill_forbidden`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillErrorResponse"
+
+    WorkspaceScopeReadonly:
+      description: |
+        Workspace-scoped skills are read-only through this API
+        (`code: workspace_scope_readonly`). The access boundary may also refuse
+        the session first, with the bare `{"error": ...}` wire.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillErrorResponse"
+
+    SkillNotFound:
+      description: "No such skill or skill file (`code: skill_not_found`)"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillErrorResponse"
+
+    SkillConflict:
+      description: |
+        The skill already exists, the operation conflicted with current state
+        (`code: skill_conflict`), or the skill is owned by another actor
+        (`code: skill_provenance_conflict`, with `owner` and `source`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillErrorResponse"
+
+    SkillPreconditionFailed:
+      description: |
+        The document changed since it was read (`code: precondition_failed`).
+        `revision` carries the stored revision to retry against.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillErrorResponse"
+
+    SkillPreconditionRequired:
+      description: |
+        No usable precondition was sent (`code: precondition_required`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillErrorResponse"
+
+    SkillValidationFailed:
+      description: |
+        The request body failed validation (`code: skill_validation_failed`);
+        `detail` names the offending field. A malformed or oversized JSON body
+        is reported here too.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillErrorResponse"
+
+    SkillInternalError:
+      description: The skill store failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SimpleErrorResponse"
 
   schemas:
     # ── Response Envelopes ──────────────────────────────────────────────
@@ -8174,3 +8801,207 @@ components:
           $ref: "#/components/schemas/LocalSettingsTaskRunnerPatch"
         runtime_credentials:
           $ref: "#/components/schemas/LocalSettingsCredentialsPatch"
+
+    # ── Skills ────────────────────────────────────────────────────────────
+    SkillScope:
+      type: string
+      description: |
+        Which lane owns the skill. `workspace` skills come from the pack sync
+        and are read-only over HTTP; `role` skills are editable.
+      enum: [workspace, role]
+
+    SkillFileMeta:
+      type: object
+      description: One bundled document, without its content.
+      required: [path, revision, executable]
+      properties:
+        path:
+          type: string
+          description: Path inside the skill bundle.
+        revision:
+          type: string
+          description: Opaque document revision, usable as an `If-Match` value.
+        executable:
+          type: boolean
+
+    SkillSummary:
+      type: object
+      description: A catalog entry — everything but the SKILL.md body.
+      required: [name, scope, description, content_revision, files, created_at, updated_at]
+      properties:
+        name:
+          type: string
+        scope:
+          $ref: "#/components/schemas/SkillScope"
+        role:
+          type: string
+          description: Owning role. Absent on workspace-scoped skills.
+        description:
+          type: string
+        content_revision:
+          type: string
+          description: Revision of the SKILL.md body; the value served as `ETag`.
+        files:
+          type: array
+          description: Bundled documents, sorted by path.
+          items:
+            $ref: "#/components/schemas/SkillFileMeta"
+        created_by:
+          type: string
+        updated_by:
+          type: string
+        source:
+          type: string
+          description: Actor that last wrote the skill; `webui` for this API.
+        source_ref:
+          type: string
+          description: Free-form provenance pointer set by the writing actor.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SkillDetail:
+      allOf:
+        - $ref: "#/components/schemas/SkillSummary"
+        - type: object
+          required: [content]
+          properties:
+            content:
+              type: string
+              description: The SKILL.md body.
+
+    SkillCatalogGroup:
+      type: object
+      description: |
+        One scope/role bucket. The workspace group sorts first, then role
+        groups by role name.
+      required: [scope, skills]
+      properties:
+        scope:
+          $ref: "#/components/schemas/SkillScope"
+        role:
+          type: string
+          description: Owning role. Absent on the workspace group.
+        skills:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkillSummary"
+
+    SkillCatalogResponse:
+      type: object
+      required: [groups]
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkillCatalogGroup"
+
+    SkillFileDocument:
+      type: object
+      description: One bundled document with its content.
+      required: [path, content, executable, revision, skill_ref]
+      properties:
+        path:
+          type: string
+        content:
+          type: string
+        executable:
+          type: boolean
+        revision:
+          type: string
+        skill_ref:
+          type: string
+          description: |
+            The owning skill's canonical ref — `workspace:<name>` or
+            `role:<role>:<name>`.
+
+    SkillFileWriteRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+        executable:
+          type: boolean
+          default: false
+          description: Ignored when the target document is `SKILL.md`.
+
+    SkillCreateRequest:
+      type: object
+      required: [name, description]
+      properties:
+        name:
+          type: string
+          description: Skill name, unique within the role.
+        description:
+          type: string
+        content:
+          type: string
+          description: Initial SKILL.md body. Optional.
+        source_ref:
+          type: string
+          description: Optional provenance pointer recorded with the skill.
+
+    SkillPatchRequest:
+      type: object
+      description: |
+        A field left out is left alone. The SKILL.md body is not patchable
+        here — write it through the file route.
+      properties:
+        description:
+          type: string
+        source_ref:
+          type: string
+
+    SkillCapabilities:
+      type: object
+      required: [can_edit_role_scope, workspace_scope]
+      properties:
+        can_edit_role_scope:
+          type: boolean
+          description: Whether this session may write role-scoped skills.
+        workspace_scope:
+          type: string
+          description: Always `read_only` in this build.
+          enum: [read_only]
+
+    SkillErrorResponse:
+      type: object
+      description: |
+        The error wire the skills handlers write. `code` is the stable machine
+        signal; the other fields appear only on the failures that carry them.
+
+        `code` is absent when the file-browser access boundary refuses the
+        request before the handler runs — that middleware writes the bare
+        `{"error": ...}` wire.
+      required: [error]
+      properties:
+        code:
+          type: string
+          enum:
+            - skill_validation_failed
+            - skill_not_found
+            - skill_conflict
+            - skill_forbidden
+            - skill_provenance_conflict
+            - workspace_scope_readonly
+            - precondition_required
+            - precondition_failed
+            - invalid_precondition
+        error:
+          type: string
+        detail:
+          type: string
+          description: Present on validation and forbidden failures.
+        revision:
+          type: string
+          description: Present on `precondition_failed` — the stored revision.
+        owner:
+          type: string
+          description: Present on `skill_provenance_conflict`.
+        source:
+          type: string
+          description: Present on `skill_provenance_conflict`.

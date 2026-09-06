@@ -1022,6 +1022,78 @@ func (e SessionHistoryRecordStatus) Valid() bool {
 	}
 }
 
+// Defines values for SkillCapabilitiesWorkspaceScope.
+const (
+	ReadOnly SkillCapabilitiesWorkspaceScope = "read_only"
+)
+
+// Valid indicates whether the value is a known member of the SkillCapabilitiesWorkspaceScope enum.
+func (e SkillCapabilitiesWorkspaceScope) Valid() bool {
+	switch e {
+	case ReadOnly:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SkillErrorResponseCode.
+const (
+	SkillErrorResponseCodeInvalidPrecondition     SkillErrorResponseCode = "invalid_precondition"
+	SkillErrorResponseCodePreconditionFailed      SkillErrorResponseCode = "precondition_failed"
+	SkillErrorResponseCodePreconditionRequired    SkillErrorResponseCode = "precondition_required"
+	SkillErrorResponseCodeSkillConflict           SkillErrorResponseCode = "skill_conflict"
+	SkillErrorResponseCodeSkillForbidden          SkillErrorResponseCode = "skill_forbidden"
+	SkillErrorResponseCodeSkillNotFound           SkillErrorResponseCode = "skill_not_found"
+	SkillErrorResponseCodeSkillProvenanceConflict SkillErrorResponseCode = "skill_provenance_conflict"
+	SkillErrorResponseCodeSkillValidationFailed   SkillErrorResponseCode = "skill_validation_failed"
+	SkillErrorResponseCodeWorkspaceScopeReadonly  SkillErrorResponseCode = "workspace_scope_readonly"
+)
+
+// Valid indicates whether the value is a known member of the SkillErrorResponseCode enum.
+func (e SkillErrorResponseCode) Valid() bool {
+	switch e {
+	case SkillErrorResponseCodeInvalidPrecondition:
+		return true
+	case SkillErrorResponseCodePreconditionFailed:
+		return true
+	case SkillErrorResponseCodePreconditionRequired:
+		return true
+	case SkillErrorResponseCodeSkillConflict:
+		return true
+	case SkillErrorResponseCodeSkillForbidden:
+		return true
+	case SkillErrorResponseCodeSkillNotFound:
+		return true
+	case SkillErrorResponseCodeSkillProvenanceConflict:
+		return true
+	case SkillErrorResponseCodeSkillValidationFailed:
+		return true
+	case SkillErrorResponseCodeWorkspaceScopeReadonly:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SkillScope.
+const (
+	SkillScopeRole      SkillScope = "role"
+	SkillScopeWorkspace SkillScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the SkillScope enum.
+func (e SkillScope) Valid() bool {
+	switch e {
+	case SkillScopeRole:
+		return true
+	case SkillScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TabMetadataReplacedReason.
 const (
 	ServerRestart TabMetadataReplacedReason = "server_restart"
@@ -1319,6 +1391,21 @@ func (e WorkspaceResponseDesignFormat) Valid() bool {
 	}
 }
 
+// Defines values for SkillIfNoneMatch.
+const (
+	SkillIfNoneMatchAsterisk SkillIfNoneMatch = "*"
+)
+
+// Valid indicates whether the value is a known member of the SkillIfNoneMatch enum.
+func (e SkillIfNoneMatch) Valid() bool {
+	switch e {
+	case SkillIfNoneMatchAsterisk:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListBlockedParamsType.
 const (
 	ListBlockedParamsTypeBug     ListBlockedParamsType = "bug"
@@ -1600,19 +1687,19 @@ func (e StatScopedFileParamsScope) Valid() bool {
 
 // Defines values for GetScopedFileTreeParamsScope.
 const (
-	GetScopedFileTreeParamsScopeAgent     GetScopedFileTreeParamsScope = "agent"
-	GetScopedFileTreeParamsScopeRepo      GetScopedFileTreeParamsScope = "repo"
-	GetScopedFileTreeParamsScopeWorkspace GetScopedFileTreeParamsScope = "workspace"
+	Agent     GetScopedFileTreeParamsScope = "agent"
+	Repo      GetScopedFileTreeParamsScope = "repo"
+	Workspace GetScopedFileTreeParamsScope = "workspace"
 )
 
 // Valid indicates whether the value is a known member of the GetScopedFileTreeParamsScope enum.
 func (e GetScopedFileTreeParamsScope) Valid() bool {
 	switch e {
-	case GetScopedFileTreeParamsScopeAgent:
+	case Agent:
 		return true
-	case GetScopedFileTreeParamsScopeRepo:
+	case Repo:
 		return true
-	case GetScopedFileTreeParamsScopeWorkspace:
+	case Workspace:
 		return true
 	default:
 		return false
@@ -1760,6 +1847,21 @@ func (e ListReadyParamsSort) Valid() bool {
 	case Oldest:
 		return true
 	case Priority:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PutRoleSkillFileParamsIfNoneMatch.
+const (
+	PutRoleSkillFileParamsIfNoneMatchAsterisk PutRoleSkillFileParamsIfNoneMatch = "*"
+)
+
+// Valid indicates whether the value is a known member of the PutRoleSkillFileParamsIfNoneMatch enum.
+func (e PutRoleSkillFileParamsIfNoneMatch) Valid() bool {
+	switch e {
+	case PutRoleSkillFileParamsIfNoneMatchAsterisk:
 		return true
 	default:
 		return false
@@ -3358,6 +3460,175 @@ type SimpleErrorResponse struct {
 	Error string `json:"error"`
 }
 
+// SkillCapabilities defines model for SkillCapabilities.
+type SkillCapabilities struct {
+	// CanEditRoleScope Whether this session may write role-scoped skills.
+	CanEditRoleScope bool `json:"can_edit_role_scope"`
+
+	// WorkspaceScope Always `read_only` in this build.
+	WorkspaceScope SkillCapabilitiesWorkspaceScope `json:"workspace_scope"`
+}
+
+// SkillCapabilitiesWorkspaceScope Always `read_only` in this build.
+type SkillCapabilitiesWorkspaceScope string
+
+// SkillCatalogGroup One scope/role bucket. The workspace group sorts first, then role
+// groups by role name.
+type SkillCatalogGroup struct {
+	// Role Owning role. Absent on the workspace group.
+	Role *string `json:"role,omitempty"`
+
+	// Scope Which lane owns the skill. `workspace` skills come from the pack sync
+	// and are read-only over HTTP; `role` skills are editable.
+	Scope  SkillScope     `json:"scope"`
+	Skills []SkillSummary `json:"skills"`
+}
+
+// SkillCatalogResponse defines model for SkillCatalogResponse.
+type SkillCatalogResponse struct {
+	Groups []SkillCatalogGroup `json:"groups"`
+}
+
+// SkillCreateRequest defines model for SkillCreateRequest.
+type SkillCreateRequest struct {
+	// Content Initial SKILL.md body. Optional.
+	Content     *string `json:"content,omitempty"`
+	Description string  `json:"description"`
+
+	// Name Skill name, unique within the role.
+	Name string `json:"name"`
+
+	// SourceRef Optional provenance pointer recorded with the skill.
+	SourceRef *string `json:"source_ref,omitempty"`
+}
+
+// SkillDetail defines model for SkillDetail.
+type SkillDetail struct {
+	// Content The SKILL.md body.
+	Content string `json:"content"`
+
+	// ContentRevision Revision of the SKILL.md body; the value served as `ETag`.
+	ContentRevision string    `json:"content_revision"`
+	CreatedAt       time.Time `json:"created_at"`
+	CreatedBy       *string   `json:"created_by,omitempty"`
+	Description     string    `json:"description"`
+
+	// Files Bundled documents, sorted by path.
+	Files []SkillFileMeta `json:"files"`
+	Name  string          `json:"name"`
+
+	// Role Owning role. Absent on workspace-scoped skills.
+	Role *string `json:"role,omitempty"`
+
+	// Scope Which lane owns the skill. `workspace` skills come from the pack sync
+	// and are read-only over HTTP; `role` skills are editable.
+	Scope SkillScope `json:"scope"`
+
+	// Source Actor that last wrote the skill; `webui` for this API.
+	Source *string `json:"source,omitempty"`
+
+	// SourceRef Free-form provenance pointer set by the writing actor.
+	SourceRef *string   `json:"source_ref,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+	UpdatedBy *string   `json:"updated_by,omitempty"`
+}
+
+// SkillErrorResponse The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type SkillErrorResponse struct {
+	Code *SkillErrorResponseCode `json:"code,omitempty"`
+
+	// Detail Present on validation and forbidden failures.
+	Detail *string `json:"detail,omitempty"`
+	Error  string  `json:"error"`
+
+	// Owner Present on `skill_provenance_conflict`.
+	Owner *string `json:"owner,omitempty"`
+
+	// Revision Present on `precondition_failed` — the stored revision.
+	Revision *string `json:"revision,omitempty"`
+
+	// Source Present on `skill_provenance_conflict`.
+	Source *string `json:"source,omitempty"`
+}
+
+// SkillErrorResponseCode defines model for SkillErrorResponse.Code.
+type SkillErrorResponseCode string
+
+// SkillFileDocument One bundled document with its content.
+type SkillFileDocument struct {
+	Content    string `json:"content"`
+	Executable bool   `json:"executable"`
+	Path       string `json:"path"`
+	Revision   string `json:"revision"`
+
+	// SkillRef The owning skill's canonical ref — `workspace:<name>` or
+	// `role:<role>:<name>`.
+	SkillRef string `json:"skill_ref"`
+}
+
+// SkillFileMeta One bundled document, without its content.
+type SkillFileMeta struct {
+	Executable bool `json:"executable"`
+
+	// Path Path inside the skill bundle.
+	Path string `json:"path"`
+
+	// Revision Opaque document revision, usable as an `If-Match` value.
+	Revision string `json:"revision"`
+}
+
+// SkillFileWriteRequest defines model for SkillFileWriteRequest.
+type SkillFileWriteRequest struct {
+	Content string `json:"content"`
+
+	// Executable Ignored when the target document is `SKILL.md`.
+	Executable *bool `json:"executable,omitempty"`
+}
+
+// SkillPatchRequest A field left out is left alone. The SKILL.md body is not patchable
+// here — write it through the file route.
+type SkillPatchRequest struct {
+	Description *string `json:"description,omitempty"`
+	SourceRef   *string `json:"source_ref,omitempty"`
+}
+
+// SkillScope Which lane owns the skill. `workspace` skills come from the pack sync
+// and are read-only over HTTP; `role` skills are editable.
+type SkillScope string
+
+// SkillSummary A catalog entry — everything but the SKILL.md body.
+type SkillSummary struct {
+	// ContentRevision Revision of the SKILL.md body; the value served as `ETag`.
+	ContentRevision string    `json:"content_revision"`
+	CreatedAt       time.Time `json:"created_at"`
+	CreatedBy       *string   `json:"created_by,omitempty"`
+	Description     string    `json:"description"`
+
+	// Files Bundled documents, sorted by path.
+	Files []SkillFileMeta `json:"files"`
+	Name  string          `json:"name"`
+
+	// Role Owning role. Absent on workspace-scoped skills.
+	Role *string `json:"role,omitempty"`
+
+	// Scope Which lane owns the skill. `workspace` skills come from the pack sync
+	// and are read-only over HTTP; `role` skills are editable.
+	Scope SkillScope `json:"scope"`
+
+	// Source Actor that last wrote the skill; `webui` for this API.
+	Source *string `json:"source,omitempty"`
+
+	// SourceRef Free-form provenance pointer set by the writing actor.
+	SourceRef *string   `json:"source_ref,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+	UpdatedBy *string   `json:"updated_by,omitempty"`
+}
+
 // StaleDetectorStatus defines model for StaleDetectorStatus.
 type StaleDetectorStatus struct {
 	Enabled           bool       `json:"enabled"`
@@ -3834,14 +4105,116 @@ type AgentName = string
 // IssueId defines model for IssueId.
 type IssueId = string
 
+// RoleName defines model for RoleName.
+type RoleName = string
+
 // RunId defines model for RunId.
 type RunId = string
+
+// SkillFilePath defines model for SkillFilePath.
+type SkillFilePath = string
+
+// SkillIfMatch defines model for SkillIfMatch.
+type SkillIfMatch = string
+
+// SkillIfMatchOptional defines model for SkillIfMatchOptional.
+type SkillIfMatchOptional = string
+
+// SkillIfNoneMatch defines model for SkillIfNoneMatch.
+type SkillIfNoneMatch string
+
+// SkillName defines model for SkillName.
+type SkillName = string
 
 // WorkflowName defines model for WorkflowName.
 type WorkflowName = string
 
 // WorkspaceId defines model for WorkspaceId.
 type WorkspaceId = string
+
+// SkillAccessForbidden The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type SkillAccessForbidden = SkillErrorResponse
+
+// SkillAccessUnauthorized The bare error wire written by handler.RespondError.
+type SkillAccessUnauthorized = SimpleErrorResponse
+
+// SkillBadPrecondition The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type SkillBadPrecondition = SkillErrorResponse
+
+// SkillBadRequestPath The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type SkillBadRequestPath = SkillErrorResponse
+
+// SkillConflict The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type SkillConflict = SkillErrorResponse
+
+// SkillDetailResponse defines model for SkillDetailResponse.
+type SkillDetailResponse = SkillDetail
+
+// SkillFileResponse One bundled document with its content.
+type SkillFileResponse = SkillFileDocument
+
+// SkillInternalError The bare error wire written by handler.RespondError.
+type SkillInternalError = SimpleErrorResponse
+
+// SkillNotFound The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type SkillNotFound = SkillErrorResponse
+
+// SkillPreconditionFailed The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type SkillPreconditionFailed = SkillErrorResponse
+
+// SkillPreconditionRequired The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type SkillPreconditionRequired = SkillErrorResponse
+
+// SkillValidationFailed The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type SkillValidationFailed = SkillErrorResponse
+
+// WorkspaceScopeReadonly The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type WorkspaceScopeReadonly = SkillErrorResponse
 
 // ReportClientErrorJSONBody defines parameters for ReportClientError.
 type ReportClientErrorJSONBody = map[string]interface{}
@@ -4275,6 +4648,44 @@ type ListReadyParamsMolType string
 // ListReadyParamsSort defines parameters for ListReady.
 type ListReadyParamsSort string
 
+// DeleteRoleSkillParams defines parameters for DeleteRoleSkill.
+type DeleteRoleSkillParams struct {
+	// IfMatch The document revision this mutation was written against, or `*` to
+	// accept whatever revision is current. A quoted ETag is accepted; a list
+	// of ETags is not. Omitting the header is a `428`.
+	IfMatch SkillIfMatch `json:"If-Match"`
+}
+
+// PatchRoleSkillParams defines parameters for PatchRoleSkill.
+type PatchRoleSkillParams struct {
+	// IfMatch The document revision this mutation was written against, or `*` to
+	// accept whatever revision is current. A quoted ETag is accepted; a list
+	// of ETags is not. Omitting the header is a `428`.
+	IfMatch SkillIfMatch `json:"If-Match"`
+}
+
+// DeleteRoleSkillFileParams defines parameters for DeleteRoleSkillFile.
+type DeleteRoleSkillFileParams struct {
+	// IfMatch The document revision this mutation was written against, or `*` to
+	// accept whatever revision is current. A quoted ETag is accepted; a list
+	// of ETags is not. Omitting the header is a `428`.
+	IfMatch SkillIfMatch `json:"If-Match"`
+}
+
+// PutRoleSkillFileParams defines parameters for PutRoleSkillFile.
+type PutRoleSkillFileParams struct {
+	// IfMatch The overwrite lane. Mutually exclusive with `If-None-Match`; exactly one
+	// of the two must be sent.
+	IfMatch *SkillIfMatchOptional `json:"If-Match,omitempty"`
+
+	// IfNoneMatch The create lane. Must be exactly `*`. Mutually exclusive with
+	// `If-Match`; exactly one of the two must be sent.
+	IfNoneMatch *PutRoleSkillFileParamsIfNoneMatch `json:"If-None-Match,omitempty"`
+}
+
+// PutRoleSkillFileParamsIfNoneMatch defines parameters for PutRoleSkillFile.
+type PutRoleSkillFileParamsIfNoneMatch string
+
 // GetDriverRunEventsParams defines parameters for GetDriverRunEvents.
 type GetDriverRunEventsParams struct {
 	// After Opaque cursor from a previous page. Omit to start at the beginning.
@@ -4491,6 +4902,15 @@ type PostPullRequestReviewerMessageJSONRequestBody = ReviewerMessageRequest
 
 // PostPullRequestReviewJSONRequestBody defines body for PostPullRequestReview for application/json ContentType.
 type PostPullRequestReviewJSONRequestBody = PullRequestReviewRequest
+
+// CreateRoleSkillJSONRequestBody defines body for CreateRoleSkill for application/json ContentType.
+type CreateRoleSkillJSONRequestBody = SkillCreateRequest
+
+// PatchRoleSkillJSONRequestBody defines body for PatchRoleSkill for application/json ContentType.
+type PatchRoleSkillJSONRequestBody = SkillPatchRequest
+
+// PutRoleSkillFileJSONRequestBody defines body for PutRoleSkillFile for application/json ContentType.
+type PutRoleSkillFileJSONRequestBody = SkillFileWriteRequest
 
 // StartTerminalSetupJSONRequestBody defines body for StartTerminalSetup for application/json ContentType.
 type StartTerminalSetupJSONRequestBody StartTerminalSetupJSONBody
