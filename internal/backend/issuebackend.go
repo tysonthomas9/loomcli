@@ -200,6 +200,24 @@ type DeferredIssueBackend interface {
 	Deferred(ctx context.Context, opts DeferredOpts) ([]IssueData, error)
 }
 
+// IssueSummaryBackend is an optional extension for backends that can return a
+// single issue's slim record without its related data. Get is a detail read:
+// on the fleet-db backend it costs three round-trips (issue, dependencies,
+// comments) because callers of Get project all three. Callers that only need
+// scalar fields — a parent's title, a dependency row's status — should prefer
+// GetSummary.
+//
+// The contract implementations must honor:
+//   - exactly one round-trip;
+//   - the slim issue record only: no dependencies, dependents or comments;
+//   - the same not-found and validation errors Get would return.
+//
+// It is optional: callers type-assert and fall back to Get, which is correct
+// everywhere, just more expensive on backends that split related data out.
+type IssueSummaryBackend interface {
+	GetSummary(ctx context.Context, id string) (*IssueData, error)
+}
+
 // ClaimReleaser is an optional interface implemented by backends that maintain
 // an explicit claim lock distinct from issue status (e.g., the fleet-db
 // backend). Callers type-assert to release a completed agent's claim using the
