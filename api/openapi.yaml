@@ -56,6 +56,8 @@ tags:
     description: Git operations (status, push, pull, sync, PR, reset)
   - name: pull-requests
     description: Pull request review read APIs
+  - name: approvals
+    description: Approval decisions on awaiting subjects
   - name: diff
     description: Diff and commit inspection
   - name: files
@@ -303,6 +305,77 @@ paths:
                 $ref: "#/components/schemas/MessageResponse"
         "404":
           description: Workspace not found
+
+  /api/workspaces/{ws}/repos:
+    get:
+      operationId: listWorkspaceRepos
+      tags: [workspaces]
+      summary: List the repositories attached to a workspace
+      description: |
+        Lightweight alternative to `getWorkspace` for clients that only need the
+        repo list and not the full workspace topology.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Repository list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceReposResponse"
+        "400":
+          description: Workspace ID is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "404":
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
+    post:
+      operationId: addWorkspaceRepos
+      tags: [workspaces]
+      summary: Attach repositories to an existing workspace
+      description: |
+        Attaches existing local repositories by path and/or clones remote git
+        URLs into the workspace. Returns the workspace topology after the
+        repos have been attached.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceAddReposRequest"
+      responses:
+        "201":
+          description: Repositories attached; updated workspace topology
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceResponse"
+        "400":
+          description: Workspace ID is required, or invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "404":
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
+        "413":
+          description: Request body too large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
 
   /api/workspaces/{ws}/monitor/status:
     get:
@@ -677,6 +750,60 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/workspaces/{ws}/issues/search:
+    get:
+      operationId: searchIssues
+      tags: [issues]
+      summary: Full-text search across issues
+      description: |
+        Full-text search delegated to the issue backend. Returns the same
+        `{success, data: [...]}` envelope as `listIssues`.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: q
+          in: query
+          required: true
+          description: Search query. A missing or empty value is rejected with `MISSING_QUERY`.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: |
+            Result cap. Invalid or non-positive values fall back to the default
+            of 100; values above 500 are clamped down to 500.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: Matching issues
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Issue"
+        "400":
+          description: Missing search query
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Issue backend unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
+
   /api/workspaces/{ws}/issues/{id}:
     get:
       operationId: getIssue
@@ -783,6 +910,49 @@ paths:
                     type: object
         "404":
           description: Issue not found
+
+  /api/workspaces/{ws}/issues/{id}/reopen:
+    post:
+      operationId: reopenIssue
+      tags: [issues]
+      summary: Reopen a closed issue
+      description: |
+        Transitions a closed issue back to open status. The request body is
+        optional — an empty body or `{}` is valid.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReopenRequest"
+      responses:
+        "200":
+          description: Issue reopened
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReopenResponse"
+        "400":
+          description: Missing issue ID, or invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReopenResponse"
+        "404":
+          description: Issue not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
+        "413":
+          description: Request body too large (max 1MB)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReopenResponse"
 
   /api/workspaces/{ws}/issues/{id}/claim:
     post:
@@ -964,6 +1134,35 @@ paths:
 
   # ── Comments ────────────────────────────────────────────────────────────
   /api/workspaces/{ws}/issues/{id}/comments:
+    get:
+      operationId: listComments
+      tags: [comments]
+      summary: List the comments on an issue
+      description: |
+        Always returns a list shape: an issue with no comments yields
+        `{success: true, data: []}`, never `null`.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      responses:
+        "200":
+          description: Comment list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommentListResponse"
+        "400":
+          description: Missing issue ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommentListResponse"
+        "404":
+          description: Issue not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
     post:
       operationId: addComment
       tags: [comments]
@@ -997,6 +1196,49 @@ paths:
 
   # ── Dependencies ────────────────────────────────────────────────────────
   /api/workspaces/{ws}/issues/{id}/dependencies:
+    get:
+      operationId: listDependencies
+      tags: [dependencies]
+      summary: List the dependencies of an issue
+      description: |
+        Returns the same wire shape embedded in the issue detail payload:
+        one slim entry per dependency relation.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      responses:
+        "200":
+          description: Dependency list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/IssueDependencyEntry"
+        "400":
+          description: Missing issue ID
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  error:
+                    type: string
+        "404":
+          description: Issue not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
     post:
       operationId: addDependency
       tags: [dependencies]
@@ -1996,6 +2238,60 @@ paths:
           description: Agent lifecycle backend unavailable
 
   # ── Agent Terminal ──────────────────────────────────────────────────────
+  /api/workspaces/{ws}/agents/{name}/terminal/session:
+    post:
+      operationId: ensureAgentTerminalSession
+      tags: [agent-terminal]
+      summary: Ensure a live terminal session exists for an agent
+      description: |
+        Idempotent: reuses the agent's existing tab when its PTY is still
+        attachable and its cached launch spec is still valid, otherwise
+        spawns a fresh session. Returns the resulting tab metadata.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Tab metadata for the live agent session
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/TabMetadata"
+                  error:
+                    type: string
+        "400":
+          description: |
+            Invalid agent name, or a daemon-owned ephemeral worker whose
+            terminal cannot be started from the agents page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
+        "404":
+          description: Agent or role not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
+        "503":
+          description: Terminal service or agent store not initialized
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  error:
+                    type: string
+
   /api/workspaces/{ws}/agents/{name}/terminal/info:
     get:
       operationId: getAgentTerminalInfo
@@ -2082,6 +2378,45 @@ paths:
                           type: string
                         label:
                           type: string
+
+  /api/workspaces/{ws}/pending-inputs:
+    get:
+      operationId: listPendingInputs
+      tags: [agent-control]
+      summary: List every agent's pending interactive-input requests
+      description: |
+        Workspace-wide view of the prompts agents are blocked on. Registered
+        only when the daemon exposes the interactive-input surface. The body
+        is a bare array, not the usual `{success, data}` envelope.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Pending input requests (bare array, no envelope)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PendingInput"
+        "502":
+          description: Malformed pending-input payload from the daemon
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Agent supervisor is not running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "504":
+          description: Agent supervisor did not respond in time
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/workspaces/{ws}/agents:
     get:
@@ -2171,6 +2506,212 @@ paths:
           description: Agent already exists
         "503":
           description: Agent service unavailable
+
+  /api/workspaces/{ws}/agents/{name}:
+    patch:
+      operationId: updateAgent
+      tags: [agent-control]
+      summary: Update an agent assignment
+      description: |
+        Partial update. Only the fields present in the body are changed;
+        every field is optional.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentUpdateRequest"
+      responses:
+        "200":
+          description: Updated agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "400":
+          description: Invalid request body, state, or desired_state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
+        "404":
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
+    delete:
+      operationId: deleteAgent
+      tags: [agent-control]
+      summary: Delete an agent assignment
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Agent deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "404":
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
+
+  /api/workspaces/{ws}/agents/{name}/queue:
+    get:
+      operationId: getAgentQueue
+      tags: [agent-control]
+      summary: Ranked task queue for a single agent
+      description: |
+        The daemon's ranked backlog projection for one agent. Only served in
+        local daemon mode; in fleet-db store mode the route responds 501 and
+        callers should read the monitor task queues instead.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Ranked queue entries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data, total]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AgentQueueEntry"
+                  total:
+                    type: integer
+        "404":
+          description: Agent not found in daemon config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "501":
+          description: Not available in fleet-db store mode
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
+        "503":
+          description: Daemon unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/agents/{name}/input:
+    get:
+      operationId: getAgentPendingInput
+      tags: [agent-control]
+      summary: Pending interactive-input requests for one agent
+      description: |
+        The subset of `listPendingInputs` scoped to a single agent. Registered
+        only when the daemon exposes the interactive-input surface.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Pending input requests (bare array, no envelope)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PendingInput"
+        "404":
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Malformed pending-input payload from the daemon
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Agent supervisor is not running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "504":
+          description: Agent supervisor did not respond in time
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/agents/{name}/answer:
+    post:
+      operationId: answerAgentPrompt
+      tags: [agent-control]
+      summary: Answer an agent's pending interactive prompt
+      description: |
+        Resolves a pending prompt by selecting an option, supplying free text,
+        or declining. At least one of `option_id`, `text` or `decline` must be
+        set. Shares the agent-control authz boundary with start/stop.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentAnswerRequest"
+      responses:
+        "200":
+          description: Answer delivered to the agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Invalid body, or no option_id / text / decline supplied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Agent is not in a state that can accept an answer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Agent supervisor is not running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "504":
+          description: Agent supervisor did not respond in time
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/workspaces/{ws}/agents/{name}/stop:
     post:
@@ -2419,6 +2960,52 @@ paths:
                 type: object
 
   # ── Pull Requests ───────────────────────────────────────────────────────
+  /api/workspaces/{ws}/pull-requests:
+    get:
+      operationId: listPullRequests
+      tags: [pull-requests]
+      summary: List pull requests across every repo in the workspace
+      description: |
+        Aggregated across the workspace's repos. Per-repo failures (non-GitHub
+        remote, missing auth, connector errors) are reported in `warnings`
+        rather than failing the whole listing.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: state
+          in: query
+          description: |
+            Which pull requests to include. `merged` is always served from
+            the `gh` CLI, since the connector pulls API cannot express it.
+          schema:
+            type: string
+            enum: [all, open, merged, review]
+            default: all
+      responses:
+        "200":
+          description: Pull request list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/PullRequestListData"
+                  error:
+                    type: string
+        "502":
+          description: |
+            Listing failed for the workspace. A service error carries its
+            kind; anything else is reported as a bare message.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ServiceErrorResponse"
+                  - $ref: "#/components/schemas/SimpleErrorResponse"
+
   /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}:
     get:
       operationId: getPullRequestDetail
@@ -2833,6 +3420,69 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Approvals ───────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/approvals:
+    post:
+      operationId: postApproval
+      tags: [approvals]
+      summary: Record an approval decision on a subject
+      description: |
+        Journals an approval (or rejection) against a rendered subject key and
+        dispatches it to any pending awaits on that key. The approver is taken
+        from the verified session identity only — it is never read from the
+        body. A decision recorded with no pending await is still journaled, so
+        a later await registration on the same key resolves against it.
+
+        Error bodies on this route are `{error: {code, message}}`, not the
+        `{success:false, error}` envelope used elsewhere.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalRequest"
+      responses:
+        "200":
+          description: Approval journaled, with the awaits it resolved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalResponse"
+        "400":
+          description: |
+            Undecodable body, a decision other than approved/rejected, or a
+            subjectRef/eventType pair that does not render a subject-scoped key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalError"
+        "401":
+          description: No verified session identity on the request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalError"
+        "403":
+          description: The session actor is not an eligible approver for the subject
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalError"
+        "500":
+          description: Await lookup or journal append failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalError"
+        "501":
+          description: The configured backend has no await store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalError"
 
   /api/workspaces/{ws}/agents/{name}/git/diff-stat:
     get:
@@ -4156,6 +4806,45 @@ components:
         details:
           type: object
 
+    ServiceErrorResponse:
+      type: object
+      description: |
+        The error wire written by handler.HandleServiceError: the service
+        error's message plus its structured kind, so a client can branch on
+        the kind instead of substring-matching the English message. Note it
+        carries NO `success` field.
+      required: [error]
+      properties:
+        error:
+          type: string
+        kind:
+          type: string
+          enum:
+            - not_found
+            - validation_error
+            - unavailable
+            - timeout
+            - conflict
+            - internal
+            - forbidden
+            - unauthorized
+            - locked
+            - payload_too_large
+            - rate_limited
+            - bad_gateway
+            - not_implemented
+            - starting
+            - precondition_failed
+            - precondition_required
+
+    SimpleErrorResponse:
+      type: object
+      description: The bare error wire written by handler.RespondError.
+      required: [error]
+      properties:
+        error:
+          type: string
+
     MessageResponse:
       type: object
       required: [success, message]
@@ -4570,6 +5259,135 @@ components:
           type: string
 
     # ── Pull Request Schemas ────────────────────────────────────────────
+    PullRequestListData:
+      type: object
+      required: [pull_requests]
+      properties:
+        pull_requests:
+          type: array
+          items:
+            $ref: "#/components/schemas/PullRequestSummary"
+        warnings:
+          type: array
+          description: Per-repo failures that did not prevent the rest of the listing.
+          items:
+            type: string
+
+    PullRequestSummary:
+      type: object
+      description: One pull request as listed across the workspace's repos.
+      required: [number, title, url, state, is_draft, head_ref_name, base_ref_name, repo_name]
+      properties:
+        number:
+          type: integer
+        title:
+          type: string
+        url:
+          type: string
+        state:
+          type: string
+        is_draft:
+          type: boolean
+        head_ref_name:
+          type: string
+        base_ref_name:
+          type: string
+        author_login:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+        review_decision:
+          type: string
+        repo_name:
+          type: string
+        source_repo:
+          type: string
+        additions:
+          type: integer
+        deletions:
+          type: integer
+        changed_files:
+          type: integer
+
+    ApprovalRequest:
+      type: object
+      description: |
+        The approver is deliberately absent: it comes from the verified
+        session identity only.
+      required: [subjectRef]
+      properties:
+        subjectRef:
+          type: string
+          description: The rendered subject the approval targets, e.g. "acme/widgets#7@shaA".
+        eventType:
+          type: string
+          default: approval
+        decision:
+          type: string
+          enum: [approved, rejected]
+          default: approved
+        note:
+          type: string
+          description: Optional free-form reviewer note carried on the payload.
+
+    ApprovalResponse:
+      type: object
+      required: [status, eventId, actor, subjectKey, pendingMatched]
+      properties:
+        status:
+          type: string
+          description: The recorded decision.
+          enum: [approved, rejected]
+        eventId:
+          type: string
+        actor:
+          type: string
+          description: The verified approver ref (session email, else user id).
+        subjectKey:
+          type: string
+          description: eventType and subjectRef rendered into one await key.
+        pendingMatched:
+          type: integer
+          description: |
+            Pending awaits on the key at decision time. Zero means the event
+            was journaled for a future registration.
+        resolutions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApprovalResolution"
+
+    ApprovalResolution:
+      type: object
+      description: One await instance this approval touched.
+      required: [instanceKey, runId, outcome]
+      properties:
+        instanceKey:
+          type: string
+        runId:
+          type: string
+        outcome:
+          type: string
+          enum: [resolved, actor_rejected, already_resolved, resume_deferred, failed]
+
+    ApprovalError:
+      type: object
+      description: |
+        The approvals route's error wire. Distinct from ErrorResponse: the
+        code and message are nested under `error`.
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [unauthenticated, invalid, await_actor_forbidden, internal, unsupported]
+            message:
+              type: string
+
     PullRequestDetail:
       type: object
       required:
@@ -5380,6 +6198,63 @@ components:
           type: [string, "null"]
           enum: [idle, spawning, running, working, stuck, done, stopped, dead, null]
 
+    ReopenRequest:
+      type: object
+      description: Optional body for the reopen endpoint. An empty body is valid.
+      properties:
+        reason:
+          type: string
+          description: Free-text reason recorded on the reopen event.
+
+    ReopenResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+        error:
+          type: string
+
+    CommentListResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Comment"
+        error:
+          type: string
+
+    IssueDependencyEntry:
+      type: object
+      description: |
+        One dependency relation as emitted by the dependency list endpoint and
+        embedded in the issue detail payload. `id` is the id of the OTHER
+        issue in the relation.
+      required: [id, title, status, priority, created_at, dependency_type]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+        priority:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        dependency_type:
+          type: string
+          description: Relation type (e.g. "blocks").
+        issue_type:
+          type: string
+        created_by:
+          type: string
+
     CloseRequest:
       type: object
       properties:
@@ -5498,12 +6373,16 @@ components:
           type: string
         default_branch:
           type: string
+        current_branch:
+          type: string
         remote:
           type: string
         remote_url:
           type: string
         source_repo_id:
           type: string
+        is_linked_worktree:
+          type: boolean
         groups:
           type: array
           items:
@@ -5528,6 +6407,36 @@ components:
           default: []
         cross_repo:
           type: boolean
+
+    WorkspaceReposResponse:
+      type: object
+      required: [success, repos]
+      properties:
+        success:
+          type: boolean
+        repos:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspaceRepo"
+
+    WorkspaceAddReposRequest:
+      type: object
+      description: |
+        At least one of `repos` or `clone_urls` must be non-empty.
+      properties:
+        repos:
+          type: array
+          description: Absolute paths of existing local repositories to attach.
+          items:
+            type: string
+        clone_urls:
+          type: array
+          description: Remote git URLs to clone into the workspace.
+          items:
+            type: string
+        branch:
+          type: string
+          description: Branch to check out for cloned repositories.
 
     WorkspaceRenameRequest:
       type: object
@@ -5588,6 +6497,246 @@ components:
           type: string
 
     # ── Agent Schemas ───────────────────────────────────────────────────
+    Agent:
+      type: object
+      description: |
+        A stored agent assignment (domain.Agent), as returned by the agent
+        update endpoint.
+      required: [workspace_key, name, role_name, repos, repo_groups, created_at, updated_at]
+      properties:
+        workspace_key:
+          type: string
+        name:
+          type: string
+        role_name:
+          type: string
+        auto:
+          type: boolean
+        backend:
+          type: string
+        fallback_backends:
+          type: array
+          items:
+            type: string
+        repos:
+          type: array
+          items:
+            type: string
+        repo_groups:
+          type: array
+          items:
+            type: string
+        cross_repo:
+          type: boolean
+        parent:
+          type: string
+        state:
+          $ref: "#/components/schemas/AgentState"
+        mode:
+          type: string
+          enum: [ephemeral, service]
+        task_filter:
+          type: string
+        max_concurrency:
+          type: integer
+        budget_policy:
+          type: string
+        desired_state:
+          $ref: "#/components/schemas/AgentDesiredState"
+        hooks:
+          $ref: "#/components/schemas/AgentHooks"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        live_status:
+          type: string
+          description: Derived, read-only liveness signal carried from fleet-db.
+          enum: [working, idle]
+        active_task_id:
+          type: string
+          description: Set only while live_status is "working".
+        active_phase:
+          type: string
+          description: Set only while live_status is "working".
+        last_error_class:
+          type: string
+          description: |
+            Derived, read-only: the error class of the agent's most recent
+            terminal session when that run failed. Surfaced only while idle.
+
+    AgentState:
+      type: string
+      description: |
+        loom's coarse stored view of an agent assignment. Only idle, active
+        and stopped are accepted on a write; backend_unavailable is set by
+        the daemon reconciler.
+      enum: [idle, active, stopped, backend_unavailable]
+
+    AgentDesiredState:
+      type: string
+      enum: [stopped, idle, running, draining]
+
+    AgentUpdateRequest:
+      type: object
+      description: |
+        Partial agent update. Every field is optional; absent fields are left
+        unchanged.
+      properties:
+        role_name:
+          type: string
+        auto:
+          type: boolean
+        backend:
+          type: string
+        fallback_backends:
+          type: array
+          items:
+            type: string
+        repos:
+          type: array
+          items:
+            type: string
+        repo_groups:
+          type: array
+          items:
+            type: string
+        cross_repo:
+          type: boolean
+        parent:
+          type: string
+        state:
+          $ref: "#/components/schemas/AgentState"
+        desired_state:
+          $ref: "#/components/schemas/AgentDesiredState"
+
+    AgentHooks:
+      type: object
+      description: Supervisor-owned post-run pipelines for an agent.
+      properties:
+        on_complete:
+          type: array
+          description: |
+            Runs in slice order after a successful agent turn. Every
+            body-writing action (comment, write_design) must precede every
+            stamping action (add_label, remove_label, set_status, close, cycle).
+          items:
+            $ref: "#/components/schemas/AgentHookAction"
+
+    AgentHookAction:
+      type: object
+      description: |
+        One step of a completion pipeline. Only the fields appropriate to
+        `type` may be set.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [comment, write_design, add_label, remove_label, set_status, close, cycle]
+        source:
+          type: string
+          description: Which run artifact supplies the body (comment, write_design).
+          enum: [final_reply]
+        value:
+          type: string
+          description: The label name or target status, depending on `type`.
+        reason:
+          type: string
+          description: |
+            Required when `type` is set_status and `value` is blocked;
+            rejected otherwise.
+        cycle:
+          $ref: "#/components/schemas/AgentHookCycle"
+
+    AgentHookCycle:
+      type: object
+      description: Required when the action type is `cycle`, and unset otherwise.
+      required: [threshold, rearm_label, ship_label]
+      properties:
+        threshold:
+          type: integer
+          minimum: 1
+          description: Rounds to run before shipping. 1 ships on the first pass.
+        rearm_label:
+          type: string
+          description: Removed to hand the task back to the previous stage.
+        ship_label:
+          type: string
+          description: Stamped once the threshold is reached.
+        prefix:
+          type: string
+          description: Overrides the default cycle label prefix.
+
+    AgentQueueEntry:
+      type: object
+      description: One ranked backlog entry from the daemon's queue projection.
+      required: [issue_id, title, priority, score, reason, labels]
+      properties:
+        issue_id:
+          type: string
+        title:
+          type: string
+        priority:
+          type: integer
+        score:
+          type: integer
+        reason:
+          type: string
+          description: Why the entry ranked where it did.
+        labels:
+          type: array
+          items:
+            type: string
+        parent:
+          type: string
+
+    PendingInput:
+      type: object
+      description: One interactive prompt an agent is currently blocked on.
+      required: [request_id, agent, kind, prompt, asked_at]
+      properties:
+        request_id:
+          type: string
+        agent:
+          type: string
+        kind:
+          type: string
+        prompt:
+          type: string
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/PendingInputOption"
+        asked_at:
+          type: string
+
+    PendingInputOption:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+
+    AgentAnswerRequest:
+      type: object
+      description: |
+        At least one of `option_id`, `text` or `decline` must be set;
+        a body with none of the three is rejected.
+      properties:
+        request_id:
+          type: string
+          description: The prompt to answer. Defaults to the agent's oldest pending request.
+        option_id:
+          type: string
+        text:
+          type: string
+        decline:
+          type: boolean
+
     AgentStatusResponse:
       type: object
       description: Agent entity from dto.AgentStatusResponse
