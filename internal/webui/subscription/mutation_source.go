@@ -43,26 +43,47 @@ func (s *boundMutationSource) check(ctx context.Context) error {
 	return nil
 }
 
-func (s *boundMutationSource) read(ctx context.Context, fn func(context.Context) (backend.MutationPage, error)) (backend.MutationPage, error) {
+func readBoundSource[T any](s *boundMutationSource, ctx context.Context, fn func(context.Context) (T, error)) (T, error) {
+	var zero T
 	if err := s.check(ctx); err != nil {
-		return backend.MutationPage{}, err
+		return zero, err
 	}
 	requestCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	page, err := fn(requestCtx)
+	result, err := fn(requestCtx)
 	if err != nil {
-		return backend.MutationPage{}, err
+		return zero, err
 	}
 	if err := s.check(requestCtx); err != nil {
-		return backend.MutationPage{}, err
+		return zero, err
 	}
-	return page, nil
+	return result, nil
 }
+
+// ReadIssueRecovery is an optional capability on the exact source returned to
+// SSE. It never selects a fresh entry by workspace or substitutes ordinary reads.
+func (s *boundMutationSource) ReadIssueRecovery(ctx context.Context) (backend.IssueRecoverySnapshot, error) {
+	return readBoundSource(s, ctx, func(ctx context.Context) (backend.IssueRecoverySnapshot, error) {
+		reader, ok := s.entry.sub.(backend.IssueRecoveryBackend)
+		if !ok {
+			return backend.IssueRecoverySnapshot{}, fmt.Errorf("workspace %q source does not support certified issue recovery", s.workspace)
+		}
+		result, err := reader.ReadIssueRecovery(ctx)
+		if err != nil {
+			return backend.IssueRecoverySnapshot{}, err
+		}
+		if result.Workspace != s.workspace {
+			return backend.IssueRecoverySnapshot{}, fmt.Errorf("recovery workspace differs from captured source")
+		}
+		return result, nil
+	})
+}
+
 func (s *boundMutationSource) ReadHead(ctx context.Context) (backend.MutationPage, error) {
-	return s.read(ctx, func(ctx context.Context) (backend.MutationPage, error) { return s.entry.sub.GetMutationHead(ctx) })
+	return readBoundSource(s, ctx, func(ctx context.Context) (backend.MutationPage, error) { return s.entry.sub.GetMutationHead(ctx) })
 }
 func (s *boundMutationSource) ReadPage(ctx context.Context, since, through string, limit int) (backend.MutationPage, error) {
-	return s.read(ctx, func(ctx context.Context) (backend.MutationPage, error) {
+	return readBoundSource(s, ctx, func(ctx context.Context) (backend.MutationPage, error) {
 		return s.entry.sub.GetMutationPageThrough(ctx, since, through, limit)
 	})
 }
