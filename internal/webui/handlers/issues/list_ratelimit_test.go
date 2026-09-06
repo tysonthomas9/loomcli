@@ -31,7 +31,7 @@ func newFleetListHandler(t *testing.T, baseURL string) http.HandlerFunc {
 }
 
 // writeFleetThrottle emits fleet-db's throttle response: 429 plus the
-// Retry-After it wants the caller to honour.
+// Retry-After it wants the caller to honor.
 func writeFleetThrottle(w http.ResponseWriter, retryAfter string) {
 	w.Header().Set("Content-Type", "application/json")
 	if retryAfter != "" {

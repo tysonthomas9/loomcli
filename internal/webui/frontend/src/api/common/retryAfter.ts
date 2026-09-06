@@ -6,7 +6,7 @@
  * a number, so both forms are handled here.
  */
 
-/** Upper bound on an honoured wait, so a hostile or buggy upstream cannot freeze the UI. */
+/** Upper bound on an honored wait, so a hostile or buggy upstream cannot freeze the UI. */
 const MAX_RETRY_AFTER_MS = 300_000;
 
 /**

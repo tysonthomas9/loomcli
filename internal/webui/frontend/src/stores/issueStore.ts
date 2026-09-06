@@ -368,7 +368,7 @@ export function createIssueStore(
         if (currentRetryCount < MAX_AUTO_RETRIES) {
           const nextAttempt = currentRetryCount + 1;
           // A server that sent Retry-After has told us how long it wants;
-          // honour that over our own exponential guess.
+          // honor that over our own exponential guess.
           const retryAfterMs =
             err instanceof ApiError ? err.retryAfterMs : undefined;
           const delay =
