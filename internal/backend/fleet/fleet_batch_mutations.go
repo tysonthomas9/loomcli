@@ -327,8 +327,12 @@ type fleetBatchCreateIssueReq struct {
 	Repo        string   `json:"repo,omitempty"`
 	Design      string   `json:"design,omitempty"`
 	Notes       string   `json:"notes,omitempty"`
-	DueAt       string   `json:"due_at,omitempty"`
-	DeferUntil  string   `json:"defer_until,omitempty"`
+	// omitempty is load-bearing: a fleet-db whose CreateIssueRequest predates
+	// acceptance_criteria rejects the whole batch on an unknown field, and the
+	// batch path has no compatibility retry (PUPPET-522).
+	AcceptanceCriteria string `json:"acceptance_criteria,omitempty"`
+	DueAt              string `json:"due_at,omitempty"`
+	DeferUntil         string `json:"defer_until,omitempty"`
 }
 
 type fleetBatchCreateReq struct {
@@ -346,19 +350,20 @@ func batchCreateIssueReq(op backend.BatchOp) (fleetBatchCreateIssueReq, error) {
 		return fleetBatchCreateIssueReq{}, err
 	}
 	return fleetBatchCreateIssueReq{
-		Title:       p.Title,
-		Description: p.Description,
-		Priority:    p.Priority,
-		Type:        p.IssueType,
-		Assignee:    p.Assignee,
-		Owner:       p.Owner,
-		Labels:      p.Labels,
-		ParentID:    p.Parent,
-		Repo:        p.SourceRepo,
-		Design:      p.Design,
-		Notes:       p.Notes,
-		DueAt:       p.DueAt,
-		DeferUntil:  p.DeferUntil,
+		Title:              p.Title,
+		Description:        p.Description,
+		Priority:           p.Priority,
+		Type:               p.IssueType,
+		Assignee:           p.Assignee,
+		Owner:              p.Owner,
+		Labels:             p.Labels,
+		ParentID:           p.Parent,
+		Repo:               p.SourceRepo,
+		Design:             p.Design,
+		Notes:              p.Notes,
+		AcceptanceCriteria: p.AcceptanceCriteria,
+		DueAt:              p.DueAt,
+		DeferUntil:         p.DeferUntil,
 	}, nil
 }
 
