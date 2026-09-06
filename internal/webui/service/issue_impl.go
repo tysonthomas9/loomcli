@@ -140,10 +140,17 @@ func translateBackendError(err error) *ServiceError {
 		return ErrTimeout(be.Message)
 	case backend.KindNotImplemented:
 		return ErrNotImplemented(be.Message)
+	case backend.KindRateLimited:
+		return ErrRateLimitedRetryAfter(be.Message, be.Meta[backend.MetaRetryAfter])
 	default:
 		return ErrInternal(be.Message, be.Cause)
 	}
 }
+
+// FromBackendError converts a backend-layer error into a *ServiceError.
+// Exported for handlers that call an IssueBackend directly instead of
+// going through IssueService (e.g. the pool-less /stats path).
+func FromBackendError(err error) *ServiceError { return translateBackendError(err) }
 
 func (s *issueServiceImpl) acquireClient(ctx context.Context) (*rpc.Client, error) {
 	if s.pool == nil {
