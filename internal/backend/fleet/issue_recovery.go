@@ -74,6 +74,9 @@ type recoveryWire struct {
 }
 
 func validateRecoveryDocument(data []byte, ws string) (backend.IssueRecoverySnapshot, error) {
+	if err := validateRecoveryJSON(data); err != nil {
+		return backend.IssueRecoverySnapshot{}, err
+	}
 	wire, err := decodeRecoveryManifest(data, ws)
 	if err != nil {
 		return backend.IssueRecoverySnapshot{}, err
