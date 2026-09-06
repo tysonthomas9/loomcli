@@ -1,6 +1,6 @@
 # SSE recovery read proof
 
-Status: proposed protocol, not implemented. The current frontend resync checkpoint repair is separate. This plan does not authorize resetting a resume checkpoint after ordinary REST refreshes.
+Status: recovery acknowledgment remains proposed. The internal [certified issue client and captured-source capability](../testing/sse-certified-issue-source-proof.md) are implemented, without a Loom REST bridge or frontend consumer. The current frontend resync checkpoint repair is separate. This plan does not authorize resetting a resume checkpoint after ordinary REST refreshes.
 
 ## Required guarantee
 

@@ -185,7 +185,7 @@ func (s *BackendMutationSubscriber) GetMutationHead(ctx context.Context) (backen
 	if !ok {
 		return backend.MutationPage{}, fmt.Errorf("backend does not support authoritative mutation head")
 	}
-	return s.readWithLifetime(ctx, func(ctx context.Context) (backend.MutationPage, error) { return reader.GetMutationsAfter(ctx, "$", 1) })
+	return withSubscriberLifetime(ctx, s.ctx, func(ctx context.Context) (backend.MutationPage, error) { return reader.GetMutationsAfter(ctx, "$", 1) })
 }
 
 // GetMutationPageThrough reads a fixed interval without falling back to an
@@ -195,34 +195,46 @@ func (s *BackendMutationSubscriber) GetMutationPageThrough(ctx context.Context, 
 	if !ok {
 		return backend.MutationPage{}, fmt.Errorf("backend does not support bounded mutation replay")
 	}
-	return s.readWithLifetime(ctx, func(ctx context.Context) (backend.MutationPage, error) {
+	return withSubscriberLifetime(ctx, s.ctx, func(ctx context.Context) (backend.MutationPage, error) {
 		return reader.GetMutationsThrough(ctx, since, through, limit)
 	})
 }
 
-// readWithLifetime is the shared cancellation boundary for authoritative reads.
-func (s *BackendMutationSubscriber) readWithLifetime(ctx context.Context, read func(context.Context) (backend.MutationPage, error)) (backend.MutationPage, error) {
+// ReadIssueRecovery uses the same backend object as authoritative mutation
+// reads. Retirement invalidates even a successful late HTTP response.
+func (s *BackendMutationSubscriber) ReadIssueRecovery(ctx context.Context) (backend.IssueRecoverySnapshot, error) {
+	reader, ok := s.backend.(backend.IssueRecoveryBackend)
+	if !ok {
+		return backend.IssueRecoverySnapshot{}, fmt.Errorf("backend does not support certified issue recovery")
+	}
+	return withSubscriberLifetime(ctx, s.ctx, reader.ReadIssueRecovery)
+}
+
+// withSubscriberLifetime is the shared cancellation boundary for authoritative
+// pages and certified reads; neither may return success after retirement.
+func withSubscriberLifetime[T any](ctx, lifetime context.Context, read func(context.Context) (T, error)) (T, error) {
+	var zero T
 	requestCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stop := context.AfterFunc(s.ctx, cancel)
+	stop := context.AfterFunc(lifetime, cancel)
 	defer stop()
-	if err := s.ctx.Err(); err != nil {
-		return backend.MutationPage{}, err
+	if err := lifetime.Err(); err != nil {
+		return zero, err
 	}
 	if err := requestCtx.Err(); err != nil {
-		return backend.MutationPage{}, err
+		return zero, err
 	}
-	page, err := read(requestCtx)
+	result, err := read(requestCtx)
 	if err != nil {
-		return backend.MutationPage{}, err
+		return zero, err
 	}
-	if err := s.ctx.Err(); err != nil {
-		return backend.MutationPage{}, err
+	if err := lifetime.Err(); err != nil {
+		return zero, err
 	}
 	if err := requestCtx.Err(); err != nil {
-		return backend.MutationPage{}, err
+		return zero, err
 	}
-	return page, nil
+	return result, nil
 }
 
 func (s *BackendMutationSubscriber) loop() {
