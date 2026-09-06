@@ -10,10 +10,13 @@ import (
 // sha256 over a UTC date bucket and the server-visible create body.
 //
 // The hash input is the fleet-db body projection (CreateParams.FleetCreateBody),
-// NOT the full CreateParams: fields fleet-db drops (id, acceptance_criteria,
-// created_by, estimated_minutes, dependencies) must not
+// NOT the full CreateParams: fields fleet-db drops (id, created_by,
+// estimated_minutes, dependencies) must not
 // differentiate keys, or two requests that persist identically would mint
-// duplicates. Using the same projection the wire request is built from also
+// duplicates. acceptance_criteria left that list in PUPPET-522 — fleet-db now
+// persists it, so it correctly differentiates keys: two creates whose
+// acceptance criteria differ no longer persist identically and must not dedup
+// to a single issue. Using the same projection the wire request is built from also
 // keeps the key aligned byte-for-byte with the body fleet-db fingerprints,
 // so a default key can never trip the key-reuse-with-different-body 409.
 //
