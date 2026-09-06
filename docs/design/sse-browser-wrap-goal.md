@@ -16,6 +16,8 @@ The v6 timeline pair (Loom #679 / FleetDB #285) and workspace bootstrap prerequi
 
 The wrap-up is complete only when the paired delivery is published, final verification outcomes and remaining gaps are documented, and owned-resource cleanup is accounted for. An unavailable runtime is an explicit verification gap, not a successful test. The broader architecture objective remains unfinished.
 
+Published dependent drafts: [Loom #682](https://github.com/tysonthomas9/loomcli/pull/682) (implementation/evidence commit `4f147037f`) and [FleetDB #288](https://github.com/BrowserOperator/fleet-db/pull/288) (implementation commit `c0298005`). Final runtime verification remains pending as described above.
+
 ## Acceptance criteria
 
 1. Finish and independently vet the current v6 timeline contract and permission checks. Run the relevant regression, build and repository gates.
