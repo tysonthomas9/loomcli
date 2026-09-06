@@ -243,6 +243,10 @@ describe("issueStore", () => {
     });
 
     it("preserves SSE mutations during fetch (merge: newer wins)", async () => {
+      // Seed the same committed scope the production UI configures before writing.
+      mockGetReadyIssues.mockResolvedValueOnce([]);
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+      mockGetReadyIssues.mockClear();
       // Seed an issue with a newer timestamp
       const newerIssue = makeIssue({
         id: "a",
@@ -269,6 +273,10 @@ describe("issueStore", () => {
     });
 
     it("preserves reference for unchanged issues (issuesAreEqual)", async () => {
+      // Seed the same committed scope the production UI configures before writing.
+      mockGetReadyIssues.mockResolvedValueOnce([]);
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+      mockGetReadyIssues.mockClear();
       const original = makeIssue({ id: "a" });
       store.setState({ issuesMap: new Map([["a", original]]) });
 
@@ -316,6 +324,10 @@ describe("issueStore", () => {
     });
 
     it("skips issues deleted during fetch window", async () => {
+      // Seed the same committed scope the production UI configures before writing.
+      mockGetReadyIssues.mockResolvedValueOnce([]);
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+      mockGetReadyIssues.mockClear();
       // We need to intercept during the fetch. Use a delayed mock that triggers a delete.
       mockGetReadyIssues.mockImplementation(async () => {
         // Simulate SSE delete arriving while fetch is in flight
@@ -1327,6 +1339,10 @@ describe("issueStore", () => {
 
   describe("updateIssueStatus", () => {
     it("optimistically updates status, then confirms", async () => {
+      // Seed the same committed scope the production UI configures before writing.
+      mockGetReadyIssues.mockResolvedValueOnce([]);
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+      mockGetReadyIssues.mockClear();
       const issue = makeIssue({ id: "a", status: "open" });
       store.setState({ issuesMap: new Map([["a", issue]]) });
       mockUpdateIssue.mockResolvedValue(
@@ -1362,6 +1378,10 @@ describe("issueStore", () => {
     });
 
     it("rolls back on API failure and calls onToast", async () => {
+      // Seed the same committed scope the production UI configures before writing.
+      mockGetReadyIssues.mockResolvedValueOnce([]);
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+      mockGetReadyIssues.mockClear();
       const toastFn = vi.fn();
       store.getState().configure({ onToast: toastFn });
 
@@ -1380,12 +1400,20 @@ describe("issueStore", () => {
     });
 
     it("throws if issue not found", async () => {
+      // Seed the same committed scope the production UI configures before writing.
+      mockGetReadyIssues.mockResolvedValueOnce([]);
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+      mockGetReadyIssues.mockClear();
       await expect(
         store.getState().updateIssueStatus("nonexistent", "in_progress", "ws1"),
       ).rejects.toThrow("Issue nonexistent not found");
     });
 
     it("throws if issue already has pending update", async () => {
+      // Seed the same committed scope the production UI configures before writing.
+      mockGetReadyIssues.mockResolvedValueOnce([]);
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+      mockGetReadyIssues.mockClear();
       const issue = makeIssue({ id: "a", status: "open" });
       store.setState({ issuesMap: new Map([["a", issue]]) });
 
@@ -1402,6 +1430,10 @@ describe("issueStore", () => {
     });
 
     it("buffers SSE mutations during optimistic window, flushes on confirm", async () => {
+      // Seed the same committed scope the production UI configures before writing.
+      mockGetReadyIssues.mockResolvedValueOnce([]);
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+      mockGetReadyIssues.mockClear();
       const issue = makeIssue({ id: "a", status: "open", title: "Before" });
       store.setState({ issuesMap: new Map([["a", issue]]) });
 
@@ -1443,7 +1475,11 @@ describe("issueStore", () => {
       expect(store.getState().issuesMap.get("a")!.title).toBe("SSE Updated");
     });
 
-    it("auto-rolls back after timeout", () => {
+    it("auto-rolls back after timeout", async () => {
+      // Seed the same committed scope the production UI configures before writing.
+      mockGetReadyIssues.mockResolvedValueOnce([]);
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+      mockGetReadyIssues.mockClear();
       const toastFn = vi.fn();
       store.getState().configure({ onToast: toastFn });
 
@@ -1638,7 +1674,11 @@ describe("issueStore", () => {
       expect(s.pendingIds.size).toBe(0);
     });
 
-    it("clears pending optimistic timers", () => {
+    it("clears pending optimistic timers", async () => {
+      // Seed the same committed scope the production UI configures before writing.
+      mockGetReadyIssues.mockResolvedValueOnce([]);
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+      mockGetReadyIssues.mockClear();
       const issue = makeIssue({ id: "a", status: "open" });
       store.setState({ issuesMap: new Map([["a", issue]]) });
       mockUpdateIssue.mockReturnValue(new Promise(() => {}));
@@ -1991,7 +2031,11 @@ describe("issueStore", () => {
   // -----------------------------------------------------------------------
 
   describe("configure", () => {
-    it("sets onToast callback", () => {
+    it("sets onToast callback", async () => {
+      // Seed the same committed scope the production UI configures before writing.
+      mockGetReadyIssues.mockResolvedValueOnce([]);
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+      mockGetReadyIssues.mockClear();
       const toastFn = vi.fn();
       store.getState().configure({ onToast: toastFn });
 

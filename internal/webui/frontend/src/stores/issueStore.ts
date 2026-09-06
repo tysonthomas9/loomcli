@@ -74,6 +74,12 @@ export function createIssueStore(
 ): StoreApi<IssueStore> {
   // --- Closure state (not in Zustand — doesn't trigger re-renders) ---
   const optimisticEntries = new Map<string, OptimisticEntry>();
+  let scopeEpoch = 0;
+  let activeScopeKey: string | null = null;
+  let recoveryRevision = 0;
+  let commandRevision = 0;
+  const unresolvedCommands = new Map<string, Set<object>>();
+  let fetchGeneration = 0;
   let fetchTimestamp = 0;
   /**
    * Controller for the in-flight fetchIssues call. New calls abort it and
@@ -141,6 +147,7 @@ export function createIssueStore(
     set: (partial: Partial<IssueStore>) => void,
     get: () => IssueStore,
   ): void {
+    const mutationEpoch = scopeEpoch;
     const result = issueMutationAppliesToLocalIssue(mutation)
       ? applyMutationPure(get().issuesMap, mutation, activeController !== null)
       : {
@@ -165,6 +172,8 @@ export function createIssueStore(
       set({ issuesMap: result.newMap });
     }
 
+    if (scopeEpoch !== mutationEpoch) return;
+
     if (result.incrementCount) {
       set({ mutationCount: get().mutationCount + 1 });
     }
@@ -177,26 +186,46 @@ export function createIssueStore(
     jitterFactor: 0,
   };
 
-  /** Remove an optimistic entry and update pendingIds */
+  /** Retire UI ownership without pretending outstanding server work settled. */
+  function retireScope(): void {
+    scopeEpoch++;
+    recoveryRevision++;
+    for (const entry of optimisticEntries.values())
+      clearTimeout(entry.timeoutId);
+    optimisticEntries.clear();
+    if (refreshTimeout !== null) clearTimeout(refreshTimeout);
+    refreshTimeout = null;
+    projectionRefreshPendingSince = null;
+    if (retryTimeout !== null) clearTimeout(retryTimeout);
+    retryTimeout = null;
+  }
+
   function removeOptimisticEntry(
     issueId: string,
+    expected: OptimisticEntry,
     get: () => IssueStore,
     set: (partial: Partial<IssueStore>) => void,
   ): void {
-    const entry = optimisticEntries.get(issueId);
-    if (entry) {
-      clearTimeout(entry.timeoutId);
-      optimisticEntries.delete(issueId);
-      const newPending = new Set(get().pendingIds);
-      newPending.delete(issueId);
-      set({ pendingIds: newPending });
-    }
+    if (optimisticEntries.get(issueId) !== expected) return;
+    clearTimeout(expected.timeoutId);
+    optimisticEntries.delete(issueId);
+    const pendingIds = new Set(get().pendingIds);
+    pendingIds.delete(issueId);
+    set({ pendingIds });
   }
 
   async function runFetchIssues(
     params: FetchIssuesParams,
     recovery = false,
   ): Promise<void> {
+    params = {
+      ...params,
+      ...(params.filter ? { filter: structuredClone(params.filter) } : {}),
+      ...(params.graphFilter
+        ? { graphFilter: structuredClone(params.graphFilter) }
+        : {}),
+      ...(params.sourceRepos ? { sourceRepos: [...params.sourceRepos] } : {}),
+    };
     const set = store.setState;
     const get = store.getState;
     const {
@@ -212,20 +241,48 @@ export function createIssueStore(
       if (recovery) throw new DOMException("Recovery aborted", "AbortError");
       return;
     }
+    const nextScope = fetchScope(params);
+    const generation = ++fetchGeneration;
+    const scopeChanged = nextScope !== activeScopeKey;
+    if (scopeChanged) {
+      retireScope();
+      activeScopeKey = nextScope;
+    }
     activeWorkspaceId = workspaceId;
     activeMode = mode;
     activeFilter = filter;
     activeGraphFilter = graphFilter;
     activeSourceRepos = sourceRepos ?? null;
 
+    const readScopeEpoch = scopeEpoch;
+    const readCommandRevision = commandRevision;
+    if (scopeChanged) {
+      set({ issuesMap: new Map(), pendingIds: new Set() });
+      if (scopeEpoch !== readScopeEpoch || generation !== fetchGeneration) {
+        if (recovery) throw new Error("Issue recovery scope changed");
+        return;
+      }
+    }
+
     // Cancel any in-flight fetch so the new call always proceeds.
     // This replaces the previous `if (isFetching) return` guard, which
     // silently dropped manual retries and view-switch fetches.
-    if (activeController) {
-      activeController.abort();
-    }
+    const previousController = activeController;
     const internalController = new AbortController();
     activeController = internalController;
+    previousController?.abort();
+    if (
+      activeController !== internalController ||
+      scopeEpoch !== readScopeEpoch ||
+      generation !== fetchGeneration
+    ) {
+      if (recovery)
+        throw new DOMException(
+          "Recovery superseded while starting",
+          "AbortError",
+        );
+      return;
+    }
 
     // Cancel any pending auto-retry timer. If this call IS an auto-retry,
     // preserve retryCount (the retry logic already incremented it when
@@ -244,6 +301,19 @@ export function createIssueStore(
       });
     } else {
       set({ isLoading: true, error: null, nextRetryAt: null });
+    }
+
+    if (
+      activeController !== internalController ||
+      scopeEpoch !== readScopeEpoch ||
+      generation !== fetchGeneration
+    ) {
+      if (recovery)
+        throw new DOMException(
+          "Recovery superseded while starting",
+          "AbortError",
+        );
+      return;
     }
 
     fetchTimestamp = Date.now();
@@ -300,13 +370,29 @@ export function createIssueStore(
         );
       }
 
-      if (activeController !== internalController || mergedSignal.aborted) {
+      if (
+        activeController !== internalController ||
+        mergedSignal.aborted ||
+        scopeEpoch !== readScopeEpoch ||
+        generation !== fetchGeneration
+      ) {
         if (recovery)
           throw new DOMException(
             "Recovery superseded or aborted",
             "AbortError",
           );
         return;
+      }
+
+      if (
+        recovery &&
+        (unresolvedCommands.get(workspaceId)?.size ||
+          commandRevision !== readCommandRevision ||
+          scopeEpoch !== readScopeEpoch)
+      ) {
+        throw new Error(
+          "Issue recovery cannot complete while commands are unresolved or changed",
+        );
       }
 
       const deletedSnapshot = new Set(deletedDuringFetch);
@@ -358,7 +444,12 @@ export function createIssueStore(
       });
       if (
         recovery &&
-        (activeController !== internalController || mergedSignal.aborted)
+        (activeController !== internalController ||
+          mergedSignal.aborted ||
+          scopeEpoch !== readScopeEpoch ||
+          generation !== fetchGeneration ||
+          commandRevision !== readCommandRevision ||
+          !!unresolvedCommands.get(workspaceId)?.size)
       ) {
         throw new DOMException(
           "Recovery superseded during commit",
@@ -430,6 +521,12 @@ export function createIssueStore(
           retryCount: nextAttempt,
           nextRetryAt: Date.now() + delay,
         });
+        if (
+          activeController !== internalController ||
+          scopeEpoch !== readScopeEpoch ||
+          generation !== fetchGeneration
+        )
+          return;
         // Strip the external signal before retrying: by the time this
         // timer fires, the caller's AbortController (e.g. the one from
         // App.tsx's useEffect) may have been aborted by a cleanup (view
@@ -440,6 +537,8 @@ export function createIssueStore(
         const { signal: _externalSignal, ...retryParams } = params;
         void _externalSignal;
         retryTimeout = setTimeout(() => {
+          if (scopeEpoch !== readScopeEpoch || generation !== fetchGeneration)
+            return;
           retryTimeout = null;
           void get().fetchIssues({
             ...retryParams,
@@ -484,6 +583,10 @@ export function createIssueStore(
       return runFetchIssues(params);
     },
 
+    getRecoveryRevision(): number {
+      return recoveryRevision;
+    },
+
     async refreshForRecovery(
       signal: AbortSignal,
       expectedWorkspaceId?: string,
@@ -498,6 +601,8 @@ export function createIssueStore(
         );
       }
       const workspaceId = activeWorkspaceId;
+      if (unresolvedCommands.get(workspaceId)?.size)
+        throw new Error("Issue recovery has unresolved commands");
       const params: FetchIssuesParams = {
         workspaceId,
         mode: activeMode,
@@ -537,30 +642,32 @@ export function createIssueStore(
     },
 
     connectToEvents(subscribeFn: SubscribeFn): () => void {
-      if (eventUnsubscribe) {
-        return eventUnsubscribe;
-      }
-
-      const unsubscribe = subscribeFn((mutation: MutationPayload) => {
-        get().applyMutation(mutation);
-      });
-
-      eventUnsubscribe = () => {
-        unsubscribe();
-        eventUnsubscribe = null;
+      if (eventUnsubscribe) return eventUnsubscribe;
+      let active = true;
+      let sourceUnsubscribe: (() => void) | undefined;
+      const cleanup = () => {
+        if (!active) return;
+        active = false;
+        if (eventUnsubscribe === cleanup) eventUnsubscribe = null;
+        sourceUnsubscribe?.();
       };
-
-      return eventUnsubscribe;
+      eventUnsubscribe = cleanup;
+      try {
+        const unsubscribe = subscribeFn((mutation: MutationPayload) => {
+          if (active && eventUnsubscribe === cleanup)
+            get().applyMutation(mutation);
+        });
+        sourceUnsubscribe = unsubscribe;
+        if (!active) unsubscribe();
+      } catch (error) {
+        cleanup();
+        throw error;
+      }
+      return cleanup;
     },
 
     applyMutation(mutation: MutationPayload): void {
       const { issue_id } = mutation;
-      // Optimistic gate: buffer mutations for pending issues
-      if (issue_id && optimisticEntries.has(issue_id)) {
-        optimisticEntries.get(issue_id)!.bufferedMutations.push(mutation);
-        return;
-      }
-
       // Workspace gate
       if (
         activeWorkspaceId &&
@@ -580,6 +687,17 @@ export function createIssueStore(
         }
       }
 
+      if (
+        issueMutationAppliesToLocalIssue(mutation) ||
+        issueMutationInvalidatesProjection(mutation)
+      )
+        recoveryRevision++;
+      // Optimistic gate: buffer mutations for pending issues
+      if (issue_id && optimisticEntries.has(issue_id)) {
+        optimisticEntries.get(issue_id)!.bufferedMutations.push(mutation);
+        return;
+      }
+
       applyMutationToStore(mutation, set, get);
     },
 
@@ -588,86 +706,78 @@ export function createIssueStore(
       newStatus: Status,
       workspaceId: string,
     ): Promise<void> {
+      if (workspaceId !== activeWorkspaceId)
+        throw new Error("Issue update workspace is not active");
       const existingIssue = get().issuesMap.get(issueId);
-      if (!existingIssue) {
-        throw new Error(`Issue ${issueId} not found`);
-      }
-
-      if (optimisticEntries.has(issueId)) {
+      if (!existingIssue) throw new Error(`Issue ${issueId} not found`);
+      if (optimisticEntries.has(issueId))
         throw new Error(`Issue ${issueId} already has a pending update`);
-      }
-
-      // Auto-rollback timeout
-      const timeoutId = setTimeout(() => {
-        const entry = optimisticEntries.get(issueId);
-        if (!entry) return;
-
-        const currentMap = get().issuesMap;
-        const newMap = new Map(currentMap);
-        newMap.set(issueId, entry.snapshot);
-        set({ issuesMap: newMap });
-
-        for (const m of entry.bufferedMutations) {
-          applyMutationToStore(m, set, get);
+      const epoch = scopeEpoch;
+      const token = {};
+      const pending = unresolvedCommands.get(workspaceId) ?? new Set<object>();
+      pending.add(token);
+      unresolvedCommands.set(workspaceId, pending);
+      commandRevision++;
+      recoveryRevision++;
+      const owns = () =>
+        scopeEpoch === epoch &&
+        activeWorkspaceId === workspaceId &&
+        optimisticEntries.get(issueId) === entry;
+      const finish = (rollback: boolean, message?: string) => {
+        if (!owns()) return;
+        if (rollback) {
+          const issuesMap = new Map(get().issuesMap);
+          issuesMap.set(issueId, entry.snapshot);
+          set({ issuesMap });
         }
-
-        optimisticEntries.delete(issueId);
-        const newPending = new Set(get().pendingIds);
-        newPending.delete(issueId);
-        set({ pendingIds: newPending });
-
-        onToast?.("Update timed out — changes reverted", { type: "error" });
-      }, AUTO_ROLLBACK_TIMEOUT_MS);
-
+        for (const mutation of entry.bufferedMutations) {
+          if (!owns()) return;
+          applyMutationToStore(mutation, set, get);
+        }
+        if (!owns()) return;
+        const revisionBeforeCallbacks = commandRevision;
+        removeOptimisticEntry(issueId, entry, get, set);
+        if (scopeEpoch !== epoch || commandRevision !== revisionBeforeCallbacks)
+          return;
+        if (message) onToast?.(message, { type: "error" });
+        else scheduleProjectionRefresh(get);
+      };
+      const timeoutId = setTimeout(
+        () => finish(true, "Update timed out — changes reverted"),
+        AUTO_ROLLBACK_TIMEOUT_MS,
+      );
       const entry: OptimisticEntry = {
         snapshot: existingIssue,
         bufferedMutations: [],
         timeoutId,
       };
       optimisticEntries.set(issueId, entry);
-      const newPending = new Set(get().pendingIds);
-      newPending.add(issueId);
-      set({ pendingIds: newPending });
-
-      // Optimistic update
-      const optimisticIssue: Issue = {
-        ...existingIssue,
-        status: newStatus,
-        updated_at: new Date().toISOString(),
-      };
-      const currentMap = get().issuesMap;
-      const newMap = new Map(currentMap);
-      newMap.set(issueId, optimisticIssue);
-      set({ issuesMap: newMap });
-
       try {
+        const pendingIds = new Set(get().pendingIds);
+        pendingIds.add(issueId);
+        const issuesMap = new Map(get().issuesMap);
+        issuesMap.set(issueId, {
+          ...existingIssue,
+          status: newStatus,
+          updated_at: new Date().toISOString(),
+        });
+        set({ issuesMap, pendingIds });
         await apiUpdateIssue(workspaceId, issueId, { status: newStatus });
-        // Flush buffered mutations then clean up
-        const confirmedEntry = optimisticEntries.get(issueId);
-        if (confirmedEntry) {
-          for (const m of confirmedEntry.bufferedMutations) {
-            applyMutationToStore(m, set, get);
-          }
-        }
-        removeOptimisticEntry(issueId, get, set);
-        scheduleProjectionRefresh(get);
-      } catch (err) {
-        const currentEntry = optimisticEntries.get(issueId);
-        if (currentEntry) {
-          const rollbackMap = new Map(get().issuesMap);
-          rollbackMap.set(issueId, currentEntry.snapshot);
-          set({ issuesMap: rollbackMap });
-
-          for (const m of currentEntry.bufferedMutations) {
-            applyMutationToStore(m, set, get);
-          }
-
-          const message =
-            err instanceof Error ? err.message : "Failed to update status";
-          onToast?.(message, { type: "error" });
-        }
-        removeOptimisticEntry(issueId, get, set);
-        throw err;
+        finish(false);
+      } catch (error) {
+        finish(
+          true,
+          error instanceof Error ? error.message : "Failed to update status",
+        );
+        throw error;
+      } finally {
+        pending.delete(token);
+        if (
+          pending.size === 0 &&
+          unresolvedCommands.get(workspaceId) === pending
+        )
+          unresolvedCommands.delete(workspaceId);
+        recoveryRevision++;
       }
     },
 
@@ -750,10 +860,8 @@ export function createIssueStore(
 
     reset(): void {
       activeRecovery = null;
-      for (const entry of optimisticEntries.values()) {
-        clearTimeout(entry.timeoutId);
-      }
-      optimisticEntries.clear();
+      activeScopeKey = null;
+      retireScope();
 
       if (refreshTimeout) {
         clearTimeout(refreshTimeout);
