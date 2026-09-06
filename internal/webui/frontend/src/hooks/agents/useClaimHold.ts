@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { ApiError } from "@/api/common";
 import {
   fetchClaimHold,
   releaseClaimHold,
@@ -30,6 +31,8 @@ export interface UseClaimHoldReturn {
   gated: number;
   busy: boolean;
   error: string | null;
+  /** True when release was refused because another actor owns the hold. */
+  canForceRelease: boolean;
   /** Resolves true when the hold was released. */
   release: (force?: boolean) => Promise<boolean>;
   refresh: () => Promise<void>;
@@ -42,21 +45,27 @@ export function useClaimHold(): UseClaimHoldReturn {
   const [gated, setGated] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [canForceRelease, setCanForceRelease] = useState(false);
   const mounted = useRef(true);
+  const activeWorkspace = useRef(workspaceId);
+  activeWorkspace.current = workspaceId;
 
   const refresh = useCallback(async () => {
     if (!workspaceId) return;
+    const requestedWorkspace = workspaceId;
     try {
       const status = await fetchClaimHold(workspaceId);
-      if (!mounted.current) return;
+      if (!mounted.current || activeWorkspace.current !== requestedWorkspace)
+        return;
       setHold(status.hold ?? null);
       setRunning(status.running ?? []);
       setGated(status.gated ?? 0);
+      if (!status.hold?.held) setCanForceRelease(false);
     } catch {
       // A daemon without the claim-hold route (older build, remote mode, or
       // simply not running) is not an error state for a banner — there is
       // just nothing to show.
-      if (mounted.current) {
+      if (mounted.current && activeWorkspace.current === requestedWorkspace) {
         setHold(null);
         setRunning([]);
         setGated(0);
@@ -66,6 +75,12 @@ export function useClaimHold(): UseClaimHoldReturn {
 
   useEffect(() => {
     mounted.current = true;
+    setHold(null);
+    setRunning([]);
+    setGated(0);
+    setBusy(false);
+    setError(null);
+    setCanForceRelease(false);
     void refresh();
     const timer = setInterval(() => void refresh(), POLL_MS);
     return () => {
@@ -77,31 +92,68 @@ export function useClaimHold(): UseClaimHoldReturn {
   const release = useCallback(
     async (force = false): Promise<boolean> => {
       if (!workspaceId) return false;
+      const requestedWorkspace = workspaceId;
       setBusy(true);
       setError(null);
+      setCanForceRelease(false);
       try {
         const status = await releaseClaimHold(workspaceId, { force });
-        if (mounted.current) {
+        if (mounted.current && activeWorkspace.current === requestedWorkspace) {
           setHold(status.hold ?? null);
           setRunning(status.running ?? []);
           setGated(status.gated ?? 0);
+          setCanForceRelease(false);
         }
         return true;
       } catch (e) {
         // A 409 here is the daemon refusing to let one operator silently undo
         // another's quiesce; surface its wording rather than a generic failure.
-        if (mounted.current) {
+        if (mounted.current && activeWorkspace.current === requestedWorkspace) {
           setError(e instanceof Error ? e.message : "release failed");
+          if (e instanceof ApiError && e.status === 409) {
+            try {
+              const status = await fetchClaimHold(requestedWorkspace);
+              if (
+                mounted.current &&
+                activeWorkspace.current === requestedWorkspace
+              ) {
+                setHold(status.hold ?? null);
+                setRunning(status.running ?? []);
+                setGated(status.gated ?? 0);
+                setCanForceRelease(Boolean(status.hold?.held));
+              }
+            } catch {
+              // Never offer an unconditional force release without a fresh,
+              // authoritative holder to name in the confirmation.
+              if (
+                mounted.current &&
+                activeWorkspace.current === requestedWorkspace
+              ) {
+                setCanForceRelease(false);
+              }
+            }
+          }
         }
         return false;
       } finally {
-        if (mounted.current) setBusy(false);
+        if (mounted.current && activeWorkspace.current === requestedWorkspace) {
+          setBusy(false);
+        }
       }
     },
     [workspaceId],
   );
 
-  return { hold, running, gated, busy, error, release, refresh };
+  return {
+    hold,
+    running,
+    gated,
+    busy,
+    error,
+    canForceRelease,
+    release,
+    refresh,
+  };
 }
 
 export type { ClaimHold, ClaimHoldRunningAgent };

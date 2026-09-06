@@ -4,7 +4,7 @@
 
 /**
  * Unit tests for useWorkspaceSessionCount.
- * Covers the counting rule (non-agent tabs with a live PTY), the empty-workspace
+ * Covers the counting rule (non-agent tabs with an attachable PTY), the empty-workspace
  * short circuit, the workspace-switch reset that is the PUPPET-123 regression,
  * the stale-response guard, SSE-driven debounced refetch, the cancellation of a
  * debounce left pending across a workspace switch, and silent failure.

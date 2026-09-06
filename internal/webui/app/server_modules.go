@@ -127,6 +127,9 @@ func (app *Server) buildInfraModules() {
 	}
 
 	if storeBacked {
+		if app.config.ClaimHoldFn != nil {
+			app.wsModules = append(app.wsModules, webui.NewClaimHoldModule(app.config.ClaimHoldFn))
+		}
 		app.connectorDispatcher = app.buildConnectorDispatcher()
 		app.wsModules = append(app.wsModules, agents.NewModule(app.agentSvc, app.hub))
 		app.wsModules = append(app.wsModules, skills.NewModule(app.config.Store, fileAccessCfg))

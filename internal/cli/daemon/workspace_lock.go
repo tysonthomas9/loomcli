@@ -86,21 +86,37 @@ func (w *workspaceDaemonLock) UpdatePaths(cwd, socket, claimHold string) error {
 	return updateWorkspacePID(w.pidPath, cwd, socket, claimHold)
 }
 
-// Release drops the lock and removes the PID sidecar. Safe on nil.
+// Release drops the lock and marks the PID sidecar stopped. Safe on nil.
 //
 // The lock file itself intentionally remains on disk. Removing a flocked file
 // after unlock can delete a successor daemon's newly-acquired lock path during
 // handoff, allowing a third daemon to create and lock a different inode.
+// The sidecar's resolved paths also intentionally remain: an offline
+// `daemon release` may run from another cwd after the daemon has stopped and
+// still needs to find the persistent claim-hold file for this workspace.
 func (w *workspaceDaemonLock) Release() {
 	if w == nil {
 		return
 	}
 	if w.lockFile != nil {
-		_ = os.Remove(w.pidPath)
+		_ = markWorkspacePIDStopped(w.pidPath)
 		_ = lockfile.FlockUnlock(w.lockFile)
 		_ = w.lockFile.Close()
 		w.lockFile = nil
 	}
+}
+
+func markWorkspacePIDStopped(path string) error {
+	info, ok := readWorkspacePIDFile(path)
+	if !ok {
+		return nil
+	}
+	info.PID = 0
+	data, err := json.Marshal(info)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644) //nolint:gosec // user-private sidecar
 }
 
 // workspaceLockBusyError carries the existing daemon's PID so callers
@@ -214,11 +230,22 @@ func readWorkspacePIDFile(path string) (workspacePIDFile, bool) {
 // Filesystem-only on purpose: a hold has to work while fleet-db (and so
 // daemonregistry) is being redeployed, which is exactly when it is needed.
 func workspaceSidecar() (workspacePIDFile, bool) {
-	rt := detectWorkspaceDaemonRuntime()
-	if !rt.Running || rt.Dir == "" {
+	if rt := detectWorkspaceDaemonRuntime(); rt.Running && rt.Dir != "" {
+		return readWorkspacePIDFile(filepath.Join(rt.Dir, "daemon.pid"))
+	}
+	// The lock is free, so no daemon is supervising this workspace right now.
+	// The sidecar still holds the right paths: Release marks it stopped instead
+	// of deleting it precisely so an offline `daemon release`, run from some
+	// other cwd after the daemon exited, can still find the claim-hold file it
+	// was gating with. Same principle detectWorkspaceDaemonRuntime already
+	// states for a dead PID — these are paths, not liveness evidence. The
+	// caller dials the socket, finds nothing listening, and takes the offline
+	// path, which is the intended outcome.
+	workspace := strings.TrimSpace(os.Getenv("LOOM_WORKSPACE"))
+	if workspace == "" {
 		return workspacePIDFile{}, false
 	}
-	return readWorkspacePIDFile(filepath.Join(rt.Dir, "daemon.pid"))
+	return readWorkspacePIDFile(filepath.Join(cfgpkg.GetWorkspaceDir(workspace), "daemon.pid"))
 }
 
 // writeWorkspacePID stores the daemon PID as JSON so the format is

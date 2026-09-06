@@ -26,7 +26,17 @@
 # and per-scope walls add ~100 lines, so folding them in would trade this gate
 # for that one. Same trade abandoned_run.go and profile.go were granted above,
 # and the same sub-split end state applies.
-internal/cli/daemon/supervisor 31
+# Raised 31 -> 32 for claim_hold.go (the claim-hold subsystem: the hold record
+# and its scope predicates, the snapshot/reload path, the two-level gate and the
+# scope label, PUPPET-110/111/432). Recorded during the local/union <- origin/v5
+# trunk catch-up. It is a net MOVE, not new surface — the code came out of
+# claim.go (1088 -> 698) — but it cannot go back: claim.go stood at 1069 on
+# local/union BEFORE this merge, already over the 1000-line LOC ceiling, and the
+# merge added the release-clears-gated-status fix on top, so keeping one file
+# here would trade this gate for that one. Same trade abandoned_run.go,
+# profile.go and account_wall.go were granted above; same sub-split end state.
+# The pairing with the pre-existing claim_hold_test.go was already implied.
+internal/cli/daemon/supervisor 32
 # internal/cli gained the daemon input-await seam (agent_input_await.go) with
 # the human answer path; 26th file, same sub-split end state applies. The
 # hook-driven exit-code contract lives in exit.go rather than a file of its own,

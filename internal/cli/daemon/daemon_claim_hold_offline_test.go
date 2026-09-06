@@ -53,6 +53,72 @@ func writeHold(t *testing.T, dir string, h *supervisor.ClaimHold) string {
 	return path
 }
 
+func TestResolveClaimHoldEndpointsUsesWorkspaceTuple(t *testing.T) {
+	t.Setenv("LOOM_WORKSPACE", "CLAIM-ENDPOINTS")
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Chdir(t.TempDir())
+
+	lock, err := acquireWorkspaceDaemonLock()
+	if err != nil {
+		t.Fatalf("acquire workspace lock: %v", err)
+	}
+	if lock == nil {
+		t.Fatal("expected workspace lock")
+	}
+	defer lock.Release()
+
+	daemonDir := t.TempDir()
+	socketPath := filepath.Join(daemonDir, ".loom", "daemon.sock")
+	holdPath := filepath.Join(daemonDir, ".loom", claimHoldFileName)
+	if err := lock.UpdatePaths(daemonDir, socketPath, holdPath); err != nil {
+		t.Fatalf("update workspace paths: %v", err)
+	}
+
+	ep, err := resolveClaimHoldEndpoints()
+	if err != nil {
+		t.Fatalf("resolve claim-hold endpoints: %v", err)
+	}
+	if ep.projectDir != daemonDir || ep.socketPath != socketPath || ep.holdPath() != holdPath {
+		t.Fatalf("endpoints = %+v, hold=%q; want project=%q socket=%q hold=%q",
+			ep, ep.holdPath(), daemonDir, socketPath, holdPath)
+	}
+	if ep.source != controlSocketSourceWorkspaceLock {
+		t.Fatalf("source = %q, want %q", ep.source, controlSocketSourceWorkspaceLock)
+	}
+}
+
+func TestReleaseAfterWorkspaceDaemonStopsUsesRecordedHoldPath(t *testing.T) {
+	t.Setenv("LOOM_WORKSPACE", "CLAIM-OFFLINE")
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	lock, err := acquireWorkspaceDaemonLock()
+	if err != nil {
+		t.Fatalf("acquire workspace lock: %v", err)
+	}
+	daemonDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(daemonDir, ".loom"), 0o755); err != nil {
+		t.Fatalf("mkdir daemon .loom: %v", err)
+	}
+	holdPath := writeHold(t, daemonDir, &supervisor.ClaimHold{
+		Held: true, Actor: "union-autodeploy", Reason: "deploy",
+		Since: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
+	})
+	if err := lock.UpdatePaths(daemonDir, filepath.Join(daemonDir, ".loom", "daemon.sock"), holdPath); err != nil {
+		t.Fatalf("update workspace paths: %v", err)
+	}
+	lock.Release()
+
+	// The deploy command need not share the daemon's cwd.
+	t.Chdir(t.TempDir())
+	releaseFlags(t, "union-autodeploy", false)
+	if err := runDaemonRelease(nil, nil); err != nil {
+		t.Fatalf("offline release from another cwd: %v", err)
+	}
+	if _, statErr := os.Stat(holdPath); !os.IsNotExist(statErr) {
+		t.Fatalf("recorded claim-hold file still present: %v", statErr)
+	}
+}
+
 // captureStdout runs fn with os.Stdout redirected and returns what it printed.
 // The release path reports what it cleared, and that wording is part of the
 // contract: an operator has no other signal that the file, not a daemon,

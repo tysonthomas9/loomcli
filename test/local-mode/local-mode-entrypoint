@@ -25,6 +25,10 @@ case "$AGENT_BACKEND" in
 esac
 PLAN_AGENT="${LOOM_LOCAL_MODE_PLAN_AGENT:-$DEFAULT_PLAN_AGENT}"
 CODE_AGENT="${LOOM_LOCAL_MODE_CODE_AGENT:-$DEFAULT_CODE_AGENT}"
+CODE_ROLE="task"
+if [ "$AGENT_BACKEND" != "localdogfood" ]; then
+  CODE_ROLE="local-mode-task"
+fi
 PLAN_TASK_ID="${LOOM_LOCAL_MODE_PLAN_TASK_ID:-${WORKSPACE}-2}"
 CODE_TASK_ID="${LOOM_LOCAL_MODE_CODE_TASK_ID:-${WORKSPACE}-3}"
 LOOM_BIND="${LOOM_LOCAL_MODE_BIND:-0.0.0.0}"
@@ -213,10 +217,41 @@ register_agents() {
   loom agentdef remove "$PLAN_AGENT" >/dev/null 2>&1 || true
   loom agentdef remove "$CODE_AGENT" >/dev/null 2>&1 || true
   loom agentdef add "$PLAN_AGENT" --role plan --auto --backend "$AGENT_BACKEND" --repos source-repo
-  loom agentdef add "$CODE_AGENT" --role task --auto --backend "$AGENT_BACKEND" --repos source-repo
+  loom agentdef add "$CODE_AGENT" --role "$CODE_ROLE" --auto --backend "$AGENT_BACKEND" --repos source-repo
   # After the roles exist, before the daemon starts: role config is resolved
   # once, at daemon creation, so a policy applied later is inert until a bounce.
-  allow_harness_prompts plan task
+  allow_harness_prompts plan "$CODE_ROLE"
+}
+
+prepare_local_mode_coder_role() {
+  if [ "$CODE_ROLE" = "task" ]; then
+    return 0
+  fi
+
+  prompt_path="${WORKSPACE_ROOT}/.loom/local-mode-task.md"
+  mkdir -p "$(dirname "$prompt_path")"
+  cat > "$prompt_path" <<'EOF'
+You are the local-mode end-to-end coder for agent {{.AgentName}}.
+
+{{.WorkspaceBlock}}
+{{.SafetyBlock}}
+
+Work only on the assigned task {{.TaskID}}:
+{{.TaskDetail}}
+
+Implement the approved design in the assigned repo worktree. Run `make gate`,
+commit the result, then close the task with `loom data close {{.TaskID}}
+--reason "Completed with tests and code review"` and run `loom complete`.
+
+This isolated fixture intentionally uses a local bare Git origin and has no
+GitHub repository. A committed change plus the recorded Loom diff is its
+delivery contract; do not run `loom stack publish` or create a pull request.
+Exit immediately after signaling completion.
+EOF
+
+  loom role remove "$CODE_ROLE" >/dev/null 2>&1 || true
+  loom role add "$CODE_ROLE" --kind worker --prompt-file ".loom/local-mode-task.md"
+  loom role set "$CODE_ROLE" task_filter has_design
 }
 
 prepare_codex_credentials() {
@@ -563,6 +598,7 @@ create_workspace
 create_agent_worktree "$PLAN_AGENT"
 create_agent_worktree "$CODE_AGENT"
 trust_codex_local_mode_paths
+prepare_local_mode_coder_role
 register_agents
 start_serve
 seed_tasks
