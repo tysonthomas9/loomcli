@@ -13,7 +13,7 @@ const offer: RecoveryHandle = {
   workspace: "WS",
   source_repos: [],
   expires_at: "2026-09-05T12:01:00Z",
-  manifest: "fleet.issue-workspace.v1",
+  manifest: "fleet.issue-workspace.v2",
 };
 const document = JSON.stringify({
   manifest: offer.manifest,
