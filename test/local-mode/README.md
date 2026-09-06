@@ -131,3 +131,50 @@ Troubleshooting:
   errors. This is a Podman machine boot failure, not a local-mode app failure.
   Recreate or downgrade/fix the Podman machine before running
   `make local-mode-up`, or use Docker Compose when available.
+
+## PostgreSQL committed workspace bootstrap
+
+`make local-mode-postgres-up` layers `docker-compose.postgres.yml` onto the
+standard deterministic local-mode stack. It adds PostgreSQL 16 with a
+project-scoped volume, retains Redis for auxiliary services, and selects Fleet's
+`--backend postgres --pg-committed-workspace-creation` path. The paired Fleet
+build must support that flag. The normal entrypoint creates the workspace,
+agents and tasks through product APIs; this override inserts no database state.
+
+Use a new project and free ports so workspace creation runs against fresh storage:
+
+```sh
+LOCAL_MODE_COMPOSE_PROJECT=loom-pg-sse-owned \
+LOCAL_MODE_FLEETDB_PORT=8580 LOCAL_MODE_API_PORT=8582 LOCAL_MODE_UI_PORT=8583 \
+LOCAL_MODE_COMPOSE_UP_FLAGS='--build -d' make local-mode-postgres-up
+```
+
+The default Fleet build context is the sibling `fleet-db` checkout. Set
+`LOCAL_MODE_FLEETDB_BUILD_CONTEXT` to an absolute path to test another paired
+checkout. Existing image, compose-engine and extra-override knobs apply. The
+PostgreSQL port is not published; its fixed credentials are disposable local
+fixture credentials, not deployment configuration.
+
+This path uses `localdogfood`, not a paid AI backend. Successful startup is not
+proof of SSE delivery or autonomous task completion. Enrolled public claim/release
+routing remains incomplete; report daemon failures rather than substituting
+manual locks or synthetic outcomes. Browser verification must record actual
+stream requests and UI updates separately from startup.
+
+After evidence capture, remove only this run's resources using the same project
+and any extra override files:
+
+```sh
+LOCAL_MODE_COMPOSE_PROJECT=loom-pg-sse-owned make local-mode-postgres-down
+```
+
+This removes the named project's volumes. Do not use an existing shared project
+or reuse a previously populated workspace as clean-genesis proof.
+
+Workspace-local repository names (for example `source-repo`) are first-class
+Fleet repo records, not global `org/repo` ownership keys. Loom's RepoStore creates
+and deletes those records only; workspace configuration and worktree resolution
+load them through RepoStore.List. It must not PATCH the global workspace catalog
+with bare names or compensate a catalog rejection by deleting a successfully
+created repository. Git remote URLs and local paths are not coerced into global
+catalog identities.

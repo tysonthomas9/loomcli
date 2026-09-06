@@ -1,0 +1,251 @@
+- generic [ref=e1] clickable [onclick]
+  - status
+  - link "Skip to main content" [ref=e2]
+  - banner
+    - button "Go home" [ref=e4]
+      - heading "Loom home" [level=1, ref=e16]
+        - button "Loom home" [ref=e33]
+          - StaticText "Loom"
+    - button "Switch to light mode" [ref=e5]
+  - navigation "Primary" [ref=e3]
+    - button "Home" [ref=e6]
+      - tooltip "Home"
+    - button "Workspaces" [ref=e7]
+      - tooltip "Workspaces"
+    - button "Pull Requests" [ref=e8]
+      - tooltip "Pull Requests"
+    - button "Terminal" [ref=e9]
+      - tooltip "Terminal"
+    - button "Files" [ref=e10]
+      - tooltip "Files"
+    - button "Skills" [ref=e11]
+      - tooltip "Skills"
+    - region "Workspace selector" [ref=e12]
+      - button "Switch to LOCALMODE" [ref=e17]
+      - button "Add workspace" [ref=e18]
+        - StaticText "+"
+    - button "Settings" [ref=e13]
+      - tooltip "Settings"
+  - complementary
+    - generic
+      - button "Active workspace: LOCALMODE. Click to switch." [expanded=false, ref=e19]
+        - StaticText "LOCALMODE"
+      - button "Collapse workspace tree" [expanded=true, ref=e20]
+      - StaticText "AGENTS"
+      - button "Agent: local-coder" [ref=e21]
+        - StaticText "LC"
+        - StaticText "Local-Coder"
+        - StaticText "Task"
+        - StaticText "Ready"
+      - button "Archive local-coder" [ref=e22]
+      - button "Drag to reorder local-coder" [ref=e23]
+        - image
+      - button "Agent: local-planner" [ref=e24]
+        - StaticText "LP"
+        - StaticText "Local-Planner"
+        - StaticText "Plan"
+        - StaticText "Ready"
+      - button "Archive local-planner" [ref=e25]
+      - button "Drag to reorder local-planner" [ref=e26]
+        - image
+      - status
+      - button "+ Add agent" [ref=e27]
+      - region "REPOS" [ref=e28]
+        - heading "REPOS" [level=2, ref=e34]
+        - button "source-repo" [ref=e35]
+          - StaticText "source-repo"
+        - button "+ Add Repo" [ref=e36]
+      - separator "Resize workspace sidebar" [ref=e29] focusable [tabindex]: 210
+  - main
+    - tablist "View mode"
+      - tab "Kanban" [selected, ref=e37]
+      - tab "List" [ref=e38]
+    - searchbox "Search tasks..." [ref=e30]
+    - button "New Issue" [ref=e14]
+      - StaticText "+ New Issue"
+    - generic
+      - toolbar "Lane controls"
+        - StaticText "Compact"
+        - switch "Compact" [checked=false, ref=e39]
+      - region "Collapse Local mode dogfood epic Open epic LOCALMODE-1: Local mode dogfood epic 5 issues Run epic LOCALMODE-1 Unclaimed" [ref=e31]
+        - sectionheader
+          - button "Collapse Local mode dogfood epic" [expanded=true, ref=e42]
+          - heading "Open epic LOCALMODE-1: Local mode dogfood epic" [level=3, ref=e43]
+            - button "Open epic LOCALMODE-1: Local mode dogfood epic" [ref=e53]
+              - StaticText "Local mode dogfood epic"
+              - StaticText "LOCALMODE-1"
+          - StaticText "5"
+          - button "Run epic LOCALMODE-1" [ref=e44]
+            - StaticText "Run"
+          - StaticText "Unclaimed"
+        - generic
+          - heading "Backlog" [level=3, ref=e54]
+          - heading "Open" [level=3, ref=e55]
+          - heading "Blocked" [level=3, ref=e56]
+          - heading "In Progress" [level=3, ref=e57]
+          - heading "Review" [level=3, ref=e58]
+          - heading "Done" [level=3, ref=e59]
+          - region "Backlog issues" [ref=e45]
+            - list
+              - button "Issue: Backlog grooming placeholder (backlog)" [ref=e76]
+                - sectionheader
+                  - StaticText "LOCALMODE-6"
+                - heading "Backlog grooming placeholder" [level=3, ref=e83]
+                - sectionfooter
+          - region "Open issues" [ref=e46]
+            - list
+              - button "Issue: Local mode planner dogfood" [ref=e77]
+                - sectionheader
+                  - StaticText "LOCALMODE-2"
+                - heading "Local mode planner dogfood" [level=3, ref=e84]
+                - sectionfooter
+              - button "Issue: Local mode coder dogfood" [ref=e78]
+                - sectionheader
+                  - StaticText "LOCALMODE-3"
+                - heading "Local mode coder dogfood" [level=3, ref=e85]
+                - sectionfooter
+              - button "Issue: Document local-mode runbook" [ref=e79]
+                - sectionheader
+                  - StaticText "LOCALMODE-4"
+                - heading "Document local-mode runbook" [level=3, ref=e86]
+                - sectionfooter
+          - region "Blocked issues" [ref=e47]
+            - list
+              - status "No blocked issues"
+                - paragraph
+                  - StaticText "No blocked issues"
+          - region "In Progress issues" [ref=e48]
+            - list
+              - status "No issues in progress"
+                - paragraph
+                  - StaticText "No issues in progress"
+          - region "Review issues" [ref=e49]
+            - list
+              - button "Issue: Exercise epic swimlane UI — disconnected replay" [ref=e80]
+                - sectionheader
+                  - StaticText "LOCALMODE-5"
+                - heading "Exercise epic swimlane UI — disconnected replay" [level=3, ref=e87]
+                - sectionfooter
+                  - StaticText "LP"
+          - region "Done issues" [ref=e50]
+            - list
+              - status "No completed issues"
+                - paragraph
+                  - StaticText "No completed issues"
+      - status
+    - generic [ref=e15] clickable [onclick]
+      - dialog "Details for Exercise epic swimlane UI — disconnected replay" [ref=e32] clickable [onclick]
+        - generic
+          - sectionheader
+            - StaticText "LOCALMODE-5"
+            - combobox "Change issue status" [expanded=false, ref=e60]: Review
+              - MenuListPopup
+                - option "Open" [ref=e88]
+                - option "In Progress" [ref=e89]
+                - option "Blocked" [ref=e90]
+                - option "Deferred" [ref=e91]
+                - option "Review" [selected, ref=e92]
+                - option "Closed" [ref=e93]
+            - button "Copy link" [ref=e61]
+            - button "Exit full screen" [ref=e62]
+            - button "Close panel" [ref=e63]
+            - button "Exercise epic swimlane UI — disconnected replay. Click to edit." [ref=e64]
+              - heading "Exercise epic swimlane UI — disconnected replay" [level=2, ref=e81] clickable [cursor:pointer]
+          - StaticText "Task"
+          - button "Assignee: local-planner. Click to change." [expanded=false, ref=e65]
+            - StaticText "local-planner"
+          - button "Repo: source-repo. Click to change." [expanded=false, ref=e66]
+            - StaticText "source-repo"
+          - StaticText "Created: "
+          - StaticText "Sep 5, 2026"
+        - button "Approve" [ref=e40]
+          - StaticText "✓ Approve"
+        - button "Reject" [ref=e41]
+          - StaticText "✗ Reject"
+        - tablist "Issue detail tabs"
+          - tab "Details" [selected, ref=e67]
+            - StaticText "Details"
+          - tab "Runs" [ref=e68]
+            - StaticText "Runs"
+        - tabpanel "Details"
+          - generic
+            - heading "DESCRIPTION" [level=3, ref=e69]
+            - generic
+              - paragraph
+                - StaticText "Verify epic grouping on the kanban board."
+              - button "Edit description" [ref=e94]
+                - StaticText "Edit"
+          - region "Pull request" [ref=e51]
+            - StaticText "No pull request yet"
+            - StaticText "The agent hasn't pushed a branch for this task."
+          - generic
+            - heading "BLOCKED BY (1)" [level=3, ref=e70]
+              - StaticText "BLOCKED BY (1)"
+            - button "Add dependency" [ref=e71]
+              - StaticText "Add"
+            - list
+              - button "open LOCALMODE-1 Local mode dogfood epic Parent Child Remove dependency LOCALMODE-1" [ref=e82]
+                - StaticText "LOCALMODE-1"
+                - StaticText "Local mode dogfood epic"
+                - StaticText "Parent Child"
+                - button "Remove dependency LOCALMODE-1" [ref=e95]
+          - region "Task journey" [ref=e52]
+            - heading "JOURNEY" [level=3, ref=e72]
+            - list
+              - listitem [level=1]
+                - time
+                  - StaticText "23:14:44"
+                - article
+                  - StaticText "Open"
+                  - StaticText "unclaimed"
+                  - StaticText "4m 03s"
+                  - list
+                    - listitem [level=2]
+                      - time
+                        - StaticText "23:14:44"
+                      - StaticText "Created issue"
+              - listitem [level=1]
+                - time
+                  - StaticText "23:18:48"
+                - article
+                  - StaticText "Review"
+                  - StaticText "unclaimed"
+                  - StaticText "5m 21s"
+                  - list
+                    - listitem [level=2]
+                      - time
+                        - StaticText "23:18:48"
+                      - StaticText "operator@local changed status from Open to Review"
+                    - listitem [level=2]
+                      - time
+                        - StaticText "23:19:13"
+                      - StaticText "Updated title"
+                    - listitem [level=2]
+                      - time
+                        - StaticText "23:19:53"
+                      - StaticText "Updated title"
+                    - listitem [level=2]
+                      - time
+                        - StaticText "23:23:52"
+                      - StaticText "Added comment"
+              - listitem [level=1]
+                - time
+                  - StaticText "23:24:09"
+                - StaticText "Now"
+                - StaticText "in this stage for 5m 21s"
+            - paragraph
+              - StaticText "Stages derived from 5 events returned."
+          - generic
+            - heading "COMMENTS (1)" [level=3, ref=e73]
+              - StaticText "COMMENTS (1)"
+            - generic
+              - StaticText "O"
+              - StaticText "operator@local"
+              - time
+                - StaticText "just now"
+              - paragraph
+                - StaticText "PostgreSQL browser proof: persisted comment after SSE reconnect."
+          - form
+            - textbox "Add a comment" [ref=e74]
+            - StaticText "Cmd+Enter to submit"
+            - button "Add Comment" [disabled, ref=e75]
