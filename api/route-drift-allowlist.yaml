@@ -1,0 +1,136 @@
+# Known gaps between api/openapi.yaml and the routes the server actually
+# registers. Enforced by TestOpenAPIRouteDrift in internal/webui/app.
+#
+# Two directions, two keys:
+#
+#   unserved:   declared in the spec but NOT registered by the server.
+#   undeclared: registered by the server but NOT declared in the spec.
+#
+# Every entry is `{ route: "METHOD /path", reason: "..." }`. Routes are matched
+# after every `{wildcard}` is normalized to a bare `{}`, so renaming a path
+# parameter on either side does not turn an entry stale.
+#
+# TestRouteDriftAllowlistIsClean rejects an entry with an empty reason, an entry
+# that matches nothing any more, and an entry that is ALSO declared in the spec.
+# So documenting a route in openapi.yaml forces its entry out of this file — that
+# is the point: the list is meant to shrink.
+#
+# The `/api/internal/workers/` family is deliberately absent. It is served behind
+# a token-authed covering sub-mount, which the mount table in route_drift_test.go
+# already excludes; an entry here would be flagged as a no-op.
+
+# Nothing. Every operation the spec declares is reachable on a maximal server.
+unserved: []
+
+undeclared:
+  # ── Internal control planes: served, deliberately undocumented ──────────────
+  # These are not part of the public API surface. They are called by the driver
+  # and by task runs with a run token, never by the web UI or an external client,
+  # so they are intentionally absent from the spec rather than merely missing.
+  - route: "POST /api/workspaces/{ws}/driver/{op}"
+    reason: "driver control plane, run-token authed"
+  - route: "POST /api/workspaces/{ws}/driver/events/await"
+    reason: "driver control plane, run-token authed"
+  - route: "POST /api/workspaces/{ws}/driver/workflows/await"
+    reason: "driver control plane, run-token authed"
+  - route: "POST /api/workspaces/{ws}/driver/workflows/start"
+    reason: "driver control plane, run-token authed"
+  - route: "GET /api/workspaces/{ws}/driver/events/awaits"
+    reason: "driver control plane, run-token authed"
+  - route: "GET /api/workspaces/{ws}/driver/watch/epic"
+    reason: "driver control plane, run-token authed"
+  - route: "POST /api/workspaces/{ws}/task-run/{op}"
+    reason: "task-run callback surface, run-token authed"
+  - route: "PUT /api/workspaces/{ws}/task-run/artifacts/{artifactId}/content"
+    reason: "task-run callback surface, run-token authed"
+
+  # ── Documentable: real API surface the spec has not caught up with ──────────
+  # PUPPET-488 children 4 and 5 move these into api/openapi.yaml. Each one that
+  # lands there must be deleted from here in the same change, or
+  # TestRouteDriftAllowlistIsClean fails on the contradiction.
+  - route: "DELETE /api/workspaces/{ws}/agents/{name}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "DELETE /api/workspaces/{ws}/roles/{role}/skills/{name}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "DELETE /api/workspaces/{ws}/roles/{role}/skills/{name}/files/{path...}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "DELETE /api/workspaces/{ws}/skills/{name}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "DELETE /api/workspaces/{ws}/skills/{name}/files/{path...}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/config/terminal"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/daemon/config"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/daemon/supervisor"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/local/settings"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/agents/{name}/queue"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/issues/search"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/issues/{id}/comments"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/issues/{id}/dependencies"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/pull-requests"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/repos"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/roles/{role}/skills/{name}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/roles/{role}/skills/{name}/files/{path...}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/runs/{runId}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/runs/{runId}/events"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/runs/{runId}/stream"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/skill-capabilities"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/skills"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/skills/{name}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/skills/{name}/files/{path...}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/trigger-deliveries"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/trigger-deliveries/{deliveryId}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/trigger-events"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/trigger-events/{eventId}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "PATCH /api/local/settings"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "PATCH /api/workspaces/{ws}/agents/{name}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "PATCH /api/workspaces/{ws}/roles/{role}/skills/{name}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "PATCH /api/workspaces/{ws}/skills/{name}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "POST /api/workspaces/{ws}/agents/{name}/terminal/session"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "POST /api/workspaces/{ws}/approvals"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "POST /api/workspaces/{ws}/issues/{id}/reopen"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "POST /api/workspaces/{ws}/repos"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "POST /api/workspaces/{ws}/roles/{role}/skills"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "POST /api/workspaces/{ws}/skills"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "POST /api/workspaces/{ws}/webhooks/{name}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "POST /api/workspaces/{ws}/workflows/{name}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "POST /api/workspaces/{ws}/workflows/{name}/versions"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "PUT /api/workspaces/{ws}/roles/{role}/skills/{name}/files/{path...}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "PUT /api/workspaces/{ws}/skills/{name}/files/{path...}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"

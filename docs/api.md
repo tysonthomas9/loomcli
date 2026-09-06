@@ -32,6 +32,17 @@ These routes do not require bearer token authentication:
 - `POST/GET /api/workspaces/{ws}/fleet/*` (use fleet-specific auth)
 - Frontend static files (non-`/api/` paths)
 
+## Spec drift
+
+`api/openapi.yaml` is the declared API surface; the routes the server registers
+are the served one. `TestOpenAPIRouteDrift`
+(`internal/webui/app/route_drift_test.go`) compares the two in both directions on
+every `go test ./...` run, so a route added without a spec entry — or a spec
+entry with no route behind it — fails the Go gate. Known, deliberate gaps live in
+`api/route-drift-allowlist.yaml`, each with a reason; documenting a route in the
+spec requires deleting its allowlist entry in the same change. Run it alone with
+`make check-route-drift`.
+
 ## Response Format
 
 Most endpoints return a standard envelope:
