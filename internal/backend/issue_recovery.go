@@ -6,7 +6,8 @@ import (
 )
 
 // IssueRecoverySnapshot preserves the complete native certified issue manifest.
-// Through is a committed lower bound, not an authorization to reset a client.
+// Through is the v2 producer snapshot boundary under its guarded-writer contract.
+// It is not authorization to reset a client or proof of cross-request identity.
 type IssueRecoverySnapshot struct {
 	Manifest  string
 	Workspace string

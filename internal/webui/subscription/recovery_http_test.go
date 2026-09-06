@@ -37,14 +37,14 @@ func httpRecoveryRequest(principal, workspace, handle string) *http.Request {
 func TestRecoveryHTTPUsesCapturedSourceAndPreservesDocument(t *testing.T) {
 	registry := realtime.NewRecoveryRegistry()
 	defer registry.Close()
-	raw := []byte(`{ "manifest":"fleet.issue-workspace.v1", "workspace":"WS", "through":"c1.MS0w", "issues":[], "total":0, "ready":[], "blocked":[], "deferred":[], "future":{"keep":"verbatim"} }`)
+	raw := []byte(`{ "manifest":"fleet.issue-workspace.v2", "workspace":"WS", "through":"c1.MS0w", "issues":[], "total":0, "ready":[], "blocked":[], "deferred":[], "future":{"keep":"verbatim"} }`)
 	oldCalls, newCalls := 0, 0
 	var selected backend.IssueRecoveryBackend = httpRecoverySource(func(ctx context.Context) (backend.IssueRecoverySnapshot, error) {
 		oldCalls++
 		deadline, ok := ctx.Deadline()
 		require.True(t, ok)
 		require.LessOrEqual(t, time.Until(deadline), 15*time.Second)
-		return backend.IssueRecoverySnapshot{Manifest: "fleet.issue-workspace.v1", Workspace: "WS", Through: "c1.MS0w", Document: raw}, nil
+		return backend.IssueRecoverySnapshot{Manifest: "fleet.issue-workspace.v2", Workspace: "WS", Through: "c1.MS0w", Document: raw}, nil
 	})
 	handle, err := registry.Register("user", "WS", nil, selected)
 	require.NoError(t, err)
@@ -178,7 +178,7 @@ func TestRecoveryHTTPCanceledReadCannotPublishSuccess(t *testing.T) {
 	defer cancel()
 	handle, err := registry.Register("user", "WS", nil, httpRecoverySource(func(context.Context) (backend.IssueRecoverySnapshot, error) {
 		cancel()
-		return backend.IssueRecoverySnapshot{Manifest: "fleet.issue-workspace.v1", Workspace: "WS", Through: "c1.MS0w", Document: []byte(`{"secret":"late success"}`)}, nil
+		return backend.IssueRecoverySnapshot{Manifest: "fleet.issue-workspace.v2", Workspace: "WS", Through: "c1.MS0w", Document: []byte(`{"secret":"late success"}`)}, nil
 	}))
 	require.NoError(t, err)
 	req := httpRecoveryRequest("user", "WS", handle.Handle)
