@@ -144,19 +144,29 @@ func runCodexRemoteTUI(ctx context.Context, cfg CodexLeadRuntimeConfig, endpoint
 	_, _ = fmt.Fprintln(cfg.Stdout, "Launching controlled Codex lead session...")
 	_, _ = fmt.Fprintln(cfg.Stdout, "")
 	// #nosec G204 -- cfg.CodexPath/workDir/prompt are the same trusted inputs used by interactive agent launch.
-	tuiCmd := exec.CommandContext(ctx, cfg.CodexPath,
-		"--remote", endpoint,
-		"--no-alt-screen",
-		"--dangerously-bypass-approvals-and-sandbox",
-		"-C", cfg.WorkDir,
-		cfg.Prompt,
-	)
+	tuiCmd := exec.CommandContext(ctx, cfg.CodexPath, codexRemoteTUIArgs(cfg, endpoint)...)
 	tuiCmd.Dir = cfg.WorkDir
 	tuiCmd.Env = os.Environ()
 	tuiCmd.Stdin = cfg.Stdin
 	tuiCmd.Stdout = cfg.Stdout
 	tuiCmd.Stderr = cfg.Stderr
 	return tuiCmd.Run()
+}
+
+// codexRemoteTUIArgs builds the remote-TUI argv. An empty prompt means the
+// persona is suppressed (--prompt builtin:none) and the positional is omitted
+// entirely; `codex ... ""` is not the same as `codex ...`.
+func codexRemoteTUIArgs(cfg CodexLeadRuntimeConfig, endpoint string) []string {
+	args := []string{
+		"--remote", endpoint,
+		"--no-alt-screen",
+		"--dangerously-bypass-approvals-and-sandbox",
+		"-C", cfg.WorkDir,
+	}
+	if cfg.Prompt != "" {
+		args = append(args, cfg.Prompt)
+	}
+	return args
 }
 
 func normalizeCodexLeadRuntimeConfig(cfg CodexLeadRuntimeConfig) CodexLeadRuntimeConfig {
