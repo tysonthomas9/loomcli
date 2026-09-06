@@ -31,6 +31,7 @@ import {
 import type { Issue, Status } from "@/types";
 
 import App from "../App";
+import { useParams } from "react-router-dom";
 
 // Mock react-router-dom
 const mockNavigate = vi.fn();
@@ -791,6 +792,7 @@ function createMockUseIssueDetailReturn(
     issueDetails: unknown;
     isLoading: boolean;
     error: string | null;
+    isNotFound: boolean;
     fetchIssue: ReturnType<typeof vi.fn>;
     clearIssue: ReturnType<typeof vi.fn>;
     updateIssueDetails: ReturnType<typeof vi.fn>;
@@ -800,6 +802,7 @@ function createMockUseIssueDetailReturn(
     issueDetails: null,
     isLoading: false,
     error: null,
+    isNotFound: false,
     fetchIssue: vi.fn(),
     clearIssue: vi.fn(),
     updateIssueDetails: vi.fn(),
@@ -934,6 +937,7 @@ vi.mock("@/components/WorkspaceTree/AgentSection", () => ({
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(useParams).mockReturnValue({ workspaceId: "test-ws-id" });
     mockCreateWorkspaceAgent.mockResolvedValue({
       name: "planner",
       role_name: "plan",
@@ -2213,37 +2217,190 @@ describe("App", () => {
       expect(screen.getByText("Detail Issue Title")).toBeInTheDocument();
     });
 
-    it("syncs loaded issue details from fresher live issue store updates", async () => {
-      const updateIssueDetails = vi.fn();
-      const liveIssue = createMockIssue({
-        id: "issue-1",
-        title: "Live Detail Issue",
-        status: "in_progress",
-        updated_at: "2024-01-01T00:01:00Z",
+    it("invalidates loaded detail on list changes without publishing timestamp patches", async () => {
+      mockUsePanelManager.mockReturnValue({
+        activePanel: { type: "issue", id: "issue-1" },
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: mockIsOpen,
       });
-      mockStoreState = createMockUseIssuesReturn({ issues: [liveIssue] });
+      const updateIssueDetails = vi.fn();
+      const fetchIssue = vi.fn();
+      const original = createMockIssue({
+        id: "issue-1",
+        title: "Original",
+        assignee: "old",
+      });
+      mockStoreState = createMockUseIssuesReturn({ issues: [original] });
+      const details = {
+        ...original,
+        title: "Fresh detail",
+        assignee: "current",
+      };
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
-          issueDetails: {
-            id: "issue-1",
-            title: "Live Detail Issue",
-            priority: 2,
-            status: "open",
-            issue_type: "task",
-            created_at: "2024-01-01T00:00:00Z",
-            updated_at: "2024-01-01T00:00:00Z",
-          },
+          issueDetails: details,
+          fetchIssue,
           updateIssueDetails,
         }),
       );
-
-      render(<App />);
-
-      await waitFor(() => {
-        expect(updateIssueDetails).toHaveBeenCalledWith(liveIssue);
+      const { rerender } = render(<App />);
+      expect(updateIssueDetails).not.toHaveBeenCalled();
+      const stale = createMockIssue({
+        id: "issue-1",
+        title: "Stale clock-ahead row",
+        updated_at: "2099-01-01T00:00:00Z",
       });
+      mockStoreState = createMockUseIssuesReturn({ issues: [stale] });
+      rerender(<App />);
+      await waitFor(() => expect(fetchIssue).toHaveBeenCalledWith("issue-1"));
+      expect(updateIssueDetails).not.toHaveBeenCalled();
+      fetchIssue.mockClear();
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: { ...details, title: "Recovered", assignee: undefined },
+          fetchIssue,
+          updateIssueDetails,
+        }),
+      );
+      rerender(<App />);
+      expect(updateIssueDetails).not.toHaveBeenCalled();
+      expect(fetchIssue).not.toHaveBeenCalled();
     });
 
+    it.each([false, true])(
+      "only leaves a detail route for confirmed missing=%s",
+      (missing) => {
+        vi.mocked(useParams).mockReturnValue({
+          workspaceId: "test-ws-id",
+          issueId: "issue-1",
+        });
+        mockUseRouteView.mockReturnValue(createViewStateReturn("issue-detail"));
+        vi.mocked(useIssueDetail).mockReturnValue(
+          createMockUseIssueDetailReturn({
+            error: missing ? "Not found" : "Service unavailable",
+            isNotFound: missing,
+          }),
+        );
+        render(<App />);
+        if (missing) expect(mockSetActiveView).toHaveBeenCalledWith("kanban");
+        else expect(mockSetActiveView).not.toHaveBeenCalled();
+      },
+    );
+    it("refetches the same selected ID when workspace changes its fetch owner", () => {
+      vi.mocked(useParams).mockReturnValue({
+        workspaceId: "test-ws-id",
+        issueId: "issue-1",
+      });
+      mockUseRouteView.mockReturnValue(createViewStateReturn("issue-detail"));
+      const first = vi.fn(),
+        second = vi.fn(),
+        clearIssue = vi.fn();
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({ fetchIssue: first, clearIssue }),
+      );
+      const { rerender } = render(<App />);
+      expect(first).toHaveBeenCalledWith("issue-1");
+      const prior = vi.mocked(useWorkspaceContext).mock.results.at(-1)!.value;
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        ...prior,
+        workspaceId: "other-ws",
+      });
+      vi.mocked(useParams).mockReturnValue({
+        workspaceId: "other-ws",
+        issueId: "issue-1",
+      });
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({ fetchIssue: second, clearIssue }),
+      );
+      rerender(<App />);
+      expect(second).toHaveBeenCalledWith("issue-1");
+    });
+    it("does not refetch retained old detail when a different selection is pending", () => {
+      const old = createMockIssue({ id: "issue-a", title: "Old" });
+      const selected = createMockIssue({ id: "issue-b", title: "Selected" });
+      mockStoreState = createMockUseIssuesReturn({ issues: [old, selected] });
+      mockUsePanelManager.mockReturnValue({
+        activePanel: { type: "issue", id: "issue-b" },
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: mockIsOpen,
+      });
+      const fetchIssue = vi.fn();
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: old,
+          fetchIssue,
+          isLoading: true,
+        }),
+      );
+      const { rerender } = render(<App />);
+      fetchIssue.mockClear();
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [{ ...old, title: "Changed old" }, selected],
+      });
+      rerender(<App />);
+      expect(fetchIssue).not.toHaveBeenCalledWith("issue-a");
+    });
+
+    it("preserves an open detail when only the underlying view changes", () => {
+      const row = createMockIssue({ id: "issue-a", title: "Open detail" });
+      mockStoreState = createMockUseIssuesReturn({ issues: [row] });
+      mockUsePanelManager.mockReturnValue({
+        activePanel: { type: "issue", id: "issue-a" },
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: mockIsOpen,
+      });
+      const clearIssue = vi.fn(),
+        fetchIssue = vi.fn();
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: row,
+          clearIssue,
+          fetchIssue,
+        }),
+      );
+      const { rerender } = render(<App />);
+      clearIssue.mockClear();
+      mockUseRouteView.mockReturnValue(createViewStateReturn("table"));
+      rerender(<App />);
+      expect(clearIssue).not.toHaveBeenCalled();
+    });
+    it("does not clear reopened detail when an older close timer elapses", () => {
+      vi.useFakeTimers();
+      try {
+        const old = createMockIssue({ id: "issue-a", title: "Old" });
+        const next = createMockIssue({
+          id: "issue-b",
+          title: "Reopened target issue",
+        });
+        mockStoreState = createMockUseIssuesReturn({ issues: [old, next] });
+        mockUsePanelManager.mockReturnValue({
+          activePanel: { type: "issue", id: "issue-a" },
+          pendingPanel: null,
+          openPanel: mockOpenPanel,
+          closePanel: mockClosePanel,
+          isOpen: mockIsOpen,
+        });
+        const clearIssue = vi.fn();
+        vi.mocked(useIssueDetail).mockReturnValue(
+          createMockUseIssueDetailReturn({ issueDetails: old, clearIssue }),
+        );
+        render(<App />);
+        clearIssue.mockClear();
+        fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+        expect(mockClosePanel).toHaveBeenCalled();
+        fireEvent.click(screen.getByText("Reopened target issue"));
+        act(() => vi.advanceTimersByTime(301));
+        expect(clearIssue).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
     it("passes error state to IssueDetailPanel when fetch fails", () => {
       const issues = [
         createMockIssue({
