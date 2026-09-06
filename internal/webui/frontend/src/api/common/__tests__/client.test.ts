@@ -817,6 +817,42 @@ describe("API Client", () => {
       }
     });
 
+    // PUPPET-529 characterisation: /api/workspaces/{ws}/claims/hold answers 503
+    // permanently wherever the server can reach no agent supervisor, and
+    // useClaimHold swallows it by design — but the transport does not, so a
+    // 10 s poll produces a workspace-unavailable notification and a
+    // POST /api/client-errors forever. This documents that behaviour; the fix
+    // inverts both assertions.
+    it("503 from /claims/hold notifies workspace-unavailable and files a client-error report", async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        // Distinct statusText: errorReporter dedups on `${type}:${message}`
+        // for 5 s and the suite's fake timers never advance Date.now().
+        statusText: "Supervisor Unavailable",
+        text: () => Promise.resolve("unavailable"),
+      });
+      global.fetch = fetchMock;
+
+      const cb = vi.fn();
+      const unsub = onWorkspaceUnavailable(cb);
+
+      try {
+        await expect(
+          get("/api/workspaces/PUPPET/claims/hold"),
+        ).rejects.toThrow(ApiError);
+
+        expect(cb).toHaveBeenCalledTimes(1);
+        expect(
+          fetchMock.mock.calls.some(
+            (call) => call[0] === "/api/client-errors",
+          ),
+        ).toBe(true);
+      } finally {
+        unsub();
+      }
+    });
+
     it("network error notifies workspace service-unavailable listeners", async () => {
       global.fetch = vi
         .fn()
