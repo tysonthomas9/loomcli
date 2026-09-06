@@ -20,7 +20,7 @@ func (s registryRecoverySource) ReadIssueRecovery(ctx context.Context) (backend.
 	return s(ctx)
 }
 func registrySnapshot() backend.IssueRecoverySnapshot {
-	return backend.IssueRecoverySnapshot{SourceIdentity: "s1.Zml4dHVyZQ", Manifest: issueRecoveryManifest, Workspace: "WS", Through: "c2.MTAtMA", Document: []byte(`{"native":"preserved"}`)}
+	return backend.IssueRecoverySnapshot{SourceIdentity: "s1.Zml4dHVyZQ", Manifest: issueRecoveryManifest, Workspace: "WS", Through: "c2.MTAtMA", Document: []byte(`{"history":null,"native":"preserved"}`)}
 }
 func registrySource() registryRecoverySource {
 	return func(context.Context) (backend.IssueRecoverySnapshot, error) { return registrySnapshot(), nil }

@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"unicode/utf8"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
 type recoveryHistoryWire struct {
@@ -59,7 +60,7 @@ func validateRecoveryHistory(raw json.RawMessage, ws string, issues map[string]m
 	if err := json.Unmarshal(raw, &history); err != nil {
 		return err
 	}
-	if !validRecoveryIssueSelection(history.IssueID) || history.Present == nil || history.Events == nil || history.HasOlder == nil {
+	if !backend.ValidRecoveryIssueSelection(history.IssueID) || history.Present == nil || history.Events == nil || history.HasOlder == nil {
 		return fmt.Errorf("incomplete history")
 	}
 	present := issues[history.IssueID] != nil
@@ -170,8 +171,4 @@ var recoveryHistoryActionEntities = map[string]string{
 	"workspace.create":     "workspace",
 	"workspace.delete":     "workspace",
 	"workspace.update":     "workspace",
-}
-
-func validRecoveryIssueSelection(id string) bool {
-	return len(id) <= 1024 && utf8.ValidString(id) && strings.TrimSpace(id) != ""
 }

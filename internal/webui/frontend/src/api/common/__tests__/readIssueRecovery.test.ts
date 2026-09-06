@@ -60,6 +60,40 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 describe("readIssueRecovery", () => {
+  it("encodes selected scope without query injection and validates the exact echo", async () => {
+    const id = "WS-1 &another=two";
+    const selected = JSON.stringify({
+      ...JSON.parse(document),
+      history: { issue_id: id, present: false, events: [], has_older: false },
+    });
+    const fetcher = vi
+      .fn()
+      .mockImplementation(async () => response([encoder.encode(selected)]));
+    vi.stubGlobal("fetch", fetcher);
+    const result = await readIssueRecovery(
+      offer,
+      new AbortController().signal,
+      id,
+    );
+    expect(result.history?.issue_id).toBe(id);
+    expect(fetcher.mock.calls[0][0]).toBe(
+      `/api/workspaces/WS/events/recovery/issues?${new URLSearchParams({ issue_id: id })}`,
+    );
+    await expect(
+      readIssueRecovery(offer, new AbortController().signal, "WS-other"),
+    ).rejects.toThrow();
+  });
+  it.each(["", "\u0085", "😀".repeat(257), "\uD800"])(
+    "rejects invalid selected scope before network %s",
+    async (id) => {
+      const fetcher = vi.fn();
+      vi.stubGlobal("fetch", fetcher);
+      await expect(
+        readIssueRecovery(offer, new AbortController().signal, id),
+      ).rejects.toThrow();
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
   it("rejects a selected-history document on the unselected HTTP read", async () => {
     const selected = JSON.stringify({
       ...JSON.parse(document),

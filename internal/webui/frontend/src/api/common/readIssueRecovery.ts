@@ -1,6 +1,7 @@
 import { getAuthToken, wsUrl } from "./client";
 import {
   prepareIssueRecovery,
+  selectedHistoryIdentity,
   type PreparedIssueRecovery,
 } from "./issueRecovery";
 import { decodeRecoveryHandle, type RecoveryHandle } from "./recoveryHandle";
@@ -12,14 +13,21 @@ const HANDLE_HEADER = "X-Loom-Recovery-Handle";
 export async function readIssueRecovery(
   input: RecoveryHandle,
   signal: AbortSignal,
+  expectedIssueId?: string,
 ): Promise<PreparedIssueRecovery> {
   signal.throwIfAborted();
+  if (expectedIssueId !== undefined) selectedHistoryIdentity(expectedIssueId);
   const offer = decodeRecoveryHandle(
     input,
     input?.workspace,
     input?.source_repos,
   );
   if (!offer) throw new Error("Invalid recovery offer");
+  const path = wsUrl(offer.workspace, "/events/recovery/issues");
+  const url =
+    expectedIssueId === undefined
+      ? path
+      : `${path}?${new URLSearchParams({ issue_id: expectedIssueId })}`;
   const token = getAuthToken();
   if (!token?.trim()) throw new Error("Recovery authentication required");
   const controller = new AbortController();
@@ -51,7 +59,7 @@ export async function readIssueRecovery(
   try {
     check();
     const response = await Promise.race([
-      fetch(wsUrl(offer.workspace, "/events/recovery/issues"), {
+      fetch(url, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -101,7 +109,13 @@ export async function readIssueRecovery(
     }
     parts.push(decoder.decode());
     check();
-    const result = prepareIssueRecovery(parts.join(""), offer, offer.handle);
+    const result = prepareIssueRecovery(
+      parts.join(""),
+      offer,
+      offer.handle,
+      Date.now(),
+      expectedIssueId,
+    );
     check();
     return result;
   } finally {

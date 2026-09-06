@@ -29,7 +29,7 @@ func (b *FleetBackend) ReadIssueRecovery(ctx context.Context) (backend.IssueReco
 }
 
 func (b *FleetBackend) ReadIssueRecoveryForIssue(ctx context.Context, issueID string) (backend.IssueRecoverySnapshot, error) {
-	if !validRecoveryIssueSelection(issueID) {
+	if !backend.ValidRecoveryIssueSelection(issueID) {
 		return backend.IssueRecoverySnapshot{}, backend.ErrInternal(recoveryOp, "selected issue is required", nil)
 	}
 	return b.readIssueRecovery(ctx, issueID)
@@ -83,6 +83,7 @@ func (b *FleetBackend) readIssueRecovery(ctx context.Context, issueID string) (b
 	if err := ctx.Err(); err != nil {
 		return backend.IssueRecoverySnapshot{}, classifyTransportError(recoveryOp, err)
 	}
+	result.SelectedIssueID = issueID
 	return result, nil
 }
 
