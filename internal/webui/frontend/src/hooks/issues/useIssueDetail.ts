@@ -3,7 +3,14 @@
  * Used when clicking a node to open the detail panel.
  */
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import {
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+} from "react";
 
 import { getIssue } from "@/api/issues";
 import type { Issue, IssueDetails } from "@/types";
@@ -59,9 +66,20 @@ export interface UseIssueDetailReturn {
  */
 export function useIssueDetail(): UseIssueDetailReturn {
   const { workspaceId } = useWorkspaceContext();
+  // Object identity rejects A-B-A completions, even when names match again.
+  const scope = useMemo(() => ({ workspaceId }), [workspaceId]);
+  const scopeRef = useRef(scope);
   const [issueDetails, setIssueDetails] = useState<IssueDetails | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  useLayoutEffect(() => {
+    if (scopeRef.current === scope) return;
+    scopeRef.current = scope;
+    setIssueDetails(null);
+    setIsLoading(false);
+    setError(null);
+  }, [scope]);
 
   // Track the current request ID to handle concurrent requests (latest wins)
   const currentRequestIdRef = useRef<number>(0);
@@ -71,16 +89,18 @@ export function useIssueDetail(): UseIssueDetailReturn {
 
   // Cleanup on unmount
   useEffect(() => {
+    const requests = currentRequestIdRef;
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      requests.current++;
     };
   }, []);
 
   const fetchIssue = useCallback(
     async (id: string): Promise<void> => {
       // Validate ID
-      if (!id) {
+      if (!id || scopeRef.current !== scope) {
         return;
       }
 
@@ -94,56 +114,74 @@ export function useIssueDetail(): UseIssueDetailReturn {
         const details = await getIssue(workspaceId, id);
 
         // Only update state if this is the latest request and still mounted
-        if (requestId === currentRequestIdRef.current && mountedRef.current) {
+        if (
+          requestId === currentRequestIdRef.current &&
+          mountedRef.current &&
+          scopeRef.current === scope
+        ) {
           setIssueDetails(details);
           setError(null);
         }
       } catch (err) {
         // Only update state if this is the latest request and still mounted
-        if (requestId === currentRequestIdRef.current && mountedRef.current) {
+        if (
+          requestId === currentRequestIdRef.current &&
+          mountedRef.current &&
+          scopeRef.current === scope
+        ) {
           const errorMessage = err instanceof Error ? err.message : String(err);
           setError(errorMessage);
           // Don't clear existing details on error - show stale data with error
         }
       } finally {
         // Only update loading state if this is the latest request
-        if (requestId === currentRequestIdRef.current && mountedRef.current) {
+        if (
+          requestId === currentRequestIdRef.current &&
+          mountedRef.current &&
+          scopeRef.current === scope
+        ) {
           setIsLoading(false);
         }
       }
     },
-    [workspaceId],
+    [workspaceId, scope],
   );
 
   const clearIssue = useCallback(() => {
+    if (scopeRef.current !== scope) return;
     currentRequestIdRef.current++; // Cancel any in-flight requests
     setIssueDetails(null);
     setError(null);
     setIsLoading(false);
-  }, []);
+  }, [scope]);
 
-  const updateIssueDetails = useCallback((updated: Issue) => {
-    setIssueDetails((prev) => {
-      if (!prev) return prev;
-      // Build a partial update from defined fields only (respects exactOptionalPropertyTypes)
-      const patch: Partial<IssueDetails> = {
-        title: updated.title,
-        priority: updated.priority,
-        updated_at: updated.updated_at,
-      };
-      if (updated.status !== undefined) patch.status = updated.status;
-      if (updated.issue_type !== undefined)
-        patch.issue_type = updated.issue_type;
-      if (updated.assignee !== undefined) patch.assignee = updated.assignee;
-      if (updated.owner !== undefined) patch.owner = updated.owner;
-      if (updated.description !== undefined)
-        patch.description = updated.description;
-      if (updated.design !== undefined) patch.design = updated.design;
-      if (updated.notes !== undefined) patch.notes = updated.notes;
-      if (updated.labels !== undefined) patch.labels = updated.labels;
-      return { ...prev, ...patch };
-    });
-  }, []);
+  const updateIssueDetails = useCallback(
+    (updated: Issue) => {
+      if (scopeRef.current !== scope) return;
+      setIssueDetails((prev) => {
+        if (!prev || prev.id !== updated.id || scopeRef.current !== scope)
+          return prev;
+        // Build a partial update from defined fields only (respects exactOptionalPropertyTypes)
+        const patch: Partial<IssueDetails> = {
+          title: updated.title,
+          priority: updated.priority,
+          updated_at: updated.updated_at,
+        };
+        if (updated.status !== undefined) patch.status = updated.status;
+        if (updated.issue_type !== undefined)
+          patch.issue_type = updated.issue_type;
+        if (updated.assignee !== undefined) patch.assignee = updated.assignee;
+        if (updated.owner !== undefined) patch.owner = updated.owner;
+        if (updated.description !== undefined)
+          patch.description = updated.description;
+        if (updated.design !== undefined) patch.design = updated.design;
+        if (updated.notes !== undefined) patch.notes = updated.notes;
+        if (updated.labels !== undefined) patch.labels = updated.labels;
+        return { ...prev, ...patch };
+      });
+    },
+    [scope],
+  );
 
   return {
     issueDetails,

@@ -11,6 +11,7 @@ import {
 } from "@microsoft/fetch-event-source";
 
 import { get, ApiError, wsUrl, getApiOrigin } from "./client";
+import { decodeRecoveryHandle, type RecoveryHandle } from "./recoveryHandle";
 
 // SSE token exchange: fetch opaque token to avoid exposing JWT in URL
 export type SseTokenResult =
@@ -58,6 +59,8 @@ export interface ResyncEvent {
   /** Effective resume checkpoint after the frame; empty means no checkpoint. */
   to: string;
   reason: ResyncReason;
+  /** Validated optional retry offer; never a reset acknowledgement. */
+  recovery?: RecoveryHandle;
 }
 
 // Mutation types: definitions live in src/types/workspace/mutation.ts (the canonical
@@ -154,7 +157,7 @@ export class WorkspaceSSEClient {
     if (this.destroyed) return;
 
     if (sourceRepos !== undefined) {
-      this.currentSourceRepos = sourceRepos;
+      this.currentSourceRepos = [...sourceRepos];
     }
 
     if (this.state === "connected" || this.state === "connecting") {
@@ -174,11 +177,11 @@ export class WorkspaceSSEClient {
     this.connectAbortController = abortController;
     const generation = ++this.connectionGeneration;
     const sinceParam = since ?? this.lastEventId;
-    const url = getSSEUrl(
-      this.workspaceId,
-      sinceParam,
-      this.currentSourceRepos,
-    );
+    const wireSourceRepos =
+      this.currentSourceRepos === undefined
+        ? undefined
+        : [...this.currentSourceRepos];
+    const url = getSSEUrl(this.workspaceId, sinceParam, wireSourceRepos);
     let streamAttempt = 0;
 
     void fetchEventSource(url, {
@@ -214,7 +217,12 @@ export class WorkspaceSSEClient {
       },
       onmessage: (event) => {
         if (this.isActive(abortController, generation)) {
-          this.handleMessage(event, abortController, generation);
+          this.handleMessage(
+            event,
+            abortController,
+            generation,
+            wireSourceRepos,
+          );
         }
       },
       onclose: () => {
@@ -254,7 +262,8 @@ export class WorkspaceSSEClient {
   updateSourceRepos(sourceRepos: string[] | undefined): void {
     if (this.destroyed) return;
 
-    this.currentSourceRepos = sourceRepos;
+    this.currentSourceRepos =
+      sourceRepos === undefined ? undefined : [...sourceRepos];
     this.disconnect();
     void this.connect();
   }
@@ -400,6 +409,7 @@ export class WorkspaceSSEClient {
     event: EventSourceMessage,
     abortController: AbortController,
     generation: number,
+    wireSourceRepos: readonly string[] | undefined,
   ): void {
     const previousEventId = this.lastEventId;
     this.lastEventId =
@@ -413,8 +423,12 @@ export class WorkspaceSSEClient {
       this.lastEventId = previousEventId;
       this.restoreResumeHeader();
       let reason: ResyncReason = "error";
+      let recovery: RecoveryHandle | undefined;
       try {
-        const parsed = JSON.parse(event.data) as { reason?: unknown };
+        const parsed = JSON.parse(event.data) as {
+          reason?: unknown;
+          recovery?: unknown;
+        };
         if (
           parsed.reason !== "cap" &&
           parsed.reason !== "error" &&
@@ -424,6 +438,13 @@ export class WorkspaceSSEClient {
           throw new Error("invalid resync reason");
         }
         reason = parsed.reason;
+        if (reason === "expired") {
+          recovery = decodeRecoveryHandle(
+            parsed.recovery,
+            this.workspaceId,
+            wireSourceRepos,
+          );
+        }
       } catch {
         console.warn("[SSE] Received malformed resync event");
       }
@@ -433,6 +454,7 @@ export class WorkspaceSSEClient {
         // Even explicit IDs on resync are not accepted checkpoints.
         to: this.lastEventId ?? "",
         reason,
+        ...(recovery === undefined ? {} : { recovery }),
       });
       return;
     }

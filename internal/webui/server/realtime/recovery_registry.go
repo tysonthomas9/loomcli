@@ -101,7 +101,7 @@ func (r *RecoveryRegistry) Register(principal, workspace string, repos []string,
 	if _, exists := r.entries[token]; exists {
 		return RecoveryHandle{}, ErrRecoveryUnavailable
 	}
-	handle := RecoveryHandle{Handle: token, Workspace: workspace, SourceRepos: append([]string{}, repos...), ExpiresAt: now.Add(recoveryHandleTTL), Manifest: issueRecoveryManifest}
+	handle := RecoveryHandle{Handle: token, Workspace: workspace, SourceRepos: append([]string{}, repos...), ExpiresAt: now.Add(recoveryHandleTTL).UTC(), Manifest: issueRecoveryManifest}
 	r.entries[token] = &recoveryRegistration{handle: handle, principal: principal, source: source}
 	// Both the caller and registry own their filter slices.
 	handle.SourceRepos = append([]string{}, handle.SourceRepos...)

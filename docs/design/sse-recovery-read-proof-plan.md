@@ -91,6 +91,8 @@ Define the loss/retry behavior before implementing acknowledgment: repeated ackn
 
 The retention protection or restart behavior during a recovery attempt is also explicit: if `H` becomes invalid before resume, reject and restart recovery. Never advance to a newly discovered retention floor without a new proof.
 
+The [browser coverage audit](sse-browser-recovery-coverage.md) records the concrete cache and view gaps that must be resolved before enabling certificate consumption.
+
 ## Delivery order
 
 1. Keep the frontend resync checkpoint repair independent: no refresh completion or resync payload authorizes a reset.
@@ -123,4 +125,4 @@ The retention protection or restart behavior during a recovery attempt is also e
 
 ## Scope of this document
 
-This is an implementation plan based on inspected seams. It does not implement a ticket, epoch, certified read, cache-generation protocol, or acknowledgment endpoint. Existing registered-query recovery remains useful and intentionally weaker. Fixed replay fences and connection-bound mutation sources are prerequisites, not substitutes for read certification.
+This plan records the remaining whole-client recovery protocol. Certified Fleet issue reads, the Loom handle bridge and browser offer decoding now exist; durable incarnation, cache-generation publication and acknowledgment do not. Existing registered-query recovery remains useful and intentionally weaker. Fixed replay fences and connection-bound mutation sources are prerequisites, not substitutes for complete read coverage.
