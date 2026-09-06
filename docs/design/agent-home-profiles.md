@@ -193,7 +193,10 @@ So `runLead` both **injects and verifies**, before any backend work
    below, and a value pointing *outside*
    `<workspace>/.loom/agent-profiles/`, which is an operator's own config root.
    Nothing here provisioned it and nothing here can repair it, so it is neither
-   verified nor overwritten.
+   verified nor overwritten. A **relative** inherited value is refused outright:
+   the harness resolves it against its own cwd, so the same variable names a
+   different directory from every worktree, and no classification of it can be
+   trusted.
 2. The variable is **unset** and a profile root exists — resolve it, verify it,
    and export it. This is what makes a bare `loom lead` carry
    `CLAUDE_CONFIG_DIR=<ws>/.loom/agent-profiles/lead/claude` and
@@ -202,6 +205,16 @@ So `runLead` both **injects and verifies**, before any backend work
    `lead` inherits the operator's roots exactly as before.
 4. Anything that does not verify prints the reason and the repair to stderr and
    exits non-zero.
+
+"Inside" and "outside" that tree are decided by **filesystem identity**
+(`os.SameFile` on the walked-up ancestors), never by comparing path spellings.
+Two spellings of one directory are routine: a case-insensitive macOS volume
+renders the workspace as both `puppet` and `PUPPET`, and `/tmp` is a symlink to
+`/private/tmp`. The original prefix comparison read every such spelling as "an
+operator's own config root", which silently turned off both the verification
+and the credential injection for a root this workspace had provisioned
+(PUPPET-523). `loom doctor`'s `lead_profile_binding` check reports the binding
+the current shell would actually hand a harness, using that same predicate.
 
 It refuses rather than unsetting the variable and continuing, for the same
 reason the spawn path does. The launcher script needs no change: it is
