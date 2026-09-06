@@ -80,7 +80,15 @@ CLAUDE.md. Generate one with:
 
 A session whose profile carries that CLAUDE.md should then be launched with
 --prompt builtin:lead-profile, a minimal pointer prompt that leaves the role
-instructions to the profile instead of repeating them every session.`,
+instructions to the profile instead of repeating them every session.
+
+--prompt builtin:none goes one step further and suppresses the argv persona
+entirely: the prompt is empty and no positional prompt argument is passed to
+the backend at all, so the role instructions must already reach the model as
+ambient context. Suppression is absolute - it ignores a ./loom-prompts/none.md
+override and drops the LOOM_READ_ONLY preamble (a warning is logged; hard
+read-only enforcement stays on the backend flags). With --print-prompt it
+prints nothing and exits 0.`,
 	Args: cobra.NoArgs,
 	Run:  runLead,
 }
@@ -210,6 +218,12 @@ func printLeadPrompt() {
 		fmt.Fprintf(os.Stderr, "Error loading terminal prompt: %v\n", err)
 		os.Exit(1)
 	}
+	// A suppressed persona (--prompt builtin:none) must print 0 bytes, not the
+	// bare newline fmt.Println would add: the output is redirected straight
+	// into a profile's CLAUDE.md.
+	if prompt == "" {
+		return
+	}
 	fmt.Println(prompt)
 }
 
@@ -286,14 +300,25 @@ func loadLeadRolePrompt(ctx context.Context, registration leadSessionRegistratio
 // applyLeadPromptContext appends the backend assignment context and the
 // optional --message initial request onto the base terminal-agent prompt.
 func applyLeadPromptContext(prompt string) string {
-	if assignment := currentLeadAssignmentPrompt(context.Background()); assignment != "" {
-		prompt += "\n\n## Loom Backend Assignment\n\n" + assignment
+	return composeLeadPrompt(prompt, currentLeadAssignmentPrompt(context.Background()), leadMessage)
+}
+
+// composeLeadPrompt joins the base prompt with the per-session sections. It is
+// the pure half of applyLeadPromptContext, so the exact bytes it produces are
+// pinned by the argv_golden testdata.
+func composeLeadPrompt(base, assignment, message string) string {
+	sections := make([]string, 0, 3)
+	if base != "" {
+		sections = append(sections, base)
 	}
-	if leadMessage != "" {
-		prompt += "\n\n## User's Initial Request\n\n" + leadMessage +
-			"\n\nAddress this request using the lead mode conventions above."
+	if assignment != "" {
+		sections = append(sections, "## Loom Backend Assignment\n\n"+assignment)
 	}
-	return prompt
+	if message != "" {
+		sections = append(sections, "## User's Initial Request\n\n"+message+
+			"\n\nAddress this request using the lead mode conventions above.")
+	}
+	return strings.Join(sections, "\n\n")
 }
 
 func currentLeadAssignmentPrompt(ctx context.Context) string {
