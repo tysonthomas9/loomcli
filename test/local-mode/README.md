@@ -178,3 +178,41 @@ load them through RepoStore.List. It must not PATCH the global workspace catalog
 with bare names or compensate a catalog rejection by deleting a successfully
 created repository. Git remote URLs and local paths are not coerced into global
 catalog identities.
+
+
+### Real PostgreSQL browser regression
+
+Use a dedicated Podman project whose name starts with `loomcli-pg-browser-`.
+After `local-mode-postgres-up` reports the product entrypoint ready, run:
+
+```sh
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-pg-browser-owned \
+LOCAL_MODE_API_PORT=8582 LOCAL_MODE_UI_PORT=8583 \
+make local-mode-postgres-sse-verify
+```
+
+Use the same project/ports for startup and teardown. This target **stops and
+restarts that project's UI proxy** to sever the existing fetch-SSE sockets while
+leaving the API available for mutations. The test checks the container's Compose
+ownership label and restores it in `finally`; a process kill can still require
+manual restoration of this run-owned proxy. Do not point it at shared services.
+The currently paired Fleet must implement enrolled public issue command routing;
+a 500 from claim/release is a failed prerequisite, not a skipped success.
+
+The tests observe the application's actual Fetch response bytes through Chromium
+CDP. They neither replace browser responses nor create another SSE subscription.
+They require connected frames, scoped mutation IDs, immediate rendering before
+collection responses, later authoritative projection refresh, matching deliveries
+to two independent browser contexts, exact resume headers, and no document reload
+through the real outage. Duplicate/gap assertions cover the deliberately created
+mutation sequence and observation interval, not arbitrary workloads.
+
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` can select an already installed compatible
+Chromium. Otherwise use the repo's installed Playwright browser. A non-secret
+local-mode API-key value prevents the harness reading the host's key file; local
+mode disables auth, so this target provides no authentication-security proof.
+Results, sanitized CDP evidence and browser screenshots are attached to the JSON
+report at `internal/webui/frontend/test-results/pg-sse-report.json`; set
+`PLAYWRIGHT_JSON_OUTPUT_FILE` to preserve it elsewhere. Do not publish general
+HAR files or host credentials. No reload fallback, retry-on-failure test rerun or
+manual database enrollment is permitted to turn a failure into a pass.

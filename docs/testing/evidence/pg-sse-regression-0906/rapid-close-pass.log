@@ -1,0 +1,14 @@
+
+Running 2 tests using 1 worker
+
+(node:66000) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:66000) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1/2] [integration] › tests/e2e/integration/sse-updates.integration.spec.ts:172:1 › rapid creates each reach the browser exactly once in the observed interval @regression
+[2/2] [integration] › tests/e2e/integration/sse-updates.integration.spec.ts:196:1 › close leaves Open through the observed stream without reload @regression
+  2 passed (5.8s)
