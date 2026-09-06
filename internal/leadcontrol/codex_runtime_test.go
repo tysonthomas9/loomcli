@@ -92,3 +92,113 @@ func TestCodexAppServerTimeoutErrorOmitsMissingLogTail(t *testing.T) {
 		t.Fatalf("timeout error included missing probe error:\n%s", got)
 	}
 }
+
+func TestCodexLeadRuntimeDirsSQLiteHomeIsStablePerLead(t *testing.T) {
+	t.Parallel()
+
+	runtimeDir := t.TempDir()
+	base := CodexLeadRuntimeConfig{Workspace: "PUPPET", LeadName: "Lead One", RuntimeDir: runtimeDir}
+
+	first := base
+	first.SessionID = "session-aaa"
+	secondCfg := base
+	secondCfg.SessionID = "session-bbb"
+
+	runtimeA, sqliteA := codexLeadRuntimeDirs(normalizeCodexLeadRuntimeConfig(first))
+	runtimeB, sqliteB := codexLeadRuntimeDirs(normalizeCodexLeadRuntimeConfig(secondCfg))
+
+	if sqliteA != sqliteB {
+		t.Fatalf("sqlite home is per session: %q vs %q", sqliteA, sqliteB)
+	}
+	wantSQLite := filepath.Join(runtimeDir, ".loom", "lead-sessions", "puppet", "lead-one", "sqlite")
+	if sqliteA != wantSQLite {
+		t.Fatalf("sqlite home = %q, want %q", sqliteA, wantSQLite)
+	}
+	if runtimeA == runtimeB {
+		t.Fatalf("runtime home is shared across sessions: %q", runtimeA)
+	}
+	if want := filepath.Join(runtimeDir, ".loom", "lead-sessions", "puppet", "lead-one", "runs", "session-aaa"); runtimeA != want {
+		t.Fatalf("runtime home = %q, want %q", runtimeA, want)
+	}
+}
+
+func TestCodexLeadRuntimeDirsStayOutOfTheOSCacheDir(t *testing.T) {
+	t.Parallel()
+
+	cacheDir, err := os.UserCacheDir()
+	if err != nil || strings.TrimSpace(cacheDir) == "" {
+		t.Skip("no user cache dir on this host")
+	}
+	runtimeDir := t.TempDir()
+	cfg := normalizeCodexLeadRuntimeConfig(CodexLeadRuntimeConfig{
+		Workspace:  "PUPPET",
+		LeadName:   "lead-one",
+		SessionID:  "session-aaa",
+		RuntimeDir: runtimeDir,
+	})
+
+	runtimeHome, sqliteHome := codexLeadRuntimeDirs(cfg)
+	for _, got := range []string{runtimeHome, sqliteHome} {
+		rel, err := filepath.Rel(cacheDir, got)
+		if err == nil && !strings.HasPrefix(rel, "..") {
+			t.Fatalf("%q is under the OS cache dir %q", got, cacheDir)
+		}
+	}
+}
+
+func TestCodexLeadRuntimeDirsPreferInjectedRuntimeDirOverEnvAndTempFallback(t *testing.T) {
+	envDir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", envDir)
+
+	// An explicit RuntimeDir wins over the environment.
+	injected := t.TempDir()
+	cfg := normalizeCodexLeadRuntimeConfig(CodexLeadRuntimeConfig{
+		Workspace:  "PUPPET",
+		LeadName:   "lead-one",
+		SessionID:  "session-aaa",
+		RuntimeDir: injected,
+	})
+	if _, sqliteHome := codexLeadRuntimeDirs(cfg); !strings.HasPrefix(sqliteHome, injected) {
+		t.Fatalf("sqlite home = %q, want it under the injected runtime dir %q", sqliteHome, injected)
+	}
+
+	// With no explicit RuntimeDir the environment wins over os.TempDir().
+	cfg = normalizeCodexLeadRuntimeConfig(CodexLeadRuntimeConfig{
+		Workspace: "PUPPET",
+		LeadName:  "lead-one",
+		SessionID: "session-aaa",
+	})
+	_, sqliteHome := codexLeadRuntimeDirs(cfg)
+	if !strings.HasPrefix(sqliteHome, envDir) {
+		t.Fatalf("sqlite home = %q, want it under LOOM_WORKSPACE_RUNTIME_DIR %q", sqliteHome, envDir)
+	}
+
+	// Only with neither does it fall back to the temp dir.
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", "")
+	cfg = normalizeCodexLeadRuntimeConfig(CodexLeadRuntimeConfig{
+		Workspace: "PUPPET",
+		LeadName:  "lead-one",
+		SessionID: "session-aaa",
+	})
+	if _, sqliteHome := codexLeadRuntimeDirs(cfg); !strings.HasPrefix(sqliteHome, os.TempDir()) {
+		t.Fatalf("sqlite home = %q, want the os.TempDir() fallback %q", sqliteHome, os.TempDir())
+	}
+}
+
+func TestLegacyCodexLeadCacheRootIsPerLead(t *testing.T) {
+	t.Parallel()
+
+	cacheDir, err := os.UserCacheDir()
+	if err != nil || strings.TrimSpace(cacheDir) == "" {
+		t.Skip("no user cache dir on this host")
+	}
+	cfg := normalizeCodexLeadRuntimeConfig(CodexLeadRuntimeConfig{
+		Workspace: "PUPPET",
+		LeadName:  "Lead One",
+		SessionID: "session-aaa",
+	})
+	want := filepath.Join(cacheDir, "loom", "codex-leads", "puppet", "lead-one")
+	if got := legacyCodexLeadCacheRoot(cfg); got != want {
+		t.Fatalf("legacyCodexLeadCacheRoot() = %q, want %q", got, want)
+	}
+}
