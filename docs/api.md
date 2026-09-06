@@ -4428,9 +4428,23 @@ Per role it reports three raw numbers, never an adjective:
 
 | Symbol | Meaning |
 |--------|---------|
+| `kind` | the resolved role kind, `worker` or `interactive` |
 | `q` | ready, unassigned issues the role's include/exclude labels and its agents' repo/epic scope admit |
 | `c_int` | agents in the role whose desired state is not `stopped` — *intended* capacity |
 | `c_act` | those of `c_int` that are actually alive — *real* capacity |
+
+An **interactive** role — one declaring `kind: interactive`, or named `lead` or
+`orchestrator` under the legacy convention — is a hand-driven lane the daemon
+deliberately never auto-supervises. Its agents therefore count toward neither
+`c_int` nor `c_act`, exactly as an agent parked with `desired_state=stopped`
+does, and for the same reason: the intended *auto*-capacity is zero by
+definition, so such a role can never be starved. It still reports its real `q`
+and still appears in the table — `kind=interactive` next to `c_int=0` is what
+says why. The predicate is `domain.ResolveRoleKind`, the same one the supervisor
+applies in `AgentEntry.ShouldSuperviseWithRoles`, so the check cannot drift from
+the supervisor it measures. Only the exact value `interactive` disables
+counting; an unrecognized `kind` resolves to `worker`, which fails toward still
+detecting starvation.
 
 A role is starved when `q >= 1 && c_int > 0 && c_act == 0`. The `c_int > 0`
 term is what makes the check correct rather than noisy: it separates capacity
@@ -4454,7 +4468,9 @@ carries a label filter at all the report sets `unreachable_computed: false`
 rather than reporting a misleading `0`. *Config defects* name a role with no
 label filter (it will claim tickets meant for other roles), an agent whose role
 has no role config, and an agent configured on another node and therefore absent
-from this node's state file.
+from this node's state file. Interactive roles are exempt from both secondary
+findings: they are never a claimant, so one can neither make work reachable nor
+be faulted for carrying no label filter.
 
 The full per-role table is published on the check's `data` field in `--json`
 output, for a separate ops runner to consume and integrate over time. `data` is
