@@ -18,6 +18,12 @@ import {
 } from "react";
 
 import { getIssue } from "@/api/issues";
+import { ApiError } from "@/api/common/client";
+import {
+  QueryRecoveryContext,
+  QueryRecoveryCoordinator,
+} from "@/hooks/common/queryRecovery";
+import type { ReactNode } from "react";
 import type { Issue, IssueDetails } from "@/types";
 
 import { useIssueDetail } from "../useIssueDetail";
@@ -130,6 +136,7 @@ describe("useIssueDetail", () => {
     expect(mockGetIssue).toHaveBeenCalledExactlyOnceWith(
       "test-ws-id",
       "issue-1",
+      { signal: expect.any(AbortSignal) },
     );
     expect(view.container.textContent).toBe("test-ws-id:still current");
     view.unmount();
@@ -145,7 +152,7 @@ describe("useIssueDetail", () => {
     );
     const { result, rerender } = renderHook(() => useIssueDetail());
     let pending!: Promise<void>;
-    act(() => {
+    await act(async () => {
       pending = result.current.fetchIssue("same-id");
     });
     workspace.id = "other";
@@ -243,7 +250,9 @@ describe("useIssueDetail", () => {
       expect(result.current.error).toBeNull();
       expect(result.current.isLoading).toBe(false);
       expect(mockGetIssue).toHaveBeenCalledTimes(1);
-      expect(mockGetIssue).toHaveBeenCalledWith("test-ws-id", "issue-123");
+      expect(mockGetIssue).toHaveBeenCalledWith("test-ws-id", "issue-123", {
+        signal: expect.any(AbortSignal),
+      });
     });
 
     it("sets isLoading to true during fetch", async () => {
@@ -256,7 +265,7 @@ describe("useIssueDetail", () => {
       const { result } = renderHook(() => useIssueDetail());
 
       // Start fetch
-      act(() => {
+      await act(async () => {
         result.current.fetchIssue("issue-1");
       });
 
@@ -285,7 +294,7 @@ describe("useIssueDetail", () => {
       expect(result.current.error).toBe("Network error");
 
       // Second call succeeds
-      mockGetIssue.mockResolvedValueOnce(createIssueDetails());
+      mockGetIssue.mockResolvedValueOnce(createIssueDetails({ id: "issue-2" }));
 
       await act(async () => {
         await result.current.fetchIssue("issue-2");
@@ -421,7 +430,7 @@ describe("useIssueDetail", () => {
       const { result } = renderHook(() => useIssueDetail());
 
       // Start fetch
-      act(() => {
+      await act(async () => {
         result.current.fetchIssue("issue-1");
       });
 
@@ -485,12 +494,12 @@ describe("useIssueDetail", () => {
       const { result } = renderHook(() => useIssueDetail());
 
       // Start first fetch
-      act(() => {
+      await act(async () => {
         result.current.fetchIssue("first");
       });
 
       // Start second fetch before first completes
-      act(() => {
+      await act(async () => {
         result.current.fetchIssue("second");
       });
 
@@ -513,7 +522,7 @@ describe("useIssueDetail", () => {
 
     it("ignores stale request errors when newer request succeeds", async () => {
       const successIssue = createIssueDetails({
-        id: "success",
+        id: "second",
         title: "Success Issue",
       });
 
@@ -534,12 +543,12 @@ describe("useIssueDetail", () => {
       const { result } = renderHook(() => useIssueDetail());
 
       // Start first fetch
-      act(() => {
+      await act(async () => {
         result.current.fetchIssue("first");
       });
 
       // Start second fetch before first completes
-      act(() => {
+      await act(async () => {
         result.current.fetchIssue("second");
       });
 
@@ -584,12 +593,12 @@ describe("useIssueDetail", () => {
       const { result } = renderHook(() => useIssueDetail());
 
       // Start first fetch
-      act(() => {
+      await act(async () => {
         result.current.fetchIssue("first");
       });
 
       // Start second fetch before first completes
-      act(() => {
+      await act(async () => {
         result.current.fetchIssue("second");
       });
 
@@ -630,14 +639,14 @@ describe("useIssueDetail", () => {
       const { result } = renderHook(() => useIssueDetail());
 
       // Start first fetch
-      act(() => {
+      await act(async () => {
         result.current.fetchIssue("first");
       });
 
       expect(result.current.isLoading).toBe(true);
 
       // Start second fetch
-      act(() => {
+      await act(async () => {
         result.current.fetchIssue("second");
       });
 
@@ -672,7 +681,7 @@ describe("useIssueDetail", () => {
       const { result, unmount } = renderHook(() => useIssueDetail());
 
       // Start fetch
-      act(() => {
+      await act(async () => {
         result.current.fetchIssue("issue-1");
       });
 
@@ -699,7 +708,7 @@ describe("useIssueDetail", () => {
       const { result, unmount } = renderHook(() => useIssueDetail());
 
       // Start fetch
-      act(() => {
+      await act(async () => {
         result.current.fetchIssue("issue-1");
       });
 
@@ -1088,5 +1097,187 @@ describe("useIssueDetail", () => {
 
       expect(result.current.updateIssueDetails).toBe(initialUpdateFn);
     });
+  });
+});
+
+function recoveryDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+}
+function detailRecoveryWrapper(coordinator: QueryRecoveryCoordinator) {
+  return function DetailRecoveryWrapper({ children }: { children: ReactNode }) {
+    return createElement(
+      QueryRecoveryContext.Provider,
+      { value: coordinator },
+      children,
+    );
+  };
+}
+describe("selected detail query recovery", () => {
+  beforeEach(() => {
+    mockGetIssue.mockReset();
+    workspace.id = "test-ws-id";
+  });
+  it("does not enroll until a selection exists and supersedes a pre-fence read", async () => {
+    const coordinator = new QueryRecoveryCoordinator();
+    const { result } = renderHook(() => useIssueDetail(), {
+      wrapper: detailRecoveryWrapper(coordinator),
+    });
+    await coordinator.refresh();
+    expect(mockGetIssue).not.toHaveBeenCalled();
+    const old = recoveryDeferred<IssueDetails>(),
+      fresh = recoveryDeferred<IssueDetails>();
+    mockGetIssue
+      .mockReturnValueOnce(old.promise)
+      .mockReturnValueOnce(fresh.promise);
+    await act(async () => {
+      void result.current.fetchIssue("issue-1");
+    });
+    let recovery!: Promise<void>;
+    await act(async () => {
+      recovery = coordinator.refresh();
+    });
+    expect(mockGetIssue).toHaveBeenCalledTimes(2);
+    expect(mockGetIssue.mock.calls[0]?.[2]?.signal?.aborted).toBe(true);
+    await act(async () => {
+      old.resolve(createIssueDetails({ title: "old" }));
+    });
+    expect(result.current.issueDetails).toBeNull();
+    await act(async () => {
+      fresh.resolve(createIssueDetails({ title: "fresh" }));
+      await recovery;
+    });
+    expect(result.current.issueDetails?.title).toBe("fresh");
+  });
+  it.each([404, 503])(
+    "rejects failed recovery with status %s and clears only missing detail",
+    async (status) => {
+      const coordinator = new QueryRecoveryCoordinator();
+      const { result } = renderHook(() => useIssueDetail(), {
+        wrapper: detailRecoveryWrapper(coordinator),
+      });
+      mockGetIssue.mockResolvedValueOnce(createIssueDetails());
+      await act(async () => {
+        await result.current.fetchIssue("issue-1");
+      });
+      mockGetIssue.mockRejectedValueOnce(new ApiError(status, "failed"));
+      await act(async () => {
+        await expect(coordinator.refresh()).rejects.toThrow("failed");
+      });
+      expect(result.current.isNotFound).toBe(status === 404);
+      expect(result.current.issueDetails === null).toBe(status === 404);
+      expect(result.current.error).not.toBeNull();
+    },
+  );
+  it("moves a pending barrier to a new selection before discarding the old read", async () => {
+    const coordinator = new QueryRecoveryCoordinator();
+    const { result } = renderHook(() => useIssueDetail(), {
+      wrapper: detailRecoveryWrapper(coordinator),
+    });
+    mockGetIssue.mockResolvedValueOnce(createIssueDetails());
+    await act(async () => {
+      await result.current.fetchIssue("issue-1");
+    });
+    const old = recoveryDeferred<IssueDetails>(),
+      fresh = recoveryDeferred<IssueDetails>();
+    mockGetIssue.mockImplementation((_ws, id) =>
+      id === "issue-1" ? old.promise : fresh.promise,
+    );
+    let recovery!: Promise<void>;
+    let completed = false;
+    await act(async () => {
+      recovery = coordinator.refresh();
+      void recovery.then(() => {
+        completed = true;
+      });
+    });
+    await act(async () => {
+      void result.current.fetchIssue("issue-2");
+    });
+    await act(async () => {
+      old.resolve(createIssueDetails({ title: "late" }));
+    });
+    expect(completed).toBe(false);
+    await act(async () => {
+      fresh.resolve(
+        createIssueDetails({ id: "issue-2", title: "new selection" }),
+      );
+      await recovery;
+    });
+    expect(result.current.issueDetails?.id).toBe("issue-2");
+    expect(result.current.error).toBeNull();
+  });
+  it("repeats strict recovery after an ordinary invalidation during its read", async () => {
+    const coordinator = new QueryRecoveryCoordinator();
+    const { result } = renderHook(() => useIssueDetail(), {
+      wrapper: detailRecoveryWrapper(coordinator),
+    });
+    mockGetIssue.mockResolvedValueOnce(createIssueDetails());
+    await act(async () => {
+      await result.current.fetchIssue("issue-1");
+    });
+    const first = recoveryDeferred<IssueDetails>(),
+      next = recoveryDeferred<IssueDetails>();
+    mockGetIssue
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(next.promise);
+    let recovery!: Promise<void>;
+    let completed = false;
+    await act(async () => {
+      recovery = coordinator.refresh();
+      void recovery.then(() => {
+        completed = true;
+      });
+    });
+    await act(async () => {
+      void result.current.fetchIssue("issue-1");
+    });
+    expect(mockGetIssue).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      first.resolve(createIssueDetails({ title: "before invalidation" }));
+    });
+    expect(completed).toBe(false);
+    expect(mockGetIssue).toHaveBeenCalledTimes(3);
+    await act(async () => {
+      next.resolve(createIssueDetails({ title: "after invalidation" }));
+      await recovery;
+    });
+    expect(result.current.issueDetails?.title).toBe("after invalidation");
+  });
+  it("rejects malformed foreign detail and ignores canceled late success after clear", async () => {
+    const coordinator = new QueryRecoveryCoordinator();
+    const { result } = renderHook(() => useIssueDetail(), {
+      wrapper: detailRecoveryWrapper(coordinator),
+    });
+    mockGetIssue.mockResolvedValueOnce(createIssueDetails());
+    await act(async () => {
+      await result.current.fetchIssue("issue-1");
+    });
+    mockGetIssue.mockResolvedValueOnce(createIssueDetails({ id: "other" }));
+    await act(async () => {
+      await expect(coordinator.refresh()).rejects.toThrow(
+        "Invalid issue detail",
+      );
+    });
+    const pending = recoveryDeferred<IssueDetails>();
+    mockGetIssue.mockReturnValueOnce(pending.promise);
+    let recovery!: Promise<void>;
+    await act(async () => {
+      recovery = coordinator.refresh();
+    });
+    await act(async () => {
+      result.current.clearIssue();
+      await recovery;
+    });
+    await act(async () => {
+      pending.resolve(createIssueDetails({ title: "late" }));
+    });
+    expect(result.current.issueDetails).toBeNull();
+    expect(result.current.error).toBeNull();
   });
 });
