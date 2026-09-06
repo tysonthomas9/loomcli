@@ -128,6 +128,7 @@ func (b *FleetBackend) sendRequest(ctx context.Context, method, rawURL string, a
 	if err != nil {
 		return nil, resp.StatusCode, err
 	}
+	captureRetryAfter(apiResp, resp.Header)
 	return apiResp, resp.StatusCode, nil
 }
 
@@ -202,6 +203,27 @@ func (b *FleetBackend) doRequestAsEffectiveActor(ctx context.Context, method, pa
 	auth.Actor = processActor
 	apiResp, statusCode, err = b.sendRequest(ctx, method, reqURL, auth, body)
 	return apiResp, statusCode, processActor, err
+}
+
+// captureRetryAfter copies the Retry-After response header into the
+// apiResponse meta map. Going through Meta keeps every do* signature
+// unchanged; classifyHTTPError's attachMeta then lands it on the
+// BackendError, where the service layer reads it back out.
+//
+// It runs after parseFleetResponse, so a header value takes precedence over
+// a server-sent meta.retry_after — the header is the protocol-level truth.
+func captureRetryAfter(apiResp *apiResponse, h http.Header) {
+	if apiResp == nil {
+		return
+	}
+	v := strings.TrimSpace(h.Get("Retry-After"))
+	if v == "" {
+		return
+	}
+	if apiResp.Meta == nil {
+		apiResp.Meta = make(map[string]string, 1)
+	}
+	apiResp.Meta[backend.MetaRetryAfter] = v
 }
 
 // parseFleetResponse turns a fleet-db response body into the apiResponse

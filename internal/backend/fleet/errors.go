@@ -55,6 +55,14 @@ func classifyHTTPErrorKind(op string, statusCode int, body apiResponse) error {
 		return attachMeta(classified, body.Meta)
 	}
 
+	// A 429 is authoritative regardless of message text: the backend is up
+	// and asking us to slow down. Checked ahead of the classifyErrorString
+	// promotion below so a throttle message containing e.g. "invalid" is
+	// not reclassified as a validation failure.
+	if statusCode == 429 {
+		return attachMeta(backend.ErrRateLimited(op, msg), body.Meta)
+	}
+
 	// 2xx with success=false: classify from error string.
 	if statusCode >= 200 && statusCode < 300 {
 		return attachMeta(classifyErrorString(op, msg), body.Meta)
@@ -95,8 +103,6 @@ func classifyStatus(op string, statusCode int, msg string) error {
 		return backend.ErrNotFound(op, msg)
 	case 409:
 		return backend.ErrConflict(op, msg)
-	case 429:
-		return backend.ErrUnavailable(op, "rate limited: "+msg, nil)
 	case 503:
 		return backend.ErrUnavailable(op, msg, nil)
 	case 504:
