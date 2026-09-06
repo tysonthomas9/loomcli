@@ -140,6 +140,15 @@ type harnessLeadLaunch struct {
 // the format claude's --session-id requires.
 var newHarnessSessionID = uuid.NewString
 
+// appendClaudeModelPin appends `--model <pin>` when the lead's model is pinned
+// (pinnedClaudeModel, see model_pin.go) and leaves args untouched otherwise.
+func appendClaudeModelPin(args []string) []string {
+	if model := pinnedClaudeModel(); model != "" {
+		return append(args, "--model", model)
+	}
+	return args
+}
+
 // harnessLeadInvocation mirrors each backend's InvokeInteractive command
 // construction (binary, args, env) for use under harness-wrapper supervision.
 // The prompt is appended by the runtime as the final positional argument.
@@ -156,6 +165,12 @@ var newHarnessSessionID = uuid.NewString
 // Only claude supports it today; every other backend refuses rather than
 // silently starting a fresh session, because a lead that answers "--continue"
 // with an empty conversation has lost the transcript the operator asked for.
+//
+// The model pin is now part of what this builder must mirror: claude's
+// `--model` comes from pinnedClaudeModel(), the same resolver
+// buildClaudeInteractiveCmd uses, so a lead launched through here and one
+// launched through the LOOM_LEAD_CONTROLLED=0 fallback boot on the same model.
+// See model_pin.go for the precedence ladder.
 func harnessLeadInvocation(backend, workDir, resumeSessionID string) (harnessLeadLaunch, bool, error) {
 	switch backend {
 	case "claude":
@@ -166,7 +181,9 @@ func harnessLeadInvocation(backend, workDir, resumeSessionID string) (harnessLea
 			// profile via claudeResumeArgs, the same builder the RunTurn path
 			// uses, so resume stays owned in one place.
 			args := append([]string{}, claudeResumeArgs(resumeSessionID)...)
-			args = append(args, "--dangerously-skip-permissions")
+			// The model pin applies to a resumed lead too: without it a resume
+			// boots on whatever model a drifted settings.json names.
+			args = appendClaudeModelPin(append(args, "--dangerously-skip-permissions"))
 			return harnessLeadLaunch{
 				binary:           "claude",
 				args:             appendClaudeSafetyArgs(args),
@@ -175,9 +192,12 @@ func harnessLeadInvocation(backend, workDir, resumeSessionID string) (harnessLea
 			}, true, nil
 		}
 		sessionID := newHarnessSessionID()
+		args := appendClaudeModelPin([]string{"--session-id", sessionID, "--dangerously-skip-permissions"})
+		// Safety args stay LAST, matching buildClaudeInteractiveCmd's ordering.
+		args = appendClaudeSafetyArgs(args)
 		return harnessLeadLaunch{
 			binary:           "claude",
-			args:             appendClaudeSafetyArgs([]string{"--session-id", sessionID, "--dangerously-skip-permissions"}),
+			args:             args,
 			env:              env,
 			harnessSessionID: sessionID,
 		}, true, nil
