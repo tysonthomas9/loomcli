@@ -53,38 +53,6 @@ undeclared:
   # PUPPET-488 children 4 and 5 move these into api/openapi.yaml. Each one that
   # lands there must be deleted from here in the same change, or
   # TestRouteDriftAllowlistIsClean fails on the contradiction.
-  - route: "DELETE /api/workspaces/{ws}/roles/{role}/skills/{name}"
-    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
-  - route: "DELETE /api/workspaces/{ws}/roles/{role}/skills/{name}/files/{path...}"
-    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
-  - route: "DELETE /api/workspaces/{ws}/skills/{name}"
-    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
-  - route: "DELETE /api/workspaces/{ws}/skills/{name}/files/{path...}"
-    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
-  - route: "GET /api/workspaces/{ws}/roles/{role}/skills/{name}"
-    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
-  - route: "GET /api/workspaces/{ws}/roles/{role}/skills/{name}/files/{path...}"
-    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
-  - route: "GET /api/workspaces/{ws}/skill-capabilities"
-    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
-  - route: "GET /api/workspaces/{ws}/skills"
-    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
-  - route: "GET /api/workspaces/{ws}/skills/{name}"
-    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
-  - route: "GET /api/workspaces/{ws}/skills/{name}/files/{path...}"
-    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
-  - route: "PATCH /api/workspaces/{ws}/roles/{role}/skills/{name}"
-    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
-  - route: "PATCH /api/workspaces/{ws}/skills/{name}"
-    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
-  - route: "POST /api/workspaces/{ws}/roles/{role}/skills"
-    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
-  - route: "POST /api/workspaces/{ws}/skills"
-    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
-  - route: "PUT /api/workspaces/{ws}/roles/{role}/skills/{name}/files/{path...}"
-    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
-  - route: "PUT /api/workspaces/{ws}/skills/{name}/files/{path...}"
-    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
 
   # ── Daemon-socket control surface ───────────────────────────────────────────
   # Registered only when the server has the matching daemon control-socket
