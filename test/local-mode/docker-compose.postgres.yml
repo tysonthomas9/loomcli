@@ -1,0 +1,41 @@
+# Paired Fleet must support --pg-committed-workspace-creation.
+# Uses ordinary workspace creation and the unchanged local-mode entrypoint.
+volumes:
+  postgres-data:
+    driver: local
+
+services:
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    environment:
+      POSTGRES_USER: fleet_local
+      POSTGRES_PASSWORD: local-mode-owned-only
+      POSTGRES_DB: fleet_local
+    networks: [local-mode]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fleet_local -d fleet_local"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  fleet-db:
+    build:
+      context: ${LOCAL_MODE_FLEETDB_BUILD_CONTEXT:-../../../fleet-db}
+      dockerfile: deploy/docker/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - "--backend"
+      - "postgres"
+      - "--pg-dsn"
+      - "postgres://fleet_local:local-mode-owned-only@postgres:5432/fleet_local?sslmode=disable"
+      - "--pg-committed-workspace-creation"
+      - "--redis-addr"
+      - "redis:6379"
+      - "--addr"
+      - ":8080"
+      - "--auth-dev-mode"
+      - "--authz-enabled=false"
