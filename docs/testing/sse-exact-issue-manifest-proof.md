@@ -21,3 +21,5 @@ Deterministic frontend tests and local HTTP fixtures exercise v2 success and v1 
 - `go test -race -p 1 ./internal/backend/fleet ./internal/webui/server/realtime ./internal/webui/subscription -run 'Recovery|Resync'`: passed. Local HTTP listeners required sandbox socket permission; the initial restricted run could not bind its fixture.
 - Scoped Go lint for Fleet client, realtime and subscription packages: passed with zero issues (existing unknown `norawexec` directive warning).
 - Logs: `/private/tmp/loom-exact-manifest-{frontend,go,tsc,eslint,golint}.log`.
+
+Hosted frontend CI exposed Prettier failures in the new offer test and an inherited issue-store ownership test. Both received formatting-only fixes. The exact `make check-frontend` gate then passed locally, including formatting, typecheck, full lint, architecture, generated-code staleness and all 9,210 tests with coverage (81.54% statements, 74.02% branches, 80.18% functions, 83.63% lines). Log: `/private/tmp/loom-exact-manifest-check-frontend.log`. The gate installed its worktree-local dependency tree because the initial shared symlink marker was stale.
