@@ -213,7 +213,13 @@ func buildClaudeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	if effort := resolveAgentEffort(); effort != "" {
 		args = append(args, "--effort", effort)
 	}
-	if model := resolveAgentModel(); model != "" {
+	// pinnedClaudeModel, not resolveAgentModel: this builder also serves the
+	// lead's LOOM_LEAD_CONTROLLED=0 fallback, so it has to reach the same
+	// launch state as harnessLeadInvocation. Non-lead interactive claude
+	// launches therefore also get a baseline-derived model when no role model
+	// is set — deliberate, and identical in kind (boot on the model your
+	// profile was provisioned with).
+	if model := pinnedClaudeModel(); model != "" {
 		args = append(args, "--model", model)
 	}
 	args = appendClaudeSafetyArgs(args)
