@@ -45,6 +45,11 @@ import {
   InvalidatedQueryRegistryContext,
 } from "./invalidatedQueryRegistry";
 
+import {
+  IssueRecoverySelectionRegistry,
+  IssueRecoverySelectionContext,
+} from "./issueRecoverySelection";
+
 export type { ConnectionState } from "@/api/common";
 
 /**
@@ -150,6 +155,11 @@ export function EventProvider({
   );
   const recoveryAttempts = useMemo(
     () => new IssueRecoveryAttemptController(),
+    [],
+  );
+
+  const recoverySelections = useMemo(
+    () => new IssueRecoverySelectionRegistry(),
     [],
   );
 
@@ -359,10 +369,27 @@ export function EventProvider({
         if (!owns()) return;
         if (event.reason === "expired" && event.recovery) {
           const lease = client.suspendForRecovery();
-          recoveryAttempts.start(event.recovery, lease, (status) => {
-            if (active && clientRef.current === client)
-              setRecoveryStatus(status);
-          });
+          try {
+            const selection = recoverySelections.capture(workspaceId);
+            if (!owns() || !lease.isCurrent()) {
+              selection.release?.();
+              return;
+            }
+            recoveryAttempts.start(
+              event.recovery,
+              lease,
+              (status) => {
+                if (active && clientRef.current === client)
+                  setRecoveryStatus(status);
+              },
+              selection,
+            );
+          } catch {
+            if (owns()) {
+              recoveryAttempts.cancel();
+              if (owns()) setRecoveryStatus("failed");
+            }
+          }
           if (!active || clientRef.current !== client || !lease.isCurrent())
             return;
         }
@@ -423,6 +450,7 @@ export function EventProvider({
     credentialGeneration,
     dispatchMutation,
     recoveryAttempts,
+    recoverySelections,
     workspaceId,
   ]);
 
@@ -483,7 +511,11 @@ export function EventProvider({
   return (
     <InvalidatedQueryRegistryContext.Provider value={invalidatedQueryRegistry}>
       <QueryRecoveryContext.Provider value={queryRecovery}>
-        <EventContext.Provider value={value}>{children}</EventContext.Provider>
+        <IssueRecoverySelectionContext.Provider value={recoverySelections}>
+          <EventContext.Provider value={value}>
+            {children}
+          </EventContext.Provider>
+        </IssueRecoverySelectionContext.Provider>
       </QueryRecoveryContext.Provider>
     </InvalidatedQueryRegistryContext.Provider>
   );

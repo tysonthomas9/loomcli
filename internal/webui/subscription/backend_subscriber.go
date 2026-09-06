@@ -210,6 +210,20 @@ func (s *BackendMutationSubscriber) ReadIssueRecovery(ctx context.Context) (back
 	return withSubscriberLifetime(ctx, s.ctx, reader.ReadIssueRecovery)
 }
 
+// ReadIssueRecoveryForIssue uses the same captured backend and retirement fence.
+func (s *BackendMutationSubscriber) ReadIssueRecoveryForIssue(ctx context.Context, issueID string) (backend.IssueRecoverySnapshot, error) {
+	if !backend.ValidRecoveryIssueSelection(issueID) {
+		return backend.IssueRecoverySnapshot{}, fmt.Errorf("invalid selected issue")
+	}
+	reader, ok := s.backend.(backend.IssueRecoverySelectedBackend)
+	if !ok {
+		return backend.IssueRecoverySnapshot{}, fmt.Errorf("backend does not support selected issue recovery")
+	}
+	return withSubscriberLifetime(ctx, s.ctx, func(ctx context.Context) (backend.IssueRecoverySnapshot, error) {
+		return reader.ReadIssueRecoveryForIssue(ctx, issueID)
+	})
+}
+
 // withSubscriberLifetime is the shared cancellation boundary for authoritative
 // pages and certified reads; neither may return success after retirement.
 func withSubscriberLifetime[T any](ctx, lifetime context.Context, read func(context.Context) (T, error)) (T, error) {

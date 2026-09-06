@@ -47,3 +47,7 @@ The decoder exposes valid offers to the owning EventProvider, which now pauses t
 ## v5 selected history contract
 
 Native v5 now includes explicit history:null or a validated selected window. The current browser reader remains unselected; the preparer can retain a selected window only with an exact expected scope. Registry/attempt selection ownership, timeline adaptation, ordinary-request fencing and publication remain pending. See [contract proof](../testing/sse-history-recovery-contract-proof.md).
+
+## Selected history ownership integration
+
+The captured registry path now forwards an explicitly selected issue. Committed history hooks enroll selection ownership; the browser attempt binds its immutable scope and generation through preparation, including ABA cancellation. Conflicting active issue scopes refuse recovery. Native history remains private until timeline adaptation and coordinated publication are implemented. See [ownership proof](../testing/sse-selected-history-ownership-proof.md).
