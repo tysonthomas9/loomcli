@@ -14,7 +14,7 @@ const offer: RecoveryHandle = {
   workspace: "WS",
   source_repos: [],
   expires_at: "2026-09-05T12:01:00Z",
-  manifest: "fleet.issue-workspace.v3",
+  manifest: "fleet.issue-workspace.v4",
 };
 const document = JSON.stringify({
   manifest: offer.manifest,
@@ -26,6 +26,7 @@ const document = JSON.stringify({
   blocked: [],
   deferred: [],
   dependencies: [],
+  comments: [],
 });
 const headers = {
   "X-Loom-Recovery-Source": offer.source_identity,
