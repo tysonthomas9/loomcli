@@ -6,230 +6,233 @@ import {
   closeTestIssue,
   resolveWorkspaceId,
 } from "./helpers";
+import {
+  createSSEBrowserProbe,
+  type SSEBrowserProbe,
+} from "./sse-browser-probe";
 
-/**
- * Integration tests for SSE live updates against real backend.
- *
- * These tests require:
- * - A running loom serve instance (default http://localhost:8080)
- * - RUN_INTEGRATION_TESTS=1 environment variable
- *
- * Run with: RUN_INTEGRATION_TESTS=1 npx playwright test --project=integration
- */
-
-// Skip if integration tests not enabled
-const skipIntegration = !process.env.RUN_INTEGRATION_TESTS;
-test.skip(skipIntegration, "Integration tests require RUN_INTEGRATION_TESTS=1");
-
-// Run tests serially to avoid data conflicts
+// Real product fetch-SSE only. No page routes, response fixtures or extra stream.
+test.skip(
+  !process.env.RUN_INTEGRATION_TESTS,
+  "Requires running paired services",
+);
 test.describe.configure({ mode: "serial" });
 
-async function gotoKanban(page: Page, query = "") {
-  const workspaceId = await resolveWorkspaceId();
-  await page.goto(`/ws/${encodeURIComponent(workspaceId)}/kanban${query}`);
+let probe: SSEBrowserProbe;
+let workspace: string;
+const issueIds: string[] = [];
+let navigations = 0;
+
+test.beforeEach(async ({ page }) => {
+  workspace = await resolveWorkspaceId();
+  probe = await createSSEBrowserProbe(page, workspace);
+  navigations = 0;
+  page.on("request", (request) => {
+    if (
+      request.isNavigationRequest() &&
+      request.resourceType() === "document" &&
+      request.frame() === page.mainFrame()
+    )
+      navigations++;
+  });
+});
+
+test.afterEach(async ({ page }, info) => {
+  try {
+    probe?.assertHealthy();
+  } finally {
+    if (probe) {
+      await info.attach("actual-fetch-sse", {
+        body: JSON.stringify(probe.snapshot(), null, 2),
+        contentType: "application/json",
+      });
+      await info.attach("board", {
+        body: await page.screenshot(),
+        contentType: "image/png",
+      });
+      await probe.dispose();
+    }
+    for (const id of issueIds.splice(0)) await closeTestIssue(id);
+  }
+});
+
+async function createIssue(title: string): Promise<string> {
+  const id = await createTestIssue(title);
+  issueIds.push(id);
+  probe.ownIssue(id);
+  return id;
 }
 
-test.describe("SSE Live Updates Integration", () => {
-  const testIssueIds: string[] = [];
+async function gotoKanban(page: Page) {
+  await page.goto(`/ws/${encodeURIComponent(workspace)}/kanban?groupBy=none`);
+  await expect
+    .poll(() => {
+      probe.assertHealthy();
+      return probe.frames.some((frame) => frame.event === "connected");
+    })
+    .toBe(true);
+  probe.assertHealthy();
+  await expect(
+    page.getByRole("region", { name: "Open issues", exact: true }),
+  ).toBeVisible();
+  await expect
+    .poll(() => {
+      probe.assertHealthy();
+      return probe.completions.length;
+    })
+    .toBeGreaterThan(0);
+  expect(navigations).toBe(1);
+}
 
-  test.afterEach(async () => {
-    // Clean up created issues via API
-    for (const id of testIssueIds) {
-      await closeTestIssue(id);
-    }
-    testIssueIds.length = 0;
+function mutations(id: string) {
+  probe.assertHealthy();
+  const found = probe.frames.filter(
+    (frame) => frame.event === "mutation" && frame.issueId === id,
+  );
+  for (const frame of found) {
+    expect(frame.workspaceId).toBe(workspace);
+    expect(frame.id).toMatch(/^c2\./);
+    expect(frame.action).toMatch(
+      /^issue\.(create|update|claim|release|close)$/,
+    );
+  }
+  return found;
+}
+
+async function expectProjectionRefreshAfter(completed: number) {
+  // Production debounces refresh for 1s, with a 5s maximum under a busy stream.
+  await expect
+    .poll(
+      () => {
+        probe.assertHealthy();
+        return probe.completions.length;
+      },
+      { timeout: 10_000 },
+    )
+    .toBeGreaterThan(completed);
+  probe.assertHealthy();
+  expect(navigations).toBe(1);
+}
+
+test("fetch SSE establishes with a connected frame @smoke", async ({
+  page,
+}) => {
+  await gotoKanban(page);
+  expect(
+    probe.requests.some(
+      (request) =>
+        request.path.endsWith("/events") &&
+        request.status === 200 &&
+        request.type === "Fetch" &&
+        request.streamAttached,
+    ),
+  ).toBe(true);
+  // Never swallow a failed alert assertion as the former test did.
+  await expect(
+    page.getByRole("alert").filter({ hasText: /error|failed/i }),
+  ).toHaveCount(0);
+});
+
+test("API-created issue renders before projection refresh then converges @smoke", async ({
+  page,
+}) => {
+  await createIssue(`SSE seed ${generateTestId()}`);
+  await gotoKanban(page);
+  const completed = probe.completions.length;
+  const responses = probe.responses.length;
+  const title = `SSE create ${generateTestId()}`;
+  const id = await createIssue(title);
+  await expect(
+    page
+      .getByRole("region", { name: "Open issues", exact: true })
+      .getByText(title, { exact: true }),
+  ).toBeVisible();
+  expect(
+    probe.responses.length,
+    "SSE must render before a collection response can repair the view",
+  ).toBe(responses);
+  await expect.poll(() => mutations(id).length).toBe(1);
+  await expectProjectionRefreshAfter(completed);
+  expect(mutations(id)).toHaveLength(1);
+});
+
+test("status moves before projection refresh then converges @smoke", async ({
+  page,
+}) => {
+  const title = `SSE status ${generateTestId()}`;
+  const id = await createIssue(title);
+  await gotoKanban(page);
+  const open = page.getByRole("region", { name: "Open issues", exact: true });
+  const active = page.getByRole("region", {
+    name: "In Progress issues",
+    exact: true,
   });
+  await expect(open.getByText(title, { exact: true })).toBeVisible();
+  const completed = probe.completions.length;
+  const responses = probe.responses.length;
+  await updateIssueStatus(id, "in_progress");
+  await expect(active.getByText(title, { exact: true })).toBeVisible();
+  await expect(open.getByText(title, { exact: true })).toHaveCount(0);
+  expect(
+    probe.responses.length,
+    "Status application cannot be rescued by projection refetch",
+  ).toBe(responses);
+  await expect.poll(() => mutations(id).length).toBe(1);
+  await expectProjectionRefreshAfter(completed);
+  await expect(active.getByText(title, { exact: true })).toHaveCount(1);
+  expect(mutations(id).map((frame) => frame.action)).toEqual(["issue.claim"]);
+  const beforeRelease = probe.responses.length;
+  const completedBeforeRelease = probe.completions.length;
+  await updateIssueStatus(id, "open");
+  await expect(open.getByText(title, { exact: true })).toBeVisible();
+  expect(probe.responses.length).toBe(beforeRelease);
+  await expect.poll(() => mutations(id).length).toBe(2);
+  await expectProjectionRefreshAfter(completedBeforeRelease);
+  expect(mutations(id).map((frame) => frame.action)).toEqual([
+    "issue.claim",
+    "issue.release",
+  ]);
+});
 
-  test("SSE connection establishes on page load @smoke", async ({ page }) => {
-    // Navigate to Kanban board
-    await gotoKanban(page);
+test("rapid creates each reach the browser exactly once in the observed interval @regression", async ({
+  page,
+}) => {
+  await gotoKanban(page);
+  const completed = probe.completions.length;
+  const created: Array<{ id: string; title: string }> = [];
+  for (let i = 0; i < 3; i++) {
+    const title = `SSE rapid ${generateTestId()}`;
+    created.push({ id: await createIssue(title), title });
+  }
+  for (const { id, title } of created) {
+    await expect(
+      page
+        .getByRole("region", { name: "Open issues", exact: true })
+        .getByText(title, { exact: true }),
+    ).toHaveCount(1);
+    await expect.poll(() => mutations(id).length).toBe(1);
+  }
+  await expectProjectionRefreshAfter(completed);
+  const ids = created.map(({ id }) => mutations(id)[0].id);
+  expect(new Set(ids).size).toBe(3);
+  for (const { id } of created) expect(mutations(id)).toHaveLength(1);
+});
 
-    // Wait for SSE connection status to show connected
-    // The connection indicator uses data-state="connected"
-    const connectionStatus = page.locator('[data-state="connected"]');
-    await expect(connectionStatus).toBeVisible({ timeout: 10000 });
-
-    // Verify no error toasts appeared
-    const errorToast = page.locator('[role="alert"]', {
-      hasText: /error|failed/i,
-    });
-    await expect(errorToast)
-      .not.toBeVisible({ timeout: 2000 })
-      .catch(() => {
-        // It's okay if we timeout - means no error toast
-      });
-  });
-
-  test("API-created issue appears via SSE without reload @smoke", async ({
-    page,
-  }) => {
-    // Create initial issue so Kanban renders columns (not empty state)
-    const seedTitle = `SSE Seed ${generateTestId()}`;
-    const seedId = await createTestIssue(seedTitle);
-    testIssueIds.push(seedId);
-
-    let issueFetchCount = 0;
-    page.on("request", (request) => {
-      const url = new URL(request.url());
-      if (
-        request.method() === "GET" &&
-        url.pathname.match(/\/api\/workspaces\/[^/]+\/issues$/)
-      ) {
-        issueFetchCount++;
-      }
-    });
-
-    // Navigate to Kanban — initial API fetch picks up the seed issue
-    await gotoKanban(page, "?groupBy=none");
-    await page.waitForLoadState("domcontentloaded");
-
-    // Wait for SSE connection and ready column
-    const connectionStatus = page.locator('[data-state="connected"]');
-    await expect(connectionStatus).toBeVisible({ timeout: 10000 });
-    const readyColumn = page.getByRole("region", { name: "Open issues" });
-    await expect(readyColumn).toBeVisible({ timeout: 15000 });
-    const fetchesAfterInitialRender = issueFetchCount;
-
-    // Allow SSE connection to stabilize after initial page load
-    await page.waitForTimeout(2000);
-
-    // Now create a second issue via API — this must appear via SSE
-    const uniqueTitle = `SSE Test Issue ${generateTestId()}`;
-    const issueId = await createTestIssue(uniqueTitle);
-    testIssueIds.push(issueId);
-
-    // Verify the new issue card appears without reload
-    await expect(readyColumn.getByText(uniqueTitle)).toBeVisible({
-      timeout: 15000,
-    });
-    expect(issueFetchCount).toBe(fetchesAfterInitialRender);
-  });
-
-  test("status change via API moves card without reload or refetch @smoke", async ({
-    page,
-  }) => {
-    // Create test issue via API (open status by default -> appears in ready)
-    const uniqueTitle = `Status Change Test ${generateTestId()}`;
-    const issueId = await createTestIssue(uniqueTitle);
-    testIssueIds.push(issueId);
-
-    let issueFetchCount = 0;
-    page.on("request", (request) => {
-      const url = new URL(request.url());
-      if (
-        request.method() === "GET" &&
-        url.pathname.match(/\/api\/workspaces\/[^/]+\/issues$/)
-      ) {
-        issueFetchCount++;
-      }
-    });
-
-    // Navigate to Kanban
-    await gotoKanban(page, "?groupBy=none");
-    await page.waitForLoadState("domcontentloaded");
-
-    // Wait for SSE connection
-    const connectionStatus = page.locator('[data-state="connected"]');
-    await expect(connectionStatus).toBeVisible({ timeout: 10000 });
-
-    // Wait for issue to appear in ready column
-    const readyColumn = page.getByRole("region", { name: "Open issues" });
-    const inProgressColumn = page.getByRole("region", {
-      name: "In Progress issues",
-    });
-
-    await expect(readyColumn.getByText(uniqueTitle)).toBeVisible({
-      timeout: 10000,
-    });
-    const fetchesAfterInitialRender = issueFetchCount;
-
-    // Verify issue is NOT in in_progress column initially
-    await expect(inProgressColumn.getByText(uniqueTitle)).not.toBeVisible();
-
-    // Update status via API to in_progress
-    await updateIssueStatus(issueId, "in_progress");
-
-    // Wait for card to move to in_progress via the live SSE stream only.
-    await expect(inProgressColumn.getByText(uniqueTitle)).toBeVisible({
-      timeout: 15000,
-    });
-    await expect(readyColumn.getByText(uniqueTitle)).not.toBeVisible();
-    expect(issueFetchCount).toBe(fetchesAfterInitialRender);
-  });
-
-  test("multiple rapid updates via API are reflected in UI @regression", async ({
-    page,
-  }) => {
-    // Navigate to Kanban and wait for connection
-    await gotoKanban(page);
-    await page.waitForLoadState("domcontentloaded");
-
-    const connectionStatus = page.locator('[data-state="connected"]');
-    await expect(connectionStatus).toBeVisible({ timeout: 10000 });
-
-    // Create multiple issues rapidly via API
-    const issues: { id: string; title: string }[] = [];
-    for (let i = 0; i < 3; i++) {
-      const title = `Rapid Update Test ${generateTestId()}`;
-      const id = await createTestIssue(title);
-      issues.push({ id, title });
-      testIssueIds.push(id);
-    }
-
-    // Wait for all issues to appear in ready column
-    const readyColumn = page.getByRole("region", { name: "Open issues" });
-
-    await expect(async () => {
-      for (const issue of issues) {
-        await expect(readyColumn.getByText(issue.title)).toBeVisible();
-      }
-    }).toPass({ timeout: 15000, intervals: [500, 1000, 2000] });
-
-    // Verify all 3 issues are visible
-    for (const issue of issues) {
-      await expect(readyColumn.getByText(issue.title)).toBeVisible();
-    }
-  });
-
-  test("closed issue disappears from open columns @regression", async ({
-    page,
-  }) => {
-    // Create test issue
-    const uniqueTitle = `Close via SSE Test ${generateTestId()}`;
-    const issueId = await createTestIssue(uniqueTitle);
-    testIssueIds.push(issueId);
-
-    // Navigate to Kanban
-    await gotoKanban(page);
-    await page.waitForLoadState("domcontentloaded");
-
-    // Wait for SSE connection
-    const connectionStatus = page.locator('[data-state="connected"]');
-    await expect(connectionStatus).toBeVisible({ timeout: 10000 });
-
-    // Wait for issue to appear in ready column
-    const readyColumn = page.getByRole("region", { name: "Open issues" });
-    await expect(readyColumn.getByText(uniqueTitle)).toBeVisible({
-      timeout: 10000,
-    });
-
-    // Close issue via API
-    await closeTestIssue(issueId);
-
-    // Issue should disappear from ready column (moved to done or removed)
-    await expect(async () => {
-      const isVisible = await readyColumn
-        .getByText(uniqueTitle)
-        .isVisible()
-        .catch(() => false);
-      expect(isVisible).toBe(false);
-    }).toPass({ timeout: 20000, intervals: [500, 1000, 2000, 3000] });
-
-    // Optionally check done column if visible
-    const doneColumn = page.locator('section[data-status="done"]');
-    if (await doneColumn.isVisible({ timeout: 2000 }).catch(() => false)) {
-      // Issue may or may not be in done column depending on UI state/filters
-      // Just verify it's not in the active columns
-    }
-  });
+test("close leaves Open through the observed stream without reload @regression", async ({
+  page,
+}) => {
+  const title = `SSE close ${generateTestId()}`;
+  const id = await createIssue(title);
+  await gotoKanban(page);
+  const open = page
+    .getByRole("region", { name: "Open issues", exact: true })
+    .getByText(title, { exact: true });
+  await expect(open).toBeVisible();
+  const completed = probe.completions.length;
+  await closeTestIssue(id);
+  issueIds.splice(issueIds.indexOf(id), 1);
+  await expect(open).toHaveCount(0);
+  await expect.poll(() => mutations(id).length).toBe(1);
+  await expectProjectionRefreshAfter(completed);
+  expect(mutations(id)).toHaveLength(1);
 });

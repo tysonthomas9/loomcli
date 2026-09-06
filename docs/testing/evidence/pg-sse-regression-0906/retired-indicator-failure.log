@@ -1,0 +1,44 @@
+
+Running 1 test using 1 worker
+
+(node:55054) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:55054) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1/1] [integration] › tests/e2e/integration/sse-updates.integration.spec.ts:108:3 › SSE Live Updates Integration › status change via API moves card without reload or refetch @smoke
+  1) [integration] › tests/e2e/integration/sse-updates.integration.spec.ts:108:3 › SSE Live Updates Integration › status change via API moves card without reload or refetch @smoke 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('[data-state="connected"]')
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for locator('[data-state="connected"]')
+
+
+      131 |     // Wait for SSE connection
+      132 |     const connectionStatus = page.locator('[data-state="connected"]');
+    > 133 |     await expect(connectionStatus).toBeVisible({ timeout: 10000 });
+          |                                    ^
+      134 |
+      135 |     // Wait for issue to appear in ready column
+      136 |     const readyColumn = page.getByRole("region", { name: "Open issues" });
+        at /Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/tests/e2e/integration/sse-updates.integration.spec.ts:133:36
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/sse-updates.integration-SS-bcc7f-out-reload-or-refetch-smoke-integration/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/sse-updates.integration-SS-bcc7f-out-reload-or-refetch-smoke-integration/error-context.md
+
+
+  1 failed
+    [integration] › tests/e2e/integration/sse-updates.integration.spec.ts:108:3 › SSE Live Updates Integration › status change via API moves card without reload or refetch @smoke 

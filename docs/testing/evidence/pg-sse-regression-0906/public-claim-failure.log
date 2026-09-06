@@ -1,0 +1,38 @@
+
+Running 1 test using 1 worker
+
+(node:61573) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:61573) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1/1] [integration] › tests/e2e/integration/sse-updates.integration.spec.ts:118:1 › status moves before projection refresh then converges @smoke
+  1) [integration] › tests/e2e/integration/sse-updates.integration.spec.ts:118:1 › status moves before projection refresh then converges @smoke 
+
+    Error: Failed to update issue LOCALMODE-9 in workspace LOCALMODE: 500 - {"error":"internal server error","kind":"internal"}
+
+
+       at integration/helpers.ts:507
+
+      505 |   if (!response.ok) {
+      506 |     const text = await response.text();
+    > 507 |     throw new Error(
+          |           ^
+      508 |       `Failed to update issue ${id} in workspace ${workspaceId}: ${response.status} - ${text}`,
+      509 |     );
+      510 |   }
+        at updateIssueStatusInWorkspace (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/tests/e2e/integration/helpers.ts:507:11)
+        at /Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/tests/e2e/integration/sse-updates.integration.spec.ts:131:3
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/sse-updates.integration-st-06452-efresh-then-converges-smoke-integration/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/sse-updates.integration-st-06452-efresh-then-converges-smoke-integration/error-context.md
+
+
+  1 failed
+    [integration] › tests/e2e/integration/sse-updates.integration.spec.ts:118:1 › status moves before projection refresh then converges @smoke 
