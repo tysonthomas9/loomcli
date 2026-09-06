@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -28,8 +31,9 @@ func handleIssueRecovery(registry *realtime.RecoveryRegistry, workspaceFromCtx f
 			handler.RespondError(w, http.StatusUnauthorized, "authentication required")
 			return
 		}
+		issueID, validSelection := recoveryRequestSelection(r.URL)
 		values := recoveryHeaderValues(r.Header, recoveryHandleHeader)
-		if len(values) != 1 || !realtime.ValidRecoveryHandle(values[0]) || invalidRecoveryRequest(r) {
+		if !validSelection || len(values) != 1 || !realtime.ValidRecoveryHandle(values[0]) || invalidRecoveryRequest(r) {
 			handler.RespondError(w, http.StatusBadRequest, "invalid recovery request")
 			return
 		}
@@ -39,7 +43,13 @@ func handleIssueRecovery(registry *realtime.RecoveryRegistry, workspaceFromCtx f
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
-		result, err := registry.Read(ctx, identity.UserID, sseWorkspaceFromContext(ctx, workspaceFromCtx), values[0])
+		var result backend.IssueRecoverySnapshot
+		var err error
+		if issueID == "" {
+			result, err = registry.Read(ctx, identity.UserID, sseWorkspaceFromContext(ctx, workspaceFromCtx), values[0])
+		} else {
+			result, err = registry.ReadForIssue(ctx, identity.UserID, sseWorkspaceFromContext(ctx, workspaceFromCtx), values[0], issueID)
+		}
 		if err == nil {
 			err = ctx.Err()
 		}
@@ -66,7 +76,7 @@ func recoveryHeaderValues(headers http.Header, name string) []string {
 }
 
 func invalidRecoveryRequest(r *http.Request) bool {
-	return r.URL.RawQuery != "" || r.URL.ForceQuery || r.ContentLength != 0 || len(r.TransferEncoding) != 0 || len(recoveryHeaderValues(r.Header, "Transfer-Encoding")) != 0 ||
+	return r.ContentLength != 0 || len(r.TransferEncoding) != 0 || len(recoveryHeaderValues(r.Header, "Transfer-Encoding")) != 0 ||
 		(r.Body != nil && r.Body != http.NoBody) || len(recoveryHeaderValues(r.Header, "X-Fleet-Repo")) != 0
 }
 
@@ -85,4 +95,19 @@ func writeRecoveryReadError(w http.ResponseWriter, err error) {
 		message = "recovery already in progress"
 	}
 	handler.RespondError(w, status, message)
+}
+
+func recoveryRequestSelection(u *url.URL) (string, bool) {
+	if u.RawQuery == "" {
+		return "", !u.ForceQuery
+	}
+	values, err := url.ParseQuery(u.RawQuery)
+	if err != nil || len(values) != 1 {
+		return "", false
+	}
+	selected, ok := values["issue_id"]
+	if !ok || len(selected) != 1 || !backend.ValidRecoveryIssueSelection(selected[0]) {
+		return "", false
+	}
+	return selected[0], true
 }

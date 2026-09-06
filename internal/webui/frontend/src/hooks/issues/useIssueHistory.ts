@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { getIssueEvents } from "@/api";
+import { IssueRecoverySelectionContext } from "@/hooks/common/issueRecoverySelection";
 import { QueryRecoveryContext } from "@/hooks/common/queryRecovery";
 import { useEventContext } from "@/hooks/common/useEventProvider";
 import { useWorkspaceContext } from "@/hooks/workspace";
@@ -74,7 +75,14 @@ export function useIssueHistory(
 ): UseIssueHistoryResult {
   const { workspaceId } = useWorkspaceContext();
   const recovery = useContext(QueryRecoveryContext);
+  const selections = useContext(IssueRecoverySelectionContext);
   const { subscribe, connectionEpoch } = useEventContext();
+  // Participation follows committed hook ownership, including mounted hidden
+  // panels. Ordinary detail revisions do not change the selected generation.
+  useLayoutEffect(() => {
+    if (!enabled || !issueId) return;
+    return selections?.register(workspaceId, issueId);
+  }, [selections, workspaceId, issueId, enabled]);
   const committed = useRef<HistoryOwner | null>(null);
   const stateOwner = useRef<HistoryOwner | null>(null);
   const [events, setEvents] = useState<Event[]>([]);

@@ -110,6 +110,17 @@ func (r *RecoveryRegistry) Register(principal, workspace string, repos []string,
 }
 
 func (r *RecoveryRegistry) Read(ctx context.Context, principal, workspace, handle string) (backend.IssueRecoverySnapshot, error) {
+	return r.read(ctx, principal, workspace, handle, "")
+}
+
+func (r *RecoveryRegistry) ReadForIssue(ctx context.Context, principal, workspace, handle, issueID string) (backend.IssueRecoverySnapshot, error) {
+	if !backend.ValidRecoveryIssueSelection(issueID) {
+		return backend.IssueRecoverySnapshot{}, ErrRecoveryUnavailable
+	}
+	return r.read(ctx, principal, workspace, handle, issueID)
+}
+
+func (r *RecoveryRegistry) read(ctx context.Context, principal, workspace, handle, issueID string) (backend.IssueRecoverySnapshot, error) {
 	if err := ctx.Err(); err != nil {
 		return backend.IssueRecoverySnapshot{}, err
 	}
@@ -128,7 +139,17 @@ func (r *RecoveryRegistry) Read(ctx context.Context, principal, workspace, handl
 	if err := readCtx.Err(); err != nil {
 		return backend.IssueRecoverySnapshot{}, err
 	}
-	result, err := entry.source.ReadIssueRecovery(readCtx)
+	read := entry.source.ReadIssueRecovery
+	if issueID != "" {
+		selected, ok := entry.source.(backend.IssueRecoverySelectedBackend)
+		if !ok {
+			return backend.IssueRecoverySnapshot{}, ErrRecoveryUnavailable
+		}
+		read = func(ctx context.Context) (backend.IssueRecoverySnapshot, error) {
+			return selected.ReadIssueRecoveryForIssue(ctx, issueID)
+		}
+	}
+	result, err := read(readCtx)
 	if err != nil {
 		return backend.IssueRecoverySnapshot{}, err
 	}
@@ -138,7 +159,10 @@ func (r *RecoveryRegistry) Read(ctx context.Context, principal, workspace, handl
 	r.mu.Lock()
 	valid := !r.stoppedLocked() && r.entries[handle] == entry && r.now().Before(entry.handle.ExpiresAt)
 	r.mu.Unlock()
-	if !valid || result.SourceIdentity != entry.handle.SourceIdentity || result.Workspace != entry.handle.Workspace || result.Manifest != issueRecoveryManifest || !backend.ValidMutationCursor(result.Through) || len(result.Document) == 0 {
+	if !valid || result.SelectedIssueID != issueID || result.SourceIdentity != entry.handle.SourceIdentity || result.Workspace != entry.handle.Workspace || result.Manifest != issueRecoveryManifest || !backend.ValidMutationCursor(result.Through) || len(result.Document) == 0 {
+		return backend.IssueRecoverySnapshot{}, ErrRecoveryUnavailable
+	}
+	if err := backend.ValidateIssueRecoverySelection(result, issueID); err != nil {
 		return backend.IssueRecoverySnapshot{}, ErrRecoveryUnavailable
 	}
 	return result, nil

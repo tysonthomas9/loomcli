@@ -442,7 +442,7 @@ const historyActionEntities = new Map<string, string>([
   ].map((op): [string, string] => [`driver_run.${op}`, "driver_run"]),
   ["daemon.update", "daemon_profile"],
 ]);
-function selectedHistoryIdentity(value: unknown): string {
+export function selectedHistoryIdentity(value: unknown): string {
   const identity = nonblank(value);
   if (
     /[\uD800-\uDFFF]/u.test(identity) ||

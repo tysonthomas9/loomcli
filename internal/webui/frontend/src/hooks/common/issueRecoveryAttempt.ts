@@ -14,7 +14,15 @@ export interface IssueRecoveryLease {
   isCurrent(): boolean;
   retry(): boolean;
 }
+export interface IssueRecoverySelectionLease {
+  readonly issueId?: string | undefined;
+  readonly signal: AbortSignal;
+  isCurrent(): boolean;
+  release?(): void;
+}
 type Attempt = {
+  selection?: IssueRecoverySelectionLease;
+
   lease: IssueRecoveryLease;
   controller: AbortController;
   deadline: number;
@@ -38,18 +46,43 @@ export class IssueRecoveryAttemptController {
     input: RecoveryHandle,
     lease: IssueRecoveryLease,
     onStatus: (status: IssueRecoveryAttemptStatus) => void,
+    selection?: IssueRecoverySelectionLease,
   ): void {
+    const capturedSelection =
+      selection &&
+      Object.freeze({
+        issueId: selection.issueId,
+        signal: selection.signal,
+        isCurrent: () => selection.isCurrent(),
+        release: () => selection.release?.(),
+      });
     const generation = ++this.generation;
     this.retire();
-    if (generation !== this.generation) return;
+    if (generation !== this.generation) {
+      capturedSelection?.release();
+      return;
+    }
     const offer = decodeRecoveryHandle(
       input,
       input?.workspace,
       input?.source_repos,
     );
-    if (lease.signal.aborted || !lease.isCurrent()) return;
+    if (
+      lease.signal.aborted ||
+      !lease.isCurrent() ||
+      (capturedSelection &&
+        (capturedSelection.signal.aborted || !capturedSelection.isCurrent()))
+    ) {
+      capturedSelection?.release();
+      return;
+    }
+    if (generation !== this.generation) {
+      capturedSelection?.release();
+      return;
+    }
     const attempt: Attempt = {
       lease,
+      ...(capturedSelection ? { selection: capturedSelection } : {}),
       controller: new AbortController(),
       deadline: offer ? Date.parse(offer.expires_at) : Date.now(),
       onStatus,
@@ -60,7 +93,14 @@ export class IssueRecoveryAttemptController {
       if (this.active === attempt) this.cancel();
     };
     lease.signal.addEventListener("abort", canceled, { once: true });
-    attempt.detach = () => lease.signal.removeEventListener("abort", canceled);
+    capturedSelection?.signal.addEventListener("abort", canceled, {
+      once: true,
+    });
+    attempt.detach = () => {
+      lease.signal.removeEventListener("abort", canceled);
+      capturedSelection?.signal.removeEventListener("abort", canceled);
+      capturedSelection?.release();
+    };
     if (!offer) {
       this.fail(attempt);
       return;
@@ -71,7 +111,11 @@ export class IssueRecoveryAttemptController {
     void Promise.resolve()
       .then(() => {
         if (!this.current(attempt)) return;
-        return this.read(offer, attempt.controller.signal);
+        return this.read(
+          offer,
+          attempt.controller.signal,
+          attempt.selection?.issueId,
+        );
       })
       .then(
         (prepared) => {
@@ -106,12 +150,22 @@ export class IssueRecoveryAttemptController {
     previous.detach();
     previous.controller.abort();
   }
-  private current(attempt: Attempt): boolean {
+  private owns(attempt: Attempt): boolean {
     if (this.active !== attempt) return false;
-    if (attempt.lease.signal.aborted || !attempt.lease.isCurrent()) {
+    const valid =
+      !attempt.lease.signal.aborted &&
+      attempt.lease.isCurrent() &&
+      (!attempt.selection ||
+        (!attempt.selection.signal.aborted && attempt.selection.isCurrent()));
+    if (this.active !== attempt) return false;
+    if (!valid) {
       this.cancel();
       return false;
     }
+    return true;
+  }
+  private current(attempt: Attempt): boolean {
+    if (!this.owns(attempt)) return false;
     if (Date.now() >= attempt.deadline) {
       this.fail(attempt);
       return false;
@@ -135,9 +189,12 @@ export class IssueRecoveryAttemptController {
     if (this.active === attempt) this.publish(attempt, "failed");
   }
   private publish(attempt: Attempt, status: IssueRecoveryAttemptStatus): void {
-    if (this.active !== attempt) return;
+    if (!this.owns(attempt)) return;
     this.status = status;
     this.notify(attempt, status);
+    // A status observer can synchronously revoke selection without emitting
+    // abort. Retire retained prepared data before returning from publication.
+    this.owns(attempt);
   }
   private notify(attempt: Attempt, status: IssueRecoveryAttemptStatus): void {
     try {
