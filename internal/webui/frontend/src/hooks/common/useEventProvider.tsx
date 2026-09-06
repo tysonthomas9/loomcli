@@ -10,6 +10,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useCallback,
@@ -25,6 +26,15 @@ import {
   type MutationType,
   type ResyncEvent,
 } from "@/api/common";
+import {
+  getAuthCredentialGeneration,
+  getAuthToken,
+  onAuthCredentialChange,
+} from "@/api/common/client";
+import {
+  IssueRecoveryAttemptController,
+  type IssueRecoveryAttemptStatus,
+} from "./issueRecoveryAttempt";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import {
   QueryRecoveryCoordinator,
@@ -56,6 +66,8 @@ export interface SubscriptionOptions {
 export interface EventContextValue {
   /** Current SSE connection state */
   state: ConnectionState;
+  /** Native recovery preparation only; never a reset acknowledgment. */
+  recoveryStatus: IssueRecoveryAttemptStatus;
   /** Number of consecutive reconnection attempts */
   reconnectAttempts: number;
   /** Last error message, if any */
@@ -80,6 +92,7 @@ export interface EventContextValue {
 /** Default no-op value returned when useEventContext is called outside an EventProvider. */
 export const NO_EVENT_CONTEXT: EventContextValue = {
   state: "disconnected",
+  recoveryStatus: "idle",
   reconnectAttempts: 0,
   lastError: null,
   isConnected: false,
@@ -130,6 +143,15 @@ export function EventProvider({
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const [lastError, setLastError] = useState<string | null>(null);
   const [connectionEpoch, setConnectionEpoch] = useState(0);
+  const [recoveryStatus, setRecoveryStatus] =
+    useState<IssueRecoveryAttemptStatus>("idle");
+  const [credentialGeneration, setCredentialGeneration] = useState(
+    getAuthCredentialGeneration,
+  );
+  const recoveryAttempts = useMemo(
+    () => new IssueRecoveryAttemptController(),
+    [],
+  );
 
   // One invalidated-query registry belongs to this workspace SSE owner.
   const invalidatedQueryRegistryRef = useRef<InvalidatedQueryRegistry | null>(
@@ -149,7 +171,7 @@ export function EventProvider({
 
   // SSE client ref
   const clientRef = useRef<WorkspaceSSEClient | null>(null);
-  const mountedRef = useRef(true);
+  const ownerRevisionRef = useRef(0);
   const handshakeResyncPendingRef = useRef(false);
 
   // Track sourceRepos for reconnect detection
@@ -164,7 +186,7 @@ export function EventProvider({
     [workspaceId, sourceReposKey],
   );
   const queryRecoveryRef = useRef(queryRecovery);
-  useEffect(() => {
+  useLayoutEffect(() => {
     queryRecoveryRef.current = queryRecovery;
     const unregister = queryRecovery.register(
       "invalidated queries",
@@ -177,7 +199,7 @@ export function EventProvider({
     };
   }, [invalidatedQueryRegistry, queryRecovery]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     sourceReposRef.current = sourceRepos;
   }, [sourceRepos]);
 
@@ -230,37 +252,54 @@ export function EventProvider({
     [],
   );
 
-  const dispatchMutation = useCallback((mutation: MutationPayload): void => {
-    for (const entry of subscribersRef.current.values()) {
-      if (entry.types && !entry.types.includes(mutation.type)) {
-        continue;
+  const dispatchMutation = useCallback(
+    (mutation: MutationPayload, owns: () => boolean): void => {
+      for (const entry of subscribersRef.current.values()) {
+        if (!owns()) return;
+        if (entry.types && !entry.types.includes(mutation.type)) {
+          continue;
+        }
+        if (
+          entry.entityTypes &&
+          (mutation.entity_type == null ||
+            !entry.entityTypes.includes(mutation.entity_type))
+        ) {
+          continue;
+        }
+        if (
+          entry.actions &&
+          (mutation.action == null || !entry.actions.includes(mutation.action))
+        ) {
+          continue;
+        }
+        try {
+          entry.callback(mutation);
+        } catch (err) {
+          console.error("[EventProvider] Subscriber callback threw:", err);
+        }
       }
-      if (
-        entry.entityTypes &&
-        (mutation.entity_type == null ||
-          !entry.entityTypes.includes(mutation.entity_type))
-      ) {
-        continue;
-      }
-      if (
-        entry.actions &&
-        (mutation.action == null || !entry.actions.includes(mutation.action))
-      ) {
-        continue;
-      }
-      try {
-        entry.callback(mutation);
-      } catch (err) {
-        console.error("[EventProvider] Subscriber callback threw:", err);
-      }
-    }
-  }, []);
+    },
+    [],
+  );
 
-  // Create client on mount / workspaceId change
-  useEffect(() => {
+  useLayoutEffect(
+    () =>
+      onAuthCredentialChange((generation) => {
+        ownerRevisionRef.current++;
+        recoveryAttempts.cancel();
+        clientRef.current?.destroy();
+        queryRecoveryRef.current.cancel();
+        setCredentialGeneration(generation);
+      }),
+    [recoveryAttempts],
+  );
+
+  // Install ownership at commit, before stale asynchronous callbacks can run.
+  useLayoutEffect(() => {
     if (typeof window === "undefined") return;
 
-    mountedRef.current = true;
+    const owner = ownerRevisionRef;
+    owner.current++;
 
     // Reset reactive state for the new client (prevents stale values
     // from a previous workspaceId's client bleeding into the new one)
@@ -268,15 +307,25 @@ export function EventProvider({
     setReconnectAttempts(0);
     setLastError(null);
     setConnectionEpoch(0);
+    recoveryAttempts.cancel();
+    setRecoveryStatus("idle");
     handshakeResyncPendingRef.current = false;
 
+    let active = true;
     const client = new WorkspaceSSEClient(workspaceId, {
       onMutation: (mutation: MutationPayload) => {
-        if (!mountedRef.current) return;
-        dispatchMutation(mutation);
+        if (!active || clientRef.current !== client) return;
+        const revision = ownerRevisionRef.current;
+        dispatchMutation(
+          mutation,
+          () =>
+            active &&
+            clientRef.current === client &&
+            revision === ownerRevisionRef.current,
+        );
       },
       onStateChange: (newState: ConnectionState) => {
-        if (!mountedRef.current) return;
+        if (!active || clientRef.current !== client) return;
         if (newState === "connecting" || newState === "reconnecting") {
           handshakeResyncPendingRef.current = false;
         }
@@ -286,15 +335,15 @@ export function EventProvider({
         }
       },
       onError: (error: string) => {
-        if (!mountedRef.current) return;
+        if (!active || clientRef.current !== client) return;
         setLastError(error);
       },
       onReconnect: (attempt: number) => {
-        if (!mountedRef.current) return;
+        if (!active || clientRef.current !== client) return;
         setReconnectAttempts(attempt);
       },
       onConnected: () => {
-        if (!mountedRef.current) return;
+        if (!active || clientRef.current !== client) return;
         if (handshakeResyncPendingRef.current) {
           handshakeResyncPendingRef.current = false;
           return;
@@ -302,14 +351,32 @@ export function EventProvider({
         setConnectionEpoch((epoch) => epoch + 1);
       },
       onResync: (event: ResyncEvent) => {
-        if (!mountedRef.current) return;
+        const revision = ownerRevisionRef.current;
+        const owns = () =>
+          active &&
+          clientRef.current === client &&
+          revision === ownerRevisionRef.current;
+        if (!owns()) return;
+        if (event.reason === "expired" && event.recovery) {
+          const lease = client.suspendForRecovery();
+          recoveryAttempts.start(event.recovery, lease, (status) => {
+            if (active && clientRef.current === client)
+              setRecoveryStatus(status);
+          });
+          if (!active || clientRef.current !== client || !lease.isCurrent())
+            return;
+        }
         handshakeResyncPendingRef.current = event.reason !== "overflow";
         setConnectionEpoch((epoch) => epoch + 1);
-        dispatchMutation({
-          type: "refresh",
-          timestamp: new Date().toISOString(),
-          workspace_id: workspaceId,
-        });
+        dispatchMutation(
+          {
+            type: "refresh",
+            timestamp: new Date().toISOString(),
+            workspace_id: workspaceId,
+          },
+          owns,
+        );
+        if (!owns()) return;
         // This covers registered surfaces, not a committed source snapshot.
         // Successful query refresh never resets the SSE checkpoint here.
         void queryRecoveryRef.current.refresh().catch((error: unknown) => {
@@ -317,6 +384,7 @@ export function EventProvider({
           console.error("[EventProvider] Query recovery failed:", error);
         });
         for (const callback of resyncSubscribersRef.current.values()) {
+          if (!owns()) return;
           try {
             callback(event);
           } catch (err) {
@@ -327,41 +395,59 @@ export function EventProvider({
     });
     clientRef.current = client;
 
-    if (autoConnect) {
+    if (
+      autoConnect &&
+      (credentialGeneration === 0 || getAuthToken() !== null)
+    ) {
       client.connect(undefined, sourceReposRef.current);
     }
 
     const handleSignOut = () => {
+      ownerRevisionRef.current++;
+      recoveryAttempts.cancel();
+      queryRecoveryRef.current.cancel();
       client.destroy();
     };
     window.addEventListener("auth-sign-out", handleSignOut);
 
     return () => {
-      mountedRef.current = false;
+      active = false;
+      recoveryAttempts.cancel();
+      owner.current++;
       window.removeEventListener("auth-sign-out", handleSignOut);
       client.destroy();
       clientRef.current = null;
     };
-  }, [autoConnect, dispatchMutation, workspaceId]);
+  }, [
+    autoConnect,
+    credentialGeneration,
+    dispatchMutation,
+    recoveryAttempts,
+    workspaceId,
+  ]);
 
-  // Reconnect when sourceRepos changes
-  useEffect(() => {
+  // Revoke recovery and rebind synchronously when committed scope changes.
+  useLayoutEffect(() => {
     const prevKey = prevSourceReposKeyRef.current;
     prevSourceReposKeyRef.current = sourceReposKey;
     if (prevKey === sourceReposKey) return;
 
     const client = clientRef.current;
     if (client) {
+      ownerRevisionRef.current++;
+      recoveryAttempts.cancel();
       client.updateSourceRepos(sourceRepos);
     }
-  }, [sourceRepos, sourceReposKey]);
+  }, [recoveryAttempts, sourceRepos, sourceReposKey]);
 
   // Stable control methods
   const retryNow = useCallback(() => {
+    ownerRevisionRef.current++;
     clientRef.current?.retryNow();
   }, []);
 
   const disconnect = useCallback(() => {
+    ownerRevisionRef.current++;
     clientRef.current?.disconnect();
   }, []);
 
@@ -370,6 +456,7 @@ export function EventProvider({
   const value = useMemo<EventContextValue>(
     () => ({
       state,
+      recoveryStatus,
       reconnectAttempts,
       lastError,
       isConnected,
@@ -381,6 +468,7 @@ export function EventProvider({
     }),
     [
       state,
+      recoveryStatus,
       reconnectAttempts,
       lastError,
       isConnected,

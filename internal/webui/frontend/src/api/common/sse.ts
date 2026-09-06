@@ -97,6 +97,12 @@ export interface SSEClientOptions {
   maxReconnectDelay?: number;
 }
 
+export interface RecoverySuspensionLease {
+  readonly signal: AbortSignal;
+  isCurrent(): boolean;
+  retry(): boolean;
+}
+
 class FatalSSEError extends Error {}
 
 const FATAL_TOKEN_STATUSES = new Set([401, 403]);
@@ -116,6 +122,7 @@ export class WorkspaceSSEClient {
   private destroyed = false;
   private connectAbortController: AbortController | null = null;
   private connectionGeneration = 0;
+  private recoverySuspension: AbortController | null = null;
   private connectedFrameSeenForOpen = false;
 
   private onMutation: ((mutation: MutationPayload) => void) | undefined;
@@ -155,27 +162,28 @@ export class WorkspaceSSEClient {
     sourceRepos?: string[],
   ): Promise<void> {
     if (this.destroyed) return;
-
-    if (sourceRepos !== undefined) {
-      this.currentSourceRepos = [...sourceRepos];
-    }
-
-    if (this.state === "connected" || this.state === "connecting") {
+    if (
+      this.recoverySuspension === null &&
+      (this.state === "connected" || this.state === "connecting")
+    ) {
+      if (sourceRepos !== undefined) this.currentSourceRepos = [...sourceRepos];
       return;
     }
-
+    const generation = ++this.connectionGeneration;
+    this.cancelRecoverySuspension();
+    if (this.destroyed || generation !== this.connectionGeneration) return;
+    if (sourceRepos !== undefined) this.currentSourceRepos = [...sourceRepos];
     this.lastEventId =
       since !== undefined ? String(since) : this.getLastEventId();
     this.resumeHeaders = undefined;
-
     this.manualDisconnect = false;
-    this.setState("connecting");
-
-    // A direct connect while reconnecting replaces the library-owned retry loop.
-    this.connectAbortController?.abort();
+    const previousController = this.connectAbortController;
     const abortController = new AbortController();
     this.connectAbortController = abortController;
-    const generation = ++this.connectionGeneration;
+    previousController?.abort();
+    if (!this.isActive(abortController, generation)) return;
+    this.setState("connecting");
+    if (!this.isActive(abortController, generation)) return;
     const sinceParam = since ?? this.lastEventId;
     const wireSourceRepos =
       this.currentSourceRepos === undefined
@@ -264,7 +272,9 @@ export class WorkspaceSSEClient {
 
     this.currentSourceRepos =
       sourceRepos === undefined ? undefined : [...sourceRepos];
+    const nextGeneration = this.connectionGeneration + 1;
     this.disconnect();
+    if (this.connectionGeneration !== nextGeneration) return;
     void this.connect();
   }
 
@@ -274,14 +284,15 @@ export class WorkspaceSSEClient {
   disconnect(): void {
     if (this.destroyed) return;
 
+    const generation = ++this.connectionGeneration;
     this.resumeHeaders = undefined;
     this.manualDisconnect = true;
-
-    this.connectionGeneration++;
-    this.connectAbortController?.abort();
+    const previousController = this.connectAbortController;
     this.connectAbortController = null;
-
-    this.setState("disconnected");
+    this.cancelRecoverySuspension();
+    previousController?.abort();
+    if (generation === this.connectionGeneration && !this.destroyed)
+      this.setState("disconnected");
   }
 
   /**
@@ -319,17 +330,22 @@ export class WorkspaceSSEClient {
 
   /**
    * Immediately retry connection.
-   * Only works when in 'reconnecting' state.
+   * Works while reconnecting or suspended for recovery.
    * Resets the reconnect counter on manual retry.
    */
   retryNow(): void {
     if (this.destroyed) return;
-    if (this.state !== "reconnecting") return;
-
-    this.connectAbortController?.abort();
+    if (this.state !== "reconnecting" && this.recoverySuspension === null)
+      return;
+    const generation = ++this.connectionGeneration;
+    const previousController = this.connectAbortController;
     this.connectAbortController = null;
+    this.cancelRecoverySuspension();
+    previousController?.abort();
+    if (generation !== this.connectionGeneration || this.destroyed) return;
     this.reconnectAttempts = 0;
     this.callSafely("onReconnect", this.onReconnect, 0);
+    if (generation !== this.connectionGeneration || this.destroyed) return;
     void this.connect(undefined, this.currentSourceRepos);
   }
 
@@ -340,6 +356,7 @@ export class WorkspaceSSEClient {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.cancelRecoverySuspension();
 
     this.manualDisconnect = true;
     this.connectionGeneration++;
@@ -353,6 +370,46 @@ export class WorkspaceSSEClient {
     this.onReconnect = undefined;
     this.onConnected = undefined;
     this.onResync = undefined;
+  }
+
+  /** Stop delivery while one recovery attempt owns this transport. No cursor is acknowledged. */
+  suspendForRecovery(): RecoverySuspensionLease {
+    const controller = new AbortController();
+    if (this.destroyed) controller.abort();
+    const generation = this.destroyed
+      ? this.connectionGeneration
+      : ++this.connectionGeneration;
+    const isCurrent = () =>
+      !this.destroyed &&
+      !controller.signal.aborted &&
+      this.recoverySuspension === controller &&
+      this.connectionGeneration === generation;
+    const lease = Object.freeze({
+      signal: controller.signal,
+      isCurrent,
+      retry: () => {
+        if (!isCurrent()) return false;
+        this.retryNow();
+        return true;
+      },
+    });
+    if (this.destroyed) return lease;
+    const previousLease = this.recoverySuspension;
+    const previousController = this.connectAbortController;
+    this.recoverySuspension = controller;
+    this.connectAbortController = null;
+    this.resumeHeaders = undefined;
+    this.manualDisconnect = true;
+    previousLease?.abort();
+    previousController?.abort();
+    if (isCurrent()) this.setState("disconnected");
+    return lease;
+  }
+
+  private cancelRecoverySuspension(): void {
+    const controller = this.recoverySuspension;
+    this.recoverySuspension = null;
+    controller?.abort();
   }
 
   private setState(state: ConnectionState): void {
