@@ -1,10 +1,13 @@
+import {
+  createIsolatedSSEWorkspace,
+  assertSSEWorkspaceHasNoAgents,
+} from "./sse-workspace";
 import { test, expect, type Page } from "@playwright/test";
 import {
   generateTestId,
-  createTestIssue,
-  updateIssueStatus,
-  closeTestIssue,
-  resolveWorkspaceId,
+  createTestIssueInWorkspace,
+  updateIssueStatusInWorkspace,
+  closeTestIssueInWorkspace,
 } from "./helpers";
 import {
   createSSEBrowserProbe,
@@ -20,11 +23,24 @@ test.describe.configure({ mode: "serial" });
 
 let probe: SSEBrowserProbe;
 let workspace: string;
+let baselineIssue: string;
 const issueIds: string[] = [];
 let navigations = 0;
 
+test.beforeAll(async () => {
+  workspace = await createIsolatedSSEWorkspace();
+  baselineIssue = await createTestIssueInWorkspace(
+    workspace,
+    `SSE baseline ${generateTestId()}`,
+  );
+});
+
+test.afterAll(async () => {
+  if (baselineIssue) await closeTestIssueInWorkspace(workspace, baselineIssue);
+});
+
 test.beforeEach(async ({ page }) => {
-  workspace = await resolveWorkspaceId();
+  await assertSSEWorkspaceHasNoAgents(workspace);
   probe = await createSSEBrowserProbe(page, workspace);
   navigations = 0;
   page.on("request", (request) => {
@@ -52,12 +68,13 @@ test.afterEach(async ({ page }, info) => {
       });
       await probe.dispose();
     }
-    for (const id of issueIds.splice(0)) await closeTestIssue(id);
+    for (const id of issueIds.splice(0))
+      await closeTestIssueInWorkspace(workspace, id);
   }
 });
 
 async function createIssue(title: string): Promise<string> {
-  const id = await createTestIssue(title);
+  const id = await createTestIssueInWorkspace(workspace, title);
   issueIds.push(id);
   probe.ownIssue(id);
   return id;
@@ -170,7 +187,7 @@ test("status moves before projection refresh then converges @smoke", async ({
   await expect(open.getByText(title, { exact: true })).toBeVisible();
   const completed = probe.completions.length;
   const responses = probe.responses.length;
-  await updateIssueStatus(id, "in_progress");
+  await updateIssueStatusInWorkspace(workspace, id, "in_progress");
   await expect(active.getByText(title, { exact: true })).toBeVisible();
   await expect(open.getByText(title, { exact: true })).toHaveCount(0);
   expect(
@@ -183,7 +200,7 @@ test("status moves before projection refresh then converges @smoke", async ({
   expect(mutations(id).map((frame) => frame.action)).toEqual(["issue.claim"]);
   const beforeRelease = probe.responses.length;
   const completedBeforeRelease = probe.completions.length;
-  await updateIssueStatus(id, "open");
+  await updateIssueStatusInWorkspace(workspace, id, "open");
   await expect(open.getByText(title, { exact: true })).toBeVisible();
   expect(probe.responses.length).toBe(beforeRelease);
   await expect.poll(() => mutations(id).length).toBe(2);
@@ -229,7 +246,7 @@ test("close leaves Open through the observed stream without reload @regression",
     .getByText(title, { exact: true });
   await expect(open).toBeVisible();
   const completed = probe.completions.length;
-  await closeTestIssue(id);
+  await closeTestIssueInWorkspace(workspace, id);
   issueIds.splice(issueIds.indexOf(id), 1);
   await expect(open).toHaveCount(0);
   await expect.poll(() => mutations(id).length).toBe(1);
