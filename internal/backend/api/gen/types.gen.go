@@ -206,6 +206,135 @@ func (e CreateIssueRequestStatus) Valid() bool {
 	}
 }
 
+// Defines values for DaemonConfigResponseSuccess.
+const (
+	DaemonConfigResponseSuccessTrue DaemonConfigResponseSuccess = true
+)
+
+// Valid indicates whether the value is a known member of the DaemonConfigResponseSuccess enum.
+func (e DaemonConfigResponseSuccess) Valid() bool {
+	switch e {
+	case DaemonConfigResponseSuccessTrue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DaemonSupervisorResponseSuccess.
+const (
+	DaemonSupervisorResponseSuccessTrue DaemonSupervisorResponseSuccess = true
+)
+
+// Valid indicates whether the value is a known member of the DaemonSupervisorResponseSuccess enum.
+func (e DaemonSupervisorResponseSuccess) Valid() bool {
+	switch e {
+	case DaemonSupervisorResponseSuccessTrue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DriverOwnerType.
+const (
+	DriverOwnerTypeLeadAgent DriverOwnerType = "lead_agent"
+	DriverOwnerTypeSystem    DriverOwnerType = "system"
+	DriverOwnerTypeTeam      DriverOwnerType = "team"
+	DriverOwnerTypeUser      DriverOwnerType = "user"
+)
+
+// Valid indicates whether the value is a known member of the DriverOwnerType enum.
+func (e DriverOwnerType) Valid() bool {
+	switch e {
+	case DriverOwnerTypeLeadAgent:
+		return true
+	case DriverOwnerTypeSystem:
+		return true
+	case DriverOwnerTypeTeam:
+		return true
+	case DriverOwnerTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DriverStatus.
+const (
+	DriverStatusActive   DriverStatus = "active"
+	DriverStatusDisabled DriverStatus = "disabled"
+	DriverStatusDraft    DriverStatus = "draft"
+)
+
+// Valid indicates whether the value is a known member of the DriverStatus enum.
+func (e DriverStatus) Valid() bool {
+	switch e {
+	case DriverStatusActive:
+		return true
+	case DriverStatusDisabled:
+		return true
+	case DriverStatusDraft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DriverRunStatus.
+const (
+	DriverRunStatusCancelled              DriverRunStatus = "cancelled"
+	DriverRunStatusCompleted              DriverRunStatus = "completed"
+	DriverRunStatusFailed                 DriverRunStatus = "failed"
+	DriverRunStatusNeedsReview            DriverRunStatus = "needs_review"
+	DriverRunStatusQueued                 DriverRunStatus = "queued"
+	DriverRunStatusRunning                DriverRunStatus = "running"
+	DriverRunStatusSuspendedAwaitingEvent DriverRunStatus = "suspended_awaiting_event"
+)
+
+// Valid indicates whether the value is a known member of the DriverRunStatus enum.
+func (e DriverRunStatus) Valid() bool {
+	switch e {
+	case DriverRunStatusCancelled:
+		return true
+	case DriverRunStatusCompleted:
+		return true
+	case DriverRunStatusFailed:
+		return true
+	case DriverRunStatusNeedsReview:
+		return true
+	case DriverRunStatusQueued:
+		return true
+	case DriverRunStatusRunning:
+		return true
+	case DriverRunStatusSuspendedAwaitingEvent:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DriverVersionValidationStatus.
+const (
+	DriverVersionValidationStatusFailed  DriverVersionValidationStatus = "failed"
+	DriverVersionValidationStatusPassed  DriverVersionValidationStatus = "passed"
+	DriverVersionValidationStatusPending DriverVersionValidationStatus = "pending"
+)
+
+// Valid indicates whether the value is a known member of the DriverVersionValidationStatus enum.
+func (e DriverVersionValidationStatus) Valid() bool {
+	switch e {
+	case DriverVersionValidationStatusFailed:
+		return true
+	case DriverVersionValidationStatusPassed:
+		return true
+	case DriverVersionValidationStatusPending:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ErrorResponseSuccess.
 const (
 	False ErrorResponseSuccess = false
@@ -554,15 +683,30 @@ func (e IssueTabType) Valid() bool {
 	}
 }
 
+// Defines values for LocalSettingsResponseSuccess.
+const (
+	LocalSettingsResponseSuccessTrue LocalSettingsResponseSuccess = true
+)
+
+// Valid indicates whether the value is a known member of the LocalSettingsResponseSuccess enum.
+func (e LocalSettingsResponseSuccess) Valid() bool {
+	switch e {
+	case LocalSettingsResponseSuccessTrue:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MessageResponseSuccess.
 const (
-	True MessageResponseSuccess = true
+	MessageResponseSuccessTrue MessageResponseSuccess = true
 )
 
 // Valid indicates whether the value is a known member of the MessageResponseSuccess enum.
 func (e MessageResponseSuccess) Valid() bool {
 	switch e {
-	case True:
+	case MessageResponseSuccessTrue:
 		return true
 	default:
 		return false
@@ -862,16 +1006,88 @@ func (e SessionHistoryRecordLauncher) Valid() bool {
 
 // Defines values for SessionHistoryRecordStatus.
 const (
-	Active    SessionHistoryRecordStatus = "active"
-	Completed SessionHistoryRecordStatus = "completed"
+	SessionHistoryRecordStatusActive    SessionHistoryRecordStatus = "active"
+	SessionHistoryRecordStatusCompleted SessionHistoryRecordStatus = "completed"
 )
 
 // Valid indicates whether the value is a known member of the SessionHistoryRecordStatus enum.
 func (e SessionHistoryRecordStatus) Valid() bool {
 	switch e {
-	case Active:
+	case SessionHistoryRecordStatusActive:
 		return true
-	case Completed:
+	case SessionHistoryRecordStatusCompleted:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SkillCapabilitiesWorkspaceScope.
+const (
+	ReadOnly SkillCapabilitiesWorkspaceScope = "read_only"
+)
+
+// Valid indicates whether the value is a known member of the SkillCapabilitiesWorkspaceScope enum.
+func (e SkillCapabilitiesWorkspaceScope) Valid() bool {
+	switch e {
+	case ReadOnly:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SkillErrorResponseCode.
+const (
+	SkillErrorResponseCodeInvalidPrecondition     SkillErrorResponseCode = "invalid_precondition"
+	SkillErrorResponseCodePreconditionFailed      SkillErrorResponseCode = "precondition_failed"
+	SkillErrorResponseCodePreconditionRequired    SkillErrorResponseCode = "precondition_required"
+	SkillErrorResponseCodeSkillConflict           SkillErrorResponseCode = "skill_conflict"
+	SkillErrorResponseCodeSkillForbidden          SkillErrorResponseCode = "skill_forbidden"
+	SkillErrorResponseCodeSkillNotFound           SkillErrorResponseCode = "skill_not_found"
+	SkillErrorResponseCodeSkillProvenanceConflict SkillErrorResponseCode = "skill_provenance_conflict"
+	SkillErrorResponseCodeSkillValidationFailed   SkillErrorResponseCode = "skill_validation_failed"
+	SkillErrorResponseCodeWorkspaceScopeReadonly  SkillErrorResponseCode = "workspace_scope_readonly"
+)
+
+// Valid indicates whether the value is a known member of the SkillErrorResponseCode enum.
+func (e SkillErrorResponseCode) Valid() bool {
+	switch e {
+	case SkillErrorResponseCodeInvalidPrecondition:
+		return true
+	case SkillErrorResponseCodePreconditionFailed:
+		return true
+	case SkillErrorResponseCodePreconditionRequired:
+		return true
+	case SkillErrorResponseCodeSkillConflict:
+		return true
+	case SkillErrorResponseCodeSkillForbidden:
+		return true
+	case SkillErrorResponseCodeSkillNotFound:
+		return true
+	case SkillErrorResponseCodeSkillProvenanceConflict:
+		return true
+	case SkillErrorResponseCodeSkillValidationFailed:
+		return true
+	case SkillErrorResponseCodeWorkspaceScopeReadonly:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SkillScope.
+const (
+	SkillScopeRole      SkillScope = "role"
+	SkillScopeWorkspace SkillScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the SkillScope enum.
+func (e SkillScope) Valid() bool {
+	switch e {
+	case SkillScopeRole:
+		return true
+	case SkillScopeWorkspace:
 		return true
 	default:
 		return false
@@ -887,6 +1103,21 @@ const (
 func (e TabMetadataReplacedReason) Valid() bool {
 	switch e {
 	case ServerRestart:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TerminalLifecycleConfigResponseSuccess.
+const (
+	True TerminalLifecycleConfigResponseSuccess = true
+)
+
+// Valid indicates whether the value is a known member of the TerminalLifecycleConfigResponseSuccess enum.
+func (e TerminalLifecycleConfigResponseSuccess) Valid() bool {
+	switch e {
+	case True:
 		return true
 	default:
 		return false
@@ -1049,6 +1280,81 @@ func (e TreeNodeStatus) Valid() bool {
 	}
 }
 
+// Defines values for TriggerDeliveryStatus.
+const (
+	TriggerDeliveryStatusAccepted   TriggerDeliveryStatus = "accepted"
+	TriggerDeliveryStatusDispatched TriggerDeliveryStatus = "dispatched"
+	TriggerDeliveryStatusDuplicate  TriggerDeliveryStatus = "duplicate"
+	TriggerDeliveryStatusFailed     TriggerDeliveryStatus = "failed"
+	TriggerDeliveryStatusHeld       TriggerDeliveryStatus = "held"
+	TriggerDeliveryStatusQueued     TriggerDeliveryStatus = "queued"
+	TriggerDeliveryStatusRejected   TriggerDeliveryStatus = "rejected"
+	TriggerDeliveryStatusReplayed   TriggerDeliveryStatus = "replayed"
+	TriggerDeliveryStatusSuperseded TriggerDeliveryStatus = "superseded"
+)
+
+// Valid indicates whether the value is a known member of the TriggerDeliveryStatus enum.
+func (e TriggerDeliveryStatus) Valid() bool {
+	switch e {
+	case TriggerDeliveryStatusAccepted:
+		return true
+	case TriggerDeliveryStatusDispatched:
+		return true
+	case TriggerDeliveryStatusDuplicate:
+		return true
+	case TriggerDeliveryStatusFailed:
+		return true
+	case TriggerDeliveryStatusHeld:
+		return true
+	case TriggerDeliveryStatusQueued:
+		return true
+	case TriggerDeliveryStatusRejected:
+		return true
+	case TriggerDeliveryStatusReplayed:
+		return true
+	case TriggerDeliveryStatusSuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TriggerEventOrigin.
+const (
+	TriggerEventOriginExternal TriggerEventOrigin = "external"
+	TriggerEventOriginSystem   TriggerEventOrigin = "system"
+	TriggerEventOriginWorkflow TriggerEventOrigin = "workflow"
+)
+
+// Valid indicates whether the value is a known member of the TriggerEventOrigin enum.
+func (e TriggerEventOrigin) Valid() bool {
+	switch e {
+	case TriggerEventOriginExternal:
+		return true
+	case TriggerEventOriginSystem:
+		return true
+	case TriggerEventOriginWorkflow:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WebhookDispatchResultStatus.
+const (
+	WebhookDispatchResultStatusAccepted WebhookDispatchResultStatus = "accepted"
+)
+
+// Valid indicates whether the value is a known member of the WebhookDispatchResultStatus enum.
+func (e WebhookDispatchResultStatus) Valid() bool {
+	switch e {
+	case WebhookDispatchResultStatusAccepted:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WorkspaceDesignFormatPatchRequestDesignFormat.
 const (
 	WorkspaceDesignFormatPatchRequestDesignFormatHtml     WorkspaceDesignFormatPatchRequestDesignFormat = "html"
@@ -1079,6 +1385,21 @@ func (e WorkspaceResponseDesignFormat) Valid() bool {
 	case Html:
 		return true
 	case Markdown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SkillIfNoneMatch.
+const (
+	SkillIfNoneMatchAsterisk SkillIfNoneMatch = "*"
+)
+
+// Valid indicates whether the value is a known member of the SkillIfNoneMatch enum.
+func (e SkillIfNoneMatch) Valid() bool {
+	switch e {
+	case SkillIfNoneMatchAsterisk:
 		return true
 	default:
 		return false
@@ -1366,19 +1687,19 @@ func (e StatScopedFileParamsScope) Valid() bool {
 
 // Defines values for GetScopedFileTreeParamsScope.
 const (
-	GetScopedFileTreeParamsScopeAgent     GetScopedFileTreeParamsScope = "agent"
-	GetScopedFileTreeParamsScopeRepo      GetScopedFileTreeParamsScope = "repo"
-	GetScopedFileTreeParamsScopeWorkspace GetScopedFileTreeParamsScope = "workspace"
+	Agent     GetScopedFileTreeParamsScope = "agent"
+	Repo      GetScopedFileTreeParamsScope = "repo"
+	Workspace GetScopedFileTreeParamsScope = "workspace"
 )
 
 // Valid indicates whether the value is a known member of the GetScopedFileTreeParamsScope enum.
 func (e GetScopedFileTreeParamsScope) Valid() bool {
 	switch e {
-	case GetScopedFileTreeParamsScopeAgent:
+	case Agent:
 		return true
-	case GetScopedFileTreeParamsScopeRepo:
+	case Repo:
 		return true
-	case GetScopedFileTreeParamsScopeWorkspace:
+	case Workspace:
 		return true
 	default:
 		return false
@@ -1532,6 +1853,21 @@ func (e ListReadyParamsSort) Valid() bool {
 	}
 }
 
+// Defines values for PutRoleSkillFileParamsIfNoneMatch.
+const (
+	PutRoleSkillFileParamsIfNoneMatchAsterisk PutRoleSkillFileParamsIfNoneMatch = "*"
+)
+
+// Valid indicates whether the value is a known member of the PutRoleSkillFileParamsIfNoneMatch enum.
+func (e PutRoleSkillFileParamsIfNoneMatch) Valid() bool {
+	switch e {
+	case PutRoleSkillFileParamsIfNoneMatchAsterisk:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for StartTerminalSetupJSONBodyAction.
 const (
 	Configure StartTerminalSetupJSONBodyAction = "configure"
@@ -1550,6 +1886,21 @@ func (e StartTerminalSetupJSONBodyAction) Valid() bool {
 	case Login:
 		return true
 	case Test:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReceiveWebhookParamsName.
+const (
+	Github ReceiveWebhookParamsName = "github"
+)
+
+// Valid indicates whether the value is a known member of the ReceiveWebhookParamsName enum.
+func (e ReceiveWebhookParamsName) Valid() bool {
+	switch e {
+	case Github:
 		return true
 	default:
 		return false
@@ -1742,6 +2093,88 @@ type CreateIssueRequestIssueType string
 // CreateIssueRequestStatus defines model for CreateIssueRequest.Status.
 type CreateIssueRequestStatus string
 
+// CreateWorkflowVersionRequest defines model for CreateWorkflowVersionRequest.
+type CreateWorkflowVersionRequest struct {
+	// Activate Whether to make the new version the driver's active one.
+	Activate *bool `json:"activate,omitempty"`
+
+	// Entrypoint Entrypoint path. Defaults to `workflows/{name}.ts` and must live
+	// under the workflow's own directory.
+	Entrypoint *string `json:"entrypoint,omitempty"`
+
+	// Files Workflow sources keyed by repo-relative path. At least one entry is
+	// required and the entrypoint must be among them.
+	Files map[string]string `json:"files"`
+}
+
+// DaemonAgentEntry One supervised agent in the supervisor snapshot.
+type DaemonAgentEntry struct {
+	BackoffUntil *time.Time `json:"backoff_until,omitempty"`
+
+	// ClaimsGated Cycling, but gated by an active claim hold.
+	ClaimsGated    *bool      `json:"claims_gated,omitempty"`
+	CurrentBackend *string    `json:"current_backend,omitempty"`
+	EpicId         *string    `json:"epic_id,omitempty"`
+	LastErrorClass *string    `json:"last_error_class,omitempty"`
+	LastExit       *time.Time `json:"last_exit,omitempty"`
+	LastExitCode   *int       `json:"last_exit_code,omitempty"`
+	LastStart      *time.Time `json:"last_start,omitempty"`
+	NoWorkCount    *int       `json:"no_work_count,omitempty"`
+	Pid            int        `json:"pid"`
+	RemoteBranch   *string    `json:"remote_branch,omitempty"`
+	Repo           *string    `json:"repo,omitempty"`
+	RestartCount   int        `json:"restart_count"`
+	Role           string     `json:"role"`
+	Status         string     `json:"status"`
+	StopReason     *string    `json:"stop_reason,omitempty"`
+	StoppedAt      *time.Time `json:"stopped_at,omitempty"`
+	TaskId         *string    `json:"task_id,omitempty"`
+	Worktree       string     `json:"worktree"`
+	WorktreePath   *string    `json:"worktree_path,omitempty"`
+}
+
+// DaemonClaimHold A workspace-level refusal to start new work. Carried on the supervisor
+// response so the banner costs no extra round trip.
+type DaemonClaimHold struct {
+	Actor     string     `json:"actor"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Held      bool       `json:"held"`
+	Reason    string     `json:"reason"`
+	Since     time.Time  `json:"since"`
+}
+
+// DaemonConfigResponse defines model for DaemonConfigResponse.
+type DaemonConfigResponse struct {
+	// Data The effective daemon config, embedded verbatim. Its shape follows
+	// the daemon config file, not a fixed API schema.
+	Data    map[string]interface{}      `json:"data"`
+	Success DaemonConfigResponseSuccess `json:"success"`
+}
+
+// DaemonConfigResponseSuccess defines model for DaemonConfigResponse.Success.
+type DaemonConfigResponseSuccess bool
+
+// DaemonSupervisorData defines model for DaemonSupervisorData.
+type DaemonSupervisorData struct {
+	Agents []DaemonAgentEntry `json:"agents"`
+
+	// ClaimHold A workspace-level refusal to start new work. Carried on the supervisor
+	// response so the banner costs no extra round trip.
+	ClaimHold     *DaemonClaimHold `json:"claim_hold,omitempty"`
+	Pid           int              `json:"pid"`
+	StartedAt     time.Time        `json:"started_at"`
+	UptimeSeconds float32          `json:"uptime_seconds"`
+}
+
+// DaemonSupervisorResponse defines model for DaemonSupervisorResponse.
+type DaemonSupervisorResponse struct {
+	Data    DaemonSupervisorData            `json:"data"`
+	Success DaemonSupervisorResponseSuccess `json:"success"`
+}
+
+// DaemonSupervisorResponseSuccess defines model for DaemonSupervisorResponse.Success.
+type DaemonSupervisorResponseSuccess bool
+
 // Dependency Full dependency relation from types.Dependency
 type Dependency struct {
 	CreatedAt   time.Time `json:"created_at"`
@@ -1764,6 +2197,115 @@ type DependencyRef struct {
 	// Type Dependency type (e.g. "blocks")
 	Type string `json:"type"`
 }
+
+// Driver A registered workflow driver.
+type Driver struct {
+	ActiveVersionId *string            `json:"active_version_id,omitempty"`
+	CreatedAt       time.Time          `json:"created_at"`
+	Description     *string            `json:"description,omitempty"`
+	DriverId        string             `json:"driver_id"`
+	Metadata        *map[string]string `json:"metadata,omitempty"`
+	Name            string             `json:"name"`
+	OwnerRef        *string            `json:"owner_ref,omitempty"`
+	OwnerType       DriverOwnerType    `json:"owner_type"`
+	Status          DriverStatus       `json:"status"`
+	TrustLevel      *string            `json:"trust_level,omitempty"`
+	UpdatedAt       time.Time          `json:"updated_at"`
+	WorkspaceKey    string             `json:"workspace_key"`
+}
+
+// DriverOwnerType defines model for Driver.OwnerType.
+type DriverOwnerType string
+
+// DriverStatus defines model for Driver.Status.
+type DriverStatus string
+
+// DriverBundle The built bundle produced for a driver version.
+type DriverBundle struct {
+	BundleDigest string            `json:"bundle_digest"`
+	BundleRef    string            `json:"bundle_ref"`
+	Diagnostics  *string           `json:"diagnostics,omitempty"`
+	Manifest     map[string]string `json:"manifest"`
+	Root         string            `json:"root"`
+	SourceDigest string            `json:"source_digest"`
+	SourceRef    string            `json:"source_ref"`
+}
+
+// DriverRun One execution of a driver (workflow) version. Created by the workflow
+// run endpoint or by trigger dispatch, then advanced by the executor that
+// holds its lease.
+type DriverRun struct {
+	// CancelRequestedAt Set when a cooperative cancel was requested against a running run.
+	// The run still terminalizes through its normal fenced finish.
+	CancelRequestedAt     *time.Time `json:"cancel_requested_at,omitempty"`
+	CancelRequestedReason *string    `json:"cancel_requested_reason,omitempty"`
+	CreatedAt             time.Time  `json:"created_at"`
+	DriverId              string     `json:"driver_id"`
+	DriverVersionId       string     `json:"driver_version_id"`
+	Entrypoint            *string    `json:"entrypoint,omitempty"`
+	EpicId                *string    `json:"epic_id,omitempty"`
+	ErrorClass            *string    `json:"error_class,omitempty"`
+
+	// FencingToken Monotonic token that fences stale lease holders out of writes.
+	FencingToken   *int64     `json:"fencing_token,omitempty"`
+	FinishedAt     *time.Time `json:"finished_at,omitempty"`
+	IdempotencyKey *string    `json:"idempotency_key,omitempty"`
+	LastHeartbeat  *time.Time `json:"last_heartbeat,omitempty"`
+	LeaseId        *string    `json:"lease_id,omitempty"`
+
+	// NodeId Executor node currently holding the run.
+	NodeId *string            `json:"node_id,omitempty"`
+	Output *map[string]string `json:"output,omitempty"`
+
+	// ParentRunId Parent workflow run when this run was spawned by composition.
+	// Empty means a root/detached run.
+	ParentRunId *string `json:"parent_run_id,omitempty"`
+
+	// Payload The raw JSON payload the run was created with.
+	Payload interface{} `json:"payload,omitempty"`
+
+	// ResumeSourceEventId Trigger event that resolved the await and resumed the run.
+	ResumeSourceEventId *string `json:"resume_source_event_id,omitempty"`
+	RunId               string  `json:"run_id"`
+
+	// SourceKind What created the run, e.g. `api` or `trigger`.
+	SourceKind *string `json:"source_kind,omitempty"`
+
+	// SourceRef Request path or trigger route that created the run.
+	SourceRef    *string         `json:"source_ref,omitempty"`
+	StartedAt    *time.Time      `json:"started_at,omitempty"`
+	Status       DriverRunStatus `json:"status"`
+	Summary      *string         `json:"summary,omitempty"`
+	SuspendedAt  *time.Time      `json:"suspended_at,omitempty"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+	WorkspaceKey string          `json:"workspace_key"`
+}
+
+// DriverRunStatus defines model for DriverRun.Status.
+type DriverRunStatus string
+
+// DriverVersion One content-addressed version of a driver's bundled sources.
+type DriverVersion struct {
+	BuildDiagnostics *string                       `json:"build_diagnostics,omitempty"`
+	BundleDigest     string                        `json:"bundle_digest"`
+	BundleRef        string                        `json:"bundle_ref"`
+	CreatedAt        time.Time                     `json:"created_at"`
+	CreatedBy        *string                       `json:"created_by,omitempty"`
+	DriverId         string                        `json:"driver_id"`
+	Manifest         *map[string]string            `json:"manifest,omitempty"`
+	Runtime          *string                       `json:"runtime,omitempty"`
+	SourceDigest     string                        `json:"source_digest"`
+	SourceRef        string                        `json:"source_ref"`
+	ValidationStatus DriverVersionValidationStatus `json:"validation_status"`
+
+	// Version Monotonic version number within the driver.
+	Version      int    `json:"version"`
+	VersionId    string `json:"version_id"`
+	WorkspaceKey string `json:"workspace_key"`
+}
+
+// DriverVersionValidationStatus defines model for DriverVersion.ValidationStatus.
+type DriverVersionValidationStatus string
 
 // EditorInfo defines model for EditorInfo.
 type EditorInfo struct {
@@ -2261,6 +2803,81 @@ type JourneySpan struct {
 	UnknownStart  bool       `json:"unknown_start"`
 }
 
+// LocalSettingsAgentRuntimePatch defines model for LocalSettingsAgentRuntimePatch.
+type LocalSettingsAgentRuntimePatch struct {
+	// Default Normalized and validated before it is stored.
+	Default *string `json:"default,omitempty"`
+}
+
+// LocalSettingsCredentialPatch Supply the credential under whichever field the provider uses; GitHub
+// prefers `token`, Daytona prefers `api_key`, and each falls back to the
+// other. An empty value is a no-op. The value is sealed before it is
+// written and never returned.
+type LocalSettingsCredentialPatch struct {
+	ApiKey *string `json:"api_key,omitempty"`
+
+	// Clear Removes the stored credential; takes precedence over any value.
+	Clear *bool   `json:"clear,omitempty"`
+	Token *string `json:"token,omitempty"`
+}
+
+// LocalSettingsCredentialsPatch defines model for LocalSettingsCredentialsPatch.
+type LocalSettingsCredentialsPatch struct {
+	// Daytona Supply the credential under whichever field the provider uses; GitHub
+	// prefers `token`, Daytona prefers `api_key`, and each falls back to the
+	// other. An empty value is a no-op. The value is sealed before it is
+	// written and never returned.
+	Daytona *LocalSettingsCredentialPatch `json:"daytona,omitempty"`
+
+	// Github Supply the credential under whichever field the provider uses; GitHub
+	// prefers `token`, Daytona prefers `api_key`, and each falls back to the
+	// other. An empty value is a no-op. The value is sealed before it is
+	// written and never returned.
+	Github *LocalSettingsCredentialPatch `json:"github,omitempty"`
+}
+
+// LocalSettingsPatchRequest Only the sections present are applied; omitted ones are untouched.
+type LocalSettingsPatchRequest struct {
+	AgentRuntime *LocalSettingsAgentRuntimePatch `json:"agent_runtime,omitempty"`
+
+	// FleetdbRedis `redis_url`, when non-empty, is parsed first and supplies the whole
+	// config; the discrete fields then override what it set.
+	FleetdbRedis       *LocalSettingsRedisPatch       `json:"fleetdb_redis,omitempty"`
+	LocalTaskRunner    *LocalSettingsTaskRunnerPatch  `json:"local_task_runner,omitempty"`
+	RuntimeCredentials *LocalSettingsCredentialsPatch `json:"runtime_credentials,omitempty"`
+}
+
+// LocalSettingsRedisPatch `redis_url`, when non-empty, is parsed first and supplies the whole
+// config; the discrete fields then override what it set.
+type LocalSettingsRedisPatch struct {
+	Addr          *string `json:"addr,omitempty"`
+	ClearPassword *bool   `json:"clear_password,omitempty"`
+	Db            *int    `json:"db,omitempty"`
+	Enabled       *bool   `json:"enabled,omitempty"`
+
+	// Password Ignored when empty. Use `clear_password` to unset.
+	Password *string `json:"password,omitempty"`
+	RedisUrl *string `json:"redis_url,omitempty"`
+	Tls      *bool   `json:"tls,omitempty"`
+}
+
+// LocalSettingsResponse defines model for LocalSettingsResponse.
+type LocalSettingsResponse struct {
+	Data *SanitizedLocalSettings `json:"data,omitempty"`
+
+	// Message Set on a successful PATCH.
+	Message *string                      `json:"message,omitempty"`
+	Success LocalSettingsResponseSuccess `json:"success"`
+}
+
+// LocalSettingsResponseSuccess defines model for LocalSettingsResponse.Success.
+type LocalSettingsResponseSuccess bool
+
+// LocalSettingsTaskRunnerPatch defines model for LocalSettingsTaskRunnerPatch.
+type LocalSettingsTaskRunnerPatch struct {
+	OpencodeModel *string `json:"opencode_model,omitempty"`
+}
+
 // MessageResponse defines model for MessageResponse.
 type MessageResponse struct {
 	Message string                 `json:"message"`
@@ -2612,6 +3229,28 @@ type PatchIssueRequestDesignFormat string
 // PatchIssueRequestStatus defines model for PatchIssueRequest.Status.
 type PatchIssueRequestStatus string
 
+// PlatformEvent defines model for PlatformEvent.
+type PlatformEvent struct {
+	// Action Dotted action name, e.g. `run.started`.
+	Action      string             `json:"action"`
+	Actor       string             `json:"actor"`
+	After       *string            `json:"after,omitempty"`
+	Before      *string            `json:"before,omitempty"`
+	EntityId    string             `json:"entity_id"`
+	EntityType  string             `json:"entity_type"`
+	Id          string             `json:"id"`
+	Metadata    *map[string]string `json:"metadata,omitempty"`
+	Timestamp   time.Time          `json:"timestamp"`
+	WorkspaceId string             `json:"workspace_id"`
+}
+
+// PlatformEventsPage defines model for PlatformEventsPage.
+type PlatformEventsPage struct {
+	// Cursor Opaque cursor to pass as `after` for the next page.
+	Cursor string          `json:"cursor"`
+	Events []PlatformEvent `json:"events"`
+}
+
 // PullRequestDetail defines model for PullRequestDetail.
 type PullRequestDetail struct {
 	BaseRefName string `json:"base_ref_name"`
@@ -2720,6 +3359,52 @@ type RuntimeReadyResponse struct {
 // RuntimeReadyResponseMode defines model for RuntimeReadyResponse.Mode.
 type RuntimeReadyResponseMode string
 
+// SanitizedAgentRuntimeConfig defines model for SanitizedAgentRuntimeConfig.
+type SanitizedAgentRuntimeConfig struct {
+	// Default Where app-triggered task agents run by default.
+	Default string `json:"default"`
+}
+
+// SanitizedLocalSettings defines model for SanitizedLocalSettings.
+type SanitizedLocalSettings struct {
+	AgentRuntime SanitizedAgentRuntimeConfig `json:"agent_runtime"`
+
+	// FleetdbRedis Redis settings for embedded fleet-db, with the password reduced to a flag.
+	FleetdbRedis       SanitizedRedisConfig           `json:"fleetdb_redis"`
+	LocalTaskRunner    SanitizedLocalTaskRunnerConfig `json:"local_task_runner"`
+	RuntimeCredentials SanitizedRuntimeCredentialSet  `json:"runtime_credentials"`
+	Version            int                            `json:"version"`
+}
+
+// SanitizedLocalTaskRunnerConfig defines model for SanitizedLocalTaskRunnerConfig.
+type SanitizedLocalTaskRunnerConfig struct {
+	OpencodeModel *string `json:"opencode_model,omitempty"`
+}
+
+// SanitizedRedisConfig Redis settings for embedded fleet-db, with the password reduced to a flag.
+type SanitizedRedisConfig struct {
+	Addr        *string `json:"addr,omitempty"`
+	Db          int     `json:"db"`
+	Enabled     bool    `json:"enabled"`
+	PasswordSet bool    `json:"password_set"`
+	Tls         bool    `json:"tls"`
+}
+
+// SanitizedRuntimeCredential Credential presence only — the value itself is never returned.
+type SanitizedRuntimeCredential struct {
+	Configured bool    `json:"configured"`
+	UpdatedAt  *string `json:"updated_at,omitempty"`
+}
+
+// SanitizedRuntimeCredentialSet defines model for SanitizedRuntimeCredentialSet.
+type SanitizedRuntimeCredentialSet struct {
+	// Daytona Credential presence only — the value itself is never returned.
+	Daytona SanitizedRuntimeCredential `json:"daytona"`
+
+	// Github Credential presence only — the value itself is never returned.
+	Github SanitizedRuntimeCredential `json:"github"`
+}
+
 // SessionHistoryRecord Session history record (Redis-backed, per-issue)
 type SessionHistoryRecord struct {
 	Backend        string                       `json:"backend"`
@@ -2768,6 +3453,180 @@ type SessionResponse struct {
 	StartedAt        time.Time  `json:"started_at"`
 	Status           string     `json:"status"`
 	TaskId           string     `json:"task_id"`
+}
+
+// SimpleErrorResponse The bare error wire written by handler.RespondError.
+type SimpleErrorResponse struct {
+	Error string `json:"error"`
+}
+
+// SkillCapabilities defines model for SkillCapabilities.
+type SkillCapabilities struct {
+	// CanEditRoleScope Whether this session may write role-scoped skills.
+	CanEditRoleScope bool `json:"can_edit_role_scope"`
+
+	// WorkspaceScope Always `read_only` in this build.
+	WorkspaceScope SkillCapabilitiesWorkspaceScope `json:"workspace_scope"`
+}
+
+// SkillCapabilitiesWorkspaceScope Always `read_only` in this build.
+type SkillCapabilitiesWorkspaceScope string
+
+// SkillCatalogGroup One scope/role bucket. The workspace group sorts first, then role
+// groups by role name.
+type SkillCatalogGroup struct {
+	// Role Owning role. Absent on the workspace group.
+	Role *string `json:"role,omitempty"`
+
+	// Scope Which lane owns the skill. `workspace` skills come from the pack sync
+	// and are read-only over HTTP; `role` skills are editable.
+	Scope  SkillScope     `json:"scope"`
+	Skills []SkillSummary `json:"skills"`
+}
+
+// SkillCatalogResponse defines model for SkillCatalogResponse.
+type SkillCatalogResponse struct {
+	Groups []SkillCatalogGroup `json:"groups"`
+}
+
+// SkillCreateRequest defines model for SkillCreateRequest.
+type SkillCreateRequest struct {
+	// Content Initial SKILL.md body. Optional.
+	Content     *string `json:"content,omitempty"`
+	Description string  `json:"description"`
+
+	// Name Skill name, unique within the role.
+	Name string `json:"name"`
+
+	// SourceRef Optional provenance pointer recorded with the skill.
+	SourceRef *string `json:"source_ref,omitempty"`
+}
+
+// SkillDetail defines model for SkillDetail.
+type SkillDetail struct {
+	// Content The SKILL.md body.
+	Content string `json:"content"`
+
+	// ContentRevision Revision of the SKILL.md body; the value served as `ETag`.
+	ContentRevision string    `json:"content_revision"`
+	CreatedAt       time.Time `json:"created_at"`
+	CreatedBy       *string   `json:"created_by,omitempty"`
+	Description     string    `json:"description"`
+
+	// Files Bundled documents, sorted by path.
+	Files []SkillFileMeta `json:"files"`
+	Name  string          `json:"name"`
+
+	// Role Owning role. Absent on workspace-scoped skills.
+	Role *string `json:"role,omitempty"`
+
+	// Scope Which lane owns the skill. `workspace` skills come from the pack sync
+	// and are read-only over HTTP; `role` skills are editable.
+	Scope SkillScope `json:"scope"`
+
+	// Source Actor that last wrote the skill; `webui` for this API.
+	Source *string `json:"source,omitempty"`
+
+	// SourceRef Free-form provenance pointer set by the writing actor.
+	SourceRef *string   `json:"source_ref,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+	UpdatedBy *string   `json:"updated_by,omitempty"`
+}
+
+// SkillErrorResponse The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type SkillErrorResponse struct {
+	Code *SkillErrorResponseCode `json:"code,omitempty"`
+
+	// Detail Present on validation and forbidden failures.
+	Detail *string `json:"detail,omitempty"`
+	Error  string  `json:"error"`
+
+	// Owner Present on `skill_provenance_conflict`.
+	Owner *string `json:"owner,omitempty"`
+
+	// Revision Present on `precondition_failed` — the stored revision.
+	Revision *string `json:"revision,omitempty"`
+
+	// Source Present on `skill_provenance_conflict`.
+	Source *string `json:"source,omitempty"`
+}
+
+// SkillErrorResponseCode defines model for SkillErrorResponse.Code.
+type SkillErrorResponseCode string
+
+// SkillFileDocument One bundled document with its content.
+type SkillFileDocument struct {
+	Content    string `json:"content"`
+	Executable bool   `json:"executable"`
+	Path       string `json:"path"`
+	Revision   string `json:"revision"`
+
+	// SkillRef The owning skill's canonical ref — `workspace:<name>` or
+	// `role:<role>:<name>`.
+	SkillRef string `json:"skill_ref"`
+}
+
+// SkillFileMeta One bundled document, without its content.
+type SkillFileMeta struct {
+	Executable bool `json:"executable"`
+
+	// Path Path inside the skill bundle.
+	Path string `json:"path"`
+
+	// Revision Opaque document revision, usable as an `If-Match` value.
+	Revision string `json:"revision"`
+}
+
+// SkillFileWriteRequest defines model for SkillFileWriteRequest.
+type SkillFileWriteRequest struct {
+	Content string `json:"content"`
+
+	// Executable Ignored when the target document is `SKILL.md`.
+	Executable *bool `json:"executable,omitempty"`
+}
+
+// SkillPatchRequest A field left out is left alone. The SKILL.md body is not patchable
+// here — write it through the file route.
+type SkillPatchRequest struct {
+	Description *string `json:"description,omitempty"`
+	SourceRef   *string `json:"source_ref,omitempty"`
+}
+
+// SkillScope Which lane owns the skill. `workspace` skills come from the pack sync
+// and are read-only over HTTP; `role` skills are editable.
+type SkillScope string
+
+// SkillSummary A catalog entry — everything but the SKILL.md body.
+type SkillSummary struct {
+	// ContentRevision Revision of the SKILL.md body; the value served as `ETag`.
+	ContentRevision string    `json:"content_revision"`
+	CreatedAt       time.Time `json:"created_at"`
+	CreatedBy       *string   `json:"created_by,omitempty"`
+	Description     string    `json:"description"`
+
+	// Files Bundled documents, sorted by path.
+	Files []SkillFileMeta `json:"files"`
+	Name  string          `json:"name"`
+
+	// Role Owning role. Absent on workspace-scoped skills.
+	Role *string `json:"role,omitempty"`
+
+	// Scope Which lane owns the skill. `workspace` skills come from the pack sync
+	// and are read-only over HTTP; `role` skills are editable.
+	Scope SkillScope `json:"scope"`
+
+	// Source Actor that last wrote the skill; `webui` for this API.
+	Source *string `json:"source,omitempty"`
+
+	// SourceRef Free-form provenance pointer set by the writing actor.
+	SourceRef *string   `json:"source_ref,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+	UpdatedBy *string   `json:"updated_by,omitempty"`
 }
 
 // StaleDetectorStatus defines model for StaleDetectorStatus.
@@ -2864,6 +3723,26 @@ type TabPutRequest struct {
 	SortOrder int    `json:"sort_order"`
 }
 
+// TerminalLifecycleConfig Terminal lifecycle limits. A zero millisecond value disables that limit.
+type TerminalLifecycleConfig struct {
+	// GracePeriodMs How long a detached session is held before it is killed.
+	GracePeriodMs int64 `json:"grace_period_ms"`
+
+	// IdleTimeoutMs How long an idle session is held before it is reaped.
+	IdleTimeoutMs int64 `json:"idle_timeout_ms"`
+	MaxSessions   int   `json:"max_sessions"`
+}
+
+// TerminalLifecycleConfigResponse defines model for TerminalLifecycleConfigResponse.
+type TerminalLifecycleConfigResponse struct {
+	// Data Terminal lifecycle limits. A zero millisecond value disables that limit.
+	Data    TerminalLifecycleConfig                `json:"data"`
+	Success TerminalLifecycleConfigResponseSuccess `json:"success"`
+}
+
+// TerminalLifecycleConfigResponseSuccess defines model for TerminalLifecycleConfigResponse.Success.
+type TerminalLifecycleConfigResponseSuccess bool
+
 // TranscriptEntry Single transcript entry from a session
 type TranscriptEntry struct {
 	Content   *string             `json:"content,omitempty"`
@@ -2948,6 +3827,88 @@ type TreeNodeIssueType string
 // are not settable via the API and excluded from this enum.
 type TreeNodeStatus string
 
+// TriggerDeliveriesResponse defines model for TriggerDeliveriesResponse.
+type TriggerDeliveriesResponse struct {
+	Count             int               `json:"count"`
+	TriggerDeliveries []TriggerDelivery `json:"trigger_deliveries"`
+}
+
+// TriggerDelivery One fan-out leg of a dispatched trigger event: the binding that matched
+// it and the driver run it enqueued.
+type TriggerDelivery struct {
+	Attempt     int       `json:"attempt"`
+	CreatedAt   time.Time `json:"created_at"`
+	DeliveryId  string    `json:"delivery_id"`
+	DriverRunId *string   `json:"driver_run_id,omitempty"`
+
+	// ErrorClass Terminal error class. `retries_exhausted` marks a failed delivery
+	// whose binding retry budget is spent; it leaves the retry due-index.
+	ErrorClass      *string    `json:"error_class,omitempty"`
+	NextRetryAt     *time.Time `json:"next_retry_at,omitempty"`
+	RejectionReason *string    `json:"rejection_reason,omitempty"`
+
+	// Status Lifecycle of one delivery leg. `superseded` marks a delivery replaced
+	// by a newer event for the same subject key; `held` marks one queued
+	// behind an active run for its subject key.
+	Status TriggerDeliveryStatus `json:"status"`
+
+	// SubjectKey Rendered concurrency subject key — the binding's subject key
+	// template output, or `binding_id|subject_ref` when it has none.
+	SubjectKey       *string   `json:"subject_key,omitempty"`
+	TriggerBindingId string    `json:"trigger_binding_id"`
+	TriggerEventId   string    `json:"trigger_event_id"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	WorkspaceKey     string    `json:"workspace_key"`
+}
+
+// TriggerDeliveryStatus Lifecycle of one delivery leg. `superseded` marks a delivery replaced
+// by a newer event for the same subject key; `held` marks one queued
+// behind an active run for its subject key.
+type TriggerDeliveryStatus string
+
+// TriggerEvent A durable record of one event ingested by the trigger layer, written
+// before any dispatch. Records persisted before structural provenance
+// existed normalize to `origin: external` on read.
+type TriggerEvent struct {
+	ActorRef  *string `json:"actor_ref,omitempty"`
+	EventId   string  `json:"event_id"`
+	EventType string  `json:"event_type"`
+
+	// HopDepth Workflow re-trigger hops from the originating external or system
+	// event, which sit at depth 0.
+	HopDepth       *int      `json:"hop_depth,omitempty"`
+	IdempotencyKey *string   `json:"idempotency_key,omitempty"`
+	OccurredAt     time.Time `json:"occurred_at"`
+
+	// Origin Server-stamped provenance.
+	Origin *TriggerEventOrigin `json:"origin,omitempty"`
+
+	// RawPayloadDigest `sha256:<hex>` digest of the raw delivery body.
+	RawPayloadDigest *string   `json:"raw_payload_digest,omitempty"`
+	RawPayloadRef    *string   `json:"raw_payload_ref,omitempty"`
+	ReceivedAt       time.Time `json:"received_at"`
+	ReplayOfEventId  *string   `json:"replay_of_event_id,omitempty"`
+	SignatureStatus  *string   `json:"signature_status,omitempty"`
+
+	// SourceEventId The source's own delivery id, used as the idempotency anchor.
+	SourceEventId *string `json:"source_event_id,omitempty"`
+
+	// SourceKind Ingest source, e.g. `github`.
+	SourceKind       string  `json:"source_kind"`
+	SubjectRef       *string `json:"subject_ref,omitempty"`
+	TriggerBindingId *string `json:"trigger_binding_id,omitempty"`
+	WorkspaceKey     string  `json:"workspace_key"`
+}
+
+// TriggerEventOrigin Server-stamped provenance.
+type TriggerEventOrigin string
+
+// TriggerEventsResponse defines model for TriggerEventsResponse.
+type TriggerEventsResponse struct {
+	Count         int            `json:"count"`
+	TriggerEvents []TriggerEvent `json:"trigger_events"`
+}
+
 // UsageAgentSummary defines model for UsageAgentSummary.
 type UsageAgentSummary struct {
 	InputTokens  int64   `json:"input_tokens"`
@@ -3004,6 +3965,36 @@ type UsageSessionRecord struct {
 	TaskId           *string   `json:"task_id,omitempty"`
 }
 
+// WebhookDelivery One fan-out leg of a webhook dispatch, as reported on ingest.
+type WebhookDelivery struct {
+	DeliveryId      string  `json:"delivery_id"`
+	DriverRunId     string  `json:"driver_run_id"`
+	RejectionReason *string `json:"rejection_reason,omitempty"`
+
+	// Status Lifecycle of one delivery leg. `superseded` marks a delivery replaced
+	// by a newer event for the same subject key; `held` marks one queued
+	// behind an active run for its subject key.
+	Status           TriggerDeliveryStatus `json:"status"`
+	TriggerBindingId string                `json:"trigger_binding_id"`
+}
+
+// WebhookDispatchResult The 202 ingest wire. Legs are in dispatch order: the exact route-key
+// binding first when present and enabled, then pattern matches in
+// binding-id order.
+type WebhookDispatchResult struct {
+	Deliveries []WebhookDelivery `json:"deliveries"`
+
+	// IdempotencyKey `{adapter}:{delivery-id}`.
+	IdempotencyKey string `json:"idempotency_key"`
+
+	// RouteKey Derived route key, e.g. `github.pull_request.opened`.
+	RouteKey string                      `json:"route_key"`
+	Status   WebhookDispatchResultStatus `json:"status"`
+}
+
+// WebhookDispatchResultStatus defines model for WebhookDispatchResult.Status.
+type WebhookDispatchResultStatus string
+
 // WorkerRegisterRequest defines model for WorkerRegisterRequest.
 type WorkerRegisterRequest struct {
 	Agent     string  `json:"agent"`
@@ -3018,6 +4009,29 @@ type WorkerStateRequest struct {
 	State     *string `json:"state,omitempty"`
 	TaskId    *string `json:"task_id,omitempty"`
 	TaskTitle *string `json:"task_title,omitempty"`
+}
+
+// WorkflowVersionResult Outcome of a version registration. Exactly one of `created_version` and
+// `reused_version` is true — re-posting identical sources reuses the
+// existing version.
+type WorkflowVersionResult struct {
+	// Activated Whether this version is now the driver's active version.
+	Activated bool `json:"activated"`
+
+	// BuildDiagnostics Bundler output, empty on a clean build.
+	BuildDiagnostics *string `json:"build_diagnostics,omitempty"`
+
+	// Bundle The built bundle produced for a driver version.
+	Bundle         *DriverBundle `json:"bundle,omitempty"`
+	CreatedDriver  bool          `json:"created_driver"`
+	CreatedVersion bool          `json:"created_version"`
+
+	// Driver A registered workflow driver.
+	Driver        Driver `json:"driver"`
+	ReusedVersion bool   `json:"reused_version"`
+
+	// Version One content-addressed version of a driver's bundled sources.
+	Version DriverVersion `json:"version"`
 }
 
 // WorkspaceAgentInfo defines model for WorkspaceAgentInfo.
@@ -3091,8 +4105,116 @@ type AgentName = string
 // IssueId defines model for IssueId.
 type IssueId = string
 
+// RoleName defines model for RoleName.
+type RoleName = string
+
+// RunId defines model for RunId.
+type RunId = string
+
+// SkillFilePath defines model for SkillFilePath.
+type SkillFilePath = string
+
+// SkillIfMatch defines model for SkillIfMatch.
+type SkillIfMatch = string
+
+// SkillIfMatchOptional defines model for SkillIfMatchOptional.
+type SkillIfMatchOptional = string
+
+// SkillIfNoneMatch defines model for SkillIfNoneMatch.
+type SkillIfNoneMatch string
+
+// SkillName defines model for SkillName.
+type SkillName = string
+
+// WorkflowName defines model for WorkflowName.
+type WorkflowName = string
+
 // WorkspaceId defines model for WorkspaceId.
 type WorkspaceId = string
+
+// SkillAccessForbidden The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type SkillAccessForbidden = SkillErrorResponse
+
+// SkillAccessUnauthorized The bare error wire written by handler.RespondError.
+type SkillAccessUnauthorized = SimpleErrorResponse
+
+// SkillBadPrecondition The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type SkillBadPrecondition = SkillErrorResponse
+
+// SkillBadRequestPath The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type SkillBadRequestPath = SkillErrorResponse
+
+// SkillConflict The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type SkillConflict = SkillErrorResponse
+
+// SkillDetailResponse defines model for SkillDetailResponse.
+type SkillDetailResponse = SkillDetail
+
+// SkillFileResponse One bundled document with its content.
+type SkillFileResponse = SkillFileDocument
+
+// SkillInternalError The bare error wire written by handler.RespondError.
+type SkillInternalError = SimpleErrorResponse
+
+// SkillNotFound The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type SkillNotFound = SkillErrorResponse
+
+// SkillPreconditionFailed The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type SkillPreconditionFailed = SkillErrorResponse
+
+// SkillPreconditionRequired The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type SkillPreconditionRequired = SkillErrorResponse
+
+// SkillValidationFailed The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type SkillValidationFailed = SkillErrorResponse
+
+// WorkspaceScopeReadonly The error wire the skills handlers write. `code` is the stable machine
+// signal; the other fields appear only on the failures that carry them.
+//
+// `code` is absent when the file-browser access boundary refuses the
+// request before the handler runs — that middleware writes the bare
+// `{"error": ...}` wire.
+type WorkspaceScopeReadonly = SkillErrorResponse
 
 // ReportClientErrorJSONBody defines parameters for ReportClientError.
 type ReportClientErrorJSONBody = map[string]interface{}
@@ -3526,6 +4648,60 @@ type ListReadyParamsMolType string
 // ListReadyParamsSort defines parameters for ListReady.
 type ListReadyParamsSort string
 
+// DeleteRoleSkillParams defines parameters for DeleteRoleSkill.
+type DeleteRoleSkillParams struct {
+	// IfMatch The document revision this mutation was written against, or `*` to
+	// accept whatever revision is current. A quoted ETag is accepted; a list
+	// of ETags is not. Omitting the header is a `428`.
+	IfMatch SkillIfMatch `json:"If-Match"`
+}
+
+// PatchRoleSkillParams defines parameters for PatchRoleSkill.
+type PatchRoleSkillParams struct {
+	// IfMatch The document revision this mutation was written against, or `*` to
+	// accept whatever revision is current. A quoted ETag is accepted; a list
+	// of ETags is not. Omitting the header is a `428`.
+	IfMatch SkillIfMatch `json:"If-Match"`
+}
+
+// DeleteRoleSkillFileParams defines parameters for DeleteRoleSkillFile.
+type DeleteRoleSkillFileParams struct {
+	// IfMatch The document revision this mutation was written against, or `*` to
+	// accept whatever revision is current. A quoted ETag is accepted; a list
+	// of ETags is not. Omitting the header is a `428`.
+	IfMatch SkillIfMatch `json:"If-Match"`
+}
+
+// PutRoleSkillFileParams defines parameters for PutRoleSkillFile.
+type PutRoleSkillFileParams struct {
+	// IfMatch The overwrite lane. Mutually exclusive with `If-None-Match`; exactly one
+	// of the two must be sent.
+	IfMatch *SkillIfMatchOptional `json:"If-Match,omitempty"`
+
+	// IfNoneMatch The create lane. Must be exactly `*`. Mutually exclusive with
+	// `If-Match`; exactly one of the two must be sent.
+	IfNoneMatch *PutRoleSkillFileParamsIfNoneMatch `json:"If-None-Match,omitempty"`
+}
+
+// PutRoleSkillFileParamsIfNoneMatch defines parameters for PutRoleSkillFile.
+type PutRoleSkillFileParamsIfNoneMatch string
+
+// GetDriverRunEventsParams defines parameters for GetDriverRunEvents.
+type GetDriverRunEventsParams struct {
+	// After Opaque cursor from a previous page. Omit to start at the beginning.
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+
+	// Limit Page size. Must be 1-1000; defaults to 100.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// StreamDriverRunEventsParams defines parameters for StreamDriverRunEvents.
+type StreamDriverRunEventsParams struct {
+	// After Opaque cursor to resume from. Defaults to `"0"`, i.e. the start of
+	// the run's event log.
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+}
+
 // GetTaskLogParams defines parameters for GetTaskLog.
 type GetTaskLogParams struct {
 	// Lines Number of lines to return
@@ -3564,6 +4740,64 @@ type ConnectTerminalWSParams struct {
 	Session *string `form:"session,omitempty" json:"session,omitempty"`
 }
 
+// ListTriggerDeliveriesParams defines parameters for ListTriggerDeliveries.
+type ListTriggerDeliveriesParams struct {
+	// TriggerEventId Filter to the legs of one trigger event.
+	TriggerEventId *string `form:"trigger_event_id,omitempty" json:"trigger_event_id,omitempty"`
+
+	// TriggerBindingId Filter by the matched binding.
+	TriggerBindingId *string `form:"trigger_binding_id,omitempty" json:"trigger_binding_id,omitempty"`
+
+	// Status Filter by delivery status.
+	Status *TriggerDeliveryStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// Limit Maximum records to return. Must be 1-1000 when supplied.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListTriggerEventsParams defines parameters for ListTriggerEvents.
+type ListTriggerEventsParams struct {
+	// SourceKind Filter by ingest source, e.g. `github`.
+	SourceKind *string `form:"source_kind,omitempty" json:"source_kind,omitempty"`
+
+	// TriggerBindingId Filter by the binding that matched the event.
+	TriggerBindingId *string `form:"trigger_binding_id,omitempty" json:"trigger_binding_id,omitempty"`
+
+	// Limit Maximum records to return. Must be 1-1000 when supplied.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ReceiveWebhookJSONBody defines parameters for ReceiveWebhook.
+type ReceiveWebhookJSONBody map[string]interface{}
+
+// ReceiveWebhookParams defines parameters for ReceiveWebhook.
+type ReceiveWebhookParams struct {
+	// XGitHubEvent GitHub event name; part of the derived route key.
+	XGitHubEvent string `json:"X-GitHub-Event"`
+
+	// XGitHubDelivery GitHub delivery id. Used as the idempotency anchor, so an empty
+	// one is rejected rather than collapsing every delivery onto one key.
+	XGitHubDelivery string `json:"X-GitHub-Delivery"`
+
+	// XHubSignature256 `sha256=<hex>` HMAC over the raw body, verified against the
+	// source connector's inbound secret (the previous secret is accepted
+	// inside the rotation window).
+	XHubSignature256 string `json:"X-Hub-Signature-256"`
+}
+
+// ReceiveWebhookParamsName defines parameters for ReceiveWebhook.
+type ReceiveWebhookParamsName string
+
+// CreateWorkflowRunJSONBody defines parameters for CreateWorkflowRun.
+type CreateWorkflowRunJSONBody map[string]interface{}
+
+// CreateWorkflowRunParams defines parameters for CreateWorkflowRun.
+type CreateWorkflowRunParams struct {
+	// IdempotencyKey Repeat key. A second request carrying the same key returns the
+	// already-admitted run instead of creating a second one.
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
+
 // ReportClientErrorJSONRequestBody defines body for ReportClientError for application/json ContentType.
 type ReportClientErrorJSONRequestBody = ReportClientErrorJSONBody
 
@@ -3581,6 +4815,9 @@ type PushWorkerLogsJSONRequestBody = PushWorkerLogsJSONBody
 
 // UpdateWorkerStateJSONRequestBody defines body for UpdateWorkerState for application/json ContentType.
 type UpdateWorkerStateJSONRequestBody = WorkerStateRequest
+
+// PatchLocalSettingsJSONRequestBody defines body for PatchLocalSettings for application/json ContentType.
+type PatchLocalSettingsJSONRequestBody = LocalSettingsPatchRequest
 
 // NotifySessionChangeJSONRequestBody defines body for NotifySessionChange for application/json ContentType.
 type NotifySessionChangeJSONRequestBody NotifySessionChangeJSONBody
@@ -3666,6 +4903,15 @@ type PostPullRequestReviewerMessageJSONRequestBody = ReviewerMessageRequest
 // PostPullRequestReviewJSONRequestBody defines body for PostPullRequestReview for application/json ContentType.
 type PostPullRequestReviewJSONRequestBody = PullRequestReviewRequest
 
+// CreateRoleSkillJSONRequestBody defines body for CreateRoleSkill for application/json ContentType.
+type CreateRoleSkillJSONRequestBody = SkillCreateRequest
+
+// PatchRoleSkillJSONRequestBody defines body for PatchRoleSkill for application/json ContentType.
+type PatchRoleSkillJSONRequestBody = SkillPatchRequest
+
+// PutRoleSkillFileJSONRequestBody defines body for PutRoleSkillFile for application/json ContentType.
+type PutRoleSkillFileJSONRequestBody = SkillFileWriteRequest
+
 // StartTerminalSetupJSONRequestBody defines body for StartTerminalSetup for application/json ContentType.
 type StartTerminalSetupJSONRequestBody StartTerminalSetupJSONBody
 
@@ -3677,3 +4923,12 @@ type PatchTerminalTabJSONRequestBody = TabPatchRequest
 
 // PutTerminalTabJSONRequestBody defines body for PutTerminalTab for application/json ContentType.
 type PutTerminalTabJSONRequestBody = TabPutRequest
+
+// ReceiveWebhookJSONRequestBody defines body for ReceiveWebhook for application/json ContentType.
+type ReceiveWebhookJSONRequestBody ReceiveWebhookJSONBody
+
+// CreateWorkflowRunJSONRequestBody defines body for CreateWorkflowRun for application/json ContentType.
+type CreateWorkflowRunJSONRequestBody CreateWorkflowRunJSONBody
+
+// CreateWorkflowVersionJSONRequestBody defines body for CreateWorkflowVersion for application/json ContentType.
+type CreateWorkflowVersionJSONRequestBody = CreateWorkflowVersionRequest

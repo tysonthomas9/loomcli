@@ -2121,6 +2121,557 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/runs/{runId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Fetch one driver (workflow) run
+     * @description Returns the persisted `DriverRun` record for a run created by
+     *     `POST /api/workspaces/{ws}/workflows/{name}` or by trigger dispatch.
+     */
+    get: operations["getDriverRun"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/runs/{runId}/events": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Page through a run's platform events
+     * @description Cursor-paginated read of the run's event log. Pass the previous page's
+     *     `cursor` back as `after` to fetch the next page; an empty `events`
+     *     array with an unchanged cursor means the run has produced nothing new.
+     */
+    get: operations["getDriverRunEvents"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/runs/{runId}/stream": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * SSE stream of a run's platform events
+     * @description Server-Sent Events endpoint. The handler polls the run's event log once
+     *     a second and emits every newly appended event; it never terminates on
+     *     its own, so clients close the connection when the run reaches a
+     *     terminal status. The response is committed (flushed) before the first
+     *     poll, so the stream reads as open even when the first page is empty.
+     *
+     *     **Event names**
+     *
+     *     - `event` — `data:` is one JSON `PlatformEvent`:
+     *       ```json
+     *       {
+     *         "id": "evt-4",
+     *         "timestamp": "2026-09-05T12:00:00Z",
+     *         "actor": "driver",
+     *         "action": "run.started",
+     *         "entity_type": "driver_run",
+     *         "entity_id": "run-abc",
+     *         "workspace_id": "default"
+     *       }
+     *       ```
+     *     - `error` — `data:` is `{"error": "<message>"}`, emitted when a poll
+     *       fails; the stream ends after it.
+     *
+     *     No SSE `id:` field is written, so `Last-Event-ID` resumption does not
+     *     apply — resume with the `after` query parameter instead.
+     */
+    get: operations["streamDriverRunEvents"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/trigger-events": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List ingested trigger events
+     * @description Read-only listing of the durable `TriggerEvent` records written at
+     *     ingest — one per admitted external delivery, persisted before any
+     *     dispatch happens.
+     */
+    get: operations["listTriggerEvents"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/trigger-events/{eventId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Fetch one trigger event */
+    get: operations["getTriggerEvent"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/trigger-deliveries": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List trigger deliveries
+     * @description Read-only listing of `TriggerDelivery` records — one per fan-out leg of
+     *     a dispatched trigger event, linking the event to the binding that
+     *     matched it and the driver run it enqueued.
+     */
+    get: operations["listTriggerDeliveries"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/trigger-deliveries/{deliveryId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Fetch one trigger delivery */
+    get: operations["getTriggerDelivery"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/workflows/{name}/versions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Build and register a new workflow version
+     * @description Bundles the supplied TypeScript sources, registers them as a new
+     *     version of the workflow's driver, and (by default) activates that
+     *     version. Registration is content-addressed: re-posting identical
+     *     sources reuses the existing version instead of creating a new one,
+     *     which is reported back as `reused_version`.
+     */
+    post: operations["createWorkflowVersion"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/workflows/{name}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start a workflow run
+     * @description Enqueues a run of the workflow's active driver version. The whole
+     *     request body is passed through to the run as its payload; an empty
+     *     body becomes `{}`. Builtin workflows are registered on demand, so a
+     *     first run of one does not need a prior version upload.
+     *
+     *     Before the run is created the resolved runner backend is checked
+     *     (installed and authenticated), so a misconfigured runner fails here
+     *     rather than deep inside the worker.
+     */
+    post: operations["createWorkflowRun"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/webhooks/{name}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Ingest an inbound provider webhook
+     * @description Provider-facing ingest endpoint. `{name}` selects the adapter;
+     *     `github` is the only one registered today.
+     *
+     *     The handler normalizes headers and body into a route key, resolves the
+     *     enabled binding for it, verifies the signature, then dispatches
+     *     durably: one `TriggerEvent` plus one queued `DriverRun` and
+     *     `TriggerDelivery` per matched binding. It never executes work inline.
+     *
+     *     Dispatch is idempotent on `{adapter}:{delivery-id}`, so provider
+     *     redelivery heals each fan-out leg independently rather than
+     *     duplicating runs.
+     *
+     *     **Wire note**: the 202 body carries `deliveries[]` only. There is no
+     *     top-level `driver_run_id` or `driver_run` — fetch the run by
+     *     `deliveries[i].driver_run_id`.
+     */
+    post: operations["receiveWebhook"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/config/terminal": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Terminal lifecycle limits
+     * @description Serves the server's terminal lifecycle snapshot. The frontend uses it
+     *     to bound auto-reconnect: the client's retry ceiling must stay at or
+     *     under `grace_period_ms`, or it gives up while the server still holds
+     *     the shell open. A zero millisecond value means that limit is disabled.
+     */
+    get: operations["getTerminalConfig"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/daemon/supervisor": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Supervisor state and supervised agents
+     * @description Reads the daemon's state file. Registered only when the server was
+     *     built with a supervisor reader; otherwise the path 404s as an unknown
+     *     API route.
+     */
+    get: operations["getDaemonSupervisor"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/daemon/config": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Effective resolved daemon config
+     * @description Returns the daemon's effective configuration verbatim, embedded under
+     *     `data` as raw JSON. The shape follows the daemon's config file rather
+     *     than a fixed API schema, so it is deliberately unconstrained here.
+     *     Registered only when the server was built with a config loader.
+     */
+    get: operations["getDaemonConfig"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/local/settings": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read desktop-local runtime settings
+     * @description Returns the sanitized desktop-local settings: secrets are never echoed,
+     *     only whether each one is set. Registered only when the server has a
+     *     local settings directory configured.
+     */
+    get: operations["getLocalSettings"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update desktop-local runtime settings
+     * @description Partial update: only the sections present in the body are touched, and
+     *     within a section only the fields present. Credential values are sealed
+     *     before they are written and are never returned — the response is the
+     *     same sanitized view as the GET.
+     *
+     *     Redis changes take effect on the next restart, because embedded
+     *     fleet-db reads them at startup.
+     */
+    patch: operations["patchLocalSettings"];
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/skill-capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Report what the caller may edit in the skill catalog
+     * @description Answers the two questions the skill editor needs before it renders a
+     *     write affordance: whether this session may write role-scoped skills,
+     *     and what the workspace scope permits. `workspace_scope` is always
+     *     `read_only` — workspace skills are owned by the pack sync and are
+     *     editable only through `loom skill update`.
+     */
+    get: operations["getSkillCapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/skills": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List every skill in the workspace, grouped by scope and role
+     * @description Returns the whole catalog in one read: the workspace-scoped group first,
+     *     then one group per role in role-name order, each group's skills sorted
+     *     by name. Entries carry file metadata (path, revision, executable) but
+     *     not file contents — fetch a body with the skill detail or file route.
+     */
+    get: operations["listSkills"];
+    put?: never;
+    /**
+     * Refused — workspace-scoped skills are read-only here
+     * @description Registered so the workspace lane answers with an explicit refusal rather
+     *     than a generic 405. Nothing about the request is read: no body, path or
+     *     precondition is ever parsed. Create role-scoped skills with
+     *     `POST /api/workspaces/{ws}/roles/{role}/skills`, or edit a
+     *     workspace-scoped skill with `loom skill update`.
+     */
+    post: operations["createWorkspaceSkill"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/skills/{name}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Fetch one workspace-scoped skill with its SKILL.md body
+     * @description The response carries the rendered `content` alongside the catalog
+     *     metadata. `ETag` is set to the skill's `content_revision`; send it back
+     *     as `If-Match` on a role-scoped mutation.
+     */
+    get: operations["getWorkspaceSkill"];
+    put?: never;
+    post?: never;
+    /**
+     * Refused — workspace-scoped skills are read-only here
+     * @description See `createWorkspaceSkill`. The request is refused unread.
+     */
+    delete: operations["deleteWorkspaceSkill"];
+    options?: never;
+    head?: never;
+    /**
+     * Refused — workspace-scoped skills are read-only here
+     * @description See `createWorkspaceSkill`. The request is refused unread.
+     */
+    patch: operations["patchWorkspaceSkill"];
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/skills/{name}/files/{path}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read one file bundled with a workspace-scoped skill
+     * @description `path` is multi-segment: it is the file's path inside the skill bundle
+     *     and may contain `/`. The literal `SKILL.md` is accepted as the skill
+     *     body; every other path is validated as a bundled file path. `ETag`
+     *     carries the document revision.
+     */
+    get: operations["getWorkspaceSkillFile"];
+    /**
+     * Refused — workspace-scoped skills are read-only here
+     * @description See `createWorkspaceSkill`. The request is refused unread.
+     */
+    put: operations["putWorkspaceSkillFile"];
+    post?: never;
+    /**
+     * Refused — workspace-scoped skills are read-only here
+     * @description See `createWorkspaceSkill`. The request is refused unread.
+     */
+    delete: operations["deleteWorkspaceSkillFile"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/roles/{role}/skills": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create a role-scoped skill
+     * @description Creates `role:{role}:{name}`. The new skill records `source: "webui"`;
+     *     a later mutation from a different actor is refused with
+     *     `skill_provenance_conflict`. `content` is optional — omit it to create
+     *     the skill with an empty SKILL.md and fill it in through the file route.
+     */
+    post: operations["createRoleSkill"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/roles/{role}/skills/{name}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Fetch one role-scoped skill with its SKILL.md body */
+    get: operations["getRoleSkill"];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a role-scoped skill and every file bundled with it
+     * @description `If-Match` is mandatory. Send the skill's `content_revision`, or `*` to
+     *     delete whatever revision is current.
+     */
+    delete: operations["deleteRoleSkill"];
+    options?: never;
+    head?: never;
+    /**
+     * Update a role-scoped skill's description or provenance ref
+     * @description Only `description` and `source_ref` are patchable; the SKILL.md body is
+     *     written through the file route. `If-Match` is mandatory and is compared
+     *     against the skill's stored `content_revision` before the update is
+     *     attempted, so a stale editor is rejected rather than silently winning.
+     */
+    patch: operations["patchRoleSkill"];
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/roles/{role}/skills/{name}/files/{path}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read one file bundled with a role-scoped skill */
+    get: operations["getRoleSkillFile"];
+    /**
+     * Create or overwrite one file bundled with a role-scoped skill
+     * @description Send exactly one precondition: `If-Match` with the document's current
+     *     revision to overwrite it (answered `200`), or `If-None-Match: *` to
+     *     create a file that must not already exist (answered `201`). Sending
+     *     both, or an `If-None-Match` that is not exactly `*`, is a `400`.
+     *
+     *     Writing `SKILL.md` through this route always stores the document
+     *     non-executable; the `executable` field in the body is ignored for it.
+     */
+    put: operations["putRoleSkillFile"];
+    post?: never;
+    /**
+     * Delete one file bundled with a role-scoped skill
+     * @description `If-Match` is mandatory. `SKILL.md` cannot be deleted here — it is the
+     *     skill body, so the request is answered `422`; delete the whole skill
+     *     instead.
+     */
+    delete: operations["deleteRoleSkillFile"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2132,6 +2683,10 @@ export interface components {
       code?: string;
       retryable?: boolean;
       details?: Record<string, never>;
+    };
+    /** @description The bare error wire written by handler.RespondError. */
+    SimpleErrorResponse: {
+      error: string;
     };
     MessageResponse: {
       /** @constant */
@@ -3425,8 +3980,745 @@ export interface components {
       /** @description Event-type-specific data (JSON object) */
       data?: Record<string, never>;
     };
+    /**
+     * @description One execution of a driver (workflow) version. Created by the workflow
+     *     run endpoint or by trigger dispatch, then advanced by the executor that
+     *     holds its lease.
+     */
+    DriverRun: {
+      workspace_key: string;
+      run_id: string;
+      driver_id: string;
+      driver_version_id: string;
+      entrypoint?: string;
+      /** @description What created the run, e.g. `api` or `trigger`. */
+      source_kind?: string;
+      /** @description Request path or trigger route that created the run. */
+      source_ref?: string;
+      epic_id?: string;
+      /** @enum {string} */
+      status:
+        | "queued"
+        | "running"
+        | "completed"
+        | "failed"
+        | "needs_review"
+        | "cancelled"
+        | "suspended_awaiting_event";
+      /** @description Executor node currently holding the run. */
+      node_id?: string;
+      lease_id?: string;
+      /**
+       * Format: int64
+       * @description Monotonic token that fences stale lease holders out of writes.
+       */
+      fencing_token?: number;
+      idempotency_key?: string;
+      /** @description The raw JSON payload the run was created with. */
+      payload?: unknown;
+      output?: {
+        [key: string]: string;
+      };
+      summary?: string;
+      error_class?: string;
+      /** Format: date-time */
+      started_at?: string;
+      /** Format: date-time */
+      last_heartbeat?: string;
+      /** Format: date-time */
+      finished_at?: string | null;
+      /**
+       * @description Parent workflow run when this run was spawned by composition.
+       *     Empty means a root/detached run.
+       */
+      parent_run_id?: string;
+      /** Format: date-time */
+      suspended_at?: string | null;
+      /**
+       * Format: date-time
+       * @description Set when a cooperative cancel was requested against a running run.
+       *     The run still terminalizes through its normal fenced finish.
+       */
+      cancel_requested_at?: string | null;
+      cancel_requested_reason?: string;
+      /** @description Trigger event that resolved the await and resumed the run. */
+      resume_source_event_id?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    PlatformEvent: {
+      id: string;
+      /** Format: date-time */
+      timestamp: string;
+      actor: string;
+      /** @description Dotted action name, e.g. `run.started`. */
+      action: string;
+      entity_type: string;
+      entity_id: string;
+      workspace_id: string;
+      before?: string;
+      after?: string;
+      metadata?: {
+        [key: string]: string;
+      };
+    };
+    PlatformEventsPage: {
+      events: components["schemas"]["PlatformEvent"][];
+      /** @description Opaque cursor to pass as `after` for the next page. */
+      cursor: string;
+    };
+    /**
+     * @description A durable record of one event ingested by the trigger layer, written
+     *     before any dispatch. Records persisted before structural provenance
+     *     existed normalize to `origin: external` on read.
+     */
+    TriggerEvent: {
+      workspace_key: string;
+      event_id: string;
+      trigger_binding_id?: string;
+      /** @description Ingest source, e.g. `github`. */
+      source_kind: string;
+      /** @description The source's own delivery id, used as the idempotency anchor. */
+      source_event_id?: string;
+      event_type: string;
+      subject_ref?: string;
+      actor_ref?: string;
+      /**
+       * @description Server-stamped provenance.
+       * @enum {string}
+       */
+      origin?: "external" | "workflow" | "system";
+      /**
+       * @description Workflow re-trigger hops from the originating external or system
+       *     event, which sit at depth 0.
+       */
+      hop_depth?: number;
+      /** Format: date-time */
+      occurred_at: string;
+      /** Format: date-time */
+      received_at: string;
+      idempotency_key?: string;
+      raw_payload_ref?: string;
+      /** @description `sha256:<hex>` digest of the raw delivery body. */
+      raw_payload_digest?: string;
+      signature_status?: string;
+      replay_of_event_id?: string;
+    };
+    /**
+     * @description Lifecycle of one delivery leg. `superseded` marks a delivery replaced
+     *     by a newer event for the same subject key; `held` marks one queued
+     *     behind an active run for its subject key.
+     * @enum {string}
+     */
+    TriggerDeliveryStatus:
+      | "accepted"
+      | "rejected"
+      | "duplicate"
+      | "queued"
+      | "dispatched"
+      | "failed"
+      | "replayed"
+      | "superseded"
+      | "held";
+    /**
+     * @description One fan-out leg of a dispatched trigger event: the binding that matched
+     *     it and the driver run it enqueued.
+     */
+    TriggerDelivery: {
+      workspace_key: string;
+      delivery_id: string;
+      trigger_event_id: string;
+      trigger_binding_id: string;
+      status: components["schemas"]["TriggerDeliveryStatus"];
+      /**
+       * @description Rendered concurrency subject key — the binding's subject key
+       *     template output, or `binding_id|subject_ref` when it has none.
+       */
+      subject_key?: string;
+      rejection_reason?: string;
+      driver_run_id?: string;
+      attempt: number;
+      /** Format: date-time */
+      next_retry_at?: string | null;
+      /**
+       * @description Terminal error class. `retries_exhausted` marks a failed delivery
+       *     whose binding retry budget is spent; it leaves the retry due-index.
+       */
+      error_class?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    TriggerEventsResponse: {
+      trigger_events: components["schemas"]["TriggerEvent"][];
+      count: number;
+    };
+    TriggerDeliveriesResponse: {
+      trigger_deliveries: components["schemas"]["TriggerDelivery"][];
+      count: number;
+    };
+    CreateWorkflowVersionRequest: {
+      /**
+       * @description Workflow sources keyed by repo-relative path. At least one entry is
+       *     required and the entrypoint must be among them.
+       */
+      files: {
+        [key: string]: string;
+      };
+      /**
+       * @description Entrypoint path. Defaults to `workflows/{name}.ts` and must live
+       *     under the workflow's own directory.
+       */
+      entrypoint?: string;
+      /**
+       * @description Whether to make the new version the driver's active one.
+       * @default true
+       */
+      activate: boolean;
+    };
+    /** @description A registered workflow driver. */
+    Driver: {
+      workspace_key: string;
+      driver_id: string;
+      name: string;
+      /** @enum {string} */
+      owner_type: "user" | "team" | "lead_agent" | "system";
+      owner_ref?: string;
+      description?: string;
+      active_version_id?: string;
+      /** @enum {string} */
+      status: "draft" | "active" | "disabled";
+      trust_level?: string;
+      metadata?: {
+        [key: string]: string;
+      };
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    /** @description One content-addressed version of a driver's bundled sources. */
+    DriverVersion: {
+      workspace_key: string;
+      version_id: string;
+      driver_id: string;
+      /** @description Monotonic version number within the driver. */
+      version: number;
+      source_ref: string;
+      source_digest: string;
+      bundle_ref: string;
+      bundle_digest: string;
+      runtime?: string;
+      manifest?: {
+        [key: string]: string;
+      };
+      build_diagnostics?: string;
+      /** @enum {string} */
+      validation_status: "pending" | "passed" | "failed";
+      created_by?: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    /** @description The built bundle produced for a driver version. */
+    DriverBundle: {
+      root: string;
+      bundle_ref: string;
+      source_ref: string;
+      source_digest: string;
+      bundle_digest: string;
+      manifest: {
+        [key: string]: string;
+      };
+      diagnostics?: string;
+    };
+    /**
+     * @description Outcome of a version registration. Exactly one of `created_version` and
+     *     `reused_version` is true — re-posting identical sources reuses the
+     *     existing version.
+     */
+    WorkflowVersionResult: {
+      driver: components["schemas"]["Driver"];
+      version: components["schemas"]["DriverVersion"];
+      bundle?: components["schemas"]["DriverBundle"];
+      created_driver: boolean;
+      created_version: boolean;
+      reused_version: boolean;
+      /** @description Whether this version is now the driver's active version. */
+      activated: boolean;
+      /** @description Bundler output, empty on a clean build. */
+      build_diagnostics?: string;
+    };
+    /** @description One fan-out leg of a webhook dispatch, as reported on ingest. */
+    WebhookDelivery: {
+      delivery_id: string;
+      trigger_binding_id: string;
+      driver_run_id: string;
+      status: components["schemas"]["TriggerDeliveryStatus"];
+      rejection_reason?: string;
+    };
+    /**
+     * @description The 202 ingest wire. Legs are in dispatch order: the exact route-key
+     *     binding first when present and enabled, then pattern matches in
+     *     binding-id order.
+     */
+    WebhookDispatchResult: {
+      /** @constant */
+      status: "accepted";
+      /** @description Derived route key, e.g. `github.pull_request.opened`. */
+      route_key: string;
+      /** @description `{adapter}:{delivery-id}`. */
+      idempotency_key: string;
+      deliveries: components["schemas"]["WebhookDelivery"][];
+    };
+    /** @description Terminal lifecycle limits. A zero millisecond value disables that limit. */
+    TerminalLifecycleConfig: {
+      /**
+       * Format: int64
+       * @description How long a detached session is held before it is killed.
+       */
+      grace_period_ms: number;
+      /**
+       * Format: int64
+       * @description How long an idle session is held before it is reaped.
+       */
+      idle_timeout_ms: number;
+      max_sessions: number;
+    };
+    TerminalLifecycleConfigResponse: {
+      /** @constant */
+      success: true;
+      data: components["schemas"]["TerminalLifecycleConfig"];
+    };
+    /**
+     * @description A workspace-level refusal to start new work. Carried on the supervisor
+     *     response so the banner costs no extra round trip.
+     */
+    DaemonClaimHold: {
+      held: boolean;
+      actor: string;
+      reason: string;
+      /** Format: date-time */
+      since: string;
+      /** Format: date-time */
+      expires_at?: string;
+    };
+    /** @description One supervised agent in the supervisor snapshot. */
+    DaemonAgentEntry: {
+      worktree: string;
+      role: string;
+      repo?: string;
+      pid: number;
+      status: string;
+      task_id?: string;
+      epic_id?: string;
+      current_backend?: string;
+      restart_count: number;
+      /** Format: date-time */
+      last_start?: string;
+      /** Format: date-time */
+      last_exit?: string;
+      last_exit_code?: number;
+      stop_reason?: string;
+      /** Format: date-time */
+      stopped_at?: string;
+      worktree_path?: string;
+      last_error_class?: string;
+      no_work_count?: number;
+      /** Format: date-time */
+      backoff_until?: string;
+      remote_branch?: string;
+      /** @description Cycling, but gated by an active claim hold. */
+      claims_gated?: boolean;
+    };
+    DaemonSupervisorData: {
+      pid: number;
+      /** Format: date-time */
+      started_at: string;
+      uptime_seconds: number;
+      agents: components["schemas"]["DaemonAgentEntry"][];
+      claim_hold?: components["schemas"]["DaemonClaimHold"];
+    };
+    DaemonSupervisorResponse: {
+      /** @constant */
+      success: true;
+      data: components["schemas"]["DaemonSupervisorData"];
+    };
+    DaemonConfigResponse: {
+      /** @constant */
+      success: true;
+      /**
+       * @description The effective daemon config, embedded verbatim. Its shape follows
+       *     the daemon config file, not a fixed API schema.
+       */
+      data: {
+        [key: string]: unknown;
+      };
+    };
+    /** @description Redis settings for embedded fleet-db, with the password reduced to a flag. */
+    SanitizedRedisConfig: {
+      enabled: boolean;
+      addr?: string;
+      db: number;
+      tls: boolean;
+      password_set: boolean;
+    };
+    SanitizedAgentRuntimeConfig: {
+      /** @description Where app-triggered task agents run by default. */
+      default: string;
+    };
+    SanitizedLocalTaskRunnerConfig: {
+      opencode_model?: string;
+    };
+    /** @description Credential presence only — the value itself is never returned. */
+    SanitizedRuntimeCredential: {
+      configured: boolean;
+      updated_at?: string;
+    };
+    SanitizedRuntimeCredentialSet: {
+      daytona: components["schemas"]["SanitizedRuntimeCredential"];
+      github: components["schemas"]["SanitizedRuntimeCredential"];
+    };
+    SanitizedLocalSettings: {
+      version: number;
+      fleetdb_redis: components["schemas"]["SanitizedRedisConfig"];
+      agent_runtime: components["schemas"]["SanitizedAgentRuntimeConfig"];
+      local_task_runner: components["schemas"]["SanitizedLocalTaskRunnerConfig"];
+      runtime_credentials: components["schemas"]["SanitizedRuntimeCredentialSet"];
+    };
+    LocalSettingsResponse: {
+      /** @constant */
+      success: true;
+      data?: components["schemas"]["SanitizedLocalSettings"];
+      /** @description Set on a successful PATCH. */
+      message?: string;
+    };
+    /**
+     * @description `redis_url`, when non-empty, is parsed first and supplies the whole
+     *     config; the discrete fields then override what it set.
+     */
+    LocalSettingsRedisPatch: {
+      enabled?: boolean;
+      redis_url?: string;
+      addr?: string;
+      /** @description Ignored when empty. Use `clear_password` to unset. */
+      password?: string;
+      clear_password?: boolean;
+      db?: number;
+      tls?: boolean;
+    };
+    LocalSettingsAgentRuntimePatch: {
+      /** @description Normalized and validated before it is stored. */
+      default?: string;
+    };
+    LocalSettingsTaskRunnerPatch: {
+      opencode_model?: string;
+    };
+    /**
+     * @description Supply the credential under whichever field the provider uses; GitHub
+     *     prefers `token`, Daytona prefers `api_key`, and each falls back to the
+     *     other. An empty value is a no-op. The value is sealed before it is
+     *     written and never returned.
+     */
+    LocalSettingsCredentialPatch: {
+      api_key?: string;
+      token?: string;
+      /** @description Removes the stored credential; takes precedence over any value. */
+      clear?: boolean;
+    };
+    LocalSettingsCredentialsPatch: {
+      daytona?: components["schemas"]["LocalSettingsCredentialPatch"];
+      github?: components["schemas"]["LocalSettingsCredentialPatch"];
+    };
+    /** @description Only the sections present are applied; omitted ones are untouched. */
+    LocalSettingsPatchRequest: {
+      fleetdb_redis?: components["schemas"]["LocalSettingsRedisPatch"];
+      agent_runtime?: components["schemas"]["LocalSettingsAgentRuntimePatch"];
+      local_task_runner?: components["schemas"]["LocalSettingsTaskRunnerPatch"];
+      runtime_credentials?: components["schemas"]["LocalSettingsCredentialsPatch"];
+    };
+    /**
+     * @description Which lane owns the skill. `workspace` skills come from the pack sync
+     *     and are read-only over HTTP; `role` skills are editable.
+     * @enum {string}
+     */
+    SkillScope: "workspace" | "role";
+    /** @description One bundled document, without its content. */
+    SkillFileMeta: {
+      /** @description Path inside the skill bundle. */
+      path: string;
+      /** @description Opaque document revision, usable as an `If-Match` value. */
+      revision: string;
+      executable: boolean;
+    };
+    /** @description A catalog entry — everything but the SKILL.md body. */
+    SkillSummary: {
+      name: string;
+      scope: components["schemas"]["SkillScope"];
+      /** @description Owning role. Absent on workspace-scoped skills. */
+      role?: string;
+      description: string;
+      /** @description Revision of the SKILL.md body; the value served as `ETag`. */
+      content_revision: string;
+      /** @description Bundled documents, sorted by path. */
+      files: components["schemas"]["SkillFileMeta"][];
+      created_by?: string;
+      updated_by?: string;
+      /** @description Actor that last wrote the skill; `webui` for this API. */
+      source?: string;
+      /** @description Free-form provenance pointer set by the writing actor. */
+      source_ref?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    SkillDetail: components["schemas"]["SkillSummary"] & {
+      /** @description The SKILL.md body. */
+      content: string;
+    };
+    /**
+     * @description One scope/role bucket. The workspace group sorts first, then role
+     *     groups by role name.
+     */
+    SkillCatalogGroup: {
+      scope: components["schemas"]["SkillScope"];
+      /** @description Owning role. Absent on the workspace group. */
+      role?: string;
+      skills: components["schemas"]["SkillSummary"][];
+    };
+    SkillCatalogResponse: {
+      groups: components["schemas"]["SkillCatalogGroup"][];
+    };
+    /** @description One bundled document with its content. */
+    SkillFileDocument: {
+      path: string;
+      content: string;
+      executable: boolean;
+      revision: string;
+      /**
+       * @description The owning skill's canonical ref — `workspace:<name>` or
+       *     `role:<role>:<name>`.
+       */
+      skill_ref: string;
+    };
+    SkillFileWriteRequest: {
+      content: string;
+      /**
+       * @description Ignored when the target document is `SKILL.md`.
+       * @default false
+       */
+      executable: boolean;
+    };
+    SkillCreateRequest: {
+      /** @description Skill name, unique within the role. */
+      name: string;
+      description: string;
+      /** @description Initial SKILL.md body. Optional. */
+      content?: string;
+      /** @description Optional provenance pointer recorded with the skill. */
+      source_ref?: string;
+    };
+    /**
+     * @description A field left out is left alone. The SKILL.md body is not patchable
+     *     here — write it through the file route.
+     */
+    SkillPatchRequest: {
+      description?: string;
+      source_ref?: string;
+    };
+    SkillCapabilities: {
+      /** @description Whether this session may write role-scoped skills. */
+      can_edit_role_scope: boolean;
+      /**
+       * @description Always `read_only` in this build.
+       * @enum {string}
+       */
+      workspace_scope: "read_only";
+    };
+    /**
+     * @description The error wire the skills handlers write. `code` is the stable machine
+     *     signal; the other fields appear only on the failures that carry them.
+     *
+     *     `code` is absent when the file-browser access boundary refuses the
+     *     request before the handler runs — that middleware writes the bare
+     *     `{"error": ...}` wire.
+     */
+    SkillErrorResponse: {
+      /** @enum {string} */
+      code?:
+        | "skill_validation_failed"
+        | "skill_not_found"
+        | "skill_conflict"
+        | "skill_forbidden"
+        | "skill_provenance_conflict"
+        | "workspace_scope_readonly"
+        | "precondition_required"
+        | "precondition_failed"
+        | "invalid_precondition";
+      error: string;
+      /** @description Present on validation and forbidden failures. */
+      detail?: string;
+      /** @description Present on `precondition_failed` — the stored revision. */
+      revision?: string;
+      /** @description Present on `skill_provenance_conflict`. */
+      owner?: string;
+      /** @description Present on `skill_provenance_conflict`. */
+      source?: string;
+    };
   };
-  responses: never;
+  responses: {
+    /** @description The skill, with its SKILL.md body */
+    SkillDetailResponse: {
+      headers: {
+        /** @description The skill's content revision, quoted. */
+        ETag?: string;
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillDetail"];
+      };
+    };
+    /** @description One document from the skill bundle */
+    SkillFileResponse: {
+      headers: {
+        /** @description The document's revision, quoted. */
+        ETag?: string;
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillFileDocument"];
+      };
+    };
+    /**
+     * @description The skill name, role name or file path in the URL is not valid
+     *     (`code: skill_validation_failed`).
+     */
+    SkillBadRequestPath: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillErrorResponse"];
+      };
+    };
+    /**
+     * @description The precondition headers are unusable — both `If-Match` and
+     *     `If-None-Match` were sent, `If-None-Match` was not exactly `*`, or
+     *     `If-Match` carried an ETag list or an unparseable revision
+     *     (`code: invalid_precondition`). A bad path segment is also answered
+     *     here with `code: skill_validation_failed`.
+     */
+    SkillBadPrecondition: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillErrorResponse"];
+      };
+    };
+    /** @description Authentication required by the file-browser access boundary */
+    SkillAccessUnauthorized: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SimpleErrorResponse"];
+      };
+    };
+    /**
+     * @description The file-browser access boundary refused the session, or the backing
+     *     skill service refused the operation (`code: skill_forbidden`).
+     */
+    SkillAccessForbidden: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillErrorResponse"];
+      };
+    };
+    /**
+     * @description Workspace-scoped skills are read-only through this API
+     *     (`code: workspace_scope_readonly`). The access boundary may also refuse
+     *     the session first, with the bare `{"error": ...}` wire.
+     */
+    WorkspaceScopeReadonly: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillErrorResponse"];
+      };
+    };
+    /** @description No such skill or skill file (`code: skill_not_found`) */
+    SkillNotFound: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillErrorResponse"];
+      };
+    };
+    /**
+     * @description The skill already exists, the operation conflicted with current state
+     *     (`code: skill_conflict`), or the skill is owned by another actor
+     *     (`code: skill_provenance_conflict`, with `owner` and `source`).
+     */
+    SkillConflict: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillErrorResponse"];
+      };
+    };
+    /**
+     * @description The document changed since it was read (`code: precondition_failed`).
+     *     `revision` carries the stored revision to retry against.
+     */
+    SkillPreconditionFailed: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillErrorResponse"];
+      };
+    };
+    /** @description No usable precondition was sent (`code: precondition_required`). */
+    SkillPreconditionRequired: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillErrorResponse"];
+      };
+    };
+    /**
+     * @description The request body failed validation (`code: skill_validation_failed`);
+     *     `detail` names the offending field. A malformed or oversized JSON body
+     *     is reported here too.
+     */
+    SkillValidationFailed: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SkillErrorResponse"];
+      };
+    };
+    /** @description The skill store failed */
+    SkillInternalError: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SimpleErrorResponse"];
+      };
+    };
+  };
   parameters: {
     /** @description Workspace identifier */
     WorkspaceId: string;
@@ -3434,6 +4726,37 @@ export interface components {
     IssueId: string;
     /** @description Agent worktree name */
     AgentName: string;
+    /** @description Driver run identifier */
+    RunId: string;
+    /** @description Workflow name */
+    WorkflowName: string;
+    /** @description Role name that owns the skill */
+    RoleName: string;
+    /** @description Skill name, unique within its scope */
+    SkillName: string;
+    /**
+     * @description Path of the document inside the skill bundle. This is a multi-segment
+     *     wildcard on the server (`{path...}`), so it may contain `/` and must be
+     *     sent unescaped. The literal `SKILL.md` addresses the skill body.
+     * @example references/checklist.md
+     */
+    SkillFilePath: string;
+    /**
+     * @description The document revision this mutation was written against, or `*` to
+     *     accept whatever revision is current. A quoted ETag is accepted; a list
+     *     of ETags is not. Omitting the header is a `428`.
+     */
+    SkillIfMatch: string;
+    /**
+     * @description The overwrite lane. Mutually exclusive with `If-None-Match`; exactly one
+     *     of the two must be sent.
+     */
+    SkillIfMatchOptional: string;
+    /**
+     * @description The create lane. Must be exactly `*`. Mutually exclusive with
+     *     `If-Match`; exactly one of the two must be sent.
+     */
+    SkillIfNoneMatch: "*";
   };
   requestBodies: never;
   headers: never;
@@ -7879,6 +9202,1252 @@ export interface operations {
           "application/json": Record<string, never>;
         };
       };
+    };
+  };
+  getDriverRun: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Driver run identifier */
+        runId: components["parameters"]["RunId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The run */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverRun"];
+        };
+      };
+      /** @description Run not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Run lookup failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  getDriverRunEvents: {
+    parameters: {
+      query?: {
+        /** @description Opaque cursor from a previous page. Omit to start at the beginning. */
+        after?: string;
+        /** @description Page size. Must be 1-1000; defaults to 100. */
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Driver run identifier */
+        runId: components["parameters"]["RunId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description One page of run events */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PlatformEventsPage"];
+        };
+      };
+      /** @description Invalid limit */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Run not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description The configured store does not implement run event reads */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  streamDriverRunEvents: {
+    parameters: {
+      query?: {
+        /**
+         * @description Opaque cursor to resume from. Defaults to `"0"`, i.e. the start of
+         *     the run's event log.
+         */
+        after?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Driver run identifier */
+        runId: components["parameters"]["RunId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description SSE stream of run events */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": string;
+        };
+      };
+      /** @description Run not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description The response writer does not support streaming */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description The configured store does not implement run event reads */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  listTriggerEvents: {
+    parameters: {
+      query?: {
+        /** @description Filter by ingest source, e.g. `github`. */
+        source_kind?: string;
+        /** @description Filter by the binding that matched the event. */
+        trigger_binding_id?: string;
+        /** @description Maximum records to return. Must be 1-1000 when supplied. */
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Matching trigger events */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TriggerEventsResponse"];
+        };
+      };
+      /** @description Invalid limit */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Listing failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  getTriggerEvent: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Trigger event identifier */
+        eventId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The trigger event */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TriggerEvent"];
+        };
+      };
+      /** @description Malformed event identifier */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Trigger event not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Lookup failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  listTriggerDeliveries: {
+    parameters: {
+      query?: {
+        /** @description Filter to the legs of one trigger event. */
+        trigger_event_id?: string;
+        /** @description Filter by the matched binding. */
+        trigger_binding_id?: string;
+        /** @description Filter by delivery status. */
+        status?: components["schemas"]["TriggerDeliveryStatus"];
+        /** @description Maximum records to return. Must be 1-1000 when supplied. */
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Matching trigger deliveries */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TriggerDeliveriesResponse"];
+        };
+      };
+      /** @description Invalid limit */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Listing failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  getTriggerDelivery: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Trigger delivery identifier */
+        deliveryId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The trigger delivery */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TriggerDelivery"];
+        };
+      };
+      /** @description Malformed delivery identifier */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Trigger delivery not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Lookup failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  createWorkflowVersion: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Workflow name */
+        name: components["parameters"]["WorkflowName"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateWorkflowVersionRequest"];
+      };
+    };
+    responses: {
+      /** @description Version registered */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WorkflowVersionResult"];
+        };
+      };
+      /**
+       * @description Invalid body, empty `files`, an entrypoint outside the workflow's
+       *     own directory, a missing entrypoint file, or a build failure.
+       */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  createWorkflowRun: {
+    parameters: {
+      query?: never;
+      header?: {
+        /**
+         * @description Repeat key. A second request carrying the same key returns the
+         *     already-admitted run instead of creating a second one.
+         */
+        "Idempotency-Key"?: string;
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Workflow name */
+        name: components["parameters"]["WorkflowName"];
+      };
+      cookie?: never;
+    };
+    /**
+     * @description Arbitrary JSON payload handed to the workflow. `epic_id`, when
+     *     present, is lifted onto the run.
+     */
+    requestBody?: {
+      content: {
+        "application/json": {
+          [key: string]: unknown;
+        };
+      };
+    };
+    responses: {
+      /** @description Run accepted and queued */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverRun"];
+        };
+      };
+      /** @description Payload is not valid JSON, or the runner preflight failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Workflow not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Run creation failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  receiveWebhook: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description GitHub event name; part of the derived route key. */
+        "X-GitHub-Event": string;
+        /**
+         * @description GitHub delivery id. Used as the idempotency anchor, so an empty
+         *     one is rejected rather than collapsing every delivery onto one key.
+         */
+        "X-GitHub-Delivery": string;
+        /**
+         * @description `sha256=<hex>` HMAC over the raw body, verified against the
+         *     source connector's inbound secret (the previous secret is accepted
+         *     inside the rotation window).
+         */
+        "X-Hub-Signature-256": string;
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Adapter name. `github` is the only registered adapter. */
+        name: "github";
+      };
+      cookie?: never;
+    };
+    /** @description The raw provider payload. Must be valid JSON; an empty body becomes `{}`. */
+    requestBody: {
+      content: {
+        "application/json": {
+          [key: string]: unknown;
+        };
+      };
+    };
+    responses: {
+      /** @description Delivery accepted and dispatched */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WebhookDispatchResult"];
+        };
+      };
+      /**
+       * @description Unreadable body, a missing required header, an empty delivery id,
+       *     or a payload that is not valid JSON.
+       */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Signature missing, malformed, or not matching */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /**
+       * @description No adapter registered for `{name}`, or no enabled trigger binding
+       *     for the derived route key.
+       */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Conflicting dispatch state */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Dispatch failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description The configured store does not implement trigger dispatch */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  getTerminalConfig: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Lifecycle config */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TerminalLifecycleConfigResponse"];
+        };
+      };
+    };
+  };
+  getDaemonSupervisor: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Supervisor snapshot */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DaemonSupervisorResponse"];
+        };
+      };
+      /** @description The state file exists but could not be read or parsed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Daemon is not running (no state file) */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getDaemonConfig: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Effective config */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DaemonConfigResponse"];
+        };
+      };
+      /** @description Config could not be loaded */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getLocalSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Sanitized settings */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalSettingsResponse"];
+        };
+      };
+      /** @description Settings directory unconfigured or unreadable */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  patchLocalSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LocalSettingsPatchRequest"];
+      };
+    };
+    responses: {
+      /** @description Saved; body carries the sanitized settings and a message */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalSettingsResponse"];
+        };
+      };
+      /** @description Malformed body, or a rejected value (bad Redis URL, unknown agent runtime) */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Request body too large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Settings directory unconfigured or unreadable */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getSkillCapabilities: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The caller's skill-editing capabilities */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillCapabilities"];
+        };
+      };
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+    };
+  };
+  listSkills: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The skill catalog */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillCatalogResponse"];
+        };
+      };
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      500: components["responses"]["SkillInternalError"];
+    };
+  };
+  createWorkspaceSkill: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["WorkspaceScopeReadonly"];
+    };
+  };
+  getWorkspaceSkill: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: components["responses"]["SkillDetailResponse"];
+      400: components["responses"]["SkillBadRequestPath"];
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      404: components["responses"]["SkillNotFound"];
+      500: components["responses"]["SkillInternalError"];
+    };
+  };
+  deleteWorkspaceSkill: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["WorkspaceScopeReadonly"];
+    };
+  };
+  patchWorkspaceSkill: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["WorkspaceScopeReadonly"];
+    };
+  };
+  getWorkspaceSkillFile: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+        /**
+         * @description Path of the document inside the skill bundle. This is a multi-segment
+         *     wildcard on the server (`{path...}`), so it may contain `/` and must be
+         *     sent unescaped. The literal `SKILL.md` addresses the skill body.
+         * @example references/checklist.md
+         */
+        path: components["parameters"]["SkillFilePath"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: components["responses"]["SkillFileResponse"];
+      400: components["responses"]["SkillBadRequestPath"];
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      404: components["responses"]["SkillNotFound"];
+      500: components["responses"]["SkillInternalError"];
+    };
+  };
+  putWorkspaceSkillFile: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+        /**
+         * @description Path of the document inside the skill bundle. This is a multi-segment
+         *     wildcard on the server (`{path...}`), so it may contain `/` and must be
+         *     sent unescaped. The literal `SKILL.md` addresses the skill body.
+         * @example references/checklist.md
+         */
+        path: components["parameters"]["SkillFilePath"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["WorkspaceScopeReadonly"];
+    };
+  };
+  deleteWorkspaceSkillFile: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+        /**
+         * @description Path of the document inside the skill bundle. This is a multi-segment
+         *     wildcard on the server (`{path...}`), so it may contain `/` and must be
+         *     sent unescaped. The literal `SKILL.md` addresses the skill body.
+         * @example references/checklist.md
+         */
+        path: components["parameters"]["SkillFilePath"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["WorkspaceScopeReadonly"];
+    };
+  };
+  createRoleSkill: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Role name that owns the skill */
+        role: components["parameters"]["RoleName"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description The created skill */
+      201: {
+        headers: {
+          /** @description The skill's content revision, quoted. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillDetail"];
+        };
+      };
+      400: components["responses"]["SkillBadRequestPath"];
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      /**
+       * @description The workspace or the role does not exist in the skill store
+       *     (`code: skill_not_found`).
+       */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillErrorResponse"];
+        };
+      };
+      409: components["responses"]["SkillConflict"];
+      422: components["responses"]["SkillValidationFailed"];
+      500: components["responses"]["SkillInternalError"];
+    };
+  };
+  getRoleSkill: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Role name that owns the skill */
+        role: components["parameters"]["RoleName"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: components["responses"]["SkillDetailResponse"];
+      400: components["responses"]["SkillBadRequestPath"];
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      404: components["responses"]["SkillNotFound"];
+      500: components["responses"]["SkillInternalError"];
+    };
+  };
+  deleteRoleSkill: {
+    parameters: {
+      query?: never;
+      header: {
+        /**
+         * @description The document revision this mutation was written against, or `*` to
+         *     accept whatever revision is current. A quoted ETag is accepted; a list
+         *     of ETags is not. Omitting the header is a `428`.
+         */
+        "If-Match": components["parameters"]["SkillIfMatch"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Role name that owns the skill */
+        role: components["parameters"]["RoleName"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted; no body */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["SkillBadPrecondition"];
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      404: components["responses"]["SkillNotFound"];
+      412: components["responses"]["SkillPreconditionFailed"];
+      428: components["responses"]["SkillPreconditionRequired"];
+      500: components["responses"]["SkillInternalError"];
+    };
+  };
+  patchRoleSkill: {
+    parameters: {
+      query?: never;
+      header: {
+        /**
+         * @description The document revision this mutation was written against, or `*` to
+         *     accept whatever revision is current. A quoted ETag is accepted; a list
+         *     of ETags is not. Omitting the header is a `428`.
+         */
+        "If-Match": components["parameters"]["SkillIfMatch"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Role name that owns the skill */
+        role: components["parameters"]["RoleName"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillPatchRequest"];
+      };
+    };
+    responses: {
+      200: components["responses"]["SkillDetailResponse"];
+      400: components["responses"]["SkillBadPrecondition"];
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      404: components["responses"]["SkillNotFound"];
+      409: components["responses"]["SkillConflict"];
+      412: components["responses"]["SkillPreconditionFailed"];
+      422: components["responses"]["SkillValidationFailed"];
+      428: components["responses"]["SkillPreconditionRequired"];
+      500: components["responses"]["SkillInternalError"];
+    };
+  };
+  getRoleSkillFile: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Role name that owns the skill */
+        role: components["parameters"]["RoleName"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+        /**
+         * @description Path of the document inside the skill bundle. This is a multi-segment
+         *     wildcard on the server (`{path...}`), so it may contain `/` and must be
+         *     sent unescaped. The literal `SKILL.md` addresses the skill body.
+         * @example references/checklist.md
+         */
+        path: components["parameters"]["SkillFilePath"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: components["responses"]["SkillFileResponse"];
+      400: components["responses"]["SkillBadRequestPath"];
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      404: components["responses"]["SkillNotFound"];
+      500: components["responses"]["SkillInternalError"];
+    };
+  };
+  putRoleSkillFile: {
+    parameters: {
+      query?: never;
+      header?: {
+        /**
+         * @description The overwrite lane. Mutually exclusive with `If-None-Match`; exactly one
+         *     of the two must be sent.
+         */
+        "If-Match"?: components["parameters"]["SkillIfMatchOptional"];
+        /**
+         * @description The create lane. Must be exactly `*`. Mutually exclusive with
+         *     `If-Match`; exactly one of the two must be sent.
+         */
+        "If-None-Match"?: components["parameters"]["SkillIfNoneMatch"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Role name that owns the skill */
+        role: components["parameters"]["RoleName"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+        /**
+         * @description Path of the document inside the skill bundle. This is a multi-segment
+         *     wildcard on the server (`{path...}`), so it may contain `/` and must be
+         *     sent unescaped. The literal `SKILL.md` addresses the skill body.
+         * @example references/checklist.md
+         */
+        path: components["parameters"]["SkillFilePath"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillFileWriteRequest"];
+      };
+    };
+    responses: {
+      /** @description Overwritten (the `If-Match` lane) */
+      200: {
+        headers: {
+          /** @description The document's new revision, quoted. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillFileDocument"];
+        };
+      };
+      /** @description Created (the `If-None-Match: *` lane) */
+      201: {
+        headers: {
+          /** @description The document's revision, quoted. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillFileDocument"];
+        };
+      };
+      400: components["responses"]["SkillBadPrecondition"];
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      404: components["responses"]["SkillNotFound"];
+      409: components["responses"]["SkillConflict"];
+      412: components["responses"]["SkillPreconditionFailed"];
+      422: components["responses"]["SkillValidationFailed"];
+      428: components["responses"]["SkillPreconditionRequired"];
+      500: components["responses"]["SkillInternalError"];
+    };
+  };
+  deleteRoleSkillFile: {
+    parameters: {
+      query?: never;
+      header: {
+        /**
+         * @description The document revision this mutation was written against, or `*` to
+         *     accept whatever revision is current. A quoted ETag is accepted; a list
+         *     of ETags is not. Omitting the header is a `428`.
+         */
+        "If-Match": components["parameters"]["SkillIfMatch"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Role name that owns the skill */
+        role: components["parameters"]["RoleName"];
+        /** @description Skill name, unique within its scope */
+        name: components["parameters"]["SkillName"];
+        /**
+         * @description Path of the document inside the skill bundle. This is a multi-segment
+         *     wildcard on the server (`{path...}`), so it may contain `/` and must be
+         *     sent unescaped. The literal `SKILL.md` addresses the skill body.
+         * @example references/checklist.md
+         */
+        path: components["parameters"]["SkillFilePath"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted; no body */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["SkillBadPrecondition"];
+      401: components["responses"]["SkillAccessUnauthorized"];
+      403: components["responses"]["SkillAccessForbidden"];
+      404: components["responses"]["SkillNotFound"];
+      412: components["responses"]["SkillPreconditionFailed"];
+      422: components["responses"]["SkillValidationFailed"];
+      428: components["responses"]["SkillPreconditionRequired"];
+      500: components["responses"]["SkillInternalError"];
     };
   };
 }

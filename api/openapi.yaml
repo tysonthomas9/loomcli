@@ -70,6 +70,20 @@ tags:
     description: Issue detail tab state (Redis-backed)
   - name: monitor
     description: Daemon monitor dashboard and metrics
+  - name: triggers
+    description: Trigger event and delivery audit trail
+  - name: workflows
+    description: Workflow version registration and run creation
+  - name: webhooks
+    description: Inbound provider webhook ingest
+  - name: daemon
+    description: Daemon supervisor state and effective config
+  - name: local-settings
+    description: Desktop-local runtime settings
+  - name: skills
+    description: Workspace and role-scoped skill catalog, bodies and bundled files
+  - name: runs
+    description: Driver (workflow) run reads and event streaming
   - name: observability
     description: Event metrics and paginated event log
 
@@ -4079,6 +4093,1137 @@ paths:
               schema:
                 type: object
 
+  # ── Driver Runs ─────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/runs/{runId}:
+    get:
+      operationId: getDriverRun
+      tags: [runs]
+      summary: Fetch one driver (workflow) run
+      description: |
+        Returns the persisted `DriverRun` record for a run created by
+        `POST /api/workspaces/{ws}/workflows/{name}` or by trigger dispatch.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: The run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverRun"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "500":
+          description: Run lookup failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
+  /api/workspaces/{ws}/runs/{runId}/events:
+    get:
+      operationId: getDriverRunEvents
+      tags: [runs]
+      summary: Page through a run's platform events
+      description: |
+        Cursor-paginated read of the run's event log. Pass the previous page's
+        `cursor` back as `after` to fetch the next page; an empty `events`
+        array with an unchanged cursor means the run has produced nothing new.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RunId"
+        - name: after
+          in: query
+          description: Opaque cursor from a previous page. Omit to start at the beginning.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Page size. Must be 1-1000; defaults to 100.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+      responses:
+        "200":
+          description: One page of run events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformEventsPage"
+        "400":
+          description: Invalid limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "501":
+          description: The configured store does not implement run event reads
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
+  /api/workspaces/{ws}/runs/{runId}/stream:
+    get:
+      operationId: streamDriverRunEvents
+      tags: [runs]
+      summary: SSE stream of a run's platform events
+      description: |
+        Server-Sent Events endpoint. The handler polls the run's event log once
+        a second and emits every newly appended event; it never terminates on
+        its own, so clients close the connection when the run reaches a
+        terminal status. The response is committed (flushed) before the first
+        poll, so the stream reads as open even when the first page is empty.
+
+        **Event names**
+
+        - `event` — `data:` is one JSON `PlatformEvent`:
+          ```json
+          {
+            "id": "evt-4",
+            "timestamp": "2026-09-05T12:00:00Z",
+            "actor": "driver",
+            "action": "run.started",
+            "entity_type": "driver_run",
+            "entity_id": "run-abc",
+            "workspace_id": "default"
+          }
+          ```
+        - `error` — `data:` is `{"error": "<message>"}`, emitted when a poll
+          fails; the stream ends after it.
+
+        No SSE `id:` field is written, so `Last-Event-ID` resumption does not
+        apply — resume with the `after` query parameter instead.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RunId"
+        - name: after
+          in: query
+          description: |
+            Opaque cursor to resume from. Defaults to `"0"`, i.e. the start of
+            the run's event log.
+          schema:
+            type: string
+            default: "0"
+      responses:
+        "200":
+          description: SSE stream of run events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  Newline-delimited SSE frames; `event: event` frames carry a
+                  JSON PlatformEvent, `event: error` frames carry {"error"}.
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "500":
+          description: The response writer does not support streaming
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "501":
+          description: The configured store does not implement run event reads
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
+  # ── Trigger Audit Trail ─────────────────────────────────────────────────
+  /api/workspaces/{ws}/trigger-events:
+    get:
+      operationId: listTriggerEvents
+      tags: [triggers]
+      summary: List ingested trigger events
+      description: |
+        Read-only listing of the durable `TriggerEvent` records written at
+        ingest — one per admitted external delivery, persisted before any
+        dispatch happens.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: source_kind
+          in: query
+          description: Filter by ingest source, e.g. `github`.
+          schema:
+            type: string
+        - name: trigger_binding_id
+          in: query
+          description: Filter by the binding that matched the event.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum records to return. Must be 1-1000 when supplied.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Matching trigger events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TriggerEventsResponse"
+        "400":
+          description: Invalid limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "500":
+          description: Listing failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
+  /api/workspaces/{ws}/trigger-events/{eventId}:
+    get:
+      operationId: getTriggerEvent
+      tags: [triggers]
+      summary: Fetch one trigger event
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: eventId
+          in: path
+          required: true
+          description: Trigger event identifier
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The trigger event
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TriggerEvent"
+        "400":
+          description: Malformed event identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "404":
+          description: Trigger event not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "500":
+          description: Lookup failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
+  /api/workspaces/{ws}/trigger-deliveries:
+    get:
+      operationId: listTriggerDeliveries
+      tags: [triggers]
+      summary: List trigger deliveries
+      description: |
+        Read-only listing of `TriggerDelivery` records — one per fan-out leg of
+        a dispatched trigger event, linking the event to the binding that
+        matched it and the driver run it enqueued.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: trigger_event_id
+          in: query
+          description: Filter to the legs of one trigger event.
+          schema:
+            type: string
+        - name: trigger_binding_id
+          in: query
+          description: Filter by the matched binding.
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: Filter by delivery status.
+          schema:
+            $ref: "#/components/schemas/TriggerDeliveryStatus"
+        - name: limit
+          in: query
+          description: Maximum records to return. Must be 1-1000 when supplied.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Matching trigger deliveries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TriggerDeliveriesResponse"
+        "400":
+          description: Invalid limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "500":
+          description: Listing failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
+  /api/workspaces/{ws}/trigger-deliveries/{deliveryId}:
+    get:
+      operationId: getTriggerDelivery
+      tags: [triggers]
+      summary: Fetch one trigger delivery
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: deliveryId
+          in: path
+          required: true
+          description: Trigger delivery identifier
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The trigger delivery
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TriggerDelivery"
+        "400":
+          description: Malformed delivery identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "404":
+          description: Trigger delivery not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "500":
+          description: Lookup failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
+  # ── Workflows ───────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/workflows/{name}/versions:
+    post:
+      operationId: createWorkflowVersion
+      tags: [workflows]
+      summary: Build and register a new workflow version
+      description: |
+        Bundles the supplied TypeScript sources, registers them as a new
+        version of the workflow's driver, and (by default) activates that
+        version. Registration is content-addressed: re-posting identical
+        sources reuses the existing version instead of creating a new one,
+        which is reported back as `reused_version`.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkflowName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkflowVersionRequest"
+      responses:
+        "201":
+          description: Version registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowVersionResult"
+        "400":
+          description: |
+            Invalid body, empty `files`, an entrypoint outside the workflow's
+            own directory, a missing entrypoint file, or a build failure.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
+  /api/workspaces/{ws}/workflows/{name}:
+    post:
+      operationId: createWorkflowRun
+      tags: [workflows]
+      summary: Start a workflow run
+      description: |
+        Enqueues a run of the workflow's active driver version. The whole
+        request body is passed through to the run as its payload; an empty
+        body becomes `{}`. Builtin workflows are registered on demand, so a
+        first run of one does not need a prior version upload.
+
+        Before the run is created the resolved runner backend is checked
+        (installed and authenticated), so a misconfigured runner fails here
+        rather than deep inside the worker.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkflowName"
+        - name: Idempotency-Key
+          in: header
+          description: |
+            Repeat key. A second request carrying the same key returns the
+            already-admitted run instead of creating a second one.
+          schema:
+            type: string
+      requestBody:
+        required: false
+        description: |
+          Arbitrary JSON payload handed to the workflow. `epic_id`, when
+          present, is lifted onto the run.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "202":
+          description: Run accepted and queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverRun"
+        "400":
+          description: Payload is not valid JSON, or the runner preflight failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "404":
+          description: Workflow not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "500":
+          description: Run creation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
+  # ── Inbound Webhooks ────────────────────────────────────────────────────
+  /api/workspaces/{ws}/webhooks/{name}:
+    post:
+      operationId: receiveWebhook
+      tags: [webhooks]
+      summary: Ingest an inbound provider webhook
+      description: |
+        Provider-facing ingest endpoint. `{name}` selects the adapter;
+        `github` is the only one registered today.
+
+        The handler normalizes headers and body into a route key, resolves the
+        enabled binding for it, verifies the signature, then dispatches
+        durably: one `TriggerEvent` plus one queued `DriverRun` and
+        `TriggerDelivery` per matched binding. It never executes work inline.
+
+        Dispatch is idempotent on `{adapter}:{delivery-id}`, so provider
+        redelivery heals each fan-out leg independently rather than
+        duplicating runs.
+
+        **Wire note**: the 202 body carries `deliveries[]` only. There is no
+        top-level `driver_run_id` or `driver_run` — fetch the run by
+        `deliveries[i].driver_run_id`.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: name
+          in: path
+          required: true
+          description: Adapter name. `github` is the only registered adapter.
+          schema:
+            type: string
+            enum: [github]
+        - name: X-GitHub-Event
+          in: header
+          required: true
+          description: GitHub event name; part of the derived route key.
+          schema:
+            type: string
+        - name: X-GitHub-Delivery
+          in: header
+          required: true
+          description: |
+            GitHub delivery id. Used as the idempotency anchor, so an empty
+            one is rejected rather than collapsing every delivery onto one key.
+          schema:
+            type: string
+        - name: X-Hub-Signature-256
+          in: header
+          required: true
+          description: |
+            `sha256=<hex>` HMAC over the raw body, verified against the
+            source connector's inbound secret (the previous secret is accepted
+            inside the rotation window).
+          schema:
+            type: string
+      requestBody:
+        required: true
+        description: The raw provider payload. Must be valid JSON; an empty body becomes `{}`.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "202":
+          description: Delivery accepted and dispatched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookDispatchResult"
+        "400":
+          description: |
+            Unreadable body, a missing required header, an empty delivery id,
+            or a payload that is not valid JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "401":
+          description: Signature missing, malformed, or not matching
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "404":
+          description: |
+            No adapter registered for `{name}`, or no enabled trigger binding
+            for the derived route key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "409":
+          description: Conflicting dispatch state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "500":
+          description: Dispatch failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "501":
+          description: The configured store does not implement trigger dispatch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
+  # ── Terminal Lifecycle Config ───────────────────────────────────────────
+  /api/config/terminal:
+    get:
+      operationId: getTerminalConfig
+      tags: [config]
+      summary: Terminal lifecycle limits
+      description: |
+        Serves the server's terminal lifecycle snapshot. The frontend uses it
+        to bound auto-reconnect: the client's retry ceiling must stay at or
+        under `grace_period_ms`, or it gives up while the server still holds
+        the shell open. A zero millisecond value means that limit is disabled.
+      responses:
+        "200":
+          description: Lifecycle config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalLifecycleConfigResponse"
+
+  # ── Daemon ──────────────────────────────────────────────────────────────
+  /api/daemon/supervisor:
+    get:
+      operationId: getDaemonSupervisor
+      tags: [daemon]
+      summary: Supervisor state and supervised agents
+      description: |
+        Reads the daemon's state file. Registered only when the server was
+        built with a supervisor reader; otherwise the path 404s as an unknown
+        API route.
+      responses:
+        "200":
+          description: Supervisor snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DaemonSupervisorResponse"
+        "500":
+          description: The state file exists but could not be read or parsed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Daemon is not running (no state file)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/daemon/config:
+    get:
+      operationId: getDaemonConfig
+      tags: [daemon]
+      summary: Effective resolved daemon config
+      description: |
+        Returns the daemon's effective configuration verbatim, embedded under
+        `data` as raw JSON. The shape follows the daemon's config file rather
+        than a fixed API schema, so it is deliberately unconstrained here.
+        Registered only when the server was built with a config loader.
+      responses:
+        "200":
+          description: Effective config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DaemonConfigResponse"
+        "503":
+          description: Config could not be loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Desktop-Local Settings ──────────────────────────────────────────────
+  /api/local/settings:
+    get:
+      operationId: getLocalSettings
+      tags: [local-settings]
+      summary: Read desktop-local runtime settings
+      description: |
+        Returns the sanitized desktop-local settings: secrets are never echoed,
+        only whether each one is set. Registered only when the server has a
+        local settings directory configured.
+      responses:
+        "200":
+          description: Sanitized settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocalSettingsResponse"
+        "500":
+          description: Settings directory unconfigured or unreadable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: patchLocalSettings
+      tags: [local-settings]
+      summary: Update desktop-local runtime settings
+      description: |
+        Partial update: only the sections present in the body are touched, and
+        within a section only the fields present. Credential values are sealed
+        before they are written and are never returned — the response is the
+        same sanitized view as the GET.
+
+        Redis changes take effect on the next restart, because embedded
+        fleet-db reads them at startup.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LocalSettingsPatchRequest"
+      responses:
+        "200":
+          description: Saved; body carries the sanitized settings and a message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocalSettingsResponse"
+        "400":
+          description: Malformed body, or a rejected value (bad Redis URL, unknown agent runtime)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Request body too large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Settings directory unconfigured or unreadable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Skills ──────────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/skill-capabilities:
+    get:
+      operationId: getSkillCapabilities
+      tags: [skills]
+      summary: Report what the caller may edit in the skill catalog
+      description: |
+        Answers the two questions the skill editor needs before it renders a
+        write affordance: whether this session may write role-scoped skills,
+        and what the workspace scope permits. `workspace_scope` is always
+        `read_only` — workspace skills are owned by the pack sync and are
+        editable only through `loom skill update`.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The caller's skill-editing capabilities
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillCapabilities"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+
+  /api/workspaces/{ws}/skills:
+    get:
+      operationId: listSkills
+      tags: [skills]
+      summary: List every skill in the workspace, grouped by scope and role
+      description: |
+        Returns the whole catalog in one read: the workspace-scoped group first,
+        then one group per role in role-name order, each group's skills sorted
+        by name. Entries carry file metadata (path, revision, executable) but
+        not file contents — fetch a body with the skill detail or file route.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The skill catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillCatalogResponse"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+    post:
+      operationId: createWorkspaceSkill
+      tags: [skills]
+      summary: Refused — workspace-scoped skills are read-only here
+      description: |
+        Registered so the workspace lane answers with an explicit refusal rather
+        than a generic 405. Nothing about the request is read: no body, path or
+        precondition is ever parsed. Create role-scoped skills with
+        `POST /api/workspaces/{ws}/roles/{role}/skills`, or edit a
+        workspace-scoped skill with `loom skill update`.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/WorkspaceScopeReadonly"
+
+  /api/workspaces/{ws}/skills/{name}:
+    get:
+      operationId: getWorkspaceSkill
+      tags: [skills]
+      summary: Fetch one workspace-scoped skill with its SKILL.md body
+      description: |
+        The response carries the rendered `content` alongside the catalog
+        metadata. `ETag` is set to the skill's `content_revision`; send it back
+        as `If-Match` on a role-scoped mutation.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SkillName"
+      responses:
+        "200":
+          $ref: "#/components/responses/SkillDetailResponse"
+        "400":
+          $ref: "#/components/responses/SkillBadRequestPath"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "404":
+          $ref: "#/components/responses/SkillNotFound"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+    patch:
+      operationId: patchWorkspaceSkill
+      tags: [skills]
+      summary: Refused — workspace-scoped skills are read-only here
+      description: |
+        See `createWorkspaceSkill`. The request is refused unread.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SkillName"
+      responses:
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/WorkspaceScopeReadonly"
+    delete:
+      operationId: deleteWorkspaceSkill
+      tags: [skills]
+      summary: Refused — workspace-scoped skills are read-only here
+      description: |
+        See `createWorkspaceSkill`. The request is refused unread.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SkillName"
+      responses:
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/WorkspaceScopeReadonly"
+
+  /api/workspaces/{ws}/skills/{name}/files/{path}:
+    get:
+      operationId: getWorkspaceSkillFile
+      tags: [skills]
+      summary: Read one file bundled with a workspace-scoped skill
+      description: |
+        `path` is multi-segment: it is the file's path inside the skill bundle
+        and may contain `/`. The literal `SKILL.md` is accepted as the skill
+        body; every other path is validated as a bundled file path. `ETag`
+        carries the document revision.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SkillName"
+        - $ref: "#/components/parameters/SkillFilePath"
+      responses:
+        "200":
+          $ref: "#/components/responses/SkillFileResponse"
+        "400":
+          $ref: "#/components/responses/SkillBadRequestPath"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "404":
+          $ref: "#/components/responses/SkillNotFound"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+    put:
+      operationId: putWorkspaceSkillFile
+      tags: [skills]
+      summary: Refused — workspace-scoped skills are read-only here
+      description: |
+        See `createWorkspaceSkill`. The request is refused unread.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SkillName"
+        - $ref: "#/components/parameters/SkillFilePath"
+      responses:
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/WorkspaceScopeReadonly"
+    delete:
+      operationId: deleteWorkspaceSkillFile
+      tags: [skills]
+      summary: Refused — workspace-scoped skills are read-only here
+      description: |
+        See `createWorkspaceSkill`. The request is refused unread.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SkillName"
+        - $ref: "#/components/parameters/SkillFilePath"
+      responses:
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/WorkspaceScopeReadonly"
+
+  /api/workspaces/{ws}/roles/{role}/skills:
+    post:
+      operationId: createRoleSkill
+      tags: [skills]
+      summary: Create a role-scoped skill
+      description: |
+        Creates `role:{role}:{name}`. The new skill records `source: "webui"`;
+        a later mutation from a different actor is refused with
+        `skill_provenance_conflict`. `content` is optional — omit it to create
+        the skill with an empty SKILL.md and fill it in through the file route.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RoleName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkillCreateRequest"
+      responses:
+        "201":
+          description: The created skill
+          headers:
+            ETag:
+              description: The skill's content revision, quoted.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillDetail"
+        "400":
+          $ref: "#/components/responses/SkillBadRequestPath"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "404":
+          description: |
+            The workspace or the role does not exist in the skill store
+            (`code: skill_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillErrorResponse"
+        "409":
+          $ref: "#/components/responses/SkillConflict"
+        "422":
+          $ref: "#/components/responses/SkillValidationFailed"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+
+  /api/workspaces/{ws}/roles/{role}/skills/{name}:
+    get:
+      operationId: getRoleSkill
+      tags: [skills]
+      summary: Fetch one role-scoped skill with its SKILL.md body
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RoleName"
+        - $ref: "#/components/parameters/SkillName"
+      responses:
+        "200":
+          $ref: "#/components/responses/SkillDetailResponse"
+        "400":
+          $ref: "#/components/responses/SkillBadRequestPath"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "404":
+          $ref: "#/components/responses/SkillNotFound"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+    patch:
+      operationId: patchRoleSkill
+      tags: [skills]
+      summary: Update a role-scoped skill's description or provenance ref
+      description: |
+        Only `description` and `source_ref` are patchable; the SKILL.md body is
+        written through the file route. `If-Match` is mandatory and is compared
+        against the skill's stored `content_revision` before the update is
+        attempted, so a stale editor is rejected rather than silently winning.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RoleName"
+        - $ref: "#/components/parameters/SkillName"
+        - $ref: "#/components/parameters/SkillIfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkillPatchRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/SkillDetailResponse"
+        "400":
+          $ref: "#/components/responses/SkillBadPrecondition"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "404":
+          $ref: "#/components/responses/SkillNotFound"
+        "409":
+          $ref: "#/components/responses/SkillConflict"
+        "412":
+          $ref: "#/components/responses/SkillPreconditionFailed"
+        "422":
+          $ref: "#/components/responses/SkillValidationFailed"
+        "428":
+          $ref: "#/components/responses/SkillPreconditionRequired"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+    delete:
+      operationId: deleteRoleSkill
+      tags: [skills]
+      summary: Delete a role-scoped skill and every file bundled with it
+      description: |
+        `If-Match` is mandatory. Send the skill's `content_revision`, or `*` to
+        delete whatever revision is current.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RoleName"
+        - $ref: "#/components/parameters/SkillName"
+        - $ref: "#/components/parameters/SkillIfMatch"
+      responses:
+        "204":
+          description: Deleted; no body
+        "400":
+          $ref: "#/components/responses/SkillBadPrecondition"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "404":
+          $ref: "#/components/responses/SkillNotFound"
+        "412":
+          $ref: "#/components/responses/SkillPreconditionFailed"
+        "428":
+          $ref: "#/components/responses/SkillPreconditionRequired"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+
+  /api/workspaces/{ws}/roles/{role}/skills/{name}/files/{path}:
+    get:
+      operationId: getRoleSkillFile
+      tags: [skills]
+      summary: Read one file bundled with a role-scoped skill
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RoleName"
+        - $ref: "#/components/parameters/SkillName"
+        - $ref: "#/components/parameters/SkillFilePath"
+      responses:
+        "200":
+          $ref: "#/components/responses/SkillFileResponse"
+        "400":
+          $ref: "#/components/responses/SkillBadRequestPath"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "404":
+          $ref: "#/components/responses/SkillNotFound"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+    put:
+      operationId: putRoleSkillFile
+      tags: [skills]
+      summary: Create or overwrite one file bundled with a role-scoped skill
+      description: |
+        Send exactly one precondition: `If-Match` with the document's current
+        revision to overwrite it (answered `200`), or `If-None-Match: *` to
+        create a file that must not already exist (answered `201`). Sending
+        both, or an `If-None-Match` that is not exactly `*`, is a `400`.
+
+        Writing `SKILL.md` through this route always stores the document
+        non-executable; the `executable` field in the body is ignored for it.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RoleName"
+        - $ref: "#/components/parameters/SkillName"
+        - $ref: "#/components/parameters/SkillFilePath"
+        - $ref: "#/components/parameters/SkillIfMatchOptional"
+        - $ref: "#/components/parameters/SkillIfNoneMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkillFileWriteRequest"
+      responses:
+        "200":
+          description: Overwritten (the `If-Match` lane)
+          headers:
+            ETag:
+              description: The document's new revision, quoted.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillFileDocument"
+        "201":
+          description: "Created (the `If-None-Match: *` lane)"
+          headers:
+            ETag:
+              description: The document's revision, quoted.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillFileDocument"
+        "400":
+          $ref: "#/components/responses/SkillBadPrecondition"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "404":
+          $ref: "#/components/responses/SkillNotFound"
+        "409":
+          $ref: "#/components/responses/SkillConflict"
+        "412":
+          $ref: "#/components/responses/SkillPreconditionFailed"
+        "422":
+          $ref: "#/components/responses/SkillValidationFailed"
+        "428":
+          $ref: "#/components/responses/SkillPreconditionRequired"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+    delete:
+      operationId: deleteRoleSkillFile
+      tags: [skills]
+      summary: Delete one file bundled with a role-scoped skill
+      description: |
+        `If-Match` is mandatory. `SKILL.md` cannot be deleted here — it is the
+        skill body, so the request is answered `422`; delete the whole skill
+        instead.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RoleName"
+        - $ref: "#/components/parameters/SkillName"
+        - $ref: "#/components/parameters/SkillFilePath"
+        - $ref: "#/components/parameters/SkillIfMatch"
+      responses:
+        "204":
+          description: Deleted; no body
+        "400":
+          $ref: "#/components/responses/SkillBadPrecondition"
+        "401":
+          $ref: "#/components/responses/SkillAccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/SkillAccessForbidden"
+        "404":
+          $ref: "#/components/responses/SkillNotFound"
+        "412":
+          $ref: "#/components/responses/SkillPreconditionFailed"
+        "422":
+          $ref: "#/components/responses/SkillValidationFailed"
+        "428":
+          $ref: "#/components/responses/SkillPreconditionRequired"
+        "500":
+          $ref: "#/components/responses/SkillInternalError"
+
 components:
   securitySchemes:
     BearerAuth:
@@ -4138,6 +5283,206 @@ components:
       schema:
         type: string
 
+    RunId:
+      name: runId
+      in: path
+      required: true
+      description: Driver run identifier
+      schema:
+        type: string
+
+    WorkflowName:
+      name: name
+      in: path
+      required: true
+      description: Workflow name
+      schema:
+        type: string
+
+    RoleName:
+      name: role
+      in: path
+      required: true
+      description: Role name that owns the skill
+      schema:
+        type: string
+
+    SkillName:
+      name: name
+      in: path
+      required: true
+      description: Skill name, unique within its scope
+      schema:
+        type: string
+
+    SkillFilePath:
+      name: path
+      in: path
+      required: true
+      description: |
+        Path of the document inside the skill bundle. This is a multi-segment
+        wildcard on the server (`{path...}`), so it may contain `/` and must be
+        sent unescaped. The literal `SKILL.md` addresses the skill body.
+      schema:
+        type: string
+      example: references/checklist.md
+
+    SkillIfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: |
+        The document revision this mutation was written against, or `*` to
+        accept whatever revision is current. A quoted ETag is accepted; a list
+        of ETags is not. Omitting the header is a `428`.
+      schema:
+        type: string
+
+    SkillIfMatchOptional:
+      name: If-Match
+      in: header
+      required: false
+      description: |
+        The overwrite lane. Mutually exclusive with `If-None-Match`; exactly one
+        of the two must be sent.
+      schema:
+        type: string
+
+    SkillIfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      description: |
+        The create lane. Must be exactly `*`. Mutually exclusive with
+        `If-Match`; exactly one of the two must be sent.
+      schema:
+        type: string
+        const: "*"
+
+  responses:
+    # ── Skills ────────────────────────────────────────────────────────────
+    SkillDetailResponse:
+      description: The skill, with its SKILL.md body
+      headers:
+        ETag:
+          description: The skill's content revision, quoted.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillDetail"
+
+    SkillFileResponse:
+      description: One document from the skill bundle
+      headers:
+        ETag:
+          description: The document's revision, quoted.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillFileDocument"
+
+    SkillBadRequestPath:
+      description: |
+        The skill name, role name or file path in the URL is not valid
+        (`code: skill_validation_failed`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillErrorResponse"
+
+    SkillBadPrecondition:
+      description: |
+        The precondition headers are unusable — both `If-Match` and
+        `If-None-Match` were sent, `If-None-Match` was not exactly `*`, or
+        `If-Match` carried an ETag list or an unparseable revision
+        (`code: invalid_precondition`). A bad path segment is also answered
+        here with `code: skill_validation_failed`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillErrorResponse"
+
+    SkillAccessUnauthorized:
+      description: Authentication required by the file-browser access boundary
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SimpleErrorResponse"
+
+    SkillAccessForbidden:
+      description: |
+        The file-browser access boundary refused the session, or the backing
+        skill service refused the operation (`code: skill_forbidden`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillErrorResponse"
+
+    WorkspaceScopeReadonly:
+      description: |
+        Workspace-scoped skills are read-only through this API
+        (`code: workspace_scope_readonly`). The access boundary may also refuse
+        the session first, with the bare `{"error": ...}` wire.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillErrorResponse"
+
+    SkillNotFound:
+      description: "No such skill or skill file (`code: skill_not_found`)"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillErrorResponse"
+
+    SkillConflict:
+      description: |
+        The skill already exists, the operation conflicted with current state
+        (`code: skill_conflict`), or the skill is owned by another actor
+        (`code: skill_provenance_conflict`, with `owner` and `source`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillErrorResponse"
+
+    SkillPreconditionFailed:
+      description: |
+        The document changed since it was read (`code: precondition_failed`).
+        `revision` carries the stored revision to retry against.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillErrorResponse"
+
+    SkillPreconditionRequired:
+      description: |
+        No usable precondition was sent (`code: precondition_required`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillErrorResponse"
+
+    SkillValidationFailed:
+      description: |
+        The request body failed validation (`code: skill_validation_failed`);
+        `detail` names the offending field. A malformed or oversized JSON body
+        is reported here too.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SkillErrorResponse"
+
+    SkillInternalError:
+      description: The skill store failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SimpleErrorResponse"
+
   schemas:
     # ── Response Envelopes ──────────────────────────────────────────────
     ErrorResponse:
@@ -4155,6 +5500,14 @@ components:
           type: boolean
         details:
           type: object
+
+    SimpleErrorResponse:
+      type: object
+      description: The bare error wire written by handler.RespondError.
+      required: [error]
+      properties:
+        error:
+          type: string
 
     MessageResponse:
       type: object
@@ -6713,3 +8066,950 @@ components:
         data:
           type: object
           description: Event-type-specific data (JSON object)
+
+    DriverRun:
+      type: object
+      description: |
+        One execution of a driver (workflow) version. Created by the workflow
+        run endpoint or by trigger dispatch, then advanced by the executor that
+        holds its lease.
+      required: [workspace_key, run_id, driver_id, driver_version_id, status, created_at, updated_at]
+      properties:
+        workspace_key:
+          type: string
+        run_id:
+          type: string
+        driver_id:
+          type: string
+        driver_version_id:
+          type: string
+        entrypoint:
+          type: string
+        source_kind:
+          type: string
+          description: What created the run, e.g. `api` or `trigger`.
+        source_ref:
+          type: string
+          description: Request path or trigger route that created the run.
+        epic_id:
+          type: string
+        status:
+          type: string
+          enum:
+            - queued
+            - running
+            - completed
+            - failed
+            - needs_review
+            - cancelled
+            - suspended_awaiting_event
+        node_id:
+          type: string
+          description: Executor node currently holding the run.
+        lease_id:
+          type: string
+        fencing_token:
+          type: integer
+          format: int64
+          description: Monotonic token that fences stale lease holders out of writes.
+        idempotency_key:
+          type: string
+        payload:
+          description: The raw JSON payload the run was created with.
+        output:
+          type: object
+          additionalProperties:
+            type: string
+        summary:
+          type: string
+        error_class:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        last_heartbeat:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        parent_run_id:
+          type: string
+          description: |
+            Parent workflow run when this run was spawned by composition.
+            Empty means a root/detached run.
+        suspended_at:
+          type: string
+          format: date-time
+          nullable: true
+        cancel_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Set when a cooperative cancel was requested against a running run.
+            The run still terminalizes through its normal fenced finish.
+        cancel_requested_reason:
+          type: string
+        resume_source_event_id:
+          type: string
+          description: Trigger event that resolved the await and resumed the run.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    PlatformEvent:
+      type: object
+      required: [id, timestamp, actor, action, entity_type, entity_id, workspace_id]
+      properties:
+        id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        actor:
+          type: string
+        action:
+          type: string
+          description: Dotted action name, e.g. `run.started`.
+        entity_type:
+          type: string
+        entity_id:
+          type: string
+        workspace_id:
+          type: string
+        before:
+          type: string
+        after:
+          type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+
+    PlatformEventsPage:
+      type: object
+      required: [events, cursor]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformEvent"
+        cursor:
+          type: string
+          description: Opaque cursor to pass as `after` for the next page.
+
+    TriggerEvent:
+      type: object
+      description: |
+        A durable record of one event ingested by the trigger layer, written
+        before any dispatch. Records persisted before structural provenance
+        existed normalize to `origin: external` on read.
+      required: [workspace_key, event_id, source_kind, event_type, occurred_at, received_at]
+      properties:
+        workspace_key:
+          type: string
+        event_id:
+          type: string
+        trigger_binding_id:
+          type: string
+        source_kind:
+          type: string
+          description: Ingest source, e.g. `github`.
+        source_event_id:
+          type: string
+          description: The source's own delivery id, used as the idempotency anchor.
+        event_type:
+          type: string
+        subject_ref:
+          type: string
+        actor_ref:
+          type: string
+        origin:
+          type: string
+          description: Server-stamped provenance.
+          enum: [external, workflow, system]
+        hop_depth:
+          type: integer
+          description: |
+            Workflow re-trigger hops from the originating external or system
+            event, which sit at depth 0.
+        occurred_at:
+          type: string
+          format: date-time
+        received_at:
+          type: string
+          format: date-time
+        idempotency_key:
+          type: string
+        raw_payload_ref:
+          type: string
+        raw_payload_digest:
+          type: string
+          description: '`sha256:<hex>` digest of the raw delivery body.'
+        signature_status:
+          type: string
+        replay_of_event_id:
+          type: string
+
+    TriggerDeliveryStatus:
+      type: string
+      description: |
+        Lifecycle of one delivery leg. `superseded` marks a delivery replaced
+        by a newer event for the same subject key; `held` marks one queued
+        behind an active run for its subject key.
+      enum:
+        - accepted
+        - rejected
+        - duplicate
+        - queued
+        - dispatched
+        - failed
+        - replayed
+        - superseded
+        - held
+
+    TriggerDelivery:
+      type: object
+      description: |
+        One fan-out leg of a dispatched trigger event: the binding that matched
+        it and the driver run it enqueued.
+      required: [workspace_key, delivery_id, trigger_event_id, trigger_binding_id, status, attempt, created_at, updated_at]
+      properties:
+        workspace_key:
+          type: string
+        delivery_id:
+          type: string
+        trigger_event_id:
+          type: string
+        trigger_binding_id:
+          type: string
+        status:
+          $ref: "#/components/schemas/TriggerDeliveryStatus"
+        subject_key:
+          type: string
+          description: |
+            Rendered concurrency subject key — the binding's subject key
+            template output, or `binding_id|subject_ref` when it has none.
+        rejection_reason:
+          type: string
+        driver_run_id:
+          type: string
+        attempt:
+          type: integer
+        next_retry_at:
+          type: string
+          format: date-time
+          nullable: true
+        error_class:
+          type: string
+          description: |
+            Terminal error class. `retries_exhausted` marks a failed delivery
+            whose binding retry budget is spent; it leaves the retry due-index.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    TriggerEventsResponse:
+      type: object
+      required: [trigger_events, count]
+      properties:
+        trigger_events:
+          type: array
+          items:
+            $ref: "#/components/schemas/TriggerEvent"
+        count:
+          type: integer
+
+    TriggerDeliveriesResponse:
+      type: object
+      required: [trigger_deliveries, count]
+      properties:
+        trigger_deliveries:
+          type: array
+          items:
+            $ref: "#/components/schemas/TriggerDelivery"
+        count:
+          type: integer
+
+    CreateWorkflowVersionRequest:
+      type: object
+      required: [files]
+      properties:
+        files:
+          type: object
+          description: |
+            Workflow sources keyed by repo-relative path. At least one entry is
+            required and the entrypoint must be among them.
+          additionalProperties:
+            type: string
+        entrypoint:
+          type: string
+          description: |
+            Entrypoint path. Defaults to `workflows/{name}.ts` and must live
+            under the workflow's own directory.
+        activate:
+          type: boolean
+          default: true
+          description: Whether to make the new version the driver's active one.
+
+    Driver:
+      type: object
+      description: A registered workflow driver.
+      required: [workspace_key, driver_id, name, owner_type, status, created_at, updated_at]
+      properties:
+        workspace_key:
+          type: string
+        driver_id:
+          type: string
+        name:
+          type: string
+        owner_type:
+          type: string
+          enum: [user, team, lead_agent, system]
+        owner_ref:
+          type: string
+        description:
+          type: string
+        active_version_id:
+          type: string
+        status:
+          type: string
+          enum: [draft, active, disabled]
+        trust_level:
+          type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    DriverVersion:
+      type: object
+      description: One content-addressed version of a driver's bundled sources.
+      required: [workspace_key, version_id, driver_id, version, source_ref, source_digest, bundle_ref, bundle_digest, validation_status, created_at]
+      properties:
+        workspace_key:
+          type: string
+        version_id:
+          type: string
+        driver_id:
+          type: string
+        version:
+          type: integer
+          description: Monotonic version number within the driver.
+        source_ref:
+          type: string
+        source_digest:
+          type: string
+        bundle_ref:
+          type: string
+        bundle_digest:
+          type: string
+        runtime:
+          type: string
+        manifest:
+          type: object
+          additionalProperties:
+            type: string
+        build_diagnostics:
+          type: string
+        validation_status:
+          type: string
+          enum: [pending, passed, failed]
+        created_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    DriverBundle:
+      type: object
+      description: The built bundle produced for a driver version.
+      required: [root, bundle_ref, source_ref, source_digest, bundle_digest, manifest]
+      properties:
+        root:
+          type: string
+        bundle_ref:
+          type: string
+        source_ref:
+          type: string
+        source_digest:
+          type: string
+        bundle_digest:
+          type: string
+        manifest:
+          type: object
+          additionalProperties:
+            type: string
+        diagnostics:
+          type: string
+
+    WorkflowVersionResult:
+      type: object
+      description: |
+        Outcome of a version registration. Exactly one of `created_version` and
+        `reused_version` is true — re-posting identical sources reuses the
+        existing version.
+      required: [driver, version, created_driver, created_version, reused_version, activated]
+      properties:
+        driver:
+          $ref: "#/components/schemas/Driver"
+        version:
+          $ref: "#/components/schemas/DriverVersion"
+        bundle:
+          $ref: "#/components/schemas/DriverBundle"
+        created_driver:
+          type: boolean
+        created_version:
+          type: boolean
+        reused_version:
+          type: boolean
+        activated:
+          type: boolean
+          description: Whether this version is now the driver's active version.
+        build_diagnostics:
+          type: string
+          description: Bundler output, empty on a clean build.
+
+    WebhookDelivery:
+      type: object
+      description: One fan-out leg of a webhook dispatch, as reported on ingest.
+      required: [delivery_id, trigger_binding_id, driver_run_id, status]
+      properties:
+        delivery_id:
+          type: string
+        trigger_binding_id:
+          type: string
+        driver_run_id:
+          type: string
+        status:
+          $ref: "#/components/schemas/TriggerDeliveryStatus"
+        rejection_reason:
+          type: string
+
+    WebhookDispatchResult:
+      type: object
+      description: |
+        The 202 ingest wire. Legs are in dispatch order: the exact route-key
+        binding first when present and enabled, then pattern matches in
+        binding-id order.
+      required: [status, route_key, idempotency_key, deliveries]
+      properties:
+        status:
+          type: string
+          const: accepted
+        route_key:
+          type: string
+          description: Derived route key, e.g. `github.pull_request.opened`.
+        idempotency_key:
+          type: string
+          description: '`{adapter}:{delivery-id}`.'
+        deliveries:
+          type: array
+          items:
+            $ref: "#/components/schemas/WebhookDelivery"
+
+    TerminalLifecycleConfig:
+      type: object
+      description: Terminal lifecycle limits. A zero millisecond value disables that limit.
+      required: [grace_period_ms, idle_timeout_ms, max_sessions]
+      properties:
+        grace_period_ms:
+          type: integer
+          format: int64
+          description: How long a detached session is held before it is killed.
+        idle_timeout_ms:
+          type: integer
+          format: int64
+          description: How long an idle session is held before it is reaped.
+        max_sessions:
+          type: integer
+
+    TerminalLifecycleConfigResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/TerminalLifecycleConfig"
+
+    DaemonClaimHold:
+      type: object
+      description: |
+        A workspace-level refusal to start new work. Carried on the supervisor
+        response so the banner costs no extra round trip.
+      required: [held, actor, reason, since]
+      properties:
+        held:
+          type: boolean
+        actor:
+          type: string
+        reason:
+          type: string
+        since:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+
+    DaemonAgentEntry:
+      type: object
+      description: One supervised agent in the supervisor snapshot.
+      required: [worktree, role, pid, status, restart_count]
+      properties:
+        worktree:
+          type: string
+        role:
+          type: string
+        repo:
+          type: string
+        pid:
+          type: integer
+        status:
+          type: string
+        task_id:
+          type: string
+        epic_id:
+          type: string
+        current_backend:
+          type: string
+        restart_count:
+          type: integer
+        last_start:
+          type: string
+          format: date-time
+        last_exit:
+          type: string
+          format: date-time
+        last_exit_code:
+          type: integer
+        stop_reason:
+          type: string
+        stopped_at:
+          type: string
+          format: date-time
+        worktree_path:
+          type: string
+        last_error_class:
+          type: string
+        no_work_count:
+          type: integer
+        backoff_until:
+          type: string
+          format: date-time
+        remote_branch:
+          type: string
+        claims_gated:
+          type: boolean
+          description: Cycling, but gated by an active claim hold.
+
+    DaemonSupervisorData:
+      type: object
+      required: [pid, started_at, uptime_seconds, agents]
+      properties:
+        pid:
+          type: integer
+        started_at:
+          type: string
+          format: date-time
+        uptime_seconds:
+          type: number
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/DaemonAgentEntry"
+        claim_hold:
+          $ref: "#/components/schemas/DaemonClaimHold"
+
+    DaemonSupervisorResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/DaemonSupervisorData"
+
+    DaemonConfigResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          type: object
+          additionalProperties: true
+          description: |
+            The effective daemon config, embedded verbatim. Its shape follows
+            the daemon config file, not a fixed API schema.
+
+    SanitizedRedisConfig:
+      type: object
+      description: Redis settings for embedded fleet-db, with the password reduced to a flag.
+      required: [enabled, db, tls, password_set]
+      properties:
+        enabled:
+          type: boolean
+        addr:
+          type: string
+        db:
+          type: integer
+        tls:
+          type: boolean
+        password_set:
+          type: boolean
+
+    SanitizedAgentRuntimeConfig:
+      type: object
+      required: [default]
+      properties:
+        default:
+          type: string
+          description: Where app-triggered task agents run by default.
+
+    SanitizedLocalTaskRunnerConfig:
+      type: object
+      properties:
+        opencode_model:
+          type: string
+
+    SanitizedRuntimeCredential:
+      type: object
+      description: Credential presence only — the value itself is never returned.
+      required: [configured]
+      properties:
+        configured:
+          type: boolean
+        updated_at:
+          type: string
+
+    SanitizedRuntimeCredentialSet:
+      type: object
+      required: [daytona, github]
+      properties:
+        daytona:
+          $ref: "#/components/schemas/SanitizedRuntimeCredential"
+        github:
+          $ref: "#/components/schemas/SanitizedRuntimeCredential"
+
+    SanitizedLocalSettings:
+      type: object
+      required: [version, fleetdb_redis, agent_runtime, local_task_runner, runtime_credentials]
+      properties:
+        version:
+          type: integer
+        fleetdb_redis:
+          $ref: "#/components/schemas/SanitizedRedisConfig"
+        agent_runtime:
+          $ref: "#/components/schemas/SanitizedAgentRuntimeConfig"
+        local_task_runner:
+          $ref: "#/components/schemas/SanitizedLocalTaskRunnerConfig"
+        runtime_credentials:
+          $ref: "#/components/schemas/SanitizedRuntimeCredentialSet"
+
+    LocalSettingsResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/SanitizedLocalSettings"
+        message:
+          type: string
+          description: Set on a successful PATCH.
+
+    LocalSettingsRedisPatch:
+      type: object
+      description: |
+        `redis_url`, when non-empty, is parsed first and supplies the whole
+        config; the discrete fields then override what it set.
+      properties:
+        enabled:
+          type: boolean
+        redis_url:
+          type: string
+        addr:
+          type: string
+        password:
+          type: string
+          description: Ignored when empty. Use `clear_password` to unset.
+        clear_password:
+          type: boolean
+        db:
+          type: integer
+        tls:
+          type: boolean
+
+    LocalSettingsAgentRuntimePatch:
+      type: object
+      properties:
+        default:
+          type: string
+          description: Normalized and validated before it is stored.
+
+    LocalSettingsTaskRunnerPatch:
+      type: object
+      properties:
+        opencode_model:
+          type: string
+
+    LocalSettingsCredentialPatch:
+      type: object
+      description: |
+        Supply the credential under whichever field the provider uses; GitHub
+        prefers `token`, Daytona prefers `api_key`, and each falls back to the
+        other. An empty value is a no-op. The value is sealed before it is
+        written and never returned.
+      properties:
+        api_key:
+          type: string
+        token:
+          type: string
+        clear:
+          type: boolean
+          description: Removes the stored credential; takes precedence over any value.
+
+    LocalSettingsCredentialsPatch:
+      type: object
+      properties:
+        daytona:
+          $ref: "#/components/schemas/LocalSettingsCredentialPatch"
+        github:
+          $ref: "#/components/schemas/LocalSettingsCredentialPatch"
+
+    LocalSettingsPatchRequest:
+      type: object
+      description: Only the sections present are applied; omitted ones are untouched.
+      properties:
+        fleetdb_redis:
+          $ref: "#/components/schemas/LocalSettingsRedisPatch"
+        agent_runtime:
+          $ref: "#/components/schemas/LocalSettingsAgentRuntimePatch"
+        local_task_runner:
+          $ref: "#/components/schemas/LocalSettingsTaskRunnerPatch"
+        runtime_credentials:
+          $ref: "#/components/schemas/LocalSettingsCredentialsPatch"
+
+    # ── Skills ────────────────────────────────────────────────────────────
+    SkillScope:
+      type: string
+      description: |
+        Which lane owns the skill. `workspace` skills come from the pack sync
+        and are read-only over HTTP; `role` skills are editable.
+      enum: [workspace, role]
+
+    SkillFileMeta:
+      type: object
+      description: One bundled document, without its content.
+      required: [path, revision, executable]
+      properties:
+        path:
+          type: string
+          description: Path inside the skill bundle.
+        revision:
+          type: string
+          description: Opaque document revision, usable as an `If-Match` value.
+        executable:
+          type: boolean
+
+    SkillSummary:
+      type: object
+      description: A catalog entry — everything but the SKILL.md body.
+      required: [name, scope, description, content_revision, files, created_at, updated_at]
+      properties:
+        name:
+          type: string
+        scope:
+          $ref: "#/components/schemas/SkillScope"
+        role:
+          type: string
+          description: Owning role. Absent on workspace-scoped skills.
+        description:
+          type: string
+        content_revision:
+          type: string
+          description: Revision of the SKILL.md body; the value served as `ETag`.
+        files:
+          type: array
+          description: Bundled documents, sorted by path.
+          items:
+            $ref: "#/components/schemas/SkillFileMeta"
+        created_by:
+          type: string
+        updated_by:
+          type: string
+        source:
+          type: string
+          description: Actor that last wrote the skill; `webui` for this API.
+        source_ref:
+          type: string
+          description: Free-form provenance pointer set by the writing actor.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SkillDetail:
+      allOf:
+        - $ref: "#/components/schemas/SkillSummary"
+        - type: object
+          required: [content]
+          properties:
+            content:
+              type: string
+              description: The SKILL.md body.
+
+    SkillCatalogGroup:
+      type: object
+      description: |
+        One scope/role bucket. The workspace group sorts first, then role
+        groups by role name.
+      required: [scope, skills]
+      properties:
+        scope:
+          $ref: "#/components/schemas/SkillScope"
+        role:
+          type: string
+          description: Owning role. Absent on the workspace group.
+        skills:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkillSummary"
+
+    SkillCatalogResponse:
+      type: object
+      required: [groups]
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkillCatalogGroup"
+
+    SkillFileDocument:
+      type: object
+      description: One bundled document with its content.
+      required: [path, content, executable, revision, skill_ref]
+      properties:
+        path:
+          type: string
+        content:
+          type: string
+        executable:
+          type: boolean
+        revision:
+          type: string
+        skill_ref:
+          type: string
+          description: |
+            The owning skill's canonical ref — `workspace:<name>` or
+            `role:<role>:<name>`.
+
+    SkillFileWriteRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+        executable:
+          type: boolean
+          default: false
+          description: Ignored when the target document is `SKILL.md`.
+
+    SkillCreateRequest:
+      type: object
+      required: [name, description]
+      properties:
+        name:
+          type: string
+          description: Skill name, unique within the role.
+        description:
+          type: string
+        content:
+          type: string
+          description: Initial SKILL.md body. Optional.
+        source_ref:
+          type: string
+          description: Optional provenance pointer recorded with the skill.
+
+    SkillPatchRequest:
+      type: object
+      description: |
+        A field left out is left alone. The SKILL.md body is not patchable
+        here — write it through the file route.
+      properties:
+        description:
+          type: string
+        source_ref:
+          type: string
+
+    SkillCapabilities:
+      type: object
+      required: [can_edit_role_scope, workspace_scope]
+      properties:
+        can_edit_role_scope:
+          type: boolean
+          description: Whether this session may write role-scoped skills.
+        workspace_scope:
+          type: string
+          description: Always `read_only` in this build.
+          enum: [read_only]
+
+    SkillErrorResponse:
+      type: object
+      description: |
+        The error wire the skills handlers write. `code` is the stable machine
+        signal; the other fields appear only on the failures that carry them.
+
+        `code` is absent when the file-browser access boundary refuses the
+        request before the handler runs — that middleware writes the bare
+        `{"error": ...}` wire.
+      required: [error]
+      properties:
+        code:
+          type: string
+          enum:
+            - skill_validation_failed
+            - skill_not_found
+            - skill_conflict
+            - skill_forbidden
+            - skill_provenance_conflict
+            - workspace_scope_readonly
+            - precondition_required
+            - precondition_failed
+            - invalid_precondition
+        error:
+          type: string
+        detail:
+          type: string
+          description: Present on validation and forbidden failures.
+        revision:
+          type: string
+          description: Present on `precondition_failed` — the stored revision.
+        owner:
+          type: string
+          description: Present on `skill_provenance_conflict`.
+        source:
+          type: string
+          description: Present on `skill_provenance_conflict`.
