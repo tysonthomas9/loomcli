@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-var recoveryDependencyTimestamp = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$`)
+var recoveryNativeTimestamp = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$`)
 
 // Dependency records belong to the complete native workspace image. They do
 // not pass through the UI compatibility model or synthesize missing edges.
@@ -54,12 +54,16 @@ func validateRecoveryDependency(raw json.RawMessage, issues map[string]map[strin
 	}
 	// Go accepts noncanonical fractions, hour widths and offsets that the
 	// browser rejects. Check lexical form before parsing calendar semantics.
-	if !recoveryDependencyTimestamp.MatchString(values["created_at"]) {
-		return key, fmt.Errorf("invalid dependency timestamp")
-	}
-	created, err := time.Parse(time.RFC3339Nano, values["created_at"])
-	if err != nil || created.IsZero() {
+	if !validRecoveryTimestamp(values["created_at"]) {
 		return key, fmt.Errorf("invalid dependency timestamp")
 	}
 	return key, nil
+}
+
+func validRecoveryTimestamp(value string) bool {
+	if !recoveryNativeTimestamp.MatchString(value) {
+		return false
+	}
+	created, err := time.Parse(time.RFC3339Nano, value)
+	return err == nil && !created.IsZero()
 }
