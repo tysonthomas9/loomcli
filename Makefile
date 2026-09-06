@@ -275,6 +275,7 @@ local-mode-postgres-sse-verify:
 	@cd internal/webui/frontend && \
 	  RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 LOOM_API_KEY=local-mode-test-unused \
 	  LOCAL_MODE_COMPOSE_PROJECT="$(LOCAL_MODE_COMPOSE_PROJECT)" \
+	  LOOM_SSE_TEST_SOURCE_REPO="$${LOOM_SSE_TEST_SOURCE_REPO:-/workspace/source-repo}" \
 	  LOOM_SSE_TEST_PROXY_CONTAINER="$(LOCAL_MODE_COMPOSE_PROJECT)-ui-local-1" \
 	  LOOM_BASE_URL="http://127.0.0.1:$${LOCAL_MODE_API_PORT:-8282}" \
 	  LOOM_FRONTEND_BASE_URL="http://127.0.0.1:$${LOCAL_MODE_UI_PORT:-8283}" \

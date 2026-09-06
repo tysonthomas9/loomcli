@@ -1,10 +1,13 @@
+import {
+  createIsolatedSSEWorkspace,
+  assertSSEWorkspaceHasNoAgents,
+} from "./sse-workspace";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { test, expect, type Page, type TestInfo } from "@playwright/test";
 import {
   FRONTEND_BASE_URL,
   generateTestId,
-  resolveWorkspaceId,
   createTestIssueInWorkspace,
   updateIssueStatusInWorkspace,
   closeTestIssueInWorkspace,
@@ -24,7 +27,10 @@ let workspace = "";
 const issueIds: string[] = [];
 
 test.beforeAll(async () => {
-  workspace = await resolveWorkspaceId();
+  workspace = await createIsolatedSSEWorkspace();
+});
+test.beforeEach(async () => {
+  await assertSSEWorkspaceHasNoAgents(workspace);
 });
 test.afterEach(async () => {
   for (const id of issueIds.splice(0))
