@@ -184,6 +184,194 @@ func TestDataUpdate_EmptyDescriptionClearsField(t *testing.T) {
 	})
 }
 
+func TestDataUpdate_AcceptanceCriteriaFlag(t *testing.T) {
+	stub := &localBackendStub{}
+	withLocalBackend(t, stub, func() {
+		resetUpdateFieldFlags(t)
+		outputFormat = "text"
+		updateAcceptanceCriteria = "AC text"
+		t.Cleanup(func() { updateAcceptanceCriteria = "" })
+		setTestFlagChanged(t, updateCmd.Flags(), "acceptance-criteria", true)
+
+		if _, err := captureDataStdout(t, func() error {
+			return updateCmd.RunE(updateCmd, []string{"loom-104"})
+		}); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		if len(stub.calls) != 1 || stub.calls[0].method != "Update" {
+			t.Fatalf("calls = %#v, want one Update call", stub.calls)
+		}
+		params := stub.calls[0].args.(backend.UpdateParams)
+		if params.AcceptanceCriteria == nil {
+			t.Fatalf("Update AcceptanceCriteria = nil, want %q", "AC text")
+		}
+		if *params.AcceptanceCriteria != "AC text" {
+			t.Fatalf("Update AcceptanceCriteria = %q, want %q", *params.AcceptanceCriteria, "AC text")
+		}
+	})
+}
+
+// TestDataUpdate_NoAcceptanceCriteriaFlag_LeavesFieldNil is the regression guard
+// on the ticket's central requirement: updating some other field must never
+// clear acceptance criteria, so an unpassed flag has to leave the pointer nil
+// (omitempty then drops the key from the PATCH body entirely).
+func TestDataUpdate_NoAcceptanceCriteriaFlag_LeavesFieldNil(t *testing.T) {
+	stub := &localBackendStub{}
+	withLocalBackend(t, stub, func() {
+		resetUpdateFieldFlags(t)
+		outputFormat = "text"
+		updateTitle = "criteria untouched"
+		// Deliberately left populated: without the Changed bit the command
+		// must not forward it.
+		updateAcceptanceCriteria = "stale-leak"
+		t.Cleanup(func() { updateTitle = ""; updateAcceptanceCriteria = "" })
+		setTestFlagChanged(t, updateCmd.Flags(), "title", true)
+
+		if _, err := captureDataStdout(t, func() error {
+			return updateCmd.RunE(updateCmd, []string{"loom-105"})
+		}); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		if len(stub.calls) != 1 || stub.calls[0].method != "Update" {
+			t.Fatalf("calls = %#v, want one Update call", stub.calls)
+		}
+		params := stub.calls[0].args.(backend.UpdateParams)
+		if params.AcceptanceCriteria != nil {
+			t.Fatalf("Update AcceptanceCriteria = %q, want nil when --acceptance-criteria was not passed", *params.AcceptanceCriteria)
+		}
+	})
+}
+
+func TestDataUpdate_EmptyAcceptanceCriteriaClearsField(t *testing.T) {
+	stub := &localBackendStub{}
+	withLocalBackend(t, stub, func() {
+		resetUpdateFieldFlags(t)
+		outputFormat = "text"
+		updateAcceptanceCriteria = ""
+		setTestFlagChanged(t, updateCmd.Flags(), "acceptance-criteria", true)
+
+		if _, err := captureDataStdout(t, func() error {
+			return updateCmd.RunE(updateCmd, []string{"loom-106"})
+		}); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		if len(stub.calls) != 1 {
+			t.Fatalf("calls = %#v, want one call", stub.calls)
+		}
+		params := stub.calls[0].args.(backend.UpdateParams)
+		if params.AcceptanceCriteria == nil {
+			t.Fatalf("Update AcceptanceCriteria = nil, want non-nil pointer to empty string")
+		}
+		if *params.AcceptanceCriteria != "" {
+			t.Fatalf("Update AcceptanceCriteria = %q, want empty string", *params.AcceptanceCriteria)
+		}
+	})
+}
+
+// TestDataUpdate_AcceptanceCriteriaWithDependencyFlag_StillUpdates pins the bool
+// applyStringFlags returns: RunE only calls Update when fieldsChanged is true or
+// no dependency flag was given, so dropping that bool would silently discard the
+// criteria while still printing success.
+func TestDataUpdate_AcceptanceCriteriaWithDependencyFlag_StillUpdates(t *testing.T) {
+	stub := &localBackendStub{}
+	withLocalBackend(t, stub, func() {
+		resetUpdateFieldFlags(t)
+		outputFormat = "text"
+		updateAcceptanceCriteria = "AC + dep"
+		updateAddDeps = []string{"dep-1"}
+		t.Cleanup(func() { updateAcceptanceCriteria = ""; updateAddDeps = nil })
+		setTestFlagChanged(t, updateCmd.Flags(), "acceptance-criteria", true)
+
+		out, err := captureDataStdout(t, func() error {
+			return updateCmd.RunE(updateCmd, []string{"loom-107"})
+		})
+		if err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		if !strings.Contains(out, "updated loom-107") {
+			t.Fatalf("update output = %q, want success message", out)
+		}
+		if len(stub.calls) != 2 {
+			t.Fatalf("calls = %#v, want Update + AddDependency (criteria must not be dropped)", stub.calls)
+		}
+		if stub.calls[0].method != "Update" || stub.calls[1].method != "AddDependency" {
+			t.Fatalf("calls = %#v, want Update before AddDependency", stub.calls)
+		}
+		params := stub.calls[0].args.(backend.UpdateParams)
+		if params.AcceptanceCriteria == nil || *params.AcceptanceCriteria != "AC + dep" {
+			t.Fatalf("Update AcceptanceCriteria = %#v, want %q", params.AcceptanceCriteria, "AC + dep")
+		}
+	})
+}
+
+// TestUpdateAcceptanceCriteriaFlag_ParseSemantics drives real pflag parsing,
+// which the stub-based tests bypass, proving the flag is registered under the
+// exact name create.go uses.
+func TestUpdateAcceptanceCriteriaFlag_ParseSemantics(t *testing.T) {
+	// resetUpdateFieldFlags must run first: setTestFlagChanged captures the
+	// prior Changed bit and restores it on cleanup, so the Changed = true that
+	// ParseFlags sets below is reverted and later tests stay unaffected.
+	resetUpdateFieldFlags(t)
+	t.Cleanup(func() { updateAcceptanceCriteria = "" })
+
+	if err := updateCmd.ParseFlags([]string{"--acceptance-criteria=x"}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+	if updateAcceptanceCriteria != "x" {
+		t.Fatalf("updateAcceptanceCriteria = %q, want %q", updateAcceptanceCriteria, "x")
+	}
+	if !updateCmd.Flags().Changed("acceptance-criteria") {
+		t.Fatal("parsing --acceptance-criteria must mark the flag Changed")
+	}
+}
+
+// TestApplyStringFlags_EachFlagLandsInItsOwnField covers the table extraction in
+// applyStringFlags: the dst **string wiring is the one place a typo would cross
+// two fields, and only some of these flags have a dedicated test elsewhere.
+func TestApplyStringFlags_EachFlagLandsInItsOwnField(t *testing.T) {
+	cases := []struct {
+		flag  string
+		set   func(string)
+		value string
+		get   func(backend.UpdateParams) *string
+	}{
+		{"status", func(v string) { updateStatus = v }, "in_progress", func(p backend.UpdateParams) *string { return p.Status }},
+		{"assignee", func(v string) { updateAssignee = v }, "someone", func(p backend.UpdateParams) *string { return p.Assignee }},
+		{"notes", func(v string) { updateNotes = v }, "a note", func(p backend.UpdateParams) *string { return p.Notes }},
+		{"design", func(v string) { updateDesign = v }, "a design", func(p backend.UpdateParams) *string { return p.Design }},
+		{"acceptance-criteria", func(v string) { updateAcceptanceCriteria = v }, "criteria", func(p backend.UpdateParams) *string { return p.AcceptanceCriteria }},
+		{"title", func(v string) { updateTitle = v }, "a title", func(p backend.UpdateParams) *string { return p.Title }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.flag, func(t *testing.T) {
+			resetUpdateFieldFlags(t)
+			for _, other := range cases {
+				other.set("")
+			}
+			tc.set(tc.value)
+			t.Cleanup(func() { tc.set("") })
+			setTestFlagChanged(t, updateCmd.Flags(), tc.flag, true)
+
+			params := backend.UpdateParams{}
+			if !applyStringFlags(updateCmd, &params) {
+				t.Fatalf("applyStringFlags(--%s) = false, want true", tc.flag)
+			}
+			got := tc.get(params)
+			if got == nil || *got != tc.value {
+				t.Fatalf("--%s landed as %#v, want pointer to %q", tc.flag, got, tc.value)
+			}
+			for _, other := range cases {
+				if other.flag == tc.flag {
+					continue
+				}
+				if p := other.get(params); p != nil {
+					t.Errorf("--%s also set the %s field to %q, want nil", tc.flag, other.flag, *p)
+				}
+			}
+		})
+	}
+}
+
 // resetUpdateFieldFlags clears any Changed state leaked onto updateCmd's
 // field flags by earlier tests in the package, so dependency-flag tests see
 // a deterministic "no field flags set" baseline.
@@ -192,7 +380,7 @@ func resetUpdateFieldFlags(t *testing.T) {
 	for _, name := range []string{
 		"status", "assignee", "notes", "design", "priority",
 		"title", "description", "description-from-file",
-		"add-label", "remove-label",
+		"acceptance-criteria", "add-label", "remove-label",
 	} {
 		setTestFlagChanged(t, updateCmd.Flags(), name, false)
 	}
