@@ -144,6 +144,10 @@ func TestStarvation_DashboardQaParkedRunning(t *testing.T) {
 
 	cfg := &cfgpkg.DaemonConfig{
 		Roles: map[string]cfgpkg.RoleConfig{
+			// The absent Kind is load-bearing: this role resolves to a *worker*
+			// (the name convention only makes lead/orchestrator interactive), so
+			// this stays the genuine-starvation regression. The interactive
+			// spelling of the same lane is TestStarvation_InteractiveRoleNeverStarves.
 			"dashboard-qa": {Labels: []string{"qa"}},
 		},
 		Agents: []cfgpkg.AgentEntry{
@@ -499,4 +503,142 @@ func hasDefect(report starvationReport, kind, subject string) bool {
 		}
 	}
 	return false
+}
+
+// TestStarvation_InteractiveRoleNeverStarves is the acceptance case: an
+// interactive lane is one the daemon deliberately never auto-supervises, so it
+// has no intended auto-capacity and can never be starved — however much ready
+// work its (filterless) scope happens to admit. Before this, dashboard-qa read
+// Q=21 C_int=1 C_act=0 and FAILed the check continuously.
+func TestStarvation_InteractiveRoleNeverStarves(t *testing.T) {
+	isolateRuntimeDir(t)
+
+	cfg := &cfgpkg.DaemonConfig{
+		Roles: map[string]cfgpkg.RoleConfig{
+			// The live shape: kind=interactive, no label filter.
+			"dashboard-qa": {Kind: "interactive"},
+		},
+		Agents: []cfgpkg.AgentEntry{
+			{Worktree: "dashboard-qa", Role: "dashboard-qa"},
+		},
+	}
+	state := loadStateFixture(t, "dashboard_qa_parked_running.json")
+
+	for _, q := range []int{1, 21, 10000} {
+		t.Run(fmt.Sprintf("q=%d", q), func(t *testing.T) {
+			report := computeStarvation(cfg, nil, state, readyIssues(q), 0)
+
+			m := metricFor(t, report, "dashboard-qa")
+			assertMetric(t, m, q, 0, 0, false)
+			if m.Kind != "interactive" {
+				t.Fatalf("kind = %q, want interactive", m.Kind)
+			}
+			if len(report.Starved) != 0 {
+				t.Fatalf("starved roles = %v, want none", report.Starved)
+			}
+			if renderStarvation(report).Status == StatusFail {
+				t.Fatal("an interactive role must never produce a FAIL")
+			}
+			if hasDefect(report, "filterless_role", "dashboard-qa") {
+				t.Fatalf("filterless_role raised for an interactive role: %+v", report.ConfigDefects)
+			}
+			detail := renderStarvationDetail(report)
+			if !strings.Contains(detail, "role=dashboard-qa kind=interactive") {
+				t.Fatalf("detail does not name the kind:\n%s", detail)
+			}
+			// The lane is reported, not hidden — but nothing about it is dead,
+			// because nothing intended to supervise it.
+			if strings.Contains(detail, "dead: worktree=dashboard-qa") {
+				t.Fatalf("interactive agent reported as a dead supervised agent:\n%s", detail)
+			}
+		})
+	}
+}
+
+// TestStarvation_InteractiveByNameConvention pins the legacy fallback, so a
+// future refactor cannot quietly narrow the predicate to the explicit Kind
+// field: domain.ResolveRoleKind also reads lead/orchestrator by name.
+func TestStarvation_InteractiveByNameConvention(t *testing.T) {
+	isolateRuntimeDir(t)
+
+	state := &daemonStateView{
+		PID:    1,
+		Agents: []daemonAgentView{{Worktree: "lead", Role: "lead", Status: "parked", DesiredState: "running"}},
+	}
+	cfg := &cfgpkg.DaemonConfig{
+		Roles:  map[string]cfgpkg.RoleConfig{"lead": {}}, // no Kind at all
+		Agents: []cfgpkg.AgentEntry{{Worktree: "lead", Role: "lead"}},
+	}
+
+	report := computeStarvation(cfg, nil, state, readyIssues(5), starvationReadyLimit)
+	m := metricFor(t, report, "lead")
+	assertMetric(t, m, 5, 0, 0, false)
+	if m.Kind != "interactive" {
+		t.Fatalf("kind = %q, want interactive by name convention", m.Kind)
+	}
+}
+
+// TestStarvation_InteractiveRoleNotAClaimant: an interactive role never makes
+// work look reachable, even when it does carry a label filter. It is never
+// auto-supervised, so it will not claim that ticket.
+func TestStarvation_InteractiveRoleNotAClaimant(t *testing.T) {
+	isolateRuntimeDir(t)
+
+	state := &daemonStateView{
+		PID: 1,
+		Agents: []daemonAgentView{
+			{Worktree: "worker", Role: "coder", Status: "running"},
+			{Worktree: "dashboard-qa", Role: "dashboard-qa", Status: "running"},
+		},
+	}
+	cfg := &cfgpkg.DaemonConfig{
+		Roles: map[string]cfgpkg.RoleConfig{
+			"coder":        {Labels: []string{"ready-to-implement"}},
+			"dashboard-qa": {Kind: "interactive", Labels: []string{"approved"}},
+		},
+		Agents: []cfgpkg.AgentEntry{
+			{Worktree: "worker", Role: "coder"},
+			{Worktree: "dashboard-qa", Role: "dashboard-qa"},
+		},
+	}
+	ready := []backend.IssueData{
+		{ID: "REACHABLE", Labels: []string{"ready-to-implement"}},
+		{ID: "APPROVED", Labels: []string{"approved"}},
+	}
+
+	report := computeStarvation(cfg, nil, state, ready, starvationReadyLimit)
+
+	if !report.UnreachableComputed {
+		t.Fatal("unreachable_computed = false, want true (coder carries a filter)")
+	}
+	if len(report.Unreachable) != 1 || report.Unreachable[0] != "APPROVED" {
+		t.Fatalf("unreachable = %v, want [APPROVED]: an interactive lane is not a claimant", report.Unreachable)
+	}
+}
+
+// TestStarvation_UnknownKindIsWorker guards the fail-safe direction: only
+// "interactive" turns supervision off, so an unrecognized kind must still be
+// counted and must still be able to starve.
+func TestStarvation_UnknownKindIsWorker(t *testing.T) {
+	isolateRuntimeDir(t)
+
+	cfg := &cfgpkg.DaemonConfig{
+		Roles: map[string]cfgpkg.RoleConfig{
+			"dashboard-qa": {Kind: "batch", Labels: []string{"qa"}},
+		},
+		Agents: []cfgpkg.AgentEntry{
+			{Worktree: "dashboard-qa", Role: "dashboard-qa"},
+		},
+	}
+	state := loadStateFixture(t, "dashboard_qa_parked_running.json")
+
+	report := computeStarvation(cfg, nil, state, readyIssues(3, "qa"), starvationReadyLimit)
+	m := metricFor(t, report, "dashboard-qa")
+	assertMetric(t, m, 3, 1, 0, true)
+	if m.Kind != "worker" {
+		t.Fatalf("kind = %q, want worker for an unrecognized kind", m.Kind)
+	}
+	if renderStarvation(report).Status != StatusFail {
+		t.Fatal("an unrecognized kind must not disable starvation detection")
+	}
 }

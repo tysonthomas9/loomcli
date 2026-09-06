@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
@@ -102,6 +103,10 @@ type daemonStateView struct {
 // roleMetric is the per-role row of the JSON payload.
 type roleMetric struct {
 	Role string `json:"role"`
+	// Kind is the resolved role kind ("worker" or "interactive"). An
+	// interactive lane reports a Q it will never serve, so the row has to say
+	// why C_int is 0 rather than leaving the reader to guess.
+	Kind string `json:"kind,omitempty"`
 	Q    int    `json:"q"`
 	// QFloor is true when Q is a floor rather than an exact count, because the
 	// ready query came back at the row limit.
@@ -318,6 +323,11 @@ type roleAccumulator struct {
 	// counted or not. When nothing counts (C_int = 0) these keep Q meaningful:
 	// the ci-verifier case must still report the work it is parked on.
 	present []scopedEntry
+	// interactive marks a role the daemon deliberately never auto-supervises
+	// (domain.RoleKindInteractive). Such a lane has no intended auto-capacity,
+	// so its agents count toward neither C_int nor C_act — the same treatment a
+	// desired_state=stopped park gets, and for the same reason.
+	interactive bool
 }
 
 // computeStarvation is the whole metric, as a pure function of its three
@@ -392,7 +402,7 @@ func accumulateRoles(
 		if a, ok := acc[role]; ok {
 			return a
 		}
-		a := &roleAccumulator{}
+		a := &roleAccumulator{interactive: roleIsInteractive(cfg.Roles[role], role)}
 		acc[role] = a
 		return a
 	}
@@ -438,6 +448,15 @@ func countAgent(a *roleAccumulator, entry cfgpkg.AgentEntry, live daemonAgentVie
 	scope := scopedEntry{Repos: resolveEntryRepos(entry, repos), Parent: entry.Parent}
 	a.present = append(a.present, scope)
 
+	if a.interactive {
+		// Deliberately hand-driven: no auto-capacity was ever intended, so this
+		// agent is neither C_int nor C_act, and its parked/failed state is not a
+		// dead supervised agent. Appending to a.present first is load-bearing:
+		// scopeAdmits falls back to present when nothing is counted, which keeps
+		// Q scoped to this lane's repos instead of widening to the whole board.
+		return
+	}
+
 	// The state file's desired_state is authoritative when set (it is what the
 	// running daemon believes); the config's value is the fallback for an entry
 	// the daemon has not stamped.
@@ -469,6 +488,12 @@ func filteredRoles(cfg *cfgpkg.DaemonConfig) ([]string, []configDefect) {
 	var defects []configDefect
 	filtered := make([]string, 0, len(cfg.Roles))
 	for role, rc := range cfg.Roles {
+		if roleIsInteractive(rc, role) {
+			// Never a claimant, so it can neither make work reachable nor be
+			// faulted for carrying no filter: "it will claim tickets meant for
+			// other roles" is false for a lane that is never auto-supervised.
+			continue
+		}
 		if len(rc.Labels) > 0 || len(rc.ExcludeLabels) > 0 {
 			filtered = append(filtered, role)
 			continue
@@ -481,6 +506,19 @@ func filteredRoles(cfg *cfgpkg.DaemonConfig) ([]string, []configDefect) {
 	}
 	sort.Strings(filtered)
 	return filtered, defects
+}
+
+// roleIsInteractive answers the same question the supervisor asks in
+// AgentEntry.ShouldSuperviseWithRoles: is this a hand-driven lane the daemon
+// never auto-supervises? The predicate is read from domain rather than respelt
+// here, so doctor cannot drift from the supervisor it is measuring.
+//
+// rc is the zero value for a role with no role config; ResolveRoleKind then
+// falls back to the legacy name convention (lead/orchestrator), which is
+// exactly what ShouldSupervise does for the same case.
+func roleIsInteractive(rc cfgpkg.RoleConfig, roleName string) bool {
+	role := &domain.Role{Kind: domain.RoleKind(rc.Kind)}
+	return domain.ResolveRoleKind(role, roleName) == domain.RoleKindInteractive
 }
 
 // roleMetrics computes Q and the starvation verdict for every role, in a stable
@@ -508,8 +546,13 @@ func roleMetrics(
 				q++
 			}
 		}
+		kind := string(domain.RoleKindWorker)
+		if a.interactive {
+			kind = string(domain.RoleKindInteractive)
+		}
 		m := roleMetric{
 			Role:       role,
+			Kind:       kind,
 			Q:          q,
 			QFloor:     qClamped,
 			CInt:       a.cInt,
@@ -713,7 +756,7 @@ func renderStarvationDetail(report starvationReport) string {
 		if m.QFloor {
 			q = ">=" + q
 		}
-		fmt.Fprintf(&b, "role=%s Q=%s C_int=%d C_act=%d starved=%t\n", m.Role, q, m.CInt, m.CAct, m.Starved)
+		fmt.Fprintf(&b, "role=%s kind=%s Q=%s C_int=%d C_act=%d starved=%t\n", m.Role, m.Kind, q, m.CInt, m.CAct, m.Starved)
 		for _, d := range m.DeadAgents {
 			fmt.Fprintf(&b, "  dead: %s\n", d)
 		}
