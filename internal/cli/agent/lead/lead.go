@@ -130,6 +130,19 @@ func runLead(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	// A suppressed persona moves the safety block off argv and onto a static
+	// file. Refuse - do not degrade - when that file does not carry the block
+	// this run would have rendered. This deliberately sits AFTER the
+	// --print-prompt early return above: --print-prompt is how the file is
+	// generated in the first place, so gating it would make the ambient file
+	// impossible to create.
+	if reason, suppressed := leadRunPersonaSuppression(context.Background()); suppressed {
+		if err := CheckAmbientSafetyBlock(backendName, workDir, dedicated, reason); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
 	// Best-effort: register this lead as an orchestrator session so workers
 	// the AI spawns via `loom agentdef add` are attributed back to it. Skips
 	// silently if there is no active workspace or fleet-db is unreachable.
@@ -257,11 +270,17 @@ func generateLeadTerminalPrompt(ctx context.Context, registration leadSessionReg
 	return prompt, false, err
 }
 
-func loadLeadRolePrompt(ctx context.Context, registration leadSessionRegistration) string {
-	roleName := strings.TrimSpace(os.Getenv("LOOM_AGENT_ROLE"))
-	if roleName == "" {
-		roleName = "lead"
+// leadRoleName is the role this lead runs as: LOOM_AGENT_ROLE, or "lead".
+// Shared with the safety-drift probe so both look up the same row.
+func leadRoleName() string {
+	if roleName := strings.TrimSpace(os.Getenv("LOOM_AGENT_ROLE")); roleName != "" {
+		return roleName
 	}
+	return "lead"
+}
+
+func loadLeadRolePrompt(ctx context.Context, registration leadSessionRegistration) string {
+	roleName := leadRoleName()
 
 	st := registration.Store()
 	ws := strings.TrimSpace(registration.Workspace)
