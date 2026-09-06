@@ -55,7 +55,7 @@ func TestGitStatusSummaryRejectsMalformedComparison(t *testing.T) {
 func TestGitStatusSummaryRealCleanDetachedAndMissingTarget(t *testing.T) {
 	dir := t.TempDir()
 	gitRun := func(dir string, args ...string) (string, error) {
-		command := exec.Command("git", args...)
+		command := exec.Command("git", args...) //nolint:norawexec // Fixed Git fixture commands run only in the test temporary repository.
 		command.Dir = dir
 		output, err := command.CombinedOutput()
 		return string(output), err
