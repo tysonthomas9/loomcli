@@ -1,5 +1,6 @@
 import { mkdirSync, rmSync, statSync } from "node:fs";
 import { test, expect, Page } from "@playwright/test";
+import { expectReactFlowEdgeCount } from "./helpers/reactFlow";
 
 /**
  * E2E tests for DependencyEdge component styling.
@@ -356,18 +357,18 @@ async function navigateToGraphView(page: Page) {
 }
 
 /**
- * Get all edges in the graph.
- */
-function getAllEdges(page: Page) {
-  return page.locator(".react-flow__edge-path");
-}
-
-/**
  * Wait for edges to be rendered with paths.
  */
-async function waitForEdgesWithPaths(page: Page, count: number) {
-  const edges = getAllEdges(page);
-  await expect(edges).toHaveCount(count, { timeout: 15000 });
+async function waitForEdgesWithPaths(
+  page: Page,
+  count: number,
+  nodeCount: number,
+) {
+  await expectReactFlowEdgeCount(page, {
+    edgeSelector: ".react-flow__edge-path",
+    expectedEdgeCount: count,
+    expectedNodeCount: nodeCount,
+  });
 }
 
 /**
@@ -401,7 +402,7 @@ test.describe("Dependency Edge Styling", () => {
     test("'blocks' type edge has typeBlocks CSS class", async ({ page }) => {
       await setupMocks(page, mockIssuesWithBlocks);
       await navigateToGraphView(page);
-      await waitForEdgesWithPaths(page, 1);
+      await waitForEdgesWithPaths(page, 1, 2);
 
       const hasTypeClass = await hasEdgeTypeClass(page, "typeBlocks");
       expect(hasTypeClass).toBe(true);
@@ -410,7 +411,7 @@ test.describe("Dependency Edge Styling", () => {
     test("'blocks' type edge is solid by default", async ({ page }) => {
       await setupMocks(page, mockIssuesWithBlocks);
       await navigateToGraphView(page);
-      await waitForEdgesWithPaths(page, 1);
+      await waitForEdgesWithPaths(page, 1, 2);
 
       const props = await getEdgeStrokeProps(page);
       expect(
@@ -423,7 +424,7 @@ test.describe("Dependency Edge Styling", () => {
     }) => {
       await setupMocks(page, mockIssuesWithBlocks);
       await navigateToGraphView(page);
-      await waitForEdgesWithPaths(page, 1);
+      await waitForEdgesWithPaths(page, 1, 2);
 
       const edgePath = page.locator(".react-flow__edge-path").first();
       // strokeWidth is set via inline style attribute
@@ -442,7 +443,7 @@ test.describe("Dependency Edge Styling", () => {
     }) => {
       await setupMocks(page, mockIssuesWithParentChild);
       await navigateToGraphView(page);
-      await waitForEdgesWithPaths(page, 1);
+      await waitForEdgesWithPaths(page, 1, 2);
 
       const hasTypeClass = await hasEdgeTypeClass(page, "typeParentChild");
       expect(hasTypeClass).toBe(true);
@@ -451,7 +452,7 @@ test.describe("Dependency Edge Styling", () => {
     test("'parent-child' type edge is solid", async ({ page }) => {
       await setupMocks(page, mockIssuesWithParentChild);
       await navigateToGraphView(page);
-      await waitForEdgesWithPaths(page, 1);
+      await waitForEdgesWithPaths(page, 1, 2);
 
       const props = await getEdgeStrokeProps(page);
       expect(
@@ -464,7 +465,7 @@ test.describe("Dependency Edge Styling", () => {
     test("'related' type edge has typeRelated CSS class", async ({ page }) => {
       await setupMocks(page, mockIssuesWithRelated);
       await navigateToGraphView(page);
-      await waitForEdgesWithPaths(page, 1);
+      await waitForEdgesWithPaths(page, 1, 2);
 
       const hasTypeClass = await hasEdgeTypeClass(page, "typeRelated");
       expect(hasTypeClass).toBe(true);
@@ -473,7 +474,7 @@ test.describe("Dependency Edge Styling", () => {
     test("'related' type edge has dashed stroke", async ({ page }) => {
       await setupMocks(page, mockIssuesWithRelated);
       await navigateToGraphView(page);
-      await waitForEdgesWithPaths(page, 1);
+      await waitForEdgesWithPaths(page, 1, 2);
 
       const props = await getEdgeStrokeProps(page);
       expect(props.strokeDasharray).toMatch(/^\d+(px)?[\s,]+\d+(px)?$/);
@@ -485,7 +486,7 @@ test.describe("Dependency Edge Styling", () => {
     }) => {
       await setupMocks(page, mockIssuesWithRelated);
       await navigateToGraphView(page);
-      await waitForEdgesWithPaths(page, 1);
+      await waitForEdgesWithPaths(page, 1, 2);
 
       const edgePath = page.locator(".react-flow__edge-path").first();
       // strokeWidth is set via inline style attribute
@@ -503,7 +504,7 @@ test.describe("Dependency Edge Styling", () => {
     test("edge label displays dependency type text", async ({ page }) => {
       await setupMocks(page, mockIssuesWithBlocks);
       await navigateToGraphView(page);
-      await waitForEdgesWithPaths(page, 1);
+      await waitForEdgesWithPaths(page, 1, 2);
 
       // Look for edge label containing the dependency type
       const edgeLabel = page.locator(".react-flow__edgelabel-renderer div");
@@ -513,7 +514,7 @@ test.describe("Dependency Edge Styling", () => {
     test("related edge label displays 'related'", async ({ page }) => {
       await setupMocks(page, mockIssuesWithRelated);
       await navigateToGraphView(page);
-      await waitForEdgesWithPaths(page, 1);
+      await waitForEdgesWithPaths(page, 1, 2);
 
       const edgeLabel = page.locator(".react-flow__edgelabel-renderer div");
       await expect(edgeLabel).toContainText("related");
@@ -524,7 +525,7 @@ test.describe("Dependency Edge Styling", () => {
     }) => {
       await setupMocks(page, mockIssuesWithParentChild);
       await navigateToGraphView(page);
-      await waitForEdgesWithPaths(page, 1);
+      await waitForEdgesWithPaths(page, 1, 2);
 
       const edgeLabel = page.locator(".react-flow__edgelabel-renderer div");
       await expect(edgeLabel).toContainText("parent-child");
@@ -533,7 +534,7 @@ test.describe("Dependency Edge Styling", () => {
     test("edge label has monospace font styling", async ({ page }) => {
       await setupMocks(page, mockIssuesWithBlocks);
       await navigateToGraphView(page);
-      await waitForEdgesWithPaths(page, 1);
+      await waitForEdgesWithPaths(page, 1, 2);
 
       const edgeLabel = page.locator(".react-flow__edgelabel-renderer div");
       await expect(edgeLabel).toBeVisible();
@@ -553,7 +554,7 @@ test.describe("Dependency Edge Styling", () => {
     }) => {
       await setupMocks(page, mockIssuesMultipleTypes);
       await navigateToGraphView(page);
-      await waitForEdgesWithPaths(page, 2);
+      await waitForEdgesWithPaths(page, 2, 3);
 
       // Get all edge path classes
       const edgePaths = page.locator(".react-flow__edge-path");
@@ -572,7 +573,7 @@ test.describe("Dependency Edge Styling", () => {
     }) => {
       await setupMocks(page, mockIssuesMultipleTypes);
       await navigateToGraphView(page);
-      await waitForEdgesWithPaths(page, 2);
+      await waitForEdgesWithPaths(page, 2, 3);
 
       const edgePaths = page.locator(".react-flow__edge-path");
       const strokeDasharrays = await edgePaths.evaluateAll((paths) =>
@@ -595,7 +596,7 @@ test.describe("Dependency Edge Styling", () => {
     }) => {
       await setupMocks(page, mockIssuesMultipleTypes);
       await navigateToGraphView(page);
-      await waitForEdgesWithPaths(page, 2);
+      await waitForEdgesWithPaths(page, 2, 3);
 
       const edgePaths = page.locator(".react-flow__edge-path");
       const strokeWidths = await edgePaths.evaluateAll((paths) =>
@@ -643,15 +644,14 @@ test.describe("Dependency Edge Styling", () => {
       await expect(nodes).toHaveCount(2);
 
       // Should have no edges
-      const edges = getAllEdges(page);
-      await expect(edges).toHaveCount(0);
+      await waitForEdgesWithPaths(page, 0, 2);
     });
 
     test("single dependency renders one edge", async ({ page }) => {
       await setupMocks(page, mockIssuesWithBlocks);
       await navigateToGraphView(page);
 
-      await waitForEdgesWithPaths(page, 1);
+      await waitForEdgesWithPaths(page, 1, 2);
     });
 
     test("multiple dependencies from same source render separate edges", async ({
@@ -705,7 +705,7 @@ test.describe("Dependency Edge Styling", () => {
       await navigateToGraphView(page);
 
       // Should have 2 separate edges
-      await waitForEdgesWithPaths(page, 2);
+      await waitForEdgesWithPaths(page, 2, 3);
     });
   });
 
@@ -718,7 +718,7 @@ test.describe("Dependency Edge Styling", () => {
 
       await setupMocks(page, mockIssuesWithBlocks);
       await navigateToGraphView(page);
-      await waitForEdgesWithPaths(page, 1);
+      await waitForEdgesWithPaths(page, 1, 2);
 
       const edgePath = page.locator(".react-flow__edge-path").first();
       // Animation should be 'none' when reduced motion is enabled
