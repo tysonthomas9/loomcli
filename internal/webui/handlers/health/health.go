@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // IssueBackendFn returns the active backend.IssueBackend or nil. Used by
@@ -251,6 +252,19 @@ func serveStatsViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 	defer cancel()
 	data, err := be.Stats(ctx)
 	if err != nil {
+		// A throttle is not an outage. Every other backend error keeps the
+		// historical blanket 500 on this endpoint — widening that to
+		// handler.StatusForKind is a separate behaviour change.
+		if svcErr := service.FromBackendError(err); svcErr.Kind == service.KindRateLimited {
+			if svcErr.RetryAfter != "" {
+				w.Header().Set("Retry-After", svcErr.RetryAfter)
+			}
+			handler.WriteJSON(w, http.StatusTooManyRequests, StatsResponse{
+				Success: false,
+				Error:   svcErr.Message,
+			})
+			return
+		}
 		handler.WriteJSON(w, http.StatusInternalServerError, StatsResponse{
 			Success: false,
 			Error:   err.Error(),

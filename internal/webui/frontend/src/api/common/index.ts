@@ -6,5 +6,6 @@ export * from "./desktop";
 export * from "./errorReporter";
 export * from "./health";
 export * from "./localSettings";
+export * from "./retryAfter";
 export * from "./sse";
 export * from "./terminalConfig";
