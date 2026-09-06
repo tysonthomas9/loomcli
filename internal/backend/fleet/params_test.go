@@ -13,7 +13,7 @@ import (
 // These exercise the loom→fleet-db field mapping. fleet-db's
 // UpdateIssueRequest schema is intentionally narrower than loom's
 // UpdateParams: status / claim / labels / agent_state / assignee /
-// acceptance_criteria / estimated_minutes have dedicated endpoints
+// estimated_minutes have dedicated endpoints
 // (close, reopen, claim, label.add, etc.) and aren't accepted on PATCH.
 // fleet-db enforces this with disallowUnknownFields, so loom must drop
 // those keys here rather than silently shipping them.
@@ -52,7 +52,11 @@ func TestUpdateParamsToPatchRequest_RenamesIssueTypeToType(t *testing.T) {
 // own api/openapi.yaml and pkg/client both still omit external_ref, which
 // the server does accept, so neither can be vendored as the source here.
 //
-// Nothing links the two repos at build time, so this list is hand-maintained.
+// Nothing links the two repos at build time, so this list is hand-maintained,
+// and it mirrors the fleet-db this build actually talks to — not necessarily
+// fleet-db's own trunk. acceptance_criteria below is the live example: it is
+// accepted by the deployed union build (fleet-db PR #244) and rejected by a
+// fleet-db built from main until that PR lands.
 // Adding a key here that fleet-db does not have is the design_format bug
 // again: disallowUnknownFields rejects the *whole* body, so the PATCH 400s
 // and every field traveling with the unknown one is lost with it — the
@@ -61,17 +65,18 @@ func TestUpdateParamsToPatchRequest_RenamesIssueTypeToType(t *testing.T) {
 // Loom deliberately forwards less than fleet-db accepts (status and claim go
 // through dedicated endpoints), so the check below is subset, not equality.
 var fleetUpdateIssueFields = map[string]bool{
-	"title":         true,
-	"description":   true,
-	"status":        true,
-	"priority":      true,
-	"type":          true,
-	"design":        true,
-	"design_format": true,
-	"notes":         true,
-	"owner":         true,
-	"due_at":        true,
-	"external_ref":  true,
+	"title":               true,
+	"description":         true,
+	"status":              true,
+	"priority":            true,
+	"type":                true,
+	"design":              true,
+	"design_format":       true,
+	"acceptance_criteria": true,
+	"notes":               true,
+	"owner":               true,
+	"due_at":              true,
+	"external_ref":        true,
 }
 
 // TestUpdateParamsToPatchRequest_SendsOnlyServerFields is the guard the
@@ -117,6 +122,9 @@ func TestUpdateParamsToPatchRequest_ForwardsEachSupportedField(t *testing.T) {
 		{"external_ref", backend.UpdateParams{
 			ExternalRef: strPtr("https://github.com/owner/repo/pull/42"),
 		}, "https://github.com/owner/repo/pull/42"},
+		{"acceptance_criteria", backend.UpdateParams{
+			AcceptanceCriteria: strPtr("AC-1"),
+		}, "AC-1"},
 	}
 
 	unset := updateParamsToPatchRequest(backend.UpdateParams{})
@@ -249,8 +257,7 @@ func TestCreateParamsToBody_DropsLoomOnlyFields(t *testing.T) {
 		Dependencies:       []string{"loom-2"},
 	})
 	for _, k := range []string{
-		"id", "acceptance_criteria", "created_by",
-		"estimated_minutes", "dependencies",
+		"id", "created_by", "estimated_minutes", "dependencies",
 	} {
 		if _, ok := req[k]; ok {
 			t.Errorf("field %q must be dropped — not on fleet-db CreateIssueRequest", k)
@@ -270,9 +277,23 @@ func TestCreateParamsToBody_KeepsExternalRef(t *testing.T) {
 	}
 }
 
+// TestCreateParamsToBody_KeepsAcceptanceCriteria is the create half of
+// PUPPET-522: the field was carried through every loom layer and then dropped
+// here, so `loom data create --acceptance-criteria` persisted null.
+func TestCreateParamsToBody_KeepsAcceptanceCriteria(t *testing.T) {
+	req := createParamsToBody(backend.CreateParams{
+		Title:              "T",
+		IssueType:          "task",
+		AcceptanceCriteria: "AC",
+	})
+	if got, ok := req["acceptance_criteria"]; !ok || got != "AC" {
+		t.Errorf("acceptance_criteria = %v (present=%t), want %q", got, ok, "AC")
+	}
+}
+
 func TestCreateParamsToBody_OmitsZeroValues(t *testing.T) {
 	req := createParamsToBody(backend.CreateParams{Title: "only"})
-	for _, k := range []string{"description", "status", "type", "assignee", "owner", "labels", "parent_id", "repo", "design", "notes", "defer_until", "due_at", "priority"} {
+	for _, k := range []string{"description", "status", "type", "assignee", "owner", "labels", "parent_id", "repo", "design", "notes", "acceptance_criteria", "defer_until", "due_at", "priority"} {
 		if _, ok := req[k]; ok {
 			t.Errorf("zero-value field %q should not appear in body", k)
 		}

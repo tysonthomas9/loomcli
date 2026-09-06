@@ -317,9 +317,13 @@ func blockedServerOpts(opts backend.BlockedOpts) backend.BlockedOpts {
 // fleet-db uses strict JSON validation (disallowUnknownFields); fields not
 // present on its UpdateIssueRequest must be omitted entirely, not just
 // zeroed. Loom carries a richer field set than fleet-db accepts on PATCH
-// (status / claim / labels go through dedicated endpoints), so we drop
-// loom-only fields here. If the caller relies on a dropped field landing,
-// the corresponding dedicated endpoint should be called instead.
+// (status / claim / labels / agent_state go through dedicated endpoints), so
+// we drop loom-only fields here. If the caller relies on a dropped field
+// landing, the corresponding dedicated endpoint should be called instead.
+//
+// acceptance_criteria is NOT one of those: fleet-db has no acceptance-criteria
+// sub-route, PATCH is its only writer, and UpdateIssueRequest accepts it — so
+// it is forwarded here (PUPPET-522).
 func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interface{} {
 	req := make(map[string]interface{})
 	setStrField(req, "title", params.Title)
@@ -327,6 +331,7 @@ func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interfac
 	setIntField(req, "priority", params.Priority)
 	setStrField(req, "design", params.Design)
 	setStrField(req, "design_format", params.DesignFormat)
+	setStrField(req, "acceptance_criteria", params.AcceptanceCriteria)
 	setStrField(req, "notes", params.Notes)
 	setStrField(req, "owner", params.Owner)
 	// Field rename: loom's IssueBackend uses "issue_type"; fleet-db's
