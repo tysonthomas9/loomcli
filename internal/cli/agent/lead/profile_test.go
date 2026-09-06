@@ -572,3 +572,155 @@ func TestLeadProfileRepair_TokenFailureNamesTheTokenScript(t *testing.T) {
 		t.Errorf("a refused profile must export nothing, got %q", got)
 	}
 }
+
+// caseInsensitiveWorkspace materializes a runtime dir whose parent segment can
+// be spelled in two cases, and returns both spellings. On a case-SENSITIVE
+// volume the second spelling names nothing, so the test skips rather than
+// asserting a property the filesystem does not have.
+func caseInsensitiveWorkspace(t *testing.T) (runtimeDir, flippedRuntimeDir string) {
+	t.Helper()
+	base := t.TempDir()
+	runtimeDir = filepath.Join(base, "Workspace")
+	if err := os.MkdirAll(runtimeDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	flippedRuntimeDir = filepath.Join(base, "workspace")
+	if _, err := os.Stat(flippedRuntimeDir); err != nil {
+		t.Skip("case-sensitive volume: two spellings of one directory are not possible here")
+	}
+	return runtimeDir, flippedRuntimeDir
+}
+
+// The reported bug: a case-differing spelling of a provisioned root read as
+// "an operator's own config root", which turned off verification and token
+// injection at once, silently.
+func TestUnderAgentProfiles_CaseDifferingSpellingIsInside(t *testing.T) {
+	runtimeDir, flipped := caseInsensitiveWorkspace(t)
+	dir := writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	_ = dir
+	configDir := filepath.Join(flipped, ".loom", agentprofile.DirName, "lead", "claude")
+
+	if !underAgentProfiles(runtimeDir, configDir) {
+		t.Fatalf("%q is the same directory as the profile root's child; must be inside", configDir)
+	}
+	if !UnderAgentProfiles(runtimeDir, configDir) {
+		t.Fatal("the exported predicate must answer the same as the internal one")
+	}
+}
+
+// The portable half of the same property, and the one CI can actually run:
+// t.TempDir() already hands out paths under a symlink on macOS (/var ->
+// /private/var), so a spelling through a link is not exotic.
+func TestUnderAgentProfiles_SymlinkedAncestorIsInside(t *testing.T) {
+	runtimeDir := t.TempDir()
+	writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(runtimeDir, link); err != nil {
+		t.Skipf("cannot create symlinks here: %v", err)
+	}
+	configDir := filepath.Join(link, ".loom", agentprofile.DirName, "lead", "claude")
+
+	if !underAgentProfiles(runtimeDir, configDir) {
+		t.Fatalf("%q reaches the profile root through a symlink; must be inside", configDir)
+	}
+}
+
+// Nothing provisioned a tree that does not exist, so no config root spelled
+// under it can be ours. This is a deliberate change from the prefix test,
+// which answered "inside" for a path under a root that was never created.
+func TestUnderAgentProfiles_MissingProfilesRootIsOutside(t *testing.T) {
+	runtimeDir := t.TempDir()
+	configDir := filepath.Join(runtimeDir, ".loom", agentprofile.DirName, "lead", "claude")
+
+	if underAgentProfiles(runtimeDir, configDir) {
+		t.Fatal("with no agent-profiles tree on disk, nothing is inside it")
+	}
+}
+
+// Guards against a regression to prefix matching: a sibling whose name merely
+// starts with the root's name is a different directory.
+func TestUnderAgentProfiles_SiblingDirectoryIsOutside(t *testing.T) {
+	runtimeDir := t.TempDir()
+	writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	sibling := filepath.Join(runtimeDir, ".loom", agentprofile.DirName+"-other", "lead", "claude")
+	if err := os.MkdirAll(sibling, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if underAgentProfiles(runtimeDir, sibling) {
+		t.Fatalf("%q is a sibling of the profile root, not a child", sibling)
+	}
+}
+
+// The ticket's repro as a unit test: a drifted profile reached by a
+// case-differing spelling must REFUSE, where before it booted unverified.
+func TestApplyLeadProfile_CaseDifferingInheritedRootRefusesDrift(t *testing.T) {
+	clearProfileEnv(t)
+	clearLeadToken(t)
+	stubClaudeOnPath(t)
+	runtimeDir, flipped := caseInsensitiveWorkspace(t)
+	dir := writeLeadProfile(t, runtimeDir, "lead", "0.0.1 (Claude Code)", map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	if err := os.WriteFile(filepath.Join(dir, "oauth-token"), []byte("sk-ant-oat01-lead"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(flipped, ".loom", agentprofile.DirName, "lead", "claude"))
+
+	if _, err := applyLeadProfile(runtimeDir, "lead", "claude"); !errors.Is(err, supervisor.ErrProfileVersionDrift) {
+		t.Fatalf("a drifted profile must refuse whatever its spelling, got %v", err)
+	}
+	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "" {
+		t.Errorf("a refused profile must export nothing, got %q", got)
+	}
+}
+
+// The other half of the same bug: a VERIFYING profile reached by a
+// case-differing spelling must still yield its own credential, overriding the
+// operator token the shell carried in.
+func TestApplyLeadProfile_CaseDifferingInheritedRootInjectsItsToken(t *testing.T) {
+	clearProfileEnv(t)
+	stubClaudeOnPath(t)
+	runtimeDir, flipped := caseInsensitiveWorkspace(t)
+	dir := writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	if err := os.WriteFile(filepath.Join(dir, "oauth-token"), []byte("sk-ant-oat01-lead"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(flipped, ".loom", agentprofile.DirName, "lead", "claude"))
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-operator")
+
+	if _, err := applyLeadProfile(runtimeDir, "lead", "claude"); err != nil {
+		t.Fatalf("a verifying profile must proceed, got %v", err)
+	}
+	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "sk-ant-oat01-lead" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want the profile's own token", got)
+	}
+}
+
+// A relative root names a different directory from every cwd, so it is refused
+// before any harness probe — note there is no stub on PATH here.
+func TestApplyLeadProfile_RelativeInheritedRootRefuses(t *testing.T) {
+	clearProfileEnv(t)
+	clearLeadToken(t)
+	runtimeDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(".loom", agentprofile.DirName, "lead", "claude"))
+
+	failed, err := applyLeadProfile(runtimeDir, "lead", "claude")
+	if !errors.Is(err, errRelativeProfileRoot) {
+		t.Fatalf("a relative config root must refuse, got %v", err)
+	}
+	if repair := leadProfileRepair(err, failed); !strings.Contains(repair, "absolute path") {
+		t.Errorf("repair = %q, want it to name an absolute path", repair)
+	}
+	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "" {
+		t.Errorf("a refused profile must export nothing, got %q", got)
+	}
+}
