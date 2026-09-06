@@ -53,7 +53,7 @@ function offer(): RecoveryHandle {
     workspace: mocks.workspace,
     source_repos: repos ?? [],
     expires_at: new Date(Date.now() + 60_000).toISOString(),
-    manifest: "fleet.issue-workspace.v5",
+    manifest: "fleet.issue-workspace.v6",
   };
 }
 function prepared(input: RecoveryHandle) {

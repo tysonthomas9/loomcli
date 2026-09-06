@@ -66,10 +66,26 @@ export interface NativeRecoveryEvent {
   readonly after: string;
   readonly metadata: Readonly<Record<string, string>>;
 }
+export interface NativeRecoveryTimeline {
+  readonly id: string;
+  readonly event_id: string;
+  readonly timestamp: string;
+  readonly actor: string;
+  readonly action: string;
+  readonly category: string;
+  readonly summary: string;
+  readonly changes: readonly {
+    readonly field: string;
+    readonly before: string;
+    readonly after: string;
+  }[];
+  readonly metadata: Readonly<Record<string, string>>;
+}
 export interface NativeRecoveryHistory {
   readonly issue_id: string;
   readonly present: boolean;
   readonly events: readonly NativeRecoveryEvent[];
+  readonly timeline: readonly NativeRecoveryTimeline[];
   readonly has_older: boolean;
 }
 /** Prepared native data only. Coverage names identify this fixed manifest, not
@@ -77,7 +93,7 @@ export interface NativeRecoveryHistory {
 export interface PreparedIssueRecovery {
   readonly offer: RecoveryHandle;
   readonly document: string;
-  readonly manifest: "fleet.issue-workspace.v5";
+  readonly manifest: "fleet.issue-workspace.v6";
   readonly workspace: string;
   readonly through: string;
   readonly offerSourceIdentity: string;
@@ -463,7 +479,7 @@ function history(
   }
   selectedHistoryIdentity(expectedIssueId);
   const row = object(value);
-  exact(row, ["issue_id", "present", "events", "has_older"]);
+  exact(row, ["issue_id", "present", "events", "has_older", "timeline"]);
   if (
     selectedHistoryIdentity(row.issue_id) !== expectedIssueId ||
     typeof row.present !== "boolean" ||
@@ -510,7 +526,71 @@ function history(
     text(event.after, true);
     for (const item of Object.values(object(event.metadata))) text(item, true);
   }
+  validateTimeline(array(row.timeline), events);
   return row as unknown as NativeRecoveryHistory;
+}
+function utf8Compare(left: string, right: string): number {
+  const encoder = new TextEncoder(),
+    a = encoder.encode(left),
+    b = encoder.encode(right);
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    if (a[i] !== b[i]) return a[i]! - b[i]!;
+  }
+  return a.length - b.length;
+}
+function validateTimeline(rows: unknown[], events: unknown[]) {
+  if (rows.length !== events.length) fail();
+  const ids = new Set<string>();
+  const categories = new Set([
+    "lifecycle",
+    "assignment",
+    "field_change",
+    "dependency",
+    "label",
+    "comment",
+    "time_management",
+    "other",
+  ]);
+  rows.forEach((value, index) => {
+    const row = object(value),
+      event = object(events[index]);
+    exact(row, [
+      "id",
+      "event_id",
+      "timestamp",
+      "actor",
+      "action",
+      "category",
+      "summary",
+      "changes",
+      "metadata",
+    ]);
+    if (!isRecoveryEnvelope(row.id, "c1.") || ids.has(row.id)) fail();
+    ids.add(row.id);
+    for (const [field, native] of [
+      ["event_id", "id"],
+      ["timestamp", "timestamp"],
+      ["actor", "actor"],
+      ["action", "action"],
+    ] as const) {
+      if (text(row[field]) !== event[native]) fail();
+    }
+    if (!categories.has(text(row.category))) fail();
+    text(row.summary, true);
+    const metadata = object(row.metadata);
+    for (const value of Object.values(metadata)) text(value, true);
+    if (!equal(metadata, event.metadata)) fail();
+    let previous: string | undefined;
+    for (const value of array(row.changes)) {
+      const change = object(value);
+      exact(change, ["field", "before", "after"]);
+      const field = text(change.field, true);
+      text(change.before, true);
+      text(change.after, true);
+      if (previous !== undefined && utf8Compare(previous, field) >= 0) fail();
+      previous = field;
+    }
+  });
 }
 function freeze<T>(value: T): T {
   if (value !== null && typeof value === "object") {
@@ -582,7 +662,7 @@ export function prepareIssueRecovery(
   return freeze({
     document,
     offer: validatedOffer,
-    manifest: "fleet.issue-workspace.v5",
+    manifest: "fleet.issue-workspace.v6",
     workspace: validatedOffer.workspace,
     through,
     offerSourceIdentity: validatedOffer.source_identity,

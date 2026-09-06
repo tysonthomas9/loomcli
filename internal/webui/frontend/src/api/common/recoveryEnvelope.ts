@@ -1,7 +1,7 @@
 /** Check only opaque wire framing. Fleet owns the payload's identity/position schema. */
 export function isRecoveryEnvelope(
   value: unknown,
-  prefix: "s1." | "c2.",
+  prefix: "s1." | "c2." | "c1.",
 ): value is string {
   if (
     typeof value !== "string" ||

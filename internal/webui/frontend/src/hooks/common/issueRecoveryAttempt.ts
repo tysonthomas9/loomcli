@@ -1,3 +1,7 @@
+import {
+  prepareIssueRecoveryTimeline,
+  type PreparedIssueRecoveryTimeline,
+} from "@/api/common/issueRecoveryTimeline";
 import { readIssueRecovery } from "@/api/common/readIssueRecovery";
 import type { PreparedIssueRecovery } from "@/api/common/issueRecovery";
 import {
@@ -30,6 +34,7 @@ type Attempt = {
   detach: () => void;
   timer?: ReturnType<typeof setTimeout>;
   prepared?: PreparedIssueRecovery;
+  timeline?: PreparedIssueRecoveryTimeline | null;
 };
 /** Preparation only: no snapshot getter, publication or checkpoint acceptance. */
 export class IssueRecoveryAttemptController {
@@ -124,6 +129,14 @@ export class IssueRecoveryAttemptController {
             this.fail(attempt);
             return;
           }
+          try {
+            const timeline = prepareIssueRecoveryTimeline(prepared);
+            if (!this.current(attempt)) return;
+            attempt.timeline = timeline;
+          } catch {
+            if (this.current(attempt)) this.fail(attempt);
+            return;
+          }
           attempt.prepared = prepared;
           this.publish(attempt, "prepared");
         },
@@ -146,6 +159,7 @@ export class IssueRecoveryAttemptController {
     this.status = "idle";
     if (!previous) return;
     delete previous.prepared;
+    delete previous.timeline;
     clearTimeout(previous.timer);
     previous.detach();
     previous.controller.abort();
@@ -184,6 +198,7 @@ export class IssueRecoveryAttemptController {
   private fail(attempt: Attempt): void {
     if (this.active !== attempt) return;
     delete attempt.prepared;
+    delete attempt.timeline;
     clearTimeout(attempt.timer);
     attempt.controller.abort();
     if (this.active === attempt) this.publish(attempt, "failed");

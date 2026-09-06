@@ -1,0 +1,806 @@
+[
+  {
+    "id": "c1.MS0w",
+    "issue_id": "WS-1",
+    "event_type": "issue.create",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "lifecycle",
+    "summary": "Created issue",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.Mi0w",
+    "issue_id": "WS-1",
+    "event_type": "issue.update",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "field_change",
+    "summary": "Updated priority, status, and title",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    },
+    "changes": [
+      {
+        "field": "priority",
+        "before": "2",
+        "after": "1"
+      },
+      {
+        "field": "status",
+        "before": "open",
+        "after": "closed"
+      },
+      {
+        "field": "title",
+        "before": "old",
+        "after": "new"
+      }
+    ]
+  },
+  {
+    "id": "c1.My0w",
+    "issue_id": "WS-1",
+    "event_type": "issue.close",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "lifecycle",
+    "summary": "Closed issue: done",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.NC0w",
+    "issue_id": "WS-1",
+    "event_type": "issue.reopen",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "lifecycle",
+    "summary": "Reopened issue",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.NS0w",
+    "issue_id": "WS-1",
+    "event_type": "issue.delete",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "lifecycle",
+    "summary": "Deleted issue",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.Ni0w",
+    "issue_id": "WS-1",
+    "event_type": "issue.claim",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "assignment",
+    "summary": "Claimed by alice",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.Ny0w",
+    "issue_id": "WS-1",
+    "event_type": "issue.release",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "assignment",
+    "summary": "Released claim",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.OC0w",
+    "issue_id": "WS-1",
+    "event_type": "issue.assign",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "assignment",
+    "summary": "Assigned issue",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.OS0w",
+    "issue_id": "WS-1",
+    "event_type": "issue.defer",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "time_management",
+    "summary": "Deferred issue",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MTAtMA",
+    "issue_id": "WS-1",
+    "event_type": "issue.undefer",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "time_management",
+    "summary": "Removed deferral",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MTEtMA",
+    "issue_id": "WS-1",
+    "event_type": "dep.add",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "dependency",
+    "summary": "Added dependency: WS-2",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MTItMA",
+    "issue_id": "WS-1",
+    "event_type": "dep.remove",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "dependency",
+    "summary": "Removed dependency: WS-2",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MTMtMA",
+    "issue_id": "WS-1",
+    "event_type": "label.add",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "label",
+    "summary": "Added label urgent",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MTQtMA",
+    "issue_id": "WS-1",
+    "event_type": "label.remove",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "label",
+    "summary": "Removed label urgent",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MTUtMA",
+    "issue_id": "WS-1",
+    "event_type": "metadata.set",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: metadata.set",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MTYtMA",
+    "issue_id": "WS-1",
+    "event_type": "metadata.remove",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: metadata.remove",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MTctMA",
+    "issue_id": "WS-1",
+    "event_type": "comment.add",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "comment",
+    "summary": "Added comment",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MTgtMA",
+    "issue_id": "WS-1",
+    "event_type": "workspace.create",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: workspace.create",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MTktMA",
+    "issue_id": "WS-1",
+    "event_type": "workspace.update",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: workspace.update",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MjAtMA",
+    "issue_id": "WS-1",
+    "event_type": "workspace.delete",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: workspace.delete",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MjEtMA",
+    "issue_id": "WS-1",
+    "event_type": "repo.create",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: repo.create",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MjItMA",
+    "issue_id": "WS-1",
+    "event_type": "repo.update",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: repo.update",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MjMtMA",
+    "issue_id": "WS-1",
+    "event_type": "repo.delete",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: repo.delete",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MjQtMA",
+    "issue_id": "WS-1",
+    "event_type": "agent.create",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: agent.create",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MjUtMA",
+    "issue_id": "WS-1",
+    "event_type": "agent.update",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: agent.update",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MjYtMA",
+    "issue_id": "WS-1",
+    "event_type": "agent.delete",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: agent.delete",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MjctMA",
+    "issue_id": "WS-1",
+    "event_type": "driver_run.create",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: driver_run.create",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MjgtMA",
+    "issue_id": "WS-1",
+    "event_type": "driver_run.claim",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: driver_run.claim",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MjktMA",
+    "issue_id": "WS-1",
+    "event_type": "driver_run.heartbeat",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: driver_run.heartbeat",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MzAtMA",
+    "issue_id": "WS-1",
+    "event_type": "driver_run.finish",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: driver_run.finish",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MzEtMA",
+    "issue_id": "WS-1",
+    "event_type": "driver_run.recover",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: driver_run.recover",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MzItMA",
+    "issue_id": "WS-1",
+    "event_type": "driver_run.suspend",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: driver_run.suspend",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MzMtMA",
+    "issue_id": "WS-1",
+    "event_type": "driver_run.resume",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: driver_run.resume",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MzQtMA",
+    "issue_id": "WS-1",
+    "event_type": "role.create",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: role.create",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MzUtMA",
+    "issue_id": "WS-1",
+    "event_type": "role.update",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: role.update",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MzYtMA",
+    "issue_id": "WS-1",
+    "event_type": "role.delete",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: role.delete",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MzctMA",
+    "issue_id": "WS-1",
+    "event_type": "skill.create",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: skill.create",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MzgtMA",
+    "issue_id": "WS-1",
+    "event_type": "skill.update",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: skill.update",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.MzktMA",
+    "issue_id": "WS-1",
+    "event_type": "skill.delete",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: skill.delete",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.NDAtMA",
+    "issue_id": "WS-1",
+    "event_type": "skill_pack.create",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: skill_pack.create",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.NDEtMA",
+    "issue_id": "WS-1",
+    "event_type": "skill_pack.update",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: skill_pack.update",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.NDItMA",
+    "issue_id": "WS-1",
+    "event_type": "skill_pack.delete",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: skill_pack.delete",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.NDMtMA",
+    "issue_id": "WS-1",
+    "event_type": "daemon.update",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "other",
+    "summary": "Unknown action: daemon.update",
+    "metadata": {
+      "body": "comment body",
+      "comment_id": "comment-1",
+      "depends_on_id": "WS-2",
+      "label": "urgent",
+      "reason": "done",
+      "type": "blocks"
+    }
+  },
+  {
+    "id": "c1.NDQtMA",
+    "issue_id": "WS-1",
+    "event_type": "issue.update",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "field_change",
+    "summary": "Updated added, clear, items, and nested",
+    "changes": [
+      {
+        "field": "added"
+      },
+      {
+        "field": "clear",
+        "before": "old"
+      },
+      {
+        "field": "items",
+        "before": "[1,2]",
+        "after": "[2,1]"
+      },
+      {
+        "field": "nested",
+        "before": "{\"a\":1}",
+        "after": "{\"a\":2}"
+      }
+    ]
+  },
+  {
+    "id": "c1.NDUtMA",
+    "issue_id": "WS-1",
+    "event_type": "issue.update",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "field_change",
+    "summary": "Updated (raw) and title",
+    "changes": [
+      {
+        "field": "(raw)",
+        "before": "not JSON"
+      },
+      {
+        "field": "title",
+        "after": "valid after"
+      }
+    ]
+  },
+  {
+    "id": "c1.NDYtMA",
+    "issue_id": "WS-1",
+    "event_type": "issue.update",
+    "actor": "alice",
+    "created_at": "2026-09-05T12:00:00.123456789Z",
+    "category": "field_change",
+    "summary": "Updated issue"
+  }
+]
