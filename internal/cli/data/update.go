@@ -13,19 +13,20 @@ import (
 )
 
 var (
-	updateStatus       string
-	updateAssignee     string
-	updateNotes        string
-	updateDesign       string
-	updateDesignFormat string
-	updatePriority     int
-	updateTitle        string
-	updateDescription  string
-	updateDescFile     string
-	updateAddDeps      []string
-	updateRemoveDeps   []string
-	updateAddLabels    []string
-	updateRemoveLabels []string
+	updateStatus             string
+	updateAssignee           string
+	updateNotes              string
+	updateDesign             string
+	updateDesignFormat       string
+	updateAcceptanceCriteria string
+	updatePriority           int
+	updateTitle              string
+	updateDescription        string
+	updateDescFile           string
+	updateAddDeps            []string
+	updateRemoveDeps         []string
+	updateAddLabels          []string
+	updateRemoveLabels       []string
 )
 
 var updateCmd = &cobra.Command{
@@ -73,20 +74,7 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 	}
 	params := backend.UpdateParams{}
 	changed := false
-	if cmd.Flags().Changed("status") {
-		params.Status = &updateStatus
-		changed = true
-	}
-	if cmd.Flags().Changed("assignee") {
-		params.Assignee = &updateAssignee
-		changed = true
-	}
-	if cmd.Flags().Changed("notes") {
-		params.Notes = &updateNotes
-		changed = true
-	}
-	if cmd.Flags().Changed("design") {
-		params.Design = &updateDesign
+	if applyStringFlags(cmd, &params) {
 		changed = true
 	}
 	if applied, err := applyDesignFormatFlag(cmd, &params); err != nil {
@@ -96,10 +84,6 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 	}
 	if cmd.Flags().Changed("priority") {
 		params.Priority = &updatePriority
-		changed = true
-	}
-	if cmd.Flags().Changed("title") {
-		params.Title = &updateTitle
 		changed = true
 	}
 	if applyLabelFlags(cmd, &params) {
@@ -130,6 +114,43 @@ func applyDescriptionFlags(cmd *cobra.Command, params *backend.UpdateParams, fro
 	}
 	params.Description = &body
 	return true, nil
+}
+
+// applyStringFlags copies each changed plain string flag into its matching
+// params field, reporting whether any of them was given. These flags share
+// identical semantics -- Changed() means "set this field", including to "",
+// which clears it server-side -- so they are handled as one table rather than
+// as repeated blocks. Keeping them here also keeps updateParamsFromFlags under
+// the funlen limit as flags are added.
+//
+// --description (has a mutually exclusive -from-file partner), --design-format
+// (validates its value) and --priority (not a string) each keep their own path.
+//
+// As with applyLabelFlags, the reported bool must feed updateParamsFromFlags'
+// changed result: RunE only calls Update when fieldsChanged || !depsChanged, so
+// one of these flags combined with a dependency flag would otherwise skip
+// Update, silently dropping the value while still reporting success.
+func applyStringFlags(cmd *cobra.Command, params *backend.UpdateParams) bool {
+	flags := []struct {
+		name string
+		src  *string
+		dst  **string
+	}{
+		{"status", &updateStatus, &params.Status},
+		{"assignee", &updateAssignee, &params.Assignee},
+		{"notes", &updateNotes, &params.Notes},
+		{"design", &updateDesign, &params.Design},
+		{"acceptance-criteria", &updateAcceptanceCriteria, &params.AcceptanceCriteria},
+		{"title", &updateTitle, &params.Title},
+	}
+	changed := false
+	for _, f := range flags {
+		if cmd.Flags().Changed(f.name) {
+			*f.dst = f.src
+			changed = true
+		}
+	}
+	return changed
 }
 
 // applyLabelFlags copies the repeatable --add-label/--remove-label occurrences
@@ -228,6 +249,7 @@ func init() {
 	updateCmd.Flags().StringVar(&updateNotes, "notes", "", "Set notes")
 	updateCmd.Flags().StringVar(&updateDesign, "design", "", "Set design")
 	updateCmd.Flags().StringVar(&updateDesignFormat, "design-format", "", "Set design format (markdown or html)")
+	updateCmd.Flags().StringVar(&updateAcceptanceCriteria, "acceptance-criteria", "", "Set acceptance criteria")
 	updateCmd.Flags().IntVar(&updatePriority, "priority", 0, "Set priority")
 	updateCmd.Flags().StringVar(&updateTitle, "title", "", "Set title")
 	updateCmd.Flags().StringVar(&updateDescription, "description", "", "Set description")
