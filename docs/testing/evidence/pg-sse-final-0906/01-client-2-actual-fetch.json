@@ -1,0 +1,132 @@
+{
+  "requests": [
+    {
+      "sequence": 1,
+      "requestId": "68102.51",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/events/token",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 2,
+      "requestId": "68102.58",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/issues",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 5,
+      "requestId": "68102.62",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/events",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch",
+      "streamAttached": true
+    },
+    {
+      "sequence": 10,
+      "requestId": "68102.66",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/issues",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    }
+  ],
+  "frames": [
+    {
+      "sequence": 6,
+      "requestId": "68102.62",
+      "event": "checkpoint",
+      "id": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0Mzk5NzU2LVRUTUdFRU1LUyIsIjNiM2U1N2E2LTYzMjEtNDVkZS1hYmI5LTg0NzM5NzMxMzZiZSIsIjYyLTAiXQ"
+    },
+    {
+      "sequence": 7,
+      "requestId": "68102.62",
+      "event": "connected"
+    },
+    {
+      "sequence": 8,
+      "requestId": "68102.62",
+      "event": "mutation",
+      "id": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0Mzk5NzU2LVRUTUdFRU1LUyIsIjNiM2U1N2E2LTYzMjEtNDVkZS1hYmI5LTg0NzM5NzMxMzZiZSIsIjYzLTAiXQ",
+      "issueId": "SSE-TEST-1788704399756-TTMGEEMKS-1",
+      "entityId": "SSE-TEST-1788704399756-TTMGEEMKS-1",
+      "action": "issue.create",
+      "workspaceId": "SSE-TEST-1788704399756-TTMGEEMKS",
+      "data": {
+        "cursor": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0Mzk5NzU2LVRUTUdFRU1LUyIsIjNiM2U1N2E2LTYzMjEtNDVkZS1hYmI5LTg0NzM5NzMxMzZiZSIsIjYzLTAiXQ",
+        "type": "create",
+        "entity_type": "issue",
+        "entity_id": "SSE-TEST-1788704399756-TTMGEEMKS-1",
+        "action": "issue.create",
+        "issue_id": "SSE-TEST-1788704399756-TTMGEEMKS-1",
+        "title": "SSE two clients test-1788704401465-6xrhvhqo4",
+        "actor": "local-mode-harness@fixture.local",
+        "timestamp": "2026-09-06T14:20:01.506413Z",
+        "new_status": "open",
+        "source_repo": "source-repo",
+        "workspace_id": "SSE-TEST-1788704399756-TTMGEEMKS"
+      }
+    },
+    {
+      "sequence": 9,
+      "requestId": "68102.62",
+      "event": "mutation",
+      "id": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0Mzk5NzU2LVRUTUdFRU1LUyIsIjNiM2U1N2E2LTYzMjEtNDVkZS1hYmI5LTg0NzM5NzMxMzZiZSIsIjY0LTAiXQ",
+      "issueId": "SSE-TEST-1788704399756-TTMGEEMKS-1",
+      "entityId": "SSE-TEST-1788704399756-TTMGEEMKS-1",
+      "action": "issue.claim",
+      "workspaceId": "SSE-TEST-1788704399756-TTMGEEMKS",
+      "data": {
+        "cursor": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0Mzk5NzU2LVRUTUdFRU1LUyIsIjNiM2U1N2E2LTYzMjEtNDVkZS1hYmI5LTg0NzM5NzMxMzZiZSIsIjY0LTAiXQ",
+        "type": "update",
+        "entity_type": "issue",
+        "entity_id": "SSE-TEST-1788704399756-TTMGEEMKS-1",
+        "action": "issue.claim",
+        "issue_id": "SSE-TEST-1788704399756-TTMGEEMKS-1",
+        "assignee": "local-mode-harness@fixture.local",
+        "actor": "local-mode-harness@fixture.local",
+        "timestamp": "2026-09-06T14:20:01.565623Z",
+        "old_status": "open",
+        "new_status": "in_progress",
+        "workspace_id": "SSE-TEST-1788704399756-TTMGEEMKS"
+      }
+    }
+  ],
+  "responses": [
+    {
+      "sequence": 3,
+      "requestId": "68102.58",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/issues"
+    },
+    {
+      "sequence": 11,
+      "requestId": "68102.66",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/issues"
+    }
+  ],
+  "completions": [
+    {
+      "sequence": 4,
+      "requestId": "68102.58",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/issues"
+    },
+    {
+      "sequence": 12,
+      "requestId": "68102.66",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/issues"
+    }
+  ],
+  "failures": [],
+  "errors": []
+}

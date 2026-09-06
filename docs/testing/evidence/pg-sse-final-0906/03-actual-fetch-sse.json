@@ -1,0 +1,64 @@
+{
+  "requests": [
+    {
+      "sequence": 1,
+      "requestId": "68192.51",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/events/token",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 2,
+      "requestId": "68192.58",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/issues",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 5,
+      "requestId": "68192.62",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/events",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch",
+      "streamAttached": true
+    }
+  ],
+  "frames": [
+    {
+      "sequence": 6,
+      "requestId": "68192.62",
+      "event": "checkpoint",
+      "id": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0NDIwMDA5LVZIVUE5SFpYRiIsIjIwZTZmYTI4LTIwYjAtNDMzYy1iNzQ4LWQ4YzYxM2ZhZGRhYiIsIjc4LTAiXQ"
+    },
+    {
+      "sequence": 7,
+      "requestId": "68192.62",
+      "event": "connected"
+    }
+  ],
+  "responses": [
+    {
+      "sequence": 3,
+      "requestId": "68192.58",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/issues"
+    }
+  ],
+  "completions": [
+    {
+      "sequence": 4,
+      "requestId": "68192.58",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/issues"
+    }
+  ],
+  "failures": [],
+  "errors": []
+}

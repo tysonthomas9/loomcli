@@ -1,0 +1,151 @@
+{
+  "requests": [
+    {
+      "sequence": 1,
+      "requestId": "68202.51",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/events/token",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 2,
+      "requestId": "68202.58",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/issues",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 5,
+      "requestId": "68202.62",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/events",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch",
+      "streamAttached": true
+    },
+    {
+      "sequence": 9,
+      "requestId": "68202.66",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/issues",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 13,
+      "requestId": "68202.68",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/issues",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    }
+  ],
+  "frames": [
+    {
+      "sequence": 6,
+      "requestId": "68202.62",
+      "event": "checkpoint",
+      "id": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0NDIwMDA5LVZIVUE5SFpYRiIsIjIwZTZmYTI4LTIwYjAtNDMzYy1iNzQ4LWQ4YzYxM2ZhZGRhYiIsIjgzLTAiXQ"
+    },
+    {
+      "sequence": 7,
+      "requestId": "68202.62",
+      "event": "connected"
+    },
+    {
+      "sequence": 8,
+      "requestId": "68202.62",
+      "event": "mutation",
+      "id": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0NDIwMDA5LVZIVUE5SFpYRiIsIjIwZTZmYTI4LTIwYjAtNDMzYy1iNzQ4LWQ4YzYxM2ZhZGRhYiIsIjg0LTAiXQ",
+      "issueId": "SSE-TEST-1788704420009-VHUA9HZXF-4",
+      "entityId": "SSE-TEST-1788704420009-VHUA9HZXF-4",
+      "action": "issue.claim",
+      "workspaceId": "SSE-TEST-1788704420009-VHUA9HZXF",
+      "data": {
+        "cursor": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0NDIwMDA5LVZIVUE5SFpYRiIsIjIwZTZmYTI4LTIwYjAtNDMzYy1iNzQ4LWQ4YzYxM2ZhZGRhYiIsIjg0LTAiXQ",
+        "type": "update",
+        "entity_type": "issue",
+        "entity_id": "SSE-TEST-1788704420009-VHUA9HZXF-4",
+        "action": "issue.claim",
+        "issue_id": "SSE-TEST-1788704420009-VHUA9HZXF-4",
+        "assignee": "local-mode-harness@fixture.local",
+        "actor": "local-mode-harness@fixture.local",
+        "timestamp": "2026-09-06T14:20:23.155148Z",
+        "old_status": "open",
+        "new_status": "in_progress",
+        "workspace_id": "SSE-TEST-1788704420009-VHUA9HZXF"
+      }
+    },
+    {
+      "sequence": 12,
+      "requestId": "68202.62",
+      "event": "mutation",
+      "id": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0NDIwMDA5LVZIVUE5SFpYRiIsIjIwZTZmYTI4LTIwYjAtNDMzYy1iNzQ4LWQ4YzYxM2ZhZGRhYiIsIjg1LTAiXQ",
+      "issueId": "SSE-TEST-1788704420009-VHUA9HZXF-4",
+      "entityId": "SSE-TEST-1788704420009-VHUA9HZXF-4",
+      "action": "issue.release",
+      "workspaceId": "SSE-TEST-1788704420009-VHUA9HZXF",
+      "data": {
+        "cursor": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0NDIwMDA5LVZIVUE5SFpYRiIsIjIwZTZmYTI4LTIwYjAtNDMzYy1iNzQ4LWQ4YzYxM2ZhZGRhYiIsIjg1LTAiXQ",
+        "type": "update",
+        "entity_type": "issue",
+        "entity_id": "SSE-TEST-1788704420009-VHUA9HZXF-4",
+        "action": "issue.release",
+        "issue_id": "SSE-TEST-1788704420009-VHUA9HZXF-4",
+        "actor": "local-mode-harness@fixture.local",
+        "timestamp": "2026-09-06T14:20:25.042225Z",
+        "old_status": "in_progress",
+        "new_status": "open",
+        "workspace_id": "SSE-TEST-1788704420009-VHUA9HZXF"
+      }
+    }
+  ],
+  "responses": [
+    {
+      "sequence": 3,
+      "requestId": "68202.58",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/issues"
+    },
+    {
+      "sequence": 10,
+      "requestId": "68202.66",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/issues"
+    },
+    {
+      "sequence": 14,
+      "requestId": "68202.68",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/issues"
+    }
+  ],
+  "completions": [
+    {
+      "sequence": 4,
+      "requestId": "68202.58",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/issues"
+    },
+    {
+      "sequence": 11,
+      "requestId": "68202.66",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/issues"
+    },
+    {
+      "sequence": 15,
+      "requestId": "68202.68",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/issues"
+    }
+  ],
+  "failures": [],
+  "errors": []
+}

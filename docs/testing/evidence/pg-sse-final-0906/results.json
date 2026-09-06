@@ -1,0 +1,79 @@
+{
+  "stats": {
+    "startTime": "2026-09-06T14:19:59.255Z",
+    "duration": 32221.372,
+    "expected": 7,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "results": [
+    {
+      "title": "create and status frames reach two independent clients once @regression",
+      "status": "passed",
+      "duration_ms": 3385,
+      "attachments": [
+        "01-client-1-actual-fetch.json",
+        "01-client-1-board.png",
+        "01-client-2-actual-fetch.json",
+        "01-client-2-board.png"
+      ]
+    },
+    {
+      "title": "real proxy disconnect resumes both accepted cursors without replay gaps or duplicates @regression",
+      "status": "passed",
+      "duration_ms": 16333,
+      "attachments": [
+        "02-client-1-actual-fetch.json",
+        "02-client-1-board.png",
+        "02-client-2-actual-fetch.json",
+        "02-client-2-board.png"
+      ]
+    },
+    {
+      "title": "fetch SSE establishes with a connected frame @smoke",
+      "status": "passed",
+      "duration_ms": 302,
+      "attachments": [
+        "03-actual-fetch-sse.json",
+        "03-board.png"
+      ]
+    },
+    {
+      "title": "API-created issue renders before projection refresh then converges @smoke",
+      "status": "passed",
+      "duration_ms": 2461,
+      "attachments": [
+        "04-actual-fetch-sse.json",
+        "04-board.png"
+      ]
+    },
+    {
+      "title": "status moves before projection refresh then converges @smoke",
+      "status": "passed",
+      "duration_ms": 4114,
+      "attachments": [
+        "05-actual-fetch-sse.json",
+        "05-board.png"
+      ]
+    },
+    {
+      "title": "rapid creates each reach the browser exactly once in the observed interval @regression",
+      "status": "passed",
+      "duration_ms": 2234,
+      "attachments": [
+        "06-actual-fetch-sse.json",
+        "06-board.png"
+      ]
+    },
+    {
+      "title": "close leaves Open through the observed stream without reload @regression",
+      "status": "passed",
+      "duration_ms": 2200,
+      "attachments": [
+        "07-actual-fetch-sse.json",
+        "07-board.png"
+      ]
+    }
+  ]
+}

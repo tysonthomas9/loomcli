@@ -1,0 +1,247 @@
+{
+  "requests": [
+    {
+      "sequence": 1,
+      "requestId": "68106.51",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/events/token",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 2,
+      "requestId": "68106.58",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/issues",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 5,
+      "requestId": "68106.62",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/events",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch",
+      "streamAttached": true
+    },
+    {
+      "sequence": 9,
+      "requestId": "68106.66",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/issues",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 13,
+      "requestId": "68106.67",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/events/token",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 14,
+      "requestId": "68106.68",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/events",
+      "method": "GET",
+      "since": null,
+      "lastEventId": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0Mzk5NzU2LVRUTUdFRU1LUyIsIjNiM2U1N2E2LTYzMjEtNDVkZS1hYmI5LTg0NzM5NzMxMzZiZSIsIjY4LTAiXQ",
+      "status": 200,
+      "type": "Fetch",
+      "streamAttached": true
+    },
+    {
+      "sequence": 15,
+      "requestId": "68106.69",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/issues",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 22,
+      "requestId": "68106.73",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/issues",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    }
+  ],
+  "frames": [
+    {
+      "sequence": 6,
+      "requestId": "68106.62",
+      "event": "checkpoint",
+      "id": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0Mzk5NzU2LVRUTUdFRU1LUyIsIjNiM2U1N2E2LTYzMjEtNDVkZS1hYmI5LTg0NzM5NzMxMzZiZSIsIjY3LTAiXQ"
+    },
+    {
+      "sequence": 7,
+      "requestId": "68106.62",
+      "event": "connected"
+    },
+    {
+      "sequence": 8,
+      "requestId": "68106.62",
+      "event": "mutation",
+      "id": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0Mzk5NzU2LVRUTUdFRU1LUyIsIjNiM2U1N2E2LTYzMjEtNDVkZS1hYmI5LTg0NzM5NzMxMzZiZSIsIjY4LTAiXQ",
+      "issueId": "SSE-TEST-1788704399756-TTMGEEMKS-2",
+      "entityId": "SSE-TEST-1788704399756-TTMGEEMKS-2",
+      "action": "issue.claim",
+      "workspaceId": "SSE-TEST-1788704399756-TTMGEEMKS",
+      "data": {
+        "cursor": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0Mzk5NzU2LVRUTUdFRU1LUyIsIjNiM2U1N2E2LTYzMjEtNDVkZS1hYmI5LTg0NzM5NzMxMzZiZSIsIjY4LTAiXQ",
+        "type": "update",
+        "entity_type": "issue",
+        "entity_id": "SSE-TEST-1788704399756-TTMGEEMKS-2",
+        "action": "issue.claim",
+        "issue_id": "SSE-TEST-1788704399756-TTMGEEMKS-2",
+        "assignee": "local-mode-harness@fixture.local",
+        "actor": "local-mode-harness@fixture.local",
+        "timestamp": "2026-09-06T14:20:04.71105Z",
+        "old_status": "open",
+        "new_status": "in_progress",
+        "workspace_id": "SSE-TEST-1788704399756-TTMGEEMKS"
+      }
+    },
+    {
+      "sequence": 16,
+      "requestId": "68106.68",
+      "event": "mutation",
+      "id": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0Mzk5NzU2LVRUTUdFRU1LUyIsIjNiM2U1N2E2LTYzMjEtNDVkZS1hYmI5LTg0NzM5NzMxMzZiZSIsIjY5LTAiXQ",
+      "issueId": "SSE-TEST-1788704399756-TTMGEEMKS-2",
+      "entityId": "SSE-TEST-1788704399756-TTMGEEMKS-2",
+      "action": "issue.update",
+      "workspaceId": "SSE-TEST-1788704399756-TTMGEEMKS",
+      "data": {
+        "cursor": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0Mzk5NzU2LVRUTUdFRU1LUyIsIjNiM2U1N2E2LTYzMjEtNDVkZS1hYmI5LTg0NzM5NzMxMzZiZSIsIjY5LTAiXQ",
+        "type": "update",
+        "entity_type": "issue",
+        "entity_id": "SSE-TEST-1788704399756-TTMGEEMKS-2",
+        "action": "issue.update",
+        "issue_id": "SSE-TEST-1788704399756-TTMGEEMKS-2",
+        "actor": "operator@local",
+        "timestamp": "2026-09-06T14:20:16.949713Z",
+        "old_status": "in_progress",
+        "new_status": "review",
+        "workspace_id": "SSE-TEST-1788704399756-TTMGEEMKS"
+      }
+    },
+    {
+      "sequence": 17,
+      "requestId": "68106.68",
+      "event": "connected"
+    },
+    {
+      "sequence": 20,
+      "requestId": "68106.68",
+      "event": "mutation",
+      "id": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0Mzk5NzU2LVRUTUdFRU1LUyIsIjNiM2U1N2E2LTYzMjEtNDVkZS1hYmI5LTg0NzM5NzMxMzZiZSIsIjcwLTAiXQ",
+      "issueId": "SSE-TEST-1788704399756-TTMGEEMKS-2",
+      "entityId": "SSE-TEST-1788704399756-TTMGEEMKS-2",
+      "action": "issue.update",
+      "workspaceId": "SSE-TEST-1788704399756-TTMGEEMKS",
+      "data": {
+        "cursor": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0Mzk5NzU2LVRUTUdFRU1LUyIsIjNiM2U1N2E2LTYzMjEtNDVkZS1hYmI5LTg0NzM5NzMxMzZiZSIsIjcwLTAiXQ",
+        "type": "update",
+        "entity_type": "issue",
+        "entity_id": "SSE-TEST-1788704399756-TTMGEEMKS-2",
+        "action": "issue.update",
+        "issue_id": "SSE-TEST-1788704399756-TTMGEEMKS-2",
+        "actor": "operator@local",
+        "timestamp": "2026-09-06T14:20:18.020384Z",
+        "old_status": "review",
+        "new_status": "open",
+        "workspace_id": "SSE-TEST-1788704399756-TTMGEEMKS"
+      }
+    },
+    {
+      "sequence": 21,
+      "requestId": "68106.68",
+      "event": "mutation",
+      "id": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0Mzk5NzU2LVRUTUdFRU1LUyIsIjNiM2U1N2E2LTYzMjEtNDVkZS1hYmI5LTg0NzM5NzMxMzZiZSIsIjcxLTAiXQ",
+      "issueId": "SSE-TEST-1788704399756-TTMGEEMKS-2",
+      "entityId": "SSE-TEST-1788704399756-TTMGEEMKS-2",
+      "action": "issue.assign",
+      "workspaceId": "SSE-TEST-1788704399756-TTMGEEMKS",
+      "data": {
+        "cursor": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0Mzk5NzU2LVRUTUdFRU1LUyIsIjNiM2U1N2E2LTYzMjEtNDVkZS1hYmI5LTg0NzM5NzMxMzZiZSIsIjcxLTAiXQ",
+        "type": "update",
+        "entity_type": "issue",
+        "entity_id": "SSE-TEST-1788704399756-TTMGEEMKS-2",
+        "action": "issue.assign",
+        "issue_id": "SSE-TEST-1788704399756-TTMGEEMKS-2",
+        "actor": "operator@local",
+        "timestamp": "2026-09-06T14:20:18.031918Z",
+        "workspace_id": "SSE-TEST-1788704399756-TTMGEEMKS"
+      }
+    }
+  ],
+  "responses": [
+    {
+      "sequence": 3,
+      "requestId": "68106.58",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/issues"
+    },
+    {
+      "sequence": 10,
+      "requestId": "68106.66",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/issues"
+    },
+    {
+      "sequence": 18,
+      "requestId": "68106.69",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/issues"
+    },
+    {
+      "sequence": 23,
+      "requestId": "68106.73",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/issues"
+    }
+  ],
+  "completions": [
+    {
+      "sequence": 4,
+      "requestId": "68106.58",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/issues"
+    },
+    {
+      "sequence": 11,
+      "requestId": "68106.66",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/issues"
+    },
+    {
+      "sequence": 19,
+      "requestId": "68106.69",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/issues"
+    },
+    {
+      "sequence": 24,
+      "requestId": "68106.73",
+      "path": "/api/workspaces/SSE-TEST-1788704399756-TTMGEEMKS/issues"
+    }
+  ],
+  "failures": [
+    {
+      "sequence": 12,
+      "requestId": "68106.62",
+      "canceled": false
+    }
+  ],
+  "errors": []
+}
