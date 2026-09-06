@@ -14,6 +14,33 @@ const (
 	RoleKindWorker      RoleKind = "worker"
 )
 
+// Role persona sources: where an interactive agent's role instructions come
+// from. The empty string is "unset" and resolves to PersonaSourceArgv, which is
+// what every role stored before this field carries.
+const (
+	// PersonaSourceArgv passes the persona to the harness on the command line,
+	// the way loom has always done it.
+	PersonaSourceArgv = "argv"
+	// PersonaSourceProfile means the harness reads its role instructions from
+	// its own ambient file — CLAUDE.md under CLAUDE_CONFIG_DIR for claude,
+	// AGENTS.md in the lead workdir for codex — and loom sends no persona on
+	// argv at all. It is an assertion by the operator that the ambient file is
+	// authoritative, which is why loom neither seeds nor overwrites it.
+	PersonaSourceProfile = "profile"
+)
+
+var validRolePersonaSources = map[string]bool{
+	"":                   true,
+	PersonaSourceArgv:    true,
+	PersonaSourceProfile: true,
+}
+
+// ValidateRolePersonaSource returns true if s is empty or a supported persona
+// source. Empty validates true: it is the pre-existing default, not a mistake.
+func ValidateRolePersonaSource(s string) bool {
+	return validRolePersonaSources[s]
+}
+
 // Role input-policy dispositions. The empty string is "unset", which resolves
 // to deny — see RoleInputPolicy for why the unset case must not be permissive.
 const (
@@ -179,11 +206,17 @@ type Role struct {
 	// (default, one-shot harness turn per run) or "conversation" (a held
 	// chat conversation: surfaced input requests, bounded follow-up turns,
 	// session resume). Mirrors the server's closed vocabulary.
-	Executor     string   `json:"executor,omitempty"`
-	Backend      string   `json:"backend,omitempty"`
-	Effort       string   `json:"effort,omitempty"`
-	PathPatterns []string `json:"path_patterns,omitempty"`
-	Skills       []string `json:"skills,omitempty"`
+	Executor string `json:"executor,omitempty"`
+	// PersonaSource selects where an interactive agent in this role gets its
+	// role instructions: "argv" (default, loom renders the persona and passes
+	// it to the harness) or "profile" (the harness's own ambient file is
+	// authoritative and loom passes no persona). Empty means argv. Mirrors the
+	// server's closed vocabulary.
+	PersonaSource string   `json:"persona_source,omitempty"`
+	Backend       string   `json:"backend,omitempty"`
+	Effort        string   `json:"effort,omitempty"`
+	PathPatterns  []string `json:"path_patterns,omitempty"`
+	Skills        []string `json:"skills,omitempty"`
 
 	// InputPolicy declares what an agent in this role may auto-answer when the
 	// harness raises an interactive prompt mid-turn. Nil — the zero value —
