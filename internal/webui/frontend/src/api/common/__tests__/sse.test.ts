@@ -158,6 +158,171 @@ describe("WorkspaceSSEClient", () => {
     vi.restoreAllMocks();
   });
 
+  it("suspends inside resync and rejects subsequent frames in the same chunk", async () => {
+    let lease!: ReturnType<WorkspaceSSEClient["suspendForRecovery"]>;
+    const onMutation = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", {
+      onMutation,
+      onResync: () => {
+        lease = client.suspendForRecovery();
+      },
+    });
+    await client.connect("c2.accepted");
+    await expectRequestCount(1);
+    streamRequests[0].push(
+      'event: resync\ndata: {"reason":"expired"}\n\nid: c2.stale\nevent: mutation\ndata: {"type":"status","issue_id":"old"}\n\n',
+    );
+    await flush();
+    expect(lease.isCurrent()).toBe(true);
+    expect(streamRequests[0].aborted).toBe(true);
+    expect(onMutation).not.toHaveBeenCalled();
+    expect(client.getLastEventId()).toBe("c2.accepted");
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(streamRequests).toHaveLength(1);
+    expect(lease.retry()).toBe(true);
+    expect(lease.retry()).toBe(false);
+    await expectRequestCount(2);
+    expect(streamRequests[1].headers.get("last-event-id")).toBe("c2.accepted");
+    client.destroy();
+  });
+
+  it.each([
+    "disconnect",
+    "destroy",
+    "connect",
+    "updateSourceRepos",
+    "retryNow",
+  ] as const)("%s retires the recovery lease", async (action) => {
+    const client = new WorkspaceSSEClient("test-ws");
+    await client.connect("c2.accepted");
+    await expectRequestCount(1);
+    const lease = client.suspendForRecovery();
+    if (action === "updateSourceRepos") client.updateSourceRepos(["new"]);
+    else await client[action]();
+    expect(lease.signal.aborted).toBe(true);
+    expect(lease.isCurrent()).toBe(false);
+    expect(lease.retry()).toBe(false);
+    if (
+      action === "retryNow" ||
+      action === "connect" ||
+      action === "updateSourceRepos"
+    ) {
+      await expectRequestCount(2);
+      expect(streamRequests[1].headers.get("last-event-id")).toBe(
+        "c2.accepted",
+      );
+    }
+    client.destroy();
+  });
+
+  it("suspends reentrantly from connecting before starting the stream", async () => {
+    let lease!: ReturnType<WorkspaceSSEClient["suspendForRecovery"]>;
+    let suspend = true;
+    const client = new WorkspaceSSEClient("test-ws", {
+      onStateChange: (state) => {
+        if (state === "connecting" && suspend) {
+          suspend = false;
+          lease = client.suspendForRecovery();
+        }
+      },
+    });
+    await client.connect("c2.accepted");
+    await expectRequestCount(0);
+    expect(lease.isCurrent()).toBe(true);
+    expect(lease.retry()).toBe(true);
+    await expectRequestCount(1);
+    client.destroy();
+  });
+
+  it("preserves a reentrant connection from the suspended state callback", async () => {
+    let reconnect = true;
+    const client = new WorkspaceSSEClient("test-ws", {
+      onStateChange: (state) => {
+        if (state === "disconnected" && reconnect) {
+          reconnect = false;
+          void client.connect();
+        }
+      },
+    });
+    await client.connect("c2.accepted");
+    await expectRequestCount(1);
+    const lease = client.suspendForRecovery();
+    expect(lease.isCurrent()).toBe(false);
+    expect(lease.signal.aborted).toBe(true);
+    await expectRequestCount(2);
+    expect(client.getState()).toBe("connecting");
+    client.destroy();
+  });
+
+  it("preserves a new suspension created by an old lease abort callback", async () => {
+    const client = new WorkspaceSSEClient("test-ws");
+    await client.connect("c2.accepted");
+    await expectRequestCount(1);
+    const first = client.suspendForRecovery();
+    let replacement!: ReturnType<WorkspaceSSEClient["suspendForRecovery"]>;
+    first.signal.addEventListener("abort", () => {
+      replacement = client.suspendForRecovery();
+    });
+    first.retry();
+    expect(replacement.isCurrent()).toBe(true);
+    expect(first.isCurrent()).toBe(false);
+    await expectRequestCount(1);
+    expect(replacement.retry()).toBe(true);
+    await expectRequestCount(2);
+    client.destroy();
+  });
+
+  it("rejects frames from a fetch body that ignores suspension abort", async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(value) {
+        controller = value;
+      },
+    });
+    mockStreamFetch.mockImplementationOnce(
+      async () =>
+        new Response(body, {
+          headers: { "content-type": "text/event-stream" },
+        }),
+    );
+    const onMutation = vi.fn();
+    const onConnected = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", {
+      onMutation,
+      onConnected,
+    });
+    await client.connect("c2.accepted");
+    await flush();
+    const lease = client.suspendForRecovery();
+    controller.enqueue(
+      encoder.encode(
+        'id: c2.stale\nevent: mutation\ndata: {"type":"update","issue_id":"late"}\n\nevent: connected\ndata: {"clientId":1}\n\n',
+      ),
+    );
+    await flush();
+    expect(onMutation).not.toHaveBeenCalled();
+    expect(onConnected).not.toHaveBeenCalled();
+    expect(client.getLastEventId()).toBe("c2.accepted");
+    expect(lease.isCurrent()).toBe(true);
+    controller.close();
+    await flush();
+    expect(client.getState()).toBe("disconnected");
+    client.destroy();
+  });
+
+  it("replaces a lease and returns an aborted lease after destruction", () => {
+    const client = new WorkspaceSSEClient("test-ws");
+    const first = client.suspendForRecovery();
+    const second = client.suspendForRecovery();
+    expect(first.signal.aborted).toBe(true);
+    expect(first.retry()).toBe(false);
+    expect(second.isCurrent()).toBe(true);
+    client.destroy();
+    const dead = client.suspendForRecovery();
+    expect(dead.signal.aborted).toBe(true);
+    expect(dead.retry()).toBe(false);
+  });
+
   it("resolves connect after starting the loop without waiting for open", async () => {
     let resolveToken!: (result: SseTokenResult) => void;
     const fetchToken = vi.fn(
