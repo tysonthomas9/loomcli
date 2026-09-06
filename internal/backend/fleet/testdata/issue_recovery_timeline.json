@@ -1,0 +1,1717 @@
+{
+  "timeline": [
+    {
+      "id": "c1.MS0w",
+      "event_id": "1-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.create",
+      "category": "lifecycle",
+      "summary": "Created issue",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.Mi0w",
+      "event_id": "2-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.update",
+      "category": "field_change",
+      "summary": "Updated priority, status, and title",
+      "changes": [
+        {
+          "field": "priority",
+          "before": "2",
+          "after": "1"
+        },
+        {
+          "field": "status",
+          "before": "open",
+          "after": "closed"
+        },
+        {
+          "field": "title",
+          "before": "old",
+          "after": "new"
+        }
+      ],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.My0w",
+      "event_id": "3-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.close",
+      "category": "lifecycle",
+      "summary": "Closed issue: done",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.NC0w",
+      "event_id": "4-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.reopen",
+      "category": "lifecycle",
+      "summary": "Reopened issue",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.NS0w",
+      "event_id": "5-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.delete",
+      "category": "lifecycle",
+      "summary": "Deleted issue",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.Ni0w",
+      "event_id": "6-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.claim",
+      "category": "assignment",
+      "summary": "Claimed by alice",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.Ny0w",
+      "event_id": "7-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.release",
+      "category": "assignment",
+      "summary": "Released claim",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.OC0w",
+      "event_id": "8-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.assign",
+      "category": "assignment",
+      "summary": "Assigned issue",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.OS0w",
+      "event_id": "9-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.defer",
+      "category": "time_management",
+      "summary": "Deferred issue",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MTAtMA",
+      "event_id": "10-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.undefer",
+      "category": "time_management",
+      "summary": "Removed deferral",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MTEtMA",
+      "event_id": "11-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "dep.add",
+      "category": "dependency",
+      "summary": "Added dependency: WS-2",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MTItMA",
+      "event_id": "12-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "dep.remove",
+      "category": "dependency",
+      "summary": "Removed dependency: WS-2",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MTMtMA",
+      "event_id": "13-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "label.add",
+      "category": "label",
+      "summary": "Added label urgent",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MTQtMA",
+      "event_id": "14-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "label.remove",
+      "category": "label",
+      "summary": "Removed label urgent",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MTUtMA",
+      "event_id": "15-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "metadata.set",
+      "category": "other",
+      "summary": "Unknown action: metadata.set",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MTYtMA",
+      "event_id": "16-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "metadata.remove",
+      "category": "other",
+      "summary": "Unknown action: metadata.remove",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MTctMA",
+      "event_id": "17-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "comment.add",
+      "category": "comment",
+      "summary": "Added comment",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MTgtMA",
+      "event_id": "18-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "workspace.create",
+      "category": "other",
+      "summary": "Unknown action: workspace.create",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MTktMA",
+      "event_id": "19-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "workspace.update",
+      "category": "other",
+      "summary": "Unknown action: workspace.update",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MjAtMA",
+      "event_id": "20-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "workspace.delete",
+      "category": "other",
+      "summary": "Unknown action: workspace.delete",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MjEtMA",
+      "event_id": "21-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "repo.create",
+      "category": "other",
+      "summary": "Unknown action: repo.create",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MjItMA",
+      "event_id": "22-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "repo.update",
+      "category": "other",
+      "summary": "Unknown action: repo.update",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MjMtMA",
+      "event_id": "23-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "repo.delete",
+      "category": "other",
+      "summary": "Unknown action: repo.delete",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MjQtMA",
+      "event_id": "24-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "agent.create",
+      "category": "other",
+      "summary": "Unknown action: agent.create",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MjUtMA",
+      "event_id": "25-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "agent.update",
+      "category": "other",
+      "summary": "Unknown action: agent.update",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MjYtMA",
+      "event_id": "26-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "agent.delete",
+      "category": "other",
+      "summary": "Unknown action: agent.delete",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MjctMA",
+      "event_id": "27-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "driver_run.create",
+      "category": "other",
+      "summary": "Unknown action: driver_run.create",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MjgtMA",
+      "event_id": "28-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "driver_run.claim",
+      "category": "other",
+      "summary": "Unknown action: driver_run.claim",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MjktMA",
+      "event_id": "29-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "driver_run.heartbeat",
+      "category": "other",
+      "summary": "Unknown action: driver_run.heartbeat",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MzAtMA",
+      "event_id": "30-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "driver_run.finish",
+      "category": "other",
+      "summary": "Unknown action: driver_run.finish",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MzEtMA",
+      "event_id": "31-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "driver_run.recover",
+      "category": "other",
+      "summary": "Unknown action: driver_run.recover",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MzItMA",
+      "event_id": "32-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "driver_run.suspend",
+      "category": "other",
+      "summary": "Unknown action: driver_run.suspend",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MzMtMA",
+      "event_id": "33-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "driver_run.resume",
+      "category": "other",
+      "summary": "Unknown action: driver_run.resume",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MzQtMA",
+      "event_id": "34-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "role.create",
+      "category": "other",
+      "summary": "Unknown action: role.create",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MzUtMA",
+      "event_id": "35-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "role.update",
+      "category": "other",
+      "summary": "Unknown action: role.update",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MzYtMA",
+      "event_id": "36-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "role.delete",
+      "category": "other",
+      "summary": "Unknown action: role.delete",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MzctMA",
+      "event_id": "37-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "skill.create",
+      "category": "other",
+      "summary": "Unknown action: skill.create",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MzgtMA",
+      "event_id": "38-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "skill.update",
+      "category": "other",
+      "summary": "Unknown action: skill.update",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.MzktMA",
+      "event_id": "39-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "skill.delete",
+      "category": "other",
+      "summary": "Unknown action: skill.delete",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.NDAtMA",
+      "event_id": "40-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "skill_pack.create",
+      "category": "other",
+      "summary": "Unknown action: skill_pack.create",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.NDEtMA",
+      "event_id": "41-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "skill_pack.update",
+      "category": "other",
+      "summary": "Unknown action: skill_pack.update",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.NDItMA",
+      "event_id": "42-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "skill_pack.delete",
+      "category": "other",
+      "summary": "Unknown action: skill_pack.delete",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.NDMtMA",
+      "event_id": "43-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "daemon.update",
+      "category": "other",
+      "summary": "Unknown action: daemon.update",
+      "changes": [],
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "c1.NDQtMA",
+      "event_id": "44-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.update",
+      "category": "field_change",
+      "summary": "Updated added, clear, items, and nested",
+      "changes": [
+        {
+          "field": "added",
+          "before": "",
+          "after": ""
+        },
+        {
+          "field": "clear",
+          "before": "old",
+          "after": ""
+        },
+        {
+          "field": "items",
+          "before": "[1,2]",
+          "after": "[2,1]"
+        },
+        {
+          "field": "nested",
+          "before": "{\"a\":1}",
+          "after": "{\"a\":2}"
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "id": "c1.NDUtMA",
+      "event_id": "45-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.update",
+      "category": "field_change",
+      "summary": "Updated (raw) and title",
+      "changes": [
+        {
+          "field": "(raw)",
+          "before": "not JSON",
+          "after": ""
+        },
+        {
+          "field": "title",
+          "before": "",
+          "after": "valid after"
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "id": "c1.NDYtMA",
+      "event_id": "46-0",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.update",
+      "category": "field_change",
+      "summary": "Updated issue",
+      "changes": [],
+      "metadata": {}
+    }
+  ],
+  "issue_id": "WS-1",
+  "present": true,
+  "events": [
+    {
+      "id": "1-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.create",
+      "entity_type": "issue",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "2-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.update",
+      "entity_type": "issue",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "3-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.close",
+      "entity_type": "issue",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "4-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.reopen",
+      "entity_type": "issue",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "5-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.delete",
+      "entity_type": "issue",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "6-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.claim",
+      "entity_type": "issue",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "7-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.release",
+      "entity_type": "issue",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "8-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.assign",
+      "entity_type": "issue",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "9-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.defer",
+      "entity_type": "issue",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "10-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.undefer",
+      "entity_type": "issue",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "11-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "dep.add",
+      "entity_type": "dependency",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "12-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "dep.remove",
+      "entity_type": "dependency",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "13-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "label.add",
+      "entity_type": "label",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "14-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "label.remove",
+      "entity_type": "label",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "15-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "metadata.set",
+      "entity_type": "metadata",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "16-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "metadata.remove",
+      "entity_type": "metadata",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "17-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "comment.add",
+      "entity_type": "comment",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "18-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "workspace.create",
+      "entity_type": "workspace",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "19-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "workspace.update",
+      "entity_type": "workspace",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "20-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "workspace.delete",
+      "entity_type": "workspace",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "21-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "repo.create",
+      "entity_type": "repo",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "22-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "repo.update",
+      "entity_type": "repo",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "23-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "repo.delete",
+      "entity_type": "repo",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "24-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "agent.create",
+      "entity_type": "agent",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "25-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "agent.update",
+      "entity_type": "agent",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "26-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "agent.delete",
+      "entity_type": "agent",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "27-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "driver_run.create",
+      "entity_type": "driver_run",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "28-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "driver_run.claim",
+      "entity_type": "driver_run",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "29-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "driver_run.heartbeat",
+      "entity_type": "driver_run",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "30-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "driver_run.finish",
+      "entity_type": "driver_run",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "31-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "driver_run.recover",
+      "entity_type": "driver_run",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "32-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "driver_run.suspend",
+      "entity_type": "driver_run",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "33-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "driver_run.resume",
+      "entity_type": "driver_run",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "34-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "role.create",
+      "entity_type": "role",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "35-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "role.update",
+      "entity_type": "role",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "36-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "role.delete",
+      "entity_type": "role",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "37-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "skill.create",
+      "entity_type": "skill",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "38-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "skill.update",
+      "entity_type": "skill",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "39-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "skill.delete",
+      "entity_type": "skill",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "40-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "skill_pack.create",
+      "entity_type": "skill_pack",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "41-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "skill_pack.update",
+      "entity_type": "skill_pack",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "42-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "skill_pack.delete",
+      "entity_type": "skill_pack",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "43-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "daemon.update",
+      "entity_type": "daemon_profile",
+      "entity_id": "WS-1",
+      "before": "{\"title\":\"old\",\"status\":\"open\",\"priority\":2}",
+      "after": "{\"title\":\"new\",\"status\":\"closed\",\"priority\":1}",
+      "metadata": {
+        "body": "comment body",
+        "comment_id": "comment-1",
+        "depends_on_id": "WS-2",
+        "label": "urgent",
+        "reason": "done",
+        "type": "blocks"
+      }
+    },
+    {
+      "id": "44-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.update",
+      "entity_type": "issue",
+      "entity_id": "WS-1",
+      "before": "{\"clear\":\"old\",\"nested\":{\"a\":1},\"items\":[1,2]}",
+      "after": "{\"clear\":\"\",\"nested\":{\"a\":2},\"items\":[2,1],\"added\":null}",
+      "metadata": {}
+    },
+    {
+      "id": "45-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.update",
+      "entity_type": "issue",
+      "entity_id": "WS-1",
+      "before": "not JSON",
+      "after": "{\"title\":\"valid after\"}",
+      "metadata": {}
+    },
+    {
+      "id": "46-0",
+      "workspace_id": "WS",
+      "timestamp": "2026-09-05T12:00:00.123456789Z",
+      "actor": "alice",
+      "action": "issue.update",
+      "entity_type": "issue",
+      "entity_id": "WS-1",
+      "before": "",
+      "after": "",
+      "metadata": {}
+    }
+  ],
+  "has_older": false
+}

@@ -22,7 +22,7 @@ var (
 const recoveryHandleTTL = 60 * time.Second
 const recoveryHandleCapacity = 256
 const recoveryPrincipalCapacity = 8
-const issueRecoveryManifest = "fleet.issue-workspace.v5"
+const issueRecoveryManifest = "fleet.issue-workspace.v6"
 
 // RecoveryHandle identifies a captured source for bounded retries. SourceRepos
 // records subscription filters, not repository authorization or snapshot scope.

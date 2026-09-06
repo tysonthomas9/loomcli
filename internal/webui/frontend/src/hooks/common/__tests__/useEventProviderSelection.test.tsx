@@ -50,7 +50,7 @@ function offer(): RecoveryHandle {
     workspace: mocks.workspace,
     source_repos: repos ?? [],
     expires_at: new Date(Date.now() + 60_000).toISOString(),
-    manifest: "fleet.issue-workspace.v5",
+    manifest: "fleet.issue-workspace.v6",
   };
 }
 function prepared(input: RecoveryHandle, selected?: string) {
@@ -67,7 +67,13 @@ function prepared(input: RecoveryHandle, selected?: string) {
       dependencies: [],
       comments: [],
       history: selected
-        ? { issue_id: selected, present: false, events: [], has_older: false }
+        ? {
+            issue_id: selected,
+            present: false,
+            events: [],
+            timeline: [],
+            has_older: false,
+          }
         : null,
     }),
     input,

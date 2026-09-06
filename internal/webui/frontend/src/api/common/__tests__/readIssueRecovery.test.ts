@@ -14,7 +14,7 @@ const offer: RecoveryHandle = {
   workspace: "WS",
   source_repos: [],
   expires_at: "2026-09-05T12:01:00Z",
-  manifest: "fleet.issue-workspace.v5",
+  manifest: "fleet.issue-workspace.v6",
 };
 const document = JSON.stringify({
   manifest: offer.manifest,
@@ -64,7 +64,13 @@ describe("readIssueRecovery", () => {
     const id = "WS-1 &another=two";
     const selected = JSON.stringify({
       ...JSON.parse(document),
-      history: { issue_id: id, present: false, events: [], has_older: false },
+      history: {
+        issue_id: id,
+        present: false,
+        events: [],
+        timeline: [],
+        has_older: false,
+      },
     });
     const fetcher = vi
       .fn()
@@ -101,6 +107,7 @@ describe("readIssueRecovery", () => {
         issue_id: "WS-absent",
         present: false,
         events: [],
+        timeline: [],
         has_older: false,
       },
     });
