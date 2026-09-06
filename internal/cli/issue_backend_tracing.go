@@ -94,6 +94,8 @@ func backendErrorReason(err error) string {
 			return "unavailable"
 		case backend.KindNotImplemented:
 			return "not_implemented"
+		case backend.KindRateLimited:
+			return "rate_limited"
 		}
 	}
 	return "unknown"

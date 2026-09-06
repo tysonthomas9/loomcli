@@ -817,6 +817,68 @@ describe("API Client", () => {
       }
     });
 
+    it("429 is a throttle, not an outage: no offline badge, no error report", async () => {
+      const reportSpy = vi.spyOn(
+        await import("../errorReporter"),
+        "reportError",
+      );
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        statusText: "Too Many Requests",
+        headers: new Headers({ "Retry-After": "12" }),
+        text: () =>
+          Promise.resolve(JSON.stringify({ error: "rate limit exceeded" })),
+      });
+
+      const cb = vi.fn();
+      const unsub = onWorkspaceUnavailable(cb);
+
+      try {
+        await expect(get("/api/test")).rejects.toMatchObject({
+          status: 429,
+          retryAfterMs: 12000,
+        });
+        expect(cb).not.toHaveBeenCalled();
+        expect(reportSpy).not.toHaveBeenCalled();
+      } finally {
+        unsub();
+      }
+    });
+
+    it("500 still reports a client error", async () => {
+      const reportSpy = vi.spyOn(
+        await import("../errorReporter"),
+        "reportError",
+      );
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: "Internal Server Error",
+        headers: new Headers(),
+        text: () => Promise.resolve("boom"),
+      });
+
+      await expect(get("/api/test")).rejects.toThrow(ApiError);
+      expect(reportSpy).toHaveBeenCalled();
+    });
+
+    it("a 429 without Retry-After leaves retryAfterMs undefined", async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        statusText: "Too Many Requests",
+        headers: new Headers(),
+        text: () =>
+          Promise.resolve(JSON.stringify({ error: "rate limit exceeded" })),
+      });
+
+      await expect(get("/api/test")).rejects.toMatchObject({
+        status: 429,
+        retryAfterMs: undefined,
+      });
+    });
+
     it("network error notifies workspace service-unavailable listeners", async () => {
       global.fetch = vi
         .fn()
