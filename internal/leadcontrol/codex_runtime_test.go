@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -200,5 +201,24 @@ func TestLegacyCodexLeadCacheRootIsPerLead(t *testing.T) {
 	want := filepath.Join(cacheDir, "loom", "codex-leads", "puppet", "lead-one")
 	if got := legacyCodexLeadCacheRoot(cfg); got != want {
 		t.Fatalf("legacyCodexLeadCacheRoot() = %q, want %q", got, want)
+	}
+}
+
+// The model pin reaches the app-server as a `-c` config overlay, and an empty
+// pin adds no argument at all — an unprofiled lead must launch exactly as it
+// did before.
+func TestCodexAppServerArgsModelPin(t *testing.T) {
+	base := []string{"app-server", "--listen", "ws://127.0.0.1:9", "-c", `sqlite_home="/tmp/sq"`}
+
+	got := codexAppServerArgs("ws://127.0.0.1:9", "/tmp/sq", "gpt-5.6-sol")
+	want := append(append([]string{}, base...), "-c", `model="gpt-5.6-sol"`)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("codexAppServerArgs(pin) = %#v, want %#v", got, want)
+	}
+
+	for _, empty := range []string{"", "   "} {
+		if got := codexAppServerArgs("ws://127.0.0.1:9", "/tmp/sq", empty); !reflect.DeepEqual(got, base) {
+			t.Fatalf("codexAppServerArgs(%q) = %#v, want %#v", empty, got, base)
+		}
 	}
 }

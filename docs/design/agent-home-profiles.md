@@ -97,6 +97,61 @@ soft-failing same-major version drift can never mask a real content change.
 > deliberately left alone — removing the entry would invalidate every existing
 > fingerprint and force a fleet-wide re-provision.
 
+### The baseline is also a launch input
+
+Verification is detection, not prevention: it tells an operator that a managed
+key drifted, and something still has to decide what the *next* session boots
+as. For `model` nothing did. A human typing `/model` in a lead session is
+offered "save as your default for new sessions", and accepting it rewrites
+`model` in the **live** `settings.json`. Until an operator re-provisions, every
+subsequent lead session started on whatever was last saved rather than on what
+the workspace provisioned.
+
+So the launch path reads the pinned keys out of `.provisioned/<rel>` — the same
+baseline the verifier enforces, decoded by the same decoder — and passes them on
+the command line, where a CLI argument outranks the config file:
+
+| harness | baseline file | launch argument |
+|---|---|---|
+| claude | `.provisioned/settings.json` | `--model <value>` |
+| codex | `.provisioned/config.toml` | `-c model="<value>"` (app-server) |
+
+Precedence, and the order is deliberate:
+
+```
+LOOM_AGENT_MODEL (explicit role.model from the supervisor)   <- wins
+-> provisioned baseline for the resolved profile root
+-> "" (no pin; the harness default / the live config file applies)
+```
+
+Role intent outranks the baseline: a supervisor-spawned agent whose role pins
+`model` has made a deliberate choice. The baseline is the *fallback* that closes
+the lead's hole, not an override of configured intent.
+
+Reading the baseline rather than a constant is what makes this provenance-clean:
+change the source template's `model`, re-provision, relaunch, and the pin moves
+with no code change.
+
+**Pinned keys are a short allowlist, not the whole file.** Today it is `model`
+and nothing else. The permission surface is already pinned at launch by argument
+(`--dangerously-skip-permissions` plus the safety-knob args), so pinning
+`permissions.defaultMode` again would buy nothing; `--effort` is already wired
+to `LOOM_AGENT_EFFORT`; everything else (`autoMode.environment`, the `disable*`
+flags, `cleanupPeriodDays`) stays file-borne. Pinning everything would turn the
+command line into a second copy of the profile. Adding a key means adding it in
+**one place per harness** — the table of constants in
+`internal/cli/backends/model_pin.go` — not at each call site.
+
+Nothing in this path can fail a launch. Every unresolvable case (no manifest,
+the file byte-hashed in `files` instead of `managed`, a missing or undecodable
+baseline, an absent or non-string key) resolves to "no pin" plus a debug log;
+`loom lead` additionally prints one warning line, because it is the only launch
+with an operator at the terminal. Refusing a drifted boot is the enforcement
+check's job, not the argv builder's.
+
+A drifted `settings.json` is therefore no longer "changes what the next session
+boots as". It is a `loom doctor` cleanup item.
+
 ## Why the version pin is exact, and must never become a range
 
 The pin does not assert "this profile probably works with this version". It
