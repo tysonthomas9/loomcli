@@ -2720,18 +2720,6 @@ type RuntimeReadyResponse struct {
 // RuntimeReadyResponseMode defines model for RuntimeReadyResponse.Mode.
 type RuntimeReadyResponseMode string
 
-// SeedRequest defines model for SeedRequest.
-type SeedRequest struct {
-	Blockers *[]struct {
-		Id    string `json:"id"`
-		Title string `json:"title"`
-	} `json:"blockers,omitempty"`
-	Description *string `json:"description,omitempty"`
-	Design      *string `json:"design,omitempty"`
-	IssueId     string  `json:"issue_id"`
-	Title       string  `json:"title"`
-}
-
 // SessionHistoryRecord Session history record (Redis-backed, per-issue)
 type SessionHistoryRecord struct {
 	Backend        string                       `json:"backend"`
@@ -2874,29 +2862,6 @@ type TabPutRequest struct {
 	Notes     string `json:"notes"`
 	Pinned    bool   `json:"pinned"`
 	SortOrder int    `json:"sort_order"`
-}
-
-// TerminalSessionInfo defines model for TerminalSessionInfo.
-type TerminalSessionInfo struct {
-	// Created Unix timestamp
-	Created int64   `json:"created"`
-	IssueId *string `json:"issue_id,omitempty"`
-	Label   string  `json:"label"`
-	Name    string  `json:"name"`
-}
-
-// TerminalSpawnData defines model for TerminalSpawnData.
-type TerminalSpawnData struct {
-	Backend     string `json:"backend"`
-	Command     string `json:"command"`
-	Created     bool   `json:"created"`
-	SessionName string `json:"session_name"`
-}
-
-// TerminalSpawnRequest defines model for TerminalSpawnRequest.
-type TerminalSpawnRequest struct {
-	Backend     string `json:"backend"`
-	SessionName string `json:"session_name"`
 }
 
 // TranscriptEntry Single transcript entry from a session
@@ -3570,11 +3535,6 @@ type GetTaskLogParams struct {
 	BeforeLine *int64 `form:"before_line,omitempty" json:"before_line,omitempty"`
 }
 
-// GetTerminalSessionStatusParams defines parameters for GetTerminalSessionStatus.
-type GetTerminalSessionStatusParams struct {
-	Session *string `form:"session,omitempty" json:"session,omitempty"`
-}
-
 // ListSessionsByIssueParams defines parameters for ListSessionsByIssue.
 type ListSessionsByIssueParams struct {
 	IssueId *string `form:"issue_id,omitempty" json:"issue_id,omitempty"`
@@ -3706,14 +3666,8 @@ type PostPullRequestReviewerMessageJSONRequestBody = ReviewerMessageRequest
 // PostPullRequestReviewJSONRequestBody defines body for PostPullRequestReview for application/json ContentType.
 type PostPullRequestReviewJSONRequestBody = PullRequestReviewRequest
 
-// SeedTerminalSessionJSONRequestBody defines body for SeedTerminalSession for application/json ContentType.
-type SeedTerminalSessionJSONRequestBody = SeedRequest
-
 // StartTerminalSetupJSONRequestBody defines body for StartTerminalSetup for application/json ContentType.
 type StartTerminalSetupJSONRequestBody StartTerminalSetupJSONBody
-
-// SpawnTerminalSessionJSONRequestBody defines body for SpawnTerminalSession for application/json ContentType.
-type SpawnTerminalSessionJSONRequestBody = TerminalSpawnRequest
 
 // PatchTerminalStateJSONRequestBody defines body for PatchTerminalState for application/json ContentType.
 type PatchTerminalStateJSONRequestBody PatchTerminalStateJSONBody
