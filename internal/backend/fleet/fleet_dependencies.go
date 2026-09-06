@@ -5,13 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
+
+// Compile-time proof that the fleet backend satisfies the one-round-trip
+// summary contract; see GetSummary.
+var _ backend.IssueSummaryBackend = (*FleetBackend)(nil)
 
 // fleetDepWire is one row from fleet-db's GET /issues/{id}/deps response. Each
 // row links IssueID -> DependsOnID with a relationship Type.
@@ -76,46 +82,153 @@ func (b *FleetBackend) fetchDependencies(ctx context.Context, id string) (deps, 
 	if json.Unmarshal(resp.Data, &wrap) != nil {
 		return nil, nil, nil
 	}
+	rows := make([]depRow, 0, len(wrap.Dependencies))
 	for _, d := range wrap.Dependencies {
-		dep, isDependent := b.depWireToData(ctx, d, id)
-		if isDependent {
-			dependents = append(dependents, dep)
+		rows = append(rows, depWireToRow(d, id))
+	}
+	b.hydrateDepRows(ctx, rows)
+	for _, row := range rows {
+		if row.isDependent {
+			dependents = append(dependents, row.data)
 		} else {
-			deps = append(deps, dep)
+			deps = append(deps, row.data)
 		}
 	}
 	return deps, dependents, nil
 }
 
-// depWireToData converts one /deps wire row into a DependencyData and reports
-// whether it is a dependent (the other issue depends on viewID) rather than a
-// dependency (viewID depends on the other issue). Missing display fields are
-// hydrated from the *related* issue's summary — the side that is not viewID —
-// so an epic's children carry their own metadata rather than the epic's.
-func (b *FleetBackend) depWireToData(ctx context.Context, d fleetDepWire, viewID string) (backend.DependencyData, bool) {
-	dep := backend.DependencyData{
-		IssueID:     d.IssueID,
-		DependsOnID: d.DependsOnID,
-		Type:        d.Type,
-		Title:       d.Title,
-		Status:      d.Status,
-		Priority:    d.Priority,
-		IssueType:   d.IssueType,
-		CreatedAt:   d.CreatedAt,
-		CreatedBy:   d.CreatedBy,
+// Dependency-row hydration bounds. fleet-db's /deps rows serialize only the
+// edge (issue_id, depends_on_id, type, created_*), so the display fields are
+// always empty and every distinct related issue needs a summary lookup. These
+// cap what that is allowed to cost: a wide epic must not fan out one request
+// per child.
+const (
+	// depHydrateMax is the largest number of distinct related issues worth
+	// hydrating. Past it no request is issued at all and rows keep whatever
+	// the wire gave them — a bare ID renders, which beats a 200-request
+	// `loom data show`.
+	depHydrateMax = 25
+	// depHydrateConcurrency bounds in-flight hydration requests.
+	depHydrateConcurrency = 8
+	// depHydrateTimeout caps the whole hydration pass; display metadata must
+	// never hold up the dependency projection for long.
+	depHydrateTimeout = 2 * time.Second
+)
+
+// depRow is one /deps wire row projected into backend form, carrying the
+// classification and the related issue's ID so hydration can be hoisted out of
+// the projection loop.
+type depRow struct {
+	data        backend.DependencyData
+	relatedID   string
+	isDependent bool
+}
+
+// depWireToRow converts one /deps wire row into a DependencyData and reports
+// which issue is the *related* one — the side that is not viewID — along with
+// whether the row is a dependent (the other issue depends on viewID) rather
+// than a dependency (viewID depends on the other issue).
+//
+// It is a pure wire→data projection: no context, no I/O. Filling in missing
+// display fields is the caller's job, so it can be batched.
+func depWireToRow(d fleetDepWire, viewID string) depRow {
+	row := depRow{
+		data: backend.DependencyData{
+			IssueID:     d.IssueID,
+			DependsOnID: d.DependsOnID,
+			Type:        d.Type,
+			Title:       d.Title,
+			Status:      d.Status,
+			Priority:    d.Priority,
+			IssueType:   d.IssueType,
+			CreatedAt:   d.CreatedAt,
+			CreatedBy:   d.CreatedBy,
+		},
+		relatedID: d.DependsOnID,
 	}
-	relatedID := d.DependsOnID
-	isDependent := false
 	if d.DependsOnID == viewID && d.IssueID != "" {
-		relatedID = d.IssueID
-		isDependent = true
+		row.relatedID = d.IssueID
+		row.isDependent = true
 	}
-	if dep.Title == "" {
-		if issue, err := b.fetchIssueSummary(ctx, relatedID); err == nil && issue != nil {
-			hydrateDependencyData(&dep, *issue)
+	return row
+}
+
+// hydrateDepRows fills the display fields of rows the wire left empty, in
+// place. Lookups are deduplicated by related ID (an epic's rows frequently
+// repeat one), bounded by depHydrateMax, and run concurrently under a short
+// sub-context. Every failure is skipped: a row without a title degrades to a
+// bare ID, never to a failed projection.
+func (b *FleetBackend) hydrateDepRows(ctx context.Context, rows []depRow) {
+	var (
+		needed []string
+		seen   = make(map[string]bool, len(rows))
+	)
+	for i := range rows {
+		id := rows[i].relatedID
+		if rows[i].data.Title != "" || strings.TrimSpace(id) == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		needed = append(needed, id)
+	}
+	if len(needed) == 0 {
+		return
+	}
+	if len(needed) > depHydrateMax {
+		slog.Debug("dependency hydration skipped: over cap",
+			"needed", len(needed), "cap", depHydrateMax)
+		return
+	}
+
+	summaries := b.fetchIssueSummaries(ctx, needed)
+	for i := range rows {
+		if rows[i].data.Title != "" {
+			continue
+		}
+		if issue, ok := summaries[rows[i].relatedID]; ok {
+			hydrateDependencyData(&rows[i].data, issue)
 		}
 	}
-	return dep, isDependent
+}
+
+// fetchIssueSummaries resolves the given distinct issue IDs concurrently,
+// returning whatever came back. Misses are logged at debug and dropped.
+func (b *FleetBackend) fetchIssueSummaries(ctx context.Context, ids []string) map[string]backend.IssueData {
+	fetchCtx, cancel := context.WithTimeout(ctx, depHydrateTimeout)
+	defer cancel()
+
+	var (
+		mu     sync.Mutex
+		wg     sync.WaitGroup
+		out    = make(map[string]backend.IssueData, len(ids))
+		tokens = make(chan struct{}, depHydrateConcurrency)
+	)
+	for _, id := range ids {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			tokens <- struct{}{}
+			defer func() { <-tokens }()
+
+			issue, err := b.fetchIssueSummary(fetchCtx, id)
+			if err != nil || issue == nil {
+				slog.Debug("dependency hydration: summary failed", "issue_id", id, "err", err)
+				return
+			}
+			mu.Lock()
+			out[id] = *issue
+			mu.Unlock()
+		}(id)
+	}
+	wg.Wait()
+	return out
+}
+
+// GetSummary returns the slim issue record in a single round-trip, without the
+// dependency and comment lookups Get performs. It implements
+// backend.IssueSummaryBackend for callers that only need scalar fields.
+func (b *FleetBackend) GetSummary(ctx context.Context, id string) (*backend.IssueData, error) {
+	return b.fetchIssueSummary(ctx, id)
 }
 
 func (b *FleetBackend) fetchIssueSummary(ctx context.Context, id string) (*backend.IssueData, error) {

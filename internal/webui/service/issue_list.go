@@ -141,14 +141,23 @@ func kanbanRPCToKanbanIssue(ki *rpc.KanbanIssueRPC) KanbanIssue {
 //
 // Parent titles are enriched without an N+1: the board fetches essentially the
 // whole workspace, so nearly every parent is already present in the same
-// result set. resolveParentTitles builds an id → title index over the issues
-// already in hand and fills ParentTitle from it — O(n), zero extra round-trips.
-// Only parents absent from the result set (filtered out, or past the limit)
-// need a Get, and that backfill is bounded: at most parentTitleBackfillMax
-// distinct IDs, fetched concurrently under a short sub-context, every failure
-// logged at debug and skipped. Past the cap no Get is issued at all and those
-// issues carry no ParentTitle — the FE then renders the bare parent ID, which
-// is a graceful fallback rather than an error.
+// result set. resolveParentTitles builds an id → title index and fills
+// ParentTitle from it — O(n), zero extra round-trips.
+//
+// The index is built over the *pre-filter* list, not the rows being returned.
+// That distinction is the whole point: the board sends exclude_status=tombstone,
+// so a tombstoned epic is dropped from the result while its children remain,
+// and indexing the filtered slice would make every one of those children an
+// unresolved parent needing its own request. The excluded issues are already in
+// hand — indexing them costs nothing and resolves their children for free.
+//
+// Only parents absent from the pre-filter list altogether (filtered out
+// server-side, or past the limit) need a fetch, and that backfill is bounded:
+// at most parentTitleBackfillMax distinct IDs, fetched concurrently under a
+// short sub-context, one request each via IssueSummaryBackend where the backend
+// offers it, every failure logged at debug and skipped. Past the cap nothing is
+// fetched at all and those issues carry no ParentTitle — the FE then renders
+// the bare parent ID, which is a graceful fallback rather than an error.
 //
 // The composite ListKanban RPC's full blocked-by-details lookups are still not
 // reproduced: matching them would mean N extra Gets. The blocked summary uses
@@ -162,10 +171,14 @@ func (s *issueServiceImpl) listIssuesViaBackend(
 	if err != nil {
 		return nil, translateBackendError(err)
 	}
+	// Keep the pre-filter list: it is the parent-title index source. See the
+	// doc comment above — indexing only the returned rows turns every child of
+	// an excluded epic into a per-issue request.
+	all := issues
 	issues = excludeBackendIssuesByStatus(issues, params.ExcludeStatus)
 
 	if !params.IncludeBlocked {
-		titles := s.resolveParentTitles(ctx, be, issues)
+		titles := s.resolveParentTitles(ctx, be, all, issues)
 		return &ListIssuesResult{Issues: backendIssuesWithParent(issues, titles)}, nil
 	}
 
@@ -185,8 +198,17 @@ func (s *issueServiceImpl) listIssuesViaBackend(
 	issues = appendMissingDeferredIssues(issues, deferredByID)
 
 	// After the appends, so issues pulled in by the blocked/deferred merge both
-	// contribute to the index and benefit from it.
-	titles := s.resolveParentTitles(ctx, be, issues)
+	// contribute to the index and benefit from it. The index source is the
+	// pre-filter list plus those same appends; the rows needing a title are the
+	// ones actually being returned.
+	// Copied first: with no ExcludeStatus, `all` and `issues` are the same
+	// slice, and appending to both would have them fight over one backing
+	// array — same elements, but in whichever order the map ranged.
+	indexSource := make([]backend.IssueData, len(all), len(all)+len(blockedByID)+len(deferredByID))
+	copy(indexSource, all)
+	indexSource = appendMissingBlockedIssues(indexSource, blockedByID)
+	indexSource = appendMissingDeferredIssues(indexSource, deferredByID)
+	titles := s.resolveParentTitles(ctx, be, indexSource, issues)
 
 	return &ListIssuesResult{
 		KanbanIssues: backendKanbanIssues(issues, titles, blockedByID, readyByID, deferredByID),
@@ -244,14 +266,19 @@ func unresolvedParentIDs(issues []backend.IssueData, index map[string]string) []
 }
 
 // resolveParentTitles builds the parent-title lookup for a backend list result:
-// the in-result index first, then a bounded best-effort backfill for parents
-// that are not in the result set. Never returns an error — a failed title
-// lookup degrades to a missing title, never to a failed list.
+// the in-hand index first, then a bounded best-effort backfill for parents that
+// index cannot resolve. Never returns an error — a failed title lookup degrades
+// to a missing title, never to a failed list.
+//
+// indexed is the superset of issues already fetched (the pre-filter list plus
+// any blocked/deferred merges); needing is the rows actually being returned,
+// and only their parents can trigger a backfill. Passing a superset as indexed
+// is always safe: it only makes more parents resolvable for free.
 func (s *issueServiceImpl) resolveParentTitles(
-	ctx context.Context, be backend.IssueBackend, issues []backend.IssueData,
+	ctx context.Context, be backend.IssueBackend, indexed, needing []backend.IssueData,
 ) map[string]string {
-	titles := parentTitleIndex(issues)
-	missing := unresolvedParentIDs(issues, titles)
+	titles := parentTitleIndex(indexed)
+	missing := unresolvedParentIDs(needing, titles)
 	if len(missing) == 0 {
 		return titles
 	}
@@ -268,11 +295,18 @@ func (s *issueServiceImpl) resolveParentTitles(
 
 // backfillParentTitles fetches the given parent IDs concurrently, returning
 // whatever resolved. Misses are logged at debug and dropped.
+//
+// A title is a scalar field, so the fetch goes through IssueSummaryBackend when
+// the backend implements it: on fleet-db that is one request instead of the
+// three Get costs (issue + dependencies + comments). Backends without the
+// extension fall back to Get, which is a single call for them anyway.
 func backfillParentTitles(
 	ctx context.Context, be backend.IssueBackend, ids []string,
 ) map[string]string {
 	fetchCtx, cancel := context.WithTimeout(ctx, parentTitleBackfillTimeout)
 	defer cancel()
+
+	lookup := parentTitleLookup(be)
 
 	var (
 		mu     sync.Mutex
@@ -287,24 +321,45 @@ func backfillParentTitles(
 			tokens <- struct{}{}
 			defer func() { <-tokens }()
 
-			detail, err := be.Get(fetchCtx, id)
+			title, err := lookup(fetchCtx, id)
 			if err != nil {
 				slog.Debug("parent-title backfill: get failed", "issue_id", id, "err", err)
 				return
 			}
-			// Get returns *IssueDetailData; a nil pointer with a nil error is
-			// a legal "not found" from some backends. An empty title counts as
-			// unresolved, same as the in-result index.
-			if detail == nil || detail.Title == "" {
+			// An empty title counts as unresolved, same as the in-hand index.
+			if title == "" {
 				return
 			}
 			mu.Lock()
-			out[id] = detail.Title
+			out[id] = title
 			mu.Unlock()
 		}(id)
 	}
 	wg.Wait()
 	return out
+}
+
+// parentTitleLookup returns a single-ID title reader for the backend: the
+// one-round-trip GetSummary when the backend offers it, Get otherwise. Both
+// treat a nil record with a nil error — a legal "not found" from some
+// backends — as an empty title.
+func parentTitleLookup(be backend.IssueBackend) func(context.Context, string) (string, error) {
+	if summaryBackend, ok := be.(backend.IssueSummaryBackend); ok {
+		return func(ctx context.Context, id string) (string, error) {
+			data, err := summaryBackend.GetSummary(ctx, id)
+			if err != nil || data == nil {
+				return "", err
+			}
+			return data.Title, nil
+		}
+	}
+	return func(ctx context.Context, id string) (string, error) {
+		detail, err := be.Get(ctx, id)
+		if err != nil || detail == nil {
+			return "", err
+		}
+		return detail.Title, nil
+	}
 }
 
 // Apply ExcludeStatus client-side. fleet-db's ListOpts has a single Status
@@ -318,7 +373,10 @@ func excludeBackendIssuesByStatus(issues []backend.IssueData, excludeStatus []st
 	for _, status := range excludeStatus {
 		excluded[status] = true
 	}
-	filtered := issues[:0]
+	// A fresh slice, deliberately: the caller keeps the unfiltered list as the
+	// parent-title index source, and the in-place `issues[:0]` form this used to
+	// take would overwrite it through the shared backing array.
+	filtered := make([]backend.IssueData, 0, len(issues))
 	for _, issue := range issues {
 		if !excluded[issue.Status] {
 			filtered = append(filtered, issue)
