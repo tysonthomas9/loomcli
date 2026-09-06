@@ -212,6 +212,28 @@ func TestClaimHoldRoutes_DaemonDownReturns503(t *testing.T) {
 	}
 }
 
+// TestHandleClaimHoldGet_DialErrorStringReturns503 pins PUPPET-529's starting
+// point: a control-socket dial failure, in the exact string form daemonwire
+// produces it today, makes the polled GET answer 503 daemon_unavailable.
+//
+// The error is constructed here literally and NOT with %w around
+// ErrSupervisorUnavailable, on purpose: once the fix lands, the wrapped form
+// answers 200 while this one must keep answering 503. Written against the
+// wrapped form the test would silently stop characterising anything.
+func TestHandleClaimHoldGet_DialErrorStringReturns503(t *testing.T) {
+	err := fmt.Errorf("daemon is not running (no control socket at %s)", "/nope/daemon.sock")
+	fn, _ := newMockHoldFn(nil, err)
+
+	rec := serveRequest(handleClaimHoldGet(fn), "GET", "/api/workspaces/ws1/claims/hold", "")
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 (body %s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"daemon_unavailable"`) {
+		t.Errorf("body = %s, want code daemon_unavailable", rec.Body.String())
+	}
+}
+
 // --- actor resolution ---
 
 func TestResolveActor_PrecedenceBodyThenHeader(t *testing.T) {
