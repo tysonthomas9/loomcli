@@ -26,7 +26,10 @@ describe("decodeRecoveryHandle", () => {
     ["noncanonical", { handle: "A".repeat(42) + "B" }],
     ["foreign", { workspace: "OTHER" }],
     ["manifest", { manifest: "other" }],
-    ["legacy lower-bound v1 manifest", { manifest: "fleet.issue-workspace.v1" }],
+    [
+      "legacy lower-bound v1 manifest",
+      { manifest: "fleet.issue-workspace.v1" },
+    ],
     ["expired", { expires_at: "2026-09-05T12:00:00Z" }],
     ["invalid date", { expires_at: "2026-02-30T12:00:00Z" }],
     ["offset", { expires_at: "2026-09-05T12:01:00+00:00" }],
