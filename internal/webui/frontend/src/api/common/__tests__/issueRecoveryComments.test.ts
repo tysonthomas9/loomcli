@@ -9,7 +9,7 @@ const offer: RecoveryHandle = {
   workspace: "WS",
   source_repos: [],
   expires_at: "2026-09-05T00:01:00Z",
-  manifest: "fleet.issue-workspace.v4",
+  manifest: "fleet.issue-workspace.v5",
 };
 const issue = (id: string) => ({
   id,
@@ -42,6 +42,7 @@ const document = (comments: unknown) => ({
   deferred: [],
   dependencies: [],
   comments,
+  history: null,
 });
 const prepare = (comments: unknown) =>
   prepareIssueRecovery(
@@ -62,7 +63,7 @@ describe("native recovery comments", () => {
     input.body = "changed";
     expect(result.comments[0].body).toBe(" body\n");
     expect(result.coverage).toContain("comments");
-    expect(result).not.toHaveProperty("history");
+    expect(result.history).toBeNull();
   });
   it("measures body limit in UTF8 bytes", () => {
     expect(
