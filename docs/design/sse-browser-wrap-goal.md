@@ -1,10 +1,29 @@
 # Active goal: browser verification and delivery
 
-Updated at the user's request on 2026-09-05. This is the current execution scope; it supersedes the delivery order in earlier architecture plans for this wrap-up.
+Updated at the user's request on 2026-09-06. This is the current execution scope; it supersedes the delivery order in earlier architecture plans for this wrap-up.
 
-The v6 recovery timeline pair is published as Loom #679 and FleetDB #285. The active next step is to make fresh PostgreSQL workspaces reachable through normal product bootstrap, verify the current fetch-based SSE transport in the real browser, and publish the narrow prerequisite fixes with reproducible evidence and explicit remaining gaps. Do not expand into whole-client recovery architecture in this pass.
+The immediate objective is to finish browser verification of the existing paired SSE/projection changes and deliver reviewable draft PRs with reproducible evidence. Keep the broader architecture goal active, but do not expand this delivery slice into whole-client recovery or a transport migration.
 
-The prerequisite patch covers atomic opt-in workspace genesis, exact-receipt confirmation after foreground/background projection races, and separation of local source repository membership from global catalog bindings. These were exposed by actual local-mode startup. Their focused tests and independent reviews are complete; real PostgreSQL browser startup, stream HTTP200, cursor-bearing reconnect, UI convergence and comment persistence are now recorded in [the browser proof](../testing/postgres-sse-browser-proof.md). Collection refetches prevent replay-only/exactly-once claims; multiclient, expiry, source replacement and whole-client publication remain follow-up work. This delivery slice is published as [Loom #680](https://github.com/tysonthomas9/loomcli/pull/680) and [FleetDB #287](https://github.com/BrowserOperator/fleet-db/pull/287); run-owned cleanup is complete. The broader goal remains active. FleetDB #286 tracks stronger browser acceptance and the deferred architecture work remains below.
+The v6 timeline pair (Loom #679 / FleetDB #285) and workspace bootstrap prerequisites (Loom #680 / FleetDB #287) are published. Their earlier browser evidence and cleanup are recorded in [the bootstrap proof](../testing/postgres-sse-browser-proof.md).
+
+## Completed browser delivery slice
+
+The final paired source passed all seven real PostgreSQL browser regressions in
+32.2s, with zero skips, retries or flaky results. Independent review verified the
+actual two-client replay traces, exact cursor reuse and ordered IDs. Manual UI
+create/status/review/close also matched API state. See [the final proof](../testing/postgres-sse-regression-proof.md).
+
+Published dependent drafts are [Loom #682](https://github.com/tysonthomas9/loomcli/pull/682)
+and [FleetDB #288](https://github.com/BrowserOperator/fleet-db/pull/288). Tested source
+commits are `c9267da8e` and `a82180b2`. The real PostgreSQL HTTP regression and
+focused static/service/harness gates passed after correcting late lease cleanup.
+
+The approved VM restart restored runtime access. The owned browser project,
+volumes and dedicated profile are cleaned up. The separate PostgreSQL proof
+fixture is stopped with its data preserved, and the shared VM remains running.
+Earlier pending-runtime notes are superseded by this evidence. Final hosted CI
+and the broader architecture requirements remain separate; no merge or deployment
+is included in this delivery.
 
 ## Acceptance criteria
 
@@ -21,4 +40,4 @@ The broader streaming/projection objective remains unfinished. Whole-client atom
 
 ## Goal tracker limitation
 
-The session goal remains active. Its tool supports only completion or blocking, not editing the objective text. This document records the user-directed scope change without incorrectly marking the original architecture objective complete.
+The goal tool supports completion or blocking, not editing objective text or reactivating a blocked tracker. Restoring the runtime and finishing this delivery slice do not complete the original architecture objective. The remaining scope above is preserved.

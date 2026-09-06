@@ -156,8 +156,8 @@ PostgreSQL port is not published; its fixed credentials are disposable local
 fixture credentials, not deployment configuration.
 
 This path uses `localdogfood`, not a paid AI backend. Successful startup is not
-proof of SSE delivery or autonomous task completion. Enrolled public claim/release
-routing remains incomplete; report daemon failures rather than substituting
+proof of SSE delivery or autonomous task completion. Use the paired public issue routing changes for claim/release; other lifecycle
+routing remains incomplete. Report daemon failures rather than substituting
 manual locks or synthetic outcomes. Browser verification must record actual
 stream requests and UI updates separately from startup.
 
@@ -178,3 +178,52 @@ load them through RepoStore.List. It must not PATCH the global workspace catalog
 with bare names or compensate a catalog rejection by deleting a successfully
 created repository. Git remote URLs and local paths are not coerced into global
 catalog identities.
+
+
+### Real PostgreSQL browser regression
+
+Use a dedicated Podman project whose name starts with `loomcli-pg-browser-`.
+After `local-mode-postgres-up` reports the product entrypoint ready, run:
+
+```sh
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-pg-browser-owned \
+LOCAL_MODE_API_PORT=8582 LOCAL_MODE_UI_PORT=8583 \
+make local-mode-postgres-sse-verify
+```
+
+Use the same project/ports for startup and teardown. This target **stops and
+restarts that project's UI proxy** to sever the existing fetch-SSE sockets while
+leaving the API available for mutations. The test checks the container's Compose
+ownership label and restores it in `finally`; a process kill can still require
+manual restoration of this run-owned proxy. Do not point it at shared services.
+The currently paired Fleet must implement enrolled public issue command routing;
+a 500 from claim/release is a failed prerequisite, not a skipped success.
+
+The tests observe the application's actual Fetch response bytes through Chromium
+CDP. They neither replace browser responses nor create another SSE subscription.
+They require connected frames, scoped mutation IDs, immediate rendering before
+collection responses, later authoritative projection refresh, matching deliveries
+to two independent browser contexts, exact resume headers, and no document reload
+through the real outage. Duplicate/gap assertions cover the deliberately created
+mutation sequence and observation interval, not arbitrary workloads.
+
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` can select an already installed compatible
+Chromium. Otherwise use the repo's installed Playwright browser. A non-secret
+local-mode API-key value prevents the harness reading the host's key file; local
+mode disables auth, so this target provides no authentication-security proof.
+Results, sanitized CDP evidence and browser screenshots are attached to the JSON
+report at `internal/webui/frontend/test-results/pg-sse-report.json`; set
+`PLAYWRIGHT_JSON_OUTPUT_FILE` to preserve it elsewhere. Do not publish general
+HAR files or host credentials. No reload fallback, retry-on-failure test rerun or
+manual database enrollment is permitted to turn a failure into a pass.
+
+The SSE gate creates fresh workspaces through actual POST201 responses and verifies
+that they have no agents. Existing localdogfood agents remain in their original
+workspace; they cannot claim the suite's tasks. Each spec uses explicit workspace
+IDs and the existing source repository (`LOOM_SSE_TEST_SOURCE_REPO`, default
+`/workspace/source-repo`). Tests close their tasks; matching owned-project teardown
+removes the temporary workspaces and volumes. Do not substitute arbitrary issue
+types or relax event-count assertions to avoid autonomous-worker interference.
+
+The [final paired proof](../../docs/testing/postgres-sse-regression-proof.md) records
+seven real browser passes, exact traces and remaining architecture limits.

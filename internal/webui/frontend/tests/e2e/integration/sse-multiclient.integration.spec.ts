@@ -1,306 +1,307 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+import {
+  createIsolatedSSEWorkspace,
+  assertSSEWorkspaceHasNoAgents,
+} from "./sse-workspace";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { test, expect, type Page, type TestInfo } from "@playwright/test";
 import {
   FRONTEND_BASE_URL,
   generateTestId,
-  resolveWorkspaceId,
   createTestIssueInWorkspace,
   updateIssueStatusInWorkspace,
   closeTestIssueInWorkspace,
 } from "./helpers";
+import {
+  createSSEBrowserProbe,
+  type SSEBrowserProbe,
+} from "./sse-browser-probe";
 
-/**
- * Integration tests for SSE multi-client broadcast and reconnection
- * against a real loom serve backend using workspace-scoped API paths.
- *
- * These tests require:
- * - A running loom serve instance (default http://localhost:8080)
- * - RUN_INTEGRATION_TESTS=1 environment variable
- *
- * Run with: RUN_INTEGRATION_TESTS=1 npx playwright test --project=integration sse-multiclient
- */
-
-// Skip if integration tests not enabled
-const skipIntegration = !process.env.RUN_INTEGRATION_TESTS;
-test.skip(skipIntegration, "Integration tests require RUN_INTEGRATION_TESTS=1");
-
-// Run tests serially to avoid data conflicts with shared backend
+const run = promisify(execFile);
+test.skip(
+  !process.env.RUN_INTEGRATION_TESTS,
+  "Requires running paired services",
+);
 test.describe.configure({ mode: "serial" });
-
-let workspaceId = "";
-const eventsStreamRoute = /\/api\/workspaces\/[^/]+\/events(?:\?.*)?$/;
+let workspace = "";
+const issueIds: string[] = [];
 
 test.beforeAll(async () => {
-  workspaceId = await resolveWorkspaceId();
+  workspace = await createIsolatedSSEWorkspace();
+});
+test.beforeEach(async () => {
+  await assertSSEWorkspaceHasNoAgents(workspace);
+});
+test.afterEach(async () => {
+  for (const id of issueIds.splice(0))
+    await closeTestIssueInWorkspace(workspace, id);
 });
 
-/**
- * Helper: navigate to '/' and wait for redirect + SSE connected state.
- */
-async function navigateAndWaitForConnected(page: Page) {
-  await page.goto("/");
-  await page.waitForURL("**/ws/*/**", { timeout: 10_000 });
-  await expect(page.locator('[data-state="connected"]')).toBeVisible({
-    timeout: 15_000,
-  });
+async function createIssue(title: string) {
+  const id = await createTestIssueInWorkspace(workspace, title);
+  issueIds.push(id);
+  return id;
 }
 
-async function waitForVisibleAfterReconnect(
-  page: Page,
-  locator: ReturnType<Page["locator"]>,
-) {
-  try {
-    await expect(async () => {
-      await expect(locator).toBeVisible();
-    }).toPass({ timeout: 15_000, intervals: [500, 1000, 2000, 3000] });
-  } catch {
-    await page.reload();
-    await page.waitForURL("**/ws/*/**", { timeout: 10_000 });
-    await expect(page.locator('[data-state="connected"]')).toBeVisible({
-      timeout: 15_000,
+async function observe(page: Page, owned: string[] = []) {
+  const probe = await createSSEBrowserProbe(page, workspace);
+  owned.forEach((id) => probe.ownIssue(id));
+  let navigations = 0;
+  page.on("request", (request) => {
+    if (
+      request.isNavigationRequest() &&
+      request.resourceType() === "document" &&
+      request.frame() === page.mainFrame()
+    )
+      navigations++;
+  });
+  await page.goto(`/ws/${encodeURIComponent(workspace)}/kanban?groupBy=none`);
+  await expect
+    .poll(() => {
+      probe.assertHealthy();
+      return probe.frames.some((frame) => frame.event === "connected");
+    })
+    .toBe(true);
+  await expect
+    .poll(() => {
+      probe.assertHealthy();
+      return probe.completions.length;
+    })
+    .toBeGreaterThan(0);
+  probe.assertHealthy();
+  return { page, probe, navigations: () => navigations };
+}
+
+type Client = Awaited<ReturnType<typeof observe>>;
+function mutations(probe: SSEBrowserProbe, id: string) {
+  probe.assertHealthy();
+  const found = probe.frames.filter(
+    (frame) => frame.event === "mutation" && frame.issueId === id,
+  );
+  for (const frame of found) {
+    expect(frame.workspaceId).toBe(workspace);
+    expect(frame.id).toMatch(/^c2\./);
+    expect(frame.action).toMatch(
+      /^issue\.(create|update|claim|release|assign)$/,
+    );
+  }
+  return found;
+}
+async function visible(client: Client, column: string, title: string) {
+  const card = client.page
+    .getByRole("region", { name: column, exact: true })
+    .getByText(title, { exact: true });
+  await expect(card).toBeVisible();
+  await expect(card).toHaveCount(1);
+  expect(
+    client.navigations(),
+    "Recovery must never navigate/reload the page",
+  ).toBe(1);
+  client.probe.assertHealthy();
+}
+async function attach(info: TestInfo, clients: Client[]) {
+  for (const [index, client] of clients.entries()) {
+    await info.attach(`client-${index + 1}-actual-fetch`, {
+      body: JSON.stringify(client.probe.snapshot(), null, 2),
+      contentType: "application/json",
     });
-    await expect(locator).toBeVisible({ timeout: 10_000 });
+    await info.attach(`client-${index + 1}-board`, {
+      body: await client.page.screenshot(),
+      contentType: "image/png",
+    });
+    await client.probe.dispose();
   }
 }
 
-async function waitForHeaderConnectionState(
-  page: Page,
-  statePattern: RegExp,
-  timeout = 10_000,
-) {
-  await expect(
-    page.getByRole("status", { name: /Connection status:/ }),
-  ).toHaveAttribute("aria-label", statePattern, { timeout });
+// Fault injection must target an explicitly selected, run-owned local-mode proxy.
+// No browser response interception, offline emulation or navigation fallback.
+async function proxyAction(action: "stop" | "start") {
+  const project = process.env.LOCAL_MODE_COMPOSE_PROJECT;
+  const container = process.env.LOOM_SSE_TEST_PROXY_CONTAINER;
+  if (
+    !project?.startsWith("loomcli-pg-browser-") ||
+    container !== `${project}-ui-local-1`
+  ) {
+    throw new Error(
+      "Select an isolated loomcli-pg-browser-* project and its exact ui-local-1 container",
+    );
+  }
+  const { stdout } = await run("podman", [
+    "inspect",
+    "--format",
+    '{{ index .Config.Labels "com.docker.compose.project" }}',
+    container,
+  ]);
+  expect(
+    stdout.trim(),
+    "Proxy ownership label must match the selected project",
+  ).toBe(project);
+  await run("podman", [action, container]);
 }
 
-async function waitForConnectedOrReload(page: Page) {
+test("create and status frames reach two independent clients once @regression", async ({
+  browser,
+}, info) => {
+  const contexts = await Promise.all([
+    browser.newContext({ baseURL: FRONTEND_BASE_URL }),
+    browser.newContext({ baseURL: FRONTEND_BASE_URL }),
+  ]);
+  const clients: Client[] = [];
   try {
-    await waitForHeaderConnectionState(
-      page,
-      /Connection status: Connected/,
-      15_000,
+    for (const context of contexts)
+      clients.push(await observe(await context.newPage()));
+    const title = `SSE two clients ${generateTestId()}`;
+    const id = await createIssue(title);
+    clients.forEach(({ probe }) => probe.ownIssue(id));
+    for (const client of clients) {
+      await visible(client, "Open issues", title);
+      await expect.poll(() => mutations(client.probe, id).length).toBe(1);
+    }
+    const completed = clients.map(({ probe }) => probe.completions.length);
+    await updateIssueStatusInWorkspace(workspace, id, "in_progress");
+    for (const [index, client] of clients.entries()) {
+      await visible(client, "In Progress issues", title);
+      await expect.poll(() => mutations(client.probe, id).length).toBe(2);
+      await expect
+        .poll(() => client.probe.completions.length, { timeout: 10_000 })
+        .toBeGreaterThan(completed[index]);
+      expect(mutations(client.probe, id)).toHaveLength(2);
+    }
+    const ids = clients.map(({ probe }) =>
+      mutations(probe, id).map((frame) => frame.id),
     );
-  } catch {
-    await page.reload();
-    await page.waitForURL("**/ws/*/**", { timeout: 10_000 });
-    await waitForHeaderConnectionState(
-      page,
-      /Connection status: Connected/,
-      15_000,
-    );
+    expect(ids[0]).toEqual(ids[1]);
+    expect(new Set(ids[0]).size).toBe(2);
+    for (const client of clients)
+      expect(mutations(client.probe, id).map((frame) => frame.action)).toEqual([
+        "issue.create",
+        "issue.claim",
+      ]);
+  } finally {
+    try {
+      await attach(info, clients);
+    } finally {
+      await Promise.all(contexts.map((context) => context.close()));
+    }
   }
-}
-
-test.describe("SSE multi-client broadcast", () => {
-  const testIssueIds: string[] = [];
-
-  test.afterEach(async () => {
-    for (const id of testIssueIds) {
-      await closeTestIssueInWorkspace(workspaceId, id);
-    }
-    testIssueIds.length = 0;
-  });
-
-  test("mutation broadcast reaches two independent browser contexts", async ({
-    browser,
-  }) => {
-    // Create a seed issue so the Kanban board renders columns (not empty state)
-    const seedId = await createTestIssueInWorkspace(
-      workspaceId,
-      `SSE Seed ${generateTestId()}`,
-    );
-    testIssueIds.push(seedId);
-
-    const contextA = await browser.newContext({ baseURL: FRONTEND_BASE_URL });
-    const contextB = await browser.newContext({ baseURL: FRONTEND_BASE_URL });
-
-    try {
-      const pageA = await contextA.newPage();
-      const pageB = await contextB.newPage();
-
-      await navigateAndWaitForConnected(pageA);
-      await navigateAndWaitForConnected(pageB);
-
-      // Wait for Kanban columns to render and SSE to stabilize
-      const readyColumnA = pageA.getByRole("region", { name: "Open issues" });
-      const readyColumnB = pageB.getByRole("region", { name: "Open issues" });
-      await expect(readyColumnA).toBeVisible({ timeout: 15_000 });
-      await expect(readyColumnB).toBeVisible({ timeout: 15_000 });
-      await pageA.waitForTimeout(2000);
-
-      // Create an issue via workspace-scoped API
-      const uniqueTitle = `SSE Multi-Client Test ${generateTestId()}`;
-      const issueId = await createTestIssueInWorkspace(
-        workspaceId,
-        uniqueTitle,
-      );
-      testIssueIds.push(issueId);
-
-      // Both pages should show the new issue in the ready column without reload
-      await expect(async () => {
-        await expect(readyColumnA.getByText(uniqueTitle)).toBeVisible();
-      }).toPass({ timeout: 15_000, intervals: [500, 1000, 2000, 3000] });
-
-      await expect(async () => {
-        await expect(readyColumnB.getByText(uniqueTitle)).toBeVisible();
-      }).toPass({ timeout: 15_000, intervals: [500, 1000, 2000, 3000] });
-    } finally {
-      await contextA.close();
-      await contextB.close();
-    }
-  });
-
-  test("status change broadcast reaches both clients", async ({ browser }) => {
-    // Create issue before opening browser contexts
-    const uniqueTitle = `SSE Status Broadcast Test ${generateTestId()}`;
-    const issueId = await createTestIssueInWorkspace(workspaceId, uniqueTitle);
-    testIssueIds.push(issueId);
-
-    const contextA = await browser.newContext({ baseURL: FRONTEND_BASE_URL });
-    const contextB = await browser.newContext({ baseURL: FRONTEND_BASE_URL });
-
-    try {
-      const pageA = await contextA.newPage();
-      const pageB = await contextB.newPage();
-
-      await navigateAndWaitForConnected(pageA);
-      await navigateAndWaitForConnected(pageB);
-
-      // Wait for issue to appear in ready column on both pages
-      const readyColumnA = pageA.getByRole("region", { name: "Open issues" });
-      const readyColumnB = pageB.getByRole("region", { name: "Open issues" });
-
-      await expect(async () => {
-        await expect(readyColumnA.getByText(uniqueTitle)).toBeVisible();
-      }).toPass({ timeout: 10_000, intervals: [500, 1000, 2000] });
-
-      await expect(async () => {
-        await expect(readyColumnB.getByText(uniqueTitle)).toBeVisible();
-      }).toPass({ timeout: 10_000, intervals: [500, 1000, 2000] });
-
-      // Update status to in_progress via workspace-scoped API
-      await updateIssueStatusInWorkspace(workspaceId, issueId, "in_progress");
-
-      // Both pages should show the issue moved to in_progress column
-      const inProgressA = pageA.getByRole("region", {
-        name: "In Progress issues",
-      });
-      const inProgressB = pageB.getByRole("region", {
-        name: "In Progress issues",
-      });
-
-      await expect(async () => {
-        await expect(inProgressA.getByText(uniqueTitle)).toBeVisible();
-      }).toPass({ timeout: 10_000, intervals: [500, 1000, 2000, 3000] });
-
-      await expect(async () => {
-        await expect(inProgressB.getByText(uniqueTitle)).toBeVisible();
-      }).toPass({ timeout: 10_000, intervals: [500, 1000, 2000, 3000] });
-
-      // Verify card is no longer in ready column (retry to avoid race with DOM update)
-      await expect(async () => {
-        await expect(readyColumnA.getByText(uniqueTitle)).not.toBeVisible();
-      }).toPass({ timeout: 5_000, intervals: [500, 1000] });
-
-      await expect(async () => {
-        await expect(readyColumnB.getByText(uniqueTitle)).not.toBeVisible();
-      }).toPass({ timeout: 5_000, intervals: [500, 1000] });
-    } finally {
-      await contextA.close();
-      await contextB.close();
-    }
-  });
 });
 
-test.describe("SSE reconnection and catch-up", () => {
-  const testIssueIds: string[] = [];
-
-  test.afterEach(async () => {
-    for (const id of testIssueIds) {
-      await closeTestIssueInWorkspace(workspaceId, id);
+test("real proxy disconnect resumes both accepted cursors without replay gaps or duplicates @regression", async ({
+  browser,
+}, info) => {
+  test.skip(
+    !process.env.LOOM_SSE_TEST_PROXY_CONTAINER,
+    "Requires an explicitly owned local-mode proxy for real socket interruption",
+  );
+  test.setTimeout(90_000);
+  const title = `SSE real reconnect ${generateTestId()}`;
+  const id = await createIssue(title);
+  const contexts = await Promise.all([
+    browser.newContext({ baseURL: FRONTEND_BASE_URL }),
+    browser.newContext({ baseURL: FRONTEND_BASE_URL }),
+  ]);
+  const clients: Client[] = [];
+  let proxyStopped = false;
+  try {
+    for (const context of contexts)
+      clients.push(await observe(await context.newPage(), [id]));
+    let completed = clients.map(({ probe }) => probe.completions.length);
+    await updateIssueStatusInWorkspace(workspace, id, "in_progress");
+    for (const [index, client] of clients.entries()) {
+      await visible(client, "In Progress issues", title);
+      await expect.poll(() => mutations(client.probe, id).length).toBe(1);
+      await expect
+        .poll(() => client.probe.completions.length, { timeout: 10_000 })
+        .toBeGreaterThan(completed[index]);
     }
-    testIssueIds.length = 0;
-  });
-
-  test("connection status shows disconnected during network interruption", async ({
-    page,
-  }) => {
-    await navigateAndWaitForConnected(page);
-
-    let blockSSE = true;
-    const sseRouteHandler = (route: Route) =>
-      blockSSE ? route.abort() : route.continue();
-
-    // Block new SSE connections
-    await page.route(eventsStreamRoute, sseRouteHandler);
-
-    // Force disconnect by navigating away and back — this closes the
-    // existing EventSource and the new connection hits the abort route.
-    await page.goto("about:blank");
-    await page.goto("/");
-    await page.waitForURL("**/ws/*/**", { timeout: 10_000 });
-
-    // Assert connection status shows reconnecting or disconnected.
-    await waitForHeaderConnectionState(
-      page,
-      /Connection status: (Reconnecting|Disconnected)/,
+    const cursors = clients.map(
+      ({ probe }) => probe.frames.filter((frame) => frame.id).at(-1)!.id,
     );
-
-    // Unblock SSE connections and recreate the page's EventSource so the
-    // reconnect backoff does not dominate the assertion timeout.
-    blockSSE = false;
-    await page.unrouteAll({ behavior: "ignoreErrors" });
-    await page.goto("about:blank");
-    await page.goto("/");
-    await page.waitForURL("**/ws/*/**", { timeout: 10_000 });
-
-    // Assert connection recovers to connected
-    await waitForConnectedOrReload(page);
-  });
-
-  test("issue created during disconnection appears after reconnect", async ({
-    page,
-  }) => {
-    await navigateAndWaitForConnected(page);
-
-    let blockSSE = true;
-    const sseRouteHandler = (route: Route) =>
-      blockSSE ? route.abort() : route.continue();
-
-    // Block new SSE connections
-    await page.route(eventsStreamRoute, sseRouteHandler);
-
-    // Force disconnect by navigating away and back
-    await page.goto("about:blank");
-    await page.goto("/");
-    await page.waitForURL("**/ws/*/**", { timeout: 10_000 });
-
-    // Wait for disconnected/reconnecting state.
-    await waitForHeaderConnectionState(
-      page,
-      /Connection status: (Reconnecting|Disconnected)/,
+    for (const cursor of cursors) expect(cursor).toMatch(/^c2\./);
+    const requestCounts = clients.map(({ probe }) => probe.requests.length);
+    const activeStreams = clients.map(
+      ({ probe }) =>
+        probe.requests.filter((request) => request.streamAttached).at(-1)!
+          .requestId,
     );
-
-    // Create an issue via API while disconnected
-    const uniqueTitle = `SSE Reconnect Catch-up Test ${generateTestId()}`;
-    const issueId = await createTestIssueInWorkspace(workspaceId, uniqueTitle);
-    testIssueIds.push(issueId);
-
-    // Unblock SSE connections and recreate the page's EventSource so the
-    // reconnect backoff does not dominate the assertion timeout.
-    blockSSE = false;
-    await page.unrouteAll({ behavior: "ignoreErrors" });
-    await page.goto("about:blank");
-    await page.goto("/");
-    await page.waitForURL("**/ws/*/**", { timeout: 10_000 });
-
-    // Wait for connection to recover
-    await waitForConnectedOrReload(page);
-
-    // Assert the issue created during disconnection is now visible
-    const readyColumn = page.getByRole("region", { name: "Open issues" });
-    await waitForVisibleAfterReconnect(
-      page,
-      readyColumn.getByText(uniqueTitle),
+    const failureCounts = clients.map(({ probe }) => probe.failures.length);
+    // Mark before stop so finally restores the proxy even if stop observation fails.
+    proxyStopped = true;
+    await proxyAction("stop");
+    for (const [index, client] of clients.entries()) {
+      await expect
+        .poll(
+          () => {
+            client.probe.assertHealthy();
+            return client.probe.failures
+              .slice(failureCounts[index])
+              .some((failure) => failure.requestId === activeStreams[index]);
+          },
+          { timeout: 15_000 },
+        )
+        .toBe(true);
+    }
+    await updateIssueStatusInWorkspace(workspace, id, "review");
+    for (const client of clients)
+      expect(mutations(client.probe, id)).toHaveLength(1);
+    await proxyAction("start");
+    proxyStopped = false;
+    for (const [index, client] of clients.entries()) {
+      await expect
+        .poll(
+          () =>
+            client.probe.requests
+              .slice(requestCounts[index])
+              .some(
+                (request) =>
+                  request.status === 200 &&
+                  request.lastEventId === cursors[index] &&
+                  request.since === null,
+              ),
+          { timeout: 30_000 },
+        )
+        .toBe(true);
+      await expect.poll(() => mutations(client.probe, id).length).toBe(2);
+      await visible(client, "Review issues", title);
+    }
+    completed = clients.map(({ probe }) => probe.completions.length);
+    await updateIssueStatusInWorkspace(workspace, id, "open");
+    for (const [index, client] of clients.entries()) {
+      await visible(client, "Open issues", title);
+      await expect.poll(() => mutations(client.probe, id).length).toBe(4);
+      await expect
+        .poll(() => client.probe.completions.length, { timeout: 10_000 })
+        .toBeGreaterThan(completed[index]);
+      const frames = mutations(client.probe, id);
+      expect(frames).toHaveLength(4);
+      expect(frames.map((frame) => frame.action)).toEqual([
+        "issue.claim",
+        "issue.update",
+        "issue.update",
+        "issue.assign",
+      ]);
+      expect(
+        frames.map(
+          (frame) =>
+            (frame.data as { new_status?: string } | undefined)?.new_status,
+        ),
+      ).toEqual(["in_progress", "review", "open", undefined]);
+      expect(new Set(frames.map((frame) => frame.id)).size).toBe(4);
+      expect(client.navigations()).toBe(1);
+      client.probe.assertHealthy();
+    }
+    expect(mutations(clients[0].probe, id).map((frame) => frame.id)).toEqual(
+      mutations(clients[1].probe, id).map((frame) => frame.id),
     );
-  });
+  } finally {
+    try {
+      if (proxyStopped) await proxyAction("start");
+    } finally {
+      try {
+        await attach(info, clients);
+      } finally {
+        await Promise.all(contexts.map((context) => context.close()));
+      }
+    }
+  }
 });
