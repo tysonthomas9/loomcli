@@ -10,7 +10,7 @@ function offer(): RecoveryHandle {
     workspace: "WS",
     source_repos: [],
     expires_at: new Date(now + 60_000).toISOString(),
-    manifest: "fleet.issue-workspace.v2",
+    manifest: "fleet.issue-workspace.v3",
   };
 }
 function prepared(input = offer()) {
@@ -24,6 +24,7 @@ function prepared(input = offer()) {
       ready: [],
       blocked: [],
       deferred: [],
+      dependencies: [],
     }),
     input,
     input.handle,

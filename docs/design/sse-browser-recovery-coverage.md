@@ -14,9 +14,9 @@ The authenticated handle bridge supplies a source-bound issue read. Browser offe
 | Detail comments and history | `components/IssueDetailPanel/IssueDetailPanel.tsx` owns comments and events locally | Panel history now has its own bounded ordinary recovery participant, tied to the intended selection, with explicit failure and cancellation. Confirmed local comments are a selection-scoped overlay retired when a detail read includes them. Neither is certified coverage; the native manifest still omits comments and history, and a successful issue-store refresh proves neither collection. |
 | Dormant consumers | Mode changes reuse the issue store; generic query entries are removed after the final registration disposes; App's selected detail hook remains mounted | Inventory actual retained state rather than assuming every registry entry persists. Mode switches, previous-data refs and local stores must not publish older uncertified content as recovered. |
 
-FleetDB's `fleet.issue-workspace.v2` contains complete issue rows, total, ready, blocked and deferred collections. It contains no graph edges, detail relationship collections, comments or history. The v2 read binds its cursor to the producer transaction and requires the database writer/provenance protocol. It cannot satisfy the table above by itself; time-based readiness refresh also remains necessary.
+FleetDB's `fleet.issue-workspace.v3` contains complete issue rows, total, ready, blocked, deferred and directed dependency collections. Dependencies now share the exact transaction and budget, but adapters and publication into graph/detail views remain unimplemented. Comments and history remain absent. The read binds its cursor to the producer transaction and requires the database writer/provenance protocol. It cannot satisfy the table above by itself; time-based readiness refresh also remains necessary.
 
-The [native preparation and HTTP API](../testing/sse-native-recovery-preparation-proof.md) now implement the off-store read/validation seam. They remain disconnected from EventProvider and cache publication.
+The [native preparation and HTTP API](../testing/sse-native-recovery-preparation-proof.md) now implement the off-store read/validation seam. EventProvider now owns suspended, cancellable preparation. Cache publication remains disabled.
 
 ## Chosen next implementation
 
@@ -32,7 +32,7 @@ The [native preparation and HTTP API](../testing/sse-native-recovery-preparation
 
 The offer decoder validates against the immutable repository filter used for that loop's URL. A no-op `connect(..., newRepos)` call can change saved configuration without changing the current wire subscription; saved configuration therefore cannot validate that stream's offer. Repository filters are subscription metadata, not authorization; the Fleet response is workspace-wide.
 
-The decoder only exposes valid offers to resync subscribers. It does not pause retries, fetch certificates, publish caches or advance checkpoints. Enabling partial automatic consumption now would either starve slow recovery with repeated reconnects or pause the event stream without a complete acknowledgment path.
+The decoder exposes valid offers to the owning EventProvider, which now pauses the exact transport, performs a bounded native read and retains prepared data privately. It does not publish caches or advance checkpoints. The explicit paused state still lacks a complete acknowledgment path; full view coverage and publication ownership remain required.
 
 ## Regression requirements
 

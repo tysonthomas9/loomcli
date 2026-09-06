@@ -8,7 +8,7 @@ const offer: RecoveryHandle = {
   workspace: "WS",
   source_repos: [],
   expires_at: "2026-09-05T12:01:00Z",
-  manifest: "fleet.issue-workspace.v2",
+  manifest: "fleet.issue-workspace.v3",
 };
 function issue(id = "WS-1"): Record<string, unknown> {
   return {
@@ -37,6 +37,7 @@ function document(): Record<string, unknown> {
     ready: [],
     blocked: [],
     deferred: [],
+    dependencies: [],
   };
 }
 function prepare(value: unknown) {
@@ -48,7 +49,13 @@ describe("prepareIssueRecovery", () => {
     const result = prepareIssueRecovery(raw, offer, offer.handle, now);
     expect(result.document).toBe(raw);
     expect(result.offerSourceIdentity).toBe(offer.source_identity);
-    expect(result.coverage).toEqual(["issues", "ready", "blocked", "deferred"]);
+    expect(result.coverage).toEqual([
+      "issues",
+      "ready",
+      "blocked",
+      "deferred",
+      "dependencies",
+    ]);
     expect(result.issues).toEqual([]);
     expect(Object.isFrozen(result)).toBe(true);
   });
@@ -64,6 +71,93 @@ describe("prepareIssueRecovery", () => {
     expect(() => {
       (result.issues[0].metadata as Record<string, string>).kept = "changed";
     }).toThrow();
+  });
+  it("preserves all five dependency types and their complete immutable records", () => {
+    const dependencies = [
+      "blocks",
+      "parent-child",
+      "related",
+      "duplicate-of",
+      "superseded-by",
+    ].map((type) => ({
+      issue_id: "WS-1",
+      depends_on_id: "WS-2",
+      type,
+      created_at: "2026-09-05T01:02:03.123456789-07:00",
+      created_by: "edge-author",
+    }));
+    const result = prepare({
+      ...document(),
+      issues: [issue(), issue("WS-2")],
+      total: 2,
+      dependencies,
+    });
+    expect(result.dependencies).toEqual(dependencies);
+    expect(Object.isFrozen(result.dependencies)).toBe(true);
+    expect(Object.isFrozen(result.dependencies[0])).toBe(true);
+    dependencies[0].created_by = "later";
+    expect(result.dependencies[0].created_by).toBe("edge-author");
+    expect(result.coverage).toContain("dependencies");
+    expect(result).not.toHaveProperty("graph");
+  });
+  it.each([
+    ["missing issue", { issue_id: "absent" }],
+    ["missing target", { depends_on_id: "absent" }],
+    ["self", { depends_on_id: "WS-1" }],
+    ["unknown type", { type: "relates-to" }],
+    ["empty actor", { created_by: "" }],
+    ["null actor", { created_by: null }],
+    ["invalid timestamp", { created_at: "2026-02-30T00:00:00Z" }],
+    ["zero time", { created_at: "0001-01-01T00:00:00Z" }],
+    ["zero time offset", { created_at: "0001-01-01T01:00:00+01:00" }],
+    ["zero fractional time", { created_at: "0001-01-01T00:00:00.000000000Z" }],
+    ["extra field", { workspace: "WS" }],
+  ])("rejects malformed dependency %s", (_name, patch) => {
+    const edge = {
+      issue_id: "WS-1",
+      depends_on_id: "WS-2",
+      type: "blocks",
+      created_at: "2026-09-05T00:00:00Z",
+      created_by: "actor",
+      ...patch,
+    };
+    expect(() =>
+      prepare({
+        ...document(),
+        issues: [issue(), issue("WS-2")],
+        total: 2,
+        dependencies: [edge],
+      }),
+    ).toThrow();
+  });
+  it("requires every edge field, rejects duplicate triples, and preserves nonzero nanoseconds", () => {
+    const edge = {
+      issue_id: "WS-1",
+      depends_on_id: "WS-2",
+      type: "blocks",
+      created_at: "0001-01-01T00:00:00.000000001Z",
+      created_by: "actor",
+    };
+    const d = {
+      ...document(),
+      issues: [issue(), issue("WS-2")],
+      total: 2,
+      dependencies: [edge],
+    };
+    expect(prepare(d).dependencies[0].created_at).toBe(edge.created_at);
+    expect(() =>
+      prepare({ ...d, dependencies: [edge, { ...edge, created_by: "other" }] }),
+    ).toThrow();
+    for (const key of Object.keys(edge)) {
+      const missing: Record<string, unknown> = { ...edge };
+      delete missing[key];
+      expect(() => prepare({ ...d, dependencies: [missing] })).toThrow();
+    }
+  });
+  it("rejects legacy v2 documents even with a dependencies array", () => {
+    expect(() =>
+      prepare({ ...document(), manifest: "fleet.issue-workspace.v2" }),
+    ).toThrow();
   });
   it("accepts direct blockers and sole parent sentinel", () => {
     for (const parent of [false, true]) {
@@ -110,7 +204,7 @@ describe("prepareIssueRecovery", () => {
       prepare({ ...document(), issues: [{ ...issue(), ...patch }], total: 1 }),
     ).toThrow();
   });
-  it.each(["issues", "ready", "blocked", "deferred"])(
+  it.each(["issues", "ready", "blocked", "deferred", "dependencies"])(
     "rejects missing/null %s",
     (key) => {
       const d = document();

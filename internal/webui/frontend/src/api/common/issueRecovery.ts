@@ -35,12 +35,24 @@ export interface NativeRecoveryBlocked {
   readonly issue: NativeRecoveryIssue;
   readonly blockers: readonly NativeRecoveryBlocker[];
 }
+export interface NativeRecoveryDependency {
+  readonly issue_id: string;
+  readonly depends_on_id: string;
+  readonly type:
+    | "blocks"
+    | "parent-child"
+    | "related"
+    | "duplicate-of"
+    | "superseded-by";
+  readonly created_at: string;
+  readonly created_by: string;
+}
 /** Prepared native data only. Coverage names identify this fixed manifest, not
  * mounted UI query coverage, a cache commit, or permission to acknowledge SSE. */
 export interface PreparedIssueRecovery {
   readonly offer: RecoveryHandle;
   readonly document: string;
-  readonly manifest: "fleet.issue-workspace.v2";
+  readonly manifest: "fleet.issue-workspace.v3";
   readonly workspace: string;
   readonly through: string;
   readonly offerSourceIdentity: string;
@@ -49,7 +61,14 @@ export interface PreparedIssueRecovery {
   readonly ready: readonly NativeRecoveryIssue[];
   readonly blocked: readonly NativeRecoveryBlocked[];
   readonly deferred: readonly NativeRecoveryIssue[];
-  readonly coverage: readonly ["issues", "ready", "blocked", "deferred"];
+  readonly dependencies: readonly NativeRecoveryDependency[];
+  readonly coverage: readonly [
+    "issues",
+    "ready",
+    "blocked",
+    "deferred",
+    "dependencies",
+  ];
 }
 function fail(): never {
   throw new Error("Invalid native issue recovery snapshot");
@@ -276,6 +295,48 @@ function validateBlocker(
     fail();
   seen.add(id);
 }
+function dependencies(
+  values: unknown[],
+  all: Map<string, NativeRecoveryIssue>,
+): NativeRecoveryDependency[] {
+  const seen = new Set<string>();
+  const types = new Set([
+    "blocks",
+    "parent-child",
+    "related",
+    "duplicate-of",
+    "superseded-by",
+  ]);
+  return values.map((value) => {
+    const row = object(value);
+    exact(row, [
+      "issue_id",
+      "depends_on_id",
+      "type",
+      "created_at",
+      "created_by",
+    ]);
+    const from = text(row.issue_id),
+      to = text(row.depends_on_id),
+      type = text(row.type);
+    if (!all.has(from) || !all.has(to) || from === to || !types.has(type))
+      fail();
+    const identity = JSON.stringify([from, to, type]);
+    if (seen.has(identity)) fail();
+    seen.add(identity);
+    text(row.created_by);
+    timestamp(row.created_at);
+    const createdAt = text(row.created_at);
+    // Date.parse truncates sub-millisecond precision; preserve valid nonzero
+    // nanoseconds while rejecting Go's zero instant, including offset aliases.
+    if (
+      Date.parse(createdAt) === Date.parse("0001-01-01T00:00:00Z") &&
+      !/\.\d*[1-9]\d*(?:Z|[+-]\d{2}:\d{2})$/.test(createdAt)
+    )
+      fail();
+    return row as unknown as NativeRecoveryDependency;
+  });
+}
 function freeze<T>(value: T): T {
   if (value !== null && typeof value === "object") {
     for (const child of Object.values(value)) freeze(child);
@@ -310,6 +371,7 @@ export function prepareIssueRecovery(
     "ready",
     "blocked",
     "deferred",
+    "dependencies",
   ]);
   if (
     root.manifest !== validatedOffer.manifest ||
@@ -336,7 +398,7 @@ export function prepareIssueRecovery(
   return freeze({
     document,
     offer: validatedOffer,
-    manifest: "fleet.issue-workspace.v2",
+    manifest: "fleet.issue-workspace.v3",
     workspace: validatedOffer.workspace,
     through,
     offerSourceIdentity: validatedOffer.source_identity,
@@ -345,6 +407,7 @@ export function prepareIssueRecovery(
     ready,
     blocked: blockedRows,
     deferred,
-    coverage: ["issues", "ready", "blocked", "deferred"],
+    dependencies: dependencies(array(root.dependencies), all),
+    coverage: ["issues", "ready", "blocked", "deferred", "dependencies"],
   }) as PreparedIssueRecovery;
 }
