@@ -40,6 +40,10 @@ type CodexLeadRuntimeConfig struct {
 	// id for the session. Codex picks its own most recent thread, which is not
 	// necessarily one loom launched — the caller warns about that.
 	ResumeLast bool
+	// RuntimeDir is the workspace runtime root under which the lead's
+	// persistent Codex store lives. Callers inside internal/cli pass
+	// cli.GetWorkspaceRuntimeDir(); leadcontrol must not import that package.
+	RuntimeDir string
 	Stdin      io.Reader
 	Stdout     io.Writer
 	Stderr     io.Writer
@@ -49,7 +53,11 @@ type CodexLeadRuntimeConfig struct {
 func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error {
 	cfg = normalizeCodexLeadRuntimeConfig(cfg)
 	runtimeHome, sqliteHome := codexLeadRuntimeDirs(cfg)
+	migrateLegacyCodexSQLiteHome(legacyCodexLeadCacheRoot(cfg), sqliteHome, cfg.Logger)
 	if err := os.MkdirAll(sqliteHome, 0700); err != nil {
+		return fmt.Errorf("create codex lead sqlite directory: %w", err)
+	}
+	if err := os.MkdirAll(runtimeHome, 0700); err != nil {
 		return fmt.Errorf("create codex lead runtime directory: %w", err)
 	}
 
@@ -118,7 +126,7 @@ func startCodexAppServer(
 	sqliteHome string,
 	endpoint string,
 ) (*exec.Cmd, chan error, context.CancelFunc, *os.File, error) {
-	// #nosec G304 -- runtimeHome is a lead-scoped cache path derived from Loom workspace/session ids.
+	// #nosec G304 -- runtimeHome is a lead-scoped runtime path derived from Loom workspace/session ids.
 	logFile, err := os.OpenFile(codexAppServerLogPath(runtimeHome), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("open codex app-server log: %w", err)
@@ -193,6 +201,10 @@ func normalizeCodexLeadRuntimeConfig(cfg CodexLeadRuntimeConfig) CodexLeadRuntim
 	cfg.SessionID = strings.TrimSpace(cfg.SessionID)
 	cfg.WorkDir = strings.TrimSpace(cfg.WorkDir)
 	cfg.ResumeThreadID = strings.TrimSpace(cfg.ResumeThreadID)
+	cfg.RuntimeDir = strings.TrimSpace(cfg.RuntimeDir)
+	if cfg.RuntimeDir == "" {
+		cfg.RuntimeDir = strings.TrimSpace(os.Getenv("LOOM_WORKSPACE_RUNTIME_DIR"))
+	}
 	if cfg.CodexPath == "" {
 		cfg.CodexPath = defaultCodexBinary
 	}
@@ -211,11 +223,37 @@ func normalizeCodexLeadRuntimeConfig(cfg CodexLeadRuntimeConfig) CodexLeadRuntim
 	return cfg
 }
 
+// codexLeadRuntimeDirs returns the per-run runtime home and the STABLE
+// per-lead sqlite home for a controlled Codex lead session.
+//
+// The sqlite home is NOT scratch: codex app-server keeps memories_*.sqlite,
+// goals_*.sqlite, state_*.sqlite and logs_*.sqlite there, which is real
+// cross-session lead state. It must stay keyed by lead only (never by session)
+// and must never be moved back under os.UserCacheDir(), which macOS is free to
+// purge — doing so silently threw away every lead's memories on each launch.
 func codexLeadRuntimeDirs(cfg CodexLeadRuntimeConfig) (string, string) {
-	base, err := os.UserCacheDir()
-	if err != nil || strings.TrimSpace(base) == "" {
+	base := strings.TrimSpace(cfg.RuntimeDir)
+	if base == "" {
 		base = os.TempDir()
 	}
+	workspace, lead, session := codexLeadRuntimePathParts(cfg)
+	root := filepath.Join(base, ".loom", "lead-sessions", workspace, lead)
+	return filepath.Join(root, "runs", session), filepath.Join(root, "sqlite")
+}
+
+// legacyCodexLeadCacheRoot returns the pre-PUPPET-489 per-lead root under the
+// OS cache dir, whose <session>/sqlite subdirectories are migrated once.
+// It returns "" when no cache dir is available.
+func legacyCodexLeadCacheRoot(cfg CodexLeadRuntimeConfig) string {
+	base, err := os.UserCacheDir()
+	if err != nil || strings.TrimSpace(base) == "" {
+		return ""
+	}
+	workspace, lead, _ := codexLeadRuntimePathParts(cfg)
+	return filepath.Join(base, "loom", "codex-leads", workspace, lead)
+}
+
+func codexLeadRuntimePathParts(cfg CodexLeadRuntimeConfig) (string, string, string) {
 	workspace := sanitizeRuntimePathPart(cfg.Workspace)
 	if workspace == "" {
 		workspace = "workspace"
@@ -228,8 +266,7 @@ func codexLeadRuntimeDirs(cfg CodexLeadRuntimeConfig) (string, string) {
 	if session == "" {
 		session = "session"
 	}
-	runtimeHome := filepath.Join(base, "loom", "codex-leads", workspace, lead, session)
-	return runtimeHome, filepath.Join(runtimeHome, "sqlite")
+	return workspace, lead, session
 }
 
 func sanitizeRuntimePathPart(s string) string {
