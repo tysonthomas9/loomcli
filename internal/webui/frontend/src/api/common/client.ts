@@ -147,6 +147,28 @@ export function notifyWorkspaceUnavailable(): void {
   }
 }
 
+/**
+ * Paths whose 503 is a normal, expected answer rather than a workspace outage —
+ * the owning hook already renders the failure (or renders nothing on purpose),
+ * so the transport must not also raise the offline badge or file a client-error.
+ *
+ *  /terminal/       503 when Redis is absent; the workspace service is healthy.
+ *  /claims/hold     503/200 depending on whether an agent supervisor is reachable;
+ *                   useClaimHold treats "no supervisor" as "no hold" by design.
+ *
+ * Scoped to 503 only — a 500 on these paths is still a bug and is still reported.
+ *
+ * The predicate is deliberately method-blind, so it covers POST/DELETE on
+ * /claims/hold as well as the polled GET. That suppresses only the transport's
+ * side effects: a failed release still rejects with ApiError, and useClaimHold
+ * still puts the message on screen. Quiet transport, loud UI.
+ */
+const OUTAGE_EXEMPT_PATH_PATTERNS = ["/terminal/", "/claims/hold"];
+
+export function isOutageExemptPath(pathname: string): boolean {
+  return OUTAGE_EXEMPT_PATH_PATTERNS.some((p) => pathname.includes(p));
+}
+
 // Auth-token-expired listeners
 type AuthTokenExpiredListener = { callback: () => void; active: boolean };
 const authTokenExpiredListeners: AuthTokenExpiredListener[] = [];
@@ -234,21 +256,24 @@ const apiMiddleware: Middleware = {
         notifyAuthTokenExpired();
       }
 
-      // 503 workspace service unavailable — skip for terminal endpoints which return 503
-      // when Redis is absent (the workspace service itself is still healthy)
-      const url503 = new URL(request.url, "http://localhost");
-      if (response.status === 503 && !url503.pathname.includes("/terminal/")) {
+      // 503 workspace service unavailable — skipped for endpoints whose 503 is
+      // an expected answer rather than an outage (see isOutageExemptPath).
+      const pathname = new URL(request.url, "http://localhost").pathname;
+      const exempt503 = response.status === 503 && isOutageExemptPath(pathname);
+      if (response.status === 503 && !exempt503) {
         notifyWorkspaceUnavailable();
       }
 
-      // 5xx error reporting (avoid recursion for the error endpoint itself)
-      const url = new URL(request.url, "http://localhost");
+      // 5xx error reporting (avoid recursion for the error endpoint itself).
+      // An exempt 503 is not reported either: the failure is expected and the
+      // owning hook already handles it, so a report is pure noise.
       if (
         response.status >= 500 &&
-        !url.pathname.endsWith("/api/client-errors")
+        !pathname.endsWith("/api/client-errors") &&
+        !exempt503
       ) {
         reportError("api-error", `${response.status} ${response.statusText}`, {
-          url: url.pathname,
+          url: pathname,
         });
       }
     }
@@ -397,8 +422,15 @@ async function fetchApi<T>(
         notifyAuthTokenExpired();
       }
 
-      // Report 5xx errors (but not errors about the error endpoint itself)
-      if (response.status >= 500 && path !== "/api/client-errors") {
+      // Report 5xx errors (but not errors about the error endpoint itself, and
+      // not an expected 503 on an outage-exempt path). `path` may carry a query
+      // string (releaseClaimHold appends ?actor=…&force=true), which is why the
+      // predicate matches on a substring rather than the whole path.
+      if (
+        response.status >= 500 &&
+        path !== "/api/client-errors" &&
+        !(response.status === 503 && isOutageExemptPath(path))
+      ) {
         reportError("api-error", `${response.status} ${response.statusText}`, {
           url: path,
         });
@@ -426,9 +458,9 @@ async function fetchApi<T>(
   } catch (error) {
     clearTimeoutCleanup();
     if (error instanceof ApiError) {
-      // Notify workspace service-unavailable for 503, but not for terminal endpoints
-      // which return 503 when Redis is absent (workspace service itself is still healthy)
-      if (error.status === 503 && !path.includes("/terminal/")) {
+      // Notify workspace service-unavailable for 503, but not for endpoints
+      // whose 503 is an expected answer (see isOutageExemptPath).
+      if (error.status === 503 && !isOutageExemptPath(path)) {
         notifyWorkspaceUnavailable();
       }
       throw error;

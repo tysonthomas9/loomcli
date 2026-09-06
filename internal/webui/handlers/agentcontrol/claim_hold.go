@@ -2,6 +2,7 @@ package agentcontrol
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"os/user"
@@ -27,11 +28,36 @@ func handleClaimHoldGet(holdFn ClaimHoldFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		result, err := holdFn("claims_hold_get", nil)
 		if err != nil {
+			if errors.Is(err, ErrSupervisorUnavailable) {
+				writeNoSupervisorHold(w)
+				return
+			}
 			writeDaemonError(w, err)
 			return
 		}
 		writeClaimHoldResult(w, result)
 	}
+}
+
+// writeNoSupervisorHold answers the GET when no agent supervisor could be
+// reached at all. A read of the hold is answerable without a daemon: if no
+// supervisor is running, nothing is holding claims and nothing is gated — that
+// is a complete and truthful answer to "is this workspace quiesced?", and it is
+// exactly what the browser's hook already synthesizes client-side. A write is
+// not answerable that way, so POST/DELETE keep their 503.
+//
+// This exists because the banner polls this route every 10 s forever: a
+// permanently-unreachable supervisor must be a normal, quiet answer rather than
+// a recurring server error (PUPPET-529). supervisor_available:false tells a
+// client that cares apart from a genuinely free workspace.
+func writeNoSupervisorHold(w http.ResponseWriter) {
+	unavailable := false
+	handler.WriteJSON(w, http.StatusOK, ClaimHoldStatusView{
+		Hold:                nil,
+		Running:             []ClaimHoldRunningView{},
+		Gated:               0,
+		SupervisorAvailable: &unavailable,
+	})
 }
 
 // handleClaimHoldSet handles POST /api/workspaces/{ws}/claims/hold.

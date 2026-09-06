@@ -3595,12 +3595,23 @@ All three routes answer with the same payload.
 - `running` lists agents whose runs were already in flight; a hold never touches
   them, so this is what a quiesce is still waiting on.
 - `gated` counts agents that are cycling but refused at the claim gate.
+- `supervisor_available` is present, and `false`, only when the server could
+  reach no agent supervisor at all. It is omitted — i.e. `true` — on every
+  daemon-sourced response.
 
 ### `GET /api/workspaces/{ws}/claims/hold`
 
-- **Response `200 OK`:** `ClaimHoldStatus` (`hold: null` when free)
-- **Response `503`:** the agent supervisor is not running (no control socket)
+- **Response `200 OK`:** `ClaimHoldStatus` (`hold: null` when free). When no
+  agent supervisor is reachable the answer is still `200`, with `hold: null`,
+  `running: []`, `gated: 0` and `supervisor_available: false` — a *read* of the
+  hold is answerable without a daemon ("nothing is holding claims"), and a
+  permanently-unreachable supervisor must not look like a server error to the
+  dashboard's 10 s poller.
 - **Response `504`:** the supervisor did not answer in time
+
+`POST` and `DELETE` still answer `503` when the supervisor is unreachable: a
+*write* genuinely cannot be satisfied without a daemon, and an operator trying
+to quiesce a workspace must be told so.
 
 ### `POST /api/workspaces/{ws}/claims/hold`
 
