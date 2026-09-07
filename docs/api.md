@@ -4460,6 +4460,56 @@ The full per-role table is published on the check's `data` field in `--json`
 output, for a separate ops runner to consume and integrate over time. `data` is
 `omitempty` on every `CheckResult`, so checks that set nothing are unaffected.
 
+### `fleet_reachability`
+
+Answers the question `fleet_starvation` structurally cannot: is any ready issue
+claimable by **nobody**? Starvation measures *roles* — `q >= 1` with
+intended-but-absent capacity — so when the only queued work matches a role whose
+every agent is parked, every enabled role has `q = 0` and starvation does not
+fail. On 2026-09-07 that is how 28 stranded tickets sat behind a check that was
+reporting them as a secondary line beside its own passing verdict. This check
+measures *issues*, and fails on its own line, with its own name, so the same
+fleet cannot read healthy again. It is registered by the same gate as
+`fleet_starvation` (the daemon config carries at least one agent entry) and
+reads the same three inputs.
+
+A role is **enabled** iff `c_int > 0` — at least one of its configured agents is
+in the local state file with an effective `desired_state` other than `stopped`.
+A role parked with `desired_state=stopped` is *disabled*, and its label is
+therefore served by nobody.
+
+| Condition | Status | Summary |
+|-----------|--------|---------|
+| Any open issue no enabled role can claim | `fail` | `N issue(s) no enabled role can claim: <label> (N, oldest 18d)` |
+| Everything claimable, human queue older than 24h | `warn` | `every one of N open issue(s) is claimable ...; M issue(s) awaiting a human, oldest 5d` |
+| Everything claimable | `pass` | `every one of N open issue(s) is claimable by an enabled role` |
+| No role carries a label filter | `warn` | `label reachability not computed (no role carries a label filter)` |
+| Daemon config, state file or ready queue unavailable, or the state file is stale | `warn` | not computed; a verdict is never fabricated from inputs that were not read |
+
+The failing line names the **orphaning label**, not just a count, because the
+label is what an operator acts on. For each unreachable issue the check asks
+which label is to blame: if removing a single label makes the issue reachable,
+that label is the culprit; if no single removal helps, the issue's whole sorted,
+deduped label set is an AND-combination nobody serves and is rendered `a+b+c`
+(which is a bare `delivered` for a single-label issue); an unreachable issue
+with no labels at all is grouped under `(no labels)`. When the labels are
+acceptable to some enabled role and repo/epic affinity is what rejected the
+issue, the group is marked `scope-constrained` — a "label" verdict for a
+repo-affinity cause sends the operator to the wrong file.
+
+Work carrying the reserved `operator` label is **never** in the failing set: a
+human is the intended claimant. It is counted, aged and named in its own section
+and on the summary line, and warns once its oldest item passes 24 hours. It
+never escalates to `fail` — nothing is broken, a human is slow — and it never
+suppresses the failure from genuinely unclaimable work.
+
+The ready query is bounded at 1000 rows, which is loomcli's own limit and the
+only bound on this queue: fleet-db's `maxLimit` applies to issue search, not to
+`/ready`. Only a result that comes back at exactly 1000 rows is reported as a
+floor (`>=N`, plus a truncation line in the detail); a queue of 200 or 999 is an
+exact count and is printed as one. Truncation can only *undercount* unreachable
+work, so it never suppresses a failure.
+
 ### `agent_profiles`
 
 Verifies every provisioned per-agent harness profile under

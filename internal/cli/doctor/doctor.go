@@ -147,8 +147,15 @@ func collectDoctorChecks(cmd *cobra.Command) []checkFunc {
 	} else {
 		checks = append(checks, checkFleetDB)
 	}
+	// One gate serves both: fleetStarvationApplies() asks "does this workspace
+	// have daemon agents at all", which is the precondition for either verdict.
+	// They read the same inputs and answer different questions — starvation
+	// asks whether a role's queue is unserved, reachability whether an issue is
+	// claimable by anyone — so they are registered adjacently and fail apart.
 	if fleetStarvationApplies() {
-		checks = append(checks, func() CheckResult { return checkFleetStarvation(deps) })
+		checks = append(checks,
+			func() CheckResult { return checkFleetStarvation(deps) },
+			func() CheckResult { return checkFleetReachability(deps) })
 	}
 	checks = append(checks, checkBackendCLI, checkProjectConfig, checkGlobalConfig,
 		checkWorktrees, checkStaleLocks, checkStaleSignalFiles, checkStaleSessionRecords,
