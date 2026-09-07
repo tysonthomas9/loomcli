@@ -229,25 +229,25 @@ func (e ApprovalRequestDecision) Valid() bool {
 
 // Defines values for ApprovalResolutionOutcome.
 const (
-	ActorRejected   ApprovalResolutionOutcome = "actor_rejected"
-	AlreadyResolved ApprovalResolutionOutcome = "already_resolved"
-	Failed          ApprovalResolutionOutcome = "failed"
-	Resolved        ApprovalResolutionOutcome = "resolved"
-	ResumeDeferred  ApprovalResolutionOutcome = "resume_deferred"
+	ApprovalResolutionOutcomeActorRejected   ApprovalResolutionOutcome = "actor_rejected"
+	ApprovalResolutionOutcomeAlreadyResolved ApprovalResolutionOutcome = "already_resolved"
+	ApprovalResolutionOutcomeFailed          ApprovalResolutionOutcome = "failed"
+	ApprovalResolutionOutcomeResolved        ApprovalResolutionOutcome = "resolved"
+	ApprovalResolutionOutcomeResumeDeferred  ApprovalResolutionOutcome = "resume_deferred"
 )
 
 // Valid indicates whether the value is a known member of the ApprovalResolutionOutcome enum.
 func (e ApprovalResolutionOutcome) Valid() bool {
 	switch e {
-	case ActorRejected:
+	case ApprovalResolutionOutcomeActorRejected:
 		return true
-	case AlreadyResolved:
+	case ApprovalResolutionOutcomeAlreadyResolved:
 		return true
-	case Failed:
+	case ApprovalResolutionOutcomeFailed:
 		return true
-	case Resolved:
+	case ApprovalResolutionOutcomeResolved:
 		return true
-	case ResumeDeferred:
+	case ApprovalResolutionOutcomeResumeDeferred:
 		return true
 	default:
 		return false
@@ -1393,13 +1393,13 @@ func (e TabMetadataReplacedReason) Valid() bool {
 
 // Defines values for TerminalLifecycleConfigResponseSuccess.
 const (
-	True TerminalLifecycleConfigResponseSuccess = true
+	TerminalLifecycleConfigResponseSuccessTrue TerminalLifecycleConfigResponseSuccess = true
 )
 
 // Valid indicates whether the value is a known member of the TerminalLifecycleConfigResponseSuccess enum.
 func (e TerminalLifecycleConfigResponseSuccess) Valid() bool {
 	switch e {
-	case True:
+	case TerminalLifecycleConfigResponseSuccessTrue:
 		return true
 	default:
 		return false
@@ -1453,34 +1453,34 @@ func (e TranscriptEntryType) Valid() bool {
 
 // Defines values for TreeNodeAgentState.
 const (
-	Dead     TreeNodeAgentState = "dead"
-	Done     TreeNodeAgentState = "done"
-	Idle     TreeNodeAgentState = "idle"
-	Running  TreeNodeAgentState = "running"
-	Spawning TreeNodeAgentState = "spawning"
-	Stopped  TreeNodeAgentState = "stopped"
-	Stuck    TreeNodeAgentState = "stuck"
-	Working  TreeNodeAgentState = "working"
+	TreeNodeAgentStateDead     TreeNodeAgentState = "dead"
+	TreeNodeAgentStateDone     TreeNodeAgentState = "done"
+	TreeNodeAgentStateIdle     TreeNodeAgentState = "idle"
+	TreeNodeAgentStateRunning  TreeNodeAgentState = "running"
+	TreeNodeAgentStateSpawning TreeNodeAgentState = "spawning"
+	TreeNodeAgentStateStopped  TreeNodeAgentState = "stopped"
+	TreeNodeAgentStateStuck    TreeNodeAgentState = "stuck"
+	TreeNodeAgentStateWorking  TreeNodeAgentState = "working"
 )
 
 // Valid indicates whether the value is a known member of the TreeNodeAgentState enum.
 func (e TreeNodeAgentState) Valid() bool {
 	switch e {
-	case Dead:
+	case TreeNodeAgentStateDead:
 		return true
-	case Done:
+	case TreeNodeAgentStateDone:
 		return true
-	case Idle:
+	case TreeNodeAgentStateIdle:
 		return true
-	case Running:
+	case TreeNodeAgentStateRunning:
 		return true
-	case Spawning:
+	case TreeNodeAgentStateSpawning:
 		return true
-	case Stopped:
+	case TreeNodeAgentStateStopped:
 		return true
-	case Stuck:
+	case TreeNodeAgentStateStuck:
 		return true
-	case Working:
+	case TreeNodeAgentStateWorking:
 		return true
 	default:
 		return false
@@ -1624,13 +1624,13 @@ func (e TriggerEventOrigin) Valid() bool {
 
 // Defines values for WebhookDispatchResultStatus.
 const (
-	WebhookDispatchResultStatusAccepted WebhookDispatchResultStatus = "accepted"
+	Accepted WebhookDispatchResultStatus = "accepted"
 )
 
 // Valid indicates whether the value is a known member of the WebhookDispatchResultStatus enum.
 func (e WebhookDispatchResultStatus) Valid() bool {
 	switch e {
-	case WebhookDispatchResultStatusAccepted:
+	case Accepted:
 		return true
 	default:
 		return false
@@ -1709,6 +1709,24 @@ func (e ListBlockedParamsType) Valid() bool {
 	case ListBlockedParamsTypeFeature:
 		return true
 	case ListBlockedParamsTypeTask:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReleaseClaimHoldParamsForce.
+const (
+	ReleaseClaimHoldParamsForceN1   ReleaseClaimHoldParamsForce = "1"
+	ReleaseClaimHoldParamsForceTrue ReleaseClaimHoldParamsForce = "true"
+)
+
+// Valid indicates whether the value is a known member of the ReleaseClaimHoldParamsForce enum.
+func (e ReleaseClaimHoldParamsForce) Valid() bool {
+	switch e {
+	case ReleaseClaimHoldParamsForceN1:
+		return true
+	case ReleaseClaimHoldParamsForceTrue:
 		return true
 	default:
 		return false
@@ -1969,19 +1987,19 @@ func (e StatScopedFileParamsScope) Valid() bool {
 
 // Defines values for GetScopedFileTreeParamsScope.
 const (
-	Agent     GetScopedFileTreeParamsScope = "agent"
-	Repo      GetScopedFileTreeParamsScope = "repo"
-	Workspace GetScopedFileTreeParamsScope = "workspace"
+	GetScopedFileTreeParamsScopeAgent     GetScopedFileTreeParamsScope = "agent"
+	GetScopedFileTreeParamsScopeRepo      GetScopedFileTreeParamsScope = "repo"
+	GetScopedFileTreeParamsScopeWorkspace GetScopedFileTreeParamsScope = "workspace"
 )
 
 // Valid indicates whether the value is a known member of the GetScopedFileTreeParamsScope enum.
 func (e GetScopedFileTreeParamsScope) Valid() bool {
 	switch e {
-	case Agent:
+	case GetScopedFileTreeParamsScopeAgent:
 		return true
-	case Repo:
+	case GetScopedFileTreeParamsScopeRepo:
 		return true
-	case Workspace:
+	case GetScopedFileTreeParamsScopeWorkspace:
 		return true
 	default:
 		return false
@@ -2541,6 +2559,59 @@ type BlockerRef struct {
 	Id       string `json:"id"`
 	Priority int    `json:"priority"`
 	Title    string `json:"title"`
+}
+
+// ClaimHold The hold itself, mirroring supervisor.ClaimHold.
+type ClaimHold struct {
+	// Actor Who owns the hold.
+	Actor string `json:"actor"`
+
+	// ExpiresAt RFC3339 expiry; absent when the hold has no TTL.
+	ExpiresAt *string `json:"expires_at,omitempty"`
+	Held      bool    `json:"held"`
+	Reason    string  `json:"reason"`
+
+	// Since RFC3339 timestamp of when the hold was taken.
+	Since string `json:"since"`
+}
+
+// ClaimHoldReleaseRequest Optional body for the release. Both fields may equally be passed as
+// query parameters; the body wins when both are given.
+type ClaimHoldReleaseRequest struct {
+	Actor *string `json:"actor,omitempty"`
+	Force *bool   `json:"force,omitempty"`
+}
+
+// ClaimHoldRunningAgent An agent whose run was already in flight when the hold went up. A hold
+// never touches a running agent; these are reported so an operator can
+// see what a quiesce is still waiting on.
+type ClaimHoldRunningAgent struct {
+	Agent     string  `json:"agent"`
+	Pid       int     `json:"pid"`
+	StartedAt *string `json:"started_at,omitempty"`
+	TaskId    *string `json:"task_id,omitempty"`
+}
+
+// ClaimHoldSetRequest Body for taking or refreshing a hold. `reason` is mandatory.
+type ClaimHoldSetRequest struct {
+	// Actor Overrides the X-Actor header and the OS user.
+	Actor *string `json:"actor,omitempty"`
+
+	// Force Replace a hold owned by another actor.
+	Force  *bool  `json:"force,omitempty"`
+	Reason string `json:"reason"`
+
+	// TtlSeconds Auto-expiry in seconds; 0 or absent means no expiry.
+	TtlSeconds *int64 `json:"ttl_seconds,omitempty"`
+}
+
+// ClaimHoldStatus The response body of all three claim-hold routes. `hold` is null when
+// claims are free; `running` is always present and may be empty.
+type ClaimHoldStatus struct {
+	// Gated How many claims the hold has refused since it went up.
+	Gated   *int                    `json:"gated,omitempty"`
+	Hold    *ClaimHold              `json:"hold"`
+	Running []ClaimHoldRunningAgent `json:"running"`
 }
 
 // CloseRequest defines model for CloseRequest.
@@ -4990,6 +5061,18 @@ type ListBlockedParams struct {
 // ListBlockedParamsType defines parameters for ListBlocked.
 type ListBlockedParamsType string
 
+// ReleaseClaimHoldParams defines parameters for ReleaseClaimHold.
+type ReleaseClaimHoldParams struct {
+	// Force Release a hold owned by another actor.
+	Force *ReleaseClaimHoldParamsForce `form:"force,omitempty" json:"force,omitempty"`
+
+	// Actor Who is releasing; overridden by the request body when both are given.
+	Actor *string `form:"actor,omitempty" json:"actor,omitempty"`
+}
+
+// ReleaseClaimHoldParamsForce defines parameters for ReleaseClaimHold.
+type ReleaseClaimHoldParamsForce string
+
 // SubscribeEventsParams defines parameters for SubscribeEvents.
 type SubscribeEventsParams struct {
 	// Token One-time SSE auth token (for EventSource clients)
@@ -5515,6 +5598,12 @@ type StopAgentJSONRequestBody StopAgentJSONBody
 
 // PostApprovalJSONRequestBody defines body for PostApproval for application/json ContentType.
 type PostApprovalJSONRequestBody = ApprovalRequest
+
+// ReleaseClaimHoldJSONRequestBody defines body for ReleaseClaimHold for application/json ContentType.
+type ReleaseClaimHoldJSONRequestBody = ClaimHoldReleaseRequest
+
+// SetClaimHoldJSONRequestBody defines body for SetClaimHold for application/json ContentType.
+type SetClaimHoldJSONRequestBody = ClaimHoldSetRequest
 
 // PatchWorkspaceBackendJSONRequestBody defines body for PatchWorkspaceBackend for application/json ContentType.
 type PatchWorkspaceBackendJSONRequestBody = WorkspaceBackendPatchRequest

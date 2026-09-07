@@ -48,21 +48,3 @@ undeclared:
     reason: "task-run callback surface, run-token authed"
   - route: "PUT /api/workspaces/{ws}/task-run/artifacts/{artifactId}/content"
     reason: "task-run callback surface, run-token authed"
-
-  # ── Documentable: real API surface the spec has not caught up with ──────────
-  # PUPPET-488 children 4 and 5 move these into api/openapi.yaml. Each one that
-  # lands there must be deleted from here in the same change, or
-  # TestRouteDriftAllowlistIsClean fails on the contradiction.
-
-  # ── Daemon-socket control surface ───────────────────────────────────────────
-  # Registered only when the server has the matching daemon control-socket
-  # callback (AgentInputFn / ClaimHoldFn). They are real API surface, not an
-  # internal plane, so they belong in the spec — the same PUPPET-488 follow-up
-  # applies. They are listed separately because they come from the store-less
-  # arm of buildModules, which the fixture reaches through newDaemonServer.
-  - route: "DELETE /api/workspaces/{ws}/claims/hold"
-    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
-  - route: "GET /api/workspaces/{ws}/claims/hold"
-    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
-  - route: "POST /api/workspaces/{ws}/claims/hold"
-    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
