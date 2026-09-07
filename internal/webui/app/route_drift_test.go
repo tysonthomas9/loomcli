@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"sort"
@@ -14,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -23,12 +25,46 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
-// newMaximalServer builds a Server with every optional dependency satisfied, so
-// that buildModules produces all modules and registerRoutes registers every
-// conditional route. The drift test is only meaningful against a maximal
-// server: any dependency left nil silently drops routes, which then show up as
-// phantom "declared but not served" entries.
+// The server has two MUTUALLY EXCLUSIVE deployment lanes, and buildInfraModules
+// branches between them on `app.config.Store != nil`:
+//
+//	store-backed  the fleet/store server. Gets agents, skills, workflows,
+//	              webhooks, approvals, task-run and driver modules.
+//	daemon        the local `loom serve` with a daemon control socket. Gets the
+//	              gh-backed pull-request list and the agent-control module,
+//	              whose pending-input routes exist only when AgentInputFn is
+//	              wired.
+//
+// Neither lane alone is the served surface: a route the OTHER lane registers is
+// still shipped and still belongs in the spec. So the gate compares the spec
+// against the UNION of the two, which is what routeDriftServedUnion returns.
+//
+// This is not a hypothetical. The first version of this fixture built only the
+// store-backed lane, and the three pending-input operations
+// (GET pending-inputs, GET agents/{name}/input, POST agents/{name}/answer) were
+// therefore invisible to it: the allowlist PUPPET-501 generated never listed
+// them, and the moment PUPPET-502 documented them they came back as phantom
+// "declared but not served" failures against routes that are served in every
+// local `loom serve`.
+
+// newMaximalServer builds the STORE-BACKED lane with every optional dependency
+// satisfied, so that buildModules produces all its modules and registerRoutes
+// registers every conditional route. Any dependency left nil silently drops
+// routes, which then show up as phantom "declared but not served" entries.
 func newMaximalServer(t *testing.T) *Server {
+	t.Helper()
+	return newDriftServer(t, true)
+}
+
+// newMaximalDaemonServer builds the DAEMON lane — no store, every daemon
+// callback wired — so the routes that only exist behind AgentControlFn,
+// AgentInputFn, ClaimHoldFn and AgentQueueFn are part of the comparison.
+func newMaximalDaemonServer(t *testing.T) *Server {
+	t.Helper()
+	return newDriftServer(t, false)
+}
+
+func newDriftServer(t *testing.T, storeBacked bool) *Server {
 	t.Helper()
 
 	t.Setenv("LOOM_WORKER_TOKEN", "drift-test")
@@ -47,7 +83,22 @@ func newMaximalServer(t *testing.T) *Server {
 	app.diffSvc = &stubDiffService{}
 	app.fileSvc = &stubFileService{}
 	app.claimMetrics = fleet.NewClaimMetrics()
-	app.config.Store = memstore.New()
+	if storeBacked {
+		app.config.Store = memstore.New()
+	} else {
+		// The daemon lane. Every callback is non-nil: each one gates a group of
+		// routes that would otherwise vanish from the comparison silently.
+		app.config.AgentControlFn = func(string, string, bool) (*agentcontrol.AgentControlResult, error) {
+			return &agentcontrol.AgentControlResult{Success: true}, nil
+		}
+		app.config.AgentInputFn = func(string, string, json.RawMessage) (*agentcontrol.AgentControlResult, error) {
+			return &agentcontrol.AgentControlResult{Success: true}, nil
+		}
+		app.config.ClaimHoldFn = func(string, json.RawMessage) (*agentcontrol.AgentControlResult, error) {
+			return &agentcontrol.AgentControlResult{Success: true}, nil
+		}
+		app.config.AgentQueueFn = func(string) ([]webui.AgentQueueEntry, error) { return nil, nil }
+	}
 	app.config.LocalSettingsDir = t.TempDir()
 	// A URL is enough to register the auth proxy mount; it is never dialed.
 	app.config.ExtAuthURL = "http://127.0.0.1:9999"
@@ -278,6 +329,34 @@ func routeDriftServed(t *testing.T, patterns []string) (map[string]string, []str
 	return served, covering
 }
 
+// routeDriftServedUnion is the served surface of the WHOLE product: the union
+// of the store-backed lane and the daemon lane. buildInfraModules branches
+// between the two on `app.config.Store != nil`, so no single fixture registers
+// everything, and comparing the spec against one lane reports the other lane's
+// routes as drift in both directions at once.
+func routeDriftServedUnion(t *testing.T) (map[string]string, []string) {
+	t.Helper()
+
+	served, covering := routeDriftServed(t, newMaximalServer(t).registeredRoutes())
+	daemonServed, daemonCovering := routeDriftServed(t, newMaximalDaemonServer(t).registeredRoutes())
+	for key, original := range daemonServed {
+		if _, ok := served[key]; !ok {
+			served[key] = original
+		}
+	}
+	seen := make(map[string]bool, len(covering))
+	for _, c := range covering {
+		seen[c] = true
+	}
+	for _, c := range daemonCovering {
+		if !seen[c] {
+			seen[c] = true
+			covering = append(covering, c)
+		}
+	}
+	return served, covering
+}
+
 // routeDriftDeclared parses api/openapi.yaml and returns its /api/ operations
 // keyed by normalized "METHOD /path".
 func routeDriftDeclared(t *testing.T) map[string]string {
@@ -388,8 +467,7 @@ func coveredByMount(key string, covering []string) bool {
 }
 
 func TestOpenAPIRouteDrift(t *testing.T) {
-	app := newMaximalServer(t)
-	served, covering := routeDriftServed(t, app.registeredRoutes())
+	served, covering := routeDriftServedUnion(t)
 	declared := routeDriftDeclared(t)
 	allow := loadRouteDriftAllowlist(t)
 
@@ -470,6 +548,39 @@ func TestRouteDriftFixtureIsMaximal(t *testing.T) {
 		"POST /api/internal/workers/register",     // LOOM_WORKER_TOKEN + registerWorkerAPIRoutes
 	}
 
+	assertRoutesRegistered(t, app, wantRoutes, hint)
+}
+
+// TestRouteDriftDaemonFixtureIsMaximal is the same ratchet for the OTHER lane.
+// It is not redundant with the one above: the daemon lane's routes hang off
+// four separate callbacks, and a nil one removes routes from the union
+// silently — which is precisely how the three pending-input operations went
+// missing from the allowlist PUPPET-501 generated.
+func TestRouteDriftDaemonFixtureIsMaximal(t *testing.T) {
+	const wantModules = 13
+	const hint = "the daemon-lane fixture is missing a callback, or a module was added " +
+		"to the non-store branch of buildInfraModules"
+
+	app := newMaximalDaemonServer(t)
+
+	if got := len(app.wsModules); got != wantModules {
+		t.Errorf("len(wsModules) = %d, want %d: %s", got, wantModules, hint)
+	}
+
+	// One canary per daemon callback that gates a group of routes.
+	wantRoutes := []string{
+		"POST /api/workspaces/{ws}/agents/{name}/stop", // config.AgentControlFn
+		"GET /api/workspaces/{ws}/pending-inputs",      // config.AgentInputFn
+		"GET /api/workspaces/{ws}/claims/hold",         // config.ClaimHoldFn
+		"GET /api/workspaces/{ws}/pull-requests",       // the gh-backed non-store module
+	}
+
+	assertRoutesRegistered(t, app, wantRoutes, hint)
+}
+
+func assertRoutesRegistered(t *testing.T, app *Server, wantRoutes []string, hint string) {
+	t.Helper()
+
 	registered := make(map[string]bool)
 	for _, r := range app.registeredRoutes() {
 		registered[normalizeRouteWildcards(r)] = true
@@ -492,8 +603,7 @@ func TestRouteDriftFixtureIsMaximal(t *testing.T) {
 // lands in the spec, its allowlist entry becomes a contradiction and this test
 // says so.
 func TestRouteDriftAllowlistIsClean(t *testing.T) {
-	app := newMaximalServer(t)
-	served, _ := routeDriftServed(t, app.registeredRoutes())
+	served, _ := routeDriftServedUnion(t)
 	declared := routeDriftDeclared(t)
 	allow := loadRouteDriftAllowlist(t)
 

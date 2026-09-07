@@ -2818,6 +2818,168 @@ paths:
         "503":
           description: Daemon unavailable
 
+  # ── Claim hold (workspace quiesce) ──────────────────────────────────────
+  # A workspace-level, explicitly-owned refusal to START new work. Runs already
+  # in flight are never touched, which is why the response reports them.
+  /api/workspaces/{ws}/claims/hold:
+    get:
+      operationId: getClaimHold
+      tags: [agent-control]
+      summary: Read the workspace claim hold
+      description: |
+        Returns the current hold, the runs that were already in flight when it
+        went up, and how many claims it has gated since. `hold` is null when
+        claims are free.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Current claim-hold status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimHoldStatus"
+        "502":
+          description: The daemon answered with a malformed claim-hold payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Agent supervisor is not running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "504":
+          description: Agent supervisor did not respond in time
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: setClaimHold
+      tags: [agent-control]
+      summary: Hold workspace claims
+      description: |
+        Takes or refreshes the hold. A hold taken by the same actor is an
+        idempotent refresh; replacing a hold owned by someone else requires
+        `force` and is 409 without it. The actor is resolved most-explicit
+        first: body > `X-Actor` header > `LOOM_ACTOR` > OS user.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimHoldSetRequest"
+      responses:
+        "200":
+          description: Hold taken or refreshed; the new status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimHoldStatus"
+        "400":
+          description: Invalid body, missing reason, or negative ttl_seconds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The hold is owned by another actor and `force` was not set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: The daemon answered with a malformed claim-hold payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Agent supervisor is not running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "504":
+          description: Agent supervisor did not respond in time
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: releaseClaimHold
+      tags: [agent-control]
+      summary: Release the workspace claim hold
+      description: |
+        Releasing a hold owned by someone else requires `force`. The flag and
+        the actor may be given either in a JSON body or as query parameters —
+        the browser client's shared fetch helper cannot attach a body to a
+        DELETE, and a release must not be the one operation the web UI cannot
+        perform.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: force
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ["true", "1"]
+          description: Release a hold owned by another actor.
+        - name: actor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Who is releasing; overridden by the request body when both are given.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimHoldReleaseRequest"
+      responses:
+        "200":
+          description: Hold released; the resulting status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimHoldStatus"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The hold is owned by another actor and `force` was not set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: The daemon answered with a malformed claim-hold payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Agent supervisor is not running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "504":
+          description: Agent supervisor did not respond in time
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   # ── Git Operations ──────────────────────────────────────────────────────
   /api/workspaces/{ws}/agents/{name}/git/status:
     get:
@@ -8080,6 +8242,91 @@ components:
         text:
           type: string
         decline:
+          type: boolean
+
+    ClaimHold:
+      type: object
+      description: The hold itself, mirroring supervisor.ClaimHold.
+      required: [held, actor, reason, since]
+      properties:
+        held:
+          type: boolean
+        actor:
+          type: string
+          description: Who owns the hold.
+        reason:
+          type: string
+        since:
+          type: string
+          description: RFC3339 timestamp of when the hold was taken.
+        expires_at:
+          type: string
+          description: RFC3339 expiry; absent when the hold has no TTL.
+
+    ClaimHoldRunningAgent:
+      type: object
+      description: |
+        An agent whose run was already in flight when the hold went up. A hold
+        never touches a running agent; these are reported so an operator can
+        see what a quiesce is still waiting on.
+      required: [agent, pid]
+      properties:
+        agent:
+          type: string
+        task_id:
+          type: string
+        pid:
+          type: integer
+        started_at:
+          type: string
+
+    ClaimHoldStatus:
+      type: object
+      description: |
+        The response body of all three claim-hold routes. `hold` is null when
+        claims are free; `running` is always present and may be empty.
+      required: [hold, running]
+      properties:
+        hold:
+          allOf:
+            - $ref: "#/components/schemas/ClaimHold"
+          nullable: true
+        running:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClaimHoldRunningAgent"
+        gated:
+          type: integer
+          description: How many claims the hold has refused since it went up.
+
+    ClaimHoldSetRequest:
+      type: object
+      description: Body for taking or refreshing a hold. `reason` is mandatory.
+      required: [reason]
+      properties:
+        reason:
+          type: string
+        ttl_seconds:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Auto-expiry in seconds; 0 or absent means no expiry.
+        actor:
+          type: string
+          description: Overrides the X-Actor header and the OS user.
+        force:
+          type: boolean
+          description: Replace a hold owned by another actor.
+
+    ClaimHoldReleaseRequest:
+      type: object
+      description: |
+        Optional body for the release. Both fields may equally be passed as
+        query parameters; the body wins when both are given.
+      properties:
+        actor:
+          type: string
+        force:
           type: boolean
 
     AgentStatusResponse:

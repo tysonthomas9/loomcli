@@ -1341,6 +1341,43 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/claims/hold": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read the workspace claim hold
+     * @description Returns the current hold, the runs that were already in flight when it
+     *     went up, and how many claims it has gated since. `hold` is null when
+     *     claims are free.
+     */
+    get: operations["getClaimHold"];
+    put?: never;
+    /**
+     * Hold workspace claims
+     * @description Takes or refreshes the hold. A hold taken by the same actor is an
+     *     idempotent refresh; replacing a hold owned by someone else requires
+     *     `force` and is 409 without it. The actor is resolved most-explicit
+     *     first: body > `X-Actor` header > `LOOM_ACTOR` > OS user.
+     */
+    post: operations["setClaimHold"];
+    /**
+     * Release the workspace claim hold
+     * @description Releasing a hold owned by someone else requires `force`. The flag and
+     *     the actor may be given either in a JSON body or as query parameters —
+     *     the browser client's shared fetch helper cannot attach a body to a
+     *     DELETE, and a release must not be the one operation the web UI cannot
+     *     perform.
+     */
+    delete: operations["releaseClaimHold"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/agents/{name}/git/status": {
     parameters: {
       query?: never;
@@ -3970,6 +4007,59 @@ export interface components {
       option_id?: string;
       text?: string;
       decline?: boolean;
+    };
+    /** @description The hold itself, mirroring supervisor.ClaimHold. */
+    ClaimHold: {
+      held: boolean;
+      /** @description Who owns the hold. */
+      actor: string;
+      reason: string;
+      /** @description RFC3339 timestamp of when the hold was taken. */
+      since: string;
+      /** @description RFC3339 expiry; absent when the hold has no TTL. */
+      expires_at?: string;
+    };
+    /**
+     * @description An agent whose run was already in flight when the hold went up. A hold
+     *     never touches a running agent; these are reported so an operator can
+     *     see what a quiesce is still waiting on.
+     */
+    ClaimHoldRunningAgent: {
+      agent: string;
+      task_id?: string;
+      pid: number;
+      started_at?: string;
+    };
+    /**
+     * @description The response body of all three claim-hold routes. `hold` is null when
+     *     claims are free; `running` is always present and may be empty.
+     */
+    ClaimHoldStatus: {
+      hold: components["schemas"]["ClaimHold"] | null;
+      running: components["schemas"]["ClaimHoldRunningAgent"][];
+      /** @description How many claims the hold has refused since it went up. */
+      gated?: number;
+    };
+    /** @description Body for taking or refreshing a hold. `reason` is mandatory. */
+    ClaimHoldSetRequest: {
+      reason: string;
+      /**
+       * Format: int64
+       * @description Auto-expiry in seconds; 0 or absent means no expiry.
+       */
+      ttl_seconds?: number;
+      /** @description Overrides the X-Actor header and the OS user. */
+      actor?: string;
+      /** @description Replace a hold owned by another actor. */
+      force?: boolean;
+    };
+    /**
+     * @description Optional body for the release. Both fields may equally be passed as
+     *     query parameters; the body wins when both are given.
+     */
+    ClaimHoldReleaseRequest: {
+      actor?: string;
+      force?: boolean;
     };
     /** @description Agent entity from dto.AgentStatusResponse */
     AgentStatusResponse: {
@@ -8462,6 +8552,205 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  getClaimHold: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current claim-hold status */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ClaimHoldStatus"];
+        };
+      };
+      /** @description The daemon answered with a malformed claim-hold payload */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Agent supervisor is not running */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Agent supervisor did not respond in time */
+      504: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  setClaimHold: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ClaimHoldSetRequest"];
+      };
+    };
+    responses: {
+      /** @description Hold taken or refreshed; the new status */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ClaimHoldStatus"];
+        };
+      };
+      /** @description Invalid body, missing reason, or negative ttl_seconds */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description The hold is owned by another actor and `force` was not set */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description The daemon answered with a malformed claim-hold payload */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Agent supervisor is not running */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Agent supervisor did not respond in time */
+      504: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  releaseClaimHold: {
+    parameters: {
+      query?: {
+        /** @description Release a hold owned by another actor. */
+        force?: "true" | "1";
+        /** @description Who is releasing; overridden by the request body when both are given. */
+        actor?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ClaimHoldReleaseRequest"];
+      };
+    };
+    responses: {
+      /** @description Hold released; the resulting status */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ClaimHoldStatus"];
+        };
+      };
+      /** @description Invalid request body */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description The hold is owned by another actor and `force` was not set */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description The daemon answered with a malformed claim-hold payload */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Agent supervisor is not running */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Agent supervisor did not respond in time */
+      504: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
       };
     };
   };
