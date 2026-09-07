@@ -514,13 +514,7 @@ func (b *FleetBackend) SearchIssues(ctx context.Context, query string, limit int
 // --- Mutation operations ---
 
 func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
-	result, err := b.createIssueOnce(ctx, params)
-	if err != nil && params.ExternalRef != "" && isCreateExternalRefUnsupported(err) {
-		result, err = b.createWithoutExternalRef(ctx, params)
-	}
-	if err != nil && params.AcceptanceCriteria != "" && isCreateAcceptanceCriteriaUnsupported(err) {
-		result, err = b.createWithoutAcceptanceCriteria(ctx, params)
-	}
+	result, err := b.createWithCompatRetries(ctx, params)
 	if err != nil {
 		return result, err
 	}

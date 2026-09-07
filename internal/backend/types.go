@@ -404,8 +404,9 @@ type CreateParams struct {
 // fleet-db's CreateIssueRequest expects. fleet-db's strict JSON validation
 // rejects unknown fields, so loom-only fields are dropped rather than
 // shipped as-is.
-// FleetBackend.Create retries without external_ref for deployed fleet-dbs
-// whose create schema predates that field, then applies it via PATCH.
+// FleetBackend.Create retries without external_ref and/or acceptance_criteria
+// for deployed fleet-dbs whose create schema predates those fields, then
+// applies them via PATCH (see fleet/create_compat.go).
 //
 // Field renames vs CreateParams:
 //   - "issue_type"  → "type"
