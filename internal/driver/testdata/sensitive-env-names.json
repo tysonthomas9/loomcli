@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "runner_infra": [
+    "DAYTONA_API_KEY",
+    "LOOM_TASK_RUN_LEASE_TOKEN",
+    "LOOM_DRIVER_TASK_RUNNER_CMD_JSON"
+  ],
+  "provider_credentials": [
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+    "CODEX_HOME",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "CODEX_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "CURSOR_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN"
+  ]
+}
