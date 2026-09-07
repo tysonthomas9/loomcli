@@ -32,10 +32,12 @@ import (
 // AuthFailure while work piled up). A check without it fires on every
 // deliberately parked agent and gets muted within a day.
 
-// starvationReadyLimit bounds the ready query. fleet-db clamps its own row
-// count, so an explicit limit makes the clamp visible instead of silent: when
-// the result comes back full, Q is reported as a floor (q_clamped) rather than
-// as an exact count. A clamped Q is still >= 1, so it never suppresses an alert.
+// starvationReadyLimit bounds the ready query. fleet-db's /ready applies no
+// server-side cap of its own (maxLimit = 200 governs issue search, not this
+// route), so this limit is the only bound there is -- which is why it is stated
+// here rather than assumed: when the result comes back full, Q is reported as a
+// floor (q_clamped) rather than as an exact count. A clamped Q is still >= 1, so
+// it never suppresses an alert.
 const starvationReadyLimit = 1000
 
 // starvationReadyTimeout bounds the one backend call this check makes. doctor
@@ -140,6 +142,11 @@ type starvationReport struct {
 	// Unreachable lists ready, unassigned, non-operator issues that no role
 	// carrying a label filter can claim (or whose only matching roles have
 	// C_int = 0).
+	//
+	// It stays here as informational context only — the webui and the ops
+	// runner read it. The FAILING verdict for unreachable work lives in
+	// fleet_reachability, which is a separate check precisely because a fleet
+	// with no starved roles and unclaimable work must still fail.
 	Unreachable []string `json:"unreachable,omitempty"`
 	// UnreachableComputed is false when no role carries a label filter at all.
 	// The distinction matters: an unreachable count of 0 means "everything is
@@ -221,9 +228,16 @@ func checkFleetStarvation(deps *cli.Deps) CheckResult {
 // fetchReadyQueue runs the single backend call this check makes, under a bound
 // that keeps a hung backend from holding the whole serial doctor report.
 func fetchReadyQueue(deps *cli.Deps) ([]backend.IssueData, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), starvationReadyTimeout)
+	return fetchReadyQueueWith(deps, starvationReadyLimit, starvationReadyTimeout)
+}
+
+// fetchReadyQueueWith is the same call with the bounds as parameters, so
+// fleet_reachability can state its own limit and timeout instead of inheriting
+// starvation's by accident.
+func fetchReadyQueueWith(deps *cli.Deps, limit int, timeout time.Duration) ([]backend.IssueData, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	return deps.IssueBackend.Ready(ctx, backend.ReadyOpts{Limit: starvationReadyLimit})
+	return deps.IssueBackend.Ready(ctx, backend.ReadyOpts{Limit: limit})
 }
 
 // workspaceRepos returns the repo catalog agent affinity resolves against. It
