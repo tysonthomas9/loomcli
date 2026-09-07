@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -99,6 +100,50 @@ EXAMPLES
 	},
 }
 
+// rootPreRun holds the real body of rootCmd's persistent pre-run hook. It is a
+// var so a test can substitute a failing stub without dragging in
+// ResolveAndSetBackend and DefaultDeps side effects.
+var rootPreRun = func(cmd *cobra.Command, args []string) error {
+	// --log-level wins over LOOM_LOG_LEVEL; the env var matters because
+	// the daemon is launched by pm2, where an env var is the only
+	// practical lever.
+	lvl := logLevel
+	if lvl == "" {
+		lvl = os.Getenv("LOOM_LOG_LEVEL")
+	}
+	if err := InitLogger(logFormat, logOutput, lvl); err != nil {
+		return err
+	}
+	// Mirror --server / --workspace flags into env vars so that
+	// resolveIssueBackendFromEnv and the factory helpers see the same
+	// value whether the caller used the flag or the env var directly.
+	if serverFlag != "" {
+		if err := os.Setenv("LOOM_SERVER_URL", serverFlag); err != nil {
+			return err
+		}
+	}
+	if workspaceFlag != "" {
+		if err := os.Setenv("LOOM_WORKSPACE", workspaceFlag); err != nil {
+			return err
+		}
+	}
+	if err := ResolveAndSetBackend(); err != nil {
+		return err
+	}
+	// Rebuild the package-level defaultDeps now that --workspace /
+	// --server have been mirrored into the env. The eager
+	// `var defaultDeps = DefaultDeps()` in deps.go runs at process
+	// load time, before Cobra has parsed any flags, so its cached
+	// IssueBackend would otherwise be locked to whatever env was
+	// inherited from the shell. resolveDirectIssueBackend() reads
+	// defaultDeps.IssueBackend, so refresh it here before any
+	// subcommand runs.
+	deps := DefaultDeps()
+	defaultDeps = deps
+	cmd.SetContext(WithDeps(cmd.Context(), deps))
+	return nil
+}
+
 func init() {
 	rootCmd.Flags().BoolP("version", "v", false, "Print version information")
 	rootCmd.PersistentFlags().StringVar(&backendFlag, "backend", "", "AI backend CLI to use (codex, claude, opencode). Env: LOOM_BACKEND")
@@ -111,43 +156,15 @@ func init() {
 	// Resolve and set active backend before any subcommand runs,
 	// then inject the Deps container into the command context.
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		// --log-level wins over LOOM_LOG_LEVEL; the env var matters because
-		// the daemon is launched by pm2, where an env var is the only
-		// practical lever.
-		lvl := logLevel
-		if lvl == "" {
-			lvl = os.Getenv("LOOM_LOG_LEVEL")
-		}
-		if err := InitLogger(logFormat, logOutput, lvl); err != nil {
+		if err := rootPreRun(cmd, args); err != nil {
+			// A pre-run failure is a runtime failure (bad --backend value,
+			// unwritable --log-output), not a usage error: its message
+			// already names the valid values, so cobra's usage block adds
+			// nothing. The required-flag and flag-group checks run after
+			// this hook and keep their usage block.
+			cmd.SilenceUsage = true
 			return err
 		}
-		// Mirror --server / --workspace flags into env vars so that
-		// resolveIssueBackendFromEnv and the factory helpers see the same
-		// value whether the caller used the flag or the env var directly.
-		if serverFlag != "" {
-			if err := os.Setenv("LOOM_SERVER_URL", serverFlag); err != nil {
-				return err
-			}
-		}
-		if workspaceFlag != "" {
-			if err := os.Setenv("LOOM_WORKSPACE", workspaceFlag); err != nil {
-				return err
-			}
-		}
-		if err := ResolveAndSetBackend(); err != nil {
-			return err
-		}
-		// Rebuild the package-level defaultDeps now that --workspace /
-		// --server have been mirrored into the env. The eager
-		// `var defaultDeps = DefaultDeps()` in deps.go runs at process
-		// load time, before Cobra has parsed any flags, so its cached
-		// IssueBackend would otherwise be locked to whatever env was
-		// inherited from the shell. resolveDirectIssueBackend() reads
-		// defaultDeps.IssueBackend, so refresh it here before any
-		// subcommand runs.
-		deps := DefaultDeps()
-		defaultDeps = deps
-		cmd.SetContext(WithDeps(cmd.Context(), deps))
 		return nil
 	}
 
@@ -292,9 +309,25 @@ func RegisterCommand(cmd *cobra.Command) {
 	pendingCmds = append(pendingCmds, cmd)
 }
 
-// registerPendingCommands adds all pending commands to rootCmd.
+// registerOnce guards registerPendingCommands so repeated in-process calls
+// (Execute invoked twice by a test, or BuildRootCommand before Execute) do not
+// re-add the same commands.
+var registerOnce sync.Once
+
+// registerPendingCommands adds all pending commands to rootCmd and silences
+// the usage block for runtime failures across the assembled tree.
 func registerPendingCommands() {
-	rootCmd.AddCommand(pendingCmds...)
+	registerOnce.Do(func() {
+		rootCmd.AddCommand(pendingCmds...)
+		SilenceUsageOnRunErrors(rootCmd)
+	})
+}
+
+// BuildRootCommand registers all pending sub-commands and returns the fully
+// assembled root command. Exported for tests that need to walk the real tree.
+func BuildRootCommand() *cobra.Command {
+	registerPendingCommands()
+	return rootCmd
 }
 
 // GetRootCmd returns the root cobra command for sub-packages that need
@@ -403,4 +436,60 @@ func parseGitBranches(output string) []string {
 	}
 
 	return unique
+}
+
+// silencedCmds records every command whose RunE has been wrapped by
+// SilenceUsageOnRunErrors. It is exposed through IsUsageSilenced so a wiring
+// test can assert full-tree coverage without comparing func values (which Go
+// does not allow).
+var (
+	silencedMu   sync.Mutex
+	silencedCmds = map[*cobra.Command]bool{}
+)
+
+// SilenceUsageOnRunErrors walks cmd and all of its descendants and wraps each
+// RunE so that reaching the command body suppresses cobra's usage block for
+// any error the body returns.
+//
+// The flag must be flipped inside RunE rather than in a pre-run hook: cobra
+// 1.10.2 runs ValidateRequiredFlags and ValidateFlagGroups AFTER both
+// PersistentPreRunE and PreRunE, so a hook-based flip would also swallow the
+// usage block for `required flag(s) "x" not set` — the error where the flag
+// list is the answer. Wrapping RunE also survives the subtrees that replace
+// root's PersistentPreRunE (doctor, hooks, serve log-router, skill
+// materialize), since cobra only runs the nearest persistent hook.
+//
+// Commands with a Run (not RunE) cannot return an error and so never reach
+// cobra's error branch; they are skipped rather than given a synthetic RunE,
+// which would change Runnable()/help behavior. Calling this twice is a no-op.
+func SilenceUsageOnRunErrors(cmd *cobra.Command) {
+	if cmd == nil {
+		return
+	}
+	for _, sub := range cmd.Commands() {
+		SilenceUsageOnRunErrors(sub)
+	}
+
+	silencedMu.Lock()
+	defer silencedMu.Unlock()
+	if cmd.RunE == nil || silencedCmds[cmd] {
+		return
+	}
+	prev := cmd.RunE
+	cmd.RunE = func(c *cobra.Command, args []string) error {
+		// Control has reached the command body, so every usage-error check
+		// cobra performs has already passed. Anything from here on is a
+		// runtime failure and the usage block only buries it.
+		c.SilenceUsage = true
+		return prev(c, args)
+	}
+	silencedCmds[cmd] = true
+}
+
+// IsUsageSilenced reports whether cmd's RunE has been wrapped by
+// SilenceUsageOnRunErrors.
+func IsUsageSilenced(cmd *cobra.Command) bool {
+	silencedMu.Lock()
+	defer silencedMu.Unlock()
+	return silencedCmds[cmd]
 }
