@@ -36,7 +36,13 @@
 # here would trade this gate for that one. Same trade abandoned_run.go,
 # profile.go and account_wall.go were granted above; same sub-split end state.
 # The pairing with the pre-existing claim_hold_test.go was already implied.
-internal/cli/daemon/supervisor 32
+# Raised 32 -> 33 for diffcapture.go: the checkpoint's git-diff capture was
+# lifted out of concurrency.go (a concurrency tracker it never belonged in)
+# when it grew to cover untracked files and multiple source trees. A
+# sub-package was tried first and is the right end state, but it costs the
+# package an import and pushes its recorded import-fanout ceiling (22) over
+# instead — trading one ratchet for another. Take it in the sub-split.
+internal/cli/daemon/supervisor 33
 # internal/cli gained the daemon input-await seam (agent_input_await.go) with
 # the human answer path; 26th file, same sub-split end state applies. The
 # hook-driven exit-code contract lives in exit.go rather than a file of its own,
