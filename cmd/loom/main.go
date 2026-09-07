@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -52,7 +51,8 @@ func init() {
 
 func main() {
 	if err := cli.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		// Cobra already printed "Error: <err>" from ExecuteC; printing it
+		// again here duplicated every failure message.
 		os.Exit(cli.CommandExitCode(err))
 	}
 }
