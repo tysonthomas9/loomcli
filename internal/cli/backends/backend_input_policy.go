@@ -16,28 +16,52 @@ import (
 // by the supervisor as JSON in LOOM_ROLE_INPUT_POLICY and applied here as the
 // harness-wrapper TurnConfig fields that actually resolve a prompt.
 //
-// Why loom does not simply adopt harness-wrapper's unattended default:
-// pkg/oneshot's turnConfig ships InputPolicy{"trust_prompt": answer "proceed"}
-// plus OnInputRequest = AutoAcceptAnswer, and AutoAcceptAnswer answers ANY
-// prompt with its affirmative option, falling back to the FIRST option when it
-// finds none. claude-code renders both the harmless folder-trust dialog and the
-// `--dangerously-skip-permissions` acceptance screen under the same prompt
-// kind, so adopting that default verbatim auto-accepts a skip-all-permissions
-// launch — undoing the role safety knobs (allowed_tools / denied_tools /
-// read_only) that were just made real. The role has to name the kinds it will
-// auto-accept, and everything it did not name is denied.
+// The two claude-code screens are now DISTINCT KINDS, and that is recent.
+// harness-wrapper used to render both the harmless folder-trust dialog and the
+// `--dangerously-skip-permissions` acceptance screen under one `trust_prompt`
+// kind, so a role could not allow the first without also allowing the second.
+// Since harness-wrapper v0.8.4 the acceptance screen carries its own kind,
+// `bypass_acceptance`, and `trust_prompt` means folder trust and nothing else.
+// loom does no screen matching of its own — domain.RoleInputPolicy.Kinds is
+// keyed by whatever strings the harness emits — so the split reaches loom purely
+// through the go.mod pin, and a role that wants the acceptance screen
+// auto-accepted must now name `bypass_acceptance`. A role still carrying only
+// `trust_prompt: allow` no longer allows it; that silence is a deny.
 //
-// What the leaf does today WITHOUT any of this, which is the baseline this
-// change improves on: invokeClaudeRunTurn passes neither InputPolicy nor
+// What did NOT change is deny-by-default, and the reason for it. pkg/oneshot's
+// turnConfig ships InputPolicy{"trust_prompt": answer "proceed"} plus
+// OnInputRequest = AutoAcceptAnswer, and AutoAcceptAnswer answers ANY prompt
+// with its affirmative option, falling back to the FIRST option when it finds
+// none. Adopting that verbatim would accept a skip-all-permissions launch with
+// nobody deciding to — undoing the role safety knobs (allowed_tools /
+// denied_tools / read_only) that were just made real. The role names the kinds
+// it will auto-accept, and everything it did not name is denied.
+//
+// WARNING — deny is a HARD STOP for `bypass_acceptance`, not a stall. loom
+// launches claude with `--dangerously-skip-permissions` itself
+// (backend_claude.go:186, :212, :281; harness_lead_runtime.go:121), so the
+// acceptance screen is raised on essentially every claude run. Denying it is
+// not a no-op: the screen offers a real negative option, so denyInputRequest
+// answers "No, exit" and claude exits. A role that must run claude at all
+// therefore has to say `bypass_acceptance=allow`; the safety default costs an
+// explicit opt-in here, deliberately, because the alternative is the blanket
+// yes above.
+//
+// What the leaf does WITHOUT any of this, which is the baseline this file
+// improves on: invokeClaudeRunTurn passes neither InputPolicy nor
 // OnInputRequest, so chat.Conversation.tryResolveInput resolves nothing and the
 // request is SURFACED on Events(). Nothing in loom consumes that event, so a
 // prompt raised before the first turn fails Send with chat.ErrInputPending
 // (waitReadyForSend short-circuits on a surfaced request) and a prompt raised
 // mid-turn stalls the turn until the context deadline — maybeIdleComplete
 // refuses to complete a turn while a request is awaiting the client. So the
-// status quo is a hard failure or a wedge, never an auto-accept. This change is
-// therefore a wedge fix first and a guard second: it gives deny a real answer
-// so the harness can move on, and makes allow an opt-in that a role must state.
+// status quo is a hard failure or a wedge, never an auto-accept. This file is
+// therefore a wedge fix first and a guard second: every disposition ends in a
+// real answer where the prompt offers one, and allow is an opt-in a role must
+// state. `ask` is the one disposition that can block: it publishes the prompt
+// on the daemon's pending-input registry and waits for a person (see
+// answerInputRequest), degrading to the same deny answer on every no-answer
+// path rather than leaving the request surfaced.
 
 // envRoleInputPolicy is the variable the supervisor exports the JSON-encoded
 // role policy in. Absent means deny everything — the same state a nil policy
