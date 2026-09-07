@@ -131,9 +131,18 @@ describe("sandboxLeakProbeCommand covers the full widened provider-cred set", ()
   // cred added to the contract — or to env.go's widened LOCAL-runner env, which
   // internal/driver/sensitive_env_contract_test.go holds equal to the artifact's
   // provider_credentials — must be enumerated by the probe too or this test fails.
+  //
+  // scripts/test-builtin-workflows.sh copies these tests into a temp staging dir
+  // (so the bare @flue/runtime / @daytona/sdk specifiers resolve), which puts the
+  // repo out of reach of a path relative to import.meta.url. That script exports
+  // LOOM_REPO_ROOT for exactly this; the relative path is the fallback for running
+  // `node --test` in-tree.
+  const repoRoot = process.env.LOOM_REPO_ROOT
+    ? path.resolve(process.env.LOOM_REPO_ROOT)
+    : path.join(here, "../../..");
   const artifactPath = path.join(
-    here,
-    "../../driver/testdata/sensitive-env-names.json",
+    repoRoot,
+    "internal/driver/testdata/sensitive-env-names.json",
   );
   let contract;
   try {
@@ -141,7 +150,7 @@ describe("sandboxLeakProbeCommand covers the full widened provider-cred set", ()
   } catch (err) {
     throw new Error(
       `cannot read the vendored sensitive-env-name contract at ` +
-        `internal/driver/testdata/sensitive-env-names.json (${err.message}). ` +
+        `${artifactPath} (${err.message}). ` +
         `It is vendored from meta-harness; restore it with ` +
         `scripts/sync-sensitive-env-names.sh --to <this repo> there.`,
     );
