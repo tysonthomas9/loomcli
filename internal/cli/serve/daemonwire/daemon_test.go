@@ -3,13 +3,17 @@ package daemonwire
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
 )
 
 func TestBuildStoreBackedDaemonConfigFnUsesFleetDBStore(t *testing.T) {
@@ -118,5 +122,20 @@ func TestAgentEntryFromDomainCarriesExplicitAuto(t *testing.T) {
 		if entry.AutoEnabled() != auto {
 			t.Errorf("auto=%v: AutoEnabled() = %v", auto, entry.AutoEnabled())
 		}
+	}
+}
+
+// TestSendControlRequest_MissingSocketIsSupervisorUnavailable pins the wiring
+// the webui's claim-hold GET depends on: a dial failure must be recognizable
+// with errors.Is, not by prose. Without this, the handler's 200 answer for a
+// supervisor-less host silently reverts to a 503.
+func TestSendControlRequest_MissingSocketIsSupervisorUnavailable(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nope", "daemon.sock")
+
+	if _, err := sendControlRequest(missing, "agent_list", "", false, time.Second); !errors.Is(err, agentcontrol.ErrSupervisorUnavailable) {
+		t.Errorf("sendControlRequest err = %v, want ErrSupervisorUnavailable", err)
+	}
+	if _, err := sendControlRequestArgs(missing, "claims_hold_get", "", nil, time.Second); !errors.Is(err, agentcontrol.ErrSupervisorUnavailable) {
+		t.Errorf("sendControlRequestArgs err = %v, want ErrSupervisorUnavailable", err)
 	}
 }
