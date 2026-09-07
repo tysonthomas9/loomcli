@@ -1,6 +1,11 @@
 # Known gaps between api/openapi.yaml and the routes the server actually
 # registers. Enforced by TestOpenAPIRouteDrift in internal/webui/app.
 #
+# "the routes the server registers" means BOTH arms of buildModules — the
+# store-backed one and the store-less daemon one — unioned. Neither arm alone is
+# the route surface, and comparing against one of them reports the other's routes
+# as drift that is not there.
+#
 # Two directions, two keys:
 #
 #   unserved:   declared in the spec but NOT registered by the server.
@@ -133,4 +138,23 @@ undeclared:
   - route: "PUT /api/workspaces/{ws}/roles/{role}/skills/{name}/files/{path...}"
     reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
   - route: "PUT /api/workspaces/{ws}/skills/{name}/files/{path...}"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+
+  # ── Daemon-socket control surface ───────────────────────────────────────────
+  # Registered only when the server has the matching daemon control-socket
+  # callback (AgentInputFn / ClaimHoldFn). They are real API surface, not an
+  # internal plane, so they belong in the spec — the same PUPPET-488 follow-up
+  # applies. They are listed separately because they come from the store-less
+  # arm of buildModules, which the fixture reaches through newDaemonServer.
+  - route: "DELETE /api/workspaces/{ws}/claims/hold"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/agents/{name}/input"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/claims/hold"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "GET /api/workspaces/{ws}/pending-inputs"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "POST /api/workspaces/{ws}/agents/{name}/answer"
+    reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
+  - route: "POST /api/workspaces/{ws}/claims/hold"
     reason: "TEMPORARY: to be documented in the spec, see PUPPET-488"
