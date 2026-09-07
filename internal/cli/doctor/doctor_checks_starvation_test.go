@@ -24,12 +24,20 @@ func isolateRuntimeDir(t *testing.T) {
 	t.Cleanup(ResetWorkspaceRuntimeDirCache)
 }
 
-// loadStateFixture reads one of the testdata daemon-state files.
+// loadStateFixture reads one of the testdata/starvation daemon-state files.
 func loadStateFixture(t *testing.T, name string) *daemonStateView {
 	t.Helper()
-	state, err := loadDaemonStateView(filepath.Join("testdata", "starvation", name))
+	return loadStateFixtureFrom(t, "starvation", name)
+}
+
+// loadStateFixtureFrom reads a daemon-state fixture from a testdata
+// subdirectory, so checks other than starvation can keep their fixtures beside
+// their own tests.
+func loadStateFixtureFrom(t *testing.T, subdir, name string) *daemonStateView {
+	t.Helper()
+	state, err := loadDaemonStateView(filepath.Join("testdata", subdir, name))
 	if err != nil {
-		t.Fatalf("load fixture %s: %v", name, err)
+		t.Fatalf("load fixture %s/%s: %v", subdir, name, err)
 	}
 	return state
 }
