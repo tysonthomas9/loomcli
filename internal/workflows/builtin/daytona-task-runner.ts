@@ -1054,17 +1054,28 @@ function commandLog(label, result) {
 }
 
 export function sandboxLeakProbeCommand() {
-  // This list must mirror env.go trustedLocalProviderCredentials to prevent drift:
-  // any cred name added to the widened LOCAL-runner env must also be enumerated
-  // here so a future regression that leaks it into the Daytona sandbox is caught.
+  // The canonical list lives in internal/driver/testdata/sensitive-env-names.json
+  // (vendored byte-for-byte from meta-harness's contract/sensitive-env-names.json).
+  // The entries below are its `runner_infra ++ provider_credentials` union, in that
+  // exact order, and both internal/driver/sensitive_env_contract_test.go and this
+  // module's .test.mjs fail if the two diverge — so this is no longer a list kept in
+  // step by hand. To CHANGE it, edit the artifact in meta-harness, re-run
+  // scripts/sync-sensitive-env-names.sh --to <this repo>, and land both PRs.
+  //
+  // Kept as a literal, not read from the JSON: this module is bundled into the
+  // builtin-workflow bundle and must stay self-contained with no filesystem
+  // dependency. Names are emitted split on "_" so the probe source carries no
+  // literal secret name.
   return "node -e " + shellQuote([
     "const names=[",
+    // runner_infra
     "['DAYTONA','API','KEY'],",
+    "['LOOM','TASK','RUN','LEASE','TOKEN'],",
+    "['LOOM','DRIVER','TASK','RUNNER','CMD','JSON'],",
+    // provider_credentials — mirrors env.go trustedLocalProviderCredentials
     "['GITHUB','TOKEN'],",
     "['GH','TOKEN'],",
     "['CODEX','HOME'],",
-    "['LOOM','TASK','RUN','LEASE','TOKEN'],",
-    "['LOOM','DRIVER','TASK','RUNNER','CMD','JSON'],",
     "['ANTHROPIC','API','KEY'],",
     "['OPENAI','API','KEY'],",
     "['CODEX','API','KEY'],",
@@ -1072,6 +1083,7 @@ export function sandboxLeakProbeCommand() {
     "['GOOGLE','API','KEY'],",
     "['GOOGLE','APPLICATION','CREDENTIALS'],",
     "['CURSOR','API','KEY'],",
+    "['CLAUDE','CODE','OAUTH','TOKEN'],",
     "].map((parts)=>parts.join('_'));",
     "let count=0;",
     "for (const name of names) if (process.env[name]) count++;",
