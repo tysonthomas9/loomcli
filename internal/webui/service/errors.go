@@ -33,6 +33,10 @@ type ServiceError struct {
 	Kind    ErrorKind
 	Message string
 	Cause   error
+	// RetryAfter is the verbatim upstream Retry-After value (delta-seconds
+	// or HTTP-date), empty when the upstream sent none. The handler layer
+	// copies it to the response header.
+	RetryAfter string
 }
 
 func (e *ServiceError) Error() string {
@@ -91,6 +95,12 @@ func ErrPayloadTooLarge(msg string) *ServiceError {
 
 func ErrRateLimited(msg string) *ServiceError {
 	return &ServiceError{Kind: KindRateLimited, Message: msg}
+}
+
+// ErrRateLimitedRetryAfter is ErrRateLimited carrying the upstream's
+// Retry-After value for verbatim propagation to the client.
+func ErrRateLimitedRetryAfter(msg, retryAfter string) *ServiceError {
+	return &ServiceError{Kind: KindRateLimited, Message: msg, RetryAfter: retryAfter}
 }
 
 func ErrBadGateway(msg string) *ServiceError {

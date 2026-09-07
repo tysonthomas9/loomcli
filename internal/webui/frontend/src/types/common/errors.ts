@@ -20,6 +20,11 @@ export class ApiError extends Error {
     public status: number,
     public statusText: string,
     public body?: unknown,
+    /**
+     * Milliseconds the server asked us to wait, parsed from `Retry-After`.
+     * Present only on 429/503 responses that carried the header.
+     */
+    public retryAfterMs?: number,
   ) {
     super(deriveMessage(status, statusText, body));
     this.name = "ApiError";

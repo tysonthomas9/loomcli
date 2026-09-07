@@ -1,6 +1,7 @@
 import createClient, { type Middleware } from "openapi-fetch";
 import type { paths } from "@/types/generated/openapi";
 import { reportError } from "./errorReporter";
+import { parseRetryAfter } from "./retryAfter";
 
 const DEFAULT_TIMEOUT = 30000;
 
@@ -258,6 +259,11 @@ const apiMiddleware: Middleware = {
 
       // 503 workspace service unavailable — skipped for endpoints whose 503 is
       // an expected answer rather than an outage (see isOutageExemptPath).
+      //
+      // A 429 deliberately falls through this branch and the 5xx one below: a
+      // throttle is neither a workspace outage nor a server fault, so it must
+      // raise no offline badge and file no client-error report. The status
+      // itself is the guard — no explicit 429 case belongs here.
       const pathname = new URL(request.url, "http://localhost").pathname;
       const exempt503 = response.status === 503 && isOutageExemptPath(pathname);
       if (response.status === 503 && !exempt503) {
@@ -300,6 +306,16 @@ api.use(apiMiddleware);
 // ============= Helpers for facade layer =============
 
 /**
+ * Read `Retry-After` off a response, in milliseconds.
+ *
+ * Test doubles and some polyfills hand back a response object without
+ * `headers`; a missing header simply means "no interval given".
+ */
+function retryAfterMsFrom(response: Response): number | undefined {
+  return parseRetryAfter(response.headers?.get("Retry-After") ?? null);
+}
+
+/**
  * Convert an openapi-fetch error response into an ApiError.
  * Called by facade functions when `error` is truthy.
  */
@@ -308,7 +324,12 @@ export function apiErrorFromResponse(
   response?: Response,
 ): ApiError {
   if (response) {
-    return new ApiError(response.status, response.statusText, error);
+    return new ApiError(
+      response.status,
+      response.statusText,
+      error,
+      retryAfterMsFrom(response),
+    );
   }
   return new ApiError(0, "Network error", error);
 }
@@ -443,7 +464,12 @@ async function fetchApi<T>(
       } catch {
         errorBody = responseText;
       }
-      throw new ApiError(response.status, response.statusText, errorBody);
+      throw new ApiError(
+        response.status,
+        response.statusText,
+        errorBody,
+        retryAfterMsFrom(response),
+      );
     }
 
     if (response.status === 204) {
