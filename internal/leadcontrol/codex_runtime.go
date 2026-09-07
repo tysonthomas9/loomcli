@@ -42,10 +42,17 @@ type CodexLeadRuntimeConfig struct {
 	// provisioned with rather than on whatever the live config.toml holds.
 	// Resolved by the backends layer; empty means "no pin".
 	ModelPin string
-	Stdin    io.Reader
-	Stdout   io.Writer
-	Stderr   io.Writer
-	Logger   *slog.Logger
+	// ResumeThreadID reopens a specific codex thread (`codex resume <id>`).
+	// Preferred over ResumeLast: it is the thread loom itself recorded.
+	ResumeThreadID string
+	// ResumeLast falls back to `codex resume --last` when loom has no thread
+	// id for the session. Codex picks its own most recent thread, which is not
+	// necessarily one loom launched — the caller warns about that.
+	ResumeLast bool
+	Stdin      io.Reader
+	Stdout     io.Writer
+	Stderr     io.Writer
+	Logger     *slog.Logger
 }
 
 func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error {
@@ -171,7 +178,13 @@ func codexAppServerLogPath(runtimeHome string) string {
 }
 
 func runCodexRemoteTUI(ctx context.Context, cfg CodexLeadRuntimeConfig, endpoint string) error {
-	_, _ = fmt.Fprintln(cfg.Stdout, "Launching controlled Codex lead session...")
+	if id := strings.TrimSpace(cfg.ResumeThreadID); id != "" {
+		_, _ = fmt.Fprintf(cfg.Stdout, "Resuming controlled Codex lead session (thread %s)...\n", id)
+	} else if cfg.ResumeLast {
+		_, _ = fmt.Fprintln(cfg.Stdout, "Resuming controlled Codex lead session (codex's most recent thread)...")
+	} else {
+		_, _ = fmt.Fprintln(cfg.Stdout, "Launching controlled Codex lead session...")
+	}
 	_, _ = fmt.Fprintln(cfg.Stdout, "")
 	// #nosec G204 -- cfg.CodexPath/workDir/prompt are the same trusted inputs used by interactive agent launch.
 	tuiCmd := exec.CommandContext(ctx, cfg.CodexPath, codexRemoteTUIArgs(cfg, endpoint)...)
@@ -186,17 +199,34 @@ func runCodexRemoteTUI(ctx context.Context, cfg CodexLeadRuntimeConfig, endpoint
 // codexRemoteTUIArgs builds the remote-TUI argv. An empty prompt means the
 // persona is suppressed (--prompt builtin:none) and the positional is omitted
 // entirely; `codex ... ""` is not the same as `codex ...`.
+//
+// The resume prefix, when there is one, leads: `codex resume [SESSION_ID]`
+// keeps every other flag in its usual position.
 func codexRemoteTUIArgs(cfg CodexLeadRuntimeConfig, endpoint string) []string {
-	args := []string{
+	args := append(codexResumeArgs(cfg),
 		"--remote", endpoint,
 		"--no-alt-screen",
 		"--dangerously-bypass-approvals-and-sandbox",
 		"-C", cfg.WorkDir,
-	}
+	)
 	if cfg.Prompt != "" {
 		args = append(args, cfg.Prompt)
 	}
 	return args
+}
+
+// codexResumeArgs returns the leading `resume` tokens for a resumed lead, or
+// nil for a fresh one. `codex resume [SESSION_ID] [PROMPT]` takes the prompt
+// positionally exactly as bare `codex` does, so fresh and resumed argv differ
+// only in this prefix — every other flag keeps its position.
+func codexResumeArgs(cfg CodexLeadRuntimeConfig) []string {
+	if id := strings.TrimSpace(cfg.ResumeThreadID); id != "" {
+		return []string{"resume", id}
+	}
+	if cfg.ResumeLast {
+		return []string{"resume", "--last"}
+	}
+	return nil
 }
 
 func normalizeCodexLeadRuntimeConfig(cfg CodexLeadRuntimeConfig) CodexLeadRuntimeConfig {
@@ -208,6 +238,7 @@ func normalizeCodexLeadRuntimeConfig(cfg CodexLeadRuntimeConfig) CodexLeadRuntim
 	if cfg.RuntimeDir == "" {
 		cfg.RuntimeDir = strings.TrimSpace(os.Getenv("LOOM_WORKSPACE_RUNTIME_DIR"))
 	}
+	cfg.ResumeThreadID = strings.TrimSpace(cfg.ResumeThreadID)
 	if cfg.CodexPath == "" {
 		cfg.CodexPath = defaultCodexBinary
 	}
