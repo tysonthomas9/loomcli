@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"sort"
@@ -14,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -23,12 +25,48 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
-// newMaximalServer builds a Server with every optional dependency satisfied, so
-// that buildModules produces all modules and registerRoutes registers every
-// conditional route. The drift test is only meaningful against a maximal
-// server: any dependency left nil silently drops routes, which then show up as
-// phantom "declared but not served" entries.
+// routeDriftMode selects which arm of buildModules the fixture exercises.
+//
+// buildModules is a FORK, not a ladder: `if storeBacked { ... } else { ... }`
+// (server_modules.go). No single server can register every route, because the
+// store-backed arm and the daemon arm each own modules the other never
+// constructs. A fixture that only builds one arm therefore reports every route
+// of the other as "declared but not served" — which is exactly what happened:
+// the daemon arm's pending-input routes read as phantom drift the moment the
+// spec documented them.
+type routeDriftMode int
+
+const (
+	// storeBackedMode is `serve` against a fleet/local store: agents, skills,
+	// onboarding, workflows, webhooks, prreview, approvals, task-run, driver.
+	storeBackedMode routeDriftMode = iota
+	// daemonMode is `serve` with no store, talking to the local daemon control
+	// socket: the agentcontrol module (lifecycle + pending input + claim hold)
+	// and the gh-backed pull-request list.
+	daemonMode
+)
+
+// newMaximalServer builds a store-backed Server with every optional dependency
+// satisfied. Prefer maximalRoutes for drift comparisons — a single arm is not
+// the whole route surface. See routeDriftMode.
 func newMaximalServer(t *testing.T) *Server {
+	t.Helper()
+	return newDriftServer(t, storeBackedMode)
+}
+
+// newDaemonServer builds the daemon-mode (store-less) Server. Together with
+// newMaximalServer it covers both arms of buildModules.
+func newDaemonServer(t *testing.T) *Server {
+	t.Helper()
+	return newDriftServer(t, daemonMode)
+}
+
+// newDriftServer builds a Server with every optional dependency satisfied for
+// the given arm, so that buildModules produces all of that arm's modules and
+// registerRoutes registers every conditional route. The drift test is only
+// meaningful against such a server: any dependency left nil silently drops
+// routes, which then show up as phantom "declared but not served" entries.
+func newDriftServer(t *testing.T, mode routeDriftMode) *Server {
 	t.Helper()
 
 	t.Setenv("LOOM_WORKER_TOKEN", "drift-test")
@@ -47,7 +85,24 @@ func newMaximalServer(t *testing.T) *Server {
 	app.diffSvc = &stubDiffService{}
 	app.fileSvc = &stubFileService{}
 	app.claimMetrics = fleet.NewClaimMetrics()
-	app.config.Store = memstore.New()
+	if mode == storeBackedMode {
+		app.config.Store = memstore.New()
+	}
+	// The daemon-socket callbacks. In storeBackedMode only ClaimHoldFn is read
+	// (buildInfraModules builds the claim-hold-only module there); in daemonMode
+	// all four are read and build the full agentcontrol module. Setting them
+	// unconditionally keeps the two arms differing in exactly one input — the
+	// store — which is what makes the pair a fixture rather than two fixtures.
+	app.config.AgentControlFn = func(string, string, bool) (*agentcontrol.AgentControlResult, error) {
+		return &agentcontrol.AgentControlResult{Success: true}, nil
+	}
+	app.config.AgentInputFn = func(string, string, json.RawMessage) (*agentcontrol.AgentControlResult, error) {
+		return &agentcontrol.AgentControlResult{Success: true}, nil
+	}
+	app.config.ClaimHoldFn = func(string, json.RawMessage) (*agentcontrol.AgentControlResult, error) {
+		return &agentcontrol.AgentControlResult{Success: true}, nil
+	}
+	app.config.AgentQueueFn = func(string) ([]webui.AgentQueueEntry, error) { return nil, nil }
 	app.config.LocalSettingsDir = t.TempDir()
 	// A URL is enough to register the auth proxy mount; it is never dialed.
 	app.config.ExtAuthURL = "http://127.0.0.1:9999"
@@ -101,6 +156,28 @@ func newMaximalServer(t *testing.T) *Server {
 	app.registerWorkerAPIRoutes()
 
 	return app
+}
+
+// maximalRoutes returns every pattern either arm of buildModules registers,
+// deduped and sorted. This — not one server's registeredRoutes() — is the
+// server's real route surface, and it is what both directions of the drift gate
+// compare against. See routeDriftMode for why one arm is never enough.
+func maximalRoutes(t *testing.T) []string {
+	t.Helper()
+
+	seen := make(map[string]bool)
+	var all []string
+	for _, app := range []*Server{newMaximalServer(t), newDaemonServer(t)} {
+		for _, r := range app.registeredRoutes() {
+			if seen[r] {
+				continue
+			}
+			seen[r] = true
+			all = append(all, r)
+		}
+	}
+	sort.Strings(all)
+	return all
 }
 
 // ── Drift gate ───────────────────────────────────────────────────────────────
@@ -388,8 +465,7 @@ func coveredByMount(key string, covering []string) bool {
 }
 
 func TestOpenAPIRouteDrift(t *testing.T) {
-	app := newMaximalServer(t)
-	served, covering := routeDriftServed(t, app.registeredRoutes())
+	served, covering := routeDriftServed(t, maximalRoutes(t))
 	declared := routeDriftDeclared(t)
 	allow := loadRouteDriftAllowlist(t)
 
@@ -446,44 +522,77 @@ func TestOpenAPIRouteDrift(t *testing.T) {
 }
 
 // TestRouteDriftFixtureIsMaximal is the ratchet that keeps the served_not_declared
-// direction honest. Every optional dependency newMaximalServer forgets silently
+// direction honest. Every optional dependency the fixture forgets silently
 // removes routes from the comparison, so the gate would go quiet rather than red.
+//
+// It pins BOTH arms of buildModules. Pinning only the store-backed arm is how the
+// daemon arm's pending-input routes went missing from the comparison and then
+// surfaced as phantom declared_not_served once the spec documented them.
 func TestRouteDriftFixtureIsMaximal(t *testing.T) {
-	const wantModules = 20
 	const hint = "the maximal-server fixture is missing a dependency, or a new module " +
 		"was added to buildModules — see §3 of PUPPET-501"
 
-	app := newMaximalServer(t)
-
-	if got := len(app.wsModules); got != wantModules {
-		t.Errorf("len(wsModules) = %d, want %d: %s", got, wantModules, hint)
+	arms := []struct {
+		name    string
+		build   func(*testing.T) *Server
+		modules int
+		// routes that only exist when a specific optional dependency is wired
+		// up on this arm. Each is the canary for a different one.
+		canaries []string
+	}{
+		{
+			name:    "store_backed",
+			build:   newMaximalServer,
+			modules: 21,
+			canaries: []string{
+				"GET /api/daemon/supervisor",              // handlers.DaemonSupervisor
+				"GET /api/monitor/status",                 // config.MonitorHandlers
+				"GET /api/local/settings",                 // config.LocalSettingsDir
+				"GET /api/workspaces/{ws}/agents",         // agentSvc + config.Store
+				"GET /api/workspaces/{ws}/terminal/token", // termAuth
+				"POST /api/internal/workers/register",     // LOOM_WORKER_TOKEN + registerWorkerAPIRoutes
+				"GET /api/workspaces/{ws}/claims/hold",    // config.ClaimHoldFn
+			},
+		},
+		{
+			name:    "daemon",
+			build:   newDaemonServer,
+			modules: 13,
+			canaries: []string{
+				"POST /api/workspaces/{ws}/agents/{name}/stop",   // config.AgentControlFn
+				"GET /api/workspaces/{ws}/pending-inputs",        // config.AgentInputFn
+				"GET /api/workspaces/{ws}/agents/{name}/input",   // config.AgentInputFn
+				"POST /api/workspaces/{ws}/agents/{name}/answer", // config.AgentInputFn
+				"GET /api/workspaces/{ws}/claims/hold",           // config.ClaimHoldFn
+				"GET /api/workspaces/{ws}/pull-requests",         // githandlers pull-request list
+			},
+		},
 	}
 
-	// A handful of routes that only exist when a specific optional dependency is
-	// wired up. Each is the canary for a different one.
-	wantRoutes := []string{
-		"GET /api/daemon/supervisor",              // handlers.DaemonSupervisor
-		"GET /api/monitor/status",                 // config.MonitorHandlers
-		"GET /api/local/settings",                 // config.LocalSettingsDir
-		"GET /api/workspaces/{ws}/agents",         // agentSvc + config.Store
-		"GET /api/workspaces/{ws}/terminal/token", // termAuth
-		"POST /api/internal/workers/register",     // LOOM_WORKER_TOKEN + registerWorkerAPIRoutes
-	}
+	for _, arm := range arms {
+		t.Run(arm.name, func(t *testing.T) {
+			app := arm.build(t)
 
-	registered := make(map[string]bool)
-	for _, r := range app.registeredRoutes() {
-		registered[normalizeRouteWildcards(r)] = true
-	}
+			if got := len(app.wsModules); got != arm.modules {
+				t.Errorf("len(wsModules) = %d, want %d: %s", got, arm.modules, hint)
+			}
 
-	var missing []string
-	for _, want := range wantRoutes {
-		if !registered[normalizeRouteWildcards(want)] {
-			missing = append(missing, want)
-		}
-	}
-	if len(missing) > 0 {
-		t.Errorf("conditional route(s) not registered:\n  %s\n\n%s",
-			strings.Join(missing, "\n  "), hint)
+			registered := make(map[string]bool)
+			for _, r := range app.registeredRoutes() {
+				registered[normalizeRouteWildcards(r)] = true
+			}
+
+			var missing []string
+			for _, want := range arm.canaries {
+				if !registered[normalizeRouteWildcards(want)] {
+					missing = append(missing, want)
+				}
+			}
+			if len(missing) > 0 {
+				t.Errorf("conditional route(s) not registered:\n  %s\n\n%s",
+					strings.Join(missing, "\n  "), hint)
+			}
+		})
 	}
 }
 
@@ -492,8 +601,7 @@ func TestRouteDriftFixtureIsMaximal(t *testing.T) {
 // lands in the spec, its allowlist entry becomes a contradiction and this test
 // says so.
 func TestRouteDriftAllowlistIsClean(t *testing.T) {
-	app := newMaximalServer(t)
-	served, _ := routeDriftServed(t, app.registeredRoutes())
+	served, _ := routeDriftServed(t, maximalRoutes(t))
 	declared := routeDriftDeclared(t)
 	allow := loadRouteDriftAllowlist(t)
 
