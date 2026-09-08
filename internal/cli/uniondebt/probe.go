@@ -33,6 +33,11 @@ const (
 	ClassNoBranch Class = "no-branch"
 	// ClassNoUnion means the clone is missing, or has no union branch.
 	ClassNoUnion Class = "no-union"
+	// ClassSuperseded means this ledger item's branch is no longer the branch the
+	// debt was filed against: the work has been rebuilt, or is already present in
+	// union under a different sha. Merging the recorded ref would re-apply
+	// abandoned code.
+	ClassSuperseded Class = "superseded"
 )
 
 // ProbeResult describes one probe. Ref and TipSHA are empty for ClassNoBranch
@@ -42,6 +47,7 @@ type ProbeResult struct {
 	Ref      string
 	TipSHA   string
 	Conflict string // verbatim merge-tree conflict summary, when ClassConflict
+	Detail   string // which signal fired, when ClassSuperseded
 }
 
 // gitRunner runs one git invocation and reports its exit code separately from
@@ -94,11 +100,17 @@ func NewProber() *Prober { return &Prober{git: execGitRunner{}} }
 
 // Probe classifies taskID's branch against unionBranch inside clone.
 //
-// Ref resolution tries origin/loom/<ID> first and then a bare local loom/<ID>.
-// The fallback is load-bearing: PUPPET-308 exists only as a local branch in the
+// Ref resolution tries the highest-numbered origin/loom/<ID>-r<N> first, then
+// origin/loom/<ID>, then a bare local loom/<ID>. The local fallback is
+// load-bearing and stays LAST: PUPPET-308 exists only as a local branch in the
 // meta-harness clone, and an origin-only lookup would call it NoBranch and
 // wrongly retire real debt.
-func (p *Prober) Probe(clone, unionBranch, taskID string) (ProbeResult, error) {
+//
+// recordedTip is the tip the debt was originally filed against, or "" when it
+// is unknown. It is only ever used to detect that the ref has since been
+// replaced by a non-descendant; an unknown tip simply skips that signal,
+// because a false "superseded" would retire real debt.
+func (p *Prober) Probe(clone, unionBranch, taskID, recordedTip string) (ProbeResult, error) {
 	if err := validateRef(unionBranch); err != nil {
 		return ProbeResult{}, err
 	}
@@ -112,16 +124,9 @@ func (p *Prober) Probe(clone, unionBranch, taskID string) (ProbeResult, error) {
 		return ProbeResult{Class: ClassNoUnion}, nil //nolint:nilerr // absence is a classification, not a failure
 	}
 
-	var ref, tip string
-	for _, candidate := range []string{"origin/loom/" + taskID, "loom/" + taskID} {
-		out, code, err := p.git.Run(clone, "rev-parse", "-q", "--verify", candidate)
-		if err != nil {
-			return ProbeResult{}, fmt.Errorf("rev-parse %s in %s: %w", candidate, clone, err)
-		}
-		if code == 0 {
-			ref, tip = candidate, strings.TrimSpace(out)
-			break
-		}
+	ref, tip, err := p.resolveRef(clone, taskID)
+	if err != nil {
+		return ProbeResult{}, err
 	}
 	if ref == "" {
 		return ProbeResult{Class: ClassNoBranch}, nil
@@ -133,6 +138,16 @@ func (p *Prober) Probe(clone, unionBranch, taskID string) (ProbeResult, error) {
 	}
 	if code == 0 {
 		return ProbeResult{Class: ClassInUnion, Ref: ref, TipSHA: tip}, nil
+	}
+
+	// Superseded is checked only after the cheap ancestor case, so it can never
+	// shadow a branch that is genuinely in union.
+	detail, err := p.superseded(clone, unionBranch, ref, tip, recordedTip)
+	if err != nil {
+		return ProbeResult{}, err
+	}
+	if detail != "" {
+		return ProbeResult{Class: ClassSuperseded, Ref: ref, TipSHA: tip, Detail: detail}, nil
 	}
 
 	out, code, err := p.git.Run(clone, "merge-tree", "--write-tree", unionBranch, ref)
@@ -147,4 +162,137 @@ func (p *Prober) Probe(clone, unionBranch, taskID string) (ProbeResult, error) {
 	default:
 		return ProbeResult{}, fmt.Errorf("merge-tree %s %s in %s: exit %d", unionBranch, ref, clone, code)
 	}
+}
+
+// resolveRef finds the ref that answers to taskID today, and its tip. It
+// returns "" for both when nothing resolves.
+//
+// The order is the whole point: the highest-numbered republished revision, then
+// the unsuffixed origin ref, then the bare local branch LAST.
+func (p *Prober) resolveRef(clone, taskID string) (ref, tip string, err error) {
+	rev, err := highestRevisionRef(p.git, clone, taskID)
+	if err != nil {
+		return "", "", err
+	}
+	candidates := []string{"origin/loom/" + taskID, "loom/" + taskID}
+	if rev != "" {
+		candidates = append([]string{rev}, candidates...)
+	}
+
+	for _, candidate := range candidates {
+		out, code, err := p.git.Run(clone, "rev-parse", "-q", "--verify", candidate)
+		if err != nil {
+			return "", "", fmt.Errorf("rev-parse %s in %s: %w", candidate, clone, err)
+		}
+		if code == 0 {
+			return candidate, strings.TrimSpace(out), nil
+		}
+	}
+	return "", "", nil
+}
+
+// superseded reports why ref is superseded, or "" when it is ordinary debt.
+//
+// Two independent signals, either of which is enough:
+//
+//   - Ref moved. The tip the debt was filed against is not an ancestor of the
+//     ref that answers to the task's name today, so the branch was rebuilt and
+//     merging it would re-apply abandoned code. A recorded tip that no longer
+//     resolves at all — replaced and then garbage-collected — counts too, but
+//     only because a current, different ref exists to compare it against.
+//   - Content already present. Every path the branch touches is byte-identical
+//     in union, so its work arrived by some other route.
+func (p *Prober) superseded(clone, unionBranch, ref, tip, recordedTip string) (string, error) {
+	if recordedTip != "" && validateRef(recordedTip) == nil {
+		// ^{commit} is what makes this a real existence check: a full 40-char
+		// hex name is syntactically valid to rev-parse whether or not the
+		// object is still in the clone, so --verify alone would accept a
+		// garbage-collected sha.
+		_, code, err := p.git.Run(clone, "rev-parse", "-q", "--verify", recordedTip+"^{commit}")
+		if err != nil {
+			return "", fmt.Errorf("rev-parse %s in %s: %w", recordedTip, clone, err)
+		}
+		switch {
+		case code != 0:
+			if tip != recordedTip {
+				return fmt.Sprintf("the recorded tip %s no longer resolves in %s and %s now points at %s",
+					recordedTip, clone, ref, tip), nil
+			}
+		default:
+			_, code, err := p.git.Run(clone, "merge-base", "--is-ancestor", recordedTip, ref)
+			if err != nil {
+				return "", fmt.Errorf("merge-base in %s: %w", clone, err)
+			}
+			if code != 0 {
+				return fmt.Sprintf("the recorded tip %s is not an ancestor of %s (%s): the branch was rebuilt",
+					recordedTip, ref, tip), nil
+			}
+		}
+	}
+
+	present, err := p.contentInUnion(clone, unionBranch, ref)
+	if err != nil {
+		return "", err
+	}
+	if present {
+		return fmt.Sprintf("every path %s touches is already byte-identical in %s: its work arrived by another route",
+			ref, unionBranch), nil
+	}
+	return "", nil
+}
+
+// diffChunk caps how many paths go into one `git diff` invocation, so a branch
+// touching thousands of files cannot overflow ARG_MAX.
+const diffChunk = 500
+
+// contentInUnion reports whether every path ref touches since its merge base
+// with union is already identical in union. An EMPTY path list is not enough:
+// a branch that changes nothing is handled by the ancestor check above, and
+// treating it as superseded here would retire debt on no evidence at all.
+func (p *Prober) contentInUnion(clone, unionBranch, ref string) (bool, error) {
+	base, code, err := p.git.Run(clone, "merge-base", unionBranch, ref)
+	if err != nil {
+		return false, fmt.Errorf("merge-base %s %s in %s: %w", unionBranch, ref, clone, err)
+	}
+	if code != 0 {
+		// No common ancestor (unrelated histories): nothing to compare.
+		return false, nil
+	}
+	base = strings.TrimSpace(base)
+
+	// -z keeps paths raw: git quotes and escapes unusual names in the default
+	// output, and a quoted path handed straight back to git matches nothing.
+	out, code, err := p.git.Run(clone, "diff", "-z", "--name-only", base, ref)
+	if err != nil {
+		return false, fmt.Errorf("diff --name-only %s %s in %s: %w", base, ref, clone, err)
+	}
+	if code != 0 {
+		return false, fmt.Errorf("diff --name-only %s %s in %s: exit %d", base, ref, clone, code)
+	}
+	var paths []string
+	for _, path := range strings.Split(out, "\x00") {
+		if path != "" {
+			paths = append(paths, path)
+		}
+	}
+	if len(paths) == 0 {
+		return false, nil
+	}
+
+	for start := 0; start < len(paths); start += diffChunk {
+		end := start + diffChunk
+		if end > len(paths) {
+			end = len(paths)
+		}
+		args := append([]string{"diff", "--quiet", unionBranch, ref, "--"}, paths[start:end]...)
+		_, code, err := p.git.Run(clone, args...)
+		if err != nil {
+			return false, fmt.Errorf("diff --quiet %s %s in %s: %w", unionBranch, ref, clone, err)
+		}
+		if code != 0 {
+			// Some path differs — ordinary debt. ALL of them must match.
+			return false, nil
+		}
+	}
+	return true, nil
 }
