@@ -363,7 +363,7 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 			// difference between "renew the login" / "back off blamelessly"
 			// and an Unknown that burns the restart budget on a turn that
 			// cannot succeed.
-			if ie := terminalTurnInvocationError(reason, outputTail); ie != nil {
+			if ie := terminalTurnInvocationError(reason, claudeTerminalEvidence(res)); ie != nil {
 				return ie
 			}
 			return &InvocationError{Err: errors.New(reason), OutputTail: outputTail, ExitCode: 1}
@@ -669,6 +669,22 @@ func claudeTurnText(res claudeRunTurnResult) string {
 		}
 	}
 	return res.Turn.Text
+}
+
+// claudeTerminalEvidence is the classifier's evidence window for a turn the
+// HARNESS declared terminal (auth / usage). It differs from the ordinary
+// evidence in one way: it also offers the rendered screen parked on
+// Turn.Text by invokeClaudeRunTurn, because claudeTurnText prefers the last
+// assistant message from History and would otherwise shadow it — and on an
+// auth turn the history holds the pre-failure conversation while the login
+// banner is only on the screen. Deduplicated, so a turn whose history is
+// empty does not repeat the same text twice.
+func claudeTerminalEvidence(res claudeRunTurnResult) string {
+	raw := strings.TrimSpace(res.Turn.Text)
+	if strings.TrimSpace(claudeTurnText(res)) == raw {
+		raw = ""
+	}
+	return claudeRunTurnEvidence(res, raw)
 }
 
 func claudeRunTurnEvidence(res claudeRunTurnResult, raw string) string {

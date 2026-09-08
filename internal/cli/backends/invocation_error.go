@@ -191,6 +191,15 @@ func authRequiredInvocationError(reason, outputTail string) *InvocationError {
 // through to their existing handling with a single nil check. It is now the
 // ONLY way a wall marker is raised from a turn: loom no longer infers a wall
 // from rendered screen or turn text.
+//
+// outputTail is the CLASSIFIER'S EVIDENCE WINDOW, not a cosmetic log tail:
+// agenterr describes the screen behind every auth verdict out of exactly this
+// text (ScreenEvidence.BannerRule / ComposerWitnessed). The harness names the
+// reason but ships no screen with it — Turn.Text is empty on every v0.7.7
+// producer of ReasonAuthRequired — so callers should pass the rendered screen
+// here (conversation: screenEvidence; one-shot: claudeTerminalEvidence).
+// Passing only the reason yields a recorded Screen.Scanned=false, which is a
+// finding rather than a failure, but a needless one.
 func terminalTurnInvocationError(reason, outputTail string) *InvocationError {
 	var marker string
 	switch {

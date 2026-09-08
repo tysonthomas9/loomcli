@@ -262,7 +262,7 @@ func TestTerminalTurnInvocationErrorHarnessNamedWalls(t *testing.T) {
 // it is not "fixed" back into a scrape by accident; the correct fix, if a real
 // billing wall is ever observed here, is a harness-named billing reason.
 func TestConversationTurnErrorBillingTextIsUnmarked(t *testing.T) {
-	err := conversationTurnError(chat.Turn{
+	err := conversationTurnError(nil, chat.Turn{
 		State: chat.TurnStateErrored,
 		Text:  "⏺ Your credit balance is too low to run this request.",
 	})
@@ -283,7 +283,7 @@ func TestConversationTurnErrorBillingTextIsUnmarked(t *testing.T) {
 // A turn errored for an ordinary reason keeps the plain path: no marker
 // invented for a wall that is not there.
 func TestConversationTurnErrorPlainReasonIsUnmarked(t *testing.T) {
-	err := conversationTurnError(chat.Turn{State: chat.TurnStateErrored, Reason: "stream closed", Text: "partial output"})
+	err := conversationTurnError(nil, chat.Turn{State: chat.TurnStateErrored, Reason: "stream closed", Text: "partial output"})
 	if strings.Contains(err.Error(), "loom: harness") {
 		t.Fatalf("plain errored turn acquired a marker: %q", err.Error())
 	}
