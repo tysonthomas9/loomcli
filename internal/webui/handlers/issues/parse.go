@@ -18,6 +18,13 @@ func parseListParams(r *http.Request) (*rpc.ListArgs, error) { //nolint:funlen
 	args.IssueType = handler.ParseStringParam(q, "type")
 	args.Assignee = handler.ParseStringParam(q, "assignee")
 	args.Query = handler.ParseStringParam(q, "q")
+	// parent_id was parsed for /api/ready and /api/blocked but never here, so
+	// GET /api/workspaces/{ws}/issues?parent_id=X silently returned the WHOLE
+	// board. Every layer below already forwards it (rpc.ListArgs.ParentID ->
+	// backend.ListOpts.ParentID -> fleet-db, which does filter), so a caller
+	// asking for one parent's children got an unfiltered page and no error —
+	// the failure mode that made loom doctor's decomposed checks inert.
+	args.ParentID = handler.ParseStringParam(q, "parent_id")
 
 	// Priority (integer, silently ignore invalid values)
 	args.Priority, _ = handler.ParseIntParam(q, "priority")

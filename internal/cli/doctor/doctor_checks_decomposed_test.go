@@ -56,7 +56,7 @@ func TestCheckDecomposedWithoutChildren(t *testing.T) {
 		deps, _, _, _, mockBackend := NewTestDeps(t)
 		mockBackend.ListErr = errors.New("fleet-db unreachable")
 
-		if result := checkDecomposedWithoutChildren(newDecomposedScanForLabel(deps, testDecomposedLabel)); result != (CheckResult{}) {
+		if result := checkDecomposedWithoutChildren(&decomposedScan{deps: deps, label: testDecomposedLabel}); result != (CheckResult{}) {
 			t.Errorf("expected empty (skipped) result, got %+v", result)
 		}
 	})
@@ -66,7 +66,7 @@ func TestCheckDecomposedWithoutChildren(t *testing.T) {
 		deps, _, _, _, mockBackend := NewTestDeps(t)
 		mockBackend.ListFn = decomposedListFn(nil, nil)
 
-		if result := checkDecomposedWithoutChildren(newDecomposedScanForLabel(deps, testDecomposedLabel)); result != (CheckResult{}) {
+		if result := checkDecomposedWithoutChildren(&decomposedScan{deps: deps, label: testDecomposedLabel}); result != (CheckResult{}) {
 			t.Errorf("expected empty (skipped) result, got %+v", result)
 		}
 	})
@@ -79,7 +79,7 @@ func TestCheckDecomposedWithoutChildren(t *testing.T) {
 			map[string][]backend.IssueData{"PUPPET-1": {{ID: "PUPPET-2", Status: "open"}}},
 		)
 
-		result := checkDecomposedWithoutChildren(newDecomposedScanForLabel(deps, testDecomposedLabel))
+		result := checkDecomposedWithoutChildren(&decomposedScan{deps: deps, label: testDecomposedLabel})
 		if result.Status != StatusPass {
 			t.Fatalf("expected pass, got %v: %s", result.Status, result.Summary)
 		}
@@ -102,7 +102,7 @@ func TestCheckDecomposedWithoutChildren(t *testing.T) {
 			nil,
 		)
 
-		result := checkDecomposedWithoutChildren(newDecomposedScanForLabel(deps, testDecomposedLabel))
+		result := checkDecomposedWithoutChildren(&decomposedScan{deps: deps, label: testDecomposedLabel})
 		if result.Status != StatusPass {
 			t.Fatalf("expected pass, got %v: %s", result.Status, result.Summary)
 		}
@@ -124,7 +124,7 @@ func TestCheckDecomposedWithoutChildren(t *testing.T) {
 			map[string][]backend.IssueData{"PUPPET-300": {{ID: "PUPPET-301"}}},
 		)
 
-		result := checkDecomposedWithoutChildren(newDecomposedScanForLabel(deps, testDecomposedLabel))
+		result := checkDecomposedWithoutChildren(&decomposedScan{deps: deps, label: testDecomposedLabel})
 		if result.Status != StatusWarn {
 			t.Fatalf("expected warn, got %v: %s", result.Status, result.Summary)
 		}
@@ -162,7 +162,7 @@ func TestCheckDecomposedWithoutChildren(t *testing.T) {
 			return base(ctx, opts)
 		}
 
-		result := checkDecomposedWithoutChildren(newDecomposedScanForLabel(deps, testDecomposedLabel))
+		result := checkDecomposedWithoutChildren(&decomposedScan{deps: deps, label: testDecomposedLabel})
 		if result.Status != StatusWarn {
 			t.Fatalf("expected warn, got %v: %s", result.Status, result.Summary)
 		}
@@ -193,7 +193,7 @@ func strandScan(t *testing.T, parents []backend.IssueData, kids map[string][]bac
 	t.Helper()
 	deps, _, _, _, mockBackend := NewTestDeps(t)
 	mockBackend.ListFn = decomposedListFn(parents, kids)
-	return newDecomposedScanForLabel(deps, testDecomposedLabel)
+	return &decomposedScan{deps: deps, label: testDecomposedLabel}
 }
 
 func TestCheckDecomposedChildrenAllClosed(t *testing.T) {
@@ -204,7 +204,7 @@ func TestCheckDecomposedChildrenAllClosed(t *testing.T) {
 		deps, _, _, _, mockBackend := NewTestDeps(t)
 		mockBackend.ListErr = errors.New("fleet-db unreachable")
 
-		scan := newDecomposedScanForLabel(deps, testDecomposedLabel)
+		scan := &decomposedScan{deps: deps, label: testDecomposedLabel}
 		if result := checkDecomposedChildrenAllClosed(scan); result != (CheckResult{}) {
 			t.Errorf("expected empty (skipped) result, got %+v", result)
 		}
@@ -228,7 +228,7 @@ func TestCheckDecomposedChildrenAllClosed(t *testing.T) {
 			return []backend.IssueData{{ID: "PUPPET-1", Status: "blocked"}}, nil
 		}
 
-		scan := newDecomposedScanForLabel(deps, testDecomposedLabel)
+		scan := &decomposedScan{deps: deps, label: testDecomposedLabel}
 		if result := checkDecomposedChildrenAllClosed(scan); result != (CheckResult{}) {
 			t.Errorf("expected empty (skipped) result, got %+v", result)
 		}
@@ -441,7 +441,7 @@ func TestCheckDecomposedChildrenAllClosed(t *testing.T) {
 			return base(ctx, opts)
 		}
 
-		scan := newDecomposedScanForLabel(deps, testDecomposedLabel)
+		scan := &decomposedScan{deps: deps, label: testDecomposedLabel}
 		for _, result := range []CheckResult{
 			checkDecomposedChildrenAllClosed(scan),
 			checkDecomposedWithoutChildren(scan),

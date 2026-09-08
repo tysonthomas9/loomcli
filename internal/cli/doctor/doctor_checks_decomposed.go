@@ -172,12 +172,6 @@ func newDecomposedScan(deps *cli.Deps) *decomposedScan {
 	return &decomposedScan{deps: deps}
 }
 
-// newDecomposedScanForLabel is newDecomposedScan with the label already
-// resolved.
-func newDecomposedScanForLabel(deps *cli.Deps, label string) *decomposedScan {
-	return &decomposedScan{deps: deps, label: label}
-}
-
 func (s *decomposedScan) result() scanResult {
 	s.once.Do(func() { s.res = s.run() })
 	return s.res
@@ -299,7 +293,7 @@ type strandedParent struct {
 	Children       int    `json:"children"`
 	ClosedChildren int    `json:"closed_children"`
 	// LastChildClosedAt is omitted when no child carried a closed_at. A
-	// timestamp is never synthesised, and a missing one never suppresses the
+	// timestamp is never synthesized, and a missing one never suppresses the
 	// finding.
 	LastChildClosedAt string   `json:"last_child_closed_at,omitempty"`
 	UnshippedChildren []string `json:"unshipped_children,omitempty"`
