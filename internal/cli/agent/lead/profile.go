@@ -9,6 +9,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agentprofile"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 )
 
@@ -176,4 +177,41 @@ func profileAgentName(configDir string) string {
 		return "<agent>"
 	}
 	return agent
+}
+
+// warnUnpinnedLeadModel prints one line when the selected backend's launch
+// carries no model pin, so a silently unpinned lead is not invisible.
+//
+// This is the only place in the launch path with an operator at a terminal.
+// The resolver itself lives in backends and never prints: it also runs under
+// the daemon, where this line would be noise on every spawn.
+//
+// Harnesses with no provisioned profile root (gemini, cursor, opencode) are
+// silent — there is nothing to pin them to and nothing to repair.
+func warnUnpinnedLeadModel(backend string) {
+	harness := strings.ToLower(strings.TrimSpace(backend))
+	if supervisor.ProfileEnvVar(harness) == "" {
+		return
+	}
+	if backends.PinnedModelFor(harness) != "" {
+		return
+	}
+	dir := os.Getenv(supervisor.ProfileEnvVar(harness))
+	if dir == "" {
+		dir = "none"
+	}
+	fmt.Fprintf(os.Stderr,
+		"Warning: no provisioned model pin for %s (profile %s); this session starts on whatever %s holds.\n",
+		harness, dir, pinnedModelFileFor(harness))
+	fmt.Fprintf(os.Stderr, "Repair: scripts/provision-profile.sh %s\n\n", profileAgentName(dir))
+}
+
+// pinnedModelFileFor names, for the warning only, the live file that decides
+// the model when nothing is pinned. It mirrors the managed files named in
+// backends/model_pin.go; that resolver stays the source of truth.
+func pinnedModelFileFor(harness string) string {
+	if harness == "codex" {
+		return "config.toml"
+	}
+	return "settings.json"
 }

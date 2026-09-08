@@ -8,6 +8,10 @@ import (
 )
 
 // RunCodexLeadRuntime starts a controlled Codex app-server runtime for an interactive lead session.
+//
+// The model pin is resolved HERE rather than inside leadcontrol so there is one
+// resolver per harness rather than one per runtime package; leadcontrol takes
+// the already-resolved value. See model_pin.go.
 func RunCodexLeadRuntime(
 	ctx context.Context,
 	st store.Store,
@@ -24,5 +28,6 @@ func RunCodexLeadRuntime(
 		SessionID: sessionID,
 		WorkDir:   workDir,
 		Prompt:    prompt,
+		ModelPin:  pinnedCodexModel(),
 	})
 }

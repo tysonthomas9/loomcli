@@ -272,3 +272,187 @@ func TestVerifyManaged_UnicodeEscapingDoesNotMatterAfterParsing(t *testing.T) {
 		t.Fatalf("verifyManaged = %v, want nil", err)
 	}
 }
+
+// ── TOML managed content ─────────────────────────────────────────────────────
+//
+// The codex half of the mechanism. codexBaselineTOML is the shape of the real
+// profiles/lead/codex/config.toml: the model settings plus the [projects…]
+// tables whose trust_level entries are the profile's entire reason to exist.
+
+const codexBaselineTOML = `model = "gpt-5.6-sol"
+model_reasoning_effort = "medium"
+
+[projects."/Users/oleh/.loom/workspaces/puppet"]
+trust_level = "trusted"
+
+[projects."/Users/oleh/.loom/workspaces/puppet/lead"]
+trust_level = "trusted"
+
+[projects."/Users/oleh/.loom/workspaces/PUPPET"]
+trust_level = "trusted"
+
+[projects."/Users/oleh/.loom/workspaces/PUPPET/lead"]
+trust_level = "trusted"
+`
+
+// What codex appends to config.toml on essentially every run. This is the
+// ticket: byte-hashed, these two tables brick the next `loom lead` — for the
+// claude backend too, since enforceLeadProfile exits on the first harness that
+// fails.
+const codexRuntimeAppendTOML = `
+[hooks.state]
+
+[hooks.state."/Users/oleh/.loom/workspaces/puppet/.codex/hooks.json:user_prompt_submit:0:0"]
+trusted_hash = "sha256:8f035f2a"
+
+[tui.model_availability_nux]
+gpt-6-astra = 1
+`
+
+func TestVerifyManaged_TOMLBaselineIsASubsetOfTheDriftedLiveFile(t *testing.T) {
+	dir := writeManaged(t, "config.toml", codexBaselineTOML, codexBaselineTOML+codexRuntimeAppendTOML)
+	if err := verifyManaged(dir, []string{"config.toml"}); err != nil {
+		t.Fatalf("verifyManaged = %v, want nil: codex's own runtime tables must not be drift", err)
+	}
+}
+
+// The trust boundary, still enforced. This is the whole justification for
+// verifying config.toml semantically instead of unlisting it: a tampered
+// trust_level must still refuse, appends or no appends.
+func TestVerifyManaged_TOMLDriftWhenTrustLevelChanges(t *testing.T) {
+	live := strings.Replace(codexBaselineTOML+codexRuntimeAppendTOML,
+		"[projects.\"/Users/oleh/.loom/workspaces/puppet\"]\ntrust_level = \"trusted\"",
+		"[projects.\"/Users/oleh/.loom/workspaces/puppet\"]\ntrust_level = \"untrusted\"", 1)
+	dir := writeManaged(t, "config.toml", codexBaselineTOML, live)
+	err := verifyManaged(dir, []string{"config.toml"})
+	if !errors.Is(err, ErrManagedContentDrift) {
+		t.Fatalf("verifyManaged = %v, want ErrManagedContentDrift", err)
+	}
+	// The path is the operator-facing contract, and it must name the exact
+	// project whose trust changed.
+	if !strings.Contains(err.Error(), `projects./Users/oleh/.loom/workspaces/puppet.trust_level`) {
+		t.Fatalf("error must name the diverging path, got: %v", err)
+	}
+	// Known limitation, PRE-DATING this change and deliberately not widened
+	// here: the dotted path is a string, so valueAt cannot walk back into a key
+	// that itself contains dots or slashes — every [projects."…"] key does — and
+	// both sides render "(absent)". The path names the divergence correctly,
+	// which is what the contract promises; quoting the two values would need
+	// subsetOf to carry them out structurally. Pinned so the day someone fixes
+	// that, this test tells them the codex case is the reason to.
+	if !strings.Contains(err.Error(), "provisioned (absent), on disk (absent)") {
+		t.Fatalf("dotted-key rendering changed; if values are now quoted, tighten this test: %v", err)
+	}
+}
+
+// Dropping a provisioned table is drift even though everything left is
+// unchanged: containment is one-directional.
+func TestVerifyManaged_TOMLDriftWhenAProvisionedTableIsRemoved(t *testing.T) {
+	live := strings.Replace(codexBaselineTOML,
+		"[projects.\"/Users/oleh/.loom/workspaces/PUPPET/lead\"]\ntrust_level = \"trusted\"\n", "", 1)
+	dir := writeManaged(t, "config.toml", codexBaselineTOML, live)
+	if err := verifyManaged(dir, []string{"config.toml"}); !errors.Is(err, ErrManagedContentDrift) {
+		t.Fatalf("verifyManaged = %v, want ErrManagedContentDrift", err)
+	}
+}
+
+func TestVerifyManaged_LiveFileNotTOMLIsDrift(t *testing.T) {
+	dir := writeManaged(t, "config.toml", codexBaselineTOML, `{"model":"gpt-5.6-sol"}`)
+	err := verifyManaged(dir, []string{"config.toml"})
+	if !errors.Is(err, ErrManagedContentDrift) {
+		t.Fatalf("verifyManaged = %v, want ErrManagedContentDrift", err)
+	}
+	if !strings.Contains(err.Error(), "on-disk file is not valid TOML") {
+		t.Fatalf("error must say WHICH file and WHICH format, got: %v", err)
+	}
+}
+
+func TestVerifyManaged_BaselineNotTOMLIsDrift(t *testing.T) {
+	dir := writeManaged(t, "config.toml", `{"model":"gpt-5.6-sol"}`, codexBaselineTOML)
+	err := verifyManaged(dir, []string{"config.toml"})
+	if !errors.Is(err, ErrManagedContentDrift) {
+		t.Fatalf("verifyManaged = %v, want ErrManagedContentDrift", err)
+	}
+	if !strings.Contains(err.Error(), "provisioned baseline is not valid TOML") {
+		t.Fatalf("error must say WHICH file and WHICH format, got: %v", err)
+	}
+}
+
+// A manifest naming a format the verifier cannot read is a PROVISIONING fault,
+// not agent drift: re-provisioning alone would not repair it, so it must not be
+// reported as something re-provisioning fixes.
+func TestVerifyManaged_UnsupportedExtensionIsAManifestFault(t *testing.T) {
+	dir := writeManaged(t, "config.yaml", "model: gpt\n", "model: gpt\n")
+	err := verifyManaged(dir, []string{"config.yaml"})
+	if !errors.Is(err, ErrManifestUnreadable) {
+		t.Fatalf("verifyManaged = %v, want ErrManifestUnreadable", err)
+	}
+	if !strings.Contains(err.Error(), `".yaml"`) {
+		t.Fatalf("error must quote the extension it cannot handle, got: %v", err)
+	}
+}
+
+// A file with no extension at all must not fall through permissively either.
+func TestVerifyManaged_NoExtensionIsAManifestFault(t *testing.T) {
+	dir := writeManaged(t, "config", "anything", "anything")
+	if err := verifyManaged(dir, []string{"config"}); !errors.Is(err, ErrManifestUnreadable) {
+		t.Fatalf("verifyManaged = %v, want ErrManifestUnreadable", err)
+	}
+}
+
+// The host filesystem is case-insensitive; the extension match must be too, or
+// a CONFIG.TOML would read as an unsupported format.
+func TestVerifyManaged_ExtensionMatchIsCaseInsensitive(t *testing.T) {
+	dir := writeManaged(t, "CONFIG.TOML", codexBaselineTOML, codexBaselineTOML+codexRuntimeAppendTOML)
+	if err := verifyManaged(dir, []string{"CONFIG.TOML"}); err != nil {
+		t.Fatalf("verifyManaged = %v, want nil", err)
+	}
+}
+
+// go-toml decodes an empty document to an EMPTY MAP, not nil, so a truncated
+// config.toml is caught by ordinary containment: every provisioned key is
+// missing. Pinned because a nil there would make the comparison vacuous.
+func TestVerifyManaged_TruncatedTOMLLiveFileIsDrift(t *testing.T) {
+	dir := writeManaged(t, "config.toml", codexBaselineTOML, "\n")
+	if err := verifyManaged(dir, []string{"config.toml"}); !errors.Is(err, ErrManagedContentDrift) {
+		t.Fatalf("verifyManaged = %v, want ErrManagedContentDrift", err)
+	}
+}
+
+// Same semantics as the JSON case: nothing was provisioned, so nothing drifts.
+func TestVerifyManaged_EmptyTOMLBaselinePasses(t *testing.T) {
+	dir := writeManaged(t, "config.toml", "\n", codexBaselineTOML)
+	if err := verifyManaged(dir, []string{"config.toml"}); err != nil {
+		t.Fatalf("verifyManaged = %v, want nil", err)
+	}
+}
+
+// The int64/float64 regression guard, and the reason decodeManaged takes `rel`
+// rather than being called once per side with whatever format is handy.
+// encoding/json decodes 1 to float64; go-toml decodes it to int64. Each
+// document verifies against its OWN baseline, but the two decoders' outputs do
+// not compare — so a future refactor that "helpfully" normalizes one side, or
+// decodes the two sides differently, fails here instead of in production.
+func TestVerifyManaged_DecodersAreNotMixed(t *testing.T) {
+	jsonDir := writeManaged(t, "settings.json", `{"x":1}`, `{"x":1,"extra":true}`)
+	if err := verifyManaged(jsonDir, []string{"settings.json"}); err != nil {
+		t.Fatalf("json against json = %v, want nil", err)
+	}
+	tomlDir := writeManaged(t, "config.toml", "x = 1\n", "x = 1\nextra = true\n")
+	if err := verifyManaged(tomlDir, []string{"config.toml"}); err != nil {
+		t.Fatalf("toml against toml = %v, want nil", err)
+	}
+
+	fromJSON, err := decodeManaged("settings.json", []byte(`{"x":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromTOML, err := decodeManaged("config.toml", []byte("x = 1\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := subsetOf(fromJSON, fromTOML); ok {
+		t.Fatal("json-decoded and toml-decoded numbers compared equal: " +
+			"a decoder was normalized, and the same-decoder invariant is gone")
+	}
+}
