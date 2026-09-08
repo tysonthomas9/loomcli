@@ -117,6 +117,11 @@ func TestLabels_DefaultsWhenUnconfigured(t *testing.T) {
 	if got := c.Labels(); got != defaultLabels {
 		t.Errorf("Labels() = %+v, want the defaults %+v", got, defaultLabels)
 	}
+	// Named explicitly: an unconfigured contract must still yield the label the
+	// superseded path stamps.
+	if got := c.Labels().Superseded; got != "union-superseded" {
+		t.Errorf("Superseded = %q, want union-superseded", got)
+	}
 	// A caller holding no contract at all must still get a usable vocabulary.
 	var nilContract *Contract
 	if got := nilContract.Labels(); got != defaultLabels {
@@ -124,18 +129,46 @@ func TestLabels_DefaultsWhenUnconfigured(t *testing.T) {
 	}
 }
 
+// TestLabels_PartialBlockFallsBackPerField is the exhaustiveness test for the
+// vocabulary: every field is configured ALONE and the rest must default. A new
+// field added to LabelSet without a withDefaults() clause fails here — and it
+// must, because retire() would otherwise write an empty replacement label,
+// silently removing the marker and stamping nothing.
 func TestLabels_PartialBlockFallsBackPerField(t *testing.T) {
-	c, err := LoadContract(writeContract(t, withLabels("  labels:\n    route: integrate\n")))
+	cases := []struct {
+		name  string
+		block string
+		want  func(LabelSet) LabelSet
+	}{
+		{"marker", "    marker: merge-pending\n", func(l LabelSet) LabelSet { l.Marker = "merge-pending"; return l }},
+		{"unreachable", "    unreachable: merge-unreachable\n", func(l LabelSet) LabelSet { l.Unreachable = "merge-unreachable"; return l }},
+		{"superseded", "    superseded: merge-superseded\n", func(l LabelSet) LabelSet { l.Superseded = "merge-superseded"; return l }},
+		{"debt", "    debt: merge-debt\n", func(l LabelSet) LabelSet { l.Debt = "merge-debt"; return l }},
+		{"debt_of_prefix", "    debt_of_prefix: \"merge-debt-for/\"\n", func(l LabelSet) LabelSet { l.DebtOfPrefix = "merge-debt-for/"; return l }},
+		{"route", "    route: integrate\n", func(l LabelSet) LabelSet { l.Route = "integrate"; return l }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := LoadContract(writeContract(t, withLabels("  labels:\n"+tc.block)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := tc.want(defaultLabels)
+			if got := c.Labels(); got != want {
+				t.Errorf("Labels() = %+v, want only %s overridden: %+v", got, tc.name, want)
+			}
+		})
+	}
+}
+
+// TestLabels_ExplicitSupersededOverridesDefault pins the other direction: an
+// explicitly configured value must win over the default.
+func TestLabels_ExplicitSupersededOverridesDefault(t *testing.T) {
+	c, err := LoadContract(writeContract(t, withLabels("  labels:\n    superseded: merge-superseded\n")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := c.Labels()
-	if got.Route != "integrate" {
-		t.Errorf("Route = %q, want the configured integrate", got.Route)
-	}
-	want := defaultLabels
-	want.Route = "integrate"
-	if got != want {
-		t.Errorf("Labels() = %+v, want the other four defaulted: %+v", got, want)
+	if got := c.Labels().Superseded; got != "merge-superseded" {
+		t.Errorf("Superseded = %q, want the configured merge-superseded", got)
 	}
 }

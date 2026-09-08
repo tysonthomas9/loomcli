@@ -41,6 +41,9 @@ union branch locally, and act on what it finds:
 
   already in union   remove the marker, comment; file nothing
   no branch found    swap the marker for union-unreachable, comment
+  superseded         the branch was rebuilt, or its work already arrived by
+                     another route: swap the marker for union-superseded,
+                     comment, and warn any debt ticket already filed
   not in union       file a NEW open, approved ticket the integrator claims
 
 The sweep never merges, never claims and never reopens: the closed original is
