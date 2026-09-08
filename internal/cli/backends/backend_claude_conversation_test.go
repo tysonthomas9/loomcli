@@ -90,12 +90,14 @@ func TestChooseSurfacedAnswer(t *testing.T) {
 // invocation error the one-shot path produces — auth and quota must not read
 // as generic failures that burn the restart budget.
 func TestConversationTurnError_CarriesTerminalVerdicts(t *testing.T) {
-	authErr := conversationTurnError(chat.Turn{Reason: chat.ReasonAuthRequired})
+	// nil conv: these cases hold a bare turn and no conversation, which is the
+	// case screenEvidence's nil guard exists for.
+	authErr := conversationTurnError(nil, chat.Turn{Reason: chat.ReasonAuthRequired})
 	var ie *InvocationError
 	if !errors.As(authErr, &ie) {
 		t.Fatalf("auth reason must map to an InvocationError, got %T", authErr)
 	}
-	if !errors.As(conversationTurnError(chat.Turn{Reason: "something broke"}), &ie) {
+	if !errors.As(conversationTurnError(nil, chat.Turn{Reason: "something broke"}), &ie) {
 		t.Fatalf("generic reason must still be an InvocationError")
 	}
 }

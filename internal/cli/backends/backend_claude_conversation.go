@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/olesho/harness-wrapper/pkg/chat"
 	"github.com/olesho/harness-wrapper/pkg/chat/memstore"
@@ -139,7 +140,7 @@ func runConversationTurn(ctx context.Context, conv *chat.Conversation, prompt st
 
 	turnID, err := conv.Send(ctx, prompt)
 	if err != nil {
-		return chat.Turn{}, wrapInvocationError(fmt.Errorf("send prompt: %w", err), "")
+		return chat.Turn{}, wrapInvocationError(fmt.Errorf("send prompt: %w", err), sendFailureEvidence(err, conv))
 	}
 
 	events := conv.Events()
@@ -177,7 +178,7 @@ func handleConversationEvent(ctx context.Context, conv *chat.Conversation, ev ch
 				return ev.Turn, true, nil
 			}
 		case chat.TurnStateErrored:
-			return ev.Turn, true, conversationTurnError(ev.Turn)
+			return ev.Turn, true, conversationTurnError(conv, ev.Turn)
 		}
 	}
 	return chat.Turn{}, false, nil
@@ -257,15 +258,108 @@ func conversationInputResolver(policy *domain.RoleInputPolicy) func(chat.InputRe
 // conversationTurnError maps an errored turn into the invocation-error
 // taxonomy, carrying the harness's own terminal verdict when it named one —
 // the same mapping the one-shot path applies to ErrTurnErrored.
-func conversationTurnError(turn chat.Turn) error {
+//
+// The conversation is taken as an argument for its SCREEN. On a terminal
+// auth/usage turn the wrapper hands us a Reason and nothing else: every
+// producer of chat.ReasonAuthRequired on the pinned v0.7.7 leaves Turn.Text
+// empty (emitAuthRequiredTurn never sets it; authRelabel blanks it), so the
+// classifier downstream would see the marker over an empty window and record
+// Screen.Scanned=false on exactly the verdict that description exists for.
+// Appending the live screen widens that window; it changes no class, no
+// disposition and no restart decision.
+//
+// This is the conversation-path counterpart of the one-shot fix in
+// invokeClaudeRunTurn, which parks the rendered screen on Turn.Text. There is
+// no screen parked on a conversation turn — the emulator is owned by the live
+// chat.Conversation — so it has to be read here.
+func conversationTurnError(conv *chat.Conversation, turn chat.Turn) error {
 	reason := strings.TrimSpace(turn.Reason)
 	if reason == "" {
 		reason = "claude turn errored"
 	}
-	if ie := terminalTurnInvocationError(reason, turn.Text); ie != nil {
+	if ie := terminalTurnInvocationError(reason, joinEvidence(turn.Text, screenEvidence(conv))); ie != nil {
 		return ie
 	}
 	return &InvocationError{Err: errors.New(reason), OutputTail: turn.Text, ExitCode: 1}
+}
+
+// sendFailureEvidence is the evidence window for a send-time failure.
+//
+// It is non-empty only for chat.ErrAuthRequired, and that arm is UNREACHABLE on
+// harness-wrapper@v0.7.7: Send catches its own sentinel at
+// pkg/chat/send.go:45-56 and emits a terminal assistant turn instead, so the
+// auth verdict always arrives on the errored-turn path above. It exists so a
+// future wrapper that DOES propagate the sentinel reaches
+// wrapInvocationError's chat.ErrAuthRequired arm carrying the login wall,
+// rather than a marked AuthFailure with nothing behind it. The pin is
+// TestConversationSend_AuthSurfacesAsErroredTurn, which fails first if a
+// wrapper bump ever flips that behavior.
+//
+// Every other send failure keeps the empty tail it has always had: the screen
+// says nothing useful about a store or transport error, and this is not the
+// place to widen that.
+func sendFailureEvidence(err error, conv *chat.Conversation) string {
+	if !errors.Is(err, chat.ErrAuthRequired) {
+		return ""
+	}
+	return screenEvidence(conv)
+}
+
+// conversationScreenTailCap bounds the screen text carried into an
+// InvocationError. A rendered screen is a few KiB at most; the cap is there so
+// a pathological emulator state cannot push an unbounded blob into an error
+// that gets logged, stored in a state file and shipped as an event.
+const conversationScreenTailCap = 4 << 10
+
+// conversationScreenText reads the live screen behind a conversation. It is a
+// package var because chat.Conversation's screen is unexported and only
+// chat.Open can populate it, so a test that needs a specific screen behind
+// conversationTurnError has no other seam. The nil-conversation guard lives
+// here rather than in screenEvidence so a substituted reader owns the whole
+// decision.
+var conversationScreenText = func(conv *chat.Conversation) string {
+	if conv == nil {
+		return ""
+	}
+	return conv.ScreenSnapshot().Text
+}
+
+// screenEvidence returns the trailing, bounded screen text for a conversation,
+// or "" when there is no conversation to read (the two direct-Turn call sites
+// in the tests, and any future caller holding only a turn).
+func screenEvidence(conv *chat.Conversation) string {
+	return tailBytes(strings.TrimSpace(conversationScreenText(conv)), conversationScreenTailCap)
+}
+
+// joinEvidence concatenates the non-empty evidence fragments with a newline,
+// preserving their order and skipping a fragment already contained in what
+// came before it.
+func joinEvidence(parts ...string) string {
+	var kept []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if len(kept) > 0 && strings.Contains(strings.Join(kept, "\n"), p) {
+			continue
+		}
+		kept = append(kept, p)
+	}
+	return strings.Join(kept, "\n")
+}
+
+// tailBytes keeps the last max bytes of s, cut forward to the next rune
+// boundary so a truncated multi-byte glyph never reaches a log or an event.
+func tailBytes(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	cut := s[len(s)-max:]
+	for len(cut) > 0 && !utf8.ValidString(cut[:1]) {
+		cut = cut[1:]
+	}
+	return cut
 }
 
 // conversationHarnessSessionID reads the harness-level session id off the
