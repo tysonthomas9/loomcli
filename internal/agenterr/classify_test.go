@@ -1064,3 +1064,195 @@ func TestClassifyFromOutput_IncompatibleBackendCLIIsTerminalModelFailure(t *test
 		t.Fatalf("message = %q", got.Message)
 	}
 }
+
+// TestClassifyEvidenceProvenance is a PARALLEL table to the Class/Message
+// assertions above: it asserts only what the classifier now RECORDS about how
+// it reached a verdict. The verdicts themselves are unchanged — every existing
+// Class/Message assertion in this file still holds byte-for-byte.
+func TestClassifyEvidenceProvenance(t *testing.T) {
+	tests := []struct {
+		name       string
+		text       string
+		exitCode   int
+		backend    string
+		wantClass  Outcome
+		wantSource EvidenceSource
+		wantRule   string
+		wantDetail string
+		wantHTTP   int
+	}{
+		{
+			// THE REGRESSION THIS FIXES. terminalTurnInvocationError appends the
+			// harness's own reason after "<marker>: "; the classifier used to
+			// replace the whole thing with a canned message and the reason was
+			// lost. It now rides in Evidence.Detail.
+			name:       "auth marker keeps the harness reason tail",
+			text:       AuthRequiredMarker + ": auth_required\n  Please run /login\n",
+			exitCode:   1,
+			backend:    "claude",
+			wantClass:  AuthFailure,
+			wantSource: EvidenceHarnessMarker,
+			wantRule:   "AuthRequiredMarker",
+			wantDetail: "auth_required",
+		},
+		{
+			name:       "usage-limited marker",
+			text:       UsageLimitedMarker + ": usage_limited\n  resets 6:40pm\n",
+			exitCode:   1,
+			backend:    "claude",
+			wantClass:  RateLimited,
+			wantSource: EvidenceHarnessMarker,
+			wantRule:   "UsageLimitedMarker",
+			wantDetail: "usage_limited",
+		},
+		{
+			name:       "backend-unavailable marker",
+			text:       BackendUnavailableMarker + ": claude\n",
+			exitCode:   127,
+			backend:    "claude",
+			wantClass:  BackendUnavailable,
+			wantSource: EvidenceHarnessMarker,
+			wantRule:   "BackendUnavailableMarker",
+			wantDetail: "claude",
+		},
+		{
+			name:       "agent-launch-failed marker",
+			text:       AgentLaunchFailedMarker + ": exec format error\n",
+			exitCode:   1,
+			backend:    "claude",
+			wantClass:  SpawnFailure,
+			wantSource: EvidenceHarnessMarker,
+			wantRule:   "AgentLaunchFailedMarker",
+			wantDetail: "exec format error",
+		},
+		{
+			name:       "bare 401 with no marker falls to the residual table",
+			text:       "401 Unauthorized",
+			exitCode:   1,
+			backend:    "claude",
+			wantClass:  AuthFailure,
+			wantSource: EvidenceResidual,
+			wantRule:   "residual.auth",
+		},
+		{
+			name:       "wrapper-classified rate limit carries its HTTP code",
+			text:       `API Error: 429 {"type":"error","error":{"type":"rate_limit_error"}}`,
+			exitCode:   1,
+			backend:    "claude",
+			wantClass:  RateLimited,
+			wantSource: EvidenceWrapper,
+			wantRule:   "api_error/RateLimited",
+			wantHTTP:   429,
+		},
+		{
+			name:       "exit 137 with unmatched text",
+			text:       "nothing classifiable here",
+			exitCode:   137,
+			backend:    "claude",
+			wantClass:  Timeout,
+			wantSource: EvidenceExitCode,
+			wantRule:   "exit.137_sigkill",
+		},
+		{
+			name:       "exit 143 with unmatched text",
+			text:       "nothing classifiable here",
+			exitCode:   143,
+			backend:    "claude",
+			wantClass:  Transient,
+			wantSource: EvidenceExitCode,
+			wantRule:   "exit.143_sigterm",
+		},
+		{
+			name:       "exit 1 with unmatched text",
+			text:       "nothing classifiable here",
+			exitCode:   1,
+			backend:    "claude",
+			wantClass:  Unknown,
+			wantSource: EvidenceExitCode,
+			wantRule:   "exit.default",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := ClassifyFromOutput(tt.text, tt.exitCode, tt.backend)
+			if got.Class != tt.wantClass {
+				t.Fatalf("class = %s, want %s", got.Class, tt.wantClass)
+			}
+			ev := got.Evidence
+			if ev.Source != tt.wantSource {
+				t.Errorf("evidence.Source = %q, want %q", ev.Source, tt.wantSource)
+			}
+			if ev.Rule != tt.wantRule {
+				t.Errorf("evidence.Rule = %q, want %q", ev.Rule, tt.wantRule)
+			}
+			if tt.wantDetail != "" && ev.Detail != tt.wantDetail {
+				t.Errorf("evidence.Detail = %q, want %q", ev.Detail, tt.wantDetail)
+			}
+			if ev.HTTPCode != tt.wantHTTP {
+				t.Errorf("evidence.HTTPCode = %d, want %d", ev.HTTPCode, tt.wantHTTP)
+			}
+			if ev.ExitCode != tt.exitCode {
+				t.Errorf("evidence.ExitCode = %d, want %d", ev.ExitCode, tt.exitCode)
+			}
+			if ev.ScannedBytes != len(tt.text) {
+				t.Errorf("evidence.ScannedBytes = %d, want %d", ev.ScannedBytes, len(tt.text))
+			}
+			// Screen is an auth-only description: asking "was this a real login
+			// wall?" is meaningless for a rate limit or a timeout.
+			if tt.wantClass == AuthFailure && ev.Screen == nil {
+				t.Error("an auth verdict must carry a screen description")
+			}
+			if tt.wantClass != AuthFailure && ev.Screen != nil {
+				t.Errorf("non-auth verdict must not carry a screen description, got %+v", ev.Screen)
+			}
+		})
+	}
+}
+
+// TestClassifyEvidenceOverBroadResidualAuth is executable documentation of the
+// THIRD revisit trigger in docs/adr/0002-authfailure-stays-terminal.md.
+//
+// The residual auth pattern (classify.go, residual.auth) matches
+// "unauthorized" ANYWHERE in a 100-line log tail, so ordinary task prose can
+// fatally stop an agent. That BEHAVIOR IS UNCHANGED here — this child records,
+// it does not gate. What is new is that the record now says exactly which rule
+// fired and on what text, so the trigger can be evaluated from one occurrence.
+func TestClassifyEvidenceOverBroadResidualAuth(t *testing.T) {
+	const prose = "Finished reviewing the unauthorized-access handler in auth/mw.go.\n" +
+		"All 42 tests pass; no changes needed.\n"
+
+	got := ClassifyFromOutput(prose, 1, "claude")
+
+	// Unchanged behavior: still a terminal AuthFailure.
+	if got.Class != AuthFailure {
+		t.Fatalf("class = %s, want AuthFailure (behavior must be unchanged)", got.Class)
+	}
+	ev := got.Evidence
+	if ev.Source != EvidenceResidual || ev.Rule != "residual.auth" {
+		t.Fatalf("source/rule = %q/%q, want residual_pattern/residual.auth", ev.Source, ev.Rule)
+	}
+	// The offending token, and the line it came from, are both recoverable.
+	if ev.Match != "unauthorized" {
+		t.Errorf("evidence.Match = %q, want the offending token %q", ev.Match, "unauthorized")
+	}
+	if !strings.Contains(ev.Excerpt, "unauthorized-access handler") {
+		t.Errorf("evidence.Excerpt must show the offending line, got %q", ev.Excerpt)
+	}
+
+	// The screen description is what says this was NOT a login wall: the text
+	// was scanned and carried no banner, no composer and no dialog. (In this
+	// child the scanned text is the log tail itself — PUPPET-578 carries the
+	// real rendered screen here, and Scanned=false then means "we never saw
+	// one", the ADR's fourth trigger.)
+	if ev.Screen == nil || !ev.Screen.Scanned {
+		t.Fatalf("expected a scanned screen description, got %+v", ev.Screen)
+	}
+	if ev.Screen.BannerRule != "" {
+		t.Errorf("no auth banner is present in task prose, but BannerRule = %q", ev.Screen.BannerRule)
+	}
+	if ev.Screen.ComposerWitnessed == nil || *ev.Screen.ComposerWitnessed {
+		t.Errorf("ComposerWitnessed = %v, want a witnessed false", ev.Screen.ComposerWitnessed)
+	}
+}
