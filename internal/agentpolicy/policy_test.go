@@ -46,6 +46,8 @@ func TestDecide_Golden(t *testing.T) {
 			Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}},
 		{"claims-held → uncounted fixed recheck", agenterr.OutcomeFromDomain(agenterr.ClaimsHeldOutcome),
 			Disposition{Decision: RetryUncounted, Backoff: BPClaimsHeld}},
+		{"supervisor-stop → uncounted (our kill, not the agent's fault)", agenterr.OutcomeFromDomain(agenterr.SupervisorStopOutcome),
+			Disposition{Decision: RetryUncounted, Backoff: BPDefault}},
 		// zero value (clean) — defensive conservative restart
 		{"zero outcome → conservative retry", agenterr.Outcome{},
 			Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}},
@@ -86,6 +88,7 @@ func TestQuarantineEligible(t *testing.T) {
 		{"completion-hook-failure → not eligible (supervisor write fault, not task fault)", agenterr.OutcomeFromDomain(agenterr.CompletionHookFailureOutcome), false},
 		{"claims-held → not eligible (operator quiesce, not task fault)", agenterr.OutcomeFromDomain(agenterr.ClaimsHeldOutcome), false},
 		{"issue-backend-outage → not eligible (the store is down, the task is fine)", agenterr.OutcomeFromDomain(agenterr.IssueBackendOutageOutcome), false},
+		{"supervisor-stop → not eligible (we killed the run; the task earned nothing against it)", agenterr.OutcomeFromDomain(agenterr.SupervisorStopOutcome), false},
 		// zero value (clean success)
 		{"zero outcome → not eligible", agenterr.Outcome{}, false},
 	}
