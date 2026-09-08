@@ -343,7 +343,7 @@ func TestCheckDecomposedWithoutChildrenUnconfigured(t *testing.T) {
 		return nil, nil
 	}
 
-	result := checkDecomposedWithoutChildren(deps)
+	result := checkDecomposedWithoutChildren(newDecomposedScan(deps))
 	if result.Status != StatusWarn {
 		t.Fatalf("expected warn (skipped), got %v: %s", result.Status, result.Summary)
 	}
