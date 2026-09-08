@@ -4580,7 +4580,7 @@ a key that was never asked; `stranded`, `completable` and `truncated_parents` ar
 `defaults.labels.marker` (union-pending) label; when it is non-empty the
 remediation adds that the parent must not be closed until the sweep drains them.
 `last_child_closed_at` is omitted when no child carried a `closed_at` — a
-timestamp is never synthesised, and a missing one never suppresses the finding.
+timestamp is never synthesized, and a missing one never suppresses the finding.
 
 ### `agent_profiles`
 
