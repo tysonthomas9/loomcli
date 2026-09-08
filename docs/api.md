@@ -4510,6 +4510,78 @@ floor (`>=N`, plus a truncation line in the detail); a queue of 200 or 999 is an
 exact count and is printed as one. Truncation can only *undercount* unreachable
 work, so it never suppresses a failure.
 
+### `decomposed_without_children` and `decomposed_children_all_closed`
+
+Two checks over the same population — issues carrying the workspace's
+`defaults.labels.decomposed` label — asking opposite questions. They read **one**
+board scan (the label query plus one child query per live parent, capped at 200
+rows each): running them independently would double an N+1 against fleet-db and
+let the two disagree about a board a mutation changed between the reads.
+
+Both are report-only, both skip (no line at all) when the board could not be
+read — no issue backend, a failed list, a failed child query, a cancelled
+context — and both emit a visible skipped-`warn` under their own name when the
+workspace configures no decomposed label, because a check that silently reports
+health it never measured is worse than no check.
+
+`decomposed_without_children` warns when a live decomposed parent has **no
+children at all**: the split lost its `--parent` links, so the children run and
+close while the parent sits parked forever.
+
+| Condition | Status | Summary |
+|-----------|--------|---------|
+| Every decomposed parent has children | `pass` | `no decomposed issues without children (N checked)` |
+| Some have none | `warn` | `N decomposed issue(s) have no children` |
+| More than 50 live decomposed parents | `warn` | `too many decomposed issues to check (N open, cap 50)` |
+
+`decomposed_children_all_closed` is the inverse: it warns when a parent's child
+set is non-empty, **every** child is terminal (`closed` or `tombstone`), and the
+parent is still **parked** (`blocked` or `deferred`). Nobody can claim such a
+parent and nothing will un-park it — fleet-db derives the un-park from a child
+*closing*, so a parent parked after its last child closed, parked at `deferred`,
+or closed through a path that bypasses `CloseIssue` has no future trigger left.
+This check is the backstop for exactly those states.
+
+A parent in a live status with all children finished is the *normal* end of a
+split. It is counted and carried in the payload as **completable**, and never
+warns: a backstop that cries wolf on healthy boards gets muted, and a muted
+backstop is not a backstop. A parent whose child page comes back at the 200-row
+cap is excluded from both verdicts and reported as truncated instead — asserting
+"all finished" over a clamped page is the one false positive that would make a
+downstream watcher comment on a healthy parent.
+
+| Condition | Status | Summary |
+|-----------|--------|---------|
+| A parked parent has only finished children | `warn` | `N decomposed parent(s) parked with every child finished` |
+| Otherwise | `pass` | `no decomposed parent is parked with every child finished (N checked, M completable)` |
+
+Its `data` payload is a stable contract for ops consumers. `scanned` and
+`childless_parents` are always present so a measured zero is distinguishable from
+a key that was never asked; `stranded`, `completable` and `truncated_parents` are
+`omitempty`, and the whole payload is absent on a `pass` with nothing to report.
+
+```json
+{
+  "scanned": 1,
+  "stranded": [
+    {"id": "PUPPET-284", "status": "blocked", "children": 3, "closed_children": 3,
+     "last_child_closed_at": "2026-09-03T11:02:00Z", "unshipped_children": ["PUPPET-290"],
+     "notes_present": false}
+  ],
+  "completable": [
+    {"id": "PUPPET-301", "status": "open", "children": 2, "closed_children": 2, "notes_present": false}
+  ],
+  "truncated_parents": ["PUPPET-999"],
+  "childless_parents": 0
+}
+```
+
+`unshipped_children` names finished children that still carry the workspace's
+`defaults.labels.marker` (union-pending) label; when it is non-empty the
+remediation adds that the parent must not be closed until the sweep drains them.
+`last_child_closed_at` is omitted when no child carried a `closed_at` — a
+timestamp is never synthesized, and a missing one never suppresses the finding.
+
 ### `agent_profiles`
 
 Verifies every provisioned per-agent harness profile under
