@@ -103,17 +103,14 @@ func runDaemonQueue(cmd *cobra.Command, args []string) {
 }
 
 // resolveQueueSourceRepos populates agent.SourceRepos from workspace config.
+//
+// An unresolvable binding is fatal rather than a warning: this is an
+// operator-facing command, and a queue computed against no binding is a queue
+// for a different agent than the one asked about. No queue beats a wrong one.
 func resolveQueueSourceRepos(agent *cfgpkg.AgentEntry) {
-	ws, wsErr := cfgpkg.ResolveActiveWorkspace()
-	if wsErr == nil && ws != nil && len(ws.Repos) > 0 {
-		sourceRepos, repoErr := cfgpkg.ResolveAgentRepos(*agent, ws.Repos)
-		if repoErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: resolving agent repos: %v\n", repoErr)
-		} else {
-			agent.SourceRepos = sourceRepos
-		}
-	} else if (len(agent.Repos) > 0 || len(agent.RepoGroups) > 0) && (ws == nil || len(ws.Repos) == 0) {
-		fmt.Fprintf(os.Stderr, "Warning: no workspace configured; repo affinity disabled\n")
+	if err := cfgpkg.ResolveAgentReposFromActiveWorkspace(agent); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: resolving agent repos: %v\n", err)
+		os.Exit(1)
 	}
 }
 
