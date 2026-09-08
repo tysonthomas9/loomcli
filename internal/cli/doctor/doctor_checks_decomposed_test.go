@@ -191,9 +191,17 @@ func closedAt(t *testing.T, iso string) *time.Time {
 
 func strandScan(t *testing.T, parents []backend.IssueData, kids map[string][]backend.IssueData) *decomposedScan {
 	t.Helper()
+	return strandScanWithMarker(t, "", parents, kids)
+}
+
+// strandScanWithMarker pins the union marker on the scan itself. The marker is
+// deliberately NOT overridden through the package-level resolver: parallel
+// subtests would race on it.
+func strandScanWithMarker(t *testing.T, marker string, parents []backend.IssueData, kids map[string][]backend.IssueData) *decomposedScan {
+	t.Helper()
 	deps, _, _, _, mockBackend := NewTestDeps(t)
 	mockBackend.ListFn = decomposedListFn(parents, kids)
-	return &decomposedScan{deps: deps, label: testDecomposedLabel}
+	return &decomposedScan{deps: deps, label: testDecomposedLabel, marker: marker}
 }
 
 func TestCheckDecomposedChildrenAllClosed(t *testing.T) {
@@ -484,11 +492,7 @@ func TestCheckDecomposedChildrenAllClosed(t *testing.T) {
 
 	t.Run("finished children still carrying the union marker are named", func(t *testing.T) {
 		t.Parallel()
-		orig := unionMarkerLabel
-		unionMarkerLabel = func() string { return "union-pending" }
-		t.Cleanup(func() { unionMarkerLabel = orig })
-
-		scan := strandScan(t,
+		scan := strandScanWithMarker(t, "union-pending",
 			[]backend.IssueData{{ID: "PUPPET-284", Status: "blocked", Notes: "waiting on the owner"}},
 			map[string][]backend.IssueData{"PUPPET-284": {
 				{ID: "PUPPET-290", Status: "closed", Labels: []string{"union-pending"}},
