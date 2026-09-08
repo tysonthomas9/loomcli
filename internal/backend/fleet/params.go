@@ -176,6 +176,9 @@ func addListCoreFilters(q url.Values, opts backend.ListOpts) {
 	if opts.Limit > 0 {
 		q.Set("limit", strconv.Itoa(opts.Limit))
 	}
+	if opts.Offset > 0 {
+		q.Set("offset", strconv.Itoa(opts.Offset))
+	}
 	addAll(q, "ids", opts.IDs)
 }
 
