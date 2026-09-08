@@ -237,6 +237,10 @@ type ListOpts struct {
 	IDs       []string `json:"ids,omitempty"`        // fleet-db: unsupported (fleet-qx9c)
 	ParentID  string   `json:"parent_id,omitempty"`
 	Limit     int      `json:"limit,omitempty"`
+	// Offset is the page start. Callers do not normally set it: List pages
+	// internally when the server reports more rows than it returned. It exists
+	// so that paging is expressible at all.
+	Offset int `json:"offset,omitempty"`
 
 	// Full-text search.
 	Query               string `json:"query,omitempty"`                // fleet-db: unsupported (fleet-qx9c)
