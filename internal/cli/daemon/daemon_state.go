@@ -160,6 +160,7 @@ func toDaemonAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) Da
 		StopReason:             string(ap.StopReason),
 		WorktreePath:           ap.WorktreePath, // effective placement for the cycle (see supervisor.AgentPlacement)
 		LastErrorClass:         ap.LastErrorClass,
+		LastErrorEvidence:      ap.LastErrorEvidence,
 		NoWorkCount:            ap.NoWorkCount,
 		BlockCount:             ap.BlockCount,
 		BackoffUntil:           ap.BackoffUntil,

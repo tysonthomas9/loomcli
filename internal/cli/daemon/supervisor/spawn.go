@@ -694,14 +694,33 @@ func closeAgentLogs(ap *AgentProcess) {
 	}
 }
 
+// agentExitInfo carries the values that only exist while the exiting process is
+// still on the AgentProcess — the pid in particular, which waitForAgent clears.
+// The agent.stopped event is emitted by the caller, AFTER classification, so it
+// can name the class and its provenance; without this the emit would have to
+// happen here, where nothing has been classified yet.
+type agentExitInfo struct {
+	ExitCode int
+	PID      int
+	Worktree string
+	Role     string
+	EpicID   string
+}
+
 // waitForAgent blocks until subprocess exits, returns exit code.
 func (s *Supervisor) waitForAgent(ap *AgentProcess) int {
+	return s.waitForAgentInfo(ap).ExitCode
+}
+
+// waitForAgentInfo blocks until the subprocess exits and returns the exit code
+// together with the process identity captured before it was cleared.
+func (s *Supervisor) waitForAgentInfo(ap *AgentProcess) agentExitInfo {
 	ap.Mu.Lock()
 	cmd := ap.Cmd
 	ap.Mu.Unlock()
 
 	if cmd == nil {
-		return -1
+		return agentExitInfo{ExitCode: -1, Worktree: ap.Entry.Worktree, Role: ap.Entry.Role}
 	}
 
 	// Keep this supervise goroutine's liveness tick fresh while we block in
@@ -743,12 +762,7 @@ func (s *Supervisor) waitForAgent(ap *AgentProcess) int {
 	closeAgentLogs(ap)
 	ap.Mu.Unlock()
 
-	// Emit agent_stopped event outside the lock (best-effort)
-	if evt, err := events.NewEvent(events.AgentStopped, worktree, role, epicID, events.AgentStoppedData{PID: pid, ExitCode: exitCode}); err == nil {
-		s.EmitEvent(evt)
-	}
-
-	return exitCode
+	return agentExitInfo{ExitCode: exitCode, PID: pid, Worktree: worktree, Role: role, EpicID: epicID}
 }
 
 // recoverAgent calls RecoverWorktree for cleanup.
@@ -796,4 +810,21 @@ func (s *Supervisor) appendRuntimeEnv(env []string, ap *AgentProcess) ([]string,
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// emitAgentStopped emits the agent.stopped event for a finished run. Called
+// from spawnAndWait immediately after classifyAgentExit so the event carries
+// the classification and its provenance; exactly one is emitted per exit.
+func (s *Supervisor) emitAgentStopped(ap *AgentProcess, exit agentExitInfo) {
+	data := events.AgentStoppedData{PID: exit.PID, ExitCode: exit.ExitCode}
+	ap.Mu.Lock()
+	if ap.LastError != nil {
+		data.ErrorClass = ap.LastError.Class.String()
+		data.Evidence = ap.LastError.Evidence.Summary()
+	}
+	ap.Mu.Unlock()
+	// Best-effort: a dropped event must never affect the exit path.
+	if evt, err := events.NewEvent(events.AgentStopped, exit.Worktree, exit.Role, exit.EpicID, data); err == nil {
+		s.EmitEvent(evt)
+	}
 }

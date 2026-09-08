@@ -59,9 +59,10 @@ func (s *Supervisor) handleEpicTransition(ap *AgentProcess) {
 		// don't mask a legitimate failure with an exhaustion signal.
 		if ap.LastError == nil || ap.LastError.Class.Is(agenterr.NoWorkOutcome) {
 			ap.LastError = &agenterr.AgentError{
-				Class:   agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome),
-				Message: "configured epic exhausted",
-				Backend: backend,
+				Class:    agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome),
+				Message:  "configured epic exhausted",
+				Backend:  backend,
+				Evidence: supervisorEvidence(evidenceRuleEpicExhausted),
 			}
 		}
 		ap.LastNoWork = true
