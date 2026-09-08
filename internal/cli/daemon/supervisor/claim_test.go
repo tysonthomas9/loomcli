@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -309,5 +310,99 @@ func TestTaskIDForLifecycle_UsesAssignedFallback(t *testing.T) {
 	}
 	if got := s.taskIDForLifecycle(ap, &cli.LockInfo{TaskID: "task-lock"}); got != "task-lock" {
 		t.Fatalf("taskIDForLifecycle(lock) = %q, want task-lock", got)
+	}
+}
+
+// An agent that declares a repo binding the workspace cannot resolve must not
+// fall through to an unfiltered, fleet-wide claim. Before this guard, a typo in
+// `repos:` dropped both the fetch filter and the router gate.
+func TestClaimTask_UnresolvableRepoBindingRefusesToClaim(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{
+		{ID: "task-1", IssueType: "task", Status: "open", Priority: 1, Title: "Ready", Design: "plan", SourceRepo: "sr-other"},
+	}
+	s := &Supervisor{
+		IssueBackend: mock,
+		// The workspace has no repo the agent's binding can resolve against,
+		// and "nope" matches no group either.
+		Repos: []cfgpkg.RepoConfig{{Name: "api-server", SourceRepoID: "sr-api", Groups: []string{"backend"}}},
+	}
+	ap := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "falcon", Role: "task", RepoGroups: []string{"nope"}},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+
+	if s.claimTask(ap, "parent-1") {
+		t.Fatal("claimTask returned true; an unresolved binding must not claim")
+	}
+	if len(mock.Calls) != 0 {
+		t.Fatalf("backend calls = %#v, want none (no ready query at all)", mock.Calls)
+	}
+
+	ap.Mu.Lock()
+	lastErr := ap.LastError
+	noWork := ap.LastNoWork
+	ap.Mu.Unlock()
+
+	if lastErr == nil {
+		t.Fatal("LastError = nil, want a preflight error")
+	}
+	if !strings.Contains(lastErr.Message, "repo binding unresolved") {
+		t.Errorf("LastError.Message = %q, want it to contain %q", lastErr.Message, "repo binding unresolved")
+	}
+	if !noWork {
+		t.Error("LastNoWork = false, want true (matches the no-claimable-tasks shape)")
+	}
+}
+
+// An agent that declares no affinity is unaffected: ResolveAgentRepos returns
+// (nil, nil) for it, and the claim proceeds fleet-wide as before.
+func TestClaimTask_NoDeclaredAffinityStillClaims(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{
+		{ID: "task-1", IssueType: "task", Status: "open", Priority: 1, Title: "Ready", Design: "plan", SourceRepo: "sr-other"},
+	}
+	s := &Supervisor{
+		IssueBackend: mock,
+		Repos:        []cfgpkg.RepoConfig{{Name: "api-server", SourceRepoID: "sr-api"}},
+	}
+	ap := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+
+	if !s.claimTask(ap, "parent-1") {
+		t.Fatal("claimTask returned false")
+	}
+	if ap.AssignedTaskID != "task-1" {
+		t.Fatalf("AssignedTaskID = %q, want task-1", ap.AssignedTaskID)
+	}
+}
+
+// A bound agent's claim excludes another repo's work entirely, even when the
+// ready set was not filtered at the fetch layer.
+func TestClaimTask_BoundAgentSkipsForeignRepoIssues(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{
+		{ID: "task-foreign", IssueType: "task", Status: "open", Priority: 0, Title: "Foreign P0", Design: "plan", SourceRepo: "sr-web"},
+		{ID: "task-own", IssueType: "task", Status: "open", Priority: 3, Title: "Own P3", Design: "plan", SourceRepo: "sr-api"},
+	}
+	s := &Supervisor{
+		IssueBackend: mock,
+		Repos: []cfgpkg.RepoConfig{
+			{Name: "api-server", SourceRepoID: "sr-api"},
+			{Name: "web-app", SourceRepoID: "sr-web"},
+		},
+	}
+	ap := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "falcon", Role: "task", Repos: []string{"api-server"}},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+
+	if !s.claimTask(ap, "parent-1") {
+		t.Fatal("claimTask returned false")
+	}
+	if ap.AssignedTaskID != "task-own" {
+		t.Fatalf("AssignedTaskID = %q, want task-own (the foreign P0 must not win)", ap.AssignedTaskID)
 	}
 }
