@@ -103,6 +103,7 @@ func (s *Supervisor) noteBackendUnavailable(ctx context.Context, ap *AgentProces
 		Message:   installHint,
 		Backend:   backend,
 		Timestamp: time.Now(),
+		Evidence:  supervisorEvidence(evidenceRuleBackendUnavailable),
 	}
 	worktree := ap.Entry.Worktree
 	// A zero BackendStatePatchedAt makes time.Since huge, so the first gate call
@@ -169,6 +170,7 @@ func (s *Supervisor) gateSafetyKnobsEnforceable(ap *AgentProcess) error {
 		Message:   err.Error(),
 		Backend:   backendName,
 		Timestamp: time.Now(),
+		Evidence:  supervisorEvidence(evidenceRuleSpawnFailure),
 	}
 	worktree := ap.Entry.Worktree
 	ap.Mu.Unlock()
