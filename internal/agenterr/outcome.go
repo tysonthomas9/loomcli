@@ -19,6 +19,7 @@ const (
 	IncompleteRunOutcome                       // agent exited 0 but never released its task claim (turn ended before the task did)
 	ClaimsHeldOutcome                          // a workspace-level claim hold is active: the supervisor refuses to START new work
 	IssueBackendOutageOutcome                  // the ISSUE backend (fleet-db) is unreachable or rejecting our credentials
+	SupervisorStopOutcome                      // the supervisor itself ended the run (daemon shutdown, operator stop, agent removed from config)
 )
 
 func (d DomainOutcome) String() string {
@@ -39,6 +40,8 @@ func (d DomainOutcome) String() string {
 		return "ClaimsHeld"
 	case IssueBackendOutageOutcome:
 		return "IssueBackendOutage"
+	case SupervisorStopOutcome:
+		return "SupervisorStop"
 	default:
 		return "None"
 	}
