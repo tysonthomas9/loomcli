@@ -118,7 +118,15 @@ func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
 		ap.Mu.Unlock()
 	}
 
-	opts, constraints := s.buildClaimOpts(ap, epicID)
+	opts, constraints, err := s.buildClaimOpts(ap, epicID)
+	if err != nil {
+		// Fail closed. An agent that declares a binding we cannot resolve must
+		// not fall through to an unfiltered claim: that drops the fetch filter
+		// and, with an empty constraint list, the router gate too — a typo in
+		// `repos:` would silently promote a bound agent to the whole fleet.
+		s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), fmt.Sprintf("repo binding unresolved: %v", err))
+		return false
+	}
 
 	ap.Mu.Lock()
 	requestedTaskID := ap.RequestedTaskID
@@ -245,12 +253,21 @@ func (c *claimConflicts) message() string {
 
 // buildClaimOpts assembles the ReadyOpts for an agent's task claim,
 // resolving the agent's source repos and merging role constraints.
-func (s *Supervisor) buildClaimOpts(ap *AgentProcess, epicID string) (backend.ReadyOpts, cli.RoleConstraints) {
+//
+// It returns an error when the agent declares repo affinity that cannot be
+// resolved. That case used to be a warning followed by an unbound claim, which
+// is the one outcome a repo binding exists to prevent.
+func (s *Supervisor) buildClaimOpts(ap *AgentProcess, epicID string) (backend.ReadyOpts, cli.RoleConstraints, error) {
 	ae := ap.Entry
-	if sourceRepos, err := config.ResolveAgentRepos(ap.Entry, s.Repos); err == nil {
-		ae.SourceRepos = sourceRepos
-	} else {
+	sourceRepos, err := config.ResolveAgentRepos(ap.Entry, s.Repos)
+	if err != nil {
+		if len(ap.Entry.Repos) > 0 || len(ap.Entry.RepoGroups) > 0 {
+			slog.Warn("agent repo binding unresolved; refusing to claim fleet-wide", "worktree", ap.Entry.Worktree, "err", err)
+			return backend.ReadyOpts{}, cli.RoleConstraints{}, err
+		}
 		slog.Warn("failed to resolve agent repos for task claim", "worktree", ap.Entry.Worktree, "err", err)
+	} else {
+		ae.SourceRepos = sourceRepos
 	}
 	constraints := cli.MergeRoleConstraints(ap.RoleConfig, ae)
 	opts := backend.ReadyOpts{Limit: claimReadyLimit, ParentID: epicID}
@@ -260,7 +277,7 @@ func (s *Supervisor) buildClaimOpts(ap *AgentProcess, epicID string) (backend.Re
 	if len(ae.SourceRepos) > 0 {
 		opts.SourceRepos = ae.SourceRepos
 	}
-	return opts, constraints
+	return opts, constraints, nil
 }
 
 // agentSourceRepos resolves the repos an agent is bound to, nil when it is

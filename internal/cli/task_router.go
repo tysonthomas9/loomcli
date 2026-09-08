@@ -25,7 +25,8 @@ type RoleConstraints struct {
 	Labels        []string // issue must carry ALL of these labels; empty = no requirement
 	ExcludeLabels []string // reject issue if it carries ANY of these labels (evaluated before Labels)
 	MaxPriority   *int     // reject tasks with priority > this value (nil = no cap)
-	SourceRepos   []string // resolved source repo IDs for affinity scoring
+	SourceRepos   []string // resolved source repo IDs; a hard filter unless CrossRepo
+	CrossRepo     bool     // true = repo affinity is advisory (scoring only), not a hard filter
 	ReadOnly      bool     // informational, carried through for downstream use
 	AllowedTools  []string // informational, carried through for downstream use
 	DeniedTools   []string // informational, carried through for downstream use
@@ -76,8 +77,11 @@ func MergeRoleConstraints(rc config.RoleConfig, ae config.AgentEntry) RoleConstr
 	if ae.Backend != "" {
 		c.Backend = ae.Backend
 	}
-	// SourceRepos is always agent-specific (resolved by daemon), never role-level
+	// SourceRepos is always agent-specific (resolved by daemon), never role-level.
+	// CrossRepo travels with it: it decides whether that binding is a hard
+	// filter or merely a scoring term.
 	c.SourceRepos = ae.SourceRepos
+	c.CrossRepo = ae.CrossRepo
 
 	return c
 }
@@ -121,6 +125,19 @@ func MatchTask(issue backend.IssueData, constraints RoleConstraints) TaskMatch {
 		return TaskMatch{Issue: issue, Score: 0, Reason: fmt.Sprintf("priority %d exceeds max %d", issue.Priority, *constraints.MaxPriority)}
 	}
 
+	// Repo affinity gate. This runs before any scoring — including the skill
+	// fallback's early return below — so a bound agent can never be offered
+	// another repo's work through a path that returns early.
+	repoBonus, repoReject := matchRepoAffinity(issue, constraints)
+	if repoReject != "" {
+		// cross_repo agents keep the historical score-only behavior: a
+		// mismatch ranks last instead of being rejected outright.
+		if constraints.CrossRepo {
+			return TaskMatch{Issue: issue, Score: 5, Reason: repoReject}
+		}
+		return TaskMatch{Issue: issue, Score: 0, Reason: repoReject}
+	}
+
 	// Base score
 	score := 100
 	var parts []string
@@ -137,14 +154,10 @@ func MatchTask(issue backend.IssueData, constraints RoleConstraints) TaskMatch {
 		parts = append(parts, fmt.Sprintf("skills:+%d(%d match)", bonus, skillMatches))
 	}
 
-	// Repo affinity scoring
-	if len(constraints.SourceRepos) > 0 && issue.SourceRepo != "" {
-		if matchesRepo(constraints.SourceRepos, issue.SourceRepo) {
-			score += 30
-			parts = append(parts, "repo:+30")
-		} else {
-			return TaskMatch{Issue: issue, Score: 5, Reason: "repo mismatch"}
-		}
+	// Repo affinity bonus, decided by the gate above.
+	if repoBonus > 0 {
+		score += repoBonus
+		parts = append(parts, fmt.Sprintf("repo:+%d", repoBonus))
 	}
 
 	// Priority bonus: 20 - (priority * 4), clamped to [0, 20]
@@ -270,6 +283,16 @@ func AgentEntryFromEnv() config.AgentEntry {
 	if v := os.Getenv("LOOM_SOURCE_REPOS"); v != "" {
 		ae.SourceRepos = strings.Split(v, ",")
 	}
+	// A missing or garbled value parses to false — the strict side, where the
+	// binding is a hard filter. Widening an agent to the whole fleet must never
+	// be the consequence of an unreadable env var.
+	if v := os.Getenv("LOOM_AGENT_CROSS_REPO"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			log.Printf("[router] Warning: invalid LOOM_AGENT_CROSS_REPO %q: %v; treating repo affinity as a hard filter", v, err)
+		}
+		ae.CrossRepo = b
+	}
 	return ae
 }
 
@@ -348,6 +371,31 @@ func applyTaskFilter(issue backend.IssueData, filter string) string {
 		}
 	}
 	return ""
+}
+
+// matchRepoAffinity evaluates an issue against the constraints' repo binding.
+// It returns (bonus, "") when the issue is admissible, and (0, reason) when the
+// binding rejects it. An agent with no binding is never rejected.
+//
+// A bound agent rejects an issue whose source repo is unset, matching the
+// fetch-layer filter (internal/backend/fleet.issueDataMatches), so a preview
+// computed here agrees with what a claim would actually see. The one exception
+// is a cross_repo agent, for which an unset repo stays neutral — that path
+// preserves the pre-hard-filter scoring exactly.
+func matchRepoAffinity(issue backend.IssueData, constraints RoleConstraints) (int, string) {
+	if len(constraints.SourceRepos) == 0 {
+		return 0, ""
+	}
+	if issue.SourceRepo == "" {
+		if constraints.CrossRepo {
+			return 0, ""
+		}
+		return 0, "repo unset"
+	}
+	if !matchesRepo(constraints.SourceRepos, issue.SourceRepo) {
+		return 0, "repo mismatch"
+	}
+	return 30, ""
 }
 
 // matchesRepo returns true if repo appears in the repos list.

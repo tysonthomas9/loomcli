@@ -496,6 +496,13 @@ func BuildAgentQueueFn() func(string) ([]webui.AgentQueueEntry, error) {
 		if !ok {
 			roleConfig = config.RoleConfig{TaskFilter: "has_design"}
 		}
+		// Resolve the agent's repo binding before merging: without it the
+		// preview is computed fleet-wide (FetchReadyIssues reads
+		// LOOM_SOURCE_REPOS from the *server's* env, which is unset here) and
+		// disagrees with the set a claim would actually see.
+		if err := config.ResolveAgentReposFromActiveWorkspace(agent); err != nil {
+			return nil, fmt.Errorf("resolve agent repos: %w", err)
+		}
 		constraints := cli.MergeRoleConstraints(roleConfig, *agent)
 
 		issues, err := cli.FetchReadyIssues(agent.Parent, agent.Repo)

@@ -803,8 +803,9 @@ func TestMatchTask_RepoAffinityMismatch(t *testing.T) {
 
 	got := MatchTask(issue, c)
 
-	if got.Score != 5 {
-		t.Errorf("Score = %d, want 5 (repo mismatch)", got.Score)
+	// Repo affinity is a hard filter: a mismatch is rejected, not ranked last.
+	if got.Score != 0 {
+		t.Errorf("Score = %d, want 0 (repo mismatch is a hard rejection)", got.Score)
 	}
 	if got.Reason != "repo mismatch" {
 		t.Errorf("Reason = %q, want %q", got.Reason, "repo mismatch")
@@ -840,9 +841,13 @@ func TestMatchTask_RepoAffinityEmptyIssueRepo(t *testing.T) {
 
 	got := MatchTask(issue, c)
 
-	// base(100) + priority(12) = 112 — repo-neutral issue, no penalty
-	if got.Score != 112 {
-		t.Errorf("Score = %d, want 112 (repo-neutral issue, no penalty)", got.Score)
+	// A bound agent rejects an unset repo, matching the fetch-layer filter
+	// (issueDataMatches) so preview and claim agree.
+	if got.Score != 0 {
+		t.Errorf("Score = %d, want 0 (bound agent rejects repo-unset issue)", got.Score)
+	}
+	if got.Reason != "repo unset" {
+		t.Errorf("Reason = %q, want %q", got.Reason, "repo unset")
 	}
 }
 
@@ -1310,5 +1315,157 @@ func TestSelectBestTask_LabelRoutedPipeline(t *testing.T) {
 	queue[2].Labels = append(queue[2].Labels, "plan-reviewed")
 	if drained := SelectBestTask(queue, reviewer); drained != nil {
 		t.Fatalf("SelectBestTask() = %q, want nil once the stage drained its input", drained.Issue.ID)
+	}
+}
+
+// boundConstraints is the canonical "agent bound to repo-a" constraint set used
+// by the hard-filter tests below.
+func boundConstraints() RoleConstraints {
+	return RoleConstraints{TaskFilter: "has_design", SourceRepos: []string{"repo-a"}}
+}
+
+func readyIssue(id, repo string, priority int) backend.IssueData {
+	return backend.IssueData{
+		ID: id, Status: "open", IssueType: "task",
+		Priority: priority, Design: "plan", SourceRepo: repo,
+	}
+}
+
+// The acceptance criterion: a bound agent's claim set excludes other repos
+// entirely, rather than merely ranking them lower.
+func TestSelectBestTask_BoundAgentNeverSelectsForeignRepo(t *testing.T) {
+	c := boundConstraints()
+
+	foreignOnly := []backend.IssueData{
+		readyIssue("T-P0", "repo-b", 0), // highest possible priority
+		readyIssue("T-1", "repo-c", 2),
+		readyIssue("T-2", "", 1), // repo unset
+	}
+	if got := SelectBestTask(foreignOnly, c); got != nil {
+		t.Fatalf("SelectBestTask = %+v, want nil (every candidate is foreign)", got)
+	}
+
+	// A P0 foreign issue must not outrank a P3 issue in the bound repo.
+	mixed := append([]backend.IssueData{readyIssue("T-OWN", "repo-a", 3)}, foreignOnly...)
+	best := SelectBestTask(mixed, c)
+	if best == nil {
+		t.Fatal("SelectBestTask = nil, want the repo-a issue")
+	}
+	if best.Issue.ID != "T-OWN" {
+		t.Errorf("selected %q, want T-OWN", best.Issue.ID)
+	}
+
+	// And nothing foreign survives scoring at all.
+	for _, issue := range mixed {
+		m := MatchTask(issue, c)
+		if m.Score > 0 && m.Issue.SourceRepo != "repo-a" {
+			t.Errorf("issue %q (repo %q) scored %d; foreign repos must score 0", m.Issue.ID, m.Issue.SourceRepo, m.Score)
+		}
+	}
+}
+
+// Regression guard: the repo gate must run before the skill fallback's early
+// return, or a wrong-repo issue with no skill match scores 10 and is claimable.
+func TestMatchTask_RepoGateRunsBeforeSkillFallback(t *testing.T) {
+	issue := backend.IssueData{
+		ID: "T-1", Status: "open", IssueType: "task",
+		Priority: 2, Design: "plan",
+		SourceRepo: "repo-b",
+		Labels:     []string{"unrelated"},
+	}
+	c := RoleConstraints{
+		TaskFilter:  "has_design",
+		Skills:      []string{"go"},
+		SourceRepos: []string{"repo-a"},
+	}
+
+	got := MatchTask(issue, c)
+
+	if got.Score != 0 {
+		t.Errorf("Score = %d, want 0 (repo gate precedes the skill fallback)", got.Score)
+	}
+	if got.Reason != "repo mismatch" {
+		t.Errorf("Reason = %q, want %q", got.Reason, "repo mismatch")
+	}
+}
+
+// A right-repo issue with no skill match still takes the fallback.
+func TestMatchTask_RepoMatchStillFallsBackOnNoSkillMatch(t *testing.T) {
+	issue := backend.IssueData{
+		ID: "T-1", Status: "open", IssueType: "task",
+		Priority: 2, Design: "plan",
+		SourceRepo: "repo-a",
+		Labels:     []string{"unrelated"},
+	}
+	c := RoleConstraints{
+		TaskFilter:  "has_design",
+		Skills:      []string{"go"},
+		SourceRepos: []string{"repo-a"},
+	}
+
+	got := MatchTask(issue, c)
+
+	if got.Score != 10 {
+		t.Errorf("Score = %d, want 10 (fallback preserved for the bound repo)", got.Score)
+	}
+}
+
+func TestMatchTask_CrossRepoKeepsScoring(t *testing.T) {
+	c := RoleConstraints{
+		TaskFilter:  "has_design",
+		SourceRepos: []string{"repo-a"},
+		CrossRepo:   true,
+	}
+
+	mismatch := MatchTask(readyIssue("T-1", "repo-b", 2), c)
+	if mismatch.Score != 5 {
+		t.Errorf("mismatch Score = %d, want 5 (cross_repo keeps score-only affinity)", mismatch.Score)
+	}
+	if mismatch.Reason != "repo mismatch" {
+		t.Errorf("mismatch Reason = %q, want %q", mismatch.Reason, "repo mismatch")
+	}
+
+	// base(100) + priority(12) = 112 — an unset repo stays neutral.
+	unset := MatchTask(readyIssue("T-2", "", 2), c)
+	if unset.Score != 112 {
+		t.Errorf("unset Score = %d, want 112 (repo-neutral under cross_repo)", unset.Score)
+	}
+
+	// base(100) + repo(30) + priority(12) = 142 — a match is unchanged.
+	match := MatchTask(readyIssue("T-3", "repo-a", 2), c)
+	if match.Score != 142 {
+		t.Errorf("match Score = %d, want 142", match.Score)
+	}
+}
+
+func TestMergeRoleConstraints_CrossRepoPropagated(t *testing.T) {
+	rc := RoleConfig{TaskFilter: "has_design"}
+
+	if got := MergeRoleConstraints(rc, AgentEntry{SourceRepos: []string{"repo-a"}, CrossRepo: true}); !got.CrossRepo {
+		t.Error("CrossRepo = false, want true")
+	}
+	if got := MergeRoleConstraints(rc, AgentEntry{SourceRepos: []string{"repo-a"}}); got.CrossRepo {
+		t.Error("CrossRepo = true, want false (the default is a hard filter)")
+	}
+}
+
+func TestAgentEntryFromEnv_CrossRepo(t *testing.T) {
+	tests := []struct {
+		env  string
+		want bool
+	}{
+		{"true", true},
+		{"1", true},
+		{"false", false},
+		{"", false},
+		{"garbage", false}, // unparseable falls to the strict side
+	}
+	for _, tt := range tests {
+		t.Run("env="+tt.env, func(t *testing.T) {
+			t.Setenv("LOOM_AGENT_CROSS_REPO", tt.env)
+			if got := AgentEntryFromEnv(); got.CrossRepo != tt.want {
+				t.Errorf("CrossRepo = %v, want %v", got.CrossRepo, tt.want)
+			}
+		})
 	}
 }
