@@ -153,6 +153,9 @@ type scanResult struct {
 	truncated    bool
 	live         []backend.IssueData
 	kids         map[string][]backend.IssueData
+	// marker is the union ledger label resolved for this scan, carried here so
+	// the verdicts read one immutable reading of the board and its vocabulary.
+	marker string
 }
 
 // decomposedScan is the one board scan decomposed_without_children and
@@ -166,11 +169,14 @@ type scanResult struct {
 // keeps t.Parallel() subtests independent.
 type decomposedScan struct {
 	deps *cli.Deps
-	// label, when non-empty, bypasses the workspace read — the seam tests use
-	// to exercise the scan without standing up an integration.yaml.
-	label string
-	once  sync.Once
-	res   scanResult
+	// label and marker, when non-empty, bypass the workspace read — the seam
+	// tests use to exercise the scan without standing up an integration.yaml.
+	// They are per-scan fields rather than overridable globals so parallel
+	// subtests cannot race on them.
+	label  string
+	marker string
+	once   sync.Once
+	res    scanResult
 }
 
 func newDecomposedScan(deps *cli.Deps) *decomposedScan {
@@ -193,6 +199,10 @@ func (s *decomposedScan) run() scanResult {
 	if label == "" {
 		return scanResult{unconfigured: true}
 	}
+	marker := s.marker
+	if marker == "" {
+		marker = unionMarkerLabel()
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -204,7 +214,7 @@ func (s *decomposedScan) run() scanResult {
 
 	live := liveDecomposedIssues(issues)
 	if len(live) > maxDecomposedScan {
-		return scanResult{ok: true, truncated: true, live: live}
+		return scanResult{ok: true, truncated: true, live: live, marker: marker}
 	}
 
 	kids := make(map[string][]backend.IssueData, len(live))
@@ -218,7 +228,7 @@ func (s *decomposedScan) run() scanResult {
 		}
 		kids[issue.ID] = got
 	}
-	return scanResult{ok: true, live: live, kids: kids}
+	return scanResult{ok: true, live: live, kids: kids, marker: marker}
 }
 
 // liveDecomposedIssues drops the terminal statuses: a closed or tombstoned
@@ -414,7 +424,7 @@ func checkDecomposedChildrenAllClosed(scan *decomposedScan) CheckResult {
 		return decomposedTruncatedResult(decomposedChildrenCheckName, len(res.live))
 	}
 
-	report := buildStrandReport(res, unionMarkerLabel())
+	report := buildStrandReport(res, res.marker)
 	if len(report.Stranded) == 0 {
 		return strandPassResult(report)
 	}
