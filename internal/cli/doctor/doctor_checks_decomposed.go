@@ -27,12 +27,17 @@ import (
 // them.
 const maxDecomposedScan = 50
 
-// maxChildScan is the per-parent child page the shared scan asks for. fleet-db
-// clamps any list to 200 rows (internal/api/issues.go maxLimit), so a parent
-// that returns exactly this many has an unknown tail: asserting "every child is
-// closed" over a clamped page is precisely the false positive that would make
-// the watcher comment on a healthy parent. Such a parent is excluded from both
-// verdicts and reported as truncated instead.
+// maxChildScan is fleet-db's own list cap (internal/api/issues.go maxLimit) and
+// the page size the shared scan asks for, both for the label query and for each
+// parent's children.
+//
+// It must be requested EXPLICITLY: the server's default page is 50, so the
+// label query used to see 50 of the board's 62 decomposed issues and silently
+// measure a fraction of it. A parent whose child page comes back at exactly
+// this many has an unknown tail — asserting "every child is closed" over a
+// clamped page is precisely the false positive that would make the watcher
+// comment on a healthy parent — so such a parent is excluded from both verdicts
+// and reported as truncated instead.
 const maxChildScan = 200
 
 const decomposedCheckName = "decomposed_without_children"
@@ -192,7 +197,7 @@ func (s *decomposedScan) run() scanResult {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	issues, err := s.deps.IssueBackend.List(ctx, backend.ListOpts{Labels: []string{label}})
+	issues, err := s.deps.IssueBackend.List(ctx, backend.ListOpts{Labels: []string{label}, Limit: maxChildScan})
 	if err != nil || len(issues) == 0 {
 		return scanResult{}
 	}
