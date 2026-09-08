@@ -143,6 +143,12 @@ func collectDoctorChecks(cmd *cobra.Command) []checkFunc {
 	} else {
 		checks = append(checks, checkFleetDB)
 	}
+	// Both decomposed checks read ONE board scan: they ask opposite questions
+	// off the same two queries — "no children at all" versus "children, all
+	// finished" — so sharing halves the fan-out against fleet-db and stops the
+	// two disagreeing about a board a mutation changed between reads. `doctor`
+	// is one-shot, so the scan is created and discarded here rather than cached.
+	dscan := newDecomposedScan(deps)
 	checks = append(checks, checkBackendCLI, checkProjectConfig, checkGlobalConfig,
 		checkWorktrees, checkStaleLocks, checkMergeInProgress, checkStaleSignalFiles, checkStaleSessionRecords,
 		checkOrphanedTranscripts, checkAgentProfiles, checkLeadProfileBinding, checkOrphanedTmuxSessions, checkLoomDaemon, checkDaemonStuck, checkDaemonLogging,
@@ -151,7 +157,8 @@ func collectDoctorChecks(cmd *cobra.Command) []checkFunc {
 		checkRedis,
 		checkLeadSafetyDrift,
 		func() CheckResult { return checkOrphanedFleetLocks(deps) },
-		func() CheckResult { return checkDecomposedWithoutChildren(deps) })
+		func() CheckResult { return checkDecomposedWithoutChildren(dscan) },
+		func() CheckResult { return checkDecomposedChildrenAllClosed(dscan) })
 	checks = append(checks, checkDiskHeadroom)
 	return checks
 }
