@@ -38,7 +38,7 @@ const (
 // withScreen substitutes the conversation screen reader for the duration of a
 // test. chat.Conversation's screen is unexported and only chat.Open can fill
 // it, so this is the seam that lets a unit test put a chosen screen behind
-// conversationTurnError. The end-to-end behaviour of the real reader is pinned
+// conversationTurnError. The end-to-end behavior of the real reader is pinned
 // separately by TestConversationSend_AuthSurfacesAsErroredTurn.
 func withScreen(t *testing.T, text string) {
 	t.Helper()
@@ -168,7 +168,7 @@ func TestClaudeTerminalEvidence_CarriesRawTailAndHistory(t *testing.T) {
 // The defensive arm in runConversationTurn assumes conv.Send does NOT return
 // chat.ErrAuthRequired: on v0.7.7 waitReadyForSend's auth short-circuit is
 // caught inside Send (pkg/chat/send.go:45-56), which emits a terminal assistant
-// turn instead. This pins that behaviour against a real PTY-driven session, so
+// turn instead. This pins that behavior against a real PTY-driven session, so
 // a wrapper bump that flips it fails HERE — deliberately making the defensive
 // arm live — rather than being discovered in production as a silent Unknown.
 func TestConversationSend_AuthSurfacesAsErroredTurn(t *testing.T) {

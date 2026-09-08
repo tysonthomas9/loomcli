@@ -141,20 +141,9 @@ func runConversationTurn(ctx context.Context, conv *chat.Conversation, prompt st
 		defer cancel()
 	}
 
-	turnID, err := conv.Send(ctx, prompt)
+	turnID, err := sendConversationPrompt(ctx, conv, prompt)
 	if err != nil {
-		// UNREACHABLE on harness-wrapper@v0.7.7: Send catches its own
-		// ErrAuthRequired at pkg/chat/send.go:45-56 and emits a terminal
-		// assistant turn instead of returning the sentinel, so the auth verdict
-		// always arrives on the errored-turn path below. The arm exists so a
-		// future wrapper that DOES propagate the sentinel degrades to a marked
-		// AuthFailure carrying the screen, rather than silently to Unknown —
-		// and it is pinned by TestConversationSend_AuthSurfacesAsErroredTurn,
-		// which fails first if a bump ever flips that behaviour.
-		if ie := authSentinelInvocationError(err, conv); ie != nil {
-			return chat.Turn{}, ie
-		}
-		return chat.Turn{}, wrapInvocationError(fmt.Errorf("send prompt: %w", err), "")
+		return chat.Turn{}, err
 	}
 
 	events := conv.Events()
@@ -187,6 +176,28 @@ func runConversationTurn(ctx context.Context, conv *chat.Conversation, prompt st
 			}
 		}
 	}
+}
+
+// sendConversationPrompt sends the prompt and maps a send-time failure onto the
+// invocation-error taxonomy.
+//
+// The auth arm is UNREACHABLE on harness-wrapper@v0.7.7: Send catches its own
+// ErrAuthRequired at pkg/chat/send.go:45-56 and emits a terminal assistant turn
+// instead of returning the sentinel, so the auth verdict always arrives on the
+// errored-turn path in runConversationTurn. It exists so a future wrapper that
+// DOES propagate the sentinel degrades to a marked AuthFailure carrying the
+// screen, rather than silently to Unknown — and it is pinned by
+// TestConversationSend_AuthSurfacesAsErroredTurn, which fails first if a bump
+// ever flips that behavior.
+func sendConversationPrompt(ctx context.Context, conv *chat.Conversation, prompt string) (string, error) {
+	turnID, err := conv.Send(ctx, prompt)
+	if err == nil {
+		return turnID, nil
+	}
+	if ie := authSentinelInvocationError(err, conv); ie != nil {
+		return "", ie
+	}
+	return "", wrapInvocationError(fmt.Errorf("send prompt: %w", err), "")
 }
 
 // answerSurfacedRequest resolves one surfaced prompt: hand it to a human via
