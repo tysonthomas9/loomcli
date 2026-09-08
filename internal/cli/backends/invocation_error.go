@@ -194,6 +194,16 @@ func runTurnDeadlineInvocationError(reason, outputTail string) *InvocationError 
 //
 // Returns nil when the reason is not one of the two, so callers can fall
 // through to their existing handling with a single nil check.
+//
+// outputTail is the CLASSIFIER'S EVIDENCE WINDOW, not a cosmetic log tail:
+// agenterr.classifyFromText describes the screen behind every auth verdict out
+// of exactly this text (ScreenEvidence.BannerRule / ComposerWitnessed). The
+// harness names the reason but ships no screen with it — Turn.Text is empty on
+// every v0.7.7 producer of ReasonAuthRequired — so callers should pass the
+// rendered screen here (conversation: screenEvidence; one-shot:
+// claudeTerminalEvidence). Passing only the reason yields a recorded
+// Screen.Scanned=false, which is a finding rather than a failure, but a
+// needless one.
 func terminalTurnInvocationError(reason, outputTail string) *InvocationError {
 	var marker string
 	switch {
