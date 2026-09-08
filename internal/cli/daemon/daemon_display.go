@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
@@ -72,7 +73,43 @@ func printAgentDiagnostics(agent DaemonAgentStatus) {
 		} else {
 			fmt.Printf("      Stopped: %s\n", agent.StopReason)
 		}
+		printAgentEvidence(agent)
 	}
+}
+
+// evidenceDisplayCap bounds the terminal form only. The untruncated summary
+// stays in daemon-agents.json, which is where a full read belongs.
+const evidenceDisplayCap = 300
+
+// printAgentEvidence explains a stop the operator has to act on. Restricted to
+// failed/blocked agents: an idle NoWork exit carries evidence too, and printing
+// "supervisor.no_work" under every parked agent would bury the one line that
+// matters.
+func printAgentEvidence(agent DaemonAgentStatus) {
+	if agent.LastErrorEvidence == "" {
+		return
+	}
+	if agent.Status != "failed" && agent.Status != "blocked" {
+		return
+	}
+	fmt.Printf("      Evidence: %s\n", truncateDisplay(agent.LastErrorEvidence, evidenceDisplayCap))
+}
+
+// truncateDisplay cuts on a rune boundary: evidence carries screen text full of
+// box-drawing glyphs, and a raw byte slice would print a broken one.
+func truncateDisplay(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	const ellipsis = "…"
+	cut := max - len(ellipsis)
+	if cut <= 0 {
+		return ""
+	}
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + ellipsis
 }
 
 // printAgentBranchInfo prints the branch and git sync status for an agent.

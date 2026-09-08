@@ -155,6 +155,7 @@ type SupervisedAgentStatus struct {
 	CurrentBackend         string     // effective backend (includes failover state)
 	StopReason             StopReason // why the agent stopped (empty while running)
 	LastErrorClass         string     // string representation of last error class (e.g. "RateLimited")
+	LastErrorEvidence      string     // agenterr.Evidence.Summary() for that error: which step classified it, and on what
 	NoWorkCount            int        // consecutive NoWork exits
 	BlockCount             int        // block cycles since the last successful run
 	BackoffUntil           time.Time  // when backoff sleep ends (zero if not in backoff)

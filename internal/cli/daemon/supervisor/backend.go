@@ -72,6 +72,7 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 		Message:   info.InstallHint,
 		Backend:   backend,
 		Timestamp: time.Now(),
+		Evidence:  supervisorEvidence(evidenceRuleBackendUnavailable),
 	}
 	worktree := ap.Entry.Worktree
 	ap.Mu.Unlock()
@@ -120,6 +121,7 @@ func (s *Supervisor) gateSafetyKnobsEnforceable(ap *AgentProcess) error {
 		Message:   err.Error(),
 		Backend:   backendName,
 		Timestamp: time.Now(),
+		Evidence:  supervisorEvidence(evidenceRuleSpawnFailure),
 	}
 	worktree := ap.Entry.Worktree
 	ap.Mu.Unlock()

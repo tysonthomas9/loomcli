@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"log"
+	"log/slog"
 	"time"
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
@@ -55,7 +56,7 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 		ap.LastError = ae
 		ap.LastNoWork = false
 		ap.Mu.Unlock()
-		log.Printf("[daemon] Agent %s: classified error: %v", ap.Entry.Worktree, ae)
+		logClassifiedExit(ap.Entry.Worktree, ae)
 	} else if s.runLeftClaimHeld(ap, taskID) {
 		s.markIncompleteRun(ap, taskID, backend)
 	} else {
@@ -74,9 +75,10 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 func (s *Supervisor) markNoWork(ap *AgentProcess, backend string) {
 	ap.Mu.Lock()
 	ap.LastError = &agenterr.AgentError{
-		Class:   agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome),
-		Message: "no claimable tasks",
-		Backend: backend,
+		Class:    agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome),
+		Message:  "no claimable tasks",
+		Backend:  backend,
+		Evidence: supervisorEvidence(evidenceRuleNoWork),
 	}
 	ap.LastNoWork = true
 	ap.Mu.Unlock()
@@ -124,6 +126,7 @@ func (s *Supervisor) markRunDurationExceeded(ap *AgentProcess, exitCode int, bac
 		Message:   "run exceeded its maximum duration and was stopped by the supervisor",
 		Backend:   backend,
 		Timestamp: time.Now(),
+		Evidence:  supervisorEvidence(evidenceRuleRunDurationExceeded),
 	}
 	ap.LastNoWork = false
 	ap.Mu.Unlock()
@@ -148,6 +151,7 @@ func (s *Supervisor) markIncompleteRun(ap *AgentProcess, taskID, backend string)
 		Message:   "exited 0 without releasing the claim on " + taskID,
 		Backend:   backend,
 		Timestamp: time.Now(),
+		Evidence:  supervisorEvidence(evidenceRuleIncompleteRun),
 	}
 	ap.LastNoWork = false
 	ap.Mu.Unlock()
@@ -209,6 +213,7 @@ func (s *Supervisor) markSpawnFailure(ap *AgentProcess, spawnErr error) {
 		Message:   msg,
 		Backend:   backend,
 		Timestamp: time.Now(),
+		Evidence:  supervisorEvidence(evidenceRuleSpawnFailure),
 	}
 	ap.Mu.Unlock()
 
@@ -257,9 +262,11 @@ func (s *Supervisor) saveAgentCheckpoint(ap *AgentProcess, exitCode int) {
 
 	diff := captureGitDiff(ap.WorktreePath, config.MaxDiffBytes)
 	errClass := ""
+	errEvidence := ""
 	ap.Mu.Lock()
 	if ap.LastError != nil {
 		errClass = ap.LastError.Class.String()
+		errEvidence = ap.LastError.Evidence.Summary()
 	}
 	epicID := ap.AssignedEpicID
 	ap.Mu.Unlock()
@@ -270,13 +277,14 @@ func (s *Supervisor) saveAgentCheckpoint(ap *AgentProcess, exitCode int) {
 	}
 
 	cp := &config.Checkpoint{
-		AgentName:  agentName,
-		TaskID:     taskID,
-		EpicID:     epicID,
-		GitDiff:    diff,
-		ExitCode:   exitCode,
-		ErrorClass: errClass,
-		Timestamp:  time.Now(),
+		AgentName:     agentName,
+		TaskID:        taskID,
+		EpicID:        epicID,
+		GitDiff:       diff,
+		ExitCode:      exitCode,
+		ErrorClass:    errClass,
+		ErrorEvidence: errEvidence,
+		Timestamp:     time.Now(),
 	}
 	lockDir := cli.ResolveLockDir(ap.WorktreePath)
 	if err := config.SaveCheckpoint(lockDir, cp); err != nil {
@@ -338,4 +346,58 @@ func (s *Supervisor) taskIDForLifecycle(ap *AgentProcess, lockInfo *cli.LockInfo
 	ap.Mu.Lock()
 	defer ap.Mu.Unlock()
 	return ap.AssignedTaskID
+}
+
+// Supervisor-synthesized classification rules. Every AgentError the supervisor
+// builds itself — as opposed to one agenterr derived from a log — names its
+// origin here, so no AgentError in the tree carries empty provenance and
+// "which code path decided this" is answerable from the record alone.
+const (
+	evidenceRuleNoWork              = "supervisor.no_work"
+	evidenceRuleRunDurationExceeded = "supervisor.run_duration_exceeded"
+	evidenceRuleIncompleteRun       = "supervisor.incomplete_run"
+	evidenceRuleSpawnFailure        = "supervisor.spawn_failure"
+	evidenceRuleBackendUnavailable  = "supervisor.backend_unavailable"
+	evidenceRuleEpicExhausted       = "supervisor.epic_exhausted"
+	evidenceRuleOwnershipLost       = "supervisor.ownership_lost"
+)
+
+// supervisorEvidence builds the provenance for a verdict the supervisor
+// synthesized rather than read out of agent output. There is no text to quote,
+// so the rule alone is the whole record.
+func supervisorEvidence(rule string) agenterr.Evidence {
+	return agenterr.Evidence{Source: agenterr.EvidenceSupervisor, Rule: rule}
+}
+
+// logClassifiedExit records a log-derived classification with its provenance
+// spread across structured fields, so the retained daemon log can be grepped
+// for a single rule or a single screen shape rather than parsed out of a %v.
+func logClassifiedExit(worktree string, ae *agenterr.AgentError) {
+	if ae == nil {
+		return
+	}
+	attrs := []any{
+		"worktree", worktree,
+		"class", ae.Class.String(),
+		"exit_code", ae.ExitCode,
+		"evidence_source", string(ae.Evidence.Source),
+		"evidence_rule", ae.Evidence.Rule,
+		"message", ae.Message,
+	}
+	if ae.Evidence.Detail != "" {
+		attrs = append(attrs, "detail", ae.Evidence.Detail)
+	}
+	if ae.Evidence.Excerpt != "" {
+		attrs = append(attrs, "excerpt", ae.Evidence.Excerpt)
+	}
+	if sc := ae.Evidence.Screen; sc != nil {
+		attrs = append(attrs, "screen_scanned", sc.Scanned, "banner_rule", sc.BannerRule)
+		if sc.ComposerWitnessed != nil {
+			attrs = append(attrs, "composer_witnessed", *sc.ComposerWitnessed)
+		}
+		if sc.DialogWitnessed != nil {
+			attrs = append(attrs, "dialog_witnessed", *sc.DialogWitnessed)
+		}
+	}
+	slog.Warn("agent exit classified", attrs...)
 }

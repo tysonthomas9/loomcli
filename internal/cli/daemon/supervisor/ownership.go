@@ -346,6 +346,7 @@ func (s *Supervisor) killAgentForOwnership(ap *AgentProcess, reason string, hbEr
 		Message:   fmt.Sprintf("ownership heartbeat failed (%s): %v", reason, hbErr),
 		Backend:   backend,
 		Timestamp: time.Now(),
+		Evidence:  supervisorEvidence(evidenceRuleOwnershipLost),
 	}
 	ap.Mu.Unlock()
 	s.StopAgent(ap, s.GetSigtermTimeout())

@@ -17,14 +17,18 @@ const maxDiffBytes = 4096
 // Checkpoint captures the state of an agent's progress when it exits non-zero.
 // This allows the next agent session to continue from where the previous one left off.
 type Checkpoint struct {
-	AgentName   string    `json:"agent_name"`
-	TaskID      string    `json:"task_id"`
-	EpicID      string    `json:"epic_id,omitempty"`
-	GitDiff     string    `json:"git_diff"`
-	ExitCode    int       `json:"exit_code"`
-	ErrorClass  string    `json:"error_class,omitempty"`
-	YieldReason string    `json:"yield_reason,omitempty"` // non-empty when agent was preempted via yield
-	Timestamp   time.Time `json:"timestamp"`
+	AgentName  string `json:"agent_name"`
+	TaskID     string `json:"task_id"`
+	EpicID     string `json:"epic_id,omitempty"`
+	GitDiff    string `json:"git_diff"`
+	ExitCode   int    `json:"exit_code"`
+	ErrorClass string `json:"error_class,omitempty"`
+	// ErrorEvidence is agenterr.Evidence.Summary() for the error that produced
+	// this checkpoint: which classification step decided, on which rule, and on
+	// what text. Purely descriptive — nothing reads it back to make a decision.
+	ErrorEvidence string    `json:"error_evidence,omitempty"`
+	YieldReason   string    `json:"yield_reason,omitempty"` // non-empty when agent was preempted via yield
+	Timestamp     time.Time `json:"timestamp"`
 }
 
 // SaveCheckpoint atomically writes a checkpoint file to the lock directory.

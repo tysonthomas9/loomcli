@@ -1417,9 +1417,12 @@ func TestDaemonAgentStatus_NewFields_JSON(t *testing.T) {
 		Status:         "running",
 		WorktreePath:   "/path/to/falcon",
 		LastErrorClass: "RateLimited",
-		NoWorkCount:    3,
-		BackoffUntil:   backoffTime,
-		RemoteBranch:   "origin/main",
+		// Provenance rides beside the class: PUPPET-579 made the "which step
+		// decided this" half readable from `daemon status -o json`.
+		LastErrorEvidence: `harness_marker rule=AuthRequiredMarker screen=banner:claude.loggedout.run_login,composer=false`,
+		NoWorkCount:       3,
+		BackoffUntil:      backoffTime,
+		RemoteBranch:      "origin/main",
 	}
 
 	data, err := json.Marshal(status)
@@ -1432,7 +1435,7 @@ func TestDaemonAgentStatus_NewFields_JSON(t *testing.T) {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
 
-	expectedKeys := []string{"worktree_path", "last_error_class", "no_work_count", "backoff_until", "remote_branch"}
+	expectedKeys := []string{"worktree_path", "last_error_class", "last_error_evidence", "no_work_count", "backoff_until", "remote_branch"}
 	for _, key := range expectedKeys {
 		if _, ok := m[key]; !ok {
 			t.Errorf("expected JSON key %q not found", key)
@@ -1449,6 +1452,9 @@ func TestDaemonAgentStatus_NewFields_JSON(t *testing.T) {
 	}
 	if roundTrip.LastErrorClass != "RateLimited" {
 		t.Errorf("LastErrorClass = %q, want %q", roundTrip.LastErrorClass, "RateLimited")
+	}
+	if roundTrip.LastErrorEvidence != status.LastErrorEvidence {
+		t.Errorf("LastErrorEvidence = %q, want %q", roundTrip.LastErrorEvidence, status.LastErrorEvidence)
 	}
 	if roundTrip.NoWorkCount != 3 {
 		t.Errorf("NoWorkCount = %d, want 3", roundTrip.NoWorkCount)
@@ -1476,7 +1482,7 @@ func TestDaemonAgentStatus_NewFields_OmitEmpty(t *testing.T) {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
 
-	omittedKeys := []string{"worktree_path", "last_error_class", "no_work_count", "remote_branch"}
+	omittedKeys := []string{"worktree_path", "last_error_class", "last_error_evidence", "no_work_count", "remote_branch"}
 	for _, key := range omittedKeys {
 		if _, ok := m[key]; ok {
 			t.Errorf("key %q should be omitted when zero/empty", key)
@@ -1492,14 +1498,15 @@ func TestWriteStateFile_NewFields_RoundTrip(t *testing.T) {
 
 	agents := []SupervisedAgentStatus{
 		{
-			Worktree:       "falcon",
-			Role:           "plan",
-			PID:            0,
-			WorktreePath:   "/path/to/falcon",
-			LastErrorClass: "Timeout",
-			NoWorkCount:    7,
-			BackoffUntil:   backoffTime,
-			RemoteBranch:   "origin/develop",
+			Worktree:          "falcon",
+			Role:              "plan",
+			PID:               0,
+			WorktreePath:      "/path/to/falcon",
+			LastErrorClass:    "Timeout",
+			LastErrorEvidence: "residual_pattern rule=timeout.idle",
+			NoWorkCount:       7,
+			BackoffUntil:      backoffTime,
+			RemoteBranch:      "origin/develop",
 		},
 	}
 
@@ -1523,6 +1530,11 @@ func TestWriteStateFile_NewFields_RoundTrip(t *testing.T) {
 	}
 	if a.LastErrorClass != "Timeout" {
 		t.Errorf("LastErrorClass = %q, want %q", a.LastErrorClass, "Timeout")
+	}
+	// The projection in daemon_state.go must carry the provenance across, not
+	// just the class — otherwise the state file names a verdict with no origin.
+	if a.LastErrorEvidence != "residual_pattern rule=timeout.idle" {
+		t.Errorf("LastErrorEvidence = %q, want %q", a.LastErrorEvidence, "residual_pattern rule=timeout.idle")
 	}
 	if a.NoWorkCount != 7 {
 		t.Errorf("NoWorkCount = %d, want 7", a.NoWorkCount)
