@@ -159,6 +159,9 @@ type TaskFailedData struct {
 	Error      string `json:"error"`
 	ErrorClass string `json:"error_class,omitempty"`
 	RetryAfter string `json:"retry_after,omitempty"`
+	// Evidence is agenterr.Evidence.Summary(): which classification step
+	// produced ErrorClass, on which rule, and on what text.
+	Evidence string `json:"evidence,omitempty"`
 }
 
 // TaskStuckData reports a task that failed repeatedly across consecutive
@@ -183,6 +186,11 @@ type AgentStoppedData struct {
 	PID        int    `json:"pid"`
 	ExitCode   int    `json:"exit_code"`
 	StopReason string `json:"stop_reason,omitempty"`
+	// ErrorClass and Evidence describe the classification of this exit. Both
+	// are additive and omitempty, so an event written before they existed —
+	// or by an older binary — decodes unchanged.
+	ErrorClass string `json:"error_class,omitempty"`
+	Evidence   string `json:"evidence,omitempty"`
 }
 
 type EpicAssignedData struct {
