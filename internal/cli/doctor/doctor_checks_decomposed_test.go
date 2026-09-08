@@ -210,6 +210,30 @@ func TestCheckDecomposedChildrenAllClosed(t *testing.T) {
 		}
 	})
 
+	// Both queries must ask for an explicit page. The server's default is 50,
+	// which silently reduced the label query to a fraction of the board.
+	t.Run("both queries request an explicit page", func(t *testing.T) {
+		t.Parallel()
+		deps, _, _, _, mockBackend := NewTestDeps(t)
+		var labelLimit, childLimit int
+		mockBackend.ListFn = func(_ context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
+			if opts.ParentID != "" {
+				childLimit = opts.Limit
+				return []backend.IssueData{{ID: "PUPPET-2", Status: "closed"}}, nil
+			}
+			labelLimit = opts.Limit
+			return []backend.IssueData{{ID: "PUPPET-1", Status: "open"}}, nil
+		}
+
+		checkDecomposedChildrenAllClosed(&decomposedScan{deps: deps, label: testDecomposedLabel})
+		if labelLimit != maxChildScan {
+			t.Errorf("label query limit = %d, want %d", labelLimit, maxChildScan)
+		}
+		if childLimit != maxChildScan {
+			t.Errorf("child query limit = %d, want %d", childLimit, maxChildScan)
+		}
+	})
+
 	t.Run("skipped when no decomposed issues", func(t *testing.T) {
 		t.Parallel()
 		scan := strandScan(t, nil, nil)
