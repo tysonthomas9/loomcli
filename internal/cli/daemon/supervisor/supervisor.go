@@ -602,8 +602,13 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 		return
 	}
 
-	exitCode := s.waitForAgent(ap)
+	exit := s.waitForAgentInfo(ap)
+	exitCode := exit.ExitCode
 	s.classifyAgentExit(ap, exitCode)
+	// Emitted here rather than inside waitForAgentInfo so it can carry the
+	// verdict and its provenance: classifyAgentExit has just set ap.LastError,
+	// and nothing between here and the next spawn touches it.
+	s.emitAgentStopped(ap, exit)
 	// Ledger hook: LastError is set, the lock is still present, and
 	// AgentSessionID has not been cleared by finalize yet. It runs with the
 	// FACTUAL exit code, so a clean run that later fails a completion hook
@@ -761,6 +766,7 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 		}
 		if ap.LastError != nil {
 			result[i].LastErrorClass = ap.LastError.Class.String()
+			result[i].LastErrorEvidence = ap.LastError.Evidence.Summary()
 			// Derived, not stored: the agent's last transition was a claim-hold
 			// gate. Clears itself on the next successful pre-flight.
 			result[i].ClaimsGated = ap.LastError.Class.Is(agenterr.ClaimsHeldOutcome)
