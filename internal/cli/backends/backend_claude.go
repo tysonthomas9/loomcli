@@ -363,7 +363,7 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 			// difference between "renew the login" / "back off blamelessly"
 			// and an Unknown that burns the restart budget on a turn that
 			// cannot succeed.
-			if ie := terminalTurnInvocationError(reason, outputTail); ie != nil {
+			if ie := terminalTurnInvocationError(reason, claudeTerminalEvidence(res)); ie != nil {
 				return ie
 			}
 			return &InvocationError{Err: errors.New(reason), OutputTail: outputTail, ExitCode: 1}
@@ -477,8 +477,14 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 	// accumulateHarnessUsage cannot error, so a missing or unreadable transcript
 	// leaves the turn result and the exit code exactly as they were.
 	accumulateHarnessUsage(collector, "claude", res.Session.HarnessSessionID, workDir)
-	if err != nil && claudeRunTurnEvidence(res, raw.String()) == "" {
-		res.Turn.Text = raw.String()
+	// Park the captured PTY output on the turn whenever the turn itself carries
+	// no text. It used to be parked only when the WHOLE evidence was empty,
+	// which meant a terminal auth turn — Reason set, Text blanked by the
+	// wrapper's authRelabel — kept the raw screen out of reach of the
+	// classifier, on precisely the verdict that needs a screen to be judged.
+	// Capped, because this text ends up in a logged and stored error.
+	if err != nil && strings.TrimSpace(res.Turn.Text) == "" {
+		res.Turn.Text = claudeRawTail(raw.String())
 	}
 	// Our own deadline fired. Guarded on deadlineCtx being non-nil, which is
 	// exactly the `deadline > 0` condition that created it, so a turn with no
@@ -654,6 +660,31 @@ func claudeTurnText(res claudeRunTurnResult) string {
 		}
 	}
 	return res.Turn.Text
+}
+
+// claudeRawTailCap bounds the raw PTY tail parked on a turn for the
+// classifier. 8 KiB is several screens' worth — enough to hold a login banner
+// with its surroundings, small enough to log and store.
+const claudeRawTailCap = 8 << 10
+
+// claudeRawTail keeps the last claudeRawTailCap bytes of the captured output,
+// cut forward to a rune boundary so a split glyph never reaches a log.
+func claudeRawTail(raw string) string {
+	return tailBytes(raw, claudeRawTailCap)
+}
+
+// claudeTerminalEvidence is the classifier's evidence window for a turn the
+// HARNESS declared terminal. It differs from the ordinary evidence in one way:
+// it also offers the raw PTY tail parked on Turn.Text, because on an auth turn
+// the assistant history holds the pre-failure conversation while the login
+// banner is only on the screen. Deduplicated, so a turn whose history is empty
+// does not repeat the same text twice.
+func claudeTerminalEvidence(res claudeRunTurnResult) string {
+	raw := strings.TrimSpace(res.Turn.Text)
+	if strings.TrimSpace(claudeTurnText(res)) == raw {
+		raw = ""
+	}
+	return claudeRunTurnEvidence(res, raw)
 }
 
 func claudeRunTurnEvidence(res claudeRunTurnResult, raw string) string {
