@@ -19,6 +19,7 @@ type classifyResult struct {
 	Class      Outcome
 	Message    string
 	RetryAfter time.Duration
+	Evidence   Evidence
 }
 
 // errorPattern defines a single regex→class mapping over the wrapper's
@@ -26,6 +27,10 @@ type classifyResult struct {
 // the wrapper's anchored matchers miss) rather than five near-identical
 // per-backend tables.
 type errorPattern struct {
+	// id is a STABLE CONTRACT: docs/adr/0002-authfailure-stays-terminal.md
+	// names these ids in its revisit triggers, so a rename silently breaks the
+	// trigger it belongs to. Add rows freely; do not rename existing ones.
+	id    string
 	re    *regexp.Regexp
 	class wrapper.ErrorClass
 	msg   string
@@ -140,14 +145,14 @@ var timeoutHintRe = regexp.MustCompile(`(?i)\btimeout\b|etimedout|connection.?ti
 // Ordered RateLimited-first, Transient-last, mirroring the precedence of the
 // former per-backend tables.
 var residualPatterns = []errorPattern{
-	{regexp.MustCompile(`(?i)\b429\b|too many requests|tokens per min|overloaded_error|resource.?exhausted|resource_exhausted|rate.?limit|usage.?limit|session.?limit|resets at|resets \d{1,2}:\d{2}|try again at\s+\d`), wrapper.ErrRateLimited, "rate limit exceeded"},
-	{regexp.MustCompile(`(?i)\b401\b|unauthorized|unauthenticated|permission.?denied|forbidden|invalid.?api.?key|incorrect.?api.?key|invalid.*key|authentication.?failed|ANTHROPIC_API_KEY|OPENAI_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY|CURSOR_API_KEY`), wrapper.ErrAuth, "authentication failed"},
-	{regexp.MustCompile(`(?i)\b402\b|payment.?required|insufficient.?(?:credits|quota)|insufficient_quota|exceeded.*quota|quota.?exceeded|\bquota\b|\bcredits\b|\bbilling\b`), wrapper.ErrBilling, "billing error"},
-	{regexp.MustCompile(`(?i)model requires a newer version|requires a newer version of (?:codex|claude)|upgrade to the latest (?:app or )?cli`), wrapper.ErrModelNotFound, "backend CLI is incompatible with the selected model"},
-	{regexp.MustCompile(`(?i)model.?not.?found|model.*not found|model.*does not exist|model.*not.*exist|model_not_found|unsupported.?model|unknown.?model|invalid.?model|selected model.*may not exist|selected model.*may not have access to it|\b404\b.*model`), wrapper.ErrModelNotFound, "model not found"},
-	{regexp.MustCompile(`(?i)context.?length|context.?window|context_length_exceeded|maximum context length|max.?tokens|max.*tokens|token.?limit|prompt.?too.?long|too.?long`), wrapper.ErrContextOverflow, "context length exceeded"},
-	{regexp.MustCompile(`(?i)\btimeout\b|etimedout|connection.?timed?.?out|timed?.?out|deadline.?exceeded`), wrapper.ErrTimeout, "connection timeout"},
-	{regexp.MustCompile(`(?i)\b50[023]\b|\b529\b|server.?error|server_error|internal.?server.?error|internal.?error|service.?unavailable|backend.?error|overloaded`), wrapper.ErrTransient, "server error"},
+	{"residual.ratelimit", regexp.MustCompile(`(?i)\b429\b|too many requests|tokens per min|overloaded_error|resource.?exhausted|resource_exhausted|rate.?limit|usage.?limit|session.?limit|resets at|resets \d{1,2}:\d{2}|try again at\s+\d`), wrapper.ErrRateLimited, "rate limit exceeded"},
+	{"residual.auth", regexp.MustCompile(`(?i)\b401\b|unauthorized|unauthenticated|permission.?denied|forbidden|invalid.?api.?key|incorrect.?api.?key|invalid.*key|authentication.?failed|ANTHROPIC_API_KEY|OPENAI_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY|CURSOR_API_KEY`), wrapper.ErrAuth, "authentication failed"},
+	{"residual.billing", regexp.MustCompile(`(?i)\b402\b|payment.?required|insufficient.?(?:credits|quota)|insufficient_quota|exceeded.*quota|quota.?exceeded|\bquota\b|\bcredits\b|\bbilling\b`), wrapper.ErrBilling, "billing error"},
+	{"residual.model_version", regexp.MustCompile(`(?i)model requires a newer version|requires a newer version of (?:codex|claude)|upgrade to the latest (?:app or )?cli`), wrapper.ErrModelNotFound, "backend CLI is incompatible with the selected model"},
+	{"residual.model_not_found", regexp.MustCompile(`(?i)model.?not.?found|model.*not found|model.*does not exist|model.*not.*exist|model_not_found|unsupported.?model|unknown.?model|invalid.?model|selected model.*may not exist|selected model.*may not have access to it|\b404\b.*model`), wrapper.ErrModelNotFound, "model not found"},
+	{"residual.context", regexp.MustCompile(`(?i)context.?length|context.?window|context_length_exceeded|maximum context length|max.?tokens|max.*tokens|token.?limit|prompt.?too.?long|too.?long`), wrapper.ErrContextOverflow, "context length exceeded"},
+	{"residual.timeout", regexp.MustCompile(`(?i)\btimeout\b|etimedout|connection.?timed?.?out|timed?.?out|deadline.?exceeded`), wrapper.ErrTimeout, "connection timeout"},
+	{"residual.transient", regexp.MustCompile(`(?i)\b50[023]\b|\b529\b|server.?error|server_error|internal.?server.?error|internal.?error|service.?unavailable|backend.?error|overloaded`), wrapper.ErrTransient, "server error"},
 }
 
 // classifyWithPatterns runs an ordered pattern table against text, extracting a
@@ -159,8 +164,9 @@ func classifyWithPatterns(text string, patterns []errorPattern) *classifyResult 
 	for _, p := range patterns {
 		if p.re.MatchString(text) {
 			r := &classifyResult{
-				Class:   OutcomeFromHarness(p.class),
-				Message: p.msg,
+				Class:    OutcomeFromHarness(p.class),
+				Message:  p.msg,
+				Evidence: newTextEvidence(EvidenceResidual, p.id, p.re, text),
 			}
 			if p.class == wrapper.ErrRateLimited {
 				r.RetryAfter = parseRetryAfter(text)
@@ -209,7 +215,11 @@ func classifyHarnessMarkers(text string) *classifyResult {
 	// 1. Cross-cutting wrapper signal: the loom-side translator prepends this
 	//    marker when the backend CLI is missing. It outranks everything else.
 	if backendUnavailableRe.MatchString(text) {
-		return &classifyResult{Class: OutcomeFromDomain(BackendUnavailableOutcome), Message: "backend binary not on PATH"}
+		return &classifyResult{
+			Class:    OutcomeFromDomain(BackendUnavailableOutcome),
+			Message:  "backend binary not on PATH",
+			Evidence: markerEvidence("BackendUnavailableMarker", backendUnavailableRe, BackendUnavailableMarker, text),
+		}
 	}
 
 	// A wrapper launch failure (PTY/exec) means the backend process never
@@ -218,8 +228,9 @@ func classifyHarnessMarkers(text string) *classifyResult {
 	// and keep the reason so it surfaces instead of a generic Unknown.
 	if agentLaunchFailedRe.MatchString(text) {
 		return &classifyResult{
-			Class:   OutcomeFromDomain(SpawnFailureOutcome),
-			Message: "agent process failed to launch (backend binary may be updating or incompatible)",
+			Class:    OutcomeFromDomain(SpawnFailureOutcome),
+			Message:  "agent process failed to launch (backend binary may be updating or incompatible)",
+			Evidence: markerEvidence("AgentLaunchFailedMarker", agentLaunchFailedRe, AgentLaunchFailedMarker, text),
 		}
 	}
 
@@ -242,14 +253,19 @@ func classifyHarnessMarkers(text string) *classifyResult {
 	// consuming an agent's restart budget.
 	if authRequiredRe.MatchString(text) {
 		return &classifyResult{
-			Class:   OutcomeFromHarness(wrapper.ErrAuth),
-			Message: "harness login expired or re-authentication required — renew the harness login",
+			// The Message stays byte-for-byte as it was: it is operator-facing
+			// copy. The harness's own reason tail, which used to be discarded
+			// here, now rides in Evidence.Detail instead of being lost.
+			Class:    OutcomeFromHarness(wrapper.ErrAuth),
+			Message:  "harness login expired or re-authentication required — renew the harness login",
+			Evidence: markerEvidence("AuthRequiredMarker", authRequiredRe, AuthRequiredMarker, text),
 		}
 	}
 	if usageLimitedRe.MatchString(text) {
 		result := &classifyResult{
-			Class:   OutcomeFromHarness(wrapper.ErrRateLimited),
-			Message: "harness usage or session limit reached — retry after the quota window resets",
+			Class:    OutcomeFromHarness(wrapper.ErrRateLimited),
+			Message:  "harness usage or session limit reached — retry after the quota window resets",
+			Evidence: markerEvidence("UsageLimitedMarker", usageLimitedRe, UsageLimitedMarker, text),
 		}
 		// A usage wall often states when it lifts. Honor it if present; the
 		// rate-limit backoff has its own default otherwise.
@@ -259,6 +275,33 @@ func classifyHarnessMarkers(text string) *classifyResult {
 		return result
 	}
 	return nil
+}
+
+// markerEvidence records a harness-marker hit: the marker's Go const name as
+// the rule, a redacted window around it as the excerpt, and — the point of the
+// exercise — the harness's OWN reason as Detail.
+//
+// terminalTurnInvocationError (internal/cli/backends/invocation_error.go:165)
+// appends that reason after "<marker>: ", and this classifier used to throw it
+// away and substitute a canned message. On the pinned wrapper the reason is the
+// flat chat.ReasonAuthRequired constant for all five of its producers, so Detail
+// will be identical every time; that is expected. Today the discriminating
+// signal for an auth verdict is Screen, not Detail.
+func markerEvidence(rule string, re *regexp.Regexp, marker, text string) Evidence {
+	ev := newTextEvidence(EvidenceHarnessMarker, rule, re, text)
+	ev.Detail = capString(redactEvidence(sanitizeText(markerReason(marker, text))), evidenceDetailCap)
+	return ev
+}
+
+// markerReason returns the text following "<marker>: " up to the end of that
+// line, or "" when the marker carried no reason tail.
+func markerReason(marker, text string) string {
+	i := strings.Index(text, marker)
+	if i < 0 {
+		return ""
+	}
+	line, _, _ := strings.Cut(text[i+len(marker):], "\n")
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), ":"))
 }
 
 // classifyFromText is the shared classification implementation. It is a thin
@@ -288,7 +331,23 @@ func classifyFromText(text string, exitCode int, backend string) *AgentError {
 		result = &classifyResult{
 			Class:   OutcomeFromHarness(classifyByExitCode(exitCode)),
 			Message: classifyByExitCodeMessage(exitCode),
+			Evidence: Evidence{
+				Source:   EvidenceExitCode,
+				Rule:     exitCodeRule(exitCode),
+				ExitCode: exitCode,
+			},
 		}
+	}
+
+	// Provenance is stamped once, here, so every step above only has to
+	// describe what IT matched.
+	evidence := result.Evidence
+	evidence.ExitCode = exitCode
+	evidence.ScannedBytes = len(text)
+	// Screen description is for auth verdicts only — it answers "was this a
+	// real login wall?", which is meaningless for a rate limit or a timeout.
+	if result.Class.IsClass(wrapper.ErrAuth) {
+		evidence.Screen = describeScreen(text)
 	}
 
 	return &AgentError{
@@ -299,6 +358,19 @@ func classifyFromText(text string, exitCode int, backend string) *AgentError {
 		Backend:    backend,
 		RetryAfter: result.RetryAfter,
 		Timestamp:  now,
+		Evidence:   evidence,
+	}
+}
+
+// exitCodeRule names the arm classifyByExitCode took, mirroring its switch.
+func exitCodeRule(exitCode int) string {
+	switch exitCode {
+	case 137:
+		return "exit.137_sigkill"
+	case 143:
+		return "exit.143_sigterm"
+	default:
+		return "exit.default"
 	}
 }
 
@@ -313,7 +385,11 @@ func classifyFromText(text string, exitCode int, backend string) *AgentError {
 // Timeout backoff bucket, exactly as before.
 func fromClassification(c wrapper.Classification, text string) *classifyResult {
 	if c.Status == wrapper.StatusBinaryNotFound {
-		return &classifyResult{Class: OutcomeFromDomain(BackendUnavailableOutcome), Message: "backend binary not on PATH"}
+		return &classifyResult{
+			Class:    OutcomeFromDomain(BackendUnavailableOutcome),
+			Message:  "backend binary not on PATH",
+			Evidence: wrapperEvidence(c, ""),
+		}
 	}
 	switch c.Class {
 	case wrapper.ErrNone, wrapper.ErrUnknown:
@@ -322,13 +398,31 @@ func fromClassification(c wrapper.Classification, text string) *classifyResult {
 		return nil
 	case wrapper.ErrTransient:
 		if timeoutHintRe.MatchString(text) {
-			return &classifyResult{Class: OutcomeFromHarness(wrapper.ErrTimeout), Message: reasonOr(c.Reason, "connection timeout"), RetryAfter: c.RetryAfter}
+			// Name the rewrite explicitly so the Transient→Timeout upgrade
+			// stays visible in the record rather than looking like the
+			// wrapper's own verdict.
+			return &classifyResult{Class: OutcomeFromHarness(wrapper.ErrTimeout), Message: reasonOr(c.Reason, "connection timeout"), RetryAfter: c.RetryAfter, Evidence: wrapperEvidence(c, "wrapper/timeout_upgrade")}
 		}
-		return &classifyResult{Class: OutcomeFromHarness(wrapper.ErrTransient), Message: reasonOr(c.Reason, "transient error"), RetryAfter: c.RetryAfter}
+		return &classifyResult{Class: OutcomeFromHarness(wrapper.ErrTransient), Message: reasonOr(c.Reason, "transient error"), RetryAfter: c.RetryAfter, Evidence: wrapperEvidence(c, "")}
 	case wrapper.ErrRateLimited:
-		return &classifyResult{Class: OutcomeFromHarness(wrapper.ErrRateLimited), Message: reasonOr(c.Reason, "rate limit exceeded"), RetryAfter: retryAfterFrom(c, text)}
+		return &classifyResult{Class: OutcomeFromHarness(wrapper.ErrRateLimited), Message: reasonOr(c.Reason, "rate limit exceeded"), RetryAfter: retryAfterFrom(c, text), Evidence: wrapperEvidence(c, "")}
 	default:
-		return &classifyResult{Class: OutcomeFromHarness(c.Class), Message: reasonOr(c.Reason, c.Class.String()), RetryAfter: c.RetryAfter}
+		return &classifyResult{Class: OutcomeFromHarness(c.Class), Message: reasonOr(c.Reason, c.Class.String()), RetryAfter: c.RetryAfter, Evidence: wrapperEvidence(c, "")}
+	}
+}
+
+// wrapperEvidence records a harness-wrapper verdict. rule defaults to
+// "<status>/<class>"; pass a non-empty override to name a loom-side rewrite of
+// the wrapper's answer.
+func wrapperEvidence(c wrapper.Classification, rule string) Evidence {
+	if rule == "" {
+		rule = string(c.Status) + "/" + c.Class.String()
+	}
+	return Evidence{
+		Source:   EvidenceWrapper,
+		Rule:     rule,
+		Detail:   capString(redactEvidence(sanitizeText(c.Reason)), evidenceDetailCap),
+		HTTPCode: c.HTTPCode,
 	}
 }
 
