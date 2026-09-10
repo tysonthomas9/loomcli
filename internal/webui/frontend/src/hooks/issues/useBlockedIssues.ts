@@ -102,6 +102,6 @@ export function useBlockedIssues(
     safetyPollMs: 5 * 60_000,
     pauseWhenHidden: true,
     refetchOnConnect: true,
-    resetOnKeyChange: false,
+    resetOnKeyChange: true,
   });
 }

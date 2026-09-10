@@ -1,0 +1,9 @@
+{
+  "flashes": [],
+  "requests": [
+    {
+      "duration": 11.300000011920927,
+      "url": "http://localhost:8583/api/workspaces/LOCALMODE/blocked"
+    }
+  ]
+}

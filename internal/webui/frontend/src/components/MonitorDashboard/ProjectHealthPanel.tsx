@@ -160,7 +160,7 @@ function ProjectHealthPanelComponent({
             </span>
           )}
         </h3>
-        {isLoading ? (
+        {isLoading && blockedIssues === null ? (
           <div className={styles.loading}>Loading...</div>
         ) : bottlenecks.length === 0 ? (
           <div className={styles.emptyState}>No bottlenecks detected</div>

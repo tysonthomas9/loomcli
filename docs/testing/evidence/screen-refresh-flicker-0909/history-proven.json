@@ -1,0 +1,13 @@
+{
+  "flashes": [],
+  "requests": [
+    {
+      "duration": 4.300000011920929,
+      "url": "http://localhost:8583/api/workspaces/LOCALMODE/issues/LOCALMODE-10/events?limit=200"
+    },
+    {
+      "duration": 2.699999988079071,
+      "url": "http://localhost:8583/api/workspaces/LOCALMODE/issues/LOCALMODE-10/events?limit=200"
+    }
+  ]
+}

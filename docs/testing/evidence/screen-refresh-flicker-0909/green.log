@@ -1,0 +1,1116 @@
+
+ RUN  v4.0.18 /Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend
+
+ ✓ src/components/MonitorDashboard/__tests__/ProjectHealthPanel.test.tsx (46 tests) 223ms
+stderr | src/hooks/issues/__tests__/useBlockedIssues.test.ts > useBlockedIssues > uses entity_type precedence and ignores legacy dep
+Warning: An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at TestComponent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/node_modules/@testing-library/react/dist/pure.js:328:5)
+    at Wrapper (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/hooks/issues/__tests__/useBlockedIssues.test.ts:53:20)
+
+stderr | src/hooks/issues/__tests__/useBlockedIssues.test.ts > useBlockedIssues > refetches once on a completed connection epoch
+Warning: An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at TestComponent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/node_modules/@testing-library/react/dist/pure.js:328:5)
+    at Wrapper (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/hooks/issues/__tests__/useBlockedIssues.test.ts:53:20)
+
+ ✓ src/hooks/issues/__tests__/useBlockedIssues.test.ts (11 tests) 597ms
+     ✓ shares one mount request and one debounced event fetch  306ms
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > rendering > renders when open
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > rendering > opens in the shared full-workspace detail model by default
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > rendering > shows the close reason and closed timestamp on a closed issue
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > rendering > renders nothing for an unexplained close
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > rendering > shows neither closing field on an open issue
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > rendering > shows latest failed task run and links to Runs tab
+Warning: An update to SessionsTab inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at SessionsTab (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/sessions/SessionsTab.tsx:16:24)
+    at div
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > rendering > shows latest failed task run and links to Runs tab
+Warning: An update to SessionsTab inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at SessionsTab (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/sessions/SessionsTab.tsx:16:24)
+    at div
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+Warning: An update to SessionsTab inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at SessionsTab (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/sessions/SessionsTab.tsx:16:24)
+    at div
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+Warning: An update to SessionsTab inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at SessionsTab (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/sessions/SessionsTab.tsx:16:24)
+    at div
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > rendering > applies open class when isOpen is true
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > close interactions > calls onClose when clicking overlay
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > close interactions > does not call onClose when clicking panel
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > close interactions > calls onClose when pressing Escape
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > close interactions > does not call onClose on other keys
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > accessibility > has correct ARIA attributes when open with issue
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > accessibility > clears aria-hidden on overlay when open
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > body scroll lock > locks body scroll when open
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > className prop > applies custom className to overlay
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > className prop > combines custom className with open class
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > edge cases > handles rapid open/close
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > CollapsibleSection > renders design section always visible (not collapsible at section level)
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > CollapsibleSection > renders design in right column with heading
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > CollapsibleSection > renders notes section when notes provided
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > CollapsibleSection > keeps long notes expanded by default and allows toggling
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > BlockingBanner > shows blocking banner when issue status is blocked and has open dependencies
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > BlockingBanner > shows singular text when blocked by 1 issue
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > BlockingBanner > does not show banner when status is not blocked even with open dependencies
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > BlockingBanner > does not show banner when all dependencies are closed
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > BlockingBanner > does not show banner when no dependencies
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > BlockingBanner > counts only open dependencies (excludes closed)
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > Metadata bar > renders issue type
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > Metadata bar > defaults to Task when issue_type is undefined
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > Metadata bar > does not render owner dropdown in metadata bar
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > Metadata bar > renders assignee dropdown with assignee name when provided
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > Metadata bar > renders assignee dropdown with 'Unassigned' when not provided
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > Metadata bar > renders repo dropdown in metadata bar when repo is set
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > Metadata bar > renders created date formatted correctly
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > Design section with MarkdownRenderer > renders design content using MarkdownRenderer
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > Design section with MarkdownRenderer > does not render design section when design is empty
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > Design section with MarkdownRenderer > renders markdown formatting in design content
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > ReviewActionBar > renders ReviewActionBar for review items
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > ReviewActionBar > does NOT render ReviewActionBar for non-review items
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > ReviewActionBar > does NOT render ReviewActionBar when onApprove is not provided
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > ReviewActionBar > does NOT render ReviewActionBar when onReject is not provided
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > ReviewActionBar > clicking Reject button shows the reject comment form
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > ReviewActionBar > ReviewActionBar hides when reject form is shown
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > ReviewActionBar > reject form cancel shows ReviewActionBar again
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > Details tab > always shows Details tab
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > Details tab > defaults to Details tab and shows detail content
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > Details tab > Details tab close button is not shown
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > Details tab > does not show Files changed tab even when issue has an assignee agent
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > Epic runner > shows the epic runner action for open epics only
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > PR links via IssueHeader > passes PR props to IssueHeader when issue has PR external_ref
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > PR links via IssueHeader > does not pass PR props when external_ref is null
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > PR links via IssueHeader > does not pass PR props when external_ref is undefined
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > PR links via IssueHeader > does not pass PR props when external_ref is a non-PR URL
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > PR links via IssueHeader > extracts PR number correctly from /pull/42 URL
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > PR links via IssueHeader > extracts PR number correctly from /pulls/123 URL
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > terminal session cleanup on implicit tab discard > does not call cleanup when no terminal tabs exist
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > tab reset on issue change > includes Runs tab on initial render
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > tab reset on issue change > includes Runs tab after issue ID changes
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > tab reset on issue change > resets active tab to Details when issue changes
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+stderr | src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx > IssueDetailPanel > tab reset on issue change > preserves Details tab across multiple issue changes
+Warning: An update to DefaultContent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at DefaultContent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:389:3)
+    at div
+    at aside
+    at div
+    at IssueDetailPanel (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1789:3)
+
+ ✓ src/components/IssueDetailPanel/__tests__/IssueDetailPanel.test.tsx (93 tests) 1965ms
+
+ Test Files  3 passed (3)
+      Tests  150 passed (150)
+   Start at  18:41:53
+   Duration  4.52s (transform 2.11s, setup 0ms, import 3.12s, tests 2.79s, environment 871ms)
+

@@ -1,0 +1,83 @@
+
+ RUN  v4.0.18 /Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend
+
+stderr | src/hooks/issues/__tests__/useBlockedIssues.test.ts > useBlockedIssues > uses entity_type precedence and ignores legacy dep
+Warning: An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at TestComponent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/node_modules/@testing-library/react/dist/pure.js:328:5)
+    at Wrapper (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/hooks/issues/__tests__/useBlockedIssues.test.ts:53:20)
+
+stderr | src/hooks/issues/__tests__/useBlockedIssues.test.ts > useBlockedIssues > refetches once on a completed connection epoch
+Warning: An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at TestComponent (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/node_modules/@testing-library/react/dist/pure.js:328:5)
+    at Wrapper (/Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend/src/hooks/issues/__tests__/useBlockedIssues.test.ts:53:20)
+
+ ❯ src/hooks/issues/__tests__/useBlockedIssues.test.ts (11 tests | 1 failed) 619ms
+     ✓ fetches on mount and forwards the request signal 64ms
+     ✓ keeps data on errors and clears the error after success 55ms
+     ✓ passes filters and refetches when the key changes 57ms
+     ✓ includes source repos in the request and query key 56ms
+     × does not expose previous repository rows while the next scope loads 60ms
+     ✓ shares one mount request and one debounced event fetch  310ms
+     ✓ uses entity_type precedence and ignores legacy dep 9ms
+     ✓ does not fetch while disabled, but disabled refetch still uses the entry 3ms
+     ✓ refetches once on a completed connection epoch 2ms
+     ✓ does one immediate repair fetch when the document becomes visible 2ms
+     ✓ silently ignores AbortError and aborts an in-flight request on unmount 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/hooks/issues/__tests__/useBlockedIssues.test.ts > useBlockedIssues > does not expose previous repository rows while the next scope loads
+AssertionError: expected [ { id: 'issue-1', …(6) } ] to be null
+
+- Expected: 
+null
+
++ Received: 
+[
+  {
+    "blocked_by": [
+      "blocker-1",
+    ],
+    "blocked_by_count": 1,
+    "created_at": "2024-01-01T00:00:00Z",
+    "id": "issue-1",
+    "priority": 2,
+    "title": "Blocked issue-1",
+    "updated_at": "2024-01-01T00:00:00Z",
+  },
+]
+
+ ❯ src/hooks/issues/__tests__/useBlockedIssues.test.ts:217:33
+    215|     mockWorkspaceContext.sourceReposFilter = ["repo-b"];
+    216|     rerender();
+    217|     expect(result.current.data).toBeNull();
+       |                                 ^
+    218|     await act(async () => { resolve([]); });
+    219|     expect(result.current.data).toEqual([]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 10 passed (11)
+   Start at  18:41:51
+   Duration  1.93s (transform 490ms, setup 0ms, import 792ms, tests 619ms, environment 425ms)
+
