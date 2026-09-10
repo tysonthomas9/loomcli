@@ -43,6 +43,16 @@ func wrapInvocationError(err error, outputTail string) error {
 		return nil
 	}
 
+	// Already carrying invocation-local evidence — in practice a marked error
+	// built by one of the helpers below (e.g. runTurnDeadlineInvocationError,
+	// applied inside invokeClaudeRunTurn). Re-wrapping it would splice a second
+	// copy of the marker into OutputTail and, worse, overwrite the deliberate
+	// ExitCode with the generic 1, so return it untouched.
+	var ie *InvocationError
+	if errors.As(err, &ie) {
+		return ie
+	}
+
 	// Categorical wrapper signals: when the wrapper reports the binary
 	// is not on PATH, prepend the stable marker that agenterr classifies
 	// as BackendUnavailable. Without this, the outer supervisor sees a
@@ -136,6 +146,39 @@ func agentLaunchFailedInvocationError(reason, outputTail string) *InvocationErro
 		// failure where the binary exists but cannot be exec'd.
 		OutputTail: evidence,
 		ExitCode:   126,
+	}
+}
+
+// runTurnDeadlineInvocationError returns the canonical InvocationError for a
+// turn ended by LOOM'S OWN per-turn deadline — the ceiling derived from the
+// role's max_run_duration (see backend_claude.runTurnDeadline). Direct sibling
+// of agentLaunchFailedInvocationError.
+//
+// The marker is what makes this a categorical signal rather than a guess: the
+// wrapper returns a bare "context deadline exceeded" on this path, which the
+// residual pattern table would classify as a network "connection timeout".
+// Callers MUST only build this when errors.Is(derivedCtx.Err(),
+// context.DeadlineExceeded) holds on the context THEY created with the
+// deadline, so a parent cancellation (context.Canceled) never wears it.
+func runTurnDeadlineInvocationError(reason, outputTail string) *InvocationError {
+	msg := strings.TrimSpace(reason)
+	if msg == "" {
+		msg = "turn exceeded loom's per-turn deadline"
+	}
+	combined := agenterr.RunTurnDeadlineMarker + ": " + msg
+	evidence := strings.TrimSpace(outputTail)
+	if evidence == "" {
+		evidence = combined
+	} else if !strings.Contains(evidence, combined) {
+		evidence = combined + "\n" + evidence
+	}
+	return &InvocationError{
+		Err:        errors.New(combined),
+		OutputTail: evidence,
+		// Same reasoning as terminalTurnInvocationError: the marker text is the
+		// signal the outer classifier reads, so the exit code only has to be
+		// non-zero to keep the run from being mistaken for a clean one.
+		ExitCode: 1,
 	}
 }
 

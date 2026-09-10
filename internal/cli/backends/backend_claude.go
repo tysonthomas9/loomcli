@@ -426,10 +426,21 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 	// Bound the turn. Without this the ctx carries no deadline at all, so a
 	// turn-detector drift in the harness becomes an unbounded wait that only the
 	// supervisor's watchdog ends — by SIGKILL. See runTurnDeadline.
-	if d := runTurnDeadline(); d > 0 {
+	//
+	// Expiry of THIS context is a categorical loom signal, not a network fault,
+	// and must be reported with agenterr.RunTurnDeadlineMarker rather than left
+	// to the residual "deadline exceeded" regex — see the error path below and
+	// runTurnDeadlineInvocationError. deadlineCtx is kept separately because
+	// errors.Is(deadlineCtx.Err(), context.DeadlineExceeded) is true only when
+	// OUR timer fired; a daemon shutdown through the parent yields
+	// context.Canceled on the very same context.
+	var deadlineCtx context.Context
+	deadline := runTurnDeadline()
+	if deadline > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, d)
+		ctx, cancel = context.WithTimeout(ctx, deadline)
 		defer cancel()
+		deadlineCtx = ctx
 	}
 
 	raw := &capturedOutput{}
@@ -468,6 +479,16 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 	accumulateHarnessUsage(collector, "claude", res.Session.HarnessSessionID, workDir)
 	if err != nil && claudeRunTurnEvidence(res, raw.String()) == "" {
 		res.Turn.Text = raw.String()
+	}
+	// Our own deadline fired. Guarded on deadlineCtx being non-nil, which is
+	// exactly the `deadline > 0` condition that created it, so a turn with no
+	// deadline configured (standalone/interactive use, or a cap at or below the
+	// margin) can never take this path.
+	if err != nil && deadlineCtx != nil && errors.Is(deadlineCtx.Err(), context.DeadlineExceeded) {
+		return res, runTurnDeadlineInvocationError(
+			fmt.Sprintf("turn exceeded the %s per-turn deadline", deadline),
+			claudeRunTurnEvidence(res, raw.String()),
+		)
 	}
 	return res, err
 }

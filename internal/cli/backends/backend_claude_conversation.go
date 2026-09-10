@@ -55,6 +55,15 @@ func conversationTurnTimeout() time.Duration {
 	// The daemon's run-duration cap (#316) is the real ceiling; a per-turn
 	// bound here would double-configure it. Kept as a function so the knob
 	// has one obvious home when a per-turn policy is wanted.
+	//
+	// DO NOT make this non-zero without wiring the marker in first.
+	// runConversationTurn hands the expiry to wrapInvocationError(ctx.Err(), ""),
+	// which produces a bare "context deadline exceeded" — the residual pattern
+	// table then classifies loom's own clean stop as a network "connection
+	// timeout", the exact bug fixed on the one-shot path. The fix to copy is
+	// runTurnDeadlineInvocationError (invocation_error.go), applied only when
+	// errors.Is on the DERIVED context reports context.DeadlineExceeded. While
+	// this returns 0 no derived context exists and the path cannot reproduce it.
 	return 0
 }
 
