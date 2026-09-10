@@ -72,8 +72,12 @@ func (q *taskQuarantine) takeDue(threshold, deadlineThreshold int) []dueTask {
 		// "this task cannot be finished". No-progress is checked first so a
 		// record at both thresholds reports the crash bucket, the more serious
 		// of the two.
-		bucket := agentpolicy.QuarantineNone
-		count, applied := 0, 0
+		// Declared, not assigned: every reachable arm below sets all three or
+		// `continue`s, so QuarantineNone/0/0 are only the zero values.
+		var (
+			bucket         agentpolicy.QuarantineBucket
+			count, applied int
+		)
 		switch {
 		case rec.Count >= threshold:
 			bucket, count, applied = agentpolicy.QuarantineNoProgress, rec.Count, threshold
