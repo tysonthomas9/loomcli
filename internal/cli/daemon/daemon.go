@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
+	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/notify"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -297,6 +298,16 @@ func wireSupervisorCallbacks(sup *supervisor.Supervisor, issueBackend backend.Is
 			}
 		}
 		return nil
+	}
+	// Resolve the per-repo, per-agent worktree, creating it when the repo
+	// checkout exists but the agent's worktree does not. This is the seam
+	// applyTaskPlacement routes through; nil disables placement routing.
+	sup.ResolveWorktree = func(agentName, repo string) (string, error) {
+		target, err := workspace.ResolveAgentTarget(agentName, repo)
+		if err != nil {
+			return "", err
+		}
+		return target.WorkDir, nil
 	}
 	sup.IssueBackendReady = func(epicID string) (bool, error) {
 		issues, err := issueBackend.Ready(cmdstore.RootContext(), backend.ReadyOpts{

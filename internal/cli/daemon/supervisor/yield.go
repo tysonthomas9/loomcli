@@ -27,7 +27,7 @@ func (s *Supervisor) RequestYield(ap *AgentProcess, reason string) error {
 		RequestedAt: time.Now(),
 		RequestedBy: "daemon",
 	}
-	if err := WriteYieldFile(ap.WorktreePath, req); err != nil {
+	if err := WriteYieldFile(ap.WorkDir(), req); err != nil {
 		return fmt.Errorf("request yield for %s: %w", ap.Entry.Worktree, err)
 	}
 	slog.Info("yield requested", "worktree", ap.Entry.Worktree, "reason", reason)
