@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
+	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
@@ -125,6 +126,10 @@ type Supervisor struct {
 	NodeID       string
 	NodeTTL      time.Duration
 	NodeInterval time.Duration
+
+	// notifySessionChange is the test seam for the web UI's scoped session
+	// completion signal. Production uses sessions.NotifyWebUI when nil.
+	notifySessionChange func(context.Context, string, string, string, sessions.SessionStatus)
 
 	// backendRecheckInterval is the fixed delay computeBackoff returns for a
 	// BackendUnavailable block (agent's backend CLI missing from PATH). Zero
@@ -684,15 +689,18 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 
 	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
 	defer cancel()
-	if _, err := s.ControlStore.AgentSessions().Update(ctx, s.WorkspaceID, input.sessionID, store.AgentSessionUpdate{
+	updatedSession, updateErr := s.ControlStore.AgentSessions().Update(ctx, s.WorkspaceID, input.sessionID, store.AgentSessionUpdate{
 		Status:     &status,
 		TaskID:     taskIDPtr,
 		FinishedAt: &finishedAtPtr,
 		ErrorClass: &input.errClass,
 		ExitCode:   &exitCodePtr,
 		Metadata:   &metadata,
-	}); err != nil {
-		slog.Warn("control-plane agent session completion failed", "worktree", ap.Entry.Worktree, "session_id", input.sessionID, "err", err)
+	})
+	if updateErr != nil {
+		slog.Warn("control-plane agent session completion failed", "worktree", ap.Entry.Worktree, "session_id", input.sessionID, "err", updateErr)
+	} else {
+		s.publishAgentSessionChange(updatedSession)
 	}
 	if input.leaseID != "" && input.leaseToken != "" {
 		if _, err := s.ControlStore.AgentLeases().Release(ctx, s.WorkspaceID, input.leaseID, input.leaseToken); err != nil {
@@ -701,6 +709,25 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 	}
 	s.releaseAssignedTaskClaim(ap, input.taskID)
 	s.deregisterWorker(ap)
+}
+
+// publishAgentSessionChange emits the existing ephemeral UI notification only
+// after the authoritative control-plane update succeeds. The returned session
+// supplies every routing key so the signal cannot drift from persisted state.
+func (s *Supervisor) publishAgentSessionChange(updated *domain.AgentSession) {
+	if updated == nil || updated.WorkspaceKey == "" || updated.TaskID == "" || updated.SessionID == "" {
+		return
+	}
+	ctx := cmdstore.RootContext()
+	workspaceID := updated.WorkspaceKey
+	taskID := updated.TaskID
+	sessionID := updated.SessionID
+	status := sessions.SessionStatus(updated.Status)
+	if notify := s.notifySessionChange; notify != nil {
+		go notify(ctx, workspaceID, taskID, sessionID, status)
+		return
+	}
+	go sessions.NotifyWebUI(ctx, backends.ResolveWebUIURL(), workspaceID, taskID, sessionID, status, backends.ResolveNotifyToken())
 }
 
 // uploadTranscriptArtifact uploads the daemon leaf's transcript as a content

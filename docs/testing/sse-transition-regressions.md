@@ -7,7 +7,7 @@ before the action and remains active through response completion and rendering.
 
 ## Additional product bugs found
 
-Four distinct root causes were reproduced while implementing this suite:
+Five distinct root causes were reproduced while implementing this suite:
 
 1. Standalone issue detail replaced loaded controls during same-issue refresh.
    Retain only a full detail snapshot matching the selected issue identity.
@@ -23,6 +23,16 @@ Four distinct root causes were reproduced while implementing this suite:
    the task/session identifiers and assert literal JSON keys. Remove the
    guaranteed-invalid pre-claim notification with no task ID; this does not
    introduce a taskless session-start protocol.
+
+5. The daemon supervisor persisted completed Fleet sessions without invoking the
+   session-change notifier at all. Publish the existing scoped notification only
+   after a successful authoritative update; failed writes must not advertise
+   completion. This is separate from the malformed automode notification above.
+
+Session notifications use the existing ephemeral UI channel. They do not gain
+persistent replay or catch-up guarantees from these fixes. The repository-field
+repair targets the Fleet IssueBackend graph path; the legacy RPC graph path is
+outside this change.
 
 These counts exclude the original panel flicker and authorization retry leak,
 which motivated the work, and exclude test-harness failures. Original local
