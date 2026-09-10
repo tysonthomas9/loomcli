@@ -9,6 +9,7 @@ import (
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
@@ -197,7 +198,7 @@ func TestRecordUncountedKill_LandsInTheTimelineWithoutCounting(t *testing.T) {
 		t.Errorf("Kills[1].NotCounted = %q, want daemon_shutdown", rec.Kills[1].NotCounted)
 	}
 
-	text := formatKillTimeline("T-8", 3, rec.Count, rec.Kills)
+	text := formatKillTimeline("T-8", agentpolicy.QuarantineNoProgress, 3, rec.Count, rec.Kills)
 	if !strings.Contains(text, "| note |") {
 		t.Errorf("timeline is missing the note column:\n%s", text)
 	}

@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
@@ -117,7 +118,7 @@ func replayLedger(t *testing.T, fp replayFingerprint) map[string]int {
 			st.addComment(nextCommentID)
 		}
 		ev := killEvent{At: at, Agent: k.agent, StopReason: k.stop, ErrClass: k.class}
-		count, progressed := q.recordEligibleKill(k.task, ev, fp(st), true)
+		count, progressed := q.recordEligibleKill(k.task, agentpolicy.QuarantineNoProgress, ev, fp(st), true)
 		if !progressed && count > peak[k.task] {
 			peak[k.task] = count
 		}

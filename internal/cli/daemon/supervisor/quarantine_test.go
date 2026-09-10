@@ -15,6 +15,7 @@ import (
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
@@ -842,7 +843,7 @@ func TestFormatKillTimeline_RendersASCIIMarkdownTable(t *testing.T) {
 		{At: time.Date(2026, 6, 5, 14, 2, 11, 0, time.UTC), Agent: "web-extractor-a", StopReason: "watchdog", ErrClass: "Timeout", ExitCode: 137, FleetSessionID: "sess-abc123def", ClaudeSessionID: "9f3e4a5b-1111"},
 		{At: time.Date(2026, 6, 5, 14, 40, 0, 0, time.UTC), Agent: "web-extractor-b", StopReason: "", ErrClass: "Unknown", ExitCode: -1},
 	}
-	text := formatKillTimeline("WEB-49", 3, 2, kills)
+	text := formatKillTimeline("WEB-49", agentpolicy.QuarantineNoProgress, 3, 2, kills)
 
 	for i, r := range text {
 		if r > 127 {

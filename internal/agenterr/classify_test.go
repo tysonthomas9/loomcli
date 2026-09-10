@@ -1396,3 +1396,70 @@ func TestClassifyEvidenceOverBroadResidualAuth(t *testing.T) {
 		t.Errorf("ComposerWitnessed = %v, want a witnessed false", ev.Screen.ComposerWitnessed)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Run-turn deadline: loom's own per-turn deadline, classified categorically
+// ---------------------------------------------------------------------------
+
+// runTurnDeadlineResidualExcerpt is the shape an expiry actually left in the
+// agent log before the marker existed: the inner loom subprocess starts a run
+// and the wrapper returns a bare "context deadline exceeded". Nothing in it
+// says WHOSE deadline fired — which is precisely why the residual table's
+// `deadline.?exceeded` pattern read it as a network fault.
+const runTurnDeadlineResidualExcerpt = `time=2026-09-09T21:41:02.118+02:00 level=INFO msg="api issue backend created" url=http://127.0.0.1:3012 workspace=PUPPET
+not resuming Claude session (no session id recorded for this task)
+Launching Claude agent (non-interactive)...
+Error: context deadline exceeded
+`
+
+// TestClassifyRunTurnDeadlineMarker is the regression assertion for this
+// ticket. The marker must win over the residual timeout pattern even though
+// the very same text also carries "context deadline exceeded" — before the
+// marker existed this classified as Timeout / "connection timeout", which sent
+// operators to investigate the network and, because Timeout is
+// quarantine-eligible, recorded a no-progress kill against an innocent ticket.
+func TestClassifyRunTurnDeadlineMarker(t *testing.T) {
+	t.Parallel()
+
+	text := RunTurnDeadlineMarker + ": turn exceeded the 1h58m0s per-turn deadline\n" +
+		"context deadline exceeded\n"
+
+	got := ClassifyFromOutput(text, 1, "claude")
+	if want := OutcomeFromDomain(RunTurnDeadlineOutcome); got.Class != want {
+		t.Fatalf("Class = %v, want %v (the residual deadline.?exceeded pattern must never be reached)", got.Class, want)
+	}
+	if !strings.Contains(got.Message, "max_run_duration") {
+		t.Errorf("Message = %q, want the operator-actionable raise-max_run_duration text", got.Message)
+	}
+	if strings.Contains(got.Message, "connection timeout") {
+		t.Errorf("Message = %q, want the deadline verdict, not the network one", got.Message)
+	}
+}
+
+// TestClassifyRunTurnDeadlineExcerpt pins both halves of the contract on the
+// real log excerpt: with the marker it is a deadline, and WITHOUT it the same
+// bytes still classify Timeout — an upstream deadline from someone else's
+// context is untouched by this change.
+func TestClassifyRunTurnDeadlineExcerpt(t *testing.T) {
+	t.Parallel()
+
+	marked := RunTurnDeadlineMarker + ": turn exceeded the 1h58m0s per-turn deadline\n" + runTurnDeadlineResidualExcerpt
+	if got, want := ClassifyFromOutput(marked, 1, "claude").Class, OutcomeFromDomain(RunTurnDeadlineOutcome); got != want {
+		t.Errorf("marked excerpt: Class = %v, want %v", got, want)
+	}
+
+	got := ClassifyFromOutput(runTurnDeadlineResidualExcerpt, 1, "claude")
+	if want := OutcomeFromHarness(wrapper.ErrTimeout); got.Class != want {
+		t.Errorf("unmarked excerpt: Class = %v, want %v (unrelated deadline errors must stay Timeout)", got.Class, want)
+	}
+}
+
+func TestRunTurnDeadlineOutcomeString(t *testing.T) {
+	t.Parallel()
+
+	// Serialized into daemon-agents.json last_error_class, events and the web
+	// UI's ERROR_CLASS_LABELS map, so the spelling is a wire contract.
+	if got := RunTurnDeadlineOutcome.String(); got != "RunTurnDeadline" {
+		t.Fatalf("RunTurnDeadlineOutcome.String() = %q, want %q", got, "RunTurnDeadline")
+	}
+}

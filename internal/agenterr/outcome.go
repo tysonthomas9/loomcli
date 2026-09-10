@@ -20,6 +20,7 @@ const (
 	ClaimsHeldOutcome                          // a workspace-level claim hold is active: the supervisor refuses to START new work
 	IssueBackendOutageOutcome                  // the ISSUE backend (fleet-db) is unreachable or rejecting our credentials
 	SupervisorStopOutcome                      // the supervisor itself ended the run (daemon shutdown, operator stop, agent removed from config)
+	RunTurnDeadlineOutcome                     // the turn was ended by loom's own per-turn deadline (LOOM_RUN_TURN_TIMEOUT_SECONDS)
 )
 
 func (d DomainOutcome) String() string {
@@ -42,6 +43,8 @@ func (d DomainOutcome) String() string {
 		return "IssueBackendOutage"
 	case SupervisorStopOutcome:
 		return "SupervisorStop"
+	case RunTurnDeadlineOutcome:
+		return "RunTurnDeadline"
 	default:
 		return "None"
 	}
