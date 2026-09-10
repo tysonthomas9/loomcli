@@ -114,7 +114,8 @@ async function attach(info: TestInfo, clients: Client[]) {
 }
 
 // Fault injection must target an explicitly selected, run-owned local-mode proxy.
-// No browser response interception, offline emulation or navigation fallback.
+// SSE is never intercepted or mocked. The test separately aborts collection
+// requests to exercise a failed refresh before interrupting the real socket.
 async function proxyAction(action: "stop" | "start") {
   const project = process.env.LOCAL_MODE_COMPOSE_PROJECT;
   const container = process.env.LOOM_SSE_TEST_PROXY_CONTAINER;
@@ -205,14 +206,26 @@ test("real proxy disconnect resumes both accepted cursors without replay gaps or
   try {
     for (const context of contexts)
       clients.push(await observe(await context.newPage(), [id]));
+    // Fail collection refreshes only; SSE and the writer use real services.
+    // This makes the original "cached board replaced by error" deterministic.
+    const collectionRoute = `**/api/workspaces/${workspace}/issues?*`;
+    for (const client of clients)
+      await client.page.route(collectionRoute, (route) =>
+        route.abort("failed"),
+      );
     let completed = clients.map(({ probe }) => probe.completions.length);
     await updateIssueStatusInWorkspace(workspace, id, "in_progress");
-    for (const [index, client] of clients.entries()) {
+    for (const client of clients) {
       await visible(client, "In Progress issues", title);
       await expect.poll(() => mutations(client.probe, id).length).toBe(1);
-      await expect
-        .poll(() => client.probe.completions.length, { timeout: 10_000 })
-        .toBeGreaterThan(completed[index]);
+      await expect(
+        client.page
+          .getByRole("status")
+          .filter({ hasText: "Unable to refresh" }),
+      ).toBeVisible();
+      await expect(
+        client.page.getByRole("heading", { name: "Failed to load data" }),
+      ).toHaveCount(0);
     }
     const cursors = clients.map(
       ({ probe }) => probe.frames.filter((frame) => frame.id).at(-1)!.id,
@@ -244,6 +257,10 @@ test("real proxy disconnect resumes both accepted cursors without replay gaps or
     await updateIssueStatusInWorkspace(workspace, id, "review");
     for (const client of clients)
       expect(mutations(client.probe, id)).toHaveLength(1);
+    for (const client of clients) {
+      await visible(client, "In Progress issues", title);
+      await client.page.unroute(collectionRoute);
+    }
     await proxyAction("start");
     proxyStopped = false;
     for (const [index, client] of clients.entries()) {
@@ -263,6 +280,11 @@ test("real proxy disconnect resumes both accepted cursors without replay gaps or
         .toBe(true);
       await expect.poll(() => mutations(client.probe, id).length).toBe(2);
       await visible(client, "Review issues", title);
+      await expect(
+        client.page
+          .getByRole("status")
+          .filter({ hasText: "Unable to refresh" }),
+      ).toHaveCount(0);
     }
     completed = clients.map(({ probe }) => probe.completions.length);
     await updateIssueStatusInWorkspace(workspace, id, "open");

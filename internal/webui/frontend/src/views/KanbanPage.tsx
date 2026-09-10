@@ -20,6 +20,7 @@ export function KanbanPage() {
     issues,
     isLoading,
     error,
+    retainSnapshotOnError,
     retryCount,
     nextRetryAt,
     isMultiRepo,
@@ -110,6 +111,7 @@ export function KanbanPage() {
         issues={issues}
         isLoading={isLoading}
         error={error}
+        retainSnapshotOnError={retainSnapshotOnError ?? false}
         retryCount={retryCount}
         nextRetryAt={nextRetryAt}
         isMultiRepo={isMultiRepo}

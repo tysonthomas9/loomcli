@@ -27,6 +27,7 @@ export function HomePage(): JSX.Element {
     issues,
     isLoading,
     error,
+    retainSnapshotOnError,
     retryCount,
     nextRetryAt,
     isMultiRepo,
@@ -140,6 +141,7 @@ export function HomePage(): JSX.Element {
         issues={issues}
         isLoading={isLoading}
         error={error}
+        retainSnapshotOnError={retainSnapshotOnError ?? false}
         retryCount={retryCount}
         nextRetryAt={nextRetryAt}
         isMultiRepo={isMultiRepo}

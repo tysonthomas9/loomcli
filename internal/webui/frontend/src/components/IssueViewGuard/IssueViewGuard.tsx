@@ -30,6 +30,8 @@ interface IssueViewGuardProps {
   issues: Issue[];
   isLoading: boolean;
   error: string | null;
+  /** Only transient failures of a committed same-scope snapshot qualify. */
+  retainSnapshotOnError?: boolean;
   isMultiRepo: boolean;
   onRetry: () => void;
   loadingVariant: "columns" | "table";
@@ -45,6 +47,7 @@ export function IssueViewGuard({
   issues,
   isLoading,
   error,
+  retainSnapshotOnError = false,
   isMultiRepo,
   onRetry,
   loadingVariant,
@@ -69,7 +72,7 @@ export function IssueViewGuard({
     );
   }
 
-  if (error) {
+  if (error && !retainSnapshotOnError) {
     const isStarting = error.includes("workspace is loading");
     // Only mark as "retrying" while a retry is actually scheduled
     // (nextRetryAt is non-null). Once the budget is exhausted, retryCount
@@ -91,9 +94,21 @@ export function IssueViewGuard({
     );
   }
 
-  if (issues.length === 0 && showEmptyState) {
-    return <EmptyWorkspaceBoard isMultiRepo={isMultiRepo} />;
-  }
-
-  return <>{children}</>;
+  return (
+    <>
+      {error && retainSnapshotOnError && (
+        <div role="status">
+          Unable to refresh — showing last known state.{" "}
+          <button type="button" onClick={onRetry}>
+            Retry now
+          </button>
+        </div>
+      )}
+      {issues.length === 0 && showEmptyState ? (
+        <EmptyWorkspaceBoard isMultiRepo={isMultiRepo} />
+      ) : (
+        children
+      )}
+    </>
+  );
 }
