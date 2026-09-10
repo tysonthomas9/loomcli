@@ -109,6 +109,12 @@ type Supervisor struct {
 	// FindRepoConfig looks up a config.RepoConfig by name.
 	FindRepoConfig func(repoName string) *config.RepoConfig
 
+	// ResolveWorktree resolves the per-repo, per-agent worktree path, creating
+	// the worktree when absent. Injected by the daemon; overridden in tests
+	// (the real one shells out to git). Nil DISABLES placement routing — see
+	// applyTaskPlacement in placement.go.
+	ResolveWorktree func(agentName, repo string) (string, error)
+
 	// IssueBackendReady checks if an epic has ready tasks. Injected by daemon.
 	IssueBackendReady func(epicID string) (bool, error)
 	IssueBackend      backend.IssueBackend
@@ -419,6 +425,10 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 		return false
 	}
 
+	// A daemon restart starts with a nil placement: re-adopt the worktree this
+	// agent last ran in BEFORE recovery reads its lock file.
+	s.adoptCarriedWorktree(ap)
+
 	taskID, mode := s.detectRecovery(ap)
 	switch mode {
 	case recoverResume:
@@ -439,12 +449,16 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	ap.RecoveryMode = mode // consumed by recordResumeOutcome after the run
 	ap.Mu.Unlock()
 
-	if err := ClearYieldFile(ap.WorktreePath); err != nil {
+	if err := ClearYieldFile(ap.WorkDir()); err != nil {
 		slog.Warn("failed to clear stale yield file", "worktree", ap.Entry.Worktree, "err", err)
 	}
 
 	epicID := s.assignEpic(ap)
 	if !s.claimTask(ap, epicID) {
+		return false
+	}
+	// The worktree follows the CLAIM; must precede createAgentSession's BeforeRef.
+	if !s.applyTaskPlacement(ap) {
 		return false
 	}
 	s.createAgentSession(ap, epicID)
@@ -496,7 +510,7 @@ func (s *Supervisor) createAgentSession(ap *AgentProcess, epicID string) {
 		return
 	}
 	txPath := sessStore.NativeTranscriptPath(sess.SessionID())
-	bRef := automode.CaptureHEADRef(ap.WorktreePath)
+	bRef := automode.CaptureHEADRef(ap.WorkDir())
 	ap.Mu.Lock()
 	ap.Session = sess
 	ap.AgentSessionID = sess.SessionID()
@@ -782,7 +796,7 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 
 // postMortemRecovery runs recovery after agent exit, skipping for yield exits.
 func (s *Supervisor) postMortemRecovery(ap *AgentProcess, exitCode int) {
-	if IsYieldRequested(ap.WorktreePath) {
+	if IsYieldRequested(ap.WorkDir()) {
 		slog.Info("skipping post-mortem recovery for yield exit", "worktree", ap.Entry.Worktree)
 		return
 	}
@@ -889,12 +903,15 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 
 	result := make([]SupervisedAgentStatus, len(snapshot))
 	for i, ap := range snapshot {
+		// Read the placement OUTSIDE Mu (it is published atomically): the
+		// effective repo/path is where the agent actually ran this cycle.
+		effectiveRepo, effectivePath := ap.effectivePlacement()
 		ap.Mu.Lock()
 		result[i] = SupervisedAgentStatus{
 			Worktree:               ap.Entry.Worktree,
 			Role:                   ap.Entry.Role,
-			Repo:                   ap.Entry.Repo,
-			WorktreePath:           ap.WorktreePath,
+			Repo:                   effectiveRepo,
+			WorktreePath:           effectivePath,
 			PID:                    ap.Pid,
 			RestartCount:           ap.RestartCount,
 			LastStart:              ap.LastStart,

@@ -27,7 +27,7 @@ func (s *Supervisor) DrainWithGrace(ap *AgentProcess, reason string, yieldTimeou
 	pid := ap.Pid
 	ap.Mu.Unlock()
 	if pid == 0 || !lockfile.IsProcessRunning(pid) {
-		if err := ClearYieldFile(ap.WorktreePath); err != nil {
+		if err := ClearYieldFile(ap.WorkDir()); err != nil {
 			slog.Warn("failed to clear stale yield file", "worktree", ap.Entry.Worktree, "err", err)
 		}
 		slog.Info("agent already stopped before yield", "worktree", ap.Entry.Worktree)
@@ -41,7 +41,7 @@ func (s *Supervisor) DrainWithGrace(ap *AgentProcess, reason string, yieldTimeou
 		return false
 	}
 	defer func() {
-		if err := ClearYieldFile(ap.WorktreePath); err != nil {
+		if err := ClearYieldFile(ap.WorkDir()); err != nil {
 			slog.Warn("failed to clear yield file after drain", "worktree", ap.Entry.Worktree, "err", err)
 		}
 	}()
