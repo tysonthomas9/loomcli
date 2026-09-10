@@ -1,0 +1,78 @@
+{
+  "requests": [
+    {
+      "id": "20377.141",
+      "at": 1789006846035,
+      "path": "/api/workspaces/SSE-MANUAL-0909/events",
+      "lastEventId": null,
+      "hasSince": false,
+      "status": 200,
+      "attached": true,
+      "failure": "net::ERR_INCOMPLETE_CHUNKED_ENCODING"
+    },
+    {
+      "id": "20377.169",
+      "at": 1789007016436,
+      "path": "/api/workspaces/SSE-MANUAL-0909/events",
+      "lastEventId": "c2.WyIyNWFkZDNiZC1jY2E2LTQ0ZDktYjMyYy1hM2FhNjk3NGJkNWUiLCJTU0UtTUFOVUFMLTA5MDkiLCIyMWJiZThhNC01NWI2LTRkZDQtOGZhZi1jZDg0ZmUyMGRmYWYiLCIxMTAtMCJd",
+      "hasSince": false,
+      "status": 200,
+      "attached": true
+    }
+  ],
+  "frames": [
+    {
+      "at": 1789006846044,
+      "requestId": "20377.141",
+      "id": "c2.WyIyNWFkZDNiZC1jY2E2LTQ0ZDktYjMyYy1hM2FhNjk3NGJkNWUiLCJTU0UtTUFOVUFMLTA5MDkiLCIyMWJiZThhNC01NWI2LTRkZDQtOGZhZi1jZDg0ZmUyMGRmYWYiLCIxMDgtMCJd",
+      "event": "checkpoint"
+    },
+    {
+      "at": 1789006846044,
+      "requestId": "20377.141",
+      "event": "connected"
+    },
+    {
+      "at": 1789006867287,
+      "requestId": "20377.141",
+      "id": "c2.WyIyNWFkZDNiZC1jY2E2LTQ0ZDktYjMyYy1hM2FhNjk3NGJkNWUiLCJTU0UtTUFOVUFMLTA5MDkiLCIyMWJiZThhNC01NWI2LTRkZDQtOGZhZi1jZDg0ZmUyMGRmYWYiLCIxMDktMCJd",
+      "event": "mutation",
+      "issueId": "SSE-MANUAL-0909-1",
+      "action": "issue.claim",
+      "type": "update"
+    },
+    {
+      "at": 1789006913915,
+      "requestId": "20377.141",
+      "id": "c2.WyIyNWFkZDNiZC1jY2E2LTQ0ZDktYjMyYy1hM2FhNjk3NGJkNWUiLCJTU0UtTUFOVUFMLTA5MDkiLCIyMWJiZThhNC01NWI2LTRkZDQtOGZhZi1jZDg0ZmUyMGRmYWYiLCIxMTAtMCJd",
+      "event": "mutation",
+      "issueId": "SSE-MANUAL-0909-1",
+      "action": "issue.update",
+      "type": "update"
+    },
+    {
+      "at": 1789007016441,
+      "requestId": "20377.169",
+      "id": "c2.WyIyNWFkZDNiZC1jY2E2LTQ0ZDktYjMyYy1hM2FhNjk3NGJkNWUiLCJTU0UtTUFOVUFMLTA5MDkiLCIyMWJiZThhNC01NWI2LTRkZDQtOGZhZi1jZDg0ZmUyMGRmYWYiLCIxMTEtMCJd",
+      "event": "mutation",
+      "issueId": "SSE-MANUAL-0909-1",
+      "action": "issue.assign",
+      "type": "update"
+    },
+    {
+      "at": 1789007016441,
+      "requestId": "20377.169",
+      "id": "c2.WyIyNWFkZDNiZC1jY2E2LTQ0ZDktYjMyYy1hM2FhNjk3NGJkNWUiLCJTU0UtTUFOVUFMLTA5MDkiLCIyMWJiZThhNC01NWI2LTRkZDQtOGZhZi1jZDg0ZmUyMGRmYWYiLCIxMTItMCJd",
+      "event": "mutation",
+      "issueId": "SSE-MANUAL-0909-1",
+      "action": "issue.close",
+      "type": "status"
+    },
+    {
+      "at": 1789007016441,
+      "requestId": "20377.169",
+      "event": "connected"
+    }
+  ],
+  "errors": []
+}

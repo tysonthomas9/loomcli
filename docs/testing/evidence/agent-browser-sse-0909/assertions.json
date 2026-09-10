@@ -1,0 +1,13 @@
+{
+  "initial_http_200": true,
+  "actual_disconnect": true,
+  "resume_http_200": true,
+  "exact_last_event_id": true,
+  "no_since_query": true,
+  "missed_close_replayed": true,
+  "replay_before_connected": true,
+  "unique_mutation_ids": true,
+  "same_document": true,
+  "one_done_card": true,
+  "no_capture_errors": true
+}
