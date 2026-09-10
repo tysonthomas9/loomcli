@@ -363,3 +363,141 @@ func parseQueryValues(t *testing.T, raw string) url.Values {
 	}
 	return v
 }
+
+// --- PUPPET-603: the thirteen filters that used to be parsed and discarded ---
+
+// TestListOptsToQuery_ForwardsOnlyServerEvaluatedFilters is the wire half of the
+// contract. Emitting a parameter fleet-db does not implement is what made the
+// request look filtered when it was not, so absence is the assertion here.
+func TestListOptsToQuery_ForwardsOnlyServerEvaluatedFilters(t *testing.T) {
+	p, pinned := 1, true
+	q := listOptsToQuery(backend.ListOpts{
+		Priority:      &p,
+		UpdatedAfter:  "2026-01-01",
+		UpdatedBefore: "2026-12-31T23:59:59Z",
+
+		CreatedAfter:        "2026-01-01",
+		CreatedBefore:       "2026-12-31",
+		Query:               "search",
+		TitleContains:       "title",
+		DescriptionContains: "desc",
+		NotesContains:       "note",
+		EmptyDescription:    true,
+		NoAssignee:          true,
+		NoLabels:            true,
+		Pinned:              &pinned,
+	})
+	values, err := url.ParseQuery(q)
+	if err != nil {
+		t.Fatalf("ParseQuery(%q): %v", q, err)
+	}
+
+	// Forwarded: fleet-db evaluates these itself.
+	if got := values.Get("priority"); got != "1" {
+		t.Errorf("priority = %q, want 1", got)
+	}
+	// Normalized: fleet-db parses updated_* with a strict RFC3339 and would 400
+	// on the bare date this layer accepts.
+	if got := values.Get("updated_after"); got != "2026-01-01T00:00:00Z" {
+		t.Errorf("updated_after = %q, want RFC3339-normalized", got)
+	}
+	if got := values.Get("updated_before"); got != "2026-12-31T23:59:59Z" {
+		t.Errorf("updated_before = %q", got)
+	}
+
+	// Not forwarded: evaluated client-side by List.
+	for _, key := range []string{
+		"created_after", "created_before", "query", "title_contains",
+		"description_contains", "notes_contains", "empty_description",
+		"no_assignee", "no_labels", "pinned", "priority_min", "priority_max",
+	} {
+		if values.Has(key) {
+			t.Errorf("query carries %q = %q; fleet-db ignores it, so sending it makes the request look filtered when it is not",
+				key, values.Get(key))
+		}
+	}
+}
+
+// TestNeedsListClientFilter_CoversEveryClientSideFilter matters more than it
+// looks: listServerOpts zeroes the server limit off this predicate. Miss a
+// filter here and `?limit=10&no_assignee=true` returns the unassigned subset of
+// the first ten rows instead of ten unassigned rows — a subtler version of the
+// same bug.
+func TestNeedsListClientFilter_CoversEveryClientSideFilter(t *testing.T) {
+	pinned := false
+	tests := []struct {
+		name string
+		opts backend.ListOpts
+	}{
+		{"CreatedAfter", backend.ListOpts{CreatedAfter: "2026-01-01"}},
+		{"CreatedBefore", backend.ListOpts{CreatedBefore: "2026-01-01"}},
+		{"Query", backend.ListOpts{Query: "x"}},
+		{"TitleContains", backend.ListOpts{TitleContains: "x"}},
+		{"DescriptionContains", backend.ListOpts{DescriptionContains: "x"}},
+		{"NotesContains", backend.ListOpts{NotesContains: "x"}},
+		{"EmptyDescription", backend.ListOpts{EmptyDescription: true}},
+		{"NoAssignee", backend.ListOpts{NoAssignee: true}},
+		{"NoLabels", backend.ListOpts{NoLabels: true}},
+		{"Pinned", backend.ListOpts{Pinned: &pinned}},
+		{"multi-label (pre-existing)", backend.ListOpts{Labels: []string{"a", "b"}}},
+		{"multi-repo (pre-existing)", backend.ListOpts{SourceRepos: []string{"a", "b"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !needsListClientFilter(tt.opts) {
+				t.Fatal("needsListClientFilter = false; the server limit will not be zeroed")
+			}
+			tt.opts.Limit = 10
+			if got := listServerOpts(tt.opts).Limit; got != 0 {
+				t.Errorf("listServerOpts().Limit = %d, want 0", got)
+			}
+		})
+	}
+
+	// Server-only filters must NOT trigger the client pass; paying for a full
+	// walk when fleet-db can answer directly is the cost of getting this wrong.
+	p := 1
+	for _, opts := range []backend.ListOpts{
+		{Status: "open"}, {Assignee: "tyson"}, {Priority: &p},
+		{Labels: []string{"one"}}, {UpdatedAfter: "2026-01-01"},
+	} {
+		if needsListClientFilter(opts) {
+			t.Errorf("needsListClientFilter(%+v) = true, want false", opts)
+		}
+	}
+}
+
+// TestCheckFleetUnsupportedFilters_SupportedFields is the companion to
+// TestCheckFleetUnsupportedFilters_EachField: these thirteen used to be
+// rejected (CLI) or silently dropped (HTTP) and are now honored.
+func TestCheckFleetUnsupportedFilters_SupportedFields(t *testing.T) {
+	p, pinned := 1, true
+	tests := []struct {
+		name string
+		opts backend.ListOpts
+	}{
+		{"Priority", backend.ListOpts{Priority: &p}},
+		{"UpdatedAfter", backend.ListOpts{UpdatedAfter: "2026-01-01"}},
+		{"UpdatedBefore", backend.ListOpts{UpdatedBefore: "2026-01-01"}},
+		{"CreatedAfter", backend.ListOpts{CreatedAfter: "2026-01-01"}},
+		{"CreatedBefore", backend.ListOpts{CreatedBefore: "2026-01-01"}},
+		{"Query", backend.ListOpts{Query: "x"}},
+		{"TitleContains", backend.ListOpts{TitleContains: "x"}},
+		{"DescriptionContains", backend.ListOpts{DescriptionContains: "x"}},
+		{"NotesContains", backend.ListOpts{NotesContains: "x"}},
+		{"EmptyDescription", backend.ListOpts{EmptyDescription: true}},
+		{"NoAssignee", backend.ListOpts{NoAssignee: true}},
+		{"NoLabels", backend.ListOpts{NoLabels: true}},
+		{"Pinned", backend.ListOpts{Pinned: &pinned}},
+	}
+	if len(tests) != 13 {
+		t.Fatalf("expected 13 restored filters, table has %d", len(tests))
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := checkFleetUnsupportedFilters(tt.opts); err != nil {
+				t.Fatalf("checkFleetUnsupportedFilters: %v", err)
+			}
+		})
+	}
+}

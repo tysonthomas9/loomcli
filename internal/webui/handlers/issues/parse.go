@@ -26,9 +26,21 @@ func parseListParams(r *http.Request) (*rpc.ListArgs, error) { //nolint:funlen
 	args.Labels = handler.ParseArrayParam(q, "labels")
 	args.SourceRepos = handler.ParseArrayParam(q, "source_repos")
 
-	// Limit (capped at MaxListLimit to prevent DoS, silently ignore invalid)
-	limitPtr, _ := handler.ParseIntParam(q, "limit")
-	if limitPtr != nil && *limitPtr > 0 {
+	// Limit: reject what cannot be honored, clamp what can.
+	//
+	// This used to discard the parse error and ignore any non-positive value,
+	// so limit=abc, limit=0 and limit=-1 all quietly meant "no limit" and
+	// returned every row. A caller asking for ten rows and receiving eleven
+	// hundred has no way to tell it was ignored, so these are 400s now. Values
+	// above MaxListLimit are still clamped — that is a real cap, not an ignore.
+	limitPtr, err := handler.ParseIntParam(q, "limit")
+	if err != nil {
+		return nil, err
+	}
+	if limitPtr != nil {
+		if *limitPtr <= 0 {
+			return nil, fmt.Errorf("limit must be a positive integer, got %d", *limitPtr)
+		}
 		limit := *limitPtr
 		if limit > handler.MaxListLimit {
 			limit = handler.MaxListLimit
