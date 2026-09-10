@@ -9,6 +9,7 @@ import (
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
@@ -197,7 +198,7 @@ func TestRecordUncountedKill_LandsInTheTimelineWithoutCounting(t *testing.T) {
 		t.Errorf("Kills[1].NotCounted = %q, want daemon_shutdown", rec.Kills[1].NotCounted)
 	}
 
-	text := formatKillTimeline("T-8", 3, rec.Count, rec.Kills)
+	text := formatKillTimeline("T-8", agentpolicy.QuarantineNoProgress, 3, rec.Count, rec.Kills)
 	if !strings.Contains(text, "| note |") {
 		t.Errorf("timeline is missing the note column:\n%s", text)
 	}
@@ -249,15 +250,17 @@ func TestRecordUncountedKill_DoesNotConsumeTheReArm(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// part C: the duration cap counts only when the run was also silent
+// part C: the duration cap charges the deadline bucket unless the run was silent
 // ---------------------------------------------------------------------------
 
 // markRunDurationExceeded argues a duration kill is a no-progress signal, and
 // it is — for a run that sat idle until the ceiling hit it. A run whose
-// transcript shows writes right up to the kill was working, and says nothing
-// about the task.
+// transcript shows writes right up to the kill was working, just past its time
+// budget: since PUPPET-611 that is a turn-deadline kill, counted in the
+// separate, higher deadline bucket rather than exempted (the policy PUPPET-198
+// shipped before the deadline bucket existed).
 func TestQuarantineCountable_DurationKillCountsOnlyWhenSilent(t *testing.T) {
-	t.Run("active at the cap: not counted", func(t *testing.T) {
+	t.Run("active at the cap: deadline bucket, not no-progress", func(t *testing.T) {
 		s := newQuarantineSupervisor(nil)
 		ap := newKilledAgent(t, "falcon", "T-11", timeoutOutcome())
 		ap.RunSilentAtStop = false
@@ -267,9 +270,15 @@ func TestQuarantineCountable_DurationKillCountsOnlyWhenSilent(t *testing.T) {
 		if got := recordCount(s, "T-11"); got != 0 {
 			t.Errorf("Count = %d, want 0 (a run still talking at the ceiling is not stalled)", got)
 		}
+		if rec := record(s, "T-11"); rec == nil || rec.DeadlineCount != 1 {
+			t.Errorf("record = %+v, want DeadlineCount 1 (an active cap kill is a turn-deadline kill)", rec)
+		}
 		ev := killEvent{StopReason: string(StopReasonRunDurationExceeded)}
-		if countable, why := s.quarantineCountable(ev); countable || why != "duration_kill_while_active" {
-			t.Errorf("quarantineCountable = (%v, %q), want (false, duration_kill_while_active)", countable, why)
+		if countable, why := s.quarantineCountable(ev); !countable || why != "" {
+			t.Errorf("quarantineCountable = (%v, %q), want (true, \"\")", countable, why)
+		}
+		if got := quarantineBucketForKill(ev, agentpolicy.QuarantineNoProgress); got != agentpolicy.QuarantineDeadline {
+			t.Errorf("quarantineBucketForKill = %v, want QuarantineDeadline", got)
 		}
 	})
 

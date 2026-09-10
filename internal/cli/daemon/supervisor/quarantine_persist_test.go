@@ -264,7 +264,7 @@ func TestQuarantinePersist_ClearsInFlightOnLoad(t *testing.T) {
 
 	sA := newPersistSupervisor(dir, openIssueMock(&status, &design))
 	killNTimes(sA, newKilledAgent(t, "falcon", "T-6", timeoutOutcome()), defaultQuarantineThreshold)
-	if due := sA.qrec().takeDue(defaultQuarantineThreshold); len(due) != 1 {
+	if due := sA.qrec().takeDue(defaultQuarantineThreshold, defaultDeadlineQuarantineThreshold); len(due) != 1 {
 		t.Fatalf("setup: takeDue returned %d tasks, want 1", len(due))
 	}
 	// Daemon A dies here, mid-write, with inFlight latched on.
@@ -280,7 +280,7 @@ func TestQuarantinePersist_ClearsInFlightOnLoad(t *testing.T) {
 	if rec.inFlight {
 		t.Error("inFlight must be cleared on load, otherwise the record can never be swept again")
 	}
-	if due := sB.qrec().takeDue(defaultQuarantineThreshold); len(due) != 1 {
+	if due := sB.qrec().takeDue(defaultQuarantineThreshold, defaultDeadlineQuarantineThreshold); len(due) != 1 {
 		t.Fatalf("takeDue after restart returned %d tasks, want 1", len(due))
 	}
 }
