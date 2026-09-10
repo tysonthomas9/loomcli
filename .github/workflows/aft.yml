@@ -95,7 +95,7 @@ jobs:
 
       - name: Run aft suites (deterministic)
         if: inputs.mode != 'strict'
-        run: make test-aft AFT_ARGS="--record --screenshots --junit tests/aft/reports/junit.xml"
+        run: make test-aft AFT_ARGS="--record --screenshots --storyboard --junit tests/aft/reports/junit.xml"
 
       - name: Install claude CLI
         if: inputs.mode == 'strict'
@@ -105,13 +105,13 @@ jobs:
         if: inputs.mode == 'strict'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: make test-aft-strict AFT_ARGS="--record --screenshots --junit tests/aft/reports/junit.xml"
+        run: make test-aft-strict AFT_ARGS="--record --screenshots --storyboard --junit tests/aft/reports/junit.xml"
 
       - name: Write step summary
         if: always()
         run: python3 tests/aft/scripts/report-summary.py tests/aft/reports/last-run.json >> "$GITHUB_STEP_SUMMARY" || true
 
-      - name: Upload reports (JSON, JUnit, HTML report, screenshots, failure videos, server log)
+      - name: Upload reports (JSON, JUnit, Storyboard, HTML report, screenshots, failure videos, server log)
         if: always()
         uses: actions/upload-artifact@v4
         with:
