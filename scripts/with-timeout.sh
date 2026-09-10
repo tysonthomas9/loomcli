@@ -65,8 +65,10 @@ case "$grace" in
 esac
 
 sentinel="$(mktemp "${TMPDIR:-/tmp}/loom.gate.timeout.XXXXXX")"
+# Not created by mktemp: the watchdog tests for its EXISTENCE.
+donefile="$sentinel.done"
 cleanup() {
-    rm -f "$sentinel"
+    rm -f "$sentinel" "$donefile"
 }
 trap cleanup EXIT
 
@@ -95,6 +97,7 @@ on_signal() {
     _name="$1"
     _num="$2"
     kill_group "$_name" "$child"
+    : >"$donefile" 2>/dev/null
     kill_group TERM "$watchdog"
     wait "$child" 2>/dev/null
     exit $((128 + _num))
@@ -114,8 +117,31 @@ export LOOM_GATE_TIMEOUT_ACTIVE=1
 "$@" </dev/null &
 child=$!
 
+# The watchdog counts down in one-second steps and stops itself the moment the
+# wrapper drops "$donefile". Signalling it instead is not reliable: the wrapper
+# can reach the kill before this subshell has forked its `sleep`, and the kill
+# then lands on a group whose only member is a bash that has not started
+# sleeping yet — the sleep is forked immediately afterwards and orphaned by the
+# very signal meant to reap it. A flag the watchdog reads itself has no such
+# window, and one-second steps mean even a genuinely stranded sleep is gone in
+# a second instead of sitting on the gate's stdout for the length of the cap.
+#
+# Two details inside: `trap -` because a subshell inherits the wrapper's signal
+# handlers and bash defers a trapped signal until the running foreground command
+# finishes, and `set +m` because under monitor mode bash puts every job —
+# foreground ones included — in a process group of its own, so the sleeps would
+# not be in this subshell's group at all.
 (
-    sleep "$seconds"
+    trap - INT TERM HUP
+    set +m
+    waited=0
+    while [ "$waited" -lt "$seconds" ]; do
+        if [ -e "$donefile" ]; then
+            exit 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
     echo timeout >"$sentinel"
     kill -TERM -"$child" 2>/dev/null || true
     sleep "$grace"
@@ -133,7 +159,11 @@ rc=$?
 trap - INT TERM HUP
 
 # Reap the watchdog on every path. A leaked `sleep 1800` is itself an orphan,
-# which would be an embarrassing way to fix an orphan bug.
+# which would be an embarrassing way to fix an orphan bug. The flag stops it
+# within a second on the normal path; the group kill cuts short the grace sleep
+# on the timeout path, where the watchdog is long since established and the
+# signal has nothing to race with.
+: >"$donefile" 2>/dev/null
 kill_group TERM "$watchdog"
 wait "$watchdog" 2>/dev/null || true
 
