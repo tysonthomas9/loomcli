@@ -13,10 +13,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
-	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
@@ -633,21 +631,6 @@ func (s *Supervisor) agentSessionMetadataLocked(ap *AgentProcess, backend string
 	return metadata
 }
 
-type agentSessionCompletionInput struct {
-	sessionID  string
-	leaseID    string
-	leaseToken string
-	exitCode   int
-	errClass   string
-	taskID     string
-	diffResult sessionfinalize.WithWorktreeResult
-	// transcriptData is the leaf's on-disk transcript (read once in
-	// finalizeAgentSession). When present it is uploaded as a control-plane artifact
-	// and referenced via metadata["transcript_ref"], so a non-owning serve node can
-	// surface it (controlPlaneSessionTranscript). Empty on the backend-unavailable path.
-	transcriptData []byte
-}
-
 //nolint:funlen // Completion writes status, metadata, transcript artifact, and retry-safe control-plane updates together.
 func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input agentSessionCompletionInput) {
 	if s.ControlStore == nil || s.WorkspaceID == "" || input.sessionID == "" {
@@ -709,25 +692,6 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 	}
 	s.releaseAssignedTaskClaim(ap, input.taskID)
 	s.deregisterWorker(ap)
-}
-
-// publishAgentSessionChange emits the existing ephemeral UI notification only
-// after the authoritative control-plane update succeeds. The returned session
-// supplies every routing key so the signal cannot drift from persisted state.
-func (s *Supervisor) publishAgentSessionChange(updated *domain.AgentSession) {
-	if updated == nil || updated.WorkspaceKey == "" || updated.TaskID == "" || updated.SessionID == "" {
-		return
-	}
-	ctx := cmdstore.RootContext()
-	workspaceID := updated.WorkspaceKey
-	taskID := updated.TaskID
-	sessionID := updated.SessionID
-	status := sessions.SessionStatus(updated.Status)
-	if notify := s.notifySessionChange; notify != nil {
-		go notify(ctx, workspaceID, taskID, sessionID, status)
-		return
-	}
-	go sessions.NotifyWebUI(ctx, backends.ResolveWebUIURL(), workspaceID, taskID, sessionID, status, backends.ResolveNotifyToken())
 }
 
 // uploadTranscriptArtifact uploads the daemon leaf's transcript as a content

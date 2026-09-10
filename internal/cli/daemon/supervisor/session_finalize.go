@@ -13,6 +13,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/backends"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
@@ -46,6 +48,40 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 type leafUsage struct {
 	sessions.TokenUsage
 	CostUSD float64
+}
+
+type agentSessionCompletionInput struct {
+	sessionID  string
+	leaseID    string
+	leaseToken string
+	exitCode   int
+	errClass   string
+	taskID     string
+	diffResult sessionfinalize.WithWorktreeResult
+	// transcriptData is the leaf's on-disk transcript (read once in
+	// finalizeAgentSession). When present it is uploaded as a control-plane artifact
+	// and referenced via metadata["transcript_ref"], so a non-owning serve node can
+	// surface it (controlPlaneSessionTranscript). Empty on the backend-unavailable path.
+	transcriptData []byte
+}
+
+// publishAgentSessionChange emits the existing ephemeral UI notification only
+// after the authoritative control-plane update succeeds. The returned session
+// supplies every routing key so the signal cannot drift from persisted state.
+func (s *Supervisor) publishAgentSessionChange(updated *domain.AgentSession) {
+	if updated == nil || updated.WorkspaceKey == "" || updated.TaskID == "" || updated.SessionID == "" {
+		return
+	}
+	ctx := cmdstore.RootContext()
+	workspaceID := updated.WorkspaceKey
+	taskID := updated.TaskID
+	sessionID := updated.SessionID
+	status := sessions.SessionStatus(updated.Status)
+	if notify := s.notifySessionChange; notify != nil {
+		go notify(ctx, workspaceID, taskID, sessionID, status)
+		return
+	}
+	go sessions.NotifyWebUI(ctx, backends.ResolveWebUIURL(), workspaceID, taskID, sessionID, status, backends.ResolveNotifyToken())
 }
 
 // readLeafTranscript reads the session's on-disk native transcript ONCE so the
