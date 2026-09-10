@@ -922,6 +922,99 @@ func TestParseReadyParams_SortPolicy(t *testing.T) {
 	}
 }
 
+func TestParseReadyParams_Type(t *testing.T) {
+	tests := []struct {
+		name      string
+		query     string
+		wantVal   string
+		wantErr   bool
+		errSubstr string
+	}{
+		{
+			name:    "valid single type",
+			query:   "type=task",
+			wantVal: "task",
+		},
+		{
+			name:    "valid single type bug",
+			query:   "type=bug",
+			wantVal: "bug",
+		},
+		{
+			// fleet-db's parseReadyFilter splits type on commas and validates
+			// each element, so a CSV list must keep working and must reach the
+			// backend verbatim.
+			name:    "valid comma separated list",
+			query:   "type=bug,feature",
+			wantVal: "bug,feature",
+		},
+		{
+			name:    "trailing comma is tolerated",
+			query:   "type=bug,",
+			wantVal: "bug,",
+		},
+		{
+			name:    "absent type leaves the filter empty",
+			query:   "",
+			wantVal: "",
+		},
+		{
+			name:    "empty type leaves the filter empty",
+			query:   "type=",
+			wantVal: "",
+		},
+		{
+			name:      "invalid type",
+			query:     "type=bogus",
+			wantErr:   true,
+			errSubstr: "bogus",
+		},
+		{
+			name:      "invalid element inside a list",
+			query:     "type=bug,bogus",
+			wantErr:   true,
+			errSubstr: "invalid type",
+		},
+		{
+			// Case-sensitive on purpose: fleet-db's models.IssueType.IsValid is
+			// too. Normalizing here would make loomcli and fleet-db disagree
+			// about what the filter means.
+			name:      "uppercase is rejected",
+			query:     "type=BUG",
+			wantErr:   true,
+			errSubstr: "invalid type",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/ready?"+tt.query, nil)
+
+			args, err := parseReadyParams(req)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("parseReadyParams() expected error, got nil")
+					return
+				}
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
+					t.Errorf("error = %q, want to contain %q", err.Error(), tt.errSubstr)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("parseReadyParams() unexpected error: %v", err)
+				return
+			}
+
+			if args.Type != tt.wantVal {
+				t.Errorf("Type = %q, want %q", args.Type, tt.wantVal)
+			}
+		})
+	}
+}
+
 func TestParseReadyParams_Labels(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -1068,19 +1161,6 @@ func TestParseReadyParams_BooleanParams(t *testing.T) {
 				t.Errorf("Unassigned = %v, want %v", args.Unassigned, tt.wantUnassigned)
 			}
 		})
-	}
-}
-
-func TestParseReadyParams_Type(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/ready?type=bug", nil)
-
-	args, err := parseReadyParams(req)
-	if err != nil {
-		t.Errorf("parseReadyParams() unexpected error: %v", err)
-	}
-
-	if args.Type != "bug" {
-		t.Errorf("Type = %q, want %q", args.Type, "bug")
 	}
 }
 
