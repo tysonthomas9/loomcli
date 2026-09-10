@@ -1,0 +1,12 @@
+
+ RUN  v4.0.18 /Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend
+
+ ✓ src/stores/__tests__/issueStoreWriteOwnership.test.ts (23 tests) 17ms
+ ✓ src/stores/__tests__/issueStore.test.ts (112 tests) 36ms
+ ✓ src/components/IssueViewGuard/__tests__/IssueViewGuard.test.tsx (23 tests) 35ms
+
+ Test Files  3 passed (3)
+      Tests  158 passed (158)
+   Start at  17:51:27
+   Duration  771ms (transform 387ms, setup 0ms, import 662ms, tests 88ms, environment 471ms)
+

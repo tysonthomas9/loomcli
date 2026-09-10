@@ -63,6 +63,49 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("issue store write ownership", () => {
+  it.each([{ snapshot: [] }, { snapshot: [issue()] }])(
+    "keeps a loaded snapshot visible during refetch: %j",
+    async ({ snapshot }) => {
+      vi.mocked(getReadyIssues).mockResolvedValueOnce(snapshot);
+      await configure();
+      const page = deferred<Issue[]>();
+      vi.mocked(getReadyIssues).mockReturnValueOnce(page.promise);
+      const refresh = store.getState().refetch();
+      expect(store.getState().isLoading).toBe(false);
+      expect([...store.getState().issuesMap.values()]).toEqual(snapshot);
+      page.resolve(snapshot);
+      await refresh;
+    },
+  );
+
+  it("shows loading and clears the previous snapshot when repository scope changes", async () => {
+    await configure();
+    const page = deferred<Issue[]>();
+    vi.mocked(getReadyIssues).mockReturnValueOnce(page.promise);
+    const refresh = configure("A", ["repo-b"]);
+    expect(store.getState().isLoading).toBe(true);
+    expect(store.getState().issuesMap.size).toBe(0);
+    page.resolve([]);
+    await refresh;
+  });
+
+  it("does not reuse loaded state after reset or during fenced recovery", async () => {
+    await configure();
+    const recoveryPage = deferred<Issue[]>();
+    vi.mocked(getReadyIssues).mockReturnValueOnce(recoveryPage.promise);
+    const recovery = recover();
+    expect(store.getState().isLoading).toBe(true);
+    recoveryPage.resolve([issue()]);
+    await recovery;
+    store.getState().reset();
+    const page = deferred<Issue[]>();
+    vi.mocked(getReadyIssues).mockReturnValueOnce(page.promise);
+    const refresh = configure();
+    expect(store.getState().isLoading).toBe(true);
+    page.resolve([]);
+    await refresh;
+  });
+
   it("an already-aborted fetch cannot retire the valid in-flight read", async () => {
     await configure();
     const page = deferred<Issue[]>();

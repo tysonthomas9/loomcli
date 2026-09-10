@@ -78,6 +78,8 @@ export function createIssueStore(
   const optimisticEntries = new Map<string, OptimisticEntry>();
   let scopeEpoch = 0;
   let activeScopeKey: string | null = null;
+  // Only a committed collection response establishes a usable snapshot, even empty.
+  let loadedScopeKey: string | null = null;
   let recoveryRevision = 0;
   let commandRevision = 0;
   const unresolvedCommands = new Map<string, Set<object>>();
@@ -191,6 +193,7 @@ export function createIssueStore(
   /** Retire UI ownership without pretending outstanding server work settled. */
   function retireScope(): void {
     scopeEpoch++;
+    loadedScopeKey = null;
     recoveryRevision++;
     for (const entry of optimisticEntries.values())
       clearTimeout(entry.timeoutId);
@@ -259,7 +262,7 @@ export function createIssueStore(
     const readScopeEpoch = scopeEpoch;
     const readCommandRevision = commandRevision;
     if (scopeChanged) {
-      set({ issuesMap: new Map(), pendingIds: new Set() });
+      set({ issuesMap: new Map(), pendingIds: new Set(), isLoading: true });
       if (scopeEpoch !== readScopeEpoch || generation !== fetchGeneration) {
         if (recovery) throw new Error("Issue recovery scope changed");
         return;
@@ -294,15 +297,18 @@ export function createIssueStore(
       clearTimeout(retryTimeout);
       retryTimeout = null;
     }
+    // Background refreshes keep the current scope mounted. Fenced recovery
+    // still blocks publication, and a different scope must load from scratch.
+    const isLoading = recovery || loadedScopeKey !== nextScope;
     if (!isAutoRetry) {
       set({
-        isLoading: true,
+        isLoading,
         error: null,
         retryCount: 0,
         nextRetryAt: null,
       });
     } else {
-      set({ isLoading: true, error: null, nextRetryAt: null });
+      set({ isLoading, error: null, nextRetryAt: null });
     }
 
     if (
@@ -433,6 +439,9 @@ export function createIssueStore(
         }
       }
 
+      // Set before notifying subscribers: a reentrant refresh can reuse this
+      // accepted snapshot, while scope retirement clears the marker.
+      loadedScopeKey = nextScope;
       // Success is the only point that can clear stale snapshot state.
       set({
         issuesMap: mergedMap,
