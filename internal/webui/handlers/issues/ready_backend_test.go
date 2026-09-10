@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,10 +22,14 @@ import (
 type stubReadyBackend struct {
 	ready []backend.IssueData
 	err   error
+	// calls counts Ready invocations so a test can assert the handler
+	// rejected a bad filter before reaching the backend at all.
+	calls int
 }
 
 func (s *stubReadyBackend) BackendName() string { return "stub-ready" }
 func (s *stubReadyBackend) Ready(_ context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {
+	s.calls++
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -211,5 +216,151 @@ func TestHandleReady_NoPoolNoBackendReturns503(t *testing.T) {
 	handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503", rr.Code)
+	}
+}
+
+// readyBackendErrorTest exercises the /ready backend path with a stub that
+// always fails, pinning the backend.Kind -> HTTP status mapping and the
+// message policy (4xx surfaces the backend text, 5xx stays opaque).
+func TestHandleReady_BackendErrorStatusMapping(t *testing.T) {
+	tests := []struct {
+		name          string
+		err           error
+		wantStatus    int
+		wantContains  string
+		wantNotHaving string
+	}{
+		{
+			name:         "validation error becomes 400 with the backend message",
+			err:          backend.ErrValidation("Ready", `invalid type: "bogus"`),
+			wantStatus:   http.StatusBadRequest,
+			wantContains: "bogus",
+		},
+		{
+			name:         "not found becomes 404",
+			err:          backend.ErrNotFound("Ready", "parent EPIC-9 not found"),
+			wantStatus:   http.StatusNotFound,
+			wantContains: "EPIC-9",
+		},
+		{
+			name:         "timeout becomes 504 and stays opaque",
+			err:          backend.ErrTimeout("Ready", "deadline exceeded talking to fleet-db", errors.New("ctx")),
+			wantStatus:   http.StatusGatewayTimeout,
+			wantContains: "failed to list ready issues",
+		},
+		{
+			name:         "unavailable becomes 503 and stays opaque",
+			err:          backend.ErrUnavailable("Ready", "fleet-db rate limited", errors.New("429")),
+			wantStatus:   http.StatusServiceUnavailable,
+			wantContains: "failed to list ready issues",
+		},
+		{
+			name:          "internal stays 500 and does not leak the cause",
+			err:           backend.ErrInternal("Ready", "boom", errors.New("x")),
+			wantStatus:    http.StatusInternalServerError,
+			wantContains:  "failed to list ready issues",
+			wantNotHaving: "boom",
+		},
+		{
+			name:         "validation error with an empty message still says something",
+			err:          &backend.BackendError{Kind: backend.KindValidation, Op: "Ready", Message: ""},
+			wantStatus:   http.StatusBadRequest,
+			wantContains: "Ready",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			be := &stubReadyBackend{err: tt.err}
+			h := HandleReadyWithBackend(nil, func(_ context.Context) backend.IssueBackend { return be })
+
+			// A valid query, so up-front parameter validation passes and the
+			// backend error is what decides the status.
+			req := httptest.NewRequest(http.MethodGet, "/api/ready?type=task", nil)
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, req)
+
+			if rr.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", rr.Code, tt.wantStatus, rr.Body.String())
+			}
+			var resp ReadyResponse
+			if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if resp.Success {
+				t.Error("success = true, want false on an error response")
+			}
+			if resp.Error == "" {
+				t.Error(`error = "", want a non-empty message`)
+			}
+			if !strings.Contains(resp.Error, tt.wantContains) {
+				t.Errorf("error = %q, want to contain %q", resp.Error, tt.wantContains)
+			}
+			if tt.wantNotHaving != "" && strings.Contains(resp.Error, tt.wantNotHaving) {
+				t.Errorf("error = %q, must not leak %q", resp.Error, tt.wantNotHaving)
+			}
+		})
+	}
+}
+
+func TestHandleReady_InvalidTypeReturns400(t *testing.T) {
+	be := &stubReadyBackend{ready: []backend.IssueData{{ID: "SHOULD-NOT-APPEAR"}}}
+	h := HandleReadyWithBackend(nil, func(_ context.Context) backend.IssueBackend { return be })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/ready?type=bogus", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp ReadyResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Success {
+		t.Error("success = true, want false")
+	}
+	if !strings.Contains(resp.Error, "bogus") {
+		t.Errorf("error = %q, want to name the rejected value %q", resp.Error, "bogus")
+	}
+	// The whole point of validating up front: no pointless round-trip.
+	if be.calls != 0 {
+		t.Errorf("backend Ready called %d times, want 0 (rejected before dispatch)", be.calls)
+	}
+}
+
+func TestHandleReady_ValidTypeUnchanged(t *testing.T) {
+	be := &stubReadyBackend{
+		ready: []backend.IssueData{
+			{ID: "RDY-1", Title: "Ready One", Status: "open", Priority: 1, IssueType: "task"},
+		},
+	}
+	h := HandleReadyWithBackend(nil, func(_ context.Context) backend.IssueBackend { return be })
+
+	for _, q := range []string{"type=task", "type=bug,feature", "type=bug,", "type="} {
+		t.Run(q, func(t *testing.T) {
+			be.calls = 0
+			req := httptest.NewRequest(http.MethodGet, "/api/ready?"+q, nil)
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+			}
+			var resp ReadyResponse
+			if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if !resp.Success {
+				t.Fatalf("expected success=true; error=%q", resp.Error)
+			}
+			if len(resp.Data) != 1 || resp.Data[0].ID != "RDY-1" {
+				t.Errorf("data = %+v, want the single RDY-1 item", resp.Data)
+			}
+			if be.calls != 1 {
+				t.Errorf("backend Ready called %d times, want 1", be.calls)
+			}
+		})
 	}
 }

@@ -1135,6 +1135,19 @@ func TestTranslateBackendError_NilReturnsNil(t *testing.T) {
 	}
 }
 
+// TestTranslateBackendError_ExportedName pins the exported entry point that
+// the /ready handler calls directly (it owns a non-standard response envelope
+// and so cannot go through handler.HandleServiceError).
+func TestTranslateBackendError_ExportedName(t *testing.T) {
+	err := TranslateBackendError(backend.ErrValidation("Ready", `invalid type: "bogus"`))
+	if err == nil || err.Kind != KindValidation {
+		t.Fatalf("expected validation, got %+v", err)
+	}
+	if !strings.Contains(err.Message, "bogus") {
+		t.Errorf("expected 'bogus' in message, got %q", err.Message)
+	}
+}
+
 // --- NewIssueService without a backend returns ErrUnavailable for backend-only paths ---
 
 func TestNewIssueService_NoBackend_ListEvents_Unavailable(t *testing.T) {
