@@ -43,6 +43,32 @@ func (s *Supervisor) sweepOrphanedBackends() {
 	}
 }
 
+// sweepOrphanedBackendsForWorktree is the deadline backstop: it runs the same
+// orphan sweep as startup, but scoped to a single agent's worktree so the
+// daemon never signals anything that is not ours.
+//
+// harness-wrapper terminates the harness's whole process group when a turn
+// ends, which reaps every descendant that stayed in that group. A descendant
+// that called setsid() itself has left the group and survives it; this sweep
+// catches that leftover. Because an escapee is a real finding rather than
+// routine cleanup, a kill is logged at Warn with the task id.
+//
+// Returns the number of orphans signaled. Best-effort throughout: an empty
+// worktree path skips the sweep entirely (sweeping *everything* is never the
+// right fallback), and signal errors are swallowed by the callee, so this
+// never changes a run's classification.
+func (s *Supervisor) sweepOrphanedBackendsForWorktree(worktreePath, taskID string) int {
+	if strings.TrimSpace(worktreePath) == "" {
+		return 0
+	}
+	killed := s.killOrphanedWorktreeProcesses([]string{worktreePath})
+	if killed > 0 {
+		slog.Warn("killed orphaned backend processes after run-turn deadline exit",
+			"task", taskID, "worktree", worktreePath, "count", killed)
+	}
+	return killed
+}
+
 // managedWorktreePaths returns the absolute filesystem paths the daemon is
 // currently supervising. Used to scope the startup orphan sweep so the daemon
 // never signals processes that aren't ours.
