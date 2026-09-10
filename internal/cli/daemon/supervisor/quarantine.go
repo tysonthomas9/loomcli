@@ -287,7 +287,7 @@ func (s *Supervisor) recordTaskExitForQuarantine(ap *AgentProcess, exitCode int)
 	if s.quarantineThreshold() <= 0 {
 		return
 	}
-	lockInfo, _, _ := cli.CheckLock(ap.WorktreePath)
+	lockInfo, _, _ := cli.CheckLock(ap.WorkDir())
 	taskID := s.taskIDForLifecycle(ap, lockInfo)
 	if taskID == "" {
 		return // no task attached (idle watchdog kills classify as NoWork anyway)
@@ -303,7 +303,7 @@ func (s *Supervisor) recordTaskExitForQuarantine(ap *AgentProcess, exitCode int)
 	// and QuarantineEligible rejects those, which is right — a turn that ran out
 	// is a coordination signal, not a task-fault kill, and counting it would
 	// quarantine tasks whose agents are progressing without committing.
-	if snap.clean || commitProgressed(ap.WorktreePath, snap.beforeRef) {
+	if snap.clean || commitProgressed(ap.WorkDir(), snap.beforeRef) {
 		q.evict(taskID)
 		return
 	}

@@ -148,7 +148,7 @@ func takeAgentSessionForFinalize(ap *AgentProcess) agentSessionFinalizeState {
 
 func (s *Supervisor) taskIDForFinalize(ap *AgentProcess) string {
 	taskID := ""
-	if info, lockErr := cli.ReadLockFile(ap.WorktreePath); lockErr == nil {
+	if info, lockErr := cli.ReadLockFile(ap.WorkDir()); lockErr == nil {
 		taskID = info.TaskID
 	}
 	if taskID == "" {
@@ -200,7 +200,7 @@ func finalizeLocalSession(
 	leafTokens leafUsage,
 ) sessionfinalize.WithWorktreeResult {
 	result, err := sessionfinalize.WithWorktree(sess, sessionfinalize.WithWorktreeOptions{
-		WorktreePath: ap.WorktreePath,
+		WorktreePath: ap.WorkDir(),
 		BeforeRef:    beforeRef,
 		TaskID:       taskID,
 		ExitCode:     exitCode,
@@ -506,7 +506,7 @@ func (s *Supervisor) completionHookTarget(ap *AgentProcess, exitCode int) (*doma
 	if lastErr != nil || completionHookSkipReasons[stopReason] {
 		return nil, "", false
 	}
-	if IsYieldRequested(ap.WorktreePath) {
+	if IsYieldRequested(ap.WorkDir()) {
 		return nil, "", false
 	}
 	taskID := s.taskIDForFinalize(ap)
@@ -774,19 +774,19 @@ func (s *Supervisor) mirrorNativeTranscript(ap *AgentProcess) error {
 	}
 	switch sess.Meta.Backend {
 	case backendnames.Codex:
-		path, err := sess.SyncLatestCodexRollout(ap.WorktreePath, sess.Meta.StartedAt)
+		path, err := sess.SyncLatestCodexRollout(ap.WorkDir(), sess.Meta.StartedAt)
 		if err == nil && path == "" {
 			return fmt.Errorf("no codex rollout for %s since %s",
-				ap.WorktreePath, sess.Meta.StartedAt.Format(time.RFC3339))
+				ap.WorkDir(), sess.Meta.StartedAt.Format(time.RFC3339))
 		}
 		return err
 	case backendnames.Claude:
 		// Empty claudeUUID: newest-by-mtime in the worktree's project dir, the
 		// same resolution the supervisor's finalize uses.
-		path, err := sess.SyncLatestClaudeTranscript(ap.WorktreePath, "", sess.Meta.StartedAt)
+		path, err := sess.SyncLatestClaudeTranscript(ap.WorkDir(), "", sess.Meta.StartedAt)
 		if err == nil && path == "" {
 			return fmt.Errorf("no claude transcript for %s since %s",
-				ap.WorktreePath, sess.Meta.StartedAt.Format(time.RFC3339))
+				ap.WorkDir(), sess.Meta.StartedAt.Format(time.RFC3339))
 		}
 		return err
 	default:

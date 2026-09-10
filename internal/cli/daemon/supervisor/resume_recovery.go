@@ -37,7 +37,7 @@ const maxResumeFailures = 2
 // checkpoint does not (the agent re-derives the prior attempt's WIP from the
 // saved checkpoint + worktree diff).
 func (s *Supervisor) detectRecovery(ap *AgentProcess) (string, recoveryMode) {
-	info, running, err := cli.CheckLock(ap.WorktreePath)
+	info, running, err := cli.CheckLock(ap.WorkDir())
 	if err != nil || info == nil || running || info.TaskID == "" {
 		return "", recoverCold // no crash remnant / agent still alive / no task to recover
 	}
@@ -91,13 +91,13 @@ func (s *Supervisor) detectRecovery(ap *AgentProcess) (string, recoveryMode) {
 // that TTL is enabled). Returns ("", 0) otherwise — never an error, because a
 // missing or unreadable checkpoint just means "nothing to recover".
 func checkpointRecoveryTask(ap *AgentProcess) (string, int) {
-	cp, err := config.LoadCheckpoint(cli.ResolveLockDir(ap.WorktreePath))
+	cp, err := config.LoadCheckpoint(cli.ResolveLockDir(ap.WorkDir()))
 	if err != nil || cp == nil || cp.TaskID == "" {
 		return "", 0
 	}
 	owner := ap.Entry.Worktree
 	lockTaskID := ""
-	if info, _, lockErr := cli.CheckLock(ap.WorktreePath); lockErr == nil && info != nil {
+	if info, _, lockErr := cli.CheckLock(ap.WorkDir()); lockErr == nil && info != nil {
 		lockTaskID = info.TaskID
 		if info.AgentName != "" {
 			owner = info.AgentName
@@ -141,7 +141,7 @@ func (s *Supervisor) prepareCheckpointRetry(ap *AgentProcess, taskID string) {
 	s.sweepWorktreeBackends(ap)
 	// Drop the carried session so maybeResumeDaemonSession won't arm `--resume`;
 	// the agent then falls back to checkpoint injection for this task.
-	if err := cli.ClearStaleLockClaudeSessionID(ap.WorktreePath); err != nil {
+	if err := cli.ClearStaleLockClaudeSessionID(ap.WorkDir()); err != nil {
 		slog.Warn("checkpoint retry: failed to clear carried session id",
 			"worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
 	}
@@ -156,7 +156,7 @@ func (s *Supervisor) prepareCheckpointRetry(ap *AgentProcess, taskID string) {
 // this worktree from a crashed run, scoped so the daemon never signals
 // processes that are not its own.
 func (s *Supervisor) sweepWorktreeBackends(ap *AgentProcess) {
-	if killed := s.killOrphanedWorktreeProcesses([]string{ap.WorktreePath}); killed > 0 {
+	if killed := s.killOrphanedWorktreeProcesses([]string{ap.WorkDir()}); killed > 0 {
 		slog.Info("killed orphaned backend before recovery",
 			"worktree", ap.Entry.Worktree, "count", killed)
 	}
@@ -169,7 +169,7 @@ func (s *Supervisor) sweepWorktreeBackends(ap *AgentProcess) {
 // gone, or one whose PID came back to life, leaves the state as-is and the
 // bounded ResumeFailures ladder still caps the retries.
 func (s *Supervisor) abandonResumeTarget(ap *AgentProcess, taskID string) {
-	if err := cli.ClearStaleLockTaskID(ap.WorktreePath); err != nil {
+	if err := cli.ClearStaleLockTaskID(ap.WorkDir()); err != nil {
 		slog.Warn("failed to clear abandoned resume target from lock",
 			"worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
 	}

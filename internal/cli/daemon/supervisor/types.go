@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
@@ -17,10 +18,23 @@ import (
 
 // AgentProcess tracks a single supervised agent subprocess.
 type AgentProcess struct {
-	Entry        cfgpkg.AgentEntry  // agent configuration from FleetDB
-	RoleConfig   cfgpkg.RoleConfig  // resolved role configuration
-	WorktreePath string             // resolved worktree path
-	RepoConfig   *cfgpkg.RepoConfig // per-repo config (nil in non-workspace mode)
+	Entry      cfgpkg.AgentEntry // agent configuration from FleetDB
+	RoleConfig cfgpkg.RoleConfig // resolved role configuration
+	// WorktreePath is the BASE placement: the worktree resolved once at config
+	// load from the agent's CONFIGURED repo. It is written by NewAgent and never
+	// mutated, so the several goroutines that read it need no synchronization.
+	// Runtime readers must NOT use it directly — the cycle's effective worktree
+	// follows the claimed task's source_repo and is read via WorkDir(). See
+	// placement.go.
+	WorktreePath string             // base (configured) worktree path; runtime readers use WorkDir()
+	RepoConfig   *cfgpkg.RepoConfig // base per-repo config (nil in non-workspace mode); runtime readers use Placement().RepoConfig
+
+	// placement is the cycle's EFFECTIVE (repo, worktree, repo config) triple,
+	// re-resolved after each claim from the claimed task's source_repo. Swapped
+	// atomically rather than guarded by Mu: several readers already hold Mu when
+	// they need the path, and sync.Mutex is not reentrant. Nil means "never
+	// re-pointed" and reads back as the base placement.
+	placement atomic.Pointer[AgentPlacement]
 
 	// claimantOnce/claimantIdentity memoize the process-local claim identity
 	// used for agents configured without a worktree (see claimantID in
@@ -50,6 +64,7 @@ type AgentProcess struct {
 	OwnershipRenewedAt     time.Time         // local-clock anchor captured just before the last confirmed acquire/renew was sent; drives the bounded fail-open validity window — never server-derived
 	BeforeRef              string            // git HEAD ref before spawn (for diff stats at finalization)
 	AssignedTaskID         string            // task claimed by supervisor preflight for this run
+	AssignedTaskRepo       string            // source_repo of the claimed task ("" when the task carries none, or on a resume); drives applyTaskPlacement
 	RequestedTaskID        string            // task requested by a lifecycle command before normal queue selection
 	ResumeTaskID           string            // interrupted task to re-claim this cycle (detected from a surviving crash-remnant lock); drives claimResumeTask for BOTH resume and checkpoint recovery. Per-cycle: cleared in clearAgentSessionState, re-detected in preFlightSetup
 	ResumeFailures         int               // consecutive failed RECOVERY attempts — resume AND checkpoint fallback (PERSISTS across cycles); escalation: resume×maxResumeFailures → checkpoint×1 → cold-start
@@ -107,7 +122,7 @@ type AgentProcess struct {
 	// task. False for every other stop reason.
 	RunSilentAtStop bool
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, LogFileStartOffset, SoftKnobWarning, ProfileError, restart tracking, IdleSince, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, HeldRepos, YieldRequested, YieldEscalated, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, RunSilentAtStop, LastActivity, InputWaitPending, InputWaitSince, AbandonedRunsChecked, CredentialKey
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, LogFileStartOffset, SoftKnobWarning, ProfileError, restart tracking, IdleSince, AssignedEpicID, AssignedTaskID, AssignedTaskRepo, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, HeldRepos, YieldRequested, YieldEscalated, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, RunSilentAtStop, LastActivity, InputWaitPending, InputWaitSince, AbandonedRunsChecked, CredentialKey
 }
 
 // StopReason identifies why an agent was stopped.
@@ -189,8 +204,9 @@ func (r StopReason) IsWallPark() bool {
 // resolveRemote returns the git remote name for this agent.
 // Uses RepoConfig.Remote if available, otherwise defaults to "origin".
 func (ap *AgentProcess) ResolveRemote() string {
-	if ap.RepoConfig != nil && ap.RepoConfig.Remote != "" {
-		return ap.RepoConfig.Remote
+	rc := ap.Placement().RepoConfig
+	if rc != nil && rc.Remote != "" {
+		return rc.Remote
 	}
 	return "origin"
 }
@@ -199,12 +215,12 @@ func (ap *AgentProcess) ResolveRemote() string {
 // (e.g. "origin/main"). Uses RepoConfig if available, otherwise defaults
 // to "origin/main".
 func (ap *AgentProcess) ResolveRemoteBranch() string {
-	if ap.RepoConfig != nil {
-		remote := ap.RepoConfig.Remote
+	if rc := ap.Placement().RepoConfig; rc != nil {
+		remote := rc.Remote
 		if remote == "" {
 			remote = "origin"
 		}
-		branch := ap.RepoConfig.DefaultBranch
+		branch := rc.DefaultBranch
 		if branch == "" {
 			branch = "main"
 		}
@@ -218,8 +234,8 @@ func (ap *AgentProcess) ResolveRemoteBranch() string {
 type SupervisedAgentStatus struct {
 	Worktree               string
 	Role                   string
-	Repo                   string
-	WorktreePath           string
+	Repo                   string // effective repo for the current cycle (falls back to the configured one)
+	WorktreePath           string // effective worktree for the current cycle
 	PID                    int
 	RestartCount           int
 	LastStart              time.Time

@@ -125,6 +125,12 @@ type Supervisor struct {
 	// FindRepoConfig looks up a config.RepoConfig by name.
 	FindRepoConfig func(repoName string) *config.RepoConfig
 
+	// ResolveWorktree resolves the per-repo, per-agent worktree path, creating
+	// the worktree when absent. Injected by the daemon; overridden in tests
+	// (the real one shells out to git). Nil DISABLES placement routing — see
+	// applyTaskPlacement in placement.go.
+	ResolveWorktree func(agentName, repo string) (string, error)
+
 	// IssueBackendReady checks if an epic has ready tasks. Injected by daemon.
 	IssueBackendReady func(epicID string) (bool, error)
 	IssueBackend      backend.IssueBackend
@@ -446,6 +452,10 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.TranscriptPath = ""
 	ap.BeforeRef = ""
 	ap.AssignedTaskID = ""
+	// per-cycle, like AssignedTaskID. ap.placement is deliberately NOT cleared:
+	// it must carry into the next cycle so recovery reads the lock file where
+	// the crash actually left it.
+	ap.AssignedTaskRepo = ""
 	ap.ResumeTaskID = ""          // per-cycle; re-detected in preFlightSetup (ResumeFailures persists)
 	ap.RecoveryMode = recoverCold // per-cycle; re-classified in preFlightSetup
 	ap.YieldRequested = false     // per-cycle; re-set by RequestYield
@@ -473,7 +483,10 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 // CHECKPOINT retry of the same task (re-claim, but cold-start with the prior
 // attempt's diff injected) before finally cold-starting a fresh task. See
 // detectRecovery.
-func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
+// runPreflightGates is the ordered set of refusals that run BEFORE this cycle
+// touches the queue, the worktree or a session. Every one of them means "do not
+// start work now"; each records its own reason on the agent.
+func (s *Supervisor) runPreflightGates(ap *AgentProcess) bool {
 	// FIRST gate: a held workspace issues no Ready query, no ClaimIssue, runs
 	// no recovery and creates no session.
 	if !s.gateClaimsHeld(ap) {
@@ -496,6 +509,17 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	if err := s.gateProfileVerified(ap); err != nil {
 		return false
 	}
+	return true
+}
+
+func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
+	if !s.runPreflightGates(ap) {
+		return false
+	}
+
+	// A daemon restart starts with a nil placement: re-adopt the worktree this
+	// agent last ran in BEFORE recovery reads its lock file.
+	s.adoptCarriedWorktree(ap)
 
 	taskID, mode := s.detectRecovery(ap)
 	switch mode {
@@ -523,12 +547,17 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	ap.RecoveryMode = mode // consumed by recordResumeOutcome after the run
 	ap.Mu.Unlock()
 
-	if err := ClearYieldFile(ap.WorktreePath); err != nil {
+	if err := ClearYieldFile(ap.WorkDir()); err != nil {
 		slog.Warn("failed to clear stale yield file", "worktree", ap.Entry.Worktree, "err", err)
 	}
 
 	epicID := s.assignEpic(ap)
 	if !s.claimTask(ap, epicID) {
+		return false
+	}
+	// The worktree follows the CLAIM, not the configured repo. Before
+	// createAgentSession, which captures BeforeRef from the worktree.
+	if !s.applyTaskPlacement(ap) {
 		return false
 	}
 	// Holding the claim lock proves any unfinished session row for this task is
@@ -742,12 +771,15 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 
 	result := make([]SupervisedAgentStatus, len(snapshot))
 	for i, ap := range snapshot {
+		// Read the placement OUTSIDE Mu (it is published atomically): the
+		// effective repo/path is where the agent actually ran this cycle.
+		effectiveRepo, effectivePath := ap.effectivePlacement()
 		ap.Mu.Lock()
 		result[i] = SupervisedAgentStatus{
 			Worktree:               ap.Entry.Worktree,
 			Role:                   ap.Entry.Role,
-			Repo:                   ap.Entry.Repo,
-			WorktreePath:           ap.WorktreePath,
+			Repo:                   effectiveRepo,
+			WorktreePath:           effectivePath,
 			PID:                    ap.Pid,
 			RestartCount:           ap.RestartCount,
 			LastStart:              ap.LastStart,

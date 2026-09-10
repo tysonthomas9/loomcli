@@ -347,7 +347,7 @@ func (s *Supervisor) tryFallbackBackend(ap *AgentProcess) bool {
 
 func (s *Supervisor) ensureHookConfig(ap *AgentProcess) {
 	backend := s.GetEffectiveBackend(ap)
-	if err := hookcfg.EnsureSkillMaterializeHook(ap.WorktreePath, backend); err != nil {
+	if err := hookcfg.EnsureSkillMaterializeHook(ap.WorkDir(), backend); err != nil {
 		slog.Warn("agent hook configuration failed; continuing without raw-PTY pre-turn hook",
 			"worktree", ap.Entry.Worktree, "backend", backend, "err", err)
 	}
@@ -364,7 +364,7 @@ func (s *Supervisor) materializeSkills(ctx context.Context, ap *AgentProcess) er
 	}
 	ctx, cancel := context.WithTimeout(ctx, controlPlaneOperationTimeout)
 	defer cancel()
-	return skillmat.MaterializeWithOptions(ctx, s.ControlStore, s.WorkspaceID, ap.Entry.Role, ap.WorktreePath,
+	return skillmat.MaterializeWithOptions(ctx, s.ControlStore, s.WorkspaceID, ap.Entry.Role, ap.WorkDir(),
 		skillmat.Options{LeasesDisabled: s.LeasesDisabled})
 }
 

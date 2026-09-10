@@ -737,7 +737,7 @@ func TestClaimIssueForAgent_FailedClaimReleasesReservation(t *testing.T) {
 	s := &Supervisor{IssueBackend: mock}
 	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "worker-1", Role: "task"}}
 
-	if err := s.claimIssueForAgent(ap, "task-1", "test"); err == nil {
+	if err := s.claimIssueForAgent(ap, "task-1", "", "test"); err == nil {
 		t.Fatal("claimIssueForAgent returned nil, want conflict")
 	}
 	if err := s.claims.reserve("task-1", "worker-2"); err != nil {
