@@ -448,12 +448,16 @@ func backendIssueDataToWithCounts(d *backend.IssueData) *types.IssueWithCounts {
 // TestBackendIssueDataToWithCounts_CarriesNotes — so the kanban board can
 // compute the "blocked with notes" needs-attention state.)
 
-// listArgsToBackendOpts converts the rpc.ListArgs the webui handler
-// composes for the daemon path into the backend.ListOpts shape. We map
-// only fields that backend.IssueBackend.List accepts uniformly across
-// drivers — fleet-db rejects several optional filters (see ListOpts
-// "fleet-db: unsupported" comments), so passing them through would
-// surface as runtime errors instead of being silently ignored.
+// listArgsToBackendOpts converts the rpc.ListArgs the webui handler composes
+// for the daemon path into the backend.ListOpts shape.
+//
+// It maps every filter this route declares. It used to map seven of them, and
+// dropping the rest was how `?no_assignee=true` came to answer 200 with the
+// entire board: the fields were gone before FleetBackend.List could refuse
+// them, so nothing ever surfaced. A filter that a backend cannot honor must
+// reach it and be rejected — silence is the one outcome the caller cannot
+// detect. Anything the backend does not support now comes back as a
+// KindValidation error and a 400.
 func listArgsToBackendOpts(a *rpc.ListArgs) backend.ListOpts {
 	if a == nil {
 		return backend.ListOpts{}
@@ -466,5 +470,21 @@ func listArgsToBackendOpts(a *rpc.ListArgs) backend.ListOpts {
 		ParentID:    a.ParentID,
 		Limit:       a.Limit,
 		SourceRepos: a.SourceRepos,
+
+		Priority:      a.Priority,
+		CreatedAfter:  a.CreatedAfter,
+		CreatedBefore: a.CreatedBefore,
+		UpdatedAfter:  a.UpdatedAfter,
+		UpdatedBefore: a.UpdatedBefore,
+
+		Query:               a.Query,
+		TitleContains:       a.TitleContains,
+		DescriptionContains: a.DescriptionContains,
+		NotesContains:       a.NotesContains,
+
+		EmptyDescription: a.EmptyDescription,
+		NoAssignee:       a.NoAssignee,
+		NoLabels:         a.NoLabels,
+		Pinned:           a.Pinned,
 	}
 }
