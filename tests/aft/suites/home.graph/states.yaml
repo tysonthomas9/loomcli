@@ -1,0 +1,121 @@
+kind: graph-states
+version: 1
+flow: home-operator-queue
+
+states:
+  browser-ready:
+    intent: A fresh Home path begins in the runner's blank browser page.
+    assert:
+      - use: blank-browser-ready
+
+  home-ready:
+    intent: Workspace Home is hydrated with an empty operator queue.
+    assert:
+      - use: hydrated-home-ready
+
+  ranked-queue-visible:
+    intent: Home shows design, blocked, and revision work in oldest-first order without a reload.
+    terminal: true
+    assert:
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-testid=operator-queue] [data-testid=queue-card]').length === 3
+        intent: Wait until all three operator-attention cards stream into Home.
+      - expect:
+          count:
+            selector: "[data-testid=operator-queue] [data-testid=queue-card]"
+            equals: 3
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[data-testid=operator-queue] [data-testid=queue-card]'))
+              .map((card) => card.getAttribute('data-kind'))
+              .join(',') === 'design-gate,blocked,needs-revision'
+        intent: Wait until Home ranks the three queue categories from oldest to newest.
+
+  design-gate-visible:
+    intent: Home presents the designed review task as a decision the operator can approve.
+    assert:
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=queue-card][data-kind=design-gate]')
+        intent: Wait until the design gate streams into the Home queue.
+      - expect:
+          visible:
+            selector: "[data-testid=queue-card][data-kind=design-gate] [data-testid=queue-approve]"
+
+  design-gate-cleared:
+    intent: Approving the design removes it from the operator queue.
+    assert:
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=queue-card][data-kind=design-gate]')
+        intent: Wait until the approved design gate leaves the Home queue.
+      - expect:
+          count:
+            selector: "[data-testid=queue-card][data-kind=design-gate]"
+            equals: 0
+
+  design-gate-approved:
+    intent: Approving a design reopens the task and leaves Home with no pending decision.
+    terminal: true
+    assert:
+      - expect: { visible: { testid: queue-empty } }
+
+  blocked-task-visible:
+    intent: Home presents a blocked task with its explanation and an operator unblock action.
+    assert:
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=queue-card][data-kind=blocked] [data-testid=queue-unblock]')
+        intent: Wait until the blocked task streams into the Home queue.
+      - expect:
+          visible:
+            selector: "[data-testid=queue-card][data-kind=blocked] [data-testid=queue-unblock]"
+      - expect: { text: "waiting for operator input ${AFT_CASE_ID}" }
+
+  blocked-task-cleared:
+    intent: Unblocking the task removes it from the operator queue.
+    assert:
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=queue-card][data-kind=blocked]')
+        intent: Wait until the unblocked task leaves the Home queue.
+      - expect:
+          count:
+            selector: "[data-testid=queue-card][data-kind=blocked]"
+            equals: 0
+
+  blocked-task-unblocked:
+    intent: Unblocking from Home reopens the same task without losing its assignee.
+    terminal: true
+    assert:
+      - expect: { visible: { testid: queue-empty } }
+
+  needs-revision-visible:
+    intent: Home presents a needs-revision task as work the operator can review.
+    assert:
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=queue-card][data-kind=needs-revision]')
+        intent: Wait until the revision task streams into the Home queue.
+      - expect:
+          visible:
+            selector: "[data-testid=queue-card][data-kind=needs-revision] button:not([data-testid=queue-card-open])"
+      - expect: { text: "home revision review ${RUN_ID:-local}-${AFT_CASE_ID}" }
+
+  needs-revision-panel-open:
+    intent: Reviewing a needs-revision card opens that task in the editable issue panel.
+    terminal: true
+    assert:
+      - wait:
+          fn: >-
+            (() => {
+              const panel = document.querySelector('[data-testid=issue-detail-panel]');
+              return panel?.getAttribute('data-state') === 'open' &&
+                panel?.getAttribute('data-loading') === 'false' &&
+                !!document.querySelector('[data-testid=editable-description]');
+            })()
+        intent: Wait until the revision task's editable panel is fully loaded.
+      - expect: { visible: { testid: issue-header } }
+      - expect: { visible: { testid: editable-description } }
+      - expect: { text: "home revision review ${RUN_ID:-local}-${AFT_CASE_ID}" }

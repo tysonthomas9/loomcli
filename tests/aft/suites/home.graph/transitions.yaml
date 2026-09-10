@@ -1,0 +1,183 @@
+kind: graph-transitions
+version: 1
+flow: home-operator-queue
+group: operator-queue
+
+transitions:
+  open-home:
+    intent: A human opens workspace Home before any task needs attention.
+    actor: human
+    via: ui
+    steps:
+      - open: "/ws/${AFT_WS:-E2E-WS}/home"
+
+  create-ranked-queue:
+    intent: Agents create the three kinds of work that need operator attention while Home remains open.
+    actor: agent
+    via: api
+    steps:
+      - api:
+          method: POST
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "home design gate ${RUN_ID:-local}-${AFT_CASE_ID}"
+            issue_type: task
+            priority: 2
+            design: "Review this design for ${AFT_CASE_ID}."
+          save:
+            - from: data.id
+              as: homeDesignId
+        intent: An agent creates the designed task for the oldest Home queue item.
+      - api:
+          method: PATCH
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:homeDesignId}"
+          body:
+            status: review
+        intent: The agent sends its designed task to the operator for approval.
+      - api:
+          method: POST
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "home blocked task ${RUN_ID:-local}-${AFT_CASE_ID}"
+            issue_type: task
+            priority: 2
+            notes: "BLOCKED: waiting for operator input ${AFT_CASE_ID}"
+          save:
+            - from: data.id
+              as: homeBlockedId
+        intent: An agent creates the task that will ask the operator for help.
+      - api:
+          method: PATCH
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:homeBlockedId}"
+          body:
+            status: blocked
+        intent: The agent declares the task blocked with its explanatory note.
+      - api:
+          method: POST
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "home revision task ${RUN_ID:-local}-${AFT_CASE_ID}"
+            issue_type: task
+            priority: 2
+            labels: [needs-revision]
+        intent: An agent creates the newest task that needs revision arbitration.
+
+  create-design-gate:
+    intent: An agent submits a designed task for operator approval while Home remains open.
+    actor: agent
+    via: api
+    steps:
+      - api:
+          method: POST
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "home approval ${RUN_ID:-local}-${AFT_CASE_ID}"
+            issue_type: task
+            priority: 2
+            design: "Approve the Home design for ${AFT_CASE_ID}."
+            labels: [needs-revision]
+          save:
+            - from: data.id
+              as: homeApproveId
+        intent: An agent creates a designed task that still carries its revision label.
+      - api:
+          method: PATCH
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:homeApproveId}"
+          body:
+            status: review
+        intent: The agent submits the designed task to the Home approval queue.
+
+  approve-design-gate:
+    intent: A human approves the design through its mounted Home queue action.
+    actor: human
+    via: ui
+    steps:
+      - click:
+          selector: "[data-testid=queue-card][data-kind=design-gate] [data-testid=queue-approve]"
+
+  read-approved-design:
+    intent: An API readback confirms Home approval reopened the task.
+    actor: api-client
+    via: api
+    steps:
+      - api:
+          method: GET
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:homeApproveId}"
+          assert:
+            - path: data.status
+              equals: open
+        intent: Read back the task status after the operator approves its design.
+
+  create-blocked-task:
+    intent: An agent asks for operator help while Home remains open.
+    actor: agent
+    via: api
+    steps:
+      - api:
+          method: POST
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "home unblock ${RUN_ID:-local}-${AFT_CASE_ID}"
+            issue_type: task
+            priority: 2
+            assignee: "home-agent-${AFT_CASE_ID}"
+            notes: "BLOCKED: waiting for operator input ${AFT_CASE_ID}"
+          save:
+            - from: data.id
+              as: homeUnblockId
+        intent: An agent creates its assigned task with an explanation for the operator.
+      - api:
+          method: PATCH
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:homeUnblockId}"
+          body:
+            status: blocked
+        intent: The agent declares its assigned task blocked.
+
+  unblock-task:
+    intent: A human unblocks the task through its mounted Home queue action.
+    actor: human
+    via: ui
+    steps:
+      - click:
+          selector: "[data-testid=queue-card][data-kind=blocked] [data-testid=queue-unblock]"
+
+  read-unblocked-task:
+    intent: An API readback confirms the human reopened the same assigned task.
+    actor: api-client
+    via: api
+    steps:
+      - api:
+          method: GET
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:homeUnblockId}"
+          assert:
+            - path: data.status
+              equals: open
+            - path: data.assignee
+              equals: "home-agent-${AFT_CASE_ID}"
+        intent: Read back the unblocked task's status and assignee.
+
+  create-needs-revision-task:
+    intent: An agent flags an open task for operator revision while Home remains open.
+    actor: agent
+    via: api
+    steps:
+      - api:
+          method: POST
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "home revision review ${RUN_ID:-local}-${AFT_CASE_ID}"
+            issue_type: task
+            priority: 2
+            description: "Review this task from workspace Home."
+            labels: [needs-revision]
+          save:
+            - from: data.id
+              as: homeRevisionId
+        intent: An agent creates an open task carrying the needs-revision label.
+
+  open-needs-revision-task:
+    intent: A human opens the needs-revision task from Home for review.
+    actor: human
+    via: ui
+    steps:
+      - click: { role: button, name: "Review task", exact: true }

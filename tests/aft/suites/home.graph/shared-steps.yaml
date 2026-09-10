@@ -1,0 +1,21 @@
+kind: graph-steps
+version: 1
+flow: home-operator-queue
+
+blocks:
+  blank-browser-ready:
+    steps:
+      - expect: { url: "about:blank" }
+
+  hydrated-home-ready:
+    steps:
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=home-page]')
+        intent: Wait until workspace Home is mounted.
+      - expect: { visible: { testid: home-page } }
+      - expect: { visible: { testid: queue-empty } }
+      - expect:
+          count:
+            selector: "[data-testid=operator-queue] [data-testid=queue-card]"
+            equals: 0
