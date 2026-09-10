@@ -38,7 +38,7 @@ func classifyHTTPError(op string, statusCode int, body apiResponse) error {
 	case 409:
 		return backend.ErrConflict(op, msg)
 	case 429:
-		return backend.ErrUnavailable(op, "rate limited: "+msg, nil)
+		return backend.ErrRateLimited(op, msg)
 	case 503:
 		return backend.ErrUnavailable(op, msg, nil)
 	case 504:

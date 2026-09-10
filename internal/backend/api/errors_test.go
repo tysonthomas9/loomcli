@@ -58,7 +58,7 @@ func TestClassifyHTTPError_StatusCodes(t *testing.T) {
 		{"403 forbidden", 403, apiResponse{Error: "forbidden"}, backend.KindUnavailable},
 		{"404 not found", 404, apiResponse{Error: "issue not found"}, backend.KindNotFound},
 		{"409 conflict", 409, apiResponse{Error: "already claimed"}, backend.KindConflict},
-		{"429 rate limit", 429, apiResponse{Error: "too many requests"}, backend.KindUnavailable},
+		{"429 rate limit", 429, apiResponse{Error: "too many requests"}, backend.KindRateLimited},
 		{"500 internal", 500, apiResponse{Error: "server error"}, backend.KindInternal},
 		{"502 bad gateway", 502, apiResponse{Error: "bad gateway"}, backend.KindInternal},
 		{"503 unavailable", 503, apiResponse{Error: "maintenance"}, backend.KindUnavailable},

@@ -235,6 +235,20 @@ func TestHandleServiceError_KindStarting(t *testing.T) {
 			wantMsg:        "workspace is loading",
 		},
 		{
+			name:           "KindRateLimited propagates the upstream Retry-After",
+			err:            service.ErrRateLimitedRetryAfter("rate limit exceeded", "7"),
+			wantStatus:     http.StatusTooManyRequests,
+			wantRetryAfter: "7",
+			wantMsg:        "rate limit exceeded",
+		},
+		{
+			name:           "KindRateLimited without an upstream value sets no header",
+			err:            service.ErrRateLimited("rate limit exceeded"),
+			wantStatus:     http.StatusTooManyRequests,
+			wantRetryAfter: "",
+			wantMsg:        "rate limit exceeded",
+		},
+		{
 			name:           "KindUnavailable does NOT set Retry-After header",
 			err:            service.ErrUnavailable("service down"),
 			wantStatus:     http.StatusServiceUnavailable,
