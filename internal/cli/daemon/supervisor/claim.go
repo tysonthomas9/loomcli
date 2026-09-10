@@ -341,7 +341,7 @@ func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts
 			s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), fmt.Sprintf("requested task %s is not claimable", taskID))
 			return false
 		}
-		if err := s.claimIssueForAgent(ap, taskID, "requested task"); err != nil {
+		if err := s.claimIssueForAgent(ap, taskID, issue.SourceRepo, "requested task"); err != nil {
 			if backend.IsKind(err, backend.KindConflict) {
 				s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome), fmt.Sprintf("requested task %s locked by %s", taskID, conflictHolder(err)))
 				return false
@@ -368,7 +368,11 @@ func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts
 // work, and abandoning it mid-flight is the very thing the hold promises not to
 // do to a run in flight.
 func (s *Supervisor) claimResumeTask(ap *AgentProcess, taskID string) bool {
-	err := s.claimIssueForAgent(ap, taskID, "resume interrupted task")
+	// No IssueData in hand, and deliberately no extra fetch: a resume is by
+	// definition the same task that already ran in the current effective
+	// worktree, so it keeps that placement (applyTaskPlacement reads an empty
+	// repo as "keep current").
+	err := s.claimIssueForAgent(ap, taskID, "", "resume interrupted task")
 	if err == nil {
 		return true
 	}
@@ -382,6 +386,7 @@ func (s *Supervisor) claimResumeTask(ap *AgentProcess, taskID string) bool {
 		}
 		ap.Mu.Lock()
 		ap.AssignedTaskID = taskID
+		ap.AssignedTaskRepo = ""
 		ap.RequestedTaskID = ""
 		ap.Mu.Unlock()
 		slog.Info("resuming task already claimed by this worktree", "worktree", ap.Entry.Worktree, "task_id", taskID)
@@ -407,7 +412,7 @@ func (s *Supervisor) tryClaimBestTask(ap *AgentProcess, issues []backend.IssueDa
 		if match == nil {
 			return false, false
 		}
-		if err := s.claimIssueForAgent(ap, match.Issue.ID, match.Reason); err != nil {
+		if err := s.claimIssueForAgent(ap, match.Issue.ID, match.Issue.SourceRepo, match.Reason); err != nil {
 			if backend.IsKind(err, backend.KindConflict) {
 				conflicts.record(match.Issue.ID, conflictHolder(err))
 				if conflicts.count >= claimConflictRetryLimit {
@@ -439,7 +444,12 @@ func conflictHolder(err error) string {
 	return "unknown"
 }
 
-func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string) error {
+// claimIssueForAgent claims taskID for the agent and records BOTH the task id
+// and the repo the task belongs to. sourceRepo is a required parameter rather
+// than something looked up here so every call site has to decide explicitly
+// whether it has a repo (from IssueData.SourceRepo) or genuinely does not (the
+// resume path, which keeps the placement it carried into the cycle).
+func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, sourceRepo, reason string) error {
 	claimant := claimantID(ap)
 	// Reserve first: this is the mutual exclusion. Losing the reservation race
 	// returns a KindConflict indistinguishable from a backend one, so every
@@ -468,6 +478,7 @@ func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string)
 	s.claims.dropOthers(claimant, taskID)
 	ap.Mu.Lock()
 	ap.AssignedTaskID = taskID
+	ap.AssignedTaskRepo = sourceRepo
 	ap.RequestedTaskID = ""
 	// The counters still hold the streak that just ended: applyNoWorkRestart
 	// increments NoWorkCount, and every reset lives in an exit-path handler
@@ -475,7 +486,7 @@ func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string)
 	idlePolls := ap.NoWorkCount
 	idleSince := ap.IdleSince
 	ap.Mu.Unlock()
-	args := []any{"worktree", ap.Entry.Worktree, "task_id", taskID, "reason", reason}
+	args := []any{"worktree", ap.Entry.Worktree, "task_id", taskID, "source_repo", sourceRepo, "reason", reason}
 	if idlePolls > 0 {
 		args = append(args, "idle_polls", idlePolls, "idle_for", time.Since(idleSince))
 	}

@@ -44,22 +44,31 @@ func (s *Supervisor) sweepOrphanedBackends() {
 }
 
 // managedWorktreePaths returns the absolute filesystem paths the daemon is
-// currently supervising (one per agent). Used to scope the startup orphan
-// sweep so the daemon never signals processes that aren't ours.
+// currently supervising. Used to scope the startup orphan sweep so the daemon
+// never signals processes that aren't ours.
+//
+// It collects BOTH the base and the effective placement for each agent: an
+// agent that was re-pointed to another repo's worktree can have left an orphan
+// in either, and dropping the base one would leave that orphan unswept.
 func (s *Supervisor) managedWorktreePaths() []string {
 	s.AgentsMu.RLock()
 	defer s.AgentsMu.RUnlock()
 	seen := map[string]struct{}{}
-	paths := make([]string, 0, len(s.Agents))
+	paths := make([]string, 0, 2*len(s.Agents))
 	for _, ap := range s.Agents {
-		if ap == nil || ap.WorktreePath == "" {
+		if ap == nil {
 			continue
 		}
-		if _, dup := seen[ap.WorktreePath]; dup {
-			continue
+		for _, path := range []string{ap.WorktreePath, ap.WorkDir()} {
+			if path == "" {
+				continue
+			}
+			if _, dup := seen[path]; dup {
+				continue
+			}
+			seen[path] = struct{}{}
+			paths = append(paths, path)
 		}
-		seen[ap.WorktreePath] = struct{}{}
-		paths = append(paths, ap.WorktreePath)
 	}
 	return paths
 }

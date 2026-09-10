@@ -21,6 +21,7 @@ const (
 	IssueBackendOutageOutcome                  // the ISSUE backend (fleet-db) is unreachable or rejecting our credentials
 	SupervisorStopOutcome                      // the supervisor itself ended the run (daemon shutdown, operator stop, agent removed from config)
 	RunTurnDeadlineOutcome                     // the turn was ended by loom's own per-turn deadline (LOOM_RUN_TURN_TIMEOUT_SECONDS)
+	WorktreeUnavailableOutcome                 // the claimed task's source_repo has no usable worktree for this agent (unknown repo, or resolution failed)
 )
 
 func (d DomainOutcome) String() string {
@@ -45,6 +46,8 @@ func (d DomainOutcome) String() string {
 		return "SupervisorStop"
 	case RunTurnDeadlineOutcome:
 		return "RunTurnDeadline"
+	case WorktreeUnavailableOutcome:
+		return "WorktreeUnavailable"
 	default:
 		return "None"
 	}

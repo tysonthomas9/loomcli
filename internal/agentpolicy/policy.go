@@ -218,6 +218,12 @@ func decideDomain(d agenterr.DomainOutcome) Disposition {
 		// consume turns forever. BPTimeout is the backoff bucket for a
 		// time-budget overrun.
 		return Disposition{Decision: Retry, Backoff: BPTimeout, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
+	case agenterr.WorktreeUnavailableOutcome:
+		// The claimed task names a repo this workspace has no worktree for.
+		// Same shape as BackendUnavailable: operator-actionable, immune to an
+		// immediate retry, and self-healing once the repo is registered — so
+		// block with a periodic recheck rather than burning restart budget.
+		return Disposition{Decision: Block, Backoff: BPBackendUnavailable}
 	case agenterr.IncompleteRunOutcome:
 		// The turn ended before the task did. Retrying is the right move — the
 		// worktree, the checkpoint and (across a daemon restart) the session id

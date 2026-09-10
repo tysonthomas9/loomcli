@@ -333,6 +333,48 @@ func reportStalledSharedWorktrees() {
 	}
 }
 
+// CleanAdoptedWorktree readies a worktree the supervisor has just re-pointed a
+// cycle onto (see supervisor.applyTaskPlacement) WITHOUT touching any task
+// claim. It drops a stale lock and returns the tree to a clean checkout, so the
+// agent's BeforeRef and branch cut start from a known state.
+//
+// It is deliberately NOT RecoverWorktree. That call releases and resets tasks —
+// the one it is handed, and every other in_progress task assigned to the agent —
+// and on this path the supervisor has ALREADY claimed the task it is about to
+// run. Full recovery here would hand that claim straight back. A stale lock left
+// in this worktree may still name an orphaned task; the next cycle's ordinary
+// pre-flight recovery, which now runs against the carried placement, releases it
+// with the task id in hand.
+//
+// A lock whose process is still ALIVE is left completely alone: another agent is
+// working there and this is not the path that arbitrates that.
+func CleanAdoptedWorktree(worktreePath string) error {
+	if worktreePath == "" {
+		return nil
+	}
+	if _, err := os.Stat(worktreePath); err != nil {
+		// Nothing on disk to clean. The resolver creates the worktree when the
+		// repo checkout exists, so this is the harmless case (a test seam, or a
+		// path that vanished under us), not a condition to fail the cycle on.
+		return nil //nolint:nilerr // absence is not a cleanup failure
+	}
+	lockInfo, isRunning, err := cli.CheckLock(worktreePath)
+	if err != nil {
+		return fmt.Errorf("failed to check lock: %w", err)
+	}
+	if isRunning {
+		return fmt.Errorf("worktree %s is locked by a running process (PID %d)", worktreePath, lockInfo.PID)
+	}
+	if lockInfo != nil {
+		if err := forceReleaseLock(worktreePath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to clear lock: %w", err)
+		}
+	}
+	abortInProgressGitOp(worktreePath)
+	cleanUntrackedFiles(worktreePath, true)
+	return nil
+}
+
 // StalledSharedWorktrees exposes the shared-worktree scan to the daemon
 // supervisor, which already depends on this package and must not grow a
 // dependency on the git plumbing underneath it.

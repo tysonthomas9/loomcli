@@ -35,7 +35,7 @@ func (s *Supervisor) DrainWithGrace(ap *AgentProcess, reason string, yieldTimeou
 	}
 
 	if s.agentStopped(ap) {
-		if err := ClearYieldFile(ap.WorktreePath); err != nil {
+		if err := ClearYieldFile(ap.WorkDir()); err != nil {
 			slog.Warn("failed to clear stale yield file", "worktree", ap.Entry.Worktree, "err", err)
 		}
 		slog.Info("agent already stopped before yield", "worktree", ap.Entry.Worktree)
@@ -58,7 +58,7 @@ func (s *Supervisor) DrainWithGrace(ap *AgentProcess, reason string, yieldTimeou
 		return outcome(DrainPhaseYieldWriteFail)
 	}
 	defer func() {
-		if err := ClearYieldFile(ap.WorktreePath); err != nil {
+		if err := ClearYieldFile(ap.WorkDir()); err != nil {
 			slog.Warn("failed to clear yield file after drain", "worktree", ap.Entry.Worktree, "err", err)
 		}
 	}()
@@ -132,7 +132,7 @@ func (s *Supervisor) isGracefulYieldExit(ap *AgentProcess) bool {
 	}
 	// No daemon-side drain ran: fall back to the file, which is the only record
 	// of an agent-initiated yield.
-	return IsYieldRequested(ap.WorktreePath)
+	return IsYieldRequested(ap.WorkDir())
 }
 
 // GetYieldTimeout returns the configured yield timeout duration.

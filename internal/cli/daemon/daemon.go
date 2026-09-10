@@ -363,6 +363,15 @@ func wireSupervisorCallbacks(sup *supervisor.Supervisor, issueBackend backend.Is
 		}
 		return nil
 	}
+	// Resolve the per-repo, per-agent worktree, creating it when the repo
+	// checkout exists but the agent's worktree does not. This is the seam
+	// applyTaskPlacement routes through; nil disables placement routing.
+	//
+	// The implementation lives in the supervisor package rather than inline
+	// here: it needs internal/cli/workspace, which that package already imports
+	// and this one does not — and internal/cli/daemon sits AT its import-fanout
+	// ceiling (gate step 7), so adding the import would fail the gate.
+	sup.ResolveWorktree = supervisor.DefaultResolveWorktree
 	sup.IssueBackendReady = func(epicID string) (bool, error) {
 		issues, err := issueBackend.Ready(cmdstore.RootContext(), backend.ReadyOpts{
 			ParentID: epicID,

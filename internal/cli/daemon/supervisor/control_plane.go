@@ -245,7 +245,7 @@ func (s *Supervisor) createAgentSession(ap *AgentProcess, epicID string) {
 		return
 	}
 	txPath := sessStore.NativeTranscriptPath(sess.SessionID())
-	bRef := automode.CaptureHEADRef(ap.WorktreePath)
+	bRef := automode.CaptureHEADRef(ap.WorkDir())
 	ap.Mu.Lock()
 	ap.Session = sess
 	ap.AgentSessionID = sess.SessionID()
