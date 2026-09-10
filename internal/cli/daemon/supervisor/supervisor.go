@@ -783,6 +783,10 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	// quarantine — deliberate (hook outcomes are agent-side, not task-side) and
 	// bounded instead by the agent's block budget via CompletionHookFailure.
 	s.recordTaskExitForQuarantine(ap, exitCode)
+	// Orphan backstop, on the same seam and for the same reason: the lock is
+	// still present, so the sweep's Warn line can name the task the escaped
+	// process belongs to. Only a RunTurnDeadline exit reaches the sweep.
+	s.sweepOrphansAfterDeadlineExit(ap)
 	// Completion hooks run while the session id, claim, and transcript still
 	// exist, and before finalize/checkpoint/recovery decide the run's fate: a
 	// failed hook write demotes exitCode so the owned task is reopened.

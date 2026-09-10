@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
@@ -144,4 +147,82 @@ func TestSweepOrphanedBackendsForWorktree_KillsOnlyItsOwnWorktree(t *testing.T) 
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("orphaned child PID %d survived its own worktree's sweep", childPID)
+}
+
+// stubDeadlineSweep swaps the classification-path sweep seam for a recorder, so
+// the both-directions test below asserts the WIRING without signaling anything.
+func stubDeadlineSweep(t *testing.T) *[]string {
+	t.Helper()
+	saved := sweepDeadlineOrphans
+	t.Cleanup(func() { sweepDeadlineOrphans = saved })
+	var swept []string
+	sweepDeadlineOrphans = func(_ *Supervisor, worktreePath, taskID string) int {
+		swept = append(swept, worktreePath+"|"+taskID)
+		return 1
+	}
+	return &swept
+}
+
+// TestSweepOrphansAfterDeadlineExit_OnlyOnDeadlineOutcome is the whole point of
+// the hook: an orphan is created when a turn is CUT SHORT, so the backstop must
+// fire on a run-turn deadline exit and on nothing else. Sweeping after every
+// exit would put a process-table scan and a signal on the daemon's hot restart
+// path for runs that ended normally.
+func TestSweepOrphansAfterDeadlineExit_OnlyOnDeadlineOutcome(t *testing.T) {
+	cases := []struct {
+		name     string
+		lastErr  *agenterr.AgentError
+		wantSwep bool
+	}{
+		{"run-turn deadline", &agenterr.AgentError{
+			Class: agenterr.OutcomeFromDomain(agenterr.RunTurnDeadlineOutcome)}, true},
+		{"incomplete run", &agenterr.AgentError{
+			Class: agenterr.OutcomeFromDomain(agenterr.IncompleteRunOutcome)}, false},
+		{"no work", &agenterr.AgentError{
+			Class: agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome)}, false},
+		{"harness timeout (run-duration cap)", &agenterr.AgentError{
+			Class: agenterr.OutcomeFromHarness(wrapper.ErrTimeout)}, false},
+		{"clean exit", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			swept := stubDeadlineSweep(t)
+			s := newDrainTestSupervisor(&config.DaemonConfig{})
+			ap := &AgentProcess{
+				WorktreePath:   t.TempDir(),
+				AssignedTaskID: "PUPPET-612",
+				LastError:      tc.lastErr,
+			}
+			s.sweepOrphansAfterDeadlineExit(ap)
+			if got := len(*swept) > 0; got != tc.wantSwep {
+				t.Fatalf("swept=%v, want %v (swept=%v)", got, tc.wantSwep, *swept)
+			}
+			if tc.wantSwep && (*swept)[0] != ap.WorktreePath+"|PUPPET-612" {
+				t.Fatalf("sweep called with %q, want %q", (*swept)[0], ap.WorktreePath+"|PUPPET-612")
+			}
+		})
+	}
+}
+
+// TestSweepOrphansAfterDeadlineExit_SkipsEmptyWorktree repeats the empty-path
+// guard one level up: an agent with no recorded worktree must not reach the
+// sweep at all, since the sweep's own fallback would be to sweep nothing but
+// the guard belongs on both sides of the seam.
+func TestSweepOrphansAfterDeadlineExit_SkipsEmptyWorktree(t *testing.T) {
+	swept := stubDeadlineSweep(t)
+	s := newDrainTestSupervisor(&config.DaemonConfig{})
+	for _, path := range []string{"", "   "} {
+		ap := &AgentProcess{
+			WorktreePath:   path,
+			AssignedTaskID: "PUPPET-612",
+			LastError: &agenterr.AgentError{
+				Class: agenterr.OutcomeFromDomain(agenterr.RunTurnDeadlineOutcome)},
+		}
+		if killed := s.sweepOrphansAfterDeadlineExit(ap); killed != 0 {
+			t.Fatalf("worktree path %q reported %d kills, want 0", path, killed)
+		}
+	}
+	if len(*swept) != 0 {
+		t.Fatalf("empty worktree path still reached the sweep: %v", *swept)
+	}
 }
