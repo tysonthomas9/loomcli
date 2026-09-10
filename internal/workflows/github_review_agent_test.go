@@ -10,13 +10,17 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
-// Both built-ins are registered and discoverable through the generalized
+// All built-ins are registered and discoverable through the generalized
 // registry: BuiltinWorkflowNames returns them sorted, and each resolves to a
 // single-entrypoint spec at workflows/{name}.ts. BuiltinWorkflow returns a
 // defensive copy of the files map (mutating it must not corrupt the registry).
-func TestBuiltinWorkflowRegistryListsBothBuiltins(t *testing.T) {
+//
+// This is the deliberate builtin-count tripwire: adding a builtin extends the
+// want list AND the per-builtin file counts in the same change (scout was the
+// third, per the scout proposal's Builtin registration section).
+func TestBuiltinWorkflowRegistryListsAllBuiltins(t *testing.T) {
 	names := BuiltinWorkflowNames()
-	want := []string{BuiltinEpicRunnerWorkflowName, BuiltinGitHubReviewAgentWorkflowName}
+	want := []string{BuiltinEpicRunnerWorkflowName, BuiltinGitHubReviewAgentWorkflowName, BuiltinScoutWorkflowName}
 	if len(names) != len(want) {
 		t.Fatalf("BuiltinWorkflowNames() = %v, want %v", names, want)
 	}
@@ -38,9 +42,12 @@ func TestBuiltinWorkflowRegistryListsBothBuiltins(t *testing.T) {
 			t.Fatalf("%s spec missing entrypoint file %q", name, entrypoint)
 		}
 		wantFiles := 1
-		if name == BuiltinEpicRunnerWorkflowName {
+		switch name {
+		case BuiltinEpicRunnerWorkflowName:
 			wantFiles = 4
-		} else if name == BuiltinGitHubReviewAgentWorkflowName {
+		case BuiltinGitHubReviewAgentWorkflowName:
+			wantFiles = 2
+		case BuiltinScoutWorkflowName:
 			wantFiles = 2
 		}
 		if len(spec.Files) != wantFiles {

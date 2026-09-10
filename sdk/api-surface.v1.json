@@ -109,6 +109,10 @@
       "method": "POST",
       "fields": ["connectorId", "action", "resource", "args", "preconditions", "callSeq"]
     },
+    "create-issue": {
+      "method": "POST",
+      "fields": ["title", "description", "issueType", "priority", "labels", "repo", "parent", "design", "status", "idempotencyKey"]
+    },
     "events/await": { "method": "POST", "fields": ["pattern", "actor", "timeoutMs", "awaitIndex"] },
     "events/awaits": { "method": "GET", "fields": [] },
     "workflows/start": { "method": "POST", "fields": ["workflowName", "idempotencyKey", "startIndex", "input"] },
@@ -119,6 +123,7 @@
       "epics": ["get", "snapshot", "watch"],
       "agents": ["list", "orchestrationSession", "updateParent", "deliverAssignment", "message"],
       "tasks": ["claimReady", "complete", "release"],
+      "issues": ["create"],
       "taskRuns": ["request", "get", "await", "active", "recoverStale"],
       "connectors": ["dispatch", "github", "slack", "datadog"],
       "events": ["await", "list"],

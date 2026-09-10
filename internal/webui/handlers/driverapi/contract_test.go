@@ -22,6 +22,7 @@ var frozenDriverOps = []string{
 	"claim-ready",
 	"complete-task",
 	"connector-dispatch",
+	"create-issue",
 	"deliver-agent-message",
 	"deliver-lead-assignment",
 	"emit-event",

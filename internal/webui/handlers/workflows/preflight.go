@@ -17,17 +17,24 @@ import (
 // would fail deep in the worker — or fake-complete — so we resolve the backend
 // and health-check it here, mirroring the CLI `loom epic run` preflight.
 //
-// Returns nil (no gate) for every non-local runner and for non-epic-runner
-// workflows. Returns an actionable error string when the local runner cannot
-// execute.
+// Returns nil (no gate) for every non-local runner and for workflows whose
+// leaves never shell out locally. Returns an actionable error string when the
+// local runner cannot execute.
 func (m *Module) preflightRunnerForRun(ctx context.Context, ws, workflowName string, payload json.RawMessage) error {
-	if strings.TrimSpace(workflowName) != workflowdefs.BuiltinEpicRunnerWorkflowName {
+	switch strings.TrimSpace(workflowName) {
+	case workflowdefs.BuiltinEpicRunnerWorkflowName:
+		if !runnerIsLocal(payload) {
+			return nil
+		}
+		return runtimepreflight.PreflightLocalTaskRunner(ctx, m.store, ws)
+	case workflowdefs.BuiltinScoutWorkflowName:
+		// The scout's analysis leaf (scout-task-runner) always execs the
+		// workspace-default backend CLI on the host, regardless of the payload's
+		// runner field — so the same fail-closed backend health check applies.
+		return runtimepreflight.PreflightLocalTaskRunner(ctx, m.store, ws)
+	default:
 		return nil
 	}
-	if !runnerIsLocal(payload) {
-		return nil
-	}
-	return runtimepreflight.PreflightLocalTaskRunner(ctx, m.store, ws)
 }
 
 // runnerIsLocal reports whether the run payload resolves to the local task
