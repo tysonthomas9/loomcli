@@ -293,3 +293,80 @@ func TestBackendIssueDataToWithCounts_CarriesExternalRef(t *testing.T) {
 		t.Errorf("ExternalRef = %v, want %q carried into the embedded Issue", wc.Issue.ExternalRef, ref)
 	}
 }
+
+// TestListArgsToBackendOpts_CarriesEveryDeclaredFilter is where PUPPET-603's bug
+// lived: this mapping copied seven of the 21 declared filters and dropped the
+// rest, so `?no_assignee=true` reached the backend as an empty ListOpts and came
+// back 200 with the whole board. A dropped filter is undetectable to the caller;
+// a forwarded one the backend cannot honor at least surfaces as a 400.
+func TestListArgsToBackendOpts_CarriesEveryDeclaredFilter(t *testing.T) {
+	p := 1
+	pinned := true
+	args := &rpc.ListArgs{
+		Status:      "open",
+		IssueType:   "bug",
+		Assignee:    "tyson",
+		Labels:      []string{"alpha"},
+		ParentID:    "EPIC-1",
+		Limit:       25,
+		SourceRepos: []string{"org/repo"},
+
+		Priority:      &p,
+		CreatedAfter:  "2026-01-01",
+		CreatedBefore: "2026-12-31",
+		UpdatedAfter:  "2026-02-01",
+		UpdatedBefore: "2026-11-30",
+
+		Query:               "needle",
+		TitleContains:       "title",
+		DescriptionContains: "desc",
+		NotesContains:       "note",
+
+		EmptyDescription: true,
+		NoAssignee:       true,
+		NoLabels:         true,
+		Pinned:           &pinned,
+	}
+
+	got := listArgsToBackendOpts(args)
+
+	checks := []struct {
+		field string
+		ok    bool
+	}{
+		{"Status", got.Status == "open"},
+		{"IssueType", got.IssueType == "bug"},
+		{"Assignee", got.Assignee == "tyson"},
+		{"Labels", len(got.Labels) == 1 && got.Labels[0] == "alpha"},
+		{"ParentID", got.ParentID == "EPIC-1"},
+		{"Limit", got.Limit == 25},
+		{"SourceRepos", len(got.SourceRepos) == 1 && got.SourceRepos[0] == "org/repo"},
+
+		{"Priority", got.Priority != nil && *got.Priority == 1},
+		{"CreatedAfter", got.CreatedAfter == "2026-01-01"},
+		{"CreatedBefore", got.CreatedBefore == "2026-12-31"},
+		{"UpdatedAfter", got.UpdatedAfter == "2026-02-01"},
+		{"UpdatedBefore", got.UpdatedBefore == "2026-11-30"},
+
+		{"Query", got.Query == "needle"},
+		{"TitleContains", got.TitleContains == "title"},
+		{"DescriptionContains", got.DescriptionContains == "desc"},
+		{"NotesContains", got.NotesContains == "note"},
+
+		{"EmptyDescription", got.EmptyDescription},
+		{"NoAssignee", got.NoAssignee},
+		{"NoLabels", got.NoLabels},
+		{"Pinned", got.Pinned != nil && *got.Pinned},
+	}
+	for _, c := range checks {
+		if !c.ok {
+			t.Errorf("%s was not carried into backend.ListOpts", c.field)
+		}
+	}
+}
+
+func TestListArgsToBackendOpts_NilArgs(t *testing.T) {
+	if got := listArgsToBackendOpts(nil); got.Status != "" || got.Limit != 0 {
+		t.Errorf("listArgsToBackendOpts(nil) = %+v, want the zero value", got)
+	}
+}
