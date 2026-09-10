@@ -22,6 +22,8 @@ graph:
     create-design-gate: design-gate-visible
     create-blocked-task: blocked-task-visible
     create-needs-revision-task: needs-revision-visible
+    create-live-activity: live-activity-visible
+    create-historical-activity: historical-activity-recorded
 
   design-gate-visible:
     approve-design-gate: design-gate-cleared
@@ -37,6 +39,9 @@ graph:
 
   needs-revision-visible:
     open-needs-revision-task: needs-revision-panel-open
+
+  historical-activity-recorded:
+    reload-home-activity: activity-history-restored
 
 coverage:
   strategy: transition

@@ -181,3 +181,28 @@ transitions:
     via: ui
     steps:
       - click: { role: button, name: "Review task", exact: true }
+
+  create-live-activity:
+    intent: An agent creates and starts a task while the operator observes workspace Home.
+    actor: agent
+    via: api
+    steps:
+      - use: emit-home-activity
+        with:
+          title: "home live activity ${RUN_ID:-local}-${AFT_CASE_ID}"
+
+  create-historical-activity:
+    intent: An agent creates and claims a task whose persisted activity should survive a fresh Home load.
+    actor: agent
+    via: api
+    steps:
+      - use: emit-home-activity
+        with:
+          title: "home historical activity ${RUN_ID:-local}-${AFT_CASE_ID}"
+
+  reload-home-activity:
+    intent: A human reloads Home to review the activity restored from task history.
+    actor: human
+    via: ui
+    steps:
+      - reload: true

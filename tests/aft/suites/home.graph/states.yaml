@@ -119,3 +119,57 @@ states:
       - expect: { visible: { testid: issue-header } }
       - expect: { visible: { testid: editable-description } }
       - expect: { text: "home revision review ${RUN_ID:-local}-${AFT_CASE_ID}" }
+
+  live-activity-visible:
+    intent: Home captures an agent's live task status changes once and in newest-first order.
+    terminal: true
+    assert:
+      - wait:
+          fn: >-
+            (() => {
+              const rows = Array.from(document.querySelectorAll('[data-testid=activity-row]'));
+              const issueId = rows[0]?.querySelector('code')?.textContent;
+              if (!issueId) return false;
+              const latest = rows.filter((row) => row.querySelector('code')?.textContent === issueId);
+              const occurrences = (text) => latest.filter((row) => row.textContent.includes(text)).length;
+              return latest.length >= 2 &&
+                latest[0].textContent.includes('set to in progress') &&
+                latest[1].textContent.includes('set to open') &&
+                occurrences('set to in progress') === 1 &&
+                occurrences('set to open') === 1 &&
+                latest.every((row) => row.textContent.includes('loom-e2e')) &&
+                latest[0].querySelector('[data-marker]')?.getAttribute('data-marker') === 'op';
+            })()
+        intent: Wait until Home shows each live status change once with the newest action first.
+      - expect: { visible: { testid: rail-activity } }
+      - expect: { visible: { testid: activity-scroll } }
+
+  historical-activity-recorded:
+    intent: Home has received the live task activity before its persisted history is reloaded.
+    assert:
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-testid=activity-row]').length >= 3
+        intent: Wait until the live Home rail contains the task's core lifecycle changes.
+      - expect: { visible: { testid: rail-activity } }
+
+  activity-history-restored:
+    intent: A fresh Home load restores the task's persisted creation and claim activity without duplicate rows.
+    terminal: true
+    assert:
+      - wait:
+          fn: >-
+            (() => {
+              const rows = Array.from(document.querySelectorAll('[data-testid=activity-row]'));
+              if (rows.length < 2) return false;
+              const latest = rows.slice(0, 2);
+              const issueIds = latest.map((row) => row.querySelector('code')?.textContent);
+              return latest[0].textContent.includes('claimed') &&
+                latest[1].textContent.includes('created') &&
+                latest.every((row) => row.textContent.includes('loom-e2e')) &&
+                issueIds.every((id) => id && id === issueIds[0]) &&
+                latest[0].querySelector('[data-marker]')?.getAttribute('data-marker') === 'op';
+            })()
+        intent: Wait until Home rehydrates one ordered two-event history for the newest task.
+      - expect: { visible: { testid: rail-activity } }
+      - expect: { visible: { testid: activity-scroll } }

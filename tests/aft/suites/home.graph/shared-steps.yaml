@@ -19,3 +19,24 @@ blocks:
           count:
             selector: "[data-testid=operator-queue] [data-testid=queue-card]"
             equals: 0
+
+  emit-home-activity:
+    params: [title]
+    steps:
+      - api:
+          method: POST
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "{{title}}"
+            issue_type: task
+            priority: 2
+          save:
+            - from: data.id
+              as: homeActivityId
+        intent: An agent creates a task while the operator keeps Home open.
+      - api:
+          method: PATCH
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:homeActivityId}"
+          body:
+            status: in_progress
+        intent: The agent starts the task while the operator keeps Home open.
