@@ -342,6 +342,10 @@ export async function fetchGraphIssues(
       defer_until: issue.defer_until ?? null,
       due_at: issue.due_at ?? null,
     };
+    if (issue.source_repo !== undefined) {
+      result.source_repo = issue.source_repo;
+      result.repo = issue.source_repo;
+    }
     if (issue.dependencies) {
       result.dependencies = issue.dependencies.map((dep) => ({
         issue_id: issue.id,

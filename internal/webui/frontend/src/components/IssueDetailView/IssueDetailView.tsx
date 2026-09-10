@@ -26,6 +26,8 @@ import styles from "./IssueDetailView.module.css";
  * Props for the IssueDetailView component.
  */
 export interface IssueDetailViewProps {
+  /** Currently selected issue ID, used to distinguish refresh from replacement. */
+  selectedIssueId?: string | null;
   issue: Issue | IssueDetails | null;
   isLoading: boolean;
   error: string | null;
@@ -164,6 +166,7 @@ function renderDependencyChip(
  */
 export function IssueDetailView({
   issue,
+  selectedIssueId,
   isLoading,
   error,
   previousView,
@@ -294,8 +297,11 @@ export function IssueDetailView({
     [issue, onIssueUpdate],
   );
 
-  // Loading state
-  if (isLoading) {
+  // Keep an eligible same-selection snapshot mounted during background reads.
+  // A selection replacement still gets the loading state, so old content can
+  // never appear under a new issue URL.
+  const refreshingSelectedIssue = !!issue && selectedIssueId === issue.id;
+  if (isLoading && !refreshingSelectedIssue) {
     return (
       <div className={styles.container} data-testid="issue-detail-view">
         <div className={styles.headerBar}>

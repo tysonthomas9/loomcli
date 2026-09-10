@@ -24,6 +24,8 @@ function resolvePort(name: string, fallback: number): number {
 }
 
 const selfContainedPort = resolvePort("E2E_PORT", 8090);
+const mockedPort = resolvePort("E2E_MOCKED_PORT", 3000);
+const ownMockedServer = process.env.E2E_OWNED_MOCKED_SERVER === "1";
 // Vite preview serves the frontend for integration tests (backed by preview.proxy).
 const selfContainedFrontendPort = resolvePort("E2E_FRONTEND_PORT", 3100);
 
@@ -161,9 +163,9 @@ function resolveWebServer() {
   }
   // Chromium unit tests: Vite dev server
   return {
-    command: "PLAYWRIGHT_TEST=1 npm run dev",
-    url: "http://localhost:3000",
-    reuseExistingServer: !isCI,
+    command: `PLAYWRIGHT_TEST=1 npm run dev -- --port ${mockedPort} --strictPort`,
+    url: `http://localhost:${mockedPort}`,
+    reuseExistingServer: !isCI && !ownMockedServer,
     timeout: 60_000,
   };
 }
@@ -192,7 +194,7 @@ export default defineConfig({
   snapshotPathTemplate: "{snapshotDir}/{testFilePath}/{arg}{ext}",
 
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: `http://localhost:${mockedPort}`,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     video: useFailureVideo,

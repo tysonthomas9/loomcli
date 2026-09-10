@@ -119,15 +119,20 @@ async function attach(info: TestInfo, clients: Client[]) {
 async function proxyAction(action: "stop" | "start") {
   const project = process.env.LOCAL_MODE_COMPOSE_PROJECT;
   const container = process.env.LOOM_SSE_TEST_PROXY_CONTAINER;
+  const engine = process.env.LOOM_SSE_TEST_CONTAINER_ENGINE;
   if (
-    !project?.startsWith("loomcli-pg-browser-") ||
-    container !== `${project}-ui-local-1`
+    !project ||
+    !/^loomcli-(?:pg-browser|sse-ui-(?:redis|postgres))-[a-zA-Z0-9_-]+$/.test(
+      project,
+    ) ||
+    !container ||
+    (engine !== "podman" && engine !== "docker")
   ) {
     throw new Error(
-      "Select an isolated loomcli-pg-browser-* project and its exact ui-local-1 container",
+      "Select an isolated SSE compose project, container engine, and exact ui-local container ID",
     );
   }
-  const { stdout } = await run("podman", [
+  const { stdout } = await run(engine, [
     "inspect",
     "--format",
     '{{ index .Config.Labels "com.docker.compose.project" }}',
@@ -137,7 +142,7 @@ async function proxyAction(action: "stop" | "start") {
     stdout.trim(),
     "Proxy ownership label must match the selected project",
   ).toBe(project);
-  await run("podman", [action, container]);
+  await run(engine, [action, container]);
 }
 
 test("create and status frames reach two independent clients once @regression", async ({
@@ -187,7 +192,7 @@ test("create and status frames reach two independent clients once @regression", 
   }
 });
 
-test("real proxy disconnect resumes both accepted cursors without replay gaps or duplicates @regression", async ({
+test("T06 real proxy disconnect resumes both accepted cursors without replay gaps or duplicates @regression @sse-ui-transition @T06", async ({
   browser,
 }, info) => {
   test.skip(

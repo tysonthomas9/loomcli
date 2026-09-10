@@ -918,7 +918,7 @@ func TestParseGraphParams_TableDriven(t *testing.T) {
 func TestHandleGraph_BackendWhenNoPool(t *testing.T) {
 	be := &stubGraphBackend{
 		list: []backend.IssueData{
-			{ID: "PARITY-1", Title: "Child A", Status: "open", Priority: 1, IssueType: "bug", Parent: "EPIC-1"},
+			{ID: "PARITY-1", Title: "Child A", Status: "open", Priority: 1, IssueType: "bug", SourceRepo: "repo-a", Parent: "EPIC-1"},
 			{ID: "EPIC-1", Title: "Epic", Status: "open", Priority: 0, IssueType: "epic"},
 		},
 		details: map[string]*backend.IssueDetailData{
@@ -958,6 +958,9 @@ func TestHandleGraph_BackendWhenNoPool(t *testing.T) {
 	}
 	if found == nil {
 		t.Fatal("missing PARITY-1 node")
+	}
+	if found.SourceRepo != "repo-a" {
+		t.Errorf("source_repo = %q, want repo-a", found.SourceRepo)
 	}
 	// Should contain BOTH the backend-reported "blocks" dependency AND the
 	// synthesized parent-child edge (Parent field).

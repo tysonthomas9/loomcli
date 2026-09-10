@@ -1134,8 +1134,10 @@ function DefaultContent({
     );
   }, [issueRevision]);
 
-  // Loading state
-  if (isLoading) {
+  // Keep the selected issue mounted during refreshes, including mutation/SSE
+  // invalidations. A new selection must not expose the previous issue.
+  const refreshingSelectedIssue = !!issue && selectedIssueId === issue.id;
+  if (isLoading && !refreshingSelectedIssue) {
     return (
       <div className={styles.loadingContainer} data-testid="panel-loading">
         <div className={styles.spinner} />

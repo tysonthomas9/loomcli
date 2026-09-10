@@ -76,6 +76,7 @@ function createDefaultProps(
 ): IssueDetailViewProps {
   return {
     issue: createTestIssue(),
+    selectedIssueId: "test-issue-abc123",
     isLoading: false,
     error: null,
     previousView: "kanban",
@@ -118,6 +119,42 @@ describe("IssueDetailView", () => {
       fireEvent.click(screen.getByTestId("detail-back-button"));
 
       expect(onBack).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("background refresh continuity", () => {
+    it("keeps the selected issue controls mounted while its refresh is pending", () => {
+      const issue = createTestIssue();
+      const props = createDefaultProps({ issue, selectedIssueId: issue.id });
+      const { rerender } = render(
+        <IssueDetailView {...props} isLoading={false} />,
+      );
+      const status = screen.getByRole("combobox", {
+        name: "Change issue status",
+      });
+
+      rerender(<IssueDetailView {...props} isLoading={true} />);
+
+      expect(screen.queryByTestId("detail-loading")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("combobox", { name: "Change issue status" }),
+      ).toBe(status);
+    });
+
+    it("does not show the previous issue while a different selection loads", () => {
+      const issue = createTestIssue();
+      render(
+        <IssueDetailView
+          {...createDefaultProps({ issue })}
+          selectedIssueId="other-issue"
+          isLoading
+        />,
+      );
+
+      expect(screen.getByTestId("detail-loading")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("combobox", { name: "Change issue status" }),
+      ).not.toBeInTheDocument();
     });
   });
 

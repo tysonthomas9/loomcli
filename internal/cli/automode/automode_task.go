@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/workspace"
 )
 
 func createAutoSession(ctx *autoLoopCtx, prompt string) *sessions.Session {
@@ -28,7 +29,6 @@ func createAutoSession(ctx *autoLoopCtx, prompt string) *sessions.Session {
 	})
 	if sess != nil {
 		backends.SetActiveSessionRuntimeEnv(cli.GetWorkspaceRuntimeDir(), sess.SessionID())
-		go sessions.NotifyWebUI(cmdstore.RootContext(), backends.ResolveWebUIURL(), "", sess.SessionID(), sessions.StatusRunning, backends.ResolveNotifyToken())
 	}
 	return sess
 }
@@ -60,7 +60,12 @@ func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef str
 		CacheWriteTokens: cacheWriteTokens,
 	})
 	backends.ClearActiveSessionEnv()
-	go sessions.NotifyWebUI(cmdstore.RootContext(), backends.ResolveWebUIURL(), taskID, sess.SessionID(), sess.Meta.Status, backends.ResolveNotifyToken())
+	// A session only becomes task-scoped after the agent records its claim.
+	// The receiver rejects taskless notifications, so publish the final state
+	// once both the task and workspace scopes are known.
+	if taskID != "" {
+		go sessions.NotifyWebUI(cmdstore.RootContext(), backends.ResolveWebUIURL(), workspace.ResolveWorkspaceID(ctx.opts.WorkspaceID), taskID, sess.SessionID(), sess.Meta.Status, backends.ResolveNotifyToken())
+	}
 }
 
 // maxSameTaskFailures is the consecutive same-task-ID failure threshold that

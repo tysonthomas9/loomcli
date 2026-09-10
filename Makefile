@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli test-skills-release-compat fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-postgres-up local-mode-postgres-down local-mode-postgres-sse-verify local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-ci test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli test-skills-release-compat test-sse-ui-transitions test-sse-ui-transition-runner fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-postgres-up local-mode-postgres-down local-mode-postgres-sse-verify local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-ci test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -98,6 +98,17 @@ test-fleetdb-embedded: build
 # server pin.
 test-skills-release-compat:
 	@scripts/test-vercel-skills-compat.sh
+
+# Exact, zero-skip SSE/UI transition manifest. Mocked runs need only frontend
+# dependencies; Redis/PostgreSQL runs build a fresh pinned Fleet/Loom stack and
+# remove only their generated Compose project. Example:
+#   SSE_UI_BACKEND=redis SSE_UI_RUN_ID=review-123 make test-sse-ui-transitions
+test-sse-ui-transitions:
+	@: "$${SSE_UI_BACKEND:?set SSE_UI_BACKEND=mocked, redis or postgres}"
+	@scripts/test-sse-ui-transitions.sh --backend "$${SSE_UI_BACKEND}"
+
+test-sse-ui-transition-runner:
+	@scripts/test-sse-ui-transition-runner.sh
 
 test-fleetdb-supervisor:
 	@echo "Running fleet-db supervisor control-plane gate..."
@@ -783,6 +794,8 @@ help:
 	@echo "  make test-e2e          - Run Playwright mocked e2e tests (no server)"
 	@echo "  make test-fleetdb-ui   - Run fleet-db-only UI regression suite"
 	@echo "  make test-skills-release-compat - Verify the pinned Vercel corpus against a FleetDB checkout"
+	@echo "  make test-sse-ui-transitions - Exact SSE/UI P0 manifest (set SSE_UI_BACKEND=mocked|redis|postgres)"
+	@echo "  make test-sse-ui-transition-runner - Fail-closed manifest/runner self-tests"
 	@echo "  make test-env-up        - Start the disposable fleet-db test backend (workspace LOOMTEST, :53351)"
 	@echo "  make test-env-down      - Stop it and drop its volumes"
 	@echo "                            Point a shell at it: eval \"\$$(scripts/test-env.sh env)\""

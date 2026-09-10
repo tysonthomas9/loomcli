@@ -24,6 +24,8 @@ services:
     build:
       context: ${LOCAL_MODE_FLEETDB_BUILD_CONTEXT:-../../../fleet-db}
       dockerfile: deploy/docker/Dockerfile
+      args:
+        COMMIT: ${LOCAL_MODE_FLEETDB_BUILD_REVISION:-local-mode-unpinned}
     depends_on:
       postgres:
         condition: service_healthy

@@ -26,6 +26,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -157,6 +158,7 @@ function AgentsPageInner(): JSX.Element {
   const [epicRunnerRuns, setEpicRunnerRuns] = useState<
     Record<string, WorkflowRun>
   >({});
+  const taskSelectionScopeRef = useRef<string | null>(null);
 
   const persistSelectedTaskId = useCallback(
     (taskId: string | null) => {
@@ -169,7 +171,11 @@ function AgentsPageInner(): JSX.Element {
   );
 
   useEffect(() => {
-    clearIssue();
+    const selectionScope = agentName ? `${workspaceId}:${agentName}` : null;
+    if (taskSelectionScopeRef.current !== selectionScope) {
+      taskSelectionScopeRef.current = selectionScope;
+      clearIssue();
+    }
     if (!agentName) {
       setSelectedTask(null);
       return;
@@ -326,6 +332,10 @@ function AgentsPageInner(): JSX.Element {
     if (issueDetails?.id === selectedTask.id) return issueDetails;
     return selectedTask;
   }, [selectedTask, issueDetails]);
+  const inlinePanelSelectedIssueId =
+    selectedTask && issueDetails?.id === selectedTask.id
+      ? selectedTask.id
+      : null;
 
   // Workspace-wide counts for the Info tab stat cards.
   const counts = useMemo(() => {
@@ -559,6 +569,7 @@ function AgentsPageInner(): JSX.Element {
             <IssueDetailPanel
               inline
               isOpen={true}
+              selectedIssueId={inlinePanelSelectedIssueId}
               issue={inlinePanelIssue}
               isLoading={isLoadingDetails}
               error={detailError}

@@ -9,9 +9,13 @@ import {
 /** Product-created workspace with no autonomous agents; existing dogfood agents remain untouched. */
 export async function createIsolatedSSEWorkspace(): Promise<string> {
   const project = process.env.LOCAL_MODE_COMPOSE_PROJECT ?? "";
-  if (!/^loomcli-pg-browser-[a-zA-Z0-9_-]+$/.test(project)) {
+  if (
+    !/^loomcli-(?:pg-browser|sse-ui-(?:redis|postgres))-[a-zA-Z0-9_-]+$/.test(
+      project,
+    )
+  ) {
     throw new Error(
-      "SSE isolation requires a run-owned loomcli-pg-browser-* project",
+      "SSE isolation requires a run-owned loomcli-pg-browser-* or loomcli-sse-ui-<backend>-* project",
     );
   }
   const repo =

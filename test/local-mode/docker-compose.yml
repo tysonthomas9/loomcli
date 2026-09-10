@@ -45,8 +45,13 @@ services:
   fleet-db:
     image: ${LOCAL_MODE_FLEETDB_IMAGE:-loomcli-local-mode-fleet-db:latest}
     build:
-      context: ../../../fleet-db
+      context: ${LOCAL_MODE_FLEETDB_BUILD_CONTEXT:-../../../fleet-db}
       dockerfile: deploy/docker/Dockerfile
+      args:
+        # CI passes the exact pinned source SHA. The Fleet binary logs this at
+        # startup so backend identity is based on runtime evidence, not a
+        # matrix label or mutable image tag.
+        COMMIT: ${LOCAL_MODE_FLEETDB_BUILD_REVISION:-local-mode-unpinned}
     depends_on:
       redis:
         condition: service_healthy

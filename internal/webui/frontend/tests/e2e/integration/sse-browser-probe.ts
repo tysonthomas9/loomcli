@@ -66,6 +66,24 @@ export interface ProbeRequest {
   status?: number;
   type?: string;
   streamAttached?: boolean;
+  issueId?: string;
+  bodyComplete?: boolean;
+  bodyJson?: boolean;
+  successfulSnapshot?: boolean;
+}
+export interface ProbeCompletion {
+  sequence: number;
+  finishedSequence: number;
+  requestSequence: number;
+  requestId: string;
+  workspace: string;
+  path: string;
+  method: string;
+  status: number;
+  issueId?: string;
+  bodyComplete: boolean;
+  bodyJson: boolean;
+  successfulSnapshot: boolean;
 }
 export interface ProbeFrame {
   sequence: number;
@@ -82,15 +100,18 @@ export interface ProbeFrame {
 /** Observes the current application's stream, without interception or extra requests. */
 export async function createSSEBrowserProbe(page: Page, workspace: string) {
   const session = await page.context().newCDPSession(page);
+  const base = `/api/workspaces/${encodeURIComponent(workspace)}`;
   const requests: ProbeRequest[] = [],
     frames: ProbeFrame[] = [];
   const responses: { sequence: number; requestId: string; path: string }[] = [];
-  const completions: { sequence: number; requestId: string; path: string }[] =
-    [];
+  const completions: ProbeCompletion[] = [];
   const failures: { sequence: number; requestId: string; canceled: boolean }[] =
     [];
   const errors: string[] = [],
     owned = new Set<string>();
+  const enrolledReads = new Map<string, { method: string; issueId?: string }>([
+    [`${base}/issues`, { method: "GET" }],
+  ]);
   const tracked = new Map<string, ProbeRequest>();
   const streams = new Map<
     string,
@@ -104,7 +125,6 @@ export async function createSSEBrowserProbe(page: Page, workspace: string) {
   const attachments = new Set<Promise<void>>();
   let sequence = 0,
     disposed = false;
-  const base = `/api/workspaces/${encodeURIComponent(workspace)}`;
   function record<T>(array: T[], value: T) {
     if (++sequence > 10_000)
       throw new Error("SSE probe record budget exceeded");
@@ -131,10 +151,10 @@ export async function createSSEBrowserProbe(page: Page, workspace: string) {
     "Network.requestWillBeSent",
     safe((e: Protocol.Network.requestWillBeSentPayload) => {
       const url = new URL(e.request.url);
+      const enrolledRead = enrolledReads.get(url.pathname);
       if (
-        ![`${base}/events`, `${base}/events/token`, `${base}/issues`].includes(
-          url.pathname,
-        )
+        !enrolledRead &&
+        ![`${base}/events`, `${base}/events/token`].includes(url.pathname)
       )
         return;
       const resume = Object.entries(e.request.headers).find(
@@ -147,6 +167,7 @@ export async function createSSEBrowserProbe(page: Page, workspace: string) {
         method: e.request.method,
         since: url.searchParams.get("since"),
         lastEventId: resume === undefined ? null : String(resume),
+        ...(enrolledRead?.issueId ? { issueId: enrolledRead.issueId } : {}),
       };
       record(requests, request);
       tracked.set(e.requestId, request);
@@ -157,7 +178,7 @@ export async function createSSEBrowserProbe(page: Page, workspace: string) {
     safe((e: Protocol.Network.responseReceivedPayload) => {
       const request = tracked.get(e.requestId);
       if (!request) return;
-      if (request.path === `${base}/issues` && request.method === "GET") {
+      if (enrolledReads.has(request.path) && request.method === "GET") {
         record(responses, {
           sequence: sequence + 1,
           requestId: e.requestId,
@@ -243,12 +264,70 @@ export async function createSSEBrowserProbe(page: Page, workspace: string) {
     "Network.loadingFinished",
     safe((e: Protocol.Network.loadingFinishedPayload) => {
       const request = tracked.get(e.requestId);
-      if (request?.path === `${base}/issues` && request.method === "GET")
+      if (
+        !request ||
+        !enrolledReads.has(request.path) ||
+        request.method !== "GET"
+      )
+        return;
+      const finishedSequence = ++sequence;
+      if (finishedSequence > 10_000)
+        throw new Error("SSE probe record budget exceeded");
+      const completion = (async () => {
+        let bodyComplete = false;
+        let bodyJson = false;
+        let successfulSnapshot = false;
+        try {
+          const result = await session.send("Network.getResponseBody", {
+            requestId: e.requestId,
+          });
+          const body = result.base64Encoded
+            ? Buffer.from(result.body, "base64").toString("utf8")
+            : result.body;
+          bodyComplete = true;
+          try {
+            const parsed = JSON.parse(body) as unknown;
+            bodyJson = true;
+            successfulSnapshot =
+              (request.status ?? 0) >= 200 &&
+              (request.status ?? 0) < 300 &&
+              !!parsed &&
+              typeof parsed === "object" &&
+              (parsed as { success?: unknown }).success === true &&
+              "data" in parsed;
+          } catch {
+            // An intentionally injected HTTP failure may return plain text.
+            // It is complete transport evidence, but never a valid snapshot.
+          }
+        } catch (error) {
+          fail(
+            new Error(
+              `SSE probe could not read complete JSON body for ${request.path}: ${
+                error instanceof Error ? error.message : "unknown error"
+              }`,
+            ),
+          );
+        }
+        request.bodyComplete = bodyComplete;
+        request.bodyJson = bodyJson;
+        request.successfulSnapshot = successfulSnapshot;
         record(completions, {
           sequence: sequence + 1,
+          finishedSequence,
+          requestSequence: request.sequence,
           requestId: e.requestId,
+          workspace,
           path: request.path,
+          method: request.method,
+          status: request.status ?? 0,
+          ...(request.issueId ? { issueId: request.issueId } : {}),
+          bodyComplete,
+          bodyJson,
+          successfulSnapshot,
         });
+      })();
+      attachments.add(completion);
+      void completion.finally(() => attachments.delete(completion));
     }),
   );
   session.on(
@@ -277,6 +356,45 @@ export async function createSSEBrowserProbe(page: Page, workspace: string) {
     errors,
     ownIssue(id: string) {
       owned.add(id);
+      enrolledReads.set(`${base}/issues/${encodeURIComponent(id)}`, {
+        method: "GET",
+        issueId: id,
+      });
+    },
+    enrollRead(path: string, issueId?: string) {
+      const url = new URL(path, "http://probe.invalid");
+      if (!url.pathname.startsWith(`${base}/`))
+        throw new Error("Probe reads must belong to its workspace");
+      enrolledReads.set(url.pathname, {
+        method: "GET",
+        ...(issueId ? { issueId } : {}),
+      });
+    },
+    watermark() {
+      return sequence;
+    },
+    completedReadsAfter(
+      watermark: number,
+      match: {
+        path?: string;
+        issueId?: string;
+        status?: number;
+        method?: string;
+        successfulSnapshot?: boolean;
+      },
+    ) {
+      return completions.filter(
+        (completion) =>
+          completion.requestSequence > watermark &&
+          completion.bodyComplete &&
+          (match.path === undefined || completion.path === match.path) &&
+          (match.issueId === undefined ||
+            completion.issueId === match.issueId) &&
+          (match.status === undefined || completion.status === match.status) &&
+          (match.method === undefined || completion.method === match.method) &&
+          (match.successfulSnapshot === undefined ||
+            completion.successfulSnapshot === match.successfulSnapshot),
+      );
     },
     assertHealthy() {
       if (errors.length) throw new Error(errors.join("; "));
@@ -294,9 +412,9 @@ export async function createSSEBrowserProbe(page: Page, workspace: string) {
       );
     },
     async dispose() {
+      await Promise.allSettled(attachments);
       disposed = true;
       await session.detach();
-      await Promise.allSettled(attachments);
     },
   };
 }

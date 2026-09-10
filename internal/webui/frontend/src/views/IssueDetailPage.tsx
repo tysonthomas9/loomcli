@@ -209,6 +209,7 @@ export function IssueDetailPage() {
   return (
     <ErrorBoundary resetOnChange={[selectedIssueId]}>
       <IssueDetailView
+        selectedIssueId={selectedIssueId}
         issue={issueDetails}
         isLoading={isLoadingDetails}
         error={detailError}

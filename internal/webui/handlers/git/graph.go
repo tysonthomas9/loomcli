@@ -79,6 +79,7 @@ type GraphIssue struct {
 	Status       string             `json:"status"`
 	Priority     int                `json:"priority"`
 	IssueType    string             `json:"issue_type"`
+	SourceRepo   string             `json:"source_repo,omitempty"`
 	Labels       []string           `json:"labels,omitempty"`
 	Dependencies []*GraphDependency `json:"dependencies,omitempty"`
 	DeferUntil   string             `json:"defer_until,omitempty"`
@@ -396,12 +397,13 @@ func serveGraphViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 			continue
 		}
 		gi := &GraphIssue{
-			ID:        d.ID,
-			Title:     d.Title,
-			Status:    d.Status,
-			Priority:  d.Priority,
-			IssueType: d.IssueType,
-			Labels:    d.Labels,
+			ID:         d.ID,
+			Title:      d.Title,
+			Status:     d.Status,
+			Priority:   d.Priority,
+			IssueType:  d.IssueType,
+			SourceRepo: d.SourceRepo,
+			Labels:     d.Labels,
 		}
 		// Fetch detail to pull dependencies; issue backends populate
 		// DependencyData from a single Get. If Get fails, leave
