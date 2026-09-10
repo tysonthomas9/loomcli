@@ -33,6 +33,41 @@ Reproducible end-to-end plans for the fleet-db-backed architecture. Designed to 
 
 ## Running Tests
 
+### The quality gate is wall-capped
+
+`make check` (the pre-push gate, `scripts/hooks/pre-push`) and `make check-go` run
+under a wall-clock cap, so one gate invocation can never outlast the turn budget
+or session it runs inside. Without it the run is unbounded: `-timeout 15m` is
+go's *per-package* timeout, and a serial `-p 1` run over ~159 packages has no
+total. An overrun that outlives its caller becomes an orphaned `go test -race`
+tree competing for the machine with whatever starts next.
+
+The cap resolves in `scripts/gate-timeout-seconds.sh`:
+
+1. `LOOM_GATE_TIMEOUT_SECONDS`, if set to a non-negative integer, wins verbatim.
+   **`0` disables the cap** — the escape hatch for a deliberate long local run.
+2. else, if the loom supervisor exported `LOOM_RUN_TURN_TIMEOUT_SECONDS`,
+   `min(1800, budget - 300)`, floored at 300.
+3. else 1800 (30 minutes) — the default on developer machines and in CI, roughly
+   2.7x a measured green CI `make check-go`.
+
+When the cap fires, `scripts/with-timeout.sh` SIGTERMs the whole process group
+(then SIGKILLs it after a grace period, `LOOM_GATE_TIMEOUT_KILL_GRACE_SECONDS`,
+default 10s), prints a `[gate] TIMEOUT:` banner naming the cap, and exits **124**
+— the coreutils `timeout` convention.
+
+**Exit 124 means the clock ran out, not that a test failed.** Re-run with a
+larger `LOOM_GATE_TIMEOUT_SECONDS`, or `LOOM_GATE_TIMEOUT_SECONDS=0` for no cap,
+before reading it as a regression. A `[gate] ... already bounded by an outer
+wall-time cap` note is normal: it means an inner wrapper deliberately did not arm
+a second deadline.
+
+`LOOM_GATE_TIMEOUT_ACTIVE` is **internal** and must never be set by hand —
+setting it silently unwraps the entire gate. Use `LOOM_GATE_TIMEOUT_SECONDS=0`.
+
+Tests for the wrapper: `./scripts/with-timeout_test.sh` (run manually, like the
+other `scripts/*_test.sh`).
+
 ### Go Tests
 
 ```bash
