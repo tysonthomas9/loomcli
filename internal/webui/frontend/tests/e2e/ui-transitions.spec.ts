@@ -493,10 +493,12 @@ test("T04 A to B to A fences both obsolete responses @sse-ui-transition @T04", a
     .toContain("T04 issue A obsolete pending generation");
   a.title = "T04 issue A current generation";
   await detail.getByRole("button").filter({ hasText: b.id }).click();
+  await expect(page).toHaveURL(`/ws/${WS}/issues/${b.id}`);
   await expect
     .poll(() => app.pendingDetailIds.filter((id) => id === b.id).length)
     .toBeGreaterThan(0);
   await page.goBack();
+  await expect(page).toHaveURL(`/ws/${WS}/issues/${a.id}`);
   await expect
     .poll(() => app.pendingDetailTitles)
     .toContain("T04 issue A current generation");
@@ -586,7 +588,10 @@ test("T05 authorization loss discards detail through pending retry @sse-ui-trans
       // A not-found result retires the selected query owner. A document retry
       // creates a new owner, which must still start without republishing the
       // discarded response.
-      await casePage.reload({ waitUntil: "domcontentloaded" });
+      await casePage.goto(`/ws/${WS}/issues/${row.id}`, {
+        waitUntil: "domcontentloaded",
+      });
+      await expect(casePage).toHaveURL(`/ws/${WS}/issues/${row.id}`);
     } else {
       await app.send("mutation", {
         type: "update",

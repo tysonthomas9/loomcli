@@ -37,14 +37,12 @@ func NotifyWebUI(ctx context.Context, serverURL, workspaceID, taskID, sessionID 
 	)
 	defer span.End()
 
-	payload := sessionNotifyPayload{
+	body, err := json.Marshal(sessionNotifyPayload{
 		WorkspaceID: workspaceID,
 		TaskID:      taskID,
 		SessionID:   sessionID,
 		Status:      string(status),
-	}
-
-	body, err := json.Marshal(payload)
+	})
 	if err != nil {
 		recordErr(span, err)
 		log.Printf("sessions.NotifyWebUI: marshal error: %v", err)
