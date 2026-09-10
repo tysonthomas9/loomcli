@@ -426,10 +426,21 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 	// Bound the turn. Without this the ctx carries no deadline at all, so a
 	// turn-detector drift in the harness becomes an unbounded wait that only the
 	// supervisor's watchdog ends — by SIGKILL. See runTurnDeadline.
-	if d := runTurnDeadline(); d > 0 {
+	//
+	// Expiry of THIS context is a categorical loom signal, not a network fault,
+	// and must be reported with agenterr.RunTurnDeadlineMarker rather than left
+	// to the residual "deadline exceeded" regex — see the error path below and
+	// runTurnDeadlineInvocationError. deadlineCtx is kept separately because
+	// errors.Is(deadlineCtx.Err(), context.DeadlineExceeded) is true only when
+	// OUR timer fired; a daemon shutdown through the parent yields
+	// context.Canceled on the very same context.
+	var deadlineCtx context.Context
+	deadline := runTurnDeadline()
+	if deadline > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, d)
+		ctx, cancel = context.WithTimeout(ctx, deadline)
 		defer cancel()
+		deadlineCtx = ctx
 	}
 
 	raw := &capturedOutput{}
@@ -475,30 +486,47 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 	// leaves the turn result and the exit code exactly as they were.
 	accumulateHarnessUsage(collector, "claude", res.Session.HarnessSessionID, workDir)
 
-	// Carry the harness's rendered screen out with EVERY errored turn, not just
-	// when there is no other evidence. The old guard was
-	// `claudeRunTurnEvidence(res, raw.String()) == ""`, which is true only when
-	// raw is itself empty — so it assigned "" and dropped the screen in exactly
-	// the case the screen was the only thing worth having. Even the corrected
-	// form (evidence WITHOUT raw) is not enough: a bare harness exit sets
-	// Turn.Reason to "exit code 1", which is non-empty, uninformative, and
-	// classifies as [Unknown] — the verdict that burns a task's no-progress
-	// budget and quarantines it. The screen is what distinguishes a folder-trust
-	// dialog from an auth wall from a genuine crash, so it must always reach
-	// InvocationError.OutputTail.
 	if err != nil {
-		if screen := strings.TrimSpace(raw.String()); screen != "" {
-			if len(screen) > maxTurnScreenEvidence {
-				screen = screen[len(screen)-maxTurnScreenEvidence:]
-			}
-			if strings.TrimSpace(res.Turn.Text) == "" {
-				res.Turn.Text = screen
-			} else {
-				res.Turn.Text = res.Turn.Text + "\n" + screen
-			}
-		}
+		carryScreenIntoTurnText(&res, raw)
+	}
+	// Our own deadline fired. Guarded on deadlineCtx being non-nil, which is
+	// exactly the `deadline > 0` condition that created it, so a turn with no
+	// deadline configured (standalone/interactive use, or a cap at or below the
+	// margin) can never take this path.
+	if err != nil && deadlineCtx != nil && errors.Is(deadlineCtx.Err(), context.DeadlineExceeded) {
+		return res, runTurnDeadlineInvocationError(
+			fmt.Sprintf("turn exceeded the %s per-turn deadline", deadline),
+			claudeRunTurnEvidence(res, raw.String()),
+		)
 	}
 	return res, err
+}
+
+// carryScreenIntoTurnText appends the harness's rendered screen to an errored
+// turn's text so it always reaches InvocationError.OutputTail.
+//
+// It runs on EVERY errored turn, not just when there is no other evidence. The
+// old guard was `claudeRunTurnEvidence(res, raw.String()) == ""`, which is true
+// only when raw is itself empty — so it assigned "" and dropped the screen in
+// exactly the case the screen was the only thing worth having. Even the
+// corrected form (evidence WITHOUT raw) is not enough: a bare harness exit sets
+// Turn.Reason to "exit code 1", which is non-empty, uninformative, and
+// classifies as [Unknown] — the verdict that burns a task's no-progress budget
+// and quarantines it. The screen is what distinguishes a folder-trust dialog
+// from an auth wall from a genuine crash.
+func carryScreenIntoTurnText(res *claudeRunTurnResult, raw *capturedOutput) {
+	screen := strings.TrimSpace(raw.String())
+	if screen == "" {
+		return
+	}
+	if len(screen) > maxTurnScreenEvidence {
+		screen = screen[len(screen)-maxTurnScreenEvidence:]
+	}
+	if strings.TrimSpace(res.Turn.Text) == "" {
+		res.Turn.Text = screen
+		return
+	}
+	res.Turn.Text = res.Turn.Text + "\n" + screen
 }
 
 // Retry tunables for the RunTurn path. The in-tree harness.RunWithRetry wraps

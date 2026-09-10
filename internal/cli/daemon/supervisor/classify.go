@@ -490,13 +490,27 @@ type killEvent struct {
 	NotCounted string `json:"not_counted,omitempty"`
 }
 
-// reason renders a compact kill descriptor for status output, e.g.
-// "watchdog/Timeout" or "crash/Unknown".
-func (ev killEvent) reason() string {
-	kind := ev.StopReason
-	if kind == "" {
-		kind = "crash"
+// killKind renders the kill's shape: the recorded StopReason when there is
+// one, else a fallback derived from the class.
+//
+// "crash" is the historical fallback and is wrong for exactly one class: a
+// run-turn deadline expiry is loom's OWN clean stop, so rendering it
+// "crash/RunTurnDeadline" reproduces one level down the same misnomer this
+// whole path exists to remove. It renders "expiry" instead.
+func (ev killEvent) killKind() string {
+	if ev.StopReason != "" {
+		return ev.StopReason
 	}
+	if ev.ErrClass == agenterr.RunTurnDeadlineOutcome.String() {
+		return "expiry"
+	}
+	return "crash"
+}
+
+// reason renders a compact kill descriptor for status output, e.g.
+// "watchdog/Timeout", "crash/Unknown" or "expiry/RunTurnDeadline".
+func (ev killEvent) reason() string {
+	kind := ev.killKind()
 	if ev.ErrClass == "" {
 		return kind
 	}
