@@ -1,0 +1,69 @@
+{
+  "requests": [
+    {
+      "path": "/api/workspaces/LOCALMODE/events/token",
+      "status": 200,
+      "method": "GET",
+      "mimeType": "application/json"
+    },
+    {
+      "path": "/api/workspaces/LOCALMODE/events",
+      "status": 200,
+      "method": "GET",
+      "mimeType": "text/event-stream"
+    },
+    {
+      "path": "/api/workspaces/SSE-TEST-1789011230611-Y1YOUEKBU/events/token",
+      "status": 200,
+      "method": "GET",
+      "mimeType": "application/json"
+    },
+    {
+      "path": "/api/workspaces/SSE-TEST-1789011230611-Y1YOUEKBU/events",
+      "status": 200,
+      "method": "GET",
+      "mimeType": "text/event-stream"
+    },
+    {
+      "path": "/api/workspaces/SSE-TEST-1789011230611-Y1YOUEKBU/issues/SSE-TEST-1789011230611-Y1YOUEKBU-9/events",
+      "status": 200,
+      "method": "GET",
+      "mimeType": "application/json"
+    },
+    {
+      "path": "/api/workspaces/SSE-TEST-1789011230611-Y1YOUEKBU/issues/SSE-TEST-1789011230611-Y1YOUEKBU-9/events",
+      "status": 200,
+      "method": "GET",
+      "mimeType": "application/json"
+    },
+    {
+      "path": "/api/workspaces/SSE-TEST-1789011230611-Y1YOUEKBU/issues/SSE-TEST-1789011230611-Y1YOUEKBU-9/events",
+      "status": 200,
+      "method": "GET",
+      "mimeType": "application/json"
+    },
+    {
+      "path": "/api/workspaces/SSE-TEST-1789011230611-Y1YOUEKBU/issues/SSE-TEST-1789011230611-Y1YOUEKBU-9/events",
+      "status": 200,
+      "method": "GET",
+      "mimeType": "application/json"
+    },
+    {
+      "path": "/api/workspaces/SSE-TEST-1789011230611-Y1YOUEKBU/issues/SSE-TEST-1789011230611-Y1YOUEKBU-9/events",
+      "status": 200,
+      "method": "GET",
+      "mimeType": "application/json"
+    },
+    {
+      "path": "/api/workspaces/SSE-TEST-1789011230611-Y1YOUEKBU/issues/SSE-TEST-1789011230611-Y1YOUEKBU-9/events",
+      "status": 200,
+      "method": "GET",
+      "mimeType": "application/json"
+    }
+  ],
+  "issue": "SSE-TEST-1789011230611-Y1YOUEKBU-9",
+  "uiCreated": true,
+  "finalUIStatus": "closed",
+  "pageErrors": [],
+  "recording": "failed: ffmpeg received no image stream"
+}

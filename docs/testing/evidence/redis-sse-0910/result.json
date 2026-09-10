@@ -1,0 +1,17 @@
+{
+  "stats": {
+    "startTime": "2026-09-10T02:54:40.986Z",
+    "duration": 13075.305,
+    "expected": 0,
+    "skipped": 5,
+    "unexpected": 2,
+    "flaky": 0
+  },
+  "backend": "redis",
+  "fleetdbError": "mutation_source_unsupported",
+  "loomError": "subscription_unavailable",
+  "loomRevision": "8c0be5f97",
+  "fleetRevision": "730f47af1931c55eee95d092a5d3772c9716e930",
+  "fleetImage": "7af6816cedfb29124ede91ab0b98a8d9c4d4ff376676ba7a072ed0c93ea537be",
+  "loomImage": "d7d68a16557046e7c55d2458e4d370a5da8033ed0cd6354fd9d2bfc64b4b52e6"
+}

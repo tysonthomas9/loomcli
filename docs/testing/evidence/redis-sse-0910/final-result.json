@@ -1,0 +1,82 @@
+{
+  "stats": {
+    "startTime": "2026-09-10T03:54:25.448Z",
+    "duration": 33470.804,
+    "expected": 7,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "tests": [
+    {
+      "title": "create and status frames reach two independent clients once @regression",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration": 3222
+        }
+      ]
+    },
+    {
+      "title": "real proxy disconnect resumes both accepted cursors without replay gaps or duplicates @regression",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration": 16378
+        }
+      ]
+    },
+    {
+      "title": "fetch SSE establishes with a connected frame @smoke",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration": 620
+        }
+      ]
+    },
+    {
+      "title": "API-created issue renders before projection refresh then converges @smoke",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration": 2465
+        }
+      ]
+    },
+    {
+      "title": "status moves before projection refresh then converges @smoke",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration": 4374
+        }
+      ]
+    },
+    {
+      "title": "rapid creates each reach the browser exactly once in the observed interval @regression",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration": 2485
+        }
+      ]
+    },
+    {
+      "title": "close leaves Open through the observed stream without reload @regression",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration": 2515
+        }
+      ]
+    }
+  ]
+}
