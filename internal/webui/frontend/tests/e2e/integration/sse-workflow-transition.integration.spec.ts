@@ -181,7 +181,6 @@ test("one UI-created task plans, approves, implements, and preserves loaded run 
       "Planner local-planner",
     );
 
-    await panel.getByRole("tab", { name: "Details" }).click();
     const approvalWatermark = stream.watermark();
     const approved = page.waitForResponse(
       (response) =>
