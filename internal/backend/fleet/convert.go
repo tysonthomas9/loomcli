@@ -20,6 +20,7 @@ type fleetIssueWire struct {
 	Type             string     `json:"type,omitempty"`
 	Assignee         string     `json:"assignee,omitempty"`
 	Owner            string     `json:"owner,omitempty"`
+	EstimatedMinutes *int       `json:"estimated_minutes,omitempty"`
 	Labels           []string   `json:"labels,omitempty"`
 	Repo             string     `json:"repo,omitempty"`
 	SourceRepo       string     `json:"source_repo,omitempty"`
@@ -55,6 +56,7 @@ func (w fleetIssueWire) toIssue() types.Issue {
 		IssueType:          types.IssueType(w.Type),
 		Assignee:           w.Assignee,
 		Owner:              w.Owner,
+		EstimatedMinutes:   w.EstimatedMinutes,
 		Labels:             w.Labels,
 		SourceRepo:         w.sourceRepo(),
 		Design:             w.Design,

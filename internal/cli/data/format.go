@@ -42,6 +42,9 @@ func printIssueDetail(w io.Writer, d *backend.IssueDetailData, format string) er
 	if d.Owner != "" {
 		fmt.Fprintf(w, "Owner:    %s\n", d.Owner)
 	}
+	if d.EstimatedMinutes != nil {
+		fmt.Fprintf(w, "Est:      %d min\n", *d.EstimatedMinutes)
+	}
 	if d.Parent != "" {
 		fmt.Fprintf(w, "Parent:   %s\n", d.Parent)
 	}
