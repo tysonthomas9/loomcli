@@ -3,6 +3,10 @@
 package supervisor
 
 import (
+	"bytes"
+	"log/slog"
+	"os"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -225,4 +229,68 @@ func TestSweepOrphansAfterDeadlineExit_SkipsEmptyWorktree(t *testing.T) {
 	if len(*swept) != 0 {
 		t.Fatalf("empty worktree path still reached the sweep: %v", *swept)
 	}
+}
+
+// TestDeadlineExitSweepsSetsidEscapee_EndToEnd is the acceptance path in one
+// test: a descendant that setsid() out of the harness's process group survives
+// the wrapper's group kill, a real classification of a log slice carrying the
+// run-turn deadline marker resolves to RunTurnDeadline, and the classification
+// hook then reaps the escapee and says so at Warn with the task id.
+func TestDeadlineExitSweepsSetsidEscapee_EndToEnd(t *testing.T) {
+	logBuf := &bytes.Buffer{}
+	saved := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(saved) })
+
+	wt := t.TempDir()
+	workerCmd, childPID := spawnFakeWorker(t, wt)
+	workerPID := workerCmd.Process.Pid
+	if err := syscall.Kill(-workerPID, syscall.SIGKILL); err != nil {
+		t.Fatalf("group kill of the harness group: %v", err)
+	}
+	_ = workerCmd.Wait()
+	t.Cleanup(func() { _ = syscall.Kill(-childPID, syscall.SIGKILL) })
+
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) && readPPID(t, childPID) != 1 {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !processAlive(childPID) {
+		t.Fatalf("fixture gone before the sweep: PID %d", childPID)
+	}
+	t.Logf("escapee PID %d survived the harness group kill (PPID=%d) — this is the setsid case", childPID, readPPID(t, childPID))
+
+	logPath := wt + "/agent.log"
+	if err := os.WriteFile(logPath, []byte("some turn output\n"+agenterr.RunTurnDeadlineMarker+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newDrainTestSupervisor(&config.DaemonConfig{})
+	ap := &AgentProcess{WorktreePath: wt, AssignedTaskID: "PUPPET-612", LogFilePath: logPath}
+	ap.Entry.Worktree = "worker"
+	ap.Entry.Backend = "claude"
+	s.classifyAgentExit(ap, 1)
+	if ap.LastError == nil || !ap.LastError.Class.Is(agenterr.RunTurnDeadlineOutcome) {
+		t.Fatalf("classification: got %+v, want RunTurnDeadline", ap.LastError)
+	}
+	t.Logf("classified as %s", ap.LastError.Class)
+
+	killed := s.sweepOrphansAfterDeadlineExit(ap)
+	t.Logf("sweep killed %d; log: %s", killed, strings.TrimSpace(logBuf.String()))
+	if killed == 0 {
+		t.Fatal("deadline exit did not sweep the escapee")
+	}
+	if !strings.Contains(logBuf.String(), "level=WARN") || !strings.Contains(logBuf.String(), "PUPPET-612") {
+		t.Fatalf("no Warn line naming the task: %s", logBuf.String())
+	}
+
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if !processAlive(childPID) {
+			t.Logf("escapee PID %d is gone: ps count 0", childPID)
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("escapee PID %d survived the deadline sweep", childPID)
 }
