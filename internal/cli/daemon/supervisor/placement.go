@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 )
 
 // AgentPlacement is the (repo, worktree, repo config) triple an agent's current
@@ -56,6 +57,21 @@ func (ap *AgentProcess) effectivePlacement() (repo, workDir string) {
 
 // SetPlacement publishes a new effective placement for the agent.
 func (ap *AgentProcess) SetPlacement(p AgentPlacement) { ap.placement.Store(&p) }
+
+// DefaultResolveWorktree is the production ResolveWorktree: it resolves the
+// per-repo, per-agent worktree and CREATES it when the repo checkout exists but
+// the agent's worktree does not (that self-heal is wanted, not an error).
+//
+// It is exported so the daemon can wire it without importing
+// internal/cli/workspace itself — that package sits at its import-fanout
+// ceiling. Tests substitute their own function; a nil field disables routing.
+func DefaultResolveWorktree(agentName, repo string) (string, error) {
+	target, err := workspace.ResolveAgentTarget(agentName, repo)
+	if err != nil {
+		return "", err
+	}
+	return target.WorkDir, nil
+}
 
 // applyTaskPlacement re-points the cycle's worktree at the repo the freshly
 // claimed task belongs to. It runs immediately after claimTask and before
