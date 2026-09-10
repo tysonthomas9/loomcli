@@ -455,6 +455,17 @@ test-e2e: ensure-frontend-deps
 	@cd $(FRONTEND_DIR) && npx playwright install --with-deps chromium 2>/dev/null || true
 	@cd $(FRONTEND_DIR) && npx playwright test --project=chromium --workers=1
 
+# Run AFT browser E2E suites using the self-contained deterministic stack.
+.PHONY: test-aft test-aft-strict
+test-aft:
+	@echo "Running AFT browser E2E tests (no recovery agent)..."
+	@tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+
+# Run AFT with agent diagnosis on failures (requires the Claude CLI).
+test-aft-strict:
+	@echo "Running AFT browser E2E tests (strict recovery mode)..."
+	@tests/aft/run-aft.sh --strict $(AFT_ARGS)
+
 # Run Playwright API e2e tests (self-contained: builds loom, starts server, runs tests)
 # Run the browser e2e suite exactly as CI does: the chromium-ci project, which
 # is the mocked chromium suite minus the quarantined specs listed in

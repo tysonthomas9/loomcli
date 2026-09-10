@@ -1,0 +1,262 @@
+# Planner surface contracts. This suite owns a workspace because the plan-role
+# create-contract probes and assignee-picker gap require durable agent rows.
+suite: planner-contracts
+classification: { area: agents, feature: planner-agents, surface: api, purpose: contract }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN-SF" >/dev/null || true
+  repo="$AFT_WORK_DIR/planner-surface-repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit --allow-empty -m init -q
+  python3 -c 'import json,sys; print(json.dumps({"name":sys.argv[1],"type":"empty","repos":[sys.argv[2]]}))' "e2e-ws-plan-sf" "$repo" > "$AFT_WORK_DIR/planner-surface-workspace.json"
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/planner-surface-workspace.json" > "$AFT_WORK_DIR/planner-surface-workspace.resp.json"
+  run="${RUN_ID:-local}"
+  python3 - "$AFT_WORK_DIR/planner-surface-planner.json" "$run" <<'PY'
+  import json, sys
+  path, run = sys.argv[1], sys.argv[2]
+  payload = {
+      "name": f"plnsf-{run}",
+      "role_name": "plan",
+      "auto": False,
+      "cross_repo": False,
+      "repos": ["planner-surface-repo"],
+      "backend": "codex",
+  }
+  open(path, "w", encoding="utf-8").write(json.dumps(payload))
+  PY
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN-SF/agents" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/planner-surface-planner.json" > "$AFT_WORK_DIR/planner-surface-planner.resp.json"
+  python3 - "$AFT_WORK_DIR/planner-surface-task.json" "$run" <<'PY'
+  import json, sys
+  path, run = sys.argv[1], sys.argv[2]
+  payload = {
+      "name": f"plnsf-task-{run}",
+      "role_name": "task",
+      "auto": False,
+      "cross_repo": False,
+      "repos": ["planner-surface-repo"],
+      "backend": "codex",
+  }
+  open(path, "w", encoding="utf-8").write(json.dumps(payload))
+  PY
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN-SF/agents" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/planner-surface-task.json" > "$AFT_WORK_DIR/planner-surface-task.resp.json"
+teardown: |
+  set +e
+  AFT_WS=E2E-WS-PLAN-SF "$AFT_TESTS_DIR/scripts/close-open-issues.sh"
+  for agent in "plnsf-${RUN_ID:-local}" "plnsf-task-${RUN_ID:-local}" "p4-${RUN_ID:-local}"; do
+    curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN-SF/agents/$agent" >/dev/null || true
+  done
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN-SF" >/dev/null || true
+
+tests:
+  # covers: PLN-D15b; PRReviewWorkspace Approve divergence for fabricated plan review; /prs?review=
+  - name: prs approval closes fabricated plan review
+    intent: An API client and a reviewer confirm that approving a plan review from the PR review workspace closes the issue instead of returning it to open
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-PLAN-SF/issues"
+          body:
+            title: "planner-pr-approve ${RUN_ID:-local}"
+            issue_type: "task"
+            priority: 2
+            design: "## Summary\nAFT-PLAN-SURFACE ${RUN_ID:-local}\n\n## Technical Approach\nSurface fixture only.\n\n## Testing Strategy\nApprove from the PR review workspace."
+          save:
+            - from: "data.id"
+              as: "plannerPrApproveId"
+        intent: "An API client creates a designed task as the fabricated Planner outcome for the PR review workspace"
+      - api:
+          method: "PATCH"
+          path: "/api/workspaces/E2E-WS-PLAN-SF/issues/${var:plannerPrApproveId}"
+          body:
+            status: "review"
+        intent: "An API client moves the fabricated plan outcome into review"
+      - open: /ws/E2E-WS-PLAN-SF/prs
+      - wait: { text: "planner-pr-approve ${RUN_ID:-local}" }
+        intent: "Wait until the fabricated plan review appears in the review queue"
+      - wait:
+          fn: >-
+            (() => {
+              const row = Array.from(document.querySelectorAll('li[role="button"]')).find((el) =>
+                el.textContent.includes('planner-pr-approve ${RUN_ID:-local}'));
+              return !!row && row.textContent.includes('Plan review');
+            })()
+        intent: "Wait until the review queue labels the fabricated issue as a Plan review"
+      # budget: ui-click-retry (3s) - row click can race route navigation.
+      # NOTE: this is a folded (>-) scalar — a comment INSIDE it would fold onto one
+      # line and swallow the whole command, so the budget note stays out here.
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find role button click --name "planner-pr-approve ${RUN_ID:-local}" || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "location.search" | grep -q "review=" && exit 0;
+          done; echo "plan review row click never opened the workspace"; exit 1
+        intent: "A reviewer retries the plan-review row until the PR review workspace opens"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=pr-review-workspace]')
+        intent: "Wait until the PR review workspace is ready"
+      - click: { role: button, name: Approve }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=pr-review-workspace]')
+        intent: "Wait until the completed PR review workspace closes"
+      - api:
+          method: "GET"
+          path: "/api/workspaces/E2E-WS-PLAN-SF/issues/${var:plannerPrApproveId}"
+          assert:
+            - path: "data.status"
+              equals: "closed"
+        intent: "A reviewer's readback confirms /prs approval closed the plan review, diverging from the panel approval contract"
+
+  # covers: PLN-D21; plan-role POST /api/workspaces/:ws/agents validation contract probes
+  - name: plan agent create contract probes
+    intent: An API client probes the agent-create contract for the plan role and gets the documented validation errors
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-PLAN-SF/agents"
+          body:
+            name: ""
+            role_name: "plan"
+          status: 400
+          assert:
+            - path: "error"
+              contains: "missing agent name"
+        intent: "An API client confirms missing plan agent names are rejected"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-PLAN-SF/agents"
+          body:
+            name: "-bad-"
+            role_name: "plan"
+          status: 400
+          assert:
+            - path: "error"
+              contains: "invalid agent name"
+        intent: "An API client confirms invalid stored plan agent names are rejected"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-PLAN-SF/agents"
+          body:
+            name: "p1-${RUN_ID:-local}"
+            role_name: ""
+          status: 400
+          assert:
+            - path: "error"
+              contains: "role_name required"
+        intent: "An API client confirms role_name is required for agent creation"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-PLAN-SF/agents"
+          body:
+            name: "p2-${RUN_ID:-local}"
+            role_name: "plan"
+            kind: "bogus"
+          status: 400
+          assert:
+            - path: "error"
+              contains: "invalid role kind"
+        intent: "An API client confirms invalid role kind values are rejected"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-PLAN-SF/agents"
+          body:
+            name: "p3-${RUN_ID:-local}"
+            role_name: "plan"
+            workspace_key: "OTHER"
+          status: 400
+          assert:
+            - path: "error"
+              contains: "workspace_key must match request workspace"
+        intent: "An API client confirms workspace_key cannot target a different workspace than the route"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-PLAN-SF/agents"
+          body:
+            name: "p4-${RUN_ID:-local}"
+            role_name: "plan"
+            auto: false
+            cross_repo: false
+            repos: ["planner-surface-repo"]
+            backend: "not-a-backend"
+          status: 201
+          assert:
+            - path: "name"
+              equals: "p4-${RUN_ID:-local}"
+            - path: "role_name"
+              equals: "plan"
+            - path: "backend"
+              equals: "not-a-backend"
+        intent: "An API client confirms create accepts an unknown backend name when the agent is never started"
+      - api:
+          method: "DELETE"
+          path: "/api/workspaces/E2E-WS-PLAN-SF/agents/p4-${RUN_ID:-local}"
+          status: 200
+        intent: "An API client cleans up the unknown-backend plan agent created by the contract probe"
+
+  # covers: PLN-D22; PATCH state=backend_unavailable validation gap; domain AgentState contrast; cross-checks Planner backend_unavailable gaps against PLN-D18/PLN-D21
+  - name: backend unavailable state is not patchable
+    intent: An API client confirms the agent state surface rejects backend_unavailable even though the domain defines it
+    steps:
+      - api:
+          method: "PATCH"
+          path: "/api/workspaces/E2E-WS-PLAN-SF/agents/plnsf-${RUN_ID:-local}"
+          body:
+            state: "backend_unavailable"
+          status: 400
+          assert:
+            - path: "error"
+              contains: "invalid state"
+        intent: "An API client proves backend_unavailable has no deterministic PATCH writer today"
+
+  # covers: PLN-D23; AssigneeDropdown filters non-task agents; Planner delegation gap PLN-B6
+  - name: planner is absent from assignee picker
+    intent: An operator opening the assignee picker on a design-less task finds no Planner to delegate to
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-PLAN-SF/issues"
+          body:
+            title: "planner-assignee ${RUN_ID:-local}"
+            issue_type: "task"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "plannerAssigneeIssueId"
+        intent: "An API client creates a design-less open task for the assignee picker gap"
+      - open: /ws/E2E-WS-PLAN-SF/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready before opening the issue panel"
+      - fill: { testid: search-input-field, value: "planner-assignee ${RUN_ID:-local}" }
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll("article")).some((el) => el.textContent.includes('planner-assignee ${RUN_ID:-local}'))
+        intent: "Wait until the design-less issue is visible on the board"
+      - click: { selector: "article[aria-label*='planner-assignee ${RUN_ID:-local}']", first: true }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
+        intent: "Wait until the design-less issue detail panel opens from the board"
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          # budget: ui-click-retry (3s) - popover mount can lag the trigger click.
+          for i in 1 2 3; do
+            agent-browser --session "$AFT_SESSION" find testid assignee-dropdown-trigger click || true
+            sleep 1
+            if agent-browser --session "$AFT_SESSION" eval "
+              !!document.querySelector('[data-testid=assignee-dropdown-menu]') &&
+              !!document.querySelector('[data-testid=\"agent-assignee-plnsf-task-$run\"]')
+            " | grep -q true; then
+              exit 0
+            fi
+          done
+          echo "assignee dropdown never listed plnsf-task-$run"
+          exit 1
+        intent: "Retry opening the assignee dropdown until it lists the task-role Planner companion"
+      - expect: { visible: { testid: "agent-assignee-plnsf-task-${RUN_ID:-local}" } }
+      - expect: { count: { testid: "agent-assignee-plnsf-${RUN_ID:-local}", equals: 0 } }

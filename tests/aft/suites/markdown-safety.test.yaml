@@ -1,0 +1,56 @@
+# Markdown safety for the v5 slide-out IssueDetailPanel. Kanban cards are
+# article elements with aria-label="Issue: <title>"; clicking one opens the
+# panel overlay, whose description uses EditableDescription/MarkdownRenderer.
+suite: markdown-safety
+classification: { area: issues, feature: markdown, surface: ui, purpose: contract }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  # covers: LCLI-SEC-013
+  - name: issue detail markdown sanitizes executable html
+    intent: An agent submits an issue description containing malicious HTML, and a reviewer sees safe markdown render without script or image-handler execution
+    steps:
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "markdown safety ${RUN_ID:-local}"
+            issue_type: "task"
+            priority: 2
+            description: "safe **bold** signal\n[click me](javascript:window.__aftXss=1)\n<img src=x onerror=\"window.__aftXss=1\">\n<script>window.__aftXss=1</script>"
+          save:
+            - from: "data.id"
+              as: "markdownSafetyId"
+        intent: "An agent creates an issue containing the malicious markdown fixture"
+      - wait: { text: markdown safety }
+      # column-scoped: a page-wide role/article locator can bind to a stale
+      # closed card with the same title in Done on local reruns
+      - click: { selector: "section[data-status=ready] article", first: true }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=issue-detail-panel][data-state=open]')
+        intent: "Wait until the selected issue detail panel is open"
+      - expect: { visible: { testid: editable-description } }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=editable-description] [data-testid=markdown-content]')
+        intent: "Wait until the issue description markdown is rendered"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=editable-description] strong')?.textContent === 'bold'
+        intent: "Wait until the sanitized markdown renders its bold signal"
+      - wait: { ms: 250 }
+      - wait:
+          fn: >-
+            window.__aftXss === undefined &&
+            !document.querySelector('[data-testid=editable-description] script') &&
+            !document.querySelector('[data-testid=editable-description] img[onerror]') &&
+            !document.querySelector('[data-testid=markdown-content] a[href^="javascript:"]')
+        intent: "Wait until the rendered markdown remains free of executable HTML"

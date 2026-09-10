@@ -1,0 +1,43 @@
+# Smoke suite against the real v5 stack (loom serve + fleet-db + vite preview,
+# started by run-aft.sh). Auth is open; the board lives at /ws/E2E-WS/kanban and
+# renders epic-grouped swim lanes (issues without an epic land in "Ungrouped").
+# v5 renders no connection indicator, so SSE is asserted by observing the board.
+suite: smoke
+classification: { area: platform, feature: application-startup, surface: mixed, purpose: smoke }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  # covers: LCLI-OPS-002 (open-auth browser effect)
+  - name: app boots to the workspace kanban
+    intent: An operator reaches the E2E workspace board directly in open-auth mode without a login wall
+    steps:
+      - open: /
+      - wait: { url: "**/ws/*/kanban**" }
+      - expect: { title: Loom }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - expect: { visible: { testid: new-issue-button } }
+      - expect: { notText: Sign in to Loom }
+
+  - name: api-created issue appears via SSE without reload
+    intent: An agent creates an issue through the workspace API while an operator observes it appear on the open kanban via server push without reloading
+    steps:
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "sse smoke $RUN_ID"
+            issue_type: "task"
+            priority: 2
+        intent: "An agent creates the SSE smoke issue at priority 2"
+      - wait: { text: sse smoke }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }

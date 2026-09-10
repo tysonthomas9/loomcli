@@ -1,0 +1,164 @@
+# Route-level coverage for the pages outside the kanban/list/table/graph/monitor set.
+# Each test asserts the page's verified empty-state anchors on a fresh workspace
+# (no agents, no AI backends). Anchor sources: SettingsView.tsx, ErrorDisplay.tsx,
+# TerminalView.tsx + NoBackendsEmptyState.tsx, FileExplorer.tsx, WorkspacePage.tsx,
+# AgentsPage.tsx + AgentDetailMain.tsx, IssueDetailView.tsx.
+suite: pages
+classification: { area: workspaces, feature: navigation, surface: ui, purpose: smoke }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  - name: standalone issue page renders from a deep link
+    intent: An agent creates an issue through the API, then an operator follows its direct link and sees the standalone detail view without visiting the board first
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "pages detail $RUN_ID"
+            description: "Standalone pages detail description $RUN_ID"
+            issue_type: "task"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "pagesDetailId"
+        intent: "An agent creates the issue used by the standalone deep link"
+      # a first regular open gives the session a page; the deep link then navigates
+      # in-page via eval (keeps any recording alive and works with the dynamic id)
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - run: >-
+          agent-browser --session "$AFT_SESSION" eval
+          "location.href='$AFT_BASE_URL/ws/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/pagesDetailId")'"
+        intent: "An operator follows the server-assigned issue deep link in the active browser session"
+      - wait: { url: "**/ws/*/issues/**" }
+      # the standalone page renders IssueDetailView (issue-detail-view), NOT the
+      # slide-over's issue-detail-panel — asserting the right root catches route breakage
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=issue-detail-view]')
+        intent: "Wait until the standalone issue view is ready"
+      - expect: { visible: { testid: issue-detail-view } }
+      - expect: { visible: { testid: detail-title } }
+      - expect: { text: "pages detail ${RUN_ID:-local}" }
+      - expect: { text: "Standalone pages detail description ${RUN_ID:-local}" }
+      - expect: { visible: { testid: detail-issue-id } }
+
+  - name: settings page renders config panels
+    intent: An operator opens Settings and sees backend configuration with the fresh-workspace empty override state
+    steps:
+      - open: /ws/E2E-WS/settings
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=settings-view]')
+        intent: "Wait until the settings page is ready"
+      - expect: { visible: { testid: settings-view } }
+      - expect: { text: Project Default Backend }
+      - expect: { visible: { testid: backend-select } }
+      - expect: { text: Agent Runtime }
+      # fresh workspace: no per-agent overrides exist
+      - expect: { visible: { testid: no-overrides-message } }
+      - expect: { text: No per-agent overrides configured. }
+
+  - name: observability renders zeroed metrics on an idle workspace
+    intent: An operator opens Observability on an idle workspace and sees metric panels with explicit zero and empty states
+    steps:
+      - open: /ws/E2E-WS/observability
+      # this stack serves /api/observability/metrics with zeroed data (200, not 503),
+      # so the dashboard renders panels rather than the not-configured error state
+      - wait: { text: Tasks / Hour }
+      - expect: { text: Avg Duration }
+      - expect: { text: Error Rate }
+      - expect: { text: Hourly Completions (24h) }
+      - expect: { text: No task completions in the last 24 hours }
+      - expect: { text: Agent Utilization }
+
+  - name: terminal view resolves to a lead tab or the no-backends state
+    intent: "An operator opens Terminal and sees the complete contract for whichever healthy state resolves: a titled terminal tab or the no-backends explanation"
+    steps:
+      - open: /ws/E2E-WS/terminal
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=terminal-view]')
+        intent: "Wait until the terminal view is ready"
+      - expect: { visible: { testid: terminal-view } }
+      # The harness puts stub CLIs on the SERVER's PATH, so backends are detected and
+      # the view auto-spawns a lead tab running the harmless stub (never a real LLM —
+      # a real codex session was observed here before the stub wiring). Where tmux is
+      # unavailable the spawn can fail and the no-backends state renders instead.
+      # Record exactly one resolved state, then assert that state's full contract.
+      - wait:
+          fn: >-
+            (() => {
+              const view = document.querySelector('[data-testid=terminal-view]');
+              const tabs = document.querySelector('[data-testid=terminal-tab-bar]');
+              const empty = document.querySelector('[data-testid=no-backends-empty-state]');
+              if (!view || Boolean(tabs) === Boolean(empty)) return false;
+              view.setAttribute('data-aft-terminal-state', tabs ? 'tabs' : 'empty');
+              return true;
+            })()
+        intent: "Wait until the terminal view resolves to exactly one healthy state"
+      - wait:
+          fn: >-
+            (() => {
+              const state = document.querySelector('[data-testid=terminal-view]')?.getAttribute('data-aft-terminal-state');
+              if (state === 'tabs') {
+                const bar = document.querySelector('[data-testid=terminal-tab-bar]');
+                const titles = Array.from(document.querySelectorAll('[data-testid^="terminal-tab-label-"]'));
+                return !!bar && titles.some((node) => (node.textContent || '').trim().length > 0);
+              }
+              if (state === 'empty') {
+                const empty = document.querySelector('[data-testid=no-backends-empty-state]');
+                return !!empty && empty.textContent.includes('No backends configured') && empty.textContent.includes('Configure at least one AI backend to start using Talk to Lead.');
+              }
+              return false;
+            })()
+        intent: "Wait until the terminal view resolves to exactly one healthy state"
+      - expect: { notText: Something went wrong }
+
+  - name: files page renders the explorer toolbar
+    intent: An operator opens Files on a fresh workspace and sees the v3 explorer lens toolbar and tree scaffold
+    steps:
+      - open: /ws/E2E-WS/files
+      - wait:
+          fn: >-
+            !!document.querySelector("[role=tablist][aria-label='File explorer lens']")
+        intent: "Wait until the file explorer lens toolbar is ready"
+      # toolbar anchors only — tree contents depend on repo checkout state, which
+      # other suites may alter; the lens toolbar and resize handle are unconditional
+      - expect: { visible: { selector: "[role=tablist][aria-label='File explorer lens']" } }
+      - expect: { visible: { testid: file-tree-resize-handle } }
+
+  - name: workspace route loads without crashing
+    intent: An operator follows a workspace bookmark and reaches the designed single-repo kanban redirect without a crash
+    steps:
+      - open: /ws/E2E-WS/workspace
+      # single-repo: the app redirects /workspace → kanban once repos load, so the
+      # URL is racy — landing on either the workspace shell or the kanban board
+      # with the sidebar intact proves the route mounted rather than crashing
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=workspace-tree-resize-handle]') ||
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace route resolves to a healthy workspace surface"
+      - expect: { text: REPOS }
+      - expect: { count: { testid: workspace-view, equals: 0 } }
+      - expect: { notText: Something went wrong }
+
+  - name: agents page renders its empty state with no agents
+    intent: An operator opens Agents in a workspace with zero agents and sees the select-an-agent scaffold without a redirect
+    steps:
+      - open: /ws/E2E-WS/agents
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=agents-page]')
+        intent: "Wait until the agents page is ready"
+      - expect: { url: "**/ws/*/agents**" }
+      - expect: { visible: { testid: agents-page } }
+      - expect: { visible: { testid: agent-editor-groups } }
+      - expect: { text: Select an agent }
+      - expect: { text: Pick an agent from the rail to attach to their terminal session. }

@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""Generate the aft coverage census from the web UI source.
+
+The census is the app's testable surface — routes, data-testids, API endpoints —
+derived from the frontend source at run time so it can never go stale. aft joins
+each run's per-test traces against it and reports what no test touched.
+
+Usage: gen-census.py [--frontend <dir>] [--out <file>]
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+# Files whose strings describe test fixtures or generated contracts, not UI surface.
+# types/generated/ holds the OpenAPI contract: it lists every backend endpoint including
+# server-to-server ones the browser can never call — census must reflect UI usage only.
+EXCLUDE = re.compile(
+    r"__tests__|__mocks__|\.test\.|\.stories\.|/test/|test-utils|/mocks?/|TestFixtures|/generated/"
+)
+
+
+def source_files(root: Path) -> list[Path]:
+    return [
+        p
+        for p in sorted(root.rglob("*"))
+        if p.suffix in (".ts", ".tsx") and not EXCLUDE.search(p.as_posix())
+    ]
+
+
+def extract_routes(router: Path) -> list[str]:
+    """Route table from router.tsx: root paths start with '/'; the rest are
+    children of /ws/:workspaceId (the App shell). Wildcard/index entries skipped."""
+    src = router.read_text(encoding="utf-8", errors="ignore")
+    routes: set[str] = set()
+    for m in re.finditer(r"""path:\s*["']([^"']+)["']""", src):
+        path = m.group(1)
+        if path in ("*",) or path.endswith("*"):
+            continue
+        routes.add(path if path.startswith("/") else f"/ws/:workspaceId/{path}")
+    # Redirect/layout shims immediately forward elsewhere ("/" -> last workspace,
+    # "/ws/:id" -> kanban): the browser never rests on them, so a URL sample can never
+    # match — listing them as coverable routes would be permanent false-uncovered noise.
+    return sorted(routes - {"/", "/ws/:workspaceId"})
+
+
+def normalize_dynamic(s: str) -> str:
+    """Dynamic pieces become one path segment: `${...}` and `{id}` -> `:param`."""
+    s = re.sub(r"\$\{[^}]*\}", ":param", s)
+    s = re.sub(r"\{[A-Za-z_][A-Za-z0-9_]*\}", ":param", s)
+    return re.sub(r"(:param)+", ":param", s)  # adjacent interpolations are still one segment
+
+
+def component_name(f: Path, frontend: Path) -> str:
+    """Group testids by owning component: src/components/<Name>/… or src/views/<Name>."""
+    rel = f.relative_to(frontend).parts
+    if len(rel) >= 2 and rel[0] in ("components", "views"):
+        return rel[1].removesuffix(".tsx").removesuffix(".ts")
+    return f.stem
+
+
+def extract_testids(files: list[Path], frontend: Path) -> tuple[list[str], dict[str, list[str]]]:
+    """All testid patterns, plus a component -> testids grouping (by owning source dir)."""
+    ids: set[str] = set()
+    components: dict[str, set[str]] = {}
+    for f in files:
+        src = f.read_text(encoding="utf-8", errors="ignore")
+        file_ids: set[str] = set()
+        for m in re.finditer(r'data-testid="([^"]+)"', src):
+            file_ids.add(m.group(1))
+        # data-testid={`prefix-${expr}`} -> prefix-*  (glob; aft matches * within a segment)
+        for m in re.finditer(r"data-testid=\{`([^`]+)`\}", src):
+            file_ids.add(re.sub(r"\$\{[^}]*\}", "*", m.group(1)))
+        # data-testid={cond ? "a" : "b"} and other brace expressions with string literals
+        for m in re.finditer(r'data-testid=\{[^`}]*?"([^"]+)"[^}]*\}', src):
+            file_ids.add(m.group(1))
+        # components that take the id as a prop (testId= / overlayTestId= / closeTestId=)
+        # and render data-testid={testId}: the literal lives at the call site
+        for m in re.finditer(r'\b[a-zA-Z]*[tT]estId=\{?["\'`]([A-Za-z0-9_.:-]+)["\'`]\}?', src):
+            file_ids.add(m.group(1))
+        if file_ids:
+            ids |= file_ids
+            components.setdefault(component_name(f, frontend), set()).update(file_ids)
+    return sorted(ids), {name: sorted(v) for name, v in sorted(components.items())}
+
+
+def extract_endpoints(files: list[Path]) -> list[str]:
+    eps: set[str] = set()
+    for f in files:
+        src = f.read_text(encoding="utf-8", errors="ignore")
+        # wsUrl(ws, "/path") / wsUrl(ws, `/path/${x}`) -> /api/workspaces/:param/path
+        # (same :param name as literal-string extraction so duplicate shapes merge)
+        for m in re.finditer(r'wsUrl\([^,)]+,\s*(?:"(/[^"]*)"|`(/[^`]*)`)', src):
+            path = normalize_dynamic(m.group(1) or m.group(2)).split("?")[0]
+            eps.add(f"/api/workspaces/:param{path}")
+        # literal or template "/api/..." strings anywhere in app source
+        for m in re.finditer(r'["`](/api/[^"`\s]*)["`]', src):
+            path = normalize_dynamic(m.group(1)).split("?")[0]
+            eps.add(path)
+    return sorted(eps)
+
+
+def main() -> int:
+    default_frontend = Path(__file__).resolve().parents[3] / "internal/webui/frontend/src"
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--frontend", type=Path, default=default_frontend)
+    ap.add_argument("--out", type=Path, default=Path("census.json"))
+    args = ap.parse_args()
+
+    router = args.frontend / "router.tsx"
+    if not router.is_file():
+        print(f"gen-census: router not found at {router}", file=sys.stderr)
+        return 1
+
+    files = source_files(args.frontend)
+    testids, components = extract_testids(files, args.frontend)
+    census = {
+        "routes": extract_routes(router),
+        "components": components,
+        "testids": testids,
+        "endpoints": extract_endpoints(files),
+    }
+    args.out.write_text(json.dumps(census, indent=2) + "\n")
+    print(
+        f"{args.out}: {len(census['routes'])} routes, {len(components)} components, "
+        f"{len(testids)} testids, {len(census['endpoints'])} endpoints"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,367 @@
+# API contract coverage for custom-prompt agents. This surface suite owns fresh
+# workspaces because role rows outlive individual agents.
+suite: custom-prompt-contracts
+classification: { area: agents, feature: custom-prompts, surface: api, purpose: contract }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM-SURF" >/dev/null || true
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM-POISON" >/dev/null || true
+  for pair in custom:e2e-ws-custom-surf poison:e2e-ws-custom-poison; do
+    suffix="${pair%%:*}"
+    name="${pair#*:}"
+    repo="$AFT_WORK_DIR/surface-${suffix}-repo"
+    mkdir -p "$repo"
+    git -C "$repo" init -q
+    git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit --allow-empty -m init -q
+    python3 -c 'import json,sys; print(json.dumps({"name":sys.argv[1],"type":"empty","repos":[sys.argv[2]]}))' "$name" "$repo" > "$AFT_WORK_DIR/surface-${suffix}-workspace.json"
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/surface-${suffix}-workspace.json" > "$AFT_WORK_DIR/surface-${suffix}-workspace.resp.json"
+  done
+teardown: |
+  set +e
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM-SURF" >/dev/null || true
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM-POISON" >/dev/null || true
+
+tests:
+  # covers: CUS-D7b; custom-prompt API length boundaries; POST /api/workspaces/:ws/agents; role show
+  - name: API prompt length boundaries are enforced at role persistence and request body caps
+    intent: An API client proves the prompt field accepts the fleet-db cap, rejects one byte over it, and rejects request bodies over one megabyte
+    steps:
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          python3 - "$AFT_WORK_DIR" "$run" <<'PY'
+          import json, pathlib, sys
+          work = pathlib.Path(sys.argv[1])
+          run = sys.argv[2]
+          def write_payload(stem, name, prompt_len):
+              payload = {
+                  "name": name,
+                  "role_name": name,
+                  "kind": "interactive",
+                  "prompt": "x" * prompt_len,
+                  "auto": False,
+                  "backend": "codex",
+              }
+              (work / f"{stem}.json").write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+          write_payload("d7b-max", f"surf-max-{run}", 100000)
+          write_payload("d7b-over", f"surf-over-{run}", 100001)
+          write_payload("d7b-huge", f"surf-huge-{run}", 1100000)
+          PY
+          post_agent() {
+            stem="$1"
+            curl -sS -o "$AFT_WORK_DIR/${stem}.resp.json" -w "%{http_code}" \
+              -X POST "$AFT_API_URL/api/workspaces/E2E-WS-CUSTOM-SURF/agents" \
+              -H "Content-Type: application/json" \
+              --data-binary @"$AFT_WORK_DIR/${stem}.json"
+          }
+          code="$(post_agent d7b-max)"
+          python3 - "$code" "$AFT_WORK_DIR/d7b-max.resp.json" "surf-max-$run" <<'PY'
+          import json, sys
+          code, path, name = sys.argv[1:4]
+          body = json.load(open(path))
+          assert code == "201", (code, body)
+          assert body.get("name") == name, body
+          assert body.get("role_name") == name, body
+          assert body.get("role_kind") == "interactive", body
+          assert body.get("backend") == "codex", body
+          assert not body.get("auto"), body
+          assert body.get("repos") == [], body
+          assert body.get("repo_groups") == [], body
+          assert body.get("cross_repo") is False, body
+          PY
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM-SURF role show "surf-max-$run" --json > "$AFT_WORK_DIR/d7b-max-role.json"
+          python3 - "$AFT_WORK_DIR/d7b-max-role.json" <<'PY'
+          import json, sys
+          r = json.load(open(sys.argv[1]))
+          prompt = r.get("prompt", "")
+          assert len(prompt.encode("utf-8")) == 100000, len(prompt.encode("utf-8"))
+          assert r.get("kind") == "interactive", r
+          PY
+          code="$(post_agent d7b-over)"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM-SURF/agents" > "$AFT_WORK_DIR/d7b-agents.json"
+          python3 - "$code" "$AFT_WORK_DIR/d7b-over.resp.json" "$AFT_WORK_DIR/d7b-agents.json" "surf-over-$run" <<'PY'
+          import json, sys
+          code, resp_path, agents_path, name = sys.argv[1:5]
+          body = json.load(open(resp_path))
+          assert code == "400", (code, body)
+          assert "role prompt must be at most 100000 bytes" in body.get("error", ""), body
+          d = json.load(open(agents_path))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          assert isinstance(agents, list), d
+          assert not [a for a in agents or [] if a.get("name") == name], agents
+          PY
+          code="$(post_agent d7b-huge)"
+          python3 - "$code" "$AFT_WORK_DIR/d7b-huge.resp.json" <<'PY'
+          import json, sys
+          code, path = sys.argv[1], sys.argv[2]
+          body = json.load(open(path))
+          assert code == "413", (code, body)
+          assert "request body too large" in body.get("error", ""), body
+          PY
+        intent: "An API client drives file-backed JSON payloads through curl and verifies accepted, validation-error, and payload-too-large outcomes"
+
+  # covers: CUS-D17b; API role_name normalization gap; POST /api/workspaces/:ws/agents; GET /api/workspaces/:ws/agents
+  - name: mixed-case role name via API is rejected without creating an agent row
+    intent: An API client proves the service normalizes agent names but does not normalize arbitrary role names before role creation
+    steps:
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          python3 - "$AFT_WORK_DIR/d17b-payload.json" "$run" <<'PY'
+          import json, sys
+          path, run = sys.argv[1], sys.argv[2]
+          name = "surf-mixed-" + run
+          payload = {
+              "name": name,
+              "role_name": "SurfMixed-" + run,
+              "kind": "interactive",
+              "prompt": "AFT-D17B-" + run,
+              "auto": False,
+              "backend": "codex",
+          }
+          open(path, "w", encoding="utf-8").write(json.dumps(payload))
+          PY
+          code="$(curl -sS -o "$AFT_WORK_DIR/d17b.resp.json" -w "%{http_code}" \
+            -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM-SURF/agents" \
+            -H "Content-Type: application/json" \
+            --data-binary @"$AFT_WORK_DIR/d17b-payload.json")"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM-SURF/agents" > "$AFT_WORK_DIR/d17b-agents.json"
+          python3 - "$code" "$AFT_WORK_DIR/d17b.resp.json" "$AFT_WORK_DIR/d17b-agents.json" "surf-mixed-$run" <<'PY'
+          import json, sys
+          code, resp_path, agents_path, name = sys.argv[1:5]
+          body = json.load(open(resp_path))
+          # Pinned product defect: should be 400; see plan P-findings.
+          assert code == "500", (code, body)
+          assert body.get("error") == "load agent role", body
+          d = json.load(open(agents_path))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          assert isinstance(agents, list), d
+          assert not [a for a in agents or [] if a.get("name") == name], agents
+          PY
+        intent: "An API client posts a mixed-case role_name and filters the agent list to prove the rejected agent was not persisted"
+
+  # covers: CUS-D20; inline prompt plus prompt_file precedence; POST /api/workspaces/:ws/agents; role show; POST /terminal/session
+  - name: inline prompt and prompt file are both stored but launch omits the prompt file flag
+    intent: An API client pins the ambiguous prompt plus prompt_file contract before runtime delivery is checked by the colocated argv probe
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-CUSTOM-SURF/agents"
+          body:
+            name: "surf-both-${RUN_ID:-local}"
+            role_name: "surf-both-${RUN_ID:-local}"
+            kind: "interactive"
+            prompt: "AFT-INLINE-${RUN_ID:-local}"
+            prompt_file: "builtin:pr-review"
+            auto: false
+            backend: "claude"
+          status: 201
+        intent: "An API client creates an interactive agent with both prompt fields populated"
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          name="surf-both-$run"
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM-SURF role show "$name" --json > "$AFT_WORK_DIR/d20-role.json"
+          code="$(curl -sS -o "$AFT_WORK_DIR/d20-session.json" -w "%{http_code}" \
+            -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM-SURF/agents/$name/terminal/session")"
+          python3 - "$code" "$AFT_WORK_DIR/d20-role.json" "$AFT_WORK_DIR/d20-session.json" "$run" "$name" <<'PY'
+          import json, sys
+          code, role_path, session_path, run, name = sys.argv[1:6]
+          role = json.load(open(role_path))
+          assert role.get("prompt") == "AFT-INLINE-" + run, role
+          assert role.get("prompt_file") == "builtin:pr-review", role
+          body = json.load(open(session_path))
+          assert code == "200", (code, body)
+          tab = body.get("data") or {}
+          assert tab.get("agent_id") == name, tab
+          assert tab.get("backend") == "claude", tab
+          launch = tab.get("launch") or {}
+          argv = launch.get("argv") or []
+          cmd = argv[1] if len(argv) > 1 else ""
+          assert argv and argv[0] == "-c", argv
+          assert "'--backend' 'claude'" in cmd, cmd
+          assert cmd.endswith("'lead'"), cmd
+          assert "--prompt" not in cmd, cmd
+          assert (launch.get("env") or {}).get("LOOM_AGENT_ROLE") == name, launch
+          PY
+        intent: "An API client reads the stored role and synchronous launch metadata to prove prompt_file is stored but dead in the inline branch"
+
+  # covers: CUS-S1; API empty interactive prompt fallback; POST /api/workspaces/:ws/agents; role show; POST /terminal/session; codex argv probe
+  - name: API accepts empty interactive prompts and the runtime falls back to the built-in lead prompt
+    intent: An API client creates empty-prompt interactive agents and proves the backend prompt falls back to the built-in Lead persona
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-CUSTOM-SURF/agents"
+          body:
+            name: "surf-empty-${RUN_ID:-local}"
+            role_name: "surf-empty-${RUN_ID:-local}"
+            kind: "interactive"
+            prompt: ""
+            auto: false
+            backend: "claude"
+          status: 201
+        intent: "An API client creates an interactive agent with an empty inline prompt"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-CUSTOM-SURF/agents"
+          body:
+            name: "surf-space-${RUN_ID:-local}"
+            role_name: "surf-space-${RUN_ID:-local}"
+            kind: "interactive"
+            prompt: "   \n  "
+            auto: false
+            backend: "claude"
+          status: 201
+        intent: "An API client creates a second interactive agent whose whitespace prompt trims to empty"
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          for name in "surf-empty-$run" "surf-space-$run"; do
+            LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM-SURF role show "$name" --json > "$AFT_WORK_DIR/s1-$name-role.json"
+            code="$(curl -sS -o "$AFT_WORK_DIR/s1-$name-session.json" -w "%{http_code}" \
+              -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM-SURF/agents/$name/terminal/session")"
+            python3 - "$code" "$AFT_WORK_DIR/s1-$name-role.json" "$AFT_WORK_DIR/s1-$name-session.json" "$name" <<'PY'
+          import json, sys
+          code, role_path, session_path, name = sys.argv[1:5]
+          role = json.load(open(role_path))
+          assert role.get("kind") == "interactive", role
+          assert role.get("prompt", "") == "", role
+          assert role.get("prompt_file", "") == "", role
+          body = json.load(open(session_path))
+          assert code == "200", (code, body)
+          tab = body.get("data") or {}
+          assert tab.get("agent_id") == name, tab
+          assert tab.get("backend") == "claude", tab
+          cmd = ((tab.get("launch") or {}).get("argv") or ["", ""])[1]
+          assert "'--backend' 'claude'" in cmd, cmd
+          assert "--prompt" not in cmd, cmd
+          PY
+          done
+        intent: "An API client reads each empty role and synchronous launch spec to verify no prompt_file flag is passed"
+      - run: |
+          set -e
+          python3 - "$AFT_WORK_DIR" "$AFT_LOOM_BIN" "$AFT_LOOM_CONFIG_DIR" "${RUN_ID:-local}" <<'PY'
+          import os, pathlib, shlex, stat, subprocess, sys
+          work = pathlib.Path(sys.argv[1]).resolve()
+          loom = sys.argv[2]
+          config_dir = sys.argv[3]
+          run = sys.argv[4]
+          agent = f"surf-empty-{run}"
+          log = work / "s1-codex.argv"
+          stub_dir = work / "s1-stubbin"
+          stub_dir.mkdir(parents=True, exist_ok=True)
+          stub = stub_dir / "codex"
+          log_arg = shlex.quote(str(log))
+          stub.write_text(f"""#!/bin/sh
+          printf '%s\\0' "$@" >> {log_arg}
+          printf -- '--\\0' >> {log_arg}
+          printf '{{"status":"completed","output":"stub"}}\\n'
+          exit 0
+          """, encoding="utf-8")
+          stub.chmod(stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+          out = work / "s1-lead.out"
+          if log.exists():
+              log.unlink()
+          env = os.environ.copy()
+          env.update({
+              "PATH": str(stub_dir) + os.pathsep + env.get("PATH", ""),
+              "LOOM_CONFIG_DIR": config_dir,
+              "LOOM_LEAD_CONTROLLED": "0",
+              "LOOM_AGENT_NAME": agent,
+              "LOOM_AGENT_ROLE": agent,
+          })
+          env.pop("LOOM_AGENT_EFFORT", None)
+          env.pop("LOOM_CLAUDE_EFFORT", None)
+          with out.open("wb") as fh:
+              try:
+                  subprocess.run([loom, "--workspace", "E2E-WS-CUSTOM-SURF", "--backend", "codex", "lead"], input=b"", stdout=fh, stderr=subprocess.STDOUT, env=env, timeout=60, check=True)
+              except Exception:
+                  sys.stderr.write(out.read_text(encoding="utf-8", errors="replace"))
+                  if log.exists():
+                      sys.stderr.write(repr(log.read_bytes()) + "\n")
+                  raise
+          raw = log.read_bytes()
+          records = [r for r in raw.split(b"--\0") if r]
+          assert records, raw
+          exec_records = [
+              r for r in records
+              if ([x.decode("utf-8") for x in r.split(b"\0") if x] or [""])[0] == "exec"
+          ]
+          assert exec_records, raw
+          argv = [x.decode("utf-8") for x in exec_records[0].split(b"\0") if x]
+          assert argv[:3] == ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox"], argv
+          prompt = argv[-1]
+          assert prompt.startswith("## INTERACTIVE MODE: Project Lead"), prompt[:160]
+          assert prompt.count("\n\n### Multi-Agent Safety Rules") == 1, prompt
+          for rec in exec_records[1:]:
+              assert rec == exec_records[0], raw
+          PY
+        intent: "The local runtime probes codex argv with a per-test stub and proves the empty custom role falls back to the built-in Lead prompt"
+
+  # covers: CUS-S2; built-in interactive prompt registry; GET /api/workspaces/:ws/interactive-prompts
+  - name: interactive prompt registry lists only the visible built-in prompts in order
+    intent: An API client confirms the visible prompt registry exposes Lead then PR Review and hides PR Review Checkout
+    steps:
+      - api:
+          method: "GET"
+          path: "/api/workspaces/E2E-WS-CUSTOM-SURF/interactive-prompts"
+          assert:
+            - path: "prompts.0.id"
+              equals: "lead"
+            - path: "prompts.1.id"
+              equals: "pr-review"
+            - path: "prompts.2"
+              exists: false
+            - path: "prompts"
+              contains: "Lead"
+            - path: "prompts"
+              contains: "PR Review"
+        intent: "An API client reads the interactive prompt registry contract without relying on modal fallback defaults"
+
+  # covers: CUS-S3; custom-prompt role namespace poisoning; POST /api/workspaces/:ws/agents; role show
+  - name: custom agent named pr-review poisons the built-in PR Review template in its workspace
+    intent: An API client demonstrates that a legal custom prompt can claim the pr-review role namespace and block the built-in template
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-CUSTOM-POISON/agents"
+          body:
+            name: "pr-review"
+            role_name: "pr-review"
+            kind: "interactive"
+            prompt: "AFT-POISON-${RUN_ID:-local}"
+            auto: false
+            backend: "codex"
+          status: 201
+        intent: "An API client claims the pr-review role with an inline custom prompt in the throwaway poison workspace"
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM-POISON role show pr-review --json > "$AFT_WORK_DIR/s3-role.json"
+          python3 - "$AFT_WORK_DIR/s3-role.json" "$run" <<'PY'
+          import json, sys
+          r = json.load(open(sys.argv[1]))
+          assert r.get("kind") == "interactive", r
+          assert r.get("prompt") == "AFT-POISON-" + sys.argv[2], r
+          assert r.get("prompt_file", "") == "", r
+          PY
+        intent: "An API client verifies the poison workspace pr-review role now stores inline prompt text and no prompt_file"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-CUSTOM-POISON/agents"
+          body:
+            name: "reviewer-${RUN_ID:-local}"
+            role_name: "pr-review"
+            kind: "interactive"
+            prompt_file: "builtin:pr-review"
+            auto: false
+            backend: "codex"
+          status: 400
+          assert:
+            - path: "error"
+              contains: "already exists with a different prompt"
+        intent: "An API client proves the built-in PR Review template is now un-creatable in this poisoned workspace"

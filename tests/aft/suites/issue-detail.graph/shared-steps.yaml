@@ -1,0 +1,80 @@
+kind: graph-steps
+version: 1
+flow: issue-detail
+
+blocks:
+  open-workspace-board:
+    params: [workspace]
+    steps:
+      - open: "/ws/{{workspace}}/kanban"
+
+  open-new-issue-form:
+    steps:
+      - wait: { load: networkidle }
+      - click: { testid: new-issue-button }
+
+  fill-new-issue-form:
+    params: [title, description]
+    steps:
+      - fill: { testid: create-issue-title, value: "{{title}}" }
+      - fill: { testid: create-issue-description, value: "{{description}}" }
+
+  create-issue-through-form:
+    params: [title, description]
+    steps:
+      - use: fill-new-issue-form
+        with: { title: "{{title}}", description: "{{description}}" }
+      - click: { testid: create-issue-submit }
+
+  blank-browser-ready:
+    steps:
+      - expect: { url: "about:blank" }
+
+  hydrated-board-ready:
+    params: [title]
+    steps:
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: Wait until the workspace board is ready.
+      - expect: { visible: { testid: board-toolbar } }
+      - expect:
+          count:
+            selector: "section[data-status=ready] article[aria-label='Issue: {{title}}']"
+            equals: 0
+
+  new-issue-form-ready:
+    steps:
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=create-issue-title]')
+        intent: Wait until the New Issue form is ready.
+      - expect: { visible: { testid: create-issue-title } }
+      - expect: { enabled: { testid: create-issue-submit, equals: false } }
+
+  editable-issue-panel-ready:
+    params: [title]
+    steps:
+      - wait:
+          fn: >-
+            (() => {
+              const panel = document.querySelector('[data-testid=issue-detail-panel]');
+              return panel?.getAttribute('data-state') === 'open' &&
+                panel?.getAttribute('data-loading') === 'false' &&
+                !!document.querySelector('[data-testid=issue-id]') &&
+                !!document.querySelector('[data-testid=editable-description]') &&
+                !!document.querySelector('[data-testid=comment-form]');
+            })()
+        intent: Wait until the complete editable issue panel is ready.
+      - expect: { visible: { testid: issue-header } }
+      - expect: { visible: { testid: header-close-button } }
+      - expect: { visible: { testid: status-dropdown } }
+      - expect: { visible: { testid: priority-dropdown-trigger } }
+      - expect: { visible: { testid: label-editor } }
+      - expect: { visible: { testid: editable-description } }
+      - expect: { visible: { testid: comment-form } }
+      - expect: { text: "{{title}}" }
+      - expect:
+          count:
+            selector: "[data-testid=review-action-bar]"
+            equals: 0
