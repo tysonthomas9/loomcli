@@ -314,16 +314,6 @@ func TestParseListParams(t *testing.T) {
 			},
 		},
 		{
-			name: "negative limit is ignored",
-			url:  "/api/issues?limit=-1",
-			wantFunc: func(t *testing.T, got interface{}) {
-				args := got.(testListArgs)
-				if args.Limit != 0 {
-					t.Errorf("expected limit=0 for negative value, got %d", args.Limit)
-				}
-			},
-		},
-		{
 			name: "excessive limit is capped at MaxIssueListLimit",
 			url:  "/api/issues?limit=999999999",
 			wantFunc: func(t *testing.T, got interface{}) {
@@ -448,6 +438,73 @@ func TestParseListParams(t *testing.T) {
 			tt.wantFunc(t, testArgs)
 		})
 	}
+}
+
+// TestParseListParams_LimitIsRejectedNotIgnored pins the replacement for the
+// old "negative limit is ignored" behavior. limit=-1, limit=0 and limit=abc
+// used to mean "no limit" and returned every row: a caller that asked for a
+// bounded page and got the whole board had no way to tell it was ignored.
+func TestParseListParams_LimitIsRejectedNotIgnored(t *testing.T) {
+	for _, raw := range []string{"-1", "0", "abc"} {
+		t.Run("limit="+raw, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/api/issues?limit="+raw, nil)
+			if _, err := parseListParams(req); err == nil {
+				t.Fatalf("limit=%s: expected an error, got nil", raw)
+			}
+		})
+	}
+}
+
+// TestHandleListIssues_BadLimitIs400 is the same contract one layer up: the
+// handler renders these as 400 INVALID_PARAMS, and the excessive value is still
+// clamped rather than rejected.
+func TestHandleListIssues_BadLimitIs400(t *testing.T) {
+	svc := &fakeLimitService{}
+	h := HandleListIssues(svc)
+
+	for _, raw := range []string{"-1", "0", "abc"} {
+		t.Run("limit="+raw, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			h(rec, httptest.NewRequest("GET", "/api/issues?limit="+raw, nil))
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("limit=%s: status = %d, want 400", raw, rec.Code)
+			}
+			if !strings.Contains(rec.Body.String(), "INVALID_PARAMS") {
+				t.Errorf("limit=%s: body = %s, want INVALID_PARAMS", raw, rec.Body.String())
+			}
+			if svc.called {
+				t.Errorf("limit=%s: service was called for a rejected request", raw)
+			}
+		})
+	}
+
+	t.Run("excessive limit is clamped, not rejected", func(t *testing.T) {
+		svc.called = false
+		rec := httptest.NewRecorder()
+		h(rec, httptest.NewRequest("GET", "/api/issues?limit=999999999", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		if svc.gotLimit != MaxIssueListLimit {
+			t.Errorf("limit = %d, want %d", svc.gotLimit, MaxIssueListLimit)
+		}
+	})
+}
+
+// Embeds the interface so only the one method under test is implemented; any
+// other call would nil-panic, which is the desired signal here.
+type fakeLimitService struct {
+	service.IssueService
+	called   bool
+	gotLimit int
+}
+
+func (f *fakeLimitService) ListIssues(_ context.Context, p service.ListIssuesParams) (*service.ListIssuesResult, error) {
+	f.called = true
+	if p.Args != nil {
+		f.gotLimit = p.Args.Limit
+	}
+	return &service.ListIssuesResult{Issues: []service.IssueWithParent{}}, nil
 }
 
 // testListArgs is a simplified version of rpc.ListArgs for testing.
@@ -1996,5 +2053,85 @@ func TestHandleRemoveDependency_NotFound(t *testing.T) {
 	handler.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+// TestParseListParams_AllThirteenRestoredFilters covers the parse half of
+// PUPPET-603. parseListParams was never the broken layer — it already read all
+// 21 parameters — but the thirteen below had no test, which is how their loss
+// one layer down went unnoticed. rpc.ListArgs is asserted directly rather than
+// through testListArgs, which only carries a handful of fields.
+func TestParseListParams_AllThirteenRestoredFilters(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/issues?"+strings.Join([]string{
+		"priority=1",
+		"created_after=2026-01-01",
+		"created_before=2026-12-31",
+		"updated_after=2026-02-01",
+		"updated_before=2026-11-30",
+		"q=needle",
+		"title_contains=title",
+		"description_contains=desc",
+		"notes_contains=note",
+		"empty_description=true",
+		"no_assignee=true",
+		"no_labels=true",
+		"pinned=true",
+	}, "&"), nil)
+
+	args, err := parseListParams(req)
+	if err != nil {
+		t.Fatalf("parseListParams: %v", err)
+	}
+
+	checks := []struct {
+		field string
+		ok    bool
+	}{
+		{"priority", args.Priority != nil && *args.Priority == 1},
+		{"created_after", args.CreatedAfter != ""},
+		{"created_before", args.CreatedBefore != ""},
+		{"updated_after", args.UpdatedAfter != ""},
+		{"updated_before", args.UpdatedBefore != ""},
+		{"q", args.Query == "needle"},
+		{"title_contains", args.TitleContains == "title"},
+		{"description_contains", args.DescriptionContains == "desc"},
+		{"notes_contains", args.NotesContains == "note"},
+		{"empty_description", args.EmptyDescription},
+		{"no_assignee", args.NoAssignee},
+		{"no_labels", args.NoLabels},
+		{"pinned", args.Pinned != nil && *args.Pinned},
+	}
+	if len(checks) != 13 {
+		t.Fatalf("expected 13 restored filters, table has %d", len(checks))
+	}
+	for _, c := range checks {
+		if !c.ok {
+			t.Errorf("%s was not parsed onto rpc.ListArgs", c.field)
+		}
+	}
+}
+
+// TestParseListParams_PinnedFalseIsAnActiveFilter is the deliberate exception to
+// the "only the literal string true counts" rule the three flags above follow:
+// Pinned is a *bool, so pinned=false means "non-pinned rows", not "no filter".
+func TestParseListParams_PinnedFalseIsAnActiveFilter(t *testing.T) {
+	args, err := parseListParams(httptest.NewRequest("GET", "/api/issues?pinned=false", nil))
+	if err != nil {
+		t.Fatalf("parseListParams: %v", err)
+	}
+	if args.Pinned == nil {
+		t.Fatal("pinned=false produced a nil *bool, i.e. no filter at all")
+	}
+	if *args.Pinned {
+		t.Error("pinned=false parsed as true")
+	}
+
+	// ...while the plain bools stay off for anything but "true".
+	args, err = parseListParams(httptest.NewRequest("GET", "/api/issues?no_assignee=false&no_labels=banana", nil))
+	if err != nil {
+		t.Fatalf("parseListParams: %v", err)
+	}
+	if args.NoAssignee || args.NoLabels {
+		t.Error("a non-\"true\" value activated a plain boolean filter")
 	}
 }
