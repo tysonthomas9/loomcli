@@ -274,6 +274,7 @@ if [[ "$backend" != mocked ]]; then
   export LOCAL_MODE_FLEETDB_IMAGE="${compose_project}-fleet-db:latest"
   export LOCAL_MODE_LOOM_IMAGE="${compose_project}-loom:latest"
 
+  export LOCAL_MODE_STEP_DELAY=8
   log "building and starting owned Compose project $compose_project on $fleet_port/$api_port/$ui_port"
   # Mark ownership before `up`: a partial create/build failure still needs the
   # exact-project down path in the EXIT trap.
@@ -347,7 +348,9 @@ if [[ "$backend" != mocked ]]; then
   # LOCALMODE; the other scenarios keep their isolated no-agent workspaces.
   runtime_backend="$("$container_engine" exec "$loom_container" printenv LOOM_BACKEND)"
   [[ "$runtime_backend" == localdogfood ]] || fatal "workflow proof requires the deterministic localdogfood backend"
-  printf 'agent_backend=%s\n' "$runtime_backend" >>"$artifacts/paired-revisions.txt"
+  runtime_delay="$("$container_engine" exec "$loom_container" printenv LOOM_LOCAL_MODE_STEP_DELAY)"
+  [[ "$runtime_delay" == 8 ]] || fatal "expected deterministic work delay 8, got $runtime_delay"
+  printf 'agent_backend=%s\nagent_step_delay=%s\n' "$runtime_backend" "$runtime_delay" >>"$artifacts/paired-revisions.txt"
   export RUN_SSE_WORKFLOW_TRANSITION_TESTS=1
   export LOOM_SSE_TEST_LOOM_CONTAINER="$loom_container"
   export RUN_INTEGRATION_TESTS=1

@@ -204,6 +204,7 @@ test("one UI-created task plans, approves, implements, and preserves loaded run 
       name: /Run by local-planner, Completed/,
     });
     await expect(retainedPlannerRow).toBeVisible();
+    await retainedPlannerRow.click();
     const retainedPlannerDetail = panel.getByTestId("session-detail-view");
     const retainedPlannerTranscript = panel.getByTestId("session-transcript");
     await expect(retainedPlannerDetail).toContainText("local-planner");
