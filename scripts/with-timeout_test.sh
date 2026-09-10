@@ -170,13 +170,23 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 7. No watchdog leak: a fast command leaves no `sleep <cap>` behind.
+# 7. No watchdog leak: a fast command leaves no `sleep <cap>` behind. A leaked
+#    watchdog is itself an orphan, and it keeps the gate's stdout pipe open,
+#    which hangs anything reading the gate's output.
+#
+#    The cap is unique to this run so a stray sleep from an unrelated run cannot
+#    be mistaken for a leak, and `ps` is captured to a FILE before grepping:
+#    `ps | grep -q` under `set -o pipefail` reports the pipeline as failed when
+#    grep -q exits early and SIGPIPEs ps, which reads as "no leak" and made this
+#    very case a false negative.
 # ---------------------------------------------------------------------------
-"$WITH_TIMEOUT" 987 "leak-check" true
+LEAK_CAP=$(( 900000 + ($$ % 90000) ))
+"$WITH_TIMEOUT" "$LEAK_CAP" "leak-check" true
 sleep 1
-if ps -ax -o command= 2>/dev/null | grep -v grep | grep -q 'sleep 987'; then
+ps -ax -o command= > "$TEST_TMPDIR/ps7" 2>/dev/null
+if grep -q "sleep $LEAK_CAP" "$TEST_TMPDIR/ps7"; then
     fail "watchdog sleep leaked after a fast command"
-    pkill -f 'sleep 987' 2>/dev/null
+    pkill -f "sleep $LEAK_CAP" 2>/dev/null
 else
     pass "watchdog reaped after a fast command"
 fi
