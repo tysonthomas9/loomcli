@@ -38,7 +38,7 @@ func TestRecoveryBridgeSurvivesExpiredStreamAndRejectsReplacement(t *testing.T) 
 		},
 		recover: func(context.Context) (backend.IssueRecoverySnapshot, error) {
 			calls++
-			return backend.IssueRecoverySnapshot{Manifest: "fleet.issue-workspace.v1", Workspace: "ws", Through: "c1.MTAtMA", Document: []byte(`{"manifest":"fleet.issue-workspace.v1","workspace":"ws","through":"c1.MTAtMA","issues":[],"total":0,"ready":[],"blocked":[],"deferred":[]}`)}, nil
+			return backend.IssueRecoverySnapshot{Manifest: "fleet.issue-workspace.v2", Workspace: "ws", Through: "c1.MTAtMA", Document: []byte(`{"manifest":"fleet.issue-workspace.v2","workspace":"ws","through":"c1.MTAtMA","issues":[],"total":0,"ready":[],"blocked":[],"deferred":[]}`)}, nil
 		},
 	}
 	multi := &MultiWorkspaceSubscriber{subscribers: map[string]*subscriberEntry{"ws": {sub: sub}}}

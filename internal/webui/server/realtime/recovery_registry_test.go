@@ -190,7 +190,7 @@ func TestRecoveryRegistryDiscardsLateSuccess(t *testing.T) {
 	}
 }
 func TestRecoveryRegistryResultAndSourceErrors(t *testing.T) {
-	for _, mode := range []string{"workspace", "manifest", "document", "source"} {
+	for _, mode := range []string{"workspace", "manifest", "legacy-v1", "document", "source"} {
 		t.Run(mode, func(t *testing.T) {
 			r := NewRecoveryRegistry()
 			defer r.Close()
@@ -202,6 +202,8 @@ func TestRecoveryRegistryResultAndSourceErrors(t *testing.T) {
 					result.Workspace = "OTHER"
 				case "manifest":
 					result.Manifest = "other"
+				case "legacy-v1":
+					result.Manifest = "fleet.issue-workspace.v1"
 				case "document":
 					result.Document = nil
 				case "source":

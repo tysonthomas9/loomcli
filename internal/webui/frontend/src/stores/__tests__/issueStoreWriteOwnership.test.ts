@@ -70,14 +70,12 @@ describe("issue store write ownership", () => {
     const active = store.getState().refetch();
     const abort = new AbortController();
     abort.abort();
-    await store
-      .getState()
-      .fetchIssues({
-        workspaceId: "A",
-        mode: "ready",
-        sourceRepos: ["repo-a"],
-        signal: abort.signal,
-      });
+    await store.getState().fetchIssues({
+      workspaceId: "A",
+      mode: "ready",
+      sourceRepos: ["repo-a"],
+      signal: abort.signal,
+    });
     page.resolve([issue({ title: "Valid new read" })]);
     await active;
     expect(store.getState().getIssue("same")?.title).toBe("Valid new read");
