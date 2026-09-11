@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/taskcontent"
 )
 
 // actorClaimBackend is the optional richer claim API: when the issue backend
@@ -152,7 +153,16 @@ func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts
 			s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), fmt.Sprintf("requested task %s is not claimable", taskID))
 			return false
 		}
-		if err := s.claimIssueForAgent(ap, taskID, "requested task"); err != nil {
+		if err := s.claimIssueForAgent(ap, issue, taskID, "requested task", false); err != nil {
+			// The control-plane pre-assignment path (agent_start carrying a
+			// task_id). Refusing here is the whole point of the gate: a
+			// pre-assigned bodyless row never reaches the ready-queue filter.
+			if errors.Is(err, taskcontent.ErrNoContent) {
+				slog.Info("dispatch refused: bodyless task", "worktree", ap.Entry.Worktree, "task_id", taskID, "role", ap.Entry.Role)
+				s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome),
+					fmt.Sprintf("requested task %s has no description or acceptance criteria; not dispatchable", taskID))
+				return false
+			}
 			if backend.IsKind(err, backend.KindConflict) {
 				s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome), fmt.Sprintf("requested task %s locked by %s", taskID, conflictHolder(err)))
 				return false
@@ -174,7 +184,12 @@ func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts
 // worktree (our own claim still within its TTL). Any other failure returns
 // false so the caller cold-starts rather than stranding the agent.
 func (s *Supervisor) claimResumeTask(ap *AgentProcess, taskID string) bool {
-	err := s.claimIssueForAgent(ap, taskID, "resume interrupted task")
+	// skipGate: resume re-acquires the agent's OWN in_progress task, which has
+	// already had a run spent on it. Gating it would strand a live session on a
+	// row whose description was cleared mid-run. The exemption is narrow —
+	// ResumeTaskID is only ever set from a surviving crash-remnant lock, never
+	// from a control-plane pre-assignment.
+	err := s.claimIssueForAgent(ap, backend.IssueData{ID: taskID}, taskID, "resume interrupted task", true)
 	if err == nil {
 		return true
 	}
@@ -198,7 +213,15 @@ func (s *Supervisor) tryClaimBestTask(ap *AgentProcess, issues []backend.IssueDa
 		if match == nil {
 			return false, false
 		}
-		if err := s.claimIssueForAgent(ap, match.Issue.ID, match.Reason); err != nil {
+		if err := s.claimIssueForAgent(ap, match.Issue, match.Issue.ID, match.Reason, false); err != nil {
+			// A bodyless candidate is dropped from the list and the agent moves
+			// on to the next real task. No retry ceiling is needed: every
+			// refusal removes a candidate, so the loop is bounded by the list.
+			if errors.Is(err, taskcontent.ErrNoContent) {
+				slog.Info("dispatch refused: bodyless task", "worktree", ap.Entry.Worktree, "task_id", match.Issue.ID, "role", ap.Entry.Role)
+				issues = removeIssueByID(issues, match.Issue.ID)
+				continue
+			}
 			if backend.IsKind(err, backend.KindConflict) {
 				conflicts++
 				lastConflictID = match.Issue.ID
@@ -234,7 +257,23 @@ func conflictHolder(err error) string {
 	return "unknown"
 }
 
-func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string) error {
+// claimIssueForAgent is the single place ClaimIssue/ClaimIssueAsActor is
+// called, and therefore the one point every dispatch arrival path converges on
+// — ready queue, assignee-scoped queue, control-plane pre-assignment and
+// resume alike. The content gate sits here so it applies to all of them.
+//
+// slim is the list-projection row the caller already holds; it may be the zero
+// value when only an ID is known (the memo then loses its free invalidation on
+// edit, nothing else). skipGate exempts the resume path.
+func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, slim backend.IssueData, taskID, reason string, skipGate bool) error {
+	if !skipGate {
+		gateCtx, gateCancel := s.operationContext(claimOperationTimeout)
+		allowed, gateErr := s.ContentGate.Allow(gateCtx, s.IssueBackend, slim, taskID)
+		gateCancel()
+		if !allowed {
+			return fmt.Errorf("task %s is not dispatchable: %w", taskID, gateErr)
+		}
+	}
 	claimCtx, claimCancel := s.operationContext(claimOperationTimeout)
 	var err error
 	if ap.Entry.Worktree != "" {

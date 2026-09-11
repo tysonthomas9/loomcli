@@ -160,6 +160,17 @@ podman; the `--network=none` blocking legs assert everywhere, and
 `TestSandboxEgressForwarderHostNode` exercises the full relay mechanism
 under host node on every platform.
 
+## Dispatch Content Gate
+
+A task with no description, no acceptance criteria and no design carries no
+work, and is never handed to a worker role. The invariant is enforced at CLAIM
+time (`internal/taskcontent`), so it covers every arrival path — ready queue,
+assignee-scoped queue, control-plane pre-assignment, agent self-claim over IPC
+and the driver's claim-ready drain. It fails open on any read failure, never
+writes to the refused row, and exempts an agent resuming its OWN interrupted
+task. Escape hatch: `LOOM_DISPATCH_CONTENT_GATE=off` restores the pre-gate
+behavior exactly. See `docs/design/dispatch-content-gate.md`.
+
 ## Quick Reference
 
 ```bash

@@ -102,6 +102,13 @@ func HasUnclosedBlockers(deps []backend.DependencyData, unclosedIDs map[string]b
 // IsAvailableForPlanning returns true if the issue should be picked up by a
 // planning agent: workable and needs a plan. Ready issues are pre-filtered
 // by the backend to exclude blocked issues.
+//
+// NOTE: these predicates run on backend.IssueData, the SLIM list projection,
+// which carries neither Description nor AcceptanceCriteria — those live only on
+// backend.IssueDetailData. So "does this task have any content at all?" cannot
+// be answered here; a predicate that tried would reject every task. That
+// invariant is enforced at CLAIM time instead, in internal/taskcontent. Do not
+// re-add it to this file.
 func IsAvailableForPlanning(issue backend.IssueData) bool {
 	return IsWorkableTask(issue) && NeedsPlan(issue)
 }
