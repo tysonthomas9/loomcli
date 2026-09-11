@@ -199,8 +199,13 @@ func TestHandler_CatchUpPagesAndDeduplicatesEveryQueuedCursor(t *testing.T) {
 					Events: []backend.MutationData{{Cursor: "c1.b", Type: backend.MutationUpdate, IssueID: "catch-b"}},
 					Cursor: "c1.b",
 				}, nil
+			case 3:
+				if since != "c1.b" {
+					t.Fatalf("live since = %q", since)
+				}
+				return backend.MutationPage{Events: []backend.MutationData{{Cursor: "c1.live", Type: backend.MutationUpdate, IssueID: "live-sentinel"}}, Cursor: "c1.live"}, nil
 			default:
-				return backend.MutationPage{}, errors.New("unexpected extra catch-up page")
+				return backend.MutationPage{Cursor: since}, nil
 			}
 		},
 		WorkspaceFromCtx: func(context.Context) string { return "ws-1" },
@@ -435,90 +440,70 @@ func TestHandler_WriterDeadlineTimeoutEndsStreamAndUnregisters(t *testing.T) {
 	}
 }
 
-func TestHandler_CatchUpFailuresOpenWithResyncThenConnected(t *testing.T) {
-	tests := []struct {
-		name       string
-		configure  func(*Handler)
-		page       func(context.Context, string, string, int) (backend.MutationPage, error)
-		wantReason string
-		wantID     string
-	}{
-		{
-			name: "page cap",
-			configure: func(h *Handler) {
-				h.catchUpMaxPages = 2
-			},
-			page: func(_ context.Context, _, since string, limit int) (backend.MutationPage, error) {
-				if limit != catchUpPageLimit {
-					t.Fatalf("limit = %d, want %d", limit, catchUpPageLimit)
-				}
-				return backend.MutationPage{Events: []backend.MutationData{}, Cursor: since + ".next", HasMore: true}, nil
-			},
-			wantReason: "cap",
-			wantID:     "c1.old.next.next",
-		},
-		{
-			name: "backend error",
-			page: func(context.Context, string, string, int) (backend.MutationPage, error) {
-				return backend.MutationPage{}, errors.New("unavailable")
-			},
-			wantReason: "error",
-			wantID:     "c1.old",
-		},
-		{
-			name: "expired cursor",
-			page: func(context.Context, string, string, int) (backend.MutationPage, error) {
-				err := backend.NewBackendError(backend.KindValidation, "catchup", "expired", backend.ErrMutationCursorExpired)
-				err.Meta = map[string]string{"cursor": "c1.floor"}
-				return backend.MutationPage{}, err
-			},
-			wantReason: "expired",
-			wantID:     "c1.floor",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+func TestHandler_SourceFailuresResyncWithoutAdvancingOrConnected(t *testing.T) {
+	for _, expired := range []bool{false, true} {
+		t.Run(fmt.Sprint(expired), func(t *testing.T) {
 			hub := NewHub()
 			go hub.Run()
 			t.Cleanup(hub.Stop)
-			h := NewHandler(HandlerConfig{
-				Hub:              hub,
-				OnAuthenticated:  func(context.Context, string) (string, error) { return "c1.head", nil },
-				GetMutationPage:  tt.page,
-				WorkspaceFromCtx: func(context.Context) string { return "ws-1" },
-			})
+			reason := "error"
+			if expired {
+				reason = "expired"
+			}
+			h := NewHandler(HandlerConfig{Hub: hub, WorkspaceFromCtx: func(context.Context) string { return "ws-1" }, GetMutationPage: func(context.Context, string, string, int) (backend.MutationPage, error) {
+				if expired {
+					err := backend.NewBackendError(backend.KindValidation, "catchup", "expired", backend.ErrMutationCursorExpired)
+					err.Meta = map[string]string{"cursor": "c1.floor"}
+					return backend.MutationPage{}, err
+				}
+				return backend.MutationPage{}, errors.New("unavailable")
+			}})
 			writer := newRecordingFrameWriter()
 			h.writerFactory = func(http.ResponseWriter) (frameWriter, error) { return writer, nil }
-			h.heartbeatInterval = time.Hour
-			if tt.configure != nil {
-				tt.configure(h)
-			}
-			ctx, cancel := context.WithCancel(context.Background())
-			done := make(chan struct{})
-			rr := httptest.NewRecorder()
-			go func() {
-				h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/events?since=c1.old", nil).WithContext(ctx))
-				close(done)
-			}()
-			<-writer.connected
-			cancel()
-			<-done
-
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/events?since=c1.old", nil).WithContext(ctx))
 			frames := writer.snapshot()
-			if len(frames) < 3 {
-				t.Fatalf("frames = %#v, want resync, retry, connected", frames)
-			}
-			if frames[0] != (recordedFrame{id: tt.wantID, event: "resync", data: fmt.Sprintf(`{"reason":%q}`, tt.wantReason)}) {
-				t.Fatalf("first frame = %#v, want resync id=%q reason=%q", frames[0], tt.wantID, tt.wantReason)
-			}
-			if frames[1].event != "retry" || frames[2].event != "connected" {
-				t.Fatalf("frame order = %#v, want resync, retry, connected", frames[:3])
-			}
-			if got := rr.Header().Get("Content-Type"); got != "text/event-stream" {
-				t.Fatalf("Content-Type = %q, want open event stream", got)
+			if len(frames) != 1 || frames[0] != (recordedFrame{event: "resync", data: fmt.Sprintf(`{"reason":%q}`, reason)}) {
+				t.Fatalf("source failure must preserve cursor and never report connected: %#v", frames)
 			}
 		})
+	}
+}
+
+func TestHandler_PageBudgetSchedulesRemainingSource(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	t.Cleanup(hub.Stop)
+	calls := 0
+	h := NewHandler(HandlerConfig{Hub: hub, WorkspaceFromCtx: func(context.Context) string { return "ws-1" }, GetMutationPage: func(_ context.Context, _ string, since string, _ int) (backend.MutationPage, error) {
+		calls++
+		return backend.MutationPage{Cursor: since + ".next", HasMore: calls < 12}, nil
+	}})
+	writer := newRecordingFrameWriter()
+	h.writerFactory = func(http.ResponseWriter) (frameWriter, error) { return writer, nil }
+	h.heartbeatInterval = time.Hour
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/events?since=c1.start", nil).WithContext(ctx))
+	}()
+	select {
+	case <-writer.connected:
+	case <-ctx.Done():
+		t.Fatal("missing connected after page budget")
+	}
+	cancel()
+	<-done
+	if calls != 12 {
+		t.Fatalf("calls=%d", calls)
+	}
+	for _, frame := range writer.snapshot() {
+		if frame.event == "resync" {
+			t.Fatal("page budget skipped source via resync")
+		}
 	}
 }
 
