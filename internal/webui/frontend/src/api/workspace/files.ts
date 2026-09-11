@@ -163,6 +163,48 @@ export type FileCheckoutsResponse =
 export type FileCapabilitiesResponse =
   components["schemas"]["FileCapabilitiesResponse"];
 
+function isCheckoutKind(value: unknown): value is "agent" | "repo" {
+  return value === "agent" || value === "repo";
+}
+
+function validateFileCheckout(value: unknown): void {
+  if (value === null || typeof value !== "object")
+    throw new Error("Invalid file checkout record");
+  const checkout = value as Partial<FileCheckout>;
+  if (
+    !isCheckoutKind(checkout.kind) ||
+    typeof checkout.repo !== "string" ||
+    !checkout.repo ||
+    typeof checkout.exists !== "boolean" ||
+    !Number.isInteger(checkout.change_count) ||
+    (checkout.change_count ?? -1) < 0 ||
+    (checkout.kind === "agent" &&
+      (typeof checkout.agent !== "string" || !checkout.agent))
+  )
+    throw new Error("Invalid file checkout record");
+  for (const field of ["partial", "limit_hit", "status_error"] as const) {
+    if (checkout[field] !== undefined && typeof checkout[field] !== "boolean")
+      throw new Error("Invalid file checkout flag");
+  }
+  for (const field of ["agent", "branch", "error"] as const) {
+    if (checkout[field] !== undefined && typeof checkout[field] !== "string")
+      throw new Error("Invalid file checkout text");
+  }
+}
+
+function validateFileCheckoutError(value: unknown): void {
+  if (value === null || typeof value !== "object")
+    throw new Error("Invalid file checkout error");
+  const error = value as Partial<FileCheckoutError>;
+  if (
+    !isCheckoutKind(error.kind) ||
+    typeof error.repo !== "string" ||
+    typeof error.error !== "string" ||
+    (error.agent !== undefined && typeof error.agent !== "string")
+  )
+    throw new Error("Invalid file checkout error");
+}
+
 interface ApiSuccess {
   success: boolean;
 }
@@ -294,38 +336,8 @@ export async function listFileCheckouts(
     !Array.isArray(data.errors)
   )
     throw new Error("Invalid file checkout metadata");
-  for (const checkout of data.checkouts) {
-    if (
-      !checkout ||
-      !["agent", "repo"].includes(checkout.kind) ||
-      typeof checkout.repo !== "string" ||
-      !checkout.repo ||
-      typeof checkout.exists !== "boolean" ||
-      !Number.isInteger(checkout.change_count) ||
-      checkout.change_count < 0 ||
-      (checkout.kind === "agent" &&
-        (typeof checkout.agent !== "string" || !checkout.agent))
-    )
-      throw new Error("Invalid file checkout record");
-    for (const field of ["partial", "limit_hit", "status_error"] as const) {
-      if (checkout[field] !== undefined && typeof checkout[field] !== "boolean")
-        throw new Error("Invalid file checkout flag");
-    }
-    for (const field of ["agent", "branch", "error"] as const) {
-      if (checkout[field] !== undefined && typeof checkout[field] !== "string")
-        throw new Error("Invalid file checkout text");
-    }
-  }
-  for (const error of data.errors) {
-    if (
-      !error ||
-      !["agent", "repo"].includes(error.kind) ||
-      typeof error.repo !== "string" ||
-      typeof error.error !== "string" ||
-      (error.agent !== undefined && typeof error.agent !== "string")
-    )
-      throw new Error("Invalid file checkout error");
-  }
+  data.checkouts.forEach(validateFileCheckout);
+  data.errors.forEach(validateFileCheckoutError);
   return data;
 }
 
