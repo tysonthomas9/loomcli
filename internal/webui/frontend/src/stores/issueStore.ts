@@ -276,11 +276,11 @@ export function createIssueStore(
     const internalController = new AbortController();
     activeController = internalController;
     previousController?.abort();
-    if (
-      activeController !== internalController ||
-      scopeEpoch !== readScopeEpoch ||
-      generation !== fetchGeneration
-    ) {
+    const ownsFetch = (): boolean =>
+      activeController === internalController &&
+      scopeEpoch === readScopeEpoch &&
+      generation === fetchGeneration;
+    if (!ownsFetch()) {
       if (recovery)
         throw new DOMException(
           "Recovery superseded while starting",
@@ -323,11 +323,7 @@ export function createIssueStore(
       });
     }
 
-    if (
-      activeController !== internalController ||
-      scopeEpoch !== readScopeEpoch ||
-      generation !== fetchGeneration
-    ) {
+    if (!ownsFetch()) {
       if (recovery)
         throw new DOMException(
           "Recovery superseded while starting",
@@ -390,12 +386,7 @@ export function createIssueStore(
         );
       }
 
-      if (
-        activeController !== internalController ||
-        mergedSignal.aborted ||
-        scopeEpoch !== readScopeEpoch ||
-        generation !== fetchGeneration
-      ) {
+      if (!ownsFetch() || mergedSignal.aborted) {
         if (recovery)
           throw new DOMException(
             "Recovery superseded or aborted",
@@ -468,10 +459,8 @@ export function createIssueStore(
       });
       if (
         recovery &&
-        (activeController !== internalController ||
+        (!ownsFetch() ||
           mergedSignal.aborted ||
-          scopeEpoch !== readScopeEpoch ||
-          generation !== fetchGeneration ||
           commandRevision !== readCommandRevision ||
           !!unresolvedCommands.get(workspaceId)?.size)
       ) {
@@ -549,12 +538,7 @@ export function createIssueStore(
           retryCount: nextAttempt,
           nextRetryAt: Date.now() + delay,
         });
-        if (
-          activeController !== internalController ||
-          scopeEpoch !== readScopeEpoch ||
-          generation !== fetchGeneration
-        )
-          return;
+        if (!ownsFetch()) return;
         // Strip the external signal before retrying: by the time this
         // timer fires, the caller's AbortController (e.g. the one from
         // App.tsx's useEffect) may have been aborted by a cleanup (view
