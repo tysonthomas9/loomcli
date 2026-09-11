@@ -220,26 +220,23 @@ func validateRecoveryBlocked(rows []json.RawMessage, ws string, issues map[strin
 		if len(wrapper) != 2 || wrapper["issue"] == nil || wrapper["blockers"] == nil {
 			return fmt.Errorf("invalid blocked wrapper")
 		}
-		var row struct {
-			Issue    json.RawMessage    `json:"issue"`
-			Blockers *[]json.RawMessage `json:"blockers"`
-		}
-		if err := json.Unmarshal(raw, &row); err != nil {
+		var blockers *[]json.RawMessage
+		if err := json.Unmarshal(wrapper["blockers"], &blockers); err != nil {
 			return err
 		}
-		if err := validateRecoveryDerived(row.Issue, ws, issues, seen); err != nil {
+		if err := validateRecoveryDerived(wrapper["issue"], ws, issues, seen); err != nil {
 			return err
 		}
-		if row.Blockers == nil || len(*row.Blockers) == 0 {
+		if blockers == nil || len(*blockers) == 0 {
 			return fmt.Errorf("missing blockers")
 		}
 		blockerIDs := map[string]bool{}
-		for _, rawBlocker := range *row.Blockers {
+		for _, rawBlocker := range *blockers {
 			var reason struct {
 				Reason string `json:"reason"`
 			}
 			_ = json.Unmarshal(rawBlocker, &reason)
-			if reason.Reason == "parent-blocked" && len(*row.Blockers) != 1 {
+			if reason.Reason == "parent-blocked" && len(*blockers) != 1 {
 				return fmt.Errorf("mixed parent sentinel")
 			}
 			if err := validateRecoveryBlocker(rawBlocker, issues, blockerIDs); err != nil {
