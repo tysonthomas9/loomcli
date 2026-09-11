@@ -3,6 +3,8 @@ package envfilter
 import (
 	"os"
 	"strings"
+
+	"github.com/tysonthomas9/loomcli/internal/secrets/names"
 )
 
 // envAllowlistExact contains environment variable names that are allowed
@@ -25,24 +27,22 @@ var envAllowlistExact = map[string]bool{
 	"http_proxy": true, "https_proxy": true, "no_proxy": true,
 	// Color
 	"NO_COLOR": true, "FORCE_COLOR": true, "CLICOLOR": true, "CLICOLOR_FORCE": true,
-	// AI backend keys
-	"ANTHROPIC_API_KEY": true, "OPENAI_API_KEY": true,
-	"GEMINI_API_KEY": true, "GOOGLE_API_KEY": true, "CURSOR_API_KEY": true,
-	"CODEX_HOME": true,
-	// claude-code's config-dir override. claudeAuthFilePath() honors it when
-	// locating ~/.claude/.credentials.json for health checks, so dropping it
-	// here made preflight and the spawned CLI disagree about where auth lives.
-	"CLAUDE_CONFIG_DIR": true,
-	// claude-code's long-lived OAuth token (`claude setup-token`); the headless
-	// equivalent of a ~/.claude login, so interactive/lead claude invocations must
-	// inherit it (mirrors trustedLocalProviderCredentials on the task-runner path).
-	"CLAUDE_CODE_OAUTH_TOKEN": true,
-	// Git hosting tokens (needed by container agents for git push)
-	"GITHUB_TOKEN": true, "GITHUB_TOKEN_FILE": true,
+	// Git hosting token file path. The GITHUB_TOKEN value itself is seeded from
+	// internal/secrets/names.ProviderCredentialNames in init().
+	"GITHUB_TOKEN_FILE": true,
 	// E2E test stubs. Exact matches keep arbitrary STUB_* values out.
 	"STUB_CODEX_EPIC_RUNNER": true, "STUB_CODEX_INVOCATIONS": true,
 	// Editor
 	"EDITOR": true, "VISUAL": true,
+}
+
+func init() {
+	// Provider-credential names live in internal/secrets/names. Seed them here
+	// so lead/interactive subprocess filtering cannot drift from the local task
+	// runner's inheritance overlay in driver/env.go.
+	for _, n := range names.ProviderCredentialNames {
+		envAllowlistExact[n] = true
+	}
 }
 
 // envBlocklistExact contains environment variable names that are NEVER
