@@ -441,6 +441,27 @@ func (s *Supervisor) parkedStateBackoff(profileInvalid, blocked bool) (time.Dura
 	return 0, false
 }
 
+// fixedRecheckBackoff returns the fixed interval for the backoff buckets that
+// wait on something outside the agent rather than backing off a flaky run, and
+// ok=false for the exponential ones. Split out of computeBackoff (funlen) with
+// the arms unchanged.
+func (s *Supervisor) fixedRecheckBackoff(bp agentpolicy.BackoffProfile) (time.Duration, bool) {
+	switch bp {
+	case agentpolicy.BPBackendUnavailable:
+		// Waiting for the backend CLI to reappear.
+		return s.backendRecheckBackoff(), true
+	case agentpolicy.BPClaimsHeld:
+		// Waiting for an operator to release a hold.
+		return s.claimHoldRecheckBackoff(), true
+	case agentpolicy.BPIssueBackendOutage:
+		// Waiting for the issue store to answer again.
+		return s.issueBackendRecheckBackoff(), true
+	case agentpolicy.BPBlock:
+		return s.maxRetriesBlockBackoff(), true
+	}
+	return 0, false
+}
+
 // computeBackoff returns the sleep duration before the next restart. The
 // policy disposition names the configured bucket (BackoffProfile); this
 // layer applies its restart_policy values and counters.
@@ -475,6 +496,10 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	outcome := lastErr.Class
 	d := agentpolicy.Decide(outcome)
 
+	if wait, ok := s.fixedRecheckBackoff(d.Backoff); ok {
+		return wait
+	}
+
 	var initial int
 	var retryN int
 	switch d.Backoff {
@@ -483,20 +508,6 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 		// exponential retry curve - it is a poll that relaxes while the board stays
 		// empty and snaps back to no_work_backoff the moment anything is claimed.
 		return noWorkPollInterval(s.getNoWorkBackoff(), s.GetIdlePollInterval(), noWorkCount)
-	case agentpolicy.BPBackendUnavailable:
-		// Fixed recheck: waiting for the backend CLI to reappear, not
-		// backing off a flaky run.
-		return s.backendRecheckBackoff()
-	case agentpolicy.BPClaimsHeld:
-		// Fixed recheck: waiting for an operator to release a hold, not
-		// backing off a flaky run.
-		return s.claimHoldRecheckBackoff()
-	case agentpolicy.BPIssueBackendOutage:
-		// Fixed recheck: waiting for the issue store to answer again, not
-		// backing off a flaky run.
-		return s.issueBackendRecheckBackoff()
-	case agentpolicy.BPBlock:
-		return s.maxRetriesBlockBackoff()
 	case agentpolicy.BPRateLimit:
 		initial = s.getRateLimitBackoff()
 		retryN = rateCount
