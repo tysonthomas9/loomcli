@@ -182,26 +182,28 @@ func (h *Handler) sendCatchUp(sw *Writer, client *Client, since string, workspac
 	}
 	mutations, replayErr := h.getMutationsSince(workspaceID, since)
 	for _, m := range mutations {
-		if m.Cursor != "" {
-			client.replayed[m.Cursor] = true
-		}
-		payload := RPCMutationToPayload(m)
-		payload.WorkspaceID = workspaceID
-		if !MatchesSourceRepoFilter(sourceRepos, payload.SourceRepo) {
-			// Excluded records still advance the workspace journal position. Publish
-			// no domain payload, but preserve progress if a later page fails.
-			if m.Cursor != "" {
-				if err := sw.WriteEventID(m.Cursor, "checkpoint", "{}"); err != nil {
-					return err
-				}
-			}
-			continue
-		}
-		if err := writeSSEEvent(sw, payload); err != nil {
+		if err := writeReplayEvent(sw, client, m, workspaceID, sourceRepos); err != nil {
 			return err
 		}
 	}
 	return replayErr
+}
+
+func writeReplayEvent(sw *Writer, client *Client, mutation rpc.MutationEvent, workspaceID string, sourceRepos []string) error {
+	if mutation.Cursor != "" {
+		client.replayed[mutation.Cursor] = true
+	}
+	payload := RPCMutationToPayload(mutation)
+	payload.WorkspaceID = workspaceID
+	if MatchesSourceRepoFilter(sourceRepos, payload.SourceRepo) {
+		return writeSSEEvent(sw, payload)
+	}
+	// Excluded records still advance the workspace journal position. Publish
+	// no domain payload, but preserve progress if a later page fails.
+	if mutation.Cursor == "" {
+		return nil
+	}
+	return sw.WriteEventID(mutation.Cursor, "checkpoint", "{}")
 }
 
 // streamLoop runs the long-lived event pump and returns the disconnect
