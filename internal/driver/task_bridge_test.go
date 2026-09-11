@@ -377,6 +377,104 @@ func TestHostBridgeTaskExecutorMapsFlueSessionAndTranscript(t *testing.T) {
 	}
 }
 
+func TestPersistRunnerOutputArtifactsRedactsTranscriptAndLogs(t *testing.T) {
+	const secret = "sk-ant-api03-xK9mZ2vL8nQ5rT1wY4bC7dF0gH3jE6pA"
+	tests := []struct {
+		name       string
+		redactEnv  string
+		wantSecret bool
+		wantStatus string
+	}{
+		{name: "enabled", wantStatus: "redacted"},
+		{name: "disabled", redactEnv: "off", wantSecret: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("LOOM_REDACT_TRANSCRIPTS", tt.redactEnv)
+			ctx := context.Background()
+			st := memstore.New()
+			executor := HostBridgeTaskExecutor{Store: st}
+			req := hostBridgeTaskExecRequest()
+			session := &flueTaskSession{SessionID: "session-1", Metadata: map[string]string{}}
+
+			result, err := executor.persistRunnerOutputArtifacts(ctx, req, session, bridgeTaskRunnerResult{
+				Transcript: `{"role":"assistant","type":"text","text":"token ` + secret + `"}` + "\n",
+				Logs:       "runner log token " + secret + "\n",
+			}, TaskExecResult{})
+			if err != nil {
+				t.Fatalf("persistRunnerOutputArtifacts: %v", err)
+			}
+			if result.RuntimeMetadata["transcript_ref"] != "artifact://transcript-task-run-1" || result.LogsRef != "artifact://logs-task-run-1" {
+				t.Fatalf("refs = %+v logs=%q, want transcript/log artifact refs", result.RuntimeMetadata, result.LogsRef)
+			}
+
+			contentReader := st.Artifacts().(store.ArtifactContentReader)
+			transcriptContent, err := contentReader.ReadContent(ctx, "WS", "transcript-task-run-1")
+			if err != nil {
+				t.Fatalf("read transcript artifact: %v", err)
+			}
+			logContent, err := contentReader.ReadContent(ctx, "WS", "logs-task-run-1")
+			if err != nil {
+				t.Fatalf("read logs artifact: %v", err)
+			}
+			for _, got := range []struct {
+				name    string
+				content []byte
+			}{
+				{name: "transcript", content: transcriptContent},
+				{name: "logs", content: logContent},
+			} {
+				if strings.Contains(string(got.content), secret) != tt.wantSecret {
+					t.Fatalf("%s content secret presence = %v, want %v: %s", got.name, strings.Contains(string(got.content), secret), tt.wantSecret, got.content)
+				}
+			}
+
+			transcriptArtifact, err := st.Artifacts().Get(ctx, "WS", "transcript-task-run-1")
+			if err != nil {
+				t.Fatalf("get transcript artifact: %v", err)
+			}
+			logsArtifact, err := st.Artifacts().Get(ctx, "WS", "logs-task-run-1")
+			if err != nil {
+				t.Fatalf("get logs artifact: %v", err)
+			}
+			if transcriptArtifact.RedactionStatus != tt.wantStatus || logsArtifact.RedactionStatus != tt.wantStatus {
+				t.Fatalf("redaction statuses = %q/%q, want %q", transcriptArtifact.RedactionStatus, logsArtifact.RedactionStatus, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestCreatePatchArtifactRedactsSummaryAndPreservesPatchBytes(t *testing.T) {
+	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "")
+	const secret = "sk-ant-api03-xK9mZ2vL8nQ5rT1wY4bC7dF0gH3jE6pA"
+	ctx := context.Background()
+	st := memstore.New()
+	executor := HostBridgeTaskExecutor{Store: st}
+	req := hostBridgeTaskExecRequest()
+	patch := []byte("diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+" + secret + "\n")
+
+	artifact, _, err := executor.createPatchArtifact(ctx, req, bridgeTaskRunnerResult{
+		PatchSummary: "patch mentions " + secret,
+	}, patch)
+	if err != nil {
+		t.Fatalf("createPatchArtifact: %v", err)
+	}
+	if strings.Contains(artifact.Summary, secret) {
+		t.Fatalf("patch summary leaked secret: %q", artifact.Summary)
+	}
+	if artifact.RedactionStatus != "" {
+		t.Fatalf("patch artifact redaction status = %q, want empty because patch content is unchanged", artifact.RedactionStatus)
+	}
+	contentReader := st.Artifacts().(store.ArtifactContentReader)
+	uploaded, err := contentReader.ReadContent(ctx, "WS", artifact.ArtifactID)
+	if err != nil {
+		t.Fatalf("read patch content: %v", err)
+	}
+	if !bytes.Equal(uploaded, patch) {
+		t.Fatalf("patch content changed:\ngot  %q\nwant %q", uploaded, patch)
+	}
+}
+
 func TestHostBridgeTaskExecutorReusesOutputArtifactsOnRetry(t *testing.T) {
 	ctx, st, _ := setupRunningDriverRun(t)
 	executor := HostBridgeTaskExecutor{
