@@ -43,3 +43,7 @@ The decoder exposes valid offers to the owning EventProvider, which now pauses t
 - Foreign, expired, malformed or mismatched handle responses publish nothing and preserve the accepted SSE checkpoint.
 - A slow certified read survives suspended retry timers; duplicate offers join only the identical attempt. Manual reconnect invalidates it.
 - Actual paired Fleet/browser proof must include HTTP route/authentication, immutable source binding, stored acceptance generation, exact resume cursor and replayed post-boundary events. Package fixtures alone do not establish these runtime properties.
+
+## v5 selected history contract
+
+Native v5 now includes explicit history:null or a validated selected window. The current browser reader remains unselected; the preparer can retain a selected window only with an exact expected scope. Registry/attempt selection ownership, timeline adaptation, ordinary-request fencing and publication remain pending. See [contract proof](../testing/sse-history-recovery-contract-proof.md).
