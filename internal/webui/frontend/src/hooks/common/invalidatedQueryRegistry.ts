@@ -74,18 +74,9 @@ function normalizeOptions(
   options: UseInvalidatedQueryOptions,
 ): NormalizedOptions {
   return {
-    entityTypes:
-      options.entityTypes && options.entityTypes.length > 0
-        ? [...options.entityTypes]
-        : undefined,
-    actions:
-      options.actions && options.actions.length > 0
-        ? [...options.actions]
-        : undefined,
-    types:
-      options.types && options.types.length > 0
-        ? [...options.types]
-        : undefined,
+    entityTypes: nonEmptyCopy(options.entityTypes),
+    actions: nonEmptyCopy(options.actions),
+    types: nonEmptyCopy(options.types),
     debounceMs: Math.max(0, options.debounceMs ?? DEFAULT_OPTIONS.debounceMs),
     safetyPollMs: Math.max(
       0,
@@ -95,6 +86,10 @@ function normalizeOptions(
     refetchOnConnect:
       options.refetchOnConnect ?? DEFAULT_OPTIONS.refetchOnConnect,
   };
+}
+
+function nonEmptyCopy<T>(values: T[] | undefined): T[] | undefined {
+  return values && values.length > 0 ? [...values] : undefined;
 }
 
 function arrayKey(values: string[] | undefined): string {
@@ -344,12 +339,11 @@ class InvalidatedQueryEntry<T> {
       if (document.visibilityState !== "visible" || this.enabledCount === 0) {
         return;
       }
-      const wasDirty = this.dirty;
       this.dirty = false;
       this.clearDebounce();
       if (this.inFlight) {
         this.trailing = true;
-      } else if (wasDirty || document.visibilityState === "visible") {
+      } else {
         this.startFetch();
       }
     };
