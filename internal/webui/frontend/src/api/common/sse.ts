@@ -208,12 +208,12 @@ export class WorkspaceSSEClient {
             `Expected content-type to be ${EventStreamContentType}, Actual: ${contentType}`,
           );
         }
-        this.handleOpen(abortController, generation);
+        this.handleOpen();
         return Promise.resolve();
       },
       onmessage: (event) => {
         if (this.isActive(abortController, generation)) {
-          this.handleMessage(event);
+          this.handleMessage(event, abortController, generation);
         }
       },
       onclose: () => {
@@ -345,19 +345,10 @@ export class WorkspaceSSEClient {
     }
   }
 
-  private handleOpen(
-    abortController: AbortController,
-    generation: number,
-  ): void {
-    const wasReconnecting = this.reconnectAttempts > 0;
+  private handleOpen(): void {
+    // HTTP headers only open the transport. Replay must reach its connected
+    // frame before consumers consider the stream synchronized.
     this.connectedFrameSeenForOpen = false;
-    this.setState("connected");
-    this.throwIfInactive(abortController, generation);
-    this.reconnectAttempts = 0;
-    // Only notify about reconnect counter reset if we were actually reconnecting
-    if (wasReconnecting) {
-      this.callSafely("onReconnect", this.onReconnect, 0);
-    }
   }
 
   private handleError(
@@ -397,7 +388,11 @@ export class WorkspaceSSEClient {
     );
   }
 
-  private handleMessage(event: EventSourceMessage): void {
+  private handleMessage(
+    event: EventSourceMessage,
+    abortController: AbortController,
+    generation: number,
+  ): void {
     const previousEventId = this.lastEventId;
     this.lastEventId = this.getLastEventId();
     if (event.event === "resync") {
@@ -427,6 +422,14 @@ export class WorkspaceSSEClient {
     if (event.event === "connected") {
       if (this.connectedFrameSeenForOpen) return;
       this.connectedFrameSeenForOpen = true;
+      const wasReconnecting = this.reconnectAttempts > 0;
+      this.setState("connected");
+      if (!this.isActive(abortController, generation)) return;
+      this.reconnectAttempts = 0;
+      if (wasReconnecting) {
+        this.callSafely("onReconnect", this.onReconnect, 0);
+        if (!this.isActive(abortController, generation)) return;
+      }
       this.callSafely("onConnected", this.onConnected);
       return;
     }
