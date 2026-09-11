@@ -254,6 +254,99 @@ describe("WorkspaceSSEClient", () => {
   });
 
   it.each([
+    "valid",
+    "foreign",
+    "stale",
+    "malformed",
+    "wrong scope",
+    "non-expired",
+  ])(
+    "decodes %s recovery offers without accepting resync cursors",
+    async (mode) => {
+      const onResync = vi.fn();
+      const client = new WorkspaceSSEClient("test-ws", { onResync });
+      await client.connect("c1.previous", [" a,b "]);
+      await expectRequestCount(1);
+      const recovery = {
+        handle: "A".repeat(43),
+        workspace: mode === "foreign" ? "other" : "test-ws",
+        source_repos: mode === "wrong scope" ? ["other"] : ["b", "a"],
+        expires_at: new Date(
+          Date.now() + (mode === "stale" ? -1000 : 60000),
+        ).toISOString(),
+        manifest: mode === "malformed" ? "wrong" : "fleet.issue-workspace.v1",
+      };
+      const reason = mode === "non-expired" ? "overflow" : "expired";
+      streamRequests[0].push(
+        `id: c1.skipped\nevent: resync\ndata: ${JSON.stringify({ reason, recovery })}\n\n`,
+      );
+      await flush();
+      expect(client.getLastEventId()).toBe("c1.previous");
+      expect(onResync).toHaveBeenCalledWith({
+        from: "c1.previous",
+        to: "c1.previous",
+        reason,
+        ...(mode === "valid" ? { recovery } : {}),
+      });
+      client.disconnect();
+    },
+  );
+
+  it("validates the actual wire scope after a no-op connect changes future configuration", async () => {
+    const onResync = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", { onResync });
+    await client.connect("c1.previous", ["a"]);
+    await expectRequestCount(1);
+    pushConnected();
+    await flush();
+    await client.connect(undefined, ["b"]);
+    await expectRequestCount(1);
+    const recovery = {
+      handle: "A".repeat(43),
+      workspace: "test-ws",
+      source_repos: ["a"],
+      expires_at: new Date(Date.now() + 60000).toISOString(),
+      manifest: "fleet.issue-workspace.v1",
+    };
+    streamRequests[0].push(
+      `event: resync\ndata: ${JSON.stringify({ reason: "expired", recovery })}\n\n`,
+    );
+    await flush();
+    expect(onResync.mock.calls[0][0].recovery).toEqual(recovery);
+    streamRequests[0].push(
+      `event: resync\ndata: ${JSON.stringify({ reason: "expired", recovery: { ...recovery, source_repos: ["b"] } })}\n\n`,
+    );
+    await flush();
+    expect(onResync.mock.calls[1][0].recovery).toBeUndefined();
+    client.disconnect();
+  });
+  it("ignores recovery offers from a scope generation replaced in the same chunk", async () => {
+    const onResync = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", {
+      onResync: (event) => {
+        onResync(event);
+        client.updateSourceRepos(["b"]);
+      },
+    });
+    await client.connect("c1.previous", ["a"]);
+    await expectRequestCount(1);
+    const recovery = {
+      handle: "A".repeat(43),
+      workspace: "test-ws",
+      source_repos: ["b"],
+      expires_at: new Date(Date.now() + 60000).toISOString(),
+      manifest: "fleet.issue-workspace.v1",
+    };
+    streamRequests[0].push(
+      `event: resync\ndata: {"reason":"expired"}\n\nevent: resync\ndata: ${JSON.stringify({ reason: "expired", recovery })}\n\n`,
+    );
+    await flush();
+    expect(onResync).toHaveBeenCalledTimes(1);
+    expect(onResync.mock.calls[0][0].recovery).toBeUndefined();
+    expect(client.getLastEventId()).toBe("c1.previous");
+    client.disconnect();
+  });
+  it.each([
     ["omitted ID", "", "durable-cursor"],
     ["explicit empty ID", "id:\n", "durable-cursor"],
   ])(
