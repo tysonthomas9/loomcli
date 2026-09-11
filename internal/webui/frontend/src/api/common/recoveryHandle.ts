@@ -7,7 +7,7 @@ export interface RecoveryHandle {
   readonly workspace: string;
   readonly source_repos: readonly string[];
   readonly expires_at: string;
-  readonly manifest: "fleet.issue-workspace.v2";
+  readonly manifest: "fleet.issue-workspace.v3";
 }
 
 /** Matches the existing comma-separated SSE query and server-side trimming. */
@@ -69,7 +69,7 @@ export function decodeRecoveryHandle(
   }
   if (
     offer.workspace !== workspace ||
-    offer.manifest !== "fleet.issue-workspace.v2"
+    offer.manifest !== "fleet.issue-workspace.v3"
   )
     return undefined;
   if (
@@ -109,6 +109,6 @@ export function decodeRecoveryHandle(
     workspace,
     source_repos: Object.freeze([...repos]),
     expires_at: offer.expires_at,
-    manifest: "fleet.issue-workspace.v2",
+    manifest: "fleet.issue-workspace.v3",
   });
 }
