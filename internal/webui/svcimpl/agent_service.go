@@ -360,6 +360,11 @@ func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCrea
 	if err := validateAgentCreateInput(in); err != nil {
 		return nil, err
 	}
+	if _, err := s.store.Agents().Get(ctx, in.WorkspaceKey, in.Name); err == nil {
+		return nil, service.ErrConflict("An agent with this name already exists.")
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return nil, classifyStoreError("check existing agent", err)
+	}
 	if err := s.ensureAgentRole(ctx, in.WorkspaceKey, in.RoleName, in.Kind, in.Prompt, in.PromptFile); err != nil {
 		return nil, err
 	}
@@ -418,7 +423,7 @@ func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent 
 		return service.ErrValidation(err.Error())
 	}
 	if len(repos) == 0 {
-		return service.ErrValidation("workspace has no repos for agent")
+		return service.ErrValidation("This workspace has no repos yet — add one from the sidebar first.")
 	}
 	createdPaths := make(map[string]string, len(repos))
 	for _, repo := range repos {
@@ -498,13 +503,13 @@ func reconcileExistingAgentRole(existing *domain.Role, roleName, kind, prompt, p
 		return nil
 	}
 	if domain.ResolveRoleKind(existing, roleName) != domain.RoleKindInteractive {
-		return service.ErrValidation(fmt.Sprintf("role %q already exists and is not interactive; choose a different agent name", roleName))
+		return service.ErrValidation(fmt.Sprintf("Role %q already exists and is not interactive; choose a different agent name", roleName))
 	}
 	if p := strings.TrimSpace(prompt); p != "" && strings.TrimSpace(existing.Prompt) != p {
-		return service.ErrValidation(fmt.Sprintf("role %q already exists with a different prompt; choose a different agent name or reuse its prompt", roleName))
+		return service.ErrValidation(fmt.Sprintf("Role %q already exists with a different prompt; choose a different agent name or reuse its prompt", roleName))
 	}
 	if pf := strings.TrimSpace(promptFile); pf != "" && strings.TrimSpace(existing.PromptFile) != pf {
-		return service.ErrValidation(fmt.Sprintf("role %q already exists with a different prompt; choose a different agent name or reuse its prompt", roleName))
+		return service.ErrValidation(fmt.Sprintf("Role %q already exists with a different prompt; choose a different agent name or reuse its prompt", roleName))
 	}
 	return nil
 }

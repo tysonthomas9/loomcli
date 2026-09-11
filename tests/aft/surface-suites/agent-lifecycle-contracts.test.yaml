@@ -90,7 +90,7 @@ tests:
             - path: "kind"
               equals: "validation_error"
             - path: "error"
-              contains: "workspace has no repos for agent"
+              contains: "This workspace has no repos yet — add one from the sidebar first."
         intent: "An API client probes task-agent creation in a repo-less workspace"
       - run: |
           set -e

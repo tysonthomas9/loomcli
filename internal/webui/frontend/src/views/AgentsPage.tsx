@@ -3,7 +3,7 @@
  *
  * Layout (driven by App.tsx):
  *   [WorkspaceTree — same sidebar as kanban]
- *   [tabbed main panel — Terminal / Info / Git / Diff / Files]
+ *   [tabbed main panel — Terminal / Info / Git / Logs / Diff / Files]
  *   [right column — either AgentWorkPanel OR inline IssueDetailPanel]
  *
  * The tabbed main panel comes from the Aether V3 design (feat/updated-UI);
@@ -33,7 +33,7 @@ import { useStore } from "zustand";
 
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
 import { AgentDetailMain } from "@/components/AgentDetailMain/AgentDetailMain";
-import { GitTab } from "@/components/AgentDetailPanel";
+import { AgentLogsTab, GitTab } from "@/components/AgentDetailPanel";
 import { AgentWorkPanel } from "@/components/AgentWorkPanel/AgentWorkPanel";
 import { PanelWidthResizeHandle } from "@/components/AgentWorkPanel/PanelWidthResizeHandle";
 import {
@@ -478,6 +478,19 @@ function AgentsPageInner(): JSX.Element {
               className={`${styles.realTabBody} ${styles.realTabBodyScroll}`}
             >
               <GitTab agent={selected} isActive={isActive} />
+            </div>
+          );
+        case "logs":
+          if (!selected) {
+            return (
+              <div className={styles.tabFallback}>
+                Select an agent to view logs.
+              </div>
+            );
+          }
+          return (
+            <div className={styles.realTabBody}>
+              <AgentLogsTab agentName={selected.name} isActive={isActive} />
             </div>
           );
         case "diff":

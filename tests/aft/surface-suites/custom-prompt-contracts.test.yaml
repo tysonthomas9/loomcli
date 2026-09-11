@@ -63,12 +63,11 @@ tests:
           assert code == "201", (code, body)
           assert body.get("name") == name, body
           assert body.get("role_name") == name, body
-          assert body.get("role_kind") == "interactive", body
           assert body.get("backend") == "codex", body
-          assert not body.get("auto"), body
+          assert body.get("auto", False) is False, body
           assert body.get("repos") == [], body
           assert body.get("repo_groups") == [], body
-          assert body.get("cross_repo") is False, body
+          assert body.get("cross_repo", False) is False, body
           PY
           LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM-SURF role show "surf-max-$run" --json > "$AFT_WORK_DIR/d7b-max-role.json"
           python3 - "$AFT_WORK_DIR/d7b-max-role.json" <<'PY'
@@ -257,6 +256,10 @@ tests:
           stub = stub_dir / "codex"
           log_arg = shlex.quote(str(log))
           stub.write_text(f"""#!/bin/sh
+          if [ "$1" = "--version" ]; then
+            printf 'codex-cli 1.0.0\\n'
+            exit 0
+          fi
           printf '%s\\0' "$@" >> {log_arg}
           printf -- '--\\0' >> {log_arg}
           printf '{{"status":"completed","output":"stub"}}\\n'

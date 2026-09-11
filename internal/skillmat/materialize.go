@@ -381,7 +381,13 @@ func isUnavailableStoreError(err error) bool {
 	if errors.Is(err, context.Canceled) {
 		return false
 	}
-	return isTransportError(err) || fleetDBServerErrorPattern.MatchString(err.Error())
+	// A plain-text 404 is how pre-skills fleet-db builds report that the
+	// collection route itself does not exist. A structured resource 404 must
+	// remain a hard error; only the route-gap signature degrades to the
+	// existing materialization.
+	missingSkillRoute := errors.Is(err, domain.ErrNotFound) &&
+		strings.Contains(err.Error(), "404 page not found")
+	return missingSkillRoute || isTransportError(err) || fleetDBServerErrorPattern.MatchString(err.Error())
 }
 
 // desiredEntries derives the whole projection, skipping any single skill it

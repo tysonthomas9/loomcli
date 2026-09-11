@@ -80,6 +80,20 @@ func TestSkillMaterializationLeaseStoreUnavailableIsRecognized(t *testing.T) {
 	}
 }
 
+func TestSkillMaterializationLeaseMissingRouteIsUnavailable(t *testing.T) {
+	client, closeFn := newSkillTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		http.NotFound(w, nil)
+	})
+	defer closeFn()
+
+	_, err := client.SkillMaterializationLeases().Acquire(t.Context(), store.SkillMaterializationLeaseAcquire{
+		WorkspaceKey: "WS", Holder: "lead@host#42", TargetKey: "target-sha256",
+	})
+	if !errors.Is(err, domain.ErrSkillMaterializationLeaseStoreUnavailable) {
+		t.Fatalf("Acquire error = %v, want lease store unavailable", err)
+	}
+}
+
 func TestSkillMaterializationLeaseStoreRenew(t *testing.T) {
 	expiresAt := time.Now().UTC().Add(30 * time.Second).Truncate(time.Nanosecond)
 	client, closeFn := newSkillTestClient(t, func(w http.ResponseWriter, r *http.Request) {

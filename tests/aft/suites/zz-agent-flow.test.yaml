@@ -248,8 +248,8 @@ tests:
       - wait: { text: AFT-DIFF-MARKER }
 
   # covers: AgentWorkPanel completed-child path; runs/:id; tasks/:taskId/sessions; session detail; transcript; no-diff readback
-  - name: session detail transcript and diff tabs render
-    intent: A reviewer expands an open epic's completed history, opens the closed task, and inspects its recorded transcript and unavailable-diff state in the Runs tab
+  - name: routed issue session detail transcript and diff tabs render
+    intent: A reviewer opens a completed task by its explicit issue URL and inspects its recorded transcript and unavailable-diff state in the Runs tab
     steps:
       - run: >-
           curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/runs/$(cat "$AFT_WORK_DIR/agentRunId")" > "$AFT_WORK_DIR/agent-run-detail.json"
@@ -257,37 +257,15 @@ tests:
       - run: >-
           task="$(cat "$AFT_WORK_DIR/agentTaskId")"; curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/tasks/$task/sessions" > "$AFT_WORK_DIR/agent-sessions.json"; python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); data=d.get("data",{}); sessions=data.get("sessions") if isinstance(data,dict) else data; assert sessions, d; s=sessions[0]; assert s.get("session_id"), s; assert s.get("has_transcript") is True, s; assert s.get("has_diff") is False, s; assert s.get("files_changed")==0, s; print(s["session_id"])' "$AFT_WORK_DIR/agent-sessions.json" > "$AFT_WORK_DIR/agentSessionId"
         intent: "A reviewer records the completed task session and its artifact availability"
-      - open: /ws/E2E-WS-AGENT/agents/nova
+      - run: >-
+          task="$(cat "$AFT_WORK_DIR/agentTaskId")";
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-WS-AGENT/issues/$task"
+        intent: "A reviewer opens the completed task by its explicit issue URL"
       - wait:
           fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })() && document.body.textContent.includes('agent-flow epic')
-        intent: "Wait until the agents page renders the completed epic history"
-      # Closed children of an open epic now render through the idle-lead panel.
-      # Use the accessible expand control, then the completed task's real role=button.
-      - run: >-
-          epic="$(cat "$AFT_WORK_DIR/agentEpicId")"; for i in 1 2 3; do agent-browser --session "$AFT_SESSION" find role button click --name "Expand epic $epic" && exit 0 || true; sleep 1; done; echo "epic expand control never clicked"; exit 1
-        intent: "A reviewer retries expanding the epic until completed child history is visible"
-      - run: >-
-          task="$(cat "$AFT_WORK_DIR/agentTaskId")"; for i in 1 2 3; do agent-browser --session "$AFT_SESSION" find role button click --name "$task" && exit 0 || true; sleep 1; done; echo "closed task card never clicked"; exit 1
-        intent: "A reviewer retries opening the completed task from epic history"
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
+        intent: "Wait until the explicit issue URL opens the completed task in the slide-over"
+      - expect: { url: "**/ws/E2E-WS-AGENT/issues/**" }
       - wait:
           fn: >-
             document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'

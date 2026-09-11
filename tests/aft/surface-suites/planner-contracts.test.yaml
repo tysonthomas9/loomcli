@@ -50,9 +50,9 @@ teardown: |
   curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN-SF" >/dev/null || true
 
 tests:
-  # covers: PLN-D15b; PRReviewWorkspace Approve divergence for fabricated plan review; /prs?review=
-  - name: prs approval closes fabricated plan review
-    intent: An API client and a reviewer confirm that approving a plan review from the PR review workspace closes the issue instead of returning it to open
+  # covers: PLN-D15b; routed IssueDetailPanel approval for a fabricated plan review
+  - name: explicit issue approval completes fabricated plan review
+    intent: An API client and a reviewer confirm that approving a plan review from its explicit issue URL returns the task to implementation
     steps:
       - api:
           method: "POST"
@@ -61,54 +61,40 @@ tests:
             title: "planner-pr-approve ${RUN_ID:-local}"
             issue_type: "task"
             priority: 2
-            design: "## Summary\nAFT-PLAN-SURFACE ${RUN_ID:-local}\n\n## Technical Approach\nSurface fixture only.\n\n## Testing Strategy\nApprove from the PR review workspace."
+            design: "## Summary\nAFT-PLAN-SURFACE ${RUN_ID:-local}\n\n## Technical Approach\nSurface fixture only.\n\n## Testing Strategy\nApprove from the routed issue panel."
           save:
             - from: "data.id"
               as: "plannerPrApproveId"
-        intent: "An API client creates a designed task as the fabricated Planner outcome for the PR review workspace"
+        intent: "An API client creates a designed task as the fabricated Planner outcome"
       - api:
           method: "PATCH"
           path: "/api/workspaces/E2E-WS-PLAN-SF/issues/${var:plannerPrApproveId}"
           body:
             status: "review"
         intent: "An API client moves the fabricated plan outcome into review"
-      - open: /ws/E2E-WS-PLAN-SF/prs
-      - wait: { text: "planner-pr-approve ${RUN_ID:-local}" }
-        intent: "Wait until the fabricated plan review appears in the review queue"
-      - wait:
-          fn: >-
-            (() => {
-              const row = Array.from(document.querySelectorAll('li[role="button"]')).find((el) =>
-                el.textContent.includes('planner-pr-approve ${RUN_ID:-local}'));
-              return !!row && row.textContent.includes('Plan review');
-            })()
-        intent: "Wait until the review queue labels the fabricated issue as a Plan review"
-      # budget: ui-click-retry (3s) - row click can race route navigation.
-      # NOTE: this is a folded (>-) scalar — a comment INSIDE it would fold onto one
-      # line and swallow the whole command, so the budget note stays out here.
       - run: >-
-          for i in 1 2 3; do
-          agent-browser --session "$AFT_SESSION" find role button click --name "planner-pr-approve ${RUN_ID:-local}" || true;
-          sleep 1;
-          agent-browser --session "$AFT_SESSION" eval "location.search" | grep -q "review=" && exit 0;
-          done; echo "plan review row click never opened the workspace"; exit 1
-        intent: "A reviewer retries the plan-review row until the PR review workspace opens"
+          issue="$(cat "$AFT_WORK_DIR/plannerPrApproveId")";
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-WS-PLAN-SF/issues/$issue"
+        intent: "A reviewer opens the fabricated plan review by its explicit issue URL"
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=pr-review-workspace]')
-        intent: "Wait until the PR review workspace is ready"
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
+        intent: "Wait until the explicit issue URL opens the fabricated plan review in the slide-over"
+      - expect: { url: "**/ws/E2E-WS-PLAN-SF/issues/**" }
+      - expect: { text: "planner-pr-approve ${RUN_ID:-local}" }
       - click: { role: button, name: Approve }
       - wait:
           fn: >-
-            !document.querySelector('[data-testid=pr-review-workspace]')
-        intent: "Wait until the completed PR review workspace closes"
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'closed'
+        intent: "Wait until approval closes the routed issue slide-over"
+      - expect: { url: "**/ws/E2E-WS-PLAN-SF/kanban" }
       - api:
           method: "GET"
           path: "/api/workspaces/E2E-WS-PLAN-SF/issues/${var:plannerPrApproveId}"
           assert:
             - path: "data.status"
-              equals: "closed"
-        intent: "A reviewer's readback confirms /prs approval closed the plan review, diverging from the panel approval contract"
+              equals: "open"
+        intent: "A reviewer's readback confirms approval completed plan review and returned the task to implementation"
 
   # covers: PLN-D21; plan-role POST /api/workspaces/:ws/agents validation contract probes
   - name: plan agent create contract probes

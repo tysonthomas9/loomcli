@@ -626,7 +626,7 @@ tests:
           assert isinstance(tabs, list), type(tabs)
           matches = [t for t in tabs if t.get("kind") == "agent" and t.get("agent_id") == sys.argv[3]]
           assert matches, tabs
-          live = [t for t in matches if t.get("pty_alive")]
+          live = [t for t in matches if t.get("attachable")]
           t = live[0] if live else matches[0]
           name = sys.argv[3]
           open(sys.argv[2], "w", encoding="utf-8").write(t["session_name"])
@@ -765,7 +765,7 @@ tests:
           old, name = sys.argv[2], sys.argv[3]
           matches = [t for t in tabs if t.get("session_name") == old and t.get("agent_id") == name]
           assert matches, tabs
-          assert matches[0].get("pty_alive") is True, matches[0]
+          assert matches[0].get("attachable") is True, matches[0]
           assert ((matches[0].get("launch") or {}).get("env") or {}).get("LOOM_BACKEND"), matches[0]
           PY
         intent: "An operator records the existing live lead PTY before changing the backend"
@@ -798,7 +798,7 @@ tests:
           assert env.get("LOOM_BACKEND") == "claude", env
           old_tabs = [t for t in tabs if t.get("session_name") == old]
           assert old_tabs, "old tab is gone - product behavior changed, re-pin this case"
-          assert old_tabs[0].get("pty_alive") is True, "old PTY was reaped - product behavior changed, re-pin this case"
+          assert old_tabs[0].get("attachable") is True, "old terminal is no longer attachable - product behavior changed, re-pin this case"
           open(sys.argv[4], "w", encoding="utf-8").write(meta["session_name"])
           PY
             sleep 2
@@ -872,7 +872,7 @@ tests:
           assert isinstance(tabs, list), type(tabs)
           matches = [t for t in tabs if t.get("kind") == "agent" and t.get("agent_id") == sys.argv[3]]
           assert matches, tabs
-          live = [t for t in matches if t.get("pty_alive") is True]
+          live = [t for t in matches if t.get("attachable") is True]
           assert live, matches
           open(sys.argv[2], "w", encoding="utf-8").write(live[0]["session_name"])
           PY
@@ -906,7 +906,7 @@ tests:
           assert isinstance(tabs, list), type(tabs)
           matches = [t for t in tabs if t.get("session_name") == sys.argv[2]]
           assert matches, "orphan tab is gone - product behavior changed, re-pin this case"
-          assert matches[0].get("pty_alive") is True, "orphan PTY was reaped - product behavior changed, re-pin this case"
+          assert matches[0].get("attachable") is True, "orphan terminal is no longer attachable - product behavior changed, re-pin this case"
           PY
         intent: "An operator confirms the deleted lead still leaves an orphaned tab with a live PTY"
       - run: |

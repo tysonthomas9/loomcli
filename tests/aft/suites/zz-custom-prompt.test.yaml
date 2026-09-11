@@ -329,6 +329,10 @@ tests:
           def write_stub(log):
               log_arg = shlex.quote(str(log))
               stub.write_text(f"""#!/bin/sh
+          if [ "$1" = "--version" ]; then
+            printf 'codex-cli 1.0.0\\n'
+            exit 0
+          fi
           printf '%s\\0' "$@" >> {log_arg}
           printf -- '--\\0' >> {log_arg}
           printf '{{"status":"completed","output":"stub"}}\\n'
