@@ -83,7 +83,7 @@ func newTestSSEClientWithWorkspace(t *testing.T, hub *realtime.Hub, id int64, wo
 
 	client := realtime.NewClient(id, 64, "0", nil, workspaceID)
 
-	hub.RegisterClient(client)
+	_ = hub.RegisterClient(context.Background(), client)
 	time.Sleep(50 * time.Millisecond)
 
 	return &testSSEClient{

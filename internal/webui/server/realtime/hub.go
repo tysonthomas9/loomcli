@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -62,10 +63,34 @@ type MutationPayload struct {
 	Agent       *bool  `json:"agent,omitempty"`        // Whether the terminal runtime belongs to an agent
 }
 
+var errHubStopped = errors.New("SSE hub stopped")
+
+type hubDispatchKind string
+
+const (
+	hubDispatchRegister   hubDispatchKind = "register"
+	hubDispatchUnregister hubDispatchKind = "unregister"
+	hubDispatchBroadcast  hubDispatchKind = "broadcast"
+	hubDispatchRetry      hubDispatchKind = "retry"
+	hubDispatchShutdown   hubDispatchKind = "shutdown"
+)
+
+const (
+	registrationPending int32 = iota
+	registrationAdded
+	registrationCanceled
+)
+
+type registrationRequest struct {
+	client *Client
+	ack    chan error
+	state  atomic.Int32
+}
+
 // Hub manages connected SSE clients and broadcasts mutations to them.
 type Hub struct {
 	clients      map[*Client]bool
-	register     chan *Client
+	register     chan *registrationRequest
 	unregister   chan *Client
 	broadcast    chan *MutationPayload
 	mu           sync.RWMutex
@@ -74,6 +99,11 @@ type Hub struct {
 	retryMu      sync.Mutex
 	droppedCount int64 // For metrics
 	startedAt    time.Time
+	stopOnce     sync.Once
+
+	// dispatchBarrier is set only by tests that need deterministic control of
+	// the hub's select-loop ordering.
+	dispatchBarrier func(hubDispatchKind)
 }
 
 // Client represents a single SSE connection.
@@ -143,7 +173,7 @@ func MatchesSourceRepoFilter(sourceRepos []string, sourceRepo string) bool {
 func NewHub() *Hub {
 	return &Hub{
 		clients:    make(map[*Client]bool),
-		register:   make(chan *Client, 16),
+		register:   make(chan *registrationRequest, 16),
 		unregister: make(chan *Client, 16),
 		broadcast:  make(chan *MutationPayload, 256),
 		done:       make(chan struct{}),
@@ -158,15 +188,27 @@ func (h *Hub) Run() {
 
 	for {
 		select {
-		case client := <-h.register:
-			h.addClient(client)
+		case request := <-h.register:
+			h.beforeDispatch(hubDispatchRegister)
+			if request.state.CompareAndSwap(registrationPending, registrationAdded) {
+				h.addClient(request.client)
+				request.ack <- nil
+			} else {
+				request.ack <- context.Canceled
+			}
 		case client := <-h.unregister:
+			h.beforeDispatch(hubDispatchUnregister)
 			h.removeClient(client)
 		case mutation := <-h.broadcast:
+			h.beforeDispatch(hubDispatchBroadcast)
 			h.fanOutMutation(mutation)
 		case <-retryTicker.C:
-			h.drainRetryQueue()
+			if h.GetRetryQueueDepth() > 0 {
+				h.beforeDispatch(hubDispatchRetry)
+				h.drainRetryQueue()
+			}
 		case <-h.done:
+			h.beforeDispatch(hubDispatchShutdown)
 			h.closeAllClients()
 			return
 		}
@@ -177,8 +219,9 @@ func (h *Hub) Run() {
 func (h *Hub) addClient(client *Client) {
 	h.mu.Lock()
 	h.clients[client] = true
+	count := len(h.clients)
 	h.mu.Unlock()
-	slog.Info("SSE client registered", "client_id", client.id, "count", len(h.clients))
+	slog.Info("SSE client registered", "client_id", client.id, "count", count)
 }
 
 // removeClient unregisters an SSE client and closes its send channel.
@@ -188,8 +231,9 @@ func (h *Hub) removeClient(client *Client) {
 		delete(h.clients, client)
 		close(client.send)
 	}
+	count := len(h.clients)
 	h.mu.Unlock()
-	slog.Info("SSE client unregistered", "client_id", client.id, "count", len(h.clients))
+	slog.Info("SSE client unregistered", "client_id", client.id, "count", count)
 }
 
 // fanOutMutation sends a mutation to all matching connected clients.
@@ -232,24 +276,40 @@ func (h *Hub) closeAllClients() {
 
 // Stop gracefully stops the hub.
 func (h *Hub) Stop() {
-	close(h.done)
+	h.stopOnce.Do(func() { close(h.done) })
 }
 
-// RegisterClient adds a new client to the hub.
-// Non-blocking if the hub has been stopped -- closes the client's send channel instead.
-func (h *Hub) RegisterClient(client *Client) {
-	// Check done first to avoid writing to the buffered register channel
-	// after Run() has exited (nobody would process it).
-	select {
-	case <-h.done:
-		close(client.send)
-		return
-	default:
+// RegisterClient adds a client and returns only after the hub loop has made it
+// visible. The wait ends if ctx is canceled or the hub stops.
+func (h *Hub) RegisterClient(ctx context.Context, client *Client) error {
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	request := &registrationRequest{client: client, ack: make(chan error, 1)}
 	select {
-	case h.register <- client:
 	case <-h.done:
-		close(client.send)
+		return errHubStopped
+	case <-ctx.Done():
+		return ctx.Err()
+	case h.register <- request:
+	}
+
+	select {
+	case err := <-request.ack:
+		return err
+	case <-ctx.Done():
+		if request.state.CompareAndSwap(registrationPending, registrationCanceled) {
+			return ctx.Err()
+		}
+		select {
+		case err := <-request.ack:
+			return err
+		case <-h.done:
+			return errHubStopped
+		}
+	case <-h.done:
+		request.state.CompareAndSwap(registrationPending, registrationCanceled)
+		return errHubStopped
 	}
 }
 
@@ -270,18 +330,50 @@ func (h *Hub) UnregisterClient(client *Client) {
 // Broadcast sends a mutation to all connected clients.
 // If the broadcast channel is full, mutations are queued for retry.
 func (h *Hub) Broadcast(mutation *MutationPayload) {
+	if mutation == nil {
+		return
+	}
+	if mutation.WorkspaceID == "" {
+		slog.Warn("SSE: dropping mutation with empty workspace_id", "type", mutation.Type, "issue_id", mutation.IssueID)
+		return
+	}
+	affectedClients := h.matchingClientCount(mutation)
+	if affectedClients == 0 {
+		return
+	}
 	select {
 	case h.broadcast <- mutation:
 	default:
 		h.retryMu.Lock()
 		if len(h.retryQueue) < 1024 {
 			h.retryQueue = append(h.retryQueue, mutation)
-			slog.Warn("SSE broadcast channel full, queued mutation", "queue_size", len(h.retryQueue))
+			slog.Warn("SSE broadcast channel full, queued mutation",
+				"queue_size", len(h.retryQueue), "affected_clients", affectedClients)
 		} else {
 			atomic.AddInt64(&h.droppedCount, 1)
-			slog.Warn("SSE retry queue full, dropped mutation", "total_dropped", atomic.LoadInt64(&h.droppedCount))
+			slog.Warn("SSE retry queue full, dropped mutation",
+				"total_dropped", atomic.LoadInt64(&h.droppedCount), "affected_clients", affectedClients)
 		}
 		h.retryMu.Unlock()
+	}
+}
+
+func (h *Hub) matchingClientCount(mutation *MutationPayload) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	count := 0
+	for client := range h.clients {
+		if MatchesWorkspaceFilter(client.workspaceID, mutation.WorkspaceID) &&
+			MatchesSourceRepoFilter(client.sourceRepos, mutation.SourceRepo) {
+			count++
+		}
+	}
+	return count
+}
+
+func (h *Hub) beforeDispatch(kind hubDispatchKind) {
+	if h.dispatchBarrier != nil {
+		h.dispatchBarrier(kind)
 	}
 }
 

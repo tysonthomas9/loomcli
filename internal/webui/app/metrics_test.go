@@ -136,38 +136,15 @@ func TestHandleMetrics_ValidHub(t *testing.T) {
 	}
 }
 
-// TestGetRetryQueueDepth tests that GetRetryQueueDepth returns the correct count.
-// Since retryQueue is unexported, we fill the broadcast channel (buffer=256) first,
-// then overflow into retryQueue via Broadcast().
+// TestGetRetryQueueDepth verifies zero-client broadcasts do not consume the
+// global queue. Queue overflow behavior is covered at the Hub seam.
 func TestGetRetryQueueDepth(t *testing.T) {
 	hub := realtime.NewHub()
-	// Do NOT call hub.Run() — we want the broadcast channel to fill up.
-
-	// Initially should be 0
+	for i := 0; i < 300; i++ {
+		hub.Broadcast(&realtime.MutationPayload{Type: "create", IssueID: fmt.Sprintf("unused-%d", i), WorkspaceID: "ws"})
+	}
 	if depth := hub.GetRetryQueueDepth(); depth != 0 {
-		t.Errorf("expected initial retry queue depth=0, got %d", depth)
-	}
-
-	// Fill the broadcast channel (buffer=256)
-	for i := 0; i < 256; i++ {
-		hub.Broadcast(&realtime.MutationPayload{Type: "create", IssueID: fmt.Sprintf("fill-%d", i), WorkspaceID: "ws"})
-	}
-
-	// Now the broadcast channel is full. The next Broadcast() calls will
-	// go to the retryQueue.
-	hub.Broadcast(&realtime.MutationPayload{Type: "create", IssueID: "retry-1", WorkspaceID: "ws"})
-	hub.Broadcast(&realtime.MutationPayload{Type: "update", IssueID: "retry-2", WorkspaceID: "ws"})
-	hub.Broadcast(&realtime.MutationPayload{Type: "delete", IssueID: "retry-3", WorkspaceID: "ws"})
-
-	if depth := hub.GetRetryQueueDepth(); depth != 3 {
-		t.Errorf("expected retry queue depth=3, got %d", depth)
-	}
-
-	// Add one more
-	hub.Broadcast(&realtime.MutationPayload{Type: "status", IssueID: "retry-4", WorkspaceID: "ws"})
-
-	if depth := hub.GetRetryQueueDepth(); depth != 4 {
-		t.Errorf("expected retry queue depth=4, got %d", depth)
+		t.Errorf("expected retry queue depth=0 without clients, got %d", depth)
 	}
 }
 

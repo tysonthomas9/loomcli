@@ -243,8 +243,9 @@ func TestBackendMutationSubscriber_Broadcast(t *testing.T) {
 
 	// Register an SSE client to receive broadcasts.
 	client := realtime.NewClient(1, 64, "0", nil, "ws-test")
-	hub.RegisterClient(client)
-	time.Sleep(20 * time.Millisecond) // let the hub install the client
+	if err := hub.RegisterClient(context.Background(), client); err != nil {
+		t.Fatalf("RegisterClient: %v", err)
+	}
 
 	deliveredOnce := make(chan struct{}, 1)
 	ts := time.Date(2026, 4, 25, 11, 0, 0, 0, time.UTC)
@@ -413,19 +414,21 @@ func TestBackendMutationSubscriber_GetMutationDataSince_HappyPath(t *testing.T) 
 		}, nil
 	}
 
-	got := sub.GetMutationDataSince("100")
-	if len(got) != 2 {
-		t.Fatalf("got %d, want 2", len(got))
+	page, err := sub.GetMutationPage(context.Background(), "100", mutationPageLimit)
+	if err != nil {
+		t.Fatalf("GetMutationPage: %v", err)
 	}
-	if got[0].IssueID != "loom-1" || got[1].IssueID != "loom-2" {
-		t.Errorf("unexpected IDs: %v", got)
+	if len(page.Events) != 2 {
+		t.Fatalf("got %d, want 2", len(page.Events))
+	}
+	if page.Events[0].IssueID != "loom-1" || page.Events[1].IssueID != "loom-2" {
+		t.Errorf("unexpected IDs: %v", page.Events)
 	}
 }
 
 // TestBackendMutationSubscriber_GetMutationDataSince_BackendError verifies
-// that an error from GetMutations is swallowed (returns nil) so the SSE
-// catch-up path can proceed to the connected event without aborting the
-// stream.
+// that a catch-up error propagates so the handler can fail before opening the
+// SSE stream.
 func TestBackendMutationSubscriber_GetMutationDataSince_BackendError(t *testing.T) {
 	sub, fb, _ := newTestSubscriberEnv(t)
 
@@ -433,9 +436,8 @@ func TestBackendMutationSubscriber_GetMutationDataSince_BackendError(t *testing.
 		return nil, errors.New("simulated network failure")
 	}
 
-	got := sub.GetMutationDataSince("0")
-	if got != nil {
-		t.Errorf("expected nil on backend error, got %v", got)
+	if _, err := sub.GetMutationPage(context.Background(), "0", mutationPageLimit); err == nil {
+		t.Fatal("expected backend error to propagate")
 	}
 }
 
@@ -451,8 +453,8 @@ func TestBackendMutationSubscriber_GetMutationDataSince_NilBackend(t *testing.T)
 	sub := NewBackendMutationSubscriber(nil, hub, "ws-x")
 	t.Cleanup(sub.Stop)
 
-	if got := sub.GetMutationDataSince("0"); got != nil {
-		t.Errorf("expected nil with nil backend, got %v", got)
+	if _, err := sub.GetMutationPage(context.Background(), "0", mutationPageLimit); err == nil {
+		t.Fatal("expected error with nil backend")
 	}
 }
 
@@ -465,7 +467,8 @@ func TestBackendMutationSubscriber_StopWithoutStart(t *testing.T) {
 
 	fb := newFakeBackend()
 	sub := NewBackendMutationSubscriber(fb, hub, "ws-y")
-	sub.Stop() // must not deadlock; wg has nothing to wait on
+	sub.Stop()  // must not deadlock; wg has nothing to wait on
+	sub.Start() // must not add a goroutine after Stop has already waited
 	if fb.waitCalls.Load() != 0 {
 		t.Errorf("expected 0 wait calls when never started, got %d", fb.waitCalls.Load())
 	}

@@ -194,7 +194,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Bridge per-workspace backend mutations to SSE clients.
 	app.multiSub = appstores.NewMultiSub(ctx, app.hub, config.Logger)
-	app.getMutationsSince = appstores.GetMutationsSinceFn(app.multiSub)
+	app.getMutationPage = appstores.GetMutationPageFn(app.multiSub)
 	cleanups = append(cleanups, func() { app.multiSub.Stop() })
 
 	// Main web terminal manager: one *PTYManager per workspace, dispatched by
@@ -497,38 +497,40 @@ func isLoopbackBindAddress(bindAddress string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func (app *Server) activateSSESubscriber(ctx context.Context, wsID string) {
+func (app *Server) activateSSESubscriber(ctx context.Context, wsID string) (string, error) {
 	if app == nil || wsID == "" || app.multiSub == nil {
-		return
+		return "", nil
 	}
 	if app.registry != nil && app.registry.Registered(wsID) {
 		if err := app.registry.ActivateSubscriber(wsID); err != nil {
-			logger.Warn("failed to activate registered workspace SSE subscriber",
-				"workspace", wsID, "err", err)
+			return "", fmt.Errorf("activate registered workspace SSE subscriber %q: %w", wsID, err)
 		}
-		return
+		if app.multiSub.HasSubscriber(wsID) {
+			return app.multiSub.Ready(ctx, wsID)
+		}
+		return "", nil
 	}
-	app.ensureStoreBackedSSESubscriber(ctx, wsID)
+	if app.config.IssueBackendFn == nil {
+		return "", nil
+	}
+	return app.ensureStoreBackedSSESubscriber(ctx, wsID)
 }
 
-func (app *Server) ensureStoreBackedSSESubscriber(ctx context.Context, wsID string) {
+func (app *Server) ensureStoreBackedSSESubscriber(ctx context.Context, wsID string) (string, error) {
 	if app == nil || wsID == "" || app.multiSub == nil || app.config.IssueBackendFn == nil {
-		return
+		return "", fmt.Errorf("ensure store-backed SSE subscriber: unavailable backend")
 	}
 	if app.multiSub.HasSubscriber(wsID) {
-		return
+		return app.multiSub.Ready(ctx, wsID)
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	be := app.config.IssueBackendFn(middleware.WithWorkspace(ctx, wsID))
 	if be == nil {
-		return
+		return "", fmt.Errorf("ensure store-backed SSE subscriber: nil backend for workspace %q", wsID)
 	}
-	if err := app.multiSub.EnsureActive(ctx, wsID, be, appstores.ActivationReasonSSE); err != nil {
-		logger.Warn("failed to start store-backed workspace subscriber",
-			"workspace", wsID, "err", err)
-	}
+	return app.multiSub.EnsureActive(ctx, wsID, be, appstores.ActivationReasonSSE)
 }
 
 func storeWorkspacePathsFn(ctx context.Context, config webui.ServerConfig) func() (map[string]string, error) {
