@@ -47,6 +47,26 @@ export function getWsBaseUrl(): string {
 
 // Auth token stored in memory (not localStorage) for XSS safety
 let authToken: string | null = null;
+let authCredentialGeneration = 0;
+const authCredentialListeners = new Set<{
+  callback: (generation: number) => void;
+}>();
+
+/** Monotonic in-memory identity for the current credential, without its value. */
+export function getAuthCredentialGeneration(): number {
+  return authCredentialGeneration;
+}
+
+/** Observe credential replacement synchronously; unsubscribe releases the callback. */
+export function onAuthCredentialChange(
+  callback: (generation: number) => void,
+): () => void {
+  const listener = { callback };
+  authCredentialListeners.add(listener);
+  return () => {
+    authCredentialListeners.delete(listener);
+  };
+}
 
 /**
  * Generate a W3C traceparent header value. Format:
@@ -171,8 +191,24 @@ export function notifyAuthTokenExpired(): void {
  * When token is null, transitions to 'none'.
  */
 export function setAuthToken(token: string | null): void {
-  authToken = token;
-  setAuthState(token !== null ? "authenticated" : "none");
+  if (authToken !== token) {
+    authToken = token;
+    const generation = ++authCredentialGeneration;
+    for (const listener of [...authCredentialListeners]) {
+      // A reentrant replacement already notified the newer generation. Never
+      // deliver the superseded generation afterward to remaining listeners.
+      if (generation !== authCredentialGeneration) break;
+      if (!authCredentialListeners.has(listener)) continue;
+      try {
+        listener.callback(generation);
+      } catch {
+        // One observer cannot prevent other owners retiring credential-bound work.
+        // Do not report arbitrary listener errors: they may contain credentials.
+      }
+    }
+  }
+  // Listeners may replace the credential again before this call returns.
+  setAuthState(authToken !== null ? "authenticated" : "none");
 }
 
 /**
