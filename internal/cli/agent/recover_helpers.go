@@ -29,11 +29,13 @@ func handleOrphanedTask(deps *cli.Deps, worktreePath, taskID string, analyze boo
 			closeTask(deps, taskID, reason)
 		} else {
 			fmt.Printf("Task appears INCOMPLETE: %s\n", reason)
-			resetTask(deps, taskID)
+			// An orphaned task means the agent vanished without releasing its
+			// lock, so its completion hooks never ran — same footing as a crash.
+			resetTask(deps, taskID, resetAfterCrash)
 		}
 	} else {
 		fmt.Println("Skipping analysis (--no-analyze)")
-		resetTask(deps, taskID)
+		resetTask(deps, taskID, resetAfterCrash)
 	}
 }
 
@@ -146,36 +148,103 @@ func closeTask(deps *cli.Deps, taskID, reason string) {
 	}
 }
 
-// resetTask resets a task to open status, but only if it's still in_progress.
-// Tasks that have already reached review or closed status were successfully
-// processed and should not be reset; a blocked task was quarantined by the
-// daemon (or blocked by a human) and must not be flipped back to open by a
-// crash-recovery pass.
-func resetTask(deps *cli.Deps, taskID string) {
+// resetCause says why recovery is resetting a task, which decides whether an
+// agent-set "review" can be trusted.
+type resetCause int
+
+const (
+	// resetAfterCleanExit: the agent exited 0 but never released its claim. Its
+	// completion hooks DID run, so a status it set is a real handoff.
+	resetAfterCleanExit resetCause = iota
+
+	// resetAfterCrash: the agent exited non-zero — killed by the run-duration
+	// cap, OOM, panic. Completion hooks run only on success, so NOTHING the
+	// supervisor was supposed to stamp got stamped.
+	resetAfterCrash
+)
+
+// How hard recovery tries to put a task back on the queue. Three attempts a few
+// seconds apart clears a saturated backend without turning a genuine outage into
+// a long stall — recovery runs on the supervisor's path, so it cannot block.
+const (
+	resetTaskAttempts = 3
+	resetTaskRetryGap = 3 * time.Second
+)
+
+// resetTask resets a task to open status, unless its current status says
+// otherwise. Closed is terminal and blocked was quarantined deliberately (by
+// the daemon or a human), so neither is ever flipped back by a recovery pass.
+//
+// "review" depends on HOW the run ended, and that distinction was learned the
+// hard way. A planner hit its max_run_duration mid-run, having already written
+// its design and moved the task to review itself; because the exit was not
+// clean, its completion hooks — add_label plan-draft, set_status open — never
+// fired. Recovery then saw "review", read it as work that had been successfully
+// processed, and skipped the reset. The result was a task no one could ever
+// claim: the wrong status to be in the ready queue, and no label for any role's
+// gate. It sat untouched for over an hour, on a board that looked healthy,
+// while every other task moved.
+//
+// So on a CRASH, "review" is not a completed handoff — it is whatever the agent
+// happened to have set when it died, and the supervisor's half of the handoff
+// provably did not happen. Reset it, and let it be claimed again. The agent's
+// actual work (design, comments, labels it set itself) is untouched, so nothing
+// is lost by re-queueing; the alternative is losing the task entirely.
+//
+// On a clean exit the old behaviour stands: the hooks ran, so an agent-set
+// review is a real state and stomping it would undo a legitimate handoff.
+func resetTask(deps *cli.Deps, taskID string, cause resetCause) {
 	ib := deps.IssueBackend
 	ctx := cmdstore.RootContext()
 
 	// Check current status before resetting
 	detail, err := ib.Get(ctx, taskID)
 	if err == nil && detail != nil {
-		if detail.Status == "review" || detail.Status == "closed" || detail.Status == "blocked" {
+		skip := detail.Status == "closed" || detail.Status == "blocked" ||
+			(detail.Status == "review" && cause == resetAfterCleanExit)
+		if skip {
 			fmt.Printf("✓ Task %s already %s, skipping reset\n", taskID, detail.Status)
 			return
 		}
+		if detail.Status == "review" {
+			fmt.Printf("↻ Task %s is in review but the agent crashed before its completion hooks ran; re-queueing so it is claimable\n", taskID)
+		}
 	}
 
-	err = ib.Update(ctx, taskID, backend.UpdateParams{
-		Status:   strPtr("open"),
-		Assignee: strPtr(""),
-	})
-	if err != nil {
-		fmt.Printf("Warning: failed to reset task: %v\n", err)
-		fmt.Println("")
-		fmt.Println("You may need to manually reset the task:")
-		fmt.Printf("  loom data update %s --status open --assignee \"\"\n", taskID)
-	} else {
-		fmt.Printf("✓ Task %s reset to open\n", taskID)
+	// Retried, because this single write is what stands between a crashed run
+	// and a task nobody can ever claim — and it was observed losing that race:
+	//
+	//   Warning: failed to reset task: backend [unavailable] Update: rate limited
+	//
+	// The recovery decided correctly and then simply did not happen, leaving the
+	// task stranded exactly as if the decision had never been made. A backend
+	// under load from the fleet's own polling is the normal condition here, not
+	// an exotic one, so one attempt is not a reset — it is a coin flip.
+	//
+	// Retrying is safe without any error classification: the update is
+	// idempotent (set status open, clear assignee), so a retry after a response
+	// that was lost rather than rejected costs nothing.
+	for attempt := 1; ; attempt++ {
+		err = ib.Update(ctx, taskID, backend.UpdateParams{
+			Status:   strPtr("open"),
+			Assignee: strPtr(""),
+		})
+		if err == nil {
+			fmt.Printf("✓ Task %s reset to open\n", taskID)
+			return
+		}
+		if attempt == resetTaskAttempts {
+			break
+		}
+		fmt.Printf("Reset of %s failed (attempt %d/%d): %v — retrying in %s\n",
+			taskID, attempt, resetTaskAttempts, err, resetTaskRetryGap)
+		time.Sleep(resetTaskRetryGap)
 	}
+
+	fmt.Printf("Warning: failed to reset task after %d attempts: %v\n", resetTaskAttempts, err)
+	fmt.Println("")
+	fmt.Println("You may need to manually reset the task:")
+	fmt.Printf("  loom data update %s --status open --assignee \"\"\n", taskID)
 }
 
 // killProcess sends SIGTERM then SIGKILL to the given PID's process group.

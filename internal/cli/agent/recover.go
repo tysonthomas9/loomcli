@@ -220,17 +220,20 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int, incomplete bo
 			case exitCode != 0:
 				fmt.Printf("[recover] Agent %s exited with code %d, resetting task %s\n",
 					agentName, exitCode, lockInfo.TaskID)
-				resetTask(deps, lockInfo.TaskID)
+				// Non-zero exit: completion hooks never ran, so an agent-set
+				// "review" is mid-run state rather than a handoff.
+				resetTask(deps, lockInfo.TaskID, resetAfterCrash)
 			case incomplete:
 				// Exited 0 but the claim was never released, so there is no
 				// agent-set status to trust here — the task is still sitting in
 				// in_progress with nobody working it. Put it back on the queue
 				// so another agent (or this one on its next cycle) can carry it
-				// forward. resetTask still no-ops on review/closed/blocked, so
-				// a status the agent DID set is never stomped.
+				// forward. The exit was clean, so its completion hooks ran and
+				// resetTask still no-ops on review/closed/blocked — a status
+				// the agent DID set is never stomped.
 				fmt.Printf("[recover] Agent %s exited cleanly (code 0) without releasing its claim, returning task %s to the queue\n",
 					agentName, lockInfo.TaskID)
-				resetTask(deps, lockInfo.TaskID)
+				resetTask(deps, lockInfo.TaskID, resetAfterCleanExit)
 			default:
 				// Clean exit: trust the agent updated task status correctly.
 				// Do NOT reset — the agent may have set status to review/closed.
