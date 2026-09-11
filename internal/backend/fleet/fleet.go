@@ -391,7 +391,10 @@ func (b *FleetBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]bac
 	if err != nil {
 		return nil, err
 	}
-	return filterReadyIssues(readyIssuesToData(issues), opts), nil
+	candidates := readyIssuesToData(issues)
+	kept := filterReadyIssues(candidates, opts)
+	warnReadyRepoFilterStarvation(opts.SourceRepos, candidates, kept)
+	return kept, nil
 }
 
 // Stats builds lifecycle counts from fleet-db's status count endpoint and
@@ -455,6 +458,17 @@ func (b *FleetBackend) Count(ctx context.Context, opts backend.CountOpts) (int, 
 	}
 	if err := checkFleetUnsupportedCountFilters(opts); err != nil {
 		return 0, err
+	}
+	// A repo filter is evaluated client-side for the same two reasons as List:
+	// fleet-db rejects a bare repo name, and its server-side repo filter drops
+	// unscoped issues. Counting the list projection keeps Count and List
+	// answering the same question.
+	if len(opts.SourceRepos) > 0 {
+		issues, err := b.List(ctx, countOptsToListOpts(opts))
+		if err != nil {
+			return 0, err
+		}
+		return len(issues), nil
 	}
 	path := "/issues/count"
 	if q := countOptsToQuery(opts); q != "" {
