@@ -333,3 +333,26 @@ func (s *Supervisor) tryFallbackBackend(ap *AgentProcess) bool {
 
 	return true
 }
+
+// preFlightGates runs preFlightSetup's refusals, in order, before any recovery
+// or claim; false means this cycle must not claim. Split out of preFlightSetup
+// (funlen) with the gates and their order unchanged.
+func (s *Supervisor) preFlightGates(ap *AgentProcess) bool {
+	// FIRST gate: a held workspace issues no Ready query, no ClaimIssue, runs
+	// no recovery and creates no session.
+	if !s.gateClaimsHeld(ap) {
+		return false
+	}
+	// No span is open on this path; pass an explicit background context so the
+	// absence of a trace parent is visible here rather than hidden in the gate.
+	if err := s.gateBackendAvailable(context.Background(), ap); err != nil {
+		return false
+	}
+	if err := s.gateSafetyKnobsEnforceable(ap); err != nil {
+		return false
+	}
+	// Before claimTask, deliberately: a drifted profile that is only caught at
+	// spawn time claims a task and immediately releases it, and the release
+	// erases the diagnosis. See gateProfileVerified.
+	return s.gateProfileVerified(ap) == nil
+}
