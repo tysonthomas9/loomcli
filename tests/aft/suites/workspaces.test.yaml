@@ -1,6 +1,7 @@
 # Workspace switching uses the sidebar WorkspaceSelectorBar plus the
-# WorkspaceSwitcher dialog. Suite setup provisions e2e-ws-2 as a shared fixture;
-# the product-correct creation scenario uses CreateWorkspaceModal's Empty mode.
+# WorkspaceSwitcher dialog. Suite setup provisions e2e-ws-2 as a shared fixture.
+# The v5 creation modal is intentionally clone-only, so an API-provisioned empty
+# fixture covers the routable-board contract without inventing a removed UI mode.
 suite: workspaces
 classification: { area: workspaces, feature: workspace-management, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
@@ -8,34 +9,25 @@ setup: >-
   curl -s -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json"
   -d '{"name":"e2e-ws-2","type":"empty"}' >/dev/null; echo "ensured e2e-ws-2"
 teardown: >-
-  "$AFT_TESTS_DIR/scripts/close-open-issues.sh"; if [ -s "$AFT_WORK_DIR/workspaces-empty.id" ]; then curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/$(cat "$AFT_WORK_DIR/workspaces-empty.id")" >/dev/null || true; fi
+  "$AFT_TESTS_DIR/scripts/close-open-issues.sh"; if [ -s "$AFT_WORK_DIR/workspacesEmptyId" ]; then curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/$(cat "$AFT_WORK_DIR/workspacesEmptyId")" >/dev/null || true; fi
 
 tests:
-  # covers: LCLI-PS-001 partial; CreateWorkspaceModal empty mode; routable board
-  - name: empty-mode modal creates a workspace with a routable board
-    intent: An operator creates an empty workspace through the modal and reaches its empty kanban board
+  # covers: LCLI-PS-001 partial; empty workspace API; routable board
+  - name: API-provisioned empty workspace has a routable board
+    intent: An API client provisions an empty workspace, then an operator follows its explicit kanban URL and sees the empty board
     steps:
-      - open: /ws/E2E-WS/kanban
-      - wait:
-          fn: >-
-            !!document.querySelector('[data-testid=board-toolbar]')
-        intent: "Wait until the workspace board is ready"
-      - click: { selector: "button[aria-label^='Active workspace:']" }
-      - click: { role: button, name: "+ New Workspace", exact: true }
-      - wait:
-          fn: >-
-            !!document.querySelector('[data-testid=create-workspace-overlay]')
-        intent: "Wait until the workspace creation dialog is open"
-      - click: { testid: create-workspace-mode-empty }
-      - fill: { testid: create-workspace-name, value: e2e-ws-3 }
-      - click: { testid: create-workspace-submit }
-      # Read back the server-assigned id from the human UI action; its casing is
-      # intentionally not part of the product scenario.
+      - api:
+          method: POST
+          path: /api/workspaces
+          body:
+            name: e2e-ws-3
+            type: empty
+          save:
+            - from: data.id
+              as: workspacesEmptyId
+        intent: "An API client provisions the empty workspace fixture and records its server-assigned identity"
       - run: >-
-          for i in $(seq 1 20); do curl -sf "$AFT_BASE_URL/api/workspaces" > "$AFT_WORK_DIR/workspaces-after-empty.json" && ws="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next((w.get("id","") for w in d.get("workspaces",[]) if w.get("name")=="e2e-ws-3"), ""))' "$AFT_WORK_DIR/workspaces-after-empty.json")" && if [ -n "$ws" ]; then printf '%s\n' "$ws" > "$AFT_WORK_DIR/workspaces-empty.id"; exit 0; fi; sleep 1; done; echo "empty-mode workspace never appeared"; exit 1
-        intent: "An operator's readback waits for the modal-created workspace and records its identity"
-      - run: >-
-          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$(cat "$AFT_WORK_DIR/workspaces-empty.id")/kanban"
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$(cat "$AFT_WORK_DIR/workspacesEmptyId")/kanban"
         intent: "An operator opens the server-assigned workspace route in the active browser session"
       - wait:
           fn: >-
@@ -63,8 +55,8 @@ tests:
       - expect: { visible: { testid: empty-workspace-board } }
 
   # covers: LCLI-PS-002
-  - name: workspace selector switches route and board scope
-    intent: An agent creates an issue in E2E-WS through the API, then an operator switches to e2e-ws-2 and sees the route and board scope change
+  - name: workspace selector switches to the destination Home scope
+    intent: An agent creates an issue in E2E-WS through the API, then an operator switches to e2e-ws-2 and sees the destination Home route and workspace scope
     steps:
       - open: /ws/E2E-WS/kanban
       - wait:
@@ -95,12 +87,12 @@ tests:
             document.querySelectorAll('[data-workspace-item]').length === 1
         intent: "Wait until workspace search isolates exactly the second workspace"
       - click: { selector: "[data-workspace-item]", first: true }
-      - wait: { url: "**/ws/E2E-WS-2/kanban**" }
+      - wait: { url: "**/ws/E2E-WS-2/**" }
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=board-toolbar]')
-        intent: "Wait until the workspace board is ready"
-      - expect: { visible: { testid: empty-workspace-board } }
+            !!document.querySelector('[data-testid=home-page]')
+        intent: "Wait until the destination workspace Home page is ready"
+      - expect: { visible: { testid: queue-empty } }
       - expect: { notText: "workspace-primary-${RUN_ID:-local}" }
       - api:
           method: "GET"

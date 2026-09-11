@@ -1,6 +1,6 @@
 # Surface tier: these review-action fixtures have no reviewable branch, commit,
 # PR, or diff content on the gh-less stack (FINDINGS §1.19 and §3.9). They guard
-# the wired buttons/status transitions without claiming a real review scenario.
+# the routed issue-panel buttons/status transitions without claiming a real review scenario.
 # Promote them once seeded branch/commit review content exists.
 suite: review-actions-surface
 classification: { area: reviews, feature: review-actions, surface: mixed, purpose: contract }
@@ -10,7 +10,7 @@ teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 tests:
   # Surface-only because the row is a hollow status fixture; promote when the
   # reviewer can inspect seeded branch/commit content before approving.
-  # covers: LCLI-RA-001 partial; PRReviewWorkspace approve wiring
+  # covers: LCLI-RA-001 partial; routed IssueDetailPanel approve wiring
   - name: approving a review issue closes it and clears the queue
     intent: An issue moved to review appears as a queue row, its review workspace opens in-app, and Approve closes the issue
     steps:
@@ -21,6 +21,7 @@ tests:
             title: "review-approve-$RUN_ID"
             issue_type: "task"
             priority: 2
+            external_ref: "https://github.com/example/repository/pull/1"
           save:
             - from: "data.id"
               as: "reviewApproveId"
@@ -31,32 +32,23 @@ tests:
           body:
             status: "review"
         intent: "An API client moves the approval fixture into the review queue"
-      - open: /ws/E2E-WS/prs
-      - wait: { text: "review-approve-${RUN_ID:-local}" }
-      # rows are li[role=button] aria-label="Review <title>"
-      # rows re-render when GitHub enrichment settles, which can detach the node
-      # between find and click — retry the click until the review param lands
       - run: >-
-          for i in 1 2 3; do
-          agent-browser --session "$AFT_SESSION" find role button click --name "review-approve-${RUN_ID:-local}" || true;
-          sleep 1;
-          agent-browser --session "$AFT_SESSION" eval "location.search" | grep -q "review=" && exit 0;
-          done; echo "review row click never opened the workspace"; exit 1
-        intent: "A reviewer retries the queue row until the review workspace opens"
-      - wait: { url: "**review=**" }
+          issue="$(cat "$AFT_WORK_DIR/reviewApproveId")";
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/${AFT_WS:-E2E-WS}/issues/$issue"
+        intent: "A reviewer opens the code-review fixture by its explicit issue URL"
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=pr-review-workspace]')
-        intent: "Wait until the review workspace is ready"
-      - expect: { visible: { testid: pr-review-workspace } }
-      # unassigned review issue: the assign-a-reviewer control renders
-      - expect: { visible: { testid: review-agent-button } }
-      # button text is "✓ Approve"; accessible-name matching is substring
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open' &&
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-loading') === 'false'
+        intent: "Wait until the code-review fixture opens in the routed issue slide-over"
+      - expect: { url: "**/ws/*/issues/**" }
+      - expect: { visible: { testid: review-action-bar } }
       - click: { role: button, name: Approve }
       - wait:
           fn: >-
-            !document.querySelector('[data-testid=pr-review-workspace]')
-        intent: "Wait until the completed review workspace closes"
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'closed'
+        intent: "Wait until approval closes the routed issue slide-over"
+      - expect: { url: "**/ws/*/kanban" }
       - api:
           method: "GET"
           path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:reviewApproveId}"
@@ -68,7 +60,7 @@ tests:
 
   # Surface-only because the row is a hollow status fixture; promote when the
   # reviewer can inspect seeded branch/commit content before requesting changes.
-  # covers: LCLI-RA-001 partial; PRReviewWorkspace request-changes wiring
+  # covers: LCLI-RA-001 partial; routed IssueDetailPanel reject wiring
   - name: requesting changes sends the issue back to open
     intent: Request changes in the review workspace reopens the issue and removes it from the review queue
     steps:
@@ -89,25 +81,28 @@ tests:
           body:
             status: "review"
         intent: "An API client moves the changes fixture into the review queue"
-      - open: /ws/E2E-WS/prs
-      - wait: { text: "review-changes-${RUN_ID:-local}" }
-      # same enrichment-settle re-render race as the approve test — retry the click
       - run: >-
-          for i in 1 2 3; do
-          agent-browser --session "$AFT_SESSION" find role button click --name "review-changes-${RUN_ID:-local}" || true;
-          sleep 1;
-          agent-browser --session "$AFT_SESSION" eval "location.search" | grep -q "review=" && exit 0;
-          done; echo "review row click never opened the workspace"; exit 1
-        intent: "A reviewer retries the queue row until the review workspace opens"
+          issue="$(cat "$AFT_WORK_DIR/reviewChangesId")";
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/${AFT_WS:-E2E-WS}/issues/$issue"
+        intent: "A reviewer opens the requested-changes fixture by its explicit issue URL"
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=pr-review-workspace]')
-        intent: "Wait until the review workspace is ready"
-      - click: { role: button, name: Request changes }
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open' &&
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-loading') === 'false'
+        intent: "Wait until the requested-changes fixture opens in the routed issue slide-over"
+      - expect: { visible: { testid: review-action-bar } }
+      - click: { role: button, name: Reject }
       - wait:
           fn: >-
-            !document.querySelector('[data-testid=pr-review-workspace]')
-        intent: "Wait until the completed review workspace closes"
+            !!document.querySelector('[data-testid=reject-comment-form]')
+        intent: "Wait until the routed slide-over shows the rejection feedback form"
+      - fill: { testid: reject-textarea, value: "requested changes ${RUN_ID:-local}" }
+      - click: { testid: reject-submit }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'closed'
+        intent: "Wait until requesting changes closes the routed issue slide-over"
+      - expect: { url: "**/ws/*/kanban" }
       - api:
           method: "GET"
           path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:reviewChangesId}"
@@ -116,7 +111,19 @@ tests:
               equals: "open"
             - path: "data.labels"
               contains: "needs-revision"
-            - path: "data.notes"
-              contains: "requested changes"
-        intent: "A reviewer's readback confirms requested changes reopened and annotated the issue"
-      - expect: { notText: "review-changes-${RUN_ID:-local}" }
+        intent: "A reviewer's readback confirms requested changes reopened and labeled the issue"
+      - api:
+          method: GET
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:reviewChangesId}/comments"
+          save:
+            - from: data
+              as: reviewChangesComments
+        intent: "A reviewer reads back the persisted rejection feedback"
+      - run: >-
+          python3 -c 'import json,os; rows=json.load(open(os.environ["AFT_WORK_DIR"]+"/reviewChangesComments")); expected="FEEDBACK: requested changes "+os.environ["RUN_ID"]; assert sum(c.get("text")==expected for c in rows)==1, rows'
+        intent: "A reviewer's readback confirms the rejection feedback was persisted exactly once"
+      - wait: { text: "review-changes-${RUN_ID:-local}" }
+      - expect:
+          count:
+            selector: "section[data-status=ready] article[aria-label*='review-changes-${RUN_ID:-local}']"
+            equals: 1

@@ -32,10 +32,11 @@ tests:
     intent: An operator saves and clears a Daytona credential, switches the default runtime to Daytona, and restores it to local while API readbacks verify sanitized persistence
     steps:
       - open: /ws/E2E-WS/settings
+      - click: { role: button, name: Runtimes, exact: true }
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=settings-view]') &&
-            !!document.querySelector('[data-testid=remote-runtimes-panel]')
+            document.querySelector('[data-testid=remote-runtimes-panel]')?.offsetParent !== null
         intent: "Wait until the remote-runtime settings are ready"
       - api:
           method: "GET"
@@ -47,6 +48,10 @@ tests:
       - fill:
           testid: daytona-api-key-input
           value: "dtn_aft_${RUN_ID:-local}"
+      - run: >-
+          agent-browser --session "$AFT_SESSION" eval
+          "document.querySelector('[data-testid=daytona-credential-save-button]')?.scrollIntoView({block:'center'})"
+        intent: "An operator scrolls the Daytona save action clear of the sticky settings header"
       - click: { testid: daytona-credential-save-button }
       - wait: { text: Daytona credential saved }
       - api:

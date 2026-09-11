@@ -30,17 +30,16 @@ transitions:
       - click: { testid: description-save }
 
   reload-and-reopen-description:
-    intent: A human reloads the board and reopens the issue card to verify the description persisted.
+    intent: A human reloads the explicit issue URL and verifies the routed slide-over restores the persisted description.
     actor: human
     via: ui
     steps:
       - reload: true
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=board-toolbar]')
-        intent: Wait until the reloaded workspace board is ready.
-      - click:
-          selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open' &&
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-loading') === 'false'
+        intent: Wait until the reloaded issue URL restores its fully loaded slide-over.
 
   open-description-editor:
     intent: A human opens the description editor and types a draft without saving it.
@@ -71,14 +70,13 @@ transitions:
       - click: { testid: description-cancel }
 
   reload-and-reopen-discarded:
-    intent: A human reloads the board and reopens the issue card to verify the cancelled draft stayed discarded.
+    intent: A human reloads the explicit issue URL and verifies the routed slide-over discarded the cancelled draft.
     actor: human
     via: ui
     steps:
       - reload: true
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=board-toolbar]')
-        intent: Wait until the reloaded workspace board is ready.
-      - click:
-          selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open' &&
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-loading') === 'false'
+        intent: Wait until the reloaded issue URL restores its fully loaded slide-over.

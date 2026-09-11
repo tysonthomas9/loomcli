@@ -21,17 +21,16 @@ transitions:
         intent: A human retries submission until the mounted comment form clears.
 
   reload-and-reopen-comment:
-    intent: A human reloads the board and reopens the issue card to verify the comment persisted.
+    intent: A human reloads the explicit issue URL and verifies the routed slide-over restores the persisted comment.
     actor: human
     via: ui
     steps:
       - reload: true
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=board-toolbar]')
-        intent: Wait until the reloaded workspace board is ready.
-      - click:
-          selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open' &&
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-loading') === 'false'
+        intent: Wait until the reloaded issue URL restores its fully loaded slide-over.
 
   attempt-empty-comment:
     intent: A human submits a whitespace-only comment with the keyboard shortcut and finds it blocked.

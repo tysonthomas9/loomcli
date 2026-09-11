@@ -77,13 +77,9 @@ tests:
       - reload: true
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=board-toolbar]')
-        intent: "Wait until the workspace board is ready"
-      - click: { selector: "section[data-status=ready] article", first: true }
-      - wait:
-          fn: >-
-            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
-        intent: "Wait until the selected issue detail panel is open"
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open' &&
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-loading') === 'false'
+        intent: "Wait until the explicit issue URL restores its fully loaded slide-over"
       - wait:
           fn: >-
             Array.from(document.querySelectorAll('[data-testid=markdown-content] strong')).some((node) => node.textContent === 'bold detail')

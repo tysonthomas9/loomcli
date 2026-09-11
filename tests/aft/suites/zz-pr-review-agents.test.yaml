@@ -209,7 +209,7 @@ tests:
           assert "builtin:pr-review" in joined, joined
           assert env.get("LOOM_AGENT_ROLE") == "pr-review", env
           assert env.get("LOOM_AGENT_NAME") == name, env
-          assert t.get("pty_alive") is True, t
+          assert t.get("attachable") is True, t
           PY
             sleep 2
           done
@@ -334,7 +334,7 @@ tests:
           joined = " ".join(str(x) for x in argv)
           assert t.get("kind") == "agent", t
           assert "builtin:not-a-prompt" in joined, joined
-          assert t.get("pty_alive") is True, t
+          assert t.get("attachable") is True, t
           PY
             sleep 2
           done

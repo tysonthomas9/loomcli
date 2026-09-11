@@ -137,7 +137,7 @@ states:
                 latest[1].textContent.includes('set to open') &&
                 occurrences('set to in progress') === 1 &&
                 occurrences('set to open') === 1 &&
-                latest.every((row) => row.textContent.includes('operator@local')) &&
+                latest.every((row) => row.textContent.includes('loom-e2e')) &&
                 latest[0].querySelector('[data-marker]')?.getAttribute('data-marker') === 'op';
             })()
         intent: Wait until Home shows each live status change once with the newest action first.
@@ -166,7 +166,7 @@ states:
               const issueIds = latest.map((row) => row.querySelector('code')?.textContent);
               return latest[0].textContent.includes('claimed') &&
                 latest[1].textContent.includes('created') &&
-                latest.every((row) => row.textContent.includes('operator@local')) &&
+                latest.every((row) => row.textContent.includes('loom-e2e')) &&
                 issueIds.every((id) => id && id === issueIds[0]) &&
                 latest[0].querySelector('[data-marker]')?.getAttribute('data-marker') === 'op';
             })()

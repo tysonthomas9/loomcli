@@ -2,15 +2,15 @@
 # Each test asserts the page's verified empty-state anchors on a fresh workspace
 # (no agents, no AI backends). Anchor sources: SettingsView.tsx, ErrorDisplay.tsx,
 # TerminalView.tsx + NoBackendsEmptyState.tsx, FileExplorer.tsx, WorkspacePage.tsx,
-# AgentsPage.tsx + AgentDetailMain.tsx, IssueDetailView.tsx.
+# AgentsPage.tsx + AgentDetailMain.tsx, IssueDetailPanel.tsx.
 suite: pages
 classification: { area: workspaces, feature: navigation, surface: ui, purpose: smoke }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 
 tests:
-  - name: standalone issue page renders from a deep link
-    intent: An agent creates an issue through the API, then an operator follows its direct link and sees the standalone detail view without visiting the board first
+  - name: issue deep link opens the routed slide-over
+    intent: An agent creates an issue through the API, then an operator follows its direct link and sees the issue slide-over above the board without visiting the board first
     steps:
       - api:
           method: "POST"
@@ -36,17 +36,17 @@ tests:
           "location.href='$AFT_BASE_URL/ws/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/pagesDetailId")'"
         intent: "An operator follows the server-assigned issue deep link in the active browser session"
       - wait: { url: "**/ws/*/issues/**" }
-      # the standalone page renders IssueDetailView (issue-detail-view), NOT the
-      # slide-over's issue-detail-panel — asserting the right root catches route breakage
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=issue-detail-view]')
-        intent: "Wait until the standalone issue view is ready"
-      - expect: { visible: { testid: issue-detail-view } }
-      - expect: { visible: { testid: detail-title } }
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open' &&
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-loading') === 'false'
+        intent: "Wait until the deep link opens its fully loaded issue slide-over"
+      - expect: { visible: { testid: board-toolbar } }
+      - expect: { visible: { testid: issue-detail-panel } }
+      - expect: { visible: { testid: editable-title-display } }
       - expect: { text: "pages detail ${RUN_ID:-local}" }
       - expect: { text: "Standalone pages detail description ${RUN_ID:-local}" }
-      - expect: { visible: { testid: detail-issue-id } }
+      - expect: { visible: { testid: issue-id } }
 
   - name: settings page renders config panels
     intent: An operator opens Settings and sees backend configuration with the fresh-workspace empty override state
@@ -59,7 +59,10 @@ tests:
       - expect: { visible: { testid: settings-view } }
       - expect: { text: Project Default Backend }
       - expect: { visible: { testid: backend-select } }
-      - expect: { text: Agent Runtime }
+      - click: { role: button, name: Runtimes, exact: true }
+      - expect: { text: Remote runtimes }
+      - expect: { visible: { testid: agent-runtime-select } }
+      - click: { role: button, name: Agents, exact: true }
       # fresh workspace: no per-agent overrides exist
       - expect: { visible: { testid: no-overrides-message } }
       - expect: { text: No per-agent overrides configured. }
