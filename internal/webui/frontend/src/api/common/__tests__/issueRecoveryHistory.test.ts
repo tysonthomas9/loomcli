@@ -9,7 +9,7 @@ const offer: RecoveryHandle = {
   workspace: "WS",
   source_repos: [],
   expires_at: "2026-09-05T00:01:00Z",
-  manifest: "fleet.issue-workspace.v5",
+  manifest: "fleet.issue-workspace.v6",
 };
 const issue = {
   id: "WS-1",
@@ -40,6 +40,20 @@ const history = (events: unknown[] = [event()]) => ({
   issue_id: "WS-1",
   present: true,
   events,
+  timeline: events.map((value) => {
+    const row = value as ReturnType<typeof event>;
+    return {
+      id: `c1.${btoa(row.id).replace(/=+$/, "")}`,
+      event_id: row.id,
+      timestamp: row.timestamp,
+      actor: row.actor,
+      action: row.action,
+      category: "other",
+      summary: "",
+      changes: [],
+      metadata: row.metadata,
+    };
+  }),
   has_older: false,
 });
 const document = (history: unknown) => ({
@@ -95,6 +109,7 @@ describe("selected native recovery history", () => {
         issue_id: "WS-1",
         present: false,
         events: [],
+        timeline: [],
         has_older: false,
       }),
       issues: [],
@@ -203,6 +218,7 @@ describe("selected native recovery history", () => {
           issue_id: id,
           present: false,
           events: [],
+          timeline: [],
           has_older: false,
         }),
         issues: [],

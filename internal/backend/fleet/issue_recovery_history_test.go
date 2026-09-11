@@ -23,7 +23,7 @@ func TestReadIssueRecoverySelectedScope(t *testing.T) {
 			doc := recoveryTestDocument()
 			doc["issues"] = []any{recoveryTestIssue(selected)}
 			doc["total"] = 1
-			history := map[string]any{"issue_id": selected, "present": true, "events": []any{}, "has_older": false}
+			history := map[string]any{"issue_id": selected, "present": true, "events": []any{}, "has_older": false, "timeline": []any{}}
 			doc["history"] = history
 			if mode == "foreign echo" {
 				history["issue_id"] = "absent"

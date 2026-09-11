@@ -24,3 +24,6 @@ func validSourceEnvelope(value, prefix string) bool {
 	data, err := base64.RawURLEncoding.DecodeString(encoded)
 	return err == nil && len(data) > 0 && base64.RawURLEncoding.EncodeToString(data) == encoded
 }
+
+// ValidTimelineCursor validates the ordinary history record envelope, not an SSE checkpoint.
+func ValidTimelineCursor(value string) bool { return validSourceEnvelope(value, "c1.") }

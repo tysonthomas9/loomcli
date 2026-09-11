@@ -29,7 +29,7 @@ func TestSelectedRecoveryCapturedHTTPChain(t *testing.T) {
 		w.Header().Set("X-Fleet-Source-Identity", sourceIdentity)
 		id := r.URL.Query().Get("issue_id")
 		require.NotEmpty(t, id)
-		document := map[string]any{"manifest": "fleet.issue-workspace.v5", "workspace": "WS", "through": "c2.MS0w", "issues": []any{}, "total": 0, "ready": []any{}, "blocked": []any{}, "deferred": []any{}, "dependencies": []any{}, "comments": []any{}, "history": map[string]any{"issue_id": id, "present": false, "events": []any{}, "has_older": false}}
+		document := map[string]any{"manifest": "fleet.issue-workspace.v6", "workspace": "WS", "through": "c2.MS0w", "issues": []any{}, "total": 0, "ready": []any{}, "blocked": []any{}, "deferred": []any{}, "dependencies": []any{}, "comments": []any{}, "history": map[string]any{"issue_id": id, "present": false, "events": []any{}, "has_older": false, "timeline": []any{}}}
 		require.NoError(t, json.NewEncoder(w).Encode(document))
 	}))
 	defer server.Close()

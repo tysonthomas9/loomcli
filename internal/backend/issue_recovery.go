@@ -8,7 +8,7 @@ import (
 )
 
 // IssueRecoverySnapshot preserves the complete native certified issue manifest.
-// Through is the v5 producer snapshot boundary under its guarded-writer contract.
+// Through is the v6 producer snapshot boundary under its guarded-writer contract.
 // It is not authorization to reset a client or proof of cross-request identity.
 type IssueRecoverySnapshot struct {
 	SelectedIssueID string

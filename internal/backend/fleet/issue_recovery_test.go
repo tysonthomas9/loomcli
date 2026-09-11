@@ -71,6 +71,7 @@ func TestReadIssueRecoveryRejectsInvalidDocument(t *testing.T) {
 		mutate func(map[string]any)
 		suffix string
 	}{
+		{name: "legacy v5 manifest", mutate: func(d map[string]any) { d["manifest"] = "fleet.issue-workspace.v5" }},
 		{name: "legacy v4 manifest", mutate: func(d map[string]any) { d["manifest"] = "fleet.issue-workspace.v4" }},
 		{name: "legacy v3 manifest", mutate: func(d map[string]any) { d["manifest"] = "fleet.issue-workspace.v3" }},
 		{name: "legacy v2 manifest", mutate: func(d map[string]any) { d["manifest"] = "fleet.issue-workspace.v2" }},

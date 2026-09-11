@@ -15,6 +15,7 @@ type recoveryHistoryWire struct {
 	Present  *bool              `json:"present"`
 	Events   *[]json.RawMessage `json:"events"`
 	HasOlder *bool              `json:"has_older"`
+	Timeline *[]json.RawMessage `json:"timeline"`
 }
 
 func validateRecoveryHistoryScope(data []byte, selected string) error {
@@ -48,10 +49,10 @@ func validateRecoveryHistory(raw json.RawMessage, ws string, issues map[string]m
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return err
 	}
-	if len(fields) != 4 {
+	if len(fields) != 5 {
 		return fmt.Errorf("invalid history fields")
 	}
-	for _, key := range []string{"issue_id", "present", "events", "has_older"} {
+	for _, key := range []string{"issue_id", "present", "events", "has_older", "timeline"} {
 		if fields[key] == nil {
 			return fmt.Errorf("missing history field")
 		}
@@ -60,7 +61,7 @@ func validateRecoveryHistory(raw json.RawMessage, ws string, issues map[string]m
 	if err := json.Unmarshal(raw, &history); err != nil {
 		return err
 	}
-	if !backend.ValidRecoveryIssueSelection(history.IssueID) || history.Present == nil || history.Events == nil || history.HasOlder == nil {
+	if !backend.ValidRecoveryIssueSelection(history.IssueID) || history.Present == nil || history.Events == nil || history.HasOlder == nil || history.Timeline == nil {
 		return fmt.Errorf("incomplete history")
 	}
 	present := issues[history.IssueID] != nil
@@ -79,7 +80,7 @@ func validateRecoveryHistory(raw json.RawMessage, ws string, issues map[string]m
 		}
 		previous = seq
 	}
-	return nil
+	return validateRecoveryTimeline(*history.Timeline, *history.Events)
 }
 
 func validRecoveryHistoryWindow(reported, present bool, count int, older bool) bool {
