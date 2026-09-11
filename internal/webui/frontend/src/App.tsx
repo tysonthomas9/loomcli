@@ -468,6 +468,7 @@ function App() {
     issueDetails,
     isLoading: isLoadingDetails,
     error: detailError,
+    isNotFound: detailNotFound,
     fetchIssue,
     clearIssue,
     updateIssueDetails,
@@ -583,82 +584,61 @@ function App() {
     }
   }, [repoFilterParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Deep-link: auto-fetch issue from URL; route changes are handled by useRouteView.
-  useEffect(() => {
-    if (selectedIssueId) fetchIssue(selectedIssueId);
-    else if (activeView !== "issue-detail") clearIssue();
-  }, [selectedIssueId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const detailClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelDetailClear = useCallback(() => {
+    if (detailClearTimer.current !== null)
+      clearTimeout(detailClearTimer.current);
+    detailClearTimer.current = null;
+  }, []);
+  useEffect(() => () => cancelDetailClear(), [workspaceId, cancelDetailClear]);
 
-  // Keep the open detail panel in sync with live issue-list mutations.
-  // The panel fetches full issue details, while SSE updates land in issuesMap.
+  // Refetch on committed request-scope changes, including equal issue IDs.
   useEffect(() => {
-    if (!issueDetails) return;
-    const latestIssue = issuesMap.get(issueDetails.id);
-    if (!latestIssue) return;
+    cancelDetailClear();
+    if (selectedIssueId) void fetchIssue(selectedIssueId);
+    else if (activeViewRef.current !== "issue-detail") clearIssue();
+  }, [selectedIssueId, fetchIssue, clearIssue, cancelDetailClear]);
 
-    const latestUpdatedAt = latestIssue.updated_at
-      ? Date.parse(latestIssue.updated_at)
-      : NaN;
-    const detailUpdatedAt = issueDetails.updated_at
-      ? Date.parse(issueDetails.updated_at)
-      : NaN;
-    if (
-      !Number.isNaN(latestUpdatedAt) &&
-      !Number.isNaN(detailUpdatedAt) &&
-      latestUpdatedAt < detailUpdatedAt
-    ) {
+  // List rows invalidate detail; timestamps never authorize partial publication.
+  // A new detail result alone must not trigger this effect or copy stale rows.
+  const detailListObservation = useRef<{
+    workspace: string;
+    id: string;
+    row: Issue | undefined;
+  } | null>(null);
+  const intendedDetailPanel = pendingPanel ?? activePanel;
+  const detailId =
+    selectedIssueId ??
+    (intendedDetailPanel?.type === "issue" ? intendedDetailPanel.id : null);
+  useEffect(() => {
+    if (!detailId) {
+      detailListObservation.current = null;
       return;
     }
-
+    const row = issuesMap.get(detailId);
+    const previous = detailListObservation.current;
+    detailListObservation.current = {
+      workspace: workspaceId,
+      id: detailId,
+      row,
+    };
     if (
-      latestIssue.title !== issueDetails.title ||
-      latestIssue.status !== issueDetails.status ||
-      latestIssue.priority !== issueDetails.priority ||
-      latestIssue.issue_type !== issueDetails.issue_type ||
-      latestIssue.assignee !== issueDetails.assignee ||
-      latestIssue.owner !== issueDetails.owner ||
-      latestIssue.updated_at !== issueDetails.updated_at
+      previous?.workspace === workspaceId &&
+      previous.id === detailId &&
+      previous.row !== row
     ) {
-      updateIssueDetails(latestIssue);
+      void fetchIssue(detailId);
     }
-  }, [issueDetails, issuesMap, updateIssueDetails]);
-
-  // Force-resync the open detail surface when an optimistic update SETTLES.
-  //
-  // The effect above intentionally refuses staler data via its `updated_at`
-  // guard, which is right for SSE races but wrong here: `updateIssueStatus`
-  // stamps its optimistic issue with a fabricated `updated_at: now`, and a
-  // rollback restores the snapshot's ORIGINAL (older) timestamp. The guard
-  // therefore filters the revert out and the detail view keeps showing a
-  // status the server rejected until a full reload (PUPPET-146).
-  //
-  // Keyed on the pending -> settled edge instead of on timestamps. This relies
-  // on the store writing `issuesMap` BEFORE it clears `pendingIds` (both the
-  // rollback and the auto-rollback-timeout paths in issueStore.ts do); if that
-  // order is ever swapped, an intermediate render would see the settle edge
-  // while the map still holds the optimistic value and this would silently
-  // become a no-op.
-  const prevPendingIdsRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    const prev = prevPendingIdsRef.current;
-    prevPendingIdsRef.current = new Set(pendingIds);
-    if (!issueDetails) return;
-    const id = issueDetails.id;
-    // Still pending, or never was pending — nothing settled for this issue.
-    if (!prev.has(id) || pendingIds.has(id)) return;
-    const latest = issuesMap.get(id);
-    if (!latest) return;
-    // Status only: widening this would churn against the effect above.
-    if (latest.status !== issueDetails.status) updateIssueDetails(latest);
-  }, [pendingIds, issuesMap, issueDetails, updateIssueDetails]);
+  }, [detailId, issuesMap, workspaceId, fetchIssue]);
 
   // Deep-link error: toast + navigate away when a deep-linked issue fails to load
+  // A temporary read failure must not be reported as a deleted issue.
   useEffect(() => {
-    if (!detailError || activeView !== "issue-detail" || !selectedIssueId)
+    if (!detailNotFound || activeView !== "issue-detail" || !selectedIssueId)
       return;
     showToast("Issue not found", { type: "error" });
     setActiveView("kanban");
-  }, [detailError, activeView, selectedIssueId, showToast, setActiveView]);
+  }, [detailNotFound, activeView, selectedIssueId, showToast, setActiveView]);
 
   // Restore scroll position when returning from issue-detail view
   useEffect(() => {
@@ -719,6 +699,7 @@ function App() {
   // Handle issue click from SwimLaneBoard/IssueTable
   const handleIssueClick = useCallback(
     (issue: Issue) => {
+      cancelDetailClear();
       if (activeView === "issue-detail") {
         // Already in full-page detail — navigate to different issue within the view
         if (issue.id === selectedIssueId) return;
@@ -732,18 +713,28 @@ function App() {
       openPanel({ type: "issue", id: issue.id });
       fetchIssue(issue.id);
     },
-    [activeView, selectedIssueId, workspaceId, navigate, fetchIssue, openPanel],
+    [
+      activeView,
+      selectedIssueId,
+      workspaceId,
+      navigate,
+      fetchIssue,
+      openPanel,
+      cancelDetailClear,
+    ],
   );
 
   // Handle panel close
   const handlePanelClose = useCallback(() => {
+    cancelDetailClear();
     closePanel();
-    // Clear issue details after close animation completes
-    setTimeout(() => {
+    // Reopening a detail cancels this cleanup before it can clear a new owner.
+    detailClearTimer.current = setTimeout(() => {
+      detailClearTimer.current = null;
       if (!mountedRef.current) return;
       clearIssue();
     }, 300);
-  }, [closePanel, clearIssue]);
+  }, [closePanel, clearIssue, cancelDetailClear]);
 
   // Handle approve button click on review cards.
   //
@@ -999,10 +990,11 @@ function App() {
   const handleCreateIssueSuccess = useCallback(
     async (issue: Issue) => {
       await refetch();
+      cancelDetailClear();
       openPanel({ type: "issue", id: issue.id });
       fetchIssue(issue.id);
     },
-    [fetchIssue, openPanel, refetch],
+    [fetchIssue, openPanel, refetch, cancelDetailClear],
   );
   const workspaceOnboardingSteps: OnboardingStep[] = useMemo(
     () => [
@@ -1145,10 +1137,11 @@ function App() {
   // Handle tree issue select (wraps handleIssueClick with minimal Issue shape)
   const handleTreeIssueSelect = useCallback(
     (issueId: string) => {
+      cancelDetailClear();
       openPanel({ type: "issue", id: issueId });
       fetchIssue(issueId);
     },
-    [openPanel, fetchIssue],
+    [openPanel, fetchIssue, cancelDetailClear],
   );
 
   const handleAgentNameConsumed = useCallback(() => {
@@ -1201,11 +1194,12 @@ function App() {
   // Handle task click from agent panel (opens issue panel overlay)
   const handleAgentTaskClick = useCallback(
     (taskId: string) => {
+      cancelDetailClear();
       // Mutual exclusivity handled by usePanelManager (closes agent panel first)
       openPanel({ type: "issue", id: taskId });
       fetchIssue(taskId);
     },
-    [openPanel, fetchIssue],
+    [openPanel, fetchIssue, cancelDetailClear],
   );
 
   // -----------------------------------------------------------------------
