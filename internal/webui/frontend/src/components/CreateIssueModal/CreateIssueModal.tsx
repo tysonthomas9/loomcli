@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 
-import { createIssue } from "@/hooks/api";
+import { createIssueWithMetadata } from "@/hooks/api";
 import type { CreateIssueRequest } from "@/api/issues";
 import {
   useRegisterEscapeLayer,
@@ -61,6 +61,9 @@ export function CreateIssueModal({
   const [description, setDescription] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [duplicateIssue, setDuplicateIssue] = useState<Issue | null>(null);
+  const [duplicateRequest, setDuplicateRequest] =
+    useState<CreateIssueRequest | null>(null);
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
@@ -105,6 +108,8 @@ export function CreateIssueModal({
     setDescription(initialValues?.description ?? "");
     setIsSubmitting(false);
     setError("");
+    setDuplicateIssue(null);
+    setDuplicateRequest(null);
   }, [
     isOpen,
     initialValues?.title,
@@ -128,42 +133,24 @@ export function CreateIssueModal({
 
   const canSubmit = title.trim() !== "" && !isSubmitting;
 
-  const handleSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!canSubmit) return;
-
+  const submitRequest = useCallback(
+    async (req: CreateIssueRequest, force = false) => {
       setIsSubmitting(true);
       setError("");
 
-      const req: CreateIssueRequest = {
-        title: title.trim(),
-        issue_type: issueType,
-        priority: initialValues?.priority ?? DEFAULT_PRIORITY,
-      };
-
-      if (description.trim()) {
-        req.description = description.trim();
-      }
-      if (sourceRepo) {
-        req.source_repo = sourceRepo;
-      }
-      // Design's New Issue modal: file straight into an epic, a starting
-      // status, and an assignee — all native create-request fields.
-      if (parentEpic && issueType !== "epic") {
-        req.parent = parentEpic;
-      }
-      if (status !== "open") {
-        req.status = status;
-      }
-      if (assignee) {
-        req.assignee = assignee;
-      }
-
       try {
-        const issue = await createIssue(workspaceId, req);
+        const result = force
+          ? await createIssueWithMetadata(workspaceId, req, { force: true })
+          : await createIssueWithMetadata(workspaceId, req);
         if (!mountedRef.current) return;
-        await onSuccess(issue);
+        if (!force && result.warning === "soft-duplicate") {
+          setDuplicateIssue(result.issue);
+          setDuplicateRequest(req);
+          return;
+        }
+        setDuplicateIssue(null);
+        setDuplicateRequest(null);
+        await onSuccess(result.issue);
         if (!mountedRef.current) return;
         onClose();
       } catch (err: unknown) {
@@ -187,21 +174,51 @@ export function CreateIssueModal({
         }
       }
     },
+    [workspaceId, onSuccess, onClose],
+  );
+
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!canSubmit) return;
+
+      const req: CreateIssueRequest = {
+        title: title.trim(),
+        issue_type: issueType,
+        priority: initialValues?.priority ?? DEFAULT_PRIORITY,
+      };
+
+      if (description.trim()) req.description = description.trim();
+      if (sourceRepo) req.source_repo = sourceRepo;
+      if (parentEpic && issueType !== "epic") req.parent = parentEpic;
+      if (status !== "open") req.status = status;
+      if (assignee) req.assignee = assignee;
+
+      void submitRequest(req);
+    },
     [
       canSubmit,
       title,
       issueType,
       initialValues?.priority,
+      description,
       sourceRepo,
       parentEpic,
       status,
       assignee,
-      description,
-      workspaceId,
-      onSuccess,
-      onClose,
+      submitRequest,
     ],
   );
+
+  const handleShowExisting = useCallback(async () => {
+    if (!duplicateIssue) return;
+    await onSuccess(duplicateIssue);
+    if (mountedRef.current) onClose();
+  }, [duplicateIssue, onClose, onSuccess]);
+
+  const handleCreateAnyway = useCallback(() => {
+    if (duplicateRequest) void submitRequest(duplicateRequest, true);
+  }, [duplicateRequest, submitRequest]);
 
   if (!isOpen) return null;
 
@@ -388,6 +405,37 @@ export function CreateIssueModal({
             >
               {error}
             </p>
+          )}
+
+          {duplicateIssue && (
+            <div
+              className={styles.duplicateNotice}
+              data-testid="soft-duplicate-notice"
+              role="status"
+            >
+              <strong>An identical issue was created moments ago</strong>
+              <span>Open that issue, or create another copy intentionally.</span>
+              <div className={styles.duplicateActions}>
+                <button
+                  type="button"
+                  className={styles.cancelButton}
+                  data-testid="soft-duplicate-show-existing"
+                  onClick={() => void handleShowExisting()}
+                  disabled={isSubmitting}
+                >
+                  Show existing
+                </button>
+                <button
+                  type="button"
+                  className={styles.submitButton}
+                  data-testid="soft-duplicate-create-anyway"
+                  onClick={handleCreateAnyway}
+                  disabled={isSubmitting}
+                >
+                  Create anyway
+                </button>
+              </div>
+            </div>
           )}
 
           <div className={styles.actions}>

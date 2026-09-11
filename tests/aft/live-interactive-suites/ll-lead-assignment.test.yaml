@@ -1,0 +1,241 @@
+# LIVE tier — a real AI backend behind the Lead template, booting with an epic
+# already assigned to it.
+#
+# This is the case LI-1 cannot cover. LI-1 proves a custom prompt reaches the model at
+# BOOT as the first positional argument; the Lead path additionally loads backend state
+# (the assigned epic) and records its own delivery marker, which no stub exercises
+# because none holds a live controlled session open.
+#
+# SCOPE — read this before trusting the name. The assignment is folded into the lead's
+# LAUNCH PROMPT (applyLeadPromptContext, cli/agent/lead/lead.go:202-230). This suite
+# does NOT cover mid-session delivery — pushing a turn into an already-running session
+# via the driver op `deliver-lead-assignment` — which is a genuinely different seam and
+# remains uncovered by any tier.
+#
+# Same contract as the rest of the tier: identity, runtime-started, instructed
+# behaviour, negative scope, proven cleanup. Clause 4 (native tool_use transcript)
+# does not apply — an interactive lead records no task session — so the evidence here
+# is the delivery state machine plus the terminal.
+suite: ll-lead-assignment
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-LEADLIVE" >/dev/null || true
+  repo="$AFT_WORK_DIR/leadlive-repo"
+  rm -rf "$repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit --allow-empty -m init -q
+  python3 -c 'import json,sys; print(json.dumps({"name":sys.argv[1],"type":"empty","repos":[sys.argv[2]]}))' "e2e-ws-leadlive" "$repo" > "$AFT_WORK_DIR/leadlive-workspace.json"
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/leadlive-workspace.json" > "$AFT_WORK_DIR/leadlive-workspace.resp.json"
+  # Read the registered path from the API. An API-created workspace lives under
+  # .loom-config/workspaces/<key>/, NOT at the seed directory — assuming otherwise
+  # is what broke the worker suite's setup.
+  python3 - "$AFT_WORK_DIR/leadlive-workspace.resp.json" "$AFT_WORK_DIR/leadlive-workspace.path" <<'PY'
+  import json, sys
+  data = json.load(open(sys.argv[1])).get("data") or {}
+  open(sys.argv[2], "w", encoding="utf-8").write(data["path"])
+  PY
+teardown: |
+  set +e
+  "$AFT_TESTS_DIR/scripts/live-close-agent-tab.sh" "live-lead-${RUN_ID:-local}" E2E-WS-LEADLIVE
+  AFT_WS=E2E-WS-LEADLIVE "$AFT_TESTS_DIR/scripts/close-open-issues.sh"
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-LEADLIVE/agents/live-lead-${RUN_ID:-local}" >/dev/null || true
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-LEADLIVE" >/dev/null || true
+  "$AFT_TESTS_DIR/scripts/real-backend-teardown.sh" "${AFT_REAL_BACKEND:-codex}" || true
+
+tests:
+  # covers: LL-1; CreateAgentModal Lead template against a REAL backend; controlled
+  # runtime boot; epic assignment folded into the lead's launch prompt and marked
+  # delivered by the lead process itself.
+  #
+  # NOT covered, deliberately: mid-session delivery (assigning an epic to an ALREADY
+  # RUNNING lead, which arrives as a turn). That is a different code path — the driver
+  # op `deliver-lead-assignment` (driverapi/module.go:148) — and it needs an
+  # authenticated driver identity + fencing token. It deserves its own case; this one
+  # must not be read as covering it. An earlier revision of this suite claimed exactly
+  # that in its title while assigning before launch, which would have left mid-session
+  # delivery completely broken with LL-1 green.
+  - name: a real Lead boots its controlled runtime and starts with its assigned epic
+    intent: An operator creates a Lead agent, an orchestration client assigns it an epic before launch, and the lead process itself records that assignment as delivered when it builds its prompt
+    steps:
+      - run: >-
+          "$AFT_TESTS_DIR/scripts/live-scope-baseline.sh" "$(cat "$AFT_WORK_DIR/leadlive-workspace.path")" "$AFT_WORK_DIR/ll1-baseline.txt"
+        intent: "An operator snapshots the workspace before any model runs"
+      - open: /ws/E2E-WS-LEADLIVE/agents
+      - wait:
+          fn: >-
+            (() => {
+              const page = document.querySelector('[data-testid=agents-page]');
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+              if (!page || !settled) {
+                window.__aftAgentsPageStableSig = null;
+                window.__aftAgentsPageStableAt = 0;
+                return false;
+              }
+              if (window.__aftAgentsPageStableSig !== sig) {
+                window.__aftAgentsPageStableSig = sig;
+                window.__aftAgentsPageStableAt = Date.now();
+                return false;
+              }
+              return Date.now() - window.__aftAgentsPageStableAt >= 300;
+            })()
+        intent: "Wait until the lead-live workspace agents page is ready"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=create-agent-overlay]')
+        intent: "Wait until the agent creation dialog is open"
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "live-lead-${RUN_ID:-local}" }
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-testid=create-agent-backend] option').length > 1
+        intent: "Wait until backend options load before selecting the live backend"
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND:-codex}" }
+      - click: { testid: create-agent-submit }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=create-agent-overlay]') &&
+            document.body.textContent.includes('live-lead-${RUN_ID:-local}')
+        intent: "Wait until the live Lead appears after submit"
+      # Assignment MUST precede launch. The lead reads its assignment exactly once,
+      # while building its prompt: applyLeadPromptContext → currentLeadAssignmentPrompt
+      # → markLeadAssignmentDelivered (cli/agent/lead/lead.go:202-230). Nothing re-reads
+      # it afterwards. An earlier revision of this case assigned the epic AFTER the
+      # runtime was up and polled for `delivered` — it can never arrive that way, and
+      # the run burned a live window proving it: the agent showed
+      # delivery_state=pending for the full 60s while /outbox/due stayed empty.
+      # Mid-session delivery is a real but different path (driver op
+      # `deliver-lead-assignment`, driverapi/module.go:148), and it needs an
+      # authenticated driver identity + fencing token + parent verification — worth its
+      # own case, not smuggled into this one.
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-LEADLIVE/issues"
+          body:
+            title: "live lead epic ${RUN_ID:-local}"
+            issue_type: "epic"
+            priority: 2
+          status: 201
+          save:
+            - from: "data.id"
+              as: "ll1EpicId"
+        intent: "An orchestration client seeds the epic before the Lead is launched"
+      - api:
+          method: "PATCH"
+          path: "/api/workspaces/E2E-WS-LEADLIVE/agents/live-lead-${RUN_ID:-local}"
+          body:
+            parent: "${var:ll1EpicId}"
+          status: 200
+        intent: "An orchestration client assigns the epic to the not-yet-running Lead"
+      - open: /ws/E2E-WS-LEADLIVE/agents/live-lead-${RUN_ID:-local}
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=terminal-wrapper] .wterm')
+        intent: "Wait until the live Lead terminal mounts its grid"
+      # Clause 2 — runtime started. Only the controlled runtime prints this, and only
+      # after waitForCodexAppServer succeeds (leadcontrol/codex_runtime.go:163).
+      # "terminal has some text" is satisfied by loom's own pre-runtime banner.
+      # Scope: the banner is printed once the app-server is READY, before the
+      # `codex --remote` TUI is exec'd, so this proves the app-server stage came up —
+      # not that the TUI survived. The delivery assertion below is what shows the lead
+      # process then did real work.
+      - wait:
+          fn: >-
+            (() => {
+              const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
+              if (!wrapper) return false;
+              const rows = Array.from(wrapper.querySelectorAll('.term-row')).map((el) => el.textContent || '').join('\n');
+              if (rows.includes('Error running agent') || rows.includes('backend is not installed')) {
+                throw new Error('lead runtime failed to start: ' + rows.slice(-400));
+              }
+              return /Launching controlled .*lead session/.test(rows);
+            })()
+        intent: "Wait until the controlled lead runtime reports it started, which only happens after the backend is ready"
+      # The delivery state machine, against a live runtime for the first time. Poll
+      # only for the terminal state: `pending` is transient, and /monitor/status
+      # synthesizes pending|delivered|acknowledged and never exposes `unsupported`.
+      - run: |
+          set -e
+          name="live-lead-${RUN_ID:-local}"
+          epic="$(cat "$AFT_WORK_DIR/ll1EpicId")"
+          # budget: context-delivery (60s) - assignment crosses the outbox dispatcher,
+          # the monitor cache, and the runtime's turn queue.
+          for i in $(seq 1 60); do
+            curl -sf "$AFT_BASE_URL/api/monitor/status?workspace=E2E-WS-LEADLIVE" > "$AFT_WORK_DIR/ll1-monitor.json" &&
+            python3 - "$AFT_WORK_DIR/ll1-monitor.json" "$name" "$epic" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          name, epic = sys.argv[2], sys.argv[3]
+          matches = [a for a in d.get("agents", []) if a.get("name") == name]
+          assert matches, d.get("agents")
+          a = matches[0]
+          assert a.get("parent") == epic, a
+          assert a.get("delivery_state") == "delivered", a
+          assert (a.get("orchestrator_session_id") or "").startswith("lead-"), a
+          PY
+            sleep 1
+          done
+          echo "epic assignment never reached delivered against the live runtime"
+          echo "NOTE: delivery_state compares the lead's stored marker against the agent row's"
+          echo "CURRENT UpdatedAt, so ANY later write to that row flips a genuinely delivered"
+          echo "assignment back to 'pending' permanently (FINDINGS §1.28). If the dump below"
+          echo "shows parent set and an orchestrator_session_id present, this is very likely"
+          echo "that known race rather than a delivery regression."
+          cat "$AFT_WORK_DIR/ll1-monitor.json" 2>/dev/null || true
+          exit 1
+        # What `delivered` proves, precisely: the LEAD PROCESS loaded the assignment and
+        # wrote lead_assignment_delivered_version while constructing its prompt
+        # (cli/agent/lead/lead.go:213-230). That is real evidence the lead read backend
+        # state — it cannot be produced by the server alone — but it is written BEFORE
+        # the formatted assignment reaches the model, so it does not prove the model
+        # ingested it. Asserting model receipt would mean asserting model wording,
+        # which this tier forbids.
+        intent: "An operator polls until the lead process records the epic assignment as delivered"
+      # No terminal-text assertion here, deliberately. On the launch path the
+      # assignment is folded into the lead's PROMPT ("Loom backend assignment:",
+      # epicrunner/assignment_context.go:70) — it is not echoed to the terminal, and
+      # whether the model repeats it back is model wording, which this tier must never
+      # assert on. The string the previous revision waited for ("Loom assigned this
+      # lead session an epic through backend state", delivery.go:523) belongs to the
+      # mid-session turn path and cannot appear here at all.
+      #
+      # The observable half is instead proven from durable state below: the delivery
+      # marker is written by the lead process itself, so `delivered` is evidence the
+      # real lead read the assignment — not merely that the server queued something.
+      # Clause 1 — identity. An interactive lead records no task session, so the tab
+      # is where backend attribution is observable.
+      - run: |
+          set -e
+          name="live-lead-${RUN_ID:-local}"
+          backend="${AFT_REAL_BACKEND:-codex}"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEADLIVE/terminal/tabs" > "$AFT_WORK_DIR/ll1-tabs.json"
+          python3 - "$AFT_WORK_DIR/ll1-tabs.json" "$name" "$backend" <<'PY'
+          import json, sys
+          tabs = json.load(open(sys.argv[1])).get("data") or []
+          name, backend = sys.argv[2], sys.argv[3]
+          matches = [t for t in tabs if t.get("agent_id") == name]
+          assert matches, tabs
+          tab = matches[0]
+          assert tab.get("backend") == backend, (tab.get("backend"), backend, tab)
+          assert tab.get("role") == "lead", tab
+          env = (tab.get("launch") or {}).get("env") or {}
+          assert env.get("LOOM_AGENT_NAME") == name, env
+          assert env.get("LOOM_AGENT_ROLE") == "lead", env
+          assert env.get("LOOM_BACKEND") == backend, env
+          assert (env.get("LOOM_ORCHESTRATOR_SESSION_ID") or "").startswith("lead-"), env
+          PY
+        intent: "An operator confirms the live terminal is attributed to this Lead and the backend they selected"
+      # Clause 5 — a Lead orchestrates through the API; it has no business writing to
+      # the workspace filesystem. No allowlist: any file or ref moving is a finding.
+      - run: >-
+          "$AFT_TESTS_DIR/scripts/live-scope-verify.sh" "$(cat "$AFT_WORK_DIR/leadlive-workspace.path")" "$AFT_WORK_DIR/ll1-baseline.txt"
+        intent: "An operator proves the live Lead changed nothing on disk while orchestrating"
+      - run: >-
+          "$AFT_TESTS_DIR/scripts/live-close-agent-tab.sh" "live-lead-${RUN_ID:-local}" E2E-WS-LEADLIVE
+        intent: "An operator closes the live Lead terminal and proves no paid process is left attached"

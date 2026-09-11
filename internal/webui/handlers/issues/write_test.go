@@ -1307,6 +1307,10 @@ func TestHandleCreateIssueW_ForwardsIdempotencyHeaders(t *testing.T) {
 			if !params.Force {
 				t.Error("Force header must set params.Force")
 			}
+			service.SetCreateIssueMetadata(ctx, service.CreateIssueMetadata{
+				Replayed: true,
+				Warning:  "soft-duplicate",
+			})
 			return json.RawMessage(`{"id":"new-1","title":"T"}`), nil
 		},
 	}
@@ -1321,5 +1325,11 @@ func TestHandleCreateIssueW_ForwardsIdempotencyHeaders(t *testing.T) {
 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201 (body %s)", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("X-Idempotency-Replayed"); got != "true" {
+		t.Fatalf("X-Idempotency-Replayed = %q, want true", got)
+	}
+	if got := w.Header().Get("X-Idempotency-Warning"); got != "soft-duplicate" {
+		t.Fatalf("X-Idempotency-Warning = %q, want soft-duplicate", got)
 	}
 }

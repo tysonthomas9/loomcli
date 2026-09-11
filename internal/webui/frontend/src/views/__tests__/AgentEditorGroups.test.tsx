@@ -22,6 +22,7 @@ describe("AgentEditorGroups", () => {
     expect(
       screen.getByRole("button", { name: "Terminal" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Logs" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Files" })).toBeInTheDocument();
   });
 

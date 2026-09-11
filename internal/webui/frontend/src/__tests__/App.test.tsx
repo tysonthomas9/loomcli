@@ -33,10 +33,14 @@ import type { Issue, Status } from "@/types";
 
 import App from "../App";
 
+const { mockUseParams } = vi.hoisted(() => ({
+  mockUseParams: vi.fn(() => ({ workspaceId: "test-ws-id" })),
+}));
+
 // Mock react-router-dom
 const mockNavigate = vi.fn();
 vi.mock("react-router-dom", () => ({
-  useParams: vi.fn(() => ({ workspaceId: "test-ws-id" })),
+  useParams: mockUseParams,
   useNavigate: vi.fn(() => mockNavigate),
   useSearchParams: vi.fn(() => [new URLSearchParams(), vi.fn()]),
   useLocation: vi.fn(() => ({
@@ -142,7 +146,7 @@ vi.mock("@/hooks/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/api")>();
   return {
     ...actual,
-    createIssue: mockCreateIssue,
+    createIssueWithMetadata: mockCreateIssue,
   };
 });
 
@@ -715,6 +719,7 @@ interface MockStoreStateOverrides {
   ) => Promise<void>;
   retryConnection: () => void;
   pendingIds: Set<string>;
+  detailInvalidationVersions: Map<string, number>;
   fetchIssues: () => Promise<void>;
   showStaleBanner: boolean;
   connectionLost: boolean;
@@ -751,6 +756,7 @@ function createMockUseIssuesReturn(
     connectionLost: false,
     disconnectedSince: null,
     pendingIds: new Set<string>(),
+    detailInvalidationVersions: new Map<string, number>(),
     mutationCount: 0,
     // Issue store actions
     fetchIssues: vi.fn().mockResolvedValue(undefined),
@@ -762,6 +768,7 @@ function createMockUseIssuesReturn(
     setConnectionState: vi.fn(),
     setReconnectAttempts: vi.fn(),
     setLastEventId: vi.fn(),
+    reconcileIssue: vi.fn(),
     getIssue: (id: string) => issuesMap.get(id),
     reset: vi.fn(),
     configure: vi.fn(),
@@ -935,6 +942,7 @@ vi.mock("@/components/WorkspaceTree/AgentSection", () => ({
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseParams.mockReturnValue({ workspaceId: "test-ws-id" });
     mockCreateWorkspaceAgent.mockResolvedValue({
       name: "planner",
       role_name: "plan",
@@ -1003,7 +1011,11 @@ describe("App", () => {
     // Set up default API mocks (resolve by default so existing tests aren't affected)
     mockUpdateIssue.mockResolvedValue({});
     mockAddComment.mockResolvedValue({});
-    mockCreateIssue.mockResolvedValue(createMockIssue({ id: "created-issue" }));
+    mockCreateIssue.mockResolvedValue({
+      issue: createMockIssue({ id: "created-issue" }),
+      warning: null,
+      replayed: false,
+    });
     mockStartAgent.mockResolvedValue(undefined);
     mockRunOnboardingFirstTask.mockResolvedValue({
       success: true,
@@ -2037,12 +2049,76 @@ describe("App", () => {
       const issueCard = screen.getByText("Test Issue");
       fireEvent.click(issueCard);
 
-      // Should open panel overlay (not navigate to issue-detail view)
+      // The slide-over gets a canonical URL and opens without becoming a
+      // separate full-page issue detail surface.
+      expect(mockNavigate).toHaveBeenCalledWith(
+        "/ws/test-ws-id/issues/issue-1",
+      );
       expect(mockOpenPanel).toHaveBeenCalledWith({
         type: "issue",
         id: "issue-1",
       });
       expect(fetchIssue).toHaveBeenCalledWith("issue-1");
+    });
+
+    it("restores the slide-over when an explicit issue URL is loaded", () => {
+      const fetchIssue = vi.fn();
+      mockUseParams.mockReturnValue({
+        workspaceId: "test-ws-id",
+        issueId: "issue-deep-link",
+      });
+      vi.mocked(useRouteView).mockReturnValue(
+        createViewStateReturn("issue-detail"),
+      );
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({ fetchIssue }),
+      );
+
+      const { rerender } = render(<App />);
+
+      expect(mockOpenPanel).toHaveBeenCalledWith({
+        type: "issue",
+        id: "issue-deep-link",
+      });
+      expect(fetchIssue).toHaveBeenCalledWith("issue-deep-link");
+
+      mockUseParams.mockReturnValue({ workspaceId: "test-ws-id" });
+      rerender(<App />);
+
+      expect(mockClosePanel).toHaveBeenCalled();
+    });
+
+    it("closes an explicit issue URL back to the kanban", () => {
+      mockUseParams.mockReturnValue({
+        workspaceId: "test-ws-id",
+        issueId: "issue-deep-link",
+      });
+      vi.mocked(useRouteView).mockReturnValue(
+        createViewStateReturn("issue-detail"),
+      );
+      mockUsePanelManager.mockReturnValue({
+        activePanel: { type: "issue", id: "issue-deep-link" },
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: mockIsOpen,
+      });
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: createMockIssue({
+            id: "issue-deep-link",
+            title: "Deep-linked issue",
+          }),
+        }),
+      );
+
+      render(<App />);
+      fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+
+      expect(mockClosePanel).toHaveBeenCalled();
+      expect(mockNavigate).toHaveBeenCalledWith("/ws/test-ws-id/kanban", {
+        replace: true,
+      });
     });
 
     it("calls fetchIssue with correct ID when issue is clicked", () => {
@@ -2242,6 +2318,39 @@ describe("App", () => {
 
       await waitFor(() => {
         expect(updateIssueDetails).toHaveBeenCalledWith(liveIssue);
+      });
+    });
+
+    it("refetches an open issue after an SSE detail invalidation", async () => {
+      const fetchIssue = vi.fn();
+      const issue = createMockIssue({ id: "issue-1" });
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [issue],
+        detailInvalidationVersions: new Map([["issue-1", 0]]),
+      });
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            ...issue,
+            comments: [],
+            dependencies: [],
+            dependents: [],
+          },
+          fetchIssue,
+        }),
+      );
+
+      const { rerender } = render(<App />);
+      fetchIssue.mockClear();
+
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [issue],
+        detailInvalidationVersions: new Map([["issue-1", 1]]),
+      });
+      rerender(<App />);
+
+      await waitFor(() => {
+        expect(fetchIssue).toHaveBeenCalledWith("issue-1");
       });
     });
 
@@ -2916,7 +3025,11 @@ describe("App", () => {
         title: "Manual first task",
         issue_type: "task",
       });
-      mockCreateIssue.mockResolvedValue(createdIssue);
+      mockCreateIssue.mockResolvedValue({
+        issue: createdIssue,
+        warning: null,
+        replayed: false,
+      });
       mockStoreState = createMockUseIssuesReturn({
         issues: [],
         refetch,
@@ -3132,8 +3245,11 @@ describe("App", () => {
 
       render(<App />);
 
-      // Click first issue — should open panel, not navigate
+      // Click first issue — should navigate to its canonical panel URL.
       fireEvent.click(screen.getByLabelText(/Issue: First Issue/));
+      expect(mockNavigate).toHaveBeenCalledWith(
+        "/ws/test-ws-id/issues/issue-1",
+      );
       expect(mockOpenPanel).toHaveBeenCalledWith({
         type: "issue",
         id: "issue-1",
@@ -3142,6 +3258,9 @@ describe("App", () => {
 
       // Click second issue — same pattern
       fireEvent.click(screen.getByLabelText(/Issue: Second Issue/));
+      expect(mockNavigate).toHaveBeenCalledWith(
+        "/ws/test-ws-id/issues/issue-2",
+      );
       expect(mockOpenPanel).toHaveBeenCalledWith({
         type: "issue",
         id: "issue-2",

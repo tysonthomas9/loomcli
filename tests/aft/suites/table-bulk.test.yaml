@@ -1,0 +1,79 @@
+# Bulk table actions in an owned workspace so row counts and selection state are
+# isolated from shared E2E-WS fixtures.
+suite: table-bulk
+classification: { area: issues, feature: table-bulk-actions, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: >-
+  name="aft-bulk-${RUN_ID:-local}"; curl -sf "$AFT_BASE_URL/api/workspaces" > "$AFT_WORK_DIR/bulk-workspaces.setup.json" || true; existing="$(python3 -c 'import json,sys,os; p=sys.argv[1]; target=sys.argv[2]; print(next((w.get("id","") for w in (json.load(open(p)).get("workspaces",[]) if os.path.exists(p) and os.path.getsize(p) else []) if w.get("name")==target or w.get("id")==target), ""))' "$AFT_WORK_DIR/bulk-workspaces.setup.json" "$name")"; [ -z "$existing" ] || curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/$existing" >/dev/null || true; python3 -c 'import json,os; run=os.environ.get("RUN_ID") or "local"; print(json.dumps({"name":"aft-bulk-"+run,"type":"empty"}))' > "$AFT_WORK_DIR/bulk-create.json"; curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/bulk-create.json" > "$AFT_WORK_DIR/bulk-create.resp.json"; python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); data=d.get("data") or {}; assert data.get("id"), d; print(data["id"])' "$AFT_WORK_DIR/bulk-create.resp.json" > "$AFT_WORK_DIR/bulk-ws.id"
+teardown: >-
+  if [ -s "$AFT_WORK_DIR/bulk-ws.id" ]; then AFT_WS="$(cat "$AFT_WORK_DIR/bulk-ws.id")" "$AFT_TESTS_DIR/scripts/close-open-issues.sh" || true; curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/$(cat "$AFT_WORK_DIR/bulk-ws.id")" >/dev/null || true; fi
+
+tests:
+  # covers: table route; IssueTable; IssueRow; BulkActionToolbar; ConfirmDialog; PATCH /issues/{id}
+  - name: bulk status change
+    intent: An API client provisions two issues, then an operator selects their table rows and applies the Status bulk action while readbacks verify both become in_progress
+    steps:
+      - run: >-
+          ws="$(cat "$AFT_WORK_DIR/bulk-ws.id")"; : > "$AFT_WORK_DIR/bulk-status.ids"; for n in 1 2; do python3 -c 'import json,os,sys; run=os.environ.get("RUN_ID") or "local"; n=sys.argv[1]; print(json.dumps({"title":"bulk-status-"+run+"-"+n,"issue_type":"task","priority":2}))' "$n" > "$AFT_WORK_DIR/bulk-status-$n.json"; curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$ws/issues" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/bulk-status-$n.json" > "$AFT_WORK_DIR/bulk-status-$n.resp.json"; python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"]["id"])' "$AFT_WORK_DIR/bulk-status-$n.resp.json" >> "$AFT_WORK_DIR/bulk-status.ids"; done
+        intent: "An API client provisions the two issues for the bulk status action"
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$(cat "$AFT_WORK_DIR/bulk-ws.id")/table"
+        intent: "An operator opens the server-assigned workspace route in the active browser session"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=issue-table]')
+        intent: "Wait until the issue table is ready"
+      - wait: { text: "bulk-status-${RUN_ID:-local}-1" }
+      - wait: { text: "bulk-status-${RUN_ID:-local}-2" }
+      - run: >-
+          while read -r id; do sel="tr[data-testid=issue-row-$id] input.issue-table__checkbox"; ok=0; for i in 1 2 3; do agent-browser --session "$AFT_SESSION" click "$sel" || true; sleep 1; agent-browser --session "$AFT_SESSION" eval "document.querySelector('$sel')?.checked === true" | grep -q true && ok=1 && break; done; [ "$ok" = 1 ] || { echo "checkbox for $id never selected"; exit 1; }; done < "$AFT_WORK_DIR/bulk-status.ids"
+        intent: "An operator selects every provisioned issue row for the bulk action"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=bulk-action-toolbar]') &&
+            document.querySelector('[data-testid=selection-count]')?.textContent.includes('2 selected')
+        intent: "Wait until the bulk toolbar reports exactly two selected issues"
+      - click: { testid: bulk-action-status }
+      - wait:
+          fn: >-
+            !!document.querySelector('#bulk-status')
+        intent: "Wait until the bulk status selector is ready"
+      - select: { selector: "#bulk-status", value: in_progress }
+      - click: { testid: confirm-dialog-confirm }
+      - run: >-
+          ws="$(cat "$AFT_WORK_DIR/bulk-ws.id")"; while read -r id; do for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/workspaces/$ws/issues/$id" > "$AFT_WORK_DIR/bulk-status-$id.check.json" && python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; assert d["status"]=="in_progress", d["status"]' "$AFT_WORK_DIR/bulk-status-$id.check.json" && break; sleep 1; done; python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; assert d["status"]=="in_progress", d' "$AFT_WORK_DIR/bulk-status-$id.check.json"; done < "$AFT_WORK_DIR/bulk-status.ids"
+        intent: "An operator's readback waits for both bulk status changes to persist"
+
+  # covers: table route; IssueTable; IssueRow; BulkActionToolbar; ConfirmDialog; POST /issues/{id}/close
+  - name: bulk close
+    intent: An API client provisions a different issue pair, then an operator selects the rows and uses the Close bulk action while readbacks verify both close
+    steps:
+      - run: >-
+          ws="$(cat "$AFT_WORK_DIR/bulk-ws.id")"; : > "$AFT_WORK_DIR/bulk-close.ids"; for n in 1 2; do python3 -c 'import json,os,sys; run=os.environ.get("RUN_ID") or "local"; n=sys.argv[1]; print(json.dumps({"title":"bulk-close-"+run+"-"+n,"issue_type":"task","priority":2}))' "$n" > "$AFT_WORK_DIR/bulk-close-$n.json"; curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$ws/issues" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/bulk-close-$n.json" > "$AFT_WORK_DIR/bulk-close-$n.resp.json"; python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"]["id"])' "$AFT_WORK_DIR/bulk-close-$n.resp.json" >> "$AFT_WORK_DIR/bulk-close.ids"; done
+        intent: "An API client provisions the two issues for the bulk close action"
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$(cat "$AFT_WORK_DIR/bulk-ws.id")/table"
+        intent: "An operator opens the server-assigned workspace route in the active browser session"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=issue-table]')
+        intent: "Wait until the issue table is ready"
+      - wait: { text: "bulk-close-${RUN_ID:-local}-1" }
+      - wait: { text: "bulk-close-${RUN_ID:-local}-2" }
+      - run: >-
+          while read -r id; do sel="tr[data-testid=issue-row-$id] input.issue-table__checkbox"; ok=0; for i in 1 2 3; do agent-browser --session "$AFT_SESSION" click "$sel" || true; sleep 1; agent-browser --session "$AFT_SESSION" eval "document.querySelector('$sel')?.checked === true" | grep -q true && ok=1 && break; done; [ "$ok" = 1 ] || { echo "checkbox for $id never selected"; exit 1; }; done < "$AFT_WORK_DIR/bulk-close.ids"
+        intent: "An operator selects every provisioned issue row for the bulk action"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=bulk-action-toolbar]') &&
+            document.querySelector('[data-testid=selection-count]')?.textContent.includes('2 selected')
+        intent: "Wait until the bulk toolbar reports exactly two selected issues"
+      - click: { testid: bulk-action-close }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=confirm-dialog-confirm]')
+        intent: "Wait until the bulk close confirmation is ready"
+      - click: { testid: confirm-dialog-confirm }
+      - run: >-
+          ws="$(cat "$AFT_WORK_DIR/bulk-ws.id")"; while read -r id; do for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/workspaces/$ws/issues/$id" > "$AFT_WORK_DIR/bulk-close-$id.check.json" && python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; assert d["status"]=="closed", d["status"]' "$AFT_WORK_DIR/bulk-close-$id.check.json" && break; sleep 1; done; python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; assert d["status"]=="closed", d' "$AFT_WORK_DIR/bulk-close-$id.check.json"; done < "$AFT_WORK_DIR/bulk-close.ids"
+        intent: "An operator's readback waits for both bulk closes to persist"

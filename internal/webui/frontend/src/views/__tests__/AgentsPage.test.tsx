@@ -86,6 +86,9 @@ vi.mock("@/components/AgentDetailMain/AgentDetailMain", () => ({
 }));
 
 vi.mock("@/components/AgentDetailPanel", () => ({
+  AgentLogsTab: ({ agentName }: { agentName: string }) => (
+    <div data-testid="logs-tab" data-agent={agentName} />
+  ),
   GitTab: ({ agent }: { agent: { name: string } }) => (
     <div data-testid="git-tab" data-agent={agent.name} />
   ),

@@ -158,6 +158,25 @@ describe("CreateAgentModal: default prop seeding", () => {
   });
 });
 
+describe("CreateAgentModal: empty repository guidance", () => {
+  it("explains that background agents require a repository", () => {
+    renderModal({ repos: [] });
+
+    expect(screen.getByTestId("create-agent-no-repos")).toHaveTextContent(
+      "No repos in this workspace yet — background agents need at least one repo; interactive agents run with workspace scope.",
+    );
+  });
+
+  it("explains that interactive agents can run with workspace scope", () => {
+    renderModal({ repos: [] });
+    fireEvent.click(screen.getByTestId("create-agent-template-lead"));
+
+    expect(screen.getByTestId("create-agent-no-repos")).toHaveTextContent(
+      "No repos yet — add one from the sidebar first. This agent will run with workspace scope.",
+    );
+  });
+});
+
 // ---------- wasOpenRef: don't reset on re-render ----------
 
 describe("CreateAgentModal: state preservation across re-renders", () => {

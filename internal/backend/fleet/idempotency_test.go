@@ -122,4 +122,23 @@ func TestCreate_ReplayedResponseStillReturnsIssue(t *testing.T) {
 	if issue.ID != "TEST-1" {
 		t.Errorf("replayed issue ID = %q, want TEST-1", issue.ID)
 	}
+	if !issue.IdempotencyReplayed {
+		t.Error("replayed response metadata was not preserved")
+	}
+}
+
+func TestCreate_SoftDuplicateWarningIsPreserved(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Idempotency-Warning", "soft-duplicate")
+		respondOK(w, types.Issue{ID: "TEST-1", Title: "dup me"})
+	})
+	defer ts.Close()
+
+	issue, err := fb.Create(context.Background(), sampleCreateParams())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if issue.IdempotencyWarning != "soft-duplicate" {
+		t.Fatalf("warning = %q, want soft-duplicate", issue.IdempotencyWarning)
+	}
 }

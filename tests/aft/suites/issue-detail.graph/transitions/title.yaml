@@ -1,0 +1,63 @@
+kind: graph-transitions
+version: 1
+flow: issue-detail
+group: title
+
+transitions:
+  open-title-editor:
+    intent: A human opens the editable title control in the issue detail panel.
+    actor: human
+    via: ui
+    steps:
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=editable-title-display]')
+        intent: Wait until the editable title display is mounted.
+      - click: { testid: editable-title-display }
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find testid editable-title-display click || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=editable-title-input]')" | grep -q true && exit 0;
+          done; echo "title display click never opened the title editor"; exit 1
+        intent: A human retries the title display until its mounted input opens.
+
+  submit-empty-title:
+    intent: A human attempts to submit a whitespace-only title through the mounted title editor.
+    actor: human
+    via: ui
+    steps:
+      - fill:
+          testid: editable-title-input
+          value: " "
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" eval "document.querySelector('[data-testid=editable-title-input]')?.value === ' '" | grep -q true && exit 0;
+          agent-browser --session "$AFT_SESSION" find testid editable-title-input fill " " || true;
+          sleep 1;
+          done;
+          echo "title input never cleared to whitespace-only"; exit 1
+        intent: A human retries until the title input holds only whitespace before submitting.
+      - press: Enter
+
+  rename-title:
+    intent: A human submits a case-specific replacement title through the mounted title editor.
+    actor: human
+    via: ui
+    steps:
+      - fill:
+          testid: editable-title-input
+          value: "aft issue detail renamed ${RUN_ID:-local}-${AFT_CASE_ID}"
+      - press: Enter
+
+  reload-board-after-rename:
+    intent: A human closes the panel and reloads the board to verify the renamed card persisted.
+    actor: human
+    via: ui
+    steps:
+      - click: { testid: header-close-button }
+      - reload: true
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: Wait until the reloaded workspace board is ready after rename.

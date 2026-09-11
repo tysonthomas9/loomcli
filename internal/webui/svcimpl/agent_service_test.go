@@ -2,6 +2,7 @@ package svcimpl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -411,6 +412,40 @@ func TestCreateAgentNormalizesMixedCaseName(t *testing.T) {
 	}
 	if created.Name != "test-lead" {
 		t.Fatalf("created.Name = %q, want test-lead", created.Name)
+	}
+}
+
+func TestCreateAgentRejectsDuplicateWithStableConflictMessage(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key: "TEST2", Name: "Test 2", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	svc := NewAgentService(nil, nil, nil, st)
+	in := service.AgentCreateInput{
+		WorkspaceKey: "TEST2",
+		Name:         "duplicate-lead",
+		RoleName:     "lead",
+		Backend:      "codex",
+	}
+	if _, err := svc.CreateAgent(ctx, in); err != nil {
+		t.Fatalf("first CreateAgent returned error: %v", err)
+	}
+	_, err := svc.CreateAgent(ctx, in)
+	var svcErr *service.ServiceError
+	if !errors.As(err, &svcErr) {
+		t.Fatalf("duplicate CreateAgent error = %T %v, want *service.ServiceError", err, err)
+	}
+	if svcErr.Kind != service.KindConflict {
+		t.Fatalf("duplicate CreateAgent kind = %q, want %q", svcErr.Kind, service.KindConflict)
+	}
+	if svcErr.Message != "An agent with this name already exists." {
+		t.Fatalf("duplicate CreateAgent message = %q", svcErr.Message)
 	}
 }
 

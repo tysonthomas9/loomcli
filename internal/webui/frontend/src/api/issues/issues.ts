@@ -248,7 +248,9 @@ export async function getKanbanIssues(
   const query = cleanQuery({
     exclude_status: "tombstone",
     include_blocked: true,
-    status: mapped.status as string | undefined,
+    // The board renders a Done column, so its default query must include
+    // closed issues. An explicit filter still wins.
+    status: (mapped.status as string | undefined) ?? "all",
     type: mapped.type as string | undefined,
     assignee: mapped.assignee as string | undefined,
     priority: mapped.priority as number | undefined,
@@ -388,10 +390,17 @@ export interface UpdateIssueRequest {
 /**
  * Create a new issue.
  */
-export async function createIssue(
+export interface CreateIssueResult {
+  issue: Issue;
+  warning: string | null;
+  replayed: boolean;
+}
+
+export async function createIssueWithMetadata(
   workspaceId: string,
   reqData: CreateIssueRequest,
-): Promise<Issue> {
+  options: { force?: boolean } = {},
+): Promise<CreateIssueResult> {
   const body = cleanQuery({
     title: reqData.title,
     issue_type: reqData.issue_type as
@@ -407,6 +416,7 @@ export async function createIssue(
     design: reqData.design,
     acceptance_criteria: reqData.acceptance_criteria,
     notes: reqData.notes,
+    status: reqData.status,
     assignee: reqData.assignee,
     owner: reqData.owner,
     created_by: reqData.created_by,
@@ -423,10 +433,25 @@ export async function createIssue(
     {
       params: { path: { ws: workspaceId } },
       body,
+      ...(options.force
+        ? { headers: { "X-Idempotency-Force": "true" } }
+        : {}),
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return normalizeIssueRepo(unwrap(data, response) as unknown as Issue);
+  return {
+    issue: normalizeIssueRepo(unwrap(data, response) as unknown as Issue),
+    warning: response.headers.get("X-Idempotency-Warning"),
+    replayed: response.headers.get("X-Idempotency-Replayed") === "true",
+  };
+}
+
+/** Create a new issue, discarding transport-only idempotency metadata. */
+export async function createIssue(
+  workspaceId: string,
+  reqData: CreateIssueRequest,
+): Promise<Issue> {
+  return (await createIssueWithMetadata(workspaceId, reqData)).issue;
 }
 
 /**

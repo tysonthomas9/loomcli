@@ -79,11 +79,13 @@ export function AgentLogsTab({
         <h3 className={styles.sectionTitle}>
           {mode === "tmux" ? "Live terminal" : "Archive snapshot"}
         </h3>
-        <button type="button" onClick={load}>
+        <button type="button" onClick={load} data-testid="log-refresh-button">
           Refresh
         </button>
         <div data-testid="log-viewer">
-          <span data-state={state}>{stateLabel}</span>
+          <span data-testid="log-status" data-state={state}>
+            {stateLabel}
+          </span>
           {mode === "tmux" && terminalSession ? (
             <EmbeddedTerminal
               sessionName={terminalSession.sessionName}
