@@ -29,6 +29,7 @@ const maxResponseBody = 50 << 20
 // FleetBackend implements backend.IssueBackend by forwarding calls to a fleet
 // server's REST API. It is safe for concurrent use.
 type FleetBackend struct {
+	workspaceID      string
 	client           *http.Client
 	baseWorkspaceURL string // e.g., "http://host/api/v1/ws1"
 	baseWorkspaceV2  string // e.g., "http://host/api/v2/ws1"
@@ -75,6 +76,7 @@ func New(cfg Config) (*FleetBackend, error) {
 	}
 
 	return &FleetBackend{
+		workspaceID:      cfg.WorkspaceID,
 		client:           httpClient,
 		baseWorkspaceURL: baseURL + "/api/v1/" + url.PathEscape(cfg.WorkspaceID),
 		baseWorkspaceV2:  baseURL + "/api/v2/" + url.PathEscape(cfg.WorkspaceID),
