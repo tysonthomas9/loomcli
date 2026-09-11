@@ -79,6 +79,9 @@ func TestListTaskSessions_Empty(t *testing.T) {
 	if resp.Data.TaskID != "loom-abc123" {
 		t.Errorf("task_id = %q, want %q", resp.Data.TaskID, "loom-abc123")
 	}
+	if resp.Data.Sessions == nil {
+		t.Fatal("successful empty sessions must encode as []")
+	}
 	if len(resp.Data.Sessions) != 0 {
 		t.Errorf("sessions length = %d, want 0", len(resp.Data.Sessions))
 	}

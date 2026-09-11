@@ -1,9 +1,18 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+  useMemo,
+  useContext,
+} from "react";
 
 import { listSessionsByIssue } from "@/api/terminal";
 import type { MutationPayload } from "@/api/common";
-import { useEventSubscription } from "@/hooks/common";
+import { useEventSubscription, useEventContext } from "@/hooks/common";
 import { useWorkspaceContext } from "@/hooks/workspace";
+import { QueryRecoveryContext } from "@/hooks/common/queryRecovery";
+import { ScopedQueryRequest } from "@/hooks/common/scopedQueryRequest";
 
 export interface UseIssueSessionMapReturn {
   /** Map of issue_id to session_name[] */
@@ -30,36 +39,48 @@ export function useIssueSessionMap(
   const [issueSessionMap, setIssueSessionMap] = useState<
     Record<string, string[]>
   >({});
-  const mountedRef = useRef(true);
+  const { connectionEpoch } = useEventContext();
+  const recovery = useContext(QueryRecoveryContext);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const request = useMemo(
+    () =>
+      new ScopedQueryRequest({
+        load: (signal) => {
+          if (!enabled || !workspace)
+            return Promise.reject(new Error("Session map is disabled"));
+          return listSessionsByIssue(workspace, { signal });
+        },
+        commit: setIssueSessionMap,
+      }),
+    [workspace, enabled],
+  );
 
   useEffect(() => {
-    mountedRef.current = true;
+    setIssueSessionMap({});
     return () => {
-      mountedRef.current = false;
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
+      request.cancel();
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = null;
     };
-  }, []);
+  }, [request]);
 
   const fetchMap = useCallback(async () => {
-    if (!enabled) return;
-    if (!workspace) return; // Wait until workspace ID is known
-    try {
-      const data = await listSessionsByIssue(workspace);
-      if (mountedRef.current) {
-        setIssueSessionMap(data);
-      }
-    } catch {
-      // Silently fail — session map is non-critical UI enhancement
-    }
-  }, [enabled, workspace]);
+    if (!enabled || !workspace) return;
+    // Ordinary session badges remain a non-critical UI enhancement.
+    await request.run().catch(() => {});
+  }, [enabled, workspace, request]);
 
   useEffect(() => {
-    if (!enabled) return;
-    fetchMap();
-  }, [enabled, fetchMap]);
+    if (!enabled || !workspace) return;
+    void request.run({ fresh: true }).catch(() => {});
+  }, [enabled, workspace, request, connectionEpoch]);
+
+  useEffect(() => {
+    if (!enabled || !workspace || !recovery) return;
+    return recovery.register("issue session map", (signal) =>
+      request.run({ signal, fresh: true }),
+    );
+  }, [enabled, workspace, recovery, request]);
 
   const hasActiveSession = useCallback(
     (issueId: string): boolean => {
@@ -71,24 +92,27 @@ export function useIssueSessionMap(
 
   const handleMutation = useCallback(
     (mutation: MutationPayload) => {
-      if (!enabled) return;
+      if (!enabled || !workspace) return;
+      if (mutation.workspace_id && mutation.workspace_id !== workspace) return;
       if (
         mutation.type !== "terminal_session_change" &&
-        mutation.type !== "terminal_metadata"
+        mutation.type !== "terminal_metadata" &&
+        mutation.type !== "refresh"
       )
         return;
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
       }
       debounceRef.current = setTimeout(() => {
-        fetchMap();
+        debounceRef.current = null;
+        void fetchMap();
       }, DEBOUNCE_MS);
     },
-    [enabled, fetchMap],
+    [enabled, workspace, fetchMap],
   );
 
   useEventSubscription(handleMutation, {
-    types: ["terminal_session_change", "terminal_metadata"],
+    types: ["terminal_session_change", "terminal_metadata", "refresh"],
   });
 
   return {
