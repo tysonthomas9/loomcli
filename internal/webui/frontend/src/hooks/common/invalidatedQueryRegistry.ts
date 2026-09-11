@@ -135,7 +135,6 @@ class InvalidatedQueryEntry<T> {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private visibilityListener: (() => void) | null = null;
-  private dirty = false;
   private trailing = false;
   private trailingForce = false;
   private pendingRefetches: Array<() => void> = [];
@@ -320,7 +319,6 @@ class InvalidatedQueryEntry<T> {
       document.removeEventListener("visibilitychange", this.visibilityListener);
       this.visibilityListener = null;
     }
-    this.dirty = false;
     this.trailing = false;
     this.trailingForce = false;
     if (this.snapshot.loading) this.setSnapshot({ loading: false });
@@ -339,7 +337,6 @@ class InvalidatedQueryEntry<T> {
       if (document.visibilityState !== "visible" || this.enabledCount === 0) {
         return;
       }
-      this.dirty = false;
       this.clearDebounce();
       if (this.inFlight) {
         this.trailing = true;
@@ -353,7 +350,6 @@ class InvalidatedQueryEntry<T> {
   private pollTick(): void {
     if (this.enabledCount === 0) return;
     if (this.isHidden()) {
-      this.dirty = true;
       return;
     }
     if (this.inFlight) {
@@ -366,7 +362,6 @@ class InvalidatedQueryEntry<T> {
   private invalidateNow(): void {
     if (this.enabledCount === 0) return;
     if (this.isHidden()) {
-      this.dirty = true;
       return;
     }
     if (this.inFlight) {
@@ -429,7 +424,6 @@ class InvalidatedQueryEntry<T> {
     this.inFlight = current;
     if (enabledOnly && this.recovery) this.recovery.request = current;
     this.fetchEpoch = this.latestEpoch;
-    this.dirty = false;
     this.setSnapshot({ loading: true });
 
     if (controller.signal.aborted) return;
@@ -483,7 +477,6 @@ class InvalidatedQueryEntry<T> {
         this.startFetch();
         return;
       }
-      if (this.isHidden()) this.dirty = true;
     }
     this.settlePendingRefetches();
   }
