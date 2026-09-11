@@ -254,22 +254,29 @@ func validateRecoveryBlocker(raw json.RawMessage, issues map[string]map[string]j
 	if len(fields) != 6 {
 		return fmt.Errorf("invalid blocker fields")
 	}
+	values := make(map[string]string, 5)
 	for _, key := range []string{"id", "title", "status", "dep_type", "reason"} {
-		if _, err := recoveryString(fields, key, false); err != nil {
+		value, err := recoveryString(fields, key, false)
+		if err != nil {
 			return err
 		}
+		values[key] = value
 	}
 	var priority *int
 	if err := json.Unmarshal(fields["priority"], &priority); err != nil || priority == nil {
 		return fmt.Errorf("invalid blocker priority")
 	}
-	reason, _ := recoveryString(fields, "reason", true)
-	dep, _ := recoveryString(fields, "dep_type", true)
-	id, _ := recoveryString(fields, "id", false)
-	title, _ := recoveryString(fields, "title", false)
-	status, _ := recoveryString(fields, "status", false)
+	reason := values["reason"]
+	dep := values["dep_type"]
+	id := values["id"]
+	if reason == "" {
+		return fmt.Errorf("invalid reason")
+	}
+	if dep == "" {
+		return fmt.Errorf("invalid dep_type")
+	}
 	if reason == "parent-blocked" {
-		if dep != "parent-child" || id != "" || title != "" || status != "" || *priority != 0 {
+		if dep != "parent-child" || id != "" || values["title"] != "" || values["status"] != "" || *priority != 0 {
 			return fmt.Errorf("invalid parent sentinel")
 		}
 		return nil
