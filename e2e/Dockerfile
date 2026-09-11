@@ -9,6 +9,25 @@
 
 ARG GO_VERSION=1.25.6
 
+# ─── Stage 0: Install pinned Flue for the target Linux platform ─────────────
+# The `flue` source is supplied as a named build context by the Podman wrapper.
+# Installing here avoids leaking host-native optional dependencies (for
+# example macOS Rolldown bindings) into the Linux E2E image.
+FROM node:22-alpine AS flue-toolchain
+
+WORKDIR /opt/flue
+COPY --from=flue package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY --from=flue packages/cli/package.json packages/cli/package.json
+COPY --from=flue packages/runtime/package.json packages/runtime/package.json
+COPY --from=flue examples/hello-world/package.json examples/hello-world/package.json
+RUN corepack enable \
+    && corepack prepare pnpm@11.1.1 --activate \
+    && pnpm install --frozen-lockfile --prod \
+        --filter @flue/cli... \
+        --filter ./examples/hello-world...
+COPY --from=flue packages/cli/ packages/cli/
+COPY --from=flue packages/runtime/ packages/runtime/
+
 # ─── Stage 1: Build Go binaries ─────────────────────────────────────────────
 FROM golang:${GO_VERSION}-bookworm AS builder
 
@@ -47,6 +66,7 @@ RUN --mount=type=cache,target=/root/.npm \
 
 # Copy compiled binaries
 COPY --from=builder /out/loom /usr/local/bin/loom
+COPY --from=flue-toolchain /opt/flue /opt/flue
 
 # Source tree (for go test if Go is mounted)
 WORKDIR /src
@@ -74,6 +94,10 @@ RUN chmod +x /usr/local/bin/start-e2e-server.sh
 WORKDIR /src
 
 ENV LOOM_BACKEND=claude \
+    LOOM_SDK_ROOT=/src/sdk \
+    LOOM_FLUE_RUNTIME_ROOT=/opt/flue/packages/runtime \
+    DAYTONA_SDK_ROOT=/opt/flue/examples/hello-world/node_modules/@daytona/sdk \
+    LOOM_REAL_FLUE_CMD_JSON='["node","/opt/flue/packages/cli/bin/flue.mjs"]' \
     TERM=xterm-256color
 
 CMD ["run_test.sh"]
