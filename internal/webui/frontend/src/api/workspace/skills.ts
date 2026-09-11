@@ -216,7 +216,7 @@ export async function deleteSkill(
   });
 }
 
-export function getSkillFile(
+export async function getSkillFile(
   workspaceId: string,
   group: SkillsScopeGroup,
   name: string,
@@ -224,9 +224,24 @@ export function getSkillFile(
   options: { signal?: AbortSignal } = {},
 ): Promise<SkillFileResponse> {
   const url = skillFilePath(workspaceId, group, name, path);
-  return options.signal
+  const data = await (options.signal
     ? get<SkillFileResponse>(url, options)
-    : get<SkillFileResponse>(url);
+    : get<SkillFileResponse>(url));
+  if (
+    !data ||
+    data.path !== path ||
+    typeof data.content !== "string" ||
+    typeof data.executable !== "boolean" ||
+    typeof data.revision !== "string" ||
+    !data.revision ||
+    data.skill_ref !==
+      (group.kind === "role"
+        ? `role:${group.role}:${name}`
+        : `workspace:${name}`)
+  ) {
+    throw new Error("Invalid skill file response");
+  }
+  return data;
 }
 
 export function putSkillFile(

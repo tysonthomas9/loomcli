@@ -429,9 +429,9 @@ func TestParseETag(t *testing.T) {
 	}
 }
 
-// If a response ever omits the body revision, the ETag is the fallback — but
-// unquoted, on the way through.
-func TestSkillStore_FallsBackToTheETagWhenTheBodyOmitsTheRevision(t *testing.T) {
+// Reads require the canonical body revision even when an ETag is present.
+// A header cannot repair an incomplete document response.
+func TestSkillStore_RejectsMissingBodyRevisionDespiteETag(t *testing.T) {
 	client, closeFn := newSkillTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set(etagHeader, `W/"deadbeefdeadbeef"`)
 		_ = json.NewEncoder(w).Encode(skillDocumentWire{
@@ -441,11 +441,8 @@ func TestSkillStore_FallsBackToTheETagWhenTheBodyOmitsTheRevision(t *testing.T) 
 	defer closeFn()
 
 	doc, err := client.Skills().GetFile(t.Context(), "WS", domain.RoleSkillRef("lead", "alpha"), "notes.md")
-	if err != nil {
-		t.Fatalf("GetFile: %v", err)
-	}
-	if doc.Revision != "deadbeefdeadbeef" {
-		t.Errorf("revision = %q, want deadbeefdeadbeef", doc.Revision)
+	if err == nil || doc != nil {
+		t.Fatalf("incomplete body acknowledged: doc=%+v err=%v", doc, err)
 	}
 }
 
