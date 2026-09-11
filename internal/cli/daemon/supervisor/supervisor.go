@@ -405,23 +405,7 @@ func (s *Supervisor) checkAgentStopSignals(ap *AgentProcess) bool {
 // attempt's diff injected) before finally cold-starting a fresh task. See
 // detectRecovery.
 func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
-	// FIRST gate: a held workspace issues no Ready query, no ClaimIssue, runs
-	// no recovery and creates no session.
-	if !s.gateClaimsHeld(ap) {
-		return false
-	}
-	// No span is open on this path; pass an explicit background context so the
-	// absence of a trace parent is visible here rather than hidden in the gate.
-	if err := s.gateBackendAvailable(context.Background(), ap); err != nil {
-		return false
-	}
-	if err := s.gateSafetyKnobsEnforceable(ap); err != nil {
-		return false
-	}
-	// Before claimTask, deliberately: a drifted profile that is only caught at
-	// spawn time claims a task and immediately releases it, and the release
-	// erases the diagnosis. See gateProfileVerified.
-	if err := s.gateProfileVerified(ap); err != nil {
+	if !s.preFlightGates(ap) {
 		return false
 	}
 
