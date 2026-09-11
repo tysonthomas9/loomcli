@@ -241,9 +241,9 @@ func TestGetMutationsSinceForWorkspace_ConcurrentStop(t *testing.T) {
 		signalStarted.Do(func() { close(getStarted) })
 		select {
 		case <-ctx.Done():
-			return backend.MutationPage{}, ctx.Err()
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ"}, ctx.Err()
 		case <-releaseGet:
-			return backend.MutationPage{Events: []backend.MutationData{{Type: "create", IssueID: "fleet-stop-race", Timestamp: ts}}, Cursor: "c1.catchup"}, nil
+			return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: []backend.MutationData{{Type: "create", IssueID: "fleet-stop-race", Timestamp: ts}}, Cursor: "c1.catchup"}, nil
 		}
 	}
 
@@ -303,7 +303,7 @@ func (s *trackingWorkspaceSubscriber) Head() string { return "0" }
 
 func (s *trackingWorkspaceSubscriber) GetMutationPage(context.Context, string, int) (backend.MutationPage, error) {
 	s.getCalls.Add(1)
-	return backend.MutationPage{Events: []backend.MutationData{}}, nil
+	return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: []backend.MutationData{}}, nil
 }
 
 func waitForMultiCondition(t *testing.T, cond func() bool) {

@@ -74,6 +74,8 @@ export async function readIssueRecovery(
     if (
       response.status !== 200 ||
       response.headers.get(HANDLE_HEADER) !== offer.handle ||
+      response.headers.get("X-Loom-Recovery-Source") !==
+        offer.source_identity ||
       response.headers
         .get("Content-Type")
         ?.split(";", 1)[0]

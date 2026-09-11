@@ -27,11 +27,17 @@ func TestRecoveryUsesCapturedSource(t *testing.T) {
 				if mode == "wrong workspace" {
 					ws = "other"
 				}
-				return backend.IssueRecoverySnapshot{Workspace: ws, Through: "same", Document: []byte(`{"proof":true}`)}, nil
+				return backend.IssueRecoverySnapshot{SourceIdentity: "s1.Zml4dHVyZQ", Workspace: ws, Through: "same", Document: []byte(`{"proof":true}`)}, nil
 			}}
+			sub.head = func(context.Context) (backend.MutationPage, error) {
+				return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "c2.aGVhZA"}, nil
+			}
 			m := &MultiWorkspaceSubscriber{subscribers: map[string]*subscriberEntry{"ws": {sub: sub}}}
 			source, err := m.OpenMutationSource(t.Context(), "ws")
 			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := source.ReadHead(t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			reader := source.(backend.IssueRecoveryBackend)
@@ -67,7 +73,7 @@ func TestRecoveryRejectsInFlightRetirement(t *testing.T) {
 	sub := &recoverySubscriber{recover: func(context.Context) (backend.IssueRecoverySnapshot, error) {
 		close(started)
 		<-release
-		return backend.IssueRecoverySnapshot{Workspace: "ws", Through: "same", Document: []byte(`{}`)}, nil
+		return backend.IssueRecoverySnapshot{SourceIdentity: "s1.Zml4dHVyZQ", Workspace: "ws", Through: "same", Document: []byte(`{}`)}, nil
 	}}
 	m := &MultiWorkspaceSubscriber{subscribers: map[string]*subscriberEntry{"ws": {sub: sub}}}
 	source, err := m.OpenMutationSource(t.Context(), "ws")
@@ -115,7 +121,7 @@ func TestRecoverySubscriberLifetime(t *testing.T) {
 				<-ctx.Done()
 				close(canceled)
 				<-release
-				return backend.IssueRecoverySnapshot{Workspace: "ws", Document: []byte(`{}`)}, nil
+				return backend.IssueRecoverySnapshot{SourceIdentity: "s1.Zml4dHVyZQ", Workspace: "ws", Document: []byte(`{}`)}, nil
 			}}
 			sub := NewBackendMutationSubscriber(b, nil, "ws")
 			defer sub.Stop()

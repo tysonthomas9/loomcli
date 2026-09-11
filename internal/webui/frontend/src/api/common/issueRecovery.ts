@@ -1,3 +1,4 @@
+import { isRecoveryEnvelope } from "./recoveryEnvelope";
 import { decodeRecoveryHandle, type RecoveryHandle } from "./recoveryHandle";
 import { parseStrictRecoveryJSON } from "./strictRecoveryJSON";
 
@@ -42,6 +43,7 @@ export interface PreparedIssueRecovery {
   readonly manifest: "fleet.issue-workspace.v2";
   readonly workspace: string;
   readonly through: string;
+  readonly offerSourceIdentity: string;
   readonly total: number;
   readonly issues: readonly NativeRecoveryIssue[];
   readonly ready: readonly NativeRecoveryIssue[];
@@ -100,25 +102,7 @@ function timestamp(value: unknown) {
 }
 function cursor(value: unknown): string {
   const token = text(value);
-  if (!/^c1\.[A-Za-z0-9_-]+$/.test(token)) fail();
-  const payload = token.slice(3);
-  let decoded: string;
-  try {
-    decoded = atob(
-      payload.replace(/-/g, "+").replace(/_/g, "/") +
-        "=".repeat((4 - (payload.length % 4)) % 4),
-    );
-  } catch {
-    fail();
-  }
-  if (
-    !decoded ||
-    decoded === "0" ||
-    decoded === "$" ||
-    btoa(decoded).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "") !==
-      payload
-  )
-    fail();
+  if (!isRecoveryEnvelope(token, "c2.")) fail();
   return token;
 }
 function issue(value: unknown, workspace: string): NativeRecoveryIssue {
@@ -355,6 +339,7 @@ export function prepareIssueRecovery(
     manifest: "fleet.issue-workspace.v2",
     workspace: validatedOffer.workspace,
     through,
+    offerSourceIdentity: validatedOffer.source_identity,
     total: issues.length,
     issues,
     ready,

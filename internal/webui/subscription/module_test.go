@@ -25,7 +25,7 @@ func TestModule_RegisterRoutes(t *testing.T) {
 	defer tokens.Stop()
 
 	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{Cursor: "0"}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "0"}, nil
 	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 
@@ -61,7 +61,7 @@ func TestModule_ConditionalRoutes(t *testing.T) {
 	defer hub.Stop()
 
 	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{Cursor: "0"}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "0"}, nil
 	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 
@@ -109,7 +109,7 @@ func TestModule_WrongMethod_Returns405(t *testing.T) {
 	defer tokens.Stop()
 
 	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{Cursor: "0"}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "0"}, nil
 	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 
@@ -138,7 +138,7 @@ func TestModule_DoesNotActivateWorkspaceOnTokenRoute(t *testing.T) {
 	defer tokens.Stop()
 
 	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{Cursor: "0"}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "0"}, nil
 	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 	var activated []string
@@ -179,7 +179,7 @@ func TestModule_DoesNotActivateResolvedWorkspacePerTokenRoute(t *testing.T) {
 	defer tokens.Stop()
 
 	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{Cursor: "0"}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "0"}, nil
 	}
 	var activated []string
 	activate := func(_ context.Context, wsID string) (string, error) {
@@ -225,7 +225,7 @@ func TestModule_DoesNotActivateEventsRouteBeforeTokenAuth(t *testing.T) {
 	defer tokens.Stop()
 
 	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{Cursor: "0"}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "0"}, nil
 	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 	var activated []string
@@ -263,7 +263,7 @@ func TestModule_ActivatesEachAuthorizedEventsClient(t *testing.T) {
 	defer tokens.Stop()
 
 	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{Cursor: "0"}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "0"}, nil
 	}
 	activated := make(chan string, 3)
 	activate := func(_ context.Context, wsID string) (string, error) {
@@ -326,7 +326,7 @@ func TestModule_ActivatesWorkspaceOnEventsRoute(t *testing.T) {
 	defer hub.Stop()
 
 	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{Cursor: "0"}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "0"}, nil
 	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 	activated := make(chan string, 1)

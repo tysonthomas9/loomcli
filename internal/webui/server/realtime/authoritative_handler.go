@@ -14,16 +14,17 @@ import (
 )
 
 type authoritativeSession struct {
-	handler   *Handler
-	client    *Client
-	writer    frameWriter
-	reader    *authoritativeReader
-	source    MutationSource
-	ctx       context.Context
-	fence     string
-	passReady bool
-	fresh     bool
-	principal string
+	sourceIdentity string
+	handler        *Handler
+	client         *Client
+	writer         frameWriter
+	reader         *authoritativeReader
+	source         MutationSource
+	ctx            context.Context
+	fence          string
+	passReady      bool
+	fresh          bool
+	principal      string
 }
 
 // serveAuthoritative uses one source cursor for replay and live reconciliation.
@@ -86,7 +87,11 @@ func (s *authoritativeSession) captureFence() error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if page.Cursor == "" || page.Cursor == "$" || page.HasMore || len(page.Events) != 0 {
+	if !backend.ValidSourceIdentity(page.SourceIdentity) || (s.sourceIdentity != "" && page.SourceIdentity != s.sourceIdentity) {
+		return backend.ErrMutationSourceChanged
+	}
+	s.sourceIdentity = page.SourceIdentity
+	if !backend.ValidMutationCursor(page.Cursor) || page.HasMore || len(page.Events) != 0 {
 		return errors.New("invalid authoritative head")
 	}
 	if err := validateFrame(&page.Cursor, nil, nil); err != nil {
@@ -98,11 +103,11 @@ func (s *authoritativeSession) captureFence() error {
 }
 
 func (s *authoritativeSession) initialize(cursor string) error {
-	if s.client.workspaceID == "" {
-		return errors.New("missing workspace")
+	if cursor != "" && cursor != "0" && !backend.ValidMutationCursor(cursor) {
+		return errors.New("invalid authoritative resume cursor")
 	}
-	if s.handler.openMutationSource == nil {
-		return errors.New("bounded authoritative mutation source required")
+	if s.client.workspaceID == "" || s.handler.openMutationSource == nil {
+		return errors.New("workspace and bounded authoritative mutation source required")
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, s.handler.catchUpTimeout)
 	source, err := s.handler.openMutationSource(ctx, s.client.workspaceID)
@@ -127,7 +132,22 @@ func (s *authoritativeSession) initialize(cursor string) error {
 	}
 	reader, err := newAuthoritativeReader(s.client.workspaceID, cursor, s.client.sourceRepos,
 		func(ctx context.Context, _ string, since string, limit int) (backend.MutationPage, error) {
-			return s.source.ReadPage(ctx, since, s.fence, limit)
+			page, err := s.source.ReadPage(ctx, since, s.fence, limit)
+			if err != nil {
+				return backend.MutationPage{}, err
+			}
+			if page.SourceIdentity != s.sourceIdentity {
+				return backend.MutationPage{}, backend.ErrMutationSourceChanged
+			}
+			if !backend.ValidMutationCursor(page.Cursor) {
+				return backend.MutationPage{}, errors.New("invalid authoritative page cursor")
+			}
+			for _, event := range page.Events {
+				if !backend.ValidMutationCursor(event.Cursor) {
+					return backend.MutationPage{}, errors.New("invalid authoritative event cursor")
+				}
+			}
+			return page, nil
 		})
 	s.reader = reader
 	return err
@@ -147,7 +167,7 @@ func (s *authoritativeSession) fail(err error) {
 	}{Reason: reason}
 	if reason == "expired" && s.principal != "" && s.handler.recoveryRegistry != nil {
 		if reader, ok := s.source.(backend.IssueRecoveryBackend); ok {
-			if handle, err := s.handler.recoveryRegistry.Register(s.principal, s.client.workspaceID, s.client.sourceRepos, reader); err == nil {
+			if handle, err := s.handler.recoveryRegistry.Register(s.principal, s.client.workspaceID, s.client.sourceRepos, reader, s.sourceIdentity); err == nil {
 				payload.Recovery = &handle
 			}
 		}

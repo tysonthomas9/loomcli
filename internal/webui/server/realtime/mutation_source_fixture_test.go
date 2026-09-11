@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -29,4 +30,8 @@ func (s fixtureMutationSource) ReadHead(ctx context.Context) (backend.MutationPa
 }
 func (s fixtureMutationSource) ReadPage(ctx context.Context, since, through string, limit int) (backend.MutationPage, error) {
 	return s.page(ctx, s.workspace, since, through, limit)
+}
+
+func testScopedCursor(label string) string {
+	return "c2." + base64.RawURLEncoding.EncodeToString([]byte(label))
 }

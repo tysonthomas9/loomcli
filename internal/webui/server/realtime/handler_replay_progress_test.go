@@ -53,9 +53,9 @@ func TestReplayReaderCheckpointCoversFilteredTail(t *testing.T) {
 			reader, err := newAuthoritativeReader("WS", "c1.start", []string{"wanted"}, func(context.Context, string, string, int) (backend.MutationPage, error) {
 				calls++
 				if calls == 1 {
-					return backend.MutationPage{Events: []backend.MutationData{{Cursor: "c1.visible", Type: "update", SourceRepo: repo}}, Cursor: "c1.visible", HasMore: true}, nil
+					return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: []backend.MutationData{{Cursor: "c1.visible", Type: "update", SourceRepo: repo}}, Cursor: "c1.visible", HasMore: true}, nil
 				}
-				return backend.MutationPage{Events: []backend.MutationData{{Cursor: "c1.tail", Type: "update", SourceRepo: "other"}}, Cursor: "c1.tail"}, nil
+				return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Events: []backend.MutationData{{Cursor: "c1.tail", Type: "update", SourceRepo: "other"}}, Cursor: "c1.tail"}, nil
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -86,7 +86,7 @@ func TestReplayReaderCheckpointCoversFilteredTail(t *testing.T) {
 
 func TestReplayReaderIdlePageDoesNotInventCheckpoint(t *testing.T) {
 	reader, err := newAuthoritativeReader("WS", "c1.start", nil, func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{Cursor: "c1.start"}, nil
+		return backend.MutationPage{SourceIdentity: "s1.Zml4dHVyZQ", Cursor: "c1.start"}, nil
 	})
 	if err != nil {
 		t.Fatal(err)

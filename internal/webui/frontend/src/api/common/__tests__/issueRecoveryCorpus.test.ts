@@ -17,6 +17,7 @@ const corpus = JSON.parse(
 const now = Date.parse("2026-09-05T00:00:00Z");
 const offer: RecoveryHandle = {
   handle: "A".repeat(43),
+  source_identity: "s1.Zml4dHVyZQ",
   workspace: "WS",
   source_repos: [],
   expires_at: "2026-09-05T00:01:00Z",
