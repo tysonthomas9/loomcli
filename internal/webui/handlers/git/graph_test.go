@@ -252,7 +252,7 @@ func TestHandleBlocked_QueryParamsPassed(t *testing.T) {
 
 	handler := handleBlockedWithPool(pool)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/blocked?assignee=alice&type=bug&parent_id=loom-root&priority=2&limit=50", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/blocked?assignee=alice&type=bug&parent_id=loom-root&priority=2&source_repos=repo-a%2Crepo-b&limit=50", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
@@ -274,6 +274,9 @@ func TestHandleBlocked_QueryParamsPassed(t *testing.T) {
 	}
 	if capturedArgs.Priority == nil || *capturedArgs.Priority != 2 {
 		t.Errorf("Priority = %v, want 2", capturedArgs.Priority)
+	}
+	if len(capturedArgs.SourceRepos) != 2 || capturedArgs.SourceRepos[0] != "repo-a" || capturedArgs.SourceRepos[1] != "repo-b" {
+		t.Errorf("SourceRepos = %v, want [repo-a repo-b]", capturedArgs.SourceRepos)
 	}
 	if capturedArgs.Limit != 50 {
 		t.Errorf("Limit = %d, want 50", capturedArgs.Limit)
@@ -740,6 +743,34 @@ func TestParseBlockedParams(t *testing.T) {
 				if args.Limit != 0 {
 					t.Errorf("Limit = %d, want 0", args.Limit)
 				}
+				if args.SourceRepos != nil {
+					t.Errorf("SourceRepos = %v, want nil", args.SourceRepos)
+				}
+			},
+		},
+		{
+			name: "one source repo",
+			url:  "/api/blocked?source_repos=repo-a",
+			checkArgs: func(t *testing.T, args *rpc.BlockedArgs) {
+				if len(args.SourceRepos) != 1 || args.SourceRepos[0] != "repo-a" {
+					t.Errorf("SourceRepos = %v, want [repo-a]", args.SourceRepos)
+				}
+			},
+		},
+		{
+			name: "several repeated and comma-separated source repos",
+			url:  "/api/blocked?source_repos=repo-a&source_repos=repo-b%2Crepo-c",
+			checkArgs: func(t *testing.T, args *rpc.BlockedArgs) {
+				want := []string{"repo-a", "repo-b", "repo-c"}
+				if len(args.SourceRepos) != len(want) {
+					t.Fatalf("SourceRepos = %v, want %v", args.SourceRepos, want)
+				}
+				for i := range want {
+					if args.SourceRepos[i] != want[i] {
+						t.Errorf("SourceRepos = %v, want %v", args.SourceRepos, want)
+						break
+					}
+				}
 			},
 		},
 		{
@@ -995,11 +1026,13 @@ func TestHandleGraph_NoPoolNoBackendReturns503(t *testing.T) {
 // unintended use shows up as a test failure rather than silent success.
 type stubBlockedBackend struct {
 	*stubGraphBackend
-	blocked []backend.IssueData
-	err     error
+	blocked      []backend.IssueData
+	err          error
+	blockedCalls []backend.BlockedOpts
 }
 
-func (s *stubBlockedBackend) Blocked(_ context.Context, _ backend.BlockedOpts) ([]backend.IssueData, error) {
+func (s *stubBlockedBackend) Blocked(_ context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
+	s.blockedCalls = append(s.blockedCalls, opts)
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -1079,6 +1112,26 @@ func TestHandleBlocked_BackendOnlyWhenNoPool(t *testing.T) {
 	}
 	if !env.Success || len(env.Data) != 1 || env.Data[0].ID != "FLEET-1" {
 		t.Errorf("expected fleet-only data (FLEET-1), got %+v", env)
+	}
+}
+
+func TestHandleBlocked_BackendReceivesSourceRepos(t *testing.T) {
+	be := &stubBlockedBackend{stubGraphBackend: &stubGraphBackend{}}
+	handler := HandleBlockedWithBackend(nil, func(_ context.Context) backend.IssueBackend { return be })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/blocked?source_repos=repo-a%2Crepo-b", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if len(be.blockedCalls) != 1 {
+		t.Fatalf("Blocked calls = %d, want 1", len(be.blockedCalls))
+	}
+	got := be.blockedCalls[0].SourceRepos
+	if len(got) != 2 || got[0] != "repo-a" || got[1] != "repo-b" {
+		t.Errorf("SourceRepos = %v, want [repo-a repo-b]", got)
 	}
 }
 

@@ -4950,6 +4950,8 @@ export interface operations {
         assignee?: string;
         type?: "bug" | "feature" | "task" | "epic" | "chore";
         priority?: number;
+        /** @description Comma-separated source repo filters */
+        source_repos?: string;
         limit?: number;
       };
       header?: never;

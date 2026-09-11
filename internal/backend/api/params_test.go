@@ -194,20 +194,22 @@ func TestBlockedOptsToQuery_Empty(t *testing.T) {
 func TestBlockedOptsToQuery_AllFields(t *testing.T) {
 	p := 1
 	opts := backend.BlockedOpts{
-		ParentID: "epic-9",
-		Assignee: "bob",
-		Priority: &p,
-		Type:     "feature",
-		Limit:    5,
+		ParentID:    "epic-9",
+		Assignee:    "bob",
+		Priority:    &p,
+		Type:        "feature",
+		SourceRepos: []string{"repo-a", "repo-b"},
+		Limit:       5,
 	}
 	q := blockedOptsToQuery(opts)
 	values, _ := url.ParseQuery(q)
 	for k, want := range map[string]string{
-		"parent_id": "epic-9",
-		"assignee":  "bob",
-		"priority":  "1",
-		"type":      "feature",
-		"limit":     "5",
+		"parent_id":    "epic-9",
+		"assignee":     "bob",
+		"priority":     "1",
+		"type":         "feature",
+		"source_repos": "repo-a,repo-b",
+		"limit":        "5",
 	} {
 		if got := values.Get(k); got != want {
 			t.Errorf("%s = %q, want %q", k, got, want)

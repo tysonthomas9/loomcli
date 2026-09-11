@@ -81,6 +81,7 @@ func blockedOptsToQuery(opts backend.BlockedOpts) string {
 	setNonEmpty(q, "assignee", opts.Assignee)
 	setOptInt(q, "priority", opts.Priority)
 	setNonEmpty(q, "type", opts.Type)
+	joinCSV(q, "source_repos", opts.SourceRepos)
 	if opts.Limit > 0 {
 		q.Set("limit", strconv.Itoa(opts.Limit))
 	}

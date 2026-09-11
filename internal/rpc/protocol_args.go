@@ -272,11 +272,12 @@ type ReadyArgs struct {
 // BlockedArgs represents arguments for the blocked operation
 
 type BlockedArgs struct {
-	ParentID string `json:"parent_id,omitempty"` // Filter to descendants of this bead/epic
-	Assignee string `json:"assignee,omitempty"`  // Filter by assignee
-	Priority *int   `json:"priority,omitempty"`  // Filter by priority (0-4)
-	Type     string `json:"type,omitempty"`      // Filter by issue type
-	Limit    int    `json:"limit,omitempty"`     // Max results to return
+	ParentID    string   `json:"parent_id,omitempty"`    // Filter to descendants of this bead/epic
+	Assignee    string   `json:"assignee,omitempty"`     // Filter by assignee
+	Priority    *int     `json:"priority,omitempty"`     // Filter by priority (0-4)
+	Type        string   `json:"type,omitempty"`         // Filter by issue type
+	SourceRepos []string `json:"source_repos,omitempty"` // Filter by source repository
+	Limit       int      `json:"limit,omitempty"`        // Max results to return
 }
 
 // StaleArgs represents arguments for the stale command
