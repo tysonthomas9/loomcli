@@ -170,14 +170,15 @@ func validateRecoveryIssue(raw json.RawMessage, ws string) (string, map[string]j
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return "", nil, err
 	}
+	required := make(map[string]string, 8)
 	for _, key := range []string{"workspace", "id", "title", "status", "type", "created_by", "created_at", "updated_at"} {
-		if _, err := recoveryString(fields, key, key != "created_by"); err != nil {
+		value, err := recoveryString(fields, key, key != "created_by")
+		if err != nil {
 			return "", nil, err
 		}
+		required[key] = value
 	}
-	workspace, _ := recoveryString(fields, "workspace", true)
-	id, _ := recoveryString(fields, "id", true)
-	if workspace != ws {
+	if required["workspace"] != ws {
 		return "", nil, fmt.Errorf("foreign workspace")
 	}
 	var priority *int
@@ -185,8 +186,7 @@ func validateRecoveryIssue(raw json.RawMessage, ws string) (string, map[string]j
 		return "", nil, fmt.Errorf("invalid priority")
 	}
 	for _, key := range []string{"created_at", "updated_at"} {
-		value, _ := recoveryString(fields, key, true)
-		if _, err := time.Parse(time.RFC3339Nano, value); err != nil {
+		if _, err := time.Parse(time.RFC3339Nano, required[key]); err != nil {
 			return "", nil, err
 		}
 	}
@@ -196,7 +196,7 @@ func validateRecoveryIssue(raw json.RawMessage, ws string) (string, map[string]j
 	if err := validateRecoveryOptionalFields(fields); err != nil {
 		return "", nil, err
 	}
-	return id, fields, nil
+	return required["id"], fields, nil
 }
 func validateRecoveryDerived(raw json.RawMessage, ws string, issues map[string]map[string]json.RawMessage, seen map[string]bool) error {
 	id, fields, err := validateRecoveryIssue(raw, ws)
@@ -339,38 +339,36 @@ func validateRecoveryOptionalFields(fields map[string]json.RawMessage) error {
 }
 
 func validateRecoveryCollections(fields map[string]json.RawMessage) error {
-	if _, ok := fields["labels"]; !ok {
+	labelsJSON, ok := fields["labels"]
+	if !ok {
 		return fmt.Errorf("missing labels")
 	}
-	if _, ok := fields["metadata"]; !ok {
+	metadataJSON, ok := fields["metadata"]
+	if !ok {
 		return fmt.Errorf("missing metadata")
 	}
-	if raw, ok := fields["labels"]; ok {
-		var labels []*string
-		if err := json.Unmarshal(raw, &labels); err != nil {
-			return err
-		}
-		if labels == nil {
-			return fmt.Errorf("null labels")
-		}
-		for _, label := range labels {
-			if label == nil {
-				return fmt.Errorf("null label")
-			}
+	var labels []*string
+	if err := json.Unmarshal(labelsJSON, &labels); err != nil {
+		return err
+	}
+	if labels == nil {
+		return fmt.Errorf("null labels")
+	}
+	for _, label := range labels {
+		if label == nil {
+			return fmt.Errorf("null label")
 		}
 	}
-	if raw, ok := fields["metadata"]; ok {
-		var metadata map[string]*string
-		if err := json.Unmarshal(raw, &metadata); err != nil {
-			return err
-		}
-		if metadata == nil {
-			return fmt.Errorf("null metadata")
-		}
-		for _, value := range metadata {
-			if value == nil {
-				return fmt.Errorf("null metadata value")
-			}
+	var metadata map[string]*string
+	if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
+		return err
+	}
+	if metadata == nil {
+		return fmt.Errorf("null metadata")
+	}
+	for _, value := range metadata {
+		if value == nil {
+			return fmt.Errorf("null metadata value")
 		}
 	}
 	if raw, ok := fields["estimated_minutes"]; ok {
