@@ -27,24 +27,31 @@ export function validateDirectoryRead(
     throw new Error("Invalid directory response");
   const names = new Set<string>();
   for (const entry of data.entries) {
-    if (
-      !record(entry) ||
-      typeof entry.name !== "string" ||
-      !entry.name ||
-      entry.name === "." ||
-      entry.name === ".." ||
-      entry.name.includes("/") ||
-      entry.name.includes("\0") ||
-      names.has(entry.name) ||
-      typeof entry.is_dir !== "boolean" ||
-      !Number.isSafeInteger(entry.size) ||
-      (entry.size as number) < 0 ||
-      typeof entry.mod_time !== "string" ||
-      !Number.isFinite(Date.parse(entry.mod_time))
-    )
+    if (!validDirectoryEntry(entry, names))
       throw new Error("Invalid directory entry");
     names.add(entry.name);
   }
+}
+
+function validDirectoryEntry(
+  entry: unknown,
+  existingNames: ReadonlySet<string>,
+): entry is DirListData["entries"][number] {
+  return (
+    record(entry) &&
+    typeof entry.name === "string" &&
+    entry.name.length > 0 &&
+    entry.name !== "." &&
+    entry.name !== ".." &&
+    !entry.name.includes("/") &&
+    !entry.name.includes("\0") &&
+    !existingNames.has(entry.name) &&
+    typeof entry.is_dir === "boolean" &&
+    Number.isSafeInteger(entry.size) &&
+    (entry.size as number) >= 0 &&
+    typeof entry.mod_time === "string" &&
+    Number.isFinite(Date.parse(entry.mod_time))
+  );
 }
 
 export function validateFileRead(
