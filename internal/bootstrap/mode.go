@@ -21,6 +21,13 @@ const (
 	// EnvFleetDBURL switches loom into cloud mode — the embedded
 	// fleet-db is not started; loom talks to the URL directly.
 	EnvFleetDBURL = "LOOM_FLEET_DB_URL"
+
+	// EnvServerURL points the issue-data path at a remote loom server
+	// (see internal/cli/issue_backend_resolve.go). It does NOT configure
+	// workspace/repo/agent metadata, which is read straight from
+	// fleet-db — so on its own it is a misconfiguration for any command
+	// that opens a store. See ServerWithoutFleetDB. Mirrored from --server.
+	EnvServerURL = "LOOM_SERVER_URL"
 )
 
 // Mode is the deployment shape detected at bootstrap.
@@ -51,11 +58,28 @@ func (m Mode) String() string {
 // DetectMode returns Cloud when LOOM_FLEET_DB_URL is set, Local otherwise.
 // This is the only place that distinction is made — every other piece of
 // code threads the Mode through.
+//
+// LOOM_SERVER_URL deliberately does not produce a third mode: the runtime
+// storage paths are Local and Cloud, and anything else is a sub-option behind
+// them (enforced by `make check-control-plane-paths`). It is still not a
+// storage configuration — see ServerWithoutFleetDB, which OpenStore consults
+// before opening a local store.
 func DetectMode() Mode {
 	if os.Getenv(EnvFleetDBURL) != "" {
 		return ModeCloud
 	}
 	return ModeLocal
+}
+
+// ServerWithoutFleetDB reports the misconfiguration where the invocation is
+// aimed at a remote loom server but names no fleet-db.
+//
+// Issue data resolves over the server's HTTP API, but workspace, repo and agent
+// metadata do not — they are read directly from fleet-db. Opening a local store
+// here starts an embedded fleet-db on an empty snapshot, and the active
+// workspace then fails validation as if it did not exist.
+func ServerWithoutFleetDB() bool {
+	return os.Getenv(EnvFleetDBURL) == "" && os.Getenv(EnvServerURL) != ""
 }
 
 // ErrNoActiveWorkspace is returned when ResolveActiveWorkspaceKey can't
