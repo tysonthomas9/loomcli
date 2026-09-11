@@ -462,6 +462,19 @@ func (s *Supervisor) completionHookTarget(ap *AgentProcess, exitCode int) (*doma
 
 // executeCompletionHooks performs the configured writes strictly in stored
 // order, stopping at the first error. Reply text is never logged.
+//
+// ONE ERROR CLASS IS NOT AN ERROR HERE: a conflict saying the target issue is
+// closed. A terminal row is a DECISION — someone or something closed the task
+// while the run was in flight — not a lost race, so no retry can make the
+// write land. Demoting the run on it (runCompletionHooks turns an error into
+// exit -1) reopens the task, re-dispatches it, and the next round fails on the
+// same terminal row: the unbounded re-dispatch loop seen on PUPPET-618, four
+// rounds deep. So when backend.IsIssueClosedConflict matches, we log once,
+// skip the remaining actions and return nil, letting the run keep its factual
+// exit code. Every other error — including other conflicts — still demotes,
+// and the remaining actions of a terminal-row pipeline (add_label, set_status)
+// are skipped rather than retried, deliberately: they would fail for the same
+// unfixable reason.
 func (s *Supervisor) executeCompletionHooks(
 	ctx context.Context,
 	ap *AgentProcess,
@@ -489,76 +502,93 @@ func (s *Supervisor) executeCompletionHooks(
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("on_complete[%d] (%s): %w", i, action.Type, err)
 		}
-		var err error
-		switch action.Type {
-		case domain.AgentHookActionComment:
-			err = s.postFinalReplyComment(ctx, ap, taskID, reply)
-		case domain.AgentHookActionWriteDesign:
-			// Same extracted reply the comment posts — resolved once above, for
-			// both. A second extraction could disagree with the first about what
-			// "the run's artifact" is, and a pipeline that comments one text and
-			// records another as the design is worse than either alone.
-			err = s.writeTaskDesign(ctx, taskID, reply)
-		case domain.AgentHookActionAddLabel:
-			err = s.IssueBackend.AddLabel(ctx, taskID, action.Value)
-		case domain.AgentHookActionRemoveLabel:
-			// Writes the same task as every other action here, and the loop
-			// executes stored order verbatim — so the position that matters is
-			// the one the pipeline was BUILT with (hooksFromFlags), and the
-			// rule Validate enforces: after the comment, before the stamp.
-			//
-			// After the comment because a removal mutates the label set and is
-			// therefore observable routing state, exactly like add_label:
-			// write-before-stamp binds it, and Validate refuses a comment that
-			// follows it.
-			//
-			// Before the add_label because add_label is the certifying write —
-			// the token the next stage waits on. Removing after it would leave
-			// a window where the task carries both the label that routed it
-			// here and the label that hands it on, claimable by the upstream
-			// and downstream stages at once. Removing first can only leave the
-			// task briefly unrouted, which stalls visibly instead of forking.
-			// Same reasoning as the cycle's remove-then-bump ordering above.
-			//
-			// CAUTION: if an upstream stage's filter EXCLUDES this label, this
-			// removal re-arms that stage — it re-claims, re-stamps, and the
-			// pipeline loops forever. See AgentHookActionRemoveLabel. Not
-			// guarded here: this executor cannot see the upstream filter, so
-			// any guard would be a guess at intent.
-			err = s.IssueBackend.RemoveLabel(ctx, taskID, action.Value)
-		case domain.AgentHookActionSetStatus:
-			err = s.setTaskStatus(ctx, taskID, action)
-		case domain.AgentHookActionCycle:
-			err = s.advanceReviewCycle(ctx, taskID, action.Cycle)
-		case domain.AgentHookActionClose:
-			// Ordered last by Validate, so every write above has already
-			// landed. Closing here rather than letting the agent do it is the
-			// whole point: an agent-side close makes the preceding writes fail
-			// against a terminal issue, which silently strands the hand-off.
-			//
-			// Closing an already-closed task is NOT a failure here: fleet-db's
-			// close endpoint is idempotent (the handler swallows its own
-			// already-closed error and replies 200 with the current issue), so
-			// an agent whose prompt already closed the task, or a human closing
-			// between exit and hooks, cannot demote an otherwise clean run. No
-			// client-side tolerance is layered on top of that, deliberately —
-			// every other close conflict (open blockers, dependencies) must
-			// keep failing the pipeline.
-			_, err = s.IssueBackend.Close(ctx, taskID, backend.CloseParams{
-				Reason:  "completed by agent " + ap.Entry.Worktree,
-				Session: sessionID,
-			})
-		default:
-			// Unreachable: Validate above rejects unknown types. Kept so a new
-			// action added to the vocabulary but not to this switch fails the
-			// run instead of being silently skipped.
-			err = fmt.Errorf("unsupported action type %q", action.Type)
-		}
-		if err != nil {
+		if err := s.runCompletionHookAction(ctx, ap, action, taskID, sessionID, reply); err != nil {
+			if backend.IsIssueClosedConflict(err) {
+				slog.InfoContext(ctx, "task went terminal mid-run; skipping remaining completion hooks",
+					"task_id", taskID, "action", string(action.Type), "index", i, "err", err)
+				return nil
+			}
 			return fmt.Errorf("on_complete[%d] (%s): %w", i, action.Type, err)
 		}
 	}
 	return nil
+}
+
+// runCompletionHookAction performs ONE action of the pipeline. It is split out
+// of executeCompletionHooks so the loop that owns ordering, the error policy
+// and the skip decision stays readable next to the dispatch it drives.
+func (s *Supervisor) runCompletionHookAction(
+	ctx context.Context,
+	ap *AgentProcess,
+	action domain.AgentHookAction,
+	taskID, sessionID, reply string,
+) error {
+	var err error
+	switch action.Type {
+	case domain.AgentHookActionComment:
+		err = s.postFinalReplyComment(ctx, ap, taskID, reply)
+	case domain.AgentHookActionWriteDesign:
+		// Same extracted reply the comment posts — resolved once above, for
+		// both. A second extraction could disagree with the first about what
+		// "the run's artifact" is, and a pipeline that comments one text and
+		// records another as the design is worse than either alone.
+		err = s.writeTaskDesign(ctx, taskID, reply)
+	case domain.AgentHookActionAddLabel:
+		err = s.IssueBackend.AddLabel(ctx, taskID, action.Value)
+	case domain.AgentHookActionRemoveLabel:
+		// Writes the same task as every other action here, and the loop
+		// executes stored order verbatim — so the position that matters is
+		// the one the pipeline was BUILT with (hooksFromFlags), and the
+		// rule Validate enforces: after the comment, before the stamp.
+		//
+		// After the comment because a removal mutates the label set and is
+		// therefore observable routing state, exactly like add_label:
+		// write-before-stamp binds it, and Validate refuses a comment that
+		// follows it.
+		//
+		// Before the add_label because add_label is the certifying write —
+		// the token the next stage waits on. Removing after it would leave
+		// a window where the task carries both the label that routed it
+		// here and the label that hands it on, claimable by the upstream
+		// and downstream stages at once. Removing first can only leave the
+		// task briefly unrouted, which stalls visibly instead of forking.
+		// Same reasoning as the cycle's remove-then-bump ordering above.
+		//
+		// CAUTION: if an upstream stage's filter EXCLUDES this label, this
+		// removal re-arms that stage — it re-claims, re-stamps, and the
+		// pipeline loops forever. See AgentHookActionRemoveLabel. Not
+		// guarded here: this executor cannot see the upstream filter, so
+		// any guard would be a guess at intent.
+		err = s.IssueBackend.RemoveLabel(ctx, taskID, action.Value)
+	case domain.AgentHookActionSetStatus:
+		err = s.setTaskStatus(ctx, taskID, action)
+	case domain.AgentHookActionCycle:
+		err = s.advanceReviewCycle(ctx, taskID, action.Cycle)
+	case domain.AgentHookActionClose:
+		// Ordered last by Validate, so every write above has already
+		// landed. Closing here rather than letting the agent do it is the
+		// whole point: an agent-side close makes the preceding writes fail
+		// against a terminal issue, which silently strands the hand-off.
+		//
+		// Closing an already-closed task is NOT a failure here: fleet-db's
+		// close endpoint is idempotent (the handler swallows its own
+		// already-closed error and replies 200 with the current issue), so
+		// an agent whose prompt already closed the task, or a human closing
+		// between exit and hooks, cannot demote an otherwise clean run. No
+		// client-side tolerance is layered on top of that, deliberately —
+		// every other close conflict (open blockers, dependencies) must
+		// keep failing the pipeline.
+		_, err = s.IssueBackend.Close(ctx, taskID, backend.CloseParams{
+			Reason:  "completed by agent " + ap.Entry.Worktree,
+			Session: sessionID,
+		})
+	default:
+		// Unreachable: Validate above rejects unknown types. Kept so a new
+		// action added to the vocabulary but not to this switch fails the
+		// run instead of being silently skipped.
+		err = fmt.Errorf("unsupported action type %q", action.Type)
+	}
+	return err
 }
 
 // completionHooksNeedReply reports whether the pipeline contains a body write,
