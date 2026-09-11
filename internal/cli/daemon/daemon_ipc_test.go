@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/notify"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/taskcontent"
 )
 
 // mockIPCBackend is a minimal IssueBackend implementation for IPC server tests.
@@ -35,6 +36,11 @@ type mockIPCBackend struct {
 	closeErr    error
 	closeResult *backend.CloseResult
 	releaseErr  error
+	// getResult/getErr feed the dispatch content gate. Unset keeps Get a
+	// panic, so every test that does not install a gate is untouched.
+	getResult *backend.IssueDetailData
+	getErr    error
+	getCalls  int
 }
 
 // ReleaseClaim records the call so handleIPCReleaseClaim tests can assert the
@@ -94,7 +100,11 @@ func (m *mockIPCBackend) Close(_ context.Context, id string, params backend.Clos
 
 // Stub methods to satisfy the IssueBackend interface (not used by IPC server).
 func (m *mockIPCBackend) Get(context.Context, string) (*backend.IssueDetailData, error) {
-	panic("not implemented")
+	m.getCalls++
+	if m.getResult == nil && m.getErr == nil {
+		panic("not implemented")
+	}
+	return m.getResult, m.getErr
 }
 func (m *mockIPCBackend) List(context.Context, backend.ListOpts) ([]backend.IssueData, error) {
 	panic("not implemented")
@@ -1118,5 +1128,79 @@ func TestIPCServer_Heartbeat_NoStore(t *testing.T) {
 	})
 	if !resp.Success {
 		t.Fatalf("heartbeat against store-less daemon failed: %s", resp.Error)
+	}
+}
+
+// The agent self-selection path: an auto-mode agent picks a row out of
+// `loom data ready` and claims it over IPC. The same content invariant the
+// supervisor enforces at dispatch applies here.
+func TestIPCClaim_RefusesBodylessIssue(t *testing.T) {
+	mb := &mockIPCBackend{getResult: &backend.IssueDetailData{
+		IssueData: backend.IssueData{ID: "scratch", Title: "tester control subject"},
+	}}
+	d := newTestIPCDaemon(mb)
+	d.contentGate = taskcontent.NewGate()
+	defer close(d.sup.Shutdown)
+
+	resp := d.handleIPCClaim(AgentIPCRequest{
+		Operation: ipcOpClaim,
+		AgentName: "falcon",
+		IssueID:   "scratch",
+	})
+
+	if resp.Success {
+		t.Fatal("expected the bodyless issue to be refused")
+	}
+	if resp.Kind != string(backend.KindValidation) {
+		t.Fatalf("Kind = %q, want %q", resp.Kind, backend.KindValidation)
+	}
+	if !strings.Contains(resp.Error, "no description or acceptance criteria") {
+		t.Fatalf("Error = %q, want it to name the missing content", resp.Error)
+	}
+	if len(mb.claimCalls) != 0 {
+		t.Fatalf("claim calls = %d, want 0", len(mb.claimCalls))
+	}
+}
+
+func TestIPCClaim_AllowsDescribedIssue(t *testing.T) {
+	mb := &mockIPCBackend{getResult: &backend.IssueDetailData{
+		IssueData:   backend.IssueData{ID: "abc-123", Title: "real work"},
+		Description: "there is something to do here",
+	}}
+	d := newTestIPCDaemon(mb)
+	d.contentGate = taskcontent.NewGate()
+	defer close(d.sup.Shutdown)
+
+	resp := d.handleIPCClaim(AgentIPCRequest{
+		Operation: ipcOpClaim,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+	})
+
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+	if len(mb.claimCalls) != 1 {
+		t.Fatalf("claim calls = %d, want 1", len(mb.claimCalls))
+	}
+}
+
+func TestIPCClaim_GateFailsOpenOnGetError(t *testing.T) {
+	mb := &mockIPCBackend{getErr: context.DeadlineExceeded}
+	d := newTestIPCDaemon(mb)
+	d.contentGate = taskcontent.NewGate()
+	defer close(d.sup.Shutdown)
+
+	resp := d.handleIPCClaim(AgentIPCRequest{
+		Operation: ipcOpClaim,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+	})
+
+	if !resp.Success {
+		t.Fatalf("the gate must fail open on a read failure; got error: %s", resp.Error)
+	}
+	if len(mb.claimCalls) != 1 {
+		t.Fatalf("claim calls = %d, want 1", len(mb.claimCalls))
 	}
 }

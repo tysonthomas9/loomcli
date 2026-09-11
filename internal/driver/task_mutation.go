@@ -3,12 +3,14 @@ package driver
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/taskcontent"
 )
 
 type TaskCompleteOptions struct {
@@ -156,6 +158,14 @@ type TaskClaimOptions struct {
 	// Filtering here rather than in the ready query is deliberate: the server
 	// ready view has no exclusion filter, and the set is already in hand.
 	ExcludeLabels []string
+
+	// ContentGate refuses to claim a bodyless ready task (no description, no
+	// acceptance criteria, no design). Nil constructs a call-local gate, which
+	// keeps every existing caller source-compatible; the driver claims once per
+	// invocation rather than in a poll loop, so the per-call refusal memo costs
+	// nothing. Do NOT copy that pattern into the supervisor, where the memo
+	// surviving across poll cycles is the whole point.
+	ContentGate *taskcontent.Gate
 }
 
 type ClaimedTask struct {
@@ -190,6 +200,10 @@ func ClaimReadyTask(ctx context.Context, issueBackend backend.IssueBackend, opts
 	}
 	actor := strings.TrimSpace(opts.Actor)
 	excluded := normalizeLabelSet(opts.ExcludeLabels)
+	gate := opts.ContentGate
+	if gate == nil {
+		gate = taskcontent.NewGate()
+	}
 	for _, issue := range ready {
 		if strings.TrimSpace(issue.ID) == "" {
 			continue
@@ -200,6 +214,13 @@ func ClaimReadyTask(ctx context.Context, issueBackend backend.IssueBackend, opts
 		// Blocked issues are excluded server-side from the ready view; skip
 		// them here too in case a backend still returns them.
 		if strings.EqualFold(strings.TrimSpace(issue.Status), blockedIssueStatus) {
+			continue
+		}
+		// A row with no description, acceptance criteria or design carries no
+		// work; skip it the same way an excluded label is skipped. Fail-open
+		// lives inside the gate, so a read failure never stops the drain.
+		if allowed, _ := gate.Allow(ctx, issueBackend, issue, issue.ID); !allowed {
+			slog.Info("dispatch refused: bodyless task", "task_id", issue.ID, "path", "driver claim-ready")
 			continue
 		}
 		err := claimIssue(ctx, issueBackend, issue.ID, opts.LockTTL, actor)
