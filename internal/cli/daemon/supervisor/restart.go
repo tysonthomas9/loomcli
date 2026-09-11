@@ -354,6 +354,24 @@ func (s *Supervisor) backendRecheckBackoff() time.Duration {
 	return backendUnavailableRecheckInterval
 }
 
+// parkedStateBackoff returns the fixed interval for an agent parked by its own
+// state rather than by its last run's error, and ok=false when neither
+// applies. Split out of computeBackoff (funlen) with the checks unchanged.
+func (s *Supervisor) parkedStateBackoff(profileInvalid, blocked bool) (time.Duration, bool) {
+	// Fixed recheck, like a missing backend binary: we are waiting on an
+	// operator repairing a profile, not backing off a flaky run.
+	if profileInvalid {
+		return s.backendRecheckBackoff(), true
+	}
+
+	// A blocked agent sleeps the fixed block interval — keyed on StopReason,
+	// not error class, because any counted class can exhaust the budget.
+	if blocked {
+		return s.maxRetriesBlockBackoff(), true
+	}
+	return 0, false
+}
+
 // computeBackoff returns the sleep duration before the next restart. The
 // policy disposition names the configured bucket (BackoffProfile); this
 // layer applies its restart_policy values and counters.
@@ -368,16 +386,8 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	profileInvalid := ap.ProfileError != nil
 	ap.Mu.Unlock()
 
-	// Fixed recheck, like a missing backend binary: we are waiting on an
-	// operator repairing a profile, not backing off a flaky run.
-	if profileInvalid {
-		return s.backendRecheckBackoff()
-	}
-
-	// A blocked agent sleeps the fixed block interval — keyed on StopReason,
-	// not error class, because any counted class can exhaust the budget.
-	if blocked {
-		return s.maxRetriesBlockBackoff()
+	if wait, ok := s.parkedStateBackoff(profileInvalid, blocked); ok {
+		return wait
 	}
 
 	// A clean success has no failure to back off from — which used to mean it
