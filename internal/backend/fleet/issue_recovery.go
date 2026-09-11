@@ -170,14 +170,15 @@ func validateRecoveryIssue(raw json.RawMessage, ws string) (string, map[string]j
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return "", nil, err
 	}
+	required := make(map[string]string, 8)
 	for _, key := range []string{"workspace", "id", "title", "status", "type", "created_by", "created_at", "updated_at"} {
-		if _, err := recoveryString(fields, key, key != "created_by"); err != nil {
+		value, err := recoveryString(fields, key, key != "created_by")
+		if err != nil {
 			return "", nil, err
 		}
+		required[key] = value
 	}
-	workspace, _ := recoveryString(fields, "workspace", true)
-	id, _ := recoveryString(fields, "id", true)
-	if workspace != ws {
+	if required["workspace"] != ws {
 		return "", nil, fmt.Errorf("foreign workspace")
 	}
 	var priority *int
@@ -185,8 +186,7 @@ func validateRecoveryIssue(raw json.RawMessage, ws string) (string, map[string]j
 		return "", nil, fmt.Errorf("invalid priority")
 	}
 	for _, key := range []string{"created_at", "updated_at"} {
-		value, _ := recoveryString(fields, key, true)
-		if _, err := time.Parse(time.RFC3339Nano, value); err != nil {
+		if _, err := time.Parse(time.RFC3339Nano, required[key]); err != nil {
 			return "", nil, err
 		}
 	}
@@ -196,7 +196,7 @@ func validateRecoveryIssue(raw json.RawMessage, ws string) (string, map[string]j
 	if err := validateRecoveryOptionalFields(fields); err != nil {
 		return "", nil, err
 	}
-	return id, fields, nil
+	return required["id"], fields, nil
 }
 func validateRecoveryDerived(raw json.RawMessage, ws string, issues map[string]map[string]json.RawMessage, seen map[string]bool) error {
 	id, fields, err := validateRecoveryIssue(raw, ws)
@@ -220,26 +220,23 @@ func validateRecoveryBlocked(rows []json.RawMessage, ws string, issues map[strin
 		if len(wrapper) != 2 || wrapper["issue"] == nil || wrapper["blockers"] == nil {
 			return fmt.Errorf("invalid blocked wrapper")
 		}
-		var row struct {
-			Issue    json.RawMessage    `json:"issue"`
-			Blockers *[]json.RawMessage `json:"blockers"`
-		}
-		if err := json.Unmarshal(raw, &row); err != nil {
+		var blockers *[]json.RawMessage
+		if err := json.Unmarshal(wrapper["blockers"], &blockers); err != nil {
 			return err
 		}
-		if err := validateRecoveryDerived(row.Issue, ws, issues, seen); err != nil {
+		if err := validateRecoveryDerived(wrapper["issue"], ws, issues, seen); err != nil {
 			return err
 		}
-		if row.Blockers == nil || len(*row.Blockers) == 0 {
+		if blockers == nil || len(*blockers) == 0 {
 			return fmt.Errorf("missing blockers")
 		}
 		blockerIDs := map[string]bool{}
-		for _, rawBlocker := range *row.Blockers {
+		for _, rawBlocker := range *blockers {
 			var reason struct {
 				Reason string `json:"reason"`
 			}
 			_ = json.Unmarshal(rawBlocker, &reason)
-			if reason.Reason == "parent-blocked" && len(*row.Blockers) != 1 {
+			if reason.Reason == "parent-blocked" && len(*blockers) != 1 {
 				return fmt.Errorf("mixed parent sentinel")
 			}
 			if err := validateRecoveryBlocker(rawBlocker, issues, blockerIDs); err != nil {
@@ -257,22 +254,29 @@ func validateRecoveryBlocker(raw json.RawMessage, issues map[string]map[string]j
 	if len(fields) != 6 {
 		return fmt.Errorf("invalid blocker fields")
 	}
+	values := make(map[string]string, 5)
 	for _, key := range []string{"id", "title", "status", "dep_type", "reason"} {
-		if _, err := recoveryString(fields, key, false); err != nil {
+		value, err := recoveryString(fields, key, false)
+		if err != nil {
 			return err
 		}
+		values[key] = value
 	}
 	var priority *int
 	if err := json.Unmarshal(fields["priority"], &priority); err != nil || priority == nil {
 		return fmt.Errorf("invalid blocker priority")
 	}
-	reason, _ := recoveryString(fields, "reason", true)
-	dep, _ := recoveryString(fields, "dep_type", true)
-	id, _ := recoveryString(fields, "id", false)
-	title, _ := recoveryString(fields, "title", false)
-	status, _ := recoveryString(fields, "status", false)
+	reason := values["reason"]
+	dep := values["dep_type"]
+	id := values["id"]
+	if reason == "" {
+		return fmt.Errorf("invalid reason")
+	}
+	if dep == "" {
+		return fmt.Errorf("invalid dep_type")
+	}
 	if reason == "parent-blocked" {
-		if dep != "parent-child" || id != "" || title != "" || status != "" || *priority != 0 {
+		if dep != "parent-child" || id != "" || values["title"] != "" || values["status"] != "" || *priority != 0 {
 			return fmt.Errorf("invalid parent sentinel")
 		}
 		return nil
@@ -339,38 +343,36 @@ func validateRecoveryOptionalFields(fields map[string]json.RawMessage) error {
 }
 
 func validateRecoveryCollections(fields map[string]json.RawMessage) error {
-	if _, ok := fields["labels"]; !ok {
+	labelsJSON, ok := fields["labels"]
+	if !ok {
 		return fmt.Errorf("missing labels")
 	}
-	if _, ok := fields["metadata"]; !ok {
+	metadataJSON, ok := fields["metadata"]
+	if !ok {
 		return fmt.Errorf("missing metadata")
 	}
-	if raw, ok := fields["labels"]; ok {
-		var labels []*string
-		if err := json.Unmarshal(raw, &labels); err != nil {
-			return err
-		}
-		if labels == nil {
-			return fmt.Errorf("null labels")
-		}
-		for _, label := range labels {
-			if label == nil {
-				return fmt.Errorf("null label")
-			}
+	var labels []*string
+	if err := json.Unmarshal(labelsJSON, &labels); err != nil {
+		return err
+	}
+	if labels == nil {
+		return fmt.Errorf("null labels")
+	}
+	for _, label := range labels {
+		if label == nil {
+			return fmt.Errorf("null label")
 		}
 	}
-	if raw, ok := fields["metadata"]; ok {
-		var metadata map[string]*string
-		if err := json.Unmarshal(raw, &metadata); err != nil {
-			return err
-		}
-		if metadata == nil {
-			return fmt.Errorf("null metadata")
-		}
-		for _, value := range metadata {
-			if value == nil {
-				return fmt.Errorf("null metadata value")
-			}
+	var metadata map[string]*string
+	if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
+		return err
+	}
+	if metadata == nil {
+		return fmt.Errorf("null metadata")
+	}
+	for _, value := range metadata {
+		if value == nil {
+			return fmt.Errorf("null metadata value")
 		}
 	}
 	if raw, ok := fields["estimated_minutes"]; ok {

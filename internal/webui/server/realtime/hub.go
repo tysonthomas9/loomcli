@@ -315,13 +315,7 @@ func (h *Hub) fanOutMutation(mutation *MutationPayload) {
 	}
 	h.mu.RLock()
 	for client := range h.clients {
-		if client.authoritative && mutation.Cursor != "" {
-			continue
-		}
-		if !MatchesWorkspaceFilter(client.workspaceID, mutation.WorkspaceID) {
-			continue
-		}
-		if !MatchesSourceRepoFilter(client.sourceRepos, mutation.SourceRepo) {
+		if !clientMatchesMutation(client, mutation) {
 			continue
 		}
 		delivery := client.prepareDelivery(mutation)
@@ -445,11 +439,7 @@ func (h *Hub) markMatchingClientsPending(mutation *MutationPayload) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for client := range h.clients {
-		if client.authoritative && mutation.Cursor != "" {
-			continue
-		}
-		if MatchesWorkspaceFilter(client.workspaceID, mutation.WorkspaceID) &&
-			MatchesSourceRepoFilter(client.sourceRepos, mutation.SourceRepo) {
+		if clientMatchesMutation(client, mutation) {
 			client.markCurrentDropped()
 		}
 	}
@@ -472,15 +462,17 @@ func (h *Hub) matchingClientCount(mutation *MutationPayload) int {
 	defer h.mu.RUnlock()
 	count := 0
 	for client := range h.clients {
-		if client.authoritative && mutation.Cursor != "" {
-			continue
-		}
-		if MatchesWorkspaceFilter(client.workspaceID, mutation.WorkspaceID) &&
-			MatchesSourceRepoFilter(client.sourceRepos, mutation.SourceRepo) {
+		if clientMatchesMutation(client, mutation) {
 			count++
 		}
 	}
 	return count
+}
+
+func clientMatchesMutation(client *Client, mutation *MutationPayload) bool {
+	return !(client.authoritative && mutation.Cursor != "") &&
+		MatchesWorkspaceFilter(client.workspaceID, mutation.WorkspaceID) &&
+		MatchesSourceRepoFilter(client.sourceRepos, mutation.SourceRepo)
 }
 
 func (h *Hub) beforeDispatch(kind hubDispatchKind) {

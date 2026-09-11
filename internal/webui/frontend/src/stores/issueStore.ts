@@ -71,6 +71,30 @@ export function isRetryableError(err: unknown): boolean {
   return err.status < 400 || err.status >= 500;
 }
 
+function snapshotFetchParams(params: FetchIssuesParams): FetchIssuesParams {
+  return {
+    ...params,
+    ...(params.filter ? { filter: structuredClone(params.filter) } : {}),
+    ...(params.graphFilter
+      ? { graphFilter: structuredClone(params.graphFilter) }
+      : {}),
+    ...(params.sourceRepos ? { sourceRepos: [...params.sourceRepos] } : {}),
+  };
+}
+
+function fetchIssueProjection(
+  workspaceId: string,
+  mode: FetchIssuesParams["mode"],
+  filter: WorkFilter | undefined,
+  graphFilter: GraphFilter | undefined,
+  options: Pick<RequestOptions, "signal">,
+): Promise<Issue[]> {
+  if (mode === "kanban") return getKanbanIssues(workspaceId, filter, options);
+  if (mode === "graph")
+    return fetchGraphIssues(workspaceId, graphFilter, options);
+  return getReadyIssues(workspaceId, filter, options);
+}
+
 export function createIssueStore(
   initialConfig?: IssueStoreConfig,
 ): StoreApi<IssueStore> {
@@ -223,14 +247,7 @@ export function createIssueStore(
     params: FetchIssuesParams,
     recovery = false,
   ): Promise<void> {
-    params = {
-      ...params,
-      ...(params.filter ? { filter: structuredClone(params.filter) } : {}),
-      ...(params.graphFilter
-        ? { graphFilter: structuredClone(params.graphFilter) }
-        : {}),
-      ...(params.sourceRepos ? { sourceRepos: [...params.sourceRepos] } : {}),
-    };
+    params = snapshotFetchParams(params);
     const set = store.setState;
     const get = store.getState;
     const {
@@ -276,11 +293,11 @@ export function createIssueStore(
     const internalController = new AbortController();
     activeController = internalController;
     previousController?.abort();
-    if (
-      activeController !== internalController ||
-      scopeEpoch !== readScopeEpoch ||
-      generation !== fetchGeneration
-    ) {
+    const ownsFetch = (): boolean =>
+      activeController === internalController &&
+      scopeEpoch === readScopeEpoch &&
+      generation === fetchGeneration;
+    if (!ownsFetch()) {
       if (recovery)
         throw new DOMException(
           "Recovery superseded while starting",
@@ -323,11 +340,7 @@ export function createIssueStore(
       });
     }
 
-    if (
-      activeController !== internalController ||
-      scopeEpoch !== readScopeEpoch ||
-      generation !== fetchGeneration
-    ) {
+    if (!ownsFetch()) {
       if (recovery)
         throw new DOMException(
           "Recovery superseded while starting",
@@ -375,27 +388,17 @@ export function createIssueStore(
           mergedSignal.removeEventListener("abort", onAbort);
         }
       };
-      let data: Issue[];
-      if (mode === "kanban") {
-        data = await awaitResponse(
-          getKanbanIssues(workspaceId, effectiveFilter, reqOpts),
-        );
-      } else if (mode === "graph") {
-        data = await awaitResponse(
-          fetchGraphIssues(workspaceId, effectiveGraphFilter, reqOpts),
-        );
-      } else {
-        data = await awaitResponse(
-          getReadyIssues(workspaceId, effectiveFilter, reqOpts),
-        );
-      }
+      const data = await awaitResponse(
+        fetchIssueProjection(
+          workspaceId,
+          mode,
+          effectiveFilter,
+          effectiveGraphFilter,
+          reqOpts,
+        ),
+      );
 
-      if (
-        activeController !== internalController ||
-        mergedSignal.aborted ||
-        scopeEpoch !== readScopeEpoch ||
-        generation !== fetchGeneration
-      ) {
+      if (!ownsFetch() || mergedSignal.aborted) {
         if (recovery)
           throw new DOMException(
             "Recovery superseded or aborted",
@@ -468,10 +471,8 @@ export function createIssueStore(
       });
       if (
         recovery &&
-        (activeController !== internalController ||
+        (!ownsFetch() ||
           mergedSignal.aborted ||
-          scopeEpoch !== readScopeEpoch ||
-          generation !== fetchGeneration ||
           commandRevision !== readCommandRevision ||
           !!unresolvedCommands.get(workspaceId)?.size)
       ) {
@@ -549,12 +550,7 @@ export function createIssueStore(
           retryCount: nextAttempt,
           nextRetryAt: Date.now() + delay,
         });
-        if (
-          activeController !== internalController ||
-          scopeEpoch !== readScopeEpoch ||
-          generation !== fetchGeneration
-        )
-          return;
+        if (!ownsFetch()) return;
         // Strip the external signal before retrying: by the time this
         // timer fires, the caller's AbortController (e.g. the one from
         // App.tsx's useEffect) may have been aborted by a cleanup (view

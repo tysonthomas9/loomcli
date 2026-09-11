@@ -159,13 +159,22 @@ func (r *RecoveryRegistry) read(ctx context.Context, principal, workspace, handl
 	r.mu.Lock()
 	valid := !r.stoppedLocked() && r.entries[handle] == entry && r.now().Before(entry.handle.ExpiresAt)
 	r.mu.Unlock()
-	if !valid || result.SelectedIssueID != issueID || result.SourceIdentity != entry.handle.SourceIdentity || result.Workspace != entry.handle.Workspace || result.Manifest != issueRecoveryManifest || !backend.ValidMutationCursor(result.Through) || len(result.Document) == 0 {
+	if !valid || !recoverySnapshotMatches(result, entry.handle, issueID) {
 		return backend.IssueRecoverySnapshot{}, ErrRecoveryUnavailable
 	}
 	if err := backend.ValidateIssueRecoverySelection(result, issueID); err != nil {
 		return backend.IssueRecoverySnapshot{}, ErrRecoveryUnavailable
 	}
 	return result, nil
+}
+
+func recoverySnapshotMatches(result backend.IssueRecoverySnapshot, handle RecoveryHandle, issueID string) bool {
+	return result.SelectedIssueID == issueID &&
+		result.SourceIdentity == handle.SourceIdentity &&
+		result.Workspace == handle.Workspace &&
+		result.Manifest == issueRecoveryManifest &&
+		backend.ValidMutationCursor(result.Through) &&
+		len(result.Document) > 0
 }
 
 func (r *RecoveryRegistry) acquire(principal, workspace, handle string) (*recoveryRegistration, error) {

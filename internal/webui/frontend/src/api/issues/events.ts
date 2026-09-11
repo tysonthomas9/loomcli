@@ -47,39 +47,67 @@ function record(value: unknown): value is Record<string, unknown> {
 /** Validate the fields used to identify, sort and describe history entries. */
 function validEvent(value: unknown, issueId: string): value is Event {
   if (!record(value)) return false;
-  if (
-    typeof value.id !== "string" ||
-    !value.id ||
-    value.issue_id !== issueId ||
-    typeof value.event_type !== "string" ||
-    !value.event_type ||
-    typeof value.actor !== "string" ||
-    typeof value.created_at !== "string" ||
-    !Number.isFinite(Date.parse(value.created_at))
-  )
-    return false;
-  for (const key of ["summary", "target", "payload", "category"]) {
-    if (value[key] !== undefined && typeof value[key] !== "string")
-      return false;
-  }
-  for (const key of ["old_value", "new_value", "comment"]) {
-    if (value[key] != null && typeof value[key] !== "string") return false;
-  }
-  if (
-    value.changes !== undefined &&
-    (!Array.isArray(value.changes) ||
-      !value.changes.every(
+  return (
+    validEventIdentity(value, issueId) &&
+    stringFields(value, ["summary", "target", "payload", "category"]) &&
+    nullableStringFields(value, ["old_value", "new_value", "comment"]) &&
+    validChanges(value.changes) &&
+    validMetadata(value.metadata)
+  );
+}
+
+function validEventIdentity(
+  value: Record<string, unknown>,
+  issueId: string,
+): boolean {
+  return (
+    typeof value.id === "string" &&
+    value.id.length > 0 &&
+    value.issue_id === issueId &&
+    typeof value.event_type === "string" &&
+    value.event_type.length > 0 &&
+    typeof value.actor === "string" &&
+    typeof value.created_at === "string" &&
+    Number.isFinite(Date.parse(value.created_at))
+  );
+}
+
+function stringFields(
+  value: Record<string, unknown>,
+  fields: readonly string[],
+): boolean {
+  return fields.every(
+    (field) => value[field] === undefined || typeof value[field] === "string",
+  );
+}
+
+function nullableStringFields(
+  value: Record<string, unknown>,
+  fields: readonly string[],
+): boolean {
+  return fields.every(
+    (field) => value[field] == null || typeof value[field] === "string",
+  );
+}
+
+function validChanges(value: unknown): boolean {
+  return (
+    value === undefined ||
+    (Array.isArray(value) &&
+      value.every(
         (change: unknown) =>
           record(change) &&
           typeof change.field === "string" &&
           (change.before === undefined || typeof change.before === "string") &&
           (change.after === undefined || typeof change.after === "string"),
       ))
-  )
-    return false;
+  );
+}
+
+function validMetadata(value: unknown): boolean {
   return (
-    value.metadata === undefined ||
-    (record(value.metadata) &&
-      Object.values(value.metadata).every((item) => typeof item === "string"))
+    value === undefined ||
+    (record(value) &&
+      Object.values(value).every((item) => typeof item === "string"))
   );
 }

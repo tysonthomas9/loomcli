@@ -123,16 +123,24 @@ function object(value: unknown): Record<string, unknown> {
     fail();
   return value as Record<string, unknown>;
 }
+function hasOwn(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
 function exact(value: Record<string, unknown>, keys: readonly string[]) {
   if (
     Object.keys(value).length !== keys.length ||
-    keys.some((key) => !Object.prototype.hasOwnProperty.call(value, key))
+    keys.some((key) => !hasOwn(value, key))
   )
     fail();
 }
-function text(value: unknown, empty = false): string {
-  if (typeof value !== "string" || (!empty && value.length === 0)) fail();
+function stringValue(value: unknown): string {
+  if (typeof value !== "string") fail();
   return value;
+}
+function text(value: unknown): string {
+  const source = stringValue(value);
+  if (source.length === 0) fail();
+  return source;
 }
 function array(value: unknown): unknown[] {
   if (!Array.isArray(value)) fail();
@@ -184,7 +192,7 @@ function issue(value: unknown, workspace: string): NativeRecoveryIssue {
     "labels",
     "metadata",
   ]) {
-    if (!Object.prototype.hasOwnProperty.call(row, field)) fail();
+    if (!hasOwn(row, field)) fail();
   }
   for (const field of [
     "workspace",
@@ -196,7 +204,7 @@ function issue(value: unknown, workspace: string): NativeRecoveryIssue {
     "updated_at",
   ])
     text(row[field]);
-  text(row.created_by, true);
+  stringValue(row.created_by);
   if (row.workspace !== workspace) fail();
   if (
     !Number.isInteger(row.priority) ||
@@ -206,8 +214,8 @@ function issue(value: unknown, workspace: string): NativeRecoveryIssue {
     fail();
   timestamp(row.created_at);
   timestamp(row.updated_at);
-  for (const label of array(row.labels)) text(label, true);
-  for (const entry of Object.values(object(row.metadata))) text(entry, true);
+  for (const label of array(row.labels)) stringValue(label);
+  for (const entry of Object.values(object(row.metadata))) stringValue(entry);
   optionalFields(row);
   return row as NativeRecoveryIssue;
 }
@@ -225,15 +233,14 @@ function optionalFields(row: Record<string, unknown>) {
     "repo",
     "close_reason",
   ]) {
-    if (Object.prototype.hasOwnProperty.call(row, field))
-      text(row[field], true);
+    if (hasOwn(row, field)) stringValue(row[field]);
   }
   for (const field of ["defer_until", "due_at", "closed_at"]) {
-    if (Object.prototype.hasOwnProperty.call(row, field) && row[field] !== null)
+    if (hasOwn(row, field) && row[field] !== null)
       timestamp(row[field]);
   }
   if (
-    Object.prototype.hasOwnProperty.call(row, "estimated_minutes") &&
+    hasOwn(row, "estimated_minutes") &&
     row.estimated_minutes !== null &&
     !Number.isSafeInteger(row.estimated_minutes)
   )
@@ -244,9 +251,9 @@ function optionalFields(row: Record<string, unknown>) {
     ["parent", "parent_id"],
   ] as const) {
     if (
-      Object.prototype.hasOwnProperty.call(row, alias) &&
-      (!Object.prototype.hasOwnProperty.call(row, native) ||
-        text(row[alias], true) !== text(row[native], true))
+      hasOwn(row, alias) &&
+      (!hasOwn(row, native) ||
+        stringValue(row[alias]) !== stringValue(row[native]))
     )
       fail();
   }
@@ -267,7 +274,7 @@ function equal(left: unknown, right: unknown): boolean {
     Object.keys(a).length === Object.keys(b).length &&
     Object.keys(a).every(
       (key) =>
-        Object.prototype.hasOwnProperty.call(b, key) && equal(a[key], b[key]),
+        hasOwn(b, key) && equal(a[key], b[key]),
     )
   );
 }
@@ -313,7 +320,7 @@ function validateBlocker(
   const row = object(value);
   exact(row, ["id", "title", "priority", "status", "dep_type", "reason"]);
   for (const key of ["id", "title", "status", "dep_type", "reason"])
-    text(row[key], true);
+    stringValue(row[key]);
   if (!Number.isSafeInteger(row.priority)) fail();
   if (row.reason === "parent-blocked") {
     if (
@@ -494,6 +501,15 @@ function history(
     (!row.present && (events.length !== 0 || row.has_older))
   )
     fail();
+  validateHistoryEvents(events, workspace, expectedIssueId);
+  validateTimeline(array(row.timeline), events);
+  return row as unknown as NativeRecoveryHistory;
+}
+function validateHistoryEvents(
+  events: unknown[],
+  workspace: string,
+  expectedIssueId: string,
+) {
   let previous = 0n;
   for (const value of events) {
     const event = object(value);
@@ -522,12 +538,10 @@ function history(
       fail();
     nonzeroTimestamp(event.timestamp);
     text(event.actor);
-    text(event.before, true);
-    text(event.after, true);
-    for (const item of Object.values(object(event.metadata))) text(item, true);
+    stringValue(event.before);
+    stringValue(event.after);
+    for (const item of Object.values(object(event.metadata))) stringValue(item);
   }
-  validateTimeline(array(row.timeline), events);
-  return row as unknown as NativeRecoveryHistory;
 }
 function utf8Compare(left: string, right: string): number {
   const encoder = new TextEncoder(),
@@ -576,17 +590,17 @@ function validateTimeline(rows: unknown[], events: unknown[]) {
       if (text(row[field]) !== event[native]) fail();
     }
     if (!categories.has(text(row.category))) fail();
-    text(row.summary, true);
+    stringValue(row.summary);
     const metadata = object(row.metadata);
-    for (const value of Object.values(metadata)) text(value, true);
+    for (const value of Object.values(metadata)) stringValue(value);
     if (!equal(metadata, event.metadata)) fail();
     let previous: string | undefined;
     for (const value of array(row.changes)) {
       const change = object(value);
       exact(change, ["field", "before", "after"]);
-      const field = text(change.field, true);
-      text(change.before, true);
-      text(change.after, true);
+      const field = stringValue(change.field);
+      stringValue(change.before);
+      stringValue(change.after);
       if (previous !== undefined && utf8Compare(previous, field) >= 0) fail();
       previous = field;
     }
