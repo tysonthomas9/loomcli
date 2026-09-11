@@ -42,6 +42,8 @@ type fakeForge struct {
 	bodyUpdated  bool
 	createdTitle string // title passed to the most recent CreatePR
 	createdBody  string // body passed to the most recent CreatePR
+	mergedNumber int
+	mergeOpts    MergeOptions
 }
 
 func (f *fakeForge) PRStatuses(context.Context, string, string, string) (map[string]PRStatus, error) {
@@ -80,6 +82,18 @@ func (f *fakeForge) PushBranches(context.Context, string, []BranchPush) error {
 func (f *fakeForge) QueuedPRNumbers(context.Context, string, string) (map[int]bool, error) {
 	f.queueChecked = true
 	return f.queued, nil
+}
+func (f *fakeForge) MergePR(_ context.Context, _ string, _, _ string, number int, opts MergeOptions) error {
+	f.mutated = true
+	f.mergedNumber = number
+	f.mergeOpts = opts
+	for i := range f.prs {
+		if f.prs[i].Number == number {
+			f.prs[i].State = "closed"
+			f.prs[i].Merged = true
+		}
+	}
+	return nil
 }
 
 type updateFailStore struct {

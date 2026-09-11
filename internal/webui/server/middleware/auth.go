@@ -22,6 +22,7 @@ type UserIdentity struct {
 	UserID string // JWT "sub" claim — unique user ID from Better Auth
 	Email  string // JWT "email" claim (optional, may be empty)
 	Name   string // JWT "name" claim (optional, may be empty)
+	Role   string // JWT "role" claim (optional, defaults to read-only when empty)
 }
 
 // String returns a redacted representation safe for logging.
@@ -45,6 +46,7 @@ type AuthConfig struct {
 type extAuthClaims struct {
 	Email string `json:"email"`
 	Name  string `json:"name"`
+	Role  string `json:"role"`
 	jwt.RegisteredClaims
 }
 
@@ -157,6 +159,7 @@ func Auth(cfg AuthConfig) Middleware {
 				UserID: claims.Subject,
 				Email:  claims.Email,
 				Name:   claims.Name,
+				Role:   claims.Role,
 			}
 			ctx := context.WithValue(r.Context(), userIdentityContextKey{}, identity)
 			next.ServeHTTP(w, r.WithContext(ctx))

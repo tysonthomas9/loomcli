@@ -1474,6 +1474,91 @@ paths:
         "404":
           description: Session not found
 
+  /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/subagents:
+    get:
+      operationId: listSessionSubagents
+      tags: [sessions]
+      summary: List captured subagents for a session
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Subagent list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      session_id:
+                        type: string
+                      subagent_ids:
+                        type: array
+                        items:
+                          type: string
+        "404":
+          description: Session not found
+
+  /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/subagents/{subagentId}/transcript:
+    get:
+      operationId: getSessionSubagentTranscript
+      tags: [sessions]
+      summary: Get captured subagent transcript entries
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: subagentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Subagent transcript
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      session_id:
+                        type: string
+                      entries:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/TranscriptEntry"
+        "404":
+          description: Subagent transcript not found
+
   /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff:
     get:
       operationId: getSessionDiff

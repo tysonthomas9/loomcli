@@ -11,7 +11,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/fileaccess"
 )
 
-// WorkspaceRoleResolver authorizes a user for one canonical workspace.
+// WorkspaceRoleResolver authorizes a user for one canonical workspace. It is
+// called after authentication and workspace resolution, so identity.UserID and
+// workspaceID are both available. Returning an empty role uses the same
+// read-only behavior as an empty JWT role claim.
 type WorkspaceRoleResolver func(ctx context.Context, workspaceID string, identity UserIdentity) (string, error)
 
 // FileAccessConfig configures the workspace file-browser authorization boundary.

@@ -49,10 +49,12 @@ func NewIssueModules(issueSvc service.IssueService, sessSvc service.SessionServi
 	return []interface{ Register(*http.ServeMux) }{
 		issues.NewIssueModule(issueSvc, st),
 		issues.NewSessionModule(sessSvc, issues.SessionModuleOpts{
-			ListTaskSessions:     misc.HandleListTaskSessions(sessSvc),
-			GetSession:           misc.HandleGetSession(sessSvc),
-			GetSessionTranscript: misc.HandleGetSessionTranscript(sessSvc),
-			GetSessionDiff:       misc.HandleGetSessionDiff(sessSvc),
+			ListTaskSessions:             misc.HandleListTaskSessions(sessSvc),
+			GetSession:                   misc.HandleGetSession(sessSvc),
+			GetSessionTranscript:         misc.HandleGetSessionTranscript(sessSvc),
+			GetSessionDiff:               misc.HandleGetSessionDiff(sessSvc),
+			ListSessionSubagents:         misc.HandleListSessionSubagents(sessSvc),
+			GetSessionSubagentTranscript: misc.HandleGetSessionSubagentTranscript(sessSvc),
 		}),
 	}
 }
