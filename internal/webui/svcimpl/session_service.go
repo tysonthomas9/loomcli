@@ -345,6 +345,16 @@ func sessionRecordFromAgentSession(rec *domain.AgentSession) sessions.SessionRec
 		LinesRemoved:  diffMeta.LinesRemoved,
 		FilesTouched:  diffMeta.FilesTouched,
 	}
+	// Usage rides on metadata (domain.AgentSession has no usage fields), written
+	// by the driver when it closes the session out. Absent for runs that reported
+	// no telemetry — leave the zero values rather than inventing any.
+	if usage, ok := sessions.DecodeUsageMetadata(rec.Metadata); ok {
+		out.InputTokens = usage.InputTokens
+		out.OutputTokens = usage.OutputTokens
+		out.CacheReadTokens = usage.CacheReadTokens
+		out.CacheWriteTokens = usage.CacheWriteTokens
+		out.EstimatedCostUSD = usage.EstimatedCostUSD
+	}
 	if rec.FinishedAt != nil {
 		out.EndedAt = rec.FinishedAt
 		if !startedAt.IsZero() {

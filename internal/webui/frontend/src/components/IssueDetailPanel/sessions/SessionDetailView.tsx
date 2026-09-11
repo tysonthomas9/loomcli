@@ -27,9 +27,25 @@ export interface SessionDetailViewProps {
 
 type InnerTab = "transcript" | "diff";
 
-function formatExitCode(code: number): string {
-  if (code === 0) return "0 (success)";
-  return String(code);
+/** Shown for telemetry a session has not reported (and may never report). */
+const UNKNOWN_STAT = "—";
+
+/**
+ * A session only has an exit code and usage totals once it has actually exited.
+ * The wire format carries `exit_code` and the usage fields as plain non-nullable
+ * numbers (see dto.SessionResponse), so an unreported value arrives as 0 and is
+ * indistinguishable from a real zero. Reporting those as "0 (success)" / "$0"
+ * presents fabricated telemetry as a measurement, so gate them on the run having
+ * reached a terminal state that reports one.
+ */
+function hasReportedOutcome(session: SessionRecord): boolean {
+  return session.status === "completed" || session.status === "failed";
+}
+
+function formatExitCode(session: SessionRecord): string {
+  if (!hasReportedOutcome(session)) return UNKNOWN_STAT;
+  if (session.exit_code === 0) return "0 (success)";
+  return String(session.exit_code);
 }
 
 function formatToolInput(input: unknown): string {
@@ -263,6 +279,12 @@ export function SessionDetailView({
   };
 
   const totalTokens = sessionTotalTokens(session);
+  // Treat all-zero usage on a run that has not reported an outcome as "not
+  // measured" rather than a real zero-token, zero-cost run.
+  const hasReportedUsage =
+    hasReportedOutcome(session) ||
+    totalTokens > 0 ||
+    (session.estimated_cost_usd ?? 0) > 0;
   const runError = runErrorSummary(session);
 
   return (
@@ -310,9 +332,7 @@ export function SessionDetailView({
           </div>
           <div className={styles.stat}>
             <div className={styles.statLabel}>Exit</div>
-            <div className={styles.statValue}>
-              {formatExitCode(session.exit_code)}
-            </div>
+            <div className={styles.statValue}>{formatExitCode(session)}</div>
           </div>
           <div className={styles.stat}>
             <div className={styles.statLabel}>Duration</div>
@@ -322,13 +342,17 @@ export function SessionDetailView({
           </div>
           <div className={styles.stat}>
             <div className={styles.statLabel}>Tokens</div>
-            <div className={styles.statValue}>{formatTokens(totalTokens)}</div>
+            <div className={styles.statValue}>
+              {hasReportedUsage ? formatTokens(totalTokens) : UNKNOWN_STAT}
+            </div>
           </div>
-          {(session.estimated_cost_usd ?? 0) > 0 && (
+          {((session.estimated_cost_usd ?? 0) > 0 || !hasReportedUsage) && (
             <div className={styles.stat}>
               <div className={styles.statLabel}>Cost</div>
               <div className={styles.statValue}>
-                {formatCost(session.estimated_cost_usd)}
+                {hasReportedUsage
+                  ? formatCost(session.estimated_cost_usd)
+                  : UNKNOWN_STAT}
               </div>
             </div>
           )}
