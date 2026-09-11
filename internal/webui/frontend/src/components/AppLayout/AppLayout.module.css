@@ -7,7 +7,9 @@
 .appLayout {
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
   height: 100vh; /* Fixed height to viewport */
+  padding-top: var(--unified-header-height);
   background-color: var(--color-bg-secondary);
 }
 
@@ -71,7 +73,6 @@
   display: flex;
   overflow: hidden;
   background-color: var(--color-bg-secondary);
-  padding-top: var(--unified-header-height);
 }
 
 .sidebarSlot {

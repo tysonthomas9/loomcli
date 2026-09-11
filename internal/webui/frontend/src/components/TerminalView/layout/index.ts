@@ -16,6 +16,7 @@ export type { BackendPickerPromptProps } from "./BackendPickerPrompt";
 export { NewTerminalTabMenu } from "./NewTerminalTabMenu";
 export type { NewTerminalTabMenuProps } from "./NewTerminalTabMenu";
 export { NoBackendsEmptyState } from "./NoBackendsEmptyState";
+export { TabMetadataErrorState } from "./TabMetadataErrorState";
 
 export { SessionNamePrompt } from "./SessionNamePrompt";
 export type { SessionNamePromptProps } from "./SessionNamePrompt";

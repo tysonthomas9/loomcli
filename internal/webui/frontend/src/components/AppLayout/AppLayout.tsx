@@ -23,6 +23,12 @@ export interface AppLayoutProps {
   actions?: ReactNode;
   /** Optional element to render in the left sidebar */
   sidebar?: ReactNode;
+  /**
+   * Optional full-width notice rendered between the header and the content
+   * (e.g. the claim-hold banner). Passed in rather than imported so this
+   * component stays purely presentational — check:arch enforces that.
+   */
+  banner?: ReactNode;
   /** Application title displayed in header (defaults to "Loom") */
   title?: ReactNode;
   /** When set, the brand/title becomes a home button. */
@@ -42,6 +48,7 @@ export function AppLayout({
   navigation,
   actions,
   sidebar,
+  banner,
   title = "Loom",
   onTitleClick,
   className,
@@ -80,6 +87,7 @@ export function AppLayout({
           {actions && <div className={styles.actions}>{actions}</div>}
         </div>
       </header>
+      {banner}
       <div className={styles.contentWrapper}>
         {navRail}
         {sidebar && <aside className={styles.sidebarSlot}>{sidebar}</aside>}

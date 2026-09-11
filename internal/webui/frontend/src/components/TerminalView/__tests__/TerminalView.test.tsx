@@ -38,7 +38,7 @@ const mockMetadataHook = vi.hoisted(() => ({
     notes: string;
     sort_order: number;
     pinned: boolean;
-    pty_alive: boolean;
+    attachable: boolean;
     attached_clients: number;
     created_at: string;
     updated_at: string;
@@ -49,6 +49,7 @@ const mockMetadataHook = vi.hoisted(() => ({
     writable?: boolean;
   }>,
   isLoading: false,
+  isFetching: false,
   error: null as Error | null,
   createTab: vi.fn().mockResolvedValue(undefined),
   updateLabel: vi.fn().mockResolvedValue(undefined),
@@ -120,6 +121,13 @@ const mockBackendsHook = vi.hoisted(() => ({
   refetch: vi.fn(),
 }));
 
+// PUPPET-125: lets a test drive a real workspace switch. Defaults are empty,
+// i.e. exactly the unresolved-workspace context every other test sees today.
+const mockWorkspaceCtx = vi.hoisted(() => ({
+  workspaceId: "",
+  activeWorkspaceName: null as string | null,
+}));
+
 vi.mock("@/hooks/workspace", async () => {
   const actual =
     await vi.importActual<typeof import("@/hooks/workspace")>(
@@ -127,6 +135,14 @@ vi.mock("@/hooks/workspace", async () => {
     );
   return {
     ...actual,
+    useWorkspaceContext: () => ({
+      ...actual.NO_WORKSPACE_CONTEXT,
+      workspaceId: mockWorkspaceCtx.workspaceId,
+      activeWorkspaceName: mockWorkspaceCtx.activeWorkspaceName,
+      workspace: mockWorkspaceCtx.workspaceId
+        ? ({ id: mockWorkspaceCtx.workspaceId } as never)
+        : null,
+    }),
     useBackendConfig: () => mockBackendConfigHook,
     useBackends: () => mockBackendsHook,
   };
@@ -225,7 +241,7 @@ function setMetadata(
     notes?: string;
     sort_order?: number;
     pinned?: boolean;
-    pty_alive?: boolean;
+    attachable?: boolean;
     attached_clients?: number;
     kind?: string;
     agent_id?: string;
@@ -242,7 +258,7 @@ function setMetadata(
     notes: t.notes ?? "",
     sort_order: t.sort_order ?? i,
     pinned: t.pinned ?? false,
-    pty_alive: t.pty_alive ?? true,
+    attachable: t.attachable ?? true,
     attached_clients: t.attached_clients ?? 0,
     kind: t.kind,
     agent_id: t.agent_id,
@@ -253,6 +269,7 @@ function setMetadata(
     updated_at: now,
   }));
   mockMetadataHook.isLoading = isLoading;
+  mockMetadataHook.isFetching = isLoading;
   mockMetadataHook.error = null;
 }
 
@@ -269,8 +286,12 @@ describe("TerminalView", () => {
     sessionStorage.clear();
     mockMetadataHook.tabs = [];
     mockMetadataHook.isLoading = true;
+    mockMetadataHook.isFetching = true;
     mockMetadataHook.error = null;
+    mockMetadataHook.refetch = vi.fn();
     mockMetadataHook.createTab = vi.fn().mockResolvedValue(undefined);
+    mockWorkspaceCtx.workspaceId = "";
+    mockWorkspaceCtx.activeWorkspaceName = null;
     mockTerminalApi.patchTerminalState.mockResolvedValue(undefined);
     mockTerminalApi.ensureAgentTerminalSession.mockImplementation(
       async (_workspaceId: string, agentName: string) => ({
@@ -284,7 +305,7 @@ describe("TerminalView", () => {
         role: "lead",
         backend: "codex",
         writable: true,
-        pty_alive: true,
+        attachable: true,
         attached_clients: 0,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -329,6 +350,40 @@ describe("TerminalView", () => {
       ).toBeInTheDocument();
     });
 
+    // PUPPET-125: a failed list load deliberately leaves the hook loading, so
+    // the skeleton alone would be permanent. The view must offer a way out.
+    it("shows a retryable error instead of a permanent skeleton on load failure", () => {
+      mockMetadataHook.tabs = [];
+      mockMetadataHook.isLoading = true;
+      mockMetadataHook.isFetching = false;
+      mockMetadataHook.error = new Error("Network error");
+      render(<TerminalView />);
+
+      expect(
+        screen.queryByTestId("loading-skeleton-terminal"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("tab-metadata-error")).toBeInTheDocument();
+      expect(screen.getByText("Network error")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("retry-tab-metadata"));
+      expect(mockMetadataHook.refetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the skeleton while a retry is in flight", () => {
+      mockMetadataHook.tabs = [];
+      mockMetadataHook.isLoading = true;
+      mockMetadataHook.isFetching = true;
+      mockMetadataHook.error = new Error("Network error");
+      render(<TerminalView />);
+
+      expect(
+        screen.getByTestId("loading-skeleton-terminal"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("tab-metadata-error"),
+      ).not.toBeInTheDocument();
+    });
+
     it("restores tabs from persisted metadata once loaded", () => {
       setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
@@ -361,12 +416,12 @@ describe("TerminalView", () => {
         {
           session_name: "DESKTOP-QA--lead-codex-1",
           label: "lead-codex-1",
-          pty_alive: false,
+          attachable: false,
         },
         {
           session_name: "issue-PROJ-42",
           label: "issue-PROJ-42",
-          pty_alive: false,
+          attachable: false,
         },
       ]);
       render(<TerminalView />);
@@ -397,12 +452,12 @@ describe("TerminalView", () => {
           label: "agent-lead-ui-e2e",
           kind: "agent",
           agent_id: "lead-ui-e2e",
-          pty_alive: true,
+          attachable: true,
         },
         {
           session_name: "session-1",
           label: "Session 1",
-          pty_alive: true,
+          attachable: true,
         },
       ]);
       render(<TerminalView />);
@@ -627,12 +682,49 @@ describe("TerminalView", () => {
       expect(mockMetadataHook.createTab).toHaveBeenCalledTimes(1);
     });
 
+    // PUPPET-125: the view never unmounts, so re-entering Terminal after a
+    // workspace switch re-arms init. useTerminalMetadata now reports
+    // isLoading === true for the not-yet-fetched workspace, and the view must
+    // defer instead of auto-creating a tab for a session whose PTY is alive
+    // (the PUT that followed was rejected with 409).
+    it("re-entering Terminal after a workspace switch restores tabs without creating one", () => {
+      // Workspace A, Terminal open: one live tab restored, nothing created.
+      mockWorkspaceCtx.workspaceId = "ws-a";
+      mockWorkspaceCtx.activeWorkspaceName = "WSA";
+      setMetadata([{ session_name: "ws-a-lead", label: "WS A lead" }]);
+      const { rerender } = render(<TerminalView isActive />);
+      expect(screen.getByTestId("tab-ws-a-lead")).toBeInTheDocument();
+      expect(mockMetadataHook.createTab).not.toHaveBeenCalled();
+
+      // Navigate away (Kanban) and switch workspace. useWorkspaceTabState wipes
+      // the tab set and re-arms init; the metadata hook is disabled and holds
+      // no workspace-fresh data.
+      rerender(<TerminalView isActive={false} />);
+      mockWorkspaceCtx.workspaceId = "ws-b";
+      mockWorkspaceCtx.activeWorkspaceName = "WSB";
+      setMetadata([]);
+      rerender(<TerminalView isActive={false} />);
+      expect(screen.queryByTestId("tab-ws-a-lead")).not.toBeInTheDocument();
+
+      // Click "Terminal": the new workspace's metadata is still in flight.
+      setMetadata([], true);
+      rerender(<TerminalView isActive />);
+      expect(mockMetadataHook.createTab).not.toHaveBeenCalled();
+
+      // The fetch lands with workspace B's existing live tab: restore, no PUT.
+      setMetadata([{ session_name: "ws-b-lead", label: "WS B lead" }]);
+      rerender(<TerminalView isActive />);
+
+      expect(mockMetadataHook.createTab).not.toHaveBeenCalled();
+      expect(screen.getByTestId("tab-ws-b-lead")).toBeInTheDocument();
+    });
+
     it("propagates route activity to the selected terminal pane", async () => {
       setMetadata([
         {
           session_name: "session-1",
           label: "Session 1",
-          pty_alive: true,
+          attachable: true,
         },
       ]);
       const { rerender } = render(<TerminalView isActive />);
@@ -1226,7 +1318,7 @@ describe("TerminalView", () => {
         role: string;
         backend: string;
         writable: boolean;
-        pty_alive: boolean;
+        attachable: boolean;
         attached_clients: number;
         created_at: string;
         updated_at: string;
@@ -1283,7 +1375,7 @@ describe("TerminalView", () => {
           role: "lead",
           backend: "codex",
           writable: true,
-          pty_alive: true,
+          attachable: true,
           attached_clients: 0,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
