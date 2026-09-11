@@ -9,6 +9,27 @@ import { decodeRecoveryHandle, type RecoveryHandle } from "./recoveryHandle";
 const BODY_LIMIT = 16 * 1024 * 1024;
 const HANDLE_HEADER = "X-Loom-Recovery-Handle";
 
+function recoveryResponseBody(
+  response: Response,
+  offer: RecoveryHandle,
+): ReadableStream<Uint8Array> {
+  if (
+    response.status !== 200 ||
+    response.headers.get(HANDLE_HEADER) !== offer.handle ||
+    response.headers.get("X-Loom-Recovery-Source") !==
+      offer.source_identity ||
+    response.headers
+      .get("Content-Type")
+      ?.split(";", 1)[0]
+      ?.trim()
+      .toLowerCase() !== "application/json" ||
+    !response.body
+  ) {
+    throw new Error("Invalid recovery response");
+  }
+  return response.body;
+}
+
 /** Read one captured source. This prepares data; it never publishes or acknowledges it. */
 export async function readIssueRecovery(
   input: RecoveryHandle,
@@ -79,21 +100,7 @@ export async function readIssueRecovery(
     ]);
     received = response;
     check();
-    if (
-      response.status !== 200 ||
-      response.headers.get(HANDLE_HEADER) !== offer.handle ||
-      response.headers.get("X-Loom-Recovery-Source") !==
-        offer.source_identity ||
-      response.headers
-        .get("Content-Type")
-        ?.split(";", 1)[0]
-        ?.trim()
-        .toLowerCase() !== "application/json" ||
-      !response.body
-    ) {
-      throw new Error("Invalid recovery response");
-    }
-    reader = response.body.getReader();
+    reader = recoveryResponseBody(response, offer).getReader();
     const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
     const parts: string[] = [];
     let bytes = 0;
