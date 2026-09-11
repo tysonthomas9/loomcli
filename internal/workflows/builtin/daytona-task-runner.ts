@@ -291,6 +291,14 @@ export async function run(ctx = {}) {
         github_pr_head: published && delivery.branch,
         github_pr_base: published && delivery.baseBranch,
         github_pr_commit: published && published.commitSha,
+        // Keys the host finalize barrier reads to record this task's stack node
+        // (stackOutcome). Emitting them is what lets a dependent resolve its base.
+        ...stackDeliveryMetadata({
+          openPullRequest: delivery.openPullRequest,
+          published,
+          branch: delivery.branch,
+          filesChanged: filesChangedFromDiffStat(diffStat.stdout),
+        }),
         daytona_sandbox_env_leak_count: "0",
         response_text: redact(textTail(stringValue(response && response.text), 1000), secrets),
       }),
@@ -587,6 +595,33 @@ function readRuntimeCredentialFile(provider) {
     return "";
   }
   return fs.readFileSync(filePath, "utf8").trim();
+}
+
+// filesChangedFromDiffStat reads the file count off a `git diff --stat` summary
+// line (" 3 files changed, 5 insertions(+), 2 deletions(-)"). Returns 0 when the
+// diff is empty, so an empty unit is reported as such rather than left unknown.
+export function filesChangedFromDiffStat(diffStat) {
+  const match = /(\d+)\s+files?\s+changed/.exec(stringValue(diffStat));
+  return match ? Number(match[1]) : 0;
+}
+
+// stackDeliveryMetadata emits the keys the host finalize barrier matches on
+// (internal/driver/task_worktree_resolver.go stackOutcome). Without them
+// stackOutcome returns ok=false, finalizeStackNode records nothing, and the
+// stack node keeps the OutputBranch it was assigned at registration — so
+// BaseBranchSliding can hand a dependent task a branch that was never pushed.
+export function stackDeliveryMetadata({ openPullRequest, published, branch, filesChanged }) {
+  const meta = { files_changed: String(filesChanged) };
+  if (published) {
+    meta.delivery = "pull_request";
+    meta.github_branch = branch;
+    meta.github_head_sha = stringValue(published.commitSha);
+    return meta;
+  }
+  meta.delivery = openPullRequest && filesChanged === 0
+    ? "pull_request_skipped_no_changes"
+    : "patch_back";
+  return meta;
 }
 
 export function deliveryPlan(request, task, taskRunId) {

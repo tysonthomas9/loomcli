@@ -193,3 +193,62 @@ describe("daytona-task-runner stack lineage parity (Stage 5)", () => {
     assert.ok(cmd.includes("--branch"), "clones the predecessor base branch");
   });
 });
+
+// The host finalize barrier (internal/driver/task_worktree_resolver.go stackOutcome)
+// classifies a stacked task's node from runtimeMetadata. It matches on `delivery`,
+// `github_branch`, `github_head_sha` and `files_changed`. This runner emitted none
+// of them, so stackOutcome returned ok=false, finalizeStackNode recorded nothing,
+// and the node kept the OutputBranch assigned at registration — letting
+// BaseBranchSliding hand a dependent a branch that was never pushed.
+describe("daytona-task-runner stack finalize metadata", () => {
+  it("reports a published PR as a stacked delivery with its branch and head SHA", () => {
+    const meta = mod.stackDeliveryMetadata({
+      openPullRequest: true,
+      published: { commitSha: "deadbeefcafe" },
+      branch: "loom/stack/epic-E/T-B",
+      filesChanged: 3,
+    });
+    assert.equal(meta.delivery, "pull_request");
+    assert.equal(meta.github_branch, "loom/stack/epic-E/T-B");
+    assert.equal(meta.github_head_sha, "deadbeefcafe");
+    assert.equal(meta.files_changed, "3");
+  });
+
+  it("reports an empty unit so the dependent slides past it", () => {
+    const meta = mod.stackDeliveryMetadata({
+      openPullRequest: true,
+      published: null,
+      branch: "loom/stack/epic-E/T-B",
+      filesChanged: 0,
+    });
+    assert.equal(meta.delivery, "pull_request_skipped_no_changes");
+    assert.equal(meta.files_changed, "0");
+    assert.equal(meta.github_branch, undefined, "no branch was pushed");
+  });
+
+  it("reports patch-back when no PR was requested", () => {
+    const meta = mod.stackDeliveryMetadata({
+      openPullRequest: false,
+      published: null,
+      branch: "",
+      filesChanged: 2,
+    });
+    assert.equal(meta.delivery, "patch_back");
+    assert.equal(meta.files_changed, "2");
+  });
+
+  it("derives files_changed from the git diff --stat summary", () => {
+    assert.equal(mod.filesChangedFromDiffStat(""), 0);
+    assert.equal(mod.filesChangedFromDiffStat("(no diff)"), 0);
+    assert.equal(
+      mod.filesChangedFromDiffStat(" a.txt | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)\n"),
+      1,
+    );
+    assert.equal(
+      mod.filesChangedFromDiffStat(
+        " a.txt | 2 +-\n b.txt | 4 ++--\n c.txt | 1 +\n 3 files changed, 5 insertions(+), 2 deletions(-)\n",
+      ),
+      3,
+    );
+  });
+});
