@@ -5,19 +5,14 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
 	"sort"
 	"strconv"
 )
 
-func parseFleetActionContract(path string) ([]contractRow, error) {
-	source, err := os.ReadFile(path) //nolint:gosec // The operator explicitly selects the FleetDB checkout.
+func parseFleetActionContract(source []byte) ([]contractRow, error) {
+	file, err := parser.ParseFile(token.NewFileSet(), fleetEventPath, source, 0)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	file, err := parser.ParseFile(token.NewFileSet(), path, source, 0)
-	if err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		return nil, fmt.Errorf("parse %s: %w", fleetEventPath, err)
 	}
 	constants := stringConstants(file)
 	actions, err := validActionNames(file)

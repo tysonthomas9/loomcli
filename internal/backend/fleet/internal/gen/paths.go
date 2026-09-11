@@ -1,10 +1,7 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
-	"go/parser"
-	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,7 +27,7 @@ func findRepoRoot() (string, error) {
 	}
 }
 
-func resolveFleetDBPath(repoRoot, outputPath, explicit string) (string, error) {
+func resolveFleetDBPath(repoRoot, explicit string) (string, error) {
 	if explicit != "" {
 		return requireFleetDB(explicit)
 	}
@@ -42,12 +39,6 @@ func resolveFleetDBPath(repoRoot, outputPath, explicit string) (string, error) {
 	canonical := findFleetDBInAncestor(repoRoot)
 	if canonical == "" {
 		return "", fmt.Errorf("FleetDB checkout not found; pass -fleet-db /path/to/fleet-db")
-	}
-	revision := generatedRevision(outputPath)
-	if revision != "" {
-		if worktree := worktreeAtRevision(canonical, revision); worktree != "" {
-			return worktree, nil
-		}
 	}
 	return canonical, nil
 }
@@ -90,41 +81,6 @@ func isFleetDB(path string) bool {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
-}
-
-func generatedRevision(path string) string {
-	file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ParseComments)
-	if err != nil {
-		return ""
-	}
-	for _, group := range file.Comments {
-		for _, comment := range group.List {
-			if revision := strings.TrimPrefix(comment.Text, "// FleetDB revision: "); revision != comment.Text {
-				return strings.TrimSpace(revision)
-			}
-		}
-	}
-	return ""
-}
-
-func worktreeAtRevision(canonical, revision string) string {
-	cmd := exec.Command("git", "-C", canonical, "worktree", "list", "--porcelain") //nolint:gosec,norawexec // Fixed git query against a discovered local checkout.
-	output, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	var path string
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "worktree ") {
-			path = strings.TrimPrefix(line, "worktree ")
-		}
-		if strings.TrimPrefix(line, "HEAD ") == revision && isFleetDB(path) {
-			return path
-		}
-	}
-	return ""
 }
 
 func gitRevision(path string) (string, error) {
