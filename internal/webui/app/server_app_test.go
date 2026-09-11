@@ -289,7 +289,7 @@ func TestServer_ConfigDefaults_AllAtOnce(t *testing.T) {
 // registered) *MultiPTYManager without panicking. This exercises the
 // server.go:143-146 aggregation now that ptyMgr has changed type.
 func TestServer_BuildHandlers_MultiPTYManagerEmpty(t *testing.T) {
-	ptyMgr := terminal.NewMultiPTYManager("bash", 0)
+	ptyMgr := terminal.NewMultiPTYManager("bash", 0, nil)
 	t.Cleanup(func() { _ = ptyMgr.Close() })
 
 	app := &Server{ptyMgr: ptyMgr}
@@ -344,7 +344,7 @@ func TestServer_BuildHandlers_MultiPTYManagerEmpty(t *testing.T) {
 // timeouts set on the *MultiPTYManager propagate through buildHandlers to
 // the /api/config/terminal response.
 func TestServer_BuildHandlers_MultiPTYManagerCustom(t *testing.T) {
-	ptyMgr := terminal.NewMultiPTYManager("bash", 42)
+	ptyMgr := terminal.NewMultiPTYManager("bash", 42, nil)
 	ptyMgr.SetGracePeriod(7 * time.Second)
 	ptyMgr.SetIdleTimeout(11 * time.Second)
 	t.Cleanup(func() { _ = ptyMgr.Close() })
@@ -388,7 +388,7 @@ func TestServer_BuildHandlers_MultiPTYManagerCustom(t *testing.T) {
 // after the graceful-shutdown path (run() in server.go) has already called
 // Close(). The MultiPTYManager must not double-error.
 func TestServer_ClosePTYMgr_IdempotentWithShutdownPath(t *testing.T) {
-	ptyMgr := terminal.NewMultiPTYManager("bash", 0)
+	ptyMgr := terminal.NewMultiPTYManager("bash", 0, nil)
 	// Simulate the graceful-shutdown path (server.go run()).
 	if err := ptyMgr.Close(); err != nil {
 		t.Fatalf("first Close (graceful shutdown path) err = %v, want nil", err)

@@ -15,7 +15,7 @@ import (
 // per-workspace managers created during tests clean up quickly.
 func newTestMultiManager(t *testing.T, maxPerWS int) *MultiPTYManager {
 	t.Helper()
-	mm := NewMultiPTYManager("cat", maxPerWS)
+	mm := NewMultiPTYManager("cat", maxPerWS, nil)
 	mm.SetGracePeriod(200 * time.Millisecond)
 	mm.SetIdleTimeout(200 * time.Millisecond)
 	t.Cleanup(func() { _ = mm.Close() })
@@ -38,7 +38,7 @@ func captureManager(t *testing.T, mm *MultiPTYManager, wsID string) *PTYManager 
 }
 
 func TestNewMultiPTYManager_Empty(t *testing.T) {
-	mm := NewMultiPTYManager("cat", 7)
+	mm := NewMultiPTYManager("cat", 7, nil)
 	t.Cleanup(func() { _ = mm.Close() })
 	if got := mm.SessionCount(); got != 0 {
 		t.Errorf("SessionCount=%d want 0", got)
@@ -500,7 +500,7 @@ func TestSessionCount_Aggregates(t *testing.T) {
 }
 
 func TestMaxSessions_ReturnsPerWS(t *testing.T) {
-	mm := NewMultiPTYManager("cat", 7)
+	mm := NewMultiPTYManager("cat", 7, nil)
 	t.Cleanup(func() { _ = mm.Close() })
 	if got := mm.MaxSessions(); got != 7 {
 		t.Errorf("MaxSessions=%d want 7", got)
@@ -519,7 +519,7 @@ func TestMaxSessions_ReturnsPerWS(t *testing.T) {
 }
 
 func TestMaxSessions_ZeroMaxReturnsDefault(t *testing.T) {
-	mm := NewMultiPTYManager("cat", 0)
+	mm := NewMultiPTYManager("cat", 0, nil)
 	t.Cleanup(func() { _ = mm.Close() })
 	if got := mm.MaxSessions(); got != defaultPTYMaxSessions {
 		t.Errorf("MaxSessions with 0 cap = %d, want %d", got, defaultPTYMaxSessions)
@@ -527,7 +527,7 @@ func TestMaxSessions_ZeroMaxReturnsDefault(t *testing.T) {
 }
 
 func TestClose_ShutsDownAll(t *testing.T) {
-	mm := NewMultiPTYManager("cat", 0)
+	mm := NewMultiPTYManager("cat", 0, nil)
 	mm.SetGracePeriod(5 * time.Second)
 	if err := mm.Register("ws1", t.TempDir()); err != nil {
 		t.Fatalf("Register ws1: %v", err)
@@ -558,7 +558,7 @@ func TestClose_ShutsDownAll(t *testing.T) {
 }
 
 func TestGraceAndIdle_Forward(t *testing.T) {
-	mm := NewMultiPTYManager("cat", 0)
+	mm := NewMultiPTYManager("cat", 0, nil)
 	t.Cleanup(func() { _ = mm.Close() })
 	mm.SetGracePeriod(123 * time.Millisecond)
 	mm.SetIdleTimeout(234 * time.Millisecond)
