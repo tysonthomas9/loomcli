@@ -403,3 +403,47 @@ func TestErrorKindConstants(t *testing.T) {
 		}
 	}
 }
+
+// TestIsIssueClosedConflict pins the terminal-row question: a conflict raised
+// because the target issue is closed is not retryable, and every other conflict
+// must stay outside the carve-out. IsAlreadyClosedConflict answers the sibling
+// question ("was my close redundant?") over the same server phrasings, so both
+// are asserted here — the shared matcher must not drift for one of them.
+func TestIsIssueClosedConflict(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"write refused by a closed row", ErrConflict("Update", "issue is closed"), true},
+		{"close against an already closed row", ErrConflict("Close", "issue is already closed"), true},
+		{"mixed case from the server", ErrConflict("Update", "Issue Is Closed"), true},
+		{"open blockers", ErrConflict("Close", "issue has open blockers"), false},
+		{"blocked by dependency", ErrConflict("Close", "blocked by dependency X"), false},
+		{"dependency conflict naming a closed row", ErrConflict("Close", "dependency is closed, blocker remains"), false},
+		{"claim race", ErrConflict("Update", "claim is held by another session"), false},
+		{"not a conflict", ErrValidation("Update", "issue is closed"), false},
+		{"plain error", errors.New("issue is closed"), false},
+		{"nil", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsIssueClosedConflict(tt.err); got != tt.want {
+				t.Errorf("IsIssueClosedConflict(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+			// Unchanged behavior: the sibling answers the same over these inputs.
+			if got := IsAlreadyClosedConflict(tt.err); got != tt.want {
+				t.Errorf("IsAlreadyClosedConflict(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+// A wrapped conflict still matches: the hook executor sees the error through
+// the fleet client's own wrapping, never bare.
+func TestIsIssueClosedConflict_Wrapped(t *testing.T) {
+	err := fmt.Errorf("write_design: %w", ErrConflict("Update", "issue is closed"))
+	if !IsIssueClosedConflict(err) {
+		t.Errorf("IsIssueClosedConflict(wrapped) = false, want true")
+	}
+}
