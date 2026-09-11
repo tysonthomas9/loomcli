@@ -55,6 +55,7 @@ export type ResyncReason = "cap" | "error" | "expired" | "overflow";
 /** Cursor transition carried by a resync frame. */
 export interface ResyncEvent {
   from: string | undefined;
+  /** Effective resume checkpoint after the frame; empty means no checkpoint. */
   to: string;
   reason: ResyncReason;
 }
@@ -414,7 +415,9 @@ export class WorkspaceSSEClient {
 
       this.callSafely("onResync", this.onResync, {
         from: previousEventId,
-        to: event.id,
+        // A missing ID preserves the transport checkpoint; an explicit empty
+        // ID resets it. The parser message ID cannot distinguish these cases.
+        to: this.lastEventId ?? "",
         reason,
       });
       return;

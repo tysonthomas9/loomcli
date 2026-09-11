@@ -246,24 +246,10 @@ func (h *Handler) fetchCatchUp(
 			return mutations, seen, &resyncInstruction{cursor: since, reason: "error"}, fmt.Errorf("catch-up page %d did not advance its cursor", pageNumber)
 		}
 		pageCursors[page.Cursor] = struct{}{}
-		for _, mutation := range page.Events {
-			payload := BackendMutationToPayload(mutation, workspaceID)
-			if !MatchesSourceRepoFilter(sourceRepos, payload.SourceRepo) {
-				continue
-			}
-			id := eventIDForMutation(payload)
-			mutations = append(mutations, preparedMutation{id: id, payload: payload})
-			if payload.Cursor != "" {
-				seen[payload.Cursor] = struct{}{}
-			}
-		}
+		mutations = appendReplayMutations(mutations, page.Events, workspaceID, sourceRepos, seen)
 		cursor = page.Cursor
 		if !page.HasMore {
-			// The authoritative page cursor includes filtered-out records. Only
-			// completed replay can publish this checkpoint; failures use resync.
-			if cursor != since && (len(mutations) == 0 || mutations[len(mutations)-1].id != cursor) {
-				mutations = append(mutations, preparedMutation{id: cursor, checkpoint: true})
-			}
+			mutations = appendReplayCheckpoint(mutations, since, cursor)
 			return mutations, seen, nil, nil
 		}
 		if pageNumber == h.catchUpMaxPages {
@@ -274,6 +260,31 @@ func (h *Handler) fetchCatchUp(
 		}
 	}
 	return mutations, seen, &resyncInstruction{cursor: cursor, reason: "cap"}, fmt.Errorf("catch-up exceeded page budget")
+}
+
+// appendReplayMutations prepares matching records and tracks their replay IDs.
+func appendReplayMutations(mutations []preparedMutation, events []backend.MutationData, workspaceID string, sourceRepos []string, seen map[string]struct{}) []preparedMutation {
+	for _, mutation := range events {
+		payload := BackendMutationToPayload(mutation, workspaceID)
+		if !MatchesSourceRepoFilter(sourceRepos, payload.SourceRepo) {
+			continue
+		}
+		id := eventIDForMutation(payload)
+		mutations = append(mutations, preparedMutation{id: id, payload: payload})
+		if payload.Cursor != "" {
+			seen[payload.Cursor] = struct{}{}
+		}
+	}
+	return mutations
+}
+
+// appendReplayCheckpoint covers filtered-out records after successful replay.
+// Failed or incomplete replay must use resync instead.
+func appendReplayCheckpoint(mutations []preparedMutation, since, cursor string) []preparedMutation {
+	if cursor != since && (len(mutations) == 0 || mutations[len(mutations)-1].id != cursor) {
+		return append(mutations, preparedMutation{id: cursor, checkpoint: true})
+	}
+	return mutations
 }
 
 func catchUpErrorResync(err error, ctx context.Context, since, cursor string) *resyncInstruction {
@@ -412,7 +423,15 @@ func (h *Handler) writeOverflowResync(
 	}
 
 drained:
-	if err := sw.WriteResync(highest.cursor, "overflow"); err != nil {
+	var err error
+	if highest.cursor == "" {
+		// A transient notification cannot authorize a new durable checkpoint.
+		// Omit the id field; an explicit empty id would clear resume state.
+		err = sw.WriteEventNoID("resync", `{"reason":"overflow"}`)
+	} else {
+		err = sw.WriteResync(highest.cursor, "overflow")
+	}
+	if err != nil {
 		return closed, err
 	}
 	if highest.seq > *resyncSeq {
@@ -429,6 +448,9 @@ func writePreparedMutation(sw frameWriter, mutation preparedMutation) error {
 	if err != nil {
 		return nil
 	}
+	if mutation.id == "" {
+		return sw.WriteEventNoID("mutation", string(data))
+	}
 	return sw.WriteEventID(mutation.id, "mutation", string(data))
 }
 
@@ -438,33 +460,19 @@ func writeSSEEvent(sw frameWriter, mutation *MutationPayload) error {
 		slog.Error("SSE marshal error", "err", err)
 		return nil
 	}
-	return sw.WriteEventID(eventIDForMutation(mutation), "mutation", string(data))
+	id := eventIDForMutation(mutation)
+	if id == "" {
+		return sw.WriteEventNoID("mutation", string(data))
+	}
+	return sw.WriteEventID(id, "mutation", string(data))
 }
 
+// Only durable source cursors may advance the browser resume checkpoint.
 func eventIDForMutation(mutation *MutationPayload) string {
-	if mutation != nil && mutation.deliveryCursor != "" {
-		return mutation.deliveryCursor
+	if mutation == nil {
+		return ""
 	}
-	if mutation != nil && mutation.Cursor != "" {
-		return mutation.Cursor
-	}
-	if mutation == nil || mutation.Timestamp == "" {
-		return fmt.Sprintf("%d", NextEventID())
-	}
-	ts, err := time.Parse(time.RFC3339Nano, mutation.Timestamp)
-	if err != nil {
-		return fmt.Sprintf("%d", NextEventID())
-	}
-	tsMs := ts.UnixMilli()
-	for {
-		current := eventIDCounter.Load()
-		if tsMs <= current {
-			return fmt.Sprintf("%d", NextEventID())
-		}
-		if eventIDCounter.CompareAndSwap(current, tsMs) {
-			return fmt.Sprintf("%d", tsMs)
-		}
-	}
+	return mutation.Cursor
 }
 
 func (h *Handler) validateAuth(w http.ResponseWriter, r *http.Request) bool {
