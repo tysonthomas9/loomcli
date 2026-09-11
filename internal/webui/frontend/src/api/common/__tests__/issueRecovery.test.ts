@@ -8,7 +8,7 @@ const offer: RecoveryHandle = {
   workspace: "WS",
   source_repos: [],
   expires_at: "2026-09-05T12:01:00Z",
-  manifest: "fleet.issue-workspace.v3",
+  manifest: "fleet.issue-workspace.v4",
 };
 function issue(id = "WS-1"): Record<string, unknown> {
   return {
@@ -38,6 +38,7 @@ function document(): Record<string, unknown> {
     blocked: [],
     deferred: [],
     dependencies: [],
+    comments: [],
   };
 }
 function prepare(value: unknown) {
@@ -55,6 +56,7 @@ describe("prepareIssueRecovery", () => {
       "blocked",
       "deferred",
       "dependencies",
+      "comments",
     ]);
     expect(result.issues).toEqual([]);
     expect(Object.isFrozen(result)).toBe(true);

@@ -8,7 +8,7 @@ function offer() {
     workspace: "WS",
     source_repos: ["a", "b"],
     expires_at: "2026-09-05T12:01:00Z",
-    manifest: "fleet.issue-workspace.v3",
+    manifest: "fleet.issue-workspace.v4",
   };
 }
 describe("decodeRecoveryHandle", () => {
@@ -32,6 +32,7 @@ describe("decodeRecoveryHandle", () => {
     ["noncanonical", { handle: "A".repeat(42) + "B" }],
     ["foreign", { workspace: "OTHER" }],
     ["manifest", { manifest: "other" }],
+    ["legacy v3 without comments", { manifest: "fleet.issue-workspace.v3" }],
     [
       "legacy v2 without dependencies",
       { manifest: "fleet.issue-workspace.v2" },

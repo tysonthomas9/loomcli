@@ -47,12 +47,19 @@ export interface NativeRecoveryDependency {
   readonly created_at: string;
   readonly created_by: string;
 }
+export interface NativeRecoveryComment {
+  readonly id: string;
+  readonly issue_id: string;
+  readonly author: string;
+  readonly body: string;
+  readonly created_at: string;
+}
 /** Prepared native data only. Coverage names identify this fixed manifest, not
  * mounted UI query coverage, a cache commit, or permission to acknowledge SSE. */
 export interface PreparedIssueRecovery {
   readonly offer: RecoveryHandle;
   readonly document: string;
-  readonly manifest: "fleet.issue-workspace.v3";
+  readonly manifest: "fleet.issue-workspace.v4";
   readonly workspace: string;
   readonly through: string;
   readonly offerSourceIdentity: string;
@@ -62,12 +69,14 @@ export interface PreparedIssueRecovery {
   readonly blocked: readonly NativeRecoveryBlocked[];
   readonly deferred: readonly NativeRecoveryIssue[];
   readonly dependencies: readonly NativeRecoveryDependency[];
+  readonly comments: readonly NativeRecoveryComment[];
   readonly coverage: readonly [
     "issues",
     "ready",
     "blocked",
     "deferred",
     "dependencies",
+    "comments",
   ];
 }
 function fail(): never {
@@ -325,16 +334,49 @@ function dependencies(
     if (seen.has(identity)) fail();
     seen.add(identity);
     text(row.created_by);
-    timestamp(row.created_at);
-    const createdAt = text(row.created_at);
-    // Date.parse truncates sub-millisecond precision; preserve valid nonzero
-    // nanoseconds while rejecting Go's zero instant, including offset aliases.
-    if (
-      Date.parse(createdAt) === Date.parse("0001-01-01T00:00:00Z") &&
-      !/\.\d*[1-9]\d*(?:Z|[+-]\d{2}:\d{2})$/.test(createdAt)
-    )
-      fail();
+    nonzeroTimestamp(row.created_at);
     return row as unknown as NativeRecoveryDependency;
+  });
+}
+function nonzeroTimestamp(value: unknown) {
+  timestamp(value);
+  const source = text(value);
+  // Date.parse truncates nanoseconds. Reject Go's zero instant, including
+  // offset aliases, while preserving a nonzero sub-millisecond fraction.
+  if (
+    Date.parse(source) === Date.parse("0001-01-01T00:00:00Z") &&
+    !/\.\d*[1-9]\d*(?:Z|[+-]\d{2}:\d{2})$/.test(source)
+  )
+    fail();
+}
+function nonblank(value: unknown): string {
+  const source = text(value);
+  // Exact unicode.IsSpace set used by Go strings.TrimSpace. JS trim also
+  // removes BOM and omits NEL; neither behavior matches the native contract.
+  if (
+    /^[\t\n\v\f\r\u0020\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]*$/.test(
+      source,
+    )
+  )
+    fail();
+  return source;
+}
+function comments(
+  values: unknown[],
+  all: Map<string, NativeRecoveryIssue>,
+): NativeRecoveryComment[] {
+  const seen = new Set<string>();
+  const encoder = new TextEncoder();
+  return values.map((value) => {
+    const row = object(value);
+    exact(row, ["id", "issue_id", "author", "body", "created_at"]);
+    const id = nonblank(row.id);
+    if (seen.has(id) || !all.has(text(row.issue_id))) fail();
+    seen.add(id);
+    nonblank(row.author);
+    if (encoder.encode(nonblank(row.body)).length > 10000) fail();
+    nonzeroTimestamp(row.created_at);
+    return row as unknown as NativeRecoveryComment;
   });
 }
 function freeze<T>(value: T): T {
@@ -372,6 +414,7 @@ export function prepareIssueRecovery(
     "blocked",
     "deferred",
     "dependencies",
+    "comments",
   ]);
   if (
     root.manifest !== validatedOffer.manifest ||
@@ -398,7 +441,7 @@ export function prepareIssueRecovery(
   return freeze({
     document,
     offer: validatedOffer,
-    manifest: "fleet.issue-workspace.v3",
+    manifest: "fleet.issue-workspace.v4",
     workspace: validatedOffer.workspace,
     through,
     offerSourceIdentity: validatedOffer.source_identity,
@@ -408,6 +451,14 @@ export function prepareIssueRecovery(
     blocked: blockedRows,
     deferred,
     dependencies: dependencies(array(root.dependencies), all),
-    coverage: ["issues", "ready", "blocked", "deferred", "dependencies"],
+    comments: comments(array(root.comments), all),
+    coverage: [
+      "issues",
+      "ready",
+      "blocked",
+      "deferred",
+      "dependencies",
+      "comments",
+    ],
   }) as PreparedIssueRecovery;
 }
