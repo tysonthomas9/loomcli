@@ -1333,6 +1333,36 @@ describe("issues API", () => {
       expect(result[0].dependencies).toBeUndefined();
     });
 
+    it("preserves the source repo used by client-side graph filtering", async () => {
+      mockApiGet.mockResolvedValue(
+        okResponse({
+          success: true,
+          data: [
+            {
+              id: "issue-repo",
+              title: "Repository-scoped graph issue",
+              issue_type: "task",
+              priority: 2,
+              status: "open",
+              source_repo: "frontend",
+              labels: [],
+              created_at: "2024-01-01T00:00:00Z",
+              updated_at: "2024-01-01T00:00:00Z",
+            },
+          ],
+        }),
+      );
+
+      const result = await fetchGraphIssues("test-ws-id", {
+        source_repos: ["frontend"],
+      });
+
+      expect(result[0]).toMatchObject({
+        id: "issue-repo",
+        repo: "frontend",
+      });
+    });
+
     it("handles issues with empty dependencies array", async () => {
       mockApiGet.mockResolvedValue(
         okResponse({

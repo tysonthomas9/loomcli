@@ -266,6 +266,10 @@ function App() {
   );
   const isLoading = useStore(issueStore, (s) => s.isLoading);
   const error = useStore(issueStore, (s) => s.error);
+  const retainSnapshotOnError = useStore(
+    issueStore,
+    (s) => s.retainSnapshotOnError,
+  );
   const retryCount = useStore(issueStore, (s) => s.retryCount);
   const nextRetryAt = useStore(issueStore, (s) => s.nextRetryAt);
   const pendingIds = useStore(issueStore, (s) => s.pendingIds);
@@ -1213,6 +1217,7 @@ function App() {
       hasActiveFilters,
       isLoading,
       error,
+      retainSnapshotOnError,
       retryCount,
       nextRetryAt,
       connectionState,
@@ -1239,6 +1244,7 @@ function App() {
       hasActiveFilters,
       isLoading,
       error,
+      retainSnapshotOnError,
       retryCount,
       nextRetryAt,
       connectionState,

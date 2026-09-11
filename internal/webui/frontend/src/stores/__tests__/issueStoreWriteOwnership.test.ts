@@ -1,3 +1,4 @@
+import { ApiError } from "../../types/common";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryRecoveryCoordinator } from "../../hooks/common/queryRecovery";
 import { createIssueStore } from "../issueStore";
@@ -63,6 +64,49 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("issue store write ownership", () => {
+  it.each([{ snapshot: [] }, { snapshot: [issue()] }])(
+    "keeps a loaded snapshot visible during refetch: %j",
+    async ({ snapshot }) => {
+      vi.mocked(getReadyIssues).mockResolvedValueOnce(snapshot);
+      await configure();
+      const page = deferred<Issue[]>();
+      vi.mocked(getReadyIssues).mockReturnValueOnce(page.promise);
+      const refresh = store.getState().refetch();
+      expect(store.getState().isLoading).toBe(false);
+      expect([...store.getState().issuesMap.values()]).toEqual(snapshot);
+      page.resolve(snapshot);
+      await refresh;
+    },
+  );
+
+  it("shows loading and clears the previous snapshot when repository scope changes", async () => {
+    await configure();
+    const page = deferred<Issue[]>();
+    vi.mocked(getReadyIssues).mockReturnValueOnce(page.promise);
+    const refresh = configure("A", ["repo-b"]);
+    expect(store.getState().isLoading).toBe(true);
+    expect(store.getState().issuesMap.size).toBe(0);
+    page.resolve([]);
+    await refresh;
+  });
+
+  it("does not reuse loaded state after reset or during fenced recovery", async () => {
+    await configure();
+    const recoveryPage = deferred<Issue[]>();
+    vi.mocked(getReadyIssues).mockReturnValueOnce(recoveryPage.promise);
+    const recovery = recover();
+    expect(store.getState().isLoading).toBe(true);
+    recoveryPage.resolve([issue()]);
+    await recovery;
+    store.getState().reset();
+    const page = deferred<Issue[]>();
+    vi.mocked(getReadyIssues).mockReturnValueOnce(page.promise);
+    const refresh = configure();
+    expect(store.getState().isLoading).toBe(true);
+    page.resolve([]);
+    await refresh;
+  });
+
   it("an already-aborted fetch cannot retire the valid in-flight read", async () => {
     await configure();
     const page = deferred<Issue[]>();
@@ -429,3 +473,62 @@ describe("issue store write ownership", () => {
     unsubscribe();
   });
 });
+
+it.each([{ snapshot: [] }, { snapshot: [issue()] }])(
+  "retains only a committed same-scope snapshot after transient failure: %j",
+  async ({ snapshot }) => {
+    vi.mocked(getReadyIssues).mockResolvedValueOnce(snapshot);
+    await configure();
+    vi.mocked(getReadyIssues).mockRejectedValue(
+      new TypeError("Failed to fetch"),
+    );
+    await store.getState().refetch();
+    expect(store.getState().retainSnapshotOnError).toBe(true);
+    expect(store.getState().error).toBe("Failed to fetch");
+    await configure("B");
+    expect(store.getState().retainSnapshotOnError).toBe(false);
+  },
+);
+
+it("does not retain a snapshot after initial failure or explicit recovery failure", async () => {
+  vi.mocked(getReadyIssues).mockRejectedValueOnce(
+    new TypeError("Failed to fetch"),
+  );
+  await configure();
+  expect(store.getState().retainSnapshotOnError).toBe(false);
+  await configure();
+  vi.mocked(getReadyIssues).mockRejectedValueOnce(
+    new TypeError("Failed to fetch"),
+  );
+  await expect(recover()).rejects.toThrow();
+  expect(store.getState().retainSnapshotOnError).toBe(false);
+});
+
+it("keeps permanent errors blocking even after a successful snapshot", async () => {
+  await configure();
+  vi.mocked(getReadyIssues).mockRejectedValueOnce(
+    new ApiError(403, "Forbidden"),
+  );
+  await store.getState().refetch();
+  expect(store.getState().retainSnapshotOnError).toBe(false);
+  expect(store.getState().error).toContain("403");
+});
+
+it.each(["permission", "recovery"])(
+  "does not requalify a retired snapshot after %s failure",
+  async (kind) => {
+    await configure();
+    vi.mocked(getReadyIssues).mockRejectedValueOnce(
+      new ApiError(403, "Forbidden"),
+    );
+    if (kind === "permission") await store.getState().refetch();
+    else await expect(recover()).rejects.toThrow();
+    const pending = deferred<Issue[]>();
+    vi.mocked(getReadyIssues).mockReturnValueOnce(pending.promise);
+    const retry = store.getState().refetch();
+    expect(store.getState().isLoading).toBe(true);
+    pending.reject(new TypeError("Failed to fetch"));
+    await retry;
+    expect(store.getState().retainSnapshotOnError).toBe(false);
+  },
+);

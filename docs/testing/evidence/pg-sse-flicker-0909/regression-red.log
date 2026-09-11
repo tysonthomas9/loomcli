@@ -1,0 +1,56 @@
+
+ RUN  v4.0.18 /Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend
+
+ ❯ src/stores/__tests__/issueStoreWriteOwnership.test.ts (23 tests | 2 failed) 19ms
+     × keeps a loaded snapshot visible during refetch: {"snapshot":[]} 6ms
+     × keeps a loaded snapshot visible during refetch: {"snapshot":[{"id":"same","title":"original","status":"open","priority":2,"repo":"repo-a","source_repo":"repo-a","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}]} 1ms
+     ✓ shows loading and clears the previous snapshot when repository scope changes 0ms
+     ✓ does not reuse loaded state after reset or during fenced recovery 1ms
+     ✓ an already-aborted fetch cannot retire the valid in-flight read 0ms
+     ✓ filters foreign mutation before optimistic buffering {"workspace_id":"B","source_repo":"repo-a"} 1ms
+     ✓ filters foreign mutation before optimistic buffering {"workspace_id":"A","source_repo":"repo-b"} 0ms
+     ✓ old timed-out command cannot retire newer command (failure=false) 1ms
+     ✓ old timed-out command cannot retire newer command (failure=true) 0ms
+     ✓ rejects recovery while an API command remains unsettled after timeout and A-B-A reset 1ms
+     ✓ rejects recovery if a command starts and settles while its read is pending 0ms
+     ✓ rejects mismatched workspace before command API or optimistic write 0ms
+     ✓ scope change retires old optimistic visibility (workspace) 0ms
+     ✓ scope change retires old optimistic visibility (repo) 0ms
+     ✓ scope change retires old optimistic visibility (mode) 0ms
+     ✓ a reset A-B-A old command cannot clear a new command with the same ID 0ms
+     ✓ rechecks an accepted mutation revision before the combined recovery can finish 1ms
+     ✓ rejects reentrant command admission at recovery publication without retiring that command 0ms
+     ✓ ignores retired subscription callbacks and repeated old unsubscribe preserves the new source 0ms
+     ✓ refetches the saved filter and repository snapshot after caller mutation 0ms
+     ✓ does not supersede a newer same-scope fetch started synchronously by scope clearing 0ms
+     ✓ scope retirement cancels an old optimistic rollback timer 1ms
+     ✓ does not schedule an old retry after its error subscriber installs a new workspace 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/stores/__tests__/issueStoreWriteOwnership.test.ts > issue store write ownership > keeps a loaded snapshot visible during refetch: {"snapshot":[]}
+ FAIL  src/stores/__tests__/issueStoreWriteOwnership.test.ts > issue store write ownership > keeps a loaded snapshot visible during refetch: {"snapshot":[{"id":"same","title":"original","status":"open","priority":2,"repo":"repo-a","source_repo":"repo-a","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}]}
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/stores/__tests__/issueStoreWriteOwnership.test.ts:74:42
+     72|       vi.mocked(getReadyIssues).mockReturnValueOnce(page.promise);
+     73|       const refresh = store.getState().refetch();
+     74|       expect(store.getState().isLoading).toBe(false);
+       |                                          ^
+     75|       expect([...store.getState().issuesMap.values()]).toEqual(snapsho…
+     76|       page.resolve(snapshot);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 21 passed (23)
+   Start at  17:51:26
+   Duration  368ms (transform 165ms, setup 0ms, import 251ms, tests 19ms, environment 0ms)
+

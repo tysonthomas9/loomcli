@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli test-skills-release-compat fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-postgres-up local-mode-postgres-down local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-ci test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli test-skills-release-compat test-sse-ui-transitions test-sse-ui-transition-runner fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-postgres-up local-mode-postgres-down local-mode-postgres-sse-verify local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-ci test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -98,6 +98,17 @@ test-fleetdb-embedded: build
 # server pin.
 test-skills-release-compat:
 	@scripts/test-vercel-skills-compat.sh
+
+# Exact, zero-skip SSE/UI transition manifest. Mocked runs need only frontend
+# dependencies; Redis/PostgreSQL runs build a fresh pinned Fleet/Loom stack and
+# remove only their generated Compose project. Example:
+#   SSE_UI_BACKEND=redis SSE_UI_RUN_ID=review-123 make test-sse-ui-transitions
+test-sse-ui-transitions:
+	@: "$${SSE_UI_BACKEND:?set SSE_UI_BACKEND=mocked, redis or postgres}"
+	@scripts/test-sse-ui-transitions.sh --backend "$${SSE_UI_BACKEND}"
+
+test-sse-ui-transition-runner:
+	@scripts/test-sse-ui-transition-runner.sh
 
 test-fleetdb-supervisor:
 	@echo "Running fleet-db supervisor control-plane gate..."
@@ -268,6 +279,22 @@ local-mode-postgres-up: local-mode-frontend-dist
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
 	$$compose $(LOCAL_MODE_POSTGRES_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
+
+# Runs the real browser suite, including an explicit run-owned proxy interruption.
+local-mode-postgres-sse-verify:
+	@case "$(LOCAL_MODE_COMPOSE_PROJECT)" in loomcli-pg-browser-*) ;; *) echo "Use a dedicated loomcli-pg-browser-* project for proxy fault verification" >&2; exit 2 ;; esac
+	@cd internal/webui/frontend && \
+	  RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 LOOM_API_KEY=local-mode-test-unused \
+	  LOCAL_MODE_COMPOSE_PROJECT="$(LOCAL_MODE_COMPOSE_PROJECT)" \
+	  LOOM_SSE_TEST_SOURCE_REPO="$${LOOM_SSE_TEST_SOURCE_REPO:-/workspace/source-repo}" \
+	  LOOM_SSE_TEST_PROXY_CONTAINER="$(LOCAL_MODE_COMPOSE_PROJECT)-ui-local-1" \
+	  LOOM_BASE_URL="http://127.0.0.1:$${LOCAL_MODE_API_PORT:-8282}" \
+	  LOOM_FRONTEND_BASE_URL="http://127.0.0.1:$${LOCAL_MODE_UI_PORT:-8283}" \
+	  PLAYWRIGHT_JSON_OUTPUT_FILE="$${PLAYWRIGHT_JSON_OUTPUT_FILE:-$(CURDIR)/internal/webui/frontend/test-results/pg-sse-report.json}" \
+	  npx playwright test --project=integration \
+	    tests/e2e/integration/sse-updates.integration.spec.ts \
+	    tests/e2e/integration/sse-multiclient.integration.spec.ts \
+	    --workers=1 --retries=0 --reporter=line,json
 
 local-mode-postgres-down:
 	@set -e; \
@@ -767,6 +794,8 @@ help:
 	@echo "  make test-e2e          - Run Playwright mocked e2e tests (no server)"
 	@echo "  make test-fleetdb-ui   - Run fleet-db-only UI regression suite"
 	@echo "  make test-skills-release-compat - Verify the pinned Vercel corpus against a FleetDB checkout"
+	@echo "  make test-sse-ui-transitions - Exact SSE/UI P0 manifest (set SSE_UI_BACKEND=mocked|redis|postgres)"
+	@echo "  make test-sse-ui-transition-runner - Fail-closed manifest/runner self-tests"
 	@echo "  make test-env-up        - Start the disposable fleet-db test backend (workspace LOOMTEST, :53351)"
 	@echo "  make test-env-down      - Stop it and drop its volumes"
 	@echo "                            Point a shell at it: eval \"\$$(scripts/test-env.sh env)\""
@@ -774,6 +803,7 @@ help:
 	@echo "  make local-mode-up      - Run local-mode Podman/Docker stack"
 	@echo "  make local-mode-postgres-up - Run PostgreSQL committed-workspace local-mode stack"
 	@echo "  make local-mode-postgres-down - Remove this PostgreSQL local-mode project and volumes"
+	@echo "  make local-mode-postgres-sse-verify - Real browser SSE and owned proxy interruption proof"
 	@echo "  make local-mode-codex-up - Run local-mode stack with Codex agents"
 	@echo "  make local-mode-verify  - Verify deterministic local-mode stack"
 	@echo "  make local-mode-codex-verify - Verify Codex local-mode stack"

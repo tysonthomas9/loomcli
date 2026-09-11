@@ -193,7 +193,11 @@ export function useIssueDetail(): UseIssueDetailReturn {
             const missing =
               failure instanceof ApiError && failure.status === 404;
             setIsNotFound(missing);
-            if (missing) setIssueDetails(null);
+            // An inaccessible snapshot must not reappear while a retry loads.
+            const inaccessible =
+              failure instanceof ApiError &&
+              (failure.status === 401 || failure.status === 403);
+            if (missing || inaccessible) setIssueDetails(null);
           },
           onLoading: (loading) => {
             if (current()) {

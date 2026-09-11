@@ -45,8 +45,13 @@ services:
   fleet-db:
     image: ${LOCAL_MODE_FLEETDB_IMAGE:-loomcli-local-mode-fleet-db:latest}
     build:
-      context: ../../../fleet-db
+      context: ${LOCAL_MODE_FLEETDB_BUILD_CONTEXT:-../../../fleet-db}
       dockerfile: deploy/docker/Dockerfile
+      args:
+        # CI passes the exact pinned source SHA. The Fleet binary logs this at
+        # startup so backend identity is based on runtime evidence, not a
+        # matrix label or mutable image tag.
+        COMMIT: ${LOCAL_MODE_FLEETDB_BUILD_REVISION:-local-mode-unpinned}
     depends_on:
       redis:
         condition: service_healthy
@@ -98,7 +103,7 @@ services:
       LOOM_FRONTEND_URL: "http://localhost:${LOCAL_MODE_UI_PORT:-8283},http://127.0.0.1:${LOCAL_MODE_UI_PORT:-8283},http://localhost:3000,http://127.0.0.1:3000,http://localhost:3100,http://127.0.0.1:3100"
       LOOM_LOCAL_MODE_PLAN_TASK_ID: LOCALMODE-2
       LOOM_LOCAL_MODE_CODE_TASK_ID: LOCALMODE-3
-      LOOM_LOCAL_MODE_STEP_DELAY: "2"
+      LOOM_LOCAL_MODE_STEP_DELAY: ${LOCAL_MODE_STEP_DELAY:-2}
     networks: [local-mode]
     ports:
       - "${LOCAL_MODE_API_PORT:-8282}:8080"

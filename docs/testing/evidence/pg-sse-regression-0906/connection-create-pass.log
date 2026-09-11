@@ -1,0 +1,14 @@
+
+Running 2 tests using 1 worker
+
+(node:64038) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:64038) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1/2] [integration] › tests/e2e/integration/sse-updates.integration.spec.ts:111:1 › fetch SSE establishes with a connected frame @smoke
+[2/2] [integration] › tests/e2e/integration/sse-updates.integration.spec.ts:122:1 › API-created issue renders before projection refresh then converges @smoke
+  2 passed (4.0s)

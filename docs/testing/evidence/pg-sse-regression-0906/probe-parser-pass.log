@@ -1,0 +1,10 @@
+
+ RUN  v4.0.18 /Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend
+
+ ✓ src/api/common/__tests__/sseBrowserProbe.test.ts (3 tests) 2ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  23:50:32
+   Duration  92ms (transform 21ms, setup 0ms, import 26ms, tests 2ms, environment 0ms)
+

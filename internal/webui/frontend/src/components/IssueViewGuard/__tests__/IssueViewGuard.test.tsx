@@ -380,3 +380,21 @@ describe("IssueViewGuard", () => {
     });
   });
 });
+
+it("retains the mounted board while a usable snapshot refresh fails", () => {
+  const props = defaultProps();
+  const { rerender } = render(<IssueViewGuard {...props} />);
+  const board = screen.getByTestId("children-content");
+  rerender(
+    <IssueViewGuard
+      {...props}
+      error="Network unavailable"
+      retainSnapshotOnError
+    />,
+  );
+  expect(screen.getByTestId("children-content")).toBe(board);
+  expect(screen.queryByTestId("error-display")).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "showing last known state",
+  );
+});

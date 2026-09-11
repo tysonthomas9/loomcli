@@ -27,6 +27,7 @@ export interface WorkspaceViewData {
   hasActiveFilters: boolean;
   isLoading: boolean;
   error: string | null;
+  retainSnapshotOnError?: boolean;
   retryCount: number;
   nextRetryAt: number | null;
   connectionState: string;
@@ -87,6 +88,7 @@ export const NO_WORKSPACE_VIEW_DATA: WorkspaceViewData = {
   hasActiveFilters: false,
   isLoading: false,
   error: null,
+  retainSnapshotOnError: false,
   retryCount: 0,
   nextRetryAt: null,
   connectionState: "disconnected",

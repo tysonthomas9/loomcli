@@ -1,0 +1,33 @@
+{
+  "task": "LOCALMODE-8",
+  "workflow": "passed",
+  "backend": "localdogfood",
+  "agent_browser": "0.37.1",
+  "recording": {
+    "capturedFrames": 8731,
+    "fps": 60,
+    "frames": 22683,
+    "lifecycle": {
+      "effectiveLaunch": {
+        "browserLaunched": true,
+        "engine": "chrome",
+        "launchHash": 9869355950567186823
+      },
+      "launched": false,
+      "relaunchedBrowser": false,
+      "restartedBackground": false,
+      "restoreStatus": "not_configured",
+      "reused": true,
+      "saveStatus": "not_attempted"
+    },
+    "path": "/private/tmp/sse-flow-fixed-0909/create-plan-implement.mp4"
+  },
+  "loading_skeleton_samples": 0,
+  "removed_existing_cards": [],
+  "baseline_empty_board_durations_ms": [
+    20,
+    22,
+    18,
+    16
+  ]
+}

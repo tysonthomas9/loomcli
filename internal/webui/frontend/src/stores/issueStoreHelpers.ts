@@ -98,6 +98,7 @@ export interface IssueStoreState {
   issuesMap: Map<string, Issue>;
   isLoading: boolean;
   error: string | null;
+  retainSnapshotOnError: boolean;
   /** Current auto-retry attempt: 0 = no retries, 1 = first retry, etc. */
   retryCount: number;
   /** Timestamp (ms) when next auto-retry fires, or null if not retrying. */
@@ -166,6 +167,7 @@ export const INITIAL_STATE: IssueStoreState = {
   issuesMap: new Map(),
   isLoading: false,
   error: null,
+  retainSnapshotOnError: false,
   retryCount: 0,
   nextRetryAt: null,
   connectionState: "disconnected",

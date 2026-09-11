@@ -1,0 +1,91 @@
+
+ RUN  v4.0.18 /Users/tyson/codebase/code-agents/sept/.worktrees/sse-workspace-genesis/loomcli/internal/webui/frontend
+
+ ❯ src/components/MonitorDashboard/__tests__/ProjectHealthPanel.test.tsx (46 tests | 2 failed) 232ms
+       ✓ renders progress bar with correct percentage 83ms
+       ✓ displays completion percentage as text 3ms
+       ✓ renders progress bar fill with correct width 7ms
+       ✓ handles 0% completion 5ms
+       ✓ handles 100% completion 5ms
+       ✓ renders remaining issue count 2ms
+       ✓ renders closed issue count 1ms
+       ✓ renders total issue count 1ms
+       ✓ displays all issue counts correctly 2ms
+       ✓ detects bottlenecks from issues blocking multiple others 4ms
+       ✓ shows bottleneck count in section header 1ms
+       ✓ sorts bottlenecks by blocking count descending 17ms
+       ✓ limits bottlenecks to top 5 8ms
+       ✓ shows "No bottlenecks detected" when there are no blocked issues 1ms
+       ✓ shows "No bottlenecks detected" when blockedIssues is null 1ms
+       ✓ shows "No bottlenecks detected" when no issue blocks multiple others 1ms
+       ✓ does not show bottleneck count when no bottlenecks exist 1ms
+       ✓ calls onBottleneckClick with correct issue when bottleneck is clicked 10ms
+       ✓ does not throw when clicking bottleneck without onBottleneckClick 6ms
+       ✓ disables bottleneck buttons when onBottleneckClick is not provided 6ms
+       ✓ enables bottleneck buttons when onBottleneckClick is provided 6ms
+       × keeps loaded bottleneck content mounted during refresh: {"rows":[]} 6ms
+       × keeps loaded bottleneck content mounted during refresh: {"rows":[{"id":"test-issue-1","title":"Test Issue Title","priority":2,"created_at":"2026-01-25T00:00:00Z","updated_at":"2026-01-25T00:00:00Z","blocked_by_count":1,"blocked_by":["blocker-1"]},{"id":"second","title":"Test Issue Title","priority":2,"created_at":"2026-01-25T00:00:00Z","updated_at":"2026-01-25T00:00:00Z","blocked_by_count":1,"blocked_by":["blocker-1"]}]} 5ms
+       ✓ shows loading indicator in bottlenecks section when isLoading is true 1ms
+       ✓ does not show "No bottlenecks detected" while loading 1ms
+       ✓ still shows stats while loading 1ms
+       ✓ applies custom className to root element 1ms
+       ✓ preserves base styles when custom className is applied 1ms
+       ✓ handles zero issues correctly 1ms
+       ✓ handles single blocker (not a bottleneck) correctly 1ms
+       ✓ handles issue blocked by multiple blockers where only one is a bottleneck 2ms
+       ✓ handles empty blocked_by array 1ms
+       ✓ handles completion values that need rounding 1ms
+       ✓ handles large numbers correctly 1ms
+       ✓ has accessible progress bar 4ms
+       ✓ has data-testid for e2e tests 1ms
+       ✓ bottleneck buttons have accessible type attribute 6ms
+       ✓ uses blocked_by_details title when available 7ms
+       ✓ falls back to blocked_by IDs when blocked_by_details is undefined 1ms
+       ✓ falls back to blocked_by IDs when blocked_by_details is empty array 1ms
+       ✓ handles mixed data where some issues have details and others do not 1ms
+       ✓ uses priority from blocked_by_details when available 2ms
+       ✓ handles blocker with empty title by using ID as fallback 1ms
+       ✓ handles data with only blocked_by 5ms
+       ✓ renders Bottlenecks heading 1ms
+       ✓ highlights the top bottleneck with distinct styling 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/MonitorDashboard/__tests__/ProjectHealthPanel.test.tsx > ProjectHealthPanel > loading state > keeps loaded bottleneck content mounted during refresh: {"rows":[]}
+Error: expect(element).not.toBeInTheDocument()
+
+expected document not to contain element, found <div
+  class="_loading_bb19c0"
+>
+  Loading...
+</div> instead
+ ❯ src/components/MonitorDashboard/__tests__/ProjectHealthPanel.test.tsx:451:54
+    449|         );
+    450|         expect(content).toBeInTheDocument();
+    451|         expect(screen.queryByText("Loading...")).not.toBeInTheDocument…
+       |                                                      ^
+    452|       },
+    453|     );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/MonitorDashboard/__tests__/ProjectHealthPanel.test.tsx > ProjectHealthPanel > loading state > keeps loaded bottleneck content mounted during refresh: {"rows":[{"id":"test-issue-1","title":"Test Issue Title","priority":2,"created_at":"2026-01-25T00:00:00Z","updated_at":"2026-01-25T00:00:00Z","blocked_by_count":1,"blocked_by":["blocker-1"]},{"id":"second","title":"Test Issue Title","priority":2,"created_at":"2026-01-25T00:00:00Z","updated_at":"2026-01-25T00:00:00Z","blocked_by_count":1,"blocked_by":["blocker-1"]}]}
+Error: expect(element).toBeInTheDocument()
+
+element could not be found in the document
+ ❯ src/components/MonitorDashboard/__tests__/ProjectHealthPanel.test.tsx:450:25
+    448|           />,
+    449|         );
+    450|         expect(content).toBeInTheDocument();
+       |                         ^
+    451|         expect(screen.queryByText("Loading...")).not.toBeInTheDocument…
+    452|       },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 44 passed (46)
+   Start at  18:40:59
+   Duration  950ms (transform 74ms, setup 0ms, import 189ms, tests 232ms, environment 438ms)
+

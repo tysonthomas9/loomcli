@@ -18,6 +18,7 @@ export function GraphPage() {
     issues,
     isLoading,
     error,
+    retainSnapshotOnError,
     retryCount,
     nextRetryAt,
     isMultiRepo,
@@ -32,6 +33,7 @@ export function GraphPage() {
         issues={issues}
         isLoading={isLoading}
         error={error}
+        retainSnapshotOnError={retainSnapshotOnError ?? false}
         retryCount={retryCount}
         nextRetryAt={nextRetryAt}
         isMultiRepo={isMultiRepo}

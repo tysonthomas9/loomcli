@@ -1134,8 +1134,10 @@ function DefaultContent({
     );
   }, [issueRevision]);
 
-  // Loading state
-  if (isLoading) {
+  // Keep the selected issue mounted during refreshes, including mutation/SSE
+  // invalidations. A new selection must not expose the previous issue.
+  const refreshingSelectedIssue = !!issue && selectedIssueId === issue.id;
+  if (isLoading && !refreshingSelectedIssue) {
     return (
       <div className={styles.loadingContainer} data-testid="panel-loading">
         <div className={styles.spinner} />
@@ -1567,7 +1569,9 @@ function DefaultContent({
                 </button>
               </div>
             )}
-            {historyLoading && <div role="status">Loading issue history…</div>}
+            {historyLoading && events.length === 0 && (
+              <div role="status">Loading issue history…</div>
+            )}
             {(events.length > 0 || (!historyError && !historyLoading)) && (
               <Journey events={events} eventLimit={ISSUE_EVENT_LIMIT} />
             )}

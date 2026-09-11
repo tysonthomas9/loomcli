@@ -424,6 +424,46 @@ describe("IssueDetailPanel", () => {
   });
 
   describe("rendering", () => {
+    it("keeps the selected issue mounted during a background refresh", () => {
+      const issue = createTestIssueDetails();
+      const props = {
+        isOpen: true,
+        issue,
+        selectedIssueId: issue.id,
+        onClose: vi.fn(),
+      };
+      const { rerender } = render(
+        <IssueDetailPanel {...props} isLoading={false} />,
+      );
+      const status = screen.getByRole("combobox", {
+        name: "Change issue status",
+      });
+      rerender(<IssueDetailPanel {...props} isLoading={true} />);
+      expect(screen.queryByTestId("panel-loading")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("combobox", { name: "Change issue status" }),
+      ).toBe(status);
+    });
+
+    it("hides previous issue details while a different selection loads", () => {
+      const issue = createTestIssueDetails();
+      const props = { isOpen: true, issue, onClose: vi.fn() };
+      const { rerender } = render(
+        <IssueDetailPanel {...props} selectedIssueId={issue.id} />,
+      );
+      rerender(
+        <IssueDetailPanel
+          {...props}
+          selectedIssueId="another-issue"
+          isLoading={true}
+        />,
+      );
+      expect(screen.getByTestId("panel-loading")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("combobox", { name: "Change issue status" }),
+      ).not.toBeInTheDocument();
+    });
+
     it("renders when open", () => {
       const mockIssue = createTestIssue();
       render(

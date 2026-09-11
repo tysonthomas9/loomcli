@@ -48,7 +48,188 @@ jobs:
           path: internal/webui/frontend/playwright-report/
           retention-days: 7
 
-  # The API tier is NOT here, deliberately. It drives a real `loom serve` via
+  sse-ui-mocked:
+    name: UI transition regressions (mocked)
+    runs-on: ubuntu-latest
+    # Five minutes is the initial operating target, not an established budget.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: internal/webui/frontend/package-lock.json
+
+      - name: Install frontend dependencies and Chromium
+        run: |
+          cd internal/webui/frontend
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run exact mocked transition manifest
+        run: make test-sse-ui-transitions
+        env:
+          CI: "true"
+          SSE_UI_BACKEND: mocked
+          SSE_UI_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+          SSE_UI_ARTIFACTS_DIR: ${{ runner.temp }}/sse-ui-mocked
+          LOOM_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Upload revision and result summaries
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: sse-ui-summary-mocked-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/sse-ui-mocked/paired-revisions.txt
+            ${{ runner.temp }}/sse-ui-mocked/result-summary.json
+            ${{ runner.temp }}/sse-ui-mocked/selection-summary.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload first-failure transition evidence
+        uses: actions/upload-artifact@v4
+        if: ${{ failure() || cancelled() }}
+        with:
+          name: sse-ui-mocked-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/sse-ui-mocked/
+          if-no-files-found: warn
+          retention-days: 7
+
+  sse-ui-paired:
+    name: SSE UI transitions (${{ matrix.backend }})
+    runs-on: ubuntu-latest
+    # Fifteen minutes is the target once hosted timings are measured.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [redis, postgres]
+    env:
+      SSE_UI_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      LOCAL_MODE_COMPOSE: docker compose
+    steps:
+      - name: Checkout LoomCLI
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      # Fail instead of skipping. This repository currently needs an operator
+      # to configure the scoped credential before these hosted jobs can run.
+      # Fork code is never evaluated through pull_request_target.
+      - name: Require FleetDB read access
+        env:
+          FLEET_DB_REPO_TOKEN: ${{ secrets.FLEET_DB_REPO_TOKEN }}
+        run: bash scripts/check-fleet-contract-access.sh
+
+      - name: Resolve reviewed FleetDB pin
+        id: fleet-pin
+        shell: bash
+        run: |
+          revision="$(tr -d '[:space:]' < scripts/sse-ui-transition-fleet-revision)"
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout pinned FleetDB runtime
+        uses: actions/checkout@v4
+        with:
+          repository: BrowserOperator/fleet-db
+          ref: ${{ steps.fleet-pin.outputs.revision }}
+          # tmp/ is ignored by Loom, so the counterpart checkout cannot make
+          # Loom's local dirty-patch identity absorb the entire Fleet tree.
+          path: tmp/fleet-db-pinned
+          token: ${{ secrets.FLEET_DB_REPO_TOKEN }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: internal/webui/frontend/package-lock.json
+
+      - name: Install frontend dependencies and Chromium
+        run: |
+          cd internal/webui/frontend
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run exact paired transition manifest
+        id: transition-run
+        run: make test-sse-ui-transitions
+        env:
+          CI: "true"
+          SSE_UI_BACKEND: ${{ matrix.backend }}
+          SSE_UI_ARTIFACTS_DIR: ${{ runner.temp }}/sse-ui-${{ matrix.backend }}
+          FLEET_DB_REPO: ${{ github.workspace }}/tmp/fleet-db-pinned
+          FLEET_DB_REVISION: ${{ steps.fleet-pin.outputs.revision }}
+          LOOM_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Collect canceled-run service logs
+        if: ${{ always() && steps.transition-run.outcome != 'skipped' }}
+        shell: bash
+        env:
+          SSE_UI_ARTIFACTS_DIR: ${{ runner.temp }}/sse-ui-${{ matrix.backend }}
+          LOCAL_MODE_FLEETDB_BUILD_CONTEXT: ${{ github.workspace }}/tmp/fleet-db-pinned
+          LOCAL_MODE_FLEETDB_BUILD_REVISION: ${{ steps.fleet-pin.outputs.revision }}
+          LOCAL_MODE_FLEETDB_IMAGE: loomcli-sse-ui-${{ matrix.backend }}-${{ env.SSE_UI_RUN_ID }}-fleet-db:latest
+          LOCAL_MODE_LOOM_IMAGE: loomcli-sse-ui-${{ matrix.backend }}-${{ env.SSE_UI_RUN_ID }}-loom:latest
+        run: |
+          [[ -f "$SSE_UI_ARTIFACTS_DIR/stack-owned" ]] || exit 0
+          project="loomcli-sse-ui-${{ matrix.backend }}-${SSE_UI_RUN_ID}"
+          files=(-f test/local-mode/docker-compose.yml)
+          if [[ "${{ matrix.backend }}" == postgres ]]; then
+            files+=(-f test/local-mode/docker-compose.postgres.yml)
+          fi
+          mkdir -p "$SSE_UI_ARTIFACTS_DIR"
+          docker compose -p "$project" "${files[@]}" ps --all >"$SSE_UI_ARTIFACTS_DIR/final-compose-ps.txt" 2>&1 || true
+          docker compose -p "$project" "${files[@]}" logs --no-color >"$SSE_UI_ARTIFACTS_DIR/final-service-logs.txt" 2>&1 || true
+
+      - name: Remove only this run's stack
+        if: ${{ always() && steps.transition-run.outcome != 'skipped' }}
+        shell: bash
+        env:
+          SSE_UI_ARTIFACTS_DIR: ${{ runner.temp }}/sse-ui-${{ matrix.backend }}
+          LOCAL_MODE_FLEETDB_BUILD_CONTEXT: ${{ github.workspace }}/tmp/fleet-db-pinned
+          LOCAL_MODE_FLEETDB_BUILD_REVISION: ${{ steps.fleet-pin.outputs.revision }}
+          LOCAL_MODE_FLEETDB_IMAGE: loomcli-sse-ui-${{ matrix.backend }}-${{ env.SSE_UI_RUN_ID }}-fleet-db:latest
+          LOCAL_MODE_LOOM_IMAGE: loomcli-sse-ui-${{ matrix.backend }}-${{ env.SSE_UI_RUN_ID }}-loom:latest
+        run: |
+          [[ -f "$SSE_UI_ARTIFACTS_DIR/stack-owned" ]] || exit 0
+          project="loomcli-sse-ui-${{ matrix.backend }}-${SSE_UI_RUN_ID}"
+          files=(-f test/local-mode/docker-compose.yml)
+          if [[ "${{ matrix.backend }}" == postgres ]]; then
+            files+=(-f test/local-mode/docker-compose.postgres.yml)
+          fi
+          docker compose -p "$project" "${files[@]}" down -v --remove-orphans
+
+      - name: Upload revision and result summaries
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: sse-ui-summary-${{ matrix.backend }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/sse-ui-${{ matrix.backend }}/paired-revisions.txt
+            ${{ runner.temp }}/sse-ui-${{ matrix.backend }}/result-summary.json
+            ${{ runner.temp }}/sse-ui-${{ matrix.backend }}/selection-summary.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload first-failure transition evidence
+        uses: actions/upload-artifact@v4
+        if: ${{ failure() || cancelled() }}
+        with:
+          name: sse-ui-${{ matrix.backend }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/sse-ui-${{ matrix.backend }}/
+          if-no-files-found: warn
+          retention-days: 7
+
+  # The general API tier is NOT here, deliberately. It drives a real `loom serve` via
   # scripts/start-e2e-server.sh, which needs a sibling checkout of the private
   # BrowserOperator/fleet-db; this workflow never had a checkout step for it.
   # Because the trigger above was wrong, that never showed — the job had not

@@ -1154,8 +1154,8 @@ describe("selected detail query recovery", () => {
     });
     expect(result.current.issueDetails?.title).toBe("fresh");
   });
-  it.each([404, 503])(
-    "rejects failed recovery with status %s and clears only missing detail",
+  it.each([401, 403, 404, 503])(
+    "rejects failed recovery with status %s and clears inaccessible detail",
     async (status) => {
       const coordinator = new QueryRecoveryCoordinator();
       const { result } = renderHook(() => useIssueDetail(), {
@@ -1170,7 +1170,7 @@ describe("selected detail query recovery", () => {
         await expect(coordinator.refresh()).rejects.toThrow("failed");
       });
       expect(result.current.isNotFound).toBe(status === 404);
-      expect(result.current.issueDetails === null).toBe(status === 404);
+      expect(result.current.issueDetails === null).toBe(status !== 503);
       expect(result.current.error).not.toBeNull();
     },
   );

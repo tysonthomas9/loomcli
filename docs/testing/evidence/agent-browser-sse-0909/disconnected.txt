@@ -1,0 +1,32 @@
+Skip to main content
+◇
+Loom
+Home
+Workspaces
+Pull Requests
+Terminal
+Files
+Skills
+LO
+SM
++
+Settings
+SSE-MANUAL-0909
+Connection lost — showing last known state
+Retry now
+AGENTS
++ Add agent
+REPOS
+source-repo
++ Add Repo
+Kanban
+List
++ New Issue
+⚠
+Reconnecting — data may be stale (23s)
+Failed to load data
+
+There was a problem fetching the data. Please try again.
+
+Technical details
+Try again

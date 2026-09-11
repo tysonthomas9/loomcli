@@ -1,0 +1,15 @@
+{
+  "browser": {
+    "startTime": "2026-09-10T02:49:13.743Z",
+    "duration": 34119.043,
+    "expected": 7,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "focusedTests": 165,
+  "frontendBuild": "passed",
+  "independentReview": "no remaining blockers",
+  "stack": "loomcli-pg-browser-manual-0909",
+  "fault": "collection request abort plus real proxy stop/start"
+}

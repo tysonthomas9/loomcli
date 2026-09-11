@@ -16,16 +16,17 @@ const NotifyPath = "/api/sessions/notify"
 
 // sessionNotifyPayload is the JSON body sent to the web UI notification endpoint.
 type sessionNotifyPayload struct {
-	TaskID    string `json:"task_id"`
-	SessionID string `json:"session_id"`
-	Status    string `json:"status"`
+	WorkspaceID string `json:"workspace_id"`
+	TaskID      string `json:"task_id"`
+	SessionID   string `json:"session_id"`
+	Status      string `json:"status"`
 }
 
 // NotifyWebUI sends a fire-and-forget POST to the web UI so it can broadcast
 // a session_change SSE event to connected clients. If serverURL is empty the
 // call is a no-op. Errors are logged to stderr but never returned.
 // notifyToken is included as a Bearer token in the Authorization header when non-empty.
-func NotifyWebUI(ctx context.Context, serverURL, taskID, sessionID string, status SessionStatus, notifyToken string) {
+func NotifyWebUI(ctx context.Context, serverURL, workspaceID, taskID, sessionID string, status SessionStatus, notifyToken string) {
 	if serverURL == "" {
 		return
 	}
@@ -36,13 +37,12 @@ func NotifyWebUI(ctx context.Context, serverURL, taskID, sessionID string, statu
 	)
 	defer span.End()
 
-	payload := sessionNotifyPayload{
-		TaskID:    taskID,
-		SessionID: sessionID,
-		Status:    string(status),
-	}
-
-	body, err := json.Marshal(payload)
+	body, err := json.Marshal(sessionNotifyPayload{
+		WorkspaceID: workspaceID,
+		TaskID:      taskID,
+		SessionID:   sessionID,
+		Status:      string(status),
+	})
 	if err != nil {
 		recordErr(span, err)
 		log.Printf("sessions.NotifyWebUI: marshal error: %v", err)

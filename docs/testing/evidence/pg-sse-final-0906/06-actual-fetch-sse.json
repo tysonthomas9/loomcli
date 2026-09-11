@@ -1,0 +1,156 @@
+{
+  "requests": [
+    {
+      "sequence": 1,
+      "requestId": "68208.51",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/events/token",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 2,
+      "requestId": "68208.58",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/issues",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 5,
+      "requestId": "68208.62",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/events",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch",
+      "streamAttached": true
+    },
+    {
+      "sequence": 11,
+      "requestId": "68208.66",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/issues",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    }
+  ],
+  "frames": [
+    {
+      "sequence": 6,
+      "requestId": "68208.62",
+      "event": "checkpoint",
+      "id": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0NDIwMDA5LVZIVUE5SFpYRiIsIjIwZTZmYTI4LTIwYjAtNDMzYy1iNzQ4LWQ4YzYxM2ZhZGRhYiIsIjg2LTAiXQ"
+    },
+    {
+      "sequence": 7,
+      "requestId": "68208.62",
+      "event": "connected"
+    },
+    {
+      "sequence": 8,
+      "requestId": "68208.62",
+      "event": "mutation",
+      "id": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0NDIwMDA5LVZIVUE5SFpYRiIsIjIwZTZmYTI4LTIwYjAtNDMzYy1iNzQ4LWQ4YzYxM2ZhZGRhYiIsIjg3LTAiXQ",
+      "issueId": "SSE-TEST-1788704420009-VHUA9HZXF-5",
+      "entityId": "SSE-TEST-1788704420009-VHUA9HZXF-5",
+      "action": "issue.create",
+      "workspaceId": "SSE-TEST-1788704420009-VHUA9HZXF",
+      "data": {
+        "cursor": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0NDIwMDA5LVZIVUE5SFpYRiIsIjIwZTZmYTI4LTIwYjAtNDMzYy1iNzQ4LWQ4YzYxM2ZhZGRhYiIsIjg3LTAiXQ",
+        "type": "create",
+        "entity_type": "issue",
+        "entity_id": "SSE-TEST-1788704420009-VHUA9HZXF-5",
+        "action": "issue.create",
+        "issue_id": "SSE-TEST-1788704420009-VHUA9HZXF-5",
+        "title": "SSE rapid test-1788704427211-vi88r7mch",
+        "actor": "local-mode-harness@fixture.local",
+        "timestamp": "2026-09-06T14:20:27.251071Z",
+        "new_status": "open",
+        "source_repo": "source-repo",
+        "workspace_id": "SSE-TEST-1788704420009-VHUA9HZXF"
+      }
+    },
+    {
+      "sequence": 9,
+      "requestId": "68208.62",
+      "event": "mutation",
+      "id": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0NDIwMDA5LVZIVUE5SFpYRiIsIjIwZTZmYTI4LTIwYjAtNDMzYy1iNzQ4LWQ4YzYxM2ZhZGRhYiIsIjg4LTAiXQ",
+      "issueId": "SSE-TEST-1788704420009-VHUA9HZXF-6",
+      "entityId": "SSE-TEST-1788704420009-VHUA9HZXF-6",
+      "action": "issue.create",
+      "workspaceId": "SSE-TEST-1788704420009-VHUA9HZXF",
+      "data": {
+        "cursor": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0NDIwMDA5LVZIVUE5SFpYRiIsIjIwZTZmYTI4LTIwYjAtNDMzYy1iNzQ4LWQ4YzYxM2ZhZGRhYiIsIjg4LTAiXQ",
+        "type": "create",
+        "entity_type": "issue",
+        "entity_id": "SSE-TEST-1788704420009-VHUA9HZXF-6",
+        "action": "issue.create",
+        "issue_id": "SSE-TEST-1788704420009-VHUA9HZXF-6",
+        "title": "SSE rapid test-1788704427227-4ye5jsph8",
+        "actor": "local-mode-harness@fixture.local",
+        "timestamp": "2026-09-06T14:20:27.267058Z",
+        "new_status": "open",
+        "source_repo": "source-repo",
+        "workspace_id": "SSE-TEST-1788704420009-VHUA9HZXF"
+      }
+    },
+    {
+      "sequence": 10,
+      "requestId": "68208.62",
+      "event": "mutation",
+      "id": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0NDIwMDA5LVZIVUE5SFpYRiIsIjIwZTZmYTI4LTIwYjAtNDMzYy1iNzQ4LWQ4YzYxM2ZhZGRhYiIsIjg5LTAiXQ",
+      "issueId": "SSE-TEST-1788704420009-VHUA9HZXF-7",
+      "entityId": "SSE-TEST-1788704420009-VHUA9HZXF-7",
+      "action": "issue.create",
+      "workspaceId": "SSE-TEST-1788704420009-VHUA9HZXF",
+      "data": {
+        "cursor": "c2.WyJjMDc5ZGQyNy1lNjYyLTRjZjMtODA5NC05NmQwN2Q0MWY5OGQiLCJTU0UtVEVTVC0xNzg4NzA0NDIwMDA5LVZIVUE5SFpYRiIsIjIwZTZmYTI4LTIwYjAtNDMzYy1iNzQ4LWQ4YzYxM2ZhZGRhYiIsIjg5LTAiXQ",
+        "type": "create",
+        "entity_type": "issue",
+        "entity_id": "SSE-TEST-1788704420009-VHUA9HZXF-7",
+        "action": "issue.create",
+        "issue_id": "SSE-TEST-1788704420009-VHUA9HZXF-7",
+        "title": "SSE rapid test-1788704427241-6gft5dsrd",
+        "actor": "local-mode-harness@fixture.local",
+        "timestamp": "2026-09-06T14:20:27.279636Z",
+        "new_status": "open",
+        "source_repo": "source-repo",
+        "workspace_id": "SSE-TEST-1788704420009-VHUA9HZXF"
+      }
+    }
+  ],
+  "responses": [
+    {
+      "sequence": 3,
+      "requestId": "68208.58",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/issues"
+    },
+    {
+      "sequence": 12,
+      "requestId": "68208.66",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/issues"
+    }
+  ],
+  "completions": [
+    {
+      "sequence": 4,
+      "requestId": "68208.58",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/issues"
+    },
+    {
+      "sequence": 13,
+      "requestId": "68208.66",
+      "path": "/api/workspaces/SSE-TEST-1788704420009-VHUA9HZXF/issues"
+    }
+  ],
+  "failures": [],
+  "errors": []
+}

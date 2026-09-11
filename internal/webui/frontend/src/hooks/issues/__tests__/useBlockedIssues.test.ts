@@ -205,6 +205,28 @@ describe("useBlockedIssues", () => {
     );
   });
 
+  it("does not expose previous repository rows while the next scope loads", async () => {
+    mockWorkspaceContext.sourceReposFilter = ["repo-a"];
+    mockGetBlockedIssues.mockResolvedValueOnce([createBlockedIssue()]);
+    const { result, rerender } = renderHook(() => useBlockedIssues(), {
+      wrapper: Wrapper,
+    });
+    await waitFor(() => expect(result.current.data).toHaveLength(1));
+    let resolve!: (rows: BlockedIssue[]) => void;
+    mockGetBlockedIssues.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    mockWorkspaceContext.sourceReposFilter = ["repo-b"];
+    rerender();
+    expect(result.current.data).toBeNull();
+    await act(async () => {
+      resolve([]);
+    });
+    expect(result.current.data).toEqual([]);
+  });
+
   it("shares one mount request and one debounced event fetch", async () => {
     mockGetBlockedIssues.mockResolvedValue([]);
     const first = renderHook(() => useBlockedIssues(), { wrapper: Wrapper });

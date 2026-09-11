@@ -15,7 +15,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
@@ -125,6 +124,10 @@ type Supervisor struct {
 	NodeID       string
 	NodeTTL      time.Duration
 	NodeInterval time.Duration
+
+	// notifySessionChange is the test seam for the web UI's scoped session
+	// completion signal. Production uses sessions.NotifyWebUI when nil.
+	notifySessionChange func(context.Context, string, string, string, sessions.SessionStatus)
 
 	// backendRecheckInterval is the fixed delay computeBackoff returns for a
 	// BackendUnavailable block (agent's backend CLI missing from PATH). Zero
@@ -628,21 +631,6 @@ func (s *Supervisor) agentSessionMetadataLocked(ap *AgentProcess, backend string
 	return metadata
 }
 
-type agentSessionCompletionInput struct {
-	sessionID  string
-	leaseID    string
-	leaseToken string
-	exitCode   int
-	errClass   string
-	taskID     string
-	diffResult sessionfinalize.WithWorktreeResult
-	// transcriptData is the leaf's on-disk transcript (read once in
-	// finalizeAgentSession). When present it is uploaded as a control-plane artifact
-	// and referenced via metadata["transcript_ref"], so a non-owning serve node can
-	// surface it (controlPlaneSessionTranscript). Empty on the backend-unavailable path.
-	transcriptData []byte
-}
-
 //nolint:funlen // Completion writes status, metadata, transcript artifact, and retry-safe control-plane updates together.
 func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input agentSessionCompletionInput) {
 	if s.ControlStore == nil || s.WorkspaceID == "" || input.sessionID == "" {
@@ -684,15 +672,18 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 
 	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
 	defer cancel()
-	if _, err := s.ControlStore.AgentSessions().Update(ctx, s.WorkspaceID, input.sessionID, store.AgentSessionUpdate{
+	updatedSession, updateErr := s.ControlStore.AgentSessions().Update(ctx, s.WorkspaceID, input.sessionID, store.AgentSessionUpdate{
 		Status:     &status,
 		TaskID:     taskIDPtr,
 		FinishedAt: &finishedAtPtr,
 		ErrorClass: &input.errClass,
 		ExitCode:   &exitCodePtr,
 		Metadata:   &metadata,
-	}); err != nil {
-		slog.Warn("control-plane agent session completion failed", "worktree", ap.Entry.Worktree, "session_id", input.sessionID, "err", err)
+	})
+	if updateErr != nil {
+		slog.Warn("control-plane agent session completion failed", "worktree", ap.Entry.Worktree, "session_id", input.sessionID, "err", updateErr)
+	} else {
+		s.publishAgentSessionChange(updatedSession)
 	}
 	if input.leaseID != "" && input.leaseToken != "" {
 		if _, err := s.ControlStore.AgentLeases().Release(ctx, s.WorkspaceID, input.leaseID, input.leaseToken); err != nil {

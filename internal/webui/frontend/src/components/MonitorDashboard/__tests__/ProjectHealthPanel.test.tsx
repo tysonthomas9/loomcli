@@ -427,6 +427,34 @@ describe("ProjectHealthPanel", () => {
   });
 
   describe("loading state", () => {
+    it.each([
+      { rows: [] },
+      { rows: [createBlockedIssue(), createBlockedIssue({ id: "second" })] },
+    ])(
+      "keeps loaded bottleneck content mounted during refresh: %j",
+      ({ rows }) => {
+        const { rerender } = render(
+          <ProjectHealthPanel
+            stats={createStats()}
+            blockedIssues={rows}
+            isLoading={false}
+          />,
+        );
+        const content = rows.length
+          ? screen.getByRole("list")
+          : screen.getByText("No bottlenecks detected");
+        rerender(
+          <ProjectHealthPanel
+            stats={createStats()}
+            blockedIssues={rows}
+            isLoading={true}
+          />,
+        );
+        expect(content).toBeInTheDocument();
+        expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+      },
+    );
+
     it("shows loading indicator in bottlenecks section when isLoading is true", () => {
       render(
         <ProjectHealthPanel

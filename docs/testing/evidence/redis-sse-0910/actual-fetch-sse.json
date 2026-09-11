@@ -1,0 +1,91 @@
+{
+  "requests": [
+    {
+      "sequence": 1,
+      "requestId": "39096.50",
+      "path": "/api/workspaces/SSE-TEST-1789008888298-XBDVVS5YU/events/token",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 2,
+      "requestId": "39096.57",
+      "path": "/api/workspaces/SSE-TEST-1789008888298-XBDVVS5YU/issues",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 5,
+      "requestId": "39096.61",
+      "path": "/api/workspaces/SSE-TEST-1789008888298-XBDVVS5YU/events",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 503,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 6,
+      "requestId": "39096.62",
+      "path": "/api/workspaces/SSE-TEST-1789008888298-XBDVVS5YU/events/token",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 7,
+      "requestId": "39096.63",
+      "path": "/api/workspaces/SSE-TEST-1789008888298-XBDVVS5YU/events",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 503,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 8,
+      "requestId": "39096.64",
+      "path": "/api/workspaces/SSE-TEST-1789008888298-XBDVVS5YU/events/token",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 200,
+      "type": "Fetch"
+    },
+    {
+      "sequence": 9,
+      "requestId": "39096.65",
+      "path": "/api/workspaces/SSE-TEST-1789008888298-XBDVVS5YU/events",
+      "method": "GET",
+      "since": null,
+      "lastEventId": null,
+      "status": 503,
+      "type": "Fetch"
+    }
+  ],
+  "frames": [],
+  "responses": [
+    {
+      "sequence": 3,
+      "requestId": "39096.57",
+      "path": "/api/workspaces/SSE-TEST-1789008888298-XBDVVS5YU/issues"
+    }
+  ],
+  "completions": [
+    {
+      "sequence": 4,
+      "requestId": "39096.57",
+      "path": "/api/workspaces/SSE-TEST-1789008888298-XBDVVS5YU/issues"
+    }
+  ],
+  "failures": [],
+  "errors": []
+}

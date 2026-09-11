@@ -78,6 +78,8 @@ export function createIssueStore(
   const optimisticEntries = new Map<string, OptimisticEntry>();
   let scopeEpoch = 0;
   let activeScopeKey: string | null = null;
+  // Only a committed collection response establishes a usable snapshot, even empty.
+  let loadedScopeKey: string | null = null;
   let recoveryRevision = 0;
   let commandRevision = 0;
   const unresolvedCommands = new Map<string, Set<object>>();
@@ -191,6 +193,7 @@ export function createIssueStore(
   /** Retire UI ownership without pretending outstanding server work settled. */
   function retireScope(): void {
     scopeEpoch++;
+    loadedScopeKey = null;
     recoveryRevision++;
     for (const entry of optimisticEntries.values())
       clearTimeout(entry.timeoutId);
@@ -259,7 +262,7 @@ export function createIssueStore(
     const readScopeEpoch = scopeEpoch;
     const readCommandRevision = commandRevision;
     if (scopeChanged) {
-      set({ issuesMap: new Map(), pendingIds: new Set() });
+      set({ issuesMap: new Map(), pendingIds: new Set(), isLoading: true });
       if (scopeEpoch !== readScopeEpoch || generation !== fetchGeneration) {
         if (recovery) throw new Error("Issue recovery scope changed");
         return;
@@ -294,15 +297,30 @@ export function createIssueStore(
       clearTimeout(retryTimeout);
       retryTimeout = null;
     }
+    // Background refreshes keep the current scope mounted. Fenced recovery
+    // still blocks publication, and a different scope must load from scratch.
+    // Explicit recovery retires the old snapshot until a certified read succeeds.
+    if (recovery) loadedScopeKey = null;
+    const isLoading = recovery || loadedScopeKey !== nextScope;
+    // Keep the warning stable through retries until a fresh snapshot commits.
+    const retainedFailure = !isLoading && get().retainSnapshotOnError;
+    const errorState = {
+      error: retainedFailure ? get().error : null,
+      retainSnapshotOnError: retainedFailure,
+    };
     if (!isAutoRetry) {
       set({
-        isLoading: true,
-        error: null,
+        isLoading,
+        ...errorState,
         retryCount: 0,
         nextRetryAt: null,
       });
     } else {
-      set({ isLoading: true, error: null, nextRetryAt: null });
+      set({
+        isLoading,
+        ...errorState,
+        nextRetryAt: null,
+      });
     }
 
     if (
@@ -433,6 +451,9 @@ export function createIssueStore(
         }
       }
 
+      // Set before notifying subscribers: a reentrant refresh can reuse this
+      // accepted snapshot, while scope retirement clears the marker.
+      loadedScopeKey = nextScope;
       // Success is the only point that can clear stale snapshot state.
       set({
         issuesMap: mergedMap,
@@ -441,6 +462,7 @@ export function createIssueStore(
         disconnectedSince: null,
         isLoading: false,
         error: null,
+        retainSnapshotOnError: false,
         retryCount: 0,
         nextRetryAt: null,
       });
@@ -498,8 +520,10 @@ export function createIssueStore(
       // real message behind a countdown. 408 and 429 are the transient
       // exceptions. Surface the error and stop.
       if (!isRetryableError(err)) {
+        loadedScopeKey = null;
         set({
           error: message,
+          retainSnapshotOnError: false,
           isLoading: false,
           retryCount: MAX_AUTO_RETRIES,
           nextRetryAt: null,
@@ -510,6 +534,7 @@ export function createIssueStore(
       // Schedule exponential-backoff auto-retry if we haven't exhausted
       // the budget. The retry calls fetchIssues({ isAutoRetry: true }),
       // which preserves retryCount for subsequent attempts.
+      const retainSnapshotOnError = !recovery && loadedScopeKey === nextScope;
       const currentRetryCount = get().retryCount;
       if (currentRetryCount < MAX_AUTO_RETRIES) {
         const nextAttempt = currentRetryCount + 1;
@@ -519,6 +544,7 @@ export function createIssueStore(
         );
         set({
           error: message,
+          retainSnapshotOnError,
           isLoading: false,
           retryCount: nextAttempt,
           nextRetryAt: Date.now() + delay,
@@ -551,6 +577,7 @@ export function createIssueStore(
         // Exhausted retries — leave error displayed, stop retrying.
         set({
           error: message,
+          retainSnapshotOnError,
           isLoading: false,
           nextRetryAt: null,
         });

@@ -12,6 +12,7 @@ export function TablePage() {
     issues,
     isLoading,
     error,
+    retainSnapshotOnError,
     retryCount,
     nextRetryAt,
     isMultiRepo,
@@ -36,6 +37,7 @@ export function TablePage() {
         issues={issues}
         isLoading={isLoading}
         error={error}
+        retainSnapshotOnError={retainSnapshotOnError ?? false}
         retryCount={retryCount}
         nextRetryAt={nextRetryAt}
         isMultiRepo={isMultiRepo}
