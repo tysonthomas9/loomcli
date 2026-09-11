@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -168,7 +169,16 @@ func TestHandler_CatchUpPagesAndDeduplicatesEveryQueuedCursor(t *testing.T) {
 		OnAuthenticated: func(context.Context, string) (string, error) {
 			return "c1.head", nil
 		},
-		GetMutationPage: func(_ context.Context, wsID, since string, limit int) (backend.MutationPage, error) {
+		GetMutationPage: func(_ context.Context, _ string, since string, limit int) (backend.MutationPage, error) {
+			if since != "$" || limit != 1 {
+				t.Errorf("invalid head request")
+			}
+			if calls < 2 {
+				return backend.MutationPage{Cursor: "c1.b"}, nil
+			}
+			return backend.MutationPage{Cursor: "c1.live"}, nil
+		},
+		GetMutationPageThrough: func(_ context.Context, wsID, since, through string, limit int) (backend.MutationPage, error) {
 			if wsID != "ws-1" || limit != catchUpPageLimit {
 				t.Fatalf("catch-up request workspace/limit = %q/%d", wsID, limit)
 			}
@@ -450,7 +460,7 @@ func TestHandler_SourceFailuresResyncWithoutAdvancingOrConnected(t *testing.T) {
 			if expired {
 				reason = "expired"
 			}
-			h := NewHandler(HandlerConfig{Hub: hub, WorkspaceFromCtx: func(context.Context) string { return "ws-1" }, GetMutationPage: func(context.Context, string, string, int) (backend.MutationPage, error) {
+			h := NewHandler(HandlerConfig{Hub: hub, WorkspaceFromCtx: func(context.Context) string { return "ws-1" }, GetMutationPage: fixedReplayHead(t, "c1.head"), GetMutationPageThrough: func(context.Context, string, string, string, int) (backend.MutationPage, error) {
 				if expired {
 					err := backend.NewBackendError(backend.KindValidation, "catchup", "expired", backend.ErrMutationCursorExpired)
 					err.Meta = map[string]string{"cursor": "c1.floor"}
@@ -476,7 +486,7 @@ func TestHandler_PageBudgetSchedulesRemainingSource(t *testing.T) {
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 	calls := 0
-	h := NewHandler(HandlerConfig{Hub: hub, WorkspaceFromCtx: func(context.Context) string { return "ws-1" }, GetMutationPage: func(_ context.Context, _ string, since string, _ int) (backend.MutationPage, error) {
+	h := NewHandler(HandlerConfig{Hub: hub, WorkspaceFromCtx: func(context.Context) string { return "ws-1" }, GetMutationPage: fixedReplayHead(t, "c1.start"+strings.Repeat(".next", 12)), GetMutationPageThrough: func(_ context.Context, _ string, since, through string, _ int) (backend.MutationPage, error) {
 		calls++
 		return backend.MutationPage{Cursor: since + ".next", HasMore: calls < 12}, nil
 	}})
@@ -515,7 +525,7 @@ func TestHandler_NumericHeaderLargerThanNumericQueryWinsCatchUp(t *testing.T) {
 	h := NewHandler(HandlerConfig{
 		Hub:             hub,
 		OnAuthenticated: func(context.Context, string) (string, error) { return "1000", nil },
-		GetMutationPage: func(_ context.Context, _ string, since string, _ int) (backend.MutationPage, error) {
+		GetMutationPage: fixedReplayHead(t, "300"), GetMutationPageThrough: func(_ context.Context, _ string, since, through string, _ int) (backend.MutationPage, error) {
 			gotSince = since
 			return backend.MutationPage{Events: []backend.MutationData{}, Cursor: since}, nil
 		},
@@ -541,7 +551,7 @@ func TestHandler_NumericHeaderLargerThanNumericQueryWinsCatchUp(t *testing.T) {
 	}
 }
 
-func TestHandler_NumericLastEventIDReachesFleetAsOpaqueCatchUpCursor(t *testing.T) {
+func TestHandler_NumericLastEventIDFailsClosedForBoundedFleetReplay(t *testing.T) {
 	const (
 		numericCursor = "1700000000000"
 		opaqueCursor  = "c1.MTcwMDAwMDAwMDAwMC0w"
@@ -549,6 +559,14 @@ func TestHandler_NumericLastEventIDReachesFleetAsOpaqueCatchUpCursor(t *testing.
 	requestedSince := make(chan string, 1)
 	fleetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		since := r.URL.Query().Get("since")
+		if since == "c1.JA" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"events": []any{}, "cursor": opaqueCursor, "has_more": false})
+			return
+		}
+		if r.URL.Query().Get("through") != opaqueCursor {
+			t.Errorf("missing bounded fence")
+		}
 		requestedSince <- since
 		w.Header().Set("Content-Type", "application/json")
 		if since != opaqueCursor {
@@ -577,6 +595,9 @@ func TestHandler_NumericLastEventIDReachesFleetAsOpaqueCatchUpCursor(t *testing.
 		GetMutationPage: func(ctx context.Context, _ string, since string, limit int) (backend.MutationPage, error) {
 			return fleetBackend.GetMutationsAfter(ctx, since, limit)
 		},
+		GetMutationPageThrough: func(ctx context.Context, _ string, since, through string, limit int) (backend.MutationPage, error) {
+			return fleetBackend.GetMutationsThrough(ctx, since, through, limit)
+		},
 		WorkspaceFromCtx: func(context.Context) string { return "ws-1" },
 	})
 	h.writerFactory = func(http.ResponseWriter) (frameWriter, error) { return writer, nil }
@@ -593,18 +614,18 @@ func TestHandler_NumericLastEventIDReachesFleetAsOpaqueCatchUpCursor(t *testing.
 	}()
 
 	select {
-	case <-writer.connected:
 	case <-done:
-		t.Fatalf("handler ended before streaming: status=%d body=%q", rr.Code, rr.Body.String())
 	case <-time.After(time.Second):
-		t.Fatal("handler did not complete the numeric-cursor catch-up handshake")
+		t.Fatal("numeric resume did not fail closed")
 	}
-	if got := <-requestedSince; got != opaqueCursor {
-		t.Fatalf("Fleet since = %q, want %q", got, opaqueCursor)
+	select {
+	case since := <-requestedSince:
+		t.Fatalf("noncanonical numeric resume reached bounded Fleet HTTP: %q", since)
+	default:
 	}
-	if rr.Code == http.StatusServiceUnavailable {
-		t.Fatalf("handler returned 503 for numeric Last-Event-ID: %q", rr.Body.String())
+	frames := writer.snapshot()
+	if len(frames) != 1 || frames[0] != (recordedFrame{event: "resync", data: `{"reason":"error"}`}) {
+		t.Fatalf("numeric resume must not advance checkpoint or connect: %#v", frames)
 	}
 	cancel()
-	<-done
 }

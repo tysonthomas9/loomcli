@@ -317,3 +317,7 @@ func waitForMultiCondition(t *testing.T, cond func() bool) {
 	}
 	t.Fatal("condition not met before timeout")
 }
+
+func (s *trackingWorkspaceSubscriber) GetMutationPageThrough(ctx context.Context, since, _ string, limit int) (backend.MutationPage, error) {
+	return s.GetMutationPage(ctx, since, limit)
+}

@@ -222,6 +222,13 @@ type CursorMutationBackend interface {
 	ProbeHead(ctx context.Context) (cursor string, supported bool, err error)
 }
 
+// BoundedCursorMutationBackend reads a fixed source interval before event
+// conversion. Through is a previously captured head, compared only by equality.
+// Implementations must reject unsupported bounded reads, never fall back.
+type BoundedCursorMutationBackend interface {
+	GetMutationsThrough(ctx context.Context, since, through string, limit int) (MutationPage, error)
+}
+
 // EventHistoryBackend is an optional IssueBackend extension for honest issue
 // history pagination. It preserves ListEvents' newest-tail behavior when Since
 // is nil and exposes one forward fleet-db page when Since is non-nil.
