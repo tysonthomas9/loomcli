@@ -956,6 +956,30 @@ describe("local-task-runner pull-request delivery gating", () => {
     assert.equal(out.runtimeMetadata.github_pr_url, undefined);
   });
 
+  it("a frozen pull_request plan selects PR delivery without the legacy flag", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    delete process.env.GITHUB_TOKEN;
+    delete process.env.GH_TOKEN;
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-policy-pr",
+      task_id: "T-POLICY-PR",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: {
+        title: "Policy PR",
+        deliveryPlan: { plan_id: "plan-1", requirement: "pull_request" },
+        githubRepo: "owner/repo",
+      },
+    });
+
+    const out = await run();
+    assert.equal(out.status, "completed");
+    assert.equal(out.runtimeMetadata.delivery, "pull_request_skipped_no_changes");
+  });
+
   it("stacked mode with no credential and changes fails closed (github_credentials_missing)", async () => {
     const binDirNoGh = sanitizedBinDir();
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
