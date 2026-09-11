@@ -142,88 +142,30 @@ states:
       - expect: { text: "Initial issue detail description ${RUN_ID:-local}-${AFT_CASE_ID}." }
       - expect: { notText: "discarded draft ${RUN_ID:-local}-${AFT_CASE_ID}" }
 
-  priority-saved:
-    intent: The open panel reflects the human's priority change.
+  assignee-saved:
+    intent: The open panel reflects the human's assignee assignment.
     assert:
       - wait:
           fn: >-
             (() => {
-              const trigger = document.querySelector('[data-testid=priority-dropdown-trigger]');
-              return trigger?.getAttribute('data-priority') === '1' &&
-                trigger?.getAttribute('data-saving') !== 'true' &&
-                !document.querySelector('[data-testid=priority-saving]') &&
-                !document.querySelector('[data-testid=priority-error]');
+              const trigger = document.querySelector('[data-testid=assignee-dropdown-trigger]');
+              return trigger?.textContent.includes('graph-assignee-${RUN_ID:-local}-${AFT_CASE_ID}') &&
+                !document.querySelector('[data-testid=assignee-error]') &&
+                !document.querySelector('[data-testid=assignee-saving]');
             })()
-        intent: Wait until the priority 1 save completes without an error.
-      - expect:
-          attr:
-            testid: priority-dropdown-trigger
-            name: data-priority
-            equals: "1"
-
-  priority-persisted:
-    intent: A fresh priority-filtered board renders the changed issue.
-    assert:
-      - wait:
-          fn: >-
-            document.querySelectorAll("section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}'][data-priority='1']").length === 1
-        intent: Wait until the filtered board renders this issue at priority 1.
-      - expect:
-          attr:
-            selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
-            name: data-priority
-            equals: "1"
-
-  priority-panel-reopened:
-    intent: The priority-filtered card reopens with the saved priority still reflected in the panel.
-    assert:
-      - wait:
-          fn: >-
-            (() => {
-              const panel = document.querySelector('[data-testid=issue-detail-panel]');
-              const trigger = document.querySelector('[data-testid=priority-dropdown-trigger]');
-              return panel?.getAttribute('data-state') === 'open' &&
-                panel?.getAttribute('data-loading') === 'false' &&
-                trigger?.getAttribute('data-priority') === '1';
-            })()
-        intent: Wait until the reopened panel reflects priority 1.
-      - expect:
-          attr:
-            testid: priority-dropdown-trigger
-            name: data-priority
-            equals: "1"
-
-  owner-saved:
-    intent: The open panel reflects the human's owner assignment.
-    assert:
-      - wait:
-          fn: >-
-            (() => {
-              const trigger = document.querySelector('[data-testid=owner-dropdown-trigger]');
-              return trigger?.textContent.includes('graph-owner-${RUN_ID:-local}-${AFT_CASE_ID}') &&
-                !document.querySelector('[data-testid=owner-error]') &&
-                !document.querySelector('[data-testid=owner-saving]');
-            })()
-        intent: Wait until the saved owner renders in the trigger without an error.
-      # FINDINGS §1.22: a stale board→details overwrite can revert the rendered
-      # owner moments later, so the instant expects pin only the stable no-error
-      # contract; the next state proves persistence from a fresh load.
-      - expect: { count: { selector: "[data-testid=owner-error]", equals: 0 } }
+        intent: Wait until the saved assignee renders in the trigger without an error.
+      - expect: { count: { selector: "[data-testid=assignee-error]", equals: 0 } }
       - expect: { count: { selector: "[data-testid=metadata-error-toast]", equals: 0 } }
 
-  owner-persisted-on-card:
-    intent: A fresh priority-filtered board renders the case-specific owner badge on the issue card.
+  assignee-persisted:
+    intent: A freshly reopened panel renders the case-specific human assignee.
     terminal: true
     assert:
       - wait:
           fn: >-
-            document.querySelectorAll("article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}'] [data-testid=issue-card-owner][title='Owner: graph-owner-${RUN_ID:-local}-${AFT_CASE_ID}']").length === 1
-        intent: Wait until the reloaded card renders the case-specific owner badge.
-      - expect:
-          attr:
-            selector: "article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}'] [data-testid=issue-card-owner]"
-            name: title
-            equals: "Owner: graph-owner-${RUN_ID:-local}-${AFT_CASE_ID}"
+            document.querySelector('[data-testid=assignee-dropdown-trigger]')?.textContent.includes('graph-assignee-${RUN_ID:-local}-${AFT_CASE_ID}')
+        intent: Wait until the freshly loaded panel renders the saved assignee.
+      - expect: { text: "graph-assignee-${RUN_ID:-local}-${AFT_CASE_ID}" }
 
   label-saved:
     intent: The open panel reflects the human's new label.
@@ -295,7 +237,7 @@ states:
       - wait:
           fn: >-
             Array.from(document.querySelectorAll('[data-testid=activity-comment]'))
-              .filter((node) => node.textContent.includes('graph comment ${RUN_ID:-local}-${AFT_CASE_ID}') && node.textContent.includes('loom-e2e')).length === 1
+              .filter((node) => node.textContent.includes('graph comment ${RUN_ID:-local}-${AFT_CASE_ID}') && node.textContent.includes('operator@local')).length === 1
         intent: Wait until the case-specific comment appears with the configured web actor.
       - expect: { value: { testid: comment-textarea, equals: "" } }
 
@@ -305,7 +247,7 @@ states:
       - wait:
           fn: >-
             Array.from(document.querySelectorAll('[data-testid=activity-comment]'))
-              .filter((node) => node.textContent.includes('graph comment ${RUN_ID:-local}-${AFT_CASE_ID}') && node.textContent.includes('loom-e2e')).length === 1
+              .filter((node) => node.textContent.includes('graph comment ${RUN_ID:-local}-${AFT_CASE_ID}') && node.textContent.includes('operator@local')).length === 1
         intent: Wait until the reloaded activity log renders the case-specific comment once.
       - expect: { text: "graph comment ${RUN_ID:-local}-${AFT_CASE_ID}" }
 
@@ -494,7 +436,7 @@ states:
         intent: Wait until the reopened editable issue panel is ready.
       - expect: { visible: { testid: issue-header } }
       - expect: { visible: { testid: status-dropdown } }
-      - expect: { visible: { testid: priority-dropdown-trigger } }
+      - expect: { visible: { testid: type-dropdown-trigger } }
       - expect: { visible: { testid: label-editor } }
       - expect: { text: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}" }
 

@@ -71,9 +71,17 @@ tests:
               as: "lifecycleEvents"
         intent: "An operator reads back the lifecycle event history"
       - run: >-
-          python3 -c 'import json,os; events=json.load(open(os.environ["AFT_WORK_DIR"]+"/lifecycleEvents")); closes=[e for e in events if e.get("event_type")=="issue.closed"]; assert len(closes)==1, events; assert closes[0].get("comment")=="aft lifecycle test", closes[0]'
+          python3 -c 'import json,os; events=json.load(open(os.environ["AFT_WORK_DIR"]+"/lifecycleEvents")); closes=[e for e in events if e.get("event_type")=="issue.close"]; assert len(closes)==1, events; assert (closes[0].get("metadata") or {}).get("reason")=="aft lifecycle test", closes[0]'
         intent: "An operator's readback confirms exactly one close event carries the completion reason"
       - fill: { testid: search-input-field, value: "lifecycle ${RUN_ID:-local}" }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=toggle-completed-lanes]') ||
+            !!document.querySelector("section[data-status=done] article[aria-label*='lifecycle ${RUN_ID:-local}']")
+        intent: "Wait until the closed result or its completed-lane reveal control is available"
+      - run: >-
+          agent-browser --session "$AFT_SESSION" find testid toggle-completed-lanes click || true
+        intent: "A human reveals the completed epic lane when fully closed lanes are hidden by default"
       - wait:
           fn: >-
             document.querySelectorAll("section[data-status=done] article[aria-label*='lifecycle ${RUN_ID:-local}']").length === 1

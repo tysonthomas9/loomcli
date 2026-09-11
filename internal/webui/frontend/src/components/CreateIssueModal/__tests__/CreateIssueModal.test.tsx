@@ -21,7 +21,7 @@ import { CreateIssueModal } from "../CreateIssueModal";
 // ---------- Mocks ----------
 
 vi.mock("@/hooks/api", () => ({
-  createIssue: vi.fn(),
+  createIssueWithMetadata: vi.fn(),
 }));
 
 vi.mock("@/hooks/ui", async () => {
@@ -50,11 +50,11 @@ vi.mock("@/hooks/workspace", async () => {
   };
 });
 
-import { createIssue } from "@/hooks/api";
+import { createIssueWithMetadata } from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import type { Issue } from "@/types";
 
-const mockCreateIssue = vi.mocked(createIssue);
+const mockCreateIssue = vi.mocked(createIssueWithMetadata);
 const mockUseWorkspaceContext = vi.mocked(useWorkspaceContext);
 
 const MOCK_ISSUE: Issue = {
@@ -66,6 +66,11 @@ const MOCK_ISSUE: Issue = {
   labels: [],
   created_at: "2026-03-21T00:00:00Z",
   updated_at: "2026-03-21T00:00:00Z",
+};
+const MOCK_CREATE_RESULT = {
+  issue: MOCK_ISSUE,
+  warning: null,
+  replayed: false,
 };
 
 describe("CreateIssueModal", () => {
@@ -205,10 +210,10 @@ describe("CreateIssueModal", () => {
 
     it("shows 'Creating...' text on submit button during submission", async () => {
       // Keep the promise pending so we can observe the submitting state
-      let resolvePromise!: (value: Issue) => void;
+      let resolvePromise!: (value: typeof MOCK_CREATE_RESULT) => void;
       mockCreateIssue.mockImplementation(
         () =>
-          new Promise<Issue>((resolve) => {
+          new Promise<typeof MOCK_CREATE_RESULT>((resolve) => {
             resolvePromise = resolve;
           }),
       );
@@ -236,14 +241,14 @@ describe("CreateIssueModal", () => {
 
       // Clean up
       await act(async () => {
-        resolvePromise(MOCK_ISSUE);
+        resolvePromise(MOCK_CREATE_RESULT);
       });
     });
   });
 
   describe("form submission", () => {
     it("calls createIssue with correct data on submit", async () => {
-      mockCreateIssue.mockResolvedValue(MOCK_ISSUE);
+      mockCreateIssue.mockResolvedValue(MOCK_CREATE_RESULT);
 
       render(
         <CreateIssueModal
@@ -275,7 +280,7 @@ describe("CreateIssueModal", () => {
     });
 
     it("calls onSuccess and onClose after successful creation", async () => {
-      mockCreateIssue.mockResolvedValue(MOCK_ISSUE);
+      mockCreateIssue.mockResolvedValue(MOCK_CREATE_RESULT);
 
       render(
         <CreateIssueModal
@@ -296,8 +301,72 @@ describe("CreateIssueModal", () => {
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
+    it("shows the existing issue when the server reports a soft duplicate", async () => {
+      mockCreateIssue.mockResolvedValue({
+        issue: MOCK_ISSUE,
+        warning: "soft-duplicate",
+        replayed: false,
+      });
+
+      render(
+        <CreateIssueModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+      fireEvent.change(screen.getByTestId("create-issue-title"), {
+        target: { value: "Test issue" },
+      });
+      fireEvent.click(screen.getByTestId("create-issue-submit"));
+
+      expect(await screen.findByTestId("soft-duplicate-notice")).toHaveTextContent(
+        "An identical issue was created moments ago",
+      );
+      expect(onSuccess).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByTestId("soft-duplicate-show-existing"));
+      await waitFor(() => expect(onSuccess).toHaveBeenCalledWith(MOCK_ISSUE));
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("forces a second create only after the human chooses Create anyway", async () => {
+      mockCreateIssue
+        .mockResolvedValueOnce({
+          issue: MOCK_ISSUE,
+          warning: "soft-duplicate",
+          replayed: false,
+        })
+        .mockResolvedValueOnce({
+          issue: { ...MOCK_ISSUE, id: "TST-002" },
+          warning: null,
+          replayed: false,
+        });
+
+      render(
+        <CreateIssueModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+      fireEvent.change(screen.getByTestId("create-issue-title"), {
+        target: { value: "Test issue" },
+      });
+      fireEvent.click(screen.getByTestId("create-issue-submit"));
+      fireEvent.click(
+        await screen.findByTestId("soft-duplicate-create-anyway"),
+      );
+
+      await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(2));
+      expect(mockCreateIssue.mock.calls[1]?.[2]).toEqual({ force: true });
+      expect(onSuccess).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "TST-002" }),
+      );
+    });
+
     it("waits for async onSuccess before closing", async () => {
-      mockCreateIssue.mockResolvedValue(MOCK_ISSUE);
+      mockCreateIssue.mockResolvedValue(MOCK_CREATE_RESULT);
       let resolveSuccess!: () => void;
       onSuccess.mockImplementation(
         () =>
@@ -334,7 +403,7 @@ describe("CreateIssueModal", () => {
     });
 
     it("surfaces async onSuccess failures without closing", async () => {
-      mockCreateIssue.mockResolvedValue(MOCK_ISSUE);
+      mockCreateIssue.mockResolvedValue(MOCK_CREATE_RESULT);
       onSuccess.mockRejectedValue(new Error("Refresh failed"));
 
       render(
@@ -385,7 +454,7 @@ describe("CreateIssueModal", () => {
     });
 
     it("description is optional: submitting without description works", async () => {
-      mockCreateIssue.mockResolvedValue(MOCK_ISSUE);
+      mockCreateIssue.mockResolvedValue(MOCK_CREATE_RESULT);
 
       render(
         <CreateIssueModal
@@ -415,7 +484,7 @@ describe("CreateIssueModal", () => {
     });
 
     it("includes selected source_repo in multi-repo workspaces", async () => {
-      mockCreateIssue.mockResolvedValue(MOCK_ISSUE);
+      mockCreateIssue.mockResolvedValue(MOCK_CREATE_RESULT);
       mockUseWorkspaceContext.mockReturnValue({
         workspaceId: "test-ws-id",
         repos: [
@@ -451,7 +520,7 @@ describe("CreateIssueModal", () => {
     });
 
     it("defaults source_repo in single-repo workspaces", async () => {
-      mockCreateIssue.mockResolvedValue(MOCK_ISSUE);
+      mockCreateIssue.mockResolvedValue(MOCK_CREATE_RESULT);
       mockUseWorkspaceContext.mockReturnValue({
         workspaceId: "test-ws-id",
         repos: [{ name: "hello-world", source_repo_id: "hello-world" }],

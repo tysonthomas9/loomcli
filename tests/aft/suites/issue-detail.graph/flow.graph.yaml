@@ -34,7 +34,7 @@ graph:
     edit-description: description-saved
     change-type: type-saved
     add-label: label-saved
-    change-priority: priority-saved
+    set-assignee: assignee-saved
     post-comment: comment-visible
     start-work: in-progress-detail
     defer-issue: deferred-detail
@@ -61,17 +61,8 @@ graph:
   label-removed:
     close-and-refilter-label: label-removal-persisted
 
-  priority-saved:
-    close-and-filter-priority: priority-persisted
-
-  priority-persisted:
-    reopen-prioritized-card: priority-panel-reopened
-
-  priority-panel-reopened:
-    set-owner: owner-saved
-
-  owner-saved:
-    close-and-reload-owner-board: owner-persisted-on-card
+  assignee-saved:
+    close-and-reload-assignee-board: assignee-persisted
 
   comment-visible:
     reload-and-reopen-comment: comment-persisted

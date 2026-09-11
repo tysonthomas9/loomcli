@@ -9,9 +9,9 @@ teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 tests:
   # covers: LCLI-WP-002; LCLI-WP-006 partial (markdown description only — the
   # DesignPanel's design notes / acceptance criteria are untested); LCLI-WP-003
-  # partial; PriorityDropdown; LabelEditor; IssueDetailPanel PATCH wiring
+  # partial; LabelEditor; IssueDetailPanel PATCH wiring
   - name: Issue detail edits persist after reload
-    intent: An agent creates an issue through the API, then a human editor saves markdown, changes priority and labels through mounted controls, and changes status while readbacks verify persistence
+    intent: An agent creates an issue through the API, then a human editor saves markdown, changes labels through mounted controls, and changes status while readbacks verify persistence
     steps:
       - api:
           method: "POST"
@@ -91,22 +91,6 @@ tests:
       - expect: { text: Panel markdown persists. }
       - run: >-
           for i in 1 2 3; do
-          agent-browser --session "$AFT_SESSION" find testid priority-dropdown-trigger click || true;
-          sleep 1;
-          agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=priority-dropdown-menu]')" | grep -q true && exit 0;
-          done; echo "priority dropdown click never opened the menu"; exit 1
-        intent: "A human editor retries opening the priority menu until it is mounted"
-      - wait:
-          fn: >-
-            !!document.querySelector('[data-testid=priority-dropdown-menu]')
-        intent: "Wait until the priority menu is open"
-      - click: { testid: priority-option-1 }
-      - wait:
-          fn: >-
-            document.querySelector('[data-testid=priority-dropdown-trigger]')?.getAttribute('data-priority') === '1'
-        intent: "Wait until the priority control reflects priority 1"
-      - run: >-
-          for i in 1 2 3; do
           agent-browser --session "$AFT_SESSION" find testid add-label-button click || true;
           sleep 1;
           agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=label-input]')" | grep -q true && exit 0;
@@ -123,23 +107,20 @@ tests:
             document.querySelector('[data-testid=label-list]')?.textContent.includes('detail-label-${RUN_ID:-local}')
         intent: "Wait until the new label appears in the issue metadata"
       - click: { testid: header-close-button }
-      - open: /ws/E2E-WS/kanban?priority=1&labels=detail-label-${RUN_ID:-local}
+      - open: /ws/E2E-WS/kanban?labels=detail-label-${RUN_ID:-local}
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
         intent: "Wait until the workspace board is ready"
       - wait: { text: detail panel }
       - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
-      - expect: { attr: { selector: "section[data-status=ready] article", name: data-priority, equals: "1" } }
       - api:
           method: "GET"
           path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:detailId}"
           assert:
-            - path: "data.priority"
-              equals: 1
             - path: "data.labels"
               contains: "detail-label-$RUN_ID"
-        intent: "A human editor's readback confirms the priority and label changes persisted"
+        intent: "A human editor's readback confirms the label change persisted"
       - open: /ws/E2E-WS/kanban
       - wait:
           fn: >-

@@ -679,6 +679,56 @@ describe("IssueDetailPanel", () => {
   });
 
   describe("close interactions", () => {
+    it("opens the move dialog from the header when another workspace exists", () => {
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({
+          workspaceId: "workspace-1",
+          workspace: {
+            id: "workspace-1",
+            name: "workspace-1",
+            path: "/tmp/workspace-1",
+            repos: [],
+            groups: [],
+            agents: [],
+            default_workspace: "workspace-1",
+            workspaces: [
+              {
+                id: "workspace-1",
+                name: "workspace-1",
+                path: "/tmp/workspace-1",
+                active: true,
+                repo_count: 1,
+                is_default: true,
+              },
+              {
+                id: "workspace-2",
+                name: "workspace-2",
+                path: "/tmp/workspace-2",
+                active: false,
+                repo_count: 0,
+                is_default: false,
+              },
+            ],
+          },
+        }),
+      );
+
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssue()}
+          onClose={() => {}}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("header-move-button"));
+
+      expect(screen.getByTestId("move-dialog-overlay")).toBeInTheDocument();
+      expect(screen.getByTestId("move-workspace-select")).toHaveValue(
+        "workspace-2",
+      );
+    });
+
     it("calls onClose when clicking overlay", () => {
       const mockIssue = createTestIssue();
       const onClose = vi.fn();
@@ -1085,6 +1135,49 @@ describe("IssueDetailPanel", () => {
       );
       const typeItem = screen.getByTestId("metadata-type");
       expect(typeItem).toHaveTextContent("Task");
+    });
+
+    it("persists issue type changes through the mounted editor", async () => {
+      const mockIssue = createTestIssueDetails({ issue_type: "task" });
+      vi.mocked(updateIssue).mockResolvedValue({
+        ...mockIssue,
+        issue_type: "bug",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("type-dropdown-trigger"));
+      fireEvent.click(screen.getByTestId("type-option-bug"));
+
+      await waitFor(() =>
+        expect(updateIssue).toHaveBeenCalledWith("", mockIssue.id, {
+          issue_type: "bug",
+        }),
+      );
+    });
+
+    it("persists labels through the mounted editor", async () => {
+      const mockIssue = createTestIssueDetails({ labels: [] });
+      vi.mocked(updateIssue).mockResolvedValue({
+        ...mockIssue,
+        labels: ["frontend"],
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("add-label-button"));
+      fireEvent.change(screen.getByTestId("label-input"), {
+        target: { value: "frontend" },
+      });
+      fireEvent.keyDown(screen.getByTestId("label-input"), { key: "Enter" });
+
+      await waitFor(() =>
+        expect(updateIssue).toHaveBeenCalledWith("", mockIssue.id, {
+          add_labels: ["frontend"],
+        }),
+      );
     });
 
     it("does not render owner dropdown in metadata bar", () => {

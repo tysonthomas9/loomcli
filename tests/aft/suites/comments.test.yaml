@@ -93,10 +93,10 @@ tests:
       - expect: { count: { testid: activity-comment, atLeast: 2 } }
       # author metadata must be asserted INSIDE a comment node: lifecycle events
       # also render the actor text, so a page-wide match cannot catch an author
-      # regression. API comments carry the fleet actor (loom-e2e), not web-ui.
+      # regression. API comments carry the local stack's authenticated actor.
       - wait:
           fn: >-
-            Array.from(document.querySelectorAll('[data-testid=activity-comment]')).some((n) => n.textContent.includes('loom-e2e'))
+            Array.from(document.querySelectorAll('[data-testid=activity-comment]')).some((n) => n.textContent.includes('operator@local'))
         intent: "Wait until an API comment renders its configured author metadata"
       - expect: { text: first api comment }
       - expect: { text: second api comment }
@@ -104,10 +104,9 @@ tests:
           fn: >-
             (() => { const text = document.querySelector('[data-testid=activity-log]')?.textContent || ''; return text.indexOf('first api comment') >= 0 && text.indexOf('second api comment') > text.indexOf('first api comment'); })()
         intent: "Wait until the activity log preserves the API comment order"
-      # lifecycle events render as activity-event nodes (close reason text is not
-      # displayed; the reopen reason may surface as an extra comment via the
-      # backend's best-effort comment post). Assert event existence, not reasons.
-      - expect: { count: { testid: activity-event, atLeast: 2 } }
+      # Lifecycle events are audit entries nested in Journey spans; comments
+      # remain in the separate ActivityLog below them.
+      - expect: { count: { testid: journey-audit-event, atLeast: 2 } }
       - expect: { visible: { testid: comment-form } }
       - fill: { testid: comment-textarea, value: "web ui comment ${RUN_ID:-local}" }
       - run: >-
@@ -119,7 +118,7 @@ tests:
         intent: "A human commenter retries submission until the comment form clears"
       - wait:
           fn: >-
-            Array.from(document.querySelectorAll('[data-testid=activity-comment]')).some((n) => n.textContent.includes('web ui comment ${RUN_ID:-local}') && n.textContent.includes('loom-e2e'))
+            Array.from(document.querySelectorAll('[data-testid=activity-comment]')).some((n) => n.textContent.includes('web ui comment ${RUN_ID:-local}') && n.textContent.includes('operator@local'))
         intent: "Wait until the human comment appears with the configured author"
       - expect: { text: "web ui comment ${RUN_ID:-local}" }
       # Readback verifies the result of the human UI action; it is not a separate
@@ -132,5 +131,5 @@ tests:
               as: "commentsReadback"
         intent: "An operator reads back the issue comments after the human submission"
       - run: >-
-          python3 -c 'import json,os; data=json.load(open(os.environ["AFT_WORK_DIR"]+"/commentsReadback")); text="web ui comment "+os.environ["RUN_ID"]; matches=[c for c in data if c.get("text")==text]; assert len(matches)==1, data; assert matches[0].get("author")=="loom-e2e", matches[0]'
+          python3 -c 'import json,os; data=json.load(open(os.environ["AFT_WORK_DIR"]+"/commentsReadback")); text="web ui comment "+os.environ["RUN_ID"]; matches=[c for c in data if c.get("text")==text]; assert len(matches)==1, data; assert matches[0].get("author")=="operator@local", matches[0]'
         intent: "An operator's readback confirms the human comment persisted once with the configured author"

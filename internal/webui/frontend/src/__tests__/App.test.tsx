@@ -142,7 +142,7 @@ vi.mock("@/hooks/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/api")>();
   return {
     ...actual,
-    createIssue: mockCreateIssue,
+    createIssueWithMetadata: mockCreateIssue,
   };
 });
 
@@ -715,6 +715,7 @@ interface MockStoreStateOverrides {
   ) => Promise<void>;
   retryConnection: () => void;
   pendingIds: Set<string>;
+  detailInvalidationVersions: Map<string, number>;
   fetchIssues: () => Promise<void>;
   showStaleBanner: boolean;
   connectionLost: boolean;
@@ -751,6 +752,7 @@ function createMockUseIssuesReturn(
     connectionLost: false,
     disconnectedSince: null,
     pendingIds: new Set<string>(),
+    detailInvalidationVersions: new Map<string, number>(),
     mutationCount: 0,
     // Issue store actions
     fetchIssues: vi.fn().mockResolvedValue(undefined),
@@ -762,6 +764,7 @@ function createMockUseIssuesReturn(
     setConnectionState: vi.fn(),
     setReconnectAttempts: vi.fn(),
     setLastEventId: vi.fn(),
+    reconcileIssue: vi.fn(),
     getIssue: (id: string) => issuesMap.get(id),
     reset: vi.fn(),
     configure: vi.fn(),
@@ -1003,7 +1006,11 @@ describe("App", () => {
     // Set up default API mocks (resolve by default so existing tests aren't affected)
     mockUpdateIssue.mockResolvedValue({});
     mockAddComment.mockResolvedValue({});
-    mockCreateIssue.mockResolvedValue(createMockIssue({ id: "created-issue" }));
+    mockCreateIssue.mockResolvedValue({
+      issue: createMockIssue({ id: "created-issue" }),
+      warning: null,
+      replayed: false,
+    });
     mockStartAgent.mockResolvedValue(undefined);
     mockRunOnboardingFirstTask.mockResolvedValue({
       success: true,
@@ -2245,6 +2252,39 @@ describe("App", () => {
       });
     });
 
+    it("refetches an open issue after an SSE detail invalidation", async () => {
+      const fetchIssue = vi.fn();
+      const issue = createMockIssue({ id: "issue-1" });
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [issue],
+        detailInvalidationVersions: new Map([["issue-1", 0]]),
+      });
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            ...issue,
+            comments: [],
+            dependencies: [],
+            dependents: [],
+          },
+          fetchIssue,
+        }),
+      );
+
+      const { rerender } = render(<App />);
+      fetchIssue.mockClear();
+
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [issue],
+        detailInvalidationVersions: new Map([["issue-1", 1]]),
+      });
+      rerender(<App />);
+
+      await waitFor(() => {
+        expect(fetchIssue).toHaveBeenCalledWith("issue-1");
+      });
+    });
+
     // PUPPET-146 regression. `updateIssueStatus` stamps its optimistic issue
     // with a fabricated fresh `updated_at`, but a rollback restores the
     // snapshot's ORIGINAL (older) one — so the sync effect above filters the
@@ -2916,7 +2956,11 @@ describe("App", () => {
         title: "Manual first task",
         issue_type: "task",
       });
-      mockCreateIssue.mockResolvedValue(createdIssue);
+      mockCreateIssue.mockResolvedValue({
+        issue: createdIssue,
+        warning: null,
+        replayed: false,
+      });
       mockStoreState = createMockUseIssuesReturn({
         issues: [],
         refetch,

@@ -2,7 +2,7 @@
 
 `flow.graph.yaml` is the authoritative product topology. Read it first: one UI
 creation prefix reaches `detail-panel-ready`, which fans out to complete
-human journeys covering description save/cancel, type, priority/owner, labels,
+human journeys covering description save/cancel, type, assignee, labels,
 comments, lifecycle, title, dependency, and card reopen behavior.
 
 `shared-steps.yaml` owns the parameterized setup blocks used by every replay,
@@ -24,7 +24,7 @@ folds those repeated captures by authored source while retaining each execution
 under the collapsed card.
 
 The deepened label, priority, and comment branches continue past their original
-persistence checks to cover label removal, owner persistence on the card, and
+persistence checks to cover label removal, assignee persistence on the card, and
 empty-comment blocking. New branches cover type filtering, title validation and
 rename persistence, deferred and review status placement, cancelling an unsaved
 description edit, and adding a blocking dependency through the detail panel.

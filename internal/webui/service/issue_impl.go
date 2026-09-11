@@ -228,6 +228,10 @@ func (s *issueServiceImpl) CreateIssue(ctx context.Context, params CreateIssuePa
 	if created == nil {
 		return nil, ErrInternal("backend returned nil issue after create", nil)
 	}
+	SetCreateIssueMetadata(ctx, CreateIssueMetadata{
+		Replayed: created.IdempotencyReplayed,
+		Warning:  created.IdempotencyWarning,
+	})
 
 	// backend.IssueData is the slim projection; the previous direct-RPC
 	// path returned the full types.Issue (with description / design /

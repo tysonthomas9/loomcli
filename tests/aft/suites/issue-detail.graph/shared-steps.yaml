@@ -69,7 +69,7 @@ blocks:
       - expect: { visible: { testid: issue-header } }
       - expect: { visible: { testid: header-close-button } }
       - expect: { visible: { testid: status-dropdown } }
-      - expect: { visible: { testid: priority-dropdown-trigger } }
+      - expect: { visible: { testid: type-dropdown-trigger } }
       - expect: { visible: { testid: label-editor } }
       - expect: { visible: { testid: editable-description } }
       - expect: { visible: { testid: comment-form } }

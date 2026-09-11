@@ -30,7 +30,7 @@ tests:
       - expect: { count: { selector: "section[data-status=ready] article[aria-label*='ui created ${RUN_ID:-local}']", equals: 1 } }
       - run: >-
           curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues?limit=100"
-          | python3 -c "import os,sys,json,urllib.request; base=os.environ['AFT_BASE_URL']; ws=os.environ.get('AFT_WS','E2E-WS'); title='ui created '+os.environ['RUN_ID']; issues=json.load(sys.stdin)['data']; matches=[i for i in issues if i.get('title')==title]; assert len(matches)==1, matches; issue=matches[0]; events=json.load(urllib.request.urlopen(f'{base}/api/workspaces/{ws}/issues/{issue[\"id\"]}/events'))['data']; creates=[e for e in events if e.get('event_type')=='issue.created']; assert len(creates)==1, events"
+          | python3 -c "import os,sys,json,urllib.request; base=os.environ['AFT_BASE_URL']; ws=os.environ.get('AFT_WS','E2E-WS'); title='ui created '+os.environ['RUN_ID']; issues=json.load(sys.stdin)['data']; matches=[i for i in issues if i.get('title')==title]; assert len(matches)==1, matches; issue=matches[0]; events=json.load(urllib.request.urlopen(f'{base}/api/workspaces/{ws}/issues/{issue[\"id\"]}/events'))['data']; creates=[e for e in events if e.get('event_type')=='issue.create']; assert len(creates)==1, events"
         intent: "A human author's readback confirms one created issue and one creation event"
 
   # covers: LCLI-WP-001
@@ -171,12 +171,12 @@ tests:
           done;
           echo "Show existing opened '$actual', expected '$expected'"; exit 1
         intent: "A human author's visible issue id confirms Show existing opened the original issue identity"
-      - click: { testid: header-close-button }
+      - press: Escape
       - wait:
           fn: >-
             !document.querySelector('[data-testid=issue-detail-panel]') ||
             document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'closed'
-        intent: "Wait until the original issue detail panel closes"
+        intent: "A human closes the original issue detail panel with its keyboard dismissal"
       - click: { testid: new-issue-button }
       - expect: { visible: { testid: create-issue-title } }
       - fill: { testid: create-issue-title, value: "ui-duplicate-${RUN_ID:-local}" }

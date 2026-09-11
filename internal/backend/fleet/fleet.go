@@ -364,6 +364,13 @@ func (b *FleetBackend) List(ctx context.Context, opts backend.ListOpts) ([]backe
 	if err := checkFleetUnsupportedFilters(opts); err != nil {
 		return nil, err
 	}
+	if opts.Status == "all" {
+		return b.listAllStatuses(ctx, opts)
+	}
+	return b.list(ctx, opts)
+}
+
+func (b *FleetBackend) list(ctx context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
 	serverOpts := listServerOpts(opts)
 	path := "/issues?" + listOptsToQuery(serverOpts)
 	resp, err := b.exec(ctx, "List", "GET", path, nil)
@@ -375,6 +382,43 @@ func (b *FleetBackend) List(ctx context.Context, opts backend.ListOpts) ([]backe
 		return nil, err
 	}
 	return filterListIssues(issues, opts), nil
+}
+
+// FleetDB's issue list uses an omitted status for active work and an explicit
+// "closed" status for completed work. The web UI exposes the more useful
+// aggregate "all" contract, so resolve it at this adapter boundary instead of
+// leaking a FleetDB-specific multi-request into every caller.
+func (b *FleetBackend) listAllStatuses(ctx context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
+	queryOpts := opts
+	queryOpts.Status = ""
+	// Preserve the caller's limit on each FleetDB request. Omitting it does not
+	// mean unlimited: FleetDB falls back to 50, which can hide a newly closed
+	// issue in a long-lived workspace before the two result sets are merged.
+	// The merged result is still capped to the caller's limit below.
+	active, err := b.list(ctx, queryOpts)
+	if err != nil {
+		return nil, err
+	}
+
+	queryOpts.Status = "closed"
+	closed, err := b.list(ctx, queryOpts)
+	if err != nil {
+		return nil, err
+	}
+
+	merged := make([]backend.IssueData, 0, len(active)+len(closed))
+	seen := make(map[string]struct{}, len(active)+len(closed))
+	for _, issue := range append(active, closed...) {
+		if _, exists := seen[issue.ID]; exists {
+			continue
+		}
+		seen[issue.ID] = struct{}{}
+		merged = append(merged, issue)
+	}
+
+	resultOpts := opts
+	resultOpts.Status = ""
+	return filterListIssues(merged, resultOpts), nil
 }
 
 func (b *FleetBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
@@ -547,6 +591,8 @@ func (b *FleetBackend) createIssueOnce(ctx context.Context, params backend.Creat
 	}
 	logIdempotencyResponse(respHeaders, issue.ID)
 	result := issueToData(&issue)
+	result.IdempotencyReplayed = respHeaders.Get("X-Idempotency-Replayed") == "true"
+	result.IdempotencyWarning = respHeaders.Get("X-Idempotency-Warning")
 	return &result, nil
 }
 

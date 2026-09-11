@@ -283,6 +283,7 @@ function App() {
   );
   const retryConnection = useStore(issueStore, (s) => s.retryConnection);
   const fetchIssues = useStore(issueStore, (s) => s.fetchIssues);
+  const reconcileIssue = useStore(issueStore, (s) => s.reconcileIssue);
 
   // Wrap store's 3-arg updateIssueStatus to bind workspaceId (views expect 2-arg signature)
   const updateIssueStatus = useCallback(
@@ -472,6 +473,19 @@ function App() {
     clearIssue,
     updateIssueDetails,
   } = useIssueDetail();
+  const handleIssueDetailsUpdate = useCallback(
+    (updatedIssue: Issue) => {
+      reconcileIssue(updatedIssue);
+      updateIssueDetails(updatedIssue);
+    },
+    [reconcileIssue, updateIssueDetails],
+  );
+  const openDetailIssueId = issueDetails?.id ?? selectedIssueId;
+  const selectedIssueDetailInvalidation = useStore(issueStore, (s) =>
+    openDetailIssueId
+      ? (s.detailInvalidationVersions.get(openDetailIssueId) ?? 0)
+      : 0,
+  );
 
   // Previous view for issue-detail back navigation.
   // Tracks the last "content" view (excludes issue-detail, terminal, settings).
@@ -588,6 +602,36 @@ function App() {
     if (selectedIssueId) fetchIssue(selectedIssueId);
     else if (activeView !== "issue-detail") clearIssue();
   }, [selectedIssueId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Full issue details own collections that the board/list projection omits.
+  // An issue-scoped SSE comment/label/dependency mutation advances this
+  // revision; refetch the already-open detail exactly once for that event.
+  const detailInvalidationBaselineRef = useRef<{
+    issueId: string | null;
+    version: number;
+  }>({ issueId: null, version: 0 });
+  useEffect(() => {
+    const previous = detailInvalidationBaselineRef.current;
+    detailInvalidationBaselineRef.current = {
+      issueId: openDetailIssueId,
+      version: selectedIssueDetailInvalidation,
+    };
+    if (
+      !openDetailIssueId ||
+      !issueDetails ||
+      issueDetails.id !== openDetailIssueId ||
+      previous.issueId !== openDetailIssueId ||
+      selectedIssueDetailInvalidation <= previous.version
+    ) {
+      return;
+    }
+    fetchIssue(openDetailIssueId);
+  }, [
+    selectedIssueDetailInvalidation,
+    openDetailIssueId,
+    issueDetails,
+    fetchIssue,
+  ]);
 
   // Keep the open detail panel in sync with live issue-list mutations.
   // The panel fetches full issue details, while SSE updates land in issuesMap.
@@ -1272,7 +1316,7 @@ function App() {
       updateIssueStatus,
       fetchIssue,
       clearIssue,
-      updateIssueDetails,
+      updateIssueDetails: handleIssueDetailsUpdate,
       openPanel,
       closePanel,
       handleIssueClick,
@@ -1292,7 +1336,7 @@ function App() {
       updateIssueStatus,
       fetchIssue,
       clearIssue,
-      updateIssueDetails,
+      handleIssueDetailsUpdate,
       openPanel,
       closePanel,
       handleIssueClick,
@@ -1540,7 +1584,7 @@ function App() {
             onClose={handlePanelClose}
             onApprove={handleApprove}
             onReject={handleReject}
-            onIssueUpdate={updateIssueDetails}
+            onIssueUpdate={handleIssueDetailsUpdate}
             onCopyLink={handleCopyLink}
             onNavigateToIssue={handleIssueClick}
           />

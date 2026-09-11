@@ -29,6 +29,14 @@ transitions:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
         intent: Wait until the search-filtered board is ready.
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=toggle-completed-lanes]') ||
+            !!document.querySelector("section[data-status=done] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']")
+        intent: Wait until the closed result or its completed-lane reveal control is available.
+      - run: >-
+          agent-browser --session "$AFT_SESSION" find testid toggle-completed-lanes click || true
+        intent: A human reveals the completed epic lane when the board hides fully closed lanes by default.
 
   defer-issue:
     intent: A human defers the issue through the mounted status control.

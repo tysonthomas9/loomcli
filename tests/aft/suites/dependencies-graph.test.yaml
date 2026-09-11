@@ -193,17 +193,15 @@ tests:
             document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
         intent: "Wait until the selected issue detail panel is open"
       - expect: { visible: { testid: header-move-button } }
-      # The detail header can re-render as its workspace/dependency metadata
-      # settles. This is the same mounted-control race handled by the existing
-      # priority, label, and description journeys: require the click to produce
-      # the dialog rather than treating a dispatched-but-lost click as success.
+      # The panel body replaces its initial issue projection with full details.
+      # Retry across that replacement so the click lands on the mounted header.
       - run: >-
           for i in 1 2 3; do
           agent-browser --session "$AFT_SESSION" find testid header-move-button click || true;
           sleep 1;
           agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=move-dialog-overlay]')" | grep -q true && exit 0;
-          done; echo "move button click never opened the dialog"; exit 1
-        intent: "An operator retries opening the move dialog until it is mounted"
+          done; echo "move button click never opened the move dialog"; exit 1
+        intent: "A human retries the move action until the mounted dialog opens"
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=move-dialog-overlay]')

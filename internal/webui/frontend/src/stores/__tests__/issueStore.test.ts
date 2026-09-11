@@ -102,6 +102,7 @@ describe("issueStore", () => {
       expect(s.disconnectedSince).toBeNull();
       expect(s.pendingIds.size).toBe(0);
       expect(s.mutationCount).toBe(0);
+      expect(s.detailInvalidationVersions.size).toBe(0);
     });
   });
 
@@ -1026,6 +1027,46 @@ describe("issueStore", () => {
 
       expect(refetchSpy).toHaveBeenCalledTimes(1);
       expect(store.getState().mutationCount).toBe(0);
+    });
+
+    it("invalidates full issue details when a comment SSE mutation arrives", () => {
+      store.getState().applyMutation(
+        makeMutation({
+          type: "comment",
+          entity_type: "comment",
+          entity_id: "task-1",
+          action: "comment.create",
+          issue_id: undefined,
+        }),
+      );
+
+      expect(store.getState().detailInvalidationVersions.get("task-1")).toBe(1);
+
+      store.getState().applyMutation(
+        makeMutation({
+          type: "comment",
+          entity_type: "comment",
+          entity_id: "task-1",
+          action: "comment.create",
+          issue_id: undefined,
+        }),
+      );
+
+      expect(store.getState().detailInvalidationVersions.get("task-1")).toBe(2);
+    });
+
+    it("reconciles a successful detail write into the issue projection", () => {
+      store.setState({
+        issuesMap: new Map([
+          ["task-1", makeIssue({ id: "task-1", issue_type: "task" })],
+        ]),
+      });
+
+      store
+        .getState()
+        .reconcileIssue(makeIssue({ id: "task-1", issue_type: "bug" }));
+
+      expect(store.getState().issuesMap.get("task-1")?.issue_type).toBe("bug");
     });
 
     it("ignores generic non-issue entity events even when legacy issue_id is present", () => {
