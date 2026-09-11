@@ -221,9 +221,7 @@ func (m *MultiWorkspaceSubscriber) GetMutationsSince(since string) ([]rpc.Mutati
 		if err != nil {
 			return nil, err
 		}
-		for _, m := range muts {
-			all = append(all, realtime.BackendMutationToRPCEvent(m))
-		}
+		all = append(all, mutationDataToRPCEvents(muts)...)
 	}
 	return all, nil
 }
@@ -285,14 +283,18 @@ func (m *MultiWorkspaceSubscriber) GetMutationsSinceForWorkspace(wsID string, si
 		return nil, fmt.Errorf("no active mutation subscriber for workspace %q", wsID)
 	}
 	muts, err := entry.sub.GetMutationDataSince(since)
-	if len(muts) == 0 {
-		return nil, err
+	return mutationDataToRPCEvents(muts), err
+}
+
+func mutationDataToRPCEvents(mutations []backend.MutationData) []rpc.MutationEvent {
+	if len(mutations) == 0 {
+		return nil
 	}
-	out := make([]rpc.MutationEvent, len(muts))
-	for i, m := range muts {
+	out := make([]rpc.MutationEvent, len(mutations))
+	for i, m := range mutations {
 		out[i] = realtime.BackendMutationToRPCEvent(m)
 	}
-	return out, err
+	return out
 }
 
 func parseCursorMillis(cursor string) int64 {
