@@ -47,9 +47,11 @@ type Issue struct {
 	DeferUntil *time.Time `json:"defer_until,omitempty"`
 
 	// ===== External Integration =====
-	ExternalRef  *string `json:"external_ref,omitempty"`
-	SourceSystem string  `json:"source_system,omitempty"`
-	SourceRepo   string  `json:"source_repo,omitempty"`
+	ExternalRef          *string  `json:"external_ref,omitempty"`
+	SourceSystem         string   `json:"source_system,omitempty"`
+	SourceRepo           string   `json:"source_repo,omitempty"`
+	PrimaryRepository    string   `json:"primary_repository,omitempty"`
+	SelectedRepositories []string `json:"selected_repositories,omitempty"`
 
 	// ===== Relational Data =====
 	Labels       []string      `json:"labels,omitempty"`

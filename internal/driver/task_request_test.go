@@ -566,6 +566,20 @@ func TestRequestTaskRunHostBridgeCustomProviderRequiresExplicitBackend(t *testin
 	}
 }
 
+func TestTaskRunMayCloseTaskOnlyAfterReviewOrNoChange(t *testing.T) {
+	changed := TaskExecResult{RuntimeMetadata: map[string]string{"change_handoff_outcome": "ready_to_review"}}
+	noChange := TaskExecResult{RuntimeMetadata: map[string]string{"change_handoff_outcome": "no_change"}}
+	if taskRunMayCloseTask(&domain.TaskRun{ExecutionClass: domain.TaskRunExecutionImplementation}, changed) {
+		t.Fatal("implementation with published changes may not close Task before review")
+	}
+	if !taskRunMayCloseTask(&domain.TaskRun{ExecutionClass: domain.TaskRunExecutionImplementation}, noChange) {
+		t.Fatal("no-change implementation should close Task")
+	}
+	if !taskRunMayCloseTask(&domain.TaskRun{ExecutionClass: domain.TaskRunExecutionReview}, changed) {
+		t.Fatal("passing review should own Task closure")
+	}
+}
+
 func TestRequestTaskRunExecutorErrorRecordsFailedChild(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	executor := &recordingTaskExecutor{err: errors.New("agent command failed")}

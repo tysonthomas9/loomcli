@@ -24,16 +24,18 @@ import (
 // IssueData is the slim issue projection returned by List, Ready, and Blocked.
 // It contains the fields needed for list views, kanban boards, and summary displays.
 type IssueData struct {
-	ID         string   `json:"id"`
-	Title      string   `json:"title"`
-	Status     string   `json:"status"`
-	Priority   int      `json:"priority"`
-	IssueType  string   `json:"issue_type,omitempty"`
-	Assignee   string   `json:"assignee,omitempty"`
-	Owner      string   `json:"owner,omitempty"`
-	Labels     []string `json:"labels,omitempty"`
-	SourceRepo string   `json:"source_repo,omitempty"`
-	Parent     string   `json:"parent,omitempty"`
+	ID                   string   `json:"id"`
+	Title                string   `json:"title"`
+	Status               string   `json:"status"`
+	Priority             int      `json:"priority"`
+	IssueType            string   `json:"issue_type,omitempty"`
+	Assignee             string   `json:"assignee,omitempty"`
+	Owner                string   `json:"owner,omitempty"`
+	Labels               []string `json:"labels,omitempty"`
+	SourceRepo           string   `json:"source_repo,omitempty"`
+	PrimaryRepository    string   `json:"primary_repository,omitempty"`
+	SelectedRepositories []string `json:"selected_repositories,omitempty"`
+	Parent               string   `json:"parent,omitempty"`
 	// Collection responses may omit a large design body while retaining its
 	// stable presence flag and managed-artifact reference.
 	Design           string `json:"design,omitempty"`
@@ -370,26 +372,28 @@ type CountOpts struct {
 
 // CreateParams contains fields for creating a new issue.
 type CreateParams struct {
-	ID                 string   `json:"id,omitempty"`
-	Parent             string   `json:"parent,omitempty"`
-	Title              string   `json:"title"`
-	Description        string   `json:"description,omitempty"`
-	Status             string   `json:"status,omitempty"`
-	IssueType          string   `json:"issue_type"`
-	Priority           int      `json:"priority"`
-	Design             string   `json:"design,omitempty"`
-	AcceptanceCriteria string   `json:"acceptance_criteria,omitempty"`
-	Notes              string   `json:"notes,omitempty"`
-	Assignee           string   `json:"assignee,omitempty"`
-	Owner              string   `json:"owner,omitempty"`
-	CreatedBy          string   `json:"created_by,omitempty"`
-	ExternalRef        string   `json:"external_ref,omitempty"`
-	EstimatedMinutes   *int     `json:"estimated_minutes,omitempty"`
-	Labels             []string `json:"labels,omitempty"`
-	Dependencies       []string `json:"dependencies,omitempty"`
-	SourceRepo         string   `json:"source_repo,omitempty"`
-	DueAt              string   `json:"due_at,omitempty"`
-	DeferUntil         string   `json:"defer_until,omitempty"`
+	ID                   string   `json:"id,omitempty"`
+	Parent               string   `json:"parent,omitempty"`
+	Title                string   `json:"title"`
+	Description          string   `json:"description,omitempty"`
+	Status               string   `json:"status,omitempty"`
+	IssueType            string   `json:"issue_type"`
+	Priority             int      `json:"priority"`
+	Design               string   `json:"design,omitempty"`
+	AcceptanceCriteria   string   `json:"acceptance_criteria,omitempty"`
+	Notes                string   `json:"notes,omitempty"`
+	Assignee             string   `json:"assignee,omitempty"`
+	Owner                string   `json:"owner,omitempty"`
+	CreatedBy            string   `json:"created_by,omitempty"`
+	ExternalRef          string   `json:"external_ref,omitempty"`
+	EstimatedMinutes     *int     `json:"estimated_minutes,omitempty"`
+	Labels               []string `json:"labels,omitempty"`
+	Dependencies         []string `json:"dependencies,omitempty"`
+	SourceRepo           string   `json:"source_repo,omitempty"`
+	PrimaryRepository    string   `json:"primary_repository,omitempty"`
+	SelectedRepositories []string `json:"selected_repositories,omitempty"`
+	DueAt                string   `json:"due_at,omitempty"`
+	DeferUntil           string   `json:"defer_until,omitempty"`
 
 	// IdempotencyKey rides as the X-Idempotency-Key HTTP header on create
 	// requests (fleet-db's strict JSON decode rejects unknown body fields,
@@ -443,6 +447,10 @@ func (p CreateParams) FleetCreateBody() map[string]interface{} {
 	}
 	setNonEmptyMapStr(req, "parent_id", p.Parent)
 	setNonEmptyMapStr(req, "repo", p.SourceRepo)
+	setNonEmptyMapStr(req, "primary_repository", p.PrimaryRepository)
+	if len(p.SelectedRepositories) > 0 {
+		req["selected_repositories"] = p.SelectedRepositories
+	}
 	setNonEmptyMapStr(req, "design", p.Design)
 	setNonEmptyMapStr(req, "notes", p.Notes)
 	setNonEmptyMapStr(req, "external_ref", p.ExternalRef)

@@ -190,8 +190,6 @@ func TestLocalTaskRunnerBaseEnvWideningGatedByEntrypoint(t *testing.T) {
 	for _, key := range []string{
 		"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_HOME",
 		"GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS", "CURSOR_API_KEY",
-		// GitHub tokens are admitted for the local runner's opt-in PR delivery.
-		"GITHUB_TOKEN", "GH_TOKEN",
 	} {
 		if _, ok := localEnv[key]; !ok {
 			t.Fatalf("local runner env missing trusted credential %s: %+v", key, localEnv)
@@ -200,9 +198,8 @@ func TestLocalTaskRunnerBaseEnvWideningGatedByEntrypoint(t *testing.T) {
 	if _, ok := localEnv["PATH"]; !ok {
 		t.Fatalf("local runner env missing PATH: %+v", localEnv)
 	}
-	// The local runner still never inherits non-provider secrets like the
-	// fleet-db API key (GitHub tokens ARE admitted, above, for PR delivery).
-	for _, key := range []string{"LOOM_FLEET_DB_API_KEY"} {
+	// Publication credentials belong to Loom's push proxy, not the backend.
+	for _, key := range []string{"GITHUB_TOKEN", "GH_TOKEN", "LOOM_FLEET_DB_API_KEY"} {
 		if _, ok := localEnv[key]; ok {
 			t.Fatalf("local runner env leaked non-provider secret %s: %+v", key, localEnv)
 		}

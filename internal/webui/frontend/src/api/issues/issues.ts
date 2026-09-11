@@ -365,6 +365,8 @@ export interface CreateIssueRequest {
   labels?: string[];
   dependencies?: string[];
   source_repo?: string;
+  primary_repository?: string;
+  selected_repositories?: string[];
   due_at?: string;
   defer_until?: string;
 }
@@ -415,6 +417,8 @@ export async function createIssue(
     labels: reqData.labels,
     dependencies: reqData.dependencies,
     source_repo: reqData.source_repo,
+    primary_repository: reqData.primary_repository,
+    selected_repositories: reqData.selected_repositories,
     due_at: reqData.due_at,
     defer_until: reqData.defer_until,
   });

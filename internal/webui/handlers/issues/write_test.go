@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -471,6 +472,24 @@ func TestHandleCreateIssueW_WithParent(t *testing.T) {
 	}
 	if !resp.Success {
 		t.Error("expected success=true")
+	}
+}
+
+func TestHandleCreateIssueW_ForwardsTaskRepositoryContext(t *testing.T) {
+	svc := &mockIssueService{createIssueFunc: func(_ context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
+		if params.SourceRepo != "source-a" || params.PrimaryRepository != "repo-a" || !reflect.DeepEqual(params.SelectedRepositories, []string{"repo-b"}) {
+			t.Fatalf("repository context = source %q primary %q selected %v", params.SourceRepo, params.PrimaryRepository, params.SelectedRepositories)
+		}
+		return json.RawMessage(`{"id":"TEST-1"}`), nil
+	}}
+	handler := handleCreateIssue(svc)
+	body := `{"title":"Cross repo","issue_type":"task","priority":1,"source_repo":"source-a","primary_repository":"repo-a","selected_repositories":["repo-b"]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/issues", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
 	}
 }
 

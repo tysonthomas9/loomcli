@@ -210,18 +210,19 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 			writeJSON(t, w, domain.DriverStep{WorkspaceKey: "WS", StepID: "step-1", DriverRunID: "run-1", StepKind: "custom_vendor_gate", Status: domain.DriverStepCompleted, TaskRunID: *req.TaskRunID, OutputRef: *req.OutputRef})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/task-runs":
 			var req struct {
-				TaskRunID        string                  `json:"task_run_id"`
-				DriverRunID      string                  `json:"driver_run_id"`
-				DriverStepID     string                  `json:"driver_step_id"`
-				TaskID           string                  `json:"task_id"`
-				WorkerProfileID  string                  `json:"worker_profile_id"`
-				NodeID           string                  `json:"node_id"`
-				LeaseID          string                  `json:"lease_id"`
-				FencingToken     int64                   `json:"fencing_token"`
-				SandboxPlacement domain.TaskRunPlacement `json:"sandbox_placement"`
+				TaskRunID        string                       `json:"task_run_id"`
+				DriverRunID      string                       `json:"driver_run_id"`
+				DriverStepID     string                       `json:"driver_step_id"`
+				TaskID           string                       `json:"task_id"`
+				ExecutionClass   domain.TaskRunExecutionClass `json:"execution_class"`
+				WorkerProfileID  string                       `json:"worker_profile_id"`
+				NodeID           string                       `json:"node_id"`
+				LeaseID          string                       `json:"lease_id"`
+				FencingToken     int64                        `json:"fencing_token"`
+				SandboxPlacement domain.TaskRunPlacement      `json:"sandbox_placement"`
 			}
 			decodeJSONBody(t, r, &req)
-			if req.TaskRunID != "task-run-1" || req.DriverRunID != "run-1" || req.DriverStepID != "step-1" || req.TaskID != "WS-1" || req.WorkerProfileID != "falcon" || req.NodeID != "node-1" || req.LeaseID != "task-lease-1" {
+			if req.TaskRunID != "task-run-1" || req.DriverRunID != "run-1" || req.DriverStepID != "step-1" || req.TaskID != "WS-1" || req.ExecutionClass != domain.TaskRunExecutionImplementation || req.WorkerProfileID != "falcon" || req.NodeID != "node-1" || req.LeaseID != "task-lease-1" {
 				t.Fatalf("task run create body = %+v", req)
 			}
 			if req.SandboxPlacement.Provider != "daytona" || req.SandboxPlacement.CWD != "/workspace" {
@@ -450,7 +451,7 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 		t.Fatalf("RecoverStaleTaskRuns = %+v err=%v, want recovery counts", recovered, err)
 	}
 
-	taskRun, err := client.TaskRuns().Create(t.Context(), store.TaskRunCreate{WorkspaceKey: "WS", TaskRunID: "task-run-1", DriverRunID: "run-1", DriverStepID: "step-1", TaskID: "WS-1", WorkerProfileID: "falcon", Status: domain.TaskRunRunning, NodeID: "node-1", LeaseID: "task-lease-1", SandboxPlacement: domain.TaskRunPlacement{Provider: "daytona", CWD: "/workspace"}})
+	taskRun, err := client.TaskRuns().Create(t.Context(), store.TaskRunCreate{WorkspaceKey: "WS", TaskRunID: "task-run-1", DriverRunID: "run-1", DriverStepID: "step-1", TaskID: "WS-1", ExecutionClass: domain.TaskRunExecutionImplementation, WorkerProfileID: "falcon", Status: domain.TaskRunRunning, NodeID: "node-1", LeaseID: "task-lease-1", SandboxPlacement: domain.TaskRunPlacement{Provider: "daytona", CWD: "/workspace"}})
 	if err != nil {
 		t.Fatalf("Create task run: %v", err)
 	}
@@ -522,6 +523,43 @@ func TestPlatformClientFinishesDriverRunWithNeedsReviewStatus(t *testing.T) {
 	}
 	if finished.Status != domain.DriverRunNeedsReview {
 		t.Fatalf("finished status = %q, want needs_review", finished.Status)
+	}
+}
+
+func TestPlatformClientDecodesTaskRunRepositorySet(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/WS/task-runs/task-run-1" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		writeJSON(t, w, map[string]any{
+			"workspace_key":  "WS",
+			"task_run_id":    "task-run-1",
+			"task_id":        "WS-1",
+			"status":         "running",
+			"repository_set": []string{"loom", "fleet-db"},
+		})
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := client.TaskRuns().Get(t.Context(), "WS", "task-run-1")
+	if err != nil {
+		t.Fatalf("Get task run: %v", err)
+	}
+
+	encoded, err := json.Marshal(run)
+	if err != nil {
+		t.Fatalf("marshal task run: %v", err)
+	}
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &wire); err != nil {
+		t.Fatalf("decode task run wire form: %v", err)
+	}
+	if got := string(wire["repository_set"]); got != `["loom","fleet-db"]` {
+		t.Fatalf("repository_set = %s, want %s", got, `["loom","fleet-db"]`)
 	}
 }
 

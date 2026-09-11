@@ -97,6 +97,33 @@
   flex: 1;
 }
 
+.repositorySet {
+  margin: 0 0 14px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.hint {
+  margin: 0 0 8px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.repositoryOptions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.repositoryOption {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text);
+  font-size: 13px;
+}
+
 .error {
   color: var(--color-danger);
   font-size: 12px;

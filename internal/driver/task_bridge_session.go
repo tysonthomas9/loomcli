@@ -97,6 +97,9 @@ func localWorktreeResolutionFailure(err error) TaskExecResult {
 }
 
 func (e *HostBridgeTaskExecutor) resolveLocalTaskWorktree(ctx context.Context, req TaskExecRequest) (TaskWorktree, TaskExecResult, bool) {
+	if len(req.RepositorySet) > 0 {
+		return TaskWorktree{}, TaskExecResult{}, false
+	}
 	if !isLocalTaskRunner(req) || e.WorktreeResolver == nil {
 		return TaskWorktree{}, TaskExecResult{}, false
 	}
@@ -114,6 +117,28 @@ func (e *HostBridgeTaskExecutor) resolveLocalTaskWorktree(ctx context.Context, r
 		e.WorktreePath = resolved.Path
 	}
 	return resolved, TaskExecResult{}, false
+}
+
+func (e *HostBridgeTaskExecutor) resolveLocalTaskRoot(ctx context.Context, req TaskExecRequest) (TaskRoot, TaskExecResult, bool) {
+	if !isLocalTaskRunner(req) || len(req.RepositorySet) == 0 {
+		return TaskRoot{}, TaskExecResult{}, false
+	}
+	if e.RootResolver == nil {
+		return TaskRoot{}, localWorktreeResolutionFailure(fmt.Errorf("composite TaskRun Root resolver is required")), true
+	}
+	resolved, err := e.RootResolver.ResolveTaskRoot(ctx, req)
+	if err != nil {
+		return TaskRoot{}, localWorktreeResolutionFailure(err), true
+	}
+	if strings.TrimSpace(resolved.Path) == "" || strings.TrimSpace(resolved.ManifestPath) == "" {
+		return TaskRoot{}, localWorktreeResolutionFailure(fmt.Errorf("composite TaskRun Root is incomplete")), true
+	}
+	if strings.TrimSpace(e.driverBundleBaseDir) == "" {
+		e.driverBundleBaseDir = e.WorktreePath
+	}
+	e.WorktreePath = resolved.Path
+	e.taskRootManifest = resolved.ManifestPath
+	return resolved, TaskExecResult{}, true
 }
 
 func refuseUntrustedTaskRunnerPreflight(opts TaskRunRequestOptions) error {

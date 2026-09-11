@@ -91,12 +91,6 @@ var trustedLocalProviderCredentials = map[string]struct{}{
 	"GOOGLE_API_KEY":                 {},
 	"GOOGLE_APPLICATION_CREDENTIALS": {},
 	"CURSOR_API_KEY":                 {},
-	// GitHub tokens enable the local runner's opt-in pull-request delivery.
-	// They remain in subprocessEnvSensitiveExact so the strict filter still
-	// denies them to Daytona/remote runners; localTaskRunnerBaseEnv adds them
-	// back ONLY for the local-task-runner entrypoint.
-	"GITHUB_TOKEN": {},
-	"GH_TOKEN":     {},
 }
 
 func driverRuntimeBaseEnv(env []string) []string {

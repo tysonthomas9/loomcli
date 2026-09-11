@@ -48,6 +48,7 @@ func TestFleetIssueWire_FieldDriftGuard(t *testing.T) {
 		"id": true, "title": true, "status": true, "priority": true,
 		"kind": true, "assignee": true, "owner": true, "labels": true,
 		"repo_canonical": true, "parent": true, "design": true,
+		"primary_repository": true, "selected_repositories": true,
 		"design_artifact_id": true, "design_format": true, "has_design": true, "description": true,
 		"acceptance_criteria": true, "notes": true, "external_ref": true,
 		"created_at": true, "created_by": true, "updated_at": true,
@@ -84,26 +85,28 @@ func TestFleetIssueWire_RoundTrip(t *testing.T) {
 	due := now.Add(24 * time.Hour)
 	defer_ := now.Add(time.Hour)
 	wire := fleetIssueWire{
-		ID:          "PARITY-1",
-		Title:       "round-trip",
-		Status:      "closed",
-		Priority:    1,
-		Type:        "bug",
-		Assignee:    "agent-a",
-		Owner:       "owner@example.com",
-		Labels:      []string{"x", "y"},
-		Repo:        "repo",
-		ParentID:    "EPIC-1",
-		Design:      "design notes",
-		Notes:       "BLOCKED: dep missing",
-		Description: "desc",
-		CreatedAt:   now,
-		CreatedBy:   "creator",
-		UpdatedAt:   now,
-		DueAt:       &due,
-		DeferUntil:  &defer_,
-		ClosedAt:    &closed,
-		CloseReason: "fixed",
+		ID:                   "PARITY-1",
+		Title:                "round-trip",
+		Status:               "closed",
+		Priority:             1,
+		Type:                 "bug",
+		Assignee:             "agent-a",
+		Owner:                "owner@example.com",
+		Labels:               []string{"x", "y"},
+		Repo:                 "repo",
+		PrimaryRepository:    "loom",
+		SelectedRepositories: []string{"fleet-db"},
+		ParentID:             "EPIC-1",
+		Design:               "design notes",
+		Notes:                "BLOCKED: dep missing",
+		Description:          "desc",
+		CreatedAt:            now,
+		CreatedBy:            "creator",
+		UpdatedAt:            now,
+		DueAt:                &due,
+		DeferUntil:           &defer_,
+		ClosedAt:             &closed,
+		CloseReason:          "fixed",
 	}
 	d := fleetIssueWithCountsWire{fleetIssueWire: wire}.toIssueData()
 	want := map[string]any{
@@ -135,6 +138,12 @@ func TestFleetIssueWire_RoundTrip(t *testing.T) {
 	}
 	if d.DeferUntil == nil || !d.DeferUntil.Equal(defer_) {
 		t.Errorf("DeferUntil = %v, want %v", d.DeferUntil, defer_)
+	}
+	if !reflect.DeepEqual(d.SelectedRepositories, []string{"fleet-db"}) {
+		t.Errorf("SelectedRepositories = %#v, want %#v", d.SelectedRepositories, []string{"fleet-db"})
+	}
+	if d.PrimaryRepository != "loom" {
+		t.Errorf("PrimaryRepository = %q, want loom", d.PrimaryRepository)
 	}
 }
 
@@ -453,6 +462,24 @@ func TestFleetIssueWire_RepoProjection(t *testing.T) {
 	w := fleetIssueWire{Repo: "org/repo"}
 	if got := w.toIssue().SourceRepo; got != "org/repo" {
 		t.Errorf("SourceRepo = %q, want %q", got, "org/repo")
+	}
+}
+
+func TestFleetIssueWire_SelectedRepositoriesProjection(t *testing.T) {
+	var wire fleetIssueWire
+	if err := json.Unmarshal([]byte(`{"id":"WS-1","selected_repositories":["loom","fleet-db"]}`), &wire); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(wire.toIssue())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var projected map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &projected); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(projected["selected_repositories"]); got != `["loom","fleet-db"]` {
+		t.Fatalf("selected_repositories = %s, want %s", got, `["loom","fleet-db"]`)
 	}
 }
 

@@ -6,9 +6,11 @@ DESKTOP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${DESKTOP_DIR}/.." && pwd)"
 BIN_DIR="${DESKTOP_DIR}/src-tauri/binaries"
 FLEET_DB_REPO="${FLEET_DB_REPO:-${REPO_ROOT}/../fleet-db}"
+FLUE_REPO="${FLUE_REPO:-${REPO_ROOT}/../flue}"
 WEBUI_FRONTEND_DIR="${REPO_ROOT}/internal/webui/frontend"
 WEBUI_DIST_DIR="${WEBUI_FRONTEND_DIR}/dist"
 WEBUI_RESOURCE_DIR="${DESKTOP_DIR}/src-tauri/resources/webui"
+BUILTIN_WORKFLOW_RESOURCE_DIR="${DESKTOP_DIR}/src-tauri/resources/workflows/epic-runner"
 
 if ! command -v rustc >/dev/null 2>&1; then
   echo "rustc is required to prepare the Tauri sidecar" >&2
@@ -39,6 +41,18 @@ if [ ! -f "${WEBUI_DIST_DIR}/index.html" ]; then
 fi
 mkdir -p "${WEBUI_RESOURCE_DIR}"
 cp -R "${WEBUI_DIST_DIR}/." "${WEBUI_RESOURCE_DIR}/"
+
+if [ ! -f "${FLUE_REPO}/packages/cli/bin/flue.mjs" ]; then
+  echo "Flue CLI is missing at ${FLUE_REPO}; build the pinned sibling Flue checkout or set FLUE_REPO" >&2
+  exit 1
+fi
+echo "[desktop] building packaged epic-runner workflow"
+BUILTIN_DIST_DEST="${BUILTIN_WORKFLOW_RESOURCE_DIR}" \
+  FLUE_REPO="${FLUE_REPO}" \
+  "${REPO_ROOT}/scripts/rebuild-builtin-bundle.sh"
+# Source maps are developer diagnostics, not runtime dependencies, and add
+# tens of megabytes to every signed desktop package.
+find "${BUILTIN_WORKFLOW_RESOURCE_DIR}" -name '*.map' -delete
 
 BUILD="${BUILD:-$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
 OUT="${BIN_DIR}/loom-${TARGET_TRIPLE}"
