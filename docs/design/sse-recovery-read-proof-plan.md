@@ -125,4 +125,4 @@ The [browser coverage audit](sse-browser-recovery-coverage.md) records the concr
 
 ## Scope of this document
 
-This plan records the remaining whole-client recovery protocol. Certified Fleet issue reads, the Loom handle bridge and browser offer decoding now exist; durable incarnation, cache-generation publication and acknowledgment do not. Existing registered-query recovery remains useful and intentionally weaker. Fixed replay fences and connection-bound mutation sources are prerequisites, not substitutes for complete read coverage.
+This plan records the remaining whole-client recovery protocol. Certified Fleet issue reads, the Loom handle bridge, browser offer decoding and native preparation/HTTP API now exist; durable incarnation, cache-generation publication and acknowledgment do not. Existing registered-query recovery remains useful and intentionally weaker. Fixed replay fences and connection-bound mutation sources are prerequisites, not substitutes for complete read coverage.
