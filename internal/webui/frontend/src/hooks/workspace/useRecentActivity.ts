@@ -1,7 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useContext,
+} from "react";
 
 import { getIssueEvents } from "@/api";
-import { useEventSubscription, useResyncSubscription } from "@/hooks/common";
+import { useEventSubscription, useEventContext } from "@/hooks/common";
+import { useIssueStoreInstance } from "@/hooks/common/useStoreContext";
+import { QueryRecoveryContext } from "@/hooks/common/queryRecovery";
+import { ScopedQueryRequest } from "@/hooks/common/scopedQueryRequest";
 import type { Event, Issue, LoomAgentStatus, MutationPayload } from "@/types";
 
 const ACTIVITY_BUFFER_SIZE = 150;
@@ -245,7 +255,9 @@ export function useRecentActivity(
   agents: readonly LoomAgentStatus[],
 ): RecentActivityItem[] {
   const [activity, setActivity] = useState<RecentActivityItem[]>([]);
-  const seededWorkspaceRef = useRef<string | null>(null);
+  const issueStore = useIssueStoreInstance();
+  const recovery = useContext(QueryRecoveryContext);
+  const { connectionEpoch } = useEventContext();
   const knownAgentNames = useMemo(
     () => new Set(agents.map((agent) => agent.name)),
     [agents],
@@ -273,10 +285,62 @@ export function useRecentActivity(
     setActivity((current) => mergeRecentActivity(current, incoming));
   }, []);
 
+  // Read the same issue map as Home directly. React may not have rendered the
+  // issue recovery commit yet when the coordinator checks its participants.
+  const history = useMemo(() => {
+    let observedMap = issueStore.getState().issuesMap;
+    let revision = 0;
+    const request = new ScopedQueryRequest<RecentActivityItem[]>({
+      load: async (signal) => {
+        const selected = [...issueStore.getState().issuesMap.values()]
+          .filter((issue) => issue.issue_type !== "epic")
+          .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
+          .slice(0, SEED_ISSUE_COUNT);
+        const rebuilt: RecentActivityItem[] = [];
+        for (const issue of selected) {
+          signal.throwIfAborted();
+          const events = await getIssueEvents(
+            workspaceId,
+            issue.id,
+            SEED_EVENTS_PER_ISSUE,
+            { signal },
+          );
+          rebuilt.push(
+            ...events.map((event) =>
+              describeIssueEvent(event, knownAgentNamesRef.current),
+            ),
+          );
+        }
+        return rebuilt;
+      },
+      commit: appendActivity,
+    });
+    return {
+      request,
+      revision: () => {
+        const current = issueStore.getState().issuesMap;
+        if (current !== observedMap) {
+          observedMap = current;
+          revision++;
+        }
+        return revision;
+      },
+    };
+  }, [appendActivity, issueStore, workspaceId]);
+
   useEffect(() => {
-    seededWorkspaceRef.current = null;
     setActivity([]);
-  }, [workspaceId]);
+    return () => history.request.cancel();
+  }, [history, recovery]);
+
+  useEffect(() => {
+    if (!workspaceId || !recovery) return;
+    return recovery.register(
+      "bounded recent activity",
+      (signal) => history.request.run({ signal, fresh: true }),
+      history.revision,
+    );
+  }, [history, recovery, workspaceId]);
 
   useEventSubscription(
     useCallback(
@@ -301,54 +365,12 @@ export function useRecentActivity(
     ),
   );
 
-  const rebuildActivity = useCallback(async (): Promise<void> => {
-    if (!workspaceId || seedIssueIds.length === 0) return;
-    const rebuildWorkspace = workspaceId;
-    const rebuilt: RecentActivityItem[] = [];
-    for (const issueId of seedIssueIds) {
-      try {
-        const events = await getIssueEvents(
-          rebuildWorkspace,
-          issueId,
-          SEED_EVENTS_PER_ISSUE,
-        );
-        rebuilt.push(
-          ...events.map((event) =>
-            describeIssueEvent(event, knownAgentNamesRef.current),
-          ),
-        );
-      } catch {
-        // Activity is ambient context; one unavailable issue trail should not
-        // prevent the rest of the live Home surface from rendering.
-      }
-    }
-    if (seededWorkspaceRef.current === rebuildWorkspace) {
-      appendActivity(rebuilt);
-    }
-  }, [appendActivity, seedIssueIds, workspaceId]);
-
-  useResyncSubscription(
-    useCallback(() => {
-      if (!workspaceId || seedIssueIds.length === 0) return;
-      seededWorkspaceRef.current = workspaceId;
-      // TODO(transport-repair-3): replace this bounded per-issue rebuild with
-      // the missing client-facing mutations-range endpoint for global backfill.
-      void rebuildActivity();
-    }, [rebuildActivity, seedIssueIds.length, workspaceId]),
-  );
-
   useEffect(() => {
-    if (!workspaceId || seedIssueIds.length === 0) return;
-    if (seededWorkspaceRef.current === workspaceId) return;
-    seededWorkspaceRef.current = workspaceId;
-
-    // Deliberately not cancelled on re-render: the seed is a one-shot per
-    // workspace, and agent or issue updates arriving mid-fetch must not
-    // abort it (rows are real events and dedupe by id). Only a workspace
-    // switch discards the result.
-    void rebuildActivity();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- seedKey stands in for seedIssueIds
-  }, [rebuildActivity, seedKey, workspaceId]);
+    if (!workspaceId) return;
+    // Ordinary ambient activity may remain stale on error. Recovery uses the
+    // same loader but propagates any selected trail failure to the coordinator.
+    void history.request.run({ fresh: true }).catch(() => {});
+  }, [history, seedKey, workspaceId, connectionEpoch, recovery]);
 
   // Agents may load after the seed; re-derive operator-vs-agent markers so a
   // known agent is never shown as an operator just because it raced the fetch.

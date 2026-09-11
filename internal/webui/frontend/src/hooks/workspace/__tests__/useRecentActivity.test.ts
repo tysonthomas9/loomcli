@@ -2,11 +2,16 @@
  * @vitest-environment jsdom
  */
 
+import { createElement, type ReactNode } from "react";
+import {
+  QueryRecoveryCoordinator,
+  QueryRecoveryContext,
+} from "@/hooks/common/queryRecovery";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "@/api";
-import { useResyncSubscription } from "@/hooks/common";
+import { useEventSubscription } from "@/hooks/common";
 import type { Event, Issue, LoomAgentStatus, MutationPayload } from "@/types";
 
 import {
@@ -17,13 +22,21 @@ import {
   useRecentActivity,
 } from "../useRecentActivity";
 
+const storeSnapshot = vi.hoisted(() => ({
+  issuesMap: new Map<string, Issue>(),
+}));
+const store = { getState: () => storeSnapshot };
+vi.mock("@/hooks/common/useStoreContext", () => ({
+  useIssueStoreInstance: () => store,
+}));
+
 vi.mock("@/api", () => ({
   getIssueEvents: vi.fn(),
 }));
 
 vi.mock("@/hooks/common", () => ({
   useEventSubscription: vi.fn(),
-  useResyncSubscription: vi.fn(),
+  useEventContext: () => ({ connectionEpoch: 0 }),
 }));
 
 const mockGetIssueEvents = vi.mocked(api.getIssueEvents);
@@ -233,7 +246,8 @@ describe("useRecentActivity", () => {
 
   beforeEach(() => {
     mockGetIssueEvents.mockReset();
-    vi.mocked(useResyncSubscription).mockClear();
+    vi.mocked(useEventSubscription).mockClear();
+    storeSnapshot.issuesMap = new Map();
   });
 
   it("seeds from the issue trails and survives agents arriving mid-fetch", async () => {
@@ -254,12 +268,15 @@ describe("useRecentActivity", () => {
     );
 
     const issues = [issue("TASK-1", "2026-08-21T15:48:02.000Z", "source-repo")];
+    storeSnapshot.issuesMap = new Map(issues.map((issue) => [issue.id, issue]));
     const { result, rerender } = renderHook(
       ({ agents }) => useRecentActivity("WS", issues, agents),
       { initialProps: { agents: [] as LoomAgentStatus[] } },
     );
     await waitFor(() => expect(mockGetIssueEvents).toHaveBeenCalledTimes(1));
-    expect(mockGetIssueEvents).toHaveBeenCalledWith("WS", "TASK-1", 15);
+    expect(mockGetIssueEvents).toHaveBeenCalledWith("WS", "TASK-1", 15, {
+      signal: expect.any(AbortSignal),
+    });
 
     // Agents load while the seed is still in flight: must not abort it.
     rerender({ agents: [agent("agent-dev-1")] });
@@ -276,20 +293,211 @@ describe("useRecentActivity", () => {
     expect(mockGetIssueEvents).toHaveBeenCalledTimes(1);
   });
 
-  it("rebuilds once when the provider reports a resync", async () => {
+  const recoveryWrapper = (coordinator: QueryRecoveryCoordinator) =>
+    function RecoveryWrapper({ children }: { children: ReactNode }) {
+      return createElement(
+        QueryRecoveryContext.Provider,
+        { value: coordinator },
+        children,
+      );
+    };
+
+  it("rebuilds through the coordinator with successful bounded history", async () => {
     mockGetIssueEvents
       .mockResolvedValueOnce([fleetEvent({ id: "before" })])
       .mockResolvedValueOnce([fleetEvent({ id: "after" })]);
     const issues = [issue("TASK-1", "2026-08-21T15:48:02.000Z")];
-    renderHook(() => useRecentActivity("WS", issues, []));
-    await waitFor(() => expect(mockGetIssueEvents).toHaveBeenCalledTimes(1));
-
-    const onResync = vi.mocked(useResyncSubscription).mock.calls.at(-1)?.at(0);
-    expect(onResync).toBeTypeOf("function");
-    act(() => {
-      onResync?.({ from: "c1.before", to: "c1.after", reason: "overflow" });
+    storeSnapshot.issuesMap = new Map(issues.map((issue) => [issue.id, issue]));
+    const coordinator = new QueryRecoveryCoordinator();
+    const { result } = renderHook(() => useRecentActivity("WS", issues, []), {
+      wrapper: recoveryWrapper(coordinator),
     });
+    await waitFor(() => expect(result.current).toHaveLength(1));
+    await act(async () => coordinator.refresh());
+    expect(mockGetIssueEvents).toHaveBeenCalledTimes(2);
+    expect(result.current).toHaveLength(2);
+  });
 
+  it("rejects any selected history failure without committing partial results", async () => {
+    const issues = [issue("A", "2026-08-22"), issue("B", "2026-08-21")];
+    storeSnapshot.issuesMap = new Map(issues.map((issue) => [issue.id, issue]));
+    mockGetIssueEvents.mockResolvedValue([]);
+    const coordinator = new QueryRecoveryCoordinator();
+    const { result } = renderHook(() => useRecentActivity("WS", issues, []), {
+      wrapper: recoveryWrapper(coordinator),
+    });
     await waitFor(() => expect(mockGetIssueEvents).toHaveBeenCalledTimes(2));
+    mockGetIssueEvents
+      .mockResolvedValueOnce([fleetEvent({ id: "partial", issue_id: "A" })])
+      .mockRejectedValueOnce(new Error("history unavailable"));
+    await act(async () => {
+      await expect(coordinator.refresh()).rejects.toThrow(
+        "history unavailable",
+      );
+    });
+    expect(result.current).toEqual([]);
+  });
+
+  it.each([false, true])(
+    "rechecks issue-map changes before React renders (same IDs: %s)",
+    async (sameIds) => {
+      const issues = [issue("A", "2026-08-21")];
+      storeSnapshot.issuesMap = new Map(
+        issues.map((issue) => [issue.id, issue]),
+      );
+      mockGetIssueEvents.mockResolvedValue([]);
+      const coordinator = new QueryRecoveryCoordinator();
+      let finishIssues!: () => void;
+      coordinator.register(
+        "issues",
+        () =>
+          new Promise<void>((resolve) => {
+            finishIssues = resolve;
+          }),
+      );
+      const { result } = renderHook(() => useRecentActivity("WS", issues, []), {
+        wrapper: recoveryWrapper(coordinator),
+      });
+      await waitFor(() => expect(mockGetIssueEvents).toHaveBeenCalledTimes(1));
+      let recovery!: Promise<void>;
+      act(() => {
+        recovery = coordinator.refresh();
+      });
+      await waitFor(() => expect(mockGetIssueEvents).toHaveBeenCalledTimes(2));
+      await act(async () => {
+        storeSnapshot.issuesMap = new Map([["A", issue("A", "2026-08-23")]]);
+        if (!sameIds)
+          storeSnapshot.issuesMap.set("B", issue("B", "2026-08-24"));
+        mockGetIssueEvents.mockImplementation(async (_ws, id) => [
+          fleetEvent({ id: `${id}-recovered`, issue_id: id }),
+        ]);
+        finishIssues();
+        await recovery;
+      });
+      expect(
+        mockGetIssueEvents.mock.calls.slice(2).map((call) => call[1]),
+      ).toEqual(sameIds ? ["A"] : ["B", "A"]);
+      expect(result.current.map((item) => item.id)).toEqual(
+        expect.arrayContaining(
+          sameIds
+            ? ["event-A-recovered"]
+            : ["event-A-recovered", "event-B-recovered"],
+        ),
+      );
+    },
+  );
+
+  it("fences old A history through an A to B to A workspace transition", async () => {
+    const issues = [issue("TASK-1", "2026-08-21")];
+    storeSnapshot.issuesMap = new Map(issues.map((issue) => [issue.id, issue]));
+    let finishOld!: (events: Event[]) => void;
+    mockGetIssueEvents
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishOld = resolve;
+        }),
+      )
+      .mockResolvedValue([]);
+    const { result, rerender } = renderHook(
+      ({ workspace }) => useRecentActivity(workspace, issues, []),
+      { initialProps: { workspace: "A" } },
+    );
+    await waitFor(() => expect(mockGetIssueEvents).toHaveBeenCalledTimes(1));
+    rerender({ workspace: "B" });
+    await waitFor(() => expect(mockGetIssueEvents).toHaveBeenCalledTimes(2));
+    rerender({ workspace: "A" });
+    await waitFor(() => expect(mockGetIssueEvents).toHaveBeenCalledTimes(3));
+    await act(async () => finishOld([fleetEvent({ id: "stale-A" })]));
+    expect(result.current).toEqual([]);
+  });
+  it("preserves live events during history recovery and deduplicates source IDs", async () => {
+    const issues = [issue("TASK-1", "2026-08-21")];
+    storeSnapshot.issuesMap = new Map(issues.map((issue) => [issue.id, issue]));
+    let finish!: (events: Event[]) => void;
+    mockGetIssueEvents.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const { result } = renderHook(() => useRecentActivity("WS", issues, []));
+    await waitFor(() => expect(mockGetIssueEvents).toHaveBeenCalledTimes(1));
+    const onMutation = vi.mocked(useEventSubscription).mock.calls.at(-1)?.[0];
+    act(() =>
+      onMutation?.({
+        workspace_id: "WS",
+        cursor: "shared",
+        type: "update",
+        issue_id: "TASK-1",
+        timestamp: "2026-08-21T15:48:02.000Z",
+      }),
+    );
+    await act(async () =>
+      finish([
+        fleetEvent({ id: "shared" }),
+        fleetEvent({ id: "history-only" }),
+      ]),
+    );
+    expect(result.current.map((item) => item.id).sort()).toEqual([
+      "event-history-only",
+      "event-shared",
+    ]);
+  });
+
+  it("reads at most five non-epic trails at fifteen events each", async () => {
+    const issues = Array.from({ length: 7 }, (_, index) =>
+      issue(`TASK-${index}`, `2026-08-${21 + index}`),
+    );
+    issues.push({ ...issue("EPIC", "2026-08-31"), issue_type: "epic" });
+    storeSnapshot.issuesMap = new Map(issues.map((issue) => [issue.id, issue]));
+    mockGetIssueEvents.mockResolvedValue([]);
+    renderHook(() => useRecentActivity("WS", issues, []));
+    await waitFor(() => expect(mockGetIssueEvents).toHaveBeenCalledTimes(5));
+    expect(mockGetIssueEvents.mock.calls.map((call) => call[1])).toEqual([
+      "TASK-6",
+      "TASK-5",
+      "TASK-4",
+      "TASK-3",
+      "TASK-2",
+    ]);
+    expect(mockGetIssueEvents.mock.calls.every((call) => call[2] === 15)).toBe(
+      true,
+    );
+  });
+  it("restarts and fences history when the coordinator changes with the same workspace and seed", async () => {
+    const issues = [issue("TASK-1", "2026-08-21", "repo-a")];
+    storeSnapshot.issuesMap = new Map(issues.map((issue) => [issue.id, issue]));
+    let finishOld!: (events: Event[]) => void;
+    mockGetIssueEvents
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishOld = resolve;
+        }),
+      )
+      .mockResolvedValueOnce([fleetEvent({ id: "new-owner" })]);
+    let coordinator = new QueryRecoveryCoordinator("first");
+    function Wrapper({ children }: { children: ReactNode }) {
+      return createElement(
+        QueryRecoveryContext.Provider,
+        { value: coordinator },
+        children,
+      );
+    }
+    const { result, rerender } = renderHook(
+      () => useRecentActivity("WS", issues, []),
+      { wrapper: Wrapper },
+    );
+    await waitFor(() => expect(mockGetIssueEvents).toHaveBeenCalledTimes(1));
+    const oldSignal = mockGetIssueEvents.mock.calls[0]?.[3]?.signal;
+    coordinator = new QueryRecoveryCoordinator("second");
+    rerender();
+    await waitFor(() =>
+      expect(result.current.map((item) => item.id)).toEqual([
+        "event-new-owner",
+      ]),
+    );
+    expect(oldSignal?.aborted).toBe(true);
+    await act(async () => finishOld([fleetEvent({ id: "old-owner" })]));
+    expect(result.current.map((item) => item.id)).toEqual(["event-new-owner"]);
+    expect(mockGetIssueEvents).toHaveBeenCalledTimes(2);
   });
 });

@@ -1506,6 +1506,7 @@ func TestListEvents_HappyPath(t *testing.T) {
 			t.Errorf("limit = %q, want %q", r.URL.Query().Get("limit"), "200")
 		}
 		respondOK(w, map[string]any{
+			"has_more": false,
 			"history": []map[string]any{
 				{
 					"id":        "1787177211116-0",

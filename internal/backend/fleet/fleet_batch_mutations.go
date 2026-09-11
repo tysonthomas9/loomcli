@@ -68,9 +68,6 @@ func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]
 	if err != nil {
 		return nil, err
 	}
-	if history == nil {
-		return []backend.EventData{}, nil
-	}
 	return history.Events, nil
 }
 
@@ -106,9 +103,6 @@ func (b *FleetBackend) eventHistoryForwardPage(ctx context.Context, id, since st
 	if err != nil {
 		return nil, err
 	}
-	if history == nil {
-		return &backend.EventHistoryData{Events: []backend.EventData{}}, nil
-	}
 	return &backend.EventHistoryData{
 		Events:      eventDataFromHistory(history.History, id),
 		Cursor:      history.Cursor,
@@ -129,9 +123,6 @@ func (b *FleetBackend) eventHistoryTail(ctx context.Context, id string, limit, p
 		history, err := b.listEventHistoryPage(ctx, id, cursor, pageLimit)
 		if err != nil {
 			return nil, err
-		}
-		if history == nil {
-			return &backend.EventHistoryData{Events: []backend.EventData{}}, nil
 		}
 		result = append(result, eventDataFromHistory(history.History, id)...)
 		totalEvents = history.TotalEvents
@@ -176,12 +167,24 @@ func (b *FleetBackend) listEventHistoryPage(
 		return nil, err
 	}
 	if !hasData(resp) {
-		return nil, nil
+		return nil, backend.ErrInternal("ListEvents", "history response data missing", nil)
 	}
 
 	var history fleetEventHistory
 	if err := json.Unmarshal(resp.Data, &history); err != nil {
 		return nil, backend.ErrInternal("ListEvents", "unmarshal response", err)
+	}
+	var fields struct {
+		HasMore *bool `json:"has_more"`
+	}
+	if err := json.Unmarshal(resp.Data, &fields); err != nil || fields.HasMore == nil {
+		return nil, backend.ErrInternal("ListEvents", "history response requires boolean has_more", err)
+	}
+	if history.History == nil {
+		return nil, backend.ErrInternal("ListEvents", "history response requires an array", nil)
+	}
+	if history.HasMore && (history.Cursor == "" || history.Cursor == cursor) {
+		return nil, backend.ErrInternal("ListEvents", "history response has_more without a new cursor", nil)
 	}
 	return &history, nil
 }
