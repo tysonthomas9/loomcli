@@ -71,6 +71,17 @@ export function isRetryableError(err: unknown): boolean {
   return err.status < 400 || err.status >= 500;
 }
 
+function snapshotFetchParams(params: FetchIssuesParams): FetchIssuesParams {
+  return {
+    ...params,
+    ...(params.filter ? { filter: structuredClone(params.filter) } : {}),
+    ...(params.graphFilter
+      ? { graphFilter: structuredClone(params.graphFilter) }
+      : {}),
+    ...(params.sourceRepos ? { sourceRepos: [...params.sourceRepos] } : {}),
+  };
+}
+
 export function createIssueStore(
   initialConfig?: IssueStoreConfig,
 ): StoreApi<IssueStore> {
@@ -223,14 +234,7 @@ export function createIssueStore(
     params: FetchIssuesParams,
     recovery = false,
   ): Promise<void> {
-    params = {
-      ...params,
-      ...(params.filter ? { filter: structuredClone(params.filter) } : {}),
-      ...(params.graphFilter
-        ? { graphFilter: structuredClone(params.graphFilter) }
-        : {}),
-      ...(params.sourceRepos ? { sourceRepos: [...params.sourceRepos] } : {}),
-    };
+    params = snapshotFetchParams(params);
     const set = store.setState;
     const get = store.getState;
     const {
