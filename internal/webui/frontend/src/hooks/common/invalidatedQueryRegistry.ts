@@ -527,6 +527,7 @@ export class InvalidatedQueryRegistry {
         }
         entry = this.getOrCreateEntry<T>(key, options, nextEpoch);
         registration = entry.register(nextFetcher);
+        entry.commit(registration, nextFetcher);
         disposed = false;
       },
       setEnabled: (enabled) => entry.setEnabled(registration, enabled),

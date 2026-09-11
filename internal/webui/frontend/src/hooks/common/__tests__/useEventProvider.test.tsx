@@ -120,7 +120,16 @@ class MockFetchEventSourceAttempt {
   }
 
   simulateRawMutation(data: string, lastEventId = ""): void {
-    this.options.onmessage?.({ event: "mutation", id: lastEventId, data });
+    try {
+      this.options.onmessage?.({ event: "mutation", id: lastEventId, data });
+    } catch (error) {
+      // The actual library routes parser callback failures through onerror.
+      try {
+        this.options.onerror?.(error);
+      } catch {
+        this.readyState = MockFetchEventSourceAttempt.CLOSED;
+      }
+    }
   }
 
   static reset(): void {
@@ -731,13 +740,17 @@ describe("useEventProvider", () => {
   });
 
   describe("Error isolation", () => {
-    it("malformed mutation events are skipped without poisoning later generic events", async () => {
+    it("malformed mutation events stop the stream with a visible error", async () => {
       const cb = vi.fn();
+      const observed = { state: "", error: null as string | null };
       const consoleWarnSpy = vi
         .spyOn(console, "warn")
         .mockImplementation(() => {});
 
       function AgentSub() {
+        const context = useEventContext();
+        observed.state = context.state;
+        observed.error = context.lastError;
         useEventSubscription(cb, { entityTypes: ["agent"] });
         return null;
       }
@@ -763,25 +776,10 @@ describe("useEventProvider", () => {
         "[SSE] Received malformed mutation event",
       );
       expect(cb).not.toHaveBeenCalled();
-
-      act(() => {
-        MockFetchEventSourceAttempt.lastInstance?.simulateMutation({
-          type: "refresh",
-          entity_type: "agent",
-          entity_id: "agent-alpha",
-          action: "agent.refresh",
-          title: "agent-alpha",
-          timestamp: "2025-01-23T12:00:00Z",
-        });
-      });
-
-      expect(cb).toHaveBeenCalledTimes(1);
-      expect(cb).toHaveBeenCalledWith(
-        expect.objectContaining({
-          entity_type: "agent",
-          entity_id: "agent-alpha",
-          action: "agent.refresh",
-        }),
+      expect(observed.state).toBe("disconnected");
+      expect(observed.error).toBe("Malformed SSE mutation payload");
+      expect(MockFetchEventSourceAttempt.lastInstance?.readyState).toBe(
+        MockFetchEventSourceAttempt.CLOSED,
       );
     });
 

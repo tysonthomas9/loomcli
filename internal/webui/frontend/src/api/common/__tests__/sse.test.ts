@@ -337,20 +337,28 @@ describe("WorkspaceSSEClient", () => {
     client.disconnect();
   });
 
-  it("ignores malformed mutation JSON without advancing the public cursor", async () => {
+  it("stops on malformed mutation JSON and reconnects from the prior checkpoint", async () => {
     const onMutation = vi.fn();
+    const onError = vi.fn();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const client = new WorkspaceSSEClient("test-ws", { onMutation });
+    const client = new WorkspaceSSEClient("test-ws", { onMutation, onError });
 
-    await client.connect();
+    await client.connect("valid-checkpoint");
     await expectRequestCount(1);
     streamRequests[0].push("id: bad-id\nevent: mutation\ndata: {oops\n\n");
     await flush();
 
     expect(onMutation).not.toHaveBeenCalled();
-    expect(client.getLastEventId()).toBeUndefined();
+    expect(client.getLastEventId()).toBe("valid-checkpoint");
+    expect(client.getState()).toBe("disconnected");
+    expect(onError).toHaveBeenCalledWith("Malformed SSE mutation payload");
     expect(warn).toHaveBeenCalledWith(
       "[SSE] Received malformed mutation event",
+    );
+    await client.connect();
+    await expectRequestCount(2);
+    expect(streamRequests[1].headers.get("Last-Event-ID")).toBe(
+      "valid-checkpoint",
     );
     client.disconnect();
   });
@@ -546,6 +554,87 @@ describe("WorkspaceSSEClient", () => {
     await expectRequestCount(2);
     client.disconnect();
   });
+
+  it.each(["token", "503", "close"])(
+    "preserves the saved checkpoint after %s failure before the first wire ID",
+    async (failure) => {
+      if (failure === "token") {
+        mockGet.mockRejectedValueOnce(new Error("temporary token failure"));
+      } else if (failure === "503") {
+        queueResponse(503);
+      }
+      const client = new WorkspaceSSEClient("test-ws");
+      await client.connect("saved-checkpoint");
+      await flush();
+      if (failure === "close") {
+        await expectRequestCount(1);
+        streamRequests[0].close();
+        await flush();
+      }
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await expectRequestCount(failure === "token" ? 1 : 2);
+      const retry = streamRequests.at(-1)!;
+      expect(retry.headers.get("Last-Event-ID")).toBe("saved-checkpoint");
+      expect(new URL(retry.url).searchParams.has("since")).toBe(false);
+      client.disconnect();
+    },
+  );
+
+  it("allows an empty first wire ID to clear the saved checkpoint", async () => {
+    const client = new WorkspaceSSEClient("test-ws");
+    await client.connect("saved-checkpoint");
+    await expectRequestCount(1);
+    streamRequests[0].push("id:\n\n");
+    streamRequests[0].close();
+    await flush();
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await expectRequestCount(2);
+    expect(streamRequests[1].headers.has("Last-Event-ID")).toBe(false);
+    expect(new URL(streamRequests[1].url).searchParams.has("since")).toBe(
+      false,
+    );
+    client.disconnect();
+  });
+
+  it.each(["retryNow", "rebind", "reconnect"])(
+    "carries ID-only checkpoints and empty resets across %s",
+    async (transition) => {
+      const client = new WorkspaceSSEClient("test-ws");
+      await client.connect("initial-cursor");
+      await expectRequestCount(1);
+
+      for (const cursor of ["checkpoint-only", ""]) {
+        const active = streamRequests.at(-1)!;
+        active.push(`id: ${cursor}\n\n`);
+        await flush();
+        expect(client.getLastEventId()).toBe(cursor || undefined);
+        // A control frame and heartbeat lacking an ID do not reset the cursor.
+        active.push('event: connected\ndata: {"clientId":1}\n\n: ping\n\n');
+        await flush();
+        expect(client.getLastEventId()).toBe(cursor || undefined);
+        const expectedRequests = streamRequests.length + 1;
+        if (transition === "retryNow") {
+          active.close();
+          await flush();
+          client.retryNow();
+        } else if (transition === "rebind") {
+          client.updateSourceRepos(["repo-b"]);
+        } else {
+          client.disconnect();
+          await client.connect();
+        }
+        await expectRequestCount(expectedRequests);
+        const next = streamRequests.at(-1)!;
+        expect(next.headers.get("Last-Event-ID")).toBe(cursor || null);
+        expect(new URL(next.url).searchParams.get("since")).toBe(
+          cursor || null,
+        );
+      }
+      client.disconnect();
+    },
+  );
 
   it("lets fetch-event-source send Last-Event-ID and refreshes query auth", async () => {
     mockGet
