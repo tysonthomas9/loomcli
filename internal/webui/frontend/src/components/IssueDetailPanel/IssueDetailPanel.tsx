@@ -1751,16 +1751,16 @@ export function IssueDetailPanel({
 }: IssueDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
 
-  // Open as a full content workspace by default, matching the PR review detail
-  // model. The header toggle still lets users collapse it to a side panel.
-  const [isMaximized, setIsMaximized] = useState(true);
+  // Issue details open as the right-side slide-over. Full-screen is an explicit
+  // operator choice through the header toggle, not the default presentation.
+  const [isMaximized, setIsMaximized] = useState(false);
   const toggleMaximize = useCallback(() => setIsMaximized((v) => !v), []);
-  // Each newly opened issue starts in the shared full-workspace detail model.
+  // Each newly opened issue returns to the compact slide-over model.
   useEffect(() => {
-    if (!isOpen) setIsMaximized(true);
+    if (!isOpen) setIsMaximized(false);
   }, [isOpen]);
   useEffect(() => {
-    setIsMaximized(true);
+    setIsMaximized(false);
   }, [issue?.id]);
 
   // Handle Escape key to close panel via global shortcut layer system.

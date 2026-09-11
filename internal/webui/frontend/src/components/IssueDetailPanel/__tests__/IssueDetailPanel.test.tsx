@@ -428,15 +428,20 @@ describe("IssueDetailPanel", () => {
       expect(screen.getByTestId("issue-detail-panel")).toBeInTheDocument();
     });
 
-    it("opens in the shared full-workspace detail model by default", () => {
+    it("opens as a right-side panel and maximizes only when requested", () => {
       const mockIssue = createTestIssue();
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
-      expect(screen.getByTestId("issue-detail-panel")).toHaveAttribute(
-        "data-maximized",
-        "true",
-      );
+      const panel = screen.getByTestId("issue-detail-panel");
+      expect(panel).not.toHaveAttribute("data-maximized");
+      const maximize = screen.getByRole("button", {
+        name: "Expand to full screen",
+      });
+
+      fireEvent.click(maximize);
+
+      expect(panel).toHaveAttribute("data-maximized", "true");
       expect(
         screen.getByRole("button", { name: "Exit full screen" }),
       ).toBeInTheDocument();

@@ -597,6 +597,21 @@ function App() {
     }
   }, [repoFilterParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Deep-link: the canonical issue URL renders the board behind this panel.
+  // Keep the route and panel state synchronized so refresh/share/back retain
+  // the issue context without turning issue details into a full-page view.
+  const previousRouteIssueIdRef = useRef(routeIssueId);
+  useEffect(() => {
+    const previousRouteIssueId = previousRouteIssueIdRef.current;
+    previousRouteIssueIdRef.current = routeIssueId;
+    if (routeIssueId) {
+      openPanel({ type: "issue", id: routeIssueId });
+    } else if (previousRouteIssueId) {
+      // Browser back/forward is a first-class way to close the routed panel.
+      closePanel();
+    }
+  }, [routeIssueId, openPanel, closePanel]);
+
   // Deep-link: auto-fetch issue from URL; route changes are handled by useRouteView.
   useEffect(() => {
     if (selectedIssueId) fetchIssue(selectedIssueId);
@@ -771,8 +786,9 @@ function App() {
         return;
       }
 
-      // From list/graph/monitor views — open panel overlay
-      // (mutual exclusivity + no-op guard handled by usePanelManager)
+      // From list/graph/monitor views, give the panel a canonical URL before
+      // opening it. The issues route renders the board behind the slide-over.
+      navigate(`/ws/${workspaceId}/issues/${encodeURIComponent(issue.id)}`);
       openPanel({ type: "issue", id: issue.id });
       fetchIssue(issue.id);
     },
@@ -782,12 +798,15 @@ function App() {
   // Handle panel close
   const handlePanelClose = useCallback(() => {
     closePanel();
+    if (routeIssueId) {
+      navigate(`/ws/${workspaceId}/kanban`, { replace: true });
+    }
     // Clear issue details after close animation completes
     setTimeout(() => {
       if (!mountedRef.current) return;
       clearIssue();
     }, 300);
-  }, [closePanel, clearIssue]);
+  }, [closePanel, clearIssue, routeIssueId, navigate, workspaceId]);
 
   // Handle approve button click on review cards.
   //
@@ -1043,10 +1062,11 @@ function App() {
   const handleCreateIssueSuccess = useCallback(
     async (issue: Issue) => {
       await refetch();
+      navigate(`/ws/${workspaceId}/issues/${encodeURIComponent(issue.id)}`);
       openPanel({ type: "issue", id: issue.id });
       fetchIssue(issue.id);
     },
-    [fetchIssue, openPanel, refetch],
+    [fetchIssue, navigate, openPanel, refetch, workspaceId],
   );
   const workspaceOnboardingSteps: OnboardingStep[] = useMemo(
     () => [
@@ -1189,10 +1209,11 @@ function App() {
   // Handle tree issue select (wraps handleIssueClick with minimal Issue shape)
   const handleTreeIssueSelect = useCallback(
     (issueId: string) => {
+      navigate(`/ws/${workspaceId}/issues/${encodeURIComponent(issueId)}`);
       openPanel({ type: "issue", id: issueId });
       fetchIssue(issueId);
     },
-    [openPanel, fetchIssue],
+    [openPanel, fetchIssue, navigate, workspaceId],
   );
 
   const handleAgentNameConsumed = useCallback(() => {
@@ -1246,10 +1267,11 @@ function App() {
   const handleAgentTaskClick = useCallback(
     (taskId: string) => {
       // Mutual exclusivity handled by usePanelManager (closes agent panel first)
+      navigate(`/ws/${workspaceId}/issues/${encodeURIComponent(taskId)}`);
       openPanel({ type: "issue", id: taskId });
       fetchIssue(taskId);
     },
-    [openPanel, fetchIssue],
+    [openPanel, fetchIssue, navigate, workspaceId],
   );
 
   // -----------------------------------------------------------------------
@@ -1410,11 +1432,15 @@ function App() {
     activeView === "kanban" ||
     activeView === "list" ||
     activeView === "table" ||
-    activeView === "graph";
+    activeView === "graph" ||
+    activeView === "issue-detail";
   const boardToolbar = (
     <div className={styles.boardToolbar} data-testid="board-toolbar">
       <div className={styles.boardToolbarTabs}>
-        <ViewSubSwitcher activeView={activeView} onChange={navigateToView} />
+        <ViewSubSwitcher
+          activeView={activeView === "issue-detail" ? "kanban" : activeView}
+          onChange={navigateToView}
+        />
       </div>
       <div className={styles.boardToolbarSearch}>{searchControl}</div>
       <div className={styles.boardToolbarActions}>{newIssueButton}</div>

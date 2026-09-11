@@ -1031,9 +1031,9 @@ tests:
               .some((badge) => (badge.textContent || '').includes('atlas-${RUN_ID:-local}'))
         intent: "Wait until the claimed epic lane names the assigned lead"
 
-  # covers: LED-D20a; pinned defect: issue-detail header-run-epic-button is inert
-  - name: slide-over run epic control is inert -- pinned defect
-    intent: An operator clicks Run epic from issue detail and verifies the current pinned defect where no epic runner is queued
+  # covers: LED-D20a; canonical issue URL opens the Run epic slide-over
+  - name: issue URL slide-over run epic creates a purpose-named lead
+    intent: An operator opens an epic at its explicit issue URL, keeps the board visible behind the slide-over, and queues its purpose-named lead
     steps:
       - api:
           method: "POST"
@@ -1047,6 +1047,15 @@ tests:
             - from: "data.id"
               as: "d20aEpicId"
         intent: "An orchestration client seeds an unclaimed epic for the issue-detail run control"
+      - run: |
+          set -e
+          python3 - "$AFT_WORK_DIR/d20aEpicId" "$AFT_WORK_DIR/d20aExpectedLead" <<'PY'
+          import re, sys
+          epic = open(sys.argv[1], encoding="utf-8").read().strip()
+          slug = re.sub(r"[^a-z0-9_-]+", "-", epic.strip().lower()).strip("-")[:48].rstrip("-") or "epic"
+          open(sys.argv[2], "w", encoding="utf-8").write("lead-" + slug)
+          PY
+        intent: "An operator computes the expected purpose-named lead from the saved epic id"
       - open: /ws/E2E-WS-LEAD/kanban
       - wait:
           fn: >-
@@ -1077,35 +1086,52 @@ tests:
         intent: "An operator opens the epic detail slide-over from the swimlane header title"
       - wait:
           fn: >-
-            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open' &&
-            !!document.querySelector('[data-testid=header-run-epic-button]') &&
-            document.querySelectorAll('[data-testid=activity-log] [data-testid=activity-comment], [data-testid=activity-log] [data-testid=activity-event]').length === 1
-        intent: "Wait until the epic detail panel header run control is available with exactly one initial activity entry"
-      - click: { testid: header-run-epic-button }
-      # PINNED PRODUCT DEFECT: slide-over Run epic does not queue an
-      # epic-runner while the lane and agents-page paths do (suspect the panel
-      # handler bails on Unassigned/no-children - IssueDetailPanel.tsx:1161,
-      # useRunEpicWorkflow.ts:60); this test flips when fixed - then assert the
-      # toast + queued workflow like D20b.
-      - wait:
-          fn: >-
             (() => {
-              const activity = document.querySelector('[data-testid=issue-detail-panel] [data-testid=activity-log]');
-              if (!activity) return false;
-              const items = activity.querySelectorAll('[data-testid=activity-comment], [data-testid=activity-event]');
-              const toastText = document.querySelector('[data-testid=toast-container]')?.textContent || '';
-              const hasRunToast = toastText.includes('Epic runner queued') || toastText.includes('Epic runner failed');
-              if (items.length !== 1 || hasRunToast) {
-                window.__aftD20aInertViolation = true;
+              const panel = document.querySelector('[data-testid=issue-detail-panel]');
+              const ready = panel?.getAttribute('data-state') === 'open' &&
+                !panel.hasAttribute('data-maximized') &&
+                !!document.querySelector('[data-testid=swim-lane-board]') &&
+                !!panel.querySelector('[data-testid=header-run-epic-button]') &&
+                /^\/ws\/E2E-WS-LEAD\/issues\/[^/]+$/.test(location.pathname);
+              if (!ready) {
+                window.__aftIssuePanelStableAt = 0;
                 return false;
               }
-              if (!window.__aftD20aInertStartedAt) {
-                window.__aftD20aInertStartedAt = Date.now();
+              if (!window.__aftIssuePanelStableAt) {
+                window.__aftIssuePanelStableAt = Date.now();
+                return false;
               }
-              return !window.__aftD20aInertViolation &&
-                Date.now() - window.__aftD20aInertStartedAt >= 8000;
+              return Date.now() - window.__aftIssuePanelStableAt >= 500;
             })()
-        intent: "Wait about 8s and prove slide-over Run epic remains inert with one activity item and no runner toast"
+        intent: "Wait until the explicit issue URL shows the epic in a right-side slide-over over the Kanban"
+      - click: { testid: header-run-epic-button }
+      - wait:
+          fn: >-
+            document.body.textContent.includes('Epic runner queued for lead-')
+        intent: "Wait until the slide-over run action reports a queued epic runner"
+      - run: |
+          set -e
+          want="$(cat "$AFT_WORK_DIR/d20aExpectedLead")"
+          # budget: db-persist (20s) - Run action creates the purpose-named lead before starting the workflow.
+          for i in $(seq 1 20); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/agents" > "$AFT_WORK_DIR/lead-d20a-agents.json" &&
+            python3 - "$AFT_WORK_DIR/lead-d20a-agents.json" "$want" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          matches = [a for a in agents or [] if a.get("name") == sys.argv[2]]
+          assert len(matches) == 1, agents
+          a = matches[0]
+          assert a.get("role_name") == "lead", a
+          assert not a.get("auto"), a
+          PY
+            sleep 1
+          done
+          echo "slide-over Run epic did not create the expected lead"
+          cat "$AFT_WORK_DIR/lead-d20a-agents.json" 2>/dev/null || true
+          exit 1
+        intent: "An operator's readback confirms slide-over Run epic created the expected lead agent"
 
   # covers: LED-D20b; list lane lane-run-epic-button creates lead slug
   - name: list lane run epic creates the same purpose-named lead
