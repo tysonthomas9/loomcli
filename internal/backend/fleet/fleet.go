@@ -271,33 +271,6 @@ func hasData(resp *apiResponse) bool {
 //
 // Try the bare array first; on a JSON unmarshal type mismatch, fall back
 // to the wrapper. Anything else is a real parse failure.
-// unmarshalIssueRowsPage is unmarshalIssueList for List's paging loop: it keeps
-// the wire Description that the slim projection drops (List's client-side
-// filters need it) and reads the has_more flag the plain form discards. Only the
-// wrapper dialect carries has_more; a bare array is by definition the whole
-// answer, so hasMore is false there.
-func unmarshalIssueRowsPage(resp *apiResponse, op string) ([]listRow, bool, error) {
-	if !hasData(resp) {
-		return []listRow{}, false, nil
-	}
-	wires, err := unmarshalListOrWrapper[fleetIssueWithCountsWire](resp.Data, op)
-	if err != nil {
-		return nil, false, err
-	}
-	rows := make([]listRow, 0, len(wires))
-	for _, w := range wires {
-		rows = append(rows, listRow{data: w.toIssueData(), description: w.Description})
-	}
-	var wrapper struct {
-		HasMore bool `json:"has_more"`
-	}
-	if err := json.Unmarshal(resp.Data, &wrapper); err != nil {
-		// A bare array does not unmarshal into a struct; that is not an error
-		// here, it just means there is no pagination envelope to read.
-		return rows, false, nil
-	}
-	return rows, wrapper.HasMore, nil
-}
 
 func unmarshalIssueList(resp *apiResponse, op string) ([]backend.IssueData, error) {
 	if !hasData(resp) {
@@ -386,60 +359,6 @@ func (b *FleetBackend) Get(ctx context.Context, id string) (*backend.IssueDetail
 	}
 
 	return &result, nil
-}
-
-// maxListPages bounds List's paging loop. fleet-db caps a page at 200 rows, so
-// this allows 20k issues per call — far beyond any real workspace, while still
-// making a server that always reports has_more terminate instead of spinning.
-const maxListPages = 100
-
-func (b *FleetBackend) List(ctx context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
-	if err := checkFleetUnsupportedFilters(opts); err != nil {
-		return nil, err
-	}
-	// Parse the created-range bounds once, up front, so a malformed date is a
-	// validation error (400) before any request goes out rather than a silent
-	// no-op per row.
-	dates, err := parseListDateFilters(opts)
-	if err != nil {
-		return nil, err
-	}
-	serverOpts := listServerOpts(opts)
-
-	// fleet-db caps a page at 200 rows regardless of the limit asked for, and
-	// reports the truncation in has_more. Returning that first page silently is
-	// how `loom data list --limit 500` came to answer with 200 rows and no
-	// indication the other 327 existed — and how a caller checking "does X
-	// exist" got a confident false negative, because the rows it dropped were
-	// the NEWEST. Page until the caller's limit is met or the server runs out.
-	var out []listRow
-	for page := 0; page < maxListPages; page++ {
-		resp, err := b.exec(ctx, "List", "GET", "/issues?"+listOptsToQuery(serverOpts), nil)
-		if err != nil {
-			return nil, err
-		}
-		issues, hasMore, err := unmarshalIssueRowsPage(resp, "List")
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, issues...)
-		// A short or empty page ends the walk even if the server still claims
-		// more; without that an endpoint that always sets has_more would spin.
-		if !hasMore || len(issues) == 0 {
-			break
-		}
-		if serverOpts.Limit > 0 && len(out) >= serverOpts.Limit {
-			break
-		}
-		serverOpts.Offset += len(issues)
-	}
-	if serverOpts.Limit > 0 && len(out) > serverOpts.Limit {
-		out = out[:serverOpts.Limit]
-	}
-	// Project last: listRowsToData drops the wire Description again, so the
-	// lightweight list payload the kanban board receives is unchanged, and it
-	// always returns a non-nil slice for the empty case.
-	return listRowsToData(filterListIssues(out, opts, dates)), nil
 }
 
 func (b *FleetBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {

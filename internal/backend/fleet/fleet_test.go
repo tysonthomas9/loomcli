@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -346,7 +347,9 @@ func TestList_ClientFiltersMultipleReposWithoutServerLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if strings.Contains(gotQuery, "source_repos=") || strings.Contains(gotQuery, "repo=") || strings.Contains(gotQuery, "limit=") {
+	// List's own page size may appear; the caller's pre-filter limit (1) must not.
+	if strings.Contains(gotQuery, "source_repos=") || strings.Contains(gotQuery, "repo=") ||
+		(strings.Contains(gotQuery, "limit=") && !strings.Contains(gotQuery, fmt.Sprintf("limit=%d", listPageSize))) {
 		t.Fatalf("query = %q, want no unsupported repo filter or pre-filter limit", gotQuery)
 	}
 	if len(result) != 1 || result[0].ID != "b" {

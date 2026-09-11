@@ -391,9 +391,12 @@ func TestList_LimitAppliesAfterFiltering(t *testing.T) {
 			t.Fatalf("row %s has assignee %q; the limit was applied before filtering", r.ID, r.Assignee)
 		}
 	}
+	// The only server-side limit allowed is List's own page size: the
+	// caller's limit (10) must not reach the server, or the client pass
+	// filters a truncated set.
 	for _, q := range stub.queries {
-		if strings.Contains(q, "limit=") {
-			t.Errorf("query %q carries a server-side limit; the client pass needs the complete set", q)
+		if strings.Contains(q, "limit=") && !strings.Contains(q, fmt.Sprintf("limit=%d", listPageSize)) {
+			t.Errorf("query %q carries the caller's limit; the client pass needs the complete set", q)
 		}
 	}
 }
