@@ -88,7 +88,23 @@ const issueJournalMaxBackoffShift = 6
 // allowlist for a later roster expansion so a single binding cannot
 // accidentally react to the full issue lifecycle before the downstream agents
 // are ready for it.
+//
+// The default is deliberately unchanged: serve widens it per-deployment through
+// LOOM_ISSUE_BRIDGE_ACTIONS (see serve.issueBridgeActions for why the roster is
+// opt-in rather than default-on).
 var defaultIssueJournalActionAllowlist = []string{"issue.create"}
+
+// IssueJournalActions resolves an ActionAllowlist to the roster the bridge will
+// actually apply: the configured list, or the default when it is empty. Exported
+// so callers (serve's startup log, audit tooling) can report the EFFECTIVE
+// roster instead of re-deriving the nil-means-default rule and drifting from it.
+// The returned slice is a copy and is safe to retain.
+func IssueJournalActions(allowlist []string) []string {
+	if len(allowlist) == 0 {
+		return append([]string(nil), defaultIssueJournalActionAllowlist...)
+	}
+	return append([]string(nil), allowlist...)
+}
 
 // IssueJournalCursorStore persists the per-workspace journal cursor across
 // bridge passes. The in-memory implementation (issueJournalMemCursors, the zero
@@ -285,7 +301,7 @@ func (b *IssueJournalBridge) emitBatch(ctx context.Context, ws string, events []
 			advanced = ev.ID
 			continue
 		}
-		if err := b.emitOne(ctx, ws, ev); err != nil {
+		if err := b.emitEvent(ctx, ws, b.toInternalEvent(ev)); err != nil {
 			return advanced, err
 		}
 		out.Emitted++
@@ -294,22 +310,53 @@ func (b *IssueJournalBridge) emitBatch(ctx context.Context, ws string, events []
 	return advanced, nil
 }
 
-// emitOne re-enters one journal entry into the router as a system-origin
-// internal event. A no-listener dispatch (domain.ErrNotFound — no binding on
+// emitEvent re-enters one derived or pass-through internal event into the
+// router. A no-listener dispatch (domain.ErrNotFound — no binding on
 // internal.issue.created) is NOT a bridge failure: the cursor still advances so
 // a missing binding never permanently stalls the bridge. Any other Emit error
 // is returned so the drain stops and the entry is retried.
-func (b *IssueJournalBridge) emitOne(ctx context.Context, ws string, ev store.JournalEvent) error {
-	_, err := b.Source.Emit(ctx, ws, b.toInternalEvent(ev))
+func (b *IssueJournalBridge) emitEvent(ctx context.Context, ws string, ev InternalEvent) error {
+	_, err := b.Source.Emit(ctx, ws, ev)
 	switch {
 	case err == nil:
 		return nil
 	case errors.Is(err, domain.ErrNotFound):
 		b.logger().Debug("issue journal bridge: no binding for internal event, advancing past it",
-			"workspace", ws, "event_id", IssueJournalEventIDPrefix+ev.ID, "action", ev.Action)
+			"workspace", ws, "event_id", ev.EventID, "event_type", ev.EventType)
 		return nil
 	default:
-		return fmt.Errorf("emit issue journal event %q in workspace %q: %w", ev.ID, ws, err)
+		return fmt.Errorf("emit issue journal event %q in workspace %q: %w", ev.EventID, ws, err)
+	}
+}
+
+// Label journal actions. fleet-db emits a DEDICATED event per label write
+// (issue_service.AddLabel/RemoveLabel) rather than folding it into a
+// whole-entity issue.update: action label.add / label.remove, entity_type
+// "label", entity_id the ISSUE id, and the label itself in the event metadata.
+// Neither verb is in internalEventVerbNormalization, so both pass through
+// unchanged and route as internal.label.add / internal.label.remove.
+const (
+	IssueLabelAddAction    = "label.add"
+	IssueLabelRemoveAction = "label.remove"
+)
+
+// issueJournalLabelMetaKey is fleet-db's metadata key carrying the single label
+// a label.add/label.remove event is about (models.MetaLabel).
+const issueJournalLabelMetaKey = "label"
+
+// IssueLabelSubjectAttr is the scalar subject attr carrying that label,
+// addressable as {{attrs.label}} in a binding's subject_key_template. The
+// snapshot's own labels field is an ARRAY, which issueSubjectAttrs drops, so
+// lifting the metadata value is what makes a label nameable in a template.
+const IssueLabelSubjectAttr = "label"
+
+// isIssueLabelAction reports whether the journal action is a per-label write.
+func isIssueLabelAction(action string) bool {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case IssueLabelAddAction, IssueLabelRemoveAction:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -318,7 +365,13 @@ func (b *IssueJournalBridge) emitOne(ctx context.Context, ws string, ev store.Jo
 // system; ParentEventID is empty (a depth-0 root — the journal entry is not a
 // continuation of a known trigger chain); ActorRef is the journal actor
 // VERBATIM (the bridge never filters or rewrites it — see the self-trigger
-// story); SubjectAttrs are extracted from the After snapshot.
+// story); SubjectAttrs are extracted from the After snapshot, plus the label
+// metadata on a label.add/label.remove entry.
+//
+// SubjectRef is the ISSUE ref on every entry including the label ones: their
+// entity_type is "label" but their entity_id is the issue id, so the whole
+// journal addresses one subject namespace and an await keyed on an issue
+// matches whichever lifecycle event names it.
 func (b *IssueJournalBridge) toInternalEvent(ev store.JournalEvent) InternalEvent {
 	return InternalEvent{
 		EventID:      IssueJournalEventIDPrefix + ev.ID,
@@ -327,8 +380,31 @@ func (b *IssueJournalBridge) toInternalEvent(ev store.JournalEvent) InternalEven
 		ActorRef:     ev.Actor,
 		SubjectRef:   IssueJournalSubjectRefPrefix + ev.EntityID,
 		Payload:      ev.After,
-		SubjectAttrs: issueSubjectAttrs(ev.After),
+		SubjectAttrs: issueEventSubjectAttrs(ev),
 	}
+}
+
+// issueEventSubjectAttrs builds one entry's subject attrs: the After-snapshot
+// projection, plus {{attrs.label}} lifted from the metadata on a per-label
+// entry. The metadata is the ONLY place the individual label appears as a
+// scalar — the snapshot carries the whole labels array, which issueSubjectAttrs
+// drops. An entry whose metadata is missing the key contributes no label attr
+// rather than an empty one, so a template naming it falls back to the default
+// subject key instead of collapsing unrelated deliveries onto "".
+func issueEventSubjectAttrs(ev store.JournalEvent) map[string]string {
+	attrs := issueSubjectAttrs(ev.After)
+	if !isIssueLabelAction(ev.Action) {
+		return attrs
+	}
+	label := strings.TrimSpace(ev.Metadata[issueJournalLabelMetaKey])
+	if label == "" {
+		return attrs
+	}
+	if attrs == nil {
+		attrs = make(map[string]string, 1)
+	}
+	attrs[IssueLabelSubjectAttr] = label
+	return attrs
 }
 
 // workspaceKeys resolves the sweep targets: the configured workspace, or every

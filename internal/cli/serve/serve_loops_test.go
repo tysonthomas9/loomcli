@@ -9,6 +9,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 // readerCapableEvents satisfies store.TriggerEventStore AND the optional
@@ -147,6 +148,56 @@ func TestIssueBridgeDisabled(t *testing.T) {
 				t.Fatalf("issueBridgeDisabled() = true for %q", value)
 			}
 		})
+	}
+}
+
+func TestIssueBridgeActions(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  []string
+	}{
+		// Unset is the load-bearing case: nil leaves the bridge on its
+		// conservative default rather than widening on upgrade.
+		{"unset", "", nil},
+		{"single", "issue.update", []string{"issue.update"}},
+		{"multiple", "issue.create,issue.update", []string{"issue.create", "issue.update"}},
+		{"whitespace and case", " Issue.Create , ISSUE.UPDATE ", []string{"issue.create", "issue.update"}},
+		{"empty segments dropped", "issue.create,,issue.close,", []string{"issue.create", "issue.close"}},
+		{"duplicates collapsed", "issue.update,issue.update", []string{"issue.update"}},
+		// Operator error (a value that parses to nothing) must not mute the
+		// bridge — it falls back to the default, same as unset.
+		{"parses to nothing", ",, ,", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envLoomIssueBridgeActions, tt.value)
+			got := issueBridgeActions()
+			if len(got) != len(tt.want) {
+				t.Fatalf("issueBridgeActions() = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("issueBridgeActions() = %v, want %v", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+// The startup log reports the EFFECTIVE roster, so an unset knob must render as
+// the bridge default rather than an empty list.
+func TestIssueBridgeActionsEffectiveRosterForLog(t *testing.T) {
+	t.Setenv(envLoomIssueBridgeActions, "")
+	effective := trigger.IssueJournalActions(issueBridgeActions())
+	if len(effective) != 1 || effective[0] != "issue.create" {
+		t.Fatalf("effective roster = %v, want [issue.create]", effective)
+	}
+
+	t.Setenv(envLoomIssueBridgeActions, "issue.update")
+	effective = trigger.IssueJournalActions(issueBridgeActions())
+	if len(effective) != 1 || effective[0] != "issue.update" {
+		t.Fatalf("effective roster = %v, want [issue.update]", effective)
 	}
 }
 
