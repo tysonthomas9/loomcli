@@ -1066,6 +1066,7 @@ export function sandboxLeakProbeCommand() {
     "['LOOM','TASK','RUN','LEASE','TOKEN'],",
     "['LOOM','DRIVER','TASK','RUNNER','CMD','JSON'],",
     "['ANTHROPIC','API','KEY'],",
+    "['CLAUDE','CODE','OAUTH','TOKEN'],",
     "['OPENAI','API','KEY'],",
     "['CODEX','API','KEY'],",
     "['GEMINI','API','KEY'],",
