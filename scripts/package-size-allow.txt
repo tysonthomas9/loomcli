@@ -13,7 +13,12 @@
 # sub-package was tried first and is the right end state, but it costs the
 # package an import and pushes its recorded import-fanout ceiling (22) over
 # instead — trading one ratchet for another. Take it in the sub-split.
-internal/cli/daemon/supervisor 29
+# Raised 29 -> 30 for profile.go: the per-agent profile boot path (#563/#652,
+# PUPPET-275/485) took spawn.go to 1059 lines, over the 1000-line LOC gate,
+# and .loc-allowlist takes no new entries. The profile section moved out of
+# spawn.go unchanged, as local/union did in 769403892 (PUPPET-243) - the
+# alternative is trading the package gate for the LOC gate.
+internal/cli/daemon/supervisor 30
 # internal/cli gained the daemon input-await seam (agent_input_await.go) with
 # the human answer path; 26th file, same sub-split end state applies. The
 # hook-driven exit-code contract lives in exit.go rather than a file of its own,
