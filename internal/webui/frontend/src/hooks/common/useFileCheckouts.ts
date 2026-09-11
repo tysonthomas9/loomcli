@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { listFileCheckouts } from "@/hooks/api";
 import type { FileCheckout } from "@/api/workspace";
-import { ScopedQueryRequest } from "./scopedQueryRequest";
+import { ScopedQueryRequest } from "@/utils/scopedQueryRequest";
 import { QueryRecoveryContext } from "./queryRecovery";
 
 /** Mounted browser metadata only; directory and document state have other owners. */

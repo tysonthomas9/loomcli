@@ -23,7 +23,7 @@ import {
 } from "react";
 
 import { QueryRecoveryContext } from "@/hooks/common/queryRecovery";
-import { ScopedQueryRequest } from "@/hooks/common/scopedQueryRequest";
+import { ScopedQueryRequest } from "@/utils/scopedQueryRequest";
 import { listTabMetadata } from "@/api/terminal";
 import type { MutationPayload } from "@/api/common";
 import { isAgentMetadata } from "@/utils/terminalTabMetadata";

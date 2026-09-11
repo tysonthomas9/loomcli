@@ -12,7 +12,7 @@ import {
   getFileCapabilities,
   type FileCapabilitiesResponse,
 } from "@/api/workspace";
-import { ScopedQueryRequest } from "./scopedQueryRequest";
+import { ScopedQueryRequest } from "@/utils/scopedQueryRequest";
 import { QueryRecoveryContext } from "./queryRecovery";
 import { useEventContext } from "./useEventProvider";
 

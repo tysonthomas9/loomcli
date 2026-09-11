@@ -11,7 +11,7 @@ import { getIssueEvents } from "@/api";
 import { useEventSubscription, useEventContext } from "@/hooks/common";
 import { useIssueStoreInstance } from "@/hooks/common/useStoreContext";
 import { QueryRecoveryContext } from "@/hooks/common/queryRecovery";
-import { ScopedQueryRequest } from "@/hooks/common/scopedQueryRequest";
+import { ScopedQueryRequest } from "@/utils/scopedQueryRequest";
 import type { Event, Issue, LoomAgentStatus, MutationPayload } from "@/types";
 
 const ACTIVITY_BUFFER_SIZE = 150;
