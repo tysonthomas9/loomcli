@@ -21,6 +21,7 @@ import (
 // stubCheckBackend swaps backendcheck.CheckBackend with the given fn
 // for the duration of the test, restoring the original on cleanup.
 // Used to drive the spawn gate deterministically without touching PATH.
+// Do not use this helper from t.Parallel tests; it mutates package-global state.
 func stubCheckBackend(t *testing.T, fn func(string) (discovery.Info, error)) {
 	t.Helper()
 	prev := backendcheck.CheckBackend
@@ -44,6 +45,91 @@ func newBackendUnavailableAgentProcess() *AgentProcess {
 	return &AgentProcess{
 		Entry:      cfgpkg.AgentEntry{Worktree: "falcon", Role: "plan", Backend: "codex"},
 		RoleConfig: cfgpkg.RoleConfig{Description: "test"},
+	}
+}
+
+func TestSuperviseAgent_BackendUnavailableSkipsPreflightClaims(t *testing.T) {
+	stubCheckBackend(t, func(name string) (discovery.Info, error) {
+		return discovery.Info{
+			Name:        name,
+			Binary:      name,
+			Installed:   false,
+			InstallHint: `"codex" not on PATH`,
+		}, nil
+	})
+
+	cli.ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(cli.ResetWorkspaceRuntimeDirCache)
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", t.TempDir())
+	cli.ResetWorkspaceRuntimeDirCache()
+
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{{
+		ID:        "task-1",
+		IssueType: "task",
+		Status:    "open",
+		Priority:  1,
+		Title:     "Ready task",
+	}}
+
+	s := newBackendUnavailableSupervisor()
+	s.IssueBackend = mock
+	s.Concurrency = NewConcurrencyTracker(nil)
+	s.backendRecheckInterval = 250 * time.Millisecond
+
+	ap := newBackendUnavailableAgentProcess()
+	ap.Entry.Role = "task"
+	ap.RoleConfig = cfgpkg.RoleConfig{TaskFilter: "any"}
+	ap.WorktreePath = t.TempDir()
+	ap.StopCh = make(chan struct{})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.superviseAgent(ap)
+	}()
+
+	waitForBackendUnavailable(t, ap, done)
+	close(ap.StopCh)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("superviseAgent did not stop after StopCh closed")
+	}
+
+	for _, call := range mock.Calls {
+		switch call.Method {
+		case "Ready", "ClaimIssue":
+			t.Fatalf("backend unavailable gate ran after task preflight; unexpected %s call: %#v", call.Method, mock.Calls)
+		}
+	}
+	if ap.AssignedTaskID != "" {
+		t.Fatalf("AssignedTaskID = %q, want empty when backend is unavailable", ap.AssignedTaskID)
+	}
+	if ap.AgentSessionID != "" {
+		t.Fatalf("AgentSessionID = %q, want empty when backend is unavailable", ap.AgentSessionID)
+	}
+}
+
+func waitForBackendUnavailable(t *testing.T, ap *AgentProcess, done <-chan struct{}) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		ap.Mu.Lock()
+		lastErr := ap.LastError
+		ap.Mu.Unlock()
+		if lastErr != nil && lastErr.Class == agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome) {
+			return
+		}
+		select {
+		case <-done:
+			t.Fatal("superviseAgent exited before setting BackendUnavailable")
+		case <-deadline:
+			t.Fatal("timed out waiting for BackendUnavailable")
+		case <-tick.C:
+		}
 	}
 }
 
