@@ -125,6 +125,17 @@ function setupSuccessfulMocks(): void {
   mockFetchStatus.mockResolvedValue(makeStatusResult());
 }
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -342,6 +353,31 @@ describe("agentStore", () => {
       expect(mockFetchStatus).toHaveBeenCalledWith("ws-1");
       expect(mockFetchAgents).not.toHaveBeenCalled();
       expect(mockFetchTasks).not.toHaveBeenCalled();
+    });
+
+    it("supersedes an in-flight request when the workspace changes", async () => {
+      const oldFetch = deferred<FetchStatusResult>();
+      const newFetch = deferred<FetchStatusResult>();
+      mockFetchStatus.mockImplementation((workspaceId) =>
+        workspaceId === "ws-old" ? oldFetch.promise : newFetch.promise,
+      );
+
+      store.getState().startPolling({ workspaceId: "ws-old", pollInterval: 0 });
+      store.getState().startPolling({ workspaceId: "ws-new", pollInterval: 0 });
+
+      expect(mockFetchStatus.mock.calls).toEqual([["ws-old"], ["ws-new"]]);
+
+      oldFetch.resolve(
+        makeStatusResult({ agents: [makeAgent({ name: "old-agent" })] }),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(store.getState().agents).toEqual([]);
+
+      newFetch.resolve(
+        makeStatusResult({ agents: [makeAgent({ name: "new-agent" })] }),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(store.getState().agents[0]?.name).toBe("new-agent");
     });
   });
 
@@ -567,30 +603,41 @@ describe("agentStore", () => {
   });
 
   // -----------------------------------------------------------------------
-  // 19. Watchdog
+  // 19. Hung request recovery
   // -----------------------------------------------------------------------
 
-  describe("watchdog", () => {
-    it("recovers from hung fetch via timeout and continues polling", async () => {
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-      // First call hangs (never resolves) — withTimeout will reject it at 15s
+  describe("hung request recovery", () => {
+    it("recovers from a request whose promise never settles", async () => {
+      // There is no watchdog: withTimeout races every request against
+      // FETCH_TIMEOUT_MS, so even a promise that never settles releases the
+      // lock, and the next poll tick fetches again. This test exists to catch
+      // anyone removing that race, or reintroducing a watchdog below the
+      // request timeout that would discard healthy slow requests instead.
       mockFetchStatus.mockReturnValueOnce(
         new Promise<FetchStatusResult>(() => {}),
       );
+      mockFetchStatus.mockResolvedValue(
+        makeStatusResult({ agents: [makeAgent({ name: "recovered" })] }),
+      );
 
       store.getState().startPolling({ pollInterval: 5000 });
+      await vi.advanceTimersByTimeAsync(25_000);
 
-      // At 15s, withTimeout fires, rejecting the fetch and resetting fetchInProgress
-      // At 20s, next poll fires and should succeed
+      expect(store.getState().agents[0]?.name).toBe("recovered");
+    });
+
+    it("leaves a slow but healthy request alone", async () => {
+      const slow = deferred<FetchStatusResult>();
+      mockFetchStatus.mockReturnValueOnce(slow.promise);
       mockFetchStatus.mockResolvedValue(makeStatusResult());
-      await vi.advanceTimersByTimeAsync(20000);
 
-      // The system recovered: subsequent fetch succeeded
-      expect(store.getState().error).toBeNull();
-      expect(mockFetchStatus.mock.calls.length).toBeGreaterThan(1);
+      store.getState().startPolling({ pollInterval: 5000 });
+      await vi.advanceTimersByTimeAsync(14_000);
+      slow.resolve(makeStatusResult({ agents: [makeAgent({ name: "slow" })] }));
+      await vi.advanceTimersByTimeAsync(0);
 
-      warnSpy.mockRestore();
+      expect(mockFetchStatus).toHaveBeenCalledOnce();
+      expect(store.getState().agents[0]?.name).toBe("slow");
     });
   });
 
@@ -613,6 +660,23 @@ describe("agentStore", () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(mockFetchStatus).toHaveBeenCalledTimes(2);
+    });
+
+    it("coalesces a focus refetch with an in-flight request", async () => {
+      const inFlight = deferred<FetchStatusResult>();
+      mockFetchStatus.mockReturnValue(inFlight.promise);
+
+      store.getState().startPolling({ pollInterval: 0 });
+      expect(mockFetchStatus).toHaveBeenCalledOnce();
+
+      mockVisibilityState = "visible";
+      document.dispatchEvent(new Event("visibilitychange"));
+
+      inFlight.resolve(makeStatusResult());
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockFetchStatus).toHaveBeenCalledOnce();
+      expect(store.getState().isConnected).toBe(true);
     });
 
     it("does not refetch when polling is stopped", async () => {
@@ -679,6 +743,23 @@ describe("agentStore", () => {
       mockFetchStatus.mockClear();
       await vi.advanceTimersByTimeAsync(60000);
       expect(mockFetchStatus).not.toHaveBeenCalled();
+    });
+
+    it("ignores a request that resolves after reset", async () => {
+      const oldFetch = deferred<FetchStatusResult>();
+      mockFetchStatus.mockReturnValueOnce(oldFetch.promise);
+
+      const request = store.getState().fetchData();
+      store.getState().reset();
+
+      oldFetch.resolve(
+        makeStatusResult({ agents: [makeAgent({ name: "old-agent" })] }),
+      );
+      await request;
+
+      expect(store.getState().agents).toEqual([]);
+      expect(store.getState().isConnected).toBe(false);
+      expect(store.getState().lastUpdated).toBeNull();
     });
   });
 
