@@ -36,31 +36,51 @@ export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
   const [error, setError] = useState<Error | null>(null);
 
   const mountedRef = useRef(true);
-  const fetchInProgressRef = useRef(false);
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions; // always keep ref in sync with latest state
 
+  // The hook instance survives a taskId change (IssueDetailPanel renders with no
+  // `key`), so refs are reused across the switch and `mountedRef` alone fences
+  // nothing: React runs the old cleanup and the new effect in the same commit,
+  // so it is back to true before any in-flight promise resolves. `generationRef`
+  // is bumped on every (workspaceId, taskId) change; a response is only allowed
+  // to write state when it still belongs to the current generation. Without it,
+  // task A's late response lands under task B.
+  const generationRef = useRef(0);
+  // In-flight guard is per generation, not per hook: a fetch for the previous
+  // task must never suppress the new task's fetch.
+  const fetchInProgressRef = useRef(-1);
+  // Identity the currently displayed sessions belong to, so a switch can drop
+  // them without also clearing on the initial mount.
+  const lastKeyRef = useRef<string | null>(null);
+
   const fetchData = useCallback(async () => {
     if (!taskId) return;
-    if (fetchInProgressRef.current) return;
-    fetchInProgressRef.current = true;
+    const generation = generationRef.current;
+    if (fetchInProgressRef.current === generation) return;
+    fetchInProgressRef.current = generation;
     setIsLoading(true);
+
+    const isCurrent = () =>
+      mountedRef.current && generationRef.current === generation;
 
     try {
       const result = await getTaskSessions(workspaceId, taskId);
-      if (mountedRef.current) {
+      if (isCurrent()) {
         setSessions(result);
         setError(null);
       }
     } catch (err) {
-      if (mountedRef.current) {
+      if (isCurrent()) {
         setError(err instanceof Error ? err : new Error(String(err)));
       }
     } finally {
-      if (mountedRef.current) {
+      if (isCurrent()) {
         setIsLoading(false);
       }
-      fetchInProgressRef.current = false;
+      if (fetchInProgressRef.current === generation) {
+        fetchInProgressRef.current = -1;
+      }
     }
   }, [workspaceId, taskId]);
 
@@ -86,6 +106,22 @@ export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
 
   useEffect(() => {
     mountedRef.current = true;
+    // Open a new generation: every response issued for a previous (workspace,
+    // task) pair is now stale and must not write state.
+    generationRef.current += 1;
+    const generation = generationRef.current;
+
+    // Drop the previous task's rows straight away. Consumers (SessionsTab,
+    // IssueDetailPanel's failed-run banner, TaskSessionDiffPane) render
+    // `sessions` without re-filtering on task_id, so leaving them in place
+    // shows task A's runs, cost summary and failure banner under task B for the
+    // whole duration of task B's fetch.
+    const key = `${workspaceId}\u0000${taskId ?? ""}`;
+    if (lastKeyRef.current !== null && lastKeyRef.current !== key) {
+      setSessions([]);
+      setError(null);
+    }
+    lastKeyRef.current = key;
 
     if (!taskId) {
       setSessions([]);
@@ -104,7 +140,10 @@ export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     const scheduleNext = () => {
-      if (!mountedRef.current) return;
+      // Generation-checked as well as mount-checked: an in-flight poll from the
+      // previous task resolves after this effect re-ran, and would otherwise
+      // schedule a timer that this effect's cleanup never clears.
+      if (!mountedRef.current || generationRef.current !== generation) return;
       timer = setTimeout(() => {
         void fetchData().then(scheduleNext);
       }, getPollInterval());
