@@ -245,7 +245,19 @@ func ClassifyMarker(text string) (*AgentError, bool) {
 // using the same bounded read as ClassifyFromLog. It exists because the
 // supervisor has no access to the unexported tail reader.
 func ClassifyMarkerFromLog(logPath string) (*AgentError, bool) {
-	logTail, _ := readLogTail(logPath, 100)
+	return ClassifyMarkerFromLogAt(logPath, 0)
+}
+
+// ClassifyMarkerFromLogAt is ClassifyMarkerFromLog scoped to a single run, the
+// way ClassifyFromLogAt scopes ClassifyFromLog — and it matters MORE here, not
+// less. A marker is categorical: it overrides every other verdict and stops the
+// agent fatally. A previous run's "Not logged in · Run /login" left in the
+// append-only log therefore condemns every later run on that agent, no matter
+// how healthy, until someone rotates the file by hand. offset is the byte
+// position of the current run's first line
+// (supervisor.AgentProcess.LogFileStartOffset); 0 restores whole-file behavior.
+func ClassifyMarkerFromLogAt(logPath string, offset int64) (*AgentError, bool) {
+	logTail, _ := readLogTailAt(logPath, 100, offset)
 	return ClassifyMarker(logTail)
 }
 
