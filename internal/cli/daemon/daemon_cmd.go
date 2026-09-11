@@ -219,25 +219,14 @@ func runDaemonBody() int {
 	isolateProcessGroup()
 
 	// Refuse an inherited agent identity before anything else; see
-	// supervisor_env.go for what that costs when it goes unnoticed.
+	// supervisorEnvOK (daemon_run_helpers.go) for what that costs when it
+	// goes unnoticed.
 	if !supervisorEnvOK() {
 		return 1
 	}
 
-	projectDir, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)
-		return 1
-	}
-
-	config, err := cfgpkg.LoadDaemonConfig(projectDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: loading config: %v\n", err)
-		return 1
-	}
-
-	if len(config.Agents) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: no agents configured in FleetDB for the active workspace\n")
+	projectDir, config, ok := loadDaemonBodyConfig()
+	if !ok {
 		return 1
 	}
 
@@ -279,6 +268,29 @@ func runDaemonBody() int {
 	hydrateClaimHold(daemon, paths.claimHoldFile)
 
 	return runDaemonMainLoop(config, projectDir, paths, shutdown, daemon, lockFile)
+}
+
+// loadDaemonBodyConfig resolves the project dir and the daemon config for
+// runDaemonBody, reporting any failure on stderr. ok is false when the daemon
+// must not start: no working directory, an unloadable config, or no agents.
+func loadDaemonBodyConfig() (string, *cfgpkg.DaemonConfig, bool) {
+	projectDir, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)
+		return "", nil, false
+	}
+
+	config, err := cfgpkg.LoadDaemonConfig(projectDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: loading config: %v\n", err)
+		return "", nil, false
+	}
+
+	if len(config.Agents) == 0 {
+		fmt.Fprintf(os.Stderr, "Error: no agents configured in FleetDB for the active workspace\n")
+		return "", nil, false
+	}
+	return projectDir, config, true
 }
 
 // recordDaemonPaths annotates the workspace PID sidecar with this daemon's
