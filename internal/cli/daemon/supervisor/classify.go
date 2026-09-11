@@ -48,7 +48,7 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 		backend = s.ConfigSnapshot().Backend
 	}
 
-	if s.classifyFromHarnessMarker(ap, exitCode, backend, logPath, stopReason) {
+	if s.classifyFromHarnessMarker(ap, exitCode, backend, logPath, logStart, stopReason) {
 		return
 	}
 
@@ -166,8 +166,8 @@ func (s *Supervisor) markSupervisorStop(ap *AgentProcess, exitCode int, backend 
 // filed as "no work": both hide the one fact an operator needs.
 //
 // Only the explicit markers override. A pattern match never does.
-func (s *Supervisor) classifyFromHarnessMarker(ap *AgentProcess, exitCode int, backend, logPath string, stopReason StopReason) bool {
-	ae, ok := agenterr.ClassifyMarkerFromLog(logPath)
+func (s *Supervisor) classifyFromHarnessMarker(ap *AgentProcess, exitCode int, backend, logPath string, logStart int64, stopReason StopReason) bool {
+	ae, ok := agenterr.ClassifyMarkerFromLogAt(logPath, logStart)
 	if !ok {
 		return false
 	}
