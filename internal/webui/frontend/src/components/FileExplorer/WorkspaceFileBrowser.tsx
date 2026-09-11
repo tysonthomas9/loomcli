@@ -11,14 +11,13 @@ import { useStore } from "zustand";
 
 import { ResizeHandle } from "@/components/ResizeHandle";
 import type { DiffFile } from "@/api/issues";
-import type { FileCheckout } from "@/api/workspace";
+import { useFileCheckouts } from "@/hooks/common/useFileCheckouts";
 import {
   deleteScopedPath,
   fetchDiffFiles,
   gitStatusScoped,
   indexScopedFiles,
   listScopedDir,
-  listFileCheckouts,
   mkdirScoped,
   moveScopedPath,
   repairFileCheckout,
@@ -232,9 +231,13 @@ function FileBrowserInner({
   const [branchDiffsByRef, setBranchDiffsByRef] = useState<
     Record<string, DiffFile[] | undefined>
   >({});
-  const [checkouts, setCheckouts] = useState<FileCheckout[]>([]);
-  const [checkoutsSettled, setCheckoutsSettled] = useState(false);
-  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const {
+    checkouts,
+    checkoutsSettled,
+    checkoutError,
+    refreshCheckouts,
+    refreshCheckoutsForRepair,
+  } = useFileCheckouts(workspaceId, hasCheckouts);
   const [repairError, setRepairError] = useState<string | null>(null);
   const [repairingCheckoutKey, setRepairingCheckoutKey] = useState<
     string | null
@@ -544,7 +547,6 @@ function FileBrowserInner({
     setLens(getStoredLens(workspaceId));
     setCompareMode(getStoredCompareMode(workspaceId));
     setBranchDiffsByRef({});
-    setCheckoutsSettled(false);
     branchDiffsInFlightRef.current.clear();
   }, [workspaceId]);
 
@@ -567,18 +569,6 @@ function FileBrowserInner({
   const markIndexStale = useCallback(() => {
     quickOpenFetchedAtRef.current = 0;
   }, []);
-
-  const refreshCheckouts = useCallback(async () => {
-    if (!hasCheckouts) return;
-    try {
-      const data = await listFileCheckouts(workspaceId);
-      setCheckouts(data.checkouts);
-      setCheckoutError(null);
-    } catch (err) {
-      setCheckoutError(err instanceof Error ? err.message : String(err));
-    }
-    setCheckoutsSettled(true);
-  }, [hasCheckouts, workspaceId]);
 
   const refreshGitStatus = useCallback(async () => {
     const next: Record<string, Record<string, string>> = {};
@@ -1495,7 +1485,7 @@ function FileBrowserInner({
           return;
         }
         markIndexStale();
-        await refreshCheckouts();
+        await refreshCheckoutsForRepair();
         void refreshGitStatus();
         void refreshBranchDiffs();
         refreshParents(checkoutExplorerRef(ref), "");
@@ -1515,7 +1505,7 @@ function FileBrowserInner({
       repairingCheckoutKey,
       markIndexStale,
       refreshBranchDiffs,
-      refreshCheckouts,
+      refreshCheckoutsForRepair,
       refreshGitStatus,
       refreshParents,
       showToast,

@@ -103,28 +103,30 @@ func (s *fileServiceImpl) workspaceGitStatus(ctx context.Context, wsID, target, 
 }
 
 func workspaceFileCheckouts(_ string, wsRoot string, ws *ops.WorkspaceData) []gitStatusCheckout {
+	candidates := workspaceFileCheckoutCandidates(wsRoot, ws)
+	result := make([]gitStatusCheckout, 0, len(candidates))
+	for _, candidate := range candidates {
+		if checked, ok := workspaceCheckoutWithinRoot(wsRoot, candidate.path); ok {
+			candidate.path, candidate.prefix = checked.path, checked.prefix
+			result = append(result, candidate)
+		}
+	}
+	return result
+}
+
+// Catalog membership comes from declared topology, even when a path cannot be
+// safely inspected. Such candidates produce an explicit partial/error row.
+func workspaceFileCheckoutCandidates(wsRoot string, ws *ops.WorkspaceData) []gitStatusCheckout {
 	if ws == nil {
 		return nil
 	}
 	checkouts := make([]gitStatusCheckout, 0, len(ws.Repos)+len(ws.Agents)*len(ws.Repos))
 	for _, repo := range ws.Repos {
-		if checkout, ok := workspaceCheckoutWithinRoot(wsRoot, repoCheckoutPath(wsRoot, repo)); ok {
-			checkout.kind = "repo"
-			checkout.repo = repo.Name
-			checkouts = append(checkouts, checkout)
-		}
+		checkouts = append(checkouts, gitStatusCheckout{kind: "repo", repo: repo.Name, path: repoCheckoutPath(wsRoot, repo)})
 	}
 	for _, agent := range ws.Agents {
 		for _, repo := range agentCheckoutRepos(ws.Repos, agent) {
-			path := filepath.Join(wsRoot, "worktrees", repo.Name, agent.Name)
-			checkout, ok := workspaceCheckoutWithinRoot(wsRoot, path)
-			if !ok {
-				continue
-			}
-			checkout.kind = "agent"
-			checkout.agent = agent.Name
-			checkout.repo = repo.Name
-			checkouts = append(checkouts, checkout)
+			checkouts = append(checkouts, gitStatusCheckout{kind: "agent", agent: agent.Name, repo: repo.Name, path: filepath.Join(wsRoot, "worktrees", repo.Name, agent.Name)})
 		}
 	}
 	return checkouts
@@ -136,9 +138,24 @@ func (s *fileServiceImpl) ListFileCheckouts(ctx context.Context, wsID string) (*
 		return nil, err
 	}
 	wsRoot := ws.Path
-	checkouts := workspaceFileCheckouts(wsID, wsRoot, ws)
-	inspectable := presentGitCheckouts(wsRoot, checkouts)
+	checkouts := workspaceFileCheckoutCandidates(wsRoot, ws)
+	present := make(map[string]bool, len(checkouts))
+	presenceErrors := make(map[string]error)
+	inspectable := make([]gitStatusCheckout, 0, len(checkouts))
+	for _, checkout := range checkouts {
+		exists, err := checkoutPathPresence(wsRoot, checkout.path)
+		present[checkout.path] = exists
+		if err != nil {
+			presenceErrors[checkout.path] = err
+		} else if exists {
+			inspectable = append(inspectable, checkout)
+		}
+	}
 	items := s.inspectWorkspaceCheckouts(ctx, inspectable, true)
+	return checkoutCatalogResult(ctx, checkouts, present, presenceErrors, items), nil
+}
+
+func checkoutCatalogResult(ctx context.Context, checkouts []gitStatusCheckout, present map[string]bool, presenceErrors map[string]error, items []workspaceGitInspection) *service.FileCheckoutsResult {
 	byPath := make(map[string]workspaceGitInspection, len(items))
 	for _, item := range items {
 		byPath[item.checkout.path] = item
@@ -151,7 +168,15 @@ func (s *fileServiceImpl) ListFileCheckouts(ctx context.Context, wsID string) (*
 			Agent: checkout.agent,
 			Repo:  checkout.repo,
 		}
-		if checkoutPathPresent(wsRoot, checkout.path) {
+		if err := presenceErrors[checkout.path]; err != nil {
+			item.StatusError = true
+			item.Error = err.Error()
+			result.Partial = true
+			result.Errors = append(result.Errors, checkoutError(checkout, err))
+			out = append(out, item)
+			continue
+		}
+		if present[checkout.path] {
 			item.Exists = true
 			inspection := byPath[checkout.path]
 			if inspection.err != nil {
@@ -178,17 +203,7 @@ func (s *fileServiceImpl) ListFileCheckouts(ctx context.Context, wsID string) (*
 	}
 	result.Checkouts = out
 	sortCheckoutErrors(result.Errors)
-	return result, nil
-}
-
-func presentGitCheckouts(wsRoot string, checkouts []gitStatusCheckout) []gitStatusCheckout {
-	out := make([]gitStatusCheckout, 0, len(checkouts))
-	for _, checkout := range checkouts {
-		if checkoutPathPresent(wsRoot, checkout.path) {
-			out = append(out, checkout)
-		}
-	}
-	return out
+	return result
 }
 
 type workspaceGitInspection struct {
@@ -421,30 +436,43 @@ func workspaceCheckoutWithinRoot(wsRoot, checkoutPath string) (gitStatusCheckout
 	return gitStatusCheckout{path: absCheckout, prefix: filepath.ToSlash(rel)}, true
 }
 
+// checkoutPathPresent is used by best-effort discovery paths. The checkout
+// catalog uses checkoutPathPresence so failed inspection is not called absence.
 func checkoutPathPresent(wsRoot, checkoutPath string) bool {
+	present, _ := checkoutPathPresence(wsRoot, checkoutPath)
+	return present
+}
+
+func checkoutPathPresence(wsRoot, checkoutPath string) (bool, error) {
 	if checkoutPath == "" {
-		return false
+		return false, service.ErrValidation("checkout path missing")
 	}
 	absRoot, err := filepath.Abs(wsRoot)
 	if err != nil {
-		return false
+		return false, err
 	}
 	absCheckout, err := filepath.Abs(checkoutPath)
 	if err != nil {
-		return false
+		return false, err
 	}
 	if err := webuilog.ValidatePathWithinDir(absCheckout, absRoot); err != nil {
-		return false
+		return false, err
 	}
 	if err := validateNoSymlinkComponents(absRoot, absCheckout); err != nil {
-		return false
+		return false, err
 	}
 	fi, err := os.Lstat(absCheckout)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
 	if err != nil {
-		return false
+		return false, err
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
-		return false
+		return false, service.ErrForbidden("checkout is a symlink")
 	}
-	return true
+	if !fi.IsDir() {
+		return false, service.ErrValidation("checkout is not a directory")
+	}
+	return true, nil
 }
