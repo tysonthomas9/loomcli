@@ -53,13 +53,21 @@ const (
 // only shows up once you look at what the harness actually emits.
 // harness-wrapper's own unattended default (pkg/oneshot.AutoAcceptAnswer)
 // answers every prompt with its affirmative option, falling back to the first
-// option — and claude-code renders BOTH the harmless folder-trust dialog AND
-// the `--dangerously-skip-permissions` acceptance screen under the same prompt
-// kind. A blanket yes therefore accepts a skip-all-permissions launch with
-// nobody having decided to, which would quietly undo the role safety knobs
-// (allowed_tools / denied_tools / read_only) that were just made real. Making
-// the policy per-role means a role names the kinds it is willing to
-// auto-accept and everything it did not name is denied.
+// option — and one of the prompts it would answer is claude-code's
+// `--dangerously-skip-permissions` acceptance screen. A blanket yes therefore
+// accepts a skip-all-permissions launch with nobody having decided to, which
+// would quietly undo the role safety knobs (allowed_tools / denied_tools /
+// read_only) that were just made real. Making the policy per-role means a role
+// names the kinds it is willing to auto-accept and everything it did not name
+// is denied.
+//
+// Per-KIND matters as much as per-role, and harness-wrapper v0.8.4 is what
+// made it possible: the acceptance screen and the harmless folder-trust dialog
+// used to arrive under one `trust_prompt` kind, so allowing folder trust
+// allowed the bypass too. They are now `trust_prompt` and `bypass_acceptance`,
+// two independently namable kinds. See internal/cli/backends for the
+// consequence a role author has to know: denying `bypass_acceptance` does not
+// stall claude, it exits it.
 //
 // The zero value denies everything: a nil policy, an empty Default and an
 // absent Kinds entry all resolve to deny. A role that says nothing must never
