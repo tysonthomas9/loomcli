@@ -147,7 +147,6 @@ func TestHub_BroadcastDelivers(t *testing.T) {
 
 	c := NewClient(1, ClientSendBuf, "0", nil, "ws-1")
 	_ = h.RegisterClient(context.Background(), c)
-	time.Sleep(20 * time.Millisecond)
 
 	h.Broadcast(&MutationPayload{
 		Type:        "create",
@@ -172,7 +171,6 @@ func TestHub_BroadcastDropsEmptyWorkspace(t *testing.T) {
 
 	c := NewClient(1, ClientSendBuf, "0", nil, "ws-1")
 	_ = h.RegisterClient(context.Background(), c)
-	time.Sleep(20 * time.Millisecond)
 
 	// Mutation with empty WorkspaceID should be dropped
 	h.Broadcast(&MutationPayload{
@@ -198,7 +196,6 @@ func TestHub_WorkspaceFilter(t *testing.T) {
 	c2 := NewClient(2, ClientSendBuf, "0", nil, "ws-2")
 	_ = h.RegisterClient(context.Background(), c1)
 	_ = h.RegisterClient(context.Background(), c2)
-	time.Sleep(20 * time.Millisecond)
 
 	h.Broadcast(&MutationPayload{
 		Type:        "update",
@@ -230,7 +227,6 @@ func TestHub_SourceRepoFilter(t *testing.T) {
 
 	c := NewClient(1, ClientSendBuf, "0", []string{"repoA"}, "ws-1")
 	_ = h.RegisterClient(context.Background(), c)
-	time.Sleep(20 * time.Millisecond)
 
 	// Should be delivered (matches filter)
 	h.Broadcast(&MutationPayload{
@@ -278,7 +274,6 @@ func TestHub_Stop(t *testing.T) {
 
 	c := NewClient(1, ClientSendBuf, "0", nil, "ws-1")
 	_ = h.RegisterClient(context.Background(), c)
-	time.Sleep(20 * time.Millisecond)
 
 	h.Stop()
 
@@ -336,26 +331,59 @@ func TestHub_RetryQueueBoundedUnderHighFanout(t *testing.T) {
 	}
 }
 
-func TestHub_SlowClientDisconnectedWhenSendBufferFull(t *testing.T) {
+func TestHub_StampsFramesAndKeepsSlowClientOnBufferFull(t *testing.T) {
 	h := NewHub()
-	go h.Run()
-	defer h.Stop()
+	c := NewClient(1, 1, "c1.start", nil, "ws-1")
+	h.addClient(c)
 
-	c := NewClient(1, 1, "1700000000000-0", nil, "ws-1")
-	_ = h.RegisterClient(context.Background(), c)
-	waitForHubCondition(t, func() bool { return h.ClientCount() == 1 })
+	h.fanOutMutation(&MutationPayload{Cursor: "c1.first", Type: "update", IssueID: "first", WorkspaceID: "ws-1"})
+	h.fanOutMutation(&MutationPayload{Cursor: "c1.second", Type: "update", IssueID: "second", WorkspaceID: "ws-1"})
+	h.fanOutMutation(&MutationPayload{Cursor: "c1.third", Type: "update", IssueID: "third", WorkspaceID: "ws-1"})
 
-	h.Broadcast(&MutationPayload{Type: "update", IssueID: "first", WorkspaceID: "ws-1"})
-	waitForHubCondition(t, func() bool { return len(c.send) == 1 })
-
-	h.Broadcast(&MutationPayload{Type: "update", IssueID: "second", WorkspaceID: "ws-1"})
-	waitForHubCondition(t, func() bool { return h.ClientCount() == 0 })
-
-	if _, ok := <-c.send; !ok {
-		t.Fatal("expected first buffered mutation to remain readable before channel close")
+	first := <-c.send
+	if first.deliverySeq != 1 || first.deliveryCursor != "c1.first" {
+		t.Fatalf("first delivery metadata = (%d, %q), want (1, c1.first)", first.deliverySeq, first.deliveryCursor)
 	}
-	if _, ok := <-c.send; ok {
-		t.Fatal("expected slow client send channel to close after disconnect")
+	if got := h.ClientCount(); got != 1 {
+		t.Fatalf("client count after overflow = %d, want client retained", got)
+	}
+	dropped, pending := c.beginResync()
+	if !pending {
+		t.Fatal("pending resync = false, want true")
+	}
+	if dropped.seq != 3 || dropped.cursor != "c1.third" {
+		t.Fatalf("last dropped frame = (%d, %q), want (3, c1.third)", dropped.seq, dropped.cursor)
+	}
+}
+
+func TestHub_GlobalDropMarksEveryMatchingClientForResync(t *testing.T) {
+	h := NewHub()
+	matching := NewClient(1, 1, "c1.matching", []string{"repo-a"}, "ws-1")
+	otherRepo := NewClient(2, 1, "c1.other-repo", []string{"repo-b"}, "ws-1")
+	otherWorkspace := NewClient(3, 1, "c1.other-workspace", nil, "ws-2")
+	h.addClient(matching)
+	h.addClient(otherRepo)
+	h.addClient(otherWorkspace)
+
+	for i := 0; i < cap(h.broadcast)+retryQueueCapacity+1; i++ {
+		h.Broadcast(&MutationPayload{
+			Cursor:      "c1.global",
+			Type:        "update",
+			IssueID:     "global-overflow",
+			SourceRepo:  "repo-a",
+			WorkspaceID: "ws-1",
+		})
+	}
+
+	dropped, pending := matching.beginResync()
+	if !pending || dropped.seq != 0 || dropped.cursor != "c1.matching" {
+		t.Fatalf("matching client resync = (%v, %d, %q), want (true, 0, c1.matching)", pending, dropped.seq, dropped.cursor)
+	}
+	if _, pending := otherRepo.beginResync(); pending {
+		t.Fatal("non-matching source-repo client marked for resync")
+	}
+	if _, pending := otherWorkspace.beginResync(); pending {
+		t.Fatal("non-matching workspace client marked for resync")
 	}
 }
 
@@ -370,7 +398,6 @@ func TestHub_GetActiveSourceRepos(t *testing.T) {
 	_ = h.RegisterClient(context.Background(), c1)
 	_ = h.RegisterClient(context.Background(), c2)
 	_ = h.RegisterClient(context.Background(), c3)
-	time.Sleep(20 * time.Millisecond)
 
 	repos := h.GetActiveSourceRepos()
 	sort.Strings(repos)
@@ -543,16 +570,4 @@ func TestNewClient(t *testing.T) {
 	if c.workspaceID != "ws-1" {
 		t.Errorf("expected workspaceID ws-1, got %s", c.workspaceID)
 	}
-}
-
-func waitForHubCondition(t *testing.T, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatal("condition not met before timeout")
 }

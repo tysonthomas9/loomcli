@@ -9,6 +9,7 @@ import {
   EventProvider,
   useEventContext,
   useEventSubscription,
+  useResyncSubscription,
 } from "../useEventProvider";
 import type { MutationPayload } from "@/api/common";
 
@@ -80,6 +81,17 @@ class MockFetchEventSourceAttempt {
 
   simulateConnected(): void {
     this.options.onmessage?.({ id: "", event: "connected", data: "" });
+  }
+
+  simulateResync(
+    id: string,
+    reason: "cap" | "error" | "expired" | "overflow",
+  ): void {
+    this.options.onmessage?.({
+      id,
+      event: "resync",
+      data: JSON.stringify({ reason }),
+    });
   }
 
   simulateError(
@@ -259,6 +271,79 @@ describe("useEventProvider", () => {
       });
 
       expect(result.current.connectionEpoch).toBe(1);
+    });
+
+    it("handles handshake resync as one epoch and one legacy refresh", async () => {
+      const mutationListener = vi.fn();
+      const resyncListener = vi.fn();
+
+      function Listener(): null {
+        useEventSubscription(mutationListener);
+        useResyncSubscription(resyncListener);
+        return null;
+      }
+
+      const { result } = renderHook(() => useEventContext(), {
+        wrapper: ({ children }) => (
+          <EventProvider>
+            <Listener />
+            {children}
+          </EventProvider>
+        ),
+      });
+      await flushConnect();
+
+      act(() => {
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateResync(
+          "c1.floor",
+          "expired",
+        );
+        MockFetchEventSourceAttempt.lastInstance?.simulateConnected();
+      });
+
+      expect(result.current.connectionEpoch).toBe(1);
+      expect(resyncListener).toHaveBeenCalledOnce();
+      expect(resyncListener).toHaveBeenCalledWith({
+        from: undefined,
+        to: "c1.floor",
+        reason: "expired",
+      });
+      expect(mutationListener).toHaveBeenCalledOnce();
+      expect(mutationListener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "refresh",
+          workspace_id: "test-ws-id",
+        }),
+      );
+    });
+
+    it("does not suppress the next open after a handshake resync stream fails", async () => {
+      vi.useFakeTimers();
+      const { result } = renderHook(() => useEventContext(), { wrapper });
+      await flushConnect();
+
+      act(() => {
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateResync(
+          "c1.floor",
+          "expired",
+        );
+        MockFetchEventSourceAttempt.lastInstance?.simulateError();
+      });
+      expect(result.current.connectionEpoch).toBe(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      expect(MockFetchEventSourceAttempt.instances).toHaveLength(2);
+
+      act(() => {
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateConnected();
+      });
+
+      expect(result.current.connectionEpoch).toBe(2);
     });
 
     it("exposes reconnectAttempts", async () => {
@@ -762,19 +847,30 @@ describe("useEventProvider", () => {
     });
 
     it("reconnects when sourceRepos changes", async () => {
+      let epoch = 0;
+      function EpochProbe(): null {
+        epoch = useEventContext().connectionEpoch;
+        return null;
+      }
       const { rerender } = render(
         <EventProvider sourceRepos={["repo-a"]}>
-          <div>child</div>
+          <EpochProbe />
         </EventProvider>,
       );
       await flushConnect();
+
+      act(() => {
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateConnected();
+      });
+      expect(epoch).toBe(1);
 
       expect(MockFetchEventSourceAttempt.instances.length).toBe(1);
       const firstInstance = MockFetchEventSourceAttempt.lastInstance;
 
       rerender(
         <EventProvider sourceRepos={["repo-b"]}>
-          <div>child</div>
+          <EpochProbe />
         </EventProvider>,
       );
       await flushConnect();
@@ -786,6 +882,11 @@ describe("useEventProvider", () => {
       expect(MockFetchEventSourceAttempt.lastInstance?.url).toContain(
         "source_repos=repo-b",
       );
+      act(() => {
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateConnected();
+      });
+      expect(epoch).toBe(2);
     });
   });
 
@@ -799,6 +900,7 @@ describe("useEventProvider", () => {
       expect(result.current.isConnected).toBe(false);
       expect(result.current.connectionEpoch).toBe(0);
       expect(typeof result.current.subscribe).toBe("function");
+      expect(typeof result.current.onResync).toBe("function");
       expect(typeof result.current.retryNow).toBe("function");
       expect(typeof result.current.disconnect).toBe("function");
 
@@ -908,6 +1010,12 @@ describe("useEventProvider", () => {
       await flushConnect();
 
       expect(MockFetchEventSourceAttempt.instances.length).toBe(2);
+
+      act(() => {
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateConnected();
+      });
+      expect(result.current.connectionEpoch).toBe(1);
     });
 
     it("disconnect delegates to client", async () => {

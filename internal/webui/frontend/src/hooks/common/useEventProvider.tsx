@@ -23,6 +23,7 @@ import {
   type MutationEntityType,
   type MutationPayload,
   type MutationType,
+  type ResyncEvent,
 } from "@/api/common";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import {
@@ -64,6 +65,8 @@ export interface EventContextValue {
     callback: (mutation: MutationPayload) => void,
     options?: SubscriptionOptions,
   ) => () => void;
+  /** Register a transport-resync listener. Returns an unsubscribe function. */
+  onResync: (callback: (event: ResyncEvent) => void) => () => void;
   /** Immediately retry connection (only works in 'reconnecting' state) */
   retryNow: () => void;
   /** Disconnect from the SSE endpoint */
@@ -78,6 +81,7 @@ export const NO_EVENT_CONTEXT: EventContextValue = {
   isConnected: false,
   connectionEpoch: 0,
   subscribe: () => () => {},
+  onResync: () => () => {},
   retryNow: () => {},
   disconnect: () => {},
 };
@@ -135,10 +139,14 @@ export function EventProvider({
   // Ref-based subscriber registry — changes don't trigger re-renders
   const subscriberIdRef = useRef(0);
   const subscribersRef = useRef<Map<number, SubscriberEntry>>(new Map());
+  const resyncSubscribersRef = useRef<
+    Map<number, (event: ResyncEvent) => void>
+  >(new Map());
 
   // SSE client ref
   const clientRef = useRef<WorkspaceSSEClient | null>(null);
   const mountedRef = useRef(true);
+  const handshakeResyncPendingRef = useRef(false);
 
   // Track sourceRepos for reconnect detection
   const sourceReposRef = useRef(sourceRepos);
@@ -186,6 +194,43 @@ export function EventProvider({
     [],
   );
 
+  const onResync = useCallback(
+    (callback: (event: ResyncEvent) => void): (() => void) => {
+      const id = ++subscriberIdRef.current;
+      resyncSubscribersRef.current.set(id, callback);
+      return () => {
+        resyncSubscribersRef.current.delete(id);
+      };
+    },
+    [],
+  );
+
+  const dispatchMutation = useCallback((mutation: MutationPayload): void => {
+    for (const entry of subscribersRef.current.values()) {
+      if (entry.types && !entry.types.includes(mutation.type)) {
+        continue;
+      }
+      if (
+        entry.entityTypes &&
+        (mutation.entity_type == null ||
+          !entry.entityTypes.includes(mutation.entity_type))
+      ) {
+        continue;
+      }
+      if (
+        entry.actions &&
+        (mutation.action == null || !entry.actions.includes(mutation.action))
+      ) {
+        continue;
+      }
+      try {
+        entry.callback(mutation);
+      } catch (err) {
+        console.error("[EventProvider] Subscriber callback threw:", err);
+      }
+    }
+  }, []);
+
   // Create client on mount / workspaceId change
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -198,38 +243,18 @@ export function EventProvider({
     setReconnectAttempts(0);
     setLastError(null);
     setConnectionEpoch(0);
+    handshakeResyncPendingRef.current = false;
 
     const client = new WorkspaceSSEClient(workspaceId, {
       onMutation: (mutation: MutationPayload) => {
         if (!mountedRef.current) return;
-        // Fan out to all subscribers
-        for (const entry of subscribersRef.current.values()) {
-          if (entry.types && !entry.types.includes(mutation.type)) {
-            continue;
-          }
-          if (
-            entry.entityTypes &&
-            (mutation.entity_type == null ||
-              !entry.entityTypes.includes(mutation.entity_type))
-          ) {
-            continue;
-          }
-          if (
-            entry.actions &&
-            (mutation.action == null ||
-              !entry.actions.includes(mutation.action))
-          ) {
-            continue;
-          }
-          try {
-            entry.callback(mutation);
-          } catch (err) {
-            console.error("[EventProvider] Subscriber callback threw:", err);
-          }
-        }
+        dispatchMutation(mutation);
       },
       onStateChange: (newState: ConnectionState) => {
         if (!mountedRef.current) return;
+        if (newState === "connecting" || newState === "reconnecting") {
+          handshakeResyncPendingRef.current = false;
+        }
         setState(newState);
         if (newState === "connected") {
           setLastError(null);
@@ -245,7 +270,28 @@ export function EventProvider({
       },
       onConnected: () => {
         if (!mountedRef.current) return;
+        if (handshakeResyncPendingRef.current) {
+          handshakeResyncPendingRef.current = false;
+          return;
+        }
         setConnectionEpoch((epoch) => epoch + 1);
+      },
+      onResync: (event: ResyncEvent) => {
+        if (!mountedRef.current) return;
+        handshakeResyncPendingRef.current = event.reason !== "overflow";
+        setConnectionEpoch((epoch) => epoch + 1);
+        dispatchMutation({
+          type: "refresh",
+          timestamp: new Date().toISOString(),
+          workspace_id: workspaceId,
+        });
+        for (const callback of resyncSubscribersRef.current.values()) {
+          try {
+            callback(event);
+          } catch (err) {
+            console.error("[EventProvider] Resync subscriber threw:", err);
+          }
+        }
       },
     });
     clientRef.current = client;
@@ -266,7 +312,7 @@ export function EventProvider({
       client.destroy();
       clientRef.current = null;
     };
-  }, [autoConnect, workspaceId]);
+  }, [autoConnect, dispatchMutation, workspaceId]);
 
   // Reconnect when sourceRepos changes
   useEffect(() => {
@@ -307,6 +353,7 @@ export function EventProvider({
       isConnected,
       connectionEpoch,
       subscribe,
+      onResync,
       retryNow,
       disconnect,
     }),
@@ -317,6 +364,7 @@ export function EventProvider({
       isConnected,
       connectionEpoch,
       subscribe,
+      onResync,
       retryNow,
       disconnect,
     ],
@@ -380,4 +428,18 @@ export function useEventSubscription(
     );
     return unsubscribe;
   }, [subscribe, typesKey, entityTypesKey, actionsKey]);
+}
+
+/** Subscribe to transport resync cursor transitions without receiving mutations. */
+export function useResyncSubscription(
+  callback: (event: ResyncEvent) => void,
+): void {
+  const { onResync } = useEventContext();
+  const callbackRef = useRef(callback);
+
+  useEffect(() => {
+    callbackRef.current = callback;
+  }, [callback]);
+
+  useEffect(() => onResync((event) => callbackRef.current(event)), [onResync]);
 }

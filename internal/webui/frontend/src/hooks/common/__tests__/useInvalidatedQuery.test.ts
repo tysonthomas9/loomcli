@@ -34,6 +34,7 @@ function Wrapper({ children }: { children: React.ReactNode }): JSX.Element {
     isConnected: true,
     connectionEpoch: epoch,
     subscribe,
+    onResync: () => () => {},
     retryNow: vi.fn(),
     disconnect: vi.fn(),
   };
