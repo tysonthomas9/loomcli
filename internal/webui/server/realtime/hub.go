@@ -167,15 +167,6 @@ func (h *Hub) Run() {
 	}
 }
 
-// addClient registers a new SSE client.
-func (h *Hub) addClient(client *Client) {
-	h.mu.Lock()
-	h.clients[client] = true
-	count := len(h.clients)
-	h.mu.Unlock()
-	slog.Info("SSE client registered", "client_id", client.id, "count", count)
-}
-
 // removeClient unregisters an SSE client and closes its send channel.
 func (h *Hub) removeClient(client *Client) {
 	h.mu.Lock()

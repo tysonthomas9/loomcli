@@ -19,6 +19,17 @@ declare global {
   }
 }
 
+async function appendIssuesSequentially(
+  issueIds: string[],
+  workspaceId: string,
+  count: number,
+  title: (index: number) => string,
+): Promise<void> {
+  for (let index = 0; index < count; index++) {
+    issueIds.push(await createTestIssueInWorkspace(workspaceId, title(index)));
+  }
+}
+
 // Real product writes and native EventSource delivery. The only injected fault
 // closes the transport; the application/client/page remain alive throughout.
 // Set SSE_REPLAY_DISABLE_DELIVERY=1 for the deliberately failing negative control.
@@ -110,10 +121,12 @@ test("persistent browser drains paginated replay before synchronized", async ({
       before.barriers,
     );
     // Sequential committed API writes give an independent expected order.
-    for (let n = 0; n < 201; n++)
-      created.push(
-        await createTestIssueInWorkspace(ws, `${prefix} backlog ${n}`),
-      );
+    await appendIssuesSequentially(
+      created,
+      ws,
+      201,
+      (index) => `${prefix} backlog ${index}`,
+    );
     const backlog = created.slice(1);
     const navigations: string[] = [];
     page.on("framenavigated", (frame) => {
@@ -121,10 +134,12 @@ test("persistent browser drains paginated replay before synchronized", async ({
     });
     blocked = process.env.SSE_REPLAY_DISABLE_DELIVERY === "1";
     // Additional product writes race with the reconnect/replay window.
-    for (let n = 0; n < 10; n++)
-      created.push(
-        await createTestIssueInWorkspace(ws, `${prefix} concurrent ${n}`),
-      );
+    await appendIssuesSequentially(
+      created,
+      ws,
+      10,
+      (index) => `${prefix} concurrent ${index}`,
+    );
     const expected = created.slice(1);
     await expect
       .poll(

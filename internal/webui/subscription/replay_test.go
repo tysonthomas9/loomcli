@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -20,6 +21,14 @@ import (
 type replayTransport func(*http.Request) (*http.Response, error)
 
 func (f replayTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func mutationEvents(data []backend.MutationData) []rpc.MutationEvent {
+	out := make([]rpc.MutationEvent, len(data))
+	for i, mutation := range data {
+		out[i] = realtime.BackendMutationToRPCEvent(mutation)
+	}
+	return out
+}
 
 type handshakeRecorder struct {
 	*httptest.ResponseRecorder
@@ -87,11 +96,7 @@ func TestReplayCompletesBeforeConnected(t *testing.T) {
 				if err != nil {
 					return nil, err
 				}
-				out := make([]rpc.MutationEvent, len(data))
-				for i, m := range data {
-					out[i] = realtime.BackendMutationToRPCEvent(m)
-				}
-				return out, nil
+				return mutationEvents(data), nil
 			}})
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
@@ -148,11 +153,7 @@ func TestReplayFailureDoesNotReportConnected(t *testing.T) {
 				defer sub.Stop()
 				h := realtime.NewHandler(realtime.HandlerConfig{Hub: hub, WorkspaceFromCtx: func(context.Context) string { return "replay" }, GetMutationsSince: func(_, since string) ([]rpc.MutationEvent, error) {
 					data, err := sub.GetMutationDataSince(since)
-					out := make([]rpc.MutationEvent, len(data))
-					for i, m := range data {
-						out[i] = realtime.BackendMutationToRPCEvent(m)
-					}
-					return out, err
+					return mutationEvents(data), err
 				}})
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 				defer cancel()

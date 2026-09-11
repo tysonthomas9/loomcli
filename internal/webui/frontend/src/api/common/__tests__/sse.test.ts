@@ -60,6 +60,12 @@ class MockEventSource {
     this.readyState = MockEventSource.CLOSED;
   }
 
+  private dispatch(type: string, event: MessageEvent): void {
+    for (const listener of this.eventListeners.get(type) ?? []) {
+      listener(event);
+    }
+  }
+
   // Test helpers
   simulateOpen(): void {
     this.readyState = MockEventSource.OPEN;
@@ -71,38 +77,27 @@ class MockEventSource {
   }
 
   simulateMutation(data: MutationPayload, eventId?: string): void {
-    const listeners = this.eventListeners.get("mutation") ?? [];
     // Compute eventId from timestamp if not provided (simulates server behavior)
     const lastEventId = eventId ?? String(Date.parse(data.timestamp));
-    const event = {
+    this.dispatch("mutation", {
       data: JSON.stringify(data),
       lastEventId,
-    } as MessageEvent;
-    for (const listener of listeners) {
-      listener(event);
-    }
+    } as MessageEvent);
   }
 
   simulateRawMutation(data: string, eventId = ""): void {
-    const listeners = this.eventListeners.get("mutation") ?? [];
-    const event = { data, lastEventId: eventId } as MessageEvent;
-    for (const listener of listeners) {
-      listener(event);
-    }
+    this.dispatch("mutation", { data, lastEventId: eventId } as MessageEvent);
   }
 
   simulateCheckpoint(id: string): void {
-    for (const listener of this.eventListeners.get("checkpoint") ?? []) {
-      listener({ data: "{}", lastEventId: id } as MessageEvent);
-    }
+    this.dispatch("checkpoint", {
+      data: "{}",
+      lastEventId: id,
+    } as MessageEvent);
   }
 
   simulateConnectedEvent(): void {
-    const listeners = this.eventListeners.get("connected") ?? [];
-    const event = { data: "" } as MessageEvent;
-    for (const listener of listeners) {
-      listener(event);
-    }
+    this.dispatch("connected", { data: "" } as MessageEvent);
   }
 
   static reset(): void {
