@@ -501,6 +501,15 @@ function history(
     (!row.present && (events.length !== 0 || row.has_older))
   )
     fail();
+  validateHistoryEvents(events, workspace, expectedIssueId);
+  validateTimeline(array(row.timeline), events);
+  return row as unknown as NativeRecoveryHistory;
+}
+function validateHistoryEvents(
+  events: unknown[],
+  workspace: string,
+  expectedIssueId: string,
+) {
   let previous = 0n;
   for (const value of events) {
     const event = object(value);
@@ -533,8 +542,6 @@ function history(
     stringValue(event.after);
     for (const item of Object.values(object(event.metadata))) stringValue(item);
   }
-  validateTimeline(array(row.timeline), events);
-  return row as unknown as NativeRecoveryHistory;
 }
 function utf8Compare(left: string, right: string): number {
   const encoder = new TextEncoder(),
