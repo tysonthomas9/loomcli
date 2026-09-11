@@ -228,10 +228,7 @@ func (d *Daemon) handleAgentControlStart(name string, taskIDs ...string) DaemonC
 	if !ok {
 		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in daemon config", name)}
 	}
-	if err := validateAutoEnabled(entry); err != nil {
-		return DaemonControlResponse{Error: err.Error()}
-	}
-	if err := d.validateEphemeralStart(entry, taskID); err != nil {
+	if err := d.validateControlStart(entry, taskID); err != nil {
 		return DaemonControlResponse{Error: err.Error()}
 	}
 
@@ -279,6 +276,16 @@ func (d *Daemon) markAgentStartAccepted(name string) {
 		return
 	}
 	d.setConfigAgentDesiredStateLocked(name, desired)
+}
+
+// validateControlStart runs the per-entry refusals of a control-socket start,
+// in order: a disabled agent (auto: false), then an ephemeral start without a
+// task. Split out of handleAgentControlStart (funlen) with the checks unchanged.
+func (d *Daemon) validateControlStart(entry config.AgentEntry, taskID string) error {
+	if err := validateAutoEnabled(entry); err != nil {
+		return err
+	}
+	return d.validateEphemeralStart(entry, taskID)
 }
 
 // validateAutoEnabled refuses a durably disabled agent. Starting one would
