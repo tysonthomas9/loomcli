@@ -7,7 +7,6 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -43,11 +42,8 @@ const (
 // SessionRecord is a type alias for sessionhistory.SessionRecord.
 type SessionRecord = sessionhistory.SessionRecord
 
-// MutationPageFn is the type for a workspace-scoped mutation-page callback.
-type MutationPageFn = func(context.Context, string, string, int) (backend.MutationPage, error)
-
-// MutationPageThroughFn reads a workspace-scoped fixed replay interval.
-type MutationPageThroughFn = func(context.Context, string, string, string, int) (backend.MutationPage, error)
+// MutationSourceFn opens a connection-bound source.
+type MutationSourceFn = func(context.Context, string) (realtime.MutationSource, error)
 
 // Hub is a type alias for realtime.Hub.
 type Hub = realtime.Hub
@@ -73,20 +69,12 @@ func NewMultiSub(ctx context.Context, hub *realtime.Hub, logger *slog.Logger) *M
 	return subscription.NewStartedMultiWorkspaceSubscriber(ctx, hub, logger)
 }
 
-// GetMutationPageFn returns the mutation-page callback from the subscriber.
-func GetMutationPageFn(sub *MultiWorkspaceSubscriber) MutationPageFn {
+// GetMutationSourceFn returns the subscriber-binding factory.
+func GetMutationSourceFn(sub *MultiWorkspaceSubscriber) MutationSourceFn {
 	if sub == nil {
 		return nil
 	}
-	return sub.GetMutationPageForWorkspace
-}
-
-// GetMutationPageThroughFn returns the fixed replay callback.
-func GetMutationPageThroughFn(sub *MultiWorkspaceSubscriber) MutationPageThroughFn {
-	if sub == nil {
-		return nil
-	}
-	return sub.GetMutationPageThroughForWorkspace
+	return sub.OpenMutationSource
 }
 
 // InitTabMeta creates the tab metadata store from Redis config.
@@ -127,11 +115,10 @@ type SubscriptionModule = subscription.Module
 // NewSubscriptionModule creates a new SSE subscription module.
 func NewSubscriptionModule(
 	hub *realtime.Hub,
-	getMutationPage MutationPageFn,
-	getMutationPageThrough MutationPageThroughFn,
+	openMutationSource MutationSourceFn,
 	wsFromCtx func(context.Context) string,
 	activateWorkspace func(context.Context, string) (string, error),
 	sseTokens *realtime.TokenStore,
 ) *SubscriptionModule {
-	return subscription.NewModule(hub, getMutationPage, getMutationPageThrough, wsFromCtx, activateWorkspace, sseTokens)
+	return subscription.NewModule(hub, openMutationSource, wsFromCtx, activateWorkspace, sseTokens)
 }

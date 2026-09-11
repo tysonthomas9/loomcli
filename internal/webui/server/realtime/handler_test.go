@@ -22,9 +22,8 @@ func TestHandler_FleetDBOnlyReconnectCatchUpUsesLastEventID(t *testing.T) {
 		gotSince string
 	)
 	h := NewHandler(HandlerConfig{
-		Hub:             NewHub(),
-		GetMutationPage: fixedReplayHead(t, "1700000000100-0"),
-		GetMutationPageThrough: func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
+		Hub: NewHub(),
+		OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "1700000000100-0"), func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
 			mu.Lock()
 			gotWS = wsID
 			gotSince = since
@@ -36,7 +35,8 @@ func TestHandler_FleetDBOnlyReconnectCatchUpUsesLastEventID(t *testing.T) {
 				Title:     "missed mutation",
 				Timestamp: time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC),
 			}}, Cursor: "1700000000100-0"}, nil
-		},
+		}),
+
 		WorkspaceFromCtx: func(context.Context) string { return workspaceID },
 	})
 	h.heartbeatInterval = time.Hour
@@ -67,9 +67,8 @@ func TestHandler_FleetDBOnlyReconnectCatchUpUsesSinceQuery(t *testing.T) {
 
 	var gotSince string
 	h := NewHandler(HandlerConfig{
-		Hub:             NewHub(),
-		GetMutationPage: fixedReplayHead(t, "1700000000400-0"),
-		GetMutationPageThrough: func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
+		Hub: NewHub(),
+		OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "1700000000400-0"), func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
 			if wsID != workspaceID {
 				t.Errorf("workspace = %q, want %q", wsID, workspaceID)
 			}
@@ -78,7 +77,8 @@ func TestHandler_FleetDBOnlyReconnectCatchUpUsesSinceQuery(t *testing.T) {
 				{Cursor: "1700000000300-0", Type: "update", IssueID: "task-2", Timestamp: time.Date(2026, 5, 1, 12, 1, 0, 0, time.UTC)},
 				{Cursor: "1700000000400-0", Type: "status", IssueID: "task-3", Timestamp: time.Date(2026, 5, 1, 12, 2, 0, 0, time.UTC)},
 			}, Cursor: "1700000000400-0"}, nil
-		},
+		}),
+
 		WorkspaceFromCtx: func(context.Context) string { return workspaceID },
 	})
 	h.heartbeatInterval = time.Hour
@@ -102,14 +102,14 @@ func TestHandler_FleetDBOnlyReconnectCatchUpUsesSinceQuery(t *testing.T) {
 
 func TestHandler_FleetDBOnlyCatchUpAppliesSourceRepoFilter(t *testing.T) {
 	h := NewHandler(HandlerConfig{
-		Hub:             NewHub(),
-		GetMutationPage: fixedReplayHead(t, "1700000000600-0"),
-		GetMutationPageThrough: func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
+		Hub: NewHub(),
+		OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "1700000000600-0"), func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
 			return backend.MutationPage{Events: []backend.MutationData{
 				{Cursor: "1700000000500-0", Type: "update", IssueID: "repo-a-task", SourceRepo: "repo-a", Timestamp: time.Date(2026, 5, 1, 12, 3, 0, 0, time.UTC)},
 				{Cursor: "1700000000600-0", Type: "update", IssueID: "repo-b-task", SourceRepo: "repo-b", Timestamp: time.Date(2026, 5, 1, 12, 4, 0, 0, time.UTC)},
 			}, Cursor: "1700000000600-0"}, nil
-		},
+		}),
+
 		WorkspaceFromCtx: func(context.Context) string { return "ws-fleet" },
 	})
 	h.heartbeatInterval = time.Hour
@@ -132,14 +132,14 @@ func TestHandler_FleetDBOnlyCatchUpAppliesSourceRepoFilter(t *testing.T) {
 func TestHandler_FleetDBOnlyCatchUpFailsClosedWithoutWorkspace(t *testing.T) {
 	called := false
 	h := NewHandler(HandlerConfig{
-		Hub:             NewHub(),
-		GetMutationPage: fixedReplayHead(t, "1700000000700-0"),
-		GetMutationPageThrough: func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
+		Hub: NewHub(),
+		OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "1700000000700-0"), func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
 			called = true
 			return backend.MutationPage{Events: []backend.MutationData{
 				{Cursor: "1700000000700-0", Type: "update", IssueID: "leaked-task", Timestamp: time.Date(2026, 5, 1, 12, 5, 0, 0, time.UTC)},
 			}, Cursor: "1700000000700-0"}, nil
-		},
+		}),
+
 		WorkspaceFromCtx: func(context.Context) string { return "" },
 	})
 	h.heartbeatInterval = time.Hour
@@ -182,10 +182,10 @@ func TestHandler_FleetDBOnlyReconnectCanMoveBetweenServeProcesses(t *testing.T) 
 	}
 	newProcess := func() *Handler {
 		h := NewHandler(HandlerConfig{
-			Hub:                    NewHub(),
-			GetMutationPage:        fixedReplayHead(t, "1700000000900-0"),
-			GetMutationPageThrough: getSince,
-			WorkspaceFromCtx:       func(context.Context) string { return workspaceID },
+			Hub:                NewHub(),
+			OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "1700000000900-0"), getSince),
+
+			WorkspaceFromCtx: func(context.Context) string { return workspaceID },
 		})
 		h.heartbeatInterval = time.Hour
 		return h

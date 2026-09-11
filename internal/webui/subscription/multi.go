@@ -33,6 +33,7 @@ type workspaceSubscriber interface {
 	Stop()
 	Ready(context.Context) (string, error)
 	Head() string
+	GetMutationHead(context.Context) (backend.MutationPage, error)
 	GetMutationPage(context.Context, string, int) (backend.MutationPage, error)
 	GetMutationPageThrough(context.Context, string, string, int) (backend.MutationPage, error)
 }
