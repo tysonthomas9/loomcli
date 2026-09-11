@@ -26,7 +26,12 @@
 # more weight on claim.go or supervisor.go — both of which are already at their
 # own ceilings. It is a self-contained candidate to move out wholesale when the
 # sub-split happens.
-internal/cli/daemon/supervisor 31
+# 31 -> 32 for quarantine_sweep.go: the persisted, progress-aware quarantine
+# ledger (#456/#520/#522, PUPPET-108/198/199) took quarantine.go to 1030 lines,
+# over the 1000-line LOC gate, and .loc-allowlist takes no new entries. The
+# sweep/write section (sweepQuarantineDue .. shortSessionID) moved out
+# unchanged; the ledger and the exit hook stay in quarantine.go.
+internal/cli/daemon/supervisor 32
 # internal/cli gained the daemon input-await seam (agent_input_await.go) with
 # the human answer path; 26th file, same sub-split end state applies. The
 # hook-driven exit-code contract lives in exit.go rather than a file of its own,
