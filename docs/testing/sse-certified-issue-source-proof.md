@@ -21,6 +21,6 @@ These are deterministic package and simulated HTTP proofs. FleetDB PR #274 separ
 
 ## Remaining protocol work
 
-No Loom REST route or frontend consumer invokes this capability yet. A future recovery request must refer to the already-captured source through an authenticated, scoped registration handle, with explicit lifetime behavior when initial replay expires. It must not open another source by workspace or infer identity from equal cursors.
+The [recovery handle bridge](sse-recovery-handle-proof.md) now exposes this capability through an authenticated registration retained after expired replay. There is still no frontend consumer. Recovery must not open another source by workspace or infer identity from equal cursors.
 
 A process-local subscriber identity is not a durable backend incarnation. Cross-request storage incarnation, recovery attempt and cache generations, active and dormant view coverage, non-issue view certificates, acknowledgment and replay-after-acceptance remain unresolved. `Through` is a committed lower bound supplied by the producer, not permission to reset a client. Existing signal-only resync behavior remains unchanged.

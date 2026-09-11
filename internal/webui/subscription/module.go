@@ -40,15 +40,21 @@ func NewModule(
 
 // Register implements [Module] by registering workspace-scoped SSE routes.
 func (m *Module) Register(mux *http.ServeMux) {
+	var recovery *realtime.RecoveryRegistry
+	if m.sseTokens != nil && m.openMutationSource != nil {
+		recovery = realtime.NewRecoveryRegistry()
+	}
 	// SSE event stream — uses mux.Handle because realtime.NewHandler returns http.Handler
 	sseHandler := realtime.NewHandler(realtime.HandlerConfig{
 		Hub:                m.hub,
 		OpenMutationSource: m.openMutationSource,
 		WorkspaceFromCtx:   m.workspaceFromCtx,
 		TokenStore:         m.sseTokens,
+		RecoveryRegistry:   recovery,
 		OnAuthenticated:    m.activateWorkspace,
 	})
 	mux.Handle("GET /api/workspaces/{ws}/events", sseHandler)
+	mux.HandleFunc("POST /api/workspaces/{ws}/events/recovery/issues", handleIssueRecovery(recovery, m.workspaceFromCtx))
 
 	mux.HandleFunc(
 		"GET /api/workspaces/{ws}/events/token",

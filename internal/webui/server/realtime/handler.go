@@ -46,6 +46,7 @@ type HandlerConfig struct {
 	OpenMutationSource func(context.Context, string) (MutationSource, error)
 	WorkspaceFromCtx   func(context.Context) string
 	TokenStore         *TokenStore // nil = open mode (no auth required)
+	RecoveryRegistry   *RecoveryRegistry
 	// OnAuthenticated activates the workspace subscriber and returns its
 	// ready head. It runs only after the client has been synchronously registered.
 	OnAuthenticated func(context.Context, string) (string, error)
@@ -65,6 +66,7 @@ type Handler struct {
 	openMutationSource func(context.Context, string) (MutationSource, error)
 	heartbeatInterval  time.Duration
 	tokenStore         *TokenStore
+	recoveryRegistry   *RecoveryRegistry
 	workspaceFromCtx   func(context.Context) string
 	onAuthenticated    func(context.Context, string) (string, error)
 	clientIDCounter    atomic.Int64
@@ -75,11 +77,16 @@ type Handler struct {
 
 // NewHandler creates an SSE Handler from the given config.
 func NewHandler(cfg HandlerConfig) *Handler {
+	if cfg.RecoveryRegistry != nil && cfg.Hub != nil {
+		cfg.RecoveryRegistry.bindShutdown(cfg.Hub.done)
+		go func() { <-cfg.Hub.done; cfg.RecoveryRegistry.Close() }()
+	}
 	return &Handler{
 		hub:                cfg.Hub,
 		openMutationSource: cfg.OpenMutationSource,
 		heartbeatInterval:  HeartbeatInterval,
 		tokenStore:         cfg.TokenStore,
+		recoveryRegistry:   cfg.RecoveryRegistry,
 		workspaceFromCtx:   cfg.WorkspaceFromCtx,
 		onAuthenticated:    cfg.OnAuthenticated,
 		catchUpTimeout:     defaultCatchUpTimeout,
@@ -90,7 +97,8 @@ func NewHandler(cfg HandlerConfig) *Handler {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !h.validateAuth(w, r) {
+	principal, authenticated := h.validateAuth(w, r)
+	if !authenticated {
 		return
 	}
 	if h.hub == nil {
@@ -148,7 +156,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if client.authoritative {
-		h.serveAuthoritative(w, r, client, lastSince, handshakeSpan)
+		h.serveAuthoritative(w, r, client, lastSince, principal, handshakeSpan)
 		return
 	}
 
@@ -350,24 +358,25 @@ func eventIDForMutation(mutation *MutationPayload) string {
 	return mutation.Cursor
 }
 
-func (h *Handler) validateAuth(w http.ResponseWriter, r *http.Request) bool {
+func (h *Handler) validateAuth(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if h.tokenStore == nil {
-		return true
+		return "", true
 	}
 	token := r.URL.Query().Get("token")
 	if token == "" {
 		jsonError(w, http.StatusUnauthorized, "authentication required")
-		return false
+		return "", false
 	}
 	expectedWS := ""
 	if h.workspaceFromCtx != nil {
 		expectedWS = h.workspaceFromCtx(r.Context())
 	}
-	if _, err := h.tokenStore.Validate(token, expectedWS); err != nil {
+	principal, err := h.tokenStore.Validate(token, expectedWS)
+	if err != nil {
 		jsonError(w, http.StatusUnauthorized, "invalid or expired token")
-		return false
+		return "", false
 	}
-	return true
+	return principal, true
 }
 
 // RPCMutationToPayload converts an RPC mutation event to a payload.
