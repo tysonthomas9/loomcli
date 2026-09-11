@@ -82,6 +82,19 @@ function snapshotFetchParams(params: FetchIssuesParams): FetchIssuesParams {
   };
 }
 
+function fetchIssueProjection(
+  workspaceId: string,
+  mode: FetchIssuesParams["mode"],
+  filter: WorkFilter | undefined,
+  graphFilter: GraphFilter | undefined,
+  options: Pick<RequestOptions, "signal">,
+): Promise<Issue[]> {
+  if (mode === "kanban") return getKanbanIssues(workspaceId, filter, options);
+  if (mode === "graph")
+    return fetchGraphIssues(workspaceId, graphFilter, options);
+  return getReadyIssues(workspaceId, filter, options);
+}
+
 export function createIssueStore(
   initialConfig?: IssueStoreConfig,
 ): StoreApi<IssueStore> {
@@ -375,20 +388,15 @@ export function createIssueStore(
           mergedSignal.removeEventListener("abort", onAbort);
         }
       };
-      let data: Issue[];
-      if (mode === "kanban") {
-        data = await awaitResponse(
-          getKanbanIssues(workspaceId, effectiveFilter, reqOpts),
-        );
-      } else if (mode === "graph") {
-        data = await awaitResponse(
-          fetchGraphIssues(workspaceId, effectiveGraphFilter, reqOpts),
-        );
-      } else {
-        data = await awaitResponse(
-          getReadyIssues(workspaceId, effectiveFilter, reqOpts),
-        );
-      }
+      const data = await awaitResponse(
+        fetchIssueProjection(
+          workspaceId,
+          mode,
+          effectiveFilter,
+          effectiveGraphFilter,
+          reqOpts,
+        ),
+      );
 
       if (!ownsFetch() || mergedSignal.aborted) {
         if (recovery)
