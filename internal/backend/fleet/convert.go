@@ -515,6 +515,8 @@ type fleetMutationsResponse struct {
 // actionToMutationType maps fleet-db Action values (issue.create, ...) to the
 // backend.Mutation* string constants. Fleet emits fine-grained actions; loom's
 // mutation-type space is coarser, so several actions fold into MutationUpdate.
+//
+//go:generate go run ./internal/gen
 func actionToMutationType(action, entityType string) string {
 	switch action {
 	case "issue.create":
