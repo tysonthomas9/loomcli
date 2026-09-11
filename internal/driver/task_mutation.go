@@ -30,10 +30,6 @@ type TaskMutationResult struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
-type actorReleaser interface {
-	ReleaseIssueAsActor(context.Context, string, string) error
-}
-
 func CompleteTask(ctx context.Context, issueBackend backend.IssueBackend, opts TaskCompleteOptions) (*TaskMutationResult, error) {
 	if issueBackend == nil {
 		return nil, fmt.Errorf("issue backend required: %w", domain.ErrInvalid)
@@ -122,7 +118,7 @@ func ReleaseTask(ctx context.Context, issueBackend backend.IssueBackend, opts Ta
 	}
 	actor := strings.TrimSpace(opts.Actor)
 	if actor != "" {
-		if actorBackend, ok := issueBackend.(actorReleaser); ok {
+		if actorBackend, ok := issueBackend.(backend.ActorReleaser); ok {
 			if err := actorBackend.ReleaseIssueAsActor(ctx, taskID, actor); err != nil {
 				return nil, fmt.Errorf("release task %q: %w", taskID, err)
 			}
@@ -170,10 +166,6 @@ type ClaimedTask struct {
 	Parent     string    `json:"parent,omitempty"`
 	ClaimedBy  string    `json:"claimedBy,omitempty"`
 	ClaimedAt  time.Time `json:"claimedAt,omitempty"`
-}
-
-type actorClaimer interface {
-	ClaimIssueAsActor(context.Context, string, time.Duration, string) error
 }
 
 func ClaimReadyTask(ctx context.Context, issueBackend backend.IssueBackend, opts TaskClaimOptions) (*ClaimedTask, error) {
@@ -244,7 +236,7 @@ func hasAnyLabel(labels []string, set map[string]struct{}) bool {
 
 func claimIssue(ctx context.Context, issueBackend backend.IssueBackend, issueID string, lockTTL time.Duration, actor string) error {
 	if actor != "" {
-		if actorBackend, ok := issueBackend.(actorClaimer); ok {
+		if actorBackend, ok := issueBackend.(backend.ActorClaimer); ok {
 			return actorBackend.ClaimIssueAsActor(ctx, issueID, lockTTL, actor)
 		}
 	}

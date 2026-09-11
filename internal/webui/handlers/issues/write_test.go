@@ -1323,3 +1323,60 @@ func TestHandleCreateIssueW_ForwardsIdempotencyHeaders(t *testing.T) {
 		t.Fatalf("status = %d, want 201 (body %s)", w.Code, w.Body.String())
 	}
 }
+
+// The serve-mediated claim path used to drop the worker identity entirely, so
+// fleet-db attributed every sibling's claim to serve itself and its per-actor
+// lock arbitration never fired. The handler's job here is small but
+// load-bearing: carry X-Actor into the service params.
+func TestHandleClaimIssueW_ForwardsActorHeader(t *testing.T) {
+	var gotActor string
+	svc := &mockIssueService{
+		claimIssueFunc: func(_ context.Context, params service.ClaimIssueParams) (json.RawMessage, error) {
+			gotActor = params.Actor
+			return json.RawMessage(`{"id":"claim-1"}`), nil
+		},
+	}
+	h := handleClaimIssue(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws/issues/claim-1/claim", nil)
+	req.SetPathValue("id", "claim-1")
+	req.Header.Set("X-Actor", "  worker-3  ")
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if gotActor != "worker-3" {
+		t.Errorf("Actor = %q, want the trimmed header value worker-3", gotActor)
+	}
+}
+
+// No header is the legacy path: serve claims as its own configured actor. It
+// must stay working (older clients) but must be distinguishable from a real
+// actor, hence empty rather than a placeholder.
+func TestHandleClaimIssueW_NoActorHeaderStaysEmpty(t *testing.T) {
+	var called bool
+	var gotActor string
+	svc := &mockIssueService{
+		claimIssueFunc: func(_ context.Context, params service.ClaimIssueParams) (json.RawMessage, error) {
+			called, gotActor = true, params.Actor
+			return json.RawMessage(`{"id":"claim-1"}`), nil
+		},
+	}
+	h := handleClaimIssue(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws/issues/claim-1/claim", nil)
+	req.SetPathValue("id", "claim-1")
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if !called {
+		t.Fatal("service was not called")
+	}
+	if gotActor != "" {
+		t.Errorf("Actor = %q, want empty so the service takes the legacy path", gotActor)
+	}
+}
