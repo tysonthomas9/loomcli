@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/scripts/lib/sandbox.sh"
 LOOM_BIN="${LOOM_BIN:-$ROOT/loom}"
 FLEET_DB_BIN="${FLEET_DB_BIN:-/tmp/fleet-db}"
 
@@ -14,7 +15,7 @@ if [[ ! -x "$FLEET_DB_BIN" ]]; then
   exit 2
 fi
 
-tmp="$(mktemp -d)"
+loom_mktemp_dir fleetdb-clean-checkout; tmp="$LOOM_SANDBOX_DIR"
 cleanup() {
   if [[ -n "${serve_pid:-}" ]]; then
     kill "$serve_pid" >/dev/null 2>&1 || true
@@ -22,7 +23,7 @@ cleanup() {
   fi
   rm -rf "$tmp"
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 dump_serve_log() {
   if [[ -f "$tmp/serve.log" ]]; then

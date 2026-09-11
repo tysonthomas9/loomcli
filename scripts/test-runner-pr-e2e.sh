@@ -22,6 +22,7 @@ set -Eeuo pipefail
 
 BACKEND="${1:?usage: test-runner-pr-e2e.sh <codex|claude|cursor|opencode|gemini>}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/scripts/lib/sandbox.sh"
 FLEET_DB_REPO="${FLEET_DB_REPO:-$(cd "$ROOT/../fleet-db" 2>/dev/null && pwd || true)}"
 REPO_SLUG="${PR_E2E_REPO_SLUG:-aether-loom/webhook-e2e-sandbox}"
 TOKEN="${GITHUB_TOKEN:-$(cat "$HOME/.loom-secrets/github_token" 2>/dev/null || true)}"
@@ -39,7 +40,7 @@ freeport() { node -e 's=require("net").createServer();s.listen(0,"127.0.0.1",()=
 REDIS_PORT="$(freeport)"; FLEET_PORT="$(freeport)"; LOOM_PORT="$(freeport)"
 FLEET_URL="http://127.0.0.1:$FLEET_PORT"; LOOM_URL="http://127.0.0.1:$LOOM_PORT"
 
-TMP_ROOT="$(mktemp -d -t loom-pr-e2e.XXXXXX)"
+loom_mktemp_dir test-runner-pr-e2e; TMP_ROOT="$LOOM_SANDBOX_DIR"
 BIN_DIR="$TMP_ROOT/bin"; REPO="$TMP_ROOT/repo"; STAGE="$TMP_ROOT/dist"; CONFIG="$TMP_ROOT/loom-config"
 mkdir -p "$BIN_DIR" "$CONFIG"
 PIDS=()
@@ -49,7 +50,7 @@ cleanup() {
   for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null || true; done
   [ "${KEEP:-0}" = "1" ] && echo "kept $TMP_ROOT"
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 say "PR e2e backend=$BACKEND ws=$WS repo=$REPO_SLUG ports redis=$REDIS_PORT fleet=$FLEET_PORT loom=$LOOM_PORT"
 

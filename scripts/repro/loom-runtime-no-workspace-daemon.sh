@@ -2,6 +2,7 @@
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+. "$repo_root/scripts/lib/sandbox.sh"
 cd "$repo_root"
 
 if [ -z "${LOOM_BIN:-}" ]; then
@@ -10,7 +11,7 @@ if [ -z "${LOOM_BIN:-}" ]; then
 	LOOM_BIN=./bin/loom
 fi
 
-tmp=$(mktemp -d)
+loom_mktemp_dir loom-runtime-no-workspace-daemon; tmp="$LOOM_SANDBOX_DIR"
 runtime_pid=
 cleanup() {
 	if [ -n "$runtime_pid" ]; then

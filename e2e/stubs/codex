@@ -50,6 +50,10 @@ validate_relative_path() {
 
 run_epic_runner_task() {
     prompt_file="$(mktemp)"
+    # Remove the prompt scratch file on any exit — including the early error
+    # branches below and the SIGTERM handler above — so repeated stub runs do
+    # not accumulate tmp.* files in $TMPDIR.
+    trap 'rm -f "${prompt_file:-}"' EXIT
     if [ ! -t 0 ]; then
         cat > "$prompt_file"
     else
