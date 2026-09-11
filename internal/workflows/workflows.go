@@ -319,6 +319,12 @@ func BuildBuiltinBundle(ctx context.Context, name, destDir string) (string, stri
 	if _, err := os.Stat(serverPath); err != nil {
 		return "", output, fmt.Errorf("flue build missing dist/server.mjs: %w", err)
 	}
+	// Stage the meta-harness PTY bridge + node-pty next to server.mjs so the
+	// bundled runner can drive a real backend PTY. dir(serverPath) == destDir here,
+	// which the daemon leaf passes as BundledRunnerOptions.ServerPath.
+	if err := copyRuntimeAssets(destDir, filesUseMetaHarness(spec.Files)); err != nil {
+		return "", output, fmt.Errorf("stage runtime assets: %w", err)
+	}
 	return serverPath, output, nil
 }
 
@@ -374,6 +380,13 @@ func BuildAndRegister(ctx context.Context, st store.Store, opts BuildAndRegister
 		return nil, "", err
 	}
 	output = RedactBuildDiagnostics(output)
+	// Stage meta-harness runtime assets into the dist dir BEFORE registration, so
+	// RegisterFlueDriver's copyTree + bundle digest carry them into (and pin them
+	// to) the staged bundle. server.mjs is at outputDir/server.mjs, so the launcher's
+	// META_HARNESS_PTY_HOST (dir(server.mjs)/ptyHost.mjs) resolves inside the bundle.
+	if err := copyRuntimeAssets(outputDir, filesUseMetaHarness(opts.Files)); err != nil {
+		return nil, output, fmt.Errorf("stage runtime assets: %w", err)
+	}
 	result, err := driver.RegisterFlueDriver(ctx, st, driver.RegisterFlueOptions{
 		WorkspaceKey:     opts.WorkspaceKey,
 		WorkDir:          workDir,
@@ -612,7 +625,11 @@ func validateWorkflowFilePath(raw string) (string, error) {
 }
 
 func writeWorkflowBuildProject(root string, files map[string]string) error {
-	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"type":"module","dependencies":{"@loom/sdk":"file:./node_modules/@loom/sdk","@flue/runtime":"file:./node_modules/@flue/runtime"}}`+"\n"), 0o644); err != nil {
+	deps := `"@loom/sdk":"file:./node_modules/@loom/sdk","@flue/runtime":"file:./node_modules/@flue/runtime"`
+	if filesUseMetaHarness(files) {
+		deps += `,"meta-harness":"file:./node_modules/meta-harness"`
+	}
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"type":"module","dependencies":{`+deps+`}}`+"\n"), 0o644); err != nil {
 		return fmt.Errorf("write generated package.json: %w", err)
 	}
 	sdkRoot, err := loomSDKRoot()
@@ -625,6 +642,20 @@ func writeWorkflowBuildProject(root string, files map[string]string) error {
 	}
 	if err := os.Symlink(sdkRoot, filepath.Join(loomScope, "sdk")); err != nil {
 		return fmt.Errorf("link @loom/sdk: %w", err)
+	}
+	// Link the built meta-harness clone so `flue build` (esbuild) resolves
+	// `import ... from "meta-harness/oneshot"` (etc.) to its compiled dist via the
+	// package's conditional exports (esbuild takes `import`, not `bun`). Best-effort
+	// and gated on actual use: only workflows that import meta-harness need it, and a
+	// real esbuild build fails loudly at resolve time if the clone is missing — so we
+	// do NOT hard-require it here (unrelated bundles and fake-flue tests keep building
+	// without the clone).
+	if filesUseMetaHarness(files) {
+		if mhRoot, err := metaHarnessRoot(); err == nil {
+			if err := os.Symlink(mhRoot, filepath.Join(root, "node_modules", "meta-harness")); err != nil {
+				return fmt.Errorf("link meta-harness: %w", err)
+			}
+		}
 	}
 	if err := linkFlueBuildDependencies(root); err != nil {
 		return err

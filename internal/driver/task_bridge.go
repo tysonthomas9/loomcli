@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -806,6 +807,10 @@ func (e HostBridgeTaskExecutor) taskRunnerBundleEnv(req TaskExecRequest) []strin
 			"LOOM_TASK_RUNNER_BUNDLE_ROOT=" + bundleRoot,
 			"LOOM_TASK_RUNNER_SERVER_PATH=" + serverPath,
 			"LOOM_TASK_RUNNER_MANIFEST_JSON=" + string(encoded),
+			// meta-harness (bundled into server.mjs) resolves its PTY bridge here: the
+			// staged ptyHost.mjs sits next to server.mjs (dir(serverPath)). The launcher
+			// forks server.mjs with {...process.env}, so this reaches pty.ts at spawn time.
+			"META_HARNESS_PTY_HOST=" + filepath.Join(filepath.Dir(serverPath), "ptyHost.mjs"),
 		}
 	}
 	return nil

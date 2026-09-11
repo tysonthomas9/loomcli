@@ -116,6 +116,10 @@ func buildLeafRunnerEnv(opts BundledRunnerOptions, entrypoint, requestJSON strin
 		"LOOM_TASK_RUNNER_KIND="+RunnerKindFlueWorkflow,
 		"LOOM_TASK_RUN_REQUEST_JSON="+requestJSON,
 		"LOOM_TASK_RUN_LEASE_TOKEN="+opts.LeaseToken,
+		// meta-harness (bundled into server.mjs) resolves its PTY bridge here: the
+		// staged ptyHost.mjs sits next to server.mjs. Set before the node fork so
+		// pty.ts's spawn-time lookup finds it (import.meta.url points at the bundle).
+		"META_HARNESS_PTY_HOST="+filepath.Join(filepath.Dir(opts.ServerPath), "ptyHost.mjs"),
 	)
 	if wt := strings.TrimSpace(opts.Worktree); wt != "" {
 		env = append(env, "LOOM_WORKTREE_PATH="+wt)
