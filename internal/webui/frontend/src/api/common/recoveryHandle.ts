@@ -10,6 +10,15 @@ export interface RecoveryHandle {
   readonly manifest: "fleet.issue-workspace.v6";
 }
 
+const recoveryHandleKeys = [
+  "handle",
+  "source_identity",
+  "workspace",
+  "source_repos",
+  "expires_at",
+  "manifest",
+] as const;
+
 /** Matches the existing comma-separated SSE query and server-side trimming. */
 function wireScope(repos: readonly string[] | undefined): Set<string> {
   return new Set(
@@ -18,6 +27,57 @@ function wireScope(repos: readonly string[] | undefined): Set<string> {
       .split(",")
       .map((repo) => repo.trim())
       .filter(Boolean),
+  );
+}
+
+function canonicalHandle(value: unknown): value is string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(value))
+    return false;
+  try {
+    const decoded = atob(value.replace(/-/g, "+").replace(/_/g, "/") + "=");
+    return (
+      decoded.length === 32 &&
+      btoa(decoded)
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "") === value
+    );
+  } catch {
+    return false;
+  }
+}
+
+function futureCanonicalExpiry(value: unknown, now: number): value is string {
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value)
+  )
+    return false;
+  const expiry = Date.parse(value);
+  return (
+    Number.isFinite(expiry) &&
+    expiry > now &&
+    new Date(expiry).toISOString().slice(0, 19) === value.slice(0, 19)
+  );
+}
+
+function matchingScope(
+  value: unknown,
+  expectedRepos: readonly string[] | undefined,
+): value is string[] {
+  if (
+    !Array.isArray(value) ||
+    value.some(
+      (repo: unknown) =>
+        typeof repo !== "string" || repo.length === 0 || repo.trim() !== repo,
+    )
+  )
+    return false;
+  const expected = wireScope(expectedRepos);
+  const actual = new Set(value);
+  return (
+    actual.size === expected.size &&
+    [...actual].every((repo) => expected.has(repo))
   );
 }
 
@@ -33,76 +93,23 @@ export function decodeRecoveryHandle(
   if (value === null || typeof value !== "object" || Array.isArray(value))
     return undefined;
   const offer = value as Record<string, unknown>;
-  const keys = [
-    "handle",
-    "source_identity",
-    "workspace",
-    "source_repos",
-    "expires_at",
-    "manifest",
-  ];
   if (
-    Object.keys(offer).length !== keys.length ||
-    keys.some((key) => !Object.prototype.hasOwnProperty.call(offer, key))
+    Object.keys(offer).length !== recoveryHandleKeys.length ||
+    recoveryHandleKeys.some(
+      (key) => !Object.prototype.hasOwnProperty.call(offer, key),
+    )
   )
     return undefined;
   if (!isRecoveryEnvelope(offer.source_identity, "s1.")) return undefined;
-  if (
-    typeof offer.handle !== "string" ||
-    !/^[A-Za-z0-9_-]{43}$/.test(offer.handle)
-  )
-    return undefined;
-  try {
-    const decoded = atob(
-      offer.handle.replace(/-/g, "+").replace(/_/g, "/") + "=",
-    );
-    if (
-      decoded.length !== 32 ||
-      btoa(decoded)
-        .replace(/\+/g, "-")
-        .replace(/\//g, "_")
-        .replace(/=+$/, "") !== offer.handle
-    )
-      return undefined;
-  } catch {
-    return undefined;
-  }
+  if (!canonicalHandle(offer.handle)) return undefined;
   if (
     offer.workspace !== workspace ||
     offer.manifest !== "fleet.issue-workspace.v6"
   )
     return undefined;
-  if (
-    typeof offer.expires_at !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(
-      offer.expires_at,
-    )
-  )
-    return undefined;
-  const expiry = Date.parse(offer.expires_at);
-  if (
-    !Number.isFinite(expiry) ||
-    expiry <= now ||
-    new Date(expiry).toISOString().slice(0, 19) !==
-      offer.expires_at.slice(0, 19)
-  )
-    return undefined;
-  if (
-    !Array.isArray(offer.source_repos) ||
-    offer.source_repos.some(
-      (repo: unknown) =>
-        typeof repo !== "string" || repo.length === 0 || repo.trim() !== repo,
-    )
-  )
-    return undefined;
-  const repos = offer.source_repos as string[];
-  const expected = wireScope(sourceRepos);
-  const actual = new Set(repos);
-  if (
-    actual.size !== expected.size ||
-    [...actual].some((repo) => !expected.has(repo))
-  )
-    return undefined;
+  if (!futureCanonicalExpiry(offer.expires_at, now)) return undefined;
+  if (!matchingScope(offer.source_repos, sourceRepos)) return undefined;
+  const repos = offer.source_repos;
   return Object.freeze({
     handle: offer.handle,
     source_identity: offer.source_identity,
