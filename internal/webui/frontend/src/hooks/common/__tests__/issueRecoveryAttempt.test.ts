@@ -13,7 +13,7 @@ function offer(): RecoveryHandle {
     manifest: "fleet.issue-workspace.v5",
   };
 }
-function prepared(input = offer()) {
+function prepared(input = offer(), selected?: string) {
   return prepareIssueRecovery(
     JSON.stringify({
       manifest: input.manifest,
@@ -26,10 +26,20 @@ function prepared(input = offer()) {
       deferred: [],
       dependencies: [],
       comments: [],
-      history: null,
+      history:
+        selected === undefined
+          ? null
+          : {
+              issue_id: selected,
+              present: false,
+              events: [],
+              has_older: false,
+            },
     }),
     input,
     input.handle,
+    Date.now(),
+    selected,
   );
 }
 function deferred<T>() {
@@ -222,4 +232,153 @@ it("long-lived invalidly extended offer cannot overflow browser timers", async (
   expect(c.getStatus()).toBe("prepared");
   c.cancel();
   expect(vi.getTimerCount()).toBe(0);
+});
+
+function selection(issueId?: string) {
+  const controller = new AbortController();
+  return {
+    issueId,
+    controller,
+    signal: controller.signal,
+    isCurrent: vi.fn(() => true),
+    release: vi.fn(),
+  };
+}
+it("captures exact selection before deferred dispatch and forwards it to the strict reader", async () => {
+  const scope = selection("WS-1 &other=two");
+  const read = vi.fn(async () => prepared(offer(), "WS-1 &other=two"));
+  const c = new IssueRecoveryAttemptController(read);
+  c.start(offer(), lease(), vi.fn(), scope);
+  scope.issueId = "WS-2";
+  await flush();
+  expect(read.mock.calls[0]?.[2]).toBe("WS-1 &other=two");
+  expect(c.getStatus()).toBe("prepared");
+  c.cancel();
+  expect(scope.release).toHaveBeenCalledTimes(1);
+});
+it("revokes an explicitly unselected read when its selection generation changes", async () => {
+  const scope = selection();
+  const pending = deferred<ReturnType<typeof prepared>>();
+  const read = vi.fn(() => pending.promise);
+  const c = new IssueRecoveryAttemptController(read);
+  const status = vi.fn();
+  c.start(offer(), lease(), status, scope);
+  await flush();
+  expect(read.mock.calls[0]?.[2]).toBeUndefined();
+  scope.controller.abort();
+  pending.resolve(prepared());
+  await flush();
+  expect(read.mock.calls[0]?.[1].aborted).toBe(true);
+  expect(status.mock.calls).toEqual([["reading"], ["idle"]]);
+  expect(scope.release).toHaveBeenCalledTimes(1);
+});
+it("selection ABA never accepts the old ignored-abort response", async () => {
+  const first = selection("WS-A"),
+    second = selection("WS-B"),
+    third = selection("WS-A");
+  const old = deferred<ReturnType<typeof prepared>>();
+  const read = vi
+    .fn()
+    .mockReturnValueOnce(old.promise)
+    .mockImplementation(async (_offer, _signal, id) => prepared(offer(), id));
+  const c = new IssueRecoveryAttemptController(read);
+  const oldStatus = vi.fn();
+  c.start(offer(), lease(), oldStatus, first);
+  await flush();
+  first.controller.abort();
+  c.start(offer(), lease(), vi.fn(), second);
+  await flush();
+  second.controller.abort();
+  c.start(offer(), lease(), vi.fn(), third);
+  await flush();
+  old.resolve(prepared(offer(), "WS-A"));
+  await flush();
+  expect(c.getStatus()).toBe("prepared");
+  expect(oldStatus.mock.calls).toEqual([["reading"], ["idle"]]);
+  expect(first.release).toHaveBeenCalledTimes(1);
+  c.cancel();
+});
+it.each(["reading", "prepared"])(
+  "rechecks selection after reentrant %s notification",
+  async (phase) => {
+    const scope = selection("WS-1");
+    const read = vi.fn(async () => prepared(offer(), "WS-1"));
+    const c = new IssueRecoveryAttemptController(read);
+    const status = vi.fn((next) => {
+      if (next === phase) scope.isCurrent.mockReturnValue(false);
+    });
+    c.start(offer(), lease(), status, scope);
+    await flush();
+    expect(c.getStatus()).toBe("idle");
+    expect(scope.release).toHaveBeenCalledTimes(1);
+    expect(status).toHaveBeenLastCalledWith("idle");
+    if (phase === "reading") expect(read).not.toHaveBeenCalled();
+  },
+);
+it("revokes already prepared state and detaches both selection and transport listeners", async () => {
+  const scope = selection("WS-1");
+  const l = lease();
+  const selectionRemove = vi.spyOn(scope.signal, "removeEventListener");
+  const transportRemove = vi.spyOn(l.signal, "removeEventListener");
+  const c = new IssueRecoveryAttemptController(async () =>
+    prepared(offer(), "WS-1"),
+  );
+  c.start(offer(), l, vi.fn(), scope);
+  await flush();
+  expect(c.getStatus()).toBe("prepared");
+  scope.controller.abort();
+  expect(c.getStatus()).toBe("idle");
+  expect(selectionRemove).toHaveBeenCalledWith("abort", expect.any(Function));
+  expect(transportRemove).toHaveBeenCalledWith("abort", expect.any(Function));
+  expect(scope.release).toHaveBeenCalledTimes(1);
+  expect(l.retry).not.toHaveBeenCalled();
+});
+
+it.each(["stale transport", "canceled selection"])(
+  "releases a new selection rejected before installation: %s",
+  (reason) => {
+    const scope = selection("WS-A"),
+      l = lease();
+    if (reason === "stale transport") l.isCurrent.mockReturnValue(false);
+    else scope.controller.abort();
+    const read = vi.fn();
+    const c = new IssueRecoveryAttemptController(read);
+    c.start(offer(), l, vi.fn(), scope);
+    expect(scope.release).toHaveBeenCalledTimes(1);
+    expect(read).not.toHaveBeenCalled();
+    expect(c.getStatus()).toBe("idle");
+    c.cancel();
+    expect(scope.release).toHaveBeenCalledTimes(1);
+  },
+);
+it("releases the rejected incoming capture when retirement starts a newer attempt", async () => {
+  const first = selection("WS-first"),
+    rejected = selection("WS-rejected"),
+    winner = selection("WS-winner");
+  const read = vi
+    .fn()
+    .mockReturnValueOnce(new Promise(() => {}))
+    .mockImplementation(async (_offer, _signal, id) => prepared(offer(), id));
+  const c = new IssueRecoveryAttemptController(read);
+  c.start(offer(), lease(), vi.fn(), first);
+  await flush();
+  read.mock.calls[0][1].addEventListener(
+    "abort",
+    () => {
+      c.start(offer(), lease(), vi.fn(), winner);
+    },
+    { once: true },
+  );
+  c.start(offer(), lease(), vi.fn(), rejected);
+  await flush();
+  expect(first.release).toHaveBeenCalledTimes(1);
+  expect(rejected.release).toHaveBeenCalledTimes(1);
+  expect(winner.release).not.toHaveBeenCalled();
+  expect(read.mock.calls.map((call) => call[2])).toEqual([
+    "WS-first",
+    "WS-winner",
+  ]);
+  expect(c.getStatus()).toBe("prepared");
+  c.cancel();
+  expect(winner.release).toHaveBeenCalledTimes(1);
 });

@@ -79,20 +79,42 @@ func readBoundSource[T any](s *boundMutationSource, ctx context.Context, fn func
 // ReadIssueRecovery is an optional capability on the exact source returned to
 // SSE. It never selects a fresh entry by workspace or substitutes ordinary reads.
 func (s *boundMutationSource) ReadIssueRecovery(ctx context.Context) (backend.IssueRecoverySnapshot, error) {
+	return s.readIssueRecovery(ctx, "")
+}
+func (s *boundMutationSource) ReadIssueRecoveryForIssue(ctx context.Context, issueID string) (backend.IssueRecoverySnapshot, error) {
+	if !backend.ValidRecoveryIssueSelection(issueID) {
+		return backend.IssueRecoverySnapshot{}, fmt.Errorf("invalid selected issue")
+	}
+	return s.readIssueRecovery(ctx, issueID)
+}
+func (s *boundMutationSource) readIssueRecovery(ctx context.Context, issueID string) (backend.IssueRecoverySnapshot, error) {
 	return readBoundSource(s, ctx, func(ctx context.Context) (backend.IssueRecoverySnapshot, error) {
-		reader, ok := s.entry.sub.(backend.IssueRecoveryBackend)
-		if !ok {
-			return backend.IssueRecoverySnapshot{}, fmt.Errorf("workspace %q source does not support certified issue recovery", s.workspace)
+		var result backend.IssueRecoverySnapshot
+		var err error
+		if issueID == "" {
+			reader, ok := s.entry.sub.(backend.IssueRecoveryBackend)
+			if !ok {
+				return result, fmt.Errorf("source does not support issue recovery")
+			}
+			result, err = reader.ReadIssueRecovery(ctx)
+		} else {
+			reader, ok := s.entry.sub.(backend.IssueRecoverySelectedBackend)
+			if !ok {
+				return result, fmt.Errorf("source does not support selected issue recovery")
+			}
+			result, err = reader.ReadIssueRecoveryForIssue(ctx, issueID)
 		}
-		result, err := reader.ReadIssueRecovery(ctx)
 		if err != nil {
 			return backend.IssueRecoverySnapshot{}, err
 		}
 		if err := s.checkIdentity(result.SourceIdentity, false); err != nil {
 			return backend.IssueRecoverySnapshot{}, err
 		}
-		if result.Workspace != s.workspace {
-			return backend.IssueRecoverySnapshot{}, fmt.Errorf("recovery workspace differs from captured source")
+		if result.Workspace != s.workspace || result.SelectedIssueID != issueID {
+			return backend.IssueRecoverySnapshot{}, fmt.Errorf("recovery source scope mismatch")
+		}
+		if err := backend.ValidateIssueRecoverySelection(result, issueID); err != nil {
+			return backend.IssueRecoverySnapshot{}, err
 		}
 		return result, nil
 	})
