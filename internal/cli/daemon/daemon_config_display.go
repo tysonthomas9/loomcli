@@ -44,6 +44,9 @@ func applyRestartPolicyDefaults(rp *config.RestartPolicy) {
 	if rp.SigtermTimeout == nil {
 		rp.SigtermTimeout = config.IntPtr(supervisor.DefaultSigtermTimeout)
 	}
+	if rp.AccountWallCooldown == nil {
+		rp.AccountWallCooldown = config.IntPtr(900)
+	}
 }
 
 // maskDaemonSecrets replaces sensitive fields in config.DaemonSettings with "***".
@@ -54,56 +57,34 @@ func maskDaemonSecrets(ds *config.DaemonSettings) {
 	}
 }
 
+// copyIntPtr clones an optional int so a copied config never aliases the live
+// one — a display call must not be able to mutate the daemon's own settings.
+func copyIntPtr(p *int) *int {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
+}
+
 // deepCopyRestartPolicy returns a deep copy of src with all pointer fields cloned.
 func deepCopyRestartPolicy(src *config.RestartPolicy) config.RestartPolicy {
 	dst := *src
-	if src.MaxRetries != nil {
-		v := *src.MaxRetries
-		dst.MaxRetries = &v
-	}
-	if src.BackoffInitial != nil {
-		v := *src.BackoffInitial
-		dst.BackoffInitial = &v
-	}
-	if src.BackoffMax != nil {
-		v := *src.BackoffMax
-		dst.BackoffMax = &v
-	}
-	if src.OutputTimeout != nil {
-		v := *src.OutputTimeout
-		dst.OutputTimeout = &v
-	}
-	if src.RateLimitBackoff != nil {
-		v := *src.RateLimitBackoff
-		dst.RateLimitBackoff = &v
-	}
-	if src.RateLimitMaxWait != nil {
-		v := *src.RateLimitMaxWait
-		dst.RateLimitMaxWait = &v
-	}
+	dst.MaxRetries = copyIntPtr(src.MaxRetries)
+	dst.BackoffInitial = copyIntPtr(src.BackoffInitial)
+	dst.BackoffMax = copyIntPtr(src.BackoffMax)
+	dst.OutputTimeout = copyIntPtr(src.OutputTimeout)
+	dst.RateLimitBackoff = copyIntPtr(src.RateLimitBackoff)
+	dst.RateLimitMaxWait = copyIntPtr(src.RateLimitMaxWait)
+	dst.TimeoutBackoff = copyIntPtr(src.TimeoutBackoff)
+	dst.NoWorkBackoff = copyIntPtr(src.NoWorkBackoff)
+	dst.IdlePollInterval = copyIntPtr(src.IdlePollInterval)
+	dst.YieldTimeout = copyIntPtr(src.YieldTimeout)
+	dst.SigtermTimeout = copyIntPtr(src.SigtermTimeout)
+	dst.AccountWallCooldown = copyIntPtr(src.AccountWallCooldown)
 	if src.RateLimitNoCount != nil {
 		v := *src.RateLimitNoCount
 		dst.RateLimitNoCount = &v
-	}
-	if src.TimeoutBackoff != nil {
-		v := *src.TimeoutBackoff
-		dst.TimeoutBackoff = &v
-	}
-	if src.NoWorkBackoff != nil {
-		v := *src.NoWorkBackoff
-		dst.NoWorkBackoff = &v
-	}
-	if src.IdlePollInterval != nil {
-		v := *src.IdlePollInterval
-		dst.IdlePollInterval = &v
-	}
-	if src.YieldTimeout != nil {
-		v := *src.YieldTimeout
-		dst.YieldTimeout = &v
-	}
-	if src.SigtermTimeout != nil {
-		v := *src.SigtermTimeout
-		dst.SigtermTimeout = &v
 	}
 	return dst
 }
