@@ -81,7 +81,9 @@ func localDaemonRunnableWorkspace(ctx context.Context, dataDir, runtimeURL strin
 		return workspaceKey, false, err
 	}
 	for _, agent := range config.Agents {
-		if agent.ShouldSuperviseWithRoles(config.Roles) {
+		// No supervisor is running yet at this probe, so no node identity
+		// exists to compare a drain against; "" never reads as superseded.
+		if agent.ShouldSuperviseWithRoles(config.Roles, "", time.Now()) {
 			return workspaceKey, true, nil
 		}
 	}

@@ -10,19 +10,37 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-
-	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 )
 
-// agentsListEnvelope matches dto.ListResponse[gen.AgentControlEntry]
-// returned by GET /api/workspaces/{ws}/agents. We inline the shape here
-// rather than adding a shared decoder because it is used in exactly one
-// place and inlining keeps cli/data flat.
+// agentEntry is the decoded agent row.
+//
+// It is wider than gen.AgentControlEntry on purpose. That generated type only
+// knows "status", which the socket-backed daemon sends; the store-backed server
+// sends "state", "desired_state" and "live_status" instead and no "status" at
+// all, which is why the STATUS column rendered blank in store-backed mode.
+// Keeping all four and choosing at render time keeps both modes working.
+type agentEntry struct {
+	Name string `json:"name"`
+	// Role is the socket-mode key; RoleName is what the store-backed server
+	// sends (it marshals domain.Agent directly). Both are kept for the same
+	// reason the status keys are.
+	Role         string `json:"role,omitempty"`
+	RoleName     string `json:"role_name,omitempty"`
+	Status       string `json:"status,omitempty"`
+	State        string `json:"state,omitempty"`
+	DesiredState string `json:"desired_state,omitempty"`
+	LiveStatus   string `json:"live_status,omitempty"`
+}
+
+// agentsListEnvelope matches dto.ListResponse returned by
+// GET /api/workspaces/{ws}/agents. We inline the shape here rather than adding
+// a shared decoder because it is used in exactly one place and inlining keeps
+// cli/data flat.
 type agentsListEnvelope struct {
-	Success bool                    `json:"success"`
-	Data    []gen.AgentControlEntry `json:"data"`
-	Total   int                     `json:"total"`
-	Error   string                  `json:"error,omitempty"`
+	Success bool         `json:"success"`
+	Data    []agentEntry `json:"data"`
+	Total   int          `json:"total"`
+	Error   string       `json:"error,omitempty"`
 }
 
 var agentsCmd = &cobra.Command{
@@ -49,7 +67,7 @@ var agentsCmd = &cobra.Command{
 
 // fetchAgents issues GET /api/workspaces/{ws}/agents and unwraps the
 // dto.ListResponse envelope into a slice of AgentControlEntry.
-func fetchAgents(ctx context.Context, cli *http.Client, baseURL, wsID string) ([]gen.AgentControlEntry, error) {
+func fetchAgents(ctx context.Context, cli *http.Client, baseURL, wsID string) ([]agentEntry, error) {
 	path := baseURL + "/api/workspaces/" + url.PathEscape(wsID) + "/agents"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)
 	if err != nil {

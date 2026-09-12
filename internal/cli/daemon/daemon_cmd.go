@@ -29,7 +29,7 @@ type DaemonAgentStatus struct {
 	Role                   string    `json:"role"`
 	Repo                   string    `json:"repo,omitempty"`
 	PID                    int       `json:"pid"`
-	Status                 string    `json:"status"` // "running", "starting", "stopped", "failed", "blocked", "unavailable"
+	Status                 string    `json:"status"` // "running", "starting", "stopped", "failed", "blocked", "unavailable", "parked"
 	Detail                 string    `json:"detail,omitempty"`
 	Hint                   string    `json:"hint,omitempty"`
 	TaskID                 string    `json:"task_id,omitempty"`
@@ -56,6 +56,12 @@ type DaemonAgentStatus struct {
 	// ProfileError is the harness-profile refusal that is keeping this agent
 	// out of the claim loop. omitempty: a healthy fleet's JSON is unchanged.
 	ProfileError string `json:"profile_error,omitempty"`
+	// DesiredState, DrainExpiresAt and ResumeCommand are set for parked agents,
+	// which have no supervised process to describe. Without them a park renders
+	// as an agent that simply is not there.
+	DesiredState   string     `json:"desired_state,omitempty"`
+	DrainExpiresAt *time.Time `json:"drain_expires_at,omitempty"`
+	ResumeCommand  string     `json:"resume_command,omitempty"`
 }
 
 // DaemonState represents the complete daemon state in daemon-agents.json
@@ -437,7 +443,7 @@ func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths dae
 	}
 
 	startedAt := time.Now()
-	if err := writeStateFile(paths.stateFile, startedAt, daemon.Agents(), daemon.UnavailableAgents(), daemon.QuarantinedTasks(), daemon.sup.Degradations(), maxRetries,
+	if err := writeStateFile(paths.stateFile, startedAt, daemon.Agents(), daemon.UnavailableAgents(), daemon.ParkedAgents(), daemon.QuarantinedTasks(), daemon.sup.Degradations(), maxRetries,
 		daemon.sup.ClaimHoldSnapshot()); err != nil {
 		fmt.Printf("Warning: failed to write initial state file: %v\n", err)
 	}

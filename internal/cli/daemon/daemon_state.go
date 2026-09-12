@@ -101,13 +101,16 @@ func ReadStateFile(path string) (*DaemonState, error) {
 // the dashboard see it: leaving them out is what would make a misconfigured
 // agent silently vanish rather than show up as broken.
 //
+// parked are the agents this daemon deliberately did not claim; they are not in
+// sup.Agents, so they are appended to Agents to stay visible.
+//
 // hold is variadic to carry 0 or 1 claim-hold snapshots without disturbing the
 // existing positional signature (and its call sites).
-func writeStateFile(path string, startedAt time.Time, agents []supervisor.SupervisedAgentStatus, unavailable []UnavailableAgent, quarantined []supervisor.QuarantinedTaskInfo, degradations []supervisor.Degradation, maxRetries int, hold ...*supervisor.ClaimHold) error {
+func writeStateFile(path string, startedAt time.Time, agents []supervisor.SupervisedAgentStatus, unavailable []UnavailableAgent, parked []ParkedAgent, quarantined []supervisor.QuarantinedTaskInfo, degradations []supervisor.Degradation, maxRetries int, hold ...*supervisor.ClaimHold) error {
 	state := DaemonState{
 		PID:              os.Getpid(),
 		StartedAt:        startedAt,
-		Agents:           make([]DaemonAgentStatus, len(agents), len(agents)+len(unavailable)),
+		Agents:           make([]DaemonAgentStatus, len(agents), len(agents)+len(unavailable)+len(parked)),
 		WrittenAt:        time.Now(),
 		Degradations:     degradations,
 		QuarantinedTasks: quarantined,
@@ -122,6 +125,12 @@ func writeStateFile(path string, startedAt time.Time, agents []supervisor.Superv
 	// history an unavailable agent does not have.
 	for _, u := range unavailable {
 		state.Agents = append(state.Agents, u.toDaemonAgentStatus())
+	}
+	// Parked agents are not in sup.Agents. Appending them here is what keeps a
+	// parked agent visible in `loom daemon status` and in the Agents count
+	// instead of silently disappearing from the fleet.
+	for _, p := range parked {
+		state.Agents = append(state.Agents, p.toDaemonAgentStatus())
 	}
 
 	data, err := json.MarshalIndent(state, "", "  ")
