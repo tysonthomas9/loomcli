@@ -118,6 +118,7 @@ type Supervisor struct {
 	// the cross-package composite-literal construction site stays untouched.
 	quarantine     *taskQuarantine
 	quarantineOnce sync.Once
+	claims         claimLedger // process-local claim mutual exclusion; see claim.go
 
 	// ControlStore is the fleet-db-backed control plane used for node,
 	// session, lease, terminal, artifact, and command records.
