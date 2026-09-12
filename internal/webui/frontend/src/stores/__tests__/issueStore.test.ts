@@ -467,6 +467,43 @@ describe("issueStore", () => {
       expect(store.getState().nextRetryAt).not.toBeNull();
     });
 
+    it("waits the server's Retry-After on a 429 instead of its own backoff", async () => {
+      const before = Date.now();
+      mockGetReadyIssues.mockRejectedValueOnce(
+        new ApiError(
+          429,
+          "Too Many Requests",
+          { error: "rate limit exceeded" },
+          12_000,
+        ),
+      );
+
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+
+      const nextRetryAt = store.getState().nextRetryAt;
+      expect(nextRetryAt).not.toBeNull();
+      expect((nextRetryAt as number) - before).toBe(12_000);
+
+      // Nothing fires before the server's interval elapses.
+      await vi.advanceTimersByTimeAsync(11_000);
+      expect(mockGetReadyIssues).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(mockGetReadyIssues).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps its own backoff for a 500, which carries no Retry-After", async () => {
+      const before = Date.now();
+      mockGetReadyIssues.mockRejectedValueOnce(
+        new ApiError(500, "Internal Server Error"),
+      );
+
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+
+      const nextRetryAt = store.getState().nextRetryAt;
+      expect(nextRetryAt).not.toBeNull();
+      expect((nextRetryAt as number) - before).toBeLessThan(12_000);
+    });
+
     it("schedules an auto-retry when fetch fails with a non-abort error", async () => {
       mockGetReadyIssues.mockRejectedValueOnce(new Error("boom"));
 

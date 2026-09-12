@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli test-skills-release-compat fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-ci test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli test-skills-release-compat fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status compose-smoke compose-smoke-down ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-ci test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -211,6 +211,21 @@ test-env-down:
 
 test-env-status:
 	@./scripts/test-env.sh status
+
+# End-to-end smoke test of the SHIPPED compose stacks (docker-compose.dev.yml
+# and deploy/docker-compose.yml). This target is the anti-rot measure: both
+# files decayed into an unstartable state because nothing here or in CI ever
+# ran them. It builds four images (including an npm ci frontend build), so it
+# is minutes-long and deliberately not part of `make check`.
+compose-smoke:
+	@./scripts/compose-smoke.sh
+
+# Tear down a stack left running by `scripts/compose-smoke.sh --keep`. The
+# smoke script cleans up after itself on every other exit path.
+compose-smoke-down:
+	@set -e; \
+	$(LOCAL_MODE_COMPOSE_SELECT); \
+	$$compose -f docker-compose.dev.yml down -v --remove-orphans
 
 # Start the fleet-db regression stack: redis, fleet-db, loom serve on the
 # fleet-db backend, the Web UI sidecar, and a one-shot fixture seeder.
@@ -616,10 +631,19 @@ check-go:
 #   failure `cover: line "..." doesn't match expected format`, which looks like a
 #   coverage regression but is a corrupt profile. The trap removes it on every
 #   exit path, so nothing stale survives to poison a later run.
+#   The wall-clock cap bounds the WHOLE run: `-timeout 15m` is go's PER-PACKAGE
+#   timeout, so ~159 serial packages have no bounded total. The wrapper execs
+#   straight through when `make check` already armed a cap above us, and arms its
+#   own when `check-go` is the entry point (CI, or a direct invocation).
+#   `set -e` ordering is load-bearing: a non-zero exit here — 124 from the cap,
+#   or a killed tree — aborts before step 13, so check-coverage.sh never scores
+#   the truncated profile a killed `go test` leaves behind. Do not add `|| true`.
 	@set -e; \
 	 profile="$$(mktemp "$${TMPDIR:-/tmp}/loom.coverage.XXXXXX")"; \
 	 trap 'rm -f "$$profile"' EXIT; \
-	 ./scripts/with-clean-loom-env.sh go test -p 1 -race -covermode=atomic -coverprofile="$$profile" -timeout 15m ./...; \
+	 cap="$$(./scripts/gate-timeout-seconds.sh)"; \
+	 ./scripts/with-timeout.sh "$$cap" "check-go: go test -race ./..." \
+	   ./scripts/with-clean-loom-env.sh go test -p 1 -race -covermode=atomic -coverprofile="$$profile" -timeout 15m ./...; \
 	 echo "=== [13/13] Go: coverage threshold ==="; \
 	 COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh "$$profile"
 	@echo "=== Go quality gates PASSED ==="
@@ -643,9 +667,15 @@ check-frontend: ensure-frontend-deps
 # Unified quality gate — runs Go + frontend checks in parallel
 check:
 	@echo "=== Running Go and Frontend checks in parallel ==="
+# Each side is wall-capped so a gate invocation can never outlast the turn
+# budget it runs inside; see scripts/with-timeout.sh. These are two SIBLING
+# wrappers, not nested ones: each arms its own deadline and its own process
+# group. The banner goes to stderr, which the redirections below already fold
+# into the log that is `cat`ed when a side fails.
 	@go_log=$$(mktemp); fe_log=$$(mktemp); \
-	$(MAKE) check-go >"$$go_log" 2>&1 & go_pid=$$!; \
-	$(MAKE) check-frontend >"$$fe_log" 2>&1 & fe_pid=$$!; \
+	cap=$$(./scripts/gate-timeout-seconds.sh); \
+	./scripts/with-timeout.sh "$$cap" "check-go" $(MAKE) check-go >"$$go_log" 2>&1 & go_pid=$$!; \
+	./scripts/with-timeout.sh "$$cap" "check-frontend" $(MAKE) check-frontend >"$$fe_log" 2>&1 & fe_pid=$$!; \
 	go_rc=0; fe_rc=0; \
 	wait $$go_pid || go_rc=$$?; \
 	wait $$fe_pid || fe_rc=$$?; \
@@ -756,6 +786,8 @@ help:
 	@echo "  make test-skills-release-compat - Verify the pinned Vercel corpus against a FleetDB checkout"
 	@echo "  make test-env-up        - Start the disposable fleet-db test backend (workspace LOOMTEST, :53351)"
 	@echo "  make test-env-down      - Stop it and drop its volumes"
+	@echo "  make compose-smoke      - Smoke-test the shipped compose stacks end-to-end (slow; needs ../fleet-db)"
+	@echo "  make compose-smoke-down - Tear down a compose-smoke stack left running with --keep"
 	@echo "                            Point a shell at it: eval \"\$$(scripts/test-env.sh env)\""
 	@echo "                            Use this, not the live stack on :3011, for anything that writes"
 	@echo "  make local-mode-up      - Run local-mode Podman/Docker stack"

@@ -174,6 +174,11 @@ func pushBranchInRepoDetachedResult(repoPath, sourceBranch, targetBranch, remote
 
 // PullRepoWorktreeResult pulls a source branch into the worktree and returns a structured result.
 // Unlike pullRepoWorktree, it does NOT launch an AI agent for conflicts.
+//
+// After a clean merge it PUSHES currentBranch to the remote, as its result
+// message ("Pulled from ... and pushed to ...") states. This is unconditional:
+// the CLI's `loom sync --pull-only` / `loom pull --no-push` suppression is
+// threaded through pullRepoWorktree and does not reach this exported path.
 func PullRepoWorktreeResult(repoPath, currentBranch, sourceBranch, remote string) (*PullResult, error) {
 	r := resolveRemote(remote)
 

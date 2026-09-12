@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -28,7 +29,9 @@ type DaemonAgentStatus struct {
 	Role                   string    `json:"role"`
 	Repo                   string    `json:"repo,omitempty"`
 	PID                    int       `json:"pid"`
-	Status                 string    `json:"status"` // "running", "starting", "stopped", "failed", "blocked"
+	Status                 string    `json:"status"` // "running", "starting", "stopped", "failed", "blocked", "unavailable"
+	Detail                 string    `json:"detail,omitempty"`
+	Hint                   string    `json:"hint,omitempty"`
 	TaskID                 string    `json:"task_id,omitempty"`
 	EpicID                 string    `json:"epic_id,omitempty"`
 	CurrentBackend         string    `json:"current_backend,omitempty"`
@@ -40,6 +43,7 @@ type DaemonAgentStatus struct {
 	StoppedAt              time.Time `json:"stopped_at,omitempty"`
 	WorktreePath           string    `json:"worktree_path,omitempty"`
 	LastErrorClass         string    `json:"last_error_class,omitempty"`
+	LastErrorEvidence      string    `json:"last_error_evidence,omitempty"` // provenance of LastErrorClass; see agenterr.Evidence
 	NoWorkCount            int       `json:"no_work_count,omitempty"`
 	BlockCount             int       `json:"block_count,omitempty"` // display-only: never hydrated back into supervision across daemon restarts
 	BackoffUntil           time.Time `json:"backoff_until,omitempty"`
@@ -49,6 +53,9 @@ type DaemonAgentStatus struct {
 	OwnershipLastHeartbeat time.Time `json:"ownership_last_heartbeat,omitempty"`
 	LastActivity           time.Time `json:"last_activity,omitempty"`
 	ClaimsGated            bool      `json:"claims_gated,omitempty"` // cycling but gated by an active claim hold
+	// ProfileError is the harness-profile refusal that is keeping this agent
+	// out of the claim loop. omitempty: a healthy fleet's JSON is unchanged.
+	ProfileError string `json:"profile_error,omitempty"`
 }
 
 // DaemonState represents the complete daemon state in daemon-agents.json
@@ -56,6 +63,16 @@ type DaemonState struct {
 	PID       int                 `json:"pid"`
 	StartedAt time.Time           `json:"started_at"`
 	Agents    []DaemonAgentStatus `json:"agents"`
+	// WrittenAt is when this file was last written. It exists because mtime
+	// alone lies: a `cp` of the state file carries a fresh mtime over stale
+	// contents, and during the 2026-08-31 outage the operator was handed
+	// two-hour-old agent data with nothing saying so. Zero for files written
+	// by an older binary — readers fall back to mtime in that case.
+	WrittenAt time.Time `json:"written_at,omitempty"`
+	// Degradations is the daemon's active degradation episodes at write time,
+	// so every out-of-band reader can say the daemon is running but not doing
+	// one of its jobs.
+	Degradations []supervisor.Degradation `json:"degradations,omitempty"`
 	// QuarantinedTasks lists tasks the daemon set to blocked after repeated
 	// no-progress kills (plus pending retries when the write is failing).
 	// Display-only: never hydrated back into supervision across restarts.
@@ -218,20 +235,15 @@ func runDaemon(cmd *cobra.Command, args []string) {
 func runDaemonBody() int {
 	isolateProcessGroup()
 
-	projectDir, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)
+	// Refuse an inherited agent identity before anything else; see
+	// supervisorEnvOK (daemon_run_helpers.go) for what that costs when it
+	// goes unnoticed.
+	if !supervisorEnvOK() {
 		return 1
 	}
 
-	config, err := cfgpkg.LoadDaemonConfig(projectDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: loading config: %v\n", err)
-		return 1
-	}
-
-	if len(config.Agents) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: no agents configured in FleetDB for the active workspace\n")
+	projectDir, config, ok := loadDaemonBodyConfig()
+	if !ok {
 		return 1
 	}
 
@@ -272,7 +284,46 @@ func runDaemonBody() int {
 	// socket operations reach the file.
 	hydrateClaimHold(daemon, paths.claimHoldFile)
 
-	return runDaemonMainLoop(config, projectDir, paths, shutdown, daemon, lockFile)
+	return runDaemonMainLoop(config, projectDir, paths, shutdown, daemon, lockFile,
+		lockCleanupFunc(wsLock, lockFile, paths))
+}
+
+// lockCleanupFunc returns runDaemonBody's lock teardown as a closure, for the
+// shutdown force-exit path: os.Exit skips deferred cleanups, so without this
+// a forced exit would leave a stale workspace PID file behind and a later
+// collision message would name a dead PID. Ordering matches the defers (LIFO):
+// workspace lock first, then the cwd lock.
+func lockCleanupFunc(wsLock *workspaceDaemonLock, lockFile *os.File, paths daemonPaths) func() {
+	return func() {
+		wsLock.Release()
+		if err := lockFile.Close(); err != nil {
+			slog.Warn("failed to close daemon lock file during force-exit", "err", err)
+		}
+		removeDaemonFile(paths.lockFile)
+	}
+}
+
+// loadDaemonBodyConfig resolves the project dir and the daemon config for
+// runDaemonBody, reporting any failure on stderr. ok is false when the daemon
+// must not start: no working directory, an unloadable config, or no agents.
+func loadDaemonBodyConfig() (string, *cfgpkg.DaemonConfig, bool) {
+	projectDir, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)
+		return "", nil, false
+	}
+
+	config, err := cfgpkg.LoadDaemonConfig(projectDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: loading config: %v\n", err)
+		return "", nil, false
+	}
+
+	if len(config.Agents) == 0 {
+		fmt.Fprintf(os.Stderr, "Error: no agents configured in FleetDB for the active workspace\n")
+		return "", nil, false
+	}
+	return projectDir, config, true
 }
 
 // recordDaemonPaths annotates the workspace PID sidecar with this daemon's
@@ -377,7 +428,7 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 // Returns a process exit code: 0 on graceful shutdown, 2 if a critical
 // supervisor goroutine died (panic, unexpected return, or liveness watchdog
 // timeout).
-func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths daemonPaths, shutdown chan struct{}, daemon *Daemon, lockFile *os.File) int {
+func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths daemonPaths, shutdown chan struct{}, daemon *Daemon, lockFile *os.File, cleanup func()) int {
 	cli.PrintDaemonBanner(config, projectDir)
 
 	maxRetries := 3
@@ -386,7 +437,7 @@ func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths dae
 	}
 
 	startedAt := time.Now()
-	if err := writeStateFile(paths.stateFile, startedAt, daemon.Agents(), daemon.QuarantinedTasks(), maxRetries,
+	if err := writeStateFile(paths.stateFile, startedAt, daemon.Agents(), daemon.UnavailableAgents(), daemon.QuarantinedTasks(), daemon.sup.Degradations(), maxRetries,
 		daemon.sup.ClaimHoldSnapshot()); err != nil {
 		fmt.Printf("Warning: failed to write initial state file: %v\n", err)
 	}
@@ -403,18 +454,12 @@ func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths dae
 	exitCode := awaitDaemonExit(shutdown, daemon.sup.FatalChannel())
 
 	// Bounded graceful drain. If daemon.Stop() hangs (e.g. AgentsMu is
-	// deadlocked), still exit so the user sees the failure rather than a
-	// process that refuses to die.
-	stopDone := make(chan struct{})
-	go func() {
-		daemon.Stop()
-		close(stopDone)
-	}()
-	select {
-	case <-stopDone:
-	case <-time.After(30 * time.Second):
-		log.Printf("[daemon] daemon.Stop() did not return within 30s; forcing exit")
-	}
+	// deadlocked, or a superviseAgent goroutine is wedged in cmd.Wait()),
+	// gracefulShutdown terminates the process at the deadline — for real, and
+	// naming the worktrees that did not yield. The budget is derived from the
+	// drain timeouts it guards, so the watchdog cannot contradict them.
+	budget := daemon.sup.ShutdownBudget()
+	gracefulShutdown(daemon, budget, paths, cleanup, exitCode)
 
 	// stateUpdateDone closes only when the state updater observes shutdown
 	// being closed; on the FatalCh path, shutdown is still open. Close it
@@ -425,10 +470,8 @@ func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths dae
 	default:
 		close(shutdown)
 	}
-	select {
-	case <-stateUpdateDone:
-	case <-time.After(10 * time.Second):
-		log.Printf("[daemon] state updater did not exit within 10s; forcing exit")
+	if !waitBounded(stateUpdateDone, stateUpdaterBudget) {
+		log.Printf("[daemon] state updater did not exit within %s; continuing exit", stateUpdaterBudget)
 	}
 
 	if exitCode == 0 {
@@ -519,36 +562,67 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	out := cmd.OutOrStdout()
+
 	// Use shared runtime detection, then fall back to the workspace lock
 	rt := detectDaemonRuntimeForCommand(projectDir)
 	if !rt.Running {
-		fmt.Println("Daemon: not running")
+		_, _ = fmt.Fprintln(out, "Daemon: not running")
 		return
 	}
 
-	fmt.Printf("Daemon: running (PID %d)\n", rt.PID)
+	// One target, one directory: every sidecar path below comes from the
+	// evidence that proved this daemon alive, never from the cwd
+	// independently. See DaemonRuntimeInfo's provenance contract.
+	stateFilePath := statePathForTarget(rt, projectDir)
+	state, stateMTime := readStateForTarget(stateFilePath)
 
-	// Read and display agent status
-	stateFilePath := cfgpkg.ResolveDaemonStatePath(projectDir)
-	state, err := ReadStateFile(stateFilePath)
-	if err != nil {
-		fmt.Printf("  (no agent status available: %v)\n", err)
-		return
+	in := daemonStatusInputs{
+		RT:         rt,
+		State:      state,
+		StatePath:  stateFilePath,
+		StateMTime: stateMTime,
+		LiveCount:  agentCountUnknown,
+		Now:        time.Now(),
+	}
+	// Ask the daemon itself only when the snapshot cannot be believed, so a
+	// healthy in-project status costs no extra control-socket round trip.
+	if trusted, _ := stateFileTrust(in); !trusted {
+		in.LiveCount = liveAgentCount(rt, projectDir)
 	}
 
-	fmt.Printf("Started: %s\n", state.StartedAt.Format(time.RFC3339))
-	fmt.Printf("Agents: %d\n", len(state.Agents))
+	view := buildDaemonStatusView(in)
+	for _, line := range view.HeaderLines() {
+		_, _ = fmt.Fprintln(out, line)
+	}
+
+	// The agent table is a rendering of the state file, so it is shown only
+	// when the state file was accepted as describing this daemon.
+	if !view.Trusted {
+		if state == nil {
+			_, _ = fmt.Fprintf(out, "  (no agent status available: cannot read %s)\n", stateFilePath)
+		}
+		return
+	}
+	// Before the table, never after: a stale or degraded daemon makes
+	// everything below it untrustworthy, and the operator must know that
+	// first.
+	printStateFreshness(state, stateFilePath)
 	printClaimHoldBanner(state.ClaimHold)
 	printClaimHoldReleaseHint(state.ClaimHold)
-	fmt.Println("")
+	_, _ = fmt.Fprintln(out, "")
+	printDaemonAgentTable(state, targetDir(rt, projectDir))
+}
 
+// printDaemonAgentTable renders the per-agent listing from a state file that
+// has already been accepted as describing the detected daemon.
+func printDaemonAgentTable(state *DaemonState, dir string) {
 	// Pending interactive prompts come from the live daemon, not the state
 	// file: a question is meaningful only while the asking process waits, so
 	// it is never persisted. Best-effort — status must render even when the
 	// control socket does not.
-	waiting := pendingInputsByAgent()
+	waiting := pendingInputsForDir(dir)
 
-	// Format agent table
 	for _, agent := range state.Agents {
 		printAgentStatus(agent)
 		if p, ok := waiting[agent.Worktree]; ok {
@@ -557,19 +631,16 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	printProfileBlockedBanner(state.Agents)
 	printQuarantinedTasks(state.QuarantinedTasks)
 }
 
-// pendingInputsByAgent fetches every pending prompt from the daemon control
-// socket, keyed by agent name. Any failure returns an empty map — the status
-// listing degrades to what the state file knows.
-func pendingInputsByAgent() map[string]PendingInput {
+// pendingInputsForDir fetches every pending prompt from the control socket of
+// the daemon in dir, keyed by agent name. Any failure returns an empty map —
+// the status listing degrades to what the state file knows.
+func pendingInputsForDir(dir string) map[string]PendingInput {
 	out := map[string]PendingInput{}
-	socketPath, err := resolveControlSocketFromCwd()
-	if err != nil {
-		return out
-	}
-	pending, err := fetchPendingInputs(socketPath, "")
+	pending, err := fetchPendingInputs(socketPathForDir(dir), "")
 	if err != nil {
 		return out
 	}

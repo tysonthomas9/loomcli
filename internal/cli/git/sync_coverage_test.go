@@ -5,7 +5,12 @@ import (
 	"testing"
 )
 
-func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
+// TestSyncSingleWorkspace_PushAndPull_StillPushesAfterPull pins the plain
+// `loom sync` path: with neither --push-only nor --pull-only, phase 2 must
+// still push the worktree branch after the merge, so remote agent branches stay
+// current. It guards against over-correcting PUPPET-42 by deleting that push
+// outright instead of making it conditional.
+func TestSyncSingleWorkspace_PushAndPull_StillPushesAfterPull(t *testing.T) {
 	// not parallel: uses SetupTestEnv, mock.Install(), defaultDeps.Agent mutation
 	tmpDir := t.TempDir()
 	wsDir := tmpDir + "/ws"
@@ -37,7 +42,7 @@ func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
 		{Args: []string{"push", "origin", "api-branch"}, Err: nil},
 	})
 
-	cmdMock := NewCommandMock(t, []CommandStub{
+	pullPhaseStubs := []CommandStub{
 		// DiscoverWorktrees: GetCurrentBranch for api
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
 		// Push phase: stash list x2, GetCurrentBranch, HasCommitsBetweenRemote
@@ -45,7 +50,10 @@ func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
 		{Name: "git", Args: []string{"log", "origin/main..api-branch", "--oneline"}, Stdout: "abc commit\n"},
-	})
+	}
+	// Pull phase: the post-pull verification reads.
+	pullPhaseStubs = append(pullPhaseStubs, verifyStubs("origin", "main", "aaaaaaaaaaaa", "bbbbbbbbbbbb", 0)...)
+	cmdMock := NewCommandMock(t, pullPhaseStubs)
 	cmdMock.Install()
 	outputMock.Install()
 
@@ -67,7 +75,12 @@ func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
 		t.Fatalf("failed to set workspace: %v", err)
 	}
 
-	syncSingleWorkspace(defaultDeps, resolver, false, false)
+	// outputMock.Install() verifies on cleanup that every stub was consumed, so
+	// the phase-2 push stub above is load-bearing: a push that stopped
+	// happening fails this test.
+	if err := syncSingleWorkspace(defaultDeps, resolver, false, false); err != nil {
+		t.Errorf("expected nil error for an in-sync workspace, got %v", err)
+	}
 }
 
 func TestSyncSingleWorkspace_PushOnly(t *testing.T) {
@@ -125,10 +138,17 @@ func TestSyncSingleWorkspace_PushOnly(t *testing.T) {
 		t.Fatalf("failed to set workspace: %v", err)
 	}
 
-	syncSingleWorkspace(defaultDeps, resolver, true, false)
+	if err := syncSingleWorkspace(defaultDeps, resolver, true, false); err != nil {
+		t.Errorf("push-only sync must not fail: %v", err)
+	}
 }
 
-func TestSyncSingleWorkspace_PullOnly(t *testing.T) {
+// TestSyncSingleWorkspace_PullOnly_DoesNotPush is the PUPPET-42 regression
+// test. --pull-only must issue no remote-writing command at all: phase 1 is
+// skipped and phase 2's post-merge push is suppressed. This test previously
+// stubbed {"push", "origin", "api-branch"} — it encoded the bug, where
+// --pull-only published every worktree's current branch.
+func TestSyncSingleWorkspace_PullOnly_DoesNotPush(t *testing.T) {
 	// not parallel: uses SetupTestEnv, mock.Install(), defaultDeps.Agent mutation
 	tmpDir := t.TempDir()
 	wsDir := tmpDir + "/ws"
@@ -146,15 +166,18 @@ func TestSyncSingleWorkspace_PullOnly(t *testing.T) {
 	})
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
-		// Pull phase only
+		// Pull phase only — fetch and merge, and deliberately no push stub.
+		// OutputCommandMock t.Fatal's on any call past its stubs, so a
+		// reintroduced push fails here.
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
-		{Args: []string{"push", "origin", "api-branch"}, Err: nil},
 	})
 
-	cmdMock := NewCommandMock(t, []CommandStub{
+	stubs := []CommandStub{
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
-	})
+	}
+	stubs = append(stubs, verifyStubs("origin", "main", "aaaaaaaaaaaa", "bbbbbbbbbbbb", 0)...)
+	cmdMock := NewCommandMock(t, stubs)
 	cmdMock.Install()
 	outputMock.Install()
 
@@ -175,5 +198,7 @@ func TestSyncSingleWorkspace_PullOnly(t *testing.T) {
 		t.Fatalf("failed to set workspace: %v", err)
 	}
 
-	syncSingleWorkspace(defaultDeps, resolver, false, true)
+	if err := syncSingleWorkspace(defaultDeps, resolver, false, true); err != nil {
+		t.Errorf("expected nil error for an in-sync workspace, got %v", err)
+	}
 }

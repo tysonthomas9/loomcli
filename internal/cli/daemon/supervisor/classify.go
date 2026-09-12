@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"log"
+	"log/slog"
 	"time"
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
@@ -12,27 +13,35 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
+// logAgentExit writes the one operator-facing line for an agent exit, naming the
+// task it held when there was one. Split out of classifyAgentExit so that
+// function stays within the repo's function-length gate.
+func logAgentExit(ap *AgentProcess, exitCode int, taskID string, lockInfo *cli.LockInfo) {
+	if taskID == "" {
+		log.Printf("[daemon] Agent %s: exited with code %d", ap.Entry.Worktree, exitCode)
+		return
+	}
+	title := ""
+	if lockInfo != nil {
+		title = lockInfo.TaskTitle
+	}
+	log.Printf("[daemon] Agent %s: exited with code %d (task %s: %s)",
+		ap.Entry.Worktree, exitCode, taskID, title)
+}
+
 // classifyAgentExit reads the lock file (before recovery clears it) and classifies
 // the agent's exit into an error class. Sets ap.LastError and ap.LastNoWork.
 func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 	// Read lock info before recovery clears it (for logging and NoWork detection)
-	lockInfo, _, _ := cli.CheckLock(ap.WorktreePath)
+	lockInfo, _, _ := cli.CheckLock(ap.WorkDir())
 	taskID := s.taskIDForLifecycle(ap, lockInfo)
-	if taskID != "" {
-		title := ""
-		if lockInfo != nil {
-			title = lockInfo.TaskTitle
-		}
-		log.Printf("[daemon] Agent %s: exited with code %d (task %s: %s)",
-			ap.Entry.Worktree, exitCode, taskID, title)
-	} else {
-		log.Printf("[daemon] Agent %s: exited with code %d", ap.Entry.Worktree, exitCode)
-	}
+	logAgentExit(ap, exitCode, taskID, lockInfo)
 
 	// Resolve backend for classification
 	ap.Mu.Lock()
 	backend := ap.Entry.Backend
 	logPath := ap.LogFilePath
+	logStart := ap.LogFileStartOffset
 	stopReason := ap.StopReason
 	ap.Mu.Unlock()
 	if backend == "" {
@@ -47,15 +56,22 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 		return
 	}
 
+	// A non-zero exit we CAUSED is classified from that fact, never from the
+	// log. See supervisorEndedRun.
+	if exitCode != 0 && s.supervisorEndedRun(ap, stopReason) {
+		s.markSupervisorStop(ap, exitCode, backend, stopReason)
+		return
+	}
+
 	if taskID == "" && (exitCode == 0 || stopReason == StopReasonWatchdog) {
 		s.markNoWork(ap, backend)
 	} else if exitCode != 0 {
-		ae := agenterr.ClassifyFromLog(logPath, exitCode, backend)
+		ae := agenterr.ClassifyFromLogAt(logPath, logStart, exitCode, backend)
 		ap.Mu.Lock()
 		ap.LastError = ae
 		ap.LastNoWork = false
 		ap.Mu.Unlock()
-		log.Printf("[daemon] Agent %s: classified error: %v", ap.Entry.Worktree, ae)
+		logClassifiedExit(ap.Entry.Worktree, ae)
 	} else if s.runLeftClaimHeld(ap, taskID) {
 		s.markIncompleteRun(ap, taskID, backend)
 	} else {
@@ -66,6 +82,73 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 	}
 }
 
+// supervisorEndedRun reports whether the supervisor itself ended this run, as
+// opposed to the agent failing on its own.
+//
+// It exists because ClassifyFromLog INFERS a verdict from the tail of the log,
+// and the tail of a run we killed says nothing about why it ended — it says
+// whatever the agent last printed. A credentials banner an earlier turn had
+// already recovered from is still sitting there, so a healthy agent SIGTERMed
+// by a daemon restart gets filed as AuthFailure: a class the policy treats as
+// StopFatal and human-actionable. Measured 2026-08-26, when a false liveness
+// fatal restarted the daemon and one of the agents it killed was recorded as
+// an auth failure it never had.
+//
+// Two signals, because they become true at different moments. The stop reason
+// is authoritative once set, but it is recorded on the way OUT of the supervise
+// loop — after this classification runs — so a run killed by the shutdown drain
+// still has an empty reason here. The channels are the durable fact: closed
+// before the kill, and they stay closed.
+//
+// StopReasonWatchdog is deliberately absent. That kill is also ours, but it is
+// a verdict ABOUT the agent (it went silent past its output timeout), so it
+// keeps the classification the existing arms give it.
+func (s *Supervisor) supervisorEndedRun(ap *AgentProcess, stopReason StopReason) bool {
+	switch stopReason {
+	case StopReasonShutdown, StopReasonManualStop, StopReasonConfigRemoved:
+		return true
+	}
+	select {
+	case <-s.Shutdown:
+		return true
+	default:
+	}
+	select {
+	case <-ap.StopCh:
+		return true
+	default:
+		return false
+	}
+}
+
+// markSupervisorStop records a run the supervisor ended on purpose.
+//
+// The class is a DOMAIN outcome, not a harness one, and that is the point:
+// nothing about the agent's output failed, so no wrapper class describes this
+// honestly. Being a domain outcome also makes it quarantine-ineligible by
+// construction (agentpolicy.QuarantineEligible), which is correct — a task
+// whose agent we killed for our own reasons has earned no evidence against
+// itself. The disposition is an uncounted retry, so the kill does not erode
+// the restart budget a real failure needs.
+func (s *Supervisor) markSupervisorStop(ap *AgentProcess, exitCode int, backend string, reason StopReason) {
+	msg := "run ended by the supervisor"
+	if reason != "" {
+		msg += " (" + string(reason) + ")"
+	}
+	ap.Mu.Lock()
+	ap.LastError = &agenterr.AgentError{
+		Class:     agenterr.OutcomeFromDomain(agenterr.SupervisorStopOutcome),
+		ExitCode:  exitCode,
+		Message:   msg,
+		Backend:   backend,
+		Timestamp: time.Now(),
+	}
+	ap.LastNoWork = false
+	ap.Mu.Unlock()
+	slog.Info("agent exit classified as a supervisor-initiated stop",
+		"worktree", ap.Entry.Worktree, "exit_code", exitCode, "stop_reason", string(reason))
+}
+
 // markNoWork records an exit with no task attached: the agent found nothing
 // claimable and went home. A watchdog stop can make an otherwise idle agent exit
 // non-zero, so this is preferred over log-pattern timeout classification
@@ -74,9 +157,10 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 func (s *Supervisor) markNoWork(ap *AgentProcess, backend string) {
 	ap.Mu.Lock()
 	ap.LastError = &agenterr.AgentError{
-		Class:   agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome),
-		Message: "no claimable tasks",
-		Backend: backend,
+		Class:    agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome),
+		Message:  "no claimable tasks",
+		Backend:  backend,
+		Evidence: supervisorEvidence(evidenceRuleNoWork),
 	}
 	ap.LastNoWork = true
 	ap.Mu.Unlock()
@@ -124,6 +208,7 @@ func (s *Supervisor) markRunDurationExceeded(ap *AgentProcess, exitCode int, bac
 		Message:   "run exceeded its maximum duration and was stopped by the supervisor",
 		Backend:   backend,
 		Timestamp: time.Now(),
+		Evidence:  supervisorEvidence(evidenceRuleRunDurationExceeded),
 	}
 	ap.LastNoWork = false
 	ap.Mu.Unlock()
@@ -148,6 +233,7 @@ func (s *Supervisor) markIncompleteRun(ap *AgentProcess, taskID, backend string)
 		Message:   "exited 0 without releasing the claim on " + taskID,
 		Backend:   backend,
 		Timestamp: time.Now(),
+		Evidence:  supervisorEvidence(evidenceRuleIncompleteRun),
 	}
 	ap.LastNoWork = false
 	ap.Mu.Unlock()
@@ -209,6 +295,7 @@ func (s *Supervisor) markSpawnFailure(ap *AgentProcess, spawnErr error) {
 		Message:   msg,
 		Backend:   backend,
 		Timestamp: time.Now(),
+		Evidence:  supervisorEvidence(evidenceRuleSpawnFailure),
 	}
 	ap.Mu.Unlock()
 
@@ -224,7 +311,7 @@ func (s *Supervisor) markSpawnFailure(ap *AgentProcess, spawnErr error) {
 func (s *Supervisor) handleAgentCheckpoint(ap *AgentProcess, exitCode int) {
 	if exitCode == 0 {
 		// Check if this was a yield exit — save checkpoint instead of clearing
-		if IsYieldRequested(ap.WorktreePath) {
+		if IsYieldRequested(ap.WorkDir()) {
 			s.saveYieldCheckpoint(ap)
 			return
 		}
@@ -237,7 +324,7 @@ func (s *Supervisor) handleAgentCheckpoint(ap *AgentProcess, exitCode int) {
 			s.saveAgentCheckpoint(ap, exitCode)
 			return
 		}
-		lockDir := cli.ResolveLockDir(ap.WorktreePath)
+		lockDir := cli.ResolveLockDir(ap.WorkDir())
 		if err := config.ClearCheckpoint(lockDir); err != nil {
 			log.Printf("[daemon] Agent %s: failed to clear checkpoint: %v", ap.Entry.Worktree, err)
 		}
@@ -249,36 +336,40 @@ func (s *Supervisor) handleAgentCheckpoint(ap *AgentProcess, exitCode int) {
 // saveAgentCheckpoint captures the current worktree diff and agent state into a
 // checkpoint file. Called when an agent exits non-zero before recovery clears the worktree.
 func (s *Supervisor) saveAgentCheckpoint(ap *AgentProcess, exitCode int) {
-	lockInfo, _, _ := cli.CheckLock(ap.WorktreePath)
+	lockInfo, _, _ := cli.CheckLock(ap.WorkDir())
 	taskID := s.taskIDForLifecycle(ap, lockInfo)
 	if taskID == "" {
 		return
 	}
-
-	diff := captureGitDiff(ap.WorktreePath, config.MaxDiffBytes)
-	errClass := ""
-	ap.Mu.Lock()
-	if ap.LastError != nil {
-		errClass = ap.LastError.Class.String()
-	}
-	epicID := ap.AssignedEpicID
-	ap.Mu.Unlock()
 
 	agentName := ap.Entry.Worktree
 	if lockInfo != nil && lockInfo.AgentName != "" {
 		agentName = lockInfo.AgentName
 	}
 
-	cp := &config.Checkpoint{
-		AgentName:  agentName,
-		TaskID:     taskID,
-		EpicID:     epicID,
-		GitDiff:    diff,
-		ExitCode:   exitCode,
-		ErrorClass: errClass,
-		Timestamp:  time.Now(),
+	diff, scanned := captureGitDiff(ap.WorkDir(), agentName, config.MaxDiffBytes)
+	errClass := ""
+	errEvidence := ""
+	ap.Mu.Lock()
+	if ap.LastError != nil {
+		errClass = ap.LastError.Class.String()
+		errEvidence = ap.LastError.Evidence.Summary()
 	}
-	lockDir := cli.ResolveLockDir(ap.WorktreePath)
+	epicID := ap.AssignedEpicID
+	ap.Mu.Unlock()
+
+	cp := &config.Checkpoint{
+		AgentName:     agentName,
+		TaskID:        taskID,
+		EpicID:        epicID,
+		GitDiff:       diff,
+		ScannedPaths:  scanned,
+		ExitCode:      exitCode,
+		ErrorClass:    errClass,
+		ErrorEvidence: errEvidence,
+		Timestamp:     time.Now(),
+	}
+	lockDir := cli.ResolveLockDir(ap.WorkDir())
 	if err := config.SaveCheckpoint(lockDir, cp); err != nil {
 		log.Printf("[daemon] Agent %s: failed to save checkpoint: %v", ap.Entry.Worktree, err)
 	} else {
@@ -290,16 +381,21 @@ func (s *Supervisor) saveAgentCheckpoint(ap *AgentProcess, exitCode int) {
 // via yield. Unlike saveAgentCheckpoint (crash path), this sets ErrorClass to
 // "Yielded" and records the yield reason from the yield file.
 func (s *Supervisor) saveYieldCheckpoint(ap *AgentProcess) {
-	lockInfo, _, _ := cli.CheckLock(ap.WorktreePath)
+	lockInfo, _, _ := cli.CheckLock(ap.WorkDir())
 	taskID := s.taskIDForLifecycle(ap, lockInfo)
 	if taskID == "" {
 		return
 	}
 
-	diff := captureGitDiff(ap.WorktreePath, config.MaxDiffBytes)
+	agentName := ap.Entry.Worktree
+	if lockInfo != nil && lockInfo.AgentName != "" {
+		agentName = lockInfo.AgentName
+	}
+
+	diff, scanned := captureGitDiff(ap.WorkDir(), agentName, config.MaxDiffBytes)
 
 	yieldReason := "unknown"
-	if req, err := ReadYieldFile(ap.WorktreePath); err == nil && req != nil && req.Reason != "" {
+	if req, err := ReadYieldFile(ap.WorkDir()); err == nil && req != nil && req.Reason != "" {
 		yieldReason = req.Reason
 	}
 
@@ -307,22 +403,18 @@ func (s *Supervisor) saveYieldCheckpoint(ap *AgentProcess) {
 	epicID := ap.AssignedEpicID
 	ap.Mu.Unlock()
 
-	agentName := ap.Entry.Worktree
-	if lockInfo != nil && lockInfo.AgentName != "" {
-		agentName = lockInfo.AgentName
-	}
-
 	cp := &config.Checkpoint{
-		AgentName:   agentName,
-		TaskID:      taskID,
-		EpicID:      epicID,
-		GitDiff:     diff,
-		ExitCode:    0,
-		ErrorClass:  "Yielded",
-		YieldReason: yieldReason,
-		Timestamp:   time.Now(),
+		AgentName:    agentName,
+		TaskID:       taskID,
+		EpicID:       epicID,
+		GitDiff:      diff,
+		ScannedPaths: scanned,
+		ExitCode:     0,
+		ErrorClass:   "Yielded",
+		YieldReason:  yieldReason,
+		Timestamp:    time.Now(),
 	}
-	lockDir := cli.ResolveLockDir(ap.WorktreePath)
+	lockDir := cli.ResolveLockDir(ap.WorkDir())
 	if err := config.SaveCheckpoint(lockDir, cp); err != nil {
 		log.Printf("[daemon] Agent %s: failed to save yield checkpoint: %v", ap.Entry.Worktree, err)
 	} else {
@@ -338,4 +430,58 @@ func (s *Supervisor) taskIDForLifecycle(ap *AgentProcess, lockInfo *cli.LockInfo
 	ap.Mu.Lock()
 	defer ap.Mu.Unlock()
 	return ap.AssignedTaskID
+}
+
+// Supervisor-synthesized classification rules. Every AgentError the supervisor
+// builds itself — as opposed to one agenterr derived from a log — names its
+// origin here, so no AgentError in the tree carries empty provenance and
+// "which code path decided this" is answerable from the record alone.
+const (
+	evidenceRuleNoWork              = "supervisor.no_work"
+	evidenceRuleRunDurationExceeded = "supervisor.run_duration_exceeded"
+	evidenceRuleIncompleteRun       = "supervisor.incomplete_run"
+	evidenceRuleSpawnFailure        = "supervisor.spawn_failure"
+	evidenceRuleBackendUnavailable  = "supervisor.backend_unavailable"
+	evidenceRuleEpicExhausted       = "supervisor.epic_exhausted"
+	evidenceRuleOwnershipLost       = "supervisor.ownership_lost"
+)
+
+// supervisorEvidence builds the provenance for a verdict the supervisor
+// synthesized rather than read out of agent output. There is no text to quote,
+// so the rule alone is the whole record.
+func supervisorEvidence(rule string) agenterr.Evidence {
+	return agenterr.Evidence{Source: agenterr.EvidenceSupervisor, Rule: rule}
+}
+
+// logClassifiedExit records a log-derived classification with its provenance
+// spread across structured fields, so the retained daemon log can be grepped
+// for a single rule or a single screen shape rather than parsed out of a %v.
+func logClassifiedExit(worktree string, ae *agenterr.AgentError) {
+	if ae == nil {
+		return
+	}
+	attrs := []any{
+		"worktree", worktree,
+		"class", ae.Class.String(),
+		"exit_code", ae.ExitCode,
+		"evidence_source", string(ae.Evidence.Source),
+		"evidence_rule", ae.Evidence.Rule,
+		"message", ae.Message,
+	}
+	if ae.Evidence.Detail != "" {
+		attrs = append(attrs, "detail", ae.Evidence.Detail)
+	}
+	if ae.Evidence.Excerpt != "" {
+		attrs = append(attrs, "excerpt", ae.Evidence.Excerpt)
+	}
+	if sc := ae.Evidence.Screen; sc != nil {
+		attrs = append(attrs, "screen_scanned", sc.Scanned, "banner_rule", sc.BannerRule)
+		if sc.ComposerWitnessed != nil {
+			attrs = append(attrs, "composer_witnessed", *sc.ComposerWitnessed)
+		}
+		if sc.DialogWitnessed != nil {
+			attrs = append(attrs, "dialog_witnessed", *sc.DialogWitnessed)
+		}
+	}
+	slog.Warn("agent exit classified", attrs...)
 }

@@ -172,15 +172,27 @@ func detectWorkspaceDaemonRuntime() cli.DaemonRuntimeInfo {
 		return cli.DaemonRuntimeInfo{}
 	}
 
+	// Provenance (PUPPET-57): Dir is the ONE directory callers may derive
+	// this daemon's sidecar paths from. Prefer the project dir the daemon
+	// recorded itself (Cwd, written by recordDaemonPaths); fall back to the
+	// workspace dir for a sidecar written before that field existed.
 	info, _ := readWorkspacePIDFile(pidPath)
+	dir := info.Cwd
+	if dir == "" {
+		dir = wsDir
+	}
 	rt := cli.DaemonRuntimeInfo{
 		Running: true,
 		Source:  "workspace-lock",
 		Cwd:     info.Cwd,
 		Socket:  info.Socket,
+		Dir:     dir,
 	}
 	if info.PID > 0 && lockfile.IsProcessRunning(info.PID) {
 		rt.PID = info.PID
+		// Only a live PID binds the recorded start time to this daemon; a
+		// dead sidecar PID identifies nothing, so StartedAt stays unknown.
+		rt.StartedAt = info.StartedAt
 	}
 	return rt
 }

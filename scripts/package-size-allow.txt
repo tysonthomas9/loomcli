@@ -7,7 +7,35 @@
 # state is sub-packaging (inputwait / runcap / ...); until that split happens,
 # this records the ceiling. Shrink or remove the entry when the package is
 # split; do not raise it without recording why here.
-internal/cli/daemon/supervisor 28
+# Raised 28 -> 29 for diffcapture.go: the checkpoint's git-diff capture was
+# lifted out of concurrency.go (a concurrency tracker it never belonged in)
+# when it grew to cover untracked files and multiple source trees. A
+# sub-package was tried first and is the right end state, but it costs the
+# package an import and pushes its recorded import-fanout ceiling (22) over
+# instead — trading one ratchet for another. Take it in the sub-split.
+# Raised 29 -> 30 for profile.go: the per-agent profile boot path (#563/#652,
+# PUPPET-275/485) took spawn.go to 1059 lines, over the 1000-line LOC gate,
+# and .loc-allowlist takes no new entries. The profile section moved out of
+# spawn.go unchanged, as local/union did in 769403892 (PUPPET-243) - the
+# alternative is trading the package gate for the LOC gate.
+#
+# 30 -> 31 (PUPPET-608): placement.go. An agent's worktree used to be frozen at
+# config load from its CONFIGURED repo; it now follows the CLAIMED task's
+# source_repo, and that routing (AgentPlacement, applyTaskPlacement,
+# adoptCarriedWorktree, repo-selector matching) is its own concern rather than
+# more weight on claim.go or supervisor.go — both of which are already at their
+# own ceilings. It is a self-contained candidate to move out wholesale when the
+# sub-split happens.
+# 31 -> 32 for quarantine_sweep.go: the persisted, progress-aware quarantine
+# ledger (#456/#520/#522, PUPPET-108/198/199) took quarantine.go to 1030 lines,
+# over the 1000-line LOC gate, and .loc-allowlist takes no new entries. The
+# sweep/write section (sweepQuarantineDue .. shortSessionID) moved out
+# unchanged; the ledger and the exit hook stay in quarantine.go.
+# Raised 32 -> 33 for abandoned_run.go (the abandoned-run attempt recorder,
+# PUPPET-40). It cannot live in supervisor.go: that file is at 986 of the
+# 1000-line LOC ceiling, so folding ~400 lines in would trade this gate for
+# that one. Same sub-split end state applies.
+internal/cli/daemon/supervisor 33
 # internal/cli gained the daemon input-await seam (agent_input_await.go) with
 # the human answer path; 26th file, same sub-split end state applies. The
 # hook-driven exit-code contract lives in exit.go rather than a file of its own,

@@ -199,7 +199,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Statistics"
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/Statistics"
 
   # ── Workspaces ──────────────────────────────────────────────────────────
   /api/workspaces/active:
@@ -563,9 +569,15 @@ paths:
             type: string
         - name: limit
           in: query
+          description: |
+            Maximum number of issues to return. Values above the maximum are
+            clamped to it, not rejected: a request for 1000 returns at most
+            200 rows with HTTP 200. The response body does not currently
+            distinguish a clamped page from an exhaustive one.
           schema:
             type: integer
-            maximum: 1000
+            minimum: 1
+            maximum: 200
         - name: title_contains
           in: query
           schema:
@@ -1173,9 +1185,15 @@ paths:
             maximum: 4
         - name: limit
           in: query
+          description: |
+            Maximum number of blocked issues to return. Values above the
+            maximum are clamped to it, not rejected: a request for 1000
+            returns at most 200 rows with HTTP 200. The response body does
+            not currently distinguish a clamped page from an exhaustive one.
           schema:
             type: integer
-            maximum: 1000
+            minimum: 0
+            maximum: 200
       responses:
         "200":
           description: Blocked issues
@@ -5482,6 +5500,8 @@ components:
         - blocked_issues
         - deferred_issues
         - ready_issues
+        - review_issues
+        - status_blocked_issues
         - tombstone_issues
         - pinned_issues
         - epics_eligible_for_closure
@@ -5500,6 +5520,12 @@ components:
         deferred_issues:
           type: integer
         ready_issues:
+          type: integer
+        # Per-STATUS count. Distinct from blocked_issues, which is the computed
+        # dependency-blocked view.
+        review_issues:
+          type: integer
+        status_blocked_issues:
           type: integer
         tombstone_issues:
           type: integer
@@ -6272,7 +6298,8 @@ components:
         New consumers should prefer the generic `entity_type`, `entity_id`, and
         `action` envelope fields when deciding which local state to invalidate.
         `issue_id` is retained for backward-compatible issue-scoped consumers
-        and may be omitted for non-issue entities. For status events: old_status
+        and is populated for every issue-scoped entity, but omitted for
+        workspace-level entities. For status events: old_status
         and new_status are present. For bonded events: parent_id and step_count
         are present. This is documented as a flat schema (no discriminator)
         because the SSE stream is not validated by generated clients.
@@ -6305,7 +6332,13 @@ components:
           description: Source action for the mutation, usually the fleet-db action such as issue.update or dep.add.
         issue_id:
           type: string
-          description: Legacy issue identifier for issue-scoped consumers; omitted for non-issue entities.
+          description: >-
+            Issue identifier for issue-scoped consumers. Populated for every
+            issue-scoped entity - issue, comment, dependency, label and metadata
+            events all carry their issue id here as well as in `entity_id`.
+            Omitted for workspace-level entities (workspace, repo, agent,
+            driver_run, role, daemon_profile). New consumers should prefer
+            `entity_type` + `entity_id`.
         title:
           type: string
         assignee:
@@ -6479,13 +6512,18 @@ components:
 
     MonitorWorkspaceInfo:
       type: object
-      required: [mode]
+      required: [mode, resolved]
       properties:
         mode:
           type: string
           enum: [workspace]
         name:
           type: string
+        resolved:
+          type: boolean
+          description: >-
+            True when the server resolved the request to a concrete workspace.
+            False means the counts below are unscoped and may all be zero.
         workspaces:
           type: array
           items:
@@ -6657,6 +6695,14 @@ components:
           type: integer
         epics:
           type: integer
+        ready_by_priority:
+          type: object
+          description: >-
+            Ready work items per priority bucket 0..4 (out-of-range priorities
+            folded into 4), keyed by priority as a string. Excludes
+            needs-revision issues, unlike ready_to_implement/needs_planning.
+          additionalProperties:
+            type: integer
 
     MonitorStats:
       type: object

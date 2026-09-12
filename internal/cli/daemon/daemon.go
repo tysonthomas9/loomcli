@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
+	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/notify"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -63,6 +64,16 @@ type Daemon struct {
 	// inputs holds each agent's outstanding interactive prompt so an operator
 	// can see and answer it (see daemon_input.go).
 	inputs *inputRegistry
+
+	// unavailable holds configured agents the daemon could not construct
+	// (unresolvable worktree or role). They are deliberately NOT in sup.Agents
+	// — there is no process to supervise — so they are carried here to stay
+	// visible in the state file and `loom daemon status`, and to be retried on
+	// the config-poll tick. Guarded by unavailableMu: boot writes it, the
+	// reconciler goroutine mutates it every 30s, the state-file writer reads it.
+	unavailable           []UnavailableAgent
+	unavailableReportTick int
+	unavailableMu         sync.Mutex
 }
 
 // configSnapshot returns a snapshot of the current config pointer under RLock.
@@ -104,6 +115,7 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 	sup := &supervisor.Supervisor{
 		ConfigSnapshot: d.configSnapshot,
 		ProjectDir:     projectDir,
+		BootedAt:       time.Now(),
 		Concurrency:    supervisor.NewConcurrencyTracker(config.Roles),
 		EventBus:       eventBus,
 		StoppedAgents:  make(map[string]struct{}),
@@ -115,9 +127,7 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 	wireSupervisorCallbacks(sup, issueBackend)
 	loadSupervisorWorkspace(sup)
 
-	if err := initSupervisorAgents(sup, config.Agents, config.Roles); err != nil {
-		return nil, err
-	}
+	d.unavailable = initSupervisorAgents(sup, config.Agents, config.Roles)
 
 	d.sup = sup
 
@@ -146,6 +156,20 @@ func (d *Daemon) Start() error {
 
 // Stop gracefully shuts down the daemon.
 func (d *Daemon) Stop() {
+	_ = d.StopWithBudget(d.sup.ShutdownBudget())
+}
+
+// mutBufStopBudget is the slice of the shutdown budget granted to the mutation
+// buffer's drain. It sits before the supervisor drain and its Stop() is itself
+// unbounded, so without a cap it could silently consume the whole budget.
+const mutBufStopBudget = 5 * time.Second
+
+// StopWithBudget gracefully shuts down the daemon under an explicit wall-clock
+// budget, returning the supervisor's report so the caller can decide whether to
+// force-exit. Every wait inside is bounded.
+func (d *Daemon) StopWithBudget(budget time.Duration) supervisor.StopReport {
+	start := time.Now()
+
 	// Close the control socket listener (if running)
 	if d.controlListener != nil {
 		_ = d.controlListener.Close()
@@ -156,9 +180,18 @@ func (d *Daemon) Stop() {
 		_ = d.ipcListener.Close()
 	}
 
-	// Stop mutation buffer (drains subscription goroutine)
+	// Stop mutation buffer (drains subscription goroutine). Bounded: the drain
+	// waits on a subscription goroutine that can itself block.
 	if d.mutBuf != nil {
-		d.mutBuf.Stop()
+		mutBufDone := make(chan struct{})
+		go func() {
+			d.mutBuf.Stop()
+			close(mutBufDone)
+		}()
+		if !waitBounded(mutBufDone, mutBufStopBudget) {
+			slog.Warn("mutation buffer did not stop within its budget; continuing shutdown",
+				"budget", mutBufStopBudget)
+		}
 	}
 
 	// Close notification bus (closes subscriber channels, no-ops if NopPublisher)
@@ -166,12 +199,14 @@ func (d *Daemon) Stop() {
 		bus.Close()
 	}
 
-	d.sup.Stop()
+	remaining := budget - time.Since(start)
+	report := d.sup.StopWithBudget(remaining)
 
 	if d.storeHandle != nil {
 		_ = d.storeHandle.Close()
 		d.storeHandle = nil
 	}
+	return report
 }
 
 // Agents returns a snapshot of all agent statuses for inspection.
@@ -290,6 +325,16 @@ func wireSupervisorCallbacks(sup *supervisor.Supervisor, issueBackend backend.Is
 		}
 		return nil
 	}
+	// Resolve the per-repo, per-agent worktree, creating it when the repo
+	// checkout exists but the agent's worktree does not. This is the seam
+	// applyTaskPlacement routes through; nil disables placement routing.
+	sup.ResolveWorktree = func(agentName, repo string) (string, error) {
+		target, err := workspace.ResolveAgentTarget(agentName, repo)
+		if err != nil {
+			return "", err
+		}
+		return target.WorkDir, nil
+	}
 	sup.IssueBackendReady = func(epicID string) (bool, error) {
 		issues, err := issueBackend.Ready(cmdstore.RootContext(), backend.ReadyOpts{
 			ParentID: epicID,
@@ -310,8 +355,13 @@ func loadSupervisorWorkspace(sup *supervisor.Supervisor) {
 	}
 }
 
-// initSupervisorAgents creates agent processes from config entries.
-func initSupervisorAgents(sup *supervisor.Supervisor, agents []cfgpkg.AgentEntry, roles map[string]cfgpkg.RoleConfig) error {
+// initSupervisorAgents creates agent processes from config entries and returns
+// the entries it could not construct. A per-agent misconfiguration must never
+// fail the daemon: on 2026-08-17 one agent whose worktree was missing crashed
+// boot outright and PM2 restarted it fifteen times, with every other agent in
+// the workspace dead alongside it.
+func initSupervisorAgents(sup *supervisor.Supervisor, agents []cfgpkg.AgentEntry, roles map[string]cfgpkg.RoleConfig) []UnavailableAgent {
+	var unavailable []UnavailableAgent
 	for i, entry := range agents {
 		if !entry.ShouldSuperviseWithRoles(roles) {
 			slog.Info("skipping agent with non-running desired state", "worktree", entry.Worktree, "desired_state", entry.DesiredState)
@@ -319,9 +369,13 @@ func initSupervisorAgents(sup *supervisor.Supervisor, agents []cfgpkg.AgentEntry
 		}
 		ap, err := sup.NewAgent(entry, i)
 		if err != nil {
-			return err
+			u := newUnavailableAgent(entry, err)
+			unavailable = append(unavailable, u)
+			slog.Error("agent unavailable: not supervised",
+				"worktree", entry.Worktree, "role", entry.Role, "err", err, "hint", u.Hint)
+			continue
 		}
 		sup.Agents = append(sup.Agents, ap)
 	}
-	return nil
+	return unavailable
 }

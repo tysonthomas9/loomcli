@@ -16,6 +16,10 @@ import (
 func stageProfileWorkspace(t *testing.T, reported string) string {
 	t.Helper()
 	runtimeDir := t.TempDir()
+	// A private HOME as well: the codex sharing pass reads ~/.codex/auth.json,
+	// and a test that saw the operator's real one would depend on this
+	// machine's login state.
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
 	ResetWorkspaceRuntimeDirCache()
 	t.Cleanup(ResetWorkspaceRuntimeDirCache)
@@ -44,7 +48,113 @@ func stageProfile(t *testing.T, runtimeDir, agent, pinnedVersion string) string 
 		t.Fatalf("fingerprint: %v", err)
 	}
 	writeManifest(t, dir, agentprofile.Manifest{Files: files, Fingerprint: sum, HarnessVersion: pinnedVersion})
+	// A provisioned claude profile carries its own minted credential; doctor
+	// now reports one that does not. It is outside the manifest's file list, so
+	// it does not enter the fingerprint above.
+	writeProfileToken(t, dir, "sk-ant-oat01-fixture")
 	return dir
+}
+
+// writeProfileToken writes (or, given "", removes) a profile's oauth-token.
+func writeProfileToken(t *testing.T, dir, token string) {
+	t.Helper()
+	path := filepath.Join(dir, "oauth-token")
+	if token == "" {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("remove oauth-token: %v", err)
+		}
+		return
+	}
+	if err := os.WriteFile(path, []byte(token), 0o600); err != nil {
+		t.Fatalf("write oauth-token: %v", err)
+	}
+}
+
+// stageCodexProfile provisions a codex profile: no injected credential of its
+// own — it must never be reported for lacking an oauth-token — but a login it
+// owns, which is what its identity actually is.
+func stageCodexProfile(t *testing.T, runtimeDir, agent, pinnedVersion string) string {
+	t.Helper()
+	dir := filepath.Join(runtimeDir, ".loom", "agent-profiles", agent, "codex")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir codex profile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("# "+agent+"\n"), 0o644); err != nil {
+		t.Fatalf("write config.toml: %v", err)
+	}
+	files := []string{"config.toml"}
+	sum, err := agentprofile.Fingerprint(dir, files)
+	if err != nil {
+		t.Fatalf("fingerprint: %v", err)
+	}
+	writeManifest(t, dir, agentprofile.Manifest{Files: files, Fingerprint: sum, HarnessVersion: pinnedVersion})
+	// Outside the manifest's file list, as codex leaves it: it rewrites this
+	// file as it refreshes, so hashing it would make every refresh a drift.
+	writeCodexAuth(t, dir, "rt-"+agent, "acct-"+agent)
+	return dir
+}
+
+// agentprofile.Verify never looks at the credential — the token is deliberately
+// outside the manifest — so a profile that was never minted verified clean and
+// doctor reported the whole fleet green while those agents died on their first
+// API call. worker-2 and worker-3 were exactly this on disk. The repair is the
+// interactive minting script, not the provisioner.
+func TestCheckAgentProfiles_MissingOAuthTokenFails(t *testing.T) {
+	const version = "2.1.237 (Claude Code)"
+	runtimeDir := stageProfileWorkspace(t, version)
+	dir := stageProfile(t, runtimeDir, "worker-2", version)
+	writeProfileToken(t, dir, "")
+	stageProfile(t, runtimeDir, "planner", version)
+
+	got := checkAgentProfiles()
+	if got.Status != StatusFail {
+		t.Fatalf("Status = %v, want StatusFail (an identity-less profile is not green)", got.Status)
+	}
+	if !strings.Contains(got.Detail, "worker-2") {
+		t.Errorf("detail must name the profile, got:\n%s", got.Detail)
+	}
+	if !strings.Contains(got.Detail, "no oauth-token: profile was never minted") {
+		t.Errorf("detail must state the fault, got:\n%s", got.Detail)
+	}
+	if !strings.Contains(got.Detail, "scripts/setup-profile-token.sh worker-2") {
+		t.Errorf("detail must name the minting repair, got:\n%s", got.Detail)
+	}
+	if strings.Contains(got.Detail, "planner") {
+		t.Errorf("a minted profile must not be reported, got:\n%s", got.Detail)
+	}
+}
+
+// An empty token is a broken minting run rather than an absent one, so it keeps
+// the provisioner repair and must not be laundered into the missing bucket.
+func TestCheckAgentProfiles_EmptyOAuthTokenFails(t *testing.T) {
+	const version = "2.1.237 (Claude Code)"
+	runtimeDir := stageProfileWorkspace(t, version)
+	dir := stageProfile(t, runtimeDir, "worker-3", version)
+	writeProfileToken(t, dir, "\n")
+
+	got := checkAgentProfiles()
+	if got.Status != StatusFail {
+		t.Fatalf("Status = %v, want StatusFail", got.Status)
+	}
+	if !strings.Contains(got.Detail, "oauth-token unusable") {
+		t.Errorf("detail must state the fault, got:\n%s", got.Detail)
+	}
+	if strings.Contains(got.Detail, "setup-profile-token.sh") {
+		t.Errorf("a broken token is re-provisioned, not re-minted, got:\n%s", got.Detail)
+	}
+}
+
+// codex has no credential file at all, so the probe must stay silent about it.
+// Without this, the check reports every codex profile in the fleet as broken.
+func TestCheckAgentProfiles_CodexNeedsNoToken(t *testing.T) {
+	const version = "codex-cli 0.147.0"
+	runtimeDir := stageProfileWorkspace(t, version)
+	stageCodexProfile(t, runtimeDir, "worker", version)
+
+	got := checkAgentProfiles()
+	if got.Status != StatusPass {
+		t.Fatalf("Status = %v, want StatusPass; detail:\n%s", got.Status, got.Detail)
+	}
 }
 
 func writeManifest(t *testing.T, dir string, m agentprofile.Manifest) {
@@ -306,5 +416,95 @@ func TestCheckAgentProfiles_ProbesOncePerHarness(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Errorf("probe called %d times for 4 claude profiles, want 1", calls)
+	}
+}
+
+// stageManagedProfile provisions an agent whose settings.json is MANAGED: the
+// pristine baseline under .provisioned/ is byte-hashed, the live file is not.
+func stageManagedProfile(t *testing.T, runtimeDir, agent, pinnedVersion, baseline, live string) string {
+	t.Helper()
+	dir := filepath.Join(runtimeDir, ".loom", "agent-profiles", agent, "claude")
+	if err := os.MkdirAll(filepath.Join(dir, agentprofile.ProvisionedDirName), 0o755); err != nil {
+		t.Fatalf("mkdir profile: %v", err)
+	}
+	baseRel := filepath.Join(agentprofile.ProvisionedDirName, "settings.json")
+	if err := os.WriteFile(filepath.Join(dir, baseRel), []byte(baseline), 0o644); err != nil {
+		t.Fatalf("write baseline: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(live), 0o644); err != nil {
+		t.Fatalf("write settings.json: %v", err)
+	}
+	files := []string{baseRel}
+	sum, err := agentprofile.Fingerprint(dir, files)
+	if err != nil {
+		t.Fatalf("fingerprint: %v", err)
+	}
+	writeManifest(t, dir, agentprofile.Manifest{
+		Files:          files,
+		Managed:        []string{"settings.json"},
+		Fingerprint:    sum,
+		HarnessVersion: pinnedVersion,
+	})
+	// A minted claude profile carries its own oauth-token (PUPPET-275); without
+	// one the profile is refused before managed content is even compared.
+	writeProfileToken(t, dir, "sk-ant-oat01-fixture")
+	return dir
+}
+
+// A live settings.json that only reordered its keys and gained a runtime key is
+// the 2026-08-30 outage. `loom doctor` must report it as healthy.
+func TestCheckAgentProfiles_ManagedReorderAndExtraKeyPasses(t *testing.T) {
+	runtimeDir := stageProfileWorkspace(t, "2.1.240 (Claude Code)")
+	stageManagedProfile(t, runtimeDir, "worker", "2.1.240 (Claude Code)",
+		`{"permissions":{"defaultMode":"auto"},"disableRemoteControl":true}`,
+		`{"disableRemoteControl":true,"enabledPlugins":{"x@y":true},"permissions":{"defaultMode":"auto"}}`)
+
+	res := checkAgentProfiles()
+	if res.Status != StatusPass {
+		t.Fatalf("status = %v, want StatusPass\n%s\n%s", res.Status, res.Summary, res.Detail)
+	}
+}
+
+// A changed provisioned key fails the check, and the report names the path so
+// the operator knows what to look at.
+func TestCheckAgentProfiles_ManagedDriftFails(t *testing.T) {
+	runtimeDir := stageProfileWorkspace(t, "2.1.240 (Claude Code)")
+	stageManagedProfile(t, runtimeDir, "worker", "2.1.240 (Claude Code)",
+		`{"permissions":{"defaultMode":"auto"}}`,
+		`{"permissions":{"defaultMode":"plan"}}`)
+
+	res := checkAgentProfiles()
+	if res.Status != StatusFail {
+		t.Fatalf("status = %v, want StatusFail", res.Status)
+	}
+	if !strings.Contains(res.Detail, "permissions.defaultMode") {
+		t.Fatalf("detail does not name the diverging path:\n%s", res.Detail)
+	}
+	if !strings.Contains(res.Detail, "provision-profile.sh worker") {
+		t.Fatalf("detail does not route to the provisioner:\n%s", res.Detail)
+	}
+}
+
+// Edge 17: --fix must not "repair" managed drift. It only touches the drifted
+// (version) bucket, and Bless re-verifies first — assert it rather than assume.
+func TestCheckAgentProfiles_FixDoesNotRepairManagedDrift(t *testing.T) {
+	runtimeDir := stageProfileWorkspace(t, "2.1.251 (Claude Code)")
+	dir := stageManagedProfile(t, runtimeDir, "worker", "2.1.240 (Claude Code)",
+		`{"permissions":{"defaultMode":"auto"}}`,
+		`{"permissions":{"defaultMode":"plan"}}`)
+	before := readManifestBytes(t, dir)
+
+	doctorFix = true
+	t.Cleanup(func() { doctorFix = false })
+
+	res := checkAgentProfiles()
+	if res.Status != StatusFail {
+		t.Fatalf("status = %v, want StatusFail: --fix must not launder managed drift", res.Status)
+	}
+	if after := readManifestBytes(t, dir); string(after) != string(before) {
+		t.Fatalf("--fix rewrote the manifest of a managed-drifted profile:\n%s", after)
+	}
+	if readManifest(t, dir).HarnessVersion != "2.1.240 (Claude Code)" {
+		t.Fatal("--fix re-blessed a profile whose provisioned settings had changed")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"embed"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -382,6 +383,34 @@ func GenerateLeadPrompt() string {
 	})
 }
 
+// LeadAgentsFileText renders the built-in lead prompt with an EMPTY safety
+// block. It is the text seeded into <leadWorkdir>/AGENTS.md, where the harness
+// picks it up as ambient project instructions instead of as the session's
+// first user turn (which ages and is the first thing lost to compaction).
+//
+// The safety block is deliberately left out: it is rendered per-run per-backend
+// by buildSafetyGuardrailsBlock and must not become a static file that silently
+// goes stale. It travels on argv instead - see LeadSafetyPrompt.
+func LeadAgentsFileText() string {
+	return renderPrompt("lead", promptTemplateData{})
+}
+
+// LeadSafetyPrompt returns the multi-agent safety guardrails block alone: the
+// argv prompt for a lead whose persona already lives in a seeded AGENTS.md.
+//
+// Exported because buildSafetyGuardrailsBlock is unexported and package lead
+// cannot reach it. GenerateLeadPrompt and GenerateTerminalPrompt are
+// deliberately left byte-identical - the split happens at the call site, not
+// inside them.
+func LeadSafetyPrompt() string {
+	return buildSafetyGuardrailsBlock()
+}
+
+// BuiltinPromptNone is the built-in prompt id that suppresses the argv persona
+// entirely, for sessions whose role instructions arrive as ambient profile
+// context (a profile CLAUDE.md, a seeded AGENTS.md) instead of on argv.
+const BuiltinPromptNone = "none"
+
 // GenerateTerminalPrompt creates the base prompt for the interactive terminal
 // agent runtime. Empty promptFile preserves the built-in lead prompt; a custom
 // prompt file replaces that base and still receives the terminal safety rules.
@@ -394,6 +423,20 @@ func GenerateTerminalPrompt(promptFile string) (string, error) {
 		id := strings.TrimSpace(strings.TrimPrefix(promptFile, "builtin:"))
 		if !isBuiltinInteractivePrompt(id) {
 			return "", fmt.Errorf("unknown built-in interactive prompt %q", id)
+		}
+		// Suppression is absolute and deliberately short-circuits BEFORE
+		// renderPrompt: that would prepend the read-only preamble and would
+		// honor a ./loom-prompts/none.md override. An override that silently
+		// un-suppressed the persona would be a security surprise, and the
+		// empty embedded template alone would not deliver an empty prompt.
+		if id == BuiltinPromptNone {
+			if ReadOnlyPreamble() != "" {
+				// The soft read-only instruction now reaches the model through
+				// no channel at all. Not fatal: hard enforcement is the backend
+				// flag mapping (backends.ValidateSafetyKnobs and friends).
+				slog.Warn("read-only preamble suppressed: --prompt builtin:none removes the argv persona", "prompt", promptFile)
+			}
+			return "", nil
 		}
 		return renderPrompt(id, terminalPromptTemplateData()), nil
 	}
@@ -544,6 +587,9 @@ func buildCheckpointBlock(cp *config.Checkpoint) string {
 		sb.WriteString("The previous attempt made these uncommitted changes:\n```diff\n")
 		sb.WriteString(cp.GitDiff)
 		sb.WriteString("\n```\n\n")
+	} else if len(cp.ScannedPaths) > 0 {
+		sb.WriteString(fmt.Sprintf("The previous attempt made no uncommitted changes (scanned: %s).\n\n",
+			strings.Join(cp.ScannedPaths, ", ")))
 	} else {
 		sb.WriteString("The previous attempt made no uncommitted changes.\n\n")
 	}

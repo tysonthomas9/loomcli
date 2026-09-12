@@ -43,7 +43,17 @@ const leadStoreOpTimeout = 10 * time.Second
 // --message flag.
 var leadMessage string
 var leadPromptFile string
+var leadResume string
+var leadContinue bool
+var leadListSessions bool
+var leadListOutput = leadListOutputText
 var materializeLeadSkillsAtStart = materializeLeadSkills
+
+// leadPrintPrompt makes `loom lead` print the resolved STATIC prompt and exit
+// without starting a session. It is how the lead profile's CLAUDE.md is
+// generated, so it must never emit the per-session sections that
+// applyLeadPromptContext appends.
+var leadPrintPrompt bool
 
 var leadCmd = &cobra.Command{
 	Use:     "lead",
@@ -62,13 +72,41 @@ management mode, where the AI agent helps you:
 Pass --prompt to replace the default lead prompt with a role prompt_file while
 keeping terminal-agent guardrails and orchestration behavior.
 
+Use --list-sessions to see this agent's previous lead sessions (with the codex
+thread name where codex recorded one) and exit without starting a new one.
+
+Use --continue to reopen this agent's most recent lead conversation, or
+--resume <id> to reopen a specific one (a loom session id, or the harness
+session id / codex thread id recorded for it). A bare --resume is the same as
+--continue. Resume is supported on the claude and codex backends only, and it
+refuses rather than silently starting a fresh conversation.
+
 This command does not require a worktree - it can run from the main
 repository or any worktree.
 
 Use --message to seed the session with an initial user request. The message
 is appended to the lead system prompt, so the agent performs its normal
-lead-mode startup and then addresses the request using lead-mode conventions.`,
-	Args: cobra.NoArgs,
+lead-mode startup and then addresses the request using lead-mode conventions.
+
+Use --print-prompt to print the resolved static lead prompt and exit without
+starting a session. It prints only the static half - no backend assignment and
+no --message request - which is exactly what belongs in an agent profile's
+CLAUDE.md. Generate one with:
+
+  loom lead --print-prompt > "$WORKSPACE/profiles/lead/claude/CLAUDE.md"
+
+A session whose profile carries that CLAUDE.md should then be launched with
+--prompt builtin:lead-profile, a minimal pointer prompt that leaves the role
+instructions to the profile instead of repeating them every session.
+
+--prompt builtin:none goes one step further and suppresses the argv persona
+entirely: the prompt is empty and no positional prompt argument is passed to
+the backend at all, so the role instructions must already reach the model as
+ambient context. Suppression is absolute - it ignores a ./loom-prompts/none.md
+override and drops the LOOM_READ_ONLY preamble (a warning is logged; hard
+read-only enforcement stays on the backend flags). With --print-prompt it
+prints nothing and exits 0.`,
+	Args: leadArgs,
 	Run:  runLead,
 }
 
@@ -76,49 +114,129 @@ func init() {
 	cli.RegisterCommand(leadCmd)
 	leadCmd.Flags().StringVar(&leadMessage, "message", "", "Initial user request to address in lead mode")
 	leadCmd.Flags().StringVar(&leadPromptFile, "prompt", "", "Path to terminal-agent prompt template")
+	leadCmd.Flags().StringVar(&leadResume, "resume", "",
+		"Resume a previous lead session by loom session id or provider session id (bare --resume resumes the latest)")
+	// A bare --resume takes the sentinel, so it means exactly what --continue
+	// means instead of erroring on a missing value.
+	leadCmd.Flags().Lookup("resume").NoOptDefVal = leadcontrol.ResumeLatestSentinel
+	leadCmd.Flags().BoolVar(&leadContinue, "continue", false,
+		"Resume this agent's most recent lead session")
+	leadCmd.Flags().BoolVar(&leadListSessions, "list-sessions", false,
+		"List this agent's previous lead sessions and exit without starting one")
+	leadCmd.Flags().StringVarP(&leadListOutput, "output", "o", leadListOutputText,
+		"Output format for --list-sessions: text|json")
+	leadCmd.Flags().BoolVar(&leadPrintPrompt, "print-prompt", false, "Print the resolved static lead prompt and exit (no session, no dynamic sections)")
 }
 
 // leadStartupPrompt picks the lead runtime's boot prompt. A role prompt_file
 // supplied via --prompt wins, otherwise inline role prompt and default lead
 // prompt resolution happen in that order.
-func leadStartupPrompt(ctx context.Context, registration leadSessionRegistration) (string, error) {
-	prompt, err := generateLeadTerminalPrompt(ctx, registration)
+//
+// The second return value is the seed-and-shrink predicate: true only when the
+// workdir is dedicated to lead AND the built-in lead prompt is the one in play.
+// It gates BOTH halves of this feature, so they can never disagree - see
+// generateLeadTerminalPrompt.
+func leadStartupPrompt(ctx context.Context, registration leadSessionRegistration, dedicated bool) (string, bool, error) {
+	prompt, seedAndShrink, err := generateLeadTerminalPrompt(ctx, registration, dedicated)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	return applyLeadPromptContext(prompt), nil
+	return applyLeadPromptContext(prompt), seedAndShrink, nil
 }
 
-//nolint:funlen // The lead startup sequence stays in launch order.
-func runLead(cmd *cobra.Command, args []string) {
-	enforceLeadProfile()
-
-	// Get current working directory
-	workDir, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
-		os.Exit(1)
-	}
-
+// prepareLeadBackend checks the resolved backend and prints the mode banner.
+// An uninstalled backend is not fatal: the operator is dropped into a shell in
+// the lead workdir so they can fix it, and ok is false.
+func prepareLeadBackend(workDir, backendName string) bool {
 	// Check backend health before invoking. If the binary isn't installed,
 	// show a helpful error and drop into a shell so the user can fix it.
-	backendName := cli.GetBackendName()
 	if hs, ok := backends.CheckBackendHealth(backendName); ok && !hs.Installed {
 		fmt.Fprintf(os.Stderr, "Error: %s backend is not installed (%s)\n\n", backendName, hs.Message)
 		fmt.Fprintf(os.Stderr, "Install it and try again. Dropping into a shell so you can fix this.\n\n")
 		execShell(workDir)
-		return
+		return false
 	}
 
 	fmt.Println("=========================================")
 	fmt.Println("Starting LEAD mode (Interactive)")
 	fmt.Println("=========================================")
 	fmt.Println()
+	return true
+}
+
+//nolint:funlen // The lead startup sequence stays in launch order.
+func runLead(cmd *cobra.Command, args []string) {
+	// Print-and-exit runs before the profile enforcement, the preflight and
+	// session registration: generating a profile file must not touch the
+	// backend, write an orchestrator session row, or mark an epic assignment
+	// delivered.
+	if leadPrintPrompt {
+		printLeadPrompt()
+		return
+	}
+
+	enforceLeadProfile()
+	// Non-fatal, and it belongs here: the profile's config root is only
+	// settled once enforceLeadProfile has injected or verified it.
+	warnClaudeTranscriptCleanup(os.Stderr)
+
+	// Resolve lead's own working directory (<ws>/lead, or LOOM_LEAD_WORKDIR),
+	// falling back to the current directory outside a workspace.
+	workDir, dedicated, err := resolveLeadWorkdir(context.Background())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	// --list-sessions is a query, not a launch: it answers and returns before
+	// anything is registered, generated or materialized. It sits ahead of the
+	// resume resolution below so its usage errors are raised from the flags
+	// alone, without touching the store.
+	if leadListSessions {
+		if err := runLeadListSessions(context.Background(), os.Stdout, workDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	backendName := cli.GetBackendName()
+	// Resume is resolved BEFORE the orchestration session is registered: a
+	// resumed lead seeds its brand-new row with the ancestry and the provider
+	// handle, so the row is resumable itself even if this process dies before
+	// the runtime watcher persists anything. Every failure here exits non-zero
+	// -- never execShell, never a quiet fresh session.
+	resumeTarget, err := resolveLeadResume(context.Background(), workDir, backendName, args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if !prepareLeadBackend(workDir, backendName) {
+		return
+	}
+
+	// A suppressed persona moves the safety block off argv and onto a static
+	// file. Refuse - do not degrade - when that file does not carry the block
+	// this run would have rendered. This deliberately sits AFTER the
+	// --print-prompt early return above: --print-prompt is how the file is
+	// generated in the first place, so gating it would make the ambient file
+	// impossible to create.
+	if reason, suppressed := leadRunPersonaSuppression(context.Background()); suppressed {
+		if err := CheckAmbientSafetyBlock(backendName, workDir, dedicated, reason); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	// After the profile is settled and the backend is known: say so when this
+	// session's start state is not pinned to the provisioned baseline.
+	warnUnpinnedLeadModel(backendName)
 
 	// Best-effort: register this lead as an orchestrator session so workers
 	// the AI spawns via `loom agentdef add` are attributed back to it. Skips
 	// silently if there is no active workspace or fleet-db is unreachable.
-	registration := registerLeadOrchestratorSession(context.Background(), workDir)
+	registration := registerLeadOrchestratorSession(context.Background(), workDir, resumeTarget)
 	defer registration.Finalize()
 	if err := materializeLeadSkillsAtStart(context.Background(), registration, workDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Error materializing lead skills: %v\n", err)
@@ -129,7 +247,7 @@ func runLead(cmd *cobra.Command, args []string) {
 	ensureLeadHookConfig(workDir, backendName)
 
 	// Generate the terminal-agent prompt and append the user's initial request if provided.
-	prompt, err := leadStartupPrompt(context.Background(), registration)
+	prompt, seedAndShrink, err := leadStartupPrompt(context.Background(), registration, dedicated)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading terminal prompt: %v\n", err)
 		fmt.Fprintf(os.Stderr, "\nDropping into a shell. Fix the prompt file and run 'loom lead' to retry.\n\n")
@@ -137,20 +255,17 @@ func runLead(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	// The persona left argv, so it has to be on disk before the harness starts.
+	if seedAndShrink {
+		seedLeadWorkdirFiles(workDir)
+	}
+
 	// Invoke agent interactively (no agent name needed - lead mode doesn't claim tasks).
 	// Backends with a controlled runtime (codex app-server, harness-wrapper PTY
 	// supervision for claude and others) get queued message delivery; anything
 	// else falls back to a plain interactive launch.
-	handled, invokeErr := backends.RunControlledLeadRuntime(
-		context.Background(),
-		registration.Store(),
-		registration.Workspace,
-		registration.AgentID,
-		registration.SessionID,
-		workDir,
-		prompt,
-		backendName,
-	)
+	handled, invokeErr := backends.RunControlledLeadRuntime(context.Background(), leadRuntimeOptions(
+		registration, workDir, prompt, backendName, resumeTarget))
 	if !handled {
 		invokeErr = cli.InvokeAgent(workDir, prompt, "")
 	}
@@ -168,21 +283,94 @@ func ensureLeadHookConfig(workDir, backend string) {
 	}
 }
 
-func generateLeadTerminalPrompt(ctx context.Context, registration leadSessionRegistration) (string, error) {
-	if strings.TrimSpace(leadPromptFile) != "" {
-		return agent.GenerateTerminalPrompt(leadPromptFile)
+// printLeadPrompt writes the static lead prompt to stdout. The zero
+// registration is deliberate: loadLeadRole then opens its own short-lived
+// read-only store handle, or returns "" when there is no workspace, so this
+// works outside a workspace and with fleet-db down.
+//
+// dedicated is false on purpose: this prints the FULL static prompt, which is
+// exactly what belongs in the profile's CLAUDE.md. Shrinking it to the safety
+// block here would write a persona-less file.
+func printLeadPrompt() {
+	prompt, _, err := generateLeadTerminalPrompt(context.Background(), leadSessionRegistration{}, false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading terminal prompt: %v\n", err)
+		os.Exit(1)
 	}
-	if prompt := loadLeadRolePrompt(ctx, registration); strings.TrimSpace(prompt) != "" {
-		return agent.GenerateTerminalPromptText(prompt)
+	// A suppressed persona (--prompt builtin:none) must print 0 bytes, not the
+	// bare newline fmt.Println would add: the output is redirected straight
+	// into a profile's CLAUDE.md.
+	if prompt == "" {
+		return
 	}
-	return agent.GenerateTerminalPrompt("")
+	fmt.Println(prompt)
 }
 
-func loadLeadRolePrompt(ctx context.Context, registration leadSessionRegistration) string {
-	roleName := strings.TrimSpace(os.Getenv("LOOM_AGENT_ROLE"))
-	if roleName == "" {
-		roleName = "lead"
+// generateLeadTerminalPrompt resolves the argv prompt and reports whether this
+// launch seeds ambient instruction files and shrinks argv to the safety block.
+//
+// Both an explicit --prompt file and an inline role prompt keep today's
+// behavior verbatim and clear the predicate: they are the operator asking for a
+// specific persona on argv, and neither belongs in a seeded AGENTS.md. That is
+// also the path `--prompt builtin:lead-profile` takes, which is how a claude
+// session under its own CLAUDE_CONFIG_DIR gets its persona: from the profile's
+// CLAUDE.md, not from a file in the workdir.
+//
+// A role with persona_source: profile suppresses the argv persona entirely -
+// the same end state as --prompt builtin:none, reached from durable config
+// instead of a flag. It is checked AFTER the explicit --prompt (an operator
+// naming a prompt is overriding their own config) and BEFORE the inline role
+// prompt, so a role can carry a persona for other consumers and still keep it
+// off this argv.
+//
+// seedAndShrink stays FALSE under suppression. Seeding exists for the codex
+// case where argv shrinks to the safety block and the persona has to land
+// somewhere; persona_source: profile is the operator asserting the ambient file
+// is already authoritative, so writing an AGENTS.md nobody asked for would be
+// loom overruling that assertion.
+//
+// The built-in lead prompt shrinks to the safety guardrails ONLY in a dedicated
+// workdir. Shrinking in the os.Getwd fallback would boot a lead with no persona
+// at all, or - worse, since seeding never overwrites - let it silently adopt an
+// unrelated AGENTS.md that happened to be sitting in that directory.
+func generateLeadTerminalPrompt(ctx context.Context, registration leadSessionRegistration, dedicated bool) (string, bool, error) {
+	if strings.TrimSpace(leadPromptFile) != "" {
+		prompt, err := agent.GenerateTerminalPrompt(leadPromptFile)
+		return prompt, false, err
 	}
+	role := loadLeadRole(ctx, registration)
+	if role != nil && role.PersonaSource == domain.PersonaSourceProfile {
+		return "", false, nil
+	}
+	if role != nil && strings.TrimSpace(role.Prompt) != "" {
+		prompt, err := agent.GenerateTerminalPromptText(role.Prompt)
+		return prompt, false, err
+	}
+	if dedicated {
+		return agent.LeadSafetyPrompt(), true, nil
+	}
+	prompt, err := agent.GenerateTerminalPrompt("")
+	return prompt, false, err
+}
+
+// leadRoleName is the role this lead runs as: LOOM_AGENT_ROLE, or "lead".
+// Shared with the safety-drift probe so both look up the same row.
+func leadRoleName() string {
+	if roleName := strings.TrimSpace(os.Getenv("LOOM_AGENT_ROLE")); roleName != "" {
+		return roleName
+	}
+	return "lead"
+}
+
+// loadLeadRole fetches the role this lead session runs as, or nil.
+//
+// Every failure mode - no workspace, fleet-db unreachable, role absent -
+// returns nil, which is the fail-safe direction: the caller then falls through
+// to today's default and the lead boots with MORE persona rather than none. A
+// transport failure is logged at Warn so a lead that unexpectedly kept its argv
+// persona is diagnosable rather than merely puzzling.
+func loadLeadRole(ctx context.Context, registration leadSessionRegistration) *domain.Role {
+	roleName := leadRoleName()
 
 	st := registration.Store()
 	ws := strings.TrimSpace(registration.Workspace)
@@ -193,42 +381,50 @@ func loadLeadRolePrompt(ctx context.Context, registration leadSessionRegistratio
 		var ok bool
 		handle, ws, ok = openLeadSessionStore(openCtx)
 		if !ok {
-			return ""
+			return nil
 		}
 		defer func() { _ = handle.Close() }()
 		st = handle.Store
 	}
 	if st == nil || st.Roles() == nil || ws == "" {
-		return ""
+		return nil
 	}
 
 	loadCtx, cancel := context.WithTimeout(ctx, leadStoreOpTimeout)
 	defer cancel()
 	role, err := st.Roles().Get(loadCtx, ws, roleName)
 	if errors.Is(err, domain.ErrNotFound) {
-		return ""
+		return nil
 	}
 	if err != nil {
-		slog.Warn("lead inline prompt lookup failed, using default prompt", "workspace", ws, "role", roleName, "err", err)
-		return ""
+		slog.Warn("lead role lookup failed, using default prompt", "workspace", ws, "role", roleName, "err", err)
+		return nil
 	}
-	if role == nil {
-		return ""
-	}
-	return role.Prompt
+	return role
 }
 
 // applyLeadPromptContext appends the backend assignment context and the
 // optional --message initial request onto the base terminal-agent prompt.
 func applyLeadPromptContext(prompt string) string {
-	if assignment := currentLeadAssignmentPrompt(context.Background()); assignment != "" {
-		prompt += "\n\n## Loom Backend Assignment\n\n" + assignment
+	return composeLeadPrompt(prompt, currentLeadAssignmentPrompt(context.Background()), leadMessage)
+}
+
+// composeLeadPrompt joins the base prompt with the per-session sections. It is
+// the pure half of applyLeadPromptContext, so the exact bytes it produces are
+// pinned by the argv_golden testdata.
+func composeLeadPrompt(base, assignment, message string) string {
+	sections := make([]string, 0, 3)
+	if base != "" {
+		sections = append(sections, base)
 	}
-	if leadMessage != "" {
-		prompt += "\n\n## User's Initial Request\n\n" + leadMessage +
-			"\n\nAddress this request using the lead mode conventions above."
+	if assignment != "" {
+		sections = append(sections, "## Loom Backend Assignment\n\n"+assignment)
 	}
-	return prompt
+	if message != "" {
+		sections = append(sections, "## User's Initial Request\n\n"+message+
+			"\n\nAddress this request using the lead mode conventions above.")
+	}
+	return strings.Join(sections, "\n\n")
 }
 
 func currentLeadAssignmentPrompt(ctx context.Context) string {
@@ -331,7 +527,7 @@ func materializeLeadSkillsWith(ctx context.Context, registration leadSessionRegi
 // registration whose Finalize method marks the session completed and stops the
 // heartbeat. Best-effort: any error returns a no-op registration so lead always
 // runs.
-func registerLeadOrchestratorSession(ctx context.Context, workDir string) leadSessionRegistration {
+func registerLeadOrchestratorSession(ctx context.Context, workDir string, resume *leadcontrol.ResumeTarget) leadSessionRegistration {
 	noop := func() {}
 	empty := leadSessionRegistration{finalize: noop}
 	handle, ws, ok := openLeadSessionStore(ctx)
@@ -341,7 +537,7 @@ func registerLeadOrchestratorSession(ctx context.Context, workDir string) leadSe
 
 	sid := resolveLeadOrchestratorSessionID()
 	agentID := resolveLeadAgentID()
-	if err := createLeadSession(ctx, handle, ws, sid, agentID, workDir); err != nil {
+	if err := createLeadSession(ctx, handle, ws, sid, agentID, workDir, resume); err != nil {
 		_ = handle.Close()
 		slog.Warn("lead orchestrator session: create failed, continuing without registration", "err", err)
 		return empty
@@ -374,7 +570,7 @@ func openLeadSessionStore(ctx context.Context) (*bootstrap.StoreHandle, string, 
 	return handle, ws, true
 }
 
-func createLeadSession(ctx context.Context, handle *bootstrap.StoreHandle, ws, sid, agentID, workDir string) error {
+func createLeadSession(ctx context.Context, handle *bootstrap.StoreHandle, ws, sid, agentID, workDir string, resume *leadcontrol.ResumeTarget) error {
 	createCtx, createCancel := context.WithTimeout(ctx, leadStoreOpTimeout)
 	defer createCancel()
 	metadata := map[string]string{
@@ -388,6 +584,7 @@ func createLeadSession(ctx context.Context, handle *bootstrap.StoreHandle, ws, s
 	if roleName != "" {
 		metadata[leadcontrol.MetadataLeadRole] = roleName
 	}
+	seedResumeMetadata(metadata, resume)
 	_, err := handle.Store.AgentSessions().Create(createCtx, store.AgentSessionCreate{
 		WorkspaceKey: ws,
 		SessionID:    sid,

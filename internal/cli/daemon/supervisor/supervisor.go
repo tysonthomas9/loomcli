@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
@@ -21,8 +19,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/store"
-
-	"go.opentelemetry.io/otel/attribute"
 )
 
 // EventEmitter is the interface for emitting observability events.
@@ -40,9 +36,18 @@ type Supervisor struct {
 	ProjectDir  string
 	Repos       []config.RepoConfig // workspace repos for resolveAgentRepos; nil outside workspace mode
 	WorkspaceID string              // stable workspace UUID for log namespacing
+	BootedAt    time.Time           // when this daemon started supervising; zero DISABLES the grace it anchors and never means "the epoch" -- see quarantineBootGrace
 
 	Agents   []*AgentProcess
 	AgentsMu sync.RWMutex // protects the agents slice for concurrent read/write access
+
+	// Active self-reported degradations, and when each was last announced;
+	// see degraded.go. Guarded by degradedMu and deliberately NOT by AgentsMu:
+	// the writer is the 5s state updater, which must never contend with
+	// supervision to report that something is wrong.
+	degradations       map[DegradationKind]*Degradation
+	lastDegradedNotice map[DegradationKind]time.Time
+	degradedMu         sync.Mutex
 
 	Shutdown     chan struct{}  // closed to signal shutdown
 	ShutdownOnce sync.Once      // protects shutdown channel from double-close
@@ -109,6 +114,12 @@ type Supervisor struct {
 	// FindRepoConfig looks up a config.RepoConfig by name.
 	FindRepoConfig func(repoName string) *config.RepoConfig
 
+	// ResolveWorktree resolves the per-repo, per-agent worktree path, creating
+	// the worktree when absent. Injected by the daemon; overridden in tests
+	// (the real one shells out to git). Nil DISABLES placement routing — see
+	// applyTaskPlacement in placement.go.
+	ResolveWorktree func(agentName, repo string) (string, error)
+
 	// IssueBackendReady checks if an epic has ready tasks. Injected by daemon.
 	IssueBackendReady func(epicID string) (bool, error)
 	IssueBackend      backend.IssueBackend
@@ -118,6 +129,13 @@ type Supervisor struct {
 	// the cross-package composite-literal construction site stays untouched.
 	quarantine     *taskQuarantine
 	quarantineOnce sync.Once
+	claims         claimLedger // process-local claim mutual exclusion; see claim.go
+
+	// quarantineStatePathCache is the resolved daemon-quarantine.json path
+	// (cache + test seam). Resolved from ProjectDir on the first qrec call, so
+	// a test that redirects it MUST set it BEFORE any ledger access — setting
+	// it afterwards is a silent no-op. Empty disables persistence entirely.
+	quarantineStatePathCache string
 
 	// ControlStore is the fleet-db-backed control plane used for node,
 	// session, lease, terminal, artifact, and command records.
@@ -144,6 +162,12 @@ type Supervisor struct {
 	claimHoldLastReload      time.Time              // rate-limits ReloadClaimHold; see maybeReloadClaimHold
 	// ReloadClaimHold re-reads the hold when the FILE changed under this process. Injected by the daemon.
 	ReloadClaimHold func() (*ClaimHold, bool, error) // (hold, changed, err)
+
+	// backendStateReassertInterval bounds how often gateBackendAvailable
+	// re-asserts an unchanged backend-availability state to the control plane.
+	// Zero means use the package default (backendStateReassertInterval). Tests
+	// set a short value to exercise the re-assert without waiting 5m.
+	backendStateReassert time.Duration
 
 	// maxRetriesBlockInterval is the fixed delay computeBackoff returns once an
 	// agent has exhausted its restart budget and blocked (StopReasonMaxRetriesBlocked).
@@ -264,28 +288,6 @@ const (
 
 var controlPlaneOperationTimeout = 2 * time.Second
 
-// Stop gracefully shuts down all agents. Safe to call multiple times.
-func (s *Supervisor) Stop() {
-	// Signal all goroutines to stop (protected from double-close)
-	s.ShutdownOnce.Do(func() {
-		close(s.Shutdown)
-	})
-
-	// Unblock any agents waiting for concurrency slots
-	s.Concurrency.Close()
-
-	// Yield and stop all agent processes in parallel
-	s.AgentsMu.RLock()
-	snapshot := make([]*AgentProcess, len(s.Agents))
-	copy(snapshot, s.Agents)
-	s.AgentsMu.RUnlock()
-
-	s.drainAllWithGrace(snapshot)
-
-	// Wait for all superviseAgent goroutines to exit
-	s.Wg.Wait()
-}
-
 // superviseAgent is the main loop for a single agent (runs in goroutine).
 //
 //nolint:funlen // The restart loop keeps lifecycle ordering visible.
@@ -305,7 +307,7 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 
 		s.clearAgentSessionState(ap)
 
-		if s.acquireAgentOwnership(ap) != ownershipAcquired {
+		if !s.acquireAgentOwnershipWithReclaim(ap) {
 			if !s.sleepBeforeOwnershipRetry(ap) {
 				return
 			}
@@ -317,6 +319,11 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 			s.releaseAgentOwnership(ap)
 		}
 
+		// Ownership is the proof that no other daemon runs this agent, so any
+		// session row it left unfinished belongs to a run that is over. Once
+		// per daemon lifetime; see abandoned_run.go.
+		s.recordAbandonedRunsForAgent(ap)
+
 		if !s.Concurrency.Acquire(ap.Entry.Role) {
 			releaseOwnership()
 			slog.Info("concurrency tracker closed, exiting", "worktree", ap.Entry.Worktree)
@@ -325,6 +332,7 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 		}
 
 		if !s.preFlightSetup(ap) {
+			s.recordRecoveryFailure(ap) // a recovery cycle that never reached spawn still counts
 			s.materializeIdleSkills(ap)
 			s.Concurrency.Release(ap.Entry.Role)
 			releaseOwnership()
@@ -402,12 +410,24 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	if !s.gateClaimsHeld(ap) {
 		return false
 	}
-	if err := s.gateBackendAvailable(ap); err != nil {
+	// No span is open on this path; pass an explicit background context so the
+	// absence of a trace parent is visible here rather than hidden in the gate.
+	if err := s.gateBackendAvailable(context.Background(), ap); err != nil {
 		return false
 	}
 	if err := s.gateSafetyKnobsEnforceable(ap); err != nil {
 		return false
 	}
+	// Before claimTask, deliberately: a drifted profile that is only caught at
+	// spawn time claims a task and immediately releases it, and the release
+	// erases the diagnosis. See gateProfileVerified.
+	if err := s.gateProfileVerified(ap); err != nil {
+		return false
+	}
+
+	// A daemon restart starts with a nil placement: re-adopt the worktree this
+	// agent last ran in BEFORE recovery reads its lock file.
+	s.adoptCarriedWorktree(ap)
 
 	taskID, mode := s.detectRecovery(ap)
 	switch mode {
@@ -429,7 +449,7 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	ap.RecoveryMode = mode // consumed by recordResumeOutcome after the run
 	ap.Mu.Unlock()
 
-	if err := ClearYieldFile(ap.WorktreePath); err != nil {
+	if err := ClearYieldFile(ap.WorkDir()); err != nil {
 		slog.Warn("failed to clear stale yield file", "worktree", ap.Entry.Worktree, "err", err)
 	}
 
@@ -437,6 +457,13 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	if !s.claimTask(ap, epicID) {
 		return false
 	}
+	// The worktree follows the CLAIM; must precede createAgentSession's BeforeRef.
+	if !s.applyTaskPlacement(ap) {
+		return false
+	}
+	// Holding the claim lock proves any unfinished session row for this task is
+	// dead. Must run BEFORE this run's own row exists.
+	s.recordAbandonedRunsForTask(ap, s.taskIDForLifecycle(ap, nil))
 	s.createAgentSession(ap, epicID)
 	return true
 }
@@ -486,7 +513,7 @@ func (s *Supervisor) createAgentSession(ap *AgentProcess, epicID string) {
 		return
 	}
 	txPath := sessStore.NativeTranscriptPath(sess.SessionID())
-	bRef := automode.CaptureHEADRef(ap.WorktreePath)
+	bRef := automode.CaptureHEADRef(ap.WorkDir())
 	ap.Mu.Lock()
 	ap.Session = sess
 	ap.AgentSessionID = sess.SessionID()
@@ -545,51 +572,6 @@ func (s *Supervisor) createControlPlaneAgentSession(ap *AgentProcess, sessionID,
 	ap.Mu.Unlock()
 }
 
-// markControlPlaneAgentState persists the given agent state onto the
-// fleet-db Agent record so UIs and `workspace ops diagnose` reflect
-// supervisor lifecycle transitions (currently used by the
-// backend-availability gate to flip between AgentStateBackendUnavailable
-// and AgentStateActive). Best-effort: failures are logged but do not
-// block the supervisor.
-func (s *Supervisor) markControlPlaneAgentState(ap *AgentProcess, state domain.AgentState) {
-	if s.ControlStore == nil || s.WorkspaceID == "" {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-	defer cancel()
-	if _, err := s.ControlStore.Agents().Update(ctx, s.WorkspaceID, ap.Entry.Worktree, store.AgentUpdate{
-		State: &state,
-	}); err != nil {
-		slog.Warn("control-plane agent state update failed",
-			"worktree", ap.Entry.Worktree, "state", state, "err", err)
-	}
-}
-
-func (s *Supervisor) markControlPlaneAgentSessionRunning(ap *AgentProcess) {
-	if s.ControlStore == nil || s.WorkspaceID == "" {
-		return
-	}
-	backend := s.GetEffectiveBackend(ap)
-	ap.Mu.Lock()
-	sessionID := ap.AgentSessionID
-	metadata := s.agentSessionMetadataLocked(ap, backend)
-	ap.Mu.Unlock()
-	if sessionID == "" {
-		return
-	}
-	now := time.Now().UTC()
-	status := domain.AgentSessionRunning
-	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-	defer cancel()
-	if _, err := s.ControlStore.AgentSessions().Update(ctx, s.WorkspaceID, sessionID, store.AgentSessionUpdate{
-		Status:        &status,
-		LastHeartbeat: &now,
-		Metadata:      &metadata,
-	}); err != nil {
-		slog.Warn("control-plane agent session running update failed", "worktree", ap.Entry.Worktree, "session_id", sessionID, "err", err)
-	}
-}
-
 func (s *Supervisor) agentSessionMetadata(ap *AgentProcess, epicID string) map[string]string {
 	backend := s.GetEffectiveBackend(ap)
 	ap.Mu.Lock()
@@ -634,6 +616,7 @@ type agentSessionCompletionInput struct {
 	leaseToken string
 	exitCode   int
 	errClass   string
+	errMessage string
 	taskID     string
 	diffResult sessionfinalize.WithWorktreeResult
 	// transcriptData is the leaf's on-disk transcript (read once in
@@ -689,6 +672,7 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 		TaskID:     taskIDPtr,
 		FinishedAt: &finishedAtPtr,
 		ErrorClass: &input.errClass,
+		Summary:    agentSessionSummary(status, input.errMessage),
 		ExitCode:   &exitCodePtr,
 		Metadata:   &metadata,
 	}); err != nil {
@@ -776,8 +760,9 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 		ap.AgentLeaseID = ""
 		ap.AgentLeaseToken = ""
 		ap.Mu.Unlock()
+		spawnMsg := "agent process failed to spawn: " + err.Error()
 		if orphanSess != nil {
-			_ = orphanSess.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "spawn_failure"})
+			_ = orphanSess.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "spawn_failure", ErrorMessage: spawnMsg})
 		}
 		s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
 			sessionID:  orphanSessionID,
@@ -785,6 +770,7 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 			leaseToken: orphanLeaseToken,
 			exitCode:   -1,
 			errClass:   "spawn_failure",
+			errMessage: spawnMsg,
 			taskID:     s.taskIDForLifecycle(ap, nil),
 		})
 		s.Concurrency.Release(ap.Entry.Role)
@@ -792,8 +778,13 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 		return
 	}
 
-	exitCode := s.waitForAgent(ap)
+	exit := s.waitForAgentInfo(ap)
+	exitCode := exit.ExitCode
 	s.classifyAgentExit(ap, exitCode)
+	// Emitted here rather than inside waitForAgentInfo so it can carry the
+	// verdict and its provenance: classifyAgentExit has just set ap.LastError,
+	// and nothing between here and the next spawn touches it.
+	s.emitAgentStopped(ap, exit)
 	// Ledger hook: LastError is set, the lock is still present, and
 	// AgentSessionID has not been cleared by finalize yet. It runs with the
 	// FACTUAL exit code, so a clean run that later fails a completion hook
@@ -805,8 +796,16 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	// exist, and before finalize/checkpoint/recovery decide the run's fate: a
 	// failed hook write demotes exitCode so the owned task is reopened.
 	exitCode = s.runCompletionHooks(ap, exitCode)
+	// Captured before finalize: takeAgentSessionForFinalize clears
+	// AgentSessionID, and the timeout recorder needs it as its dedupe key.
+	timeoutSessionID := agentSessionIDSnapshot(ap)
 	s.finalizeAgentSession(ap, exitCode)
 	s.handleAgentCheckpoint(ap, exitCode)
+	// After the checkpoint, so the evidence can truthfully point at it, and
+	// BEFORE postMortemRecovery, which clears the worktree lock the task id is
+	// resolved from — recording after recovery would find no task and silently
+	// write nothing.
+	s.recordTimeoutRun(ap, exitCode, timeoutSessionID)
 	s.postMortemRecovery(ap, exitCode)
 	// Sweep AFTER recovery reset the task to open, so the quarantine write
 	// transitions open→blocked.
@@ -817,7 +816,7 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 
 // postMortemRecovery runs recovery after agent exit, skipping for yield exits.
 func (s *Supervisor) postMortemRecovery(ap *AgentProcess, exitCode int) {
-	if IsYieldRequested(ap.WorktreePath) {
+	if IsYieldRequested(ap.WorkDir()) {
 		slog.Info("skipping post-mortem recovery for yield exit", "worktree", ap.Entry.Worktree)
 		return
 	}
@@ -854,22 +853,14 @@ func (s *Supervisor) sleepBeforeRestart(ap *AgentProcess) bool {
 	ap.Mu.Lock()
 	count := ap.RestartCount
 	errType := errorTypeFromAgentErr(ap.LastError)
+	lastErr := ap.LastError
+	noWorkCount := ap.NoWorkCount
+	idleSince := ap.IdleSince
 	ap.BackoffUntil = time.Now().Add(backoff)
 	ap.Mu.Unlock()
-	slog.Info("waiting before restart", "worktree", ap.Entry.Worktree, "backoff", backoff, "attempt", count)
 
-	_, span := startSpan(cmdstore.RootContext(),
-		"daemon.supervisor.restart",
-		attribute.String("loom.agent", ap.Entry.Worktree),
-		attribute.String("loom.role", ap.Entry.Role),
-		attribute.String("loom.workspace", s.WorkspaceID),
-		attribute.Int("loom.restart_count", count),
-		attribute.String("loom.error_type", errType),
-	)
-	defer span.End()
-
-	if evt, err := events.NewEvent(events.AgentRestarted, ap.Entry.Worktree, ap.Entry.Role, "", events.AgentRestartedData{PID: 0, RestartCount: count}); err == nil {
-		s.EmitEvent(evt)
+	if logBackoffWait(ap, backoff, count, lastErr, noWorkCount, idleSince) {
+		defer s.announceRestartWait(ap, count, errType)()
 	}
 
 	// Keep the agent's liveness tick fresh during a long wait (a block, or a
@@ -924,12 +915,15 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 
 	result := make([]SupervisedAgentStatus, len(snapshot))
 	for i, ap := range snapshot {
+		// Read the placement OUTSIDE Mu (it is published atomically): the
+		// effective repo/path is where the agent actually ran this cycle.
+		effectiveRepo, effectivePath := ap.effectivePlacement()
 		ap.Mu.Lock()
 		result[i] = SupervisedAgentStatus{
 			Worktree:               ap.Entry.Worktree,
 			Role:                   ap.Entry.Role,
-			Repo:                   ap.Entry.Repo,
-			WorktreePath:           ap.WorktreePath,
+			Repo:                   effectiveRepo,
+			WorktreePath:           effectivePath,
 			PID:                    ap.Pid,
 			RestartCount:           ap.RestartCount,
 			LastStart:              ap.LastStart,
@@ -948,9 +942,16 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 		}
 		if ap.LastError != nil {
 			result[i].LastErrorClass = ap.LastError.Class.String()
+			result[i].LastErrorEvidence = ap.LastError.Evidence.Summary()
 			// Derived, not stored: the agent's last transition was a claim-hold
 			// gate. Clears itself on the next successful pre-flight.
 			result[i].ClaimsGated = ap.LastError.Class.Is(agenterr.ClaimsHeldOutcome)
+		}
+		// Projected as its own field, not folded into LastErrorClass: the
+		// message names the drifted version and the profile directory, which
+		// is the entire actionable content of the failure.
+		if ap.ProfileError != nil {
+			result[i].ProfileError = ap.ProfileError.Message
 		}
 		ap.Mu.Unlock()
 		// Resolve backend name outside the lock (GetEffectiveBackend acquires ap.Mu)
@@ -969,12 +970,4 @@ func (s *Supervisor) resolveRoleConfig(roleName string, agentIndex int) (config.
 		return config.RoleConfig{}, fmt.Errorf("agent[%d]: %w", agentIndex, err)
 	}
 	return rc, nil
-}
-
-// ResolveDaemonPath resolves a path relative to projectDir, or returns as-is if absolute.
-func ResolveDaemonPath(projectDir, path string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	return filepath.Join(projectDir, path)
 }

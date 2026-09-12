@@ -24,17 +24,25 @@ This command:
 2. Pushes each to main (or per-repo default)
 3. Pulls main into all worktrees
 
+Sync operates on REPO CHECKOUTS, not on agent worktrees; the summary names the
+agent worktrees a run did not cover.
+
+Each repo's result is verified after the pull by measuring the checkout against
+<remote>/<default-branch>. Only a repo git reports as containing that branch is
+shown as ✓; a repo still behind, or left mid-merge, is reported as a failure and
+the command exits non-zero.
+
 This is the recommended way to keep worktrees in sync with the main branch.
 
 Flags:
   --push-only        Only push (skip pulling)
-  --pull-only        Only pull (skip pushing)
+  --pull-only        Only pull (never pushes, including the post-merge push)
   -W, --workspace    Workspace to operate on
 
 Examples:
   loom sync                      # Full sync: push all ready + pull all
   loom sync --push-only          # Only push completed work
-  loom sync --pull-only          # Only pull latest (same as pull --all)
+  loom sync --pull-only          # Only pull latest; nothing is published
   loom sync -W myworkspace       # Sync specific workspace`,
 	Args: cobra.NoArgs,
 	RunE: runFullSync,
@@ -42,7 +50,7 @@ Examples:
 
 func init() {
 	syncCmd.Flags().BoolVar(&syncPushOnly, "push-only", false, "Only push (skip pulling)")
-	syncCmd.Flags().BoolVar(&syncPullOnly, "pull-only", false, "Only pull (skip pushing)")
+	syncCmd.Flags().BoolVar(&syncPullOnly, "pull-only", false, "Only pull (never pushes, including the post-merge push)")
 	syncCmd.Flags().StringVarP(&syncWorkspaceFlag, "workspace", "W", "", "Workspace to operate on")
 	cli.RegisterCommand(syncCmd)
 }
@@ -150,7 +158,32 @@ func syncSingleWorkspace(deps *cli.Deps, resolver *cli.Resolver, pushOnly, pullO
 	if !pushOnly {
 		fmt.Println("")
 		fmt.Println("--- Phase 2: Pull ---")
-		pullWorkspaceWorktrees(deps, worktrees, "")
+		// --pull-only means "do not touch any remote in a writing way". The pull
+		// path pushes the merge result by default; that push must be suppressed
+		// too, or the flag only moves where the push happens.
+		outcomes := pullWorkspaceWorktreesWithCoverage(deps, worktrees, "", !pullOnly, agentWorktreeNames(resolver))
+		if n := summaryFailures(outcomes); n > 0 {
+			return fmt.Errorf("pull phase left %d repo(s) not in sync in workspace %s", n, resolver.WorkspaceName())
+		}
 	}
 	return nil
+}
+
+// agentWorktreeNames lists the agent worktrees sync does not visit, as
+// <repo>/<agent>. This is a reporting nicety only: discovery errors and
+// non-workspace mode yield an empty list and never fail the sync.
+func agentWorktreeNames(resolver *cli.Resolver) []string {
+	agents, err := resolver.DiscoverAgentWorktrees()
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(agents))
+	for _, a := range agents {
+		if a.Repo != nil {
+			names = append(names, a.Repo.Name+"/"+a.Name)
+			continue
+		}
+		names = append(names, a.Name)
+	}
+	return names
 }

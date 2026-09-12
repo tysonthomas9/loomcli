@@ -28,6 +28,7 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.TranscriptPath = ""
 	ap.BeforeRef = ""
 	ap.AssignedTaskID = ""
+	ap.AssignedTaskRepo = ""      // per-cycle, like AssignedTaskID; ap.placement is NOT cleared — it must carry into the next cycle so recovery reads the lock where the crash left it
 	ap.ResumeTaskID = ""          // per-cycle; re-detected in preFlightSetup (ResumeFailures persists)
 	ap.RecoveryMode = recoverCold // per-cycle; re-classified in preFlightSetup
 	ap.LastActivity = time.Time{}
@@ -79,8 +80,13 @@ func extractLeafUsage(data []byte) leafUsage {
 func (s *Supervisor) completeBackendUnavailableCleanup(ap *AgentProcess) {
 	state := takeAgentSessionForFinalize(ap)
 	taskID := s.taskIDForLifecycle(ap, nil)
+	const backendUnavailableMsg = "backend binary unavailable at spawn time"
 	if state.session != nil {
-		_ = state.session.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "backend_unavailable"})
+		_ = state.session.Finalize(sessions.FinalizeOptions{
+			ExitCode:     -1,
+			ErrorClass:   "backend_unavailable",
+			ErrorMessage: backendUnavailableMsg,
+		})
 	}
 	if state.sessionID != "" {
 		s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
@@ -89,6 +95,7 @@ func (s *Supervisor) completeBackendUnavailableCleanup(ap *AgentProcess) {
 			leaseToken: state.leaseToken,
 			exitCode:   -1,
 			errClass:   "backend_unavailable",
+			errMessage: backendUnavailableMsg,
 			taskID:     taskID,
 		})
 		return
@@ -116,12 +123,14 @@ func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
 	}
 	taskID := s.taskIDForFinalize(ap)
 	errClass := agentErrorClass(ap)
+	errMessage := agentErrorMessage(ap)
 	// Read the leaf transcript once: it feeds both the on-disk token backfill (via
 	// finalizeLocalSession) and the control-plane transcript_ref artifact upload.
 	// Read before finalizeLocalSession, whose codex/claude re-sync can rewrite the
 	// on-disk file — this captures the TS leaf's canonical transcript verbatim.
 	transcriptData, leafTokens, _ := s.readLeafTranscript(state.sessionID)
-	diffResult := finalizeLocalSession(state.session, ap, state.beforeRef, taskID, exitCode, errClass, leafTokens)
+	diffResult := finalizeLocalSession(state.session, ap, state.beforeRef, taskID, exitCode,
+		errClass, errMessage, leafTokens)
 	// KNOWN GAP — local session only. leafTokens lands on the on-disk session
 	// record; it does NOT reach the control plane, because store.AgentSessionUpdate
 	// has no token or cost fields (only Status/TaskID/FinishedAt/ErrorClass/
@@ -136,6 +145,7 @@ func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
 		leaseToken:     state.leaseToken,
 		exitCode:       exitCode,
 		errClass:       errClass,
+		errMessage:     errMessage,
 		taskID:         taskID,
 		diffResult:     diffResult,
 		transcriptData: transcriptData,
@@ -161,7 +171,7 @@ func takeAgentSessionForFinalize(ap *AgentProcess) agentSessionFinalizeState {
 
 func (s *Supervisor) taskIDForFinalize(ap *AgentProcess) string {
 	taskID := ""
-	if info, lockErr := cli.ReadLockFile(ap.WorktreePath); lockErr == nil {
+	if info, lockErr := cli.ReadLockFile(ap.WorkDir()); lockErr == nil {
 		taskID = info.TaskID
 	}
 	if taskID == "" {
@@ -180,6 +190,28 @@ func agentErrorClass(ap *AgentProcess) string {
 	return errClass
 }
 
+// agentErrorMessage returns the classified failure message from the agent's most
+// recent exit, or "" when the run ended cleanly (LastError nil).
+func agentErrorMessage(ap *AgentProcess) string {
+	ap.Mu.Lock()
+	msg := ""
+	if ap.LastError != nil {
+		msg = ap.LastError.Message
+	}
+	ap.Mu.Unlock()
+	return msg
+}
+
+// agentSessionSummary returns the control-plane summary pointer for a completing
+// session: the classified message on a failed status, nil otherwise (a clean run
+// must not publish a stale LastError).
+func agentSessionSummary(status domain.AgentSessionStatus, msg string) *string {
+	if msg == "" || status != domain.AgentSessionFailed {
+		return nil
+	}
+	return &msg
+}
+
 func finalizeLocalSession(
 	sess *sessions.Session,
 	ap *AgentProcess,
@@ -187,14 +219,16 @@ func finalizeLocalSession(
 	taskID string,
 	exitCode int,
 	errClass string,
+	errMessage string,
 	leafTokens leafUsage,
 ) sessionfinalize.WithWorktreeResult {
 	result, err := sessionfinalize.WithWorktree(sess, sessionfinalize.WithWorktreeOptions{
-		WorktreePath: ap.WorktreePath,
+		WorktreePath: ap.WorkDir(),
 		BeforeRef:    beforeRef,
 		TaskID:       taskID,
 		ExitCode:     exitCode,
 		ErrorClass:   errClass,
+		ErrorMessage: errMessage,
 		// Carry the leaf's reported usage so the supervisor's collector-less finalize
 		// records non-zero tokens on the session (otherwise the reaped worker's
 		// collector-aware finalize never runs and tokens land 0). Sourced from the
@@ -290,7 +324,8 @@ func (s *Supervisor) runCompletionHooks(ap *AgentProcess, exitCode int) int {
 // The counter lives in the label set as <prefix><n>; CompletedRounds takes the
 // max, so a counter left behind by a crashed cleanup is harmless.
 //
-// ORDER IS THE CRASH-SAFETY MECHANISM. There is no atomic multi-label write, so:
+// ORDER IS THE CRASH-SAFETY MECHANISM, on BOTH branches. There is no atomic
+// multi-label write, so the re-arm sequence is:
 //
 //  1. remove the re-arm label FIRST — this hands the task back to the previous
 //     stage. A crash between 1 and 2 repeats a round: at worst one extra review,
@@ -303,9 +338,22 @@ func (s *Supervisor) runCompletionHooks(ap *AgentProcess, exitCode int) int {
 // from a round that already ran, so the next pass skips a review and the task
 // ships under-reviewed.
 //
-// The ship branch writes NO counter, so a shipped task's highest counter is
-// threshold-1, and a threshold of 1 ships with no counter at all. "N rounds ran"
-// is observable from the stage's comments, not from the label.
+// The ship branch is an EXIT from the cycle and obeys the same ordering for the
+// same reason: remove the re-arm label, stamp the ship label, then clear the
+// counters. Its end state is exactly
+//
+//	ship label present, re-arm label absent, no counters, status open
+//
+// and every part of that is load-bearing. Leaving the re-arm label behind was a
+// re-ship spin: the previous stage's filter still matched, it re-claimed the
+// task, the recomputed count was unchanged, `completed >= threshold` held again,
+// and the pipeline shipped forever. Leaving the counters behind is the mirror
+// failure — any later re-entry into the cycle computes threshold-1 + 1 and ships
+// with zero rounds run, i.e. a SKIPPED review, which this ordering doctrine
+// exists to rule out. Do not re-introduce either.
+//
+// The ship branch writes NO counter and erases the ones it finds, so "N rounds
+// ran" is observable from the stage's comments, not from the label set.
 func (s *Supervisor) advanceReviewCycle(ctx context.Context, taskID string, cycle *domain.AgentHookCycle) error {
 	if cycle == nil {
 		return fmt.Errorf("cycle action has no cycle block")
@@ -337,19 +385,7 @@ func (s *Supervisor) advanceReviewCycle(ctx context.Context, taskID string, cycl
 	completed := cycle.CompletedRounds(issue.Labels) + 1 // this pass finished a round
 
 	if completed >= cycle.Threshold {
-		if err := s.IssueBackend.AddLabel(ctx, taskID, cycle.ShipLabel); err != nil {
-			return fmt.Errorf("stamp %q: %w", cycle.ShipLabel, err)
-		}
-		// The ship label routes the task to the next stage, and that stage can
-		// only claim an `open` task — exactly like the re-arm below. Without
-		// this the loop bounds correctly and then stalls at the hand-off:
-		// ship label stamped, nothing able to act on it.
-		if err := s.reopenForNextStage(ctx, taskID, issue.Status); err != nil {
-			return err
-		}
-		slog.InfoContext(ctx, "review cycle complete; shipping",
-			"task", taskID, "rounds", completed, "threshold", cycle.Threshold, "ship_label", cycle.ShipLabel)
-		return nil
+		return s.shipReviewCycle(ctx, taskID, cycle, issue, completed)
 	}
 
 	if err := s.IssueBackend.RemoveLabel(ctx, taskID, cycle.RearmLabel); err != nil {
@@ -374,6 +410,49 @@ func (s *Supervisor) advanceReviewCycle(ctx context.Context, taskID string, cycl
 	}
 	slog.InfoContext(ctx, "review cycle re-armed",
 		"task", taskID, "round", completed, "threshold", cycle.Threshold, "rearmed", cycle.RearmLabel)
+	return nil
+}
+
+// shipReviewCycle is the cycle's exit: the task leaves carrying the ship label
+// and nothing the cycle can re-trigger on. See advanceReviewCycle's doc comment
+// for why the order and the counter cleanup are both load-bearing.
+//
+// The caller has already run the deliberate-stop guard, so this never writes to
+// a closed or blocked task.
+func (s *Supervisor) shipReviewCycle(ctx context.Context, taskID string, cycle *domain.AgentHookCycle, issue *backend.IssueDetailData, completed int) error {
+	// Remove FIRST: a crash before the ship label lands repeats a round, which
+	// is the trade the re-arm branch already takes. Stamping first would
+	// reproduce the both-labels-present re-ship spin on every crash.
+	//
+	// Hard-failing here is safe even when the re-arm label is already absent:
+	// fleet-db's RemoveLabel is a no-op on a label the issue does not carry.
+	if err := s.IssueBackend.RemoveLabel(ctx, taskID, cycle.RearmLabel); err != nil {
+		return fmt.Errorf("clear re-arm %q before shipping: %w", cycle.RearmLabel, err)
+	}
+	if err := s.IssueBackend.AddLabel(ctx, taskID, cycle.ShipLabel); err != nil {
+		return fmt.Errorf("stamp %q: %w", cycle.ShipLabel, err)
+	}
+	// Counters are the cycle's memory, and a survivor makes a later re-entry
+	// ship with zero rounds run. Best-effort for the same reason as the stale
+	// cleanup above: the ship label is already stamped, so the hand-off is
+	// complete and a lingering counter is cosmetic — never fail the run for it.
+	for _, label := range issue.Labels {
+		if cycle.ParseCounter(label) > 0 {
+			if err := s.IssueBackend.RemoveLabel(ctx, taskID, label); err != nil {
+				slog.WarnContext(ctx, "cycle counter left in place after ship",
+					"task", taskID, "label", label, "err", err)
+			}
+		}
+	}
+	// The ship label routes the task to the next stage, and that stage can only
+	// claim an `open` task — exactly like the re-arm above. Without this the
+	// loop bounds correctly and then stalls at the hand-off: ship label
+	// stamped, nothing able to act on it.
+	if err := s.reopenForNextStage(ctx, taskID, issue.Status); err != nil {
+		return err
+	}
+	slog.InfoContext(ctx, "review cycle complete; shipping",
+		"task", taskID, "rounds", completed, "threshold", cycle.Threshold, "ship_label", cycle.ShipLabel)
 	return nil
 }
 
@@ -450,7 +529,7 @@ func (s *Supervisor) completionHookTarget(ap *AgentProcess, exitCode int) (*doma
 	if lastErr != nil || completionHookSkipReasons[stopReason] {
 		return nil, "", false
 	}
-	if IsYieldRequested(ap.WorktreePath) {
+	if IsYieldRequested(ap.WorkDir()) {
 		return nil, "", false
 	}
 	taskID := s.taskIDForFinalize(ap)
@@ -718,19 +797,19 @@ func (s *Supervisor) mirrorNativeTranscript(ap *AgentProcess) error {
 	}
 	switch sess.Meta.Backend {
 	case backendnames.Codex:
-		path, err := sess.SyncLatestCodexRollout(ap.WorktreePath, sess.Meta.StartedAt)
+		path, err := sess.SyncLatestCodexRollout(ap.WorkDir(), sess.Meta.StartedAt)
 		if err == nil && path == "" {
 			return fmt.Errorf("no codex rollout for %s since %s",
-				ap.WorktreePath, sess.Meta.StartedAt.Format(time.RFC3339))
+				ap.WorkDir(), sess.Meta.StartedAt.Format(time.RFC3339))
 		}
 		return err
 	case backendnames.Claude:
 		// Empty claudeUUID: newest-by-mtime in the worktree's project dir, the
 		// same resolution the supervisor's finalize uses.
-		path, err := sess.SyncLatestClaudeTranscript(ap.WorktreePath, "", sess.Meta.StartedAt)
+		path, err := sess.SyncLatestClaudeTranscript(ap.WorkDir(), "", sess.Meta.StartedAt)
 		if err == nil && path == "" {
 			return fmt.Errorf("no claude transcript for %s since %s",
-				ap.WorktreePath, sess.Meta.StartedAt.Format(time.RFC3339))
+				ap.WorkDir(), sess.Meta.StartedAt.Format(time.RFC3339))
 		}
 		return err
 	default:

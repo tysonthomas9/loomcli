@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -29,7 +30,7 @@ func TestBuildCommand_SourceReposInjected(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	cmd, err := s.buildCommand(ap)
+	cmd, err := s.buildCommand(context.Background(), ap)
 	if err != nil {
 		t.Fatalf("buildCommand error: %v", err)
 	}
@@ -66,7 +67,7 @@ func TestBuildCommand_SourceReposAbsentWhenEmpty(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	cmd, err := s.buildCommand(ap)
+	cmd, err := s.buildCommand(context.Background(), ap)
 	if err != nil {
 		t.Fatalf("buildCommand error: %v", err)
 	}
@@ -95,7 +96,7 @@ func TestBuildCommand_NoConstraints_BackwardCompat(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	cmd, err := s.buildCommand(ap)
+	cmd, err := s.buildCommand(context.Background(), ap)
 	if err != nil {
 		t.Fatalf("buildCommand error: %v", err)
 	}
@@ -133,7 +134,7 @@ func TestBuildCommand_ErrorOnUnresolvableRepos(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	_, err := s.buildCommand(ap)
+	_, err := s.buildCommand(context.Background(), ap)
 	if err == nil {
 		t.Fatal("expected error from buildCommand when repo groups are unresolvable, got nil")
 	}
@@ -162,7 +163,7 @@ func TestBuildCommand_DaemonSocketEnvVar(t *testing.T) {
 			WorktreePath: tmpDir,
 		}
 
-		cmd, err := s.buildCommand(ap)
+		cmd, err := s.buildCommand(context.Background(), ap)
 		if err != nil {
 			t.Fatalf("buildCommand error: %v", err)
 		}
@@ -195,7 +196,7 @@ func TestBuildCommand_DaemonSocketEnvVar(t *testing.T) {
 			WorktreePath: tmpDir,
 		}
 
-		cmd, err := s.buildCommand(ap)
+		cmd, err := s.buildCommand(context.Background(), ap)
 		if err != nil {
 			t.Fatalf("buildCommand error: %v", err)
 		}
@@ -209,3 +210,47 @@ func TestBuildCommand_DaemonSocketEnvVar(t *testing.T) {
 
 // TestDaemonStop_ClosesConcurrencyTracker verifies that Daemon.Stop() calls
 // concurrency.Close() to unblock waiters.
+
+// TestBuildCommand_GitTerminalPromptDisabled verifies agent subprocesses never
+// inherit an environment in which git can block on an interactive credential
+// prompt no one is there to answer.
+func TestBuildCommand_GitTerminalPromptDisabled(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	s := &Supervisor{
+		ConfigSnapshot: func() *cfgpkg.DaemonConfig { return &cfgpkg.DaemonConfig{Daemon: cfgpkg.DaemonSettings{}} },
+		ProjectDir:     tmpDir,
+		Shutdown:       make(chan struct{}),
+		StoppedAgents:  make(map[string]struct{}),
+		EmitEvent:      func(events.Event) {},
+	}
+	ap := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"},
+		WorktreePath: tmpDir,
+	}
+
+	cmd, err := s.buildCommand(context.Background(), ap)
+	if err != nil {
+		t.Fatalf("buildCommand error: %v", err)
+	}
+
+	var found []string
+	for _, env := range cmd.Env {
+		if strings.HasPrefix(env, "GIT_TERMINAL_PROMPT=") {
+			found = append(found, env)
+		}
+	}
+	if len(found) != 1 || found[0] != "GIT_TERMINAL_PROMPT=0" {
+		t.Errorf("GIT_TERMINAL_PROMPT entries = %v, want exactly [GIT_TERMINAL_PROMPT=0]", found)
+	}
+}
+
+func TestAppendGitTerminalPrompt_KeepsExplicitSetting(t *testing.T) {
+	env := appendGitTerminalPrompt([]string{"PATH=/usr/bin", "GIT_TERMINAL_PROMPT=1"})
+	if len(env) != 2 {
+		t.Fatalf("env = %v, want the input unchanged", env)
+	}
+	if env[1] != "GIT_TERMINAL_PROMPT=1" {
+		t.Errorf("env[1] = %q, want an explicit operator setting to win", env[1])
+	}
+}

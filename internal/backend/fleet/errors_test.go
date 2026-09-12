@@ -2,7 +2,9 @@ package fleet
 
 import (
 	"context"
+	"errors"
 	"net"
+	"net/http"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -28,7 +30,8 @@ func TestClassifyHTTPError_StatusCodes(t *testing.T) {
 		{"403 forbidden", 403, apiResponse{Error: "forbidden"}, backend.KindUnavailable},
 		{"404 not found", 404, apiResponse{Error: "issue not found"}, backend.KindNotFound},
 		{"409 conflict", 409, apiResponse{Error: "already claimed"}, backend.KindConflict},
-		{"429 rate limit", 429, apiResponse{Error: "too many requests"}, backend.KindUnavailable},
+		{"429 rate limit", 429, apiResponse{Error: "too many requests"}, backend.KindRateLimited},
+		{"429 wins over string matcher", 429, apiResponse{Error: "invalid burst"}, backend.KindRateLimited},
 		{"500 internal", 500, apiResponse{Error: "server error"}, backend.KindInternal},
 		{"503 unavailable", 503, apiResponse{Error: "maintenance"}, backend.KindUnavailable},
 		{"504 timeout", 504, apiResponse{Error: "gateway timeout"}, backend.KindTimeout},
@@ -152,5 +155,127 @@ func TestClassifyTransportError(t *testing.T) {
 				t.Fatalf("expected kind %s, got %v", tt.wantKind, result)
 			}
 		})
+	}
+}
+
+func TestDoRequest_CapturesRetryAfterHeader(t *testing.T) {
+	tests := []struct {
+		name       string
+		retryAfter string
+		wantMeta   string
+	}{
+		{name: "header present", retryAfter: "30", wantMeta: "30"},
+		{name: "header absent"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if tt.retryAfter != "" {
+					w.Header().Set("Retry-After", tt.retryAfter)
+				}
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":"rate limit exceeded"}`))
+			})
+			defer ts.Close()
+
+			_, err := fb.List(context.Background(), backend.ListOpts{})
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			var be *backend.BackendError
+			if !errors.As(err, &be) {
+				t.Fatalf("error is not a *backend.BackendError: %v", err)
+			}
+			if be.Kind != backend.KindRateLimited {
+				t.Errorf("kind = %s, want %s", be.Kind, backend.KindRateLimited)
+			}
+			if got := be.Meta[backend.MetaRetryAfter]; got != tt.wantMeta {
+				t.Errorf("Meta[%s] = %q, want %q", backend.MetaRetryAfter, got, tt.wantMeta)
+			}
+		})
+	}
+}
+
+// metaOf returns the BackendError meta map for assertions, or nil.
+func metaOf(t *testing.T, err error) map[string]string {
+	t.Helper()
+	var be *backend.BackendError
+	if !errors.As(err, &be) {
+		t.Fatalf("expected *backend.BackendError, got %T (%v)", err, err)
+	}
+	return be.Meta
+}
+
+// The regression the PUPPET-127 fix hangs on: "not_claimable" must keep
+// classifying as KindConflict (nothing downstream changes) AND now carry the
+// server code, which is what makes the permanent/transient split possible.
+func TestClassifyHTTPError_NotClaimableCarriesCode(t *testing.T) {
+	err := classifyHTTPError("Claim", 422, apiResponse{
+		Error: "issue is not claimable",
+		Code:  "not_claimable",
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !backend.IsKind(err, backend.KindConflict) {
+		t.Fatalf("kind changed: want conflict, got %v", err)
+	}
+	if got := backend.ErrorCode(err); got != "not_claimable" {
+		t.Fatalf("ErrorCode() = %q, want %q", got, "not_claimable")
+	}
+	if !backend.ClaimRejectedPermanently(err) {
+		t.Fatal("ClaimRejectedPermanently() = false, want true")
+	}
+}
+
+func TestClassifyHTTPError_CodeAndMetaCoexist(t *testing.T) {
+	err := classifyHTTPError("Claim", 409, apiResponse{
+		Error: "issue already claimed",
+		Code:  "already_claimed",
+		Meta:  map[string]string{"existing_owner": "worktree-b"},
+	})
+	meta := metaOf(t, err)
+	if meta["existing_owner"] != "worktree-b" {
+		t.Errorf("existing_owner = %q, want %q", meta["existing_owner"], "worktree-b")
+	}
+	if meta[backend.MetaErrorCode] != "already_claimed" {
+		t.Errorf("error_code = %q, want %q", meta[backend.MetaErrorCode], "already_claimed")
+	}
+	// A foreign-held claim is contended, not permanently rejected.
+	if backend.ClaimRejectedPermanently(err) {
+		t.Error("ClaimRejectedPermanently() = true for already_claimed, want false")
+	}
+}
+
+func TestClassifyHTTPError_NoCodeLeavesMetaUntouched(t *testing.T) {
+	err := classifyHTTPError("Op", 500, apiResponse{Error: "server error"})
+	if !backend.IsKind(err, backend.KindInternal) {
+		t.Fatalf("kind changed: want internal, got %v", err)
+	}
+	if meta := metaOf(t, err); meta != nil {
+		if _, ok := meta[backend.MetaErrorCode]; ok {
+			t.Errorf("error_code set on a codeless response: %v", meta)
+		}
+	}
+}
+
+// The operator-parked claim refusal (fleet-db PUPPET-148) must survive the
+// three-hop classifier as KindValidation WITH its code intact, because the
+// permanence predicate keys off the code, not the Kind.
+func TestClassifyHTTPError_OperatorOnlyClaimRefusal(t *testing.T) {
+	err := classifyHTTPError("ClaimIssue", 422, apiResponse{
+		Code:  "operator_only",
+		Error: "issue is operator-only and cannot be claimed by an agent: PUPPET-1",
+	})
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("kind = %v, want KindValidation", err)
+	}
+	if got := backend.ErrorCode(err); got != "operator_only" {
+		t.Errorf("ErrorCode = %q, want operator_only", got)
+	}
+	if !backend.ClaimRejectedPermanently(err) {
+		t.Error("ClaimRejectedPermanently = false, want true")
 	}
 }

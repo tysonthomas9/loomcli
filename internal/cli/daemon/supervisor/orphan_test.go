@@ -38,6 +38,8 @@ func TestHelperProcess(t *testing.T) {
 	switch mode {
 	case "fake_worker_with_isolated_child":
 		runFakeWorkerWithIsolatedChild(t)
+	case "fake_worker_with_inherited_stdout_child":
+		runFakeWorkerWithInheritedStdoutChild(t)
 	case "fake_backend_sleep":
 		runFakeBackendSleep(t)
 	default:
@@ -104,6 +106,38 @@ func runFakeWorkerWithIsolatedChild(_ *testing.T) {
 	// (its grace windows are ≤8s), but short enough to bound the blast radius
 	// if this helper ever leaks past watchRootPID's safety net.
 	time.Sleep(helperLingerSleep)
+	os.Exit(0)
+}
+
+// runFakeWorkerWithInheritedStdoutChild mimics the shape that stalled daemon
+// shutdown in PUPPET-39: it forks a grandchild into its own pgroup that
+// INHERITS this process's stdout, then exits immediately, leaving the
+// grandchild holding the inherited descriptor. If the supervisor handed the
+// child an io.MultiWriter, that descriptor is the write end of an os.Pipe and
+// cmd.Wait() cannot return until the grandchild dies. With a real *os.File it
+// is just a dup of a regular-file fd and Wait() returns at once.
+func runFakeWorkerWithInheritedStdoutChild(_ *testing.T) {
+	selfPath, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "executable:", err)
+		os.Exit(1)
+	}
+	cmd := exec.Command(selfPath, "-test.run=TestHelperProcess", "--") //nolint:norawexec,gosec // G204/norawexec: test helper self-exec
+	cmd.Env = append(os.Environ(), "LOOM_TEST_HELPER_MODE=fake_backend_sleep")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Stdin = nil
+	// The point of this helper: the grandchild keeps the agent's stdout open.
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stdout
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintln(os.Stderr, "start child:", err)
+		os.Exit(1)
+	}
+	if path := os.Getenv("LOOM_TEST_CHILD_PID_FILE"); path != "" {
+		_ = os.WriteFile(path, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600)
+	}
+	// Exit straight away — the test asserts cmd.Wait() observes THIS exit and
+	// does not block on the grandchild.
 	os.Exit(0)
 }
 
@@ -443,5 +477,113 @@ func TestKillOrphanedWorktreeProcesses_PgroupKillEndToEnd(t *testing.T) {
 	case <-exited:
 	case <-time.After(3 * time.Second):
 		t.Fatalf("pgroup SIGTERM did not stop pid %d within 3s", pid)
+	}
+}
+
+// TestPathMatches_CaseSensitivity pins the comparison itself: pure, no
+// filesystem, no processes, so the case-sensitive branch is checkable on a
+// case-insensitive dev host and vice versa.
+func TestPathMatches_CaseSensitivity(t *testing.T) {
+	cases := []struct {
+		cwd             string
+		worktree        string
+		caseInsensitive bool
+		want            bool
+	}{
+		{"/a/PUPPET/x", "/a/puppet", false, false},
+		{"/a/PUPPET/x", "/a/puppet", true, true},
+		{"/a/puppet/x", "/a/PUPPET", true, true},
+		{"/a/puppet", "/a/PUPPET", true, true},
+		{"/a/puppet", "/a/puppet", false, true},
+		// The classic prefix bug: a sibling directory whose name merely starts
+		// with the worktree's must not match, folded or not.
+		{"/a/puppet-other/x", "/a/puppet", true, false},
+		{"/a/puppet-other/x", "/a/puppet", false, false},
+	}
+	for _, tc := range cases {
+		if got := pathMatches(tc.cwd, tc.worktree, tc.caseInsensitive); got != tc.want {
+			t.Errorf("pathMatches(%q, %q, %v) = %v, want %v",
+				tc.cwd, tc.worktree, tc.caseInsensitive, got, tc.want)
+		}
+	}
+}
+
+// TestPathIsCaseInsensitive exercises the probe. The answer for a real
+// directory is host-dependent by design, so the assertion is self-consistency
+// (a directory and its descendant live on the same filesystem) plus the two
+// "cannot tell" paths, which must both return false without hanging.
+func TestPathIsCaseInsensitive(t *testing.T) {
+	root := t.TempDir()
+	mixed := filepath.Join(root, "Mixed")
+	child := filepath.Join(mixed, "Inner")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if a, b := pathIsCaseInsensitive(mixed), pathIsCaseInsensitive(child); a != b {
+		t.Errorf("probe disagrees on the same filesystem: %q=%v, %q=%v", mixed, a, child, b)
+	}
+
+	if pathIsCaseInsensitive(filepath.Join(root, "does-not-exist")) {
+		t.Error("probe returned true for a nonexistent path; false is the safe answer")
+	}
+
+	// All-digit component: the upward walk must terminate rather than spin.
+	digits := filepath.Join(root, "123")
+	if err := os.MkdirAll(digits, 0o755); err != nil {
+		t.Fatalf("mkdir digits: %v", err)
+	}
+	_ = pathIsCaseInsensitive(digits)
+}
+
+// TestFindWorktreeOrphans_MatchesDespiteCaseMismatch is the regression test for
+// the silent-no-op sweep: the kernel reports a cwd in the directory's canonical
+// on-disk case, while the configured worktree path carries whatever case the
+// config used. It calls findWorktreeOrphans itself — a test that re-implements
+// the match inline would pass while the bug survived.
+//
+// Direction matters: the directory created on disk is the LOWERCASE one and the
+// path handed to findWorktreeOrphans the UPPERCASE one. The other way round the
+// kernel would report the uppercase spelling and the test would pass unfixed.
+func TestFindWorktreeOrphans_MatchesDespiteCaseMismatch(t *testing.T) {
+	if procInspector.List == nil || procInspector.CWD == nil {
+		t.Skip("no process inspector on this platform")
+	}
+	root := t.TempDir()
+	lower := filepath.Join(root, "puppet", "wt")
+	if err := os.MkdirAll(lower, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	upper := filepath.Join(root, "PUPPET", "wt") // never created; config spelling
+
+	if !pathIsCaseInsensitive(lower) {
+		t.Skip("filesystem is case-sensitive; the case-mismatch scenario cannot occur here")
+	}
+
+	cmd := exec.Command("sleep", "15") //nolint:norawexec,gosec // G204/norawexec: fixed args
+	cmd.Dir = lower
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+	pid := cmd.Process.Pid
+	t.Cleanup(func() {
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	})
+
+	// Stub only List, so the process looks reparented to init; the real CWD
+	// lookup stays in place and reports the genuine kernel spelling.
+	origList := procInspector.List
+	procInspector.List = func() ([]procInfo, error) {
+		return []procInfo{{PID: pid, PPID: 1, PGID: pid}}, nil
+	}
+	t.Cleanup(func() { procInspector.List = origList })
+
+	got := findWorktreeOrphans([]string{upper})
+	if len(got) != 1 {
+		t.Fatalf("findWorktreeOrphans(%q) = %+v, want exactly 1 candidate for pid %d", upper, got, pid)
+	}
+	if got[0].PID != pid {
+		t.Fatalf("candidate PID = %d, want %d", got[0].PID, pid)
 	}
 }

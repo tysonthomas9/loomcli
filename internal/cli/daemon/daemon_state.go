@@ -92,14 +92,24 @@ func ReadStateFile(path string) (*DaemonState, error) {
 }
 
 // writeStateFile writes the daemon-agents.json state file.
+// degradations are the supervisor's active degradation episodes; they ride in
+// the file so every out-of-band reader learns the daemon is impaired without
+// having to reach the daemon itself.
+//
+// unavailable holds the agents the daemon could not construct. They are
+// appended as ordinary rows because this file is the whole fleet as the CLI and
+// the dashboard see it: leaving them out is what would make a misconfigured
+// agent silently vanish rather than show up as broken.
 //
 // hold is variadic to carry 0 or 1 claim-hold snapshots without disturbing the
 // existing positional signature (and its call sites).
-func writeStateFile(path string, startedAt time.Time, agents []supervisor.SupervisedAgentStatus, quarantined []supervisor.QuarantinedTaskInfo, maxRetries int, hold ...*supervisor.ClaimHold) error {
+func writeStateFile(path string, startedAt time.Time, agents []supervisor.SupervisedAgentStatus, unavailable []UnavailableAgent, quarantined []supervisor.QuarantinedTaskInfo, degradations []supervisor.Degradation, maxRetries int, hold ...*supervisor.ClaimHold) error {
 	state := DaemonState{
 		PID:              os.Getpid(),
 		StartedAt:        startedAt,
-		Agents:           make([]DaemonAgentStatus, len(agents)),
+		Agents:           make([]DaemonAgentStatus, len(agents), len(agents)+len(unavailable)),
+		WrittenAt:        time.Now(),
+		Degradations:     degradations,
 		QuarantinedTasks: quarantined,
 	}
 	if len(hold) > 0 {
@@ -107,6 +117,11 @@ func writeStateFile(path string, startedAt time.Time, agents []supervisor.Superv
 	}
 	for i, ap := range agents {
 		state.Agents[i] = toDaemonAgentStatus(ap, maxRetries)
+	}
+	// computeAgentStatus is deliberately not consulted here — it reads run
+	// history an unavailable agent does not have.
+	for _, u := range unavailable {
+		state.Agents = append(state.Agents, u.toDaemonAgentStatus())
 	}
 
 	data, err := json.MarshalIndent(state, "", "  ")
@@ -143,8 +158,9 @@ func toDaemonAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) Da
 		LastExit:               ap.LastExit,
 		LastExitCode:           ap.LastExitCode,
 		StopReason:             string(ap.StopReason),
-		WorktreePath:           ap.WorktreePath,
+		WorktreePath:           ap.WorktreePath, // effective placement for the cycle (see supervisor.AgentPlacement)
 		LastErrorClass:         ap.LastErrorClass,
+		LastErrorEvidence:      ap.LastErrorEvidence,
 		NoWorkCount:            ap.NoWorkCount,
 		BlockCount:             ap.BlockCount,
 		BackoffUntil:           ap.BackoffUntil,
@@ -154,6 +170,7 @@ func toDaemonAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) Da
 		OwnershipLastHeartbeat: ap.OwnershipLastHeartbeat,
 		LastActivity:           ap.LastActivity,
 		ClaimsGated:            ap.ClaimsGated,
+		ProfileError:           ap.ProfileError,
 	}
 	if ap.StopReason != "" && ap.PID == 0 {
 		if !ap.LastExit.IsZero() {
@@ -174,7 +191,12 @@ func computeAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) str
 	// the supervise goroutine is alive and the agent self-resumes, so it is
 	// not "failed". Checked after the running guard so a re-spawned agent
 	// reads as "running".
-	if ap.StopReason == supervisor.StopReasonMaxRetriesBlocked {
+	// The issue-backend outage wait is the same shape: the supervise goroutine
+	// is alive and rechecking on a fixed interval, so the agent is waiting on
+	// infrastructure, not failed.
+	if ap.StopReason == supervisor.StopReasonMaxRetriesBlocked ||
+		ap.StopReason == supervisor.StopReasonProfileInvalid ||
+		ap.StopReason == supervisor.StopReasonIssueBackendUnavailable {
 		return "blocked"
 	}
 	// Not running - check if it failed via stop reason or restart count.

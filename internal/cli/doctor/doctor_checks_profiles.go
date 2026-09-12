@@ -3,6 +3,7 @@ package doctor
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agentprofile"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 )
 
 // profileProbeTimeout bounds one "<harness> --version" fork. The binary is a
@@ -76,6 +78,13 @@ func checkAgentProfiles() CheckResult {
 	for _, p := range profiles {
 		got := versions[p.Harness]
 		err := agentprofile.Verify(p.Dir, got)
+		if err == nil {
+			// Verify does not look at the credential at all — the token is
+			// deliberately outside the manifest — so a profile with no
+			// identity verified clean and doctor reported the fleet green
+			// while its agents died on their first API call. Probe it here.
+			err = checkProfileCredential(p)
+		}
 		switch {
 		case err == nil:
 		case errors.Is(err, agentprofile.ErrVersionDrift):
@@ -87,6 +96,12 @@ func checkAgentProfiles() CheckResult {
 		}
 	}
 
+	// Cross-profile, so it cannot live in the per-profile loop above: sharing
+	// is a property of a PAIR of roots. It is appended to broken deliberately
+	// — --fix must never see it, because the only repair is an interactive
+	// login and --fix exists to re-bless drift, not to touch credentials.
+	broken = append(broken, codexAuthSharingFaults(profiles)...)
+
 	var blessed []agentprofile.Profile
 	if doctorFix && len(drifted) > 0 {
 		// Every drifted profile leaves this call either blessed or broken:
@@ -96,6 +111,41 @@ func checkAgentProfiles() CheckResult {
 	}
 
 	return renderProfileResult(profiles, versions, blessed, drifted, broken, unknown)
+}
+
+// checkProfileCredential reports why a profile's own credential cannot serve as
+// an identity, or nil when the harness has none to carry or the one it has is
+// usable. It is the doctor-side twin of supervisor.ProfileSecretEnv's refusal,
+// and reuses that package's sentinels so the report buckets by the same repair
+// the boot path would name.
+//
+// It never reads the token bytes: existence and a non-whitespace size are
+// exactly what distinguishes "never minted" from "minted then broken", and a
+// credential must not pass through a reporting path.
+func checkProfileCredential(p agentprofile.Profile) error {
+	// The identity shape first: codex owns a login file rather than carrying
+	// an injected token, and this is literally the function the boot path
+	// calls, not a twin of it that can drift from it.
+	if err := supervisor.CheckProfileAuth(p.Dir, p.Harness); err != nil {
+		return err
+	}
+	path := supervisor.ProfileTokenPath(p.Dir, p.Harness)
+	if path == "" {
+		return nil // this harness carries no credential of its own
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: %s", supervisor.ErrProfileTokenMissing, path)
+		}
+		return fmt.Errorf("%w: %s: %v", supervisor.ErrProfileTokenUnreadable, path, err)
+	}
+	// Size, not content: a token is never whitespace-only, and anything at or
+	// below the size of a stray newline cannot be one.
+	if info.Size() <= 1 {
+		return fmt.Errorf("%w: %s: file is empty", supervisor.ErrProfileTokenUnreadable, path)
+	}
+	return nil
 }
 
 // probeHarnessVersions forks "<binary> --version" once per DISTINCT harness,
@@ -236,6 +286,22 @@ func faultReason(f profileFault) string {
 		return fmt.Sprintf("cannot verify: %s --version produced nothing", binary)
 	case errors.Is(f.err, agentprofile.ErrFingerprintMismatch):
 		return "fingerprint mismatch: " + fingerprintPair(f.profile.Dir)
+	case errors.Is(f.err, supervisor.ErrProfileCodexAuthMissing),
+		errors.Is(f.err, errProfileCodexAuthShared):
+		// Both already name the file and the exact fault, and the shared-
+		// credential one names the peer it is shared with; restating either
+		// here would only lose that.
+		return f.err.Error()
+
+	case errors.Is(f.err, agentprofile.ErrManagedContentDrift):
+		// The error already names the file and the dotted JSON path of the
+		// divergence, which is the whole operator-facing value; restating it
+		// here would only lose the path.
+		return f.err.Error()
+	case errors.Is(f.err, supervisor.ErrProfileTokenMissing):
+		return "no oauth-token: profile was never minted"
+	case errors.Is(f.err, supervisor.ErrProfileTokenUnreadable):
+		return "oauth-token unusable: " + f.err.Error()
 	case errors.Is(f.err, agentprofile.ErrManifestMissing):
 		return "no " + agentprofile.ManifestName + ": profile dir exists but was never provisioned"
 	default:
@@ -249,6 +315,16 @@ func faultReason(f profileFault) string {
 func faultRepair(f profileFault) string {
 	if errors.Is(f.err, agentprofile.ErrVersionDrift) {
 		return "loom doctor --fix   (re-blesses the pin; no agent restart needed)"
+	}
+	if errors.Is(f.err, supervisor.ErrProfileTokenMissing) {
+		return fmt.Sprintf("scripts/setup-profile-token.sh %s   (interactive, then provision-profile.sh %s)",
+			f.profile.Agent, f.profile.Agent)
+	}
+	if errors.Is(f.err, supervisor.ErrProfileCodexAuthMissing) {
+		return fmt.Sprintf("CODEX_HOME=%s codex login   (--fix will not touch this: no automated path may drive an interactive login)", f.profile.Dir)
+	}
+	if errors.Is(f.err, errProfileCodexAuthShared) {
+		return fmt.Sprintf("CODEX_HOME=%s codex login   (mint a dedicated login; never copy auth.json)", f.profile.Dir)
 	}
 	if errors.Is(f.err, agentprofile.ErrVersionUnknown) {
 		return fmt.Sprintf("install or PATH-expose the %s binary, then re-run loom doctor", f.profile.Harness)

@@ -2872,6 +2872,8 @@ export interface components {
       blocked_issues: number;
       deferred_issues: number;
       ready_issues: number;
+      review_issues: number;
+      status_blocked_issues: number;
       tombstone_issues: number;
       pinned_issues: number;
       epics_eligible_for_closure: number;
@@ -3283,7 +3285,8 @@ export interface components {
      *     New consumers should prefer the generic `entity_type`, `entity_id`, and
      *     `action` envelope fields when deciding which local state to invalidate.
      *     `issue_id` is retained for backward-compatible issue-scoped consumers
-     *     and may be omitted for non-issue entities. For status events: old_status
+     *     and is populated for every issue-scoped entity, but omitted for
+     *     workspace-level entities. For status events: old_status
      *     and new_status are present. For bonded events: parent_id and step_count
      *     are present. This is documented as a flat schema (no discriminator)
      *     because the SSE stream is not validated by generated clients.
@@ -3310,7 +3313,7 @@ export interface components {
       entity_id?: string;
       /** @description Source action for the mutation, usually the fleet-db action such as issue.update or dep.add. */
       action?: string;
-      /** @description Legacy issue identifier for issue-scoped consumers; omitted for non-issue entities. */
+      /** @description Issue identifier for issue-scoped consumers. Populated for every issue-scoped entity - issue, comment, dependency, label and metadata events all carry their issue id here as well as in `entity_id`. Omitted for workspace-level entities (workspace, repo, agent, driver_run, role, daemon_profile). New consumers should prefer `entity_type` + `entity_id`. */
       issue_id?: string;
       title?: string;
       assignee?: string;
@@ -3391,6 +3394,8 @@ export interface components {
       /** @enum {string} */
       mode: "workspace";
       name?: string;
+      /** @description True when the server resolved the request to a concrete workspace. False means the counts below are unscoped and may all be zero. */
+      resolved: boolean;
       workspaces?: string[];
     };
     MonitorWorkspaceDetail: {
@@ -3466,6 +3471,10 @@ export interface components {
       need_review: number;
       backlog: number;
       epics: number;
+      /** @description Ready work items per priority bucket 0..4 (out-of-range priorities folded into 4), keyed by priority as a string. Excludes needs-revision issues, unlike ready_to_implement/needs_planning. */
+      ready_by_priority?: {
+        [key: string]: number;
+      };
     };
     MonitorStats: {
       open: number;
@@ -3821,7 +3830,10 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["Statistics"];
+          "application/json": {
+            success: boolean;
+            data: components["schemas"]["Statistics"];
+          };
         };
       };
     };
@@ -4290,6 +4302,12 @@ export interface operations {
         labels?: string;
         /** @description Comma-separated source repo filters */
         source_repos?: string;
+        /**
+         * @description Maximum number of issues to return. Values above the maximum are
+         *     clamped to it, not rejected: a request for 1000 returns at most
+         *     200 rows with HTTP 200. The response body does not currently
+         *     distinguish a clamped page from an exhaustive one.
+         */
         limit?: number;
         title_contains?: string;
         description_contains?: string;
@@ -4942,6 +4960,12 @@ export interface operations {
         assignee?: string;
         type?: "bug" | "feature" | "task" | "epic" | "chore";
         priority?: number;
+        /**
+         * @description Maximum number of blocked issues to return. Values above the
+         *     maximum are clamped to it, not rejected: a request for 1000
+         *     returns at most 200 rows with HTTP 200. The response body does
+         *     not currently distinguish a clamped page from an exhaustive one.
+         */
         limit?: number;
       };
       header?: never;

@@ -81,7 +81,7 @@ Examples:
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		lf, _ := cmd.Flags().GetString("log-format")
 		lo, _ := cmd.Flags().GetString("log-output")
-		return cli.InitLogger(lf, lo)
+		return cli.InitLogger(lf, lo, "")
 	},
 }
 
@@ -120,7 +120,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	}
 
 	if summary.Fail > 0 {
-		cmd.SilenceErrors = true
+		// No SilenceErrors here: cmd/loom/main.go no longer prints the error
+		// itself, so silencing cobra would swallow the summary entirely.
 		return fmt.Errorf("doctor found %d failure(s)", summary.Fail)
 	}
 	return nil
@@ -142,7 +143,8 @@ func collectDoctorChecks(cmd *cobra.Command) []checkFunc {
 	}
 	checks = append(checks, checkBackendCLI, checkProjectConfig, checkGlobalConfig,
 		checkWorktrees, checkStaleLocks, checkStaleSignalFiles, checkStaleSessionRecords,
-		checkOrphanedTranscripts, checkAgentProfiles, checkOrphanedTmuxSessions, checkLoomDaemon, checkDaemonStuck, checkRedis,
+		checkOrphanedTranscripts, checkAgentProfiles, checkLeadProfileBinding, checkOrphanedTmuxSessions, checkLoomDaemon, checkDaemonStuck, checkRedis,
+		checkLeadSafetyDrift,
 		func() CheckResult { return checkOrphanedFleetLocks(deps) })
 	return checks
 }

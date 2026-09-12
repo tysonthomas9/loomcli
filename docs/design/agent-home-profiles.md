@@ -26,7 +26,8 @@ A provisioned profile root carries `.manifest.json`:
 
 ```json
 {
-  "files": ["CLAUDE.md", "settings.json"],
+  "files": ["CLAUDE.md", ".provisioned/settings.json"],
+  "managed": ["settings.json"],
   "fingerprint": "<sha256 hex>",
   "harness_version": "2.1.237 (Claude Code)"
 }
@@ -41,13 +42,115 @@ them at runtime by design (`.credentials.json`, `.claude.json`, `sessions/`).
 Hashing the whole directory would make every profile fail verification within
 minutes of first use.
 
-The manifest carries **two independent guarantees**, and they fail for
+### `managed`: provisioned content the harness also writes
+
+`settings.json` is both at once. It is provisioned — it carries `permissions`,
+`defaultMode`, and the `disable*` flags — *and* Claude Code rewrites it at
+runtime. On 2026-08-30 the harness re-serialized `worker`'s copy with a
+different key order plus a new `enabledPlugins` key; the byte hash tripped and
+the agent became permanently unspawnable, with `loom doctor --fix` unable to
+help because `Bless` refuses on a fingerprint mismatch by design. Enabling a
+plugin bricked an agent.
+
+Dropping the file from the manifest would lose all verification of the settings
+that actually govern what the agent may do. Canonicalizing the JSON and ignoring
+a list of harness-owned keys is the same trap one level up: the next runtime key
+the harness invents re-bricks the fleet.
+
+So the provisioner writes each managed file **twice**: the live copy at `<rel>`,
+and a pristine, never-rewritten copy at `.provisioned/<rel>`. The baseline is
+what goes in `files` and gets byte-hashed — nothing but the provisioner ever
+writes under `.provisioned/`, so its hash is stable forever. The live file is
+listed in `managed` and is not hashed at all. Verification instead asserts
+**baseline ⊆ live**: every key the baseline declares is present in the live file
+and deep-equal, recursing through objects, exact for scalars and for arrays
+(order significant). Extra keys in the live file are the harness's business.
+
+| live-file change | byte hash | subset check |
+|---|---|---|
+| keys reordered by re-serialization | fail | pass |
+| harness adds `enabledPlugins`, or any future runtime key | fail | pass |
+| `permissions.defaultMode` changed | fail | **fail** |
+| `disableRemoteControl` deleted | fail | **fail** |
+| element appended to `permissions.allow` | fail | **fail** |
+
+`managed` is optional and backward compatibility is structural: a manifest
+without the key parses to an empty list, the semantic check is a no-op, and
+`settings.json` stays in `files` and stays byte-hashed. Nothing changes for a
+profile until it is re-provisioned.
+
+The manifest carries **three independent guarantees**, and they fail for
 different reasons and are repaired by different people:
 
 | field | guarantee | violated when |
 |---|---|---|
 | `fingerprint` | the profile's *content* is what was provisioned | a file was edited, truncated, or deleted underneath the agent |
+| `managed` | the provisioned *settings* are still in effect | a provisioned key was changed or removed (an **added** key is not a violation) |
 | `harness_version` | this content was *blessed against this harness build* | the harness auto-updated since provisioning |
+
+A managed-content violation refuses the boot, exactly like a fingerprint
+mismatch, and it is checked **before** the version comparison so that a
+soft-failing same-major version drift can never mask a real content change.
+
+> Note on `oauth-token`: the provisioner byte-hashes it even though the rule
+> below says credentials are not in the manifest. That inconsistency is
+> deliberately left alone — removing the entry would invalidate every existing
+> fingerprint and force a fleet-wide re-provision.
+
+### The baseline is also a launch input
+
+Verification is detection, not prevention: it tells an operator that a managed
+key drifted, and something still has to decide what the *next* session boots
+as. For `model` nothing did. A human typing `/model` in a lead session is
+offered "save as your default for new sessions", and accepting it rewrites
+`model` in the **live** `settings.json`. Until an operator re-provisions, every
+subsequent lead session started on whatever was last saved rather than on what
+the workspace provisioned.
+
+So the launch path reads the pinned keys out of `.provisioned/<rel>` — the same
+baseline the verifier enforces, decoded by the same decoder — and passes them on
+the command line, where a CLI argument outranks the config file:
+
+| harness | baseline file | launch argument |
+|---|---|---|
+| claude | `.provisioned/settings.json` | `--model <value>` |
+| codex | `.provisioned/config.toml` | `-c model="<value>"` (app-server) |
+
+Precedence, and the order is deliberate:
+
+```
+LOOM_AGENT_MODEL (explicit role.model from the supervisor)   <- wins
+-> provisioned baseline for the resolved profile root
+-> "" (no pin; the harness default / the live config file applies)
+```
+
+Role intent outranks the baseline: a supervisor-spawned agent whose role pins
+`model` has made a deliberate choice. The baseline is the *fallback* that closes
+the lead's hole, not an override of configured intent.
+
+Reading the baseline rather than a constant is what makes this provenance-clean:
+change the source template's `model`, re-provision, relaunch, and the pin moves
+with no code change.
+
+**Pinned keys are a short allowlist, not the whole file.** Today it is `model`
+and nothing else. The permission surface is already pinned at launch by argument
+(`--dangerously-skip-permissions` plus the safety-knob args), so pinning
+`permissions.defaultMode` again would buy nothing; `--effort` is already wired
+to `LOOM_AGENT_EFFORT`; everything else (`autoMode.environment`, the `disable*`
+flags, `cleanupPeriodDays`) stays file-borne. Pinning everything would turn the
+command line into a second copy of the profile. Adding a key means adding it in
+**one place per harness** — the table of constants in
+`internal/cli/backends/model_pin.go` — not at each call site.
+
+Nothing in this path can fail a launch. Every unresolvable case (no manifest,
+the file byte-hashed in `files` instead of `managed`, a missing or undecodable
+baseline, an absent or non-string key) resolves to "no pin" plus a debug log;
+`loom lead` additionally prints one warning line, because it is the only launch
+with an operator at the terminal. Refusing a drifted boot is the enforcement
+check's job, not the argv builder's.
+
+A drifted `settings.json` is therefore no longer "changes what the next session
+boots as". It is a `loom doctor` cleanup item.
 
 ## Why the version pin is exact, and must never become a range
 
@@ -110,8 +213,9 @@ A profile root may carry `oauth-token`: a long-lived, non-rotating Claude Code
 credential minted for that one agent by `claude setup-token`, captured by the
 operator's `scripts/setup-profile-token.sh <agent>`. When the file is present,
 the injector exports its trimmed contents as `CLAUDE_CODE_OAUTH_TOKEN`
-alongside `CLAUDE_CONFIG_DIR`. When it is absent the environment is untouched,
-which is every profile provisioned before this existed.
+alongside `CLAUDE_CONFIG_DIR`. On a provisioned `claude` root the file is
+**required**: an absent one refuses the boot, exactly as a present-but-empty
+one does.
 
 This is what makes a profile an **identity** rather than a copy of one. The
 provisioner's keychain-copy fallback seeds each profile from the *operator's*
@@ -124,10 +228,27 @@ by anyone else's refresh, and revoking one agent never touches the other nine.
 
 Three properties the implementation is built around:
 
-- **Additive.** Absent file, identical behavior. Present-but-empty is not
-  absent: it is a broken minting run, and falling through to the operator's
-  token would silently restore the sharing the file exists to end, so it
-  refuses the boot.
+- **Required on a provisioned root, for the harnesses that have one.** A
+  `claude` profile with no `oauth-token` has no identity at all, so the boot is
+  refused (`ErrProfileTokenMissing`) rather than proceeding credential-less.
+  Present-but-empty is a broken minting run and refuses too
+  (`ErrProfileTokenUnreadable`); the two are separate sentinels because the
+  repairs differ — never minted needs the interactive
+  `setup-profile-token.sh <agent>` *and then* `provision-profile.sh <agent>`,
+  while a broken file is restored by re-provisioning alone. `codex`, and any
+  harness with no credential file in the table, is untouched: nothing is
+  required of it and nothing is injected.
+
+  This rule used to read the other way — *"Additive. Absent file, identical
+  behavior."* — and that was correct only while "absent" meant "legacy profile,
+  falls back to the operator's keychain". The keychain fallback is gone. Once it
+  went, an unminted profile silently became an agent that spawns, claims a task,
+  and dies on its first API call: 277 four-second `exit 0` runs from 2026-08-30,
+  which read as completed work and park the fleet. `worker-2` and `worker-3`
+  were exactly this shape on disk. The refusal is unconditional because both
+  call sites reach the credential check only *after* manifest verification, so a
+  directory this workspace never provisioned — an operator's own `~/.claude`
+  above all — can never arrive there.
 - **Last-assignment wins.** `CLAUDE_CODE_OAUTH_TOKEN` is on the envfilter
   allowlist, so the operator's own token reaches the child too. The profile's
   assignment is appended after it and exec resolves duplicates to the last one.
@@ -158,8 +279,12 @@ The split is not cosmetic — it is why `--fix` is safe to run:
 - **`scripts/setup-profile-token.sh <agent>` mints an identity.** It runs
   `claude setup-token` once per agent — an interactive flow a human completes —
   and captures the printed token straight into `<agent>/claude/oauth-token`. It
-  is the repair for an unreadable or empty token file, and the one thing that
-  is not provisioning: it writes no profile content and no manifest.
+  is the repair for a missing token file — followed by
+  `provision-profile.sh <agent>`, since minting alone does not materialize the
+  token into the live profile root — and the one thing that is not
+  provisioning: it writes no profile content and no manifest. An *unreadable or
+  empty* token file is a different fault: the identity exists, so
+  `provision-profile.sh <agent>` alone restores it.
 - **`scripts/provision-profile.sh <agent>` is the only thing that provisions.**
   It is workspace-owned, outside this repo, creates or replaces the profile's
   content, seeds the keychain slot the harness authenticates against, and
@@ -193,7 +318,10 @@ So `runLead` both **injects and verifies**, before any backend work
    below, and a value pointing *outside*
    `<workspace>/.loom/agent-profiles/`, which is an operator's own config root.
    Nothing here provisioned it and nothing here can repair it, so it is neither
-   verified nor overwritten.
+   verified nor overwritten. A **relative** inherited value is refused outright:
+   the harness resolves it against its own cwd, so the same variable names a
+   different directory from every worktree, and no classification of it can be
+   trusted.
 2. The variable is **unset** and a profile root exists — resolve it, verify it,
    and export it. This is what makes a bare `loom lead` carry
    `CLAUDE_CONFIG_DIR=<ws>/.loom/agent-profiles/lead/claude` and
@@ -202,6 +330,16 @@ So `runLead` both **injects and verifies**, before any backend work
    `lead` inherits the operator's roots exactly as before.
 4. Anything that does not verify prints the reason and the repair to stderr and
    exits non-zero.
+
+"Inside" and "outside" that tree are decided by **filesystem identity**
+(`os.SameFile` on the walked-up ancestors), never by comparing path spellings.
+Two spellings of one directory are routine: a case-insensitive macOS volume
+renders the workspace as both `puppet` and `PUPPET`, and `/tmp` is a symlink to
+`/private/tmp`. The original prefix comparison read every such spelling as "an
+operator's own config root", which silently turned off both the verification
+and the credential injection for a root this workspace had provisioned
+(PUPPET-523). `loom doctor`'s `lead_profile_binding` check reports the binding
+the current shell would actually hand a harness, using that same predicate.
 
 It refuses rather than unsetting the variable and continuing, for the same
 reason the spawn path does. The launcher script needs no change: it is

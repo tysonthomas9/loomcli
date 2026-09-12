@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -133,7 +133,7 @@ var NewGitModule = NewModule
 // module is a local interface matching webui.Module for compile-time assertions.
 // The root webui.Module interface cannot be imported here without creating a cycle.
 type module interface {
-	Register(mux *http.ServeMux)
+	Register(mux route.Router)
 }
 
 // handleAgentDiffStat → HandleAgentDiffStat
@@ -183,6 +183,10 @@ type AgentDiffStatResult = service.AgentDiffStatResult
 
 // MaxListLimit from handler package
 const MaxListLimit = handler.MaxListLimit
+
+// MaxIssueListLimit from handler package: the tighter ceiling applied to the
+// blocked-list endpoint.
+const MaxIssueListLimit = handler.MaxIssueListLimit
 
 // GitSyncResult → service.GitSyncResult
 type GitSyncResult = service.GitSyncResult

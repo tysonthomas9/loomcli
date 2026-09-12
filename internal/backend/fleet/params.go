@@ -12,30 +12,38 @@ import (
 // --- Unsupported filter validation ---
 
 // checkFleetUnsupportedFilters returns an error wrapping
-// backend.ErrFilterNotSupported if any ListOpts fields are set that the
-// fleet-db server cannot evaluate server-side. This prevents returning
-// unfiltered results when the caller expects filters to be applied.
+// backend.ErrFilterNotSupported if any ListOpts fields are set that neither the
+// fleet-db server nor List's own client-side pass can evaluate. This prevents
+// returning unfiltered results when the caller expects filters to be applied.
 //
-// Fleet-db supported fields: Status, IssueType, Assignee, Labels,
-// SourceRepos, ParentID, UpdatedAfter, UpdatedBefore, Limit.
-// All others are unsupported (tracked in fleet-qx9c).
+// Evaluated server-side: Status, IssueType, Assignee, Labels, SourceRepos,
+// ParentID, Priority, UpdatedAfter, UpdatedBefore, Limit.
+//
+// Evaluated client-side by List, over the complete paged result set (see
+// list_filters.go): CreatedAfter, CreatedBefore, Query, TitleContains,
+// DescriptionContains, NotesContains, EmptyDescription, NoAssignee, NoLabels,
+// Pinned.
+//
+// Everything still listed below is genuinely unimplemented on this route.
+//
+// The error is a *backend.BackendError of KindValidation so the webui's
+// translateBackendError can classify it — as a bare fmt.Errorf it fell through
+// to a 500. Unwrap() returns the cause, so errors.Is(err,
+// ErrFilterNotSupported) and the CLI's message are both unchanged.
 func checkFleetUnsupportedFilters(opts backend.ListOpts) error {
 	var unsupported []string
 	checkUnsupportedCore(&unsupported, opts)
-	checkUnsupportedSearch(&unsupported, opts)
 	checkUnsupportedDates(&unsupported, opts)
 	checkUnsupportedAdvanced(&unsupported, opts)
 	if len(unsupported) > 0 {
-		return fmt.Errorf("fleet-db: unsupported filters [%s]: %w",
-			strings.Join(unsupported, ", "), backend.ErrFilterNotSupported)
+		msg := fmt.Sprintf("fleet-db: unsupported filters [%s]", strings.Join(unsupported, ", "))
+		return backend.NewBackendError(backend.KindValidation, "List", msg,
+			backend.ErrFilterNotSupported)
 	}
 	return nil
 }
 
 func checkUnsupportedCore(out *[]string, opts backend.ListOpts) {
-	if opts.Priority != nil {
-		*out = append(*out, "Priority")
-	}
 	if len(opts.LabelsAny) > 0 {
 		*out = append(*out, "LabelsAny")
 	}
@@ -50,28 +58,7 @@ func checkUnsupportedCore(out *[]string, opts backend.ListOpts) {
 	}
 }
 
-func checkUnsupportedSearch(out *[]string, opts backend.ListOpts) {
-	if opts.Query != "" {
-		*out = append(*out, "Query")
-	}
-	if opts.TitleContains != "" {
-		*out = append(*out, "TitleContains")
-	}
-	if opts.DescriptionContains != "" {
-		*out = append(*out, "DescriptionContains")
-	}
-	if opts.NotesContains != "" {
-		*out = append(*out, "NotesContains")
-	}
-}
-
 func checkUnsupportedDates(out *[]string, opts backend.ListOpts) {
-	if opts.CreatedAfter != "" {
-		*out = append(*out, "CreatedAfter")
-	}
-	if opts.CreatedBefore != "" {
-		*out = append(*out, "CreatedBefore")
-	}
 	if opts.ClosedAfter != "" {
 		*out = append(*out, "ClosedAfter")
 	}
@@ -93,18 +80,6 @@ func checkUnsupportedDates(out *[]string, opts backend.ListOpts) {
 }
 
 func checkUnsupportedAdvanced(out *[]string, opts backend.ListOpts) {
-	if opts.EmptyDescription {
-		*out = append(*out, "EmptyDescription")
-	}
-	if opts.NoAssignee {
-		*out = append(*out, "NoAssignee")
-	}
-	if opts.NoLabels {
-		*out = append(*out, "NoLabels")
-	}
-	if opts.Pinned != nil {
-		*out = append(*out, "Pinned")
-	}
 	if opts.IncludeTemplates {
 		*out = append(*out, "IncludeTemplates")
 	}
@@ -136,7 +111,6 @@ func checkUnsupportedAdvanced(out *[]string, opts backend.ListOpts) {
 func listOptsToQuery(opts backend.ListOpts) string {
 	q := url.Values{}
 	addListCoreFilters(q, opts)
-	addListSearchFilters(q, opts)
 	addListDateFilters(q, opts)
 	addListAdvancedFilters(q, opts)
 	return q.Encode()
@@ -156,8 +130,16 @@ func listServerOpts(opts backend.ListOpts) backend.ListOpts {
 	return server
 }
 
+// needsListClientFilter reports whether List has work to do after the server
+// answers. Its other job is to make listServerOpts zero the server-side limit:
+// without that, `?limit=10&no_assignee=true` returns the unassigned subset of
+// the first ten rows instead of ten unassigned rows.
 func needsListClientFilter(opts backend.ListOpts) bool {
-	return len(opts.Labels) > 1 || len(opts.SourceRepos) > 1
+	return len(opts.Labels) > 1 || len(opts.SourceRepos) > 1 ||
+		opts.CreatedAfter != "" || opts.CreatedBefore != "" ||
+		opts.Query != "" || opts.TitleContains != "" ||
+		opts.DescriptionContains != "" || opts.NotesContains != "" ||
+		opts.EmptyDescription || opts.NoAssignee || opts.NoLabels || opts.Pinned != nil
 }
 
 func addListCoreFilters(q url.Values, opts backend.ListOpts) {
@@ -176,21 +158,22 @@ func addListCoreFilters(q url.Values, opts backend.ListOpts) {
 	if opts.Limit > 0 {
 		q.Set("limit", strconv.Itoa(opts.Limit))
 	}
+	if opts.Offset > 0 {
+		q.Set("offset", strconv.Itoa(opts.Offset))
+	}
 	addAll(q, "ids", opts.IDs)
 }
 
-func addListSearchFilters(q url.Values, opts backend.ListOpts) {
-	setNonEmpty(q, "query", opts.Query)
-	setNonEmpty(q, "title_contains", opts.TitleContains)
-	setNonEmpty(q, "description_contains", opts.DescriptionContains)
-	setNonEmpty(q, "notes_contains", opts.NotesContains)
-}
-
+// addListDateFilters emits only the date filters fleet-db actually evaluates.
+// created_after/created_before are absent on purpose: fleet-db ignores them, and
+// sending them is precisely what made the wire look filtered when it was not.
+// List applies them client-side instead.
+//
+// updated_* are normalized to RFC3339 because fleet-db parses them strictly and
+// 400s on the bare YYYY-MM-DD that this layer accepts.
 func addListDateFilters(q url.Values, opts backend.ListOpts) {
-	setNonEmpty(q, "created_after", opts.CreatedAfter)
-	setNonEmpty(q, "created_before", opts.CreatedBefore)
-	setNonEmpty(q, "updated_after", opts.UpdatedAfter)
-	setNonEmpty(q, "updated_before", opts.UpdatedBefore)
+	setNonEmpty(q, "updated_after", normalizeFleetDate(opts.UpdatedAfter))
+	setNonEmpty(q, "updated_before", normalizeFleetDate(opts.UpdatedBefore))
 	setNonEmpty(q, "closed_after", opts.ClosedAfter)
 	setNonEmpty(q, "closed_before", opts.ClosedBefore)
 	setNonEmpty(q, "defer_after", opts.DeferAfter)
@@ -199,13 +182,10 @@ func addListDateFilters(q url.Values, opts backend.ListOpts) {
 	setNonEmpty(q, "due_before", opts.DueBefore)
 }
 
+// addListAdvancedFilters omits empty_description, no_assignee, no_labels,
+// pinned and the priority_min/max pair: fleet-db's list route has no such
+// parameters, so emitting them only made the request look filtered.
 func addListAdvancedFilters(q url.Values, opts backend.ListOpts) {
-	setBoolIfTrue(q, "empty_description", opts.EmptyDescription)
-	setBoolIfTrue(q, "no_assignee", opts.NoAssignee)
-	setBoolIfTrue(q, "no_labels", opts.NoLabels)
-	setOptInt(q, "priority_min", opts.PriorityMin)
-	setOptInt(q, "priority_max", opts.PriorityMax)
-	setOptBool(q, "pinned", opts.Pinned)
 	setOptBool(q, "ephemeral", opts.Ephemeral)
 	setBoolIfTrue(q, "include_templates", opts.IncludeTemplates)
 	setNonEmpty(q, "mol_type", opts.MolType)
@@ -317,9 +297,13 @@ func blockedServerOpts(opts backend.BlockedOpts) backend.BlockedOpts {
 // fleet-db uses strict JSON validation (disallowUnknownFields); fields not
 // present on its UpdateIssueRequest must be omitted entirely, not just
 // zeroed. Loom carries a richer field set than fleet-db accepts on PATCH
-// (status / claim / labels go through dedicated endpoints), so we drop
-// loom-only fields here. If the caller relies on a dropped field landing,
-// the corresponding dedicated endpoint should be called instead.
+// (status / claim / labels / agent_state go through dedicated endpoints), so
+// we drop loom-only fields here. If the caller relies on a dropped field
+// landing, the corresponding dedicated endpoint should be called instead.
+//
+// acceptance_criteria is NOT one of those: fleet-db has no acceptance-criteria
+// sub-route, PATCH is its only writer, and UpdateIssueRequest accepts it — so
+// it is forwarded here (PUPPET-522).
 func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interface{} {
 	req := make(map[string]interface{})
 	setStrField(req, "title", params.Title)
@@ -327,6 +311,7 @@ func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interfac
 	setIntField(req, "priority", params.Priority)
 	setStrField(req, "design", params.Design)
 	setStrField(req, "design_format", params.DesignFormat)
+	setStrField(req, "acceptance_criteria", params.AcceptanceCriteria)
 	setStrField(req, "notes", params.Notes)
 	setStrField(req, "owner", params.Owner)
 	// Field rename: loom's IssueBackend uses "issue_type"; fleet-db's

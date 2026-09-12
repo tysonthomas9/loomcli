@@ -18,6 +18,10 @@ const (
 	CompletionHookFailureOutcome               // the subprocess exited 0 but a configured on_complete hook write failed
 	IncompleteRunOutcome                       // agent exited 0 but never released its task claim (turn ended before the task did)
 	ClaimsHeldOutcome                          // a workspace-level claim hold is active: the supervisor refuses to START new work
+	WorktreeUnavailableOutcome                 // the claimed task's source_repo has no usable worktree for this agent (unknown repo, or resolution failed)
+	IssueBackendOutageOutcome                  // the ISSUE backend (fleet-db) is unreachable or rejecting our credentials
+	SupervisorStopOutcome                      // the supervisor itself ended the run (daemon shutdown, operator stop, agent removed from config)
+	RunTurnDeadlineOutcome                     // the turn was ended by loom's own per-turn deadline (LOOM_RUN_TURN_TIMEOUT_SECONDS)
 )
 
 func (d DomainOutcome) String() string {
@@ -36,6 +40,14 @@ func (d DomainOutcome) String() string {
 		return "IncompleteRun"
 	case ClaimsHeldOutcome:
 		return "ClaimsHeld"
+	case WorktreeUnavailableOutcome:
+		return "WorktreeUnavailable"
+	case IssueBackendOutageOutcome:
+		return "IssueBackendOutage"
+	case SupervisorStopOutcome:
+		return "SupervisorStop"
+	case RunTurnDeadlineOutcome:
+		return "RunTurnDeadline"
 	default:
 		return "None"
 	}

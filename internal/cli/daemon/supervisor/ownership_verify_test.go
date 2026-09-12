@@ -297,6 +297,38 @@ func TestVerifyAgentOwnership_HeldByOtherDaemonKills(t *testing.T) {
 	}
 }
 
+// The split-brain regression: a heartbeat failure whose re-acquire is
+// answered with 409 already_claimed must kill the agent. Before
+// ErrAlreadyClaimed was classified as heldByOther this took the bounded
+// fail-open branch and kept running an agent whose lease the server had
+// already handed to someone else.
+func TestVerifyAgentOwnership_AlreadyClaimedKills(t *testing.T) {
+	fake := &scriptedOwnershipLeaseStore{
+		heartbeatResults: []error{wrappedSentinel(domain.ErrGone)},
+		acquireResults:   []scriptedAcquireResult{{err: wrappedSentinel(domain.ErrAlreadyClaimed)}},
+	}
+	s := newOwnershipVerifyTestSupervisor(fake)
+	ap := newOwnershipVerifyAgent()
+	ap.OwnershipRenewedAt = time.Now() // fresh: fail-open would have continued
+
+	if s.heartbeatAgentOwnership(ap, time.Minute) {
+		t.Fatal("heartbeat returned true, want kill on a verifiably lost lease")
+	}
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	if ap.LastError == nil || !strings.Contains(ap.LastError.Message, "verifiably_lost") {
+		t.Fatalf("LastError = %v, want a verifiably_lost kill", ap.LastError)
+	}
+}
+
+// isTypedDomainError gates whether a heartbeat failure is arbitrated at
+// all; ErrAlreadyClaimed is a server verdict, so it must be typed.
+func TestIsTypedDomainError_AlreadyClaimed(t *testing.T) {
+	if !isTypedDomainError(wrappedSentinel(domain.ErrAlreadyClaimed)) {
+		t.Fatal("isTypedDomainError(ErrAlreadyClaimed) = false, want true")
+	}
+}
+
 // Inconclusive verification within the validity window rides through (no
 // kill) — both inconclusive shapes: retry-still-untyped and
 // acquire-inconclusive.
@@ -486,6 +518,10 @@ func TestAcquireAgentOwnership_TriStateOutcomes(t *testing.T) {
 		{"success", scriptedAcquireResult{lease: freshOwnershipLease("TOKEN_FIRST", 1)}, ownershipAcquired},
 		{"held by other (already exists)", scriptedAcquireResult{err: wrappedSentinel(domain.ErrAlreadyExists)}, ownershipHeldByOther},
 		{"held by other (conflict)", scriptedAcquireResult{err: wrappedSentinel(domain.ErrConflict)}, ownershipHeldByOther},
+		// fleet-db answers a contested acquire with 409 already_claimed,
+		// which the HTTP client maps to ErrAlreadyClaimed. This is the
+		// ticket's log line: it used to fall through to inconclusive.
+		{"held by other (already claimed)", scriptedAcquireResult{err: wrappedSentinel(domain.ErrAlreadyClaimed)}, ownershipHeldByOther},
 		{"network error", scriptedAcquireResult{err: errors.New("dial tcp: i/o timeout")}, ownershipAcquireInconclusive},
 	}
 	for _, tc := range cases {

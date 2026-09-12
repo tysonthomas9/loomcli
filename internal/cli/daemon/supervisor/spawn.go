@@ -2,7 +2,6 @@ package supervisor
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -15,10 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/agentprofile"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
-	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -30,7 +27,9 @@ import (
 )
 
 // buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
-func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
+// ctx carries the caller's active span; it is what the child inherits through
+// LOOM_TRACE_PARENT, so the agent's whole run nests under the spawn that made it.
+func (s *Supervisor) buildCommand(ctx context.Context, ap *AgentProcess) (*exec.Cmd, error) {
 	cfg := s.ConfigSnapshot()
 
 	ap.Mu.Lock()
@@ -43,16 +42,17 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 		return nil, err
 	}
 
-	cmd.Dir = ap.WorktreePath
+	cmd.Dir = ap.WorkDir()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	cmd.Env = append(cli.FilteredEnv(),
+	cmd.Env = appendGitTerminalPrompt(cli.FilteredEnv())
+	cmd.Env = append(cmd.Env,
 		fmt.Sprintf("LOOM_AGENT_NAME=%s", ap.Entry.Worktree),
-		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.WorktreePath),
+		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.WorkDir()),
 		fmt.Sprintf("LOOM_EVENTS_DIR=%s", ResolveDaemonPath(s.ProjectDir, cfg.Daemon.EventsDir)),
 	)
 
-	cmd.Env = appendRoleEnv(cmd.Env, ap)
+	cmd.Env = appendRoleEnv(cmd.Env, ap, s.GetMaxRunDuration())
 	cmd.Env = appendRoutingEnv(cmd.Env, ap)
 	// Both ends of a human answer wait need the same clock: the child's ask
 	// deadline runs slightly inside this bound so an unanswered prompt ends in
@@ -65,27 +65,57 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	}
 	if len(sourceRepos) > 0 {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_SOURCE_REPOS=%s", strings.Join(sourceRepos, ",")))
+		// The binding alone does not say whether it is a hard filter; the
+		// agent-side router check needs cross_repo too, or its verdict differs
+		// from the supervisor's on exactly the wrong-repo issues.
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_AGENT_CROSS_REPO=%t", ap.Entry.CrossRepo))
 	}
 
-	ap.Mu.Lock()
-	assignedTaskID := ap.AssignedTaskID
-	ap.Mu.Unlock()
-	if assignedTaskID != "" {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ASSIGNED_TASK_ID=%s", assignedTaskID))
-	}
+	cmd.Env = appendClaimedTaskEnv(cmd.Env, ap)
 
 	if cmd.Env, err = s.appendRuntimeEnv(cmd.Env, ap); err != nil {
 		return nil, err
 	}
 
 	// Propagate the active trace context so the agent subprocess's bootstrap
-	// span and per-request spans inherit the daemon's trace tree.
+	// span and per-request spans inherit the daemon's trace tree. ctx is the
+	// caller's span context (the spawn span, on the spawnAgent path), so the
+	// child parents under the spawn rather than under the daemon root.
 	// See docs/observability/tracing-contract.md §5.
-	if tp := tracing.TraceparentFromContext(cmdstore.RootContext()); tp != "" {
+	if tp := tracing.TraceparentFromContext(ctx); tp != "" {
 		cmd.Env = append(cmd.Env, "LOOM_TRACE_PARENT="+tp)
 	}
 
 	return cmd, nil
+}
+
+// appendGitTerminalPrompt pins GIT_TERMINAL_PROMPT=0 for agent subprocesses, so
+// a git operation with no usable credential fails fast instead of hanging on a
+// prompt no one can answer. An explicit operator setting that survived the env
+// filter wins.
+func appendGitTerminalPrompt(env []string) []string {
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "GIT_TERMINAL_PROMPT=") {
+			return env
+		}
+	}
+	return append(env, "GIT_TERMINAL_PROMPT=0")
+}
+
+// appendClaimedTaskEnv exports the task this cycle claimed and the repo its
+// worktree was routed for, so the agent-side prompt can name the repo instead
+// of inferring it from the working directory.
+func appendClaimedTaskEnv(env []string, ap *AgentProcess) []string {
+	ap.Mu.Lock()
+	assignedTaskID := ap.AssignedTaskID
+	ap.Mu.Unlock()
+	if assignedTaskID != "" {
+		env = append(env, fmt.Sprintf("LOOM_ASSIGNED_TASK_ID=%s", assignedTaskID))
+	}
+	if repo := ap.Placement().Repo; repo != "" {
+		env = append(env, fmt.Sprintf("LOOM_TASK_SOURCE_REPO=%s", repo))
+	}
+	return env
 }
 
 // buildAgentExecCmd creates the exec.Cmd with the correct arguments for the agent role.
@@ -102,7 +132,7 @@ func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) (*exec.Cmd, err
 		return nil, fmt.Errorf("resolve loom executable: %w", err)
 	}
 	if BuiltInRoles[ap.Entry.Role] {
-		args := []string{ap.Entry.Role, ap.WorktreePath, "--auto", "--daemon-mode"}
+		args := []string{ap.Entry.Role, ap.WorkDir(), "--auto", "--daemon-mode"}
 		if backend != "" {
 			args = append(args, "--backend", backend)
 		}
@@ -116,7 +146,7 @@ func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) (*exec.Cmd, err
 	if promptFile == "" {
 		return nil, fmt.Errorf("custom role %q missing prompt_file", ap.Entry.Role)
 	}
-	args := []string{"agent", ap.WorktreePath, "--prompt", promptFile, "--auto", "--daemon-mode"}
+	args := []string{"agent", ap.WorkDir(), "--prompt", promptFile, "--auto", "--daemon-mode"}
 	if ap.RoleConfig.TaskFilter != "" {
 		args = append(args, "--task-filter", ap.RoleConfig.TaskFilter)
 	}
@@ -129,8 +159,14 @@ func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) (*exec.Cmd, err
 	return exec.Command(loomPath, args...), nil //nolint:gosec // G204: intentional loom subprocess launch
 }
 
-// appendRoleEnv adds role constraint env vars (allowed/denied tools, read-only, repo).
-func appendRoleEnv(env []string, ap *AgentProcess) []string {
+// appendRoleEnv adds role constraint env vars (allowed/denied tools, read-only,
+// repo), plus the per-turn deadline derived from this agent's run-duration cap.
+//
+// daemonMaxRunSeconds is the daemon-wide cap the role's own max_run_duration
+// overrides; it is passed in rather than read here so the precedence stays in
+// maxRunDurationSecondsFor alone.
+func appendRoleEnv(env []string, ap *AgentProcess, daemonMaxRunSeconds int) []string {
+	env = appendRunTurnTimeoutEnv(env, ap, daemonMaxRunSeconds)
 	if ap.Entry.Repo != "" {
 		env = append(env, fmt.Sprintf("LOOM_AGENT_REPO=%s", ap.Entry.Repo))
 	}
@@ -177,6 +213,53 @@ func appendRoleEnv(env []string, ap *AgentProcess) []string {
 		env = append(env, fmt.Sprintf("LOOM_AGENT_MODEL=%s", ap.RoleConfig.Model))
 	}
 	return env
+}
+
+// appendRunTurnTimeoutEnv sets LOOM_RUN_TURN_TIMEOUT_SECONDS to this agent's
+// run-duration cap minus the margin, and is authoritative about it: any value
+// inherited from the daemon's own environment is dropped first.
+//
+// Dropping rather than merely appending is the point. Every LOOM_ variable is
+// inherited by the child (see envfilter), so an operator who set this by hand on
+// the daemon would otherwise hand every agent the same blanket number — exactly
+// the shape of the bug this export exists to fix, where one fleet-wide value
+// stood in for a per-role one and every role's max_run_duration was inert. The
+// supervisor has resolved the correct number for THIS agent; a blanket override
+// has no claim to overrule it, the same precedence maxRunDurationSecondsFor
+// already applies to the cap itself.
+//
+// A disabled cap exports nothing and inherits nothing: 0 means no ceiling, and
+// leaving an inherited deadline standing would quietly reinstate one.
+func appendRunTurnTimeoutEnv(env []string, ap *AgentProcess, daemonMaxRunSeconds int) []string {
+	const key = "LOOM_RUN_TURN_TIMEOUT_SECONDS"
+	seconds := runTurnTimeoutSecondsFor(ap, daemonMaxRunSeconds)
+
+	kept := env[:0:0]
+	inherited := ""
+	for _, entry := range env {
+		if v, ok := strings.CutPrefix(entry, key+"="); ok {
+			inherited = v
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	if inherited != "" {
+		name := ""
+		if ap != nil {
+			name = ap.Entry.Worktree
+		}
+		if seconds > 0 {
+			log.Printf("[daemon] Agent %s: %s=%s inherited from the daemon env, overridden with %d (this role's run-duration cap minus %ds)",
+				name, key, inherited, seconds, runTurnDeadlineMarginSeconds)
+		} else {
+			log.Printf("[daemon] Agent %s: %s=%s inherited from the daemon env, dropped — this role's run-duration cap is disabled",
+				name, key, inherited)
+		}
+	}
+	if seconds <= 0 {
+		return kept
+	}
+	return append(kept, fmt.Sprintf("%s=%d", key, seconds))
 }
 
 // appendRoutingEnv adds routing constraint env vars (skills, path patterns, priority, role).
@@ -250,7 +333,7 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 //
 //nolint:funlen // Linear orchestration: gate → build → start → record. Each step is short; extracting would fragment the lifecycle.
 func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
-	_, span := startSpan(cmdstore.RootContext(),
+	ctx, span := startSpan(cmdstore.RootContext(),
 		"daemon.supervisor.spawn",
 		attribute.String("loom.agent", ap.Entry.Worktree),
 		attribute.String("loom.role", ap.Entry.Role),
@@ -258,11 +341,11 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 	)
 	defer span.End()
 
-	if err := s.gateBackendAvailable(ap); err != nil {
+	if err := s.gateBackendAvailable(ctx, ap); err != nil {
 		recordErr(span, err, "spawn.backend_unavailable")
 		return err
 	}
-	if err := s.materializeSkills(ap); err != nil {
+	if err := s.materializeSkills(ctx, ap); err != nil {
 		if skillmat.IsStoreUnavailable(err) {
 			slog.Warn("skill store unavailable; continuing with existing materialization",
 				"worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "err", err)
@@ -273,7 +356,7 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 	}
 	s.ensureHookConfig(ap)
 
-	cmd, err := s.buildCommand(ap)
+	cmd, err := s.buildCommand(ctx, ap)
 	if err != nil {
 		recordErr(span, err, "spawn.build_command")
 		return fmt.Errorf("build command: %w", err)
@@ -289,6 +372,10 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 		recordErr(span, err, "spawn.start")
 		return fmt.Errorf("failed to start subprocess: %w", err)
 	}
+
+	// The child owns one sink's fd directly; this feeds the other one. Started
+	// after Start() so the mirror never runs for an agent that failed to spawn.
+	ap.stopLogMirror = s.startAgentLogMirror(ap)
 
 	ap.Cmd = cmd
 	ap.Pid = cmd.Process.Pid
@@ -309,20 +396,20 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 	if evt, err := events.NewEvent(events.AgentStarted, worktree, role, epicID, events.AgentStartedData{PID: pid}); err == nil {
 		s.EmitEvent(evt)
 	}
-	s.markControlPlaneAgentSessionRunning(ap)
+	s.markControlPlaneAgentSessionRunning(ctx, ap)
 
 	return nil
 }
 
 func (s *Supervisor) ensureHookConfig(ap *AgentProcess) {
 	backend := s.GetEffectiveBackend(ap)
-	if err := agent.EnsureSkillMaterializeHook(ap.WorktreePath, backend); err != nil {
+	if err := agent.EnsureSkillMaterializeHook(ap.WorkDir(), backend); err != nil {
 		slog.Warn("agent hook configuration failed; continuing without raw-PTY pre-turn hook",
 			"worktree", ap.Entry.Worktree, "backend", backend, "err", err)
 	}
 }
 
-func (s *Supervisor) materializeSkills(ap *AgentProcess) error {
+func (s *Supervisor) materializeSkills(ctx context.Context, ap *AgentProcess) error {
 	if s.WorkspaceID == "" {
 		return nil
 	}
@@ -331,9 +418,9 @@ func (s *Supervisor) materializeSkills(ap *AgentProcess) error {
 			"worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID)
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(cmdstore.RootContext(), controlPlaneOperationTimeout)
+	ctx, cancel := context.WithTimeout(ctx, controlPlaneOperationTimeout)
 	defer cancel()
-	return skillmat.MaterializeLeased(ctx, s.ControlStore, s.WorkspaceID, ap.Entry.Role, ap.WorktreePath)
+	return skillmat.MaterializeLeased(ctx, s.ControlStore, s.WorkspaceID, ap.Entry.Role, ap.WorkDir())
 }
 
 // materializeIdleSkills keeps an idle worker's worktree current while the
@@ -349,7 +436,7 @@ func (s *Supervisor) materializeIdleSkills(ap *AgentProcess) {
 	if !noWork {
 		return
 	}
-	if err := s.materializeSkills(ap); err != nil {
+	if err := s.materializeSkills(cmdstore.RootContext(), ap); err != nil {
 		slog.Warn("idle skill materialization failed", "worktree", ap.Entry.Worktree, "err", err)
 	}
 }
@@ -367,23 +454,63 @@ func (s *Supervisor) materializeIdleSkills(ap *AgentProcess) {
 //     — whose pane tmux routes here via `pipe-pane … loom log-router` — are
 //     inspectable. Daemon-mode agents bypass tmux, so we write it directly.
 //
-// When both sinks are open the child's output is fanned out with io.MultiWriter.
-// The watchdog still observes the daemon log's mtime because the os/exec copy
-// advances it as output arrives. Must be called while ap.Mu is held.
+// INVARIANT (PUPPET-49): the child is ALWAYS handed a real *os.File, never an
+// io.Writer wrapper. os/exec dups an *os.File straight onto the child's fd, but
+// for anything else it allocates an os.Pipe plus a copy goroutine — and
+// cmd.Wait() (see waitForAgent) then cannot return until EVERY process holding
+// that pipe's write end closes it. StopAgent only signals the worker plus the
+// descendant pgroup snapshot taken at SIGTERM time (findDescendantPGIDs), so a
+// backend that forked afterwards, was already reparented to init, or sat in a
+// pgroup the snapshot missed kept the write end open and cmd.Wait() blocked
+// forever. That was the most credible in-process cause of the 18-minute daemon
+// shutdown stall PUPPET-39 bounded but deliberately did not fix. Do NOT
+// "simplify" this back to an io.MultiWriter.
+//
+// So exactly one sink becomes the child's fd and the second, when open, is fed
+// by a daemon-owned mirror that reads the daemon log as a regular file (see
+// startAgentLogMirror) — reads on a regular file always terminate at EOF, so no
+// daemon goroutine can be pinned by a lingering descendant either.
+//
+// The daemon log is deliberately the one the child writes, because the watchdog
+// stats its mtime and the classifier tails it; the child's own write(2) now
+// advances that mtime directly instead of relying on an os/exec copy goroutine.
+// The archive tolerates the mirror's sub-second lag: nothing gates on it.
+//
+// Accepted residue: a lingering descendant still holds a dup of the daemon log
+// fd and can append to it after the agent exits. That is harmless — the file
+// stays valid — and it can no longer block cmd.Wait().
+//
+// Must be called while ap.Mu is held.
 func (s *Supervisor) setupAgentLogFile(ap *AgentProcess, cmd *exec.Cmd) {
-	var sinks []io.Writer
-
-	if f := s.openDaemonLogFile(ap); f != nil {
-		ap.LogFile = f
-		sinks = append(sinks, f)
+	daemonLog := s.openDaemonLogFile(ap)
+	if daemonLog != nil {
+		ap.LogFile = daemonLog
+	} else {
+		// No daemon log this cycle means no file whose bytes belong to this
+		// run, so drop both halves of the classification window instead of
+		// leaving a previous cycle's path and offset in place. Tailing another
+		// run's file is exactly the misclassification the offset exists to
+		// prevent, and this is also what makes the archive-only case below true
+		// to its comment.
+		ap.LogFilePath = ""
+		ap.LogFileStartOffset = 0
 	}
-	if af := s.openAgentArchiveLog(ap); af != nil {
-		ap.ArchiveLogFile = af
-		sinks = append(sinks, af)
+	archive := s.openAgentArchiveLog(ap)
+	if archive != nil {
+		ap.ArchiveLogFile = archive
 	}
 
-	switch len(sinks) {
-	case 0:
+	switch {
+	case daemonLog != nil:
+		// Both-sinks and daemon-log-only cases. spawnAgent starts the archive
+		// mirror after cmd.Start() when the archive is also open.
+		cmd.Stdout, cmd.Stderr = daemonLog, daemonLog
+	case archive != nil:
+		// Archive only: LogFilePath stays empty, so watchdog tier 2 (log mtime)
+		// is skipped — checkWatchdog already guards logPath != "" and tiers 0/1
+		// (IPC heartbeat, transcript mtime) still apply. No mirror is needed.
+		cmd.Stdout, cmd.Stderr = archive, archive
+	default:
 		// Both sinks are unavailable, so the child's stdout and stderr go
 		// nowhere: cmd.Stdout/Stderr stay nil, which os/exec wires to
 		// /dev/null. That is survivable but it must not be silent — with no
@@ -395,13 +522,93 @@ func (s *Supervisor) setupAgentLogFile(ap *AgentProcess, cmd *exec.Cmd) {
 		log.Printf("[daemon] Agent %s: NO LOG SINK — the agent's output is being discarded; "+
 			"set daemon.log_dir or fix the agent archive to make this run diagnosable",
 			ap.Entry.Worktree)
-		return
-	case 1:
-		cmd.Stdout, cmd.Stderr = sinks[0], sinks[0]
-	default:
-		w := io.MultiWriter(sinks...)
-		cmd.Stdout, cmd.Stderr = w, w
 	}
+}
+
+// agentLogMirrorInterval is how often the mirror re-checks the daemon log for
+// bytes the child appended. It bounds the Logs tab's lag, nothing else — no
+// liveness or classification signal reads the archive.
+const agentLogMirrorInterval = 250 * time.Millisecond
+
+// startAgentLogMirror feeds the agent archive from the daemon log the child is
+// writing directly (see the setupAgentLogFile invariant). It returns an
+// idempotent stop func that drains whatever is left and waits for the goroutine
+// to finish, or nil when no mirror is needed or one could not be started.
+//
+// The read side is a regular file, so io.Copy always terminates at EOF: this
+// goroutine cannot be pinned by a descendant the way an os.Pipe reader would
+// be, and registering it on s.Wg therefore cannot delay Stop()'s Wg.Wait().
+//
+// Must be called while ap.Mu is held (it reads ap's log fields).
+func (s *Supervisor) startAgentLogMirror(ap *AgentProcess) func() {
+	path, dst, offset := ap.LogFilePath, ap.ArchiveLogFile, ap.LogFileStartOffset
+	worktree := ap.Entry.Worktree
+	if path == "" || dst == nil || ap.LogFile == nil {
+		return nil // only one sink open (or none): nothing to mirror
+	}
+
+	src, err := os.Open(path) //nolint:gosec // G304: same daemon-config path openDaemonLogFile just opened
+	if err != nil {
+		// Degraded Logs tab, never a spawn failure.
+		log.Printf("[daemon] Agent %s: archive mirror disabled (open %s: %v)", worktree, path, err)
+		return nil
+	}
+	if _, err := src.Seek(offset, io.SeekStart); err != nil {
+		log.Printf("[daemon] Agent %s: archive mirror disabled (seek %s: %v)", worktree, path, err)
+		_ = src.Close()
+		return nil
+	}
+
+	stopCh, doneCh := make(chan struct{}), make(chan struct{})
+	s.Wg.Add(1)
+	go func() {
+		defer s.Wg.Done()
+		defer close(doneCh)
+		defer func() { _ = src.Close() }()
+
+		ticker := time.NewTicker(agentLogMirrorInterval)
+		defer ticker.Stop()
+		for {
+			if err := mirrorAgentLogChunk(src, dst); err != nil {
+				// Disk full, archive closed, ... — log once and give up rather
+				// than spin. The agent's lifecycle is unaffected either way.
+				log.Printf("[daemon] Agent %s: archive mirror stopped: %v", worktree, err)
+				return
+			}
+			select {
+			case <-stopCh:
+				// Final drain: the tail of a dying agent's output is the part
+				// most worth reading, so it must land before the archive closes.
+				if err := mirrorAgentLogChunk(src, dst); err != nil {
+					log.Printf("[daemon] Agent %s: archive mirror final drain failed: %v", worktree, err)
+				}
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() { close(stopCh) })
+		<-doneCh
+	}
+}
+
+// mirrorAgentLogChunk copies everything appended to src since the last call
+// into dst. src is a regular file, so io.Copy returns at EOF instead of
+// blocking. If the file shrank underneath us (truncation or rotation) the read
+// position is reset to the start rather than left spinning past EOF.
+func mirrorAgentLogChunk(src *os.File, dst io.Writer) error {
+	if pos, err := src.Seek(0, io.SeekCurrent); err == nil {
+		if info, serr := src.Stat(); serr == nil && info.Size() < pos {
+			if _, err := src.Seek(0, io.SeekStart); err != nil {
+				return err
+			}
+		}
+	}
+	_, err := io.Copy(dst, src)
+	return err
 }
 
 // openDaemonLogFile opens the daemon process log consumed by the watchdog and
@@ -440,6 +647,17 @@ func (s *Supervisor) openDaemonLogFile(ap *AgentProcess) *os.File {
 		log.Printf("[daemon] Agent %s: failed to open log file: %v", ap.Entry.Worktree, err)
 		return nil
 	}
+
+	// Snapshot the size before the child writes anything. The file is opened
+	// O_APPEND and outlives restarts, so this is where the archive mirror must
+	// start reading — otherwise cycle N re-copies cycle N-1's output. Treat a
+	// stat failure as "start at 0": duplicated archive lines beat lost ones.
+	ap.LogFileStartOffset = 0
+	if info, err := f.Stat(); err == nil {
+		ap.LogFileStartOffset = info.Size()
+	} else {
+		log.Printf("[daemon] Agent %s: could not size log file for archive mirror: %v", ap.Entry.Worktree, err)
+	}
 	return f
 }
 
@@ -457,8 +675,30 @@ func (s *Supervisor) openAgentArchiveLog(ap *AgentProcess) *os.File {
 }
 
 // closeAgentLogs closes both agent log sinks (best-effort) and clears the
-// handles. Must be called while ap.Mu is held.
+// handles. Must be called while ap.Mu is held, and is called on both the
+// spawn-failure and the normal-exit paths — so it must tolerate a nil
+// stopLogMirror and a stop func invoked more than once.
+//
+// Ordering is load-bearing: the mirror is stopped (and drained) BEFORE the
+// archive handle is closed, or the dying agent's last lines are lost and the
+// goroutine writes into a closed file. The drain reads a regular file, so it is
+// bounded even though ap.Mu is held across it.
+//
+// LogFileStartOffset deliberately SURVIVES this call. It has two consumers with
+// different lifetimes: the archive mirror, which captured it by value at start
+// and is already stopped by the line above, and exit classification, which runs
+// AFTER the logs are closed (waitForAgent -> closeAgentLogs, then
+// classifyAgentExit). Clearing it here left classification reading from offset
+// 0 — the whole append-only per-role log — so a marker an earlier run wrote
+// became every later run's verdict, and the agent was fatally stopped for an
+// account wall it never hit. Each spawn re-establishes the offset in
+// openDaemonLogFile, and setupAgentLogFile clears it when there is no daemon
+// log this cycle, so it cannot go stale.
 func closeAgentLogs(ap *AgentProcess) {
+	if ap.stopLogMirror != nil {
+		ap.stopLogMirror()
+		ap.stopLogMirror = nil
+	}
 	if ap.LogFile != nil {
 		if err := ap.LogFile.Close(); err != nil {
 			log.Printf("[daemon] Agent %s: failed to close log file: %v", ap.Entry.Worktree, err)
@@ -473,14 +713,33 @@ func closeAgentLogs(ap *AgentProcess) {
 	}
 }
 
+// agentExitInfo carries the values that only exist while the exiting process is
+// still on the AgentProcess — the pid in particular, which waitForAgent clears.
+// The agent.stopped event is emitted by the caller, AFTER classification, so it
+// can name the class and its provenance; without this the emit would have to
+// happen here, where nothing has been classified yet.
+type agentExitInfo struct {
+	ExitCode int
+	PID      int
+	Worktree string
+	Role     string
+	EpicID   string
+}
+
 // waitForAgent blocks until subprocess exits, returns exit code.
 func (s *Supervisor) waitForAgent(ap *AgentProcess) int {
+	return s.waitForAgentInfo(ap).ExitCode
+}
+
+// waitForAgentInfo blocks until the subprocess exits and returns the exit code
+// together with the process identity captured before it was cleared.
+func (s *Supervisor) waitForAgentInfo(ap *AgentProcess) agentExitInfo {
 	ap.Mu.Lock()
 	cmd := ap.Cmd
 	ap.Mu.Unlock()
 
 	if cmd == nil {
-		return -1
+		return agentExitInfo{ExitCode: -1, Worktree: ap.Entry.Worktree, Role: ap.Entry.Role}
 	}
 
 	// Keep this supervise goroutine's liveness tick fresh while we block in
@@ -489,9 +748,15 @@ func (s *Supervisor) waitForAgent(ap *AgentProcess) int {
 	// Renew the agent's fleet-db worker-registration lease for the same window,
 	// so a live agent is not reaped by the server-side TTL while it runs.
 	stopWorkerHeartbeat := s.startWorkerHeartbeat(ap)
+	// Keep the control-plane agent session heartbeating for the same window, so
+	// heartbeat age is a liveness signal a server-side sweeper can trust. It is
+	// stopped before waitForAgent returns, and therefore before the session is
+	// finalized, so no late beat can land on an already-terminal row.
+	stopSessionHeartbeat := s.startAgentSessionHeartbeat(ap)
 	err := cmd.Wait()
 	stopHeartbeat()
 	stopWorkerHeartbeat()
+	stopSessionHeartbeat()
 
 	ap.Mu.Lock()
 	ap.LastExit = time.Now()
@@ -516,12 +781,7 @@ func (s *Supervisor) waitForAgent(ap *AgentProcess) int {
 	closeAgentLogs(ap)
 	ap.Mu.Unlock()
 
-	// Emit agent_stopped event outside the lock (best-effort)
-	if evt, err := events.NewEvent(events.AgentStopped, worktree, role, epicID, events.AgentStoppedData{PID: pid, ExitCode: exitCode}); err == nil {
-		s.EmitEvent(evt)
-	}
-
-	return exitCode
+	return agentExitInfo{ExitCode: exitCode, PID: pid, Worktree: worktree, Role: role, EpicID: epicID}
 }
 
 // recoverAgent calls RecoverWorktree for cleanup.
@@ -533,7 +793,7 @@ func (s *Supervisor) waitForAgent(ap *AgentProcess) int {
 // this cycle classifies anything — it would otherwise inherit the previous
 // cycle's verdict and skip the cold-start cleanup it exists to perform.
 func (s *Supervisor) recoverAgent(ap *AgentProcess, exitCode int, incomplete bool) error {
-	return agent.RecoverWorktree(ap.WorktreePath, ap.Entry.Worktree, exitCode, incomplete)
+	return agent.RecoverWorktree(ap.WorkDir(), ap.Entry.Worktree, exitCode, incomplete)
 }
 
 // appendDaemonEnv appends daemon-level env vars (workspace ID, IPC socket path)
@@ -551,21 +811,6 @@ func (s *Supervisor) appendDaemonEnv(env []string) []string {
 	return env
 }
 
-// AgentProfilesDirName is the workspace-relative root holding per-agent
-// harness profile directories: .loom/agent-profiles/<worktree>/{claude,codex}.
-// When a backend subdirectory exists for an agent, the supervisor exports the
-// matching harness config-root variable (CLAUDE_CONFIG_DIR / CODEX_HOME) into
-// the agent process. envfilter allowlists both names, so the value flows
-// unchanged through cli.FilteredEnv() into the harness child built by the
-// backends layer — no change is needed there.
-//
-// Directory existence is the whole contract: there is no config key and no
-// flag, so the same layout works unchanged inside a container image.
-//
-// It is an alias, not a second literal: agentprofile owns the layout, and the
-// readers (transcript mirroring, `loom doctor`) resolve it from there.
-const AgentProfilesDirName = agentprofile.DirName
-
 // appendRuntimeEnv appends the per-run environment an agent subprocess needs:
 // the daemon's control-plane wiring, its verified harness profile roots, the
 // yield file it watches, and its session identity. It is the one step of
@@ -577,264 +822,28 @@ func (s *Supervisor) appendRuntimeEnv(env []string, ap *AgentProcess) ([]string,
 	if err != nil {
 		return nil, fmt.Errorf("agent %s profile: %w", ap.Entry.Worktree, err)
 	}
-	env = append(env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.WorktreePath, YieldFileName)))
+	env = append(env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.WorkDir(), YieldFileName)))
 	return appendSessionEnv(env, ap), nil
-}
-
-// ProfileManifestName is the launch-verification manifest a provisioned
-// profile root carries. Format and fingerprint scheme are documented on
-// agentprofile.ManifestName, which owns the verification.
-const ProfileManifestName = agentprofile.ManifestName
-
-// Boot-refusal reasons, distinguished so an operator reading the agent's
-// failure knows which repair applies: re-provision (stale fingerprint),
-// re-bless the upgrade (version drift), or provision at all (no manifest).
-// They are aliases of the agentprofile sentinels, so errors.Is works across
-// both packages.
-var (
-	ErrProfileManifestMissing     = agentprofile.ErrManifestMissing
-	ErrProfileManifestUnreadable  = agentprofile.ErrManifestUnreadable
-	ErrProfileFingerprintMismatch = agentprofile.ErrFingerprintMismatch
-	ErrProfileVersionDrift        = agentprofile.ErrVersionDrift
-	ErrProfileVersionUnknown      = agentprofile.ErrVersionUnknown
-)
-
-// ErrProfileTokenUnreadable is deliberately NOT an agentprofile alias: the
-// credential file is the supervisor's concern, not the manifest's — the
-// manifest does not describe it, so agentprofile has no counterpart to alias.
-// Keep it here rather than "tidying" it into agentprofile.
-var ErrProfileTokenUnreadable = errors.New("profile harness token unreadable")
-
-// profileHarnessEnvVar maps a profile harness root to the environment variable
-// that points the harness at it. Together with agentprofile.HarnessBinary this
-// is the whole export vocabulary; a new harness is one entry in each map.
-var profileHarnessEnvVar = map[string]string{
-	"claude": "CLAUDE_CONFIG_DIR",
-	"codex":  "CODEX_HOME",
-}
-
-// profileHarnesses is the fixed order profile roots are resolved in, so an
-// agent's environment is byte-identical from one boot to the next.
-var profileHarnesses = []string{"claude", "codex"}
-
-// profileTokenFile names the file inside a harness profile root that carries
-// that profile's OWN long-lived credential, and profileTokenEnvVar the
-// variable exporting it. Only claude has one: `claude setup-token` mints a
-// per-invocation, non-rotating token and prints it instead of writing a
-// credentials file, so the operator's setup-profile-token.sh captures it to
-// <root>/claude/oauth-token (mode 600). codex has no equivalent, and a harness
-// absent from these maps simply gets no credential injected.
-//
-// This is what makes a profile an IDENTITY rather than a copy of one. The
-// keychain-copy fallback shares the operator's own OAuth pair across every
-// profile, and the operator's next /login refresh invalidates it for whichever
-// profile copied it last — the "Login expired" the agents kept hitting on an
-// uncontrolled schedule. A profile carrying its own token is unaffected by
-// anyone else's refresh.
-//
-// The token file is deliberately NOT in the manifest's file list: that list is
-// an allowlist of files the fingerprint covers, and a credential must not be
-// hashed into a value that is written down, compared and reported.
-var (
-	profileTokenFile = map[string]string{
-		"claude": "oauth-token",
-	}
-	profileTokenEnvVar = map[string]string{
-		"claude": "CLAUDE_CODE_OAUTH_TOKEN",
-	}
-)
-
-// ProfileHarnesses returns the harnesses a profile root can be provisioned
-// for. Callers that inject one harness at a time (`loom lead`) iterate this
-// rather than writing their own list, which is how the two would drift.
-func ProfileHarnesses() []string {
-	return append([]string(nil), profileHarnesses...)
-}
-
-// ProfileHarnessBinary returns the binary whose --version output a harness
-// profile's manifest pins, or "" for an unknown harness. Exported so a caller
-// verifying a root outside the spawn path resolves the same binary the spawn
-// path would, and so the provisioner's pin can be asserted against it. The
-// table itself lives in agentprofile, which owns verification.
-func ProfileHarnessBinary(harness string) string {
-	return agentprofile.HarnessBinary[harness]
-}
-
-// ProfileEnvVar returns the environment variable a harness profile root is
-// exported as, or "" for an unknown harness. It is exported so a caller can
-// tell whether a variable is ALREADY set before paying for verification —
-// `loom lead` must leave an inherited value alone, including an operator's own
-// config root that no manifest here could ever verify.
-func ProfileEnvVar(harness string) string {
-	return profileHarnessEnvVar[harness]
-}
-
-// ProfileHarnessEnv resolves one harness profile root for an agent, verifies
-// it, and returns the KEY=VALUE assignment that exports it — or "" when the
-// agent has no such root on disk.
-//
-// This is the single implementation of the resolve-verify-export policy. The
-// supervisor reaches it through AppendProfileEnv at spawn; `loom lead`, the one
-// agent the supervisor does not spawn, calls it per harness so it can skip the
-// ones whose variable it inherited. Neither may grow a second, weaker copy.
-//
-// An existing but unverifiable profile is a BOOT FAILURE, never a fallback to
-// legacy env: silently running the agent against the operator's full ~/.claude
-// is the exact leak per-agent profiles close. Per-agent boot degradation
-// contains the failure to the one agent whose profile is broken.
-func ProfileHarnessEnv(projectDir, agent, harness string) (string, []string, error) {
-	root := agentprofile.Dir(projectDir, agent)
-	if root == "" {
-		// No resolvable profile root (empty or non-segment agent name): the
-		// same situation as no profile on disk, so stay on the legacy env.
-		return "", nil, nil
-	}
-	envVar := profileHarnessEnvVar[harness]
-	if envVar == "" {
-		return "", nil, nil
-	}
-	dir := filepath.Join(root, harness)
-	if !dirExists(dir) {
-		return "", nil, nil
-	}
-	if err := verifyProfileManifest(dir, agentprofile.HarnessBinary[harness]); err != nil {
-		return "", nil, err
-	}
-	env := []string{fmt.Sprintf("%s=%s", envVar, dir)}
-	secret, err := ProfileSecretEnv(dir, harness)
-	if err != nil {
-		return dir, nil, err
-	}
-	return dir, append(env, secret...), nil
-}
-
-// ProfileSecretEnv returns the assignments exporting the credential a harness
-// profile root carries of its own, or nothing when it carries none — which is
-// every profile that has not been migrated to a setup-token identity yet, and
-// every harness that has no such file at all. Absent is not an error: it is
-// the pre-existing configuration, and it must keep working unchanged.
-//
-// It is exported for `loom lead`, the one agent the supervisor does not spawn,
-// which may INHERIT its config root and so never reach ProfileHarnessEnv —
-// but must still pick up that root's credential rather than run on whatever
-// token the operator's shell happened to hold.
-//
-// Neither the token nor any prefix of it appears in the returned error, and it
-// is never logged: the only place the value may go is the child's environment.
-func ProfileSecretEnv(dir, harness string) ([]string, error) {
-	name, envVar := profileTokenFile[harness], profileTokenEnvVar[harness]
-	if name == "" || envVar == "" || dir == "" {
-		return nil, nil
-	}
-	path := filepath.Join(dir, name)
-	raw, err := os.ReadFile(path) //nolint:gosec // G304: path derived from the workspace profile layout, not user input
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("%w: %s: %v", ErrProfileTokenUnreadable, path, err)
-	}
-	token := strings.TrimSpace(string(raw))
-	if token == "" {
-		// Present but empty is a broken provisioning run, not a legacy
-		// profile: falling through to the operator's token would restore the
-		// exact sharing this file exists to end, silently.
-		return nil, fmt.Errorf("%w: %s: file is empty", ErrProfileTokenUnreadable, path)
-	}
-	return []string{fmt.Sprintf("%s=%s", envVar, token)}, nil
-}
-
-// AppendProfileEnv injects every per-agent harness profile root that exists on
-// disk, after verifying each one against its manifest, together with any
-// credential that root carries of its own. Absent directories leave the
-// environment untouched, preserving the legacy behavior of inheriting the
-// operator's ~/.claude and ~/.codex.
-//
-// The profile's assignments are appended LAST, so a profile token overrides an
-// operator token the filtered environment carried in — the allowlist passes
-// CLAUDE_CODE_OAUTH_TOKEN through, and exec resolves duplicates to the final
-// assignment.
-func AppendProfileEnv(env []string, projectDir, agent string) ([]string, error) {
-	for _, harness := range profileHarnesses {
-		_, assignments, err := ProfileHarnessEnv(projectDir, agent, harness)
-		if err != nil {
-			return nil, err
-		}
-		env = append(env, assignments...)
-	}
-	return env, nil
-}
-
-// VerifyProfileManifest applies the spawn path's verify-or-refuse rule to a
-// profile root for a caller outside the daemon. `loom lead` is the one agent
-// the supervisor does not spawn — the workspace launcher exports
-// CLAUDE_CONFIG_DIR itself — so it must reuse this check rather than grow a
-// second, weaker policy alongside it.
-func VerifyProfileManifest(dir, binary string) error {
-	return verifyProfileManifest(dir, binary)
-}
-
-// verifyProfileManifest verifies dir against its manifest, supplying the
-// observed harness version from this package's TTL cache. binary selects which
-// cached probe to use; the verification itself lives in agentprofile.
-func verifyProfileManifest(dir, binary string) error {
-	return agentprofile.Verify(dir, harnessVersion(binary))
-}
-
-// harnessVersionTTL bounds how long a probed --version string is reused. It is
-// deliberately coarse: the point is that one spawn cycle — every agent the
-// supervisor brings up in a burst — costs a single probe per binary rather
-// than one per agent, each of which forks a node CLI and can cost seconds.
-// A harness upgrade lands within a TTL, and the next boot re-probes.
-const harnessVersionTTL = 2 * time.Minute
-
-var (
-	harnessVersionMu    sync.Mutex
-	harnessVersionCache = map[string]harnessVersionEntry{}
-)
-
-type harnessVersionEntry struct {
-	version string
-	probed  time.Time
-}
-
-// harnessVersion returns the cached "<binary> --version" first line, probing
-// at most once per binary per TTL. Failures are NOT cached: a probe killed
-// under load would otherwise refuse every agent boot for the whole TTL.
-func harnessVersion(binary string) string {
-	harnessVersionMu.Lock()
-	if e, ok := harnessVersionCache[binary]; ok && time.Since(e.probed) < harnessVersionTTL {
-		harnessVersionMu.Unlock()
-		return e.version
-	}
-	harnessVersionMu.Unlock()
-
-	version := probeHarnessVersion(binary)
-	if version == "" {
-		return ""
-	}
-	harnessVersionMu.Lock()
-	harnessVersionCache[binary] = harnessVersionEntry{version: version, probed: time.Now()}
-	harnessVersionMu.Unlock()
-	return version
-}
-
-// ResetHarnessVersionCache drops every cached probe. For testing only: a test
-// that shims a harness on PATH must not inherit a version another test — or
-// the enforcement `loom lead` now runs at startup — already probed off the
-// real binary.
-func ResetHarnessVersionCache() {
-	harnessVersionMu.Lock()
-	harnessVersionCache = map[string]harnessVersionEntry{}
-	harnessVersionMu.Unlock()
-}
-
-// probeHarnessVersion is a seam for tests; production runs the real binary.
-var probeHarnessVersion = func(binary string) string {
-	return agentprofile.ProbeVersion(binary, backends.VersionProbeTimeout)
 }
 
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// emitAgentStopped emits the agent.stopped event for a finished run. Called
+// from spawnAndWait immediately after classifyAgentExit so the event carries
+// the classification and its provenance; exactly one is emitted per exit.
+func (s *Supervisor) emitAgentStopped(ap *AgentProcess, exit agentExitInfo) {
+	data := events.AgentStoppedData{PID: exit.PID, ExitCode: exit.ExitCode}
+	ap.Mu.Lock()
+	if ap.LastError != nil {
+		data.ErrorClass = ap.LastError.Class.String()
+		data.Evidence = ap.LastError.Evidence.Summary()
+	}
+	ap.Mu.Unlock()
+	// Best-effort: a dropped event must never affect the exit path.
+	if evt, err := events.NewEvent(events.AgentStopped, exit.Worktree, exit.Role, exit.EpicID, data); err == nil {
+		s.EmitEvent(evt)
+	}
 }

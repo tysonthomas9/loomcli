@@ -77,3 +77,132 @@ func TestClassifyHTTPError_SkillForbiddenMatchesOnlySkillRouteFamilies(t *testin
 		})
 	}
 }
+
+// A fleet-db that does not serve the lease routes answers with ServeMux's
+// default handler (text/plain, no envelope) or a bare 405. That is the same
+// operational condition as an unavailable lease store, and must classify as
+// one — while a real handler's enveloped 404 keeps meaning "no such lease".
+func TestClassifyHTTPError_SkillMaterializationLeaseRouteMissing(t *testing.T) {
+	t.Parallel()
+	const (
+		collection = "/api/v1/WS/skill-materialization-leases"
+		item       = "/api/v1/WS/skill-materialization-leases/abc123"
+	)
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		status int
+		body   []byte
+		check  func(t *testing.T, err error)
+	}{
+		{
+			name: "unrouted collection 404", method: http.MethodPost, path: collection,
+			status: http.StatusNotFound, body: []byte("404 page not found\n"),
+			check: func(t *testing.T, err error) {
+				if !errors.Is(err, domain.ErrSkillMaterializationLeaseRouteMissing) {
+					t.Fatalf("err = %v, want errors.Is ErrSkillMaterializationLeaseRouteMissing", err)
+				}
+				if !errors.Is(err, domain.ErrSkillMaterializationLeaseStoreUnavailable) {
+					t.Fatalf("err = %v, want errors.Is ErrSkillMaterializationLeaseStoreUnavailable", err)
+				}
+			},
+		},
+		{
+			name: "method not allowed on collection", method: http.MethodPost, path: collection,
+			status: http.StatusMethodNotAllowed, body: nil,
+			check: func(t *testing.T, err error) {
+				if !errors.Is(err, domain.ErrSkillMaterializationLeaseRouteMissing) {
+					t.Fatalf("err = %v, want errors.Is ErrSkillMaterializationLeaseRouteMissing", err)
+				}
+				if !errors.Is(err, domain.ErrSkillMaterializationLeaseStoreUnavailable) {
+					t.Fatalf("err = %v, want errors.Is ErrSkillMaterializationLeaseStoreUnavailable", err)
+				}
+			},
+		},
+		{
+			name: "proxy html 404 on collection", method: http.MethodPost, path: collection,
+			status: http.StatusNotFound, body: []byte("<html><body>404 Not Found</body></html>"),
+			check: func(t *testing.T, err error) {
+				if !errors.Is(err, domain.ErrSkillMaterializationLeaseStoreUnavailable) {
+					t.Fatalf("err = %v, want errors.Is ErrSkillMaterializationLeaseStoreUnavailable", err)
+				}
+			},
+		},
+		{
+			name: "enveloped 404 on lease item stays not found", method: http.MethodDelete, path: item,
+			status: http.StatusNotFound, body: []byte(`{"error":{"code":"not_found","message":"lease not found"}}`),
+			check: func(t *testing.T, err error) {
+				if !errors.Is(err, domain.ErrNotFound) {
+					t.Fatalf("err = %v, want errors.Is ErrNotFound", err)
+				}
+				if errors.Is(err, domain.ErrSkillMaterializationLeaseStoreUnavailable) {
+					t.Fatalf("err = %v, an enveloped lease 404 must not degrade", err)
+				}
+			},
+		},
+		{
+			name: "store unavailable 503 unchanged", method: http.MethodPost, path: collection,
+			status: http.StatusServiceUnavailable,
+			body:   []byte(`{"error":{"code":"` + skillMaterializationLeaseStoreUnavailableCode + `"}}`),
+			check: func(t *testing.T, err error) {
+				if !errors.Is(err, domain.ErrSkillMaterializationLeaseStoreUnavailable) {
+					t.Fatalf("err = %v, want errors.Is ErrSkillMaterializationLeaseStoreUnavailable", err)
+				}
+				if errors.Is(err, domain.ErrSkillMaterializationLeaseRouteMissing) {
+					t.Fatalf("err = %v, a 503 is not a missing route", err)
+				}
+			},
+		},
+		{
+			name: "lease conflict 409 unchanged", method: http.MethodPost, path: collection,
+			status: http.StatusConflict,
+			body:   []byte(`{"error":{"code":"` + skillMaterializationLeaseConflictCode + `","meta":{"holder":"lead@host#1"}}}`),
+			check: func(t *testing.T, err error) {
+				var conflict *domain.SkillMaterializationLeaseConflictError
+				if !errors.As(err, &conflict) {
+					t.Fatalf("err = %v, want *domain.SkillMaterializationLeaseConflictError", err)
+				}
+			},
+		},
+		{
+			name: "generic conflict 409 still hard-fails", method: http.MethodPost, path: collection,
+			status: http.StatusConflict, body: []byte(`{"error":{"code":"conflict"}}`),
+			check: func(t *testing.T, err error) {
+				if !errors.Is(err, domain.ErrConflict) {
+					t.Fatalf("err = %v, want errors.Is ErrConflict", err)
+				}
+				if errors.Is(err, domain.ErrSkillMaterializationLeaseStoreUnavailable) {
+					t.Fatalf("err = %v, a 409 conflict must keep hard-failing", err)
+				}
+			},
+		},
+		{
+			name: "unrouted 404 off the lease family does not leak", method: http.MethodGet,
+			path: "/api/v1/WS/issues/X", status: http.StatusNotFound, body: nil,
+			check: func(t *testing.T, err error) {
+				if !errors.Is(err, domain.ErrNotFound) {
+					t.Fatalf("err = %v, want errors.Is ErrNotFound", err)
+				}
+				if errors.Is(err, domain.ErrSkillMaterializationLeaseStoreUnavailable) {
+					t.Fatalf("err = %v, the route-missing arm leaked off the lease family", err)
+				}
+			},
+		},
+		{
+			name: "resource merely named like the lease family", method: http.MethodPost,
+			path: "/api/v1/WS/repos/skill-materialization-leases", status: http.StatusNotFound, body: nil,
+			check: func(t *testing.T, err error) {
+				if errors.Is(err, domain.ErrSkillMaterializationLeaseStoreUnavailable) {
+					t.Fatalf("err = %v, segment matching must not reach a deeper segment", err)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tt.check(t, classifyHTTPError(tt.method, tt.path, tt.status, tt.body))
+		})
+	}
+}

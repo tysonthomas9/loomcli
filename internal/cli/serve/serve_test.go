@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,10 +16,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/metricscmd"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // mockMonitorData creates a sample MonitorData for testing
@@ -1471,126 +1476,167 @@ func TestRedisPasswordWiring_ConfigAndClient(t *testing.T) {
 	}
 }
 
-func TestHandleMetrics_ContentType(t *testing.T) {
-	mockData := mockMonitorData()
-
-	withMockData(t, mockData, func() {
-		req := httptest.NewRequest("GET", "/metrics", nil)
-		rr := httptest.NewRecorder()
-
-		handleMetrics(rr, req)
-
-		// Check status code
-		if rr.Code != http.StatusOK {
-			t.Errorf("status code = %d, want %d", rr.Code, http.StatusOK)
-		}
-
-		// Check Content-Type header
-		wantContentType := "text/plain; version=0.0.4; charset=utf-8"
-		if ct := rr.Header().Get("Content-Type"); ct != wantContentType {
-			t.Errorf("Content-Type = %q, want %q", ct, wantContentType)
-		}
-	})
-}
-
-func TestHandleMetrics_Format(t *testing.T) {
-	mockData := mockMonitorData()
-
-	withMockData(t, mockData, func() {
-		req := httptest.NewRequest("GET", "/metrics", nil)
-		rr := httptest.NewRecorder()
-
-		handleMetrics(rr, req)
-
-		body := rr.Body.String()
-
-		// Verify loom_ready_tasks metric format
-		expectedStrings := []string{
-			"# HELP loom_ready_tasks",
-			"# TYPE loom_ready_tasks gauge",
-			`loom_ready_tasks{priority="0"}`,
-			`loom_ready_tasks{priority="1"}`,
-			`loom_ready_tasks{priority="2"}`,
-			`loom_ready_tasks{priority="3"}`,
-			`loom_ready_tasks{priority="4"}`,
-			// Verify loom_in_progress_tasks metric format
-			"# HELP loom_in_progress_tasks",
-			"# TYPE loom_in_progress_tasks gauge",
-			"loom_in_progress_tasks",
-			// Verify loom_fleet_workers metric format
-			"# HELP loom_fleet_workers",
-			"# TYPE loom_fleet_workers gauge",
-			`loom_fleet_workers{status="active"}`,
-			`loom_fleet_workers{status="idle"}`,
-			`loom_fleet_workers{status="blocked"}`,
-		}
-
-		for _, expected := range expectedStrings {
-			if !strings.Contains(body, expected) {
-				t.Errorf("response body missing %q\n\nFull body:\n%s", expected, body)
-			}
-		}
-	})
-}
-
-func TestHandleMetrics_InProgressCount(t *testing.T) {
-	mockData := mockMonitorData() // Tasks.InProgress = 2
-
-	withMockData(t, mockData, func() {
-		req := httptest.NewRequest("GET", "/metrics", nil)
-		rr := httptest.NewRecorder()
-
-		handleMetrics(rr, req)
-
-		body := rr.Body.String()
-
-		// Verify the in-progress count matches mock data (InProgress=2)
-		if !strings.Contains(body, "loom_in_progress_tasks 2") {
-			t.Errorf("expected 'loom_in_progress_tasks 2' in response body\n\nFull body:\n%s", body)
-		}
-	})
-}
-
-func TestHandleMetrics_NilData(t *testing.T) {
-	// collectDataFunc returns nil
-	withMockData(t, nil, func() {
-		req := httptest.NewRequest("GET", "/metrics", nil)
-		rr := httptest.NewRecorder()
-
-		handleMetrics(rr, req)
-
-		// Check status code - should still succeed
-		if rr.Code != http.StatusOK {
-			t.Errorf("status code = %d, want %d", rr.Code, http.StatusOK)
-		}
-
-		body := rr.Body.String()
-
-		// When data is nil, in-progress tasks should be 0
-		if !strings.Contains(body, "loom_in_progress_tasks 0") {
-			t.Errorf("expected 'loom_in_progress_tasks 0' when data is nil\n\nFull body:\n%s", body)
-		}
-	})
-}
-
-func TestCollectWorkerStatusCounts_NoDaemon(t *testing.T) {
-	// When no daemon is running, collectWorkerStatusCounts should return all zeros
-	counts := collectWorkerStatusCounts()
-
-	expectedStatuses := []string{"active", "idle", "blocked"}
-	for _, status := range expectedStatuses {
-		val, ok := counts[status]
-		if !ok {
-			t.Errorf("missing key %q in worker status counts", status)
-			continue
-		}
-		if val != 0 {
-			t.Errorf("counts[%q] = %d, want 0 (no daemon running)", status, val)
-		}
+// TestHandleMetrics_WiredThroughScopedSources asserts the /metrics handler the
+// server actually installs: a per-workspace exposition built from the store and
+// the scoped monitor collectors.
+//
+// It replaces three tests that exercised a local copy of the old writer, and
+// TestCollectWorkerStatusCounts_NoDaemon, which asserted that the deleted daemon
+// RPC path returned zeros. That "passing" assertion was the bug: inside
+// `loom serve` the socket never resolves, so the gauge was always zero.
+// Exhaustive coverage of the exposition lives in
+// internal/cli/serve/metricscmd/metrics_test.go.
+func TestHandleMetrics_WiredThroughScopedSources(t *testing.T) {
+	st := memstore.New()
+	ctx := context.Background()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS_SERVE", Name: "Serve"}); err != nil {
+		t.Fatal(err)
 	}
 
-	// Verify no unexpected keys
-	if len(counts) != 3 {
-		t.Errorf("len(counts) = %d, want 3", len(counts))
+	data := mockMonitorData()
+	data.Tasks.ReadyByPriority = map[int]int{0: 0, 1: 3, 2: 0, 3: 0, 4: 0}
+	if data.Tasks.InProgress == 0 || data.Tasks.ReadyByPriority[1] == 0 {
+		t.Fatal("fixture must be non-zero, or it cannot tell a real reading from a constant zero")
+	}
+
+	ds := metricscmd.NewMonitorDataSource(func() *monitor.MonitorData { return data }, nil)
+	storeDS := metricscmd.NewMonitorStoreDataSource(st)
+	handler := metricscmd.HandleMetrics(ds, storeDS, st)
+
+	rr := httptest.NewRecorder()
+	handler(rr, httptest.NewRequest("GET", "/metrics", nil))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "text/plain; version=0.0.4; charset=utf-8" {
+		t.Errorf("Content-Type = %q", ct)
+	}
+
+	body := rr.Body.String()
+	expected := []string{
+		"# TYPE loom_ready_tasks gauge",
+		"# TYPE loom_in_progress_tasks gauge",
+		"# TYPE loom_fleet_workers gauge",
+		`loom_ready_tasks{workspace="WS_SERVE",priority="1"} 3`,
+		fmt.Sprintf(`loom_in_progress_tasks{workspace="WS_SERVE"} %d`, data.Tasks.InProgress),
+		`loom_fleet_workers{workspace="WS_SERVE",status="active"} 0`,
+		`loom_monitor_collection_ok{workspace="WS_SERVE"} 1`,
+	}
+	for _, want := range expected {
+		if !strings.Contains(body, want) {
+			t.Errorf("response body missing %q\n\nFull body:\n%s", want, body)
+		}
+	}
+}
+
+func TestRateLimitEnabledDefault(t *testing.T) {
+	for _, value := range []string{"", "1", "true", "TRUE", "yes", "on", "unexpected"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv(envLoomRateLimitEnabled, value)
+			if !rateLimitEnabledDefault() {
+				t.Fatalf("rateLimitEnabledDefault() = false for %q", value)
+			}
+		})
+	}
+	for _, value := range []string{"0", "false", "FALSE", "off", "no", " off "} {
+		t.Run("disabled_"+value, func(t *testing.T) {
+			t.Setenv(envLoomRateLimitEnabled, value)
+			if rateLimitEnabledDefault() {
+				t.Fatalf("rateLimitEnabledDefault() = true for %q", value)
+			}
+		})
+	}
+}
+
+func TestIntEnvDefault(t *testing.T) {
+	tests := []struct {
+		value string
+		want  int
+	}{
+		{"", 100},
+		{"500", 500},
+		{"abc", 100}, // unparseable: warn and fall back, never abort serve
+		{"0", 100},   // 0 would make rate.NewLimiter reject every request
+		{"-5", 100},  // ditto for negatives
+		{" 250 ", 250},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			t.Setenv(envLoomRateLimitReadRate, tt.value)
+			if got := intEnvDefault(envLoomRateLimitReadRate, 100); got != tt.want {
+				t.Errorf("intEnvDefault(%q) = %d, want %d", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestServeFlags_RateLimitDefaults(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
+	tests := []struct {
+		name     string
+		flagType string
+		def      string
+	}{
+		{"rate-limit-enabled", "bool", "true"},
+		{"rate-limit-read-rate", "int", "100"},
+		{"rate-limit-read-burst", "int", "200"},
+		{"rate-limit-mutate-rate", "int", "20"},
+		{"rate-limit-mutate-burst", "int", "40"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := serveCmd.Flags().Lookup(tt.name)
+			if f == nil {
+				t.Fatalf("%s flag not registered on serveCmd", tt.name)
+			}
+			if f.Value.Type() != tt.flagType {
+				t.Errorf("%s type = %q, want %q", tt.name, f.Value.Type(), tt.flagType)
+			}
+			if f.DefValue != tt.def {
+				t.Errorf("%s default = %q, want %q", tt.name, f.DefValue, tt.def)
+			}
+		})
+	}
+}
+
+func TestBuildRateLimitConfig(t *testing.T) {
+	// These are package-level vars on a shared serveCmd; restore them.
+	origEnabled, origReadRate, origReadBurst := serveRateLimitEnabled, serveRateLimitReadRate, serveRateLimitReadBurst
+	origMutateRate, origMutateBurst := serveRateLimitMutateRate, serveRateLimitMutateBurst
+	t.Cleanup(func() {
+		serveRateLimitEnabled, serveRateLimitReadRate, serveRateLimitReadBurst = origEnabled, origReadRate, origReadBurst
+		serveRateLimitMutateRate, serveRateLimitMutateBurst = origMutateRate, origMutateBurst
+	})
+
+	serveRateLimitEnabled = true
+	serveRateLimitReadRate = 500
+	serveRateLimitReadBurst = 1000
+	serveRateLimitMutateRate = 300
+	serveRateLimitMutateBurst = 600
+
+	cfg := buildRateLimitConfig()
+	if cfg == nil {
+		t.Fatal("buildRateLimitConfig() = nil, want a config")
+	}
+	if !cfg.Enabled {
+		t.Error("Enabled = false, want true")
+	}
+	if cfg.ReadRate != 500 || cfg.ReadBurst != 1000 {
+		t.Errorf("read = %v/%d, want 500/1000", cfg.ReadRate, cfg.ReadBurst)
+	}
+	if cfg.MutateRate != 300 || cfg.MutateBurst != 600 {
+		t.Errorf("mutate = %v/%d, want 300/600", cfg.MutateRate, cfg.MutateBurst)
+	}
+	// Cleanup/TTL are not flag-controlled and must keep package defaults.
+	d := middleware.DefaultRateLimitConfig()
+	if cfg.CleanupInterval != d.CleanupInterval || cfg.EntryTTL != d.EntryTTL {
+		t.Errorf("cleanup/ttl = %v/%v, want %v/%v", cfg.CleanupInterval, cfg.EntryTTL, d.CleanupInterval, d.EntryTTL)
+	}
+
+	serveRateLimitEnabled = false
+	if buildRateLimitConfig().Enabled {
+		t.Error("Enabled = true after opting out, want false")
 	}
 }

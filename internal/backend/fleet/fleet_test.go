@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -346,7 +347,9 @@ func TestList_ClientFiltersMultipleReposWithoutServerLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if strings.Contains(gotQuery, "source_repos=") || strings.Contains(gotQuery, "repo=") || strings.Contains(gotQuery, "limit=") {
+	// List's own page size may appear; the caller's pre-filter limit (1) must not.
+	if strings.Contains(gotQuery, "source_repos=") || strings.Contains(gotQuery, "repo=") ||
+		(strings.Contains(gotQuery, "limit=") && !strings.Contains(gotQuery, fmt.Sprintf("limit=%d", listPageSize))) {
 		t.Fatalf("query = %q, want no unsupported repo filter or pre-filter limit", gotQuery)
 	}
 	if len(result) != 1 || result[0].ID != "b" {
@@ -361,19 +364,24 @@ func TestList_UnsupportedFilter_Single(t *testing.T) {
 	})
 	defer ts.Close()
 
-	p := 2
 	_, err := fb.List(context.Background(), backend.ListOpts{
-		Status:   "open",
-		Priority: &p,
+		Status:  "open",
+		Overdue: true,
 	})
 	if err == nil {
-		t.Fatal("expected error for unsupported filter Priority")
+		t.Fatal("expected error for unsupported filter Overdue")
 	}
 	if !errors.Is(err, backend.ErrFilterNotSupported) {
 		t.Errorf("expected ErrFilterNotSupported, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "Priority") {
+	if !strings.Contains(err.Error(), "Overdue") {
 		t.Errorf("error should mention field name, got %q", err.Error())
+	}
+	// The webui maps this to a 400. As a bare fmt.Errorf it was unclassifiable
+	// and every such request came back 500.
+	var be *backend.BackendError
+	if !errors.As(err, &be) || be.Kind != backend.KindValidation {
+		t.Errorf("expected a *backend.BackendError of KindValidation, got %#v", err)
 	}
 }
 
@@ -384,11 +392,10 @@ func TestList_UnsupportedFilter_Multiple(t *testing.T) {
 	})
 	defer ts.Close()
 
-	p := 1
 	_, err := fb.List(context.Background(), backend.ListOpts{
-		Query:    "test",
-		Priority: &p,
-		Overdue:  true,
+		IDs:           []string{"id-1"},
+		ExcludeStatus: []string{"closed"},
+		Overdue:       true,
 	})
 	if err == nil {
 		t.Fatal("expected error for unsupported filters")
@@ -397,7 +404,7 @@ func TestList_UnsupportedFilter_Multiple(t *testing.T) {
 		t.Errorf("expected ErrFilterNotSupported, got %v", err)
 	}
 	errMsg := err.Error()
-	for _, field := range []string{"Query", "Priority", "Overdue"} {
+	for _, field := range []string{"IDs", "ExcludeStatus", "Overdue"} {
 		if !strings.Contains(errMsg, field) {
 			t.Errorf("error should mention %q, got %q", field, errMsg)
 		}
@@ -563,8 +570,12 @@ func TestSearchIssues_Empty(t *testing.T) {
 
 // TestCheckFleetUnsupportedFilters_EachField sets each unsupported ListOpts
 // field individually and verifies that (a) the error wraps
-// ErrFilterNotSupported and (b) the error message contains the field name.
+// ErrFilterNotSupported, (b) it is a KindValidation BackendError so the webui
+// renders a 400 rather than a 500, and (c) the message contains the field name.
 // This ensures no field is accidentally omitted from checkFleetUnsupportedFilters.
+//
+// The thirteen filters List now honors are covered by
+// TestCheckFleetUnsupportedFilters_SupportedFields instead.
 func TestCheckFleetUnsupportedFilters_EachField(t *testing.T) {
 	intVal := 1
 	boolTrue := true
@@ -573,23 +584,12 @@ func TestCheckFleetUnsupportedFilters_EachField(t *testing.T) {
 		name string
 		opts backend.ListOpts
 	}{
-		{"Query", backend.ListOpts{Query: "search"}},
-		{"Priority", backend.ListOpts{Priority: &intVal}},
 		{"LabelsAny", backend.ListOpts{LabelsAny: []string{"a"}}},
 		{"IDs", backend.ListOpts{IDs: []string{"id-1"}}},
-		{"TitleContains", backend.ListOpts{TitleContains: "title"}},
-		{"DescriptionContains", backend.ListOpts{DescriptionContains: "desc"}},
-		{"NotesContains", backend.ListOpts{NotesContains: "note"}},
-		{"CreatedAfter", backend.ListOpts{CreatedAfter: "2026-01-01"}},
-		{"CreatedBefore", backend.ListOpts{CreatedBefore: "2026-12-31"}},
 		{"ClosedAfter", backend.ListOpts{ClosedAfter: "2026-01-01"}},
 		{"ClosedBefore", backend.ListOpts{ClosedBefore: "2026-12-31"}},
-		{"EmptyDescription", backend.ListOpts{EmptyDescription: true}},
-		{"NoAssignee", backend.ListOpts{NoAssignee: true}},
-		{"NoLabels", backend.ListOpts{NoLabels: true}},
 		{"PriorityMin", backend.ListOpts{PriorityMin: &intVal}},
 		{"PriorityMax", backend.ListOpts{PriorityMax: &intVal}},
-		{"Pinned", backend.ListOpts{Pinned: &boolTrue}},
 		{"IncludeTemplates", backend.ListOpts{IncludeTemplates: true}},
 		{"Ephemeral", backend.ListOpts{Ephemeral: &boolTrue}},
 		{"MolType", backend.ListOpts{MolType: "molecule"}},
@@ -612,6 +612,10 @@ func TestCheckFleetUnsupportedFilters_EachField(t *testing.T) {
 			}
 			if !errors.Is(err, backend.ErrFilterNotSupported) {
 				t.Errorf("expected error wrapping ErrFilterNotSupported, got %v", err)
+			}
+			var be *backend.BackendError
+			if !errors.As(err, &be) || be.Kind != backend.KindValidation {
+				t.Errorf("expected a *backend.BackendError of KindValidation, got %#v", err)
 			}
 			if !strings.Contains(err.Error(), tt.name) {
 				t.Errorf("error message should contain field name %q, got %q", tt.name, err.Error())
@@ -2239,8 +2243,8 @@ func TestGetMutations_ActionFolding(t *testing.T) {
 			Events: []fleetMutationEvent{
 				{Timestamp: now, Action: "issue.update", EntityType: "issue", EntityID: "a"},
 				{Timestamp: now, Action: "issue.delete", EntityType: "issue", EntityID: "b"},
-				{Timestamp: now, Action: "comment.add", EntityType: "comment", EntityID: "c"},
-				{Timestamp: now, Action: "label.add", EntityType: "label", EntityID: "d"},
+				{Timestamp: now, Action: "comment.add", EntityType: "comment", EntityID: "a"},
+				{Timestamp: now, Action: "label.add", EntityType: "label", EntityID: "a"},
 				{Timestamp: now, Action: "workspace.update", EntityType: "workspace", EntityID: "ws"},
 				{Timestamp: now, Action: "unknown.weird", EntityType: "issue", EntityID: "e"},
 			},
@@ -2267,8 +2271,15 @@ func TestGetMutations_ActionFolding(t *testing.T) {
 			t.Errorf("got[%d] missing generic envelope fields: %+v", i, got[i])
 		}
 	}
-	if got[2].IssueID != "" || got[3].IssueID != "" || got[4].IssueID != "" {
-		t.Errorf("non-issue fleet mutations should not populate legacy issue_id: comment=%q label=%q workspace=%q", got[2].IssueID, got[3].IssueID, got[4].IssueID)
+	// comment.* and label.* are issue-scoped: fleet-db puts the ISSUE id in
+	// entity_id, so the legacy issue_id must be populated from it.
+	if got[2].IssueID != "a" || got[3].IssueID != "a" {
+		t.Errorf("issue-scoped fleet mutations should populate legacy issue_id: comment=%q label=%q", got[2].IssueID, got[3].IssueID)
+	}
+	// workspace.* is not issue-scoped; its entity_id is a workspace, so the
+	// legacy field must stay empty rather than match on a foreign id.
+	if got[4].IssueID != "" {
+		t.Errorf("workspace-level fleet mutations should not populate legacy issue_id: workspace=%q", got[4].IssueID)
 	}
 	if got[0].IssueID != "a" || got[5].IssueID != "e" {
 		t.Errorf("issue fleet mutations should preserve legacy issue_id: update=%q unknown=%q", got[0].IssueID, got[5].IssueID)

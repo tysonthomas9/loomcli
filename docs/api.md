@@ -108,6 +108,8 @@ Project-level statistics.
     "blocked_issues": 2,
     "deferred_issues": 1,
     "ready_issues": 10,
+    "review_issues": 4,
+    "status_blocked_issues": 3,
     "tombstone_issues": 1,
     "pinned_issues": 2,
     "epics_eligible_for_closure": 0,
@@ -865,7 +867,7 @@ All array fields marshal as `[]` (never `null`).
 | `name` | string | Agent name |
 | `repos` | []string | Assigned repository names |
 | `repo_groups` | []string | Assigned repo group names |
-| `cross_repo` | bool | Whether agent works across repos |
+| `cross_repo` | bool | `false` (default): the repo binding is a hard filter — the router rejects work outside it. `true`: affinity is advisory, a mismatch only ranks lower. See [repo affinity](arch/repo-affinity.md). |
 
 ### Validation Rules
 
@@ -3595,12 +3597,23 @@ All three routes answer with the same payload.
 - `running` lists agents whose runs were already in flight; a hold never touches
   them, so this is what a quiesce is still waiting on.
 - `gated` counts agents that are cycling but refused at the claim gate.
+- `supervisor_available` is present, and `false`, only when the server could
+  reach no agent supervisor at all. It is omitted — i.e. `true` — on every
+  daemon-sourced response.
 
 ### `GET /api/workspaces/{ws}/claims/hold`
 
-- **Response `200 OK`:** `ClaimHoldStatus` (`hold: null` when free)
-- **Response `503`:** the agent supervisor is not running (no control socket)
+- **Response `200 OK`:** `ClaimHoldStatus` (`hold: null` when free). When no
+  agent supervisor is reachable the answer is still `200`, with `hold: null`,
+  `running: []`, `gated: 0` and `supervisor_available: false` — a *read* of the
+  hold is answerable without a daemon ("nothing is holding claims"), and a
+  permanently-unreachable supervisor must not look like a server error to the
+  dashboard's 10 s poller.
 - **Response `504`:** the supervisor did not answer in time
+
+`POST` and `DELETE` still answer `503` when the supervisor is unreachable: a
+*write* genuinely cannot be satisfied without a daemon, and an operator trying
+to quiesce a workspace must be told so.
 
 ### `POST /api/workspaces/{ws}/claims/hold`
 
@@ -3657,6 +3670,30 @@ Monitor endpoints serve daemon-collected data (agent status, task distribution, 
 | GET | `/metrics` | Prometheus metrics (public, no auth required) |
 | GET | `/api/observability/metrics` | Event metrics snapshot |
 | GET | `/api/observability/events` | Paginated event log |
+
+#### `GET /metrics` — `loom_*` gauges
+
+The Prometheus exposition served here carries one label set **per workspace**,
+listed from the store on every scrape:
+
+| Series | Labels | Source |
+|--------|--------|--------|
+| `loom_ready_tasks` | `workspace`, `priority` (`0`..`4`) | scoped monitor collection, `tasks.ready_by_priority` |
+| `loom_in_progress_tasks` | `workspace` | scoped monitor collection |
+| `loom_fleet_workers` | `workspace`, `status` (`active`/`idle`/`blocked`) | store agent records |
+| `loom_monitor_collection_ok` | `workspace` | `1` when that workspace collected, `0` otherwise |
+| `loom_monitor_collection_timestamp_seconds` | `workspace` | collection time, unix seconds |
+
+A workspace whose collection fails reports `loom_monitor_collection_ok 0` and
+omits its task and worker samples, so one broken workspace never blanks the
+others. When no workspace can be listed the endpoint still returns `200` with
+`loom_monitor_collection_ok{workspace=""} 0`.
+
+**Breaking change:** `loom_ready_tasks`, `loom_in_progress_tasks` and
+`loom_fleet_workers` gained the `workspace` label, so a dashboard querying the
+bare series must now `sum by (workspace) (...)` or select a workspace. Those
+series read a constant zero before this change, so nothing correct depended on
+them.
 
 ## Multi-Workspace Endpoints
 
@@ -4253,6 +4290,53 @@ Per-IP token bucket rate limiting applied to all API endpoints (except `/health`
 - Stale entries evicted after 10 minutes of inactivity (cleanup every 5 minutes)
 - Returns `429 Too Many Requests` with `Retry-After` header
 - `/api/client-errors` and `/api/csp-report` are excluded from this global limiter — they use dedicated per-endpoint rate limiters (see [Client Error & CSP Reporting](#client-error--csp-reporting))
+
+### Configuration
+
+The global limiter is on by default at the rates above. `loom serve` exposes it via flags, each of which reads a `LOOM_RATE_LIMIT_*` env var when the flag is not passed (the flag wins when both are set):
+
+| Flag | Env Var | Default | Description |
+|------|---------|---------|-------------|
+| `--rate-limit-enabled` | `LOOM_RATE_LIMIT_ENABLED` | `true` | Per-IP HTTP rate limiting. Set `0`/`false`/`off`/`no` to disable |
+| `--rate-limit-read-rate` | `LOOM_RATE_LIMIT_READ_RATE` | `100` | Sustained read req/s per IP |
+| `--rate-limit-read-burst` | `LOOM_RATE_LIMIT_READ_BURST` | `200` | Read burst per IP |
+| `--rate-limit-mutate-rate` | `LOOM_RATE_LIMIT_MUTATE_RATE` | `20` | Sustained mutating req/s per IP |
+| `--rate-limit-mutate-burst` | `LOOM_RATE_LIMIT_MUTATE_BURST` | `40` | Mutating burst per IP |
+
+- A non-positive or unparseable value is logged and falls back to the default — it never reaches the limiter, where `0` would reject every request. A burst below its rate is raised to one second's worth of requests.
+- Disabling logs a `WARN` at startup (`http rate limiting disabled`); enabling logs the effective rates at `INFO`.
+- **Disabling removes a DoS protection.** It exists for E2E suites and single-IP automation, which trip the per-IP limits from one address. See [Security](security.md#http-rate-limiting).
+- The per-endpoint limiters on `/api/client-errors` and `/api/config` are separate and are *not* affected by these settings.
+
+## Daemon Agent State
+
+`daemon-agents.json` — written by the daemon every few seconds and read by
+`loom daemon status` and the monitor views — carries one object per supervised
+agent. Fields are omitted when empty unless noted.
+
+### `profile_error`
+
+```json
+{
+  "worktree": "observer",
+  "role": "observer",
+  "status": "blocked",
+  "stop_reason": "profile_invalid",
+  "profile_error": "profile harness version drift: /path/.loom/agent-profiles/observer/claude: manifest pins \"2.1.236 (Claude Code)\", claude reports \"2.1.237 (Claude Code)\" (re-provision to bless the upgrade)"
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `profile_error` | string (omitempty) | The harness-profile refusal keeping this agent out of the claim loop. Set when the agent's `.loom/agent-profiles/<agent>/{claude,codex}` directory fails manifest verification in daemon pre-flight; cleared on the first cycle that verifies. Absent for every healthy agent. |
+
+The refusal is raised **before** the agent claims a task, so a drifted agent
+claims nothing and produces no board churn. It is stored in its own field
+rather than in `last_error_class` for a specific reason: `last_error_class` is
+overwritten by every cycle's outcome (typically `NoWork`), which used to erase
+the diagnosis within one poll interval. `status` is `blocked` and `stop_reason`
+is `profile_invalid` for the whole time the condition holds; the agent
+self-resumes once the profile is re-provisioned.
 
 ## Error Codes
 

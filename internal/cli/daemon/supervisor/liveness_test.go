@@ -285,3 +285,79 @@ func setTickForTest(s *Supervisor, name string, when time.Time) {
 	}
 	tick.Store(when.UnixNano())
 }
+
+// TestUnregisterTickStopsWatchdogScanningIt is the unit-level guard for the
+// leak: once a slot is released the watchdog must not see it at all, however
+// old its last stamp was.
+func TestUnregisterTickStopsWatchdogScanningIt(t *testing.T) {
+	s := newHarnessSupervisor()
+	s.ConfigSnapshot = func() *cfgpkg.DaemonConfig {
+		return &cfgpkg.DaemonConfig{}
+	}
+	name := GoroutineAgentPrefix + "stopped_agent"
+	s.RegisterTick(name)
+	setTickForTest(s, name, time.Now().Add(-1*time.Hour))
+
+	s.UnregisterTick(name)
+
+	if _, ok := s.LoadTick(name); ok {
+		t.Fatal("tick slot survived UnregisterTick")
+	}
+
+	scanRepeated(s)
+
+	select {
+	case err := <-s.FatalChannel():
+		t.Fatalf("watchdog fataled on an unregistered tick: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// TestTerminallyStoppedAgentDoesNotFatalDaemon reproduces the production crash
+// loop: an agent whose supervise loop returns terminally (an AuthFailure fatal
+// stop) left its tick slot registered and frozen, so the watchdog fataled the
+// whole daemon one threshold later — and again after every pm2 restart, because
+// the stopped agent stopped ticking again immediately.
+func TestTerminallyStoppedAgentDoesNotFatalDaemon(t *testing.T) {
+	s := newHarnessSupervisor()
+	s.ConfigSnapshot = func() *cfgpkg.DaemonConfig {
+		return &cfgpkg.DaemonConfig{}
+	}
+
+	healthy := GoroutineAgentPrefix + "healthy_agent"
+	s.RegisterTick(healthy)
+
+	ap := &AgentProcess{
+		Entry:  cfgpkg.AgentEntry{Worktree: "auth_stopped_agent"},
+		StopCh: make(chan struct{}),
+		Done:   make(chan struct{}),
+	}
+	stopped := agentTickName(ap)
+	s.RegisterTick(stopped)
+
+	// Closing StopCh drives superviseAgent out through checkAgentStopSignals —
+	// the same terminal `return` an auth fatal stop takes, exercising the real
+	// deferred release rather than calling UnregisterTick directly.
+	close(ap.StopCh)
+	s.Wg.Add(1)
+	s.supervisedAgentBody(stopped, ap)
+
+	if _, ok := s.LoadTick(stopped); ok {
+		// Reproduce what production does next: nothing stamps the leaked slot,
+		// so it ages past the threshold while the rest of the fleet is healthy.
+		setTickForTest(s, stopped, time.Now().Add(-1*time.Hour))
+	}
+
+	setTickForTest(s, healthy, time.Now())
+	scanRepeated(s)
+
+	select {
+	case err := <-s.FatalChannel():
+		t.Fatalf("a terminally stopped agent fataled the daemon: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	if _, ok := s.LoadTick(stopped); ok {
+		t.Fatal("stopped agent left its tick slot registered")
+	}
+}

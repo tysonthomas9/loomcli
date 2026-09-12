@@ -1135,6 +1135,19 @@ func TestTranslateBackendError_NilReturnsNil(t *testing.T) {
 	}
 }
 
+// TestTranslateBackendError_ExportedName pins the exported entry point that
+// the /ready handler calls directly (it owns a non-standard response envelope
+// and so cannot go through handler.HandleServiceError).
+func TestTranslateBackendError_ExportedName(t *testing.T) {
+	err := TranslateBackendError(backend.ErrValidation("Ready", `invalid type: "bogus"`))
+	if err == nil || err.Kind != KindValidation {
+		t.Fatalf("expected validation, got %+v", err)
+	}
+	if !strings.Contains(err.Message, "bogus") {
+		t.Errorf("expected 'bogus' in message, got %q", err.Message)
+	}
+}
+
 // --- NewIssueService without a backend returns ErrUnavailable for backend-only paths ---
 
 func TestNewIssueService_NoBackend_ListEvents_Unavailable(t *testing.T) {
@@ -1243,5 +1256,36 @@ func TestCreateIssue_Backend_ForwardsIdempotency(t *testing.T) {
 	}
 	if fb.createParams[0].IdempotencyKey != "key-xyz" || !fb.createParams[0].Force {
 		t.Errorf("idempotency not forwarded to backend.CreateParams: %+v", fb.createParams[0])
+	}
+}
+
+// --- KindRateLimited translation ---
+
+func TestTranslateBackendError_RateLimitedCarriesRetryAfter(t *testing.T) {
+	be := &backend.BackendError{
+		Kind:    backend.KindRateLimited,
+		Op:      "List",
+		Message: "rate limit exceeded",
+		Meta:    map[string]string{backend.MetaRetryAfter: "12"},
+	}
+	err := translateBackendError(be)
+	if err.Kind != KindRateLimited {
+		t.Errorf("kind = %s, want %s", err.Kind, KindRateLimited)
+	}
+	if err.RetryAfter != "12" {
+		t.Errorf("RetryAfter = %q, want %q", err.RetryAfter, "12")
+	}
+	if err.Message != "rate limit exceeded" {
+		t.Errorf("message = %q, want the upstream text", err.Message)
+	}
+}
+
+func TestTranslateBackendError_RateLimitedWithoutMetaIsEmpty(t *testing.T) {
+	err := translateBackendError(backend.ErrRateLimited("List", "rate limit exceeded"))
+	if err.Kind != KindRateLimited {
+		t.Errorf("kind = %s, want %s", err.Kind, KindRateLimited)
+	}
+	if err.RetryAfter != "" {
+		t.Errorf("RetryAfter = %q, want empty", err.RetryAfter)
 	}
 }

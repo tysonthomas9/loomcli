@@ -50,7 +50,8 @@ func TestFleetIssueWire_FieldDriftGuard(t *testing.T) {
 		"repo_canonical": true, "parent": true, "design": true,
 		"design_artifact_id": true, "design_format": true, "has_design": true, "description": true,
 		"acceptance_criteria": true, "notes": true, "external_ref": true,
-		"created_at": true, "created_by": true, "updated_at": true,
+		"estimated_minutes": true,
+		"created_at":        true, "created_by": true, "updated_at": true,
 		"due_at": true, "defer_until": true, "closed_at": true,
 		"close_reason": true,
 	}
@@ -104,6 +105,17 @@ func TestFleetIssueWire_RoundTrip(t *testing.T) {
 		DeferUntil:  &defer_,
 		ClosedAt:    &closed,
 		CloseReason: "fixed",
+
+		EstimatedMinutes: intPtr(45),
+	}
+	// EstimatedMinutes is carried on types.Issue but not on the slim
+	// backend.IssueData projection asserted below, so it is checked on the
+	// toIssue() hop directly. Before this field existed on fleetIssueWire the
+	// value was dropped on every fleet read path.
+	if est := wire.toIssue().EstimatedMinutes; est == nil {
+		t.Errorf("EstimatedMinutes = nil, want 45")
+	} else if *est != 45 {
+		t.Errorf("EstimatedMinutes = %d, want 45", *est)
 	}
 	d := fleetIssueWithCountsWire{fleetIssueWire: wire}.toIssueData()
 	want := map[string]any{
@@ -242,17 +254,18 @@ func TestDetailsToDetailData(t *testing.T) {
 	extRef := "gh-42"
 	details := &types.IssueDetails{
 		Issue: types.Issue{
-			ID:          "test-1",
-			Title:       "Test",
-			Status:      types.StatusInProgress,
-			Priority:    1,
-			IssueType:   types.TypeTask,
-			Description: "desc",
-			Design:      "design",
-			CreatedAt:   now,
-			UpdatedAt:   now,
-			CreatedBy:   "user",
-			ExternalRef: &extRef,
+			ID:               "test-1",
+			Title:            "Test",
+			Status:           types.StatusInProgress,
+			Priority:         1,
+			IssueType:        types.TypeTask,
+			Description:      "desc",
+			Design:           "design",
+			CreatedAt:        now,
+			UpdatedAt:        now,
+			CreatedBy:        "user",
+			ExternalRef:      &extRef,
+			EstimatedMinutes: intPtr(30),
 		},
 		Labels: []string{"label-1"},
 		Parent: &parent,
@@ -289,6 +302,11 @@ func TestDetailsToDetailData(t *testing.T) {
 	}
 	if d.ExternalRef != "gh-42" {
 		t.Errorf("ExternalRef = %q, want %q", d.ExternalRef, "gh-42")
+	}
+	if d.EstimatedMinutes == nil {
+		t.Errorf("EstimatedMinutes = nil, want 30")
+	} else if *d.EstimatedMinutes != 30 {
+		t.Errorf("EstimatedMinutes = %d, want 30", *d.EstimatedMinutes)
 	}
 	if len(d.Dependencies) != 1 {
 		t.Fatalf("Dependencies len = %d, want 1", len(d.Dependencies))
@@ -465,5 +483,51 @@ func TestFleetIssueWire_ExternalRefProjection(t *testing.T) {
 	// Empty wire value projects to nil (omitted), not a pointer to "".
 	if got := (fleetIssueWire{}).toIssue().ExternalRef; got != nil {
 		t.Errorf("empty ExternalRef = %v, want nil", got)
+	}
+}
+
+func intPtr(v int) *int { return &v }
+
+// TestFleetEventToMutationData_IssueIDScoping pins which fleet-db entity types
+// get the legacy issue_id filled in from entity_id. fleet-db carries the ISSUE
+// id in entity_id for every issue-scoped entity (see issueScopedEntityTypes);
+// workspace-level entities carry their own id there and must stay empty.
+func TestFleetEventToMutationData_IssueIDScoping(t *testing.T) {
+	cases := []struct {
+		name        string
+		action      string
+		entityType  string
+		entityID    string
+		wantIssueID string
+	}{
+		{"issue create", "issue.create", "issue", "WS-1", "WS-1"},
+		{"comment add", "comment.add", "comment", "WS-1", "WS-1"},
+		{"dep add", "dep.add", "dependency", "WS-1", "WS-1"},
+		{"label add", "label.add", "label", "WS-1", "WS-1"},
+		{"metadata set", "metadata.set", "metadata", "WS-1", "WS-1"},
+		{"workspace update", "workspace.update", "workspace", "ws", ""},
+		{"agent update", "agent.update", "agent", "agent-1", ""},
+		{"driver run claim", "driver_run.claim", "driver_run", "run-9", ""},
+		{"repo create", "repo.create", "repo", "repo-1", ""},
+		{"empty entity_type falls back to issue. action prefix", "issue.update", "", "WS-2", "WS-2"},
+		{"empty entity_type, non-issue action", "workspace.update", "", "ws", ""},
+		{"issue-scoped type with empty entity_id stays empty", "comment.add", "comment", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := fleetEventToMutationData(&fleetMutationEvent{
+				Action:     tc.action,
+				EntityType: tc.entityType,
+				EntityID:   tc.entityID,
+			})
+			if md.IssueID != tc.wantIssueID {
+				t.Errorf("IssueID = %q, want %q (action=%q entity_type=%q entity_id=%q)",
+					md.IssueID, tc.wantIssueID, tc.action, tc.entityType, tc.entityID)
+			}
+			// The generic envelope is unaffected by the legacy-field fill-in.
+			if md.EntityID != tc.entityID || md.EntityType != tc.entityType {
+				t.Errorf("envelope changed: entity_type=%q entity_id=%q", md.EntityType, md.EntityID)
+			}
+		})
 	}
 }

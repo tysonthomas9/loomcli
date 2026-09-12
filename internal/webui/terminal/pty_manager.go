@@ -420,6 +420,22 @@ func (m *PTYManager) SessionCount() int {
 	return len(m.sessions)
 }
 
+// SessionNamesFor satisfies PTYSessionLister: it returns the names of the
+// live sessions this manager holds for wsID, including detached ones still
+// within the grace/idle windows. Returns an empty slice when the manager
+// owns no session for that workspace.
+func (m *PTYManager) SessionNamesFor(wsID string) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	names := make([]string, 0, len(m.sessions))
+	for key := range m.sessions {
+		if key.Workspace == wsID {
+			names = append(names, key.Name)
+		}
+	}
+	return names
+}
+
 // SessionCountFor satisfies PTYSource. A bare PTYManager owns a single
 // session namespace, so the returned count is the same as SessionCount
 // regardless of wsID. MultiPTYManager provides the per-workspace variant.

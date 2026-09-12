@@ -1,29 +1,86 @@
 # Production Docker Compose deployment for loom.
 #
-# Two services behind an nginx reverse proxy:
+# Four services behind an nginx reverse proxy:
+#   - redis:    backing store for fleet-db (internal only)
+#   - fleet-db: the issue backend (internal only)
 #   - server:   Go API on :8080 (internal only)
 #   - frontend: nginx serving the static SPA + proxying /api/* to server
 #
-# Build context is the repo root (one level up from deploy/).
+# fleet-db is not optional: `loom serve` requires an issue backend, and
+# without LOOM_FLEET_DB_URL the server tries to spawn an embedded fleet-db
+# binary that this image does not carry — a fatal error, so the container
+# crash-loops.
+#
+# Build context is the repo root (one level up from deploy/). fleet-db is
+# built from a sibling checkout at ../../fleet-db, like the stacks in test/:
+#   git clone https://github.com/BrowserOperator/fleet-db ../../fleet-db
+# Operators with a registry image can set DEPLOY_FLEETDB_IMAGE instead.
+#
+# API-ONLY: the server here runs the hardened distroless `runtime` target,
+# which has no shell. The Web UI terminal therefore cannot spawn a PTY on
+# this stack. That is deliberate — see deploy/README.md and the
+# `runtime-terminal` target in deploy/server/Dockerfile.
 #
 # Usage:
 #   cd deploy && docker compose up --build
 #   # Open http://localhost:8080
 
 services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 20
+    restart: unless-stopped
+
+  fleet-db:
+    image: ${DEPLOY_FLEETDB_IMAGE:-loom-deploy-fleet-db:latest}
+    build:
+      context: ../../fleet-db
+      dockerfile: deploy/docker/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      # Without an explicit artifact content backend fleet-db exits on startup.
+      FLEETDB_ARTIFACT_CONTENT_BACKEND: local
+      FLEETDB_ARTIFACT_CONTENT_DIR: /tmp/fleet-db-artifacts
+    command:
+      - "--redis-addr"
+      - "redis:6379"
+      - "--addr"
+      - ":8080"
+      # DEV POSTURE — REPLACE BEFORE ANY NON-LOCAL DEPLOYMENT. --auth-dev-mode
+      # trusts the X-Actor header outright and --authz-enabled=false disables
+      # authorization entirely. This file binds only to localhost and is a
+      # reference shape, not a hardened deployment.
+      - "--auth-dev-mode"
+      - "--authz-enabled=false"
+    # Distroless image: no shell, no wget, so no in-container healthcheck is
+    # possible. Dependents gate on service_started (test/testenv precedent).
+    restart: unless-stopped
+
   server:
     build:
       context: ../
       dockerfile: deploy/server/Dockerfile
+    depends_on:
+      fleet-db:
+        condition: service_started
     environment:
       LOOM_FRONTEND_URL: "http://localhost"
+      LOOM_ISSUE_BACKEND: fleetdb
+      LOOM_FLEET_DB_URL: "http://fleet-db:8080"
+      LOOM_FLEET_DB_ACTOR: "deploy-compose@local"
     expose:
       - "8080"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
+    # No healthcheck: this service runs the distroless `runtime` target, which
+    # has neither a shell nor wget, and loom has no self-probe subcommand.
+    # Readiness is asserted by the frontend's healthcheck instead, which
+    # proxies through to this server's /health — see the frontend service.
     restart: unless-stopped
 
   frontend:
@@ -36,5 +93,19 @@ services:
       - "8080:80"
     depends_on:
       server:
-        condition: service_healthy
+        # service_started, not service_healthy: the server can no longer be
+        # health-probed in-container. nginx boots fine while the server is
+        # still coming up — 99-render-nginx-resolver.sh plus `set
+        # $loom_upstream` give lazy, per-request upstream resolution.
+        condition: service_started
+    healthcheck:
+      # nginx:alpine HAS wget, and nginx.conf already proxies `location =
+      # /health` to $loom_upstream/health — so this transitively proves the
+      # server is answering. /health (not /api/health) always returns 200;
+      # /api/health returns 503 "degraded" when a daemon is expected.
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
     restart: unless-stopped

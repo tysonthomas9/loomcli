@@ -48,10 +48,42 @@ func TestMaybeResumeDaemonSession_Guards(t *testing.T) {
 			wantResume: "",
 		},
 		{
-			name:       "stale session beyond TTL → cold start",
+			// The TTL is IDLE time, so a task claimed 45 minutes ago whose last
+			// run ended a minute ago resumes. This is the ceiling-hit case: the
+			// old task-age TTL cold-started it every time.
+			name:     "long task, last run just ended → resume armed",
+			assigned: "loomcli-7",
+			lock: cli.LockInfo{
+				ClaudeSessionID: "sess-1", TaskID: "loomcli-7",
+				TaskStartedAt:  time.Now().Add(-45 * time.Minute),
+				LastRunEndedAt: time.Now().Add(-1 * time.Minute),
+			},
+			wantResume: "sess-1",
+		},
+		{
+			name:     "idle beyond TTL → cold start",
+			assigned: "loomcli-7",
+			lock: cli.LockInfo{
+				ClaudeSessionID: "sess-1", TaskID: "loomcli-7",
+				TaskStartedAt:  time.Now().Add(-5 * time.Hour),
+				LastRunEndedAt: time.Now().Add(-3 * time.Hour),
+			},
+			wantResume: "",
+		},
+		{
+			// A lock written by an older binary has no LastRunEndedAt; a zero
+			// timestamp must not read as "infinitely fresh", so the TTL falls
+			// back to TaskStartedAt.
+			name:       "no last-run-end, task older than TTL → cold start",
+			assigned:   "loomcli-7",
+			lock:       cli.LockInfo{ClaudeSessionID: "sess-1", TaskID: "loomcli-7", TaskStartedAt: time.Now().Add(-3 * time.Hour)},
+			wantResume: "",
+		},
+		{
+			name:       "no last-run-end, task inside TTL → resume armed",
 			assigned:   "loomcli-7",
 			lock:       cli.LockInfo{ClaudeSessionID: "sess-1", TaskID: "loomcli-7", TaskStartedAt: time.Now().Add(-90 * time.Minute)},
-			wantResume: "",
+			wantResume: "sess-1",
 		},
 		{
 			name:       "no carried session id → cold start",
@@ -116,5 +148,47 @@ func TestPersistAssignedTaskToLock(t *testing.T) {
 	info2, _ := cli.ReadLockFile(dir)
 	if info2 == nil || !info2.TaskStartedAt.Equal(started) {
 		t.Errorf("same-task re-persist reset TaskStartedAt: %v → %v", started, info2.TaskStartedAt)
+	}
+}
+
+// TestResumeStalenessClock pins which timestamp the TTL is measured from: the
+// last run's end when the lock has one, TaskStartedAt when it does not.
+func TestResumeStalenessClock(t *testing.T) {
+	ended := time.Now().Add(-2 * time.Minute)
+	started := time.Now().Add(-45 * time.Minute)
+
+	got, _ := ResumeStalenessClock(&cli.LockInfo{TaskStartedAt: started, LastRunEndedAt: ended})
+	if !got.Equal(ended) {
+		t.Errorf("with a last-run-end: clock = %v, want %v", got, ended)
+	}
+
+	got, _ = ResumeStalenessClock(&cli.LockInfo{TaskStartedAt: started})
+	if !got.Equal(started) {
+		t.Errorf("without a last-run-end: clock = %v, want the task start %v", got, started)
+	}
+
+	if got, _ = ResumeStalenessClock(&cli.LockInfo{}); !got.IsZero() {
+		t.Errorf("with neither timestamp: clock = %v, want zero", got)
+	}
+}
+
+// TestMarkDaemonRunEnded: the exit path stamps the lock, which is what makes
+// the next attempt's TTL measure idle time rather than task age.
+func TestMarkDaemonRunEnded(t *testing.T) {
+	dir := t.TempDir()
+	writeLockInfo(t, dir, cli.LockInfo{PID: os.Getpid(), Command: "task", AgentName: "tester", TaskID: "loomcli-7"})
+
+	before := time.Now()
+	markDaemonRunEnded(dir)
+
+	info, err := cli.ReadLockFile(dir)
+	if err != nil || info == nil {
+		t.Fatalf("read lock: %v", err)
+	}
+	if info.LastRunEndedAt.Before(before) {
+		t.Fatalf("LastRunEndedAt = %v, want at/after %v", info.LastRunEndedAt, before)
+	}
+	if since, clock := ResumeStalenessClock(info); !since.Equal(info.LastRunEndedAt) {
+		t.Fatalf("stamped lock should measure by last run end, got %v (%s)", since, clock)
 	}
 }

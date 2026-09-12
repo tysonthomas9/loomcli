@@ -1064,3 +1064,402 @@ func TestClassifyFromOutput_IncompatibleBackendCLIIsTerminalModelFailure(t *test
 		t.Fatalf("message = %q", got.Message)
 	}
 }
+
+// writeRunLog builds an append-only daemon log out of consecutive run blocks
+// and returns its path plus the byte offset at which each block starts.
+func writeRunLog(t *testing.T, blocks ...string) (string, []int64) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "worker-agent.log")
+	var (
+		buf     strings.Builder
+		offsets []int64
+	)
+	for _, b := range blocks {
+		offsets = append(offsets, int64(buf.Len()))
+		buf.WriteString(b)
+	}
+	if err := os.WriteFile(path, []byte(buf.String()), 0o600); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	return path, offsets
+}
+
+// TestClassifyFromLogAt_SkipsPriorRunAuthBanner is the misclassification this
+// exists to stop: the per-role log is append-only and spans days, so a logged-out
+// run from yesterday sits in the same file as today's timeout. Read whole, the
+// stale banner wins and the agent is walled for an auth problem it does not have.
+func TestClassifyFromLogAt_SkipsPriorRunAuthBanner(t *testing.T) {
+	t.Parallel()
+
+	priorRun := "[loom] starting task PUPPET-1\n" +
+		AuthRequiredMarker + ": Not logged in · Run /login\n" +
+		"Not logged in · Run /login\n"
+	thisRun := "[loom] starting task PUPPET-2\n" +
+		"error: context deadline exceeded\n"
+
+	path, offsets := writeRunLog(t, priorRun, thisRun)
+
+	// Control: the whole-file read is what produced the false verdict.
+	if got := ClassifyFromLog(path, 1, "claude"); got.Class != AuthFailure {
+		t.Fatalf("whole-file class = %s, want AuthFailure (control for the bug)", got.Class)
+	}
+
+	got := ClassifyFromLogAt(path, offsets[1], 1, "claude")
+	if got.Class != Timeout {
+		t.Fatalf("class = %s, want Timeout", got.Class)
+	}
+	if strings.Contains(got.RawOutput, "Not logged in") {
+		t.Errorf("raw output still carries the prior run's banner:\n%s", got.RawOutput)
+	}
+}
+
+// TestClassifyFromLogAt_OffsetPastEOFFallsBack covers rotation: the recorded
+// offset points past the end of a log that has since been replaced, so the run's
+// own bytes are gone. Classifying nothing would hide a real failure, so the
+// whole file is read instead.
+func TestClassifyFromLogAt_OffsetPastEOFFallsBack(t *testing.T) {
+	t.Parallel()
+
+	path, _ := writeRunLog(t, "error: context deadline exceeded\n")
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+
+	got := ClassifyFromLogAt(path, info.Size()+4096, 1, "claude")
+	want := ClassifyFromLog(path, 1, "claude")
+	if got.Class != want.Class || got.RawOutput != want.RawOutput {
+		t.Fatalf("offset past EOF: class/raw = %s/%q, want %s/%q",
+			got.Class, got.RawOutput, want.Class, want.RawOutput)
+	}
+	if got.Class != Timeout {
+		t.Fatalf("class = %s, want Timeout", got.Class)
+	}
+}
+
+// TestClassifyFromLogAt_ZeroOffsetMatchesClassifyFromLog is the compatibility
+// invariant: offset 0 is the value every pre-existing caller and test produces,
+// and it must read byte-for-byte what it always did — including past the
+// 100-line and 64KiB tail caps.
+func TestClassifyFromLogAt_ZeroOffsetMatchesClassifyFromLog(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"empty":       "",
+		"single line": "error: context deadline exceeded\n",
+		"over 100 lines": strings.Repeat("chatter\n", 500) +
+			"error: context deadline exceeded\n",
+		"over 64KiB": strings.Repeat("x", 80*1024) +
+			"\nerror: context deadline exceeded\n",
+		"no trailing newline": "Invalid API key · Please run /login",
+	}
+
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			path, _ := writeRunLog(t, body)
+
+			gotTail, gotErr := readLogTailAt(path, 100, 0)
+			wantTail, wantErr := readLogTail(path, 100)
+			if gotTail != wantTail {
+				t.Fatalf("tail differs at offset 0:\ngot  %q\nwant %q", gotTail, wantTail)
+			}
+			if (gotErr == nil) != (wantErr == nil) {
+				t.Fatalf("err differs: got %v, want %v", gotErr, wantErr)
+			}
+
+			got := ClassifyFromLogAt(path, 0, 1, "claude")
+			want := ClassifyFromLog(path, 1, "claude")
+			if got.Class != want.Class || got.RawOutput != want.RawOutput || got.Message != want.Message {
+				t.Fatalf("classification differs at offset 0:\ngot  %+v\nwant %+v", got, want)
+			}
+		})
+	}
+}
+
+// TestClassifyEvidenceProvenance is a PARALLEL table to the Class/Message
+// assertions above: it asserts only what the classifier now RECORDS about how
+// it reached a verdict. The verdicts themselves are unchanged — every existing
+// Class/Message assertion in this file still holds byte-for-byte.
+func TestClassifyEvidenceProvenance(t *testing.T) {
+	tests := []struct {
+		name       string
+		text       string
+		exitCode   int
+		backend    string
+		wantClass  Outcome
+		wantSource EvidenceSource
+		wantRule   string
+		wantDetail string
+		wantHTTP   int
+	}{
+		{
+			// THE REGRESSION THIS FIXES. terminalTurnInvocationError appends the
+			// harness's own reason after "<marker>: "; the classifier used to
+			// replace the whole thing with a canned message and the reason was
+			// lost. It now rides in Evidence.Detail.
+			name:       "auth marker keeps the harness reason tail",
+			text:       AuthRequiredMarker + ": auth_required\n  Please run /login\n",
+			exitCode:   1,
+			backend:    "claude",
+			wantClass:  AuthFailure,
+			wantSource: EvidenceHarnessMarker,
+			wantRule:   "AuthRequiredMarker",
+			wantDetail: "auth_required",
+		},
+		{
+			name:       "usage-limited marker",
+			text:       UsageLimitedMarker + ": usage_limited\n  resets 6:40pm\n",
+			exitCode:   1,
+			backend:    "claude",
+			wantClass:  RateLimited,
+			wantSource: EvidenceHarnessMarker,
+			wantRule:   "UsageLimitedMarker",
+			wantDetail: "usage_limited",
+		},
+		{
+			name:       "backend-unavailable marker",
+			text:       BackendUnavailableMarker + ": claude\n",
+			exitCode:   127,
+			backend:    "claude",
+			wantClass:  BackendUnavailable,
+			wantSource: EvidenceHarnessMarker,
+			wantRule:   "BackendUnavailableMarker",
+			wantDetail: "claude",
+		},
+		{
+			name:       "agent-launch-failed marker",
+			text:       AgentLaunchFailedMarker + ": exec format error\n",
+			exitCode:   1,
+			backend:    "claude",
+			wantClass:  SpawnFailure,
+			wantSource: EvidenceHarnessMarker,
+			wantRule:   "AgentLaunchFailedMarker",
+			wantDetail: "exec format error",
+		},
+		{
+			name:       "bare 401 with no marker falls to the residual table",
+			text:       "401 Unauthorized",
+			exitCode:   1,
+			backend:    "claude",
+			wantClass:  AuthFailure,
+			wantSource: EvidenceResidual,
+			wantRule:   "residual.auth",
+		},
+		{
+			name:       "wrapper-classified rate limit carries its HTTP code",
+			text:       `API Error: 429 {"type":"error","error":{"type":"rate_limit_error"}}`,
+			exitCode:   1,
+			backend:    "claude",
+			wantClass:  RateLimited,
+			wantSource: EvidenceWrapper,
+			wantRule:   "api_error/RateLimited",
+			wantHTTP:   429,
+		},
+		{
+			name:       "exit 137 with unmatched text",
+			text:       "nothing classifiable here",
+			exitCode:   137,
+			backend:    "claude",
+			wantClass:  Timeout,
+			wantSource: EvidenceExitCode,
+			wantRule:   "exit.137_sigkill",
+		},
+		{
+			name:       "exit 143 with unmatched text",
+			text:       "nothing classifiable here",
+			exitCode:   143,
+			backend:    "claude",
+			wantClass:  Transient,
+			wantSource: EvidenceExitCode,
+			wantRule:   "exit.143_sigterm",
+		},
+		{
+			name:       "exit 1 with unmatched text",
+			text:       "nothing classifiable here",
+			exitCode:   1,
+			backend:    "claude",
+			wantClass:  Unknown,
+			wantSource: EvidenceExitCode,
+			wantRule:   "exit.default",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := ClassifyFromOutput(tt.text, tt.exitCode, tt.backend)
+			if got.Class != tt.wantClass {
+				t.Fatalf("class = %s, want %s", got.Class, tt.wantClass)
+			}
+			ev := got.Evidence
+			if ev.Source != tt.wantSource {
+				t.Errorf("evidence.Source = %q, want %q", ev.Source, tt.wantSource)
+			}
+			if ev.Rule != tt.wantRule {
+				t.Errorf("evidence.Rule = %q, want %q", ev.Rule, tt.wantRule)
+			}
+			if tt.wantDetail != "" && ev.Detail != tt.wantDetail {
+				t.Errorf("evidence.Detail = %q, want %q", ev.Detail, tt.wantDetail)
+			}
+			if ev.HTTPCode != tt.wantHTTP {
+				t.Errorf("evidence.HTTPCode = %d, want %d", ev.HTTPCode, tt.wantHTTP)
+			}
+			if ev.ExitCode != tt.exitCode {
+				t.Errorf("evidence.ExitCode = %d, want %d", ev.ExitCode, tt.exitCode)
+			}
+			if ev.ScannedBytes != len(tt.text) {
+				t.Errorf("evidence.ScannedBytes = %d, want %d", ev.ScannedBytes, len(tt.text))
+			}
+			// Screen is an auth-only description: asking "was this a real login
+			// wall?" is meaningless for a rate limit or a timeout.
+			if tt.wantClass == AuthFailure && ev.Screen == nil {
+				t.Error("an auth verdict must carry a screen description")
+			}
+			if tt.wantClass != AuthFailure && ev.Screen != nil {
+				t.Errorf("non-auth verdict must not carry a screen description, got %+v", ev.Screen)
+			}
+		})
+	}
+}
+
+// TestReadLogTailAt_ReadsOnlyFromOffset checks the read window directly, so a
+// future change to the tail caps cannot quietly start including pre-offset bytes.
+func TestReadLogTailAt_ReadsOnlyFromOffset(t *testing.T) {
+	t.Parallel()
+
+	path, offsets := writeRunLog(t, "first run\n", "second run\n")
+
+	tail, err := readLogTailAt(path, 100, offsets[1])
+	if err != nil {
+		t.Fatalf("readLogTailAt: %v", err)
+	}
+	if strings.Contains(tail, "first run") {
+		t.Errorf("tail includes pre-offset bytes: %q", tail)
+	}
+	if !strings.Contains(tail, "second run") {
+		t.Errorf("tail is missing the run's own bytes: %q", tail)
+	}
+
+	// An offset exactly at EOF has nothing of its own to report.
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if tail, err := readLogTailAt(path, 100, info.Size()); err != nil || tail != "" {
+		t.Errorf("readLogTailAt at EOF = %q, %v; want empty and no error", tail, err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Run-turn deadline: loom's own per-turn deadline, classified categorically
+// ---------------------------------------------------------------------------
+
+// runTurnDeadlineResidualExcerpt is the shape an expiry actually left in the
+// agent log before the marker existed: the inner loom subprocess starts a run
+// and the wrapper returns a bare "context deadline exceeded". Nothing in it
+// says WHOSE deadline fired — which is precisely why the residual table's
+// `deadline.?exceeded` pattern read it as a network fault.
+const runTurnDeadlineResidualExcerpt = `time=2026-09-09T21:41:02.118+02:00 level=INFO msg="api issue backend created" url=http://127.0.0.1:3012 workspace=PUPPET
+not resuming Claude session (no session id recorded for this task)
+Launching Claude agent (non-interactive)...
+Error: context deadline exceeded
+`
+
+// TestClassifyRunTurnDeadlineMarker is the regression assertion for this
+// ticket. The marker must win over the residual timeout pattern even though
+// the very same text also carries "context deadline exceeded" — before the
+// marker existed this classified as Timeout / "connection timeout", which sent
+// operators to investigate the network and, because Timeout is
+// quarantine-eligible, recorded a no-progress kill against an innocent ticket.
+func TestClassifyRunTurnDeadlineMarker(t *testing.T) {
+	t.Parallel()
+
+	text := RunTurnDeadlineMarker + ": turn exceeded the 1h58m0s per-turn deadline\n" +
+		"context deadline exceeded\n"
+
+	got := ClassifyFromOutput(text, 1, "claude")
+	if want := OutcomeFromDomain(RunTurnDeadlineOutcome); got.Class != want {
+		t.Fatalf("Class = %v, want %v (the residual deadline.?exceeded pattern must never be reached)", got.Class, want)
+	}
+	if !strings.Contains(got.Message, "max_run_duration") {
+		t.Errorf("Message = %q, want the operator-actionable raise-max_run_duration text", got.Message)
+	}
+	if strings.Contains(got.Message, "connection timeout") {
+		t.Errorf("Message = %q, want the deadline verdict, not the network one", got.Message)
+	}
+}
+
+// TestClassifyRunTurnDeadlineExcerpt pins both halves of the contract on the
+// real log excerpt: with the marker it is a deadline, and WITHOUT it the same
+// bytes still classify Timeout — an upstream deadline from someone else's
+// context is untouched by this change.
+func TestClassifyRunTurnDeadlineExcerpt(t *testing.T) {
+	t.Parallel()
+
+	marked := RunTurnDeadlineMarker + ": turn exceeded the 1h58m0s per-turn deadline\n" + runTurnDeadlineResidualExcerpt
+	if got, want := ClassifyFromOutput(marked, 1, "claude").Class, OutcomeFromDomain(RunTurnDeadlineOutcome); got != want {
+		t.Errorf("marked excerpt: Class = %v, want %v", got, want)
+	}
+
+	got := ClassifyFromOutput(runTurnDeadlineResidualExcerpt, 1, "claude")
+	if want := OutcomeFromHarness(wrapper.ErrTimeout); got.Class != want {
+		t.Errorf("unmarked excerpt: Class = %v, want %v (unrelated deadline errors must stay Timeout)", got.Class, want)
+	}
+}
+
+func TestRunTurnDeadlineOutcomeString(t *testing.T) {
+	t.Parallel()
+
+	// Serialized into daemon-agents.json last_error_class, events and the web
+	// UI's ERROR_CLASS_LABELS map, so the spelling is a wire contract.
+	if got := RunTurnDeadlineOutcome.String(); got != "RunTurnDeadline" {
+		t.Fatalf("RunTurnDeadlineOutcome.String() = %q, want %q", got, "RunTurnDeadline")
+	}
+}
+
+// TestClassifyEvidenceOverBroadResidualAuth is executable documentation of the
+// THIRD revisit trigger in docs/adr/0002-authfailure-stays-terminal.md.
+//
+// The residual auth pattern (classify.go, residual.auth) matches
+// "unauthorized" ANYWHERE in a 100-line log tail, so ordinary task prose can
+// fatally stop an agent. That BEHAVIOR IS UNCHANGED here — this child records,
+// it does not gate. What is new is that the record now says exactly which rule
+// fired and on what text, so the trigger can be evaluated from one occurrence.
+func TestClassifyEvidenceOverBroadResidualAuth(t *testing.T) {
+	const prose = "Finished reviewing the unauthorized-access handler in auth/mw.go.\n" +
+		"All 42 tests pass; no changes needed.\n"
+
+	got := ClassifyFromOutput(prose, 1, "claude")
+
+	// Unchanged behavior: still a terminal AuthFailure.
+	if got.Class != AuthFailure {
+		t.Fatalf("class = %s, want AuthFailure (behavior must be unchanged)", got.Class)
+	}
+	ev := got.Evidence
+	if ev.Source != EvidenceResidual || ev.Rule != "residual.auth" {
+		t.Fatalf("source/rule = %q/%q, want residual_pattern/residual.auth", ev.Source, ev.Rule)
+	}
+	// The offending token, and the line it came from, are both recoverable.
+	if ev.Match != "unauthorized" {
+		t.Errorf("evidence.Match = %q, want the offending token %q", ev.Match, "unauthorized")
+	}
+	if !strings.Contains(ev.Excerpt, "unauthorized-access handler") {
+		t.Errorf("evidence.Excerpt must show the offending line, got %q", ev.Excerpt)
+	}
+
+	// The screen description is what says this was NOT a login wall: the text
+	// was scanned and carried no banner, no composer and no dialog. (In this
+	// child the scanned text is the log tail itself — PUPPET-578 carries the
+	// real rendered screen here, and Scanned=false then means "we never saw
+	// one", the ADR's fourth trigger.)
+	if ev.Screen == nil || !ev.Screen.Scanned {
+		t.Fatalf("expected a scanned screen description, got %+v", ev.Screen)
+	}
+	if ev.Screen.BannerRule != "" {
+		t.Errorf("no auth banner is present in task prose, but BannerRule = %q", ev.Screen.BannerRule)
+	}
+	if ev.Screen.ComposerWitnessed == nil || *ev.Screen.ComposerWitnessed {
+		t.Errorf("ComposerWitnessed = %v, want a witnessed false", ev.Screen.ComposerWitnessed)
+	}
+}

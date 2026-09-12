@@ -57,6 +57,7 @@ const (
 	BPBackendUnavailable                       // fixed recheck: backendRecheckBackoff
 	BPBlock                                    // fixed: maxRetriesBlockBackoff
 	BPClaimsHeld                               // fixed recheck: claimHoldRecheckBackoff
+	BPIssueBackendOutage                       // fixed recheck: issueBackendRecheckBackoff
 )
 
 // Disposition is the policy verdict for an Outcome.
@@ -117,28 +118,65 @@ func decideHarness(c wrapper.ErrorClass) Disposition {
 	}
 }
 
-// QuarantineEligible reports whether an Outcome counts toward TASK-level
-// quarantine (repeated no-progress kills of the same task, across agents).
-// Declared here in the policy seat; counted by the supervisor (mirrors how
-// BlockBudget is declared in the table and counted via ap.BlockCount).
+// QuarantineBucket names WHICH task-level quarantine counter an Outcome
+// advances. Two failure shapes both mean "this task cannot be finished", but
+// they are not the same event and must not share a threshold.
+type QuarantineBucket int
+
+const (
+	// QuarantineNone: the outcome never counts toward task quarantine.
+	QuarantineNone QuarantineBucket = iota
+	// QuarantineNoProgress: a watchdog/ownership kill of a silently-stalled
+	// backend. The historical bucket, threshold defaultQuarantineThreshold (3).
+	QuarantineNoProgress
+	// QuarantineDeadline: loom's OWN per-turn deadline expired. A separate,
+	// HIGHER threshold — see QuarantineBucketFor for why it is counted at all.
+	QuarantineDeadline
+)
+
+// QuarantineBucketFor reports which task-level quarantine counter an Outcome
+// advances (repeated failures of the same task, across agents). Declared here
+// in the policy seat; counted by the supervisor (mirrors how BlockBudget is
+// declared in the table and counted via ap.BlockCount).
 //
-// Eligible: the classes a watchdog/ownership kill of a silently-stalled
-// backend actually produces via the exit-code fallback (-1 → Unknown,
-// 137 → Timeout, 143 → Transient), plus ContextOverflow (FastFails the
-// agent, but the task returns to open and boomerangs across siblings).
-// Not eligible: domain outcomes (coordination signals, not task-fault),
-// RateLimited (backend-wide, not task-specific), and Auth/Billing/
-// ModelNotFound (operator-actionable; the agent stops anyway).
-func QuarantineEligible(o agenterr.Outcome) bool {
+// QuarantineNoProgress: the classes a watchdog/ownership kill of a silently-
+// stalled backend actually produces via the exit-code fallback (-1 → Unknown,
+// 137 → Timeout, 143 → Transient), plus ContextOverflow (FastFails the agent,
+// but the task returns to open and boomerangs across siblings).
+//
+// QuarantineDeadline: RunTurnDeadline — loom's own per-turn deadline, which is
+// a DESIGNED clean stop, not a crash. One expiry says nothing about the ticket,
+// so it must not be 1-of-3 toward parking it (observed: two tickets reached 1/3
+// for a reason that had nothing to do with either). But it cannot be exempt
+// either: a ticket that overruns its budget EVERY time boomerangs across
+// siblings forever, and each cycle now costs two hours, so an exemption makes
+// the spiral more expensive, not cheaper. Hence a separate, higher threshold —
+// count it, just not on the crash counter.
+//
+// Note this is the ONE domain outcome that is eligible; the rest are
+// coordination signals rather than task-fault. Also not eligible: RateLimited
+// (backend-wide, not task-specific) and Auth/Billing/ModelNotFound
+// (operator-actionable; the agent stops anyway).
+func QuarantineBucketFor(o agenterr.Outcome) QuarantineBucket {
 	if o.IsDomain() {
-		return false
+		if o.Domain == agenterr.RunTurnDeadlineOutcome {
+			return QuarantineDeadline
+		}
+		return QuarantineNone
 	}
 	switch o.Harness {
 	case wrapper.ErrUnknown, wrapper.ErrTimeout, wrapper.ErrTransient, wrapper.ErrContextOverflow:
-		return true
+		return QuarantineNoProgress
 	default:
-		return false
+		return QuarantineNone
 	}
+}
+
+// QuarantineEligible reports whether an Outcome counts toward TASK-level
+// quarantine at all, in any bucket. Thin wrapper over QuarantineBucketFor,
+// kept as the name callers and pinned tests already use.
+func QuarantineEligible(o agenterr.Outcome) bool {
+	return QuarantineBucketFor(o) != QuarantineNone
 }
 
 func decideDomain(d agenterr.DomainOutcome) Disposition {
@@ -147,6 +185,14 @@ func decideDomain(d agenterr.DomainOutcome) Disposition {
 		return Disposition{Decision: RetryUncounted, Backoff: BPNoWork}
 	case agenterr.BackendUnavailableOutcome:
 		return Disposition{Decision: Block, Backoff: BPBackendUnavailable}
+	case agenterr.IssueBackendOutageOutcome:
+		// The ISSUE store is down or refusing our credentials — every agent
+		// sharing it fails in lockstep, so this is infrastructure, not agent
+		// health. Uncounted, like NoWork and rate limits: an outage that
+		// eroded max_retries would escalate through Block into FastFail and
+		// terminate the whole fleet over a fault no agent can fix, and the
+		// fleet would still be dead once the backend came back.
+		return Disposition{Decision: RetryUncounted, Backoff: BPIssueBackendOutage}
 	case agenterr.LockConflictOutcome:
 		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
 	case agenterr.SpawnFailureOutcome:
@@ -163,6 +209,21 @@ func decideDomain(d agenterr.DomainOutcome) Disposition {
 		// the agent re-checks on a fixed interval and resumes exactly where
 		// the fleet left off once the hold is released or expires.
 		return Disposition{Decision: RetryUncounted, Backoff: BPClaimsHeld}
+	case agenterr.WorktreeUnavailableOutcome:
+		// The claimed task names a repo this workspace has no worktree for.
+		// Same shape as BackendUnavailable: operator-actionable, immune to an
+		// immediate retry, and self-healing once the repo is registered — so
+		// block with a periodic recheck rather than burning restart budget.
+		return Disposition{Decision: Block, Backoff: BPBackendUnavailable}
+	case agenterr.RunTurnDeadlineOutcome:
+		// The turn ran out of ITS time budget, not the task's. The worktree,
+		// the checkpoint and the harness session id all survive, so resuming is
+		// exactly right — but as a COUNTED retry with a bounded block budget,
+		// for the same reason as IncompleteRunOutcome below: a task that can
+		// never finish inside the budget must surface as failed rather than
+		// consume turns forever. BPTimeout is the backoff bucket for a
+		// time-budget overrun.
+		return Disposition{Decision: Retry, Backoff: BPTimeout, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
 	case agenterr.IncompleteRunOutcome:
 		// The turn ended before the task did. Retrying is the right move — the
 		// worktree, the checkpoint and (across a daemon restart) the session id
@@ -174,6 +235,17 @@ func decideDomain(d agenterr.DomainOutcome) Disposition {
 		// never be finished surfaces as failed instead of consuming turns
 		// forever; a run that does complete resets the budget as usual.
 		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
+	case agenterr.SupervisorStopOutcome:
+		// Nothing failed: WE ended the run — daemon shutdown, an operator stop,
+		// or the agent's removal from config. The supervise goroutine is on its
+		// way out on every one of those paths, so this verdict is rarely acted
+		// on at all; it exists so the run carries an honest class instead of
+		// whatever the log tail happened to look like when we killed it.
+		//
+		// Uncounted, because a kill we performed is not evidence against the
+		// agent or its task, and must not erode the restart budget that a real
+		// failure needs.
+		return Disposition{Decision: RetryUncounted, Backoff: BPDefault}
 	default:
 		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
 	}

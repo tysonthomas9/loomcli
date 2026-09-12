@@ -14,6 +14,16 @@ export {
   getStatusColor,
 } from "./colors";
 
+export {
+  contrastRatio,
+  relativeLuminance,
+  worstRatioAgainstSurfaces,
+  TEXT_TOKENS,
+  NON_TEXT_TOKENS,
+  WCAG_AA_TEXT,
+  WCAG_AA_NON_TEXT,
+} from "./contrast";
+
 export type {
   StateColor,
   StatusColor,

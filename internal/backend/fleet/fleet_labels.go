@@ -20,7 +20,10 @@ func (b *FleetBackend) applyLabelUpdates(ctx context.Context, id string, params 
 		}
 	}
 	for _, label := range params.RemoveLabels {
-		if err := b.removeLabel(ctx, id, label, params.Actor); err != nil {
+		// params.Force only ever applies to labels the caller named explicitly;
+		// the SetLabels reconciliation below never forces, so a wholesale set
+		// cannot strip a reserved label by accident.
+		if err := b.removeLabel(ctx, id, label, params.Actor, params.Force); err != nil {
 			return err
 		}
 		if err := b.waitForLabelState(ctx, id, label, false); err != nil {
@@ -36,7 +39,7 @@ func (b *FleetBackend) applyLabelUpdates(ctx context.Context, id string, params 
 	}
 	for _, label := range current.Labels {
 		if !containsString(params.SetLabels, label) {
-			if err := b.removeLabel(ctx, id, label, params.Actor); err != nil {
+			if err := b.removeLabel(ctx, id, label, params.Actor, false); err != nil {
 				return err
 			}
 			if err := b.waitForLabelState(ctx, id, label, false); err != nil {

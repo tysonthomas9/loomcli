@@ -21,7 +21,9 @@ import (
 	_ "github.com/olesho/harness-wrapper/pkg/harness/claude" // register the "claude" profile
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
+	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -213,11 +215,21 @@ func buildClaudeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	if effort := resolveAgentEffort(); effort != "" {
 		args = append(args, "--effort", effort)
 	}
-	if model := resolveAgentModel(); model != "" {
+	// pinnedClaudeModel, not resolveAgentModel: this builder also serves the
+	// lead's LOOM_LEAD_CONTROLLED=0 fallback, so it has to reach the same
+	// launch state as harnessLeadInvocation. Non-lead interactive claude
+	// launches therefore also get a baseline-derived model when no role model
+	// is set — deliberate, and identical in kind (boot on the model your
+	// profile was provisioned with).
+	if model := pinnedClaudeModel(); model != "" {
 		args = append(args, "--model", model)
 	}
 	args = appendClaudeSafetyArgs(args)
-	args = append(args, prompt)
+	// An empty prompt means the persona is suppressed (--prompt builtin:none).
+	// `claude ""` is not the same as `claude`: it opens an empty user turn.
+	if prompt != "" {
+		args = append(args, prompt)
+	}
 	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
 	cmd.Env = buildClaudeEnv(workDir, agentName)
@@ -324,9 +336,19 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 		return runClaudeConversation(ctx, workDir, prompt, agentName, resumeID, collector)
 	}
 
+	startedAt := time.Now()
 	res, err := runClaudeTurnWithRetry(ctx, func() (claudeRunTurnResult, error) {
 		return invokeClaudeRunTurn(ctx, workDir, prompt, agentName, resumeID, cli.DaemonActivityObserver(), collector)
 	})
+	// Persist the session id BEFORE the error arms, not after them. A run that
+	// dies on the per-turn deadline is precisely the run whose work is worth
+	// resuming, and it used to be the one run that recorded nothing: RunTurn
+	// captures Claude's session id from the "claude --resume <uuid>" hint the
+	// TUI prints on its GRACEFUL quit, and a context-cancelled turn returns
+	// before that quit ever happens. Measured on a forced 15s deadline: the
+	// lock survived the exit with its task id intact and an EMPTY
+	// claude_session_id, so the next attempt cold-started and redid the task.
+	persistClaudeTurnSessionID(workDir, res, resumeID, startedAt)
 	outputTail := claudeRunTurnEvidence(res, "")
 	if err != nil {
 		if errors.Is(err, hwharness.ErrTurnErrored) {
@@ -341,7 +363,7 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 			// difference between "renew the login" / "back off blamelessly"
 			// and an Unknown that burns the restart budget on a turn that
 			// cannot succeed.
-			if ie := terminalTurnInvocationError(reason, outputTail); ie != nil {
+			if ie := terminalTurnInvocationError(reason, claudeTerminalEvidence(res)); ie != nil {
 				return ie
 			}
 			return &InvocationError{Err: errors.New(reason), OutputTail: outputTail, ExitCode: 1}
@@ -350,7 +372,6 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	}
 
 	displayClaudeTurn(res)
-	persistClaudeTurnSessionID(workDir, res)
 
 	// NOTE: the lock's Claude session ID is intentionally NOT cleared per-invoke.
 	// It must survive a failed/killed run so a daemon restart can carry it forward
@@ -366,7 +387,62 @@ type claudeRunTurnFn func(ctx context.Context, cfg claudeRunTurnConfig) (claudeR
 
 var claudeRunTurn claudeRunTurnFn = hwharness.RunTurn
 
+// runTurnDeadline resolves the wall-clock bound on a single RunTurn call.
+//
+// LOOM_RUN_TURN_TIMEOUT_SECONDS is the only input. The supervisor exports it per
+// agent as that agent's run-duration cap minus a margin (appendRunTurnTimeoutEnv
+// in internal/cli/daemon/supervisor/spawn.go), so the deadline fires strictly
+// before applyRunDurationKill and the turn ends as a classified exit —
+// checkpoint saved, recovery armed — rather than a SIGKILL that skips both.
+// Unset, malformed or non-positive all read as "no deadline"; there is no
+// fallback, which is what makes standalone and interactive use inert.
+//
+// It deliberately does NOT fall back to the daemon's silence watchdog
+// (LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS), which is what it did until PUPPET-443.
+// That derivation bounded a WORKING turn with the SILENCE number: the daemon
+// exports the watchdog to every child, so every agent of every role was capped
+// at watchdog-margin (2580s on this fleet) no matter what its role's
+// max_run_duration said, and 27 healthy, still-printing runs over four days were
+// killed at exactly that mark while the watchdog itself never fired once. The
+// two ceilings answer different questions — silence detects a hang, the cap
+// bounds work — and neither may be derived from the other. With the supervisor
+// exporting the cap explicitly, an unset variable now means what it says: no
+// run-duration cap is configured, so this turn has no deadline.
+func runTurnDeadline() time.Duration {
+	return positiveSecondsDuration(strings.TrimSpace(os.Getenv("LOOM_RUN_TURN_TIMEOUT_SECONDS")))
+}
+
+// positiveSecondsDuration parses a whole-second count, returning 0 for anything
+// empty, malformed or non-positive so callers get one "unusable" answer.
+func positiveSecondsDuration(raw string) time.Duration {
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return time.Duration(n) * time.Second
+}
+
 func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resumeID string, onActivity func(wrapper.Snapshot), collector *usage.Collector) (claudeRunTurnResult, error) {
+	// Bound the turn. Without this the ctx carries no deadline at all, so a
+	// turn-detector drift in the harness becomes an unbounded wait that only the
+	// supervisor's watchdog ends — by SIGKILL. See runTurnDeadline.
+	//
+	// Expiry of THIS context is a categorical loom signal, not a network fault,
+	// and must be reported with agenterr.RunTurnDeadlineMarker rather than left
+	// to the residual "deadline exceeded" regex — see the error path below and
+	// runTurnDeadlineInvocationError. deadlineCtx is kept separately because
+	// errors.Is(deadlineCtx.Err(), context.DeadlineExceeded) is true only when
+	// OUR timer fired; a daemon shutdown through the parent yields
+	// context.Canceled on the very same context.
+	var deadlineCtx context.Context
+	deadline := runTurnDeadline()
+	if deadline > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, deadline)
+		defer cancel()
+		deadlineCtx = ctx
+	}
+
 	raw := &capturedOutput{}
 	output := io.Writer(raw)
 	if onActivity != nil {
@@ -401,8 +477,24 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 	// accumulateHarnessUsage cannot error, so a missing or unreadable transcript
 	// leaves the turn result and the exit code exactly as they were.
 	accumulateHarnessUsage(collector, "claude", res.Session.HarnessSessionID, workDir)
-	if err != nil && claudeRunTurnEvidence(res, raw.String()) == "" {
-		res.Turn.Text = raw.String()
+	// Park the captured PTY output on the turn whenever the turn itself carries
+	// no text. It used to be parked only when the WHOLE evidence was empty,
+	// which meant a terminal auth turn — Reason set, Text blanked by the
+	// wrapper's authRelabel — kept the raw screen out of reach of the
+	// classifier, on precisely the verdict that needs a screen to be judged.
+	// Capped, because this text ends up in a logged and stored error.
+	if err != nil && strings.TrimSpace(res.Turn.Text) == "" {
+		res.Turn.Text = claudeRawTail(raw.String())
+	}
+	// Our own deadline fired. Guarded on deadlineCtx being non-nil, which is
+	// exactly the `deadline > 0` condition that created it, so a turn with no
+	// deadline configured (standalone/interactive use, or a cap at or below the
+	// margin) can never take this path.
+	if err != nil && deadlineCtx != nil && errors.Is(deadlineCtx.Err(), context.DeadlineExceeded) {
+		return res, runTurnDeadlineInvocationError(
+			fmt.Sprintf("turn exceeded the %s per-turn deadline", deadline),
+			claudeRunTurnEvidence(res, raw.String()),
+		)
 	}
 	return res, err
 }
@@ -521,8 +613,26 @@ func (c *capturedOutput) String() string {
 	return c.buf.String()
 }
 
-func persistClaudeTurnSessionID(workDir string, res claudeRunTurnResult) {
+// persistClaudeTurnSessionID records the turn's Claude session id on the
+// worktree lock so a next attempt can `--resume` it. It is called on EVERY exit
+// from the RunTurn path, including the error arms.
+//
+// resumeID and startedAt exist for the exit this ticket is about. A turn ended
+// by the per-turn deadline never reaches the harness's graceful quit, so
+// res.Session.HarnessSessionID is empty and there is nothing to write — the
+// resume machinery was unreachable for exactly the failure it was built for.
+// Two fallbacks close that: the id we were RESUMING (a resumed session keeps
+// its id, so it is still the right thing to carry forward), and failing that
+// Claude's own newest transcript for workDir, which is where the supervisor
+// already recovers an id it no longer has in process.
+func persistClaudeTurnSessionID(workDir string, res claudeRunTurnResult, resumeID string, startedAt time.Time) {
 	sid := strings.TrimSpace(res.Session.HarnessSessionID)
+	if sid == "" {
+		sid = strings.TrimSpace(resumeID)
+	}
+	if sid == "" {
+		sid = sessions.LatestHarnessSessionID(backendnames.Claude, workDir, "", startedAt)
+	}
 	if sid == "" {
 		return
 	}
@@ -550,6 +660,31 @@ func claudeTurnText(res claudeRunTurnResult) string {
 		}
 	}
 	return res.Turn.Text
+}
+
+// claudeRawTailCap bounds the raw PTY tail parked on a turn for the
+// classifier. 8 KiB is several screens' worth — enough to hold a login banner
+// with its surroundings, small enough to log and store.
+const claudeRawTailCap = 8 << 10
+
+// claudeRawTail keeps the last claudeRawTailCap bytes of the captured output,
+// cut forward to a rune boundary so a split glyph never reaches a log.
+func claudeRawTail(raw string) string {
+	return tailBytes(raw, claudeRawTailCap)
+}
+
+// claudeTerminalEvidence is the classifier's evidence window for a turn the
+// HARNESS declared terminal. It differs from the ordinary evidence in one way:
+// it also offers the raw PTY tail parked on Turn.Text, because on an auth turn
+// the assistant history holds the pre-failure conversation while the login
+// banner is only on the screen. Deduplicated, so a turn whose history is empty
+// does not repeat the same text twice.
+func claudeTerminalEvidence(res claudeRunTurnResult) string {
+	raw := strings.TrimSpace(res.Turn.Text)
+	if strings.TrimSpace(claudeTurnText(res)) == raw {
+		raw = ""
+	}
+	return claudeRunTurnEvidence(res, raw)
 }
 
 func claudeRunTurnEvidence(res claudeRunTurnResult, raw string) string {

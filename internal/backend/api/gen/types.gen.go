@@ -2436,12 +2436,15 @@ type MonitorTaskInfo struct {
 
 // MonitorTaskSummary defines model for MonitorTaskSummary.
 type MonitorTaskSummary struct {
-	Backlog          int `json:"backlog"`
-	Epics            int `json:"epics"`
-	InProgress       int `json:"in_progress"`
-	NeedReview       int `json:"need_review"`
-	NeedsPlanning    int `json:"needs_planning"`
-	ReadyToImplement int `json:"ready_to_implement"`
+	Backlog       int `json:"backlog"`
+	Epics         int `json:"epics"`
+	InProgress    int `json:"in_progress"`
+	NeedReview    int `json:"need_review"`
+	NeedsPlanning int `json:"needs_planning"`
+
+	// ReadyByPriority Ready work items per priority bucket 0..4 (out-of-range priorities folded into 4), keyed by priority as a string. Excludes needs-revision issues, unlike ready_to_implement/needs_planning.
+	ReadyByPriority  *map[string]int `json:"ready_by_priority,omitempty"`
+	ReadyToImplement int             `json:"ready_to_implement"`
 }
 
 // MonitorTasksResponse defines model for MonitorTasksResponse.
@@ -2464,9 +2467,12 @@ type MonitorWorkspaceDetail struct {
 
 // MonitorWorkspaceInfo defines model for MonitorWorkspaceInfo.
 type MonitorWorkspaceInfo struct {
-	Mode       MonitorWorkspaceInfoMode `json:"mode"`
-	Name       *string                  `json:"name,omitempty"`
-	Workspaces *[]string                `json:"workspaces,omitempty"`
+	Mode MonitorWorkspaceInfoMode `json:"mode"`
+	Name *string                  `json:"name,omitempty"`
+
+	// Resolved True when the server resolved the request to a concrete workspace. False means the counts below are unscoped and may all be zero.
+	Resolved   bool      `json:"resolved"`
+	Workspaces *[]string `json:"workspaces,omitempty"`
 }
 
 // MonitorWorkspaceInfoMode defines model for MonitorWorkspaceInfo.Mode.
@@ -2505,7 +2511,8 @@ type MoveResult struct {
 // New consumers should prefer the generic `entity_type`, `entity_id`, and
 // `action` envelope fields when deciding which local state to invalidate.
 // `issue_id` is retained for backward-compatible issue-scoped consumers
-// and may be omitted for non-issue entities. For status events: old_status
+// and is populated for every issue-scoped entity, but omitted for
+// workspace-level entities. For status events: old_status
 // and new_status are present. For bonded events: parent_id and step_count
 // are present. This is documented as a flat schema (no discriminator)
 // because the SSE stream is not validated by generated clients.
@@ -2521,7 +2528,7 @@ type MutationPayload struct {
 	// EntityType Generic changed entity type, for example issue, dependency, comment, label, agent, terminal, session, or workspace.
 	EntityType *string `json:"entity_type,omitempty"`
 
-	// IssueId Legacy issue identifier for issue-scoped consumers; omitted for non-issue entities.
+	// IssueId Issue identifier for issue-scoped consumers. Populated for every issue-scoped entity - issue, comment, dependency, label and metadata events all carry their issue id here as well as in `entity_id`. Omitted for workspace-level entities (workspace, repo, agent, driver_run, role, daemon_profile). New consumers should prefer `entity_type` + `entity_id`.
 	IssueId *string `json:"issue_id,omitempty"`
 
 	// NewStatus Present for status mutation events
@@ -2802,6 +2809,8 @@ type Statistics struct {
 	OpenIssues              int     `json:"open_issues"`
 	PinnedIssues            int     `json:"pinned_issues"`
 	ReadyIssues             int     `json:"ready_issues"`
+	ReviewIssues            int     `json:"review_issues"`
+	StatusBlockedIssues     int     `json:"status_blocked_issues"`
 	TombstoneIssues         int     `json:"tombstone_issues"`
 	TotalIssues             int     `json:"total_issues"`
 }
@@ -3261,7 +3270,12 @@ type ListBlockedParams struct {
 	Assignee *string                `form:"assignee,omitempty" json:"assignee,omitempty"`
 	Type     *ListBlockedParamsType `form:"type,omitempty" json:"type,omitempty"`
 	Priority *int                   `form:"priority,omitempty" json:"priority,omitempty"`
-	Limit    *int                   `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Limit Maximum number of blocked issues to return. Values above the
+	// maximum are clamped to it, not rejected: a request for 1000
+	// returns at most 200 rows with HTTP 200. The response body does
+	// not currently distinguish a clamped page from an exhaustive one.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ListBlockedParamsType defines parameters for ListBlocked.
@@ -3457,7 +3471,12 @@ type ListIssuesParams struct {
 	Labels *string `form:"labels,omitempty" json:"labels,omitempty"`
 
 	// SourceRepos Comma-separated source repo filters
-	SourceRepos         *string `form:"source_repos,omitempty" json:"source_repos,omitempty"`
+	SourceRepos *string `form:"source_repos,omitempty" json:"source_repos,omitempty"`
+
+	// Limit Maximum number of issues to return. Values above the maximum are
+	// clamped to it, not rejected: a request for 1000 returns at most
+	// 200 rows with HTTP 200. The response body does not currently
+	// distinguish a clamped page from an exhaustive one.
 	Limit               *int    `form:"limit,omitempty" json:"limit,omitempty"`
 	TitleContains       *string `form:"title_contains,omitempty" json:"title_contains,omitempty"`
 	DescriptionContains *string `form:"description_contains,omitempty" json:"description_contains,omitempty"`

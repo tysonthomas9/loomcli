@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // IssueBackendFn returns the active backend.IssueBackend or nil. Used by
@@ -251,6 +252,19 @@ func serveStatsViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 	defer cancel()
 	data, err := be.Stats(ctx)
 	if err != nil {
+		// A throttle is not an outage. Every other backend error keeps the
+		// historical blanket 500 on this endpoint — widening that to
+		// handler.StatusForKind is a separate behavior change.
+		if svcErr := service.FromBackendError(err); svcErr.Kind == service.KindRateLimited {
+			if svcErr.RetryAfter != "" {
+				w.Header().Set("Retry-After", svcErr.RetryAfter)
+			}
+			handler.WriteJSON(w, http.StatusTooManyRequests, StatsResponse{
+				Success: false,
+				Error:   svcErr.Message,
+			})
+			return
+		}
 		handler.WriteJSON(w, http.StatusInternalServerError, StatsResponse{
 			Success: false,
 			Error:   err.Error(),
@@ -265,6 +279,8 @@ func serveStatsViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 		BlockedIssues:           data.BlockedIssues,
 		DeferredIssues:          data.DeferredIssues,
 		ReadyIssues:             data.ReadyIssues,
+		ReviewIssues:            data.ReviewIssues,
+		StatusBlockedIssues:     data.StatusBlockedIssues,
 		TombstoneIssues:         data.TombstoneIssues,
 		PinnedIssues:            data.PinnedIssues,
 		EpicsEligibleForClosure: data.EpicsEligibleForClosure,
@@ -273,6 +289,10 @@ func serveStatsViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 }
 
 // HandleStatsWithPool is the implementation that accepts an interface for testing.
+//
+// This path unmarshals whatever the daemon RPC returns. OpStats has no
+// server-side handler in v5, so it is legacy: review_issues and
+// status_blocked_issues simply default to zero here, which is accepted.
 func HandleStatsWithPool(pool StatsConnectionGetter) http.HandlerFunc { //nolint:funlen
 	return func(w http.ResponseWriter, r *http.Request) {
 		if pool == nil {

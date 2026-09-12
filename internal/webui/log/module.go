@@ -1,9 +1,8 @@
 package log
 
 import (
-	"net/http"
-
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -23,7 +22,7 @@ func NewModule(agentSvc service.AgentService) *Module {
 }
 
 // Register implements [Module] by registering 2–3 log streaming routes.
-func (m *Module) Register(mux *http.ServeMux) {
+func (m *Module) Register(mux route.Router) {
 	// Agent log — conditional on agentSvc availability
 	if m.agentSvc != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/logs", misc.HandleGetAgentLog(m.agentSvc))

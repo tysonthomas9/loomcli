@@ -61,6 +61,7 @@ type Filter struct {
 	Backend   string
 	TaskID    string
 	EpicID    string
+	Status    string
 	Since     time.Time
 	Until     time.Time
 }
@@ -115,6 +116,9 @@ func matchesFilter(rec SessionUsage, f Filter) bool {
 		return false
 	}
 	if f.EpicID != "" && rec.EpicID != f.EpicID {
+		return false
+	}
+	if f.Status != "" && rec.Status != f.Status {
 		return false
 	}
 	if !f.Since.IsZero() && rec.StartedAt.Before(f.Since) {

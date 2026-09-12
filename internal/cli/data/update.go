@@ -13,19 +13,21 @@ import (
 )
 
 var (
-	updateStatus       string
-	updateAssignee     string
-	updateNotes        string
-	updateDesign       string
-	updateDesignFormat string
-	updatePriority     int
-	updateTitle        string
-	updateDescription  string
-	updateDescFile     string
-	updateAddDeps      []string
-	updateRemoveDeps   []string
-	updateAddLabels    []string
-	updateRemoveLabels []string
+	updateStatus             string
+	updateAssignee           string
+	updateNotes              string
+	updateDesign             string
+	updateDesignFormat       string
+	updateAcceptanceCriteria string
+	updatePriority           int
+	updateTitle              string
+	updateDescription        string
+	updateDescFile           string
+	updateAddDeps            []string
+	updateRemoveDeps         []string
+	updateAddLabels          []string
+	updateRemoveLabels       []string
+	updateForce              bool
 )
 
 var updateCmd = &cobra.Command{
@@ -73,20 +75,7 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 	}
 	params := backend.UpdateParams{}
 	changed := false
-	if cmd.Flags().Changed("status") {
-		params.Status = &updateStatus
-		changed = true
-	}
-	if cmd.Flags().Changed("assignee") {
-		params.Assignee = &updateAssignee
-		changed = true
-	}
-	if cmd.Flags().Changed("notes") {
-		params.Notes = &updateNotes
-		changed = true
-	}
-	if cmd.Flags().Changed("design") {
-		params.Design = &updateDesign
+	if applyStringFlags(cmd, &params) {
 		changed = true
 	}
 	if applied, err := applyDesignFormatFlag(cmd, &params); err != nil {
@@ -96,10 +85,6 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 	}
 	if cmd.Flags().Changed("priority") {
 		params.Priority = &updatePriority
-		changed = true
-	}
-	if cmd.Flags().Changed("title") {
-		params.Title = &updateTitle
 		changed = true
 	}
 	if applyLabelFlags(cmd, &params) {
@@ -132,6 +117,43 @@ func applyDescriptionFlags(cmd *cobra.Command, params *backend.UpdateParams, fro
 	return true, nil
 }
 
+// applyStringFlags copies each changed plain string flag into its matching
+// params field, reporting whether any of them was given. These flags share
+// identical semantics -- Changed() means "set this field", including to "",
+// which clears it server-side -- so they are handled as one table rather than
+// as repeated blocks. Keeping them here also keeps updateParamsFromFlags under
+// the funlen limit as flags are added.
+//
+// --description (has a mutually exclusive -from-file partner), --design-format
+// (validates its value) and --priority (not a string) each keep their own path.
+//
+// As with applyLabelFlags, the reported bool must feed updateParamsFromFlags'
+// changed result: RunE only calls Update when fieldsChanged || !depsChanged, so
+// one of these flags combined with a dependency flag would otherwise skip
+// Update, silently dropping the value while still reporting success.
+func applyStringFlags(cmd *cobra.Command, params *backend.UpdateParams) bool {
+	flags := []struct {
+		name string
+		src  *string
+		dst  **string
+	}{
+		{"status", &updateStatus, &params.Status},
+		{"assignee", &updateAssignee, &params.Assignee},
+		{"notes", &updateNotes, &params.Notes},
+		{"design", &updateDesign, &params.Design},
+		{"acceptance-criteria", &updateAcceptanceCriteria, &params.AcceptanceCriteria},
+		{"title", &updateTitle, &params.Title},
+	}
+	changed := false
+	for _, f := range flags {
+		if cmd.Flags().Changed(f.name) {
+			*f.dst = f.src
+			changed = true
+		}
+	}
+	return changed
+}
+
 // applyLabelFlags copies the repeatable --add-label/--remove-label occurrences
 // into the label deltas on params, reporting whether either flag was given.
 // Labels are deltas, not a replacement: additions and removals name individual
@@ -151,6 +173,13 @@ func applyLabelFlags(cmd *cobra.Command, params *backend.UpdateParams) bool {
 	if cmd.Flags().Changed("remove-label") {
 		params.RemoveLabels = updateRemoveLabels
 		changed = true
+	}
+	// --force is a modifier on the label deltas, not a field of its own: it
+	// never counts as a change, so `update <id> --force` alone still reaches
+	// the backend's "no fields" validation error instead of silently
+	// succeeding.
+	if cmd.Flags().Changed("force") {
+		params.Force = updateForce
 	}
 	return changed
 }
@@ -228,6 +257,7 @@ func init() {
 	updateCmd.Flags().StringVar(&updateNotes, "notes", "", "Set notes")
 	updateCmd.Flags().StringVar(&updateDesign, "design", "", "Set design")
 	updateCmd.Flags().StringVar(&updateDesignFormat, "design-format", "", "Set design format (markdown or html)")
+	updateCmd.Flags().StringVar(&updateAcceptanceCriteria, "acceptance-criteria", "", "Set acceptance criteria")
 	updateCmd.Flags().IntVar(&updatePriority, "priority", 0, "Set priority")
 	updateCmd.Flags().StringVar(&updateTitle, "title", "", "Set title")
 	updateCmd.Flags().StringVar(&updateDescription, "description", "", "Set description")
@@ -235,7 +265,8 @@ func init() {
 	updateCmd.Flags().StringArrayVar(&updateAddDeps, "depends-on", nil, "Add dependency on issue ID (repeatable)")
 	updateCmd.Flags().StringArrayVar(&updateRemoveDeps, "remove-depends-on", nil, "Remove dependency on issue ID (repeatable)")
 	updateCmd.Flags().StringArrayVar(&updateAddLabels, "add-label", nil, "Add label (repeatable); other labels are preserved")
-	updateCmd.Flags().StringArrayVar(&updateRemoveLabels, "remove-label", nil, "Remove label (repeatable); other labels are preserved")
+	updateCmd.Flags().StringArrayVar(&updateRemoveLabels, "remove-label", nil, "Remove label (repeatable); other labels are preserved. Reserved labels (e.g. \"operator\") also need --force")
+	updateCmd.Flags().BoolVar(&updateForce, "force", false, "Allow --remove-label to remove a reserved label such as \"operator\", which parks an issue for a human")
 }
 
 func readDescriptionFile(path string, stdin io.Reader) (string, error) {

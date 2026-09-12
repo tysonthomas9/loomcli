@@ -46,6 +46,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -79,7 +80,7 @@ func NewModule(st store.Store) *Module {
 	return &Module{store: st, awaits: &trigger.AwaitMatcher{Store: st}, logger: slog.Default()}
 }
 
-func (m *Module) Register(mux *http.ServeMux) {
+func (m *Module) Register(mux route.Router) {
 	if m.store == nil {
 		return
 	}

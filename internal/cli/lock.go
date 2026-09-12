@@ -39,6 +39,14 @@ type LockInfo struct {
 	State           string    `json:"state,omitempty"`             // Execution state (active/idle) for auto mode
 	ClaudeSessionID string    `json:"claude_session_id,omitempty"` // Claude CLI session UUID for resume
 	Workspace       string    `json:"workspace,omitempty"`         // Workspace name when in workspace mode
+	// LastRunEndedAt is when the most recent agent run in this worktree ended,
+	// however it ended. It is the resume-TTL clock: staleness is IDLE time
+	// since a run stopped, not the age of the task. TaskStartedAt cannot serve
+	// that purpose — it deliberately survives a resume cycle, so a run killed
+	// at a per-turn ceiling always presented a task older than the old 30m TTL
+	// and always cold-started. Zero on locks written by an older binary; see
+	// agent.maybeResumeDaemonSession for the fallback.
+	LastRunEndedAt time.Time `json:"last_run_ended_at,omitempty"`
 	// RunID is a STABLE LOGICAL run id, established at first acquisition and
 	// carried forward across stale-lock replacement (daemon restart). It keys
 	// transcript-event dedup so resumed/replayed rows collapse rather than
@@ -390,6 +398,20 @@ func UpdateLockClaudeSessionID(worktreePath, claudeSessionID string) error {
 	})
 }
 
+// MarkLockRunEnded stamps the lock with the moment this run ended, whatever its
+// outcome. It is the write half of the resume TTL: the next attempt measures
+// staleness from here, so a long run that dies at a turn ceiling hands its
+// session forward instead of aging out on a clock that started at the claim.
+func MarkLockRunEnded(worktreePath string) error {
+	return UpdateLock(worktreePath, func(info *LockInfo) error {
+		if err := requireOwner(info); err != nil {
+			return err
+		}
+		info.LastRunEndedAt = time.Now()
+		return nil
+	})
+}
+
 // ClearLockClaudeSessionID clears the Claude session UUID from the lock file.
 // Called after a Claude process exits to prevent stale session IDs.
 func ClearLockClaudeSessionID(worktreePath string) error {
@@ -420,6 +442,30 @@ func ClearStaleLockClaudeSessionID(worktreePath string) error {
 	})
 	if os.IsNotExist(err) {
 		return nil
+	}
+	return err
+}
+
+// ClearStaleLockTaskID clears the interrupted-task remnant from a dead-PID lock.
+// Used by daemon recovery when the remnant task can no longer be claimed (its
+// status left the claimable set, or it was deleted): without this the next
+// supervise cycle re-derives the same task id from the same lock and retries the
+// same doomed claim forever. The carried Claude session id is cleared with it —
+// that session belongs to the abandoned task, and resuming it under a different
+// task would continue the wrong conversation.
+func ClearStaleLockTaskID(worktreePath string) error {
+	err := UpdateLock(worktreePath, func(info *LockInfo) error {
+		if lockfile.IsProcessRunning(info.PID) {
+			return fmt.Errorf("lock belongs to running process (PID %d)", info.PID)
+		}
+		info.TaskID = ""
+		info.TaskTitle = ""
+		info.TaskStartedAt = time.Time{}
+		info.ClaudeSessionID = ""
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return nil // lock already released, nothing to clear
 	}
 	return err
 }

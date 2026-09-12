@@ -312,3 +312,16 @@ func TestParseListOpts_InvalidSortOrder(t *testing.T) {
 		t.Fatalf("expected KindValidation, got %s", svcErr.Kind)
 	}
 }
+
+// TestMaxIssueListLimit pins the issue-list ceiling to the value the FleetDB
+// backend enforces (fleet-db internal/api/issues.go maxLimit) and the value
+// api/openapi.yaml declares for listIssues/listBlocked. Changing either side
+// without the other reintroduces the declared-vs-enforced drift.
+func TestMaxIssueListLimit(t *testing.T) {
+	if MaxIssueListLimit != 200 {
+		t.Fatalf("MaxIssueListLimit = %d, want 200 (must match api/openapi.yaml)", MaxIssueListLimit)
+	}
+	if MaxIssueListLimit >= MaxListLimit {
+		t.Fatalf("MaxIssueListLimit (%d) must be tighter than MaxListLimit (%d)", MaxIssueListLimit, MaxListLimit)
+	}
+}

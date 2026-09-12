@@ -1,14 +1,24 @@
 package supervisor
 
 import (
+	"context"
+	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
+	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/events"
+
+	"go.opentelemetry.io/otel/attribute"
 )
 
 const primaryBackendRetryCooldown = time.Minute
@@ -24,6 +34,21 @@ const backendUnavailableRecheckInterval = 30 * time.Second
 // expires), so we poll on a fixed interval and never count these re-checks
 // toward max_retries — a quiesce is not an agent failure.
 const defaultClaimHoldRecheckInterval = 15 * time.Second
+
+// backendStateReassertInterval bounds how often gateBackendAvailable re-asserts
+// an unchanged backend-availability state to the control plane. The PATCH is
+// edge-triggered (see gateBackendAvailable), so without a level re-assert a
+// control-plane row that is recreated or reset out from under a parked agent
+// would never converge. It lives here beside backendUnavailableRecheckInterval
+// because the two set the cadence of the same recheck loop.
+const backendStateReassertInterval = 5 * time.Minute
+
+// issueBackendOutageRecheckInterval is the fixed delay between retries while
+// the ISSUE backend (fleet-db) is unreachable or rejecting the daemon's
+// credentials. Nothing about the agent is wrong, so — like the CLI-binary
+// recheck above — we poll on a fixed interval and never count these retries
+// toward max_retries.
+const issueBackendOutageRecheckInterval = 30 * time.Second
 
 // defaultMaxRetriesBlockInterval is the fixed delay between re-attempts after
 // an agent has exhausted its restart budget and blocked (policy OnExhaustion
@@ -52,26 +77,56 @@ func (s *Supervisor) setStopReasonDefault(ap *AgentProcess, reason StopReason) {
 	ap.Mu.Unlock()
 }
 
+// agentAuthStoppedLabel marks the task an agent was holding when it
+// fatal-stopped on an AuthFailure. It is the durable, queryable half of the
+// signal (`loom data list --label loom:agent-auth-stopped`): the daemon only
+// ever ADDS it, never removes it. Whoever fixes the auth and confirms the agent
+// healthy again is the one who clears it.
+//
+// Namespaced like attemptLabelPrefix and quarantineLabel: a label the
+// supervisor writes about its own runs shares the board with the vocabulary a
+// pipeline defines, and only the prefix says which layer owns the word.
+const agentAuthStoppedLabel = "loom:agent-auth-stopped"
+
+// authStopWriteTimeout bounds the two best-effort board writes that report an
+// auth fatal stop. The supervisor is on its way out either way, so a slow or
+// unreachable backend must not hold the goroutine open.
+const authStopWriteTimeout = 10 * time.Second
+
 // shouldRestart determines if the agent should restart by consulting the
 // policy disposition for the classified outcome of the most recent exit
 // (agentpolicy.Decide). The table owns the per-class verdict; this layer
 // owns its counters (RestartCount/RateRetryCount/NoWorkCount/BlockCount) and
 // its configured budgets.
 func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
+	restart, authStopTask := s.decideRestart(ap)
+	// Reported outside ap.Mu on purpose: these are network writes to the
+	// issue backend and must not stall anything reading agent state.
+	if authStopTask != "" {
+		s.reportAuthFatalStop(ap, authStopTask)
+	}
+	return restart
+}
+
+// decideRestart is shouldRestart's locked half: it applies the policy verdict
+// and updates the agent's counters. The second return value is the task the
+// agent was holding when an AuthFailure stopped it fatally (empty otherwise),
+// which the caller reports once the lock is released.
+func (s *Supervisor) decideRestart(ap *AgentProcess) (bool, string) {
 	maxRetries := s.getMaxRetries()
 
 	ap.Mu.Lock()
 	defer ap.Mu.Unlock()
 
-	if stopAfterEphemeralTask(ap) {
-		return false
+	if decided, restart := s.earlyRestartVerdict(ap); decided {
+		return restart, ""
 	}
 
 	// Clean success (exit 0, no error): always restart, reset counters —
 	// including the block-escalation budget ("progress" ends a block spiral).
 	if ap.LastExitCode == 0 && ap.LastError == nil {
 		s.applyCleanSuccessRestart(ap)
-		return true
+		return true, ""
 	}
 
 	var outcome agenterr.Outcome
@@ -81,33 +136,32 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 
 	switch d := agentpolicy.Decide(outcome); d.Decision {
 	case agentpolicy.StopFatal:
-		s.applyFatalStop(ap, outcome)
-		return false
+		return false, s.applyFatalStop(ap, outcome)
 
 	case agentpolicy.FastFail:
 		s.applyFastFailStop(ap, outcome)
-		return false
+		return false, ""
 
 	case agentpolicy.Block:
 		// BackendUnavailable: fixed recheck without eroding the restart
 		// budget — recoverable once the binary returns.
 		s.applyBackendUnavailableRestart(ap)
-		return true
+		return true, ""
 
 	case agentpolicy.Failover:
 		s.applyFailoverExhaustedStop(ap, outcome)
-		return false
+		return false, ""
 
 	case agentpolicy.RetryUncounted:
-		return s.applyUncountedRestart(ap, outcome, d, maxRetries)
+		return s.applyUncountedRestart(ap, outcome, d, maxRetries), ""
 
 	default: // Retry
-		return s.applyCountedRestart(ap, d, maxRetries)
+		return s.applyCountedRestart(ap, d, maxRetries), ""
 	}
 }
 
 // applyUncountedRestart handles the RetryUncounted dispositions — a claim
-// hold, no work, and rate limiting — each of which restarts without eroding
+// hold, no work, an issue-backend outage, and rate limiting — each of which restarts without eroding
 // the retry budget for its own reason. Caller holds ap.Mu.
 func (s *Supervisor) applyUncountedRestart(ap *AgentProcess, outcome agenterr.Outcome,
 	d agentpolicy.Disposition, maxRetries int) bool {
@@ -117,6 +171,12 @@ func (s *Supervisor) applyUncountedRestart(ap *AgentProcess, outcome agenterr.Ou
 	}
 	if outcome.Is(agenterr.NoWorkOutcome) {
 		s.applyNoWorkRestart(ap)
+		return true
+	}
+	// The shared issue backend being down or refusing our credentials is not
+	// evidence about this agent's health (PUPPET-210): uncounted fixed recheck.
+	if outcome.Is(agenterr.IssueBackendOutageOutcome) {
+		s.applyIssueBackendOutageRestart(ap)
 		return true
 	}
 	// Rate limits: unlimited uncounted retries by default; the
@@ -129,6 +189,35 @@ func (s *Supervisor) applyUncountedRestart(ap *AgentProcess, outcome agenterr.Ou
 	return s.applyCountedRestart(ap, d, maxRetries)
 }
 
+// earlyRestartVerdict decides the cases that must not read the exit fields at
+// all, and reports whether it decided. Both belong here for the same reason:
+// the run those fields describe is not the run being judged. An ephemeral
+// agent has finished its one task; a profile refusal never spawned anything,
+// so exit 0 / no error would take the clean-success branch and quietly clear
+// the block. Caller holds ap.Mu.
+func (s *Supervisor) earlyRestartVerdict(ap *AgentProcess) (decided, restart bool) {
+	if stopAfterEphemeralTask(ap) {
+		return true, false
+	}
+	// Uncounted on purpose: no number of restarts repairs a manifest, and
+	// eroding the budget would only turn a legible blocked agent into a dead
+	// one.
+	if ap.ProfileError != nil {
+		s.applyProfileInvalidRestart(ap)
+		return true, true
+	}
+	return false, false
+}
+
+// resetNoWork ends an idle streak: both the counter and the streak start must
+// clear together, or an idle → work → idle sequence would resume the second
+// streak mid-count with a stale start time. Every NoWorkCount reset in this
+// package goes through here. Caller holds ap.Mu.
+func resetNoWork(ap *AgentProcess) {
+	ap.NoWorkCount = 0
+	ap.IdleSince = time.Time{}
+}
+
 // stopAfterEphemeralTask stops the supervisor once an ephemeral agent has
 // completed its one assigned task cycle cleanly. A NoWork exit still falls
 // through so it can re-poll until a task arrives. Caller holds ap.Mu.
@@ -138,7 +227,7 @@ func stopAfterEphemeralTask(ap *AgentProcess) bool {
 	}
 	ap.RestartCount = 0
 	ap.RateRetryCount = 0
-	ap.NoWorkCount = 0
+	resetNoWork(ap)
 	ap.StopReason = StopReasonEphemeralDone
 	log.Printf("[daemon] Agent %s: ephemeral task complete, exiting supervisor", ap.Entry.Worktree)
 	return true
@@ -146,11 +235,69 @@ func stopAfterEphemeralTask(ap *AgentProcess) bool {
 
 // applyFatalStop stops for auth/billing errors that need human intervention.
 // Caller holds ap.Mu.
-func (s *Supervisor) applyFatalStop(ap *AgentProcess, outcome agenterr.Outcome) {
+//
+// It returns the task the agent was holding when an AuthFailure stopped it, so
+// the caller can report the stop on the board once the lock is released. Only
+// AuthFailure qualifies: a billing stop has a different remediation and does
+// not mean the agent's login broke.
+func (s *Supervisor) applyFatalStop(ap *AgentProcess, outcome agenterr.Outcome) string {
 	log.Printf("[daemon] Agent %s: fatal error (%s), stopping supervisor",
 		ap.Entry.Worktree, outcome)
-	ap.NoWorkCount = 0
+	resetNoWork(ap)
 	ap.StopReason = StopReasonFatalError
+	if !outcome.IsClass(wrapper.ErrAuth) {
+		return ""
+	}
+	return ap.AssignedTaskID
+}
+
+// reportAuthFatalStop turns an auth fatal stop into a board-level signal on the
+// task the agent was holding: the durable loom:agent-auth-stopped label plus a
+// comment naming the remediation. Without it the only trace is a line in the
+// daemon log, and the task sits at in_progress looking abandoned rather than
+// explicitly blocked on an operator.
+//
+// Best-effort by design, and in this order: the label is the queryable signal,
+// so it goes first and a comment failure cannot cost it. The stop has already
+// been decided — nothing here can undo it, so a failed write only warns.
+// Called with ap.Mu released.
+func (s *Supervisor) reportAuthFatalStop(ap *AgentProcess, taskID string) {
+	if s.IssueBackend == nil {
+		return
+	}
+	agent := ap.Entry.Worktree
+	ctx, cancel := context.WithTimeout(context.Background(), authStopWriteTimeout)
+	defer cancel()
+
+	if err := s.IssueBackend.AddLabel(ctx, taskID, agentAuthStoppedLabel); err != nil {
+		slog.Warn("auth-stop label write failed, task carries no board signal",
+			"task", taskID, "agent", agent, "label", agentAuthStoppedLabel, "err", err)
+	}
+	// fleet-db drops the Author param on the wire; attribution lives in the text.
+	if _, err := s.IssueBackend.AddComment(ctx, backend.CommentAddParams{
+		IssueID: taskID,
+		Author:  agent,
+		Text:    formatAuthStopComment(agent),
+	}); err != nil {
+		slog.Warn("auth-stop comment failed", "task", taskID, "agent", agent, "err", err)
+	}
+	slog.Info("agent auth fatal stop reported on task",
+		"task", taskID, "agent", agent, "label", agentAuthStoppedLabel)
+}
+
+// formatAuthStopComment renders the operator-facing note. Daemon-generated
+// operational text: ASCII only, no emoji.
+func formatAuthStopComment(agent string) string {
+	return fmt.Sprintf(
+		"**AGENT STOPPED** -- `%s` fatal-stopped on AuthFailure: harness login expired,\n"+
+			"or re-authentication is required.\n\n"+
+			"The agent supervisor is now fully stopped (desired_state_not_running). It needs a\n"+
+			"manual re-auth followed by `loom agentdef start %s` -- the daemon deliberately does\n"+
+			"not restart it, because a blind restart against still-broken auth just loops.\n\n"+
+			"This task was left at its current status; reclaim it once the agent is confirmed\n"+
+			"healthy. It carries the `%s` label until whoever fixes the auth clears it -- the\n"+
+			"daemon never removes that label itself.\n",
+		agent, agent, agentAuthStoppedLabel)
 }
 
 // applyFastFailStop stops for deterministic errors retrying cannot fix.
@@ -158,7 +305,7 @@ func (s *Supervisor) applyFatalStop(ap *AgentProcess, outcome agenterr.Outcome) 
 func (s *Supervisor) applyFastFailStop(ap *AgentProcess, outcome agenterr.Outcome) {
 	log.Printf("[daemon] Agent %s: deterministic failure (%s), stopping supervisor (fast-fail)",
 		ap.Entry.Worktree, outcome)
-	ap.NoWorkCount = 0
+	resetNoWork(ap)
 	ap.StopReason = StopReasonFastFail
 }
 
@@ -168,7 +315,7 @@ func (s *Supervisor) applyFastFailStop(ap *AgentProcess, outcome agenterr.Outcom
 func (s *Supervisor) applyFailoverExhaustedStop(ap *AgentProcess, outcome agenterr.Outcome) {
 	log.Printf("[daemon] Agent %s: failover-only error (%s) with no fallback remaining, stopping supervisor (fast-fail)",
 		ap.Entry.Worktree, outcome)
-	ap.NoWorkCount = 0
+	resetNoWork(ap)
 	ap.StopReason = StopReasonFastFail
 }
 
@@ -178,7 +325,7 @@ func (s *Supervisor) applyFailoverExhaustedStop(ap *AgentProcess, outcome agente
 func (s *Supervisor) applyCleanSuccessRestart(ap *AgentProcess) {
 	ap.RestartCount = 0
 	ap.RateRetryCount = 0
-	ap.NoWorkCount = 0
+	resetNoWork(ap)
 	ap.BlockCount = 0
 	ap.StopReason = ""
 	if time.Since(ap.LastStart) > time.Minute {
@@ -189,7 +336,7 @@ func (s *Supervisor) applyCleanSuccessRestart(ap *AgentProcess) {
 // applyRateLimitedRestart handles an uncounted rate-limit retry. Caller holds ap.Mu.
 func (s *Supervisor) applyRateLimitedRestart(ap *AgentProcess) {
 	ap.RateRetryCount++
-	ap.NoWorkCount = 0
+	resetNoWork(ap)
 	ap.StopReason = ""
 	log.Printf("[daemon] Agent %s: rate limited (retry %d, not counted toward max_retries)",
 		ap.Entry.Worktree, ap.RateRetryCount)
@@ -205,7 +352,7 @@ func (s *Supervisor) applyRateLimitedRestart(ap *AgentProcess) {
 func (s *Supervisor) applyCountedRestart(ap *AgentProcess, d agentpolicy.Disposition, maxRetries int) bool {
 	ap.RestartCount++
 	ap.RateRetryCount = 0 // reset rate counter on non-rate error
-	ap.NoWorkCount = 0
+	resetNoWork(ap)
 	if ap.RestartCount <= maxRetries {
 		ap.StopReason = ""
 		return true
@@ -249,7 +396,7 @@ func (s *Supervisor) applyMaxRetriesBlock(ap *AgentProcess) {
 	ap.BlockCount++
 	ap.RestartCount = 0
 	ap.RateRetryCount = 0
-	ap.NoWorkCount = 0
+	resetNoWork(ap)
 	ap.StopReason = StopReasonMaxRetriesBlocked
 	log.Printf("[daemon] Agent %s: restart budget exhausted, blocking (cycle %d) — will recheck in %s",
 		ap.Entry.Worktree, ap.BlockCount, s.maxRetriesBlockBackoff())
@@ -272,7 +419,10 @@ func (s *Supervisor) applyNoWorkRestart(ap *AgentProcess) {
 	ap.RestartCount = 0
 	ap.RateRetryCount = 0
 	ap.NoWorkCount++
-	if ap.CurrentBackendIdx > 0 && shouldRetryPrimaryAfterNoWork(ap.NoWorkCount, s.getNoWorkBackoff()) {
+	if ap.NoWorkCount == 1 {
+		ap.IdleSince = time.Now()
+	}
+	if ap.CurrentBackendIdx > 0 && shouldRetryPrimaryAfterNoWork(ap.IdleSince, ap.NoWorkCount) {
 		ap.CurrentBackendIdx = 0
 	}
 	ap.StopReason = ""
@@ -286,7 +436,7 @@ func (s *Supervisor) applyNoWorkRestart(ap *AgentProcess) {
 // runtime, after the process has already been spawned.
 func (s *Supervisor) applyBackendUnavailableRestart(ap *AgentProcess) {
 	ap.RateRetryCount = 0
-	ap.NoWorkCount = 0
+	resetNoWork(ap)
 	ap.StopReason = StopReasonBackendUnavailable
 	log.Printf("[daemon] Agent %s: backend unavailable, will recheck in %s (not counted toward max_retries)",
 		ap.Entry.Worktree, s.backendRecheckBackoff())
@@ -311,6 +461,51 @@ func (s *Supervisor) claimHoldRecheckBackoff() time.Duration {
 	return defaultClaimHoldRecheckInterval
 }
 
+// applyProfileInvalidRestart keeps an agent visibly blocked on a profile
+// refusal while re-checking on the fixed backend-recheck interval. Mirrors
+// applyBackendUnavailableRestart: same shape of fault (an environment the
+// operator repairs out-of-band), same self-recovery once repaired —
+// gateProfileVerified clears ProfileError and the stop reason on the first
+// cycle that verifies. Caller holds ap.Mu.
+func (s *Supervisor) applyProfileInvalidRestart(ap *AgentProcess) {
+	ap.RateRetryCount = 0
+	resetNoWork(ap)
+	ap.StopReason = StopReasonProfileInvalid
+	log.Printf("[daemon] Agent %s: harness profile invalid, will recheck in %s (not counted toward max_retries)",
+		ap.Entry.Worktree, s.backendRecheckBackoff())
+}
+
+// applyIssueBackendOutageRestart keeps an agent retrying while the ISSUE
+// backend is unreachable or rejecting the daemon's credentials. It mirrors
+// applyNoWorkRestart rather than applyCountedRestart, and for the same reason:
+// the condition is not a health signal about this agent. Every agent shares
+// one issue backend, so an outage fails all of them within a second of each
+// other; charging it to each agent's restart budget escalates the whole fleet
+// through BlockBudget into FastFail — a terminal stop — over a fault no agent
+// can fix and that typically clears on its own minutes later.
+//
+// RestartCount resets so a pre-outage failure streak does not carry through
+// the outage, and StopReason names the wait so `loom daemon status` shows why
+// the agent is idle instead of reporting an opaque Unknown. Caller holds ap.Mu.
+func (s *Supervisor) applyIssueBackendOutageRestart(ap *AgentProcess) {
+	ap.RestartCount = 0
+	ap.RateRetryCount = 0
+	resetNoWork(ap)
+	ap.StopReason = StopReasonIssueBackendUnavailable
+	slog.Warn("issue backend unavailable, will recheck (not counted toward max_retries)",
+		"worktree", ap.Entry.Worktree, "recheck_in", s.issueBackendRecheckBackoff())
+}
+
+// issueBackendRecheckBackoff is the fixed delay between issue-backend
+// re-checks. It shares the backendRecheckInterval override so a test that
+// shrinks the recheck cadence shrinks both.
+func (s *Supervisor) issueBackendRecheckBackoff() time.Duration {
+	if s.backendRecheckInterval > 0 {
+		return s.backendRecheckInterval
+	}
+	return issueBackendOutageRecheckInterval
+}
+
 // backendRecheckBackoff is the fixed delay between BackendUnavailable re-checks
 // (configurable via backendRecheckInterval; package default otherwise).
 func (s *Supervisor) backendRecheckBackoff() time.Duration {
@@ -318,6 +513,45 @@ func (s *Supervisor) backendRecheckBackoff() time.Duration {
 		return s.backendRecheckInterval
 	}
 	return backendUnavailableRecheckInterval
+}
+
+// parkedStateBackoff returns the fixed interval for an agent parked by its own
+// state rather than by its last run's error, and ok=false when neither
+// applies. Split out of computeBackoff (funlen) with the checks unchanged.
+func (s *Supervisor) parkedStateBackoff(profileInvalid, blocked bool) (time.Duration, bool) {
+	// Fixed recheck, like a missing backend binary: we are waiting on an
+	// operator repairing a profile, not backing off a flaky run.
+	if profileInvalid {
+		return s.backendRecheckBackoff(), true
+	}
+
+	// A blocked agent sleeps the fixed block interval — keyed on StopReason,
+	// not error class, because any counted class can exhaust the budget.
+	if blocked {
+		return s.maxRetriesBlockBackoff(), true
+	}
+	return 0, false
+}
+
+// fixedRecheckBackoff returns the fixed interval for the backoff buckets that
+// wait on something outside the agent rather than backing off a flaky run, and
+// ok=false for the exponential ones. Split out of computeBackoff (funlen) with
+// the arms unchanged.
+func (s *Supervisor) fixedRecheckBackoff(bp agentpolicy.BackoffProfile) (time.Duration, bool) {
+	switch bp {
+	case agentpolicy.BPBackendUnavailable:
+		// Waiting for the backend CLI to reappear.
+		return s.backendRecheckBackoff(), true
+	case agentpolicy.BPClaimsHeld:
+		// Waiting for an operator to release a hold.
+		return s.claimHoldRecheckBackoff(), true
+	case agentpolicy.BPIssueBackendOutage:
+		// Waiting for the issue store to answer again.
+		return s.issueBackendRecheckBackoff(), true
+	case agentpolicy.BPBlock:
+		return s.maxRetriesBlockBackoff(), true
+	}
+	return 0, false
 }
 
 // computeBackoff returns the sleep duration before the next restart. The
@@ -330,13 +564,13 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	lastErr := ap.LastError
 	count := ap.RestartCount
 	rateCount := ap.RateRetryCount
+	noWorkCount := ap.NoWorkCount
 	blocked := ap.StopReason == StopReasonMaxRetriesBlocked
+	profileInvalid := ap.ProfileError != nil
 	ap.Mu.Unlock()
 
-	// A blocked agent sleeps the fixed block interval — keyed on StopReason,
-	// not error class, because any counted class can exhaust the budget.
-	if blocked {
-		return s.maxRetriesBlockBackoff()
+	if wait, ok := s.parkedStateBackoff(profileInvalid, blocked); ok {
+		return wait
 	}
 
 	// A clean success has no failure to back off from — which used to mean it
@@ -354,22 +588,18 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	outcome := lastErr.Class
 	d := agentpolicy.Decide(outcome)
 
+	if wait, ok := s.fixedRecheckBackoff(d.Backoff); ok {
+		return wait
+	}
+
 	var initial int
 	var retryN int
 	switch d.Backoff {
 	case agentpolicy.BPNoWork:
-		// Fixed poll: task availability is not a backend-health signal.
-		return time.Duration(s.getNoWorkBackoff()) * time.Second
-	case agentpolicy.BPBackendUnavailable:
-		// Fixed recheck: waiting for the backend CLI to reappear, not
-		// backing off a flaky run.
-		return s.backendRecheckBackoff()
-	case agentpolicy.BPClaimsHeld:
-		// Fixed recheck: waiting for an operator to release a hold, not
-		// backing off a flaky run.
-		return s.claimHoldRecheckBackoff()
-	case agentpolicy.BPBlock:
-		return s.maxRetriesBlockBackoff()
+		// Task availability is not a backend-health signal, so this is not the
+		// exponential retry curve - it is a poll that relaxes while the board stays
+		// empty and snaps back to no_work_backoff the moment anything is claimed.
+		return noWorkPollInterval(s.getNoWorkBackoff(), s.GetIdlePollInterval(), noWorkCount)
 	case agentpolicy.BPRateLimit:
 		initial = s.getRateLimitBackoff()
 		retryN = rateCount
@@ -448,11 +678,45 @@ func exponentialBackoff(initial, retryN, maxBackoff int, hint time.Duration) tim
 	return backoff
 }
 
-func shouldRetryPrimaryAfterNoWork(noWorkCount, noWorkBackoffSeconds int) bool {
-	if noWorkCount <= 0 || noWorkBackoffSeconds <= 0 {
+// noWorkPollInterval doubles the base poll per consecutive NoWork observation,
+// clamped to ceil. ceil <= base disables growth (the default: both are 30s), so
+// the relaxed poll is opt-in per workspace via restart_policy.idle_poll_interval.
+//
+// Growth is opt-in deliberately: there is no wake-on-new-work path
+// (sleepBeforeRestart selects only on Shutdown and ap.StopCh), so a longer idle
+// poll is strictly a pickup-latency trade.
+func noWorkPollInterval(base, ceil, noWorkCount int) time.Duration {
+	if base <= 0 {
+		base = 30
+	}
+	if ceil <= base {
+		return time.Duration(base) * time.Second
+	}
+	if noWorkCount <= 1 {
+		return time.Duration(base) * time.Second
+	}
+	// Same shift-overflow guard exponentialBackoff uses, so a week-long idle
+	// agent cannot wrap to a negative duration.
+	shift := noWorkCount - 1
+	if shift > 30 {
+		shift = 30
+	}
+	sec := base << shift
+	if sec > ceil || sec < 0 {
+		sec = ceil
+	}
+	return time.Duration(sec) * time.Second
+}
+
+// shouldRetryPrimaryAfterNoWork reports whether an agent parked on a fallback
+// backend has been idle long enough to retry its primary. Measured from
+// IdleSince rather than noWorkCount x poll, because the poll interval is no
+// longer fixed (see noWorkPollInterval).
+func shouldRetryPrimaryAfterNoWork(idleSince time.Time, noWorkCount int) bool {
+	if noWorkCount <= 0 || idleSince.IsZero() {
 		return false
 	}
-	return time.Duration(noWorkCount)*time.Duration(noWorkBackoffSeconds)*time.Second >= primaryBackendRetryCooldown
+	return time.Since(idleSince) >= primaryBackendRetryCooldown
 }
 
 // Helper functions to safely access config.RestartPolicy fields with defaults.
@@ -559,4 +823,51 @@ func (s *Supervisor) GetSigtermTimeout() time.Duration {
 		return time.Duration(*cfg.Daemon.RestartPolicy.SigtermTimeout) * time.Second
 	}
 	return time.Duration(DefaultSigtermTimeout) * time.Second
+}
+
+// logBackoffWait writes the one line that describes this wait and reports
+// whether the wait should also be announced as a restart (span + event).
+//
+// An idle poll is not a restart: it reaches sleepBeforeRestart because
+// claimTask found nothing, and announcing it as one both floods the log and
+// makes the fleet restart metrics fiction (events.handleAgentRestarted counts
+// every AgentRestarted). The first poll of a streak is announced, so a "went
+// idle" signal survives in the log and in the metrics; the rest are Debug
+// only.
+func logBackoffWait(ap *AgentProcess, backoff time.Duration, count int, lastErr *agenterr.AgentError, noWorkCount int, idleSince time.Time) bool {
+	idle := lastErr != nil && lastErr.Class.Is(agenterr.NoWorkOutcome)
+	// applyNoWorkRestart has already incremented, so the first poll of a
+	// streak arrives here with NoWorkCount == 1.
+	firstIdle := idle && noWorkCount <= 1
+
+	switch {
+	case !idle:
+		slog.Info("waiting before restart", "worktree", ap.Entry.Worktree, "backoff", backoff, "attempt", count)
+	case firstIdle:
+		slog.Info("agent idle", "worktree", ap.Entry.Worktree, "role", ap.Entry.Role, "poll", backoff, "reason", lastErr.Message)
+	default:
+		slog.Debug("agent still idle", "worktree", ap.Entry.Worktree, "poll", backoff, "polls", noWorkCount, "idle_for", time.Since(idleSince))
+	}
+	return !idle || firstIdle
+}
+
+// announceRestartWait opens the restart span and emits the AgentRestarted
+// event for a wait that is a genuine restart — or the first poll of an idle
+// streak, which keeps a "went idle" signal in the restart metrics. It returns
+// the span's End so callers can defer it across the backoff sleep. Repeated
+// idle polls never call this: they are a state, not a restart.
+func (s *Supervisor) announceRestartWait(ap *AgentProcess, count int, errType string) func() {
+	_, span := startSpan(cmdstore.RootContext(),
+		"daemon.supervisor.restart",
+		attribute.String("loom.agent", ap.Entry.Worktree),
+		attribute.String("loom.role", ap.Entry.Role),
+		attribute.String("loom.workspace", s.WorkspaceID),
+		attribute.Int("loom.restart_count", count),
+		attribute.String("loom.error_type", errType),
+	)
+
+	if evt, err := events.NewEvent(events.AgentRestarted, ap.Entry.Worktree, ap.Entry.Role, "", events.AgentRestartedData{PID: 0, RestartCount: count}); err == nil {
+		s.EmitEvent(evt)
+	}
+	return func() { span.End() }
 }

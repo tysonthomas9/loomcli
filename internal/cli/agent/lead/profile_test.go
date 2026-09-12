@@ -87,7 +87,53 @@ func writeLeadHarnessProfile(t *testing.T, runtimeDir, agent, harness, version s
 	if err := os.WriteFile(filepath.Join(dir, supervisor.ProfileManifestName), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if harness == "claude" {
+		// A provisioned claude profile always carries its own minted token —
+		// one that lacks it now refuses to boot — so the fixture writes one and
+		// the tests about a MISSING token remove it explicitly. It sits outside
+		// the manifest's file list, as the provisioner leaves it, so it does
+		// not enter the fingerprint above.
+		writeLeadProfileToken(t, dir, "sk-ant-oat01-fixture")
+	}
+	if harness == "codex" {
+		// The codex counterpart, and the same reasoning in the other shape:
+		// the login is the identity, so a root without one refuses to boot.
+		// It is written, never injected, and never fingerprinted.
+		writeLeadCodexAuth(t, dir, "rt-"+agent)
+	}
 	return dir
+}
+
+// writeLeadCodexAuth writes (or, given "", removes) a codex root's own login.
+func writeLeadCodexAuth(t *testing.T, dir, refreshToken string) {
+	t.Helper()
+	path := filepath.Join(dir, "auth.json")
+	if refreshToken == "" {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		return
+	}
+	body := `{"tokens":{"id_token":"eyJhbGciOiJub25lIn0.e30.","access_token":"at-` + refreshToken +
+		`","refresh_token":"` + refreshToken + `","account_id":"acct"},"last_refresh":"2026-09-05T00:00:00Z"}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeLeadProfileToken writes (or, given "", removes) a profile's oauth-token.
+func writeLeadProfileToken(t *testing.T, dir, token string) {
+	t.Helper()
+	path := filepath.Join(dir, "oauth-token")
+	if token == "" {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		return
+	}
+	if err := os.WriteFile(path, []byte(token), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func sortStrings(s []string) {
@@ -528,22 +574,53 @@ func TestApplyLeadProfile_OutsideConfigRootLeavesTokenAlone(t *testing.T) {
 	}
 }
 
-// Unmigrated profiles are the majority and must be untouched: no token file,
-// no injection, no failure.
-func TestApplyLeadProfile_NoTokenFileLeavesTokenUnset(t *testing.T) {
+// A provisioned lead profile with no minted token has no identity, so lead must
+// refuse rather than start on whatever token the operator's shell held — the
+// same rule the supervisor now applies to every agent it spawns. The repair is
+// BOTH scripts: minting prints a token into profiles/, and only provisioning
+// materializes it into the live root.
+func TestApplyLeadProfile_MissingTokenRefusesAndNamesBothScripts(t *testing.T) {
 	clearProfileEnv(t)
 	clearLeadToken(t)
 	stubClaudeOnPath(t)
 	runtimeDir := t.TempDir()
-	writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+	dir := writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
 		"settings.json": `{"model":"opus"}`,
 	})
+	writeLeadProfileToken(t, dir, "")
 
-	if _, err := applyLeadProfile(runtimeDir, "lead", "claude"); err != nil {
-		t.Fatalf("a profile without a token must proceed, got %v", err)
+	failed, err := applyLeadProfile(runtimeDir, "lead", "claude")
+	if !errors.Is(err, supervisor.ErrProfileTokenMissing) {
+		t.Fatalf("an unminted profile must refuse, got %v", err)
+	}
+	want := "scripts/setup-profile-token.sh lead && scripts/provision-profile.sh lead"
+	if got := leadProfileRepair(err, failed); got != want {
+		t.Errorf("repair = %q, want %q", got, want)
 	}
 	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "" {
-		t.Fatalf("no oauth-token file must inject nothing, got %q", got)
+		t.Errorf("a refused profile must export nothing, got %q", got)
+	}
+}
+
+// The property that makes the unconditional refusal above SAFE, and it is
+// invisible from inside ProfileSecretEnv: an operator who exported a config
+// root of their own never reaches the credential check at all. Without this
+// regression test, tightening the token rule silently locks out every operator
+// running `loom lead` against their own ~/.claude, which has no oauth-token
+// file and never will.
+func TestApplyLeadProfile_InheritedRootOutsideProfilesNeedsNoToken(t *testing.T) {
+	clearProfileEnv(t)
+	clearLeadToken(t)
+	stubClaudeOnPath(t)
+	runtimeDir := t.TempDir()
+	outside := t.TempDir() // an operator's own config root: no manifest, no token
+	t.Setenv("CLAUDE_CONFIG_DIR", outside)
+
+	if _, err := applyLeadProfile(runtimeDir, "lead", "claude"); err != nil {
+		t.Fatalf("an operator's own config root must proceed without a token, got %v", err)
+	}
+	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "" {
+		t.Errorf("nothing may be injected for a root this workspace did not provision, got %q", got)
 	}
 }
 
@@ -567,6 +644,201 @@ func TestLeadProfileRepair_TokenFailureNamesTheTokenScript(t *testing.T) {
 	}
 	if got, want := leadProfileRepair(err, failed), "scripts/setup-profile-token.sh lead"; got != want {
 		t.Errorf("repair = %q, want %q", got, want)
+	}
+	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "" {
+		t.Errorf("a refused profile must export nothing, got %q", got)
+	}
+}
+
+// A codex root with no login of its own must refuse the lead's boot for the
+// same reason a claude root with no token does: CODEX_HOME points at it, so
+// codex sees an empty home and the lead runs logged out.
+func TestApplyLeadProfile_MissingCodexLoginRefuses(t *testing.T) {
+	clearProfileEnv(t)
+	clearLeadToken(t)
+	stubHarnessesOnPath(t, "codex")
+	runtimeDir := t.TempDir()
+	dir := writeLeadHarnessProfile(t, runtimeDir, "lead", "codex", fakeHarnessVersion, map[string]string{})
+	writeLeadCodexAuth(t, dir, "")
+
+	failed, err := applyLeadProfile(runtimeDir, "lead", "codex")
+	if !errors.Is(err, supervisor.ErrProfileCodexAuthMissing) {
+		t.Fatalf("a codex root with no login must refuse, got %v", err)
+	}
+	want := "CODEX_HOME=" + dir + " codex login"
+	if got := leadProfileRepair(err, failed); got != want {
+		t.Errorf("repair = %q, want %q", got, want)
+	}
+}
+
+// The repair names the DIRECTORY, not the agent: unlike claude there is no
+// script to run and nothing to copy — codex writes auth.json itself, and the
+// only thing that decides WHICH root gets the login is CODEX_HOME.
+func TestLeadProfileRepair_CodexAuthNamesTheDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agent-profiles", "lead", "codex")
+	got := leadProfileRepair(supervisor.ErrProfileCodexAuthMissing, dir)
+	if want := "CODEX_HOME=" + dir + " codex login"; got != want {
+		t.Fatalf("repair = %q, want %q", got, want)
+	}
+	// The claude repairs must be untouched by the new branch.
+	if got := leadProfileRepair(supervisor.ErrProfileTokenMissing, dir); got !=
+		"scripts/setup-profile-token.sh lead && scripts/provision-profile.sh lead" {
+		t.Errorf("claude missing-token repair changed: %q", got)
+	}
+	if got := leadProfileRepair(supervisor.ErrProfileTokenUnreadable, dir); got != "scripts/setup-profile-token.sh lead" {
+		t.Errorf("claude unreadable-token repair changed: %q", got)
+	}
+	if got := leadProfileRepair(supervisor.ErrProfileVersionDrift, dir); got != "loom doctor --fix" {
+		t.Errorf("drift repair changed: %q", got)
+	}
+}
+
+// caseInsensitiveWorkspace materializes a runtime dir whose parent segment can
+// be spelled in two cases, and returns both spellings. On a case-SENSITIVE
+// volume the second spelling names nothing, so the test skips rather than
+// asserting a property the filesystem does not have.
+func caseInsensitiveWorkspace(t *testing.T) (runtimeDir, flippedRuntimeDir string) {
+	t.Helper()
+	base := t.TempDir()
+	runtimeDir = filepath.Join(base, "Workspace")
+	if err := os.MkdirAll(runtimeDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	flippedRuntimeDir = filepath.Join(base, "workspace")
+	if _, err := os.Stat(flippedRuntimeDir); err != nil {
+		t.Skip("case-sensitive volume: two spellings of one directory are not possible here")
+	}
+	return runtimeDir, flippedRuntimeDir
+}
+
+// The reported bug: a case-differing spelling of a provisioned root read as
+// "an operator's own config root", which turned off verification and token
+// injection at once, silently.
+func TestUnderAgentProfiles_CaseDifferingSpellingIsInside(t *testing.T) {
+	runtimeDir, flipped := caseInsensitiveWorkspace(t)
+	dir := writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	_ = dir
+	configDir := filepath.Join(flipped, ".loom", agentprofile.DirName, "lead", "claude")
+
+	if !underAgentProfiles(runtimeDir, configDir) {
+		t.Fatalf("%q is the same directory as the profile root's child; must be inside", configDir)
+	}
+	if !UnderAgentProfiles(runtimeDir, configDir) {
+		t.Fatal("the exported predicate must answer the same as the internal one")
+	}
+}
+
+// The portable half of the same property, and the one CI can actually run:
+// t.TempDir() already hands out paths under a symlink on macOS (/var ->
+// /private/var), so a spelling through a link is not exotic.
+func TestUnderAgentProfiles_SymlinkedAncestorIsInside(t *testing.T) {
+	runtimeDir := t.TempDir()
+	writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(runtimeDir, link); err != nil {
+		t.Skipf("cannot create symlinks here: %v", err)
+	}
+	configDir := filepath.Join(link, ".loom", agentprofile.DirName, "lead", "claude")
+
+	if !underAgentProfiles(runtimeDir, configDir) {
+		t.Fatalf("%q reaches the profile root through a symlink; must be inside", configDir)
+	}
+}
+
+// Nothing provisioned a tree that does not exist, so no config root spelled
+// under it can be ours. This is a deliberate change from the prefix test,
+// which answered "inside" for a path under a root that was never created.
+func TestUnderAgentProfiles_MissingProfilesRootIsOutside(t *testing.T) {
+	runtimeDir := t.TempDir()
+	configDir := filepath.Join(runtimeDir, ".loom", agentprofile.DirName, "lead", "claude")
+
+	if underAgentProfiles(runtimeDir, configDir) {
+		t.Fatal("with no agent-profiles tree on disk, nothing is inside it")
+	}
+}
+
+// Guards against a regression to prefix matching: a sibling whose name merely
+// starts with the root's name is a different directory.
+func TestUnderAgentProfiles_SiblingDirectoryIsOutside(t *testing.T) {
+	runtimeDir := t.TempDir()
+	writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	sibling := filepath.Join(runtimeDir, ".loom", agentprofile.DirName+"-other", "lead", "claude")
+	if err := os.MkdirAll(sibling, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if underAgentProfiles(runtimeDir, sibling) {
+		t.Fatalf("%q is a sibling of the profile root, not a child", sibling)
+	}
+}
+
+// The ticket's repro as a unit test: a drifted profile reached by a
+// case-differing spelling must REFUSE, where before it booted unverified.
+func TestApplyLeadProfile_CaseDifferingInheritedRootRefusesDrift(t *testing.T) {
+	clearProfileEnv(t)
+	clearLeadToken(t)
+	stubClaudeOnPath(t)
+	runtimeDir, flipped := caseInsensitiveWorkspace(t)
+	dir := writeLeadProfile(t, runtimeDir, "lead", "0.0.1 (Claude Code)", map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	if err := os.WriteFile(filepath.Join(dir, "oauth-token"), []byte("sk-ant-oat01-lead"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(flipped, ".loom", agentprofile.DirName, "lead", "claude"))
+
+	if _, err := applyLeadProfile(runtimeDir, "lead", "claude"); !errors.Is(err, supervisor.ErrProfileVersionDrift) {
+		t.Fatalf("a drifted profile must refuse whatever its spelling, got %v", err)
+	}
+	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "" {
+		t.Errorf("a refused profile must export nothing, got %q", got)
+	}
+}
+
+// The other half of the same bug: a VERIFYING profile reached by a
+// case-differing spelling must still yield its own credential, overriding the
+// operator token the shell carried in.
+func TestApplyLeadProfile_CaseDifferingInheritedRootInjectsItsToken(t *testing.T) {
+	clearProfileEnv(t)
+	stubClaudeOnPath(t)
+	runtimeDir, flipped := caseInsensitiveWorkspace(t)
+	dir := writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	if err := os.WriteFile(filepath.Join(dir, "oauth-token"), []byte("sk-ant-oat01-lead"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(flipped, ".loom", agentprofile.DirName, "lead", "claude"))
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-operator")
+
+	if _, err := applyLeadProfile(runtimeDir, "lead", "claude"); err != nil {
+		t.Fatalf("a verifying profile must proceed, got %v", err)
+	}
+	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "sk-ant-oat01-lead" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want the profile's own token", got)
+	}
+}
+
+// A relative root names a different directory from every cwd, so it is refused
+// before any harness probe — note there is no stub on PATH here.
+func TestApplyLeadProfile_RelativeInheritedRootRefuses(t *testing.T) {
+	clearProfileEnv(t)
+	clearLeadToken(t)
+	runtimeDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(".loom", agentprofile.DirName, "lead", "claude"))
+
+	failed, err := applyLeadProfile(runtimeDir, "lead", "claude")
+	if !errors.Is(err, errRelativeProfileRoot) {
+		t.Fatalf("a relative config root must refuse, got %v", err)
+	}
+	if repair := leadProfileRepair(err, failed); !strings.Contains(repair, "absolute path") {
+		t.Errorf("repair = %q, want it to name an absolute path", repair)
 	}
 	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "" {
 		t.Errorf("a refused profile must export nothing, got %q", got)

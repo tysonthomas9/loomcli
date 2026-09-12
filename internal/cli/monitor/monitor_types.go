@@ -93,6 +93,15 @@ type TaskSummary struct {
 	NeedReview       int `json:"need_review"`
 	Backlog          int `json:"backlog"`
 	Epics            int `json:"epics"` // Open epics (tracked separately)
+	// ReadyByPriority counts ready work items per priority bucket 0..4, with
+	// out-of-range priorities folded into 4. All five buckets are always
+	// present so a Prometheus series never vanishes.
+	//
+	// Deliberate divergence from ReadyToImplement/NeedsPlanning above: those
+	// two do NOT exclude needs-revision issues, this histogram DOES. That is
+	// what the loom_ready_tasks gauge has always reported, and the gauge's
+	// semantics are preserved here rather than silently changed.
+	ReadyByPriority map[int]int `json:"ready_by_priority,omitempty"`
 }
 
 // WorktreeSyncDetail holds per-worktree sync detail (commits ahead or behind).
@@ -127,8 +136,12 @@ type MonitorStats struct {
 // DaemonAgentState represents the daemon-agents.json file format.
 // This matches the DaemonState written by daemon_cmd.go.
 type DaemonAgentState struct {
-	PID    int                     `json:"pid"`
-	Agents []DaemonAgentStateEntry `json:"agents"`
+	PID int `json:"pid"`
+	// WrittenAt is when the daemon last wrote the file. Consumers (monitor,
+	// webui) use it to flag state that has stopped advancing instead of
+	// rendering it as truth. Zero for files written by an older binary.
+	WrittenAt time.Time               `json:"written_at,omitempty"`
+	Agents    []DaemonAgentStateEntry `json:"agents"`
 }
 
 // DaemonAgentStateEntry represents a single agent in daemon-agents.json

@@ -3,6 +3,7 @@ package terminal
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -624,6 +625,83 @@ func TestBuildAgentLaunchSpecFallsBackWhenConfiguredWorktreeMissing(t *testing.T
 // --backend is stale once the workspace default is set, because the next
 // build would include the flag. ensure() relies on this check to know
 // when to emit a fresh tab instead of returning the cached one.
+// A WebUI-launched lead with no remembered worktree used to get an empty Cwd,
+// which makes the PTY inherit the server's own cwd - the workspace root. It now
+// lands in the same <ws>/lead the terminal launch computes, via the shared
+// localworkspace.LeadWorkdir.
+func TestBuildAgentLaunchSpecLeadFallsBackToLeadWorkdir(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv(localworkspace.EnvLeadWorkdir, "")
+	st := memstore.New()
+	workspacePath := t.TempDir()
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.Workspaces["E2E"] = bootstrap.WorkspaceLocalState{Path: workspacePath}
+		return nil
+	}); err != nil {
+		t.Fatalf("save state cache: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "E2E",
+		Name:         "lead",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "nova", RoleName: "lead"}
+
+	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_nova", agent, "lead-1")
+	if err != nil {
+		t.Fatalf("buildAgentLaunchSpec: %v", err)
+	}
+	want, ok := localworkspace.LeadWorkdir("E2E")
+	if !ok {
+		t.Fatal("LeadWorkdir: ok = false, want the workspace lead directory")
+	}
+	if launch.Cwd != want {
+		t.Fatalf("Launch.Cwd = %q, want lead workdir %q", launch.Cwd, want)
+	}
+	if launch.Cwd != filepath.Join(workspacePath, "lead") {
+		t.Fatalf("Launch.Cwd = %q, want <ws>/lead", launch.Cwd)
+	}
+	// A Cwd the PTY cannot chdir into fails the spawn outright, so the launch
+	// path creates the directory rather than merely naming it.
+	if info, statErr := os.Stat(launch.Cwd); statErr != nil || !info.IsDir() {
+		t.Fatalf("lead workdir not created at %q: %v", launch.Cwd, statErr)
+	}
+}
+
+// A worker agent keeps the empty-Cwd fallback: only the interactive lead has a
+// workspace-root directory of its own.
+func TestBuildAgentLaunchSpecWorkerKeepsEmptyCwdFallback(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv(localworkspace.EnvLeadWorkdir, "")
+	st := memstore.New()
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.Workspaces["E2E"] = bootstrap.WorkspaceLocalState{Path: t.TempDir()}
+		return nil
+	}); err != nil {
+		t.Fatalf("save state cache: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "E2E",
+		Name:         "plan",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "planner", RoleName: "plan"}
+
+	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_planner", agent, "")
+	if err != nil {
+		t.Fatalf("buildAgentLaunchSpec: %v", err)
+	}
+	if launch.Cwd != "" {
+		t.Fatalf("Launch.Cwd = %q, want empty fallback for a worker agent", launch.Cwd)
+	}
+}
+
 func TestAgentTerminalLaunchSpecStale_DetectsBackendChange(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
@@ -1299,5 +1377,216 @@ func TestBuildAgentLaunchSpecFallsBackToWorkspaceBackend(t *testing.T) {
 	joined := strings.Join(launch.Argv, " ")
 	if !strings.Contains(joined, "--backend") || !strings.Contains(joined, "codex") {
 		t.Fatalf("launch argv missing --backend codex: %v", launch.Argv)
+	}
+}
+
+// agentGetErrorStore wraps a store so Agents().Get always fails with err.
+// memstore cannot produce domain.ErrInvalid (UPPER is a storable name there),
+// so the sentinel has to be injected to exercise the fleet-db error mapping.
+type agentGetErrorStore struct {
+	store.Store
+	err error
+}
+
+func (s agentGetErrorStore) Agents() store.AgentStore {
+	return errAgentStore{AgentStore: s.Store.Agents(), err: s.err}
+}
+
+type errAgentStore struct {
+	store.AgentStore
+	err error
+}
+
+func (s errAgentStore) Get(context.Context, string, string) (*domain.Agent, error) {
+	return nil, s.err
+}
+
+// roleGetErrorStore wraps a store so Roles().Get always fails with err.
+type roleGetErrorStore struct {
+	store.Store
+	err error
+}
+
+func (s roleGetErrorStore) Roles() store.RoleStore {
+	return errRoleStore{RoleStore: s.Store.Roles(), err: s.err}
+}
+
+type errRoleStore struct {
+	store.RoleStore
+	err error
+}
+
+func (s errRoleStore) Get(context.Context, string, string) (*domain.Role, error) {
+	return nil, s.err
+}
+
+func serviceErrorFrom(t *testing.T, err error) *service.ServiceError {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	var svcErr *service.ServiceError
+	if !errors.As(err, &svcErr) {
+		t.Fatalf("expected *service.ServiceError, got %T: %v", err, err)
+	}
+	return svcErr
+}
+
+func TestLoadTerminalAgent_InvalidNameIsValidation(t *testing.T) {
+	st := agentGetErrorStore{Store: memstore.New(), err: fmt.Errorf("get agent: %w", domain.ErrInvalid)}
+
+	_, err := loadTerminalAgent(context.Background(), st, "ws", "UPPER")
+
+	svcErr := serviceErrorFrom(t, err)
+	if svcErr.Kind != service.KindValidation {
+		t.Fatalf("kind = %q, want %q", svcErr.Kind, service.KindValidation)
+	}
+	if want := `invalid agent name "UPPER"`; svcErr.Message != want {
+		t.Fatalf("message = %q, want %q", svcErr.Message, want)
+	}
+}
+
+func TestLoadTerminalAgent_OverLongNameIsValidation(t *testing.T) {
+	name := strings.Repeat("a", 128)
+	st := agentGetErrorStore{Store: memstore.New(), err: fmt.Errorf("get agent: %w", domain.ErrInvalid)}
+
+	_, err := loadTerminalAgent(context.Background(), st, "ws", name)
+
+	svcErr := serviceErrorFrom(t, err)
+	if svcErr.Kind != service.KindValidation {
+		t.Fatalf("kind = %q, want %q", svcErr.Kind, service.KindValidation)
+	}
+	if !strings.Contains(svcErr.Message, name) {
+		t.Fatalf("message = %q, want it to name the offending value", svcErr.Message)
+	}
+}
+
+func TestLoadTerminalAgent_StoreErrorStaysInternal(t *testing.T) {
+	st := agentGetErrorStore{Store: memstore.New(), err: errors.New("boom")}
+
+	_, err := loadTerminalAgent(context.Background(), st, "ws", "agent-1")
+
+	svcErr := serviceErrorFrom(t, err)
+	if svcErr.Kind != service.KindInternal {
+		t.Fatalf("kind = %q, want %q", svcErr.Kind, service.KindInternal)
+	}
+}
+
+func TestLoadTerminalAgent_NotFoundStaysNotFound(t *testing.T) {
+	st := agentGetErrorStore{Store: memstore.New(), err: fmt.Errorf("get agent: %w", domain.ErrNotFound)}
+
+	_, err := loadTerminalAgent(context.Background(), st, "ws", "nosuchagent")
+
+	svcErr := serviceErrorFrom(t, err)
+	if svcErr.Kind != service.KindNotFound {
+		t.Fatalf("kind = %q, want %q", svcErr.Kind, service.KindNotFound)
+	}
+	if want := "agent not found"; svcErr.Message != want {
+		t.Fatalf("message = %q, want %q", svcErr.Message, want)
+	}
+}
+
+func TestLoadAgentLaunchRole_InvalidRoleIsValidation(t *testing.T) {
+	st := roleGetErrorStore{Store: memstore.New(), err: fmt.Errorf("get role: %w", domain.ErrInvalid)}
+
+	_, err := loadAgentLaunchRole(context.Background(), st, "ws", "ROLE")
+
+	svcErr := serviceErrorFrom(t, err)
+	if svcErr.Kind != service.KindValidation {
+		t.Fatalf("kind = %q, want %q", svcErr.Kind, service.KindValidation)
+	}
+	if want := `invalid role name "ROLE"`; svcErr.Message != want {
+		t.Fatalf("message = %q, want %q", svcErr.Message, want)
+	}
+}
+
+func TestLoadAgentLaunchRole_StoreErrorStaysInternal(t *testing.T) {
+	st := roleGetErrorStore{Store: memstore.New(), err: errors.New("boom")}
+
+	_, err := loadAgentLaunchRole(context.Background(), st, "ws", "role-1")
+
+	svcErr := serviceErrorFrom(t, err)
+	if svcErr.Kind != service.KindInternal {
+		t.Fatalf("kind = %q, want %q", svcErr.Kind, service.KindInternal)
+	}
+}
+
+func TestLoadAgentLaunchRole_NotFoundIsNotAnError(t *testing.T) {
+	st := roleGetErrorStore{Store: memstore.New(), err: fmt.Errorf("get role: %w", domain.ErrNotFound)}
+
+	role, err := loadAgentLaunchRole(context.Background(), st, "ws", "norole")
+
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if role != nil {
+		t.Fatalf("role = %+v, want nil", role)
+	}
+}
+
+// Acceptance criterion 1: a persona_source: profile interactive role launches
+// with --prompt builtin:none EVEN WHEN role.PromptFile is set. Without the
+// explicit flag the prompt-file branch would win here and re-introduce the
+// argv persona the role asked to suppress.
+func TestAgentLaunchCommandArgsPersonaSourceProfileSuppresses(t *testing.T) {
+	agent := &domain.Agent{Name: "lead-1", RoleName: "lead"}
+	role := &domain.Role{
+		Name:          "lead",
+		Kind:          domain.RoleKindInteractive,
+		PersonaSource: domain.PersonaSourceProfile,
+		PromptFile:    "prompts/lead.md",
+	}
+
+	args, err := agentLaunchCommandArgs(domain.RoleKindInteractive, agent, role)
+	if err != nil {
+		t.Fatalf("agentLaunchCommandArgs: %v", err)
+	}
+	want := []string{"lead", "--prompt", "builtin:none"}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+}
+
+// The pre-existing branches are untouched: a prompt-file-only role still gets
+// its file, and a role with neither still launches a bare `lead`.
+func TestAgentLaunchCommandArgsPersonaSourceArgvIsUnchanged(t *testing.T) {
+	agent := &domain.Agent{Name: "lead-1", RoleName: "lead"}
+
+	tests := []struct {
+		name string
+		role *domain.Role
+		want []string
+	}{
+		{
+			name: "prompt file, persona source unset",
+			role: &domain.Role{Name: "lead", Kind: domain.RoleKindInteractive, PromptFile: "prompts/lead.md"},
+			want: []string{"lead", "--prompt", "prompts/lead.md"},
+		},
+		{
+			name: "prompt file, persona source argv",
+			role: &domain.Role{Name: "lead", Kind: domain.RoleKindInteractive, PersonaSource: domain.PersonaSourceArgv, PromptFile: "prompts/lead.md"},
+			want: []string{"lead", "--prompt", "prompts/lead.md"},
+		},
+		{
+			name: "inline prompt keeps the file off argv",
+			role: &domain.Role{Name: "lead", Kind: domain.RoleKindInteractive, Prompt: "inline", PromptFile: "prompts/lead.md"},
+			want: []string{"lead"},
+		},
+		{
+			name: "no role at all",
+			role: nil,
+			want: []string{"lead"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, err := agentLaunchCommandArgs(domain.RoleKindInteractive, agent, tt.role)
+			if err != nil {
+				t.Fatalf("agentLaunchCommandArgs: %v", err)
+			}
+			if strings.Join(args, " ") != strings.Join(tt.want, " ") {
+				t.Fatalf("args = %v, want %v", args, tt.want)
+			}
+		})
 	}
 }

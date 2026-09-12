@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
@@ -26,11 +27,15 @@ import (
 
 // Module is a local interface matching webui.Module for compile-time assertions.
 type Module interface {
-	Register(mux *http.ServeMux)
+	Register(mux route.Router)
 }
 
 // MaxListLimit from handler package
 const MaxListLimit = handler.MaxListLimit
+
+// MaxIssueListLimit from handler package: the tighter ceiling applied to the
+// issue-list and blocked-list endpoints.
+const MaxIssueListLimit = handler.MaxIssueListLimit
 
 // ---------------------------------------------------------------------------
 // Handler function aliases (handleXxx → HandleXxx)
@@ -346,8 +351,8 @@ func parseBlockedParams(r *http.Request) (*rpc.BlockedArgs, error) {
 		if v < 0 {
 			return nil, errors.New("invalid limit: must be non-negative")
 		}
-		if v > handler.MaxListLimit {
-			v = handler.MaxListLimit
+		if v > handler.MaxIssueListLimit {
+			v = handler.MaxIssueListLimit
 		}
 		args.Limit = v
 	}

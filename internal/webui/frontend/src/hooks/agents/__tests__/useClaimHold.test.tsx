@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/api/common";
 import { useClaimHold } from "../useClaimHold";
@@ -20,6 +20,15 @@ vi.mock("@/api/agents/claimHold", () => ({
 vi.mock("@/hooks/workspace", () => ({
   useWorkspaceContext: () => ({ workspaceId: mocks.workspaceId }),
 }));
+
+const freeStatus = (supervisorAvailable?: boolean) => ({
+  hold: null,
+  running: [],
+  gated: 0,
+  ...(supervisorAvailable === undefined
+    ? {}
+    : { supervisor_available: supervisorAvailable }),
+});
 
 const heldStatus = (actor: string) => ({
   hold: {
@@ -58,6 +67,139 @@ describe("useClaimHold", () => {
     expect(result.current.canForceRelease).toBe(true);
     expect(result.current.hold?.actor).toBe("current-owner");
     expect(result.current.error).toBe("claims held by deployer");
+  });
+
+  // PUPPET-529: a server that can reach no agent supervisor answers the GET
+  // 200 with supervisor_available:false, forever. Polling that at 10 s is what
+  // made this endpoint the dashboard's entire client-error rate, so the hook
+  // must slow down — and, just as importantly, must not turn the reachability
+  // signal into a re-render loop that fetches faster than the interval it
+  // replaced.
+  describe("poll cadence", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    // Settle the mount fetch (and any state it writes) without advancing timers.
+    const flush = async () => {
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    };
+
+    it("does not poll faster than the slow interval once the supervisor is unreachable", async () => {
+      mocks.fetchClaimHold.mockResolvedValue(freeStatus(false));
+      renderHook(() => useClaimHold());
+      await flush();
+      expect(mocks.fetchClaimHold).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30000);
+      });
+
+      // Exactly the mount fetch: three 10 s ticks must not have happened, and
+      // neither may a reachability-triggered effect re-run have fetched.
+      expect(mocks.fetchClaimHold).toHaveBeenCalledTimes(1);
+    });
+
+    it("polls once a minute while the supervisor is unreachable", async () => {
+      mocks.fetchClaimHold.mockResolvedValue(freeStatus(false));
+      renderHook(() => useClaimHold());
+      await flush();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60000);
+      });
+      expect(mocks.fetchClaimHold).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60000);
+      });
+      expect(mocks.fetchClaimHold).toHaveBeenCalledTimes(3);
+    });
+
+    it("keeps the 10 s cadence when the field is absent", async () => {
+      mocks.fetchClaimHold.mockResolvedValue(freeStatus());
+      renderHook(() => useClaimHold());
+      await flush();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10000);
+      });
+      expect(mocks.fetchClaimHold).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20000);
+      });
+      expect(mocks.fetchClaimHold).toHaveBeenCalledTimes(4);
+    });
+
+    it("returns to the 10 s cadence when a supervisor becomes reachable", async () => {
+      mocks.fetchClaimHold
+        .mockResolvedValueOnce(freeStatus(false))
+        .mockResolvedValue(freeStatus(true));
+      renderHook(() => useClaimHold());
+      await flush();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60000);
+      });
+      expect(mocks.fetchClaimHold).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10000);
+      });
+      expect(mocks.fetchClaimHold).toHaveBeenCalledTimes(3);
+    });
+
+    it("resets to the 10 s cadence on a workspace switch", async () => {
+      mocks.fetchClaimHold.mockResolvedValue(freeStatus(false));
+      const { rerender } = renderHook(() => useClaimHold());
+      await flush();
+      expect(mocks.fetchClaimHold).toHaveBeenCalledTimes(1);
+
+      mocks.workspaceId = "OTHER";
+      mocks.fetchClaimHold.mockResolvedValue(freeStatus(true));
+      rerender();
+      await flush();
+
+      // Exactly one immediate fetch for the new workspace, not two.
+      expect(mocks.fetchClaimHold).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10000);
+      });
+      expect(mocks.fetchClaimHold).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  // The transport is quiet about a claim-hold 503 (isOutageExemptPath), but the
+  // hook is not: an operator who presses Release on a supervisor-less host must
+  // still be told it failed.
+  it("surfaces a 503 from release as an error and clears busy", async () => {
+    mocks.fetchClaimHold.mockResolvedValue(heldStatus("deployer"));
+    mocks.releaseClaimHold.mockRejectedValue(
+      new ApiError(503, "Service Unavailable", {
+        error: "agent supervisor is not running",
+      }),
+    );
+    const { result } = renderHook(() => useClaimHold());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      expect(await result.current.release()).toBe(false);
+    });
+
+    expect(result.current.error).toBe("agent supervisor is not running");
+    expect(result.current.busy).toBe(false);
+    expect(result.current.canForceRelease).toBe(false);
   });
 
   it("ignores a release conflict that completes after switching workspaces", async () => {

@@ -23,13 +23,14 @@ import type { TabState } from "@/components/TerminalView/tabs";
 // the stub is created inside it.
 vi.mock("../TerminalInstance", () => ({
   TerminalInstance: forwardRef(function StubTerminalInstance(
-    props: { backendName?: string },
+    props: { backendName?: string; onInput?: () => void },
     _ref: Ref<unknown>,
   ) {
     return (
       <div
         data-testid="terminal-instance-stub"
         data-backend-name={props.backendName}
+        onClick={() => props.onInput?.()}
       />
     );
   }),
@@ -54,6 +55,7 @@ const defaultProps = {
   onConnectionStateChange: vi.fn(),
   onReconnectStateChange: vi.fn(),
   onOutput: vi.fn(),
+  onInput: vi.fn(),
   onBackendCrash: vi.fn(),
   onCrashRestart: vi.fn(),
   onCloseTab: vi.fn(),
@@ -78,6 +80,15 @@ describe("TerminalPane overlay exclusivity", () => {
         );
       },
     );
+
+    it("forwards onInput to TerminalInstance", () => {
+      const onInput = vi.fn();
+      render(<TerminalPane {...defaultProps} onInput={onInput} />);
+
+      screen.getByTestId("terminal-instance-stub").click();
+
+      expect(onInput).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("disconnected + reconnecting", () => {

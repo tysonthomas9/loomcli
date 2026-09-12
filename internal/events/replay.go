@@ -65,6 +65,8 @@ func normalizeEventType(et EventType) EventType {
 		return ConflictResolved
 	case "health_check":
 		return HealthCheck
+	case "daemon_degraded":
+		return DaemonDegraded
 	case "config_reloaded":
 		return ConfigReloaded
 	default:

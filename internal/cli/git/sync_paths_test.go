@@ -37,16 +37,22 @@ func TestRunWorkspaceSync_MultipleWorkspaces(t *testing.T) {
 	// FlexibleCommandMock for GetCurrentBranch calls (one per repo during discovery)
 	flexMock := NewFlexibleCommandMock(t)
 	flexMock.AddStub("git", []string{"branch", "--show-current"}, CommandResult{Stdout: "dev-branch\n"}).WithMinCalls(2)
+	// Post-pull verification reads, one set per repo.
+	flexMock.AddStub("git", []string{"rev-parse", "--verify", "HEAD"}, CommandResult{Stdout: "aaaaaaaaaaaa\n"}).WithMinCalls(2)
+	flexMock.AddStub("git", []string{"diff", "--name-only", "--diff-filter=U"}, CommandResult{}).WithMinCalls(2)
+	flexMock.AddStub("git", []string{"rev-parse", "--verify", "MERGE_HEAD"}, CommandResult{Err: errNoMergeHead}).WithMinCalls(2)
+	flexMock.AddStub("git", []string{"rev-parse", "--verify", "refs/remotes/origin/main"}, CommandResult{Stdout: "ccc\n"}).WithMinCalls(2)
+	flexMock.AddStub("git", []string{"rev-list", "--count", "HEAD..origin/main"}, CommandResult{Stdout: "0\n"}).WithMinCalls(2)
 	flexMock.Install()
 
-	// OutputCommandMock for pull phase of both workspaces
+	// OutputCommandMock for pull phase of both workspaces. --pull-only (the
+	// third argument to runWorkspaceSync below) must not push, so there are no
+	// push stubs — the mock t.Fatal's if one is attempted.
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
-		{Args: []string{"push", "origin", "dev-branch"}, Err: nil},
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
-		{Args: []string{"push", "origin", "dev-branch"}, Err: nil},
 	})
 	outputMock.Install()
 
@@ -59,7 +65,9 @@ func TestRunWorkspaceSync_MultipleWorkspaces(t *testing.T) {
 	}
 	t.Cleanup(func() { defaultDeps.Agent = origAgent })
 
-	runWorkspaceSync(defaultDeps, false, true, "")
+	if err := runWorkspaceSync(defaultDeps, false, true, ""); err != nil {
+		t.Errorf("expected nil error when every repo verifies in sync, got %v", err)
+	}
 }
 
 func TestRunWorkspaceSync_SpecificWorkspaceFlag(t *testing.T) {
@@ -91,15 +99,16 @@ func TestRunWorkspaceSync_SpecificWorkspaceFlag(t *testing.T) {
 	t.Cleanup(func() { defaultResolver = origResolver })
 
 	// Only ws-a should be processed
-	cmdMock := NewCommandMock(t, []CommandStub{
+	stubs := []CommandStub{
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature-a\n"},
-	})
+	}
+	stubs = append(stubs, verifyStubs("origin", "main", "aaaaaaaaaaaa", "bbbbbbbbbbbb", 0)...)
+	cmdMock := NewCommandMock(t, stubs)
 	cmdMock.Install()
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
-		{Args: []string{"push", "origin", "feature-a"}, Err: nil},
 	})
 	outputMock.Install()
 
@@ -112,7 +121,9 @@ func TestRunWorkspaceSync_SpecificWorkspaceFlag(t *testing.T) {
 	}
 	t.Cleanup(func() { defaultDeps.Agent = origAgent })
 
-	runWorkspaceSync(defaultDeps, false, true, "ws-a")
+	if err := runWorkspaceSync(defaultDeps, false, true, "ws-a"); err != nil {
+		t.Errorf("expected nil error when the repo verifies in sync, got %v", err)
+	}
 }
 
 func TestRunWorkspaceSync_UnknownWorkspace(t *testing.T) {
@@ -180,17 +191,21 @@ func TestRunFullSync_DispatchesToWorkspaceMode(t *testing.T) {
 	defaultResolver = nil
 	t.Cleanup(func() { defaultResolver = origResolver })
 
-	// Workspace discovery: GetCurrentBranch for the repo
-	cmdMock := NewCommandMock(t, []CommandStub{
+	// Workspace discovery: GetCurrentBranch for the repo, then the post-pull
+	// verification reads.
+	dispatchStubs := []CommandStub{
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
-	})
+	}
+	dispatchStubs = append(dispatchStubs, verifyStubs("origin", "main", "aaaaaaaaaaaa", "bbbbbbbbbbbb", 0)...)
+	cmdMock := NewCommandMock(t, dispatchStubs)
 	cmdMock.Install()
 
-	// Workspace pull: fetch, merge, push
+	// Workspace pull: fetch, merge. This is a --pull-only run (the third
+	// argument to runWorkspaceSync below), so no push stub — the pull path must
+	// not publish.
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
-		{Args: []string{"push", "origin", "api-branch"}, Err: nil},
 	})
 	outputMock.Install()
 
@@ -204,5 +219,7 @@ func TestRunFullSync_DispatchesToWorkspaceMode(t *testing.T) {
 	t.Cleanup(func() { defaultDeps.Agent = origAgent })
 
 	// Call runWorkspaceSync - should dispatch to workspace mode since config exists
-	runWorkspaceSync(defaultDeps, false, true, "")
+	if err := runWorkspaceSync(defaultDeps, false, true, ""); err != nil {
+		t.Errorf("expected nil error when the repo verifies in sync, got %v", err)
+	}
 }

@@ -121,10 +121,10 @@ func evaluateDaemonStuck(state daemon.DaemonState, stateMtime, now time.Time, no
 		}
 		switch {
 		case lateness > fatalThreshold:
-			fail = append(fail, fmt.Sprintf("agent %q backoff_until is %s in the past (>2× no_work_backoff=%s)",
+			fail = append(fail, fmt.Sprintf("agent %q backoff_until is %s in the past (>2× idle poll ceiling=%s)",
 				agent.Worktree, lateness.Truncate(time.Second), noWorkBackoff))
 		case lateness > noWorkBackoff:
-			warn = append(warn, fmt.Sprintf("agent %q backoff_until is %s in the past (>1× no_work_backoff=%s)",
+			warn = append(warn, fmt.Sprintf("agent %q backoff_until is %s in the past (>1× idle poll ceiling=%s)",
 				agent.Worktree, lateness.Truncate(time.Second), noWorkBackoff))
 		}
 	}
@@ -158,10 +158,22 @@ func evaluateDaemonStuck(state daemon.DaemonState, stateMtime, now time.Time, no
 	}
 }
 
-// resolveNoWorkBackoff returns the configured no-work backoff or the default.
+// resolveNoWorkBackoff returns the EFFECTIVE idle poll ceiling: the larger of
+// no_work_backoff and idle_poll_interval, each defaulting to 30s. The no-work
+// poll grows toward idle_poll_interval (see supervisor.noWorkPollInterval), so
+// comparing a stale backoff_until against no_work_backoff alone would flag every
+// idle agent on a workspace that relaxed its poll.
 func resolveNoWorkBackoff(dcfg *cfgpkg.DaemonConfig) time.Duration {
+	backoff := defaultNoWorkBackoff
 	if dcfg != nil && dcfg.Daemon.RestartPolicy.NoWorkBackoff != nil && *dcfg.Daemon.RestartPolicy.NoWorkBackoff > 0 {
-		return time.Duration(*dcfg.Daemon.RestartPolicy.NoWorkBackoff) * time.Second
+		backoff = time.Duration(*dcfg.Daemon.RestartPolicy.NoWorkBackoff) * time.Second
 	}
-	return defaultNoWorkBackoff
+	idlePoll := defaultNoWorkBackoff
+	if dcfg != nil && dcfg.Daemon.RestartPolicy.IdlePollInterval != nil && *dcfg.Daemon.RestartPolicy.IdlePollInterval > 0 {
+		idlePoll = time.Duration(*dcfg.Daemon.RestartPolicy.IdlePollInterval) * time.Second
+	}
+	if idlePoll > backoff {
+		return idlePoll
+	}
+	return backoff
 }

@@ -46,6 +46,16 @@ func TestDecide_Golden(t *testing.T) {
 			Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}},
 		{"claims-held → uncounted fixed recheck", agenterr.OutcomeFromDomain(agenterr.ClaimsHeldOutcome),
 			Disposition{Decision: RetryUncounted, Backoff: BPClaimsHeld}},
+		{"supervisor-stop → uncounted (our kill, not the agent's fault)", agenterr.OutcomeFromDomain(agenterr.SupervisorStopOutcome),
+			Disposition{Decision: RetryUncounted, Backoff: BPDefault}},
+		// A time-budget overrun, not a fault: counted retry (the checkpoint and
+		// harness session id survive, so resume is right) on the timeout backoff
+		// bucket, with a bounded block so a task that can NEVER finish inside
+		// the budget surfaces as failed instead of consuming turns forever.
+		{"run-turn-deadline → retry/block (capped), timeout backoff", agenterr.OutcomeFromDomain(agenterr.RunTurnDeadlineOutcome),
+			Disposition{Decision: Retry, Backoff: BPTimeout, OnExhaustion: Block, BlockBudget: defaultBlockBudget}},
+		{"incomplete-run → retry/block (capped)", agenterr.OutcomeFromDomain(agenterr.IncompleteRunOutcome),
+			Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}},
 		// zero value (clean) — defensive conservative restart
 		{"zero outcome → conservative retry", agenterr.Outcome{},
 			Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}},
@@ -59,39 +69,52 @@ func TestDecide_Golden(t *testing.T) {
 	}
 }
 
-// TestQuarantineEligible pins the task-quarantine eligibility for every
-// Outcome the supervisor can observe — like TestDecide_Golden, this table IS
-// the contract; changes are deliberate behavior changes.
+// TestQuarantineEligible pins the task-quarantine BUCKET for every Outcome the
+// supervisor can observe — like TestDecide_Golden, this table IS the contract;
+// changes are deliberate behavior changes. QuarantineEligible is asserted
+// alongside as the derived "any bucket" answer.
 func TestQuarantineEligible(t *testing.T) {
 	cases := []struct {
 		name string
 		in   agenterr.Outcome
-		want bool
+		want QuarantineBucket
 	}{
 		// harness-output classes
-		{"none → not eligible (clean)", agenterr.OutcomeFromHarness(wrapper.ErrNone), false},
-		{"rate-limited → not eligible (backend-wide)", agenterr.OutcomeFromHarness(wrapper.ErrRateLimited), false},
-		{"auth → not eligible (operator-actionable)", agenterr.OutcomeFromHarness(wrapper.ErrAuth), false},
-		{"billing → not eligible (operator-actionable)", agenterr.OutcomeFromHarness(wrapper.ErrBilling), false},
-		{"model-not-found → not eligible (operator-actionable)", agenterr.OutcomeFromHarness(wrapper.ErrModelNotFound), false},
-		{"context-overflow → eligible (task boomerangs across siblings)", agenterr.OutcomeFromHarness(wrapper.ErrContextOverflow), true},
-		{"timeout → eligible (137 watchdog kill)", agenterr.OutcomeFromHarness(wrapper.ErrTimeout), true},
-		{"transient → eligible (143 watchdog kill)", agenterr.OutcomeFromHarness(wrapper.ErrTransient), true},
-		{"unknown → eligible (-1 signal death)", agenterr.OutcomeFromHarness(wrapper.ErrUnknown), true},
+		{"none → not eligible (clean)", agenterr.OutcomeFromHarness(wrapper.ErrNone), QuarantineNone},
+		{"rate-limited → not eligible (backend-wide)", agenterr.OutcomeFromHarness(wrapper.ErrRateLimited), QuarantineNone},
+		{"auth → not eligible (operator-actionable)", agenterr.OutcomeFromHarness(wrapper.ErrAuth), QuarantineNone},
+		{"billing → not eligible (operator-actionable)", agenterr.OutcomeFromHarness(wrapper.ErrBilling), QuarantineNone},
+		{"model-not-found → not eligible (operator-actionable)", agenterr.OutcomeFromHarness(wrapper.ErrModelNotFound), QuarantineNone},
+		{"context-overflow → eligible (task boomerangs across siblings)", agenterr.OutcomeFromHarness(wrapper.ErrContextOverflow), QuarantineNoProgress},
+		{"timeout → eligible (137 watchdog kill)", agenterr.OutcomeFromHarness(wrapper.ErrTimeout), QuarantineNoProgress},
+		{"transient → eligible (143 watchdog kill)", agenterr.OutcomeFromHarness(wrapper.ErrTransient), QuarantineNoProgress},
+		{"unknown → eligible (-1 signal death)", agenterr.OutcomeFromHarness(wrapper.ErrUnknown), QuarantineNoProgress},
 		// loom-domain outcomes: coordination signals, never task-fault
-		{"no-work → not eligible", agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), false},
-		{"lock-conflict → not eligible", agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome), false},
-		{"spawn-failure → not eligible", agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome), false},
-		{"backend-unavailable → not eligible", agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome), false},
-		{"completion-hook-failure → not eligible (supervisor write fault, not task fault)", agenterr.OutcomeFromDomain(agenterr.CompletionHookFailureOutcome), false},
-		{"claims-held → not eligible (operator quiesce, not task fault)", agenterr.OutcomeFromDomain(agenterr.ClaimsHeldOutcome), false},
+		{"no-work → not eligible", agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), QuarantineNone},
+		{"lock-conflict → not eligible", agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome), QuarantineNone},
+		{"spawn-failure → not eligible", agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome), QuarantineNone},
+		{"backend-unavailable → not eligible", agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome), QuarantineNone},
+		{"completion-hook-failure → not eligible (supervisor write fault, not task fault)", agenterr.OutcomeFromDomain(agenterr.CompletionHookFailureOutcome), QuarantineNone},
+		{"claims-held → not eligible (operator quiesce, not task fault)", agenterr.OutcomeFromDomain(agenterr.ClaimsHeldOutcome), QuarantineNone},
+		{"incomplete-run → not eligible (turn ran out, agent may be progressing)", agenterr.OutcomeFromDomain(agenterr.IncompleteRunOutcome), QuarantineNone},
+		{"issue-backend-outage → not eligible (the store is down, the task is fine)", agenterr.OutcomeFromDomain(agenterr.IssueBackendOutageOutcome), QuarantineNone},
+		{"supervisor-stop → not eligible (we killed the run; the task earned nothing against it)", agenterr.OutcomeFromDomain(agenterr.SupervisorStopOutcome), QuarantineNone},
+		// The ONE eligible domain outcome, and it gets its OWN bucket: loom's
+		// per-turn deadline is a designed clean stop, so it must not advance the
+		// no-progress crash counter — but a task that overruns every time still
+		// boomerangs, so it is counted on a separate, higher threshold.
+		{"run-turn-deadline → deadline bucket, NOT the no-progress one", agenterr.OutcomeFromDomain(agenterr.RunTurnDeadlineOutcome), QuarantineDeadline},
 		// zero value (clean success)
-		{"zero outcome → not eligible", agenterr.Outcome{}, false},
+		{"zero outcome → not eligible", agenterr.Outcome{}, QuarantineNone},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := QuarantineEligible(tc.in); got != tc.want {
-				t.Fatalf("QuarantineEligible(%s) = %v, want %v", tc.in, got, tc.want)
+			if got := QuarantineBucketFor(tc.in); got != tc.want {
+				t.Fatalf("QuarantineBucketFor(%s) = %v, want %v", tc.in, got, tc.want)
+			}
+			// The thin wrapper must stay exactly "any bucket at all".
+			if got, want := QuarantineEligible(tc.in), tc.want != QuarantineNone; got != want {
+				t.Fatalf("QuarantineEligible(%s) = %v, want %v", tc.in, got, want)
 			}
 		})
 	}
@@ -115,5 +138,22 @@ func TestDecide_DeterministicNeverBlocks(t *testing.T) {
 	u := Decide(agenterr.OutcomeFromHarness(wrapper.ErrUnknown))
 	if u.OnExhaustion == Block && u.BlockBudget <= 0 {
 		t.Errorf("Unknown blocks unbounded (BlockBudget=%d), want a finite cap", u.BlockBudget)
+	}
+}
+
+// An issue-backend outage is shared by every agent in the fleet and clears on
+// its own, so it must be uncounted: a counted retry escalates through Block
+// into FastFail and takes the whole fleet down over infrastructure no agent
+// can influence. See PUPPET-210.
+func TestDecide_IssueBackendOutage_IsUncountedAndNeverTerminal(t *testing.T) {
+	d := Decide(agenterr.OutcomeFromDomain(agenterr.IssueBackendOutageOutcome))
+	if d.Decision != RetryUncounted {
+		t.Fatalf("Decision = %v, want RetryUncounted", d.Decision)
+	}
+	if d.Backoff != BPIssueBackendOutage {
+		t.Errorf("Backoff = %v, want BPIssueBackendOutage (a fixed recheck, not an exponential ramp)", d.Backoff)
+	}
+	if d.OnExhaustion == Block || d.OnExhaustion == FastFail {
+		t.Errorf("OnExhaustion = %v, want no exhaustion path at all", d.OnExhaustion)
 	}
 }

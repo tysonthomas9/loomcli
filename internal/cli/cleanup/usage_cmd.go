@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -25,6 +26,16 @@ var (
 	usageWeek    bool
 	usageFormat  string
 	usageVerbose bool
+	usageSource  string
+	usageStatus  string
+)
+
+// Usage data sources. "sessions" is the authoritative ledger every finalized
+// agent run writes to; "legacy" is the old .loom/usage.jsonl, which only
+// `loom auto` ever wrote and which is kept readable for historical data.
+const (
+	usageSourceSessions = "sessions"
+	usageSourceLegacy   = "legacy"
 )
 
 var usageCmd = &cobra.Command{
@@ -33,17 +44,27 @@ var usageCmd = &cobra.Command{
 	GroupID: "agents",
 	Long: `Display token usage and cost summaries from agent sessions.
 
-Reads usage data from the local .loom/usage.jsonl file and displays
-aggregated token consumption and cost breakdowns by agent and backend.
+Reads the session ledger at <workspace>/sessions/index.jsonl — the file every
+finalized agent run is written to — and displays aggregated token consumption
+by agent and backend. The ledger path and record count are printed in the
+header, so a number can always be traced back to its source.
+
+Cost is a pass-through: it is reported only when the backend reported one.
+When no record carries a cost, the summary says so rather than printing $0.00.
+
+--source legacy reads the old .loom/usage.jsonl ledger instead, which only
+` + "`loom auto`" + ` ever wrote. It is kept for historical data.
 
 FLAGS
   --agent <name>      Filter by agent name
   --backend <name>    Filter by backend name
   --epic <id>         Filter by epic ID
+  --status <status>   Filter by session status (running, completed, failed, aborted)
   --since <date>      Start date (YYYY-MM-DD)
   --until <date>      End date (YYYY-MM-DD)
   --today             Show only today's usage
   --week              Show last 7 days
+  --source <src>      Ledger to read: sessions (default) or legacy
   --format <fmt>      Output format: table (default) or json
   --verbose           Show per-session detail
 
@@ -52,6 +73,8 @@ EXAMPLES
   loom usage --today                # Today's usage
   loom usage --week                 # Last 7 days
   loom usage --agent nova           # Filter by agent
+  loom usage --status failed        # Only failed sessions
+  loom usage --source legacy        # Read the legacy usage.jsonl ledger
   loom usage --format json          # JSON output
   loom usage --verbose              # Per-session detail`,
 	Args: cobra.NoArgs,
@@ -68,6 +91,9 @@ func init() {
 	usageCmd.Flags().BoolVar(&usageWeek, "week", false, "Show last 7 days")
 	usageCmd.Flags().StringVar(&usageFormat, "format", "table", "Output format: table or json")
 	usageCmd.Flags().BoolVar(&usageVerbose, "verbose", false, "Show per-session detail")
+	usageCmd.Flags().StringVar(&usageStatus, "status", "", "Filter by session status (running, completed, failed, aborted)")
+	usageCmd.Flags().StringVar(&usageSource, "source", usageSourceSessions,
+		"Ledger to read: sessions (sessions/index.jsonl, default) or legacy (usage.jsonl)")
 	usageCmd.MarkFlagsMutuallyExclusive("today", "week", "since")
 	cli.RegisterCommand(usageCmd)
 }
@@ -78,26 +104,20 @@ func runUsage(cmd *cobra.Command, _ []string) {
 		loomDir = "."
 	}
 
-	store, err := usage.NewStore(loomDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-
 	f, err := buildUsageFilter()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	records, err := store.Read(f)
+	records, ledgerPath, err := readUsageRecords(loomDir, f)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading usage data: %v\n", err)
 		os.Exit(1)
 	}
 
 	if len(records) == 0 {
-		fmt.Println("No usage data found. Run agents in auto-mode to generate usage data.")
+		fmt.Println(emptyUsageMessage(ledgerPath))
 		return
 	}
 
@@ -106,7 +126,36 @@ func runUsage(cmd *cobra.Command, _ []string) {
 		return
 	}
 
-	renderUsageTable(records, f)
+	renderUsageTable(records, f, ledgerPath)
+}
+
+// readUsageRecords reads usage records from the selected ledger and returns
+// them alongside the resolved path of the file they came from.
+func readUsageRecords(loomDir string, f usage.Filter) ([]usage.SessionUsage, string, error) {
+	switch usageSource {
+	case usageSourceSessions, "":
+		return usage.ReadSessionUsage(loomDir, f)
+	case usageSourceLegacy:
+		store, err := usage.NewStore(loomDir)
+		if err != nil {
+			return nil, "", err
+		}
+		records, err := store.Read(f)
+		return records, filepath.Join(loomDir, "usage.jsonl"), err
+	default:
+		return nil, "", fmt.Errorf("invalid --source %q: expected %q or %q",
+			usageSource, usageSourceSessions, usageSourceLegacy)
+	}
+}
+
+// emptyUsageMessage names the file that turned out to be empty, so "no usage
+// data" is an answer about a specific ledger rather than a shrug.
+func emptyUsageMessage(ledgerPath string) string {
+	msg := fmt.Sprintf("No usage data found in %s.", ledgerPath)
+	if usageSource == usageSourceLegacy {
+		return msg
+	}
+	return msg + "\nIf you are looking for historical auto-mode data, try: loom usage --source legacy"
 }
 
 // buildUsageFilter constructs a usage.Filter from command-line flags.
@@ -115,6 +164,7 @@ func buildUsageFilter() (usage.Filter, error) {
 	f.AgentName = usageAgent
 	f.Backend = usageBackend
 	f.EpicID = usageEpic
+	f.Status = usageStatus
 
 	now := time.Now()
 
@@ -224,7 +274,13 @@ func aggregateUsage(records []usage.SessionUsage) usageAggregation {
 	return agg
 }
 
-func renderUsageTable(records []usage.SessionUsage, f usage.Filter) {
+func renderUsageTable(records []usage.SessionUsage, f usage.Filter, ledgerPath string) {
+	fmt.Print(buildUsageTable(records, f, ledgerPath))
+}
+
+// buildUsageTable renders the summary box and returns it, so the rendering can
+// be asserted without capturing stdout.
+func buildUsageTable(records []usage.SessionUsage, f usage.Filter, ledgerPath string) string {
 	agg := aggregateUsage(records)
 
 	var sb strings.Builder
@@ -236,38 +292,81 @@ func renderUsageTable(records []usage.SessionUsage, f usage.Filter) {
 	dateRange := formatDateRange(f, records)
 	sb.WriteString(monitor.RenderBoxLine(monitor.CenterText(dateRange, monitor.DashboardWidth-4)))
 
-	renderUsageTotals(&sb, &agg)
-	renderUsageByAgent(&sb, agg.ByAgent)
-	renderUsageByBackend(&sb, agg.ByBackend)
+	// Source line: which ledger these numbers came from, and how many records
+	// of it were counted.
+	sb.WriteString(monitor.RenderBoxLine(monitor.CenterText(
+		formatLedgerSource(ledgerPath, len(records)), monitor.DashboardWidth-4)))
+
+	haveCost := costReported(records)
+	renderUsageTotals(&sb, &agg, haveCost)
+	renderUsageByAgent(&sb, agg.ByAgent, haveCost)
+	renderUsageByBackend(&sb, agg.ByBackend, haveCost)
 
 	if usageVerbose {
-		renderUsageSessions(&sb, records)
+		renderUsageSessions(&sb, records, haveCost)
 	}
 
 	sb.WriteString(monitor.RenderBoxBottom())
-	fmt.Print(sb.String())
+	return sb.String()
+}
+
+// formatLedgerSource renders the "<ledger> — N sessions" header line. Long
+// paths are trimmed from the left, because the tail is the identifying part.
+func formatLedgerSource(ledgerPath string, count int) string {
+	const maxPath = 44
+	shown := ledgerPath
+	if len([]rune(shown)) > maxPath {
+		r := []rune(shown)
+		shown = "\u2026" + string(r[len(r)-maxPath:])
+	}
+	return fmt.Sprintf("%s \u2014 %d sessions", shown, count)
+}
+
+// costReported reports whether any record carries a backend-reported cost.
+// When none does, the summary says the cost was not reported instead of
+// printing a $0.00 that reads like a measurement.
+func costReported(records []usage.SessionUsage) bool {
+	for _, rec := range records {
+		if rec.EstimatedCostUSD != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // renderUsageTotals writes the TOTALS section into the string builder.
-func renderUsageTotals(sb *strings.Builder, agg *usageAggregation) {
+func renderUsageTotals(sb *strings.Builder, agg *usageAggregation, haveCost bool) {
 	sb.WriteString(monitor.RenderBoxSeparator())
 	sb.WriteString(monitor.RenderBoxLine(" TOTALS"))
 	sb.WriteString(monitor.RenderBoxLine(fmt.Sprintf("   Input tokens:  %s    Output tokens:    %s",
 		monitor.PadRight(formatTokenCount(agg.TotalInput), 12), formatTokenCount(agg.TotalOutput))))
 	sb.WriteString(monitor.RenderBoxLine(fmt.Sprintf("   Cache reads:   %s    Cache writes:     %s",
 		monitor.PadRight(formatTokenCount(agg.TotalCacheRead), 12), formatTokenCount(agg.TotalCacheWrite))))
+	cost := formatCostOrUnreported(agg.TotalCost, haveCost, "not reported by backend")
 	sb.WriteString(monitor.RenderBoxLine(fmt.Sprintf("   Estimated cost:  %-12s  Sessions:  %d",
-		formatCost(agg.TotalCost), agg.SessionCount)))
+		cost, agg.SessionCount)))
+}
+
+// formatCostOrUnreported renders a cost, degrading to unreported when the
+// total is zero solely because no backend reported a cost. See
+// usage.SessionUsage: Loom never derives cost from token counts, so a $0.00
+// there would read like a measurement that was never taken. A genuine zero in
+// a set that does carry costs still prints as a number.
+func formatCostOrUnreported(total float64, haveCost bool, unreported string) string {
+	if total == 0 && !haveCost {
+		return unreported
+	}
+	return formatCost(total)
 }
 
 // renderUsageByAgent writes the BY AGENT section into the string builder.
-func renderUsageByAgent(sb *strings.Builder, agents []agentUsageSummary) {
+func renderUsageByAgent(sb *strings.Builder, agents []agentUsageSummary, haveCost bool) {
 	sb.WriteString(monitor.RenderBoxSeparator())
 	sb.WriteString(monitor.RenderBoxLine(" BY AGENT"))
 	for _, a := range agents {
 		line := fmt.Sprintf("   %-12s %s  %2d sessions   input: %s  output: %s",
 			monitor.TruncateToWidth(a.Name, 12),
-			monitor.PadRight(formatCost(a.Cost), 8),
+			monitor.PadRight(formatCostOrUnreported(a.Cost, haveCost, "n/a"), 8),
 			a.Sessions,
 			formatTokenCountShort(a.InputTokens),
 			formatTokenCountShort(a.OutputTokens))
@@ -276,20 +375,20 @@ func renderUsageByAgent(sb *strings.Builder, agents []agentUsageSummary) {
 }
 
 // renderUsageByBackend writes the BY BACKEND section into the string builder.
-func renderUsageByBackend(sb *strings.Builder, backends []backendUsageSummary) {
+func renderUsageByBackend(sb *strings.Builder, backends []backendUsageSummary, haveCost bool) {
 	sb.WriteString(monitor.RenderBoxSeparator())
 	sb.WriteString(monitor.RenderBoxLine(" BY BACKEND"))
 	for _, b := range backends {
 		line := fmt.Sprintf("   %-12s %s  %2d sessions",
 			monitor.TruncateToWidth(b.Name, 12),
-			monitor.PadRight(formatCost(b.Cost), 8),
+			monitor.PadRight(formatCostOrUnreported(b.Cost, haveCost, "n/a"), 8),
 			b.Sessions)
 		sb.WriteString(monitor.RenderBoxLine(line))
 	}
 }
 
 // renderUsageSessions writes the verbose per-session detail section.
-func renderUsageSessions(sb *strings.Builder, records []usage.SessionUsage) {
+func renderUsageSessions(sb *strings.Builder, records []usage.SessionUsage, haveCost bool) {
 	sb.WriteString(monitor.RenderBoxSeparator())
 	sb.WriteString(monitor.RenderBoxLine(" SESSIONS"))
 	// Sort by start time descending (most recent first)
@@ -299,7 +398,7 @@ func renderUsageSessions(sb *strings.Builder, records []usage.SessionUsage) {
 		return sorted[i].StartedAt.After(sorted[j].StartedAt)
 	})
 	for _, rec := range sorted {
-		duration := rec.EndedAt.Sub(rec.StartedAt)
+		duration := sessionDuration(rec)
 		taskID := rec.TaskID
 		if taskID == "" {
 			taskID = "-"
@@ -309,11 +408,25 @@ func renderUsageSessions(sb *strings.Builder, records []usage.SessionUsage) {
 			monitor.TruncateToWidth(rec.AgentName, 10),
 			monitor.TruncateToWidth(rec.Backend, 8),
 			monitor.TruncateToWidth(taskID, 12),
-			monitor.PadRight(formatCost(rec.EstimatedCostUSD), 7),
+			monitor.PadRight(formatCostOrUnreported(rec.EstimatedCostUSD, haveCost, "n/a"), 7),
 			monitor.PadRight(formatUsageDuration(duration), 4),
 			rec.ExitCode)
 		sb.WriteString(monitor.RenderBoxLine(line))
 	}
+}
+
+// sessionDuration returns a session's wall-clock duration. DurationS, recorded
+// at finalize, is authoritative; EndedAt is only subtracted when it is actually
+// set. A running session has no end time, and subtracting a zero time would
+// print a nonsense multi-thousand-hour duration.
+func sessionDuration(rec usage.SessionUsage) time.Duration {
+	if rec.DurationS > 0 {
+		return time.Duration(rec.DurationS * float64(time.Second))
+	}
+	if rec.EndedAt.IsZero() || rec.StartedAt.IsZero() || rec.EndedAt.Before(rec.StartedAt) {
+		return 0
+	}
+	return rec.EndedAt.Sub(rec.StartedAt)
 }
 
 func renderUsageJSON(records []usage.SessionUsage) {

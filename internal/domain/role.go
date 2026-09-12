@@ -14,6 +14,33 @@ const (
 	RoleKindWorker      RoleKind = "worker"
 )
 
+// Role persona sources: where an interactive agent's role instructions come
+// from. The empty string is "unset" and resolves to PersonaSourceArgv, which is
+// what every role stored before this field carries.
+const (
+	// PersonaSourceArgv passes the persona to the harness on the command line,
+	// the way loom has always done it.
+	PersonaSourceArgv = "argv"
+	// PersonaSourceProfile means the harness reads its role instructions from
+	// its own ambient file — CLAUDE.md under CLAUDE_CONFIG_DIR for claude,
+	// AGENTS.md in the lead workdir for codex — and loom sends no persona on
+	// argv at all. It is an assertion by the operator that the ambient file is
+	// authoritative, which is why loom neither seeds nor overwrites it.
+	PersonaSourceProfile = "profile"
+)
+
+var validRolePersonaSources = map[string]bool{
+	"":                   true,
+	PersonaSourceArgv:    true,
+	PersonaSourceProfile: true,
+}
+
+// ValidateRolePersonaSource returns true if s is empty or a supported persona
+// source. Empty validates true: it is the pre-existing default, not a mistake.
+func ValidateRolePersonaSource(s string) bool {
+	return validRolePersonaSources[s]
+}
+
 // Role input-policy dispositions. The empty string is "unset", which resolves
 // to deny — see RoleInputPolicy for why the unset case must not be permissive.
 const (
@@ -53,13 +80,21 @@ const (
 // only shows up once you look at what the harness actually emits.
 // harness-wrapper's own unattended default (pkg/oneshot.AutoAcceptAnswer)
 // answers every prompt with its affirmative option, falling back to the first
-// option — and claude-code renders BOTH the harmless folder-trust dialog AND
-// the `--dangerously-skip-permissions` acceptance screen under the same prompt
-// kind. A blanket yes therefore accepts a skip-all-permissions launch with
-// nobody having decided to, which would quietly undo the role safety knobs
-// (allowed_tools / denied_tools / read_only) that were just made real. Making
-// the policy per-role means a role names the kinds it is willing to
-// auto-accept and everything it did not name is denied.
+// option — and one of the prompts it would answer is claude-code's
+// `--dangerously-skip-permissions` acceptance screen. A blanket yes therefore
+// accepts a skip-all-permissions launch with nobody having decided to, which
+// would quietly undo the role safety knobs (allowed_tools / denied_tools /
+// read_only) that were just made real. Making the policy per-role means a role
+// names the kinds it is willing to auto-accept and everything it did not name
+// is denied.
+//
+// Per-KIND matters as much as per-role, and harness-wrapper v0.8.4 is what
+// made it possible: the acceptance screen and the harmless folder-trust dialog
+// used to arrive under one `trust_prompt` kind, so allowing folder trust
+// allowed the bypass too. They are now `trust_prompt` and `bypass_acceptance`,
+// two independently namable kinds. See internal/cli/backends for the
+// consequence a role author has to know: denying `bypass_acceptance` does not
+// stall claude, it exits it.
 //
 // The zero value denies everything: a nil policy, an empty Default and an
 // absent Kinds entry all resolve to deny. A role that says nothing must never
@@ -179,11 +214,17 @@ type Role struct {
 	// (default, one-shot harness turn per run) or "conversation" (a held
 	// chat conversation: surfaced input requests, bounded follow-up turns,
 	// session resume). Mirrors the server's closed vocabulary.
-	Executor     string   `json:"executor,omitempty"`
-	Backend      string   `json:"backend,omitempty"`
-	Effort       string   `json:"effort,omitempty"`
-	PathPatterns []string `json:"path_patterns,omitempty"`
-	Skills       []string `json:"skills,omitempty"`
+	Executor string `json:"executor,omitempty"`
+	// PersonaSource selects where an interactive agent in this role gets its
+	// role instructions: "argv" (default, loom renders the persona and passes
+	// it to the harness) or "profile" (the harness's own ambient file is
+	// authoritative and loom passes no persona). Empty means argv. Mirrors the
+	// server's closed vocabulary.
+	PersonaSource string   `json:"persona_source,omitempty"`
+	Backend       string   `json:"backend,omitempty"`
+	Effort        string   `json:"effort,omitempty"`
+	PathPatterns  []string `json:"path_patterns,omitempty"`
+	Skills        []string `json:"skills,omitempty"`
 
 	// InputPolicy declares what an agent in this role may auto-answer when the
 	// harness raises an interactive prompt mid-turn. Nil — the zero value —

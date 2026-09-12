@@ -37,8 +37,19 @@ var envAllowlistExact = map[string]bool{
 	// equivalent of a ~/.claude login, so interactive/lead claude invocations must
 	// inherit it (mirrors trustedLocalProviderCredentials on the task-runner path).
 	"CLAUDE_CODE_OAUTH_TOKEN": true,
-	// Git hosting tokens (needed by container agents for git push)
-	"GITHUB_TOKEN": true, "GITHUB_TOKEN_FILE": true,
+	//
+	// NOT AN INCONSISTENCY, do not "fix" it: several names above
+	// (CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, CODEX_HOME, GITHUB_TOKEN…) also
+	// appear in the sensitive-env-name contract that
+	// internal/driver/testdata/sensitive-env-names.json freezes. That contract is a
+	// DENYLIST for a remote sandbox GUEST — names a Daytona probe must count as
+	// leaks. This map is an ALLOWLIST for interactive/lead agents running on the
+	// host, which must authenticate and therefore need exactly those names. Wiring
+	// the two together would invert this file's meaning.
+	// Git hosting tokens (needed by container agents for git push). gh reads
+	// GH_TOKEN before GITHUB_TOKEN, and internal/driver/env.go already pairs
+	// them, so passing only one of the two leaves half the tooling unauthenticated.
+	"GITHUB_TOKEN": true, "GITHUB_TOKEN_FILE": true, "GH_TOKEN": true,
 	// E2E test stubs. Exact matches keep arbitrary STUB_* values out.
 	"STUB_CODEX_EPIC_RUNNER": true, "STUB_CODEX_INVOCATIONS": true,
 	// Editor

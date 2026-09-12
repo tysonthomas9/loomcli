@@ -78,3 +78,59 @@ func expandRepoGroup(group string, repos []RepoConfig, add func(string)) bool {
 	}
 	return matched
 }
+
+// declaresRepoAffinity reports whether the agent asks to be bound to a subset
+// of repos at all. An agent that declares none is legitimately fleet-wide, so
+// a failure to resolve a binding it never declared is not an error.
+func declaresRepoAffinity(agent AgentEntry) bool {
+	return len(agent.Repos) > 0 || len(agent.RepoGroups) > 0
+}
+
+// ResolveAgentReposFromActiveWorkspace populates agent.SourceRepos from the
+// active workspace's repo list. It returns an error when the agent declares
+// repo affinity that resolves to zero repos, or when affinity is declared and
+// no workspace is configured.
+//
+// It exists so the preview paths (`loom queue`, the webui agent-queue panel)
+// resolve a binding the same way the supervisor's claim does, instead of each
+// keeping its own copy that drifts. Callers must treat the error as fatal for
+// a bound agent: continuing with an unresolved binding drops both the fetch
+// filter and the router gate, silently promoting the agent to fleet-wide.
+func ResolveAgentReposFromActiveWorkspace(agent *AgentEntry) error {
+	if agent == nil {
+		return fmt.Errorf("nil agent entry")
+	}
+	if !declaresRepoAffinity(*agent) {
+		agent.SourceRepos = nil
+		return nil
+	}
+
+	ws, err := ResolveActiveWorkspace()
+	if err != nil {
+		return fmt.Errorf("resolve active workspace: %w", err)
+	}
+	return resolveAgentReposFromWorkspace(agent, ws)
+}
+
+// resolveAgentReposFromWorkspace is the workspace-independent half of
+// ResolveAgentReposFromActiveWorkspace, split out so the resolution rules can
+// be tested without an active workspace on the machine running the tests.
+func resolveAgentReposFromWorkspace(agent *AgentEntry, ws *WorkspaceConfig) error {
+	if agent == nil {
+		return fmt.Errorf("nil agent entry")
+	}
+	if !declaresRepoAffinity(*agent) {
+		agent.SourceRepos = nil
+		return nil
+	}
+	if ws == nil || len(ws.Repos) == 0 {
+		return fmt.Errorf("agent declares repo affinity (repos=%v repo_groups=%v) but no workspace repos are configured", agent.Repos, agent.RepoGroups)
+	}
+
+	sourceRepos, err := ResolveAgentRepos(*agent, ws.Repos)
+	if err != nil {
+		return err
+	}
+	agent.SourceRepos = sourceRepos
+	return nil
+}

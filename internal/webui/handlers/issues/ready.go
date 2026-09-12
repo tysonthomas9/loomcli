@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // IssueBackendFn returns the active backend.IssueBackend. Consumed by
@@ -186,11 +187,7 @@ func serveReadyViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 
 	issues, err := be.Ready(ctx, opts)
 	if err != nil {
-		slog.Error("backend error in HandleReady", "err", err)
-		handler.WriteJSON(w, http.StatusInternalServerError, ReadyResponse{
-			Success: false,
-			Error:   "failed to list ready issues",
-		})
+		writeReadyBackendError(w, err)
 		return true
 	}
 	// Project each IssueData onto the pool-path wire shape. Parent/Repo are
@@ -214,6 +211,41 @@ func serveReadyViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 		Data:    out,
 	})
 	return true
+}
+
+// writeReadyBackendError maps a typed backend error onto the ReadyResponse
+// envelope. 4xx-class failures (a bad filter value, a missing parent) carry the
+// backend's own message so the client can see which value was rejected; 5xx
+// stays opaque so cause chains are not leaked.
+//
+// The envelope shape is fixed by api/openapi.yaml and the FE ready client, so
+// this deliberately does not use handler.HandleServiceError, which writes
+// {error, kind}. Only the status code and the message change here.
+func writeReadyBackendError(w http.ResponseWriter, err error) {
+	svcErr := service.TranslateBackendError(err)
+	status := handler.StatusForKind(svcErr.Kind)
+	msg := "failed to list ready issues"
+	if status >= 400 && status < 500 {
+		// A BackendError carrying only a Cause yields an empty Message; fall
+		// back rather than writing {"error": ""}.
+		msg = svcErr.Message
+		if msg == "" {
+			msg = err.Error()
+		}
+		if msg == "" {
+			msg = "failed to list ready issues"
+		}
+		slog.Debug("client error in HandleReady", "status", status, "kind", string(svcErr.Kind), "err", err)
+	} else {
+		slog.Error("backend error in HandleReady", "status", status, "err", err)
+	}
+	if svcErr.Kind == service.KindStarting {
+		w.Header().Set("Retry-After", "5")
+	}
+	handler.WriteJSON(w, status, ReadyResponse{
+		Success: false,
+		Error:   msg,
+	})
 }
 
 // issueDataToTypesIssue projects a backend.IssueData into the slim
@@ -255,6 +287,12 @@ func issueDataToTypesIssue(d *backend.IssueData) *types.Issue {
 }
 
 // executeReadyRPC acquires a connection, calls Ready, and returns filtered issues.
+//
+// Its 500s stay 500 on purpose: unlike the backend path, the errors here are a
+// transport failure, a JSON unmarshal failure, or an untyped daemon resp.Error
+// string, none of which carries a backend.Kind to translate. Reclassifying an
+// untyped daemon string by substring match would be guesswork; invalid filter
+// values are rejected up front by parseReadyParams instead.
 func executeReadyRPC(ctx context.Context, pool readyConnectionGetter, args *rpc.ReadyArgs) (readyClient, []*types.Issue, int, error) {
 	client, err := pool.Get(ctx)
 	if err != nil {
@@ -462,7 +500,6 @@ func parseReadyParams(r *http.Request) (*rpc.ReadyArgs, error) {
 	q := r.URL.Query()
 
 	args.Assignee = handler.ParseStringParam(q, "assignee")
-	args.Type = handler.ParseStringParam(q, "type")
 	args.ParentID = handler.ParseStringParam(q, "parent_id")
 
 	if err := parseReadyValidatedStrings(q, args); err != nil {
@@ -484,8 +521,21 @@ func parseReadyParams(r *http.Request) (*rpc.ReadyArgs, error) {
 	return args, nil
 }
 
-// parseReadyValidatedStrings parses and validates mol_type and sort parameters.
+// parseReadyValidatedStrings parses and validates the type, mol_type and sort
+// parameters.
 func parseReadyValidatedStrings(q url.Values, args *rpc.ReadyArgs) error {
+	if v := handler.ParseStringParam(q, "type"); v != "" {
+		// fleet-db accepts a comma-separated list here and validates each
+		// element (fleet-db internal/api/ready.go parseReadyFilter), so
+		// validate per element rather than on the raw string. The check is
+		// case-sensitive to match fleet-db: type=BUG is a 400 on both sides.
+		for _, t := range handler.SplitAndTrim(v) {
+			if !types.IssueType(t).IsValid() {
+				return fmt.Errorf("invalid type: %q (must be bug, feature, task, epic, or chore)", t)
+			}
+		}
+		args.Type = v
+	}
 	if v := handler.ParseStringParam(q, "mol_type"); v != "" {
 		if !types.MolType(v).IsValid() {
 			return fmt.Errorf("invalid mol_type: %s (must be swarm, patrol, or work)", v)

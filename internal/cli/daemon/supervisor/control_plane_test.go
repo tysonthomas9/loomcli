@@ -252,7 +252,7 @@ func TestSupervisorMirrorsAgentSessionToControlPlane(t *testing.T) {
 	ap.Mu.Lock()
 	ap.LogFilePath = "/tmp/worker-1.log"
 	ap.Mu.Unlock()
-	s.markControlPlaneAgentSessionRunning(ap)
+	s.markControlPlaneAgentSessionRunning(context.Background(), ap)
 	session, err = st.AgentSessions().Get(t.Context(), "WS", ap.AgentSessionID)
 	if err != nil {
 		t.Fatalf("get running agent session: %v", err)
@@ -371,6 +371,14 @@ type controlPlaneStoreOverrides struct {
 	sessions  store.AgentSessionStore
 	leases    store.AgentLeaseStore
 	ownership store.AgentOwnershipLeaseStore
+	agents    store.AgentStore
+}
+
+func (s *controlPlaneStoreOverrides) Agents() store.AgentStore {
+	if s.agents == nil {
+		return s.Store.Agents()
+	}
+	return s.agents
 }
 
 func (s *controlPlaneStoreOverrides) AgentSessions() store.AgentSessionStore {

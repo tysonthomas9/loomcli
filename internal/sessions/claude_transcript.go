@@ -57,6 +57,15 @@ func (s *Store) syncLatestClaudeTranscriptFor(agent, sessionID, workDir, claudeU
 	return srcPath, nil
 }
 
+// ClaudeProjectDir returns the directory Claude Code writes this working
+// directory's transcripts into, resolved against this process's config root
+// (CLAUDE_CONFIG_DIR, else ~/.claude). Returns "" when it cannot be resolved.
+// Exported for error messages that need to point an operator at the transcript
+// a resume could not find.
+func ClaudeProjectDir(workDir string) string {
+	return claudeProjectDirFor("", "", workDir)
+}
+
 // claudeProjectDirFor returns <claude-config-dir>/projects/<encoded-cwd> for
 // workDir, or "" if the config dir cannot be resolved or workDir is empty. The
 // config dir is resolved for the named agent (profile dir → CLAUDE_CONFIG_DIR

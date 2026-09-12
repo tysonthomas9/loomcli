@@ -125,7 +125,7 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 		if backend == "" {
 			backend = backendnames.Codex
 		}
-		if err := materializeInteractiveSkills(ctx, st, workspace, agent.RoleName, backend, agentLaunchCwd(workspace, agent)); err != nil {
+		if err := materializeInteractiveSkills(ctx, st, workspace, agent.RoleName, backend, agentLaunchCwd(workspace, agent, roleKind)); err != nil {
 			return nil, err
 		}
 	}
@@ -200,8 +200,14 @@ func agentTerminalLaunchSpecStale(
 func loadTerminalAgent(ctx context.Context, st store.Store, workspace, agentName string) (*domain.Agent, error) {
 	agent, err := st.Agents().Get(ctx, workspace, agentName)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
+		switch {
+		case errors.Is(err, domain.ErrNotFound):
 			return nil, service.ErrNotFound("agent not found")
+		case errors.Is(err, domain.ErrInvalid):
+			// fleet-db answers 400 invalid_parameter for a name outside its
+			// stored charset (uppercase, >100 chars); the client maps that to
+			// domain.ErrInvalid. Bad client input, not a store fault.
+			return nil, service.ErrValidation(fmt.Sprintf("invalid agent name %q", agentName))
 		}
 		return nil, service.ErrInternal("failed to load agent", err)
 	}
@@ -369,25 +375,39 @@ func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessio
 	return &tabmeta.LaunchSpec{
 		Argv: webuterminal.ShellArgvForCommand(args),
 		Env:  agentLaunchEnv(workspace, sessionName, backend, orchestratorID, agent),
-		Cwd:  agentLaunchCwd(workspace, agent),
+		Cwd:  agentLaunchCwd(workspace, agent, roleKind),
 	}, backend, nil
 }
 
-func agentLaunchCwd(workspace string, agent *domain.Agent) string {
+// agentLaunchCwd resolves the directory a WebUI-launched agent starts in. An
+// empty result makes the PTY inherit the server's own cwd, which for an
+// interactive (lead) agent means the workspace root - so lead falls back to its
+// dedicated workdir instead, resolved through the same
+// localworkspace.LeadWorkdir the terminal launch path uses. Sharing the
+// resolver is what makes the two provably compute the same string.
+func agentLaunchCwd(workspace string, agent *domain.Agent, kind domain.RoleKind) string {
 	if agent == nil {
 		return ""
 	}
 	worktree, ok := localworkspace.RememberedAgentWorktree(workspace, agent.Name)
-	if !ok {
-		return ""
+	if ok {
+		return worktree
 	}
-	return worktree
+	if kind == domain.RoleKindInteractive {
+		if leadDir, leadOK := localworkspace.EnsureLeadWorkdir(workspace); leadOK {
+			return leadDir
+		}
+	}
+	return ""
 }
 
 func loadAgentLaunchRole(ctx context.Context, st store.Store, workspace, roleName string) (*domain.Role, error) {
 	role, err := st.Roles().Get(ctx, workspace, roleName)
 	if errors.Is(err, domain.ErrNotFound) {
 		return nil, nil
+	}
+	if errors.Is(err, domain.ErrInvalid) {
+		return nil, service.ErrValidation(fmt.Sprintf("invalid role name %q", roleName))
 	}
 	if err != nil {
 		return nil, service.ErrInternal("failed to load agent role", err)
@@ -428,7 +448,15 @@ func agentLaunchCommandArgs(kind domain.RoleKind, agent *domain.Agent, role *dom
 	roleName := strings.ToLower(strings.TrimSpace(agent.RoleName))
 	if kind == domain.RoleKindInteractive {
 		args := []string{"lead"}
-		if role != nil && strings.TrimSpace(role.Prompt) == "" && strings.TrimSpace(role.PromptFile) != "" {
+		switch {
+		// The spawned CLI re-reads the role (LOOM_AGENT_ROLE is in its env) and
+		// would suppress the persona by itself — except that the prompt-file
+		// branch below wins there too. Emitting the flag explicitly settles it,
+		// and it keeps suppression working when the spawned CLI cannot reach
+		// fleet-db to re-read the role at all.
+		case role != nil && role.PersonaSource == domain.PersonaSourceProfile:
+			args = append(args, "--prompt", "builtin:none")
+		case role != nil && strings.TrimSpace(role.Prompt) == "" && strings.TrimSpace(role.PromptFile) != "":
 			args = append(args, "--prompt", role.PromptFile)
 		}
 		return args, nil

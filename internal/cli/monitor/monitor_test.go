@@ -2714,39 +2714,6 @@ func TestCollectTaskStatusReadyLimitParam(t *testing.T) {
 	}
 }
 
-// TestCollectReadyTasksByPriorityReadyLimitParam verifies that
-// collectReadyTasksByPriority passes the readyLimit parameter through to
-// Ready() (limit=50, matching the serve use case).
-func TestCollectReadyTasksByPriorityReadyLimitParam(t *testing.T) {
-	// not parallel: uses setDefaultIssueBackend
-	mock := NewMockIssueBackend()
-	var capturedOpts backend.ReadyOpts
-	mock.ReadyFn = func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
-		capturedOpts = opts
-		return []backend.IssueData{
-			{ID: "T-1", Title: "P1 task", Status: "open", Priority: 1, Design: "plan"},
-			{ID: "T-2", Title: "P2 task", Status: "open", Priority: 2, Design: ""},
-		}, nil
-	}
-	setDefaultIssueBackend(mock)
-	defer resetDefaultIssueBackend()
-
-	counts := collectReadyTasksByPriority(50)
-
-	// Verify Ready() was called with Limit=50
-	if capturedOpts.Limit != 50 {
-		t.Errorf("Ready() called with Limit=%d, want 50", capturedOpts.Limit)
-	}
-
-	// Also verify the function correctly counted by priority
-	if counts[1] != 1 {
-		t.Errorf("expected priority 1 count=1, got %d", counts[1])
-	}
-	if counts[2] != 1 {
-		t.Errorf("expected priority 2 count=1, got %d", counts[2])
-	}
-}
-
 // TestCompleteSyncStatusDetails tests that completeSyncStatus populates
 // GitPushDetails and GitPullDetails from agent Ahead/Behind counts.
 func TestCompleteSyncStatusDetails(t *testing.T) {
@@ -2931,5 +2898,31 @@ func TestProcessReadyIssuesNilBlockedIDs(t *testing.T) {
 	}
 	if len(readyToImpl) != 2 {
 		t.Errorf("expected 2 ready tasks with nil blockedIDs, got %d", len(readyToImpl))
+	}
+}
+
+// The daemon writes written_at into daemon-agents.json so readers can tell a
+// live state file from one that stopped advancing. Decoding it here is what
+// lets the monitor and webui flag stale state instead of rendering it as truth.
+func TestDaemonAgentState_DecodesWrittenAt(t *testing.T) {
+	written := time.Date(2026, 8, 31, 9, 30, 0, 0, time.UTC)
+	raw := `{"pid":123,"written_at":"` + written.Format(time.RFC3339) + `","agents":[{"worktree":"falcon","status":"running"}]}`
+
+	var state DaemonAgentState
+	if err := json.Unmarshal([]byte(raw), &state); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if !state.WrittenAt.Equal(written) {
+		t.Errorf("WrittenAt = %v, want %v", state.WrittenAt, written)
+	}
+
+	// A file from a binary predating the field decodes to the zero time, which
+	// callers must treat as "unknown" rather than as a 56-year-old write.
+	var legacy DaemonAgentState
+	if err := json.Unmarshal([]byte(`{"pid":123,"agents":[]}`), &legacy); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if !legacy.WrittenAt.IsZero() {
+		t.Errorf("WrittenAt = %v, want zero for a legacy state file", legacy.WrittenAt)
 	}
 }

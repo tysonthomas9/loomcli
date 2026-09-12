@@ -110,10 +110,14 @@ func (s *issueServiceImpl) resolveBackend(ctx context.Context) (backend.IssueBac
 	return be, nil
 }
 
-// translateBackendError converts a *backend.BackendError into a *ServiceError
+// TranslateBackendError converts a *backend.BackendError into a *ServiceError
 // so handler error mapping continues to work uniformly across migrated and
 // non-migrated paths.
-func translateBackendError(err error) *ServiceError {
+//
+// Exported so handlers that own a non-standard response envelope (the /ready
+// route, whose ReadyResponse shape is fixed by api/openapi.yaml) can reuse the
+// same kind mapping the service layer applies.
+func TranslateBackendError(err error) *ServiceError {
 	if err == nil {
 		return nil
 	}
@@ -140,10 +144,21 @@ func translateBackendError(err error) *ServiceError {
 		return ErrTimeout(be.Message)
 	case backend.KindNotImplemented:
 		return ErrNotImplemented(be.Message)
+	case backend.KindRateLimited:
+		return ErrRateLimitedRetryAfter(be.Message, be.Meta[backend.MetaRetryAfter])
 	default:
 		return ErrInternal(be.Message, be.Cause)
 	}
 }
+
+// translateBackendError is the in-package alias for TranslateBackendError,
+// kept so the existing call sites need no edit.
+func translateBackendError(err error) *ServiceError { return TranslateBackendError(err) }
+
+// FromBackendError converts a backend-layer error into a *ServiceError.
+// Exported for handlers that call an IssueBackend directly instead of
+// going through IssueService (e.g. the pool-less /stats path).
+func FromBackendError(err error) *ServiceError { return translateBackendError(err) }
 
 func (s *issueServiceImpl) acquireClient(ctx context.Context) (*rpc.Client, error) {
 	if s.pool == nil {

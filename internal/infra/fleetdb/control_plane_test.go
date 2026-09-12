@@ -404,3 +404,49 @@ func writeJSON(t *testing.T, w http.ResponseWriter, v any) {
 		t.Fatalf("encode response: %v", err)
 	}
 }
+
+// The takeover key must be ABSENT from an ordinary acquire body and present
+// only for a genuine steal: fleet-db decodes with DisallowUnknownFields, so
+// an unconditional key would 400 every acquire against an older server.
+func TestAgentOwnershipLeaseAcquire_TakeoverKeyOnlyWhenRequested(t *testing.T) {
+	now := time.Now().UTC()
+	var bodies []map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/WS/agent-ownership-leases/agent-1/acquire" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode acquire: %v", err)
+		}
+		bodies = append(bodies, body)
+		writeJSON(t, w, domain.AgentOwnershipLease{
+			WorkspaceKey: "WS", AgentID: "agent-1", LeaseID: "ol-1", OwnerID: "node-1",
+			Status: domain.AgentLeaseActive, ExpiresAt: now.Add(time.Minute),
+		})
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := store.AgentOwnershipLeaseAcquire{WorkspaceKey: "WS", AgentID: "agent-1", OwnerID: "node-1", TTL: time.Minute}
+	if _, err := client.AgentOwnershipLeases().Acquire(t.Context(), in); err != nil {
+		t.Fatalf("ordinary acquire: %v", err)
+	}
+	in.TakeoverFromOwnerID = "loom-supervisor-host-99"
+	if _, err := client.AgentOwnershipLeases().Acquire(t.Context(), in); err != nil {
+		t.Fatalf("takeover acquire: %v", err)
+	}
+
+	if len(bodies) != 2 {
+		t.Fatalf("acquire bodies = %d, want 2", len(bodies))
+	}
+	if _, ok := bodies[0]["takeover_from_owner_id"]; ok {
+		t.Fatalf("ordinary acquire body carries takeover_from_owner_id: %+v", bodies[0])
+	}
+	if got := bodies[1]["takeover_from_owner_id"]; got != "loom-supervisor-host-99" {
+		t.Fatalf("takeover_from_owner_id = %v, want the named dead owner", got)
+	}
+}

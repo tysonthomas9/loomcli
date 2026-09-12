@@ -2,18 +2,50 @@ package daemon
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 )
 
+// unavailableSuffix renders the " (N unavailable)" qualifier on the agent count
+// so an operator sees at a glance that part of the fleet never started.
+func unavailableSuffix(agents []DaemonAgentStatus) string {
+	n := 0
+	for _, a := range agents {
+		if a.Status == "unavailable" {
+			n++
+		}
+	}
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%d unavailable)", n)
+}
+
+// printUnavailableAgentStatus prints the two lines that matter for an agent the
+// daemon could not construct. Nothing else applies: it has no PID, no run
+// history, and no branch.
+func printUnavailableAgentStatus(agent DaemonAgentStatus) {
+	fmt.Printf("      unavailable — %s\n", agent.Detail)
+	if agent.Hint != "" {
+		fmt.Printf("      fix: %s\n", agent.Hint)
+	}
+}
+
 // printAgentStatus prints the detailed status for a single agent.
 func printAgentStatus(agent DaemonAgentStatus) {
 	statusIcon := statusToIcon(agent.Status)
 	fmt.Printf("  %s %s (%s)\n", statusIcon, agent.Worktree, agent.Role)
+
+	if agent.Status == "unavailable" {
+		printUnavailableAgentStatus(agent)
+		return
+	}
 
 	// PID line with uptime for running agents
 	if agent.PID > 0 {
@@ -47,6 +79,7 @@ func printAgentDiagnostics(agent DaemonAgentStatus) {
 		runtime := agent.LastExit.Sub(agent.LastStart)
 		fmt.Printf("      Last run: %s (exit %d)\n", formatDaemonDuration(runtime), agent.LastExitCode)
 	}
+	printAgentProfileError(agent)
 	if agent.LastErrorClass != "" {
 		fmt.Printf("      Last error: %s\n", agent.LastErrorClass)
 	}
@@ -72,7 +105,84 @@ func printAgentDiagnostics(agent DaemonAgentStatus) {
 		} else {
 			fmt.Printf("      Stopped: %s\n", agent.StopReason)
 		}
+		printAgentEvidence(agent)
 	}
+}
+
+// printAgentProfileError renders the harness-profile refusal that is keeping
+// an agent out of the claim loop, above the transient diagnostics: those churn
+// every poll cycle, this does not change until an operator repairs the
+// profile. Nothing is printed when the profile verifies, so a healthy fleet's
+// status output is unchanged.
+func printAgentProfileError(agent DaemonAgentStatus) {
+	if agent.ProfileError == "" {
+		return
+	}
+	lines := strings.Split(agent.ProfileError, "\n")
+	fmt.Printf("      Profile: INVALID — %s\n", lines[0])
+	for _, line := range lines[1:] {
+		fmt.Printf("                %s\n", line)
+	}
+}
+
+// printProfileBlockedBanner states the fleet-level fact once. One `claude`
+// auto-update drifts every profiled agent at the same instant, so the count is
+// what an operator can act on at a glance; the same per-agent line repeated
+// four times is not.
+func printProfileBlockedBanner(agents []DaemonAgentStatus) {
+	var blocked []string
+	for _, a := range agents {
+		if a.ProfileError != "" {
+			blocked = append(blocked, a.Worktree)
+		}
+	}
+	if len(blocked) == 0 {
+		return
+	}
+	noun := "agents"
+	if len(blocked) == 1 {
+		noun = "agent"
+	}
+	fmt.Println("")
+	fmt.Printf("⚠ %d %s blocked on profile verification: %s\n",
+		len(blocked), noun, strings.Join(blocked, ", "))
+	fmt.Println("  No task is claimed while a profile fails to verify. Re-provision the")
+	fmt.Println("  profile directories named above, then the agents resume on their own.")
+}
+
+// evidenceDisplayCap bounds the terminal form only. The untruncated summary
+// stays in daemon-agents.json, which is where a full read belongs.
+const evidenceDisplayCap = 300
+
+// printAgentEvidence explains a stop the operator has to act on. Restricted to
+// failed/blocked agents: an idle NoWork exit carries evidence too, and printing
+// "supervisor.no_work" under every parked agent would bury the one line that
+// matters.
+func printAgentEvidence(agent DaemonAgentStatus) {
+	if agent.LastErrorEvidence == "" {
+		return
+	}
+	if agent.Status != "failed" && agent.Status != "blocked" {
+		return
+	}
+	fmt.Printf("      Evidence: %s\n", truncateDisplay(agent.LastErrorEvidence, evidenceDisplayCap))
+}
+
+// truncateDisplay cuts on a rune boundary: evidence carries screen text full of
+// box-drawing glyphs, and a raw byte slice would print a broken one.
+func truncateDisplay(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	const ellipsis = "…"
+	cut := max - len(ellipsis)
+	if cut <= 0 {
+		return ""
+	}
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + ellipsis
 }
 
 // printAgentBranchInfo prints the branch and git sync status for an agent.
@@ -105,6 +215,45 @@ func printAgentBranchInfo(agent DaemonAgentStatus) {
 	}
 
 	fmt.Println(branchLine)
+}
+
+// stateStalenessThreshold is how old daemon-agents.json may be before the
+// status listing below it stops being trustworthy. The state updater ticks
+// every 5s, so 30s is six missed writes — well past a slow tick and well short
+// of the two hours the 2026-08-31 outage went unnoticed.
+const stateStalenessThreshold = 30 * time.Second
+
+// stateFileAge reports how long ago the state file was written, and whether an
+// age could be determined at all.
+//
+// WrittenAt is authoritative when present. It is absent from files written by
+// an older binary, and treating a zero time as the write time would report a
+// staleness measured in decades — so that case falls back to the file's mtime,
+// which is the pre-existing (weaker, `cp`-forgeable) signal.
+func stateFileAge(state *DaemonState, stateFilePath string) (time.Duration, bool) {
+	if state != nil && !state.WrittenAt.IsZero() {
+		return time.Since(state.WrittenAt), true
+	}
+	fi, err := os.Stat(stateFilePath)
+	if err != nil {
+		return 0, false
+	}
+	return time.Since(fi.ModTime()), true
+}
+
+// printStateFreshness prints the staleness banner and any active degradations
+// BEFORE the agent table, so an operator reading top-down learns the data is
+// suspect before they read the data.
+func printStateFreshness(state *DaemonState, stateFilePath string) {
+	if age, ok := stateFileAge(state, stateFilePath); ok && age > stateStalenessThreshold {
+		fmt.Printf("⚠  STALE: daemon-agents.json last written %s ago — the agent list below may not reflect reality.\n", age.Truncate(time.Second))
+	}
+	if state == nil {
+		return
+	}
+	for _, d := range state.Degradations {
+		fmt.Printf("⚠  DEGRADED: %s since %s (%d failures): %s\n", d.Kind, d.Since.Format(time.RFC3339), d.Count, d.LastErr)
+	}
 }
 
 // printQuarantinedTasks prints the quarantined-task section of daemon status.
@@ -164,4 +313,157 @@ func getUncommittedChangesCount(path string) int {
 		return 0
 	}
 	return len(strings.Split(output, "\n"))
+}
+
+// statusStateStaleThreshold is how old daemon-agents.json may be, relative to
+// now, before its contents stop counting as a description of the running
+// daemon. The state updater rewrites the file every 5s, so 30s leaves ample
+// headroom. Same number and same rationale as the doctor package's
+// stateFileStaleThreshold — deliberately not a second opinion.
+const statusStateStaleThreshold = 30 * time.Second
+
+// agentCountUnknown marks an agent count that could not be established. It is
+// distinct from a genuine, trusted zero, which is what `Agents: 0` claims.
+const agentCountUnknown = -1
+
+// daemonStatusInputs is everything `loom daemon status` gathered about one
+// daemon target before deciding what it is willing to assert. Collected by the
+// caller (which does the I/O) so the decision itself stays pure and testable.
+type daemonStatusInputs struct {
+	// RT is the detected daemon: the single source of truth for which daemon
+	// is being described. Every path below was derived from RT.Dir.
+	RT cli.DaemonRuntimeInfo
+	// State is the parsed daemon-agents.json, or nil when it is missing or
+	// unparseable.
+	State *DaemonState
+	// StatePath is the file State was read from, named in warnings so the
+	// reader can go look at what was distrusted.
+	StatePath string
+	// StateMTime is StatePath's modification time; zero when unavailable, in
+	// which case freshness is not evaluated.
+	StateMTime time.Time
+	// LiveCount is the daemon's own answer over the control socket, or
+	// agentCountUnknown when the socket did not answer.
+	LiveCount int
+	// Now anchors the freshness comparison. The repo has no fake clock, so it
+	// is passed in explicitly (as evaluateDaemonStuck does).
+	Now time.Time
+}
+
+// daemonStatusView is the header block of `loom daemon status`, resolved from
+// the detected daemon and whatever sidecar evidence proved trustworthy.
+//
+// The invariant this type exists to enforce: a number is printed only when it
+// carries the identity of the daemon that was actually detected. Everything
+// else renders as "unknown", with a warning naming what was distrusted.
+type daemonStatusView struct {
+	PID        int
+	Source     string
+	Dir        string
+	StartedAt  time.Time // zero => unknown
+	AgentCount int       // agentCountUnknown => unknown
+	// AgentSuffix qualifies a trusted AgentCount, e.g. " (1 unavailable)"
+	// for agents the daemon could not construct (PUPPET-91).
+	AgentSuffix string
+	Trusted     bool // state file matched the detected daemon and is fresh
+	Warnings    []string
+}
+
+// buildDaemonStatusView decides what the status header may assert.
+//
+// The state file is trusted only when it carries the detected daemon's PID and
+// is being actively maintained. Untrusted metadata never degrades to a
+// plausible-looking zero: the agent count falls back to the live socket, and
+// then to "unknown".
+func buildDaemonStatusView(in daemonStatusInputs) daemonStatusView {
+	v := daemonStatusView{
+		PID:        in.RT.PID,
+		Source:     in.RT.Source,
+		Dir:        in.RT.Dir,
+		StartedAt:  in.RT.StartedAt,
+		AgentCount: agentCountUnknown,
+	}
+
+	v.Trusted, v.Warnings = stateFileTrust(in)
+
+	if v.Trusted {
+		// The state file describes this daemon, so its own start time is the
+		// most precise one available; fall back to the detection evidence when
+		// the record predates the field.
+		if !in.State.StartedAt.IsZero() {
+			v.StartedAt = in.State.StartedAt
+		}
+		v.AgentCount = len(in.State.Agents)
+		v.AgentSuffix = unavailableSuffix(in.State.Agents)
+		return v
+	}
+
+	// Untrusted: prefer the daemon's live answer, else admit we do not know.
+	if in.LiveCount >= 0 {
+		v.AgentCount = in.LiveCount
+	}
+	return v
+}
+
+// stateFileTrust reports whether the state file may be believed, along with
+// the warnings explaining any refusal. Trust requires three things: the file
+// exists, it names the PID we detected, and it is still being written.
+func stateFileTrust(in daemonStatusInputs) (bool, []string) {
+	if in.State == nil {
+		// Absence is not suspicious on its own — the daemon may have just
+		// started, or the file may live elsewhere. Nothing to warn about.
+		return false, nil
+	}
+
+	if in.RT.PID <= 0 {
+		// Liveness was proved without an identity (lock held, contents
+		// unreadable), so there is nothing to match the file against.
+		return false, []string{fmt.Sprintf(
+			"daemon PID is unknown, so the state file at %s cannot be verified as belonging to it",
+			in.StatePath)}
+	}
+
+	if in.State.PID != in.RT.PID {
+		return false, []string{fmt.Sprintf(
+			"state file at %s belongs to PID %d, daemon is PID %d (ignoring its agent list)",
+			in.StatePath, in.State.PID, in.RT.PID)}
+	}
+
+	if !in.StateMTime.IsZero() && in.Now.Sub(in.StateMTime) > statusStateStaleThreshold {
+		return false, []string{fmt.Sprintf(
+			"state file at %s was last written %s and is no longer being maintained (ignoring its agent list)",
+			in.StatePath, in.StateMTime.Format(time.RFC3339))}
+	}
+
+	return true, nil
+}
+
+// HeaderLines renders the header block, one string per line, in print order.
+// It never formats a zero time or reports an unknown count as zero.
+func (v daemonStatusView) HeaderLines() []string {
+	lines := []string{fmt.Sprintf("Daemon: running (PID %d)", v.PID)}
+
+	// The workspace lock is the case where the daemon being described is not
+	// the one belonging to the caller's directory. Say so, and say where.
+	if v.Source == "workspace-lock" {
+		lines = append(lines, fmt.Sprintf("Source: %s (%s)", v.Source, v.Dir))
+	}
+
+	if v.StartedAt.IsZero() {
+		lines = append(lines, "Started: unknown")
+	} else {
+		lines = append(lines, fmt.Sprintf("Started: %s", v.StartedAt.Format(time.RFC3339)))
+	}
+
+	if v.AgentCount == agentCountUnknown {
+		lines = append(lines, "Agents: unknown")
+	} else {
+		lines = append(lines, fmt.Sprintf("Agents: %d%s", v.AgentCount, v.AgentSuffix))
+	}
+
+	for _, w := range v.Warnings {
+		lines = append(lines, "  warning: "+w)
+	}
+
+	return lines
 }

@@ -160,13 +160,18 @@ type EventHistoryData struct {
 // StatsData contains aggregate issue statistics.
 // Fields mirror types.Statistics so no data is dropped during mapping.
 type StatsData struct {
-	TotalIssues             int     `json:"total_issues"`
-	OpenIssues              int     `json:"open_issues"`
-	InProgressIssues        int     `json:"in_progress_issues"`
-	ClosedIssues            int     `json:"closed_issues"`
-	BlockedIssues           int     `json:"blocked_issues"`
-	DeferredIssues          int     `json:"deferred_issues"`
-	ReadyIssues             int     `json:"ready_issues"`
+	TotalIssues      int `json:"total_issues"`
+	OpenIssues       int `json:"open_issues"`
+	InProgressIssues int `json:"in_progress_issues"`
+	ClosedIssues     int `json:"closed_issues"`
+	BlockedIssues    int `json:"blocked_issues"`
+	DeferredIssues   int `json:"deferred_issues"`
+	ReadyIssues      int `json:"ready_issues"`
+	// ReviewIssues and StatusBlockedIssues are per-STATUS counts. StatusBlockedIssues
+	// is not BlockedIssues: the latter is the computed dependency-blocked view, whose
+	// members mostly carry status "open", so the two legitimately differ.
+	ReviewIssues            int     `json:"review_issues"`
+	StatusBlockedIssues     int     `json:"status_blocked_issues"`
 	TombstoneIssues         int     `json:"tombstone_issues"`
 	PinnedIssues            int     `json:"pinned_issues"`
 	EpicsEligibleForClosure int     `json:"epics_eligible_for_closure"`
@@ -229,7 +234,7 @@ type EventHistoryBackend interface {
 type ListOpts struct {
 	// Basic filters.
 	Status    string   `json:"status,omitempty"`
-	Priority  *int     `json:"priority,omitempty"` // fleet-db: unsupported (fleet-qx9c)
+	Priority  *int     `json:"priority,omitempty"`
 	IssueType string   `json:"issue_type,omitempty"`
 	Assignee  string   `json:"assignee,omitempty"`
 	Labels    []string `json:"labels,omitempty"`
@@ -237,32 +242,49 @@ type ListOpts struct {
 	IDs       []string `json:"ids,omitempty"`        // fleet-db: unsupported (fleet-qx9c)
 	ParentID  string   `json:"parent_id,omitempty"`
 	Limit     int      `json:"limit,omitempty"`
+	// Offset is the page start. Callers do not normally set it: List pages
+	// internally when the server reports more rows than it returned. It exists
+	// so that paging is expressible at all.
+	Offset int `json:"offset,omitempty"`
 
 	// Full-text search.
-	Query               string `json:"query,omitempty"`                // fleet-db: unsupported (fleet-qx9c)
-	TitleContains       string `json:"title_contains,omitempty"`       // fleet-db: unsupported (fleet-qx9c)
-	DescriptionContains string `json:"description_contains,omitempty"` // fleet-db: unsupported (fleet-qx9c)
-	NotesContains       string `json:"notes_contains,omitempty"`       // fleet-db: unsupported (fleet-qx9c)
+	// Query is a case-insensitive SUBSTRING match across title, description and
+	// notes — not the token/prefix index fleet-db exposes at
+	// GET /issues/search?q=. That route accepts no other filter, so routing
+	// Query to it would stop it composing with Status, Labels and the rest,
+	// which is exactly what list callers send. The fleet backend evaluates all
+	// four of these client-side.
+	Query               string `json:"query,omitempty"`
+	TitleContains       string `json:"title_contains,omitempty"`
+	DescriptionContains string `json:"description_contains,omitempty"`
+	NotesContains       string `json:"notes_contains,omitempty"`
 
 	// Date range filters (ISO 8601 strings).
-	CreatedAfter  string `json:"created_after,omitempty"`  // fleet-db: unsupported (fleet-qx9c)
-	CreatedBefore string `json:"created_before,omitempty"` // fleet-db: unsupported (fleet-qx9c)
+	// Created* accept RFC3339 or bare YYYY-MM-DD (read as midnight UTC) and are
+	// exclusive bounds. fleet-db has no created-range parameter, so the fleet
+	// backend applies these client-side; Updated* it evaluates server-side.
+	CreatedAfter  string `json:"created_after,omitempty"`
+	CreatedBefore string `json:"created_before,omitempty"`
 	UpdatedAfter  string `json:"updated_after,omitempty"`
 	UpdatedBefore string `json:"updated_before,omitempty"`
 	ClosedAfter   string `json:"closed_after,omitempty"`  // fleet-db: unsupported (fleet-qx9c)
 	ClosedBefore  string `json:"closed_before,omitempty"` // fleet-db: unsupported (fleet-qx9c)
 
 	// Empty/null checks.
-	EmptyDescription bool `json:"empty_description,omitempty"` // fleet-db: unsupported (fleet-qx9c)
-	NoAssignee       bool `json:"no_assignee,omitempty"`       // fleet-db: unsupported (fleet-qx9c)
-	NoLabels         bool `json:"no_labels,omitempty"`         // fleet-db: unsupported (fleet-qx9c)
+	EmptyDescription bool `json:"empty_description,omitempty"`
+	NoAssignee       bool `json:"no_assignee,omitempty"`
+	NoLabels         bool `json:"no_labels,omitempty"`
 
 	// Priority range.
 	PriorityMin *int `json:"priority_min,omitempty"` // fleet-db: unsupported (fleet-qx9c)
 	PriorityMax *int `json:"priority_max,omitempty"` // fleet-db: unsupported (fleet-qx9c)
 
 	// Special filters.
-	Pinned           *bool  `json:"pinned,omitempty"`            // fleet-db: unsupported (fleet-qx9c)
+	// Pinned is matched against STATUS == "pinned". fleet-db has no boolean
+	// pinned column; entity.Issue does carry a Pinned bool, so a reader will
+	// otherwise assume it is that one. Being a *bool, pinned=false is an active
+	// filter (non-pinned rows), unlike the plain bools above.
+	Pinned           *bool  `json:"pinned,omitempty"`
 	Ephemeral        *bool  `json:"ephemeral,omitempty"`         // fleet-db: unsupported (fleet-qx9c)
 	IncludeTemplates bool   `json:"include_templates,omitempty"` // fleet-db: unsupported (fleet-qx9c)
 	MolType          string `json:"mol_type,omitempty"`          // fleet-db: unsupported (fleet-qx9c)
@@ -404,8 +426,9 @@ type CreateParams struct {
 // fleet-db's CreateIssueRequest expects. fleet-db's strict JSON validation
 // rejects unknown fields, so loom-only fields are dropped rather than
 // shipped as-is.
-// FleetBackend.Create retries without external_ref for deployed fleet-dbs
-// whose create schema predates that field, then applies it via PATCH.
+// FleetBackend.Create retries without external_ref and/or acceptance_criteria
+// for deployed fleet-dbs whose create schema predates those fields, then
+// applies them via PATCH (see fleet/create_compat.go).
 //
 // Field renames vs CreateParams:
 //   - "issue_type"  → "type"
@@ -415,11 +438,12 @@ type CreateParams struct {
 //   - "source_repo" → "repo"
 //
 // Dropped (no equivalent on fleet-db's CreateIssueRequest):
-//   - id, acceptance_criteria, created_by,
-//     estimated_minutes, dependencies
+//   - id, created_by, estimated_minutes, dependencies
 //
 // If any of those need round-tripping, file a fleet-db ticket to extend
 // the CreateIssueRequest schema rather than smuggling them through here.
+// (acceptance_criteria used to be on this list; fleet-db's create and
+// update schemas gained it, so it is projected now — PUPPET-522.)
 //
 // This lives on CreateParams (not in the fleet package) because it is shared
 // by two consumers that must agree byte-for-byte: the fleet backend builds
@@ -445,6 +469,7 @@ func (p CreateParams) FleetCreateBody() map[string]interface{} {
 	setNonEmptyMapStr(req, "repo", p.SourceRepo)
 	setNonEmptyMapStr(req, "design", p.Design)
 	setNonEmptyMapStr(req, "notes", p.Notes)
+	setNonEmptyMapStr(req, "acceptance_criteria", p.AcceptanceCriteria)
 	setNonEmptyMapStr(req, "external_ref", p.ExternalRef)
 	setNonEmptyMapStr(req, "defer_until", p.DeferUntil)
 	setNonEmptyMapStr(req, "due_at", p.DueAt)
@@ -515,6 +540,11 @@ type UpdateParams struct {
 	DueAt              *string  `json:"due_at,omitempty"`
 	DeferUntil         *string  `json:"defer_until,omitempty"`
 	Claim              bool     `json:"claim,omitempty"`
+	// Force overrides server-side protection of reserved labels (fleet-db
+	// refuses to remove "operator" without it). It applies to the label deltas
+	// only, and is carried by the fleet-db transport, which is where the
+	// reserved-label protection lives.
+	Force bool `json:"force,omitempty"`
 }
 
 // CloseParams contains fields for closing an issue.

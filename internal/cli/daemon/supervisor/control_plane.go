@@ -10,6 +10,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli/daemonregistry"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -85,7 +86,45 @@ func (s *Supervisor) daemonRuntimeLabels() []string {
 	if s.IpcSocketPath != "" {
 		labels = append(labels, daemonregistry.LabelSocket+s.IpcSocketPath)
 	}
+	// One label per active degradation. Labels are replaced wholesale by
+	// NodeUpdate, so a recovered daemon drops its degraded labels on the next
+	// refresh without any explicit removal step.
+	labels = append(labels, s.DegradedLabels()...)
 	return labels
+}
+
+// PublishDegradation announces the current state of one degradation kind on the
+// two handles that do NOT share a failure mode with the thing that degraded:
+// the events bus and the fleet-db Node labels. The daemon state file is
+// deliberately not one of them — a state_write degradation is precisely the
+// case where writing the report there fails too.
+//
+// Best-effort by construction. It is called from the state updater's 5s loop,
+// and a fleet-db that is slow or unreachable must not stall that loop or turn a
+// reporting problem into a second outage: RefreshNodeLabels already logs at
+// Warn and swallows its error, and a nil ControlStore or EmitEvent (tests, and
+// daemons running without a control plane) is a no-op rather than a panic.
+func (s *Supervisor) PublishDegradation(kind DegradationKind) {
+	d, active := s.Degradation(kind)
+	data := events.DaemonDegradedData{
+		Kind:   string(kind),
+		Active: active,
+	}
+	if active {
+		data.Since = d.Since
+		data.Count = d.Count
+		data.LastErr = d.LastErr
+	}
+
+	if s.EmitEvent != nil {
+		if evt, err := events.NewEvent(events.DaemonDegraded, "", "", "", data); err == nil {
+			s.EmitEvent(evt)
+		} else {
+			slog.Warn("building daemon degradation event failed", "kind", string(kind), "err", err)
+		}
+	}
+
+	s.RefreshNodeLabels()
 }
 
 // RefreshNodeLabels re-publishes the supervisor's Node labels using
@@ -160,4 +199,57 @@ func resolveNodeOwnerActor() string {
 		}
 	}
 	return "local"
+}
+
+// markControlPlaneAgentState persists the given agent state onto the
+// fleet-db Agent record so UIs and `workspace ops diagnose` reflect
+// supervisor lifecycle transitions (currently used by the
+// backend-availability gate to flip between AgentStateBackendUnavailable
+// and AgentStateActive). Best-effort: failures are logged but do not
+// block the supervisor.
+//
+// ctx supplies the trace parent only: the timeout is derived through
+// context.WithoutCancel so this write still completes while the daemon is
+// tearing down (cmdstore.RootContext() may be a signal context), exactly as it
+// did when it started from context.Background().
+func (s *Supervisor) markControlPlaneAgentState(ctx context.Context, ap *AgentProcess, state domain.AgentState) {
+	if s.ControlStore == nil || s.WorkspaceID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), controlPlaneOperationTimeout)
+	defer cancel()
+	if _, err := s.ControlStore.Agents().Update(ctx, s.WorkspaceID, ap.Entry.Worktree, store.AgentUpdate{
+		State: &state,
+	}); err != nil {
+		slog.Warn("control-plane agent state update failed",
+			"worktree", ap.Entry.Worktree, "state", state, "err", err)
+	}
+}
+
+// markControlPlaneAgentSessionRunning records the first heartbeat of a freshly
+// spawned agent session. ctx supplies the trace parent only; see
+// markControlPlaneAgentState for why the timeout drops cancellation.
+func (s *Supervisor) markControlPlaneAgentSessionRunning(ctx context.Context, ap *AgentProcess) {
+	if s.ControlStore == nil || s.WorkspaceID == "" {
+		return
+	}
+	backend := s.GetEffectiveBackend(ap)
+	ap.Mu.Lock()
+	sessionID := ap.AgentSessionID
+	metadata := s.agentSessionMetadataLocked(ap, backend)
+	ap.Mu.Unlock()
+	if sessionID == "" {
+		return
+	}
+	now := time.Now().UTC()
+	status := domain.AgentSessionRunning
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), controlPlaneOperationTimeout)
+	defer cancel()
+	if _, err := s.ControlStore.AgentSessions().Update(ctx, s.WorkspaceID, sessionID, store.AgentSessionUpdate{
+		Status:        &status,
+		LastHeartbeat: &now,
+		Metadata:      &metadata,
+	}); err != nil {
+		slog.Warn("control-plane agent session running update failed", "worktree", ap.Entry.Worktree, "session_id", sessionID, "err", err)
+	}
 }

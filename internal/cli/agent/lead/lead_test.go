@@ -62,6 +62,9 @@ func TestRunLead_InvokesClaude(t *testing.T) {
 	t.Setenv("LOOM_LEAD_CONTROLLED", "0")
 	clearProfileEnv(t)
 	isolateLeadWorkspace(t)
+	// No workspace and no override: this is the os.Getwd fallback branch, and
+	// it must stay that way even when the operator's own LOOM_* vars are set.
+	isolateLeadEnv(t)
 
 	// Setup temp directory as working directory
 	tmpDir := t.TempDir()
@@ -126,6 +129,7 @@ func TestRunLeadUsesCustomTerminalPrompt(t *testing.T) {
 	t.Setenv("LOOM_LEAD_CONTROLLED", "0")
 	clearProfileEnv(t)
 	isolateLeadWorkspace(t)
+	isolateLeadEnv(t)
 	t.Setenv(envAgentName, "nova")
 	t.Setenv("LOOM_AGENT_ROLE", "operator")
 
@@ -234,12 +238,17 @@ func TestGenerateLeadTerminalPromptUsesLiteralRolePrompt(t *testing.T) {
 	leadPromptFile = ""
 	t.Cleanup(func() { leadPromptFile = oldPromptFile })
 
-	prompt, err := generateLeadTerminalPrompt(context.Background(), leadSessionRegistration{
+	// dedicated=true on purpose: an inline role prompt must still win, and must
+	// still clear the seed-and-shrink predicate.
+	prompt, seedAndShrink, err := generateLeadTerminalPrompt(context.Background(), leadSessionRegistration{
 		handle:    &bootstrap.StoreHandle{Store: st},
 		Workspace: "E2E",
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("generateLeadTerminalPrompt: %v", err)
+	}
+	if seedAndShrink {
+		t.Fatal("inline role prompt must clear seedAndShrink")
 	}
 	if !strings.HasPrefix(prompt, "Literal {{ marker }}") {
 		t.Fatalf("prompt = %q, want literal inline role prompt", prompt)
@@ -476,5 +485,210 @@ func TestMarkLeadAssignmentDelivered(t *testing.T) {
 	}
 	if got := session.Metadata["lead_assignment_delivered_epic"]; got != "EPIC-1" {
 		t.Fatalf("delivered epic = %q", got)
+	}
+}
+
+// capturePrintPromptRun runs runLead with --print-prompt set and returns stdout.
+// The mock backend is installed so the assertion that nothing was invoked is
+// meaningful rather than vacuous.
+func capturePrintPromptRun(t *testing.T, message string) (string, *mockBackend) {
+	t.Helper()
+	return capturePrintPromptRunWithPromptFile(t, message, "", nil)
+}
+
+// capturePrintPromptRunWithPromptFile is capturePrintPromptRun with an explicit
+// --prompt value, so the builtin branches can be exercised end to end.
+// overrides, keyed by prompt id, are written into ./loom-prompts inside the
+// temporary working directory before the run - that is the same per-project
+// override path loadTemplate consults.
+func capturePrintPromptRunWithPromptFile(t *testing.T, message, promptFile string, overrides map[string]string) (string, *mockBackend) {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	if len(overrides) > 0 {
+		overrideDir := filepath.Join(tmpDir, "loom-prompts")
+		if err := os.MkdirAll(overrideDir, 0o750); err != nil {
+			t.Fatalf("mkdir override dir: %v", err)
+		}
+		for id, body := range overrides {
+			if err := os.WriteFile(filepath.Join(overrideDir, id+".md"), []byte(body), 0o600); err != nil {
+				t.Fatalf("write override %s: %v", id, err)
+			}
+		}
+	}
+
+	oldPrint, oldPromptFile, oldMessage := leadPrintPrompt, leadPromptFile, leadMessage
+	leadPrintPrompt = true
+	leadPromptFile = promptFile
+	leadMessage = message
+	t.Cleanup(func() {
+		leadPrintPrompt, leadPromptFile, leadMessage = oldPrint, oldPromptFile, oldMessage
+	})
+
+	cli.TestingResetBackendState(t)
+	mock := &mockBackend{name: "claude"}
+	cli.RegisterBackend(mock)
+	_ = cli.SetBackend("claude")
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	runLead(nil, nil)
+
+	w.Close()
+	os.Stdout = oldStdout
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	return buf.String(), mock
+}
+
+func TestRunLeadPrintPromptPrintsStaticPromptAndStartsNoSession(t *testing.T) {
+	output, mock := capturePrintPromptRun(t, "")
+
+	if len(mock.interactiveCalls) != 0 {
+		t.Fatalf("--print-prompt started a session: %d invocations", len(mock.interactiveCalls))
+	}
+	if strings.Contains(output, "Starting LEAD mode") {
+		t.Fatalf("--print-prompt printed the session banner: %q", output)
+	}
+	if !strings.Contains(output, agent.GenerateLeadPrompt()) {
+		t.Fatalf("--print-prompt did not print the built-in lead prompt: %q", output)
+	}
+}
+
+func TestRunLeadPrintPromptOmitsDynamicSections(t *testing.T) {
+	output, _ := capturePrintPromptRun(t, "list open epics")
+
+	for _, forbidden := range []string{"## User's Initial Request", "list open epics", "## Loom Backend Assignment"} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("--print-prompt leaked per-session content %q: %q", forbidden, output)
+		}
+	}
+}
+
+func TestRunLeadPrintPromptWorksWithoutWorkspace(t *testing.T) {
+	// No workspace and no LOOM_* pointers: loadLeadRole must fall through
+	// to the built-in prompt instead of failing.
+	t.Setenv("LOOM_WORKSPACE", "")
+	t.Setenv("LOOM_AGENT_ROLE", "")
+
+	output, _ := capturePrintPromptRun(t, "")
+	if !strings.Contains(output, "INTERACTIVE MODE: Project Lead") {
+		t.Fatalf("--print-prompt without a workspace did not print the built-in prompt: %q", output)
+	}
+}
+
+// TestRunLeadPrintPromptBuiltinNonePrintsNothing is acceptance criterion 1:
+// a suppressed persona prints ZERO bytes, not a bare newline, because the
+// output is redirected straight into a profile's CLAUDE.md.
+func TestRunLeadPrintPromptBuiltinNonePrintsNothing(t *testing.T) {
+	output, mock := capturePrintPromptRunWithPromptFile(t, "", "builtin:none", nil)
+
+	if len(output) != 0 {
+		t.Fatalf("--prompt builtin:none printed %d bytes: %q", len(output), output)
+	}
+	if len(mock.interactiveCalls) != 0 {
+		t.Fatalf("--print-prompt started a session: %d invocations", len(mock.interactiveCalls))
+	}
+}
+
+// TestRunLeadPrintPromptBuiltinNoneIgnoresReadOnly proves the suppression
+// bypasses the read-only preamble, which renderPrompt would otherwise prepend.
+func TestRunLeadPrintPromptBuiltinNoneIgnoresReadOnly(t *testing.T) {
+	t.Setenv("LOOM_READ_ONLY", "1")
+
+	output, _ := capturePrintPromptRunWithPromptFile(t, "", "builtin:none", nil)
+	if len(output) != 0 {
+		t.Fatalf("LOOM_READ_ONLY=1 leaked into the suppressed prompt: %q", output)
+	}
+}
+
+// TestRunLeadPrintPromptBuiltinNoneIgnoresOverride proves the suppression also
+// bypasses ./loom-prompts/none.md. An override that silently un-suppressed the
+// persona would be a security surprise.
+func TestRunLeadPrintPromptBuiltinNoneIgnoresOverride(t *testing.T) {
+	output, _ := capturePrintPromptRunWithPromptFile(t, "", "builtin:none",
+		map[string]string{"none": "SNEAKY PERSONA"})
+	if len(output) != 0 {
+		t.Fatalf("./loom-prompts/none.md un-suppressed the persona: %q", output)
+	}
+}
+
+// TestComposeLeadPromptEmptyBaseHasNoLeadingBlankLines is acceptance
+// criterion 4: with the persona suppressed, --message must start the prompt.
+func TestComposeLeadPromptEmptyBaseHasNoLeadingBlankLines(t *testing.T) {
+	out := composeLeadPrompt("", "", "do the thing")
+
+	if out[0] == '\n' {
+		t.Fatalf("prompt starts with a newline: %q", out)
+	}
+	if !strings.HasPrefix(out, "## User's Initial Request") {
+		t.Fatalf("prompt does not start with the request section: %q", out)
+	}
+}
+
+// TestComposeLeadPromptEmptyBaseWithAssignment covers the same for the backend
+// assignment section, which is prepended ahead of the request.
+func TestComposeLeadPromptEmptyBaseWithAssignment(t *testing.T) {
+	out := composeLeadPrompt("", "Epic EPIC-1 is yours.", "do the thing")
+
+	if out[0] == '\n' {
+		t.Fatalf("prompt starts with a newline: %q", out)
+	}
+	if !strings.HasPrefix(out, "## Loom Backend Assignment") {
+		t.Fatalf("prompt does not start with the assignment section: %q", out)
+	}
+	if !strings.Contains(out, "\n\n## User's Initial Request\n\n") {
+		t.Fatalf("request section is not separated by exactly one blank line: %q", out)
+	}
+}
+
+// TestComposeLeadPromptEmptyEverything: nothing in, nothing out.
+func TestComposeLeadPromptEmptyEverything(t *testing.T) {
+	if out := composeLeadPrompt("", "", ""); out != "" {
+		t.Fatalf("composeLeadPrompt(\"\", \"\", \"\") = %q, want empty", out)
+	}
+}
+
+// TestLeadStartupPromptBuiltinNoneWithMessage is acceptance criterion 4 on the
+// real launch path: with the persona suppressed, the argv prompt is exactly the
+// per-session sections and never opens with a blank line.
+func TestLeadStartupPromptBuiltinNoneWithMessage(t *testing.T) {
+	t.Setenv("LOOM_WORKSPACE", "")
+	t.Setenv("LOOM_AGENT_ROLE", "")
+
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	oldPromptFile, oldMessage := leadPromptFile, leadMessage
+	leadPromptFile, leadMessage = "builtin:none", "ship the thing"
+	t.Cleanup(func() { leadPromptFile, leadMessage = oldPromptFile, oldMessage })
+
+	prompt, seedAndShrink, err := leadStartupPrompt(context.Background(), leadSessionRegistration{}, false)
+	if err != nil {
+		t.Fatalf("leadStartupPrompt: %v", err)
+	}
+	if seedAndShrink {
+		t.Fatal("an explicit --prompt must not trigger seed-and-shrink")
+	}
+	if prompt == "" || prompt[0] == '\n' {
+		t.Fatalf("prompt opens with a blank line: %q", prompt)
+	}
+	if !strings.HasPrefix(prompt, "## User's Initial Request") {
+		t.Fatalf("prompt = %q, want it to start with the request section", prompt)
+	}
+	if !strings.Contains(prompt, "ship the thing") {
+		t.Fatalf("prompt lost the --message body: %q", prompt)
 	}
 }

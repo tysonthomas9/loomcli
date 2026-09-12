@@ -42,6 +42,9 @@ func printIssueDetail(w io.Writer, d *backend.IssueDetailData, format string) er
 	if d.Owner != "" {
 		fmt.Fprintf(w, "Owner:    %s\n", d.Owner)
 	}
+	if d.EstimatedMinutes != nil {
+		fmt.Fprintf(w, "Est:      %d min\n", *d.EstimatedMinutes)
+	}
 	if d.Parent != "" {
 		fmt.Fprintf(w, "Parent:   %s\n", d.Parent)
 	}
@@ -158,7 +161,11 @@ func printMonitorStatus(w io.Writer, s *gen.MonitorStatusResponse, format string
 	if format == formatJSON {
 		return writeJSON(w, s)
 	}
-	fmt.Fprintf(w, "Workspace: %s\n", monitorWorkspaceName(s))
+	name := monitorWorkspaceName(s)
+	fmt.Fprintf(w, "Workspace: %s\n", name)
+	if name == monitorWorkspaceUnresolved {
+		fmt.Fprintln(w, "warning: server did not resolve a workspace; counts below are not scoped and may be zero")
+	}
 	fmt.Fprintln(w, "")
 
 	fmt.Fprintln(w, "AGENTS:")
@@ -195,14 +202,23 @@ func printMonitorStatus(w io.Writer, s *gen.MonitorStatusResponse, format string
 	return nil
 }
 
+// monitorWorkspaceUnresolved is the label printed when the server did not
+// resolve the request to a concrete workspace.
+const monitorWorkspaceUnresolved = "(unresolved)"
+
 // monitorWorkspaceName extracts a user-friendly workspace label from the
-// monitor response. Returns "(default)" if neither Name nor Mode is set.
+// monitor response.
+//
+// It deliberately does NOT fall back to Workspace.Mode: Mode is the literal
+// string "workspace" describing the server's mode, and printing it produced the
+// nonsense header `Workspace: workspace` whenever the server failed to resolve
+// a workspace — which read as a successfully scoped, idle fleet.
+//
+// Name is the primary signal. Workspace.Resolved corroborates it but is not
+// relied on alone, because a server predating that field decodes it as false.
 func monitorWorkspaceName(s *gen.MonitorStatusResponse) string {
 	if s.Workspace.Name != nil && *s.Workspace.Name != "" {
 		return *s.Workspace.Name
 	}
-	if s.Workspace.Mode != "" {
-		return string(s.Workspace.Mode)
-	}
-	return "(default)"
+	return monitorWorkspaceUnresolved
 }

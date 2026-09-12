@@ -6,6 +6,10 @@
  * Unit tests for SwimLane component.
  */
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { DndContext } from "@dnd-kit/core";
 import "@testing-library/jest-dom";
 import { render, screen, within, fireEvent } from "@testing-library/react";
@@ -1383,5 +1387,57 @@ describe("SwimLane", () => {
       // "Show all 15" button should appear
       expect(screen.getByText("Show all 15")).toBeInTheDocument();
     });
+  });
+});
+
+/**
+ * The "Unclaimed" badge was one of the two elements reported as unreadable in
+ * the light theme. The colour itself is enforced by
+ * src/styles/__tests__/contrast.test.ts; what has to be pinned *here* is that
+ * the badge keeps deriving its colour from --color-text-muted. A hardcoded hex
+ * would render the same today and silently bypass the contrast gate tomorrow.
+ *
+ * jsdom does not apply CSS modules, so the assertion is on the token reference
+ * in the stylesheet, not on a computed colour.
+ */
+describe("SwimLane muted-text token contract", () => {
+  const cssPath = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "SwimLane.module.css",
+  );
+
+  function ruleBody(css: string, selector: string): string {
+    const start = css.indexOf(`${selector} {`);
+    expect(
+      start,
+      `${selector} not found in SwimLane.module.css`,
+    ).toBeGreaterThan(-1);
+    return css.slice(start, css.indexOf("}", start));
+  }
+
+  it("renders the unclaimed badge through the unclaimedBadge class", () => {
+    renderWithDndContext(
+      <SwimLane
+        id="test-lane"
+        title="Test Lane"
+        issues={[]}
+        columns={defaultColumns}
+        epicRunner={null}
+      />,
+    );
+
+    expect(screen.getByTestId("lane-unclaimed-badge").className).toContain(
+      "unclaimedBadge",
+    );
+  });
+
+  it("colours .unclaimedBadge with var(--color-text-muted), not a literal", () => {
+    const rule = ruleBody(readFileSync(cssPath, "utf8"), ".unclaimedBadge");
+
+    expect(rule).toMatch(/\bcolor:\s*var\(--color-text-muted\)/);
+    expect(rule, "badge colour must stay a token, not a hex").not.toMatch(
+      /\bcolor:\s*#[0-9a-fA-F]{3,8}/,
+    );
   });
 });

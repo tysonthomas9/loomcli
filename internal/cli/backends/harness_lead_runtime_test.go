@@ -2,6 +2,7 @@ package backends
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -24,9 +25,16 @@ func installFakeHarnessLead(t *testing.T) *leadcontrol.HarnessLeadRuntimeConfig 
 }
 
 func TestRunControlledLeadRuntimeDispatchesClaude(t *testing.T) {
+	// Both pinned explicitly: agent shells export LOOM_AGENT_MODEL, so an
+	// argv assertion that trusts the ambient environment is red for whoever
+	// runs the suite from inside the fleet and green for everyone else.
+	t.Setenv("LOOM_AGENT_MODEL", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	captured := installFakeHarnessLead(t)
 
-	handled, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "lead-session", "/repo", "prompt", "claude")
+	handled, err := RunControlledLeadRuntime(context.Background(), ControlledLeadOptions{
+		Workspace: "WS", LeadName: "nova", SessionID: "lead-session", WorkDir: "/repo", Prompt: "prompt", Backend: "claude",
+	})
 	if err != nil {
 		t.Fatalf("RunControlledLeadRuntime() error = %v", err)
 	}
@@ -65,6 +73,26 @@ func TestRunControlledLeadRuntimeDispatchesClaude(t *testing.T) {
 	}
 }
 
+// The lead's controlled launch pins the model from the profile's provisioned
+// baseline, so an in-session /model save cannot change what the NEXT lead
+// session boots as.
+func TestRunControlledLeadRuntimeClaudePinsProvisionedModel(t *testing.T) {
+	t.Setenv("LOOM_AGENT_MODEL", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", writePinnedProfile(t, "settings.json", `{"model":"opus[1m]"}`))
+	captured := installFakeHarnessLead(t)
+
+	handled, err := RunControlledLeadRuntime(context.Background(), ControlledLeadOptions{
+		Workspace: "WS", LeadName: "nova", SessionID: "lead-session", WorkDir: "/repo", Prompt: "prompt", Backend: "claude",
+	})
+	if err != nil || !handled {
+		t.Fatalf("RunControlledLeadRuntime() = %v/%v", handled, err)
+	}
+	want := []string{"--session-id", captured.HarnessSessionID, "--dangerously-skip-permissions", "--model", "opus[1m]"}
+	if !reflect.DeepEqual(captured.Args, want) {
+		t.Fatalf("captured args = %#v, want %#v", captured.Args, want)
+	}
+}
+
 func TestRunControlledLeadRuntimeDispatchesGenericBackends(t *testing.T) {
 	cases := map[string]struct {
 		args   []string
@@ -74,9 +102,15 @@ func TestRunControlledLeadRuntimeDispatchesGenericBackends(t *testing.T) {
 		"cursor":   {[]string{"--force"}, "cursor-agent"},
 		"opencode": {nil, "opencode"},
 	}
+	// Same reason as the claude case above: opencode's interactive args carry
+	// the role model, so an agent shell's LOOM_AGENT_MODEL makes this argv
+	// assertion depend on who runs the suite.
+	t.Setenv("LOOM_AGENT_MODEL", "")
 	for backend, want := range cases {
 		captured := installFakeHarnessLead(t)
-		handled, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "lead-session", "/repo", "prompt", backend)
+		handled, err := RunControlledLeadRuntime(context.Background(), ControlledLeadOptions{
+			Workspace: "WS", LeadName: "nova", SessionID: "lead-session", WorkDir: "/repo", Prompt: "prompt", Backend: backend,
+		})
 		if err != nil {
 			t.Fatalf("%s: RunControlledLeadRuntime() error = %v", backend, err)
 		}
@@ -102,7 +136,9 @@ func TestRunControlledLeadRuntimeDispatchesGenericBackends(t *testing.T) {
 
 func TestRunControlledLeadRuntimeUnknownBackendNotHandled(t *testing.T) {
 	installFakeHarnessLead(t)
-	handled, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "lead-session", "/repo", "prompt", "my-external-plugin")
+	handled, err := RunControlledLeadRuntime(context.Background(), ControlledLeadOptions{
+		Workspace: "WS", LeadName: "nova", SessionID: "lead-session", WorkDir: "/repo", Prompt: "prompt", Backend: "my-external-plugin",
+	})
 	if err != nil {
 		t.Fatalf("RunControlledLeadRuntime() error = %v", err)
 	}
@@ -114,7 +150,9 @@ func TestRunControlledLeadRuntimeUnknownBackendNotHandled(t *testing.T) {
 func TestRunControlledLeadRuntimeEnvEscapeHatch(t *testing.T) {
 	t.Setenv(envLeadControlled, "0")
 	installFakeHarnessLead(t)
-	handled, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "lead-session", "/repo", "prompt", "claude")
+	handled, err := RunControlledLeadRuntime(context.Background(), ControlledLeadOptions{
+		Workspace: "WS", LeadName: "nova", SessionID: "lead-session", WorkDir: "/repo", Prompt: "prompt", Backend: "claude",
+	})
 	if err != nil {
 		t.Fatalf("RunControlledLeadRuntime() error = %v", err)
 	}

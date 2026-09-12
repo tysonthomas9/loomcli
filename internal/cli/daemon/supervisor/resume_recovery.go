@@ -36,14 +36,20 @@ const maxResumeFailures = 2
 // checkpoint does not (the agent re-derives the prior attempt's WIP from the
 // saved checkpoint + worktree diff).
 func (s *Supervisor) detectRecovery(ap *AgentProcess) (string, recoveryMode) {
-	info, running, err := cli.CheckLock(ap.WorktreePath)
+	info, running, err := cli.CheckLock(ap.WorkDir())
 	if err != nil || info == nil || running || info.TaskID == "" {
 		return "", recoverCold // no crash remnant / agent still alive / no task to recover
 	}
-	if ttl := agent.ResumeTTL(); ttl > 0 && !info.TaskStartedAt.IsZero() && time.Since(info.TaskStartedAt) > ttl {
-		slog.Info("interrupted task too old to recover; cold-starting",
+	// Same bound, same clock as the agent-side decision: ResumeTTL is IDLE time
+	// since the last run ended, so this must read LastRunEndedAt (with the same
+	// TaskStartedAt fallback) rather than task age — otherwise the supervisor
+	// and maybeResumeDaemonSession disagree about what "stale" means and one of
+	// them cold-starts a session the other was willing to resume.
+	since, clock := agent.ResumeStalenessClock(info)
+	if ttl := agent.ResumeTTL(); ttl > 0 && !since.IsZero() && time.Since(since) > ttl {
+		slog.Info("interrupted task idle too long to recover; cold-starting",
 			"worktree", ap.Entry.Worktree, "task_id", info.TaskID,
-			"age", time.Since(info.TaskStartedAt).Round(time.Second))
+			"idle", time.Since(since).Round(time.Second), "clock", clock)
 		return "", recoverCold
 	}
 	ap.Mu.Lock()
@@ -92,7 +98,7 @@ func (s *Supervisor) prepareCheckpointRetry(ap *AgentProcess, taskID string) {
 	s.sweepWorktreeBackends(ap)
 	// Drop the carried session so maybeResumeDaemonSession won't arm `--resume`;
 	// the agent then falls back to checkpoint injection for this task.
-	if err := cli.ClearStaleLockClaudeSessionID(ap.WorktreePath); err != nil {
+	if err := cli.ClearStaleLockClaudeSessionID(ap.WorkDir()); err != nil {
 		slog.Warn("checkpoint retry: failed to clear carried session id",
 			"worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
 	}
@@ -107,16 +113,50 @@ func (s *Supervisor) prepareCheckpointRetry(ap *AgentProcess, taskID string) {
 // this worktree from a crashed run, scoped so the daemon never signals
 // processes that are not its own.
 func (s *Supervisor) sweepWorktreeBackends(ap *AgentProcess) {
-	if killed := s.killOrphanedWorktreeProcesses([]string{ap.WorktreePath}); killed > 0 {
+	if killed := s.killOrphanedWorktreeProcesses([]string{ap.WorkDir()}); killed > 0 {
 		slog.Info("killed orphaned backend before recovery",
 			"worktree", ap.Entry.Worktree, "count", killed)
 	}
+}
+
+// abandonResumeTarget drops the interrupted task from the worktree's preserved
+// lock so detectRecovery stops re-proposing it. Called when the task can never
+// be re-claimed; without it, the same lock feeds the same unclaimable task id
+// into every subsequent supervise cycle. Best-effort: a lock that is already
+// gone, or one whose PID came back to life, leaves the state as-is and the
+// bounded ResumeFailures ladder still caps the retries.
+func (s *Supervisor) abandonResumeTarget(ap *AgentProcess, taskID string) {
+	if err := cli.ClearStaleLockTaskID(ap.WorkDir()); err != nil {
+		slog.Warn("failed to clear abandoned resume target from lock",
+			"worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
+	}
+	ap.Mu.Lock()
+	ap.ResumeFailures = 0 // the target is gone; a future interruption may recover normally
+	ap.Mu.Unlock()
+}
+
+// recordRecoveryFailure advances the recovery-failure counter when a recovery
+// cycle aborts BEFORE the agent is spawned (e.g. the re-claim failed), so the
+// resume → checkpoint → cold-start ladder still escalates. recordResumeOutcome
+// cannot serve this path: it keys off LastExitCode, which setPreflightError
+// leaves at 0 (= clean exit), so calling it here would RESET the counter and
+// make the retry loop permanent.
+func (s *Supervisor) recordRecoveryFailure(ap *AgentProcess) {
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	if ap.RecoveryMode == recoverCold {
+		return // this cycle was not a recovery
+	}
+	ap.ResumeFailures++
 }
 
 // recordResumeOutcome updates the persisted recovery-failure counter after a
 // supervised run. Only recovery cycles (resume or checkpoint) count: a clean
 // exit clears the counter (the task progressed), a failure advances it toward
 // the cold-start ceiling. A non-recovery (cold) cycle is ignored.
+//
+// This covers the POST-SPAWN path only; a recovery cycle that aborts during
+// pre-flight is counted by recordRecoveryFailure.
 func (s *Supervisor) recordResumeOutcome(ap *AgentProcess) {
 	ap.Mu.Lock()
 	defer ap.Mu.Unlock()
