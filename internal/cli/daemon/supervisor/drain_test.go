@@ -98,8 +98,14 @@ func TestDrainWithGrace_PIDZero(t *testing.T) {
 	result := s.DrainWithGrace(ap, "test", 10*time.Second, 5*time.Second)
 	elapsed := time.Since(start)
 
-	if !result {
-		t.Error("DrainWithGrace() = false, want true (pid already 0)")
+	if !result.Yielded() {
+		t.Errorf("DrainWithGrace().Yielded() = false, want true (pid already 0); phase=%q", result.Phase)
+	}
+	if result.Phase != DrainPhaseAlreadyStopped {
+		t.Errorf("phase = %q, want %q", result.Phase, DrainPhaseAlreadyStopped)
+	}
+	if result.Worktree != "test" {
+		t.Errorf("worktree = %q, want %q", result.Worktree, "test")
 	}
 	if elapsed > 100*time.Millisecond {
 		t.Errorf("DrainWithGrace took %v, want < 100ms for pid=0", elapsed)
@@ -148,8 +154,11 @@ func TestDrainWithGrace_AgentExitsDuringYield(t *testing.T) {
 	result := s.DrainWithGrace(ap, "test-yield", 10*time.Second, 5*time.Second)
 	elapsed := time.Since(start)
 
-	if !result {
-		t.Error("DrainWithGrace() = false, want true (agent should exit from yield file)")
+	if !result.Yielded() {
+		t.Errorf("DrainWithGrace().Yielded() = false, want true (agent should exit from yield file); phase=%q", result.Phase)
+	}
+	if result.Phase != DrainPhaseYielded {
+		t.Errorf("phase = %q, want %q", result.Phase, DrainPhaseYielded)
 	}
 	if elapsed > 5*time.Second {
 		t.Errorf("DrainWithGrace took %v, want < 5s", elapsed)
@@ -205,8 +214,11 @@ func TestDrainWithGrace_AgentIgnoresYield_FallsToSIGTERM(t *testing.T) {
 	// Use a short yield timeout so the test doesn't take too long
 	result := s.DrainWithGrace(ap, "test-timeout", 2*time.Second, 5*time.Second)
 
-	if result {
-		t.Error("DrainWithGrace() = true, want false (agent ignores yield, should fall to SIGTERM)")
+	if result.Yielded() {
+		t.Error("DrainWithGrace().Yielded() = true, want false (agent ignores yield, should fall to SIGTERM)")
+	}
+	if result.Phase != DrainPhaseSigterm {
+		t.Errorf("phase = %q, want %q", result.Phase, DrainPhaseSigterm)
 	}
 
 	// Wait for waitForAgent goroutine to finish
@@ -264,8 +276,11 @@ func TestDrainWithGrace_RequestYieldFails(t *testing.T) {
 	result := s.DrainWithGrace(ap, "test-fail", 10*time.Second, 5*time.Second)
 	elapsed := time.Since(start)
 
-	if result {
-		t.Error("DrainWithGrace() = true, want false (yield file write failed)")
+	if result.Yielded() {
+		t.Error("DrainWithGrace().Yielded() = true, want false (yield file write failed)")
+	}
+	if result.Phase != DrainPhaseYieldWriteFail {
+		t.Errorf("phase = %q, want %q", result.Phase, DrainPhaseYieldWriteFail)
 	}
 	// stopAgent has a ~5s SIGTERM window before SIGKILL, but sleep responds to SIGTERM
 	// immediately, so this should complete well under 6s.
