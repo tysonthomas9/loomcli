@@ -5,7 +5,16 @@
  * and provide TypeScript-accessible color values for use in JavaScript/React
  * components (e.g., react-flow nodes, canvas rendering, dynamic styling).
  *
- * IMPORTANT: Keep these values in sync with variables.css.
+ * IMPORTANT: Keep these values in sync with variables.css, and note that they
+ * are the *non-text* half of the palette — graph nodes, canvas fills, badge
+ * accents. They are held to the 3:1 of WCAG 1.4.11, not the 4.5:1 that text
+ * needs; the contrast contract at the top of variables.css states both, and
+ * styles/contrast.ts enforces them.
+ *
+ * There is deliberately no `-text` counterpart here. The `--color-*-text`
+ * variants differ between the dark and light themes and this file has no theme
+ * concept, so a flat map of them would be right in one theme and wrong in the
+ * other. Text colour belongs in CSS, where the theme is in scope.
  */
 
 /**

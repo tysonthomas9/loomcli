@@ -88,7 +88,7 @@
 
 .typeBadge[data-type="epic"] {
   background-color: color-mix(in srgb, var(--color-type-epic) 15%, transparent);
-  color: var(--color-type-epic);
+  color: var(--color-epic-text);
 }
 
 .priorityBadge {
