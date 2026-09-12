@@ -444,6 +444,7 @@ func TestClaimRejectedPermanently_True(t *testing.T) {
 	}{
 		{"not_claimable code", codedErr(KindConflict, "issue is not claimable", "not_claimable")},
 		{"invalid_transition code", codedErr(KindConflict, "issue is already closed", "invalid_transition")},
+		{"operator_only code", codedErr(KindValidation, "issue is operator-only and cannot be claimed by an agent", "operator_only")},
 		{"not found kind", ErrNotFound("Claim", "issue PUPPET-1 not found")},
 		{"message fallback, no code", ErrConflict("Claim", "issue is not claimable")},
 		{"wrapped coded error", fmt.Errorf("claim: %w", codedErr(KindConflict, "nope", "not_claimable"))},
