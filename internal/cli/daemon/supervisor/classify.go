@@ -255,7 +255,12 @@ func (s *Supervisor) saveAgentCheckpoint(ap *AgentProcess, exitCode int) {
 		return
 	}
 
-	diff := captureGitDiff(ap.WorktreePath, config.MaxDiffBytes)
+	agentName := ap.Entry.Worktree
+	if lockInfo != nil && lockInfo.AgentName != "" {
+		agentName = lockInfo.AgentName
+	}
+
+	diff, scanned := captureGitDiff(ap.WorktreePath, agentName, config.MaxDiffBytes)
 	errClass := ""
 	ap.Mu.Lock()
 	if ap.LastError != nil {
@@ -264,19 +269,15 @@ func (s *Supervisor) saveAgentCheckpoint(ap *AgentProcess, exitCode int) {
 	epicID := ap.AssignedEpicID
 	ap.Mu.Unlock()
 
-	agentName := ap.Entry.Worktree
-	if lockInfo != nil && lockInfo.AgentName != "" {
-		agentName = lockInfo.AgentName
-	}
-
 	cp := &config.Checkpoint{
-		AgentName:  agentName,
-		TaskID:     taskID,
-		EpicID:     epicID,
-		GitDiff:    diff,
-		ExitCode:   exitCode,
-		ErrorClass: errClass,
-		Timestamp:  time.Now(),
+		AgentName:    agentName,
+		TaskID:       taskID,
+		EpicID:       epicID,
+		GitDiff:      diff,
+		ScannedPaths: scanned,
+		ExitCode:     exitCode,
+		ErrorClass:   errClass,
+		Timestamp:    time.Now(),
 	}
 	lockDir := cli.ResolveLockDir(ap.WorktreePath)
 	if err := config.SaveCheckpoint(lockDir, cp); err != nil {
@@ -296,7 +297,12 @@ func (s *Supervisor) saveYieldCheckpoint(ap *AgentProcess) {
 		return
 	}
 
-	diff := captureGitDiff(ap.WorktreePath, config.MaxDiffBytes)
+	agentName := ap.Entry.Worktree
+	if lockInfo != nil && lockInfo.AgentName != "" {
+		agentName = lockInfo.AgentName
+	}
+
+	diff, scanned := captureGitDiff(ap.WorktreePath, agentName, config.MaxDiffBytes)
 
 	yieldReason := "unknown"
 	if req, err := ReadYieldFile(ap.WorktreePath); err == nil && req != nil && req.Reason != "" {
@@ -307,20 +313,16 @@ func (s *Supervisor) saveYieldCheckpoint(ap *AgentProcess) {
 	epicID := ap.AssignedEpicID
 	ap.Mu.Unlock()
 
-	agentName := ap.Entry.Worktree
-	if lockInfo != nil && lockInfo.AgentName != "" {
-		agentName = lockInfo.AgentName
-	}
-
 	cp := &config.Checkpoint{
-		AgentName:   agentName,
-		TaskID:      taskID,
-		EpicID:      epicID,
-		GitDiff:     diff,
-		ExitCode:    0,
-		ErrorClass:  "Yielded",
-		YieldReason: yieldReason,
-		Timestamp:   time.Now(),
+		AgentName:    agentName,
+		TaskID:       taskID,
+		EpicID:       epicID,
+		GitDiff:      diff,
+		ScannedPaths: scanned,
+		ExitCode:     0,
+		ErrorClass:   "Yielded",
+		YieldReason:  yieldReason,
+		Timestamp:    time.Now(),
 	}
 	lockDir := cli.ResolveLockDir(ap.WorktreePath)
 	if err := config.SaveCheckpoint(lockDir, cp); err != nil {
