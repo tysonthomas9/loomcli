@@ -62,6 +62,10 @@ func writeReleaseTestLock(t *testing.T, worktreePath, taskID string) {
 	}
 }
 
+// The actor forwarded is the lock file's AgentName, unchanged. PUPPET-467
+// widened FleetBackend.ReleaseClaim to also accept the backend's configured
+// actor as proof of ownership; that resolution belongs there, not here, so this
+// call site must keep passing the agent's own name.
 func TestReleaseClaimOnComplete_DispatchesReleaseWithLockTaskID(t *testing.T) {
 	stub := newReleaserStub(nil)
 	cli.SetDefaultIssueBackend(stub)

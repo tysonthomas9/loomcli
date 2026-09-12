@@ -176,3 +176,33 @@ func TestTracedIssueBackendReleaseClaim_PropagatesError(t *testing.T) {
 		t.Errorf("ReleaseClaim error = %v, want %v", got, want)
 	}
 }
+
+type configuredActorMockBackend struct {
+	*MockIssueBackend
+	actor string
+}
+
+func (m *configuredActorMockBackend) ConfiguredActor() string { return m.actor }
+
+// The tracing decorator is applied unconditionally in deps.go, so anything it
+// fails to forward is invisible to the supervisor's claimActorFor. See PUPPET-467.
+func TestTracedIssueBackendPreservesConfiguredActor(t *testing.T) {
+	inner := &configuredActorMockBackend{MockIssueBackend: NewMockIssueBackend(), actor: "loom"}
+	wrapped, ok := wrapIssueBackendWithTracing(inner).(interface{ ConfiguredActor() string })
+	if !ok {
+		t.Fatal("traced issue backend should preserve ConfiguredActor")
+	}
+	if got := wrapped.ConfiguredActor(); got != "loom" {
+		t.Fatalf("ConfiguredActor() = %q, want %q", got, "loom")
+	}
+}
+
+func TestTracedIssueBackendConfiguredActorUnsupportedInner(t *testing.T) {
+	wrapped, ok := wrapIssueBackendWithTracing(NewMockIssueBackend()).(interface{ ConfiguredActor() string })
+	if !ok {
+		t.Fatal("traced issue backend should expose ConfiguredActor")
+	}
+	if got := wrapped.ConfiguredActor(); got != "" {
+		t.Fatalf("ConfiguredActor() = %q, want empty for an inner backend without one", got)
+	}
+}
