@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { updateIssue } from "@/api";
 import {
-  deriveThisWorkspaceCounts,
   EmptyState,
   ErrorBoundary,
   HomeRail,
   OperatorQueueCard,
+  workspaceCountsFromStats,
 } from "@/components";
 import { IssueViewGuard } from "@/components/IssueViewGuard";
 import {
@@ -14,7 +14,7 @@ import {
   useWorkspaceViewData,
 } from "@/contexts/WorkspaceViewContext";
 import { useOperatorQueue } from "@/hooks/issues";
-import { useRecentActivity } from "@/hooks/workspace";
+import { useRecentActivity, useWorkspaceStats } from "@/hooks/workspace";
 import { isAgentActive } from "@/types";
 import type { Issue } from "@/types";
 import { NEEDS_REVISION_LABEL } from "@/utils/issue";
@@ -44,7 +44,10 @@ export function HomePage(): JSX.Element {
     (item) => !optimisticallyResolvedIds.has(item.issue.id),
   );
   const activity = useRecentActivity(workspaceId, issues, agents);
-  const workspaceCounts = deriveThisWorkspaceCounts(issues);
+  // Workspace-wide, from GET /stats — deliberately not derived from `issues`,
+  // which is whatever the board view has fetched or filtered.
+  const { stats } = useWorkspaceStats(workspaceId);
+  const workspaceCounts = workspaceCountsFromStats(stats);
   const idleAgents = agents.filter((agent) => !isAgentActive(agent)).length;
   const mountedRef = useRef(true);
 
@@ -175,8 +178,12 @@ export function HomePage(): JSX.Element {
                   <div className={styles.queueStats}>
                     <span data-stat="closed" data-testid="queue-stat">
                       <strong>
-                        {workspaceCounts.closed}{" "}
-                        {plural(workspaceCounts.closed, "task", "tasks")}
+                        {workspaceCounts?.closed ?? 0}{" "}
+                        {plural(
+                          workspaceCounts?.closed ?? 0,
+                          "issue",
+                          "issues",
+                        )}
                       </strong>
                       closed
                     </span>
@@ -192,7 +199,7 @@ export function HomePage(): JSX.Element {
             </section>
             <HomeRail
               activity={activity}
-              issues={issues}
+              counts={workspaceCounts}
               workspaceId={workspaceId}
             />
           </div>

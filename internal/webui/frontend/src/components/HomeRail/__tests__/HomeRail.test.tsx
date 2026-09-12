@@ -7,37 +7,42 @@ import { describe, expect, it } from "vitest";
 import "@testing-library/jest-dom";
 
 import { ThisWorkspaceCard } from "../ThisWorkspaceCard";
-import type { Issue } from "@/types";
+import type { ThisWorkspaceCounts } from "../ThisWorkspaceCard";
 
-function issue(overrides: Partial<Issue>): Issue {
+function counts(overrides: Partial<ThisWorkspaceCounts> = {}) {
   return {
-    id: "TASK-1",
-    title: "Rail task",
-    priority: 2,
-    issue_type: "task",
-    status: "open",
-    created_at: "2026-08-21T15:00:00.000Z",
-    updated_at: "2026-08-21T15:00:00.000Z",
+    total: 408,
+    closed: 340,
+    inProgress: 2,
+    review: 4,
+    open: 52,
+    blocked: 10,
+    deferred: 0,
     ...overrides,
-  } as Issue;
+  } satisfies ThisWorkspaceCounts;
 }
 
 describe("Home rail cards", () => {
-  it("counts non-epic workspace statuses", () => {
-    render(
-      <ThisWorkspaceCard
-        issues={[
-          issue({ id: "CLOSED", status: "closed" }),
-          issue({ id: "BLOCKED", status: "blocked" }),
-          issue({ id: "EPIC", issue_type: "epic", status: "closed" }),
-        ]}
-        workspaceId="workspace-1"
-      />,
+  it("renders the workspace-wide counts it is handed", () => {
+    render(<ThisWorkspaceCard counts={counts()} workspaceId="workspace-1" />);
+
+    // "issues", not "tasks": the counts include epics by decision.
+    expect(screen.getByTestId("rail-this-workspace")).toHaveTextContent(
+      "408 issues · 340 closed",
     );
+    expect(screen.getByText("blocked 10")).toBeInTheDocument();
+    expect(screen.getByText("review 4")).toBeInTheDocument();
+    expect(screen.getByText("open 52")).toBeInTheDocument();
+    expect(screen.getByText("in progress 2")).toBeInTheDocument();
+    expect(screen.getByText("deferred 0")).toBeInTheDocument();
+  });
+
+  it("renders a zero state while counts are still null", () => {
+    render(<ThisWorkspaceCard counts={null} workspaceId="workspace-1" />);
 
     expect(screen.getByTestId("rail-this-workspace")).toHaveTextContent(
-      "2 tasks · 1 closed",
+      "0 issues · 0 closed",
     );
-    expect(screen.getByText("blocked 1")).toBeInTheDocument();
+    expect(screen.getByText("open 0")).toBeInTheDocument();
   });
 });

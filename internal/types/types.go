@@ -41,13 +41,18 @@ type MoleculeProgressStats struct {
 
 // Statistics provides aggregate metrics
 type Statistics struct {
-	TotalIssues             int     `json:"total_issues"`
-	OpenIssues              int     `json:"open_issues"`
-	InProgressIssues        int     `json:"in_progress_issues"`
-	ClosedIssues            int     `json:"closed_issues"`
-	BlockedIssues           int     `json:"blocked_issues"`
-	DeferredIssues          int     `json:"deferred_issues"` // Issues on ice
-	ReadyIssues             int     `json:"ready_issues"`
+	TotalIssues      int `json:"total_issues"`
+	OpenIssues       int `json:"open_issues"`
+	InProgressIssues int `json:"in_progress_issues"`
+	ClosedIssues     int `json:"closed_issues"`
+	BlockedIssues    int `json:"blocked_issues"`
+	DeferredIssues   int `json:"deferred_issues"` // Issues on ice
+	ReadyIssues      int `json:"ready_issues"`
+	// ReviewIssues and StatusBlockedIssues are per-STATUS counts. StatusBlockedIssues
+	// is not BlockedIssues: the latter is the computed dependency-blocked view, whose
+	// members mostly carry status "open", so the two legitimately differ.
+	ReviewIssues            int     `json:"review_issues"`
+	StatusBlockedIssues     int     `json:"status_blocked_issues"`
 	TombstoneIssues         int     `json:"tombstone_issues"` // Soft-deleted issues
 	PinnedIssues            int     `json:"pinned_issues"`    // Persistent issues
 	EpicsEligibleForClosure int     `json:"epics_eligible_for_closure"`
