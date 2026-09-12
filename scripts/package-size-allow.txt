@@ -18,7 +18,15 @@
 # and .loc-allowlist takes no new entries. The profile section moved out of
 # spawn.go unchanged, as local/union did in 769403892 (PUPPET-243) - the
 # alternative is trading the package gate for the LOC gate.
-internal/cli/daemon/supervisor 30
+#
+# 30 -> 31 (PUPPET-608): placement.go. An agent's worktree used to be frozen at
+# config load from its CONFIGURED repo; it now follows the CLAIMED task's
+# source_repo, and that routing (AgentPlacement, applyTaskPlacement,
+# adoptCarriedWorktree, repo-selector matching) is its own concern rather than
+# more weight on claim.go or supervisor.go — both of which are already at their
+# own ceilings. It is a self-contained candidate to move out wholesale when the
+# sub-split happens.
+internal/cli/daemon/supervisor 31
 # internal/cli gained the daemon input-await seam (agent_input_await.go) with
 # the human answer path; 26th file, same sub-split end state applies. The
 # hook-driven exit-code contract lives in exit.go rather than a file of its own,

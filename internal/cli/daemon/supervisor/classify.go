@@ -16,7 +16,7 @@ import (
 // the agent's exit into an error class. Sets ap.LastError and ap.LastNoWork.
 func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 	// Read lock info before recovery clears it (for logging and NoWork detection)
-	lockInfo, _, _ := cli.CheckLock(ap.WorktreePath)
+	lockInfo, _, _ := cli.CheckLock(ap.WorkDir())
 	taskID := s.taskIDForLifecycle(ap, lockInfo)
 	if taskID != "" {
 		title := ""
@@ -224,7 +224,7 @@ func (s *Supervisor) markSpawnFailure(ap *AgentProcess, spawnErr error) {
 func (s *Supervisor) handleAgentCheckpoint(ap *AgentProcess, exitCode int) {
 	if exitCode == 0 {
 		// Check if this was a yield exit — save checkpoint instead of clearing
-		if IsYieldRequested(ap.WorktreePath) {
+		if IsYieldRequested(ap.WorkDir()) {
 			s.saveYieldCheckpoint(ap)
 			return
 		}
@@ -237,7 +237,7 @@ func (s *Supervisor) handleAgentCheckpoint(ap *AgentProcess, exitCode int) {
 			s.saveAgentCheckpoint(ap, exitCode)
 			return
 		}
-		lockDir := cli.ResolveLockDir(ap.WorktreePath)
+		lockDir := cli.ResolveLockDir(ap.WorkDir())
 		if err := config.ClearCheckpoint(lockDir); err != nil {
 			log.Printf("[daemon] Agent %s: failed to clear checkpoint: %v", ap.Entry.Worktree, err)
 		}
@@ -249,7 +249,7 @@ func (s *Supervisor) handleAgentCheckpoint(ap *AgentProcess, exitCode int) {
 // saveAgentCheckpoint captures the current worktree diff and agent state into a
 // checkpoint file. Called when an agent exits non-zero before recovery clears the worktree.
 func (s *Supervisor) saveAgentCheckpoint(ap *AgentProcess, exitCode int) {
-	lockInfo, _, _ := cli.CheckLock(ap.WorktreePath)
+	lockInfo, _, _ := cli.CheckLock(ap.WorkDir())
 	taskID := s.taskIDForLifecycle(ap, lockInfo)
 	if taskID == "" {
 		return
@@ -260,7 +260,7 @@ func (s *Supervisor) saveAgentCheckpoint(ap *AgentProcess, exitCode int) {
 		agentName = lockInfo.AgentName
 	}
 
-	diff, scanned := captureGitDiff(ap.WorktreePath, agentName, config.MaxDiffBytes)
+	diff, scanned := captureGitDiff(ap.WorkDir(), agentName, config.MaxDiffBytes)
 	errClass := ""
 	ap.Mu.Lock()
 	if ap.LastError != nil {
@@ -279,7 +279,7 @@ func (s *Supervisor) saveAgentCheckpoint(ap *AgentProcess, exitCode int) {
 		ErrorClass:   errClass,
 		Timestamp:    time.Now(),
 	}
-	lockDir := cli.ResolveLockDir(ap.WorktreePath)
+	lockDir := cli.ResolveLockDir(ap.WorkDir())
 	if err := config.SaveCheckpoint(lockDir, cp); err != nil {
 		log.Printf("[daemon] Agent %s: failed to save checkpoint: %v", ap.Entry.Worktree, err)
 	} else {
@@ -291,7 +291,7 @@ func (s *Supervisor) saveAgentCheckpoint(ap *AgentProcess, exitCode int) {
 // via yield. Unlike saveAgentCheckpoint (crash path), this sets ErrorClass to
 // "Yielded" and records the yield reason from the yield file.
 func (s *Supervisor) saveYieldCheckpoint(ap *AgentProcess) {
-	lockInfo, _, _ := cli.CheckLock(ap.WorktreePath)
+	lockInfo, _, _ := cli.CheckLock(ap.WorkDir())
 	taskID := s.taskIDForLifecycle(ap, lockInfo)
 	if taskID == "" {
 		return
@@ -302,10 +302,10 @@ func (s *Supervisor) saveYieldCheckpoint(ap *AgentProcess) {
 		agentName = lockInfo.AgentName
 	}
 
-	diff, scanned := captureGitDiff(ap.WorktreePath, agentName, config.MaxDiffBytes)
+	diff, scanned := captureGitDiff(ap.WorkDir(), agentName, config.MaxDiffBytes)
 
 	yieldReason := "unknown"
-	if req, err := ReadYieldFile(ap.WorktreePath); err == nil && req != nil && req.Reason != "" {
+	if req, err := ReadYieldFile(ap.WorkDir()); err == nil && req != nil && req.Reason != "" {
 		yieldReason = req.Reason
 	}
 
@@ -324,7 +324,7 @@ func (s *Supervisor) saveYieldCheckpoint(ap *AgentProcess) {
 		YieldReason:  yieldReason,
 		Timestamp:    time.Now(),
 	}
-	lockDir := cli.ResolveLockDir(ap.WorktreePath)
+	lockDir := cli.ResolveLockDir(ap.WorkDir())
 	if err := config.SaveCheckpoint(lockDir, cp); err != nil {
 		log.Printf("[daemon] Agent %s: failed to save yield checkpoint: %v", ap.Entry.Worktree, err)
 	} else {
