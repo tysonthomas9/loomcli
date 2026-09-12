@@ -41,6 +41,11 @@ export interface TerminalPaneProps {
   autoStartStaleSession?: boolean | undefined;
   /** Automatically reconnect after an unexpected WebSocket close. */
   autoReconnect?: boolean | undefined;
+  /**
+   * Called with the RFC3339 replacement timestamp when the server announces
+   * on attach that this tab's shell was replaced across a server restart.
+   */
+  onSessionReplaced?: ((replacedAt: string) => void) | undefined;
 }
 
 export function TerminalPane({
@@ -60,6 +65,7 @@ export function TerminalPane({
   attachable,
   autoStartStaleSession,
   autoReconnect,
+  onSessionReplaced,
 }: TerminalPaneProps) {
   // TerminalConnectionOverlay renders its own overlay for the initial
   // connecting spinner and for every actionable state (disconnected /
@@ -93,6 +99,7 @@ export function TerminalPane({
         attachable={attachable}
         autoStartStaleSession={autoStartStaleSession}
         autoReconnect={autoReconnect}
+        onSessionReplaced={onSessionReplaced}
       />
       {tab.crashReason != null ? (
         <CrashOverlay
