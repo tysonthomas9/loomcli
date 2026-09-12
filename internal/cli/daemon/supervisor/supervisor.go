@@ -405,23 +405,7 @@ func (s *Supervisor) checkAgentStopSignals(ap *AgentProcess) bool {
 // attempt's diff injected) before finally cold-starting a fresh task. See
 // detectRecovery.
 func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
-	// FIRST gate: a held workspace issues no Ready query, no ClaimIssue, runs
-	// no recovery and creates no session.
-	if !s.gateClaimsHeld(ap) {
-		return false
-	}
-	// No span is open on this path; pass an explicit background context so the
-	// absence of a trace parent is visible here rather than hidden in the gate.
-	if err := s.gateBackendAvailable(context.Background(), ap); err != nil {
-		return false
-	}
-	if err := s.gateSafetyKnobsEnforceable(ap); err != nil {
-		return false
-	}
-	// Before claimTask, deliberately: a drifted profile that is only caught at
-	// spawn time claims a task and immediately releases it, and the release
-	// erases the diagnosis. See gateProfileVerified.
-	if err := s.gateProfileVerified(ap); err != nil {
+	if !s.preFlightGates(ap) {
 		return false
 	}
 
@@ -440,8 +424,14 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 		ap.ResumeFailures = 0 // cold-starting ⇒ let a future interruption recover again
 		ap.Mu.Unlock()
 		// Cold start: nothing here is being continued, so recovery takes its
-		// fully destructive form (incomplete=false).
-		if err := s.recoverAgent(ap, 0, false); err != nil {
+		// fully destructive form (incomplete=false). After a daemon restart the
+		// in-memory AssignedTaskID is gone and the lock may carry no task, so
+		// the checkpoint is the surviving record of the claim to release.
+		recTask, recExit := s.taskIDForLifecycle(ap, nil), 0
+		if recTask == "" {
+			recTask, recExit = checkpointRecoveryTask(ap)
+		}
+		if err := s.recoverAgentForTask(ap, recTask, recExit, false); err != nil {
 			slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
 		}
 	}
@@ -816,9 +806,11 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	s.handleEpicTransition(ap)
 }
 
-// postMortemRecovery runs recovery after agent exit, skipping for yield exits.
+// postMortemRecovery runs recovery after agent exit, skipping for GRACEFUL
+// yield exits only — an escalated (timed-out, SIGTERMed) yield is a kill and
+// must go through recovery so its fleet-db claim is released.
 func (s *Supervisor) postMortemRecovery(ap *AgentProcess, exitCode int) {
-	if IsYieldRequested(ap.WorkDir()) {
+	if s.isGracefulYieldExit(ap) {
 		slog.Info("skipping post-mortem recovery for yield exit", "worktree", ap.Entry.Worktree)
 		return
 	}
