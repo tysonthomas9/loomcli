@@ -49,6 +49,7 @@ func TestPrintIssueDetailTextIncludesOptionalFields(t *testing.T) {
 			Parent:    "EPIC-1",
 			Labels:    []string{"coverage", "cli"},
 		},
+		EstimatedMinutes:   intPtr(30),
 		AcceptanceCriteria: "All optional fields render",
 		Comments: []backend.CommentData{{
 			Author:    "reviewer",
@@ -66,6 +67,7 @@ func TestPrintIssueDetailTextIncludesOptionalFields(t *testing.T) {
 		"Type:     task",
 		"Assignee: builder",
 		"Owner:    planner",
+		"Est:      30 min",
 		"Parent:   EPIC-1",
 		"Labels:   [coverage cli]",
 		"Acceptance Criteria:\nAll optional fields render",
@@ -223,3 +225,46 @@ func TestPrintMonitorStatusWorkspaceHeader(t *testing.T) {
 		}
 	})
 }
+
+// TestPrintIssueDetailTextEstimatedMinutes covers the two cases the optional
+// -fields test above cannot: an explicit zero is a real estimate and must
+// render, while an unset estimate must print no Est: line at all.
+func TestPrintIssueDetailTextEstimatedMinutes(t *testing.T) {
+	tests := []struct {
+		name      string
+		est       *int
+		want      string
+		wantNoEst bool
+	}{
+		{name: "explicit zero", est: intPtr(0), want: "Est:      0 min"},
+		{name: "unset", est: nil, wantNoEst: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			detail := &backend.IssueDetailData{
+				IssueData: backend.IssueData{
+					ID:     "TASK-3",
+					Title:  "Estimate rendering",
+					Status: "open",
+				},
+				EstimatedMinutes: tt.est,
+			}
+			if err := printIssueDetail(&out, detail, formatText); err != nil {
+				t.Fatalf("printIssueDetail: %v", err)
+			}
+			got := out.String()
+			if tt.wantNoEst {
+				if strings.Contains(got, "Est:") {
+					t.Fatalf("output should not contain an Est: line:\n%s", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tt.want) {
+				t.Fatalf("output missing %q:\n%s", tt.want, got)
+			}
+		})
+	}
+}
+
+func intPtr(v int) *int { return &v }
