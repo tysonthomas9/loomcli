@@ -43,6 +43,7 @@ const (
 	PRCreated        EventType = "pr.created"
 	ConflictResolved EventType = "conflict.resolved"
 	HealthCheck      EventType = "system.health_check"
+	DaemonDegraded   EventType = "system.daemon_degraded"
 	ConfigReloaded   EventType = "system.config_reloaded"
 	CircuitOpened    EventType = "circuit.opened"
 	CircuitClosed    EventType = "circuit.closed"
@@ -93,49 +94,41 @@ func NewEvent(eventType EventType, agent, role, epicID string, v interface{}) (E
 	return e, nil
 }
 
+// eventDataTargets maps each event type to a constructor for its payload
+// struct. A table rather than a switch: the switch form crossed the repo's
+// cyclomatic-complexity budget as the event set grew, and every arm was pure
+// dispatch with no logic to lose in the translation.
+var eventDataTargets = map[EventType]func() interface{}{
+	TaskClaimed:      func() interface{} { return &TaskClaimedData{} },
+	TaskStarted:      func() interface{} { return &TaskStartedData{} },
+	TaskCompleted:    func() interface{} { return &TaskCompletedData{} },
+	TaskFailed:       func() interface{} { return &TaskFailedData{} },
+	TaskStuck:        func() interface{} { return &TaskStuckData{} },
+	AgentStarted:     func() interface{} { return &AgentStartedData{} },
+	AgentRestarted:   func() interface{} { return &AgentRestartedData{} },
+	AgentStopped:     func() interface{} { return &AgentStoppedData{} },
+	EpicAssigned:     func() interface{} { return &EpicAssignedData{} },
+	EpicExhausted:    func() interface{} { return &EpicExhaustedData{} },
+	PRCreated:        func() interface{} { return &PRCreatedData{} },
+	ConflictResolved: func() interface{} { return &ConflictResolvedData{} },
+	HealthCheck:      func() interface{} { return &HealthCheckData{} },
+	DaemonDegraded:   func() interface{} { return &DaemonDegradedData{} },
+	ConfigReloaded:   func() interface{} { return &ConfigReloadedData{} },
+	CircuitOpened:    func() interface{} { return &CircuitOpenedData{} },
+	CircuitClosed:    func() interface{} { return &CircuitClosedData{} },
+}
+
 // DecodeData unmarshals the Data field into the correct typed struct based on Event.Type.
 // Returns nil if Data is empty.
 func (e *Event) DecodeData() (interface{}, error) {
 	if len(e.Data) == 0 {
 		return nil, nil
 	}
-	var target interface{}
-	switch e.Type {
-	case TaskClaimed:
-		target = &TaskClaimedData{}
-	case TaskStarted:
-		target = &TaskStartedData{}
-	case TaskCompleted:
-		target = &TaskCompletedData{}
-	case TaskFailed:
-		target = &TaskFailedData{}
-	case TaskStuck:
-		target = &TaskStuckData{}
-	case AgentStarted:
-		target = &AgentStartedData{}
-	case AgentRestarted:
-		target = &AgentRestartedData{}
-	case AgentStopped:
-		target = &AgentStoppedData{}
-	case EpicAssigned:
-		target = &EpicAssignedData{}
-	case EpicExhausted:
-		target = &EpicExhaustedData{}
-	case PRCreated:
-		target = &PRCreatedData{}
-	case ConflictResolved:
-		target = &ConflictResolvedData{}
-	case HealthCheck:
-		target = &HealthCheckData{}
-	case ConfigReloaded:
-		target = &ConfigReloadedData{}
-	case CircuitOpened:
-		target = &CircuitOpenedData{}
-	case CircuitClosed:
-		target = &CircuitClosedData{}
-	default:
+	newTarget, ok := eventDataTargets[e.Type]
+	if !ok {
 		return nil, fmt.Errorf("unknown event type: %s", e.Type)
 	}
+	target := newTarget()
 	if err := json.Unmarshal(e.Data, target); err != nil {
 		return nil, fmt.Errorf("unmarshaling %s data: %w", e.Type, err)
 	}
@@ -213,6 +206,25 @@ type ConflictResolvedData struct {
 type HealthCheckData struct {
 	AgentCount   int `json:"agent_count"`
 	HealthyCount int `json:"healthy_count"`
+}
+
+// DaemonDegradedData reports that the daemon has entered (Active true) or left
+// (Active false) a self-reported degradation. It is published on the events bus
+// specifically because the bus does not share a failure mode with the handles
+// that degrade: the outage this exists for made the daemon's own state file
+// unwritable, so a degradation recorded only there would have been unreadable
+// exactly when it mattered.
+//
+// Since, Count and LastErr describe the episode while it is active. The
+// recovery event (Active false) carries only Kind: it is published after the
+// episode has been cleared, so there is no longer an episode to report. Its
+// duration is recoverable by pairing it with the entry event that opened it.
+type DaemonDegradedData struct {
+	Kind    string    `json:"kind"`
+	Active  bool      `json:"active"`
+	Since   time.Time `json:"since"`
+	Count   int       `json:"count"`
+	LastErr string    `json:"last_err,omitempty"`
 }
 
 type ConfigReloadedData struct {
