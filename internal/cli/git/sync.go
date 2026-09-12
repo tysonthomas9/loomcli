@@ -28,13 +28,13 @@ This is the recommended way to keep worktrees in sync with the main branch.
 
 Flags:
   --push-only        Only push (skip pulling)
-  --pull-only        Only pull (skip pushing)
+  --pull-only        Only pull (never pushes, including the post-merge push)
   -W, --workspace    Workspace to operate on
 
 Examples:
   loom sync                      # Full sync: push all ready + pull all
   loom sync --push-only          # Only push completed work
-  loom sync --pull-only          # Only pull latest (same as pull --all)
+  loom sync --pull-only          # Only pull latest; nothing is published
   loom sync -W myworkspace       # Sync specific workspace`,
 	Args: cobra.NoArgs,
 	RunE: runFullSync,
@@ -42,7 +42,7 @@ Examples:
 
 func init() {
 	syncCmd.Flags().BoolVar(&syncPushOnly, "push-only", false, "Only push (skip pulling)")
-	syncCmd.Flags().BoolVar(&syncPullOnly, "pull-only", false, "Only pull (skip pushing)")
+	syncCmd.Flags().BoolVar(&syncPullOnly, "pull-only", false, "Only pull (never pushes, including the post-merge push)")
 	syncCmd.Flags().StringVarP(&syncWorkspaceFlag, "workspace", "W", "", "Workspace to operate on")
 	cli.RegisterCommand(syncCmd)
 }
@@ -150,7 +150,10 @@ func syncSingleWorkspace(deps *cli.Deps, resolver *cli.Resolver, pushOnly, pullO
 	if !pushOnly {
 		fmt.Println("")
 		fmt.Println("--- Phase 2: Pull ---")
-		pullWorkspaceWorktrees(deps, worktrees, "")
+		// --pull-only means "do not touch any remote in a writing way". The pull
+		// path pushes the merge result by default; that push must be suppressed
+		// too, or the flag only moves where the push happens.
+		pullWorkspaceWorktrees(deps, worktrees, "", !pullOnly)
 	}
 	return nil
 }

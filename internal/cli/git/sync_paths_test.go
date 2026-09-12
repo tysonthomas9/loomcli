@@ -39,14 +39,14 @@ func TestRunWorkspaceSync_MultipleWorkspaces(t *testing.T) {
 	flexMock.AddStub("git", []string{"branch", "--show-current"}, CommandResult{Stdout: "dev-branch\n"}).WithMinCalls(2)
 	flexMock.Install()
 
-	// OutputCommandMock for pull phase of both workspaces
+	// OutputCommandMock for pull phase of both workspaces. --pull-only (the
+	// third argument to runWorkspaceSync below) must not push, so there are no
+	// push stubs — the mock t.Fatal's if one is attempted.
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
-		{Args: []string{"push", "origin", "dev-branch"}, Err: nil},
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
-		{Args: []string{"push", "origin", "dev-branch"}, Err: nil},
 	})
 	outputMock.Install()
 
@@ -99,7 +99,6 @@ func TestRunWorkspaceSync_SpecificWorkspaceFlag(t *testing.T) {
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
-		{Args: []string{"push", "origin", "feature-a"}, Err: nil},
 	})
 	outputMock.Install()
 
@@ -186,11 +185,12 @@ func TestRunFullSync_DispatchesToWorkspaceMode(t *testing.T) {
 	})
 	cmdMock.Install()
 
-	// Workspace pull: fetch, merge, push
+	// Workspace pull: fetch, merge. This is a --pull-only run (the third
+	// argument to runWorkspaceSync below), so no push stub — the pull path must
+	// not publish.
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
-		{Args: []string{"push", "origin", "api-branch"}, Err: nil},
 	})
 	outputMock.Install()
 
