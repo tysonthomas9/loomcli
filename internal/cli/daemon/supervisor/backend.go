@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"errors"
 	"log"
 	"log/slog"
@@ -29,7 +30,10 @@ var ErrBackendUnavailable = errors.New("supervisor: backend binary not on PATH")
 // A discovery-layer failure (e.g. unreadable embedded versions.json)
 // is logged but does not block spawn — the supervisor will surface
 // the exec error if the binary is genuinely missing.
-func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
+//
+// ctx carries the caller's span so the control-plane state writes this gate
+// makes record as children of it rather than as orphan siblings.
+func (s *Supervisor) gateBackendAvailable(ctx context.Context, ap *AgentProcess) error {
 	backend := s.GetEffectiveBackend(ap)
 	if backend == "" {
 		// No backend resolved (test fixture or misconfiguration). The
@@ -57,7 +61,7 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 		worktree := ap.Entry.Worktree
 		ap.Mu.Unlock()
 		if wasUnavailable {
-			s.markControlPlaneAgentState(ap, domain.AgentStateActive)
+			s.markControlPlaneAgentState(ctx, ap, domain.AgentStateActive)
 			log.Printf("[daemon] Agent %s: backend %q now on PATH — resuming spawn",
 				worktree, backend)
 		}
@@ -76,7 +80,7 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 	worktree := ap.Entry.Worktree
 	ap.Mu.Unlock()
 
-	s.markControlPlaneAgentState(ap, domain.AgentStateBackendUnavailable)
+	s.markControlPlaneAgentState(ctx, ap, domain.AgentStateBackendUnavailable)
 	if !wasUnavailable {
 		log.Printf("[daemon] Agent %s: backend %q not on PATH — skipping spawn (%s)",
 			worktree, backend, info.InstallHint)

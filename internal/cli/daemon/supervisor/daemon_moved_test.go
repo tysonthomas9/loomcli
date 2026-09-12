@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1774,7 +1775,7 @@ func TestBuildCommand_UsesEffectiveBackend(t *testing.T) {
 			CurrentBackendIdx: 0,
 		}
 
-		cmd, err := s.buildCommand(ap)
+		cmd, err := s.buildCommand(context.Background(), ap)
 		if err != nil {
 			t.Fatalf("buildCommand error: %v", err)
 		}
@@ -1791,7 +1792,7 @@ func TestBuildCommand_UsesEffectiveBackend(t *testing.T) {
 			CurrentBackendIdx: 1,
 		}
 
-		cmd, err := s.buildCommand(ap)
+		cmd, err := s.buildCommand(context.Background(), ap)
 		if err != nil {
 			t.Fatalf("buildCommand error: %v", err)
 		}
@@ -1854,7 +1855,7 @@ func TestBuildCommand_BackendResolutionChain(t *testing.T) {
 			WorktreePath: tmpDir,
 		}
 
-		cmd, err := s.buildCommand(ap)
+		cmd, err := s.buildCommand(context.Background(), ap)
 		if err != nil {
 			t.Fatalf("buildCommand error: %v", err)
 		}
@@ -1885,7 +1886,7 @@ func TestBuildCommand_BackendResolutionChain(t *testing.T) {
 			WorktreePath: tmpDir,
 		}
 
-		cmd, err := s.buildCommand(ap)
+		cmd, err := s.buildCommand(context.Background(), ap)
 		if err != nil {
 			t.Fatalf("buildCommand error: %v", err)
 		}
@@ -1916,7 +1917,7 @@ func TestBuildCommand_BackendResolutionChain(t *testing.T) {
 			WorktreePath: tmpDir,
 		}
 
-		cmd, err := s.buildCommand(ap)
+		cmd, err := s.buildCommand(context.Background(), ap)
 		if err != nil {
 			t.Fatalf("buildCommand error: %v", err)
 		}
@@ -1945,7 +1946,7 @@ func TestBuildCommand_BackendResolutionChain(t *testing.T) {
 			WorktreePath: tmpDir,
 		}
 
-		cmd, err := s.buildCommand(ap)
+		cmd, err := s.buildCommand(context.Background(), ap)
 		if err != nil {
 			t.Fatalf("buildCommand error: %v", err)
 		}
@@ -1976,7 +1977,7 @@ func TestBuildCommand_ToolConstraintEnvVars(t *testing.T) {
 			WorktreePath: tmpDir,
 		}
 
-		cmd, err := s.buildCommand(ap)
+		cmd, err := s.buildCommand(context.Background(), ap)
 		if err != nil {
 			t.Fatalf("buildCommand error: %v", err)
 		}
@@ -2005,7 +2006,7 @@ func TestBuildCommand_ToolConstraintEnvVars(t *testing.T) {
 			WorktreePath: tmpDir,
 		}
 
-		cmd, err := s.buildCommand(ap)
+		cmd, err := s.buildCommand(context.Background(), ap)
 		if err != nil {
 			t.Fatalf("buildCommand error: %v", err)
 		}
@@ -2034,7 +2035,7 @@ func TestBuildCommand_ToolConstraintEnvVars(t *testing.T) {
 			WorktreePath: tmpDir,
 		}
 
-		cmd, err := s.buildCommand(ap)
+		cmd, err := s.buildCommand(context.Background(), ap)
 		if err != nil {
 			t.Fatalf("buildCommand error: %v", err)
 		}
@@ -2068,7 +2069,7 @@ func TestBuildCommand_ToolConstraintEnvVars(t *testing.T) {
 			WorktreePath: tmpDir,
 		}
 
-		cmd, err := s.buildCommand(ap)
+		cmd, err := s.buildCommand(context.Background(), ap)
 		if err != nil {
 			t.Fatalf("buildCommand error: %v", err)
 		}
@@ -2120,7 +2121,7 @@ func TestBuildCommand_RoutingEnvVars(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	cmd, err := s.buildCommand(ap)
+	cmd, err := s.buildCommand(context.Background(), ap)
 	if err != nil {
 		t.Fatalf("buildCommand error: %v", err)
 	}
@@ -2169,7 +2170,7 @@ func TestBuildCommand_NoRoutingEnvVars(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	cmd, err := s.buildCommand(ap)
+	cmd, err := s.buildCommand(context.Background(), ap)
 	if err != nil {
 		t.Fatalf("buildCommand error: %v", err)
 	}
