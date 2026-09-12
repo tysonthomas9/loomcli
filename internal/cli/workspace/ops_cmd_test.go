@@ -178,13 +178,26 @@ func TestAgentDesiredRunnable(t *testing.T) {
 		{
 			name: "running without explicit desired state is runnable",
 			agent: &domain.Agent{
+				Auto:  true,
 				State: domain.AgentStateActive,
 			},
 			want: true,
 		},
 		{
+			// auto: false is a durable policy decision, so it beats any
+			// desired state the row happens to carry.
+			name: "disabled agent is not runnable",
+			agent: &domain.Agent{
+				Auto:         false,
+				State:        domain.AgentStateActive,
+				DesiredState: domain.AgentDesiredRunning,
+			},
+			want: false,
+		},
+		{
 			name: "stopped actual state is not runnable",
 			agent: &domain.Agent{
+				Auto:  true,
 				State: domain.AgentStateStopped,
 			},
 			want: false,
@@ -192,6 +205,7 @@ func TestAgentDesiredRunnable(t *testing.T) {
 		{
 			name: "desired stopped is not runnable",
 			agent: &domain.Agent{
+				Auto:         true,
 				State:        domain.AgentStateActive,
 				DesiredState: domain.AgentDesiredStopped,
 			},
@@ -200,6 +214,7 @@ func TestAgentDesiredRunnable(t *testing.T) {
 		{
 			name: "desired draining is not runnable",
 			agent: &domain.Agent{
+				Auto:         true,
 				State:        domain.AgentStateActive,
 				DesiredState: domain.AgentDesiredDraining,
 			},
@@ -469,6 +484,7 @@ func TestWorkspaceOpsAgentStatusFlagsUnknownRole(t *testing.T) {
 	agent := &domain.Agent{
 		Name:         "rogue",
 		RoleName:     "missing",
+		Auto:         true,
 		State:        domain.AgentStateActive,
 		DesiredState: domain.AgentDesiredRunning,
 	}
@@ -503,6 +519,7 @@ func TestWorkspaceOpsAgentStatusFlagsMissingWorktree(t *testing.T) {
 	agent := &domain.Agent{
 		Name:         "planner",
 		RoleName:     "plan",
+		Auto:         true,
 		State:        domain.AgentStateActive,
 		DesiredState: domain.AgentDesiredRunning,
 	}
@@ -672,6 +689,7 @@ func TestBuildWorkspaceOpsStatusUsesNodeRegistry(t *testing.T) {
 	agent := &domain.Agent{
 		Name:         "planner",
 		RoleName:     "plan",
+		Auto:         true,
 		State:        domain.AgentStateActive,
 		DesiredState: domain.AgentDesiredRunning,
 	}
@@ -744,6 +762,7 @@ func TestBuildWorkspaceOpsStatusIgnoresTaskWorkerNode(t *testing.T) {
 	agent := &domain.Agent{
 		Name:         "planner",
 		RoleName:     "plan",
+		Auto:         true,
 		State:        domain.AgentStateActive,
 		DesiredState: domain.AgentDesiredRunning,
 	}

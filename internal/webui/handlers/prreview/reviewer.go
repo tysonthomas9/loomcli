@@ -344,6 +344,9 @@ func (m *Module) ensureReviewerAgent(ctx context.Context, ws, agentName, repo st
 		WorkspaceKey: ws,
 		Name:         agentName,
 		RoleName:     reviewerRoleName,
+		// Explicit: auto now gates supervision, and a reviewer that the daemon
+		// never runs is a reviewer that never reviews.
+		Auto:         true,
 		Backend:      backend,
 		Repos:        repos,
 		DesiredState: domain.AgentDesiredRunning,
@@ -361,7 +364,25 @@ func (m *Module) ensureReviewerAgent(ctx context.Context, ws, agentName, repo st
 	if !reviewerAgentCurrent(agent, backend, reviewerRoleName) {
 		return m.migrateReviewer(ctx, ws, agentName, backend, reviewerRoleName, repos)
 	}
-	return m.ensureReviewerRepos(ctx, ws, agentName, agent, repos)
+	if err := m.ensureReviewerRepos(ctx, ws, agentName, agent, repos); err != nil {
+		return err
+	}
+	return m.ensureReviewerSupervised(ctx, ws, agentName, agent)
+}
+
+// ensureReviewerSupervised repairs a reviewer row written before auto gated
+// supervision. Such a row carries auto=false, which now means "disabled", and
+// the module owns this agent — leaving it disabled would silently stop PR
+// reviews rather than express any owner policy.
+func (m *Module) ensureReviewerSupervised(ctx context.Context, ws, agentName string, agent *domain.Agent) error {
+	if agent == nil || agent.Auto {
+		return nil
+	}
+	auto := true
+	if _, err := m.store.Agents().Update(ctx, ws, agentName, store.AgentUpdate{Auto: &auto}); err != nil {
+		return fmt.Errorf("enable reviewer agent supervision: %w", err)
+	}
+	return nil
 }
 
 func reviewerRepos(repo string) []string {
@@ -516,9 +537,11 @@ func (m *Module) migrateReviewer(ctx context.Context, ws, agentName, backend, ro
 		return err
 	}
 	running := domain.AgentDesiredRunning
+	auto := true
 	patch := store.AgentUpdate{
 		Backend:      &backend,
 		RoleName:     &roleName,
+		Auto:         &auto,
 		DesiredState: &running,
 	}
 	if len(repos) > 0 {
