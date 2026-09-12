@@ -534,6 +534,146 @@ func TestClaimTask_SimultaneousClaimsElectOneWinner(t *testing.T) {
 	}
 }
 
+// TestClaimTask_SimultaneousWorktreelessClaimsElectOneWinner is the sibling of
+// the test above for the one configuration the ledger used to let through: an
+// agent configured without a worktree. Those agents once shared the identity
+// "role:<role>", so the second one hit reserve's "re-reserving your own task is
+// a no-op" path and reached the backend alongside the first.
+func TestClaimTask_SimultaneousWorktreelessClaimsElectOneWinner(t *testing.T) {
+	const agents = 4
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{
+		{ID: "task-hot", IssueType: "task", Status: "open", Priority: 0, Title: "Contended", Design: "plan"},
+	}
+	// The broken backend under test: no mutual exclusion at all.
+	mock.ClaimIssueFn = func(_ context.Context, _ string, _ time.Duration) error { return nil }
+
+	s := &Supervisor{IssueBackend: mock}
+	aps := make([]*AgentProcess, agents)
+	for i := range aps {
+		aps[i] = &AgentProcess{
+			Entry:      cfgpkg.AgentEntry{Worktree: "", Role: "task"},
+			RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+		}
+	}
+
+	start := make(chan struct{})
+	results := make(chan bool, agents)
+	for _, ap := range aps {
+		go func(ap *AgentProcess) {
+			<-start
+			results <- s.claimTask(ap, "")
+		}(ap)
+	}
+	close(start)
+
+	winners := 0
+	for i := 0; i < agents; i++ {
+		if <-results {
+			winners++
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("winners = %d, want exactly 1", winners)
+	}
+
+	// Agents are identified by index here: Entry.Worktree is empty for all of
+	// them, which is the whole point of the case.
+	holders := 0
+	for i, ap := range aps {
+		ap.Mu.Lock()
+		assigned := ap.AssignedTaskID
+		lastErr := ap.LastError
+		ap.Mu.Unlock()
+		if assigned == "task-hot" {
+			holders++
+			continue
+		}
+		if assigned != "" {
+			t.Fatalf("loser %d assigned %q, want empty", i, assigned)
+		}
+		if lastErr == nil || lastErr.Class != agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome) {
+			t.Fatalf("loser %d LastError = %#v, want LockConflict", i, lastErr)
+		}
+	}
+	if holders != 1 {
+		t.Fatalf("agents holding task-hot = %d, want 1", holders)
+	}
+}
+
+// TestClaimantID_WorktreelessAgentsAreDistinct names the invariant directly, so
+// a future refactor cannot quietly collapse two worktree-less agents back onto
+// one identity.
+func TestClaimantID_WorktreelessAgentsAreDistinct(t *testing.T) {
+	withWorktree := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "worker-1", Role: "task"}}
+	if got := claimantID(withWorktree); got != "worker-1" {
+		t.Fatalf("claimantID(worktree agent) = %q, want %q", got, "worker-1")
+	}
+
+	a := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "", Role: "task"}}
+	b := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "", Role: "task"}}
+
+	idA := claimantID(a)
+	idB := claimantID(b)
+	if idA == "" || idB == "" {
+		t.Fatalf("worktree-less identities must be non-empty: %q, %q", idA, idB)
+	}
+	if idA == idB {
+		t.Fatalf("two worktree-less agents of one role share identity %q", idA)
+	}
+	if again := claimantID(a); again != idA {
+		t.Fatalf("claimantID not stable: %q then %q", idA, again)
+	}
+}
+
+// TestClaimantID_ConcurrentCallersAgree pins the memoization down under -race:
+// several goroutines asking one agent for its identity must all get the same
+// answer.
+func TestClaimantID_ConcurrentCallersAgree(t *testing.T) {
+	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "", Role: "task"}}
+	const callers = 8
+	ids := make(chan string, callers)
+	start := make(chan struct{})
+	for i := 0; i < callers; i++ {
+		go func() {
+			<-start
+			ids <- claimantID(ap)
+		}()
+	}
+	close(start)
+
+	first := <-ids
+	for i := 1; i < callers; i++ {
+		if got := <-ids; got != first {
+			t.Fatalf("concurrent claimantID disagreed: %q vs %q", first, got)
+		}
+	}
+}
+
+// TestClaimTask_WorktreelessResumeReReservesOwnTask guards the resume flow: the
+// memoized identity must still let an agent re-reserve the task it already
+// holds, which reserve treats as a no-op.
+func TestClaimTask_WorktreelessResumeReReservesOwnTask(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{
+		{ID: "task-1", IssueType: "task", Status: "open", Priority: 0, Title: "Ready", Design: "plan"},
+	}
+	s := &Supervisor{IssueBackend: mock}
+	ap := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "", Role: "task"},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+	if !s.claimTask(ap, "") {
+		t.Fatalf("claimTask = false, want true")
+	}
+	if ap.AssignedTaskID != "task-1" {
+		t.Fatalf("AssignedTaskID = %q, want task-1", ap.AssignedTaskID)
+	}
+	if err := s.claims.reserve("task-1", claimantID(ap)); err != nil {
+		t.Fatalf("re-reserving own task = %v, want nil", err)
+	}
+}
+
 func TestClaimTask_LoserFallsThroughToAnotherTask(t *testing.T) {
 	mock := clitest.NewMockIssueBackend()
 	mock.ReadyResult = []backend.IssueData{
