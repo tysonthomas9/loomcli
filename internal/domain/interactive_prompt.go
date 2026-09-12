@@ -12,6 +12,7 @@ var builtinInteractivePrompts = []BuiltinInteractivePrompt{
 	{ID: "lead", Label: "Lead"},
 	{ID: "pr-review", Label: "PR Review"},
 	{ID: "pr-review-checkout", Label: "PR Review (checkout)", Hidden: true},
+	{ID: "lead-profile", Label: "Lead (profile)", Hidden: true},
 }
 
 // BuiltinInteractivePrompts returns the built-in interactive terminal prompts.
