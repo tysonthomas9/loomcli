@@ -25,7 +25,12 @@ const (
 	KindNotImplemented ErrorKind = "not_implemented"
 	KindInternal       ErrorKind = "internal"
 	KindCanceled       ErrorKind = "canceled"
+	KindRateLimited    ErrorKind = "rate_limited"
 )
+
+// MetaRetryAfter is the BackendError.Meta key holding the upstream
+// Retry-After header verbatim (delta-seconds or HTTP-date).
+const MetaRetryAfter = "retry_after"
 
 // BackendError represents a typed backend-layer error.
 // Implementations of IssueBackend return *BackendError to indicate
@@ -146,6 +151,13 @@ func ErrTimeout(op, msg string, cause error) *BackendError {
 // ErrInternal creates a KindInternal error for unexpected backend failures.
 func ErrInternal(op, msg string, cause error) *BackendError {
 	return &BackendError{Kind: KindInternal, Op: op, Message: msg, Cause: cause}
+}
+
+// ErrRateLimited creates a KindRateLimited error when the backend throttled
+// the request. Distinct from KindUnavailable, which means "unreachable":
+// a throttle is a healthy backend asking the caller to slow down.
+func ErrRateLimited(op, msg string) *BackendError {
+	return &BackendError{Kind: KindRateLimited, Op: op, Message: msg}
 }
 
 // ErrCanceled creates a KindCanceled error when an operation is canceled via context.
