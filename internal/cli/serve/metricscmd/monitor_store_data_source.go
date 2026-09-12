@@ -30,6 +30,12 @@ type MonitorStoreDataSource struct {
 type monitorStoreData struct {
 	Workspace WorkspaceInfo
 	Agents    []monitor.AgentStatus
+	// AgentStates is the raw domain.AgentState per agent name. AgentStatus.Status
+	// collapses every non-active state to "idle", which is fine for the UI but
+	// loses the stopped/backend_unavailable distinction the loom_fleet_workers
+	// "blocked" bucket is made of. Kept off AgentStatus deliberately: that type
+	// is the JSON API shape and this is an internal detail of this cache.
+	AgentStates map[string]domain.AgentState
 }
 
 type agentInboxSummary struct {
@@ -109,8 +115,9 @@ func monitorStoreCacheKey(workspaceHint string) string {
 
 func emptyMonitorStoreData() monitorStoreData {
 	return monitorStoreData{
-		Workspace: WorkspaceInfo{Mode: "workspace"},
-		Agents:    []monitor.AgentStatus{},
+		Workspace:   WorkspaceInfo{Mode: "workspace"},
+		Agents:      []monitor.AgentStatus{},
+		AgentStates: map[string]domain.AgentState{},
 	}
 }
 
@@ -143,6 +150,12 @@ func collectMonitorStoreData(ctx context.Context, st store.Store, workspaceHint 
 	orchestrationByAgent := latestOrchestrationSessionsForMonitor(ctx, st, wsKey)
 	inboxByAgent := agentInboxSummariesForMonitor(ctx, st, wsKey)
 	data.Agents = monitorAgentStatuses(assignments, rolesByName, workspaceData, latestSessions, orchestrationByAgent, inboxByAgent, wsName)
+	for _, assignment := range assignments {
+		if assignment == nil {
+			continue
+		}
+		data.AgentStates[assignment.Name] = assignment.State
+	}
 	return data
 }
 
