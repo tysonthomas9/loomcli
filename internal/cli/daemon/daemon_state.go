@@ -164,6 +164,7 @@ func toDaemonAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) Da
 		OwnershipLastHeartbeat: ap.OwnershipLastHeartbeat,
 		LastActivity:           ap.LastActivity,
 		ClaimsGated:            ap.ClaimsGated,
+		ProfileError:           ap.ProfileError,
 	}
 	if ap.StopReason != "" && ap.PID == 0 {
 		if !ap.LastExit.IsZero() {
@@ -184,7 +185,8 @@ func computeAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) str
 	// the supervise goroutine is alive and the agent self-resumes, so it is
 	// not "failed". Checked after the running guard so a re-spawned agent
 	// reads as "running".
-	if ap.StopReason == supervisor.StopReasonMaxRetriesBlocked {
+	if ap.StopReason == supervisor.StopReasonMaxRetriesBlocked ||
+		ap.StopReason == supervisor.StopReasonProfileInvalid {
 		return "blocked"
 	}
 	// Not running - check if it failed via stop reason or restart count.
