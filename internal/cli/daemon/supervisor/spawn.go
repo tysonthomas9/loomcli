@@ -613,6 +613,7 @@ var (
 	ErrProfileManifestMissing     = agentprofile.ErrManifestMissing
 	ErrProfileManifestUnreadable  = agentprofile.ErrManifestUnreadable
 	ErrProfileFingerprintMismatch = agentprofile.ErrFingerprintMismatch
+	ErrProfileManagedContentDrift = agentprofile.ErrManagedContentDrift
 	ErrProfileVersionDrift        = agentprofile.ErrVersionDrift
 	ErrProfileVersionUnknown      = agentprofile.ErrVersionUnknown
 )
