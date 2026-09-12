@@ -518,6 +518,9 @@ func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) 
 	if err != nil && params.ExternalRef != "" && isCreateExternalRefUnsupported(err) {
 		result, err = b.createWithoutExternalRef(ctx, params)
 	}
+	if err != nil && params.AcceptanceCriteria != "" && isCreateAcceptanceCriteriaUnsupported(err) {
+		result, err = b.createWithoutAcceptanceCriteria(ctx, params)
+	}
 	if err != nil {
 		return result, err
 	}
