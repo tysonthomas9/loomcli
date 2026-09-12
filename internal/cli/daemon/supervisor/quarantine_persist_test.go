@@ -411,10 +411,8 @@ func TestRecordTaskExit_NonLifecycleStopsStillEligible(t *testing.T) {
 	for _, reason := range []StopReason{
 		"", // bare crash / ownership kill
 		StopReasonWatchdog,
-		StopReasonRunDurationExceeded,
+		StopReasonRunDurationExceeded, // counts only when also silent (PUPPET-198); RunSilentAtStop set below
 		StopReasonFatalError,
-		StopReasonFastFail,
-		StopReasonMaxRetries,
 	} {
 		name := string(reason)
 		if name == "" {
@@ -424,6 +422,7 @@ func TestRecordTaskExit_NonLifecycleStopsStillEligible(t *testing.T) {
 			s := newQuarantineSupervisor(nil)
 			ap := newKilledAgent(t, "falcon", "T-eligible", timeoutOutcome())
 			ap.StopReason = reason
+			ap.RunSilentAtStop = true
 
 			s.recordTaskExitForQuarantine(ap, 137)
 
@@ -462,12 +461,18 @@ func TestRecordTaskExit_DrainOfCommittingAgentStillEvicts(t *testing.T) {
 }
 
 func TestStopReasonQuarantineEligible(t *testing.T) {
+	// PUPPET-108's lifecycle exemptions plus PUPPET-198's infrastructure and
+	// agent-budget exemptions, now one predicate (quarantineCountable).
 	notEligible := map[StopReason]bool{
-		StopReasonConfigRemoved: true,
-		StopReasonShutdown:      true,
-		StopReasonManualStop:    true,
-		StopReasonYielded:       true,
-		StopReasonEphemeralDone: true,
+		StopReasonConfigRemoved:      true,
+		StopReasonShutdown:           true,
+		StopReasonManualStop:         true,
+		StopReasonYielded:            true,
+		StopReasonEphemeralDone:      true,
+		StopReasonBackendUnavailable: true,
+		StopReasonMaxRetries:         true,
+		StopReasonMaxRetriesBlocked:  true,
+		StopReasonFastFail:           true,
 	}
 	all := []StopReason{
 		"", StopReasonNoWork, StopReasonRateLimited, StopReasonMaxRetries,
@@ -476,10 +481,13 @@ func TestStopReasonQuarantineEligible(t *testing.T) {
 		StopReasonBackendUnavailable, StopReasonEphemeralDone,
 		StopReasonMaxRetriesBlocked, StopReasonFastFail, StopReasonRunDurationExceeded,
 	}
+	s := newQuarantineSupervisor(nil)
 	for _, r := range all {
 		want := !notEligible[r]
-		if got := stopReasonQuarantineEligible(r); got != want {
-			t.Errorf("stopReasonQuarantineEligible(%q) = %v, want %v", r, got, want)
+		// RunSilent: a silent duration kill is countable; the active case is
+		// covered by TestQuarantineCountable_DurationKillCountsOnlyWhenSilent.
+		if got, _ := s.quarantineCountable(killEvent{StopReason: string(r), RunSilent: true}); got != want {
+			t.Errorf("quarantineCountable(%q) = %v, want %v", r, got, want)
 		}
 	}
 }
