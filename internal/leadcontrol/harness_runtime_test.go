@@ -50,6 +50,13 @@ func TestHarnessLeadArgsPromptPlacement(t *testing.T) {
 			cfg:  HarnessLeadRuntimeConfig{Args: []string{"--model", "provider/model"}, PromptFlag: "--prompt"},
 			want: []string{"--model", "provider/model"},
 		},
+		{
+			// A suppressed persona (--prompt builtin:none) must not become a
+			// bare "" positional.
+			name: "empty prompt omits positional",
+			cfg:  HarnessLeadRuntimeConfig{Args: []string{"--force"}},
+			want: []string{"--force"},
+		},
 	}
 
 	for _, tc := range tests {
@@ -57,6 +64,54 @@ func TestHarnessLeadArgsPromptPlacement(t *testing.T) {
 			got := harnessLeadArgs(tc.cfg)
 			if strings.Join(got, "\x00") != strings.Join(tc.want, "\x00") {
 				t.Fatalf("harnessLeadArgs() = %q, want %q", got, tc.want)
+			}
+			for i, arg := range got {
+				if arg == "" {
+					t.Fatalf("harnessLeadArgs()[%d] is an empty string: %q", i, got)
+				}
+			}
+		})
+	}
+}
+
+// TestCodexRemoteTUIArgsPromptPlacement pins the remote-TUI argv. The prompt is
+// the final positional and must vanish entirely when suppressed - `codex ... ""`
+// is not the same command as `codex ...`.
+func TestCodexRemoteTUIArgsPromptPlacement(t *testing.T) {
+	base := []string{
+		"--remote", "http://127.0.0.1:1234",
+		"--no-alt-screen",
+		"--dangerously-bypass-approvals-and-sandbox",
+		"-C", "/tmp/work",
+	}
+
+	tests := []struct {
+		name string
+		cfg  CodexLeadRuntimeConfig
+		want []string
+	}{
+		{
+			name: "positional prompt",
+			cfg:  CodexLeadRuntimeConfig{WorkDir: "/tmp/work", Prompt: "lead prompt"},
+			want: append(append([]string{}, base...), "lead prompt"),
+		},
+		{
+			name: "empty prompt omits positional",
+			cfg:  CodexLeadRuntimeConfig{WorkDir: "/tmp/work"},
+			want: base,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := codexRemoteTUIArgs(tc.cfg, "http://127.0.0.1:1234")
+			if strings.Join(got, "\x00") != strings.Join(tc.want, "\x00") {
+				t.Fatalf("codexRemoteTUIArgs() = %q, want %q", got, tc.want)
+			}
+			for i, arg := range got {
+				if arg == "" {
+					t.Fatalf("codexRemoteTUIArgs()[%d] is an empty string: %q", i, got)
+				}
 			}
 		})
 	}

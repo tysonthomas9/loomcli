@@ -5,6 +5,7 @@ import (
 	"embed"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -405,6 +406,11 @@ func LeadSafetyPrompt() string {
 	return buildSafetyGuardrailsBlock()
 }
 
+// BuiltinPromptNone is the built-in prompt id that suppresses the argv persona
+// entirely, for sessions whose role instructions arrive as ambient profile
+// context (a profile CLAUDE.md, a seeded AGENTS.md) instead of on argv.
+const BuiltinPromptNone = "none"
+
 // GenerateTerminalPrompt creates the base prompt for the interactive terminal
 // agent runtime. Empty promptFile preserves the built-in lead prompt; a custom
 // prompt file replaces that base and still receives the terminal safety rules.
@@ -417,6 +423,20 @@ func GenerateTerminalPrompt(promptFile string) (string, error) {
 		id := strings.TrimSpace(strings.TrimPrefix(promptFile, "builtin:"))
 		if !isBuiltinInteractivePrompt(id) {
 			return "", fmt.Errorf("unknown built-in interactive prompt %q", id)
+		}
+		// Suppression is absolute and deliberately short-circuits BEFORE
+		// renderPrompt: that would prepend the read-only preamble and would
+		// honor a ./loom-prompts/none.md override. An override that silently
+		// un-suppressed the persona would be a security surprise, and the
+		// empty embedded template alone would not deliver an empty prompt.
+		if id == BuiltinPromptNone {
+			if ReadOnlyPreamble() != "" {
+				// The soft read-only instruction now reaches the model through
+				// no channel at all. Not fatal: hard enforcement is the backend
+				// flag mapping (backends.ValidateSafetyKnobs and friends).
+				slog.Warn("read-only preamble suppressed: --prompt builtin:none removes the argv persona", "prompt", promptFile)
+			}
+			return "", nil
 		}
 		return renderPrompt(id, terminalPromptTemplateData()), nil
 	}

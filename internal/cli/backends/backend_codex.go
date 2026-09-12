@@ -42,7 +42,11 @@ func buildCodexInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	args := append([]string{"--no-alt-screen"}, codexSandboxArgs()...)
 	args = appendCodexEffortArgs(args, resolveAgentEffort())
 	args = appendCodexModelArgs(args, resolveAgentModel())
-	args = append(args, prompt)
+	// A suppressed persona (--prompt builtin:none) must omit the positional
+	// entirely; `codex ""` is not the same as `codex`.
+	if prompt != "" {
+		args = append(args, prompt)
+	}
 	cmd := exec.Command("codex", args...)
 	cmd.Dir = workDir
 	cmd.Env = buildBackendEnv(workDir, agentName)
