@@ -718,9 +718,19 @@ func TestRunWebUiWithLoomScript_Deleted(t *testing.T) {
 	}
 }
 
-// TestDockerComposeDevYml_Exists verifies that docker-compose.dev.yml exists
-// at repo root and defines the expected services and profile.
-func TestDockerComposeDevYml_Exists(t *testing.T) {
+// TestDockerComposeDevYml_WiresFullStack verifies that docker-compose.dev.yml
+// exists at repo root and still wires the four services the stack needs to
+// come up at all.
+//
+// These are substring checks and nothing more. They guard against the specific
+// regressions that made this stack unstartable — no fleet-db service (so
+// `loom serve` crash-loops on a missing embedded backend), no
+// LOOM_FLEET_DB_URL (same failure), no --bind (the server binds the
+// container's own loopback and the published port answers nothing), no
+// runtime-terminal target (no shell, so no PTY and no healthcheck), no
+// LOOM_CONFIG_DIR (terminal state dies with the container). They cannot catch
+// a broken image; `make compose-smoke` is what actually starts the stack.
+func TestDockerComposeDevYml_WiresFullStack(t *testing.T) {
 	t.Parallel()
 
 	data, err := os.ReadFile(repoRoot(t) + "/docker-compose.dev.yml")
@@ -729,9 +739,62 @@ func TestDockerComposeDevYml_Exists(t *testing.T) {
 	}
 	content := string(data)
 
-	for _, needle := range []string{"services:", "server:", "frontend:", "redis:", "profiles:", "fleet"} {
+	for _, needle := range []string{
+		"services:", "server:", "frontend:", "redis:", "fleet-db:",
+		"LOOM_FLEET_DB_URL", "runtime-terminal", "LOOM_CONFIG_DIR",
+	} {
 		if !strings.Contains(content, needle) {
 			t.Errorf("docker-compose.dev.yml should contain %q", needle)
+		}
+	}
+}
+
+// TestDeployServerDockerfile_Targets verifies the server image keeps both
+// runtime targets and binds to all interfaces.
+//
+// --bind lives in the Dockerfile CMD rather than in a compose `command:`, so
+// it applies to every consumer of the image, including a bare `docker run`.
+// Without it the server binds the container's own loopback interface and a
+// published port answers nothing.
+//
+// The `runtime` stage must stay LAST: whichever stage a Dockerfile ends with
+// is the default build target, and deploy/README.md Shape 2 documents that a
+// bare `docker build` yields the hardened image.
+func TestDeployServerDockerfile_Targets(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/deploy/server/Dockerfile")
+	if err != nil {
+		t.Fatalf("reading deploy/server/Dockerfile: %v", err)
+	}
+	content := string(data)
+
+	for _, needle := range []string{"AS runtime-terminal", "AS runtime", "--bind", "SHELL=/bin/bash"} {
+		if !strings.Contains(content, needle) {
+			t.Errorf("deploy/server/Dockerfile should contain %q", needle)
+		}
+	}
+
+	if strings.LastIndex(content, "AS runtime\n") < strings.LastIndex(content, "AS runtime-terminal") {
+		t.Error("the `runtime` stage must be the LAST stage so a bare docker build produces the hardened image")
+	}
+}
+
+// TestDeployDockerCompose_WiresIssueBackend verifies the production compose
+// reference also defines an issue backend. Without one the server container
+// crash-loops on startup, which is the defect this guards.
+func TestDeployDockerCompose_WiresIssueBackend(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/deploy/docker-compose.yml")
+	if err != nil {
+		t.Fatalf("reading deploy/docker-compose.yml: %v", err)
+	}
+	content := string(data)
+
+	for _, needle := range []string{"fleet-db:", "LOOM_FLEET_DB_URL"} {
+		if !strings.Contains(content, needle) {
+			t.Errorf("deploy/docker-compose.yml should contain %q", needle)
 		}
 	}
 }
