@@ -28,6 +28,13 @@ func TestBlamelessTerminalReasons_DoNotConsumeBudget(t *testing.T) {
 			wantDecision: StopFatal,
 		},
 		{
+			name: "a billing wall stops for the operator rather than retrying",
+			text: agenterr.BillingWallMarker + ": Your credit balance is too low.",
+			// Unlike a quota window, this does not lift on its own: no number
+			// of retries makes an unpaid account able to run a turn.
+			wantDecision: StopFatal,
+		},
+		{
 			name: "an exhausted quota retries without spending the restart budget",
 			text: agenterr.UsageLimitedMarker + ": usage_limit",
 			// The window reopens on its own, so this must be RetryUncounted:

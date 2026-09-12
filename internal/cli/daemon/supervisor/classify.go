@@ -48,6 +48,10 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 		backend = s.ConfigSnapshot().Backend
 	}
 
+	if s.classifyFromHarnessMarker(ap, exitCode, backend, logPath, logStart, stopReason) {
+		return
+	}
+
 	// A duration kill is classified from the stop reason rather than the exit,
 	// and checked before everything else because every arm below would read it
 	// wrong. See markRunDurationExceeded.
@@ -149,6 +153,35 @@ func (s *Supervisor) markSupervisorStop(ap *AgentProcess, exitCode int, backend 
 		"worktree", ap.Entry.Worktree, "exit_code", exitCode, "stop_reason", string(reason))
 }
 
+// classifyFromHarnessMarker applies the leaf's categorical markers, and
+// reports whether one applied.
+//
+// A categorical harness marker outranks the stop reason, and is therefore
+// read before it. The reasoning below ("a capped run has no characteristic
+// output, so log classification is arbitrary") holds for INFERENCE from a
+// kill's arbitrary output tail — it does not hold for one of the three
+// explicit markers the leaf emits, which are statements about the account,
+// not guesses about the text. Without this a billing wall that outlived the
+// run cap is filed as a timeout, and a walled agent with no task claimed is
+// filed as "no work": both hide the one fact an operator needs.
+//
+// Only the explicit markers override. A pattern match never does.
+func (s *Supervisor) classifyFromHarnessMarker(ap *AgentProcess, exitCode int, backend, logPath string, logStart int64, stopReason StopReason) bool {
+	ae, ok := agenterr.ClassifyMarkerFromLogAt(logPath, logStart)
+	if !ok {
+		return false
+	}
+	ae.ExitCode = exitCode
+	ae.Backend = backend
+	ap.Mu.Lock()
+	ap.LastError = ae
+	ap.LastNoWork = false
+	ap.Mu.Unlock()
+	slog.Info("agent exit classified from a harness marker",
+		"worktree", ap.Entry.Worktree, "class", ae.Class, "stop_reason", stopReason, "message", ae.Message)
+	return true
+}
+
 // markNoWork records an exit with no task attached: the agent found nothing
 // claimable and went home. A watchdog stop can make an otherwise idle agent exit
 // non-zero, so this is preferred over log-pattern timeout classification
@@ -188,7 +221,10 @@ func (s *Supervisor) markNoWork(ap *AgentProcess, backend string) {
 //   - A non-zero exit log-classifies the tail: whatever the agent happened to
 //     print in its last hundred lines. A run capped for length has no
 //     characteristic output, so the verdict is arbitrary — in practice the
-//     exit-143 fallback, Transient, which is the wrong backoff bucket.
+//     exit-143 fallback, Transient, which is the wrong backoff bucket. This
+//     is an argument about INFERENCE from prose, which is why classifyAgentExit
+//     still lets an explicit harness marker outrank the stop reason before it
+//     ever gets here.
 //
 // The class is wrapper.ErrTimeout rather than a new domain outcome. That is
 // already where the silence watchdog's own kills resolve (exit 137 via
