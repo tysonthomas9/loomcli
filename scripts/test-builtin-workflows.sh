@@ -29,5 +29,8 @@ printf '%s\n' '{"type":"module"}' > "$STAGE/package.json"
 cp "$SRC"/*.ts "$SRC"/*.test.mjs "$STAGE/"
 
 echo "==> node --test (from staged dir)"
-( cd "$STAGE"; node --test ./*.test.mjs )
+# The tests run from $STAGE, not from the repo, so a test that needs a checked-in
+# data file (e.g. the vendored sensitive-env-name contract) cannot resolve it
+# relative to its own module URL. Hand it the repo root explicitly.
+( cd "$STAGE"; LOOM_REPO_ROOT="$ROOT" node --test ./*.test.mjs )
 echo "==> done. staging kept at $STAGE (in \$TMPDIR; OS-cleaned)"
