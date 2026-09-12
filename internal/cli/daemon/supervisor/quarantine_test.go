@@ -908,3 +908,186 @@ func TestSweep_GuardLatchExcludedFromDaemonStatus(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// comment / label progress (the review roles: critic, integrator, tester,
+// decomposer — whose artifact is a comment or a label, never a worktree commit
+// and never a design/notes edit)
+// ---------------------------------------------------------------------------
+
+// issueStub is the mutable issue state a stub backend reports, so a test can
+// advance comments / labels / status between kills the way a real run does.
+type issueStub struct {
+	status   string
+	design   string
+	notes    string
+	labels   []string
+	comments []backend.CommentData
+}
+
+func (st *issueStub) addComment(id int64) {
+	st.comments = append(st.comments, backend.CommentData{ID: id, Text: fmt.Sprintf("c%d", id)})
+}
+
+// stubIssueMock serves *st from Get, copying the slices so the ledger never
+// aliases the test's mutable state.
+func stubIssueMock(st *issueStub) *clitest.MockIssueBackend {
+	mock := clitest.NewMockIssueBackend()
+	mock.GetFn = func(_ context.Context, _ string) (*backend.IssueDetailData, error) {
+		return &backend.IssueDetailData{
+			IssueData: backend.IssueData{
+				Status: st.status,
+				Design: st.design,
+				Notes:  st.notes,
+				Labels: append([]string(nil), st.labels...),
+			},
+			Comments: append([]backend.CommentData(nil), st.comments...),
+		}, nil
+	}
+	return mock
+}
+
+func TestRecordTaskExit_NewCommentCountsAsProgress(t *testing.T) {
+	// The PUPPET-178 shape: a critic reviewed the task, posted its verdict,
+	// and was then reaped. That kill must not count against the task it just
+	// advanced.
+	st := &issueStub{status: "open", design: "d1", comments: []backend.CommentData{{ID: 41}}}
+	s := newQuarantineSupervisor(stubIssueMock(st))
+	ap := newKilledAgent(t, "critic", "T-50", timeoutOutcome())
+
+	s.recordTaskExitForQuarantine(ap, 137) // baseline anchored at max comment 41
+	rec := record(s, "T-50")
+	if rec == nil || !rec.BaselineKnown || rec.BaselineMaxCommentID != 41 {
+		t.Fatalf("setup: record = %+v, want baseline anchored at comment 41", rec)
+	}
+
+	st.addComment(42) // the verdict the reaped critic had already posted
+	s.recordTaskExitForQuarantine(ap, 137)
+
+	if rec := record(s, "T-50"); rec != nil {
+		t.Fatalf("a new comment must evict the record, got %+v", rec)
+	}
+}
+
+func TestRecordTaskExit_DeletedCommentIsNotProgress(t *testing.T) {
+	st := &issueStub{status: "open", comments: []backend.CommentData{{ID: 7}, {ID: 8}}}
+	s := newQuarantineSupervisor(stubIssueMock(st))
+	ap := newKilledAgent(t, "critic", "T-51", timeoutOutcome())
+
+	s.recordTaskExitForQuarantine(ap, 137) // baseline max = 8
+
+	st.comments = st.comments[:1] // comment 8 deleted: max DROPS to 7
+	s.recordTaskExitForQuarantine(ap, 137)
+
+	rec := record(s, "T-51")
+	if rec == nil || rec.Count != 2 {
+		t.Fatalf("record = %+v, want Count 2 (a deleted comment lowers the max and is not progress)", rec)
+	}
+}
+
+func TestRecordTaskExit_LabelSetDeltaCountsAsProgress(t *testing.T) {
+	st := &issueStub{status: "open", labels: []string{"ready-to-implement"}}
+	s := newQuarantineSupervisor(stubIssueMock(st))
+	ap := newKilledAgent(t, "tester", "T-52", timeoutOutcome())
+
+	s.recordTaskExitForQuarantine(ap, 137)
+	st.labels = []string{"ready-to-implement"} // re-set, same SET: not progress
+	s.recordTaskExitForQuarantine(ap, 137)
+	if got := recordCount(s, "T-52"); got != 2 {
+		t.Fatalf("Count = %d, want 2 (an unchanged label set is not progress)", got)
+	}
+
+	st.labels = []string{"in-review", "ready-to-implement"} // the tester's stamp landed
+	s.recordTaskExitForQuarantine(ap, 137)
+	if rec := record(s, "T-52"); rec != nil {
+		t.Fatalf("a changed label set must evict the record, got %+v", rec)
+	}
+
+	// Label ORDER is not meaningful: the same set permuted is still no progress.
+	s.recordTaskExitForQuarantine(ap, 137)
+	st.labels = []string{"ready-to-implement", "in-review"}
+	s.recordTaskExitForQuarantine(ap, 137)
+	if got := recordCount(s, "T-52"); got != 2 {
+		t.Fatalf("Count = %d, want 2 (label order is not progress)", got)
+	}
+}
+
+func TestRecordTaskExit_StatusChurnIsNotProgress(t *testing.T) {
+	// The daemon itself drives open -> in_progress -> open on every pick and
+	// recovery. Counting Status (or UpdatedAt) would report progress on every
+	// cycle and disable the breaker outright.
+	st := &issueStub{status: "open", design: "d1"}
+	s := newQuarantineSupervisor(stubIssueMock(st))
+	ap := newKilledAgent(t, "worker", "T-53", timeoutOutcome())
+
+	for i, status := range []string{"open", "in_progress", "open", "in_progress", "open"} {
+		st.status = status
+		s.recordTaskExitForQuarantine(ap, 137)
+		if got := recordCount(s, "T-53"); got != i+1 {
+			t.Fatalf("after status %q: Count = %d, want %d (status churn is not progress)", status, got, i+1)
+		}
+	}
+}
+
+func TestSweep_LatchClearsBaselineSoOwnCommentIsNotProgress(t *testing.T) {
+	// latch used to zero Count but leave the baseline frozen, and
+	// postQuarantineComment then posts the kill timeline — so the daemon read
+	// its OWN write as task progress on the very next kill.
+	st := &issueStub{status: "open", design: "d1", comments: []backend.CommentData{{ID: 1}}}
+	mock := stubIssueMock(st)
+	nextCommentID := int64(1)
+	mock.AddCommentFn = func(_ context.Context, p backend.CommentAddParams) (*backend.CommentData, error) {
+		nextCommentID++
+		st.addComment(nextCommentID)
+		return &backend.CommentData{ID: nextCommentID, IssueID: p.IssueID, Text: p.Text}, nil
+	}
+	mock.UpdateFn = func(_ context.Context, _ string, p backend.UpdateParams) error {
+		st.labels = append(st.labels, p.AddLabels...)
+		return nil
+	}
+	s := newQuarantineSupervisor(mock)
+	ap := newKilledAgent(t, "critic", "T-54", timeoutOutcome())
+
+	killNTimes(s, ap, 3)
+	s.sweepQuarantineDue(ap)
+
+	rec := record(s, "T-54")
+	if rec == nil || rec.QuarantinedAt.IsZero() || !rec.DaemonWrote {
+		t.Fatalf("setup: record = %+v, want a daemon-written latch", rec)
+	}
+	if rec.BaselineKnown || rec.BaselineMaxCommentID != 0 || rec.BaselineLabelsHash != 0 {
+		t.Fatalf("latch left a stale baseline: %+v", rec)
+	}
+	if st.comments[len(st.comments)-1].ID <= 1 {
+		t.Fatal("setup: the kill-timeline comment did not land on the stub")
+	}
+
+	// Two fresh kills with no real progress: the daemon's own comment (and
+	// its own label) must not read as movement, so they accumulate.
+	killNTimes(s, ap, 2)
+	if got := recordCount(s, "T-54"); got != 2 {
+		t.Fatalf("Count = %d, want 2 (the daemon's own quarantine writes are not task progress)", got)
+	}
+}
+
+func TestSweep_CommentProgressBetweenKillsAndSweepReleases(t *testing.T) {
+	st := &issueStub{status: "open", design: "d1", comments: []backend.CommentData{{ID: 5}}}
+	s := newQuarantineSupervisor(stubIssueMock(st))
+	ap := newKilledAgent(t, "integrator", "T-55", timeoutOutcome())
+
+	killNTimes(s, ap, 3) // baseline anchored at max comment 5
+	st.addComment(6)     // a review landed in the kills -> sweep gap
+	s.sweepQuarantineDue(ap)
+
+	if got := updateCountOf(s); got != 0 {
+		t.Fatalf("Update count = %d, want 0 (a task that gained a comment is released, not blocked)", got)
+	}
+	if rec := record(s, "T-55"); rec != nil {
+		t.Fatalf("record = %+v, want evicted", rec)
+	}
+}
+
+// updateCountOf reads the Update call count off the supervisor's backend.
+func updateCountOf(s *Supervisor) int {
+	return s.IssueBackend.(*clitest.MockIssueBackend).CallCount("Update")
+}
