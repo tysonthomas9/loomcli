@@ -9,6 +9,17 @@
 
 export const NEEDS_REVISION_LABEL = "needs-revision";
 
+/**
+ * Reserved label that parks an issue for a human: it stays open and workable
+ * by a person, but no agent may select it. fleet-db enforces this server-side;
+ * the client mirrors it so the parked state is visible on the board.
+ *
+ * Exact, lowercase string equality — no prefix matching, no case folding, so
+ * "operator-notes" and "Operator" are ordinary labels.
+ * SYNC: taskfilter.go OperatorLabel / HasOperatorLabel.
+ */
+export const OPERATOR_LABEL = "operator";
+
 // --- Types ---
 
 export type OpenStatus = "needs_plan" | "ready";
@@ -45,6 +56,15 @@ export function hasDesign(issue: OpenStatusCheckable): boolean {
   return (
     !!issue.design || !!issue.design_artifact_id || issue.has_design === true
   );
+}
+
+/**
+ * Whether the issue is parked for an operator (agents will not select it).
+ *
+ * SYNC: Must match taskfilter.go HasOperatorLabel()
+ */
+export function hasOperatorLabel(issue: { labels?: string[] }): boolean {
+  return issue.labels?.includes(OPERATOR_LABEL) ?? false;
 }
 
 // --- Open status (was openStatus.ts — now checks labels) ---
