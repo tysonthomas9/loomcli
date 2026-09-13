@@ -105,7 +105,8 @@ EXAMPLES
 // ResolveAndSetBackend and DefaultDeps side effects.
 var rootPreRun = func(cmd *cobra.Command, args []string) error {
 	// --log-level wins over LOOM_LOG_LEVEL; the env var matters because
-	// the daemon is launched by pm2, where an env var is the only
+	// the daemon is usually launched by a process supervisor (systemd, a
+	// process manager, a container runtime), where an env var is the only
 	// practical lever.
 	lvl := logLevel
 	if lvl == "" {
