@@ -316,7 +316,7 @@ func TestUnregisterTickStopsWatchdogScanningIt(t *testing.T) {
 // TestTerminallyStoppedAgentDoesNotFatalDaemon reproduces the production crash
 // loop: an agent whose supervise loop returns terminally (an AuthFailure fatal
 // stop) left its tick slot registered and frozen, so the watchdog fataled the
-// whole daemon one threshold later — and again after every pm2 restart, because
+// whole daemon one threshold later — and again after every restart by the process supervisor, because
 // the stopped agent stopped ticking again immediately.
 func TestTerminallyStoppedAgentDoesNotFatalDaemon(t *testing.T) {
 	s := newHarnessSupervisor()
