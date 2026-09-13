@@ -30,8 +30,8 @@ type bindingRow struct {
 // never given its own credential, silently.
 //
 // Every message says "this shell" rather than "the lead": doctor also runs
-// from agent shells and from PM2, where the bound profile is legitimately that
-// agent's own.
+// from agent shells and from whatever supervises the daemon, where the bound
+// profile is legitimately that agent's own.
 func checkLeadProfileBinding() CheckResult {
 	runtimeDir := cli.GetWorkspaceRuntimeDir()
 	if runtimeDir == "" {
