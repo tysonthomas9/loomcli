@@ -403,9 +403,9 @@ func loadSupervisorWorkspace(sup *supervisor.Supervisor) {
 // initSupervisorAgents creates agent processes from config entries, returning
 // the agents it deliberately skipped (parked) and the entries it could not
 // construct (unavailable). A per-agent misconfiguration must never fail the
-// daemon: on 2026-08-17 one agent whose worktree was missing crashed boot
-// outright and PM2 restarted it fifteen times, with every other agent in the
-// workspace dead alongside it.
+// daemon: one agent whose worktree was missing once crashed boot outright,
+// and whatever supervised the daemon process restarted it into the same crash
+// again and again, with every other agent in the workspace dead alongside it.
 //
 // Skips are logged at Warn, not Info: an unclaimed agent is an anomaly an
 // operator needs to see, and logging it at Info is how a fleet-wide park once
