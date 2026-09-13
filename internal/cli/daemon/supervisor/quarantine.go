@@ -45,7 +45,7 @@ const (
 
 	// The ledger is persisted next to daemon-agents.json so a daemon restart
 	// does not reset the counter. That mattered concretely: the failure mode
-	// that produces boomeranging tasks (a wedged daemon that PM2 restarts) was
+	// that produces boomeranging tasks (a wedged daemon that its supervisor restarts) was
 	// exactly the one that wiped the evidence, so the threshold could never be
 	// reached on a host where the daemon crash-loops.
 	quarantineStateFileName = "daemon-quarantine.json"
