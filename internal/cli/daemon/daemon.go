@@ -320,9 +320,10 @@ func loadSupervisorWorkspace(sup *supervisor.Supervisor) {
 
 // initSupervisorAgents creates agent processes from config entries and returns
 // the entries it could not construct. A per-agent misconfiguration must never
-// fail the daemon: on 2026-08-17 one agent whose worktree was missing crashed
-// boot outright and PM2 restarted it fifteen times, with every other agent in
-// the workspace dead alongside it.
+// fail the daemon: one agent whose worktree was missing once crashed boot
+// outright, and whatever supervised the daemon process restarted it into the
+// same crash again and again, with every other agent in the workspace dead
+// alongside it.
 func initSupervisorAgents(sup *supervisor.Supervisor, agents []cfgpkg.AgentEntry, roles map[string]cfgpkg.RoleConfig) []UnavailableAgent {
 	var unavailable []UnavailableAgent
 	for i, entry := range agents {
