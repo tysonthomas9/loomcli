@@ -129,9 +129,9 @@ func TestReportUnavailableAgents_Throttles(t *testing.T) {
 }
 
 // TestInitSupervisorAgents_MissingWorktreeDoesNotFailTheOthers is the
-// regression test for the 2026-08-17 incident: one agent entry whose worktree
-// did not exist made NewDaemon return an error, which crash-looped the whole
-// workspace under PM2.
+// regression test for one agent entry whose worktree did not exist making
+// NewDaemon return an error, which crash-looped the whole workspace under its
+// process supervisor.
 func TestInitSupervisorAgents_MissingWorktreeDoesNotFailTheOthers(t *testing.T) {
 	tmpDir := t.TempDir()
 	wtDir := filepath.Join(tmpDir, "worktrees", "good")
