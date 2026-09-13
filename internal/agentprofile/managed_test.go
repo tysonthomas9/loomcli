@@ -282,16 +282,16 @@ func TestVerifyManaged_UnicodeEscapingDoesNotMatterAfterParsing(t *testing.T) {
 const codexBaselineTOML = `model = "gpt-5.6-sol"
 model_reasoning_effort = "medium"
 
-[projects."/Users/oleh/.loom/workspaces/puppet"]
+[projects."/home/dev/.loom/workspaces/proj"]
 trust_level = "trusted"
 
-[projects."/Users/oleh/.loom/workspaces/puppet/lead"]
+[projects."/home/dev/.loom/workspaces/proj/lead"]
 trust_level = "trusted"
 
-[projects."/Users/oleh/.loom/workspaces/PUPPET"]
+[projects."/home/dev/.loom/workspaces/PROJ"]
 trust_level = "trusted"
 
-[projects."/Users/oleh/.loom/workspaces/PUPPET/lead"]
+[projects."/home/dev/.loom/workspaces/PROJ/lead"]
 trust_level = "trusted"
 `
 
@@ -302,7 +302,7 @@ trust_level = "trusted"
 const codexRuntimeAppendTOML = `
 [hooks.state]
 
-[hooks.state."/Users/oleh/.loom/workspaces/puppet/.codex/hooks.json:user_prompt_submit:0:0"]
+[hooks.state."/home/dev/.loom/workspaces/proj/.codex/hooks.json:user_prompt_submit:0:0"]
 trusted_hash = "sha256:8f035f2a"
 
 [tui.model_availability_nux]
@@ -321,8 +321,8 @@ func TestVerifyManaged_TOMLBaselineIsASubsetOfTheDriftedLiveFile(t *testing.T) {
 // trust_level must still refuse, appends or no appends.
 func TestVerifyManaged_TOMLDriftWhenTrustLevelChanges(t *testing.T) {
 	live := strings.Replace(codexBaselineTOML+codexRuntimeAppendTOML,
-		"[projects.\"/Users/oleh/.loom/workspaces/puppet\"]\ntrust_level = \"trusted\"",
-		"[projects.\"/Users/oleh/.loom/workspaces/puppet\"]\ntrust_level = \"untrusted\"", 1)
+		"[projects.\"/home/dev/.loom/workspaces/proj\"]\ntrust_level = \"trusted\"",
+		"[projects.\"/home/dev/.loom/workspaces/proj\"]\ntrust_level = \"untrusted\"", 1)
 	dir := writeManaged(t, "config.toml", codexBaselineTOML, live)
 	err := verifyManaged(dir, []string{"config.toml"})
 	if !errors.Is(err, ErrManagedContentDrift) {
@@ -330,7 +330,7 @@ func TestVerifyManaged_TOMLDriftWhenTrustLevelChanges(t *testing.T) {
 	}
 	// The path is the operator-facing contract, and it must name the exact
 	// project whose trust changed.
-	if !strings.Contains(err.Error(), `projects./Users/oleh/.loom/workspaces/puppet.trust_level`) {
+	if !strings.Contains(err.Error(), `projects./home/dev/.loom/workspaces/proj.trust_level`) {
 		t.Fatalf("error must name the diverging path, got: %v", err)
 	}
 	// Known limitation, PRE-DATING this change and deliberately not widened
@@ -349,7 +349,7 @@ func TestVerifyManaged_TOMLDriftWhenTrustLevelChanges(t *testing.T) {
 // unchanged: containment is one-directional.
 func TestVerifyManaged_TOMLDriftWhenAProvisionedTableIsRemoved(t *testing.T) {
 	live := strings.Replace(codexBaselineTOML,
-		"[projects.\"/Users/oleh/.loom/workspaces/PUPPET/lead\"]\ntrust_level = \"trusted\"\n", "", 1)
+		"[projects.\"/home/dev/.loom/workspaces/PROJ/lead\"]\ntrust_level = \"trusted\"\n", "", 1)
 	dir := writeManaged(t, "config.toml", codexBaselineTOML, live)
 	if err := verifyManaged(dir, []string{"config.toml"}); !errors.Is(err, ErrManagedContentDrift) {
 		t.Fatalf("verifyManaged = %v, want ErrManagedContentDrift", err)
