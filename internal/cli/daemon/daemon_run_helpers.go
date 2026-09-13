@@ -131,14 +131,15 @@ func ResolveDaemonPath(projectDir, path string) string {
 
 // The supervisor is a fleet-level process: it owns every agent, and it has no
 // agent identity of its own. When an agent restarts the daemon from inside its
-// own session (a `pm2 restart`, or a `pm2 start` under a Claude Code agent's
-// shell), the process manager captures that agent's whole environment as the
-// daemon's app definition and the supervisor comes up wearing worker-N's
-// identity. Measured 2026-08-27: the daemon then read role identity from that
-// environment, claimed nothing for ~4 hours while five ready P1 tasks sat
-// unclaimed, heartbeat the agent's dead lease into HTTP 410s, and carried a
-// foreign workspace's CLAUDE_CONFIG_DIR. Nothing about it self-heals, because
-// the poisoned definition is what a re-register copies forward.
+// own session (restarting or registering it with a process manager from an
+// agent's shell), a process manager that snapshots the launching environment
+// stores that agent's whole environment as the daemon's definition and the
+// supervisor comes up wearing worker-N's identity. When that happened, the
+// daemon read role identity from that environment, claimed nothing for hours
+// while ready tasks sat unclaimed, heartbeat the agent's dead lease into HTTP
+// 410s, and carried a foreign workspace's CLAUDE_CONFIG_DIR. Nothing about it
+// self-heals, because the poisoned definition is what a re-register copies
+// forward.
 //
 // Two defenses live here, and they are deliberately different in kind:
 //
@@ -246,10 +247,11 @@ func checkSupervisorEnv(lookup func(string) (string, bool)) error {
 	return fmt.Errorf(
 		"refusing to start: this supervisor's environment carries an agent identity (%s).\n"+
 			"A daemon started from inside an agent session inherits that agent's identity and\n"+
-			"silently supervises nothing. Restarting or re-registering will not clear it — the\n"+
-			"process manager stores the polluted environment in the app definition.\n"+
-			"Fix: delete and recreate the process from a shell with no LOOM_AGENT_*/\n"+
-			"LOOM_ASSIGNED_TASK_ID set (e.g. `pm2 delete <app> && pm2 start ...`)",
+			"silently supervises nothing. Restarting or re-registering may not clear it — a\n"+
+			"supervisor that snapshots its launch environment keeps the polluted values.\n"+
+			"Fix: remove the daemon's process definition from whatever launched it and\n"+
+			"recreate it from a shell with no LOOM_AGENT_*/LOOM_ASSIGNED_TASK_ID set, so the\n"+
+			"new definition does not capture them",
 		strings.Join(found, ", "))
 }
 

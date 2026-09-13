@@ -31,15 +31,18 @@ func TestCheckSupervisorEnvRejectsAgentIdentity(t *testing.T) {
 			if !strings.Contains(err.Error(), name) {
 				t.Errorf("error does not name the offending variable: %v", err)
 			}
-			if !strings.Contains(err.Error(), "pm2 delete") {
+			if !strings.Contains(err.Error(), "recreate it from a shell") {
 				t.Errorf("error lacks remediation: %v", err)
+			}
+			if strings.Contains(strings.ToLower(err.Error()), "pm2") {
+				t.Errorf("remediation names a specific process manager: %v", err)
 			}
 		})
 	}
 }
 
 func TestCheckSupervisorEnvIgnoresEmptyValues(t *testing.T) {
-	// pm2 and shell exports can leave a name set to "". That is not an
+	// Process managers and shell exports can leave a name set to "". That is not an
 	// inherited identity, and failing on it would strand a healthy daemon.
 	env := map[string]string{"LOOM_AGENT_NAME": "", "LOOM_ASSIGNED_TASK_ID": "   "}
 	if err := checkSupervisorEnv(lookupFrom(env)); err != nil {
