@@ -846,6 +846,43 @@ func TestUpdate_StatusOpenClearsAssigneeOnAlreadyOpenIssue(t *testing.T) {
 	}
 }
 
+// An explicit status=open write (`loom data update --status open`, the board)
+// is how a human releases the `deferred` hold. The supervisor's automated
+// writers skip deferred tasks; this client path must keep releasing them.
+func TestUpdate_StatusOpenOnDeferredIssueUndefers(t *testing.T) {
+	var sawUndefer bool
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1"):
+			respondOK(w, types.Issue{
+				ID:        "test-1",
+				Title:     "T",
+				Status:    types.StatusDeferred,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/deps"):
+			respondOK(w, map[string]interface{}{"dependencies": []interface{}{}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-1/comments"):
+			respondOK(w, []interface{}{})
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/test-1/undefer"):
+			sawUndefer = true
+			respondOK(w, json.RawMessage(`{}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	})
+	defer ts.Close()
+
+	status := "open"
+	if err := fb.Update(context.Background(), "test-1", backend.UpdateParams{Status: &status}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if !sawUndefer {
+		t.Fatal("expected the undefer endpoint to be called")
+	}
+}
+
 func TestUpdate_StatusOpenAfterReopenClearsAssignee(t *testing.T) {
 	var sawReopen bool
 	var sawClearAssign bool
