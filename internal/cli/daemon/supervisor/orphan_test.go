@@ -38,6 +38,8 @@ func TestHelperProcess(t *testing.T) {
 	switch mode {
 	case "fake_worker_with_isolated_child":
 		runFakeWorkerWithIsolatedChild(t)
+	case "fake_worker_with_inherited_stdout_child":
+		runFakeWorkerWithInheritedStdoutChild(t)
 	case "fake_backend_sleep":
 		runFakeBackendSleep(t)
 	default:
@@ -104,6 +106,38 @@ func runFakeWorkerWithIsolatedChild(_ *testing.T) {
 	// (its grace windows are ≤8s), but short enough to bound the blast radius
 	// if this helper ever leaks past watchRootPID's safety net.
 	time.Sleep(helperLingerSleep)
+	os.Exit(0)
+}
+
+// runFakeWorkerWithInheritedStdoutChild mimics the shape that stalled daemon
+// shutdown in PUPPET-39: it forks a grandchild into its own pgroup that
+// INHERITS this process's stdout, then exits immediately, leaving the
+// grandchild holding the inherited descriptor. If the supervisor handed the
+// child an io.MultiWriter, that descriptor is the write end of an os.Pipe and
+// cmd.Wait() cannot return until the grandchild dies. With a real *os.File it
+// is just a dup of a regular-file fd and Wait() returns at once.
+func runFakeWorkerWithInheritedStdoutChild(_ *testing.T) {
+	selfPath, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "executable:", err)
+		os.Exit(1)
+	}
+	cmd := exec.Command(selfPath, "-test.run=TestHelperProcess", "--") //nolint:norawexec,gosec // G204/norawexec: test helper self-exec
+	cmd.Env = append(os.Environ(), "LOOM_TEST_HELPER_MODE=fake_backend_sleep")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Stdin = nil
+	// The point of this helper: the grandchild keeps the agent's stdout open.
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stdout
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintln(os.Stderr, "start child:", err)
+		os.Exit(1)
+	}
+	if path := os.Getenv("LOOM_TEST_CHILD_PID_FILE"); path != "" {
+		_ = os.WriteFile(path, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600)
+	}
+	// Exit straight away — the test asserts cmd.Wait() observes THIS exit and
+	// does not block on the grandchild.
 	os.Exit(0)
 }
 
