@@ -565,6 +565,7 @@ paths:
           in: query
           schema:
             type: integer
+            minimum: 1
             maximum: 1000
         - name: title_contains
           in: query

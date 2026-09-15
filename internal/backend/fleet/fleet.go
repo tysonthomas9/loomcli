@@ -271,24 +271,6 @@ func hasData(resp *apiResponse) bool {
 //
 // Try the bare array first; on a JSON unmarshal type mismatch, fall back
 // to the wrapper. Anything else is a real parse failure.
-// unmarshalIssueListPage is unmarshalIssueList plus the has_more flag, which
-// the plain form discards. Only the wrapper dialect carries it; a bare array is
-// by definition the whole answer, so hasMore is false there.
-func unmarshalIssueListPage(resp *apiResponse, op string) ([]backend.IssueData, bool, error) {
-	issues, err := unmarshalIssueList(resp, op)
-	if err != nil || !hasData(resp) {
-		return issues, false, err
-	}
-	var wrapper struct {
-		HasMore bool `json:"has_more"`
-	}
-	if err := json.Unmarshal(resp.Data, &wrapper); err != nil {
-		// A bare array does not unmarshal into a struct; that is not an error
-		// here, it just means there is no pagination envelope to read.
-		return issues, false, nil
-	}
-	return issues, wrapper.HasMore, nil
-}
 
 func unmarshalIssueList(resp *apiResponse, op string) ([]backend.IssueData, error) {
 	if !hasData(resp) {
@@ -377,50 +359,6 @@ func (b *FleetBackend) Get(ctx context.Context, id string) (*backend.IssueDetail
 	}
 
 	return &result, nil
-}
-
-// maxListPages bounds List's paging loop. fleet-db caps a page at 200 rows, so
-// this allows 20k issues per call — far beyond any real workspace, while still
-// making a server that always reports has_more terminate instead of spinning.
-const maxListPages = 100
-
-func (b *FleetBackend) List(ctx context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
-	if err := checkFleetUnsupportedFilters(opts); err != nil {
-		return nil, err
-	}
-	serverOpts := listServerOpts(opts)
-
-	// fleet-db caps a page at 200 rows regardless of the limit asked for, and
-	// reports the truncation in has_more. Returning that first page silently is
-	// how `loom data list --limit 500` came to answer with 200 rows and no
-	// indication the other 327 existed — and how a caller checking "does X
-	// exist" got a confident false negative, because the rows it dropped were
-	// the NEWEST. Page until the caller's limit is met or the server runs out.
-	var out []backend.IssueData
-	for page := 0; page < maxListPages; page++ {
-		resp, err := b.exec(ctx, "List", "GET", "/issues?"+listOptsToQuery(serverOpts), nil)
-		if err != nil {
-			return nil, err
-		}
-		issues, hasMore, err := unmarshalIssueListPage(resp, "List")
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, issues...)
-		// A short or empty page ends the walk even if the server still claims
-		// more; without that an endpoint that always sets has_more would spin.
-		if !hasMore || len(issues) == 0 {
-			break
-		}
-		if serverOpts.Limit > 0 && len(out) >= serverOpts.Limit {
-			break
-		}
-		serverOpts.Offset += len(issues)
-	}
-	if serverOpts.Limit > 0 && len(out) > serverOpts.Limit {
-		out = out[:serverOpts.Limit]
-	}
-	return filterListIssues(out, opts), nil
 }
 
 func (b *FleetBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
