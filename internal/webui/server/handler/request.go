@@ -20,6 +20,14 @@ const DefaultListLimit = 100
 // MaxListLimit is the maximum number of items that can be requested in a single list call.
 const MaxListLimit = 1000
 
+// MaxIssueListLimit is the ceiling for the issue-list endpoints
+// (GET /api/workspaces/{ws}/issues and .../blocked). It is deliberately
+// tighter than MaxListLimit because the FleetDB backend behind these routes
+// clamps at 200 (fleet-db internal/api/issues.go maxLimit); keeping the two
+// in step is what makes api/openapi.yaml's `maximum: 200` true for every
+// backend, not just the Fleet one.
+const MaxIssueListLimit = 200
+
 // ReadJSON reads and decodes a JSON request body into dst.
 // It enforces MaxRequestBody size limit. On failure it returns a
 // *service.ServiceError (KindPayloadTooLarge or KindValidation)

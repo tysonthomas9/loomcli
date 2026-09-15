@@ -320,11 +320,38 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 			},
 		},
 		{
-			name: "limit capped at MaxListLimit",
+			name: "limit capped at MaxIssueListLimit",
 			url:  "/api/issues?limit=99999",
 			validate: func(t *testing.T, args *rpc.ListArgs) {
-				if args.Limit != MaxListLimit {
-					t.Errorf("expected limit %d (MaxListLimit), got %d", MaxListLimit, args.Limit)
+				if args.Limit != MaxIssueListLimit {
+					t.Errorf("expected limit %d (MaxIssueListLimit), got %d", MaxIssueListLimit, args.Limit)
+				}
+			},
+		},
+		{
+			name: "limit 1000 clamped to MaxIssueListLimit",
+			url:  "/api/issues?limit=1000",
+			validate: func(t *testing.T, args *rpc.ListArgs) {
+				if args.Limit != MaxIssueListLimit {
+					t.Errorf("expected limit %d (MaxIssueListLimit), got %d", MaxIssueListLimit, args.Limit)
+				}
+			},
+		},
+		{
+			name: "limit at MaxIssueListLimit passes through",
+			url:  "/api/issues?limit=200",
+			validate: func(t *testing.T, args *rpc.ListArgs) {
+				if args.Limit != 200 {
+					t.Errorf("expected limit 200, got %d", args.Limit)
+				}
+			},
+		},
+		{
+			name: "limit just below MaxIssueListLimit is unclamped",
+			url:  "/api/issues?limit=199",
+			validate: func(t *testing.T, args *rpc.ListArgs) {
+				if args.Limit != 199 {
+					t.Errorf("expected limit 199, got %d", args.Limit)
 				}
 			},
 		},
