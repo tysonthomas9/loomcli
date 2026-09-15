@@ -279,12 +279,19 @@ func TestDataBlocked_NoServerUsesLocalBackend(t *testing.T) {
 		if !strings.Contains(out, "loom-20") || !strings.Contains(out, "blocked bug") {
 			t.Fatalf("blocked output = %q, want issue", out)
 		}
-		if len(stub.calls) != 1 || stub.calls[0].method != "Blocked" {
-			t.Fatalf("calls = %#v, want one Blocked call", stub.calls)
+		// The blocked view is a union: the canonical dependency-blocked query
+		// plus a status=blocked list, since the former never consults
+		// issues.status. Both halves carry the same filters.
+		if len(stub.calls) != 2 || stub.calls[0].method != "Blocked" || stub.calls[1].method != "List" {
+			t.Fatalf("calls = %#v, want a Blocked then a List call", stub.calls)
 		}
 		opts := stub.calls[0].args.(backend.BlockedOpts)
 		if opts.Limit != 7 || opts.Type != "bug" || opts.ParentID != "epic-2" {
 			t.Fatalf("Blocked opts = %#v", opts)
+		}
+		listOpts := stub.calls[1].args.(backend.ListOpts)
+		if listOpts.Status != "blocked" || listOpts.Limit != 7 || listOpts.IssueType != "bug" || listOpts.ParentID != "epic-2" {
+			t.Fatalf("List opts = %#v", listOpts)
 		}
 	})
 }

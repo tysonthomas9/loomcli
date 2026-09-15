@@ -245,6 +245,20 @@ FleetBackend.Close:
   does not synthesize newly-unblocked work from partial local ready predicates
 ```
 
+Active compatibility shims (remove when the FleetDB contract catches up):
+
+```text
+loom data blocked (internal/cli/data/blocked.go):
+  unions FleetDB /issues/blocked with a status=blocked issue list, because
+  fleet-db's blockedCTE computes blockage from dependency edges and parent
+  propagation only and never consults issues.status — so parked issues are
+  invisible to the canonical view. The merged view de-duplicates by id, keeps
+  the dependency-blocked entry (and its blocker metadata) on a tie, and the
+  STATUS column discriminates: "blocked" = status-blocked, anything else =
+  dependency-blocked. Drop the union once /issues/blocked satisfies the
+  "blocked" contract above.
+```
+
 SSE and realtime updates are invalidation/delivery mechanisms, not alternate
 state authorities. On an SSE event, Loom clients should refresh or reconcile
 against the same FleetDB computed views used by the runner and CLI. Adding a new

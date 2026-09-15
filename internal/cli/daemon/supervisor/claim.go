@@ -186,6 +186,16 @@ func (s *Supervisor) claimResumeTask(ap *AgentProcess, taskID string) bool {
 		slog.Info("resuming task already claimed by this worktree", "worktree", ap.Entry.Worktree, "task_id", taskID)
 		return true
 	}
+	if backend.ClaimRejectedPermanently(err) {
+		// The remnant task can never be claimed again in its current state
+		// (e.g. status moved to blocked/closed while the agent was down).
+		// Drop it from the lock so the next cycle cold-starts instead of
+		// re-issuing the same doomed claim every restart interval.
+		slog.Info("resume target no longer claimable; abandoning",
+			"worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
+		s.abandonResumeTarget(ap, taskID)
+		return false
+	}
 	slog.Warn("resume re-claim failed; cold-starting", "worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
 	return false
 }

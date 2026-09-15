@@ -403,3 +403,84 @@ func TestErrorKindConstants(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ErrorCode / ClaimRejectedPermanently
+// ---------------------------------------------------------------------------
+
+func codedErr(kind ErrorKind, msg, code string) *BackendError {
+	be := &BackendError{Kind: kind, Op: "Claim", Message: msg}
+	if code != "" {
+		be.Meta = map[string]string{MetaErrorCode: code}
+	}
+	return be
+}
+
+func TestErrorCode(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"nil", nil, ""},
+		{"plain error", errors.New("boom"), ""},
+		{"backend error without meta", ErrConflict("Claim", "issue is not claimable"), ""},
+		{"backend error with code", codedErr(KindConflict, "issue is not claimable", "not_claimable"), "not_claimable"},
+		{"wrapped", fmt.Errorf("outer: %w", codedErr(KindConflict, "x", "already_claimed")), "already_claimed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ErrorCode(tt.err); got != tt.want {
+				t.Errorf("ErrorCode() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClaimRejectedPermanently_True(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"not_claimable code", codedErr(KindConflict, "issue is not claimable", "not_claimable")},
+		{"invalid_transition code", codedErr(KindConflict, "issue is already closed", "invalid_transition")},
+		{"not found kind", ErrNotFound("Claim", "issue PUPPET-1 not found")},
+		{"message fallback, no code", ErrConflict("Claim", "issue is not claimable")},
+		{"wrapped coded error", fmt.Errorf("claim: %w", codedErr(KindConflict, "nope", "not_claimable"))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !ClaimRejectedPermanently(tt.err) {
+				t.Errorf("ClaimRejectedPermanently(%v) = false, want true", tt.err)
+			}
+		})
+	}
+}
+
+func TestClaimRejectedPermanently_False(t *testing.T) {
+	// The critical regression guard: a bare conflict is the "someone else
+	// holds the claim" case, which the retry logic depends on.
+	foreignLock := &BackendError{
+		Kind: KindConflict, Op: "Claim", Message: "issue already claimed",
+		Meta: map[string]string{"existing_owner": "worktree-b"},
+	}
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"nil", nil},
+		{"foreign lock conflict", foreignLock},
+		{"bare conflict", ErrConflict("Claim", "issue already claimed")},
+		{"timeout", ErrTimeout("Claim", "deadline exceeded", nil)},
+		{"unavailable", ErrUnavailable("Claim", "server unreachable", nil)},
+		{"plain error", errors.New("connection reset")},
+		{"unknown code", codedErr(KindConflict, "something odd", "future_code")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if ClaimRejectedPermanently(tt.err) {
+				t.Errorf("ClaimRejectedPermanently(%v) = true, want false", tt.err)
+			}
+		})
+	}
+}
