@@ -2,9 +2,9 @@ package subscription
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -40,7 +40,7 @@ func NewModule(
 }
 
 // Register implements [Module] by registering workspace-scoped SSE routes.
-func (m *Module) Register(mux *http.ServeMux) {
+func (m *Module) Register(mux route.Router) {
 	// SSE event stream — uses mux.Handle because realtime.NewHandler returns http.Handler
 	sseHandler := realtime.NewHandler(realtime.HandlerConfig{
 		Hub:               m.hub,

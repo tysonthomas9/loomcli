@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/taskrunapi"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -28,7 +29,7 @@ import (
 // PRReviewModule is the route module plus its credential-cache invalidation
 // surface used by local settings wiring.
 type PRReviewModule interface {
-	Register(*http.ServeMux)
+	Register(route.Router)
 	InvalidateCredentialSeeds()
 }
 
@@ -45,8 +46,8 @@ type LocalSettingsHandlers struct {
 }
 
 // NewIssueModules creates the issue and session modules.
-func NewIssueModules(issueSvc service.IssueService, sessSvc service.SessionService, st store.Store) []interface{ Register(*http.ServeMux) } {
-	return []interface{ Register(*http.ServeMux) }{
+func NewIssueModules(issueSvc service.IssueService, sessSvc service.SessionService, st store.Store) []interface{ Register(route.Router) } {
+	return []interface{ Register(route.Router) }{
 		issues.NewIssueModule(issueSvc, st),
 		issues.NewSessionModule(sessSvc, issues.SessionModuleOpts{
 			ListTaskSessions:     misc.HandleListTaskSessions(sessSvc),
@@ -75,8 +76,8 @@ type TerminalModuleDeps struct {
 }
 
 // NewTerminalModules creates the terminal tab and main terminal modules.
-func NewTerminalModules(deps TerminalModuleDeps) []interface{ Register(*http.ServeMux) } {
-	return []interface{ Register(*http.ServeMux) }{
+func NewTerminalModules(deps TerminalModuleDeps) []interface{ Register(route.Router) } {
+	return []interface{ Register(route.Router) }{
 		hterminal.NewTabModule(deps.TermSvc),
 		hterminal.NewModule(
 			deps.TermSvc, deps.AgentSvc, deps.PTYMgr, deps.AgentTmuxMgr,
@@ -87,24 +88,24 @@ func NewTerminalModules(deps TerminalModuleDeps) []interface{ Register(*http.Ser
 }
 
 // NewIssueTabModule creates the issue tab module.
-func NewIssueTabModule(issueTabStore *issuetabs.Store, hub *realtime.Hub) interface{ Register(*http.ServeMux) } {
+func NewIssueTabModule(issueTabStore *issuetabs.Store, hub *realtime.Hub) interface{ Register(route.Router) } {
 	return issues.NewIssueTabModule(issueTabStore, hub)
 }
 
 // NewDiffModule creates the git diff module.
-func NewDiffModule(agentSvc service.AgentService, diffSvc service.DiffService) interface{ Register(*http.ServeMux) } {
+func NewDiffModule(agentSvc service.AgentService, diffSvc service.DiffService) interface{ Register(route.Router) } {
 	return githandlers.NewModule(agentSvc, diffSvc)
 }
 
 // NewFileModule creates the file operations module.
-func NewFileModule(fileSvc service.FileService, accessCfg ...middleware.FileAccessConfig) interface{ Register(*http.ServeMux) } {
+func NewFileModule(fileSvc service.FileService, accessCfg ...middleware.FileAccessConfig) interface{ Register(route.Router) } {
 	return misc.NewModule(fileSvc, accessCfg...)
 }
 
 // NewApprovalsModule creates the await approval-resolution module
 // (POST /api/workspaces/{ws}/approvals; the actor is always the verified
 // session identity, never request data).
-func NewApprovalsModule(st store.Store) interface{ Register(*http.ServeMux) } {
+func NewApprovalsModule(st store.Store) interface{ Register(route.Router) } {
 	return approvals.NewModule(st)
 }
 
@@ -132,6 +133,6 @@ func NewLocalSettingsHandlers(dataDir string, invalidator CredentialSeedInvalida
 // NewTaskRunAPIModule creates the task-runner HTTP API module
 // (POST /api/workspaces/{ws}/task-run/{op}, lease-token auth) so task runner
 // processes talk to serve instead of holding fleet-db credentials.
-func NewTaskRunAPIModule(st store.Store, fleetBaseURL string, localSettingsDir string) interface{ Register(*http.ServeMux) } {
+func NewTaskRunAPIModule(st store.Store, fleetBaseURL string, localSettingsDir string) interface{ Register(route.Router) } {
 	return taskrunapi.NewModule(taskrunapi.Config{Store: st, FleetBaseURL: fleetBaseURL, LocalSettingsDir: localSettingsDir})
 }
