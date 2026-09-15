@@ -371,6 +371,14 @@ type controlPlaneStoreOverrides struct {
 	sessions  store.AgentSessionStore
 	leases    store.AgentLeaseStore
 	ownership store.AgentOwnershipLeaseStore
+	agents    store.AgentStore
+}
+
+func (s *controlPlaneStoreOverrides) Agents() store.AgentStore {
+	if s.agents == nil {
+		return s.Store.Agents()
+	}
+	return s.agents
 }
 
 func (s *controlPlaneStoreOverrides) AgentSessions() store.AgentSessionStore {
