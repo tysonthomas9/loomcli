@@ -24,13 +24,15 @@ import (
 
 // Attribute keys for OTel spans and metrics.
 const (
-	AttrAgent     = attribute.Key("loom.agent")
-	AttrRole      = attribute.Key("loom.role")
-	AttrEpicID    = attribute.Key("loom.epic_id")
-	AttrTaskID    = attribute.Key("loom.task_id")
-	AttrErrorType = attribute.Key("loom.error_type")
-	AttrPID       = attribute.Key("loom.pid")
-	AttrExitCode  = attribute.Key("loom.exit_code")
+	AttrAgent        = attribute.Key("loom.agent")
+	AttrRole         = attribute.Key("loom.role")
+	AttrEpicID       = attribute.Key("loom.epic_id")
+	AttrTaskID       = attribute.Key("loom.task_id")
+	AttrErrorType    = attribute.Key("loom.error_type")
+	AttrPID          = attribute.Key("loom.pid")
+	AttrExitCode     = attribute.Key("loom.exit_code")
+	AttrErrorClass   = attribute.Key("loom.error_class")
+	AttrEvidenceRule = attribute.Key("loom.evidence_rule")
 )
 
 // Exporter subscribes to the event Bus and pushes metrics/traces to an OTLP collector.
@@ -282,6 +284,19 @@ func (e *Exporter) handleAgentStarted(ev events.Event) {
 	}
 }
 
+// evidenceRuleOf pulls the `rule=` token out of an agenterr.Evidence summary.
+// Only the rule becomes a span attribute: it is a bounded set of identifiers,
+// whereas the detail and match halves are agent output and would blow up the
+// attribute cardinality of every trace backend downstream.
+func evidenceRuleOf(summary string) string {
+	for _, field := range strings.Fields(summary) {
+		if rule, ok := strings.CutPrefix(field, "rule="); ok {
+			return rule
+		}
+	}
+	return ""
+}
+
 func (e *Exporter) handleAgentStopped(ev events.Event) {
 	data, ok := decodeData[events.AgentStoppedData](ev)
 	if !ok {
@@ -291,6 +306,12 @@ func (e *Exporter) handleAgentStopped(ev events.Event) {
 	e.mu.Lock()
 	if span, ok := e.activeAgentSpans[ev.Agent]; ok {
 		span.SetAttributes(AttrExitCode.Int(data.ExitCode))
+		if data.ErrorClass != "" {
+			span.SetAttributes(AttrErrorClass.String(data.ErrorClass))
+		}
+		if rule := evidenceRuleOf(data.Evidence); rule != "" {
+			span.SetAttributes(AttrEvidenceRule.String(rule))
+		}
 		span.End()
 		delete(e.activeAgentSpans, ev.Agent)
 	}

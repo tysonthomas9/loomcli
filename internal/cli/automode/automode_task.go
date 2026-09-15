@@ -86,7 +86,14 @@ func handleAutoTaskError(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error
 	// fallback backend, so a wrong model is terminal here). These never
 	// retry, so per-task tracking would only accumulate stale state.
 	if d.Decision == agentpolicy.StopFatal || d.Decision == agentpolicy.FastFail || d.Decision == agentpolicy.Failover {
-		return exitWithReason(ctx, fmt.Sprintf("fatal error: %s", ae.Message))
+		// The evidence rides along on the printed line too: an auto-loop that
+		// stops fatally leaves nothing behind but this message, so "which step
+		// decided, on what" has to be legible here or it is lost.
+		reason := fmt.Sprintf("fatal error: %s", ae.Message)
+		if ev := ae.Evidence.Summary(); ev != "" {
+			reason += " [" + ev + "]"
+		}
+		return exitWithReason(ctx, reason)
 	}
 	if ae.Class.Is(agenterr.NoWorkOutcome) {
 		return exitWithReason(ctx, "no work available")
@@ -239,6 +246,7 @@ func emitTaskFailedEvent(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error
 	if ae.RetryAfter > 0 {
 		evtData.RetryAfter = ae.RetryAfter.String()
 	}
+	evtData.Evidence = ae.Evidence.Summary()
 	if evt, evtErr := events.NewEvent(events.TaskFailed, ctx.opts.AgentName, "", "", evtData); evtErr == nil {
 		if emitErr := ctx.opts.EventBus.Emit(evt); emitErr != nil {
 			log.Printf("[auto] Failed to emit task_failed event: %v", emitErr)
