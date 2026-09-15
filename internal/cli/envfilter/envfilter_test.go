@@ -260,3 +260,23 @@ func TestFilteredEnv_ReturnsFilteredOsEnviron(t *testing.T) {
 		t.Error("FilteredEnv() does not contain LOOM_TEST_ENVFILTER, expected it to be present")
 	}
 }
+
+// TestFilterEnv_GitHostingTokens verifies both token names gh and git consult
+// survive the filter, while the git credential-execution vector does not.
+func TestFilterEnv_GitHostingTokens(t *testing.T) {
+	input := []string{
+		"GH_TOKEN=gh-secret",
+		"GITHUB_TOKEN=gh-legacy-secret",
+		"GIT_ASKPASS=/tmp/askpass",
+	}
+	got := FilterEnv(input)
+	want := map[string]bool{"GH_TOKEN=gh-secret": true, "GITHUB_TOKEN=gh-legacy-secret": true}
+	if len(got) != len(want) {
+		t.Fatalf("FilterEnv() = %v, want %d entries", got, len(want))
+	}
+	for _, entry := range got {
+		if !want[entry] {
+			t.Errorf("FilterEnv() returned unexpected entry %q", entry)
+		}
+	}
+}
