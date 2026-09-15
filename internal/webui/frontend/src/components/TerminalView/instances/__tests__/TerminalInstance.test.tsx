@@ -15,6 +15,10 @@ const connectionState = vi.hoisted(() => ({
   cleanupCount: 0,
   fitCountsAtConnect: [] as number[],
   terminalSizesAtConnect: [] as Array<{ cols: number; rows: number }>,
+  // Opt-in fake socket: tests that need the "input actually reached the PTY"
+  // path set this before rendering. Left null, the connect mock behaves
+  // exactly as it did before, so no other test sees a live socket.
+  socket: null as { readyState: number; send: (data: unknown) => void } | null,
 }));
 
 const xtermState = vi.hoisted(() => {
@@ -35,7 +39,9 @@ const xtermState = vi.hoisted(() => {
       focus: ReturnType<typeof vi.fn>;
       fit: () => { cols: number; rows: number };
       scrollToBottom: ReturnType<typeof vi.fn>;
+      probeActivity: () => { cursorAtLineStart: boolean; altScreen: boolean };
     },
+    onData: null as null | ((data: string) => void),
   };
   state.handle = {
     write: vi.fn((data: string | Uint8Array) => {
@@ -53,6 +59,7 @@ const xtermState = vi.hoisted(() => {
       return { cols: 132, rows: 43 };
     },
     scrollToBottom: vi.fn(),
+    probeActivity: () => ({ cursorAtLineStart: false, altScreen: false }),
   };
   return state;
 });
@@ -64,9 +71,11 @@ vi.mock("../XTermRenderer", async () => {
     onReady: (handle: unknown) => void;
     onDispose: (handle: unknown) => void;
     onResize: (cols: number, rows: number) => void;
+    onData: (data: string) => void;
   }) {
     xtermState.onReady = props.onReady;
     xtermState.onResize = props.onResize;
+    xtermState.onData = props.onData;
     React.useEffect(
       () => () => {
         props.onDispose(xtermState.handle);
@@ -85,7 +94,7 @@ vi.mock("../terminalConnection", () => ({
       _workspaceId: string,
       _sessionName: string,
       write: (data: string | Uint8Array) => void,
-      _wsRef: { current: WebSocket | null },
+      wsRef: { current: WebSocket | null },
       setConnState: (state: string) => void,
       onConnected: () => void,
       onDisconnected: () => void,
@@ -95,6 +104,9 @@ vi.mock("../terminalConnection", () => ({
       terminalSize: { cols: number; rows: number },
       onAttach?: (frame: unknown) => void,
     ): (() => void) => {
+      if (connectionState.socket) {
+        wsRef.current = connectionState.socket as unknown as WebSocket;
+      }
       connectionState.writeCallbacks.push(write);
       connectionState.connectedCallbacks.push(onConnected);
       connectionState.disconnectedCallbacks.push(onDisconnected);
@@ -193,9 +205,11 @@ describe("TerminalInstance", () => {
     xtermState.screen = "";
     connectionState.fitCountsAtConnect.length = 0;
     connectionState.terminalSizesAtConnect.length = 0;
+    connectionState.socket = null;
     xtermState.fitCount = 0;
     xtermState.onReady = null;
     xtermState.onResize = null;
+    xtermState.onData = null;
     xtermState.handle.write.mockClear();
     xtermState.handle.focus.mockClear();
     xtermState.handle.scrollToBottom.mockClear();
@@ -541,6 +555,82 @@ describe("TerminalInstance", () => {
       act(() => latestAttachCallback()(attachFrame()));
 
       expect(boundaryOccurrences()).toBe(1);
+    });
+  });
+
+  describe("onInput", () => {
+    async function renderConnected(props: { writable?: boolean } = {}) {
+      const onInput = vi.fn();
+      render(
+        <TerminalInstance
+          sessionName="codex-alpha"
+          backendName="codex"
+          isActive
+          onInput={onInput}
+          {...props}
+        />,
+      );
+      await waitFor(() => expect(xtermState.onReady).not.toBeNull());
+      readyRenderer();
+      await waitFor(() => {
+        expect(connectionState.writeCallbacks).toHaveLength(1);
+      });
+      return onInput;
+    }
+
+    it("fires when a keystroke reaches an open socket", async () => {
+      connectionState.socket = { readyState: WebSocket.OPEN, send: vi.fn() };
+      const onInput = await renderConnected();
+
+      act(() => xtermState.onData?.("y"));
+
+      expect(onInput).toHaveBeenCalledTimes(1);
+      expect(connectionState.socket.send).toHaveBeenCalledWith("y");
+    });
+
+    it("does not fire for a read-only tab whose input is dropped", async () => {
+      connectionState.socket = { readyState: WebSocket.OPEN, send: vi.fn() };
+      const onInput = await renderConnected({ writable: false });
+
+      act(() => xtermState.onData?.("y"));
+
+      expect(onInput).not.toHaveBeenCalled();
+      expect(connectionState.socket.send).not.toHaveBeenCalled();
+    });
+
+    it("does not fire when the socket is not open", async () => {
+      connectionState.socket = { readyState: WebSocket.CLOSED, send: vi.fn() };
+      const onInput = await renderConnected();
+
+      act(() => xtermState.onData?.("y"));
+
+      expect(onInput).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("probeActivity", () => {
+    it("returns null before the renderer is ready and the probe after", async () => {
+      const ref = { current: null } as {
+        current: { probeActivity: () => unknown } | null;
+      };
+      render(
+        <TerminalInstance
+          ref={ref as never}
+          sessionName="codex-alpha"
+          backendName="codex"
+          isActive
+        />,
+      );
+      await waitFor(() => expect(ref.current).not.toBeNull());
+
+      expect(ref.current?.probeActivity()).toBeNull();
+
+      readyRenderer();
+
+      expect(ref.current?.probeActivity()).toEqual({
+        cursorAtLineStart: false,
+        altScreen: false,
+      });
     });
   });
 });

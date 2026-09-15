@@ -190,6 +190,33 @@
   }
 }
 
+/* ============= Waiting-For-Input Badge ============= */
+
+/*
+ * Amber pause bars: "quiet, and it is your turn". Sits next to the blue
+ * unread dot and must stay visually distinct from it — the two can be shown
+ * at the same time and mean different things. Static on purpose: a pulsing
+ * badge next to a pulsing dot reads as one animated blob.
+ */
+.waitingBadge {
+  width: 6px;
+  height: 8px;
+  flex-shrink: 0;
+  background-color: var(--color-warning, #f59e0b);
+  clip-path: polygon(
+    0 0,
+    36% 0,
+    36% 100%,
+    0 100%,
+    0 0,
+    64% 0,
+    100% 0,
+    100% 100%,
+    64% 100%,
+    64% 0
+  );
+}
+
 /* ============= Tab Label ============= */
 
 .tabLabel {
