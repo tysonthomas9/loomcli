@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 // TestEncodeClaudeCWD pins the encoding to Claude Code's actual project-dir
@@ -53,8 +55,7 @@ func writeClaudeTranscript(t *testing.T, home, workDir, uuid string, mod time.Ti
 
 func TestSyncLatestClaudeTranscript_ByUUID(t *testing.T) {
 	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := testutil.TempClaudeHome(t)
 
 	const sid = "20260417-120000-claude-abcd-0123abcd"
 	store, sessDir := newStoreWithSession(t, sid)
@@ -83,8 +84,7 @@ func TestSyncLatestClaudeTranscript_ByUUID(t *testing.T) {
 
 func TestSyncLatestClaudeTranscript_FallbackNewestAfterSince(t *testing.T) {
 	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := testutil.TempClaudeHome(t)
 
 	const sid = "20260417-120000-claude-abcd-0123abcd"
 	store, sessDir := newStoreWithSession(t, sid)
@@ -110,8 +110,7 @@ func TestSyncLatestClaudeTranscript_FallbackNewestAfterSince(t *testing.T) {
 }
 
 func TestSyncLatestClaudeTranscript_MissingIsNoop(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testutil.TempClaudeHome(t)
 	const sid = "20260417-120000-claude-abcd-0123abcd"
 	store, sessDir := newStoreWithSession(t, sid)
 
