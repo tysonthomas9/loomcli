@@ -12,6 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 )
 
@@ -1532,5 +1535,164 @@ func TestWriteStateFile_NewFields_RoundTrip(t *testing.T) {
 	}
 	if a.RemoteBranch != "origin/develop" {
 		t.Errorf("RemoteBranch = %q, want %q", a.RemoteBranch, "origin/develop")
+	}
+}
+
+// ============================================================================
+// PUPPET-57: daemon status targets the DETECTED daemon, not the cwd
+// ============================================================================
+
+// TestStatePathForTarget_UsesDetectedDir is the one-line core of the fix,
+// asserted at the path level: with the process sitting in directory A and
+// detection having resolved a daemon in directory B, the state file that gets
+// read must be B's. Reading A's is how a live PID ended up printed next to a
+// dead daemon's snapshot.
+func TestStatePathForTarget_UsesDetectedDir(t *testing.T) {
+	cwd := t.TempDir()
+	target := t.TempDir()
+
+	rt := cli.DaemonRuntimeInfo{Running: true, PID: 75714, Source: "workspace-lock", Dir: target}
+
+	got := statePathForTarget(rt, cwd)
+	if !strings.HasPrefix(got, target) {
+		t.Errorf("state path = %q, want a path under the detected daemon's dir %q", got, target)
+	}
+	if strings.HasPrefix(got, cwd) {
+		t.Errorf("state path = %q must not be derived from the cwd %q", got, cwd)
+	}
+}
+
+// TestStatePathForTarget_FallsBackToCwd keeps hand-built DaemonRuntimeInfo
+// values (older callers, tests) working: an empty Dir means "the cwd's daemon",
+// which is the historical behavior.
+func TestStatePathForTarget_FallsBackToCwd(t *testing.T) {
+	cwd := t.TempDir()
+
+	got := statePathForTarget(cli.DaemonRuntimeInfo{Running: true, PID: 1}, cwd)
+	if !strings.HasPrefix(got, cwd) {
+		t.Errorf("state path = %q, want a path under the cwd %q when Dir is empty", got, cwd)
+	}
+}
+
+// TestReadStateForTarget reports both the snapshot and its mtime, and degrades
+// to (nil, zero) rather than an error when there is nothing to read.
+func TestReadStateForTarget(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "daemon-agents.json")
+
+	if state, mtime := readStateForTarget(path); state != nil || !mtime.IsZero() {
+		t.Errorf("missing file: got (%v, %v), want (nil, zero)", state, mtime)
+	}
+
+	data, err := json.Marshal(DaemonState{PID: 4242, StartedAt: time.Now(), Agents: make([]DaemonAgentStatus, 2)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state, mtime := readStateForTarget(path)
+	if state == nil || state.PID != 4242 || len(state.Agents) != 2 {
+		t.Fatalf("state = %+v, want PID 4242 with 2 agents", state)
+	}
+	if mtime.IsZero() {
+		t.Error("mtime is zero for an existing file; freshness could never be judged")
+	}
+}
+
+// TestRunDaemonStatus_PUPPET57 drives the command end to end against the
+// reported shape: a live daemon detected in one directory, whose state file
+// on disk belongs to a long-dead PID. The output must describe the live
+// daemon and must not print the corpse's start time or "Agents: 0".
+func TestRunDaemonStatus_PUPPET57(t *testing.T) {
+	// Isolate from any real daemon on the dev box.
+	t.Setenv("LOOM_WORKSPACE", "")
+	t.Setenv("LOOM_FLEET_DB_URL", "")
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv("LOOM_DESKTOP_DATA_DIR", t.TempDir())
+
+	// The daemon's real directory, with a state file left by an earlier,
+	// now-dead daemon (the dogfood corpse from the incident).
+	targetDir := t.TempDir()
+	loomDir := filepath.Join(targetDir, ".loom")
+	if err := os.MkdirAll(loomDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	deadSnapshot := []byte(`{"pid":61906,"started_at":"2026-08-09T18:23:08+02:00","agents":[]}`)
+	if err := os.WriteFile(filepath.Join(loomDir, "daemon-agents.json"), deadSnapshot, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	liveStart := time.Now().Add(-90 * time.Minute).Round(time.Second)
+	rt := cli.DaemonRuntimeInfo{
+		Running:   true,
+		PID:       os.Getpid(),
+		Source:    "workspace-lock",
+		StartedAt: liveStart,
+		Dir:       targetDir,
+	}
+
+	statePath := statePathForTarget(rt, t.TempDir())
+	state, mtime := readStateForTarget(statePath)
+
+	view := buildDaemonStatusView(daemonStatusInputs{
+		RT:         rt,
+		State:      state,
+		StatePath:  statePath,
+		StateMTime: mtime,
+		LiveCount:  agentCountUnknown,
+		Now:        time.Now(),
+	})
+
+	var buf bytes.Buffer
+	for _, line := range view.HeaderLines() {
+		buf.WriteString(line + "\n")
+	}
+	out := buf.String()
+
+	if !strings.Contains(out, "Daemon: running (PID "+strconv.Itoa(os.Getpid())+")") {
+		t.Errorf("output should name the live daemon's PID:\n%s", out)
+	}
+	if !strings.Contains(out, "Started: "+liveStart.Format(time.RFC3339)) {
+		t.Errorf("output should report the live daemon's start time:\n%s", out)
+	}
+	if strings.Contains(out, "2026-08-09") {
+		t.Errorf("output leaks the dead snapshot's start time:\n%s", out)
+	}
+	if strings.Contains(out, "Agents: 0") {
+		t.Errorf("output reports an unverifiable agent count as zero:\n%s", out)
+	}
+	if view.Trusted {
+		t.Error("the mismatched state file must not be trusted, so no agent table is rendered")
+	}
+}
+
+// TestRunDaemonStatus_NotRunningWritesToCommandOut pins the redirection the
+// regression test above depends on: status renders through cmd.OutOrStdout(),
+// not the process's real stdout.
+func TestRunDaemonStatus_NotRunningWritesToCommandOut(t *testing.T) {
+	t.Setenv("LOOM_WORKSPACE", "")
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv("LOOM_DESKTOP_DATA_DIR", t.TempDir())
+
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+
+	cmd := &cobra.Command{}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	runDaemonStatus(cmd, nil)
+
+	if !strings.Contains(buf.String(), "Daemon: not running") {
+		t.Errorf("output = %q, want it captured from the command's writer", buf.String())
 	}
 }
