@@ -217,7 +217,11 @@ func buildClaudeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 		args = append(args, "--model", model)
 	}
 	args = appendClaudeSafetyArgs(args)
-	args = append(args, prompt)
+	// An empty prompt means the persona is suppressed (--prompt builtin:none).
+	// `claude ""` is not the same as `claude`: it opens an empty user turn.
+	if prompt != "" {
+		args = append(args, prompt)
+	}
 	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
 	cmd.Env = buildClaudeEnv(workDir, agentName)

@@ -320,3 +320,128 @@ func TestBuildOpenCodeInteractiveCmd_PassesModelFlagFromEnv(t *testing.T) {
 	}
 	t.Fatalf("expected --model flag in args %v", cmd.Args)
 }
+
+// TestBuildInteractiveCmd_EmptyPromptOmitsPositional covers the suppressed
+// persona (`loom lead --prompt builtin:none`): an empty prompt must produce
+// argv with no "" element and no trailing positional at all. `claude ""` is
+// not the same command as `claude`.
+func TestBuildInteractiveCmd_EmptyPromptOmitsPositional(t *testing.T) {
+	t.Setenv("LOOM_OPENCODE_MODEL", "")
+	t.Setenv("LOOM_AGENT_EFFORT", "")
+	t.Setenv("LOOM_AGENT_MODEL", "")
+	t.Setenv("LOOM_ALLOWED_TOOLS", "")
+	t.Setenv("LOOM_DENIED_TOOLS", "")
+	t.Setenv("LOOM_READ_ONLY", "")
+
+	tests := []struct {
+		name     string
+		buildFn  buildFunc
+		wantArgs []string
+	}{
+		{
+			name:     "claude",
+			buildFn:  buildClaudeInteractiveCmd,
+			wantArgs: append([]string{"claude"}, appendClaudeSafetyArgs([]string{"--dangerously-skip-permissions"})...),
+		},
+		{
+			name:     "codex",
+			buildFn:  buildCodexInteractiveCmd,
+			wantArgs: []string{"codex", "--no-alt-screen", "--dangerously-bypass-approvals-and-sandbox"},
+		},
+		{
+			name:     "gemini",
+			buildFn:  buildGeminiInteractiveCmd,
+			wantArgs: []string{"gemini", geminiApprovalModeArg()},
+		},
+		{
+			name:     "cursor",
+			buildFn:  buildCursorInteractiveCmd,
+			wantArgs: []string{"cursor-agent", "--force"},
+		},
+		{
+			// opencode must drop --prompt AND its value together: a dangling
+			// flag would swallow the next argument or error out.
+			name:     "opencode",
+			buildFn:  buildOpenCodeInteractiveCmd,
+			wantArgs: []string{"opencode"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := tc.buildFn("/tmp/work", "", "test-agent")
+			assertArgsEqual(t, cmd.Args, tc.wantArgs)
+			assertNoEmptyArg(t, cmd.Args)
+		})
+	}
+}
+
+// TestNonInteractiveArgs_EmptyPromptOmitsPositional covers the headless
+// fallbacks, which build their argv separately from the interactive builders.
+func TestNonInteractiveArgs_EmptyPromptOmitsPositional(t *testing.T) {
+	t.Setenv("LOOM_OPENCODE_MODEL", "")
+
+	tests := []struct {
+		name     string
+		got      []string
+		wantArgs []string
+	}{
+		{"codex", buildCodexNonInteractiveArgs(""), []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"}},
+		{"gemini", geminiNonInteractiveArgs(""), []string{geminiApprovalModeArg()}},
+		{"cursor", cursorNonInteractiveArgs(""), []string{"-p", "--force"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assertArgsEqual(t, tc.got, tc.wantArgs)
+			assertNoEmptyArg(t, tc.got)
+			for _, arg := range tc.got {
+				if arg == "-p" && tc.name == "gemini" {
+					t.Errorf("gemini kept -p with no value: %v", tc.got)
+				}
+			}
+		})
+	}
+}
+
+// TestNonInteractiveArgs_NonEmptyPromptKeepsPositional pins the unchanged
+// behavior of the same builders, so the guard cannot silently drop a real
+// prompt.
+func TestNonInteractiveArgs_NonEmptyPromptKeepsPositional(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		got  []string
+		want string
+	}{
+		{"codex", buildCodexNonInteractiveArgs("do it"), "do it"},
+		{"gemini", geminiNonInteractiveArgs("do it"), "do it"},
+		{"cursor", cursorNonInteractiveArgs("do it"), "do it"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if len(tc.got) == 0 || tc.got[len(tc.got)-1] != tc.want {
+				t.Fatalf("args = %v, want trailing %q", tc.got, tc.want)
+			}
+		})
+	}
+}
+
+func assertArgsEqual(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("args = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("args = %v, want %v", got, want)
+		}
+	}
+}
+
+func assertNoEmptyArg(t *testing.T, args []string) {
+	t.Helper()
+	for i, arg := range args {
+		if arg == "" {
+			t.Fatalf("args[%d] is an empty string: %v", i, args)
+		}
+	}
+}

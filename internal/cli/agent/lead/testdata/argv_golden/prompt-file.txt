@@ -1,0 +1,100 @@
+=== VARIANT plain ===
+# Custom role
+
+Do the custom thing.
+
+
+
+### Multi-Agent Safety Rules
+
+You are running in a parallel multi-agent environment. Follow these rules strictly:
+
+- **Only modify files directly related to your assigned task** — do not touch files outside your task scope
+- **Never run** `git stash`, `git checkout main`, or `git clean` outside your assigned worktree
+- **Never force-push or reset --hard** without explicit instruction from the user
+- **If you encounter files/changes from another agent**, leave them alone — do not modify, revert, or clean them up
+- **Commit only your changes** — do not stage unrelated modifications with `git add -A` or `git add .`; use specific file paths
+- **If your worktree has unexpected state**, report it via task notes or `loom complete` rather than cleaning it up
+- **Do not switch branches** — you are confined to your assigned worktree branch
+
+=== END plain ===
+=== VARIANT message ===
+# Custom role
+
+Do the custom thing.
+
+
+
+### Multi-Agent Safety Rules
+
+You are running in a parallel multi-agent environment. Follow these rules strictly:
+
+- **Only modify files directly related to your assigned task** — do not touch files outside your task scope
+- **Never run** `git stash`, `git checkout main`, or `git clean` outside your assigned worktree
+- **Never force-push or reset --hard** without explicit instruction from the user
+- **If you encounter files/changes from another agent**, leave them alone — do not modify, revert, or clean them up
+- **Commit only your changes** — do not stage unrelated modifications with `git add -A` or `git add .`; use specific file paths
+- **If your worktree has unexpected state**, report it via task notes or `loom complete` rather than cleaning it up
+- **Do not switch branches** — you are confined to your assigned worktree branch
+
+
+## User's Initial Request
+
+list open epics
+
+Address this request using the lead mode conventions above.
+=== END message ===
+=== VARIANT assignment ===
+# Custom role
+
+Do the custom thing.
+
+
+
+### Multi-Agent Safety Rules
+
+You are running in a parallel multi-agent environment. Follow these rules strictly:
+
+- **Only modify files directly related to your assigned task** — do not touch files outside your task scope
+- **Never run** `git stash`, `git checkout main`, or `git clean` outside your assigned worktree
+- **Never force-push or reset --hard** without explicit instruction from the user
+- **If you encounter files/changes from another agent**, leave them alone — do not modify, revert, or clean them up
+- **Commit only your changes** — do not stage unrelated modifications with `git add -A` or `git add .`; use specific file paths
+- **If your worktree has unexpected state**, report it via task notes or `loom complete` rather than cleaning it up
+- **Do not switch branches** — you are confined to your assigned worktree branch
+
+
+## Loom Backend Assignment
+
+Epic EPIC-1 is yours. Backend: claude.
+=== END assignment ===
+=== VARIANT assignment+message ===
+# Custom role
+
+Do the custom thing.
+
+
+
+### Multi-Agent Safety Rules
+
+You are running in a parallel multi-agent environment. Follow these rules strictly:
+
+- **Only modify files directly related to your assigned task** — do not touch files outside your task scope
+- **Never run** `git stash`, `git checkout main`, or `git clean` outside your assigned worktree
+- **Never force-push or reset --hard** without explicit instruction from the user
+- **If you encounter files/changes from another agent**, leave them alone — do not modify, revert, or clean them up
+- **Commit only your changes** — do not stage unrelated modifications with `git add -A` or `git add .`; use specific file paths
+- **If your worktree has unexpected state**, report it via task notes or `loom complete` rather than cleaning it up
+- **Do not switch branches** — you are confined to your assigned worktree branch
+
+
+## Loom Backend Assignment
+
+Epic EPIC-1 is yours. Backend: claude.
+
+## User's Initial Request
+
+list open epics
+
+Address this request using the lead mode conventions above.
+=== END assignment+message ===
