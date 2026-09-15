@@ -41,13 +41,13 @@ func (s *Supervisor) buildCommand(ctx context.Context, ap *AgentProcess) (*exec.
 		return nil, err
 	}
 
-	cmd.Dir = ap.WorktreePath
+	cmd.Dir = ap.WorkDir()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	cmd.Env = appendGitTerminalPrompt(cli.FilteredEnv())
 	cmd.Env = append(cmd.Env,
 		fmt.Sprintf("LOOM_AGENT_NAME=%s", ap.Entry.Worktree),
-		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.WorktreePath),
+		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.WorkDir()),
 		fmt.Sprintf("LOOM_EVENTS_DIR=%s", ResolveDaemonPath(s.ProjectDir, cfg.Daemon.EventsDir)),
 	)
 
@@ -70,12 +70,7 @@ func (s *Supervisor) buildCommand(ctx context.Context, ap *AgentProcess) (*exec.
 		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_AGENT_CROSS_REPO=%t", ap.Entry.CrossRepo))
 	}
 
-	ap.Mu.Lock()
-	assignedTaskID := ap.AssignedTaskID
-	ap.Mu.Unlock()
-	if assignedTaskID != "" {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ASSIGNED_TASK_ID=%s", assignedTaskID))
-	}
+	cmd.Env = appendClaimedTaskEnv(cmd.Env, ap)
 
 	if cmd.Env, err = s.appendRuntimeEnv(cmd.Env, ap); err != nil {
 		return nil, err
@@ -106,6 +101,22 @@ func appendGitTerminalPrompt(env []string) []string {
 	return append(env, "GIT_TERMINAL_PROMPT=0")
 }
 
+// appendClaimedTaskEnv exports the task this cycle claimed and the repo its
+// worktree was routed for, so the agent-side prompt can name the repo instead
+// of inferring it from the working directory.
+func appendClaimedTaskEnv(env []string, ap *AgentProcess) []string {
+	ap.Mu.Lock()
+	assignedTaskID := ap.AssignedTaskID
+	ap.Mu.Unlock()
+	if assignedTaskID != "" {
+		env = append(env, fmt.Sprintf("LOOM_ASSIGNED_TASK_ID=%s", assignedTaskID))
+	}
+	if repo := ap.Placement().Repo; repo != "" {
+		env = append(env, fmt.Sprintf("LOOM_TASK_SOURCE_REPO=%s", repo))
+	}
+	return env
+}
+
 // buildAgentExecCmd creates the exec.Cmd with the correct arguments for the agent role.
 // loomExecutablePath resolves the loom binary that agent workers re-exec.
 // It is a seam for tests: under `go test`, os.Executable() is the test binary
@@ -120,7 +131,7 @@ func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) (*exec.Cmd, err
 		return nil, fmt.Errorf("resolve loom executable: %w", err)
 	}
 	if BuiltInRoles[ap.Entry.Role] {
-		args := []string{ap.Entry.Role, ap.WorktreePath, "--auto", "--daemon-mode"}
+		args := []string{ap.Entry.Role, ap.WorkDir(), "--auto", "--daemon-mode"}
 		if backend != "" {
 			args = append(args, "--backend", backend)
 		}
@@ -134,7 +145,7 @@ func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) (*exec.Cmd, err
 	if promptFile == "" {
 		return nil, fmt.Errorf("custom role %q missing prompt_file", ap.Entry.Role)
 	}
-	args := []string{"agent", ap.WorktreePath, "--prompt", promptFile, "--auto", "--daemon-mode"}
+	args := []string{"agent", ap.WorkDir(), "--prompt", promptFile, "--auto", "--daemon-mode"}
 	if ap.RoleConfig.TaskFilter != "" {
 		args = append(args, "--task-filter", ap.RoleConfig.TaskFilter)
 	}
@@ -334,7 +345,7 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 
 func (s *Supervisor) ensureHookConfig(ap *AgentProcess) {
 	backend := s.GetEffectiveBackend(ap)
-	if err := agent.EnsureSkillMaterializeHook(ap.WorktreePath, backend); err != nil {
+	if err := agent.EnsureSkillMaterializeHook(ap.WorkDir(), backend); err != nil {
 		slog.Warn("agent hook configuration failed; continuing without raw-PTY pre-turn hook",
 			"worktree", ap.Entry.Worktree, "backend", backend, "err", err)
 	}
@@ -351,7 +362,7 @@ func (s *Supervisor) materializeSkills(ctx context.Context, ap *AgentProcess) er
 	}
 	ctx, cancel := context.WithTimeout(ctx, controlPlaneOperationTimeout)
 	defer cancel()
-	return skillmat.MaterializeLeased(ctx, s.ControlStore, s.WorkspaceID, ap.Entry.Role, ap.WorktreePath)
+	return skillmat.MaterializeLeased(ctx, s.ControlStore, s.WorkspaceID, ap.Entry.Role, ap.WorkDir())
 }
 
 // materializeIdleSkills keeps an idle worker's worktree current while the
@@ -551,7 +562,7 @@ func (s *Supervisor) waitForAgent(ap *AgentProcess) int {
 // this cycle classifies anything — it would otherwise inherit the previous
 // cycle's verdict and skip the cold-start cleanup it exists to perform.
 func (s *Supervisor) recoverAgent(ap *AgentProcess, exitCode int, incomplete bool) error {
-	return agent.RecoverWorktree(ap.WorktreePath, ap.Entry.Worktree, exitCode, incomplete)
+	return agent.RecoverWorktree(ap.WorkDir(), ap.Entry.Worktree, exitCode, incomplete)
 }
 
 // appendDaemonEnv appends daemon-level env vars (workspace ID, IPC socket path)
@@ -580,7 +591,7 @@ func (s *Supervisor) appendRuntimeEnv(env []string, ap *AgentProcess) ([]string,
 	if err != nil {
 		return nil, fmt.Errorf("agent %s profile: %w", ap.Entry.Worktree, err)
 	}
-	env = append(env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.WorktreePath, YieldFileName)))
+	env = append(env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.WorkDir(), YieldFileName)))
 	return appendSessionEnv(env, ap), nil
 }
 
