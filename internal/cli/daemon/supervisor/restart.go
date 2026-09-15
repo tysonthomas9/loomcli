@@ -38,6 +38,13 @@ const defaultClaimHoldRecheckInterval = 15 * time.Second
 // because the two set the cadence of the same recheck loop.
 const backendStateReassertInterval = 5 * time.Minute
 
+// issueBackendOutageRecheckInterval is the fixed delay between retries while
+// the ISSUE backend (fleet-db) is unreachable or rejecting the daemon's
+// credentials. Nothing about the agent is wrong, so — like the CLI-binary
+// recheck above — we poll on a fixed interval and never count these retries
+// toward max_retries.
+const issueBackendOutageRecheckInterval = 30 * time.Second
+
 // defaultMaxRetriesBlockInterval is the fixed delay between re-attempts after
 // an agent has exhausted its restart budget and blocked (policy OnExhaustion
 // Block). Rather than abandoning the agent (silent loss until a daemon
@@ -120,7 +127,7 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 }
 
 // applyUncountedRestart handles the RetryUncounted dispositions — a claim
-// hold, no work, and rate limiting — each of which restarts without eroding
+// hold, no work, an issue-backend outage, and rate limiting — each of which restarts without eroding
 // the retry budget for its own reason. Caller holds ap.Mu.
 func (s *Supervisor) applyUncountedRestart(ap *AgentProcess, outcome agenterr.Outcome,
 	d agentpolicy.Disposition, maxRetries int) bool {
@@ -130,6 +137,12 @@ func (s *Supervisor) applyUncountedRestart(ap *AgentProcess, outcome agenterr.Ou
 	}
 	if outcome.Is(agenterr.NoWorkOutcome) {
 		s.applyNoWorkRestart(ap)
+		return true
+	}
+	// The shared issue backend being down or refusing our credentials is not
+	// evidence about this agent's health (PUPPET-210): uncounted fixed recheck.
+	if outcome.Is(agenterr.IssueBackendOutageOutcome) {
+		s.applyIssueBackendOutageRestart(ap)
 		return true
 	}
 	// Rate limits: unlimited uncounted retries by default; the
@@ -364,10 +377,41 @@ func (s *Supervisor) claimHoldRecheckBackoff() time.Duration {
 // cycle that verifies. Caller holds ap.Mu.
 func (s *Supervisor) applyProfileInvalidRestart(ap *AgentProcess) {
 	ap.RateRetryCount = 0
-	ap.NoWorkCount = 0
+	resetNoWork(ap)
 	ap.StopReason = StopReasonProfileInvalid
 	log.Printf("[daemon] Agent %s: harness profile invalid, will recheck in %s (not counted toward max_retries)",
 		ap.Entry.Worktree, s.backendRecheckBackoff())
+}
+
+// applyIssueBackendOutageRestart keeps an agent retrying while the ISSUE
+// backend is unreachable or rejecting the daemon's credentials. It mirrors
+// applyNoWorkRestart rather than applyCountedRestart, and for the same reason:
+// the condition is not a health signal about this agent. Every agent shares
+// one issue backend, so an outage fails all of them within a second of each
+// other; charging it to each agent's restart budget escalates the whole fleet
+// through BlockBudget into FastFail — a terminal stop — over a fault no agent
+// can fix and that typically clears on its own minutes later.
+//
+// RestartCount resets so a pre-outage failure streak does not carry through
+// the outage, and StopReason names the wait so `loom daemon status` shows why
+// the agent is idle instead of reporting an opaque Unknown. Caller holds ap.Mu.
+func (s *Supervisor) applyIssueBackendOutageRestart(ap *AgentProcess) {
+	ap.RestartCount = 0
+	ap.RateRetryCount = 0
+	resetNoWork(ap)
+	ap.StopReason = StopReasonIssueBackendUnavailable
+	slog.Warn("issue backend unavailable, will recheck (not counted toward max_retries)",
+		"worktree", ap.Entry.Worktree, "recheck_in", s.issueBackendRecheckBackoff())
+}
+
+// issueBackendRecheckBackoff is the fixed delay between issue-backend
+// re-checks. It shares the backendRecheckInterval override so a test that
+// shrinks the recheck cadence shrinks both.
+func (s *Supervisor) issueBackendRecheckBackoff() time.Duration {
+	if s.backendRecheckInterval > 0 {
+		return s.backendRecheckInterval
+	}
+	return issueBackendOutageRecheckInterval
 }
 
 // backendRecheckBackoff is the fixed delay between BackendUnavailable re-checks
@@ -392,6 +436,27 @@ func (s *Supervisor) parkedStateBackoff(profileInvalid, blocked bool) (time.Dura
 	// A blocked agent sleeps the fixed block interval — keyed on StopReason,
 	// not error class, because any counted class can exhaust the budget.
 	if blocked {
+		return s.maxRetriesBlockBackoff(), true
+	}
+	return 0, false
+}
+
+// fixedRecheckBackoff returns the fixed interval for the backoff buckets that
+// wait on something outside the agent rather than backing off a flaky run, and
+// ok=false for the exponential ones. Split out of computeBackoff (funlen) with
+// the arms unchanged.
+func (s *Supervisor) fixedRecheckBackoff(bp agentpolicy.BackoffProfile) (time.Duration, bool) {
+	switch bp {
+	case agentpolicy.BPBackendUnavailable:
+		// Waiting for the backend CLI to reappear.
+		return s.backendRecheckBackoff(), true
+	case agentpolicy.BPClaimsHeld:
+		// Waiting for an operator to release a hold.
+		return s.claimHoldRecheckBackoff(), true
+	case agentpolicy.BPIssueBackendOutage:
+		// Waiting for the issue store to answer again.
+		return s.issueBackendRecheckBackoff(), true
+	case agentpolicy.BPBlock:
 		return s.maxRetriesBlockBackoff(), true
 	}
 	return 0, false
@@ -431,6 +496,10 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	outcome := lastErr.Class
 	d := agentpolicy.Decide(outcome)
 
+	if wait, ok := s.fixedRecheckBackoff(d.Backoff); ok {
+		return wait
+	}
+
 	var initial int
 	var retryN int
 	switch d.Backoff {
@@ -439,16 +508,6 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 		// exponential retry curve - it is a poll that relaxes while the board stays
 		// empty and snaps back to no_work_backoff the moment anything is claimed.
 		return noWorkPollInterval(s.getNoWorkBackoff(), s.GetIdlePollInterval(), noWorkCount)
-	case agentpolicy.BPBackendUnavailable:
-		// Fixed recheck: waiting for the backend CLI to reappear, not
-		// backing off a flaky run.
-		return s.backendRecheckBackoff()
-	case agentpolicy.BPClaimsHeld:
-		// Fixed recheck: waiting for an operator to release a hold, not
-		// backing off a flaky run.
-		return s.claimHoldRecheckBackoff()
-	case agentpolicy.BPBlock:
-		return s.maxRetriesBlockBackoff()
 	case agentpolicy.BPRateLimit:
 		initial = s.getRateLimitBackoff()
 		retryN = rateCount
