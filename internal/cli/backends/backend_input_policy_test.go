@@ -14,9 +14,9 @@ import (
 
 // claudeTrustPrompt is claude-code's folder-trust dialog as pkg/chat presents
 // it. The option labels are the ones AffirmativeOption matches on ("proceed"),
-// which is exactly why a blanket auto-accept is dangerous: claude-code renders
-// the `--dangerously-skip-permissions` acceptance screen under this SAME kind,
-// with an equally affirmative-looking option.
+// which is exactly why a blanket auto-accept is dangerous: the
+// `--dangerously-skip-permissions` acceptance screen (claudeBypassAcceptance
+// below) offers an equally affirmative-looking option.
 func claudeTrustPrompt() chat.InputRequest {
 	return chat.InputRequest{
 		ID:   "req-1",
@@ -25,6 +25,74 @@ func claudeTrustPrompt() chat.InputRequest {
 			{ID: "1", Alias: "proceed", Label: "Yes, proceed"},
 			{ID: "2", Alias: "deny", Label: "No, exit"},
 		},
+	}
+}
+
+// claudeBypassAcceptance is claude-code's `--dangerously-skip-permissions`
+// acceptance screen. Until harness-wrapper v0.8.4 it arrived under the
+// `trust_prompt` kind, indistinguishable from the folder-trust dialog above;
+// it now has its own kind, which is the whole point of the two tests below.
+func claudeBypassAcceptance() chat.InputRequest {
+	return chat.InputRequest{
+		ID:   "req-2",
+		Kind: "bypass_acceptance",
+		Options: []chat.InputOption{
+			{ID: "1", Alias: "proceed", Label: "Yes, I accept"},
+			{ID: "2", Alias: "deny", Label: "No, exit"},
+		},
+	}
+}
+
+// The behavior change harness-wrapper v0.8.4 delivers, made explicit: a role
+// written for the old shared kind allowed folder trust and the bypass screen
+// together. Now `trust_prompt: allow` says nothing about `bypass_acceptance`,
+// so the policy's deny default applies to it.
+//
+// This is not a stall. loom launches claude with
+// `--dangerously-skip-permissions` itself, so the screen appears on nearly
+// every run, and denying it answers "No, exit" — claude then exits. A role
+// that needs claude must name the new kind; that is what the second test pins.
+func TestAnswerInputRequest_TrustPromptAllowDoesNotAllowBypassAcceptance(t *testing.T) {
+	policy := &domain.RoleInputPolicy{
+		Default: domain.RoleInputDeny,
+		Kinds:   map[string]string{"trust_prompt": domain.RoleInputAllow},
+	}
+
+	ans, ok := withStderr(t, func() (chat.InputAnswer, bool) {
+		return answerInputRequest(policy, claudeBypassAcceptance())
+	})
+	if !ok {
+		t.Fatalf("want the negative option answered, got a decline")
+	}
+	if ans.OptionID != "2" {
+		t.Fatalf("answer = %q, want the deny-aliased option %q — a trust_prompt allow must NOT carry over to bypass_acceptance", ans.OptionID, "2")
+	}
+
+	// The same policy still allows the kind it actually names, so the deny
+	// above is the split and not a policy that stopped working.
+	if ans, ok := answerInputRequest(policy, claudeTrustPrompt()); !ok || ans.OptionID != "1" {
+		t.Fatalf("trust_prompt under the same policy = (%+v, %v), want the affirmative option %q", ans, ok, "1")
+	}
+}
+
+// ...and naming the new kind is what accepts the screen, which is the only way
+// a role can run claude under `--dangerously-skip-permissions` unattended.
+func TestAnswerInputRequest_BypassAcceptanceAllowAnswersTheScreen(t *testing.T) {
+	policy := &domain.RoleInputPolicy{
+		Default: domain.RoleInputDeny,
+		Kinds:   map[string]string{"bypass_acceptance": domain.RoleInputAllow},
+	}
+
+	ans, ok := answerInputRequest(policy, claudeBypassAcceptance())
+	if !ok || ans.OptionID != "1" {
+		t.Fatalf("answer = (%+v, %v), want the affirmative option %q", ans, ok, "1")
+	}
+
+	// And it is still scoped to the kind it named: folder trust stays denied.
+	if ans, ok := withStderr(t, func() (chat.InputAnswer, bool) {
+		return answerInputRequest(policy, claudeTrustPrompt())
+	}); !ok || ans.OptionID != "2" {
+		t.Fatalf("trust_prompt under the same policy = (%+v, %v), want the deny-aliased option %q", ans, ok, "2")
 	}
 }
 
