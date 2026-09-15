@@ -616,10 +616,19 @@ check-go:
 #   failure `cover: line "..." doesn't match expected format`, which looks like a
 #   coverage regression but is a corrupt profile. The trap removes it on every
 #   exit path, so nothing stale survives to poison a later run.
+#   The wall-clock cap bounds the WHOLE run: `-timeout 15m` is go's PER-PACKAGE
+#   timeout, so ~159 serial packages have no bounded total. The wrapper execs
+#   straight through when `make check` already armed a cap above us, and arms its
+#   own when `check-go` is the entry point (CI, or a direct invocation).
+#   `set -e` ordering is load-bearing: a non-zero exit here — 124 from the cap,
+#   or a killed tree — aborts before step 13, so check-coverage.sh never scores
+#   the truncated profile a killed `go test` leaves behind. Do not add `|| true`.
 	@set -e; \
 	 profile="$$(mktemp "$${TMPDIR:-/tmp}/loom.coverage.XXXXXX")"; \
 	 trap 'rm -f "$$profile"' EXIT; \
-	 ./scripts/with-clean-loom-env.sh go test -p 1 -race -covermode=atomic -coverprofile="$$profile" -timeout 15m ./...; \
+	 cap="$$(./scripts/gate-timeout-seconds.sh)"; \
+	 ./scripts/with-timeout.sh "$$cap" "check-go: go test -race ./..." \
+	   ./scripts/with-clean-loom-env.sh go test -p 1 -race -covermode=atomic -coverprofile="$$profile" -timeout 15m ./...; \
 	 echo "=== [13/13] Go: coverage threshold ==="; \
 	 COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh "$$profile"
 	@echo "=== Go quality gates PASSED ==="
@@ -643,9 +652,15 @@ check-frontend: ensure-frontend-deps
 # Unified quality gate — runs Go + frontend checks in parallel
 check:
 	@echo "=== Running Go and Frontend checks in parallel ==="
+# Each side is wall-capped so a gate invocation can never outlast the turn
+# budget it runs inside; see scripts/with-timeout.sh. These are two SIBLING
+# wrappers, not nested ones: each arms its own deadline and its own process
+# group. The banner goes to stderr, which the redirections below already fold
+# into the log that is `cat`ed when a side fails.
 	@go_log=$$(mktemp); fe_log=$$(mktemp); \
-	$(MAKE) check-go >"$$go_log" 2>&1 & go_pid=$$!; \
-	$(MAKE) check-frontend >"$$fe_log" 2>&1 & fe_pid=$$!; \
+	cap=$$(./scripts/gate-timeout-seconds.sh); \
+	./scripts/with-timeout.sh "$$cap" "check-go" $(MAKE) check-go >"$$go_log" 2>&1 & go_pid=$$!; \
+	./scripts/with-timeout.sh "$$cap" "check-frontend" $(MAKE) check-frontend >"$$fe_log" 2>&1 & fe_pid=$$!; \
 	go_rc=0; fe_rc=0; \
 	wait $$go_pid || go_rc=$$?; \
 	wait $$fe_pid || fe_rc=$$?; \
