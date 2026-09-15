@@ -150,7 +150,9 @@ func closeTask(deps *cli.Deps, taskID, reason string) {
 // Tasks that have already reached review or closed status were successfully
 // processed and should not be reset; a blocked task was quarantined by the
 // daemon (or blocked by a human) and must not be flipped back to open by a
-// crash-recovery pass.
+// crash-recovery pass. A deferred task is a human hold: only an explicit
+// deferred -> open (e.g. `loom data update --status open`) releases it, never
+// a crash-recovery pass.
 func resetTask(deps *cli.Deps, taskID string) {
 	ib := deps.IssueBackend
 	ctx := cmdstore.RootContext()
@@ -158,7 +160,7 @@ func resetTask(deps *cli.Deps, taskID string) {
 	// Check current status before resetting
 	detail, err := ib.Get(ctx, taskID)
 	if err == nil && detail != nil {
-		if detail.Status == "review" || detail.Status == "closed" || detail.Status == "blocked" {
+		if detail.Status == "review" || detail.Status == "closed" || detail.Status == "blocked" || detail.Status == "deferred" {
 			fmt.Printf("✓ Task %s already %s, skipping reset\n", taskID, detail.Status)
 			return
 		}

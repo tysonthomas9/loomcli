@@ -173,7 +173,22 @@ func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts
 // to resume: a successful (re-)claim, or a conflict whose holder is THIS
 // worktree (our own claim still within its TTL). Any other failure returns
 // false so the caller cold-starts rather than stranding the agent.
+//
+// A task a human moved to `deferred` while it was in flight is NOT ours to
+// resume, even when our lock is still live: `deferred` is the human hold, and
+// fleet-db still lets a claim take it deferred -> in_progress. Refuse before
+// the claim so both the claim and the own-lock conflict branch are covered.
+// If the status read fails the claim proceeds as before; the hold is only
+// enforced on a status we could actually see.
 func (s *Supervisor) claimResumeTask(ap *AgentProcess, taskID string) bool {
+	getCtx, getCancel := s.operationContext(claimOperationTimeout)
+	issue, getErr := s.IssueBackend.Get(getCtx, taskID)
+	getCancel()
+	if getErr == nil && issue != nil && issue.Status == "deferred" {
+		slog.Info("resume target is deferred (human hold); cold-starting instead of resuming",
+			"worktree", ap.Entry.Worktree, "task_id", taskID)
+		return false
+	}
 	err := s.claimIssueForAgent(ap, taskID, "resume interrupted task")
 	if err == nil {
 		return true
