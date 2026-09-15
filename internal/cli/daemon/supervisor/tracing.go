@@ -58,7 +58,7 @@ func errorTypeFromAgentErr(e *agenterr.AgentError) string {
 		return "unknown"
 	}
 	switch {
-	case e.Class.IsClass(wrapper.ErrTimeout):
+	case e.Class.IsClass(wrapper.ErrTimeout), e.Class.Is(agenterr.RunTurnDeadlineOutcome):
 		return "timeout"
 	case e.Class.IsClass(wrapper.ErrRateLimited):
 		return "rate_limited"

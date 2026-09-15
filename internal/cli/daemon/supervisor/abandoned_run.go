@@ -12,6 +12,7 @@ import (
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -572,12 +573,16 @@ func agentSessionIDSnapshot(ap *AgentProcess) string {
 
 // isTimeoutExit reports whether the classified exit was a ceiling hit. IsClass
 // (not Is) is the harness-class predicate used across this package, and it
-// covers both producers: markRunDurationExceeded's run-duration cap and the
-// silence watchdog's exit-137, which ClassifyFromLog resolves to ErrTimeout.
+// covers both harness producers: markRunDurationExceeded's run-duration cap and
+// the silence watchdog's exit-137, which ClassifyFromLog resolves to ErrTimeout.
+// The third producer is a domain outcome: loom's own per-turn deadline
+// (PUPPET-611) classifies as RunTurnDeadlineOutcome, and it is the ceiling hit
+// PUPPET-441 set out to record, so it must not fall through.
 func isTimeoutExit(ap *AgentProcess) bool {
 	ap.Mu.Lock()
 	defer ap.Mu.Unlock()
-	return ap.LastError != nil && ap.LastError.Class.IsClass(wrapper.ErrTimeout)
+	return ap.LastError != nil &&
+		(ap.LastError.Class.IsClass(wrapper.ErrTimeout) || ap.LastError.Class.Is(agenterr.RunTurnDeadlineOutcome))
 }
 
 // timeoutRunID is the marker suffix: the control-plane session id when there is
@@ -632,6 +637,14 @@ func (s *Supervisor) timeoutRunFactsFor(ap *AgentProcess, taskID, sessionID stri
 	}
 }
 
+// isRunTurnDeadlineExit reports whether the classified exit was loom's own
+// per-turn deadline (RunTurnDeadlineOutcome).
+func isRunTurnDeadlineExit(ap *AgentProcess) bool {
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	return ap.LastError != nil && ap.LastError.Class.Is(agenterr.RunTurnDeadlineOutcome)
+}
+
 // timeoutRunCause maps the supervisor's stop reason to the human-readable cause
 // and the ceiling that was crossed. Naming the ceiling is what lets the
 // loom:timeout-partial population be re-measured from the board rather than
@@ -642,11 +655,16 @@ func (s *Supervisor) timeoutRunCause(ap *AgentProcess, reason StopReason) (cause
 		return "run-duration cap", formatCeiling(s.maxRunDurationFor(ap))
 	case StopReasonWatchdog:
 		return "output-timeout watchdog (silence)", formatCeiling(time.Duration(s.GetOutputTimeout()) * time.Second)
-	default:
-		// Classified from the harness log with no supervisor stop reason: the
-		// run timed out, but this process did not pick the ceiling.
-		return "harness-reported timeout", "-"
 	}
+	if isRunTurnDeadlineExit(ap) {
+		// The child ended its own turn at the deadline this supervisor
+		// exported (LOOM_RUN_TURN_TIMEOUT_SECONDS), so the ceiling is known.
+		secs := runTurnTimeoutSecondsFor(ap, s.GetMaxRunDuration())
+		return "per-turn deadline (role max_run_duration minus margin)", formatCeiling(time.Duration(secs) * time.Second)
+	}
+	// Classified from the harness log with no supervisor stop reason: the
+	// run timed out, but this process did not pick the ceiling.
+	return "harness-reported timeout", "-"
 }
 
 // formatCeiling renders a disabled (zero) ceiling as "-".
