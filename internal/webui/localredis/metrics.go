@@ -27,4 +27,13 @@ var (
 		Name: "loom_localredis_snapshot_failures_total",
 		Help: "Total localredis snapshot sweeps that failed to leave a verified-healthy snapshot on disk (partial reads, scan failures, write errors).",
 	})
+	// writeThroughTotal separates debounce-triggered sweeps from the 30s
+	// tick, which is how we tell in production whether the hook fires at
+	// all and whether writeThroughGap is tuned sanely. Outcomes are
+	// already covered by the two metrics above — write-through dumps go
+	// through the same dump path.
+	writeThroughTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "loom_localredis_write_through_snapshots_total",
+		Help: "Total localredis snapshot sweeps triggered by a terminal-state mutation rather than the periodic tick.",
+	})
 )
