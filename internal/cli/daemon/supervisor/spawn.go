@@ -64,6 +64,10 @@ func (s *Supervisor) buildCommand(ctx context.Context, ap *AgentProcess) (*exec.
 	}
 	if len(sourceRepos) > 0 {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_SOURCE_REPOS=%s", strings.Join(sourceRepos, ",")))
+		// The binding alone does not say whether it is a hard filter; the
+		// agent-side router check needs cross_repo too, or its verdict differs
+		// from the supervisor's on exactly the wrong-repo issues.
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_AGENT_CROSS_REPO=%t", ap.Entry.CrossRepo))
 	}
 
 	ap.Mu.Lock()
