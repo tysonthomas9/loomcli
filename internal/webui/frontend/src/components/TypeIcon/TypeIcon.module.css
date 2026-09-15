@@ -11,19 +11,19 @@
 
 /* Type-specific icon colors */
 .typeIcon[data-type="bug"] {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
 }
 
 .typeIcon[data-type="feature"] {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 
 .typeIcon[data-type="task"] {
-  color: var(--color-success);
+  color: var(--color-success-text);
 }
 
 .typeIcon[data-type="epic"] {
-  color: var(--color-type-epic);
+  color: var(--color-epic-text);
 }
 
 .typeIcon[data-type="chore"] {

@@ -118,7 +118,7 @@
 
 .error {
   font-size: var(--font-xs);
-  color: var(--color-error);
+  color: var(--color-danger-text);
 }
 
 .emptyMessage {

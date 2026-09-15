@@ -50,12 +50,12 @@
 }
 
 .add {
-  color: var(--color-success);
+  color: var(--color-success-text);
   font-weight: 700;
 }
 
 .del {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   font-weight: 700;
 }
 

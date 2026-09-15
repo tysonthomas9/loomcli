@@ -183,7 +183,7 @@
 
 .configureLink {
   font-size: var(--font-xs);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   text-decoration: none;
   flex-shrink: 0;
 }
@@ -193,7 +193,7 @@
 }
 
 .checkmark {
-  color: var(--color-success);
+  color: var(--color-success-text);
   font-size: var(--font-sm);
   flex-shrink: 0;
 }
@@ -233,6 +233,6 @@
   left: 0;
   margin-top: var(--space-1, 4px);
   font-size: var(--font-xs);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   white-space: nowrap;
 }

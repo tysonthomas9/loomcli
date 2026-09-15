@@ -154,7 +154,7 @@
 
 /* Highlight text when toggle is active */
 .toggleLabel:has(input:checked) .toggleText {
-  color: var(--color-ready);
+  color: var(--color-success-text);
 }
 
 /* Blocked checkbox uses red accent color */
@@ -164,7 +164,7 @@
 
 /* Highlight text red when blocked toggle is active */
 .toggleLabel:has(.blockedCheckbox:checked) .toggleText {
-  color: var(--color-blocked);
+  color: var(--color-danger-text);
 }
 
 /* Closed checkbox uses muted accent color */
@@ -174,7 +174,7 @@
 
 /* Highlight text muted when closed toggle is active */
 .toggleLabel:has(.closedCheckbox:checked) .toggleText {
-  color: var(--color-status-closed);
+  color: var(--color-success-text);
 }
 
 /* Divider between highlight toggle and zoom controls */
