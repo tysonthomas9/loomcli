@@ -71,7 +71,19 @@ type DaemonInfo struct {
 	// report it (currently the Registered source — see
 	// WorkspaceOpsDaemon.Registered).
 	Cwd string `json:"cwd,omitempty"`
+	// StateWrittenAt is when the daemon last wrote daemon-agents.json. A
+	// running daemon whose state file has stopped advancing looks identical
+	// to a healthy one without this, which is exactly how the 2026-08-31
+	// outage stayed invisible. Zero when the state file is unreadable or was
+	// written by a binary predating the field.
+	StateWrittenAt time.Time `json:"state_written_at,omitempty"`
+	// Degraded names the daemon's active degradation kinds, if any.
+	Degraded []string `json:"degraded,omitempty"`
 }
+
+// daemonStateStaleAfter is how old daemon-agents.json may be before this
+// status line flags it. Matches the daemon status command's own threshold.
+const daemonStateStaleAfter = 30 * time.Second
 
 // BackendInfo holds the resolved backend information.
 type BackendInfo struct {
@@ -325,7 +337,16 @@ func renderStatusDaemon(d DaemonInfo) {
 		if uptime == "" {
 			uptime = "unknown"
 		}
-		fmt.Printf("Daemon:     running (pid %d, uptime %s)\n", d.PID, uptime)
+		line := fmt.Sprintf("Daemon:     running (pid %d, uptime %s)", d.PID, uptime)
+		if !d.StateWrittenAt.IsZero() {
+			if age := time.Since(d.StateWrittenAt); age > daemonStateStaleAfter {
+				line += fmt.Sprintf("  ⚠ STALE state file (%s old)", age.Truncate(time.Second))
+			}
+		}
+		if len(d.Degraded) > 0 {
+			line += fmt.Sprintf("  ⚠ DEGRADED: %s", strings.Join(d.Degraded, ", "))
+		}
+		fmt.Println(line)
 	case d.StalePID:
 		fmt.Println("Daemon:     not running (stale pid file)")
 	default:
@@ -415,10 +436,26 @@ func collectDaemonStatusForDir(projectDir string) DaemonInfo {
 		// Read state file for uptime info (inline to avoid daemon/ import cycle)
 		if data, err := os.ReadFile(stateFilePath); err == nil { //nolint:gosec // controlled path
 			var state struct {
-				StartedAt time.Time `json:"started_at"`
+				StartedAt    time.Time `json:"started_at"`
+				WrittenAt    time.Time `json:"written_at"`
+				Degradations []struct {
+					Kind string `json:"kind"`
+				} `json:"degradations"`
 			}
 			if json.Unmarshal(data, &state) == nil {
 				info.Uptime = formatDuration(time.Since(state.StartedAt))
+				// Fall back to mtime when written_at is absent (older
+				// binary), so a zero time is never reported as a
+				// decades-old file.
+				info.StateWrittenAt = state.WrittenAt
+				if info.StateWrittenAt.IsZero() {
+					if fi, statErr := os.Stat(stateFilePath); statErr == nil {
+						info.StateWrittenAt = fi.ModTime()
+					}
+				}
+				for _, d := range state.Degradations {
+					info.Degraded = append(info.Degraded, d.Kind)
+				}
 			}
 		}
 		return info
