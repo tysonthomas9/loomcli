@@ -51,6 +51,9 @@ type DaemonAgentStatus struct {
 	OwnershipLastHeartbeat time.Time `json:"ownership_last_heartbeat,omitempty"`
 	LastActivity           time.Time `json:"last_activity,omitempty"`
 	ClaimsGated            bool      `json:"claims_gated,omitempty"` // cycling but gated by an active claim hold
+	// ProfileError is the harness-profile refusal that is keeping this agent
+	// out of the claim loop. omitempty: a healthy fleet's JSON is unchanged.
+	ProfileError string `json:"profile_error,omitempty"`
 }
 
 // DaemonState represents the complete daemon state in daemon-agents.json
@@ -604,6 +607,7 @@ func printDaemonAgentTable(state *DaemonState, dir string) {
 		}
 	}
 
+	printProfileBlockedBanner(state.Agents)
 	printQuarantinedTasks(state.QuarantinedTasks)
 }
 
