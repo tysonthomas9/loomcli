@@ -258,6 +258,8 @@ func statisticsToData(s gen.Statistics) backend.StatsData {
 		BlockedIssues:           s.BlockedIssues,
 		DeferredIssues:          s.DeferredIssues,
 		ReadyIssues:             s.ReadyIssues,
+		ReviewIssues:            s.ReviewIssues,
+		StatusBlockedIssues:     s.StatusBlockedIssues,
 		TombstoneIssues:         s.TombstoneIssues,
 		PinnedIssues:            s.PinnedIssues,
 		EpicsEligibleForClosure: s.EpicsEligibleForClosure,
