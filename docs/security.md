@@ -28,6 +28,22 @@ Redis is configured via `loom serve` flags and environment variables:
 | `--redis-password` | `LOOM_REDIS_PASSWORD` | Redis password (prefer env var to avoid leaking in process list) |
 | `--fleet-mode` | `LOOM_FLEET_MODE=true` | Enable fleet coordination (task claims, stale detector, fleet worker API, JWT signing). Off by default. |
 
+### HTTP Rate Limiting
+
+`loom serve` installs a per-IP token bucket limiter on every API endpoint (100 read req/s burst 200; 20 mutating req/s burst 40). It is **on by default** and is the server's only built-in protection against a single client saturating the API.
+
+| Flag | Env Var | Default | Description |
+|------|---------|---------|-------------|
+| `--rate-limit-enabled` | `LOOM_RATE_LIMIT_ENABLED` | `true` | Per-IP HTTP rate limiting; `0`/`false`/`off`/`no` disables it |
+| `--rate-limit-read-rate` | `LOOM_RATE_LIMIT_READ_RATE` | `100` | Sustained read req/s per IP |
+| `--rate-limit-read-burst` | `LOOM_RATE_LIMIT_READ_BURST` | `200` | Read burst per IP |
+| `--rate-limit-mutate-rate` | `LOOM_RATE_LIMIT_MUTATE_RATE` | `20` | Sustained mutating req/s per IP |
+| `--rate-limit-mutate-burst` | `LOOM_RATE_LIMIT_MUTATE_BURST` | `40` | Mutating burst per IP |
+
+**`--rate-limit-enabled=false` removes a DoS protection.** It is intended for local development, E2E suites and single-IP automation, where a serial test run legitimately exceeds the per-IP budget and would otherwise need 429 retry loops. Never set it on an internet-exposed server; raise the rates instead if a real deployment needs more headroom. A server started with it off logs `WARN http rate limiting disabled` at startup so the state is visible in logs.
+
+There is deliberately **no automatic loopback bypass**. `loom serve` binds `127.0.0.1` by default, so a loopback exemption would silently disable limiting for the entire default deployment; and behind a TLS-terminating proxy (the `--hsts` shape) `RemoteAddr` is loopback for every remote client. `X-Forwarded-For` is not trusted, so the two cases cannot be told apart — the explicit flag is the honest opt-out.
+
 The desktop app's Settings page can configure external Redis for embedded
 FleetDB. That setting is stored outside the repo in the local runtime data
 directory as `local-settings.json` with `0o600` permissions. The UI accepts

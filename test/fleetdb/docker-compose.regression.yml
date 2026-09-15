@@ -119,6 +119,10 @@ services:
       # Any fallback to an embedded reference path in fleet mode should surface
       # as a startup error, not a silent re-route.
       LOOM_FLEET_REQUIRED: "1"
+      # A serial E2E suite hits this single serve process from one IP and trips
+      # the per-IP HTTP rate limiter (100 read/s, 20 mutate/s). Off here only;
+      # the default stays on for real deployments.
+      LOOM_RATE_LIMIT_ENABLED: "0"
     command:
       - /bin/sh
       - -c

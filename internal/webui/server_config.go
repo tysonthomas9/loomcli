@@ -64,11 +64,16 @@ type ServerConfig struct {
 	// talk to — the IssueBackend is fleet-db over HTTP. Drives the
 	// /api/health handler choice so a missing daemon is reported as the
 	// expected steady state, not a degraded one.
-	FleetClient             bool
-	FleetRedis              *fleet.RedisConfig
-	FleetJWTKey             []byte                           // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
-	FleetAPIKey             string                           // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
-	HSTSEnabled             bool                             // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
+	FleetClient bool
+	FleetRedis  *fleet.RedisConfig
+	FleetJWTKey []byte // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
+	FleetAPIKey string // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
+	HSTSEnabled bool   // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
+	// RateLimit overrides the per-IP HTTP rate limiter. nil = package defaults
+	// (enabled, 100 r/s read / 20 r/s mutate). Set by `loom serve`'s
+	// --rate-limit-* flags / LOOM_RATE_LIMIT_* env so test harnesses and
+	// single-IP automation can raise or disable the limits.
+	RateLimit               *middleware.RateLimitConfig
 	ExtAuthURL              string                           // Auth service base URL (e.g., "https://auth.loomcli.com"); empty = open mode
 	ExtAuthIssuer           string                           // Expected JWT issuer (validated against "iss" claim; defaults to ExtAuthURL)
 	ExtAuthAudience         string                           // Expected JWT audience (validated against "aud" claim; defaults to "loom")
