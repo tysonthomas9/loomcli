@@ -105,7 +105,7 @@ func TestResolveLeadWorkdirFallsBackToGetwd(t *testing.T) {
 	}
 }
 
-func TestSeedLeadWorkdirFilesWritesBoth(t *testing.T) {
+func TestSeedLeadWorkdirFilesWritesAgentsFile(t *testing.T) {
 	dir := t.TempDir()
 	seedLeadWorkdirFiles(dir)
 
@@ -117,27 +117,25 @@ func TestSeedLeadWorkdirFilesWritesBoth(t *testing.T) {
 	if strings.Contains(agents, "Multi-Agent Safety Rules") {
 		t.Fatal("AGENTS.md must not contain the runtime safety guardrails")
 	}
-	claude := readSeeded(t, filepath.Join(dir, leadClaudeFileName))
-	if !strings.Contains(claude, leadAgentsFileName) {
-		t.Fatalf("CLAUDE.md = %q, want a pointer to AGENTS.md", claude)
+	// claude reads its ambient instructions from its profile root, not from
+	// cwd, so a CLAUDE.md here would be dead weight - see the note on
+	// leadAgentsFileName.
+	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Fatalf("lead workdir must not seed CLAUDE.md: %v", err)
 	}
 }
 
 func TestSeedLeadWorkdirFilesNeverOverwrites(t *testing.T) {
 	dir := t.TempDir()
 	const edited = "operator's own lead persona\n"
-	for _, name := range []string{leadAgentsFileName, leadClaudeFileName} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(edited), 0o644); err != nil {
-			t.Fatalf("write %s: %v", name, err)
-		}
+	if err := os.WriteFile(filepath.Join(dir, leadAgentsFileName), []byte(edited), 0o644); err != nil {
+		t.Fatalf("write %s: %v", leadAgentsFileName, err)
 	}
 
 	seedLeadWorkdirFiles(dir)
 
-	for _, name := range []string{leadAgentsFileName, leadClaudeFileName} {
-		if got := readSeeded(t, filepath.Join(dir, name)); got != edited {
-			t.Fatalf("%s = %q, want the operator edit preserved byte-for-byte", name, got)
-		}
+	if got := readSeeded(t, filepath.Join(dir, leadAgentsFileName)); got != edited {
+		t.Fatalf("%s = %q, want the operator edit preserved byte-for-byte", leadAgentsFileName, got)
 	}
 }
 
@@ -285,10 +283,8 @@ func TestRunLeadDedicatedWorkdirSeedsAndShrinks(t *testing.T) {
 	if want := agent.LeadSafetyPrompt(); inv.prompt != want {
 		t.Fatalf("argv prompt = %q, want the safety block alone %q", inv.prompt, want)
 	}
-	for _, name := range []string{leadAgentsFileName, leadClaudeFileName} {
-		if _, err := os.Stat(filepath.Join(leadDir, name)); err != nil {
-			t.Fatalf("%s not seeded in the lead workdir: %v", name, err)
-		}
+	if _, err := os.Stat(filepath.Join(leadDir, leadAgentsFileName)); err != nil {
+		t.Fatalf("%s not seeded in the lead workdir: %v", leadAgentsFileName, err)
 	}
 	if _, err := os.Stat(filepath.Join(cwd, leadAgentsFileName)); !os.IsNotExist(err) {
 		t.Fatalf("seeding leaked into the current directory: %v", err)
@@ -317,8 +313,5 @@ func TestRunLeadFallbackIsInert(t *testing.T) {
 	}
 	if got := readSeeded(t, filepath.Join(cwd, leadAgentsFileName)); got != foreign {
 		t.Fatalf("foreign AGENTS.md = %q, want it untouched", got)
-	}
-	if _, err := os.Stat(filepath.Join(cwd, leadClaudeFileName)); !os.IsNotExist(err) {
-		t.Fatalf("fallback must not seed CLAUDE.md: %v", err)
 	}
 }
