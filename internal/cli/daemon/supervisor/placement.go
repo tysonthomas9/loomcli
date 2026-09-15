@@ -10,8 +10,14 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/agent"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 )
+
+// cleanAdoptedWorktree readies a worktree applyTaskPlacement has just
+// re-pointed onto. A seam, so a test can pin that the re-point cleans the tree
+// without running the full recovery that would release the claim.
+var cleanAdoptedWorktree = agent.CleanAdoptedWorktree
 
 // AgentPlacement is the (repo, worktree, repo config) triple an agent's current
 // cycle runs against. It is immutable once published; a re-point publishes a
@@ -117,10 +123,15 @@ func (s *Supervisor) applyTaskPlacement(ap *AgentProcess) bool {
 		"to_repo", repo, "to_path", path)
 
 	// The cold-start recovery in preFlightSetup ran against the PREVIOUS
-	// worktree. The newly adopted one may still be dirty from an older cycle, so
-	// re-run it here; it is a no-op on a clean tree and now targets WorkDir().
-	if err := s.recoverAgent(ap, 0, false); err != nil {
-		slog.Warn("recovery on re-pointed worktree failed",
+	// worktree. The newly adopted one may still be dirty from a cycle before
+	// that, so clean it here; it is a no-op on a clean tree.
+	//
+	// Deliberately CleanAdoptedWorktree and NOT recoverAgent: full recovery
+	// releases and resets the agent's in_progress tasks, and the claim this
+	// cycle just took is one of them, so running it here would hand the work
+	// straight back (loomcli#718-F1).
+	if err := cleanAdoptedWorktree(path); err != nil {
+		slog.Warn("could not clean the re-pointed worktree; continuing",
 			"worktree", ap.Entry.Worktree, "task_id", taskID, "work_dir", path, "err", err)
 	}
 	return true

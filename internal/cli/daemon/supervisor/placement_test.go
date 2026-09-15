@@ -120,6 +120,38 @@ func TestApplyTaskPlacement_FollowsClaimedSourceRepo(t *testing.T) {
 	}
 }
 
+// The adopted worktree is cleaned, not recovered: full recovery resets the
+// agent's in_progress tasks, which include the claim this cycle just took
+// (loomcli#718-F1).
+func TestApplyTaskPlacement_CleansAdoptedWorktreeKeepingTheClaim(t *testing.T) {
+	f := newPlacementFixture(t, "loomcli")
+	var cleaned []string
+	orig := cleanAdoptedWorktree
+	t.Cleanup(func() { cleanAdoptedWorktree = orig })
+	cleanAdoptedWorktree = func(path string) error {
+		cleaned = append(cleaned, path)
+		return nil
+	}
+
+	if !f.sup.claimTask(f.ap, "") {
+		t.Fatal("claimTask returned false")
+	}
+	if !f.sup.applyTaskPlacement(f.ap) {
+		t.Fatal("applyTaskPlacement returned false")
+	}
+
+	want := filepath.Join(f.root, "worktrees", "loomcli", "worker-2")
+	if len(cleaned) != 1 || cleaned[0] != want {
+		t.Fatalf("cleaned = %v, want [%s]", cleaned, want)
+	}
+	if len(f.mock.released) != 0 {
+		t.Fatalf("the claim was released during the re-point: %v", f.mock.released)
+	}
+	if f.ap.AssignedTaskID != "PUPPET-604" {
+		t.Fatalf("AssignedTaskID = %q, want the claimed PUPPET-604", f.ap.AssignedTaskID)
+	}
+}
+
 func TestApplyTaskPlacement_UnknownRepoFailsLoudly(t *testing.T) {
 	f := newPlacementFixture(t, "ghost-repo")
 	before := f.ap.WorkDir()
