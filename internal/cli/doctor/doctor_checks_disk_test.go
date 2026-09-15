@@ -2,10 +2,8 @@ package doctor
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 const gib = uint64(1 << 30)
@@ -39,7 +37,6 @@ func TestEvaluateDiskHeadroom(t *testing.T) {
 			want: StatusWarn, wantSummary: "20 GiB free of 100 GiB (20%)",
 		},
 		{
-			// The real 2026-08-31 10:49 low point.
 			name: "11 GiB of 460 GiB fails",
 			free: 11 * gib, total: 460 * gib,
 			want: StatusFail, wantSummary: "11 GiB free of 460 GiB (2%)",
@@ -80,7 +77,7 @@ func TestEvaluateDiskHeadroom(t *testing.T) {
 			if warnGiB == 0 {
 				warnGiB = defaultDiskWarnGiB
 			}
-			got := evaluateDiskHeadroom(tt.free, tt.total, janitorReport{}, false, failGiB, warnGiB)
+			got := evaluateDiskHeadroom("/ws", tt.free, tt.total, failGiB, warnGiB)
 			if got.Name != "disk_headroom" {
 				t.Errorf("Name = %q, want %q", got.Name, "disk_headroom")
 			}
@@ -97,73 +94,29 @@ func TestEvaluateDiskHeadroom(t *testing.T) {
 func TestEvaluateDiskHeadroomDetail(t *testing.T) {
 	t.Parallel()
 
-	rep := janitorReport{
-		TS: "2026-08-31T10:49:00Z",
-		Consumers: map[string]uint64{
-			"gocache":        34 * gib,
-			"gomodcache":     12 * gib,
-			"pm2_logs":       2 * gib,
-			"loom_worktrees": 8 * gib,
-		},
-		Swept: janitorSwept{GocacheBytes: 20 * gib, PM2Bytes: 1 * gib},
-	}
-
 	t.Run("pass has no detail", func(t *testing.T) {
 		t.Parallel()
-		got := evaluateDiskHeadroom(300*gib, 460*gib, rep, true,
-			defaultDiskFailGiB, defaultDiskWarnGiB)
+		got := evaluateDiskHeadroom("/ws", 300*gib, 460*gib, defaultDiskFailGiB, defaultDiskWarnGiB)
 		if got.Detail != "" {
 			t.Errorf("Detail = %q, want empty on pass", got.Detail)
 		}
 	})
 
-	t.Run("names the largest consumer", func(t *testing.T) {
+	t.Run("warn names the path, floor and tunable", func(t *testing.T) {
 		t.Parallel()
-		got := evaluateDiskHeadroom(11*gib, 460*gib, rep, true,
-			defaultDiskFailGiB, defaultDiskWarnGiB)
-		if !strings.Contains(got.Detail, "largest consumer: go build cache 34 GiB") {
-			t.Errorf("Detail = %q, want the go build cache named", got.Detail)
-		}
-		if !strings.Contains(got.Detail, "janitor last swept 2026-08-31T10:49:00Z, freed 21 GiB") {
-			t.Errorf("Detail = %q, want the sweep line", got.Detail)
-		}
-		if strings.Contains(got.Detail, "shortfall") {
-			t.Errorf("Detail = %q, want no shortfall line", got.Detail)
+		got := evaluateDiskHeadroom("/ws", 40*gib, 460*gib, defaultDiskFailGiB, defaultDiskWarnGiB)
+		want := "measured the filesystem holding /ws; the check warns below 46 GiB free (set LOOM_DISK_WARN_GIB to change it)"
+		if got.Detail != want {
+			t.Errorf("Detail = %q, want %q", got.Detail, want)
 		}
 	})
 
-	t.Run("reports a shortfall", func(t *testing.T) {
+	t.Run("fail names the fail floor and its tunable", func(t *testing.T) {
 		t.Parallel()
-		short := rep
-		short.ShortfallBytes = 7 * gib
-		got := evaluateDiskHeadroom(11*gib, 460*gib, short, true,
-			defaultDiskFailGiB, defaultDiskWarnGiB)
-		if !strings.Contains(got.Detail,
-			"shortfall: janitor could not reach its low-water mark by 7 GiB") {
-			t.Errorf("Detail = %q, want the shortfall line", got.Detail)
-		}
-	})
-
-	t.Run("absent sidecar is called out on a warn", func(t *testing.T) {
-		t.Parallel()
-		got := evaluateDiskHeadroom(40*gib, 460*gib, janitorReport{}, false,
-			defaultDiskFailGiB, defaultDiskWarnGiB)
-		if got.Status != StatusWarn {
-			t.Fatalf("Status = %v, want warn", got.Status)
-		}
-		if !strings.Contains(got.Detail,
-			"janitor status stale/absent — the cache bound may not be running") {
-			t.Errorf("Detail = %q, want the stale/absent sentence", got.Detail)
-		}
-	})
-
-	t.Run("unknown consumer key falls back to the raw key", func(t *testing.T) {
-		t.Parallel()
-		odd := janitorReport{Consumers: map[string]uint64{"mystery": 99 * gib}}
-		got := evaluateDiskHeadroom(11*gib, 460*gib, odd, true,
-			defaultDiskFailGiB, defaultDiskWarnGiB)
-		if !strings.Contains(got.Detail, "largest consumer: mystery 99 GiB") {
-			t.Errorf("Detail = %q, want the raw key named", got.Detail)
+		got := evaluateDiskHeadroom("/ws", 11*gib, 460*gib, defaultDiskFailGiB, defaultDiskWarnGiB)
+		want := "measured the filesystem holding /ws; the check fails below 23 GiB free (set LOOM_DISK_FAIL_GIB to change it)"
+		if got.Detail != want {
+			t.Errorf("Detail = %q, want %q", got.Detail, want)
 		}
 	})
 }
@@ -197,71 +150,25 @@ func TestDiskThresholdGiB(t *testing.T) {
 	}
 }
 
-func TestDefaultJanitorStatus(t *testing.T) {
-	fresh := `{"ts":"` + time.Now().UTC().Format(time.RFC3339) + `",` +
-		`"free_bytes":1,"total_bytes":2,"consumers":{"gocache":3},` +
-		`"shortfall_bytes":4,"errors":0,"dry_run":false}`
-
-	t.Run("valid file is reported", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "status.json")
-		if err := os.WriteFile(path, []byte(fresh), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		t.Setenv("LOOM_JANITOR_STATUS", path)
-
-		rep, ok := defaultJanitorStatus()
-		if !ok {
-			t.Fatal("ok = false, want true")
-		}
-		if rep.Consumers["gocache"] != 3 || rep.ShortfallBytes != 4 {
-			t.Errorf("report = %+v, want the file's values", rep)
-		}
-	})
-
-	t.Run("missing file degrades silently", func(t *testing.T) {
-		t.Setenv("LOOM_JANITOR_STATUS", filepath.Join(t.TempDir(), "nope.json"))
-		if rep, ok := defaultJanitorStatus(); ok || rep.TS != "" {
-			t.Errorf("got (%+v, %v), want (zero, false)", rep, ok)
-		}
-	})
-
-	t.Run("malformed JSON degrades silently", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "status.json")
-		if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		t.Setenv("LOOM_JANITOR_STATUS", path)
-		if rep, ok := defaultJanitorStatus(); ok || rep.TS != "" {
-			t.Errorf("got (%+v, %v), want (zero, false)", rep, ok)
-		}
-	})
-
-	t.Run("stale mtime degrades silently", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "status.json")
-		if err := os.WriteFile(path, []byte(fresh), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		old := time.Now().Add(-3 * time.Hour)
-		if err := os.Chtimes(path, old, old); err != nil {
-			t.Fatal(err)
-		}
-		t.Setenv("LOOM_JANITOR_STATUS", path)
-		if rep, ok := defaultJanitorStatus(); ok || rep.TS != "" {
-			t.Errorf("got (%+v, %v), want (zero, false)", rep, ok)
-		}
-	})
-
-	t.Run("stale timestamp degrades silently", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "status.json")
-		stale := `{"ts":"` + time.Now().Add(-3*time.Hour).UTC().Format(time.RFC3339) + `"}`
-		if err := os.WriteFile(path, []byte(stale), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		t.Setenv("LOOM_JANITOR_STATUS", path)
-		if rep, ok := defaultJanitorStatus(); ok || rep.TS != "" {
-			t.Errorf("got (%+v, %v), want (zero, false)", rep, ok)
-		}
-	})
+func TestDiskCheckTarget(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home directory: %v", err)
+	}
+	tests := []struct {
+		name, runtimeDir, want string
+	}{
+		{name: "workspace root is measured", runtimeDir: "/srv/loom/ws", want: "/srv/loom/ws"},
+		{name: "unconfigured workspace falls back to home", runtimeDir: ".", want: home},
+		{name: "empty falls back to home", runtimeDir: "", want: home},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := diskCheckTarget(tt.runtimeDir); got != tt.want {
+				t.Errorf("diskCheckTarget(%q) = %q, want %q", tt.runtimeDir, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestCheckDiskHeadroomStatfsError(t *testing.T) {
@@ -283,11 +190,28 @@ func TestCheckDiskHeadroomStatfsError(t *testing.T) {
 	}
 }
 
+// A platform with no free-space measurement skips the check instead of
+// warning on every run.
+func TestCheckDiskHeadroomSkipsWhenUnsupported(t *testing.T) {
+	orig := diskUsage
+	t.Cleanup(func() { diskUsage = orig })
+	diskUsage = func(string) (uint64, uint64, error) {
+		return 0, 0, errDiskUsageUnsupported
+	}
+
+	if got := checkDiskHeadroom(); got != (CheckResult{}) {
+		t.Errorf("checkDiskHeadroom() = %+v, want the zero result (skipped)", got)
+	}
+}
+
 func TestCheckDiskHeadroomUsesSeams(t *testing.T) {
-	origDisk, origJanitor := diskUsage, janitorStatus
-	t.Cleanup(func() { diskUsage, janitorStatus = origDisk, origJanitor })
-	diskUsage = func(string) (uint64, uint64, error) { return 11 * gib, 460 * gib, nil }
-	janitorStatus = func() (janitorReport, bool) { return janitorReport{}, false }
+	orig := diskUsage
+	t.Cleanup(func() { diskUsage = orig })
+	var measured string
+	diskUsage = func(path string) (uint64, uint64, error) {
+		measured = path
+		return 11 * gib, 460 * gib, nil
+	}
 	t.Setenv("LOOM_DISK_FAIL_GIB", "")
 	t.Setenv("LOOM_DISK_WARN_GIB", "")
 
@@ -298,7 +222,10 @@ func TestCheckDiskHeadroomUsesSeams(t *testing.T) {
 	if got.Summary != "11 GiB free of 460 GiB (2%)" {
 		t.Errorf("Summary = %q", got.Summary)
 	}
-	if !strings.Contains(got.Detail, "janitor status stale/absent") {
-		t.Errorf("Detail = %q, want the stale/absent sentence", got.Detail)
+	if measured == "" {
+		t.Fatal("diskUsage was not called")
+	}
+	if !strings.Contains(got.Detail, "measured the filesystem holding "+measured) {
+		t.Errorf("Detail = %q, want it to name the measured path %q", got.Detail, measured)
 	}
 }
