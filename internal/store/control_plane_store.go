@@ -271,6 +271,11 @@ type AgentOwnershipLeaseAcquire struct {
 	RuntimeProvider domain.RuntimeProvider
 	NodeID          string
 	TTL             time.Duration
+	// TakeoverFromOwnerID requests a compare-and-steal takeover of a lease
+	// that is still live: the lease is only stolen if it still names this
+	// owner, otherwise the acquire fails as it would have anyway. Empty
+	// (the normal case) means an ordinary acquire with no takeover.
+	TakeoverFromOwnerID string
 }
 
 type AgentOwnershipLeaseFilter struct {
