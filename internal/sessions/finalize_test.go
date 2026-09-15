@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // helper: createTestStore sets up a Store using t.TempDir().
@@ -1132,4 +1134,84 @@ func splitLines(data []byte) [][]byte {
 		}
 	}
 	return lines
+}
+
+// TestFinalize_LastError pins the classified failure message onto the session
+// record: SessionMetadata.LastError existed but nothing ever set it, so a failed
+// session showed a blank error field.
+func TestFinalize_LastError(t *testing.T) {
+	t.Run("message is written to metadata.json", func(t *testing.T) {
+		store := createTestStore(t)
+		sess := createTestSession(t, store, "coder", "claude")
+		err := sess.Finalize(FinalizeOptions{
+			TaskID:       "task-err",
+			ExitCode:     1,
+			ErrorClass:   "RateLimited",
+			ErrorMessage: "rate limit exceeded",
+		})
+		if err != nil {
+			t.Fatalf("Finalize: %v", err)
+		}
+		meta, err := store.LoadMetadata(sess.SessionID())
+		if err != nil {
+			t.Fatalf("LoadMetadata: %v", err)
+		}
+		if meta.LastError != "rate limit exceeded" {
+			t.Errorf("LastError = %q, want %q", meta.LastError, "rate limit exceeded")
+		}
+	})
+
+	t.Run("empty message leaves the field absent", func(t *testing.T) {
+		store := createTestStore(t)
+		sess := createTestSession(t, store, "coder", "claude")
+		if err := sess.Finalize(FinalizeOptions{TaskID: "task-ok", ExitCode: 0}); err != nil {
+			t.Fatalf("Finalize: %v", err)
+		}
+		raw, err := os.ReadFile(filepath.Join(store.dir, sess.SessionID(), "metadata.json"))
+		if err != nil {
+			t.Fatalf("read metadata.json: %v", err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatalf("unmarshal metadata.json: %v", err)
+		}
+		if _, ok := fields["last_error"]; ok {
+			t.Errorf("last_error present in metadata.json, want omitted: %s", raw)
+		}
+	})
+}
+
+func TestTruncateLastError(t *testing.T) {
+	t.Run("short message is unchanged", func(t *testing.T) {
+		if got := truncateLastError("boom"); got != "boom" {
+			t.Fatalf("truncateLastError() = %q, want %q", got, "boom")
+		}
+	})
+
+	t.Run("long message is clipped rune-safely", func(t *testing.T) {
+		// "→" is 3 bytes and 2048 is not a multiple of 3, so the byte cut lands
+		// mid-rune — the truncation must back off to a rune boundary.
+		msg := strings.Repeat("→", 2000)
+		got := truncateLastError(msg)
+		if len(got) > maxLastErrorBytes {
+			t.Fatalf("truncated length = %d bytes, over the %d budget", len(got), maxLastErrorBytes)
+		}
+		if !utf8.ValidString(got) {
+			t.Fatalf("truncation split a rune: %q", got[len(got)-8:])
+		}
+		if !strings.HasPrefix(msg, got) {
+			t.Fatal("truncated message is not a prefix of the original")
+		}
+		// Only a whole rune may be dropped past the budget.
+		if maxLastErrorBytes-len(got) >= utf8.UTFMax {
+			t.Fatalf("truncated to %d bytes, dropped more than one rune below %d", len(got), maxLastErrorBytes)
+		}
+	})
+
+	t.Run("ascii message clips exactly at the budget", func(t *testing.T) {
+		got := truncateLastError(strings.Repeat("a", maxLastErrorBytes+10))
+		if len(got) != maxLastErrorBytes {
+			t.Fatalf("truncated length = %d, want %d", len(got), maxLastErrorBytes)
+		}
+	})
 }
