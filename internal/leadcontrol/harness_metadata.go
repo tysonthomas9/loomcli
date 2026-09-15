@@ -28,6 +28,18 @@ const (
 	// dialog), only transcripts recorded after this instant can belong to
 	// this runtime.
 	MetadataHarnessStartedAt = "lead_harness_started_at"
+	// MetadataLeadResumedFrom is the loom session id of the lead run this one
+	// resumed. A resumed lead is always a NEW orchestration row — the old one
+	// carries finished_at and a completed status, and reopening it would give
+	// one row two heartbeat owners — so ancestry is recorded here instead.
+	MetadataLeadResumedFrom = "lead_resumed_from_session_id"
+	// MetadataLeadResumedHarnessID is the provider-side handle that was handed
+	// to the backend at resume (claude's --resume uuid, or the codex thread
+	// id). Kept separate from MetadataHarnessSessionID on purpose: claude can
+	// rotate its session id on resume, and overwriting the one key would
+	// destroy the evidence of which conversation this run actually continued.
+	// Read as a chain: resumed_from_harness_session_id -> harness_session_id.
+	MetadataLeadResumedHarnessID = "lead_resumed_from_harness_session_id"
 )
 
 // HarnessRuntimeMetadata mirrors CodexRuntimeMetadata for leads supervised by
