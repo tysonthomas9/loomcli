@@ -125,27 +125,45 @@ describe("daytona-task-runner demo-mode gate (design §4.5)", () => {
 });
 
 describe("sandboxLeakProbeCommand covers the full widened provider-cred set", () => {
-  // Must mirror env.go trustedLocalProviderCredentials. If a new cred is added
-  // to the LOCAL-runner env, the probe must enumerate it too or this test fails.
+  // The name list is NOT hand-copied here. It is read from the vendored canonical
+  // artifact (internal/driver/testdata/sensitive-env-names.json, mirrored
+  // byte-for-byte from meta-harness's contract/sensitive-env-names.json), so a
+  // cred added to the contract — or to env.go's widened LOCAL-runner env, which
+  // internal/driver/sensitive_env_contract_test.go holds equal to the artifact's
+  // provider_credentials — must be enumerated by the probe too or this test fails.
+  //
+  // scripts/test-builtin-workflows.sh copies these tests into a temp staging dir
+  // (so the bare @flue/runtime / @daytona/sdk specifiers resolve), which puts the
+  // repo out of reach of a path relative to import.meta.url. That script exports
+  // LOOM_REPO_ROOT for exactly this; the relative path is the fallback for running
+  // `node --test` in-tree.
+  const repoRoot = process.env.LOOM_REPO_ROOT
+    ? path.resolve(process.env.LOOM_REPO_ROOT)
+    : path.join(here, "../../..");
+  const artifactPath = path.join(
+    repoRoot,
+    "internal/driver/testdata/sensitive-env-names.json",
+  );
+  let contract;
+  try {
+    contract = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
+  } catch (err) {
+    throw new Error(
+      `cannot read the vendored sensitive-env-name contract at ` +
+        `${artifactPath} (${err.message}). ` +
+        `It is vendored from meta-harness; restore it with ` +
+        `scripts/sync-sensitive-env-names.sh --to <this repo> there.`,
+    );
+  }
   const PROBE_CRED_NAMES = [
-    "DAYTONA_API_KEY",
-    "GITHUB_TOKEN",
-    "GH_TOKEN",
-    "CODEX_HOME",
-    "LOOM_TASK_RUN_LEASE_TOKEN",
-    "LOOM_DRIVER_TASK_RUNNER_CMD_JSON",
-    "ANTHROPIC_API_KEY",
-    "OPENAI_API_KEY",
-    "CODEX_API_KEY",
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
-    "GOOGLE_APPLICATION_CREDENTIALS",
-    "CURSOR_API_KEY",
+    ...contract.runner_infra,
+    ...contract.provider_credentials,
   ];
 
   it("enumerates every widened provider-credential name", () => {
     const cmd = mod.sandboxLeakProbeCommand();
     assert.equal(typeof cmd, "string");
+    assert.ok(PROBE_CRED_NAMES.length > 0, "contract must not be empty");
     // The probe builds each env name from a name-parts array joined with "_" at
     // runtime, and the whole node script is wrapped by shellQuote(), which
     // escapes every single quote as '\''. Reconstruct the part-array literal
@@ -158,6 +176,18 @@ describe("sandboxLeakProbeCommand covers the full widened provider-cred set", ()
         `probe command must reference ${name} (${partsLiteral})`,
       );
     }
+  });
+
+  it("enumerates no names beyond the contract", () => {
+    // An EXTRA stray name in the probe must fail too, not just a missing one.
+    const cmd = mod.sandboxLeakProbeCommand();
+    const emitted = cmd.match(/\[(?:'\\''[A-Z0-9]+'\\'',?)+\]/g) || [];
+    assert.equal(
+      emitted.length,
+      PROBE_CRED_NAMES.length,
+      `probe emits ${emitted.length} name(s); the contract declares ` +
+        `${PROBE_CRED_NAMES.length}`,
+    );
   });
 });
 
