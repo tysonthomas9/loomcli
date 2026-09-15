@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -89,7 +90,6 @@ func runRecover(cmd *cobra.Command, args []string) {
 	if lockInfo == nil {
 		fmt.Println("No lock file found - checking for orphaned tasks...")
 		resetOrphanedAgentTasks(deps, worktreePath, worktreeName, "", !recoverNoAnalyze)
-		reportStalledSharedWorktrees()
 		fmt.Println("Agent is ready for new work.")
 		return
 	}
@@ -108,7 +108,6 @@ func runRecover(cmd *cobra.Command, args []string) {
 
 	resetOrphanedAgentTasks(deps, worktreePath, lockInfo.AgentName, lockInfo.TaskID, !recoverNoAnalyze)
 	cleanUntrackedFiles(worktreePath, recoverForce)
-	reportStalledSharedWorktrees()
 
 	fmt.Println("")
 	fmt.Println("=========================================")
@@ -250,9 +249,8 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int, incomplete bo
 	}
 	resetOrphanedAgentTasks(deps, worktreePath, agentName, lockTaskID, false)
 
-	// 6. Abort any in-progress git operation, clean untracked files, and
-	// report on the shared integration worktrees.
-	finishWorktreeCleanup(worktreePath, incomplete)
+	// 6. Abort any in-progress git operation, then clean untracked files.
+	finishWorktreeCleanup(worktreePath, incomplete, rescueRoot())
 
 	return nil
 }
@@ -300,57 +298,50 @@ func CleanAdoptedWorktree(worktreePath string) error {
 
 // finishWorktreeCleanup runs the destructive tail of recovery.
 //
-// The clean is skipped for an incomplete run. `git clean` here excludes only
+// Both steps are skipped for an incomplete run. `git clean` here excludes only
 // cli.ProtectedRuntimePaths, so everything the turn produced but had not
 // committed yet — new files, scratch notes, generated fixtures — is exactly
 // what it deletes. That is correct after a crash we are abandoning; it is
 // destruction of live work when the agent simply ran out of turn and the next
 // cycle is meant to continue from where it stopped.
-func finishWorktreeCleanup(worktreePath string, incomplete bool) {
-	if !incomplete {
-		// Abort BEFORE cleaning. `git clean` would otherwise delete the
-		// untracked files the merge introduced and hand the abort a dirtier
-		// tree than it started with. Aborting here is strictly less
-		// destructive than the clean that follows it, which is why it is
-		// allowed in an agent worktree and never in a shared one.
-		abortInProgressGitOp(worktreePath)
-		cleanUntrackedFiles(worktreePath, true)
+func finishWorktreeCleanup(worktreePath string, incomplete bool, snapshotRoot string) {
+	if incomplete {
+		return
 	}
-
-	// Report-only, whatever the run's fate: a shared integration worktree left
-	// mid-merge is invisible from an agent worktree, and nothing else here
-	// looks at it.
-	reportStalledSharedWorktrees()
+	// Abort BEFORE cleaning: `git clean` would delete the untracked files the
+	// operation introduced and leave the abort a dirtier tree. When the
+	// operation cannot be aborted safely, the clean is skipped too, so the
+	// worktree stays exactly as the agent left it.
+	if !abortInProgressGitOp(worktreePath, snapshotRoot) {
+		fmt.Printf("[recover] warning: skipped git clean in %s; it is still mid-operation\n", worktreePath)
+		return
+	}
+	cleanUntrackedFiles(worktreePath, true)
 }
 
-// abortInProgressGitOp undoes a merge/rebase/cherry-pick left behind in an
-// agent worktree. An abort failure is a warning, never a returned error:
-// recovery must not fail the whole run over it.
-func abortInProgressGitOp(worktreePath string) {
-	line, err := git.AbortInProgressOp(worktreePath)
+// abortInProgressGitOp snapshots and aborts a merge, rebase, cherry-pick,
+// revert or bisect left behind in an agent worktree. It reports false when an
+// operation was found and could not be aborted safely. A failure is a warning,
+// never a returned error: recovery must not fail the whole run over it.
+func abortInProgressGitOp(worktreePath, snapshotRoot string) bool {
+	line, err := git.AbortInProgressOp(worktreePath, snapshotRoot)
 	if err != nil {
 		fmt.Printf("[recover] warning: %v\n", err)
-		return
+		return false
 	}
 	if line != "" {
 		fmt.Printf("[recover] %s\n", line)
 	}
+	return true
 }
 
-// reportStalledSharedWorktrees warns about shared `local/union` worktrees stuck
-// mid-operation. It never repairs one — a live sibling integrator may own that
-// merge, and the sanctioned repair is an operator running `loom doctor --fix`.
-func reportStalledSharedWorktrees() {
-	for _, sw := range StalledSharedWorktrees() {
-		fmt.Printf("[recover] warning: shared worktree %s is stuck mid-%s — %s\n"+
-			"[recover] not repairing it here; run: loom doctor --fix\n",
-			sw.Repo, sw.Op, sw.Summary)
+// rescueRoot is where recovery keeps the snapshot of an operation it aborts:
+// a rescue directory beside the agent worktrees, or the temp dir when no
+// worktrees directory is configured.
+func rescueRoot() string {
+	dir := cli.GetWorktreesDir()
+	if dir == "" || dir == "." {
+		return filepath.Join(os.TempDir(), "loom-rescue")
 	}
-}
-
-// StalledSharedWorktrees exposes the shared-worktree scan to the daemon
-// supervisor, which already depends on this package and must not grow a
-// dependency on the git plumbing underneath it.
-func StalledSharedWorktrees() []git.StalledWorktree {
-	return git.StalledSharedWorktrees()
+	return filepath.Join(dir, "rescue")
 }

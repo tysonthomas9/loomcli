@@ -275,7 +275,7 @@ func TestSnapshotWritesArtifacts(t *testing.T) {
 	if err := Snapshot(dir, dest); err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
-	for _, name := range []string{"README.txt", "status.txt", "unmerged.txt", "MERGE_HEAD", "MERGE_MSG"} {
+	for _, name := range []string{"README.txt", "head.txt", "status.txt", "unmerged.txt", "MERGE_HEAD", "MERGE_MSG"} {
 		if _, err := os.Stat(filepath.Join(dest, name)); err != nil {
 			t.Fatalf("missing snapshot artifact %s: %v", name, err)
 		}
@@ -296,14 +296,13 @@ func TestSnapshotWritesArtifacts(t *testing.T) {
 	}
 }
 
-// TestSnapshotIsNonFatalOnGitFailure: a directory that is not a repo makes
-// every git capture fail. The snapshot must still be written, with the
-// failures recorded, so a snapshot problem never blocks an abort a human asked
-// for.
-func TestSnapshotIsNonFatalOnGitFailure(t *testing.T) {
+// TestSnapshotReportsIncompleteArtifacts: a directory that is not a repo makes
+// every git capture fail. The README still records what failed, and Snapshot
+// returns an error, so a caller never aborts on the strength of a partial copy.
+func TestSnapshotReportsIncompleteArtifacts(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "snap")
-	if err := Snapshot(t.TempDir(), dest); err != nil {
-		t.Fatalf("Snapshot should be best-effort, got: %v", err)
+	if err := Snapshot(t.TempDir(), dest); err == nil {
+		t.Fatal("Snapshot of a non-repo returned nil, want an error")
 	}
 	readme, err := os.ReadFile(filepath.Join(dest, "README.txt"))
 	if err != nil {
@@ -311,6 +310,40 @@ func TestSnapshotIsNonFatalOnGitFailure(t *testing.T) {
 	}
 	if !strings.Contains(string(readme), "incomplete artifacts") {
 		t.Fatalf("README does not record the failures:\n%s", readme)
+	}
+}
+
+// The diff is kept byte for byte, so it still applies. A trimmed copy loses a
+// final context line that is only whitespace and no longer applies.
+func TestSnapshotDiffIsVerbatim(t *testing.T) {
+	dir := t.TempDir()
+	git(t, dir, "init", "-q", "-b", "main")
+	git(t, dir, "config", "user.email", "test@example.com")
+	git(t, dir, "config", "user.name", "test")
+	git(t, dir, "config", "commit.gpgsign", "false")
+	write(t, dir, "c.txt", "one\ntwo\n   \n")
+	git(t, dir, "add", "c.txt")
+	git(t, dir, "commit", "-q", "-m", "base")
+	// Change the first line only, so the hunk's last context line is "   ".
+	write(t, dir, "c.txt", "ONE\ntwo\n   \n")
+
+	dest := filepath.Join(t.TempDir(), "snap")
+	if err := Snapshot(dir, dest); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dest, "worktree.diff"))
+	if err != nil {
+		t.Fatalf("read worktree.diff: %v", err)
+	}
+	want, err := exec.Command("git", "-C", dir, "diff", "HEAD").Output() //nolint:norawexec
+	if err != nil {
+		t.Fatalf("git diff: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("worktree.diff differs from git's output:\ngot  %q\nwant %q", got, want)
+	}
+	if !gitAllowFail(t, dir, "apply", "--check", "--reverse", filepath.Join(dest, "worktree.diff")) {
+		t.Fatal("worktree.diff does not apply in reverse to the tree it was taken from")
 	}
 }
 

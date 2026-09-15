@@ -2,11 +2,11 @@
 // the middle of a merge, rebase, cherry-pick, revert or bisect, since when, and
 // how bad is it.
 //
-// It exists because a worktree left mid-merge is silently blocking: every later
-// integrator run fails its first step against it, and nothing in loom reported
-// the condition. Two callers share this one detector — the `merge_in_progress`
-// doctor check and the supervisor's post-exit scan — so the git plumbing is
-// written once.
+// It exists because a worktree left mid-merge is silently blocking: whoever
+// works in it next fails against it, and nothing in loom reported the
+// condition. Two callers share this one detector — the `merge_in_progress`
+// doctor check and the abort-with-snapshot step of agent recovery — so the git
+// plumbing is written once.
 //
 // The package deliberately depends on nothing inside loom: it shells out to
 // git and touches the filesystem, nothing more.
@@ -82,6 +82,17 @@ func (s State) String() string {
 
 // runGit runs a git command in path and returns trimmed stdout.
 func runGit(path string, args ...string) (string, error) {
+	out, err := runGitRaw(path, args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// runGitRaw runs a git command in path and returns stdout exactly as git wrote
+// it. A patch needs this: trimming would strip a final context line that is
+// only whitespace, and the patch would no longer apply.
+func runGitRaw(path string, args ...string) (string, error) {
 	full := append([]string{"-C", path}, args...)
 	// G204: the subcommand is a package-local constant list; only the worktree
 	// path and git-owned arguments vary.
@@ -89,7 +100,7 @@ func runGit(path string, args ...string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	return string(out), nil
 }
 
 // gitDir resolves the git directory for path. For a linked worktree this is
@@ -236,9 +247,10 @@ var abortVerbs = map[Op][]string{
 	OpBisect:     {"bisect", "reset"},
 }
 
-// Abort undoes the in-progress operation. It is destructive — it throws away
-// every conflict resolution in the worktree — so it is only ever reached from
-// an explicit operator action.
+// Abort undoes the in-progress operation. It is destructive: it throws away
+// every conflict resolution in the worktree, and a rebase abort moves the
+// branch back past the commits the rebase had already made. Take a Snapshot
+// first.
 func Abort(path string, op Op) error {
 	args, ok := abortVerbs[op]
 	if !ok {
@@ -252,12 +264,15 @@ func Abort(path string, op Op) error {
 	return nil
 }
 
-// Snapshot writes what the aborted state contained into destDir, so an abort
-// is recoverable by a human afterwards.
+// Snapshot writes what an in-progress operation contains into destDir, so an
+// abort is recoverable by a human afterwards: the operation's head files, the
+// current HEAD commit (after a rebase abort, the only pointer to the commits
+// the rebase had made), the status, the full diff against HEAD and the
+// unmerged index entries.
 //
-// Best effort by design: a failure on any one artifact is recorded in
-// README.txt and does not fail the call. A snapshot that cannot be written must
-// never block the abort an operator explicitly asked for.
+// Every artifact is attempted, and README.txt lists any that failed. Any
+// failure is also returned as an error: the caller is about to throw the state
+// away, and must not do so on the strength of a partial copy.
 func Snapshot(path, destDir string) error {
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return fmt.Errorf("create snapshot dir %s: %w", destDir, err)
@@ -266,7 +281,7 @@ func Snapshot(path, destDir string) error {
 	var problems []string
 	dir, err := gitDir(path)
 	if err == nil {
-		for _, name := range []string{"MERGE_HEAD", "MERGE_MSG", "CHERRY_PICK_HEAD", "REVERT_HEAD", "REBASE_HEAD"} {
+		for _, name := range []string{"MERGE_HEAD", "MERGE_MSG", "CHERRY_PICK_HEAD", "REVERT_HEAD", "REBASE_HEAD", "ORIG_HEAD"} {
 			data, readErr := os.ReadFile(filepath.Join(dir, name)) //nolint:gosec // G304: name is a package constant, dir comes from git rev-parse
 			if readErr != nil {
 				continue
@@ -279,24 +294,7 @@ func Snapshot(path, destDir string) error {
 		problems = append(problems, fmt.Sprintf("git dir: %v", err))
 	}
 
-	captures := []struct {
-		file string
-		args []string
-	}{
-		{"status.txt", []string{"status", "--porcelain=v2", "--branch"}},
-		{"worktree.diff", []string{"diff", "HEAD"}},
-		{"unmerged.txt", []string{"ls-files", "-u"}},
-	}
-	for _, c := range captures {
-		out, runErr := runGit(path, c.args...)
-		if runErr != nil {
-			problems = append(problems, fmt.Sprintf("%s: %v", c.file, runErr))
-			continue
-		}
-		if writeErr := os.WriteFile(filepath.Join(destDir, c.file), []byte(out+"\n"), 0o644); writeErr != nil {
-			problems = append(problems, fmt.Sprintf("%s: %v", c.file, writeErr))
-		}
-	}
+	problems = append(problems, writeCaptures(path, destDir)...)
 
 	st, _ := Inspect(path)
 	readme := fmt.Sprintf("loom gitstate snapshot\npath: %s\nop: %s\nhead: %s\nunmerged: %d\nbranch: %s\ntaken: %s\n",
@@ -307,5 +305,35 @@ func Snapshot(path, destDir string) error {
 	if writeErr := os.WriteFile(filepath.Join(destDir, "README.txt"), []byte(readme), 0o644); writeErr != nil {
 		return fmt.Errorf("write snapshot README: %w", writeErr)
 	}
+	if len(problems) > 0 {
+		return fmt.Errorf("snapshot %s incomplete: %s", destDir, strings.Join(problems, "; "))
+	}
 	return nil
+}
+
+// writeCaptures writes the git-command artifacts of a Snapshot into destDir
+// and returns a line for each one that failed. They are written verbatim:
+// worktree.diff has to stay a patch that `git apply` accepts.
+func writeCaptures(path, destDir string) []string {
+	captures := []struct {
+		file string
+		args []string
+	}{
+		{"head.txt", []string{"rev-parse", "HEAD"}},
+		{"status.txt", []string{"status", "--porcelain=v2", "--branch"}},
+		{"worktree.diff", []string{"diff", "HEAD"}},
+		{"unmerged.txt", []string{"ls-files", "-u"}},
+	}
+	var problems []string
+	for _, c := range captures {
+		out, runErr := runGitRaw(path, c.args...)
+		if runErr != nil {
+			problems = append(problems, fmt.Sprintf("%s: %v", c.file, runErr))
+			continue
+		}
+		if writeErr := os.WriteFile(filepath.Join(destDir, c.file), []byte(out), 0o644); writeErr != nil {
+			problems = append(problems, fmt.Sprintf("%s: %v", c.file, writeErr))
+		}
+	}
+	return problems
 }
