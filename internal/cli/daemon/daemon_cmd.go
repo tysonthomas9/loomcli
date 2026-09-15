@@ -28,7 +28,9 @@ type DaemonAgentStatus struct {
 	Role                   string    `json:"role"`
 	Repo                   string    `json:"repo,omitempty"`
 	PID                    int       `json:"pid"`
-	Status                 string    `json:"status"` // "running", "starting", "stopped", "failed", "blocked"
+	Status                 string    `json:"status"` // "running", "starting", "stopped", "failed", "blocked", "unavailable"
+	Detail                 string    `json:"detail,omitempty"`
+	Hint                   string    `json:"hint,omitempty"`
 	TaskID                 string    `json:"task_id,omitempty"`
 	EpicID                 string    `json:"epic_id,omitempty"`
 	CurrentBackend         string    `json:"current_backend,omitempty"`
@@ -404,7 +406,7 @@ func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths dae
 	}
 
 	startedAt := time.Now()
-	if err := writeStateFile(paths.stateFile, startedAt, daemon.Agents(), daemon.QuarantinedTasks(), maxRetries,
+	if err := writeStateFile(paths.stateFile, startedAt, daemon.Agents(), daemon.UnavailableAgents(), daemon.QuarantinedTasks(), maxRetries,
 		daemon.sup.ClaimHoldSnapshot()); err != nil {
 		fmt.Printf("Warning: failed to write initial state file: %v\n", err)
 	}
