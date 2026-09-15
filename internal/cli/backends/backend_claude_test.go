@@ -15,8 +15,10 @@ import (
 	"time"
 
 	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 	"golang.org/x/term"
 
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -1014,5 +1016,147 @@ func TestClaudeTurnBackoff(t *testing.T) {
 	}
 	if got := claudeTurnBackoff(20, 0); got != claudeTurnMaxBackoff {
 		t.Errorf("large-attempt backoff = %s, want cap %s", got, claudeTurnMaxBackoff)
+	}
+}
+
+// TestRunTurnDeadline pins the resolution rules for the per-turn bound. The
+// case that matters operationally is the derived one: with the fleet's
+// LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS=2700 the deadline must land at 2580s —
+// strictly inside the silence watchdog, or the SIGKILL still wins the race and
+// nothing about the old behavior changes.
+func TestRunTurnDeadline(t *testing.T) {
+	// not parallel: mutates process env via t.Setenv
+	tests := []struct {
+		name     string
+		runTurn  string
+		watchdog string
+		want     time.Duration
+	}{
+		{"both unset: inert", "", "", 0},
+		{"explicit knob wins over the watchdog", "300", "2700", 300 * time.Second},
+		{"fleet watchdog minus the margin", "", "2700", 2580 * time.Second},
+		{"watchdog only just past the margin", "", "121", 1 * time.Second},
+		{"watchdog equal to the margin", "", "120", 0},
+		{"watchdog inside the margin", "", "60", 0},
+		{"watchdog zero", "", "0", 0},
+		{"watchdog negative", "", "-90", 0},
+		{"watchdog malformed", "", "not-a-number", 0},
+		{"explicit zero disables, no fallback", "0", "2700", 0},
+		{"explicit negative disables, no fallback", "-5", "2700", 0},
+		{"explicit malformed disables, no fallback", "soon", "2700", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("LOOM_RUN_TURN_TIMEOUT_SECONDS", tt.runTurn)
+			t.Setenv("LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS", tt.watchdog)
+			if got := runTurnDeadline(); got != tt.want {
+				t.Errorf("runTurnDeadline() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRunTurnDeadline_StrictlyInsideWatchdog states the invariant on its own so
+// a future margin change cannot silently make the deadline useless.
+func TestRunTurnDeadline_StrictlyInsideWatchdog(t *testing.T) {
+	// not parallel: mutates process env via t.Setenv
+	const fleetWatchdog = 2700 * time.Second
+	t.Setenv("LOOM_RUN_TURN_TIMEOUT_SECONDS", "")
+	t.Setenv("LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS", "2700")
+
+	got := runTurnDeadline()
+	if got <= 0 {
+		t.Fatalf("runTurnDeadline() = %v, want a positive deadline", got)
+	}
+	if got >= fleetWatchdog {
+		t.Fatalf("runTurnDeadline() = %v, must be strictly shorter than the watchdog %v", got, fleetWatchdog)
+	}
+	if fleetWatchdog-got != runTurnDeadlineMargin {
+		t.Errorf("margin = %v, want %v", fleetWatchdog-got, runTurnDeadlineMargin)
+	}
+}
+
+// TestInvokeClaudeRunTurn_DeadlineCancelsTurn drives the real seam: a RunTurn
+// that never returns on its own must be ended by the deadline, not left to the
+// supervisor's SIGKILL.
+func TestInvokeClaudeRunTurn_DeadlineCancelsTurn(t *testing.T) {
+	// not parallel: mutates process env via t.Setenv
+	t.Setenv("LOOM_RUN_TURN_TIMEOUT_SECONDS", "1")
+	t.Setenv("LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS", "")
+
+	installClaudeRunTurnMock(t, func(ctx context.Context, _ claudeRunTurnConfig) (claudeRunTurnResult, error) {
+		<-ctx.Done()
+		return claudeRunTurnResult{}, ctx.Err()
+	})
+
+	start := time.Now()
+	_, err := invokeClaudeRunTurn(context.Background(), t.TempDir(), "prompt", "agent", "", nil, nil)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want context.DeadlineExceeded", err)
+	}
+	if elapsed > 10*time.Second {
+		t.Errorf("invokeClaudeRunTurn took %v, want it bounded near the 1s deadline", elapsed)
+	}
+}
+
+// TestInvokeClaudeRunTurn_NoDeadlineWhenUnconfigured is the inertness half:
+// with neither var set the ctx handed to RunTurn must carry no deadline at all,
+// which is what standalone and interactive runs rely on.
+func TestInvokeClaudeRunTurn_NoDeadlineWhenUnconfigured(t *testing.T) {
+	// not parallel: mutates process env via t.Setenv
+	t.Setenv("LOOM_RUN_TURN_TIMEOUT_SECONDS", "")
+	t.Setenv("LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS", "")
+
+	var hadDeadline bool
+	installClaudeRunTurnMock(t, func(ctx context.Context, _ claudeRunTurnConfig) (claudeRunTurnResult, error) {
+		_, hadDeadline = ctx.Deadline()
+		return completedClaudeTurn("done"), nil
+	})
+
+	if _, err := invokeClaudeRunTurn(context.Background(), t.TempDir(), "prompt", "agent", "", nil, nil); err != nil {
+		t.Fatalf("invokeClaudeRunTurn: %v", err)
+	}
+	if hadDeadline {
+		t.Error("RunTurn ctx carries a deadline with both timeout vars unset, want none")
+	}
+}
+
+// TestDefaultClaudeNonInteractiveInvoker_DeadlineClassifiesAsTimeout closes the
+// loop the whole change exists for: the expired deadline must reach the
+// supervisor's classifier as a Timeout — a counted retry on the timeout backoff
+// — and not as Unknown (burns the restart budget) or AuthFailure (walls the
+// account).
+func TestDefaultClaudeNonInteractiveInvoker_DeadlineClassifiesAsTimeout(t *testing.T) {
+	// not parallel: mutates process env via t.Setenv
+	t.Setenv(envRoleExecutor, "")
+	t.Setenv("LOOM_RUN_TURN_TIMEOUT_SECONDS", "1")
+	t.Setenv("LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS", "")
+
+	installClaudeRunTurnMock(t, func(ctx context.Context, _ claudeRunTurnConfig) (claudeRunTurnResult, error) {
+		<-ctx.Done()
+		return claudeRunTurnResult{}, ctx.Err()
+	})
+
+	start := time.Now()
+	err := defaultClaudeNonInteractiveInvoker(t.TempDir(), "prompt", "agent", nil, nil)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("defaultClaudeNonInteractiveInvoker returned nil, want a deadline error")
+	}
+	if elapsed > 10*time.Second {
+		t.Errorf("invoker took %v, want it bounded near the 1s deadline", elapsed)
+	}
+
+	var ie *InvocationError
+	if !errors.As(err, &ie) {
+		t.Fatalf("err = %T (%v), want *InvocationError", err, err)
+	}
+
+	ae := agenterr.ClassifyFromOutput(ie.OutputTail, ie.ExitCode, "claude")
+	want := agenterr.OutcomeFromHarness(wrapper.ErrTimeout)
+	if ae.Class != want {
+		t.Fatalf("class = %s, want %s (tail: %q, exit: %d)", ae.Class, want, ie.OutputTail, ie.ExitCode)
 	}
 }
