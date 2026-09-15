@@ -37,6 +37,13 @@ export interface ClaimHoldStatus {
   running: ClaimHoldRunningAgent[];
   /** How many agents are cycling but gated by the hold. */
   gated: number;
+  /**
+   * Absent on a daemon-sourced response; false when the server could reach no
+   * agent supervisor at all. "No supervisor" is a truthful answer to a *read*
+   * of the hold — nothing is holding claims — so the route answers 200 rather
+   * than 503 and flags it here instead.
+   */
+  supervisor_available?: boolean;
 }
 
 export interface SetClaimHoldBody {

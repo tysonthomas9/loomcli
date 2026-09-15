@@ -393,6 +393,81 @@ describe("API Client", () => {
     });
   });
 
+  // The openapi-fetch middleware carries the same 503 guard as fetchApi and
+  // must not be left behind when the guard changes. It is exercised here on
+  // /terminal/token rather than /claims/hold only because the claim-hold routes
+  // are not in the generated OpenAPI paths — the predicate is the same one.
+  describe("openapi-fetch middleware outage exemptions", () => {
+    const respond = (status: number, statusText: string) =>
+      vi.fn(async (request: Request) =>
+        new URL(request.url).pathname === "/api/client-errors"
+          ? new Response(null, { status: 204 })
+          : new Response("failed", { status, statusText }),
+      );
+
+    it("does not notify or report a 503 on an exempt path", async () => {
+      const reports = vi.fn();
+      global.fetch = vi.fn((input: RequestInfo | URL) => {
+        reports(String(input));
+        return Promise.resolve({ ok: true, status: 204 });
+      }) as unknown as typeof global.fetch;
+      const cb = vi.fn();
+      const unsub = onWorkspaceUnavailable(cb);
+
+      try {
+        await api.GET("/api/workspaces/{ws}/terminal/token", {
+          baseUrl: "http://localhost",
+          params: { path: { ws: "PUPPET" } },
+          fetch: respond(503, "Terminal Unavailable"),
+        });
+
+        expect(cb).not.toHaveBeenCalled();
+        expect(reports).not.toHaveBeenCalled();
+      } finally {
+        unsub();
+      }
+    });
+
+    it("still notifies and reports a 503 on a non-exempt path", async () => {
+      const reports = vi.fn();
+      global.fetch = vi.fn((input: RequestInfo | URL) => {
+        reports(String(input));
+        return Promise.resolve({ ok: true, status: 204 });
+      }) as unknown as typeof global.fetch;
+      const cb = vi.fn();
+      const unsub = onWorkspaceUnavailable(cb);
+
+      try {
+        await api.GET("/api/workspaces/{ws}/issues", {
+          baseUrl: "http://localhost",
+          params: { path: { ws: "PUPPET" } },
+          fetch: respond(503, "Issues Service Down"),
+        });
+
+        expect(cb).toHaveBeenCalledTimes(1);
+        expect(reports).toHaveBeenCalledWith("/api/client-errors");
+      } finally {
+        unsub();
+      }
+    });
+
+    it("still reports a 500 on an exempt path", async () => {
+      const reports = vi.fn();
+      global.fetch = vi.fn((input: RequestInfo | URL) => {
+        reports(String(input));
+        return Promise.resolve({ ok: true, status: 204 });
+      }) as unknown as typeof global.fetch;
+
+      await api.GET("/api/workspaces/{ws}/terminal/token", {
+        baseUrl: "http://localhost",
+        params: { path: { ws: "PUPPET" } },
+        fetch: respond(500, "Terminal Boom"),
+      });
+
+      expect(reports).toHaveBeenCalledWith("/api/client-errors");
+    });
+  });
+
   describe("Combined signal behavior (AbortSignal.any)", () => {
     it("timeout works when caller provides their own signal", async () => {
       vi.useRealTimers();
@@ -877,6 +952,136 @@ describe("API Client", () => {
         status: 429,
         retryAfterMs: undefined,
       });
+    });
+
+    // errorReporter opens a circuit breaker after three consecutive failed
+    // reports and the suite's fake timers never advance Date.now() to close it
+    // again, so the report endpoint must answer ok here. It also dedups on
+    // `${type}:${message}` for 5 s, which is why each case below uses its own
+    // statusText.
+    const mockFetchExcept = (status: number, statusText: string) =>
+      vi.fn((url: string) =>
+        url === "/api/client-errors"
+          ? Promise.resolve({ ok: true, status: 204 })
+          : Promise.resolve({
+              ok: false,
+              status,
+              statusText,
+              text: () => Promise.resolve("failed"),
+            }),
+      ) as unknown as typeof global.fetch & ReturnType<typeof vi.fn>;
+
+    // PUPPET-529: /api/workspaces/{ws}/claims/hold answers 503 wherever the
+    // server can reach no agent supervisor, and useClaimHold treats that as
+    // "no hold" by design — so the transport must stay quiet about it. Before
+    // the fix each 10 s poll fired a workspace-unavailable notification and a
+    // POST /api/client-errors; both assertions below used to be the opposite.
+    it("503 from /claims/hold neither notifies workspace-unavailable nor files a client-error report", async () => {
+      const fetchMock = mockFetchExcept(503, "Supervisor Unavailable");
+      global.fetch = fetchMock;
+
+      const cb = vi.fn();
+      const unsub = onWorkspaceUnavailable(cb);
+
+      try {
+        await expect(get("/api/workspaces/PUPPET/claims/hold")).rejects.toThrow(
+          ApiError,
+        );
+
+        expect(cb).not.toHaveBeenCalled();
+        expect(
+          fetchMock.mock.calls.some((call) => call[0] === "/api/client-errors"),
+        ).toBe(false);
+      } finally {
+        unsub();
+      }
+    });
+
+    // The release path carries its actor/force as a query string, so the
+    // exemption must match on a substring rather than the whole path. The 503
+    // is still thrown — useClaimHold.release puts it on screen; what is
+    // suppressed is only the fleet-wide "workspace offline" signal and the
+    // server-side report for a failure the UI already showed.
+    it("503 from a /claims/hold release with a query string is exempt too", async () => {
+      const fetchMock = mockFetchExcept(
+        503,
+        "Supervisor Unavailable (release)",
+      );
+      global.fetch = fetchMock;
+
+      const cb = vi.fn();
+      const unsub = onWorkspaceUnavailable(cb);
+
+      try {
+        await expect(
+          del("/api/workspaces/PUPPET/claims/hold?actor=a&force=true"),
+        ).rejects.toThrow(ApiError);
+
+        expect(cb).not.toHaveBeenCalled();
+        expect(
+          fetchMock.mock.calls.some((call) => call[0] === "/api/client-errors"),
+        ).toBe(false);
+      } finally {
+        unsub();
+      }
+    });
+
+    // The exemption is 503-only: any other 5xx on an exempt path is a genuine
+    // bug and must still be reported.
+    it("500 from /claims/hold is still reported", async () => {
+      const fetchMock = mockFetchExcept(500, "Claims Hold Boom");
+      global.fetch = fetchMock;
+
+      await expect(get("/api/workspaces/PUPPET/claims/hold")).rejects.toThrow(
+        ApiError,
+      );
+
+      expect(
+        fetchMock.mock.calls.some((call) => call[0] === "/api/client-errors"),
+      ).toBe(true);
+    });
+
+    // The genuine-outage regression: a 503 anywhere else still means the
+    // workspace service is down and must still raise both signals.
+    it("503 from a non-exempt workspace path still notifies and reports", async () => {
+      const fetchMock = mockFetchExcept(503, "Workspace Service Down");
+      global.fetch = fetchMock;
+
+      const cb = vi.fn();
+      const unsub = onWorkspaceUnavailable(cb);
+
+      try {
+        await expect(get("/api/workspaces/PUPPET/issues")).rejects.toThrow(
+          ApiError,
+        );
+
+        expect(cb).toHaveBeenCalledTimes(1);
+        expect(
+          fetchMock.mock.calls.some((call) => call[0] === "/api/client-errors"),
+        ).toBe(true);
+      } finally {
+        unsub();
+      }
+    });
+
+    // A dead server is a real outage on every path, exempt or not — this is
+    // what keeps the offline badge honest.
+    it("network rejection on /claims/hold still notifies workspace-unavailable", async () => {
+      global.fetch = vi
+        .fn()
+        .mockRejectedValue(new TypeError("Failed to fetch"));
+
+      const cb = vi.fn();
+      const unsub = onWorkspaceUnavailable(cb);
+
+      try {
+        await expect(get("/api/workspaces/PUPPET/claims/hold")).rejects.toThrow(
+          ApiError,
+        );
+        expect(cb).toHaveBeenCalledTimes(1);
+      } finally {
+        unsub();
+      }
     });
 
     it("network error notifies workspace service-unavailable listeners", async () => {
