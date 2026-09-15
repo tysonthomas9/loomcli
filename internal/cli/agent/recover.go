@@ -257,8 +257,10 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int, incomplete bo
 
 // CleanAdoptedWorktree readies a worktree the supervisor has just re-pointed a
 // cycle onto (see supervisor.applyTaskPlacement) WITHOUT touching any task
-// claim. It drops a stale lock and cleans untracked files, so the agent's
-// BeforeRef and branch cut start from a known state.
+// claim. It drops a stale lock, then runs the same cleanup tail as recovery:
+// an operation left in progress is snapshotted and aborted before untracked
+// files are cleaned, and nothing is cleaned when that cannot be done safely.
+// The agent's BeforeRef and branch cut then start from a known state.
 //
 // It is deliberately NOT RecoverWorktree. That call releases and resets tasks:
 // the one it is handed, and every other in_progress task assigned to the agent.
@@ -292,7 +294,7 @@ func CleanAdoptedWorktree(worktreePath string) error {
 			return fmt.Errorf("failed to clear lock: %w", err)
 		}
 	}
-	cleanUntrackedFiles(worktreePath, true)
+	finishWorktreeCleanup(worktreePath, false, rescueRoot())
 	return nil
 }
 
