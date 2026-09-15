@@ -45,6 +45,14 @@ func (s *Supervisor) DrainWithGrace(ap *AgentProcess, reason string, yieldTimeou
 		return outcome(DrainPhaseAlreadyStopped)
 	}
 
+	// Stamp the reason before signaling. The exit hooks
+	// (recordTaskExitForQuarantine, daemon-agents.json) read ap.StopReason at
+	// process exit, which is BEFORE the supervise loop's own shutdown check
+	// runs — so drainAllWithGrace's kills used to label themselves "crash".
+	// DrainAgent/DrainAgentWithReason already set the reason explicitly, so
+	// this default-only write is a no-op on those paths.
+	s.setStopReasonDefault(ap, StopReason(reason))
+
 	// Phase 1: Write yield file
 	if err := s.RequestYield(ap, reason); err != nil {
 		slog.Warn("yield file write failed, falling back to SIGTERM", "worktree", ap.Entry.Worktree, "err", err)
@@ -58,6 +66,21 @@ func (s *Supervisor) DrainWithGrace(ap *AgentProcess, reason string, yieldTimeou
 	}()
 
 	// Phase 2: Poll for voluntary exit
+	if awaitVoluntaryExit(ap, yieldTimeout) {
+		slog.Info("agent yielded gracefully", "worktree", ap.Entry.Worktree, "elapsed", time.Since(start).Truncate(time.Millisecond))
+		return outcome(DrainPhaseYielded)
+	}
+
+	// Phase 3: Escalate to SIGTERM -> SIGKILL
+	slog.Info("yield timeout expired, escalating to SIGTERM", "worktree", ap.Entry.Worktree, "timeout", yieldTimeout)
+	s.StopAgent(ap, sigtermTimeout)
+	return outcome(DrainPhaseSigterm)
+}
+
+// awaitVoluntaryExit polls until the agent's process is gone or yieldTimeout
+// elapses, and reports whether it exited on its own. Split out of
+// DrainWithGrace (funlen) with the poll unchanged.
+func awaitVoluntaryExit(ap *AgentProcess, yieldTimeout time.Duration) bool {
 	deadline := time.Now().Add(yieldTimeout)
 	for time.Now().Before(deadline) {
 		ap.Mu.Lock()
@@ -65,17 +88,12 @@ func (s *Supervisor) DrainWithGrace(ap *AgentProcess, reason string, yieldTimeou
 		ap.Mu.Unlock()
 
 		if pid == 0 || !lockfile.IsProcessRunning(pid) {
-			slog.Info("agent yielded gracefully", "worktree", ap.Entry.Worktree, "elapsed", time.Since(start).Truncate(time.Millisecond))
-			return outcome(DrainPhaseYielded)
+			return true
 		}
 
 		time.Sleep(500 * time.Millisecond)
 	}
-
-	// Phase 3: Escalate to SIGTERM -> SIGKILL
-	slog.Info("yield timeout expired, escalating to SIGTERM", "worktree", ap.Entry.Worktree, "timeout", yieldTimeout)
-	s.StopAgent(ap, sigtermTimeout)
-	return outcome(DrainPhaseSigterm)
+	return false
 }
 
 // GetYieldTimeout returns the configured yield timeout duration.
