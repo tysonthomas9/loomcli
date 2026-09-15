@@ -140,7 +140,6 @@ type execBridgeGitRunner = clitest.ExecBridgeGitRunner
 // getWorktreeGitSyncStatus is a lowercase alias for GetWorktreeGitSyncStatus.
 var getWorktreeGitSyncStatus = GetWorktreeGitSyncStatus
 
-var collectReadyTasksByPriority = CollectReadyTasksByPriority
 var displayWidth = DisplayWidth
 
 // --- Command stubs for monitor tests ---
