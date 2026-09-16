@@ -62,6 +62,13 @@ func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]
 			Timestamp time.Time `json:"timestamp"`
 			Actor     string    `json:"actor"`
 			Action    string    `json:"action"`
+			Category  string    `json:"category"`
+			Summary   string    `json:"summary"`
+			Changes   []struct {
+				Field  string `json:"field"`
+				Before string `json:"before,omitempty"`
+				After  string `json:"after,omitempty"`
+			} `json:"changes,omitempty"`
 		} `json:"history"`
 	}
 	if err := json.Unmarshal(resp.Data, &history); err != nil {
@@ -69,11 +76,18 @@ func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]
 	}
 	result := make([]backend.EventData, 0, len(history.History))
 	for _, e := range history.History {
+		changes := make([]backend.FieldChange, len(e.Changes))
+		for i, c := range e.Changes {
+			changes[i] = backend.FieldChange{Field: c.Field, Before: c.Before, After: c.After}
+		}
 		result = append(result, backend.EventData{
 			ID:        e.ID,
 			IssueID:   id,
 			Kind:      e.Action,
 			Actor:     e.Actor,
+			Summary:   e.Summary,
+			Category:  e.Category,
+			Changes:   changes,
 			CreatedAt: e.Timestamp,
 		})
 	}

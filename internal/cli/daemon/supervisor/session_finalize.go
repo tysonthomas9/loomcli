@@ -27,10 +27,10 @@ type leafUsage struct {
 	CostUSD float64
 }
 
-// readLeafTranscript reads the session's on-disk native transcript ONCE so the
-// finalize can reuse it for both the on-disk token backfill (the supervisor's
-// collector-less finalize otherwise lands tokens=0) and the control-plane
-// transcript_ref artifact upload. ok=false when there is no transcript yet.
+// readLeafTranscript reads the session's on-disk native transcript for the
+// on-disk token backfill (the supervisor's collector-less finalize otherwise
+// lands tokens=0) and the control-plane transcript_ref artifact upload. ok=false
+// when there is no transcript yet.
 func (s *Supervisor) readLeafTranscript(sessionID string) (data []byte, usage leafUsage, ok bool) {
 	if sessionID == "" {
 		return nil, leafUsage{}, false
@@ -95,12 +95,21 @@ func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
 	}
 	taskID := s.taskIDForFinalize(ap)
 	errClass := agentErrorClass(ap)
-	// Read the leaf transcript once: it feeds both the on-disk token backfill (via
+	// The leaf transcript feeds both the on-disk token backfill (via
 	// finalizeLocalSession) and the control-plane transcript_ref artifact upload.
-	// Read before finalizeLocalSession, whose codex/claude re-sync can rewrite the
-	// on-disk file — this captures the TS leaf's canonical transcript verbatim.
+	// Read it before finalizeLocalSession, whose codex/claude re-sync can rewrite
+	// the on-disk file: this captures the TS leaf's canonical transcript verbatim.
 	transcriptData, leafTokens, _ := s.readLeafTranscript(state.sessionID)
 	diffResult := finalizeLocalSession(state.session, ap, state.beforeRef, taskID, exitCode, errClass, leafTokens)
+	// Read again after the sync, and keep whichever read is longer. The Go leaf's
+	// native transcript only lands during finalize (codex rollout / claude
+	// transcript mirror), so without the second read the artifact upload never
+	// fires at all. The claude Go leaf mirrors live, so the first read can succeed
+	// on a partial file that finalize then completes. Taking the longer of the two
+	// still keeps the TS leaf's canonical transcript, which finalize does not touch.
+	if synced, _, ok := s.readLeafTranscript(state.sessionID); ok && len(synced) > len(transcriptData) {
+		transcriptData = synced
+	}
 	// KNOWN GAP — local session only. leafTokens lands on the on-disk session
 	// record; it does NOT reach the control plane, because store.AgentSessionUpdate
 	// has no token or cost fields (only Status/TaskID/FinishedAt/ErrorClass/

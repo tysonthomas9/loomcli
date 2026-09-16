@@ -102,6 +102,33 @@
 .eventDescription {
   font-size: var(--font-size-base);
   color: var(--color-text-muted);
+  min-width: 0;
+}
+
+.eventDetails {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-width: 0;
+}
+
+/* Wrap rather than clip. A multi-field update is exactly what the changes list
+   exists for, and text-overflow does nothing on a flex container, so laying the
+   changes out in one row hard-cut the later fields with no ellipsis to show it
+   and no way to hover them for the full value. Truncation belongs on each
+   child, where it applies. */
+.eventChanges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  min-width: 0;
+}
+
+.eventChanges > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

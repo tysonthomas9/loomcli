@@ -247,13 +247,28 @@ func (s *Supervisor) handleAgentCheckpoint(ap *AgentProcess, exitCode int) {
 			s.saveAgentCheckpoint(ap, exitCode)
 			return
 		}
-		lockDir := cli.ResolveLockDir(ap.WorktreePath)
-		if err := config.ClearCheckpoint(lockDir); err != nil {
-			log.Printf("[daemon] Agent %s: failed to clear checkpoint: %v", ap.Entry.Worktree, err)
+		for _, lockDir := range checkpointLockDirs(ap) {
+			if err := config.ClearCheckpoint(lockDir); err != nil {
+				log.Printf("[daemon] Agent %s: failed to clear checkpoint: %v", ap.Entry.Worktree, err)
+			}
 		}
 		return
 	}
 	s.saveAgentCheckpoint(ap, exitCode)
+}
+
+// checkpointLockDirs returns the lock dirs a checkpoint must reach: the run's
+// task checkout (where the worker's prompt injection reads WIP) and the agent's
+// stable home (the only path detectRecovery still knows after a daemon restart
+// has reset WorktreePath).
+func checkpointLockDirs(ap *AgentProcess) []string {
+	dirs := []string{cli.ResolveLockDir(ap.WorktreePath)}
+	if ap.AgentWorktreePath != "" {
+		if home := cli.ResolveLockDir(ap.AgentWorktreePath); home != dirs[0] {
+			dirs = append(dirs, home)
+		}
+	}
+	return dirs
 }
 
 // saveAgentCheckpoint captures the current worktree diff and agent state into a
@@ -288,11 +303,12 @@ func (s *Supervisor) saveAgentCheckpoint(ap *AgentProcess, exitCode int) {
 		ErrorClass: errClass,
 		Timestamp:  time.Now(),
 	}
-	lockDir := cli.ResolveLockDir(ap.WorktreePath)
-	if err := config.SaveCheckpoint(lockDir, cp); err != nil {
-		log.Printf("[daemon] Agent %s: failed to save checkpoint: %v", ap.Entry.Worktree, err)
-	} else {
-		log.Printf("[daemon] Agent %s: saved checkpoint for task %s", ap.Entry.Worktree, taskID)
+	for _, lockDir := range checkpointLockDirs(ap) {
+		if err := config.SaveCheckpoint(lockDir, cp); err != nil {
+			log.Printf("[daemon] Agent %s: failed to save checkpoint: %v", ap.Entry.Worktree, err)
+		} else {
+			log.Printf("[daemon] Agent %s: saved checkpoint for task %s", ap.Entry.Worktree, taskID)
+		}
 	}
 }
 
@@ -332,12 +348,13 @@ func (s *Supervisor) saveYieldCheckpoint(ap *AgentProcess) {
 		YieldReason: yieldReason,
 		Timestamp:   time.Now(),
 	}
-	lockDir := cli.ResolveLockDir(ap.WorktreePath)
-	if err := config.SaveCheckpoint(lockDir, cp); err != nil {
-		log.Printf("[daemon] Agent %s: failed to save yield checkpoint: %v", ap.Entry.Worktree, err)
-	} else {
-		log.Printf("[daemon] Agent %s: saved yield checkpoint for task %s (reason: %s)",
-			ap.Entry.Worktree, taskID, yieldReason)
+	for _, lockDir := range checkpointLockDirs(ap) {
+		if err := config.SaveCheckpoint(lockDir, cp); err != nil {
+			log.Printf("[daemon] Agent %s: failed to save yield checkpoint: %v", ap.Entry.Worktree, err)
+		} else {
+			log.Printf("[daemon] Agent %s: saved yield checkpoint for task %s (reason: %s)",
+				ap.Entry.Worktree, taskID, yieldReason)
+		}
 	}
 }
 

@@ -204,6 +204,9 @@ func (s *Supervisor) tryFallbackBackend(ap *AgentProcess) bool {
 	ap.CurrentBackendIdx = nextIdx
 	ap.RestartCount = 0
 	ap.RateRetryCount = 0
+	// A real failover means the exhausted-fallback budget was never spent on
+	// this backend; the next one starts with its own.
+	ap.FailoverExhaustedCount = 0
 	ap.Mu.Unlock()
 
 	// Resolve backend name outside the lock for logging (GetEffectiveBackend acquires ap.Mu)

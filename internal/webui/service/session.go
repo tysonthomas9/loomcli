@@ -5,7 +5,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
 // SessionService defines business logic for session audit trail operations.
@@ -22,6 +21,10 @@ type SessionService interface {
 	// task ownership.
 	GetSessionTranscript(ctx context.Context, wsID, taskID, sessionID string) ([]transcript.Event, error)
 
+	// GetSessionTranscriptByID resolves a session without task ownership, for
+	// orchestration sessions that do not have a task ID.
+	GetSessionTranscriptByID(ctx context.Context, wsID, sessionID string) ([]transcript.Event, error)
+
 	// GetSessionSubagentTranscript returns events for a single captured
 	// subagent transcript within a session. Enforces task ownership.
 	GetSessionSubagentTranscript(ctx context.Context, wsID, taskID, sessionID, subagentID string) ([]transcript.Event, error)
@@ -32,12 +35,6 @@ type SessionService interface {
 
 	// GetSessionDiff returns the diff.patch content for a session as plain text.
 	GetSessionDiff(ctx context.Context, wsID, taskID, sessionID string) (string, error)
-
-	// ListSessionHistory returns session history records for an issue.
-	ListSessionHistory(ctx context.Context, wsID, issueID string) ([]sessionhistory.SessionRecord, error)
-
-	// GetSessionScrollback returns scrollback content for a completed session.
-	GetSessionScrollback(ctx context.Context, wsID, issueID, recordID string) (*SessionScrollbackResult, error)
 }
 
 // SessionListItem extends a session record with computed UI fields.
@@ -52,10 +49,4 @@ type SessionListItem struct {
 type SessionDetailData struct {
 	sessions.SessionMetadata
 	IsActive bool `json:"is_active"`
-}
-
-// SessionScrollbackResult contains scrollback file content.
-type SessionScrollbackResult struct {
-	Content string
-	Lines   int
 }

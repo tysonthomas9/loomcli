@@ -1,6 +1,6 @@
 // Package localredis provides an in-process miniredis instance with
 // JSON snapshot persistence. It powers the terminal-state stores
-// (tabmeta, issuetabs, sessionhistory, terminal:ui-state) when loom serve
+// (tabmeta, issuetabs, terminal:ui-state) when loom serve
 // is run without an external Redis address.
 //
 // The snapshot file lives under ~/.loom/terminal-state/snapshot.json and
@@ -74,7 +74,7 @@ const (
 var includedPrefixes = []string{
 	"terminal:meta:",
 	"terminal:ui-state", // matches per-workspace "terminal:ui-state:{wsID}" hashes via HasPrefix
-	"ws:",               // matches ws:{wsID}:issue:tabs:* and ws:{wsID}:issue:sessions:*
+	"ws:",               // matches ws:{wsID}:issue:tabs:*
 }
 
 // fleetPrefixes are key patterns persisted only when fleet mode is on.

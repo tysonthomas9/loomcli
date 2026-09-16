@@ -857,42 +857,6 @@ func (e RuntimeReadyResponseMode) Valid() bool {
 	}
 }
 
-// Defines values for SessionHistoryRecordLauncher.
-const (
-	SessionHistoryRecordLauncherStartWork SessionHistoryRecordLauncher = "start-work"
-	SessionHistoryRecordLauncherUser      SessionHistoryRecordLauncher = "user"
-)
-
-// Valid indicates whether the value is a known member of the SessionHistoryRecordLauncher enum.
-func (e SessionHistoryRecordLauncher) Valid() bool {
-	switch e {
-	case SessionHistoryRecordLauncherStartWork:
-		return true
-	case SessionHistoryRecordLauncherUser:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for SessionHistoryRecordStatus.
-const (
-	Active    SessionHistoryRecordStatus = "active"
-	Completed SessionHistoryRecordStatus = "completed"
-)
-
-// Valid indicates whether the value is a known member of the SessionHistoryRecordStatus enum.
-func (e SessionHistoryRecordStatus) Valid() bool {
-	switch e {
-	case Active:
-		return true
-	case Completed:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for TeamTemplateApplyResponseStatus.
 const (
 	TeamTemplateApplyResponseStatusDone TeamTemplateApplyResponseStatus = "done"
@@ -991,22 +955,22 @@ func (e TeamTemplateCatalogAgentRoleKind) Valid() bool {
 
 // Defines values for TranscriptEntryRole.
 const (
-	TranscriptEntryRoleAssistant TranscriptEntryRole = "assistant"
-	TranscriptEntryRoleSystem    TranscriptEntryRole = "system"
-	TranscriptEntryRoleTool      TranscriptEntryRole = "tool"
-	TranscriptEntryRoleUser      TranscriptEntryRole = "user"
+	Assistant TranscriptEntryRole = "assistant"
+	System    TranscriptEntryRole = "system"
+	Tool      TranscriptEntryRole = "tool"
+	User      TranscriptEntryRole = "user"
 )
 
 // Valid indicates whether the value is a known member of the TranscriptEntryRole enum.
 func (e TranscriptEntryRole) Valid() bool {
 	switch e {
-	case TranscriptEntryRoleAssistant:
+	case Assistant:
 		return true
-	case TranscriptEntryRoleSystem:
+	case System:
 		return true
-	case TranscriptEntryRoleTool:
+	case Tool:
 		return true
-	case TranscriptEntryRoleUser:
+	case User:
 		return true
 	default:
 		return false
@@ -2263,14 +2227,27 @@ type IssueStatus string
 
 // IssueEvent Audit trail entry for an issue
 type IssueEvent struct {
-	Actor     string    `json:"actor"`
-	Comment   *string   `json:"comment,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	EventType string    `json:"event_type"`
-	Id        int64     `json:"id"`
-	IssueId   string    `json:"issue_id"`
-	NewValue  *string   `json:"new_value,omitempty"`
-	OldValue  *string   `json:"old_value,omitempty"`
+	Actor     string              `json:"actor"`
+	Category  *string             `json:"category,omitempty"`
+	Changes   *[]IssueEventChange `json:"changes,omitempty"`
+	Comment   *string             `json:"comment,omitempty"`
+	CreatedAt time.Time           `json:"created_at"`
+
+	// EventId The backend's own event id, verbatim. fleet-db ids are redis stream entries that do not parse as int64, so id is 0 for all of them and event_id is what actually identifies one.
+	EventId   *string `json:"event_id,omitempty"`
+	EventType string  `json:"event_type"`
+	Id        int64   `json:"id"`
+	IssueId   string  `json:"issue_id"`
+	NewValue  *string `json:"new_value,omitempty"`
+	OldValue  *string `json:"old_value,omitempty"`
+	Summary   *string `json:"summary,omitempty"`
+}
+
+// IssueEventChange A field value change captured by an issue event. before and after are always present: the mapper normalizes fleet-db's omitted-when-empty values to the empty string, so a field set for the first time or cleared stays distinguishable from one this end never reported.
+type IssueEventChange struct {
+	After  string `json:"after"`
+	Before string `json:"before"`
+	Field  string `json:"field"`
 }
 
 // IssueResponse Full issue detail returned by get-single-issue endpoint. Includes dependency/dependent refs, comments, and counts.
@@ -2828,25 +2805,6 @@ type ServiceErrorResponse struct {
 	Error string `json:"error"`
 	Kind  string `json:"kind"`
 }
-
-// SessionHistoryRecord Session history record (Redis-backed, per-issue)
-type SessionHistoryRecord struct {
-	Backend        string                       `json:"backend"`
-	EndedAt        *time.Time                   `json:"ended_at,omitempty"`
-	Id             string                       `json:"id"`
-	IssueId        string                       `json:"issue_id"`
-	Launcher       SessionHistoryRecordLauncher `json:"launcher"`
-	ScrollbackPath *string                      `json:"scrollback_path,omitempty"`
-	SessionName    string                       `json:"session_name"`
-	StartedAt      time.Time                    `json:"started_at"`
-	Status         SessionHistoryRecordStatus   `json:"status"`
-}
-
-// SessionHistoryRecordLauncher defines model for SessionHistoryRecord.Launcher.
-type SessionHistoryRecordLauncher string
-
-// SessionHistoryRecordStatus defines model for SessionHistoryRecord.Status.
-type SessionHistoryRecordStatus string
 
 // SessionResponse Session audit record from dto.SessionResponse
 type SessionResponse struct {

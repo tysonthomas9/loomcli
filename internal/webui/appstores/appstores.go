@@ -1,6 +1,6 @@
 // Package appstores consolidates Redis-backed store initialization for the
 // webui/app composition root. The app package imports this single package
-// instead of issuetabs, sessionhistory, tabmeta, and subscription individually.
+// instead of issuetabs, tabmeta, and subscription individually.
 package appstores
 
 import (
@@ -11,7 +11,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/subscription"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
@@ -25,9 +24,6 @@ type TabMetaStore = tabmeta.Store
 // IssueTabStore is a type alias for issuetabs.Store.
 type IssueTabStore = issuetabs.Store
 
-// SessionHistoryStore is a type alias for sessionhistory.Store.
-type SessionHistoryStore = sessionhistory.Store
-
 // MultiWorkspaceSubscriber is a type alias for subscription.MultiWorkspaceSubscriber.
 type MultiWorkspaceSubscriber = subscription.MultiWorkspaceSubscriber
 
@@ -39,9 +35,6 @@ const (
 	ActivationReasonRegistry = subscription.ActivationReasonRegistry
 	ActivationReasonSSE      = subscription.ActivationReasonSSE
 )
-
-// SessionRecord is a type alias for sessionhistory.SessionRecord.
-type SessionRecord = sessionhistory.SessionRecord
 
 // MutationsSinceFn is the type for the getMutationsSince callback.
 type MutationsSinceFn = func(wsID string, since string) []rpc.MutationEvent
@@ -94,20 +87,6 @@ func InitIssueTabs(ctx context.Context, redisCfg *fleet.RedisConfig, initialWSID
 	cleanup := func() { _ = store.Close() }
 	logger.Info("issue tab store initialized", "redis_address", redisCfg.Address)
 	return store, cleanup
-}
-
-// InitSessionHistory creates the session history store from Redis config.
-func InitSessionHistory(ctx context.Context, redisCfg *fleet.RedisConfig, initialWSID string, logger *slog.Logger) (*SessionHistoryStore, func()) {
-	shClient := fleet.NewRedisClient(redisCfg.Address, redisCfg.Password, 0)
-	store := sessionhistory.NewStore(shClient, nil)
-	cleanup := func() { _ = store.Close() }
-	logger.Info("session history store initialized", "redis_address", redisCfg.Address)
-	return store, cleanup
-}
-
-// ValidateIssueID validates an issue ID string.
-func ValidateIssueID(issueID string) error {
-	return sessionhistory.ValidateIssueID(issueID)
 }
 
 // SubscriptionModule is a type alias for subscription.Module.

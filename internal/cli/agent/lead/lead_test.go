@@ -3,12 +3,15 @@ package lead
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
@@ -16,9 +19,112 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
+
+func TestFinalizeLeadTranscriptUploadsAndStampsMetadata(t *testing.T) {
+	runtimeDir := t.TempDir()
+	codexHome := t.TempDir()
+	workDir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	t.Setenv("CODEX_HOME", codexHome)
+	cli.ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(cli.ResetWorkspaceRuntimeDirCache)
+	local, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	const sessionID = "lead-11111111-1111-4111-8111-111111111111"
+	if _, err := os.Stat(local.SessionDir(sessionID)); !os.IsNotExist(err) {
+		t.Fatalf("session directory exists before finalization: err=%v", err)
+	}
+	started := time.Now().Add(-time.Minute)
+	rolloutDir := filepath.Join(codexHome, "sessions", started.Format("2006"), started.Format("01"), started.Format("02"))
+	if err := os.MkdirAll(rolloutDir, 0o755); err != nil {
+		t.Fatalf("mkdir rollout: %v", err)
+	}
+	rolloutMeta, _ := json.Marshal(map[string]any{"type": "session_meta", "payload": map[string]any{"cwd": workDir}})
+	rollout := filepath.Join(rolloutDir, "rollout-lead.jsonl")
+	if err := os.WriteFile(rollout, append(rolloutMeta, '\n'), 0o600); err != nil {
+		t.Fatalf("write rollout: %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.AgentSessions().Create(t.Context(), store.AgentSessionCreate{
+		WorkspaceKey: "WS", SessionID: sessionID, AgentID: "lead",
+		Kind: domain.AgentSessionKindOrchestration, Status: domain.AgentSessionRunning,
+		Metadata: map[string]string{"lead_workdir": workDir, "backend": backendnames.Codex},
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	metadata := map[string]string{"lead_workdir": workDir, "backend": backendnames.Codex}
+	if _, err := st.AgentSessions().Update(t.Context(), "WS", sessionID, store.AgentSessionUpdate{Metadata: &metadata}); err != nil {
+		t.Fatalf("set session metadata: %v", err)
+	}
+	metadata = finalizeLeadTranscript(t.Context(), st, "WS", sessionID)
+	if metadata["transcript_ref"] != "artifact://transcript-"+sessionID || metadata["transcript_path"] != local.NativeTranscriptPath(sessionID) {
+		t.Fatalf("metadata = %#v, want transcript ref and path", metadata)
+	}
+	if metadata["transcript_format"] != sessions.TranscriptFormatRaw || metadata["transcript_backend"] != backendnames.Codex {
+		t.Fatalf("transcript metadata = %#v, want raw codex markers", metadata)
+	}
+	artifact, err := st.Artifacts().Get(t.Context(), "WS", "transcript-"+sessionID)
+	if err != nil {
+		t.Fatalf("uploaded artifact missing: %v", err)
+	}
+	if artifact.Metadata["transcript_format"] != sessions.TranscriptFormatRaw || artifact.Metadata["transcript_backend"] != backendnames.Codex {
+		t.Fatalf("artifact metadata = %#v, want raw codex markers", artifact.Metadata)
+	}
+	content, ok := st.Artifacts().(store.ArtifactContentReader)
+	if !ok {
+		t.Fatal("artifact store does not support content reads")
+	}
+	data, err := content.ReadContent(t.Context(), "WS", artifact.ArtifactID)
+	if err != nil || len(data) == 0 {
+		t.Fatalf("artifact content length = %d, err %v; want non-empty", len(data), err)
+	}
+}
+
+func TestFinalizeLeadTranscriptWithoutTranscriptIsBestEffort(t *testing.T) {
+	runtimeDir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	cli.ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(cli.ResetWorkspaceRuntimeDirCache)
+	st := memstore.New()
+	if _, err := st.AgentSessions().Create(t.Context(), store.AgentSessionCreate{
+		WorkspaceKey: "WS", SessionID: "lead-session-2", AgentID: "lead",
+		Kind: domain.AgentSessionKindOrchestration, Status: domain.AgentSessionRunning,
+		Metadata: map[string]string{"lead_workdir": t.TempDir(), "backend": backendnames.Codex},
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	metadata := finalizeLeadTranscript(t.Context(), st, "WS", "lead-session-2")
+	if metadata["lead_workdir"] == "" || metadata["backend"] != backendnames.Codex {
+		t.Fatalf("metadata = %#v, want pre-existing metadata preserved", metadata)
+	}
+}
+
+func TestCreateLeadSessionAdoptsWebTerminalMetadata(t *testing.T) {
+	st := memstore.New()
+	if _, err := st.AgentSessions().Create(t.Context(), store.AgentSessionCreate{
+		WorkspaceKey: "WS", SessionID: "lead-web-terminal", AgentID: "lead",
+		Kind: domain.AgentSessionKindOrchestration, Status: domain.AgentSessionRunning,
+		Metadata: map[string]string{"source": "web-terminal"},
+	}); err != nil {
+		t.Fatalf("create existing session: %v", err)
+	}
+	if err := createLeadSession(t.Context(), &bootstrap.StoreHandle{Store: st}, "WS", "lead-web-terminal", "lead", "/work/lead"); err != nil {
+		t.Fatalf("adopt lead session: %v", err)
+	}
+	record, err := st.AgentSessions().Get(t.Context(), "WS", "lead-web-terminal")
+	if err != nil {
+		t.Fatalf("get adopted session: %v", err)
+	}
+	if record.Metadata["source"] != "web-terminal" || record.Metadata["lead_workdir"] != "/work/lead" || record.Metadata["backend"] == "" {
+		t.Fatalf("adopted metadata = %#v, want source, workdir, and backend", record.Metadata)
+	}
+}
 
 // mockBackend is a minimal cli.Backend for the registry path that runLead falls
 // back to when LOOM_LEAD_CONTROLLED=0. Self-contained here because the agent

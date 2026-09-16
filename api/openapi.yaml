@@ -38,8 +38,6 @@ tags:
     description: Issue audit events and SSE mutation stream
   - name: sessions
     description: Session audit trail (task-scoped)
-  - name: session-history
-    description: Session history (issue-scoped, Redis-backed)
   - name: logs
     description: Agent and task log retrieval
   - name: terminal
@@ -1322,62 +1320,6 @@ paths:
                     type: boolean
                     description: True when SSE token exchange is disabled in open mode
 
-  # ── Session History (Issue-Scoped) ──────────────────────────────────────
-  /api/workspaces/{ws}/issues/{issueId}/sessions:
-    get:
-      operationId: listSessionHistory
-      tags: [session-history]
-      summary: List session history records for an issue
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: issueId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Session history
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [success]
-                properties:
-                  success:
-                    type: boolean
-                  data:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/SessionHistoryRecord"
-
-  /api/workspaces/{ws}/issues/{issueId}/sessions/{recordId}/scrollback:
-    get:
-      operationId: getSessionScrollback
-      tags: [session-history]
-      summary: Get scrollback content for a session history record
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: issueId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: recordId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Scrollback content
-          content:
-            text/plain:
-              schema:
-                type: string
-        "404":
-          description: Record not found
-
   # ── Sessions (Task-Scoped Audit Trail) ──────────────────────────────────
   /api/workspaces/{ws}/tasks/{taskId}/sessions:
     get:
@@ -1457,6 +1399,41 @@ paths:
           required: true
           schema:
             type: string
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Transcript
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      session_id:
+                        type: string
+                      entries:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/TranscriptEntry"
+        "404":
+          description: Session not found
+
+  /api/workspaces/{ws}/sessions/{sessionId}/transcript:
+    get:
+      operationId: getSessionTranscriptById
+      tags: [sessions]
+      summary: Get a session transcript by session ID
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
         - name: sessionId
           in: path
           required: true
@@ -5586,12 +5563,26 @@ components:
         id:
           type: integer
           format: int64
+        event_id:
+          type: string
+          description: >
+            The backend's own event id, verbatim. fleet-db ids are redis stream
+            entries that do not parse as int64, so id is 0 for all of them and
+            event_id is what actually identifies one.
         issue_id:
           type: string
         event_type:
           type: string
         actor:
           type: string
+        summary:
+          type: string
+        category:
+          type: string
+        changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/IssueEventChange"
         old_value:
           type: [string, "null"]
         new_value:
@@ -5601,6 +5592,22 @@ components:
         created_at:
           type: string
           format: date-time
+
+    IssueEventChange:
+      type: object
+      description: >
+        A field value change captured by an issue event. before and after are
+        always present: the mapper normalizes fleet-db's omitted-when-empty
+        values to the empty string, so a field set for the first time or cleared
+        stays distinguishable from one this end never reported.
+      required: [field, before, after]
+      properties:
+        field:
+          type: string
+        before:
+          type: string
+        after:
+          type: string
 
     Statistics:
       type: object
@@ -6137,34 +6144,6 @@ components:
         tool_input:
           type: string
         raw:
-          type: string
-
-    SessionHistoryRecord:
-      type: object
-      description: Session history record (Redis-backed, per-issue)
-      required: [id, session_name, issue_id, backend, status, launcher, started_at]
-      properties:
-        id:
-          type: string
-        session_name:
-          type: string
-        issue_id:
-          type: string
-        backend:
-          type: string
-        status:
-          type: string
-          enum: [active, completed]
-        launcher:
-          type: string
-          enum: [user, start-work]
-        started_at:
-          type: string
-          format: date-time
-        ended_at:
-          type: [string, "null"]
-          format: date-time
-        scrollback_path:
           type: string
 
     # ── Terminal Schemas ────────────────────────────────────────────────

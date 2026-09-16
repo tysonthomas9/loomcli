@@ -336,17 +336,33 @@ func commentDataToTypesComment(d *backend.CommentData) *types.Comment {
 // eventDataToTypesEvent maps backend.EventData onto the strongly typed
 // types.Event used by the ListEvents handler response shape.
 //
-// backend.EventData.ID is a string but types.Event.ID is int64 (matching
-// the SQLite primary key). We parse-through to preserve the previous wire
-// shape; non-numeric IDs degrade to 0 because no caller currently relies on
-// the ID being valid for string-ID backends.
+// backend.EventData.ID is a string but types.Event.ID is int64 (matching the
+// SQLite primary key). We parse-through to preserve the previous wire shape.
+// A non-numeric ID degrades to 0, which is why the backend's own id is carried
+// verbatim in EventID as well: fleet-db's ids are redis stream entries like
+// "1756747205448-0", so every fleet event lands on ID 0 and the numeric id
+// cannot tell two of them apart.
+//
+// old_value/new_value are deliberately NOT synthesized from a single change.
+// Their only consumer is the activity list's per-type description, so filling
+// them would render the same change twice, once in the sentence and once in the
+// changes list, the moment the two event vocabularies are mapped onto each
+// other.
 func eventDataToTypesEvent(d backend.EventData) *types.Event {
 	id, _ := strconv.ParseInt(d.ID, 10, 64)
+	changes := make([]types.FieldChange, len(d.Changes))
+	for i, c := range d.Changes {
+		changes[i] = types.FieldChange{Field: c.Field, Before: c.Before, After: c.After}
+	}
 	return &types.Event{
 		ID:        id,
+		EventID:   d.ID,
 		IssueID:   d.IssueID,
 		EventType: types.EventType(d.Kind),
 		Actor:     d.Actor,
+		Summary:   d.Summary,
+		Category:  d.Category,
+		Changes:   changes,
 		CreatedAt: d.CreatedAt,
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
@@ -22,6 +23,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
+	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -283,13 +286,20 @@ func (r leadSessionRegistration) Store() store.Store {
 // heartbeat. Best-effort: any error returns a no-op registration so lead always
 // runs.
 func registerLeadOrchestratorSession(ctx context.Context, workDir string) leadSessionRegistration {
-	noop := func() {}
-	empty := leadSessionRegistration{finalize: noop}
 	handle, ws, ok := openLeadSessionStore(ctx)
 	if !ok {
-		return empty
+		return leadSessionRegistration{finalize: func() {}}
 	}
+	return registerLeadOrchestratorSessionOn(ctx, handle, ws, workDir)
+}
 
+// registerLeadOrchestratorSessionOn is the half of registration that runs once
+// fleet-db is reachable. It is split out so a test can drive the whole chain —
+// session write, environment export, heartbeat, finalizer — against a store it
+// controls, which is the only way to prove that a failed metadata write still
+// leaves orchestrator linkage armed.
+func registerLeadOrchestratorSessionOn(ctx context.Context, handle *bootstrap.StoreHandle, ws, workDir string) leadSessionRegistration {
+	empty := leadSessionRegistration{finalize: func() {}}
 	sid := resolveLeadOrchestratorSessionID()
 	agentID := resolveLeadAgentID()
 	if err := createLeadSession(ctx, handle, ws, sid, agentID, workDir); err != nil {
@@ -338,9 +348,25 @@ func createLeadSession(ctx context.Context, handle *bootstrap.StoreHandle, ws, s
 		Metadata: map[string]string{
 			"actor":        leadSessionActor(),
 			"lead_workdir": workDir,
+			"backend":      cli.GetBackendName(),
 		},
 	})
 	if errors.Is(err, domain.ErrAlreadyExists) {
+		session, getErr := handle.Store.AgentSessions().Get(createCtx, ws, sid)
+		if getErr != nil {
+			slog.Warn("lead orchestrator session: existing session lookup failed; lead transcript may not be captured", "session_id", sid, "err", getErr)
+			return nil
+		}
+		metadata := make(map[string]string, len(session.Metadata)+2)
+		for key, value := range session.Metadata {
+			metadata[key] = value
+		}
+		metadata["lead_workdir"] = workDir
+		metadata["backend"] = cli.GetBackendName()
+		_, updateErr := handle.Store.AgentSessions().Update(createCtx, ws, sid, store.AgentSessionUpdate{Metadata: &metadata})
+		if updateErr != nil {
+			slog.Warn("lead orchestrator session: existing session metadata update failed; lead transcript may not be captured", "session_id", sid, "err", updateErr)
+		}
 		return nil
 	}
 	return err
@@ -372,19 +398,142 @@ func leadSessionFinalizer(handle *bootstrap.StoreHandle, ws, sid string, stopHB 
 	return func() {
 		close(stopHB)
 		wg.Wait()
-		finCtx, finCancel := context.WithTimeout(context.Background(), leadStoreOpTimeout)
-		defer finCancel()
+		// Capture first, then open the lifecycle context. The mirror is a disk
+		// walk that can outlast any deadline we give it, and it must not spend
+		// the budget the completion Update still needs — a lost Update leaves a
+		// session that reads as running forever.
+		metadata := finalizeLeadTranscript(context.Background(), handle.Store, ws, sid)
 		status := domain.AgentSessionCompleted
 		now := time.Now().UTC()
 		finishedAt := &now
-		if _, err := handle.Store.AgentSessions().Update(finCtx, ws, sid, store.AgentSessionUpdate{
+		update := store.AgentSessionUpdate{
 			Status:     &status,
 			FinishedAt: &finishedAt,
-		}); err != nil {
-			slog.Debug("lead orchestrator session: finalize failed", "err", err)
 		}
+		if metadata != nil {
+			update.Metadata = &metadata
+		}
+		finCtx, finCancel := context.WithTimeout(context.Background(), leadStoreOpTimeout)
+		if _, err := handle.Store.AgentSessions().Update(finCtx, ws, sid, update); err != nil {
+			slog.Warn("lead orchestrator session: finalize failed; session may appear to run forever", "err", err)
+		}
+		finCancel()
 		_ = handle.Close()
 	}
+}
+
+// finalizeLeadTranscript captures the provider-native transcript and uploads a
+// copy for control-plane readers. Every step is best-effort so audit capture
+// can never change the lead's exit status or lifecycle.
+func finalizeLeadTranscript(ctx context.Context, st store.Store, ws, sid string) map[string]string {
+	getCtx, getCancel := context.WithTimeout(ctx, leadStoreOpTimeout)
+	rec, err := st.AgentSessions().Get(getCtx, ws, sid)
+	getCancel()
+	if err != nil || rec == nil {
+		slog.Warn("lead transcript: session lookup failed", "session_id", sid, "err", err)
+		return nil
+	}
+	metadata := make(map[string]string, len(rec.Metadata)+2)
+	for key, value := range rec.Metadata {
+		metadata[key] = value
+	}
+	workDir := strings.TrimSpace(metadata["lead_workdir"])
+	backend := strings.TrimSpace(metadata["backend"])
+	if workDir == "" || backend == "" {
+		slog.Warn("lead transcript: capture skipped, session metadata incomplete", "session_id", sid, "workdir", workDir != "", "backend", backend != "")
+		return metadata
+	}
+	if backend == backendnames.Codex {
+		if runtimeHome := strings.TrimSpace(metadata[leadcontrol.MetadataCodexRuntimeHome]); runtimeHome != "" {
+			metadata["log_path"] = leadcontrol.CodexAppServerLogPath(runtimeHome)
+		}
+	}
+
+	since := rec.StartedAt
+	if since.IsZero() {
+		since = rec.CreatedAt
+	}
+	transcriptPath, data := syncLeadNativeTranscript(sid, workDir, backend, since, rec)
+	if len(data) == 0 {
+		return metadata
+	}
+	metadata["transcript_path"] = transcriptPath
+	upCtx, upCancel := context.WithTimeout(context.Background(), leadStoreOpTimeout)
+	finalized, err := uploadLeadTranscript(upCtx, st, ws, sid, backend, data)
+	upCancel()
+	if err != nil {
+		slog.Warn("lead transcript: artifact upload failed", "session_id", sid, "err", err)
+		return metadata
+	}
+	metadata["transcript_ref"] = "artifact://" + finalized.ArtifactID
+	metadata["transcript_format"] = sessions.TranscriptFormatRaw
+	metadata["transcript_backend"] = backend
+	return metadata
+}
+
+// syncLeadNativeTranscript mirrors the provider's own rollout into the lead's
+// session directory and reads it back. The read must follow the sync: like the
+// daemon's Go leaf, the lead's native transcript only lands when the mirror
+// runs, so a read taken first sees nothing and the upload never fires. A failed
+// sync is not conclusive — a hook may already have mirrored the file — so the
+// read decides either way.
+func syncLeadNativeTranscript(sid, workDir, backend string, since time.Time, rec *domain.AgentSession) (string, []byte) {
+	sessStore, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
+	if err != nil {
+		slog.Warn("lead transcript: local store unavailable", "session_id", sid, "err", err)
+		return "", nil
+	}
+	if err := sessStore.EnsureSession(sid, backend); err != nil {
+		slog.Warn("lead transcript: local session unavailable", "session_id", sid, "err", err)
+		return "", nil
+	}
+	claudeUUID := ""
+	if rec != nil {
+		runtime := leadcontrol.HarnessRuntimeMetadataFromSession(rec)
+		claudeUUID = runtime.HarnessSessionID
+		if !runtime.StartedAt.IsZero() {
+			since = runtime.StartedAt
+		}
+	}
+	// opencode is missing on purpose, not by oversight: loom has no locator for
+	// its rollout, so no session kind captures one. A task session's finalize
+	// (sessionfinalize.WithWorktree) has the same two cases. Adding opencode
+	// means adding the locator, and the lead picks it up for free when it lands.
+	switch backend {
+	case backendnames.Codex:
+		_, err = sessStore.SyncLatestCodexRollout(sid, workDir, since)
+	case backendnames.Claude:
+		_, err = sessStore.SyncLatestClaudeTranscript(sid, workDir, claudeUUID, since)
+	}
+	if err != nil {
+		slog.Warn("lead transcript: native transcript sync failed", "session_id", sid, "err", err)
+	}
+	transcriptPath := sessStore.NativeTranscriptPath(sid)
+	data, err := os.ReadFile(transcriptPath) //nolint:gosec // session-owned path
+	if err != nil || len(data) == 0 {
+		if err != nil {
+			slog.Warn("lead transcript: no local transcript", "session_id", sid, "err", err)
+		}
+		return transcriptPath, nil
+	}
+	return transcriptPath, data
+}
+
+// uploadLeadTranscript stores the lead's transcript as a control-plane artifact
+// under the same id shape a task session uses, so one reader serves both.
+func uploadLeadTranscript(ctx context.Context, st store.Store, ws, sid, backend string, data []byte) (*domain.Artifact, error) {
+	return store.UploadContentArtifact(ctx, st.Artifacts(), store.ArtifactCreate{
+		WorkspaceKey:  ws,
+		ArtifactID:    "transcript-" + sid,
+		SessionID:     sid,
+		OwnerType:     "session",
+		OwnerID:       sid,
+		Type:          "transcript",
+		Summary:       "agent session transcript",
+		MIMEType:      "application/x-ndjson",
+		DurableStatus: "declared",
+		Metadata:      map[string]string{"runtime": "lead-orchestration", "backend": backend, "transcript_format": sessions.TranscriptFormatRaw, "transcript_backend": backend},
+	}, data)
 }
 
 func resolveLeadOrchestratorSessionID() string {

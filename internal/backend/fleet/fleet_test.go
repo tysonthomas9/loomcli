@@ -1508,6 +1508,11 @@ func TestListEvents_HappyPath(t *testing.T) {
 					"timestamp": now,
 					"actor":     "user",
 					"action":    "issue.created",
+					"category":  "lifecycle",
+					"summary":   "Created issue",
+					"changes": []map[string]string{
+						{"field": "title", "before": "", "after": "A title"},
+					},
 				},
 			},
 		})
@@ -1523,6 +1528,51 @@ func TestListEvents_HappyPath(t *testing.T) {
 	}
 	if result[0].Kind != "issue.created" {
 		t.Errorf("Kind = %q, want %q", result[0].Kind, "issue.created")
+	}
+	if result[0].Summary != "Created issue" || result[0].Category != "lifecycle" {
+		t.Errorf("summary/category = %q/%q, want Created issue/lifecycle", result[0].Summary, result[0].Category)
+	}
+	if len(result[0].Changes) != 1 || result[0].Changes[0].Field != "title" || result[0].Changes[0].After != "A title" {
+		t.Errorf("changes = %+v, want title change", result[0].Changes)
+	}
+}
+
+// fleet-db tags before and after omitempty, so a field set for the first time
+// arrives with the key absent rather than empty. That is the commonest change
+// an agent makes, and the id is a redis stream entry that does not parse as an
+// integer, so it has to survive the hop as a string.
+func TestListEvents_ChangeWithAbsentBefore(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondOK(w, map[string]any{
+			"history": []map[string]any{
+				{
+					"id":        "1756747205448-0",
+					"timestamp": time.Now().UTC(),
+					"actor":     "app-architect-1",
+					"action":    "issue.update",
+					"category":  "field_change",
+					"summary":   "Updated description",
+					// No "before" key at all, exactly as fleet-db serializes it.
+					"changes": []map[string]string{{"field": "description", "after": "Now with detail"}},
+				},
+			},
+		})
+	})
+	defer ts.Close()
+
+	result, err := fb.ListEvents(context.Background(), "test-1", 10)
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	if len(result) != 1 || len(result[0].Changes) != 1 {
+		t.Fatalf("result = %+v, want one event carrying one change", result)
+	}
+	change := result[0].Changes[0]
+	if change.Field != "description" || change.Before != "" || change.After != "Now with detail" {
+		t.Errorf("change = %+v, want description \"\" -> \"Now with detail\"", change)
+	}
+	if result[0].ID != "1756747205448-0" {
+		t.Errorf("ID = %q, want the stream id verbatim", result[0].ID)
 	}
 }
 

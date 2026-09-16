@@ -9,7 +9,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -68,14 +67,11 @@ func (s *stubSessionService) GetSession(_ context.Context, _, _ string) (*servic
 func (s *stubSessionService) GetSessionTranscript(_ context.Context, _, _ string) ([]sessions.TranscriptEntry, error) {
 	return nil, nil
 }
-func (s *stubSessionService) GetSessionDiff(_ context.Context, _, _ string) (string, error) {
-	return "", nil
-}
-func (s *stubSessionService) ListSessionHistory(_ context.Context, _, _ string) ([]sessionhistory.SessionRecord, error) {
+func (s *stubSessionService) GetSessionTranscriptByID(_ context.Context, _, _ string) ([]sessions.TranscriptEntry, error) {
 	return nil, nil
 }
-func (s *stubSessionService) GetSessionScrollback(_ context.Context, _, _, _ string) (*service.SessionScrollbackResult, error) {
-	return &service.SessionScrollbackResult{}, nil
+func (s *stubSessionService) GetSessionDiff(_ context.Context, _, _ string) (string, error) {
+	return "", nil
 }
 
 // stubDiffService implements DiffService with no-op defaults for module tests.

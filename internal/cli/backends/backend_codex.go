@@ -123,6 +123,9 @@ func buildCodexNonInteractiveArgs(prompt string) []string {
 func buildBackendEnv(workDir, agentName string) []string {
 	env := appendLoomExecutableDirToPath(cli.FilteredEnv())
 	env = append(env, "LOOM_WORKTREE_PATH="+workDir)
+	if daemonAgentName := strings.TrimSpace(os.Getenv("LOOM_AGENT_NAME")); daemonAgentName != "" {
+		agentName = daemonAgentName
+	}
 	if agentName != "" {
 		env = append(env, "LOOM_AGENT_NAME="+agentName)
 	}

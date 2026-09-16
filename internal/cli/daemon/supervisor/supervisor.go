@@ -431,6 +431,7 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	}
 
 	taskID, mode := s.detectRecovery(ap)
+	taskID, mode, guardRefused := s.guardRecovery(ap, taskID, mode)
 	switch mode {
 	case recoverResume:
 		s.prepareResume(ap, taskID)
@@ -441,8 +442,11 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 		ap.ResumeFailures = 0 // cold-starting ⇒ let a future interruption recover again
 		ap.Mu.Unlock()
 		// Cold start: nothing here is being continued, so recovery takes its
-		// fully destructive form (incomplete=false).
-		if err := s.recoverAgent(ap, 0, false); err != nil {
+		// fully destructive form (incomplete=false) — EXCEPT when the guard
+		// refused a recovery that was otherwise ready to run. There the worktree
+		// still holds an interrupted run's uncommitted work, waiting for the
+		// task to be unblocked, so recovery takes the preserving form.
+		if err := s.recoverAgent(ap, 0, guardRefused); err != nil {
 			slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
 		}
 	}
@@ -462,6 +466,7 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	if err := s.prepareClaimedTaskWorktree(prepareCtx, ap); err != nil {
 		prepareCancel()
 		taskID := s.taskIDForLifecycle(ap, nil)
+		slog.Warn("task worktree preflight failed", "worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
 		s.releaseAssignedTaskClaim(ap, taskID)
 		s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("prepare task worktree for %s: %v", taskID, err))
 		return false
@@ -691,8 +696,8 @@ type agentSessionCompletionInput struct {
 	errClass   string
 	taskID     string
 	diffResult sessionfinalize.WithWorktreeResult
-	// transcriptData is the leaf's on-disk transcript (read once in
-	// finalizeAgentSession). When present it is uploaded as a control-plane artifact
+	// transcriptData is the leaf's on-disk transcript read during
+	// finalizeAgentSession. When present it is uploaded as a control-plane artifact
 	// and referenced via metadata["transcript_ref"], so a non-owning serve node can
 	// surface it (controlPlaneSessionTranscript). Empty on the backend-unavailable path.
 	transcriptData []byte
@@ -730,9 +735,18 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 	// controlPlaneSessionTranscript. Best-effort: a failed upload must not block the
 	// session completion. Own context so it can't eat the Update's timeout budget.
 	if len(input.transcriptData) > 0 {
+		transcriptFormat := s.localTranscriptFormat(input.sessionID)
 		upCtx, upCancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-		if ref := s.uploadTranscriptArtifact(upCtx, input.sessionID, input.taskID, backend, input.transcriptData); ref != "" {
+		if ref := s.uploadTranscriptArtifact(upCtx, input.sessionID, input.taskID, backend, transcriptFormat, input.transcriptData); ref != "" {
 			metadata["transcript_ref"] = ref
+			// The reader needs to know how to parse what it just received: the Go
+			// leaf uploads the provider's raw stream, the TS leaf a canonical
+			// event stream. Absent markers mean an older record, which the reader
+			// treats as canonical, so only stamp a format we actually read.
+			if transcriptFormat != "" {
+				metadata["transcript_format"] = transcriptFormat
+				metadata["transcript_backend"] = backend
+			}
 		}
 		upCancel()
 	}
@@ -758,35 +772,7 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 	s.deregisterWorker(ap)
 }
 
-// uploadTranscriptArtifact uploads the daemon leaf's transcript as a content
-// artifact and returns its artifact:// ref (or "" on failure). The artifact id is
-// stable per session so a retried finalize reuses it (UploadContentArtifact is
-// idempotent). Owner is the agent session — the daemon leaf has no task_run, which
-// is the driver's owner type.
-func (s *Supervisor) uploadTranscriptArtifact(ctx context.Context, sessionID, taskID, backend string, data []byte) string {
-	if s.ControlStore == nil {
-		return ""
-	}
-	finalized, err := store.UploadContentArtifact(ctx, s.ControlStore.Artifacts(), store.ArtifactCreate{
-		WorkspaceKey:  s.WorkspaceID,
-		ArtifactID:    "transcript-" + sessionID,
-		SessionID:     sessionID,
-		TaskID:        taskID,
-		OwnerType:     "session", // fleet-db's valid owner type for a session-owned artifact (OwnerID=sessionID)
-		OwnerID:       sessionID,
-		Type:          "transcript",
-		Summary:       "agent session transcript",
-		MIMEType:      "application/x-ndjson",
-		DurableStatus: "declared",
-		Metadata:      map[string]string{"runtime": "daemon-leaf", "backend": backend},
-	}, data)
-	if err != nil {
-		slog.Warn("daemon transcript artifact upload failed", "session_id", sessionID, "err", err)
-		return ""
-	}
-	return "artifact://" + finalized.ArtifactID
-}
-
+// Transcript helpers are implemented in session_transcript.go.
 // spawnAndWait spawns the agent and waits for it to exit. A spawn failure is
 // recorded as a synthetic exit (see markSpawnFailure) so the caller's single
 // restart decision — shouldRestart + sleepBeforeRestart — owns counting and

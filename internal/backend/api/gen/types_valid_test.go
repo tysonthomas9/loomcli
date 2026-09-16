@@ -31,9 +31,10 @@ func TestGeneratedEnumValidMethods(t *testing.T) {
 		{"ObservabilityEventType", AgentStarted, ObservabilityEventType("invalid")},
 		{"PatchIssueRequestAgentState", PatchIssueRequestAgentStateWorking, PatchIssueRequestAgentState("invalid")},
 		{"PatchIssueRequestStatus", PatchIssueRequestStatusInProgress, PatchIssueRequestStatus("invalid")},
-		{"SessionHistoryRecordLauncher", SessionHistoryRecordLauncherUser, SessionHistoryRecordLauncher("invalid")},
-		{"SessionHistoryRecordStatus", Active, SessionHistoryRecordStatus("invalid")},
-		{"TranscriptEntryRole", TranscriptEntryRoleAssistant, TranscriptEntryRole("invalid")},
+		// Unprefixed since the dead SessionHistoryRecord schema was removed: its
+		// launcher enum carried "user", and that collision was the only reason
+		// oapi-codegen prefixed this enum's constant names.
+		{"TranscriptEntryRole", Assistant, TranscriptEntryRole("invalid")},
 		{"TranscriptEntryType", Text, TranscriptEntryType("invalid")},
 		{"TreeNodeAgentState", TreeNodeAgentStateRunning, TreeNodeAgentState("invalid")},
 		{"TreeNodeIssueType", TreeNodeIssueTypeEpic, TreeNodeIssueType("invalid")},

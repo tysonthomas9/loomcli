@@ -397,8 +397,6 @@ if (event.code === WS_CLOSE_BACKEND_EXITED) {
 
 On reconnect, `fetchScrollback(sessionName)` calls `GET /api/terminal/sessions/{session}/scrollback` which runs `tmux capture-pane -p -S -5000`. Terminal is cleared and scrollback is written before new WebSocket connects, giving continuity.
 
-Scrollback files are persisted to `~/.loom/session-scrollback/{sessionName}.log` when a session is killed (last 10,000 lines via `tmux capture-pane -S -10000`).
-
 Export (`GET /api/terminal/sessions/{session}/export?format=txt|md`) runs `tmux capture-pane -p -S -` (full history), ANSI codes stripped via `StripANSI`.
 
 ---

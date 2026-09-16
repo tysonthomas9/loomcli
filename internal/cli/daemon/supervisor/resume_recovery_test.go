@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,6 +14,28 @@ import (
 // written lock as a crash remnant (a dead-PID lock is the recovery trigger).
 // macOS/Linux PIDs never reach this value, so Kill→ESRCH.
 const deadPID = 2000000000
+
+func TestDetectRecovery_UsesCheckpointAfterIncompleteRunClearsLock(t *testing.T) {
+	worktree := t.TempDir()
+	s := newTestSupervisor()
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "backend-dev-1"},
+		WorktreePath: worktree,
+	}
+	if err := config.SaveCheckpoint(cli.ResolveLockDir(worktree), &config.Checkpoint{
+		AgentName: "backend-dev-1", TaskID: "T514-2", Timestamp: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(worktree, cli.LockFileName)); !os.IsNotExist(err) {
+		t.Fatalf("lock unexpectedly exists: %v", err)
+	}
+
+	taskID, mode := s.detectRecovery(ap)
+	if taskID != "T514-2" || mode != recoverCheckpoint {
+		t.Fatalf("detectRecovery() = %q, %v, want checkpoint recovery for T514-2", taskID, mode)
+	}
+}
 
 func modeName(m recoveryMode) string {
 	switch m {

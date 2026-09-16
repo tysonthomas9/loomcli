@@ -157,10 +157,10 @@ func TestShouldRestart_FastFailClasses(t *testing.T) {
 }
 
 // TestShouldRestart_FailoverExhausted_FastFails verifies the caller's fallback
-// attempt is authoritative: if shouldRestart sees a failover-only class, there
-// was no fallback left, so the agent must stop immediately instead of retrying
-// the same deterministic bad backend.
+// attempt is authoritative: with the exhausted-failover retry budget disabled,
+// if shouldRestart sees a failover-only class, the agent must stop immediately.
 func TestShouldRestart_FailoverExhausted_FastFails(t *testing.T) {
+	t.Setenv("LOOM_FAILOVER_EXHAUSTED_RETRIES", "0")
 	maxRetries := 3
 	s := newTestSupervisorWithConfig(&config.DaemonConfig{
 		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{MaxRetries: &maxRetries}},
@@ -179,7 +179,98 @@ func TestShouldRestart_FailoverExhausted_FastFails(t *testing.T) {
 		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonFastFail)
 	}
 	if ap.RestartCount != 0 {
-		t.Errorf("RestartCount = %d, want 0 (no retry-in-place for failover-only errors)", ap.RestartCount)
+		t.Errorf("RestartCount = %d, want 0 (the failover budget has its own counter)", ap.RestartCount)
+	}
+}
+
+// failoverTestAgent returns an agent whose last exit was a failover-only error
+// with no fallback backend left.
+func failoverTestAgent() *AgentProcess {
+	return &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "wt"},
+		LastExitCode: 1,
+		LastStart:    time.Now(),
+		LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrModelNotFound)},
+	}
+}
+
+func newFailoverTestSupervisor(t *testing.T) *Supervisor {
+	t.Helper()
+	maxRetries := 3
+	return newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{MaxRetries: &maxRetries}},
+	})
+}
+
+func TestShouldRestart_FailoverExhausted_RetriesThenFastFails(t *testing.T) {
+	t.Setenv("LOOM_FAILOVER_EXHAUSTED_RETRIES", "")
+	s := newFailoverTestSupervisor(t)
+	ap := failoverTestAgent()
+
+	for attempt := 1; attempt <= defaultFailoverExhaustedRetries; attempt++ {
+		if !s.shouldRestart(ap) {
+			t.Fatalf("attempt %d: shouldRestart = false, want true", attempt)
+		}
+		if ap.FailoverExhaustedCount != attempt {
+			t.Fatalf("attempt %d: FailoverExhaustedCount = %d, want %d", attempt, ap.FailoverExhaustedCount, attempt)
+		}
+	}
+	if s.shouldRestart(ap) {
+		t.Fatal("third failover-only observation should stop the supervisor")
+	}
+	if ap.StopReason != StopReasonFastFail {
+		t.Fatalf("StopReason = %q, want %q", ap.StopReason, StopReasonFastFail)
+	}
+}
+
+// The budget must not ride RestartCount: NoWork zeroes that counter, so on a
+// sparse queue an alternating NoWork / ModelNotFound sequence would retry a
+// genuinely wrong model forever.
+func TestShouldRestart_FailoverBudgetSurvivesNoWork(t *testing.T) {
+	t.Setenv("LOOM_FAILOVER_EXHAUSTED_RETRIES", "")
+	s := newFailoverTestSupervisor(t)
+	ap := failoverTestAgent()
+	noWork := &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome)}
+	failover := ap.LastError
+
+	for i := 0; i <= defaultFailoverExhaustedRetries; i++ {
+		if i > 0 {
+			ap.LastError, ap.LastNoWork = noWork, true
+			s.shouldRestart(ap)
+			ap.LastError, ap.LastNoWork = failover, false
+		}
+		if got := s.shouldRestart(ap); got != (i < defaultFailoverExhaustedRetries) {
+			t.Fatalf("observation %d: shouldRestart = %v, want %v", i+1, got, i < defaultFailoverExhaustedRetries)
+		}
+	}
+	if ap.StopReason != StopReasonFastFail {
+		t.Fatalf("StopReason = %q, want %q after the budget is spent", ap.StopReason, StopReasonFastFail)
+	}
+}
+
+// Nor may unrelated counted failures pre-spend the budget: two transient exits
+// before a provider blip must still leave the full failover budget.
+func TestShouldRestart_FailoverBudgetNotErodedByOtherFailures(t *testing.T) {
+	t.Setenv("LOOM_FAILOVER_EXHAUSTED_RETRIES", "")
+	s := newFailoverTestSupervisor(t)
+	ap := failoverTestAgent()
+	transient := &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTransient)}
+	failover := ap.LastError
+
+	ap.LastError = transient
+	for i := 0; i < 2; i++ {
+		if !s.shouldRestart(ap) {
+			t.Fatalf("transient exit %d did not restart", i+1)
+		}
+	}
+	ap.LastError = failover
+	for attempt := 1; attempt <= defaultFailoverExhaustedRetries; attempt++ {
+		if !s.shouldRestart(ap) {
+			t.Fatalf("attempt %d: shouldRestart = false, want the full budget despite earlier failures", attempt)
+		}
+	}
+	if s.shouldRestart(ap) {
+		t.Fatal("shouldRestart = true after the budget is spent")
 	}
 }
 

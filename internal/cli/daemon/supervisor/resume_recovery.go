@@ -6,6 +6,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
 // recoveryMode classifies how a supervise cycle recovers a worktree after a
@@ -37,15 +39,80 @@ const maxResumeFailures = 2
 // saved checkpoint + worktree diff).
 func (s *Supervisor) detectRecovery(ap *AgentProcess) (string, recoveryMode) {
 	info, running, err := cli.CheckLock(ap.WorktreePath)
-	if err != nil || info == nil || running || info.TaskID == "" {
-		return "", recoverCold // no crash remnant / agent still alive / no task to recover
+	if err == nil && info != nil && !running && info.TaskID != "" {
+		if ttl := agent.ResumeTTL(); ttl > 0 && !info.TaskStartedAt.IsZero() && time.Since(info.TaskStartedAt) > ttl {
+			slog.Info("interrupted task too old to recover; cold-starting",
+				"worktree", ap.Entry.Worktree, "task_id", info.TaskID,
+				"age", time.Since(info.TaskStartedAt).Round(time.Second))
+			return "", recoverCold
+		}
+		return s.recoveryModeForLock(ap, info)
 	}
-	if ttl := agent.ResumeTTL(); ttl > 0 && !info.TaskStartedAt.IsZero() && time.Since(info.TaskStartedAt) > ttl {
-		slog.Info("interrupted task too old to recover; cold-starting",
-			"worktree", ap.Entry.Worktree, "task_id", info.TaskID,
-			"age", time.Since(info.TaskStartedAt).Round(time.Second))
-		return "", recoverCold
+	// Incomplete exit-0 recovery clears the lock after saving its checkpoint.
+	// Carry that checkpoint into the next fresh claim before cold recovery can
+	// discard the committed task worktree. A daemon restart resets WorktreePath
+	// to the agent's home, so the home copy is checked as well.
+	for _, lockDir := range checkpointLockDirs(ap) {
+		if cp, cpErr := config.LoadCheckpoint(lockDir); cpErr == nil && cp != nil && cp.TaskID != "" && (cp.AgentName == "" || cp.AgentName == ap.Entry.Worktree) {
+			return cp.TaskID, recoverCheckpoint
+		}
 	}
+	return "", recoverCold // no crash remnant / agent still alive / no task to recover
+}
+
+// recoveryTaskAvailable verifies that a task selected from a crash remnant is
+// still this agent's to continue before recovery re-claims it.
+//
+// It refuses exactly one shape: blocked. That is what the task quarantine
+// ledger writes (blocked + unassigned + a loom:quarantined label), and blocked
+// is still claimable in fleet-db, so without this check the very agent whose
+// no-progress kills triggered the quarantine re-claimed the same task on its
+// next cycle — sixteen seconds later, in the run that found this. A task a
+// human blocked by hand is refused for the same reason.
+//
+// Every other status stays recoverable on purpose. review, deferred and hooked
+// are ordinary outcomes of an incomplete exit-0 run — the shapes resume and
+// checkpoint recovery exist for — and closed or tombstone tasks are not
+// claimable in fleet-db, so the claim fails on its own without a guard here.
+// A failed read is deliberately permissive: the remnant is still the best
+// evidence of an interrupted run.
+func (s *Supervisor) recoveryTaskAvailable(ap *AgentProcess, taskID string) bool {
+	if s.IssueBackend == nil || taskID == "" {
+		return true
+	}
+	ctx, cancel := s.operationContext(claimOperationTimeout)
+	issue, err := s.IssueBackend.Get(ctx, taskID)
+	cancel()
+	if err != nil || issue == nil {
+		return true
+	}
+	if issue.Status != string(types.StatusBlocked) {
+		return true
+	}
+	slog.Info("recovery task is blocked; cold-starting instead of re-claiming it",
+		"task_id", taskID, "status", issue.Status, "agent", ap.Entry.Worktree)
+	return false
+}
+
+// guardRecovery downgrades a recovery the task itself has revoked to a cold
+// start. It deliberately mutates NOTHING on disk: the refused task's worktree
+// still holds the interrupted run's uncommitted work, and its checkpoint still
+// holds that run's diff. Destroying either here would lose work that no
+// checkpoint can restore (`git clean` removes untracked files; captureGitDiff
+// only records tracked ones) and would leave the task permanently unclaimable
+// once a human releases it. The remnant survives, so recovery re-arms by itself
+// the moment the task is unblocked.
+//
+// The cold recovery preFlightSetup then runs must be the non-destructive form,
+// which is what the returned flag is for.
+func (s *Supervisor) guardRecovery(ap *AgentProcess, taskID string, mode recoveryMode) (string, recoveryMode, bool) {
+	if mode == recoverCold || s.recoveryTaskAvailable(ap, taskID) {
+		return taskID, mode, false
+	}
+	return "", recoverCold, true
+}
+
+func (s *Supervisor) recoveryModeForLock(ap *AgentProcess, info *cli.LockInfo) (string, recoveryMode) {
 	ap.Mu.Lock()
 	fails := ap.ResumeFailures
 	ap.Mu.Unlock()

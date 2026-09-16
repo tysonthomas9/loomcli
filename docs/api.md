@@ -1187,85 +1187,6 @@ The `active` flag in each `WorkspaceSummary` is set to `true` for the workspace 
   - `404` — workspace not found
   - `500` — failed to load workspace config
 
-## Issue Session History
-
-Workspace-scoped endpoints for querying session history records linked to issues. These are backed by Redis via `sessionhistory.Store` and track terminal sessions associated with specific issues (started by users or `start-work`).
-
-### `GET /api/workspaces/{ws}/issues/{issueId}/sessions`
-
-List all session history records for an issue.
-
-- **Auth:** Required (standard bearer token)
-- **Path Parameters:**
-
-| Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| ws | string | yes | Workspace ID (UUID, validated by WorkspaceMiddleware) |
-| issueId | string | yes | Issue ID (validated: `^[a-zA-Z0-9._-]+$`) |
-
-- **Behavior:** Returns all session history records for the specified issue in the given workspace, sorted by `started_at` descending (most recent first). Returns empty array (not null) for unknown issues.
-- **Response:** `200 OK`
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "issue-proj-1:1700000000",
-      "session_name": "issue-proj-1",
-      "issue_id": "proj.1",
-      "backend": "claude",
-      "status": "active",
-      "launcher": "user",
-      "started_at": "2025-01-15T10:00:00Z"
-    }
-  ]
-}
-```
-
-- Completed sessions include `ended_at` and optionally `scrollback_path`
-- **Errors:**
-  - `400` — invalid workspace ID (empty) or invalid issue ID (empty or fails regex)
-  - `404` — workspace not found (from middleware)
-  - `500` — Redis list failure
-  - `503` — session history not available (no Redis)
-- **Conditional registration:** Only registered when `sessionHistoryStore != nil`
-
-### `GET /api/workspaces/{ws}/issues/{issueId}/sessions/{recordId}/scrollback`
-
-Retrieve terminal scrollback content for a completed session.
-
-- **Auth:** Required (standard bearer token)
-- **Path Parameters:**
-
-| Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| ws | string | yes | Workspace ID (UUID) |
-| issueId | string | yes | Issue ID (validated: `^[a-zA-Z0-9._-]+$`) |
-| recordId | string | yes | Session record ID (must be non-empty) |
-
-- **Behavior:** Finds the record by ID within the issue's session history, reads the scrollback file from disk. Path-traversal protection: scrollback file must be under `~/.loom/session-scrollback/` after `filepath.Clean`.
-- **Response:** `200 OK`
-
-```json
-{
-  "success": true,
-  "data": {
-    "content": "terminal output text...",
-    "lines": 42
-  }
-}
-```
-
-- `content`: full scrollback text as a single string
-- `lines`: line count (newline-delimited, +1 for non-empty content)
-- **Errors:**
-  - `400` — invalid issue ID, empty record ID, or invalid scrollback path (path traversal attempt)
-  - `404` — workspace not found (middleware), session record not found, no scrollback available (`scrollback_path` empty), or scrollback file not found on disk
-  - `500` — Redis get failure or file read failure
-  - `503` — session history not available (no Redis)
-- **Security:** Scrollback path cleaned via `filepath.Clean` and validated to start with `~/.loom/session-scrollback/` prefix. Paths outside this directory are rejected with `400`.
-
 ## Real-time Events (SSE)
 
 ### `GET /api/events`
@@ -1792,6 +1713,16 @@ Get all transcript entries for a session.
   - `500` — failed to load session or transcript
   - `503` — session store not available
 
+### `GET /api/workspaces/{ws}/sessions/{sessionId}/transcript`
+
+Get a session transcript by session ID.
+
+- **Auth:** Required (standard bearer token)
+- **Path Parameters:** `ws` — workspace ID; `sessionId` — session ID
+- **Behavior:** Returns the session transcript, using the local native transcript when available and the control-plane artifact otherwise. This route does not require a task ID.
+- **Response:** `200 OK`, with `data.session_id` and an `entries` array
+- **Errors:** `400` — invalid session ID; `404` — session or transcript not found; `500` — failed to load the transcript
+
 ### `GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff`
 
 Get the raw diff patch content for a session.
@@ -2005,8 +1936,6 @@ Pre-create a tmux session for a specific backend.
   - `413` — request body too large (>1 MB)
   - `500` — tmux spawn failure
   - `503` — terminal manager not initialized
-
-- **Side Effect:** for issue-linked sessions (matching pattern `issue-{project}-{number}`), records session in session history store with workspace ID.
 
 ### `POST /api/workspaces/{ws}/terminal/restart`
 
