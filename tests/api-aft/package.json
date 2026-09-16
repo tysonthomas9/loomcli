@@ -1,0 +1,22 @@
+{
+  "name": "api-aft",
+  "private": true,
+  "type": "module",
+  "description": "API end-to-end harness for loom <-> fleet-db: scenario-driven, capture-and-diff, invariant-oracle.",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "doctor": "node bin/api-aft.ts doctor",
+    "run": "node bin/api-aft.ts run",
+    "typecheck": "tsc --noEmit",
+    "lint": "node scripts/check-no-asserts.mjs && node scripts/check-loc-ts.mjs"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "yaml": "^2.6.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "@types/node": "^22.10.2"
+  }
+}
