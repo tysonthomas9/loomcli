@@ -361,6 +361,13 @@ type AgentInboxMessageComplete struct {
 	DeliveredThreadID string `json:"delivered_thread_id,omitempty"`
 	ErrorClass        string `json:"error_class,omitempty"`
 	Error             string `json:"error,omitempty"`
+	// ClaimedBy asserts the claim the completion is made under. fleet-db
+	// accepts a complete only from the session holding the live claim, so
+	// this must be the claimed_by the claim itself returned — echo
+	// AgentInboxMessage.ClaimedBy rather than re-deriving the value. A
+	// mismatched or absent claimed_by on a claimed message is refused with
+	// 403; 410 is the answer while an expired claim is still the stored one.
+	ClaimedBy string `json:"claimed_by,omitempty"`
 }
 
 type AgentInboxMessageStore interface {
