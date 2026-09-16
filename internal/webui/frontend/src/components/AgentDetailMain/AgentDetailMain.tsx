@@ -32,7 +32,8 @@ import type {
   TerminalSplitControls,
 } from "@/components/TerminalView";
 import { useAgentStoreInstance } from "@/hooks";
-import { wsUrl } from "@/hooks/api";
+import { startAgent, wsUrl } from "@/hooks/api";
+import { useWorkspaceContext } from "@/hooks/workspace";
 import { type LoomAgentStatus, parseLoomStatus } from "@/types";
 import { isInteractiveAgent, isLeadRole } from "@/utils/agentRole";
 import {
@@ -77,6 +78,7 @@ export function AgentDetailMain({
   onTerminalSplitControlsChange,
 }: AgentDetailMainProps): JSX.Element {
   const agentStore = useAgentStoreInstance();
+  const { workspaceId } = useWorkspaceContext();
   const agents = useStore(agentStore, (s) => s.agents);
 
   const agent = useMemo<LoomAgentStatus | undefined>(
@@ -97,6 +99,11 @@ export function AgentDetailMain({
     () => setPendingAgentName(undefined),
     [],
   );
+  const handleStartLead = useCallback(async () => {
+    if (!agentName || !workspaceId) return;
+    await startAgent(workspaceId, agentName);
+    setPendingAgentName(agentName);
+  }, [agentName, workspaceId]);
   const terminalUnavailable = agent != null && isTerminalUnavailable(agent);
   const ephemeralWorker = agent != null && isEphemeralWorker(agent);
   const shouldResolveLeadTerminal =
@@ -157,6 +164,7 @@ export function AgentDetailMain({
               pendingTerminalInput={pendingTerminalInput}
               onTerminalInputConsumed={onTerminalInputConsumed}
               leadRuntimeStatus={agent?.runtime_status}
+              onStartLead={handleStartLead}
               hideTabs
               {...(onTerminalSplitControlsChange != null && {
                 onSplitControlsChange: onTerminalSplitControlsChange,

@@ -34,6 +34,7 @@ export interface RuntimeCredentialStatus {
 export interface RuntimeCredentialsStatus {
   daytona: RuntimeCredentialStatus;
   github: RuntimeCredentialStatus;
+  codex: RuntimeCredentialStatus;
 }
 
 export interface UpdateLocalRedisSettings {
@@ -57,12 +58,14 @@ export interface UpdateLocalTaskRunnerSettings {
 export interface UpdateRuntimeCredential {
   api_key?: string;
   token?: string;
+  auth_json?: string;
   clear?: boolean;
 }
 
 export interface UpdateRuntimeCredentialsSettings {
   daytona?: UpdateRuntimeCredential;
   github?: UpdateRuntimeCredential;
+  codex?: UpdateRuntimeCredential;
 }
 
 interface LocalSettingsEnvelope {

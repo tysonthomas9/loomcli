@@ -3151,14 +3151,14 @@ type WorkspaceAgentInfo struct {
 	// LastProvisionError Bounded error from the latest failed provision attempt.
 	LastProvisionError *string `json:"last_provision_error,omitempty"`
 
-	// LastProvisionOutcome Latest eager Daytona lead provision-attempt outcome.
+	// LastProvisionOutcome Latest eager remote lead provision-attempt outcome.
 	LastProvisionOutcome *WorkspaceAgentInfoLastProvisionOutcome `json:"last_provision_outcome,omitempty"`
 	Name                 string                                  `json:"name"`
 	RepoGroups           []string                                `json:"repo_groups"`
 	Repos                []string                                `json:"repos"`
 }
 
-// WorkspaceAgentInfoLastProvisionOutcome Latest eager Daytona lead provision-attempt outcome.
+// WorkspaceAgentInfoLastProvisionOutcome Latest eager remote lead provision-attempt outcome.
 type WorkspaceAgentInfoLastProvisionOutcome string
 
 // WorkspaceBackendPatchRequest defines model for WorkspaceBackendPatchRequest.

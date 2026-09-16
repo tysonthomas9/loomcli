@@ -112,7 +112,26 @@ func (s *hostKeyStore) callbackFor(identity string) ssh.HostKeyCallback {
 		if identity != "" {
 			host = identity
 		}
-		presented := string(ssh.MarshalAuthorizedKey(key))
+		pinKey := key
+		if cert, ok := key.(*ssh.Certificate); ok {
+			if cert.CertType != ssh.HostCert {
+				return fmt.Errorf("exe host certificate for %q is not a host certificate", host)
+			}
+			principal := ""
+			if len(cert.ValidPrincipals) > 0 {
+				// exe.dev certificates currently name exe.dev/*.exe.dev while the
+				// control plane routes SSH via exe.xyz. The signed principal set is
+				// vendor-owned; VM identity remains bound by the control response.
+				principal = cert.ValidPrincipals[0]
+			}
+			if err := (&ssh.CertChecker{}).CheckCert(principal, cert); err != nil {
+				return fmt.Errorf("exe host certificate for %q failed verification: %w", host, err)
+			}
+			// exe.dev rotates the signed host certificate while retaining its CA.
+			// Pin the verified CA key, not the certificate's changing serial/signature.
+			pinKey = cert.SignatureKey
+		}
+		presented := string(ssh.MarshalAuthorizedKey(pinKey))
 		presented = strings.TrimSpace(presented)
 
 		s.mu.Lock()
@@ -121,6 +140,17 @@ func (s *hostKeyStore) callbackFor(identity string) ssh.HostKeyCallback {
 		if !seen {
 			s.keys[host] = presented
 			return s.persistLocked()
+		}
+		// Migrate pins written by older builds, which stored the entire rotating
+		// certificate. Its embedded CA key is the stable trust anchor.
+		if parsed, _, _, _, err := ssh.ParseAuthorizedKey([]byte(known)); err == nil {
+			if cert, ok := parsed.(*ssh.Certificate); ok {
+				known = strings.TrimSpace(string(ssh.MarshalAuthorizedKey(cert.SignatureKey)))
+				if known == presented {
+					s.keys[host] = known
+					return s.persistLocked()
+				}
+			}
 		}
 		if known != presented {
 			return fmt.Errorf(

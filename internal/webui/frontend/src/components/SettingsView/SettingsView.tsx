@@ -41,7 +41,7 @@ interface RedisFormState {
 }
 
 type AgentRuntimeDefault = "local" | "daytona";
-type RuntimeCredentialProvider = "daytona" | "github";
+type RuntimeCredentialProvider = "daytona" | "github" | "codex";
 
 const EMPTY_REDIS_FORM: RedisFormState = {
   enabled: false,
@@ -333,15 +333,48 @@ export function SettingsView({
     }
   };
 
+  const handleCodexAuthUpload = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || isSavingLocalSettings) return;
+    try {
+      const authJSON = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error);
+        reader.onload = () => resolve(String(reader.result ?? ""));
+        reader.readAsText(file);
+      });
+      JSON.parse(authJSON);
+      const ok = await updateRuntimeCredentials({
+        codex: { auth_json: authJSON },
+      });
+      showToast(
+        ok ? "Codex credential saved" : "Failed to save Codex credential",
+        {
+          type: ok ? "success" : "error",
+        },
+      );
+    } catch {
+      showToast("Select a valid Codex auth.json file", { type: "error" });
+    }
+  };
+
   const handleRuntimeCredentialClear = async (
     provider: RuntimeCredentialProvider,
   ) => {
     if (isSavingLocalSettings) return;
     const ok = await updateRuntimeCredentials({ [provider]: { clear: true } });
+    const providerLabel = {
+      codex: "Codex",
+      daytona: "Daytona",
+      github: "GitHub",
+    }[provider];
     showToast(
       ok
-        ? `${provider === "daytona" ? "Daytona" : "GitHub"} credential cleared`
-        : `Failed to clear ${provider === "daytona" ? "Daytona" : "GitHub"} credential`,
+        ? `${providerLabel} credential cleared`
+        : `Failed to clear ${providerLabel} credential`,
       { type: ok ? "success" : "error" },
     );
   };
@@ -648,6 +681,49 @@ export function SettingsView({
             >
               {isSavingLocalSettings ? "Saving..." : "Save Daytona Credential"}
             </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Codex */}
+      <div className={styles.panel} data-testid="codex-settings-panel">
+        <div className={styles.panelHeader}>
+          <h3 className={styles.panelTitle}>Codex runtime</h3>
+        </div>
+        <div className={styles.panelContent}>
+          <div className={styles.formGroup}>
+            <label className={styles.label} htmlFor="codex-auth-json-input">
+              Codex auth.json
+            </label>
+            <p className={styles.description}>
+              Uploaded credentials are sealed locally and used to authenticate
+              Codex inside remote Lead sandboxes.
+            </p>
+            <input
+              id="codex-auth-json-input"
+              type="file"
+              accept="application/json,.json"
+              className={styles.input}
+              disabled={isSavingLocalSettings}
+              onChange={handleCodexAuthUpload}
+              data-testid="codex-auth-json-input"
+            />
+            <p className={styles.description}>
+              {runtimeCredentials?.codex?.configured
+                ? "Codex credential saved"
+                : "No Codex credential saved"}
+            </p>
+            {runtimeCredentials?.codex?.configured && (
+              <button
+                type="button"
+                className={styles.navButton}
+                disabled={isSavingLocalSettings}
+                onClick={() => handleRuntimeCredentialClear("codex")}
+                data-testid="codex-credential-clear-button"
+              >
+                Clear Codex Credential
+              </button>
+            )}
           </div>
         </div>
       </div>

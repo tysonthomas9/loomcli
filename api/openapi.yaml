@@ -5575,7 +5575,7 @@ components:
         last_provision_outcome:
           type: string
           enum: [in_progress, succeeded, failed]
-          description: Latest eager Daytona lead provision-attempt outcome.
+          description: Latest eager remote lead provision-attempt outcome.
         last_provision_error:
           type: string
           description: Bounded error from the latest failed provision attempt.

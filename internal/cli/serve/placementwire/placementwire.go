@@ -121,13 +121,14 @@ func newBroker(st store.Store, providers placement.ProviderRegistry, tokenKey []
 // safe default because every lookup for an unregistered provider is refused
 // fail-closed rather than falling back to Daytona.
 const (
-	envLoomExeToken      = "LOOM_EXE_TOKEN"        //nolint:gosec // env var name
-	envLoomExeSSHKey     = "LOOM_EXE_SSH_KEY_PATH" //nolint:gosec // env var name
-	envLoomExeHostKeys   = "LOOM_EXE_HOST_KEY_PATH"
-	envLoomExeImage      = "LOOM_EXE_IMAGE"
-	envLoomExeMaxVCPU    = "LOOM_EXE_MAX_VCPU"
-	envLoomExeMaxMemGiB  = "LOOM_EXE_MAX_MEM_GIB"
-	envLoomExeControlURL = "LOOM_EXE_ENDPOINT"
+	envLoomExeToken           = "LOOM_EXE_TOKEN"        //nolint:gosec // env var name
+	envLoomExeSSHKey          = "LOOM_EXE_SSH_KEY_PATH" //nolint:gosec // env var name
+	envLoomExeHostKeys        = "LOOM_EXE_HOST_KEY_PATH"
+	envLoomExeImage           = "LOOM_EXE_IMAGE"
+	envLoomExeBootstrapBinary = "LOOM_EXE_BOOTSTRAP_BINARY_PATH"
+	envLoomExeMaxVCPU         = "LOOM_EXE_MAX_VCPU"
+	envLoomExeMaxMemGiB       = "LOOM_EXE_MAX_MEM_GIB"
+	envLoomExeControlURL      = "LOOM_EXE_ENDPOINT"
 	// Opting in to open egress for exe leads. exe.dev cannot enforce a domain
 	// allow list, so without this a provision carrying one is refused instead
 	// of being silently granted unrestricted network access.
@@ -150,11 +151,12 @@ func buildExeProvider() *exe.Provider {
 		return nil
 	}
 	provider, err := exe.New(exe.Config{
-		Token:       token,
-		Endpoint:    strings.TrimSpace(os.Getenv(envLoomExeControlURL)),
-		SSHKeyPath:  keyPath,
-		HostKeyPath: hostKeyPath,
-		Image:       strings.TrimSpace(os.Getenv(envLoomExeImage)),
+		Token:               token,
+		Endpoint:            strings.TrimSpace(os.Getenv(envLoomExeControlURL)),
+		SSHKeyPath:          keyPath,
+		HostKeyPath:         hostKeyPath,
+		Image:               strings.TrimSpace(os.Getenv(envLoomExeImage)),
+		BootstrapBinaryPath: strings.TrimSpace(os.Getenv(envLoomExeBootstrapBinary)),
 
 		AllowUnrestrictedEgress: strings.TrimSpace(os.Getenv(envLoomExeAllowOpenEgress)) == "1",
 	})

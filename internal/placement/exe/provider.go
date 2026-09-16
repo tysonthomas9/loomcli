@@ -29,6 +29,9 @@ type Config struct {
 	HostKeyPath string
 	// Image is the VM image for new sandboxes.
 	Image string
+	// BootstrapBinaryPath optionally selects a target-architecture Loom binary
+	// to upload. Empty uses this serve process's executable.
+	BootstrapBinaryPath string
 	// AllowUnrestrictedEgress acknowledges that exe.dev has NO egress policy
 	// control. Without it, a provision request carrying a network allowlist is
 	// REFUSED rather than silently granted unrestricted network access.
@@ -45,10 +48,11 @@ type Config struct {
 
 // Provider implements placement.Provider for exe.dev.
 type Provider struct {
-	control  *controlClient
-	dialer   *sshDialer
-	hostKeys *hostKeyStore
-	image    string
+	control             *controlClient
+	dialer              *sshDialer
+	hostKeys            *hostKeyStore
+	image               string
+	bootstrapBinaryPath string
 
 	allowUnrestrictedEgress bool
 }
@@ -78,10 +82,11 @@ func New(cfg Config) (*Provider, error) {
 		return nil, err
 	}
 	return &Provider{
-		control:  newControlClient(cfg.Token, cfg.Endpoint, cfg.RequestTimeout),
-		dialer:   dialer,
-		hostKeys: hostKeys,
-		image:    strings.TrimSpace(cfg.Image),
+		control:             newControlClient(cfg.Token, cfg.Endpoint, cfg.RequestTimeout),
+		dialer:              dialer,
+		hostKeys:            hostKeys,
+		image:               strings.TrimSpace(cfg.Image),
+		bootstrapBinaryPath: strings.TrimSpace(cfg.BootstrapBinaryPath),
 
 		allowUnrestrictedEgress: cfg.AllowUnrestrictedEgress,
 	}, nil
@@ -273,7 +278,7 @@ func (p *Provider) CreatePty(ctx context.Context, sandboxID string, spec placeme
 	}
 	defer func() { _ = client.Close() }()
 
-	cmd := tmuxCreateSession(spec.SessionID, spec.WorkingDir, spec.Env, spec.Command)
+	cmd := tmuxCreateSession(spec.SessionID, exeUserPath(spec.WorkingDir), spec.Env, spec.Command)
 	out, err := run(client, cmd)
 	if err != nil {
 		// Idempotency is a success for the broker, not a failure.

@@ -110,8 +110,8 @@ type ServerConfig struct {
 	DriverAPIToken        string                                               // Optional shared bearer token required by the driver-op HTTP API (LOOM_DRIVER_API_TOKEN)
 	DriverAPIBaseURL      string                                               // This serve process's own driver/task-run API base URL, exported to task runners as LOOM_TASK_RUN_API_URL; empty keeps runners on the legacy direct-fleet-db env
 	DriverRunTokenKey     []byte                                               // HS256 signing key for run-scoped driver-op tokens (LOOM_RUN_TOKEN_SIGNING_KEY or ephemeral); nil disables the token auth path
-	LeadProvisioner       *leadprovision.Provisioner                           // Eager Daytona lead provisioner; nil disables agent-create provisioning.
-	LeadReviveCoordinator *leadprovision.ReviveCoordinator                     // Attach-time Daytona lead revive coordinator; nil disables self-heal.
+	LeadProvisioner       *leadprovision.Provisioner                           // Eager remote lead provisioner; nil disables agent-create provisioning.
+	LeadReviveCoordinator *leadprovision.ReviveCoordinator                     // Attach-time remote lead revive coordinator; nil disables self-heal.
 	DaemonStartupFn       func(ctx context.Context, onReady func(wsID string)) // Starts daemons for secondary workspaces; calls onReady(wsID) when each is reachable
 	Logger                *slog.Logger                                         // Structured logger (optional; nil falls back to slog.Default())
 	SentryDSN             string                                               // Sentry/GlitchTip DSN for error tracking (optional; empty disables)

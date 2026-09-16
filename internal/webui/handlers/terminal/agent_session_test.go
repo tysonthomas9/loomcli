@@ -542,7 +542,7 @@ func TestLatestActiveDaytonaLeadPlacementKeepsOriginalMessageWithoutPlacement(t 
 	st := memstore.New()
 
 	_, err := latestActiveDaytonaLeadPlacement(ctx, st, "E2E", "nova")
-	if err == nil || !strings.Contains(err.Error(), "Daytona lead has no active placement to attach") {
+	if err == nil || !strings.Contains(err.Error(), "Remote lead has no active placement to attach") {
 		t.Fatalf("latestActiveDaytonaLeadPlacement = %v, want original no-placement error", err)
 	}
 }

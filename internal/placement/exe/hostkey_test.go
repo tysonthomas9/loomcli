@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -22,6 +23,49 @@ func testHostKey(t *testing.T) ssh.PublicKey {
 		t.Fatalf("wrap key: %v", err)
 	}
 	return signer
+}
+
+func testHostCertificate(t *testing.T, ca ssh.Signer) ssh.PublicKey {
+	t.Helper()
+	subject := testHostKey(t)
+	cert := &ssh.Certificate{
+		Key:         subject,
+		CertType:    ssh.HostCert,
+		ValidAfter:  uint64(time.Now().Add(-time.Minute).Unix()),
+		ValidBefore: uint64(time.Now().Add(time.Hour).Unix()),
+	}
+	if err := cert.SignCert(rand.Reader, ca); err != nil {
+		t.Fatalf("sign host certificate: %v", err)
+	}
+	return cert
+}
+
+func testSigner(t *testing.T) ssh.Signer {
+	t.Helper()
+	_, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate signer: %v", err)
+	}
+	signer, err := ssh.NewSignerFromKey(private)
+	if err != nil {
+		t.Fatalf("wrap signer: %v", err)
+	}
+	return signer
+}
+
+func TestHostKeyPinsCertificateAuthorityAcrossRotatingCertificates(t *testing.T) {
+	store := newHostKeyStore(filepath.Join(t.TempDir(), "hostkeys"))
+	callback := store.callbackFor("vm:loom-p1")
+	ca := testSigner(t)
+	if err := callback("loom-p1.exe.xyz:22", nil, testHostCertificate(t, ca)); err != nil {
+		t.Fatalf("first certificate: %v", err)
+	}
+	if err := callback("loom-p1.exe.xyz:22", nil, testHostCertificate(t, ca)); err != nil {
+		t.Fatalf("rotated certificate signed by pinned CA rejected: %v", err)
+	}
+	if err := callback("loom-p1.exe.xyz:22", nil, testHostCertificate(t, testSigner(t))); err == nil {
+		t.Fatal("certificate from a substituted CA was accepted")
+	}
 }
 
 // TestHostKeyPinsOnFirstUseAndRejectsChanges is the security property.

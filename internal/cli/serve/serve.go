@@ -469,7 +469,7 @@ func driverRunTokenKey() []byte {
 // that installs it into each lead sandbox. Default off (fail-hard downloads
 // make it opt-in). Accepts strconv.ParseBool truthy values ("1", "true", ...).
 
-// leadAPIBaseURL is the public serve origin injected into Daytona lead
+// leadAPIBaseURL is the public serve origin injected into remote lead
 // sandboxes as LOOM_LEAD_API_URL. It must be reachable from inside the
 // sandbox; behind a proxy, set LOOM_LEAD_API_BASE_URL to that public origin.
 // When unset, the broker injects no URL and sandbox leads fail their

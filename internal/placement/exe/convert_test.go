@@ -1,9 +1,12 @@
 package exe
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -89,6 +92,81 @@ type recordingRunner struct {
 	cmds  []string
 	stdin [][]byte
 	err   error
+}
+
+func TestInstallBootstrapBinaryDownloadsBeforePrivilegedInstall(t *testing.T) {
+	runner := &recordingRunner{}
+	binary := []byte("real loom binary bytes")
+	var compressed bytes.Buffer
+	zipper := gzip.NewWriter(&compressed)
+	_, _ = zipper.Write(binary)
+	_ = zipper.Close()
+	err := installBootstrapBinary(runner, "loom-p1", &placement.BootstrapBinarySpec{
+		URL:  "https://serve.example.com/api/lead/bootstrap/loom",
+		Dest: "/usr/local/bin/loom",
+		Mode: "0755",
+	}, compressed.Bytes())
+	if err != nil {
+		t.Fatalf("installBootstrapBinary: %v", err)
+	}
+	cmd := runner.cmds[0]
+	for _, want := range []string{
+		"gzip -dc > '/tmp/loom-bootstrap.loom-tmp'",
+		"test -s '/tmp/loom-bootstrap.loom-tmp'",
+		"sudo -n install -m '0755'",
+		"'/usr/local/bin/loom'",
+		"'/usr/local/bin/loom' --help",
+		"rm -f '/tmp/loom-bootstrap.loom-tmp'",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("command missing %q: %s", want, cmd)
+		}
+	}
+	reader, err := gzip.NewReader(bytes.NewReader(runner.stdin[0]))
+	if err != nil {
+		t.Fatalf("uploaded stdin is not gzip: %v", err)
+	}
+	roundTrip, err := io.ReadAll(reader)
+	if err != nil || !bytes.Equal(roundTrip, binary) {
+		t.Fatalf("compressed bootstrap did not round trip: %v", err)
+	}
+	if strings.Contains(cmd, string(binary)) {
+		t.Fatalf("bootstrap bytes appear on the command line: %s", cmd)
+	}
+}
+
+func TestExeUserPathMapsCanonicalLeadRoot(t *testing.T) {
+	for input, want := range map[string]string{
+		"/root":                   "/home/exedev",
+		"/root/workspace/loomcli": "/home/exedev/workspace/loomcli",
+		"/root/.codex/auth.json":  "/home/exedev/.codex/auth.json",
+		"/tmp/prompt.md":          "/tmp/prompt.md",
+	} {
+		if got := exeUserPath(input); got != want {
+			t.Errorf("exeUserPath(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestCloneRepoMapsCanonicalLeadCheckoutToExeUser(t *testing.T) {
+	runner := &recordingRunner{}
+	err := cloneRepo(runner, "loom-p1", placement.LeadBootPrep{Repo: &placement.RepoClone{
+		Name: "app", RemoteURL: "https://github.com/acme/app", Checkout: "/root/workspace/app",
+	}})
+	if err != nil {
+		t.Fatalf("cloneRepo: %v", err)
+	}
+	if !strings.Contains(runner.cmds[0], "'/home/exedev/workspace/app'") {
+		t.Fatalf("clone command did not map checkout: %s", runner.cmds[0])
+	}
+	if strings.Contains(runner.cmds[0], "'/root/workspace/app'") {
+		t.Fatalf("clone command retained inaccessible root path: %s", runner.cmds[0])
+	}
+	for _, want := range []string{"config --get remote.origin.url", "exit 0", "exit 73"} {
+		if !strings.Contains(runner.cmds[0], want) {
+			t.Errorf("idempotency guard missing %q: %s", want, runner.cmds[0])
+		}
+	}
 }
 
 func (r *recordingRunner) Run(cmd string) (string, error) {

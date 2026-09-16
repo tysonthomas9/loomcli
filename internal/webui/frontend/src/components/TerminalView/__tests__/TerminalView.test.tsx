@@ -1181,6 +1181,35 @@ describe("TerminalView", () => {
       ).toHaveTextContent("Sandbox lost");
     });
 
+    it("starts an unprovisioned lead from the runtime state card", async () => {
+      setMetadata(DEFAULT_METADATA);
+      const onStartLead = vi.fn().mockResolvedValue(undefined);
+      mockTerminalApi.ensureAgentTerminalSession.mockRejectedValueOnce(
+        new ApiError(400, "Bad Request", {
+          error: "remote lead has no active placement to attach",
+        }),
+      );
+
+      render(
+        <TerminalView
+          hideTabs
+          pendingAgentName="fox"
+          onAgentNameConsumed={vi.fn()}
+          leadRuntimeStatus="not_provisioned"
+          onStartLead={onStartLead}
+        />,
+      );
+
+      const button = await screen.findByRole("button", { name: "Start Lead" });
+      await act(async () => fireEvent.click(button));
+      expect(onStartLead).toHaveBeenCalledTimes(1);
+      await waitFor(() =>
+        expect(
+          mockTerminalApi.ensureAgentTerminalSession,
+        ).toHaveBeenCalledTimes(2),
+      );
+    });
+
     it("shows a failure when the waking retry budget is exhausted", async () => {
       vi.useFakeTimers();
       const backoffSpy = vi

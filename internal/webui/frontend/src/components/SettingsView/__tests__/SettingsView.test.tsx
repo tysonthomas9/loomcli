@@ -9,7 +9,14 @@
  * the backend dropdown, save button behavior, and agent override table.
  */
 
-import { render, screen, fireEvent, within, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  within,
+  act,
+  waitFor,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
@@ -151,6 +158,7 @@ function createMockLocalSettingsReturn(
       runtime_credentials: {
         daytona: { configured: false },
         github: { configured: false },
+        codex: { configured: false },
       },
     },
     isLoading: false,
@@ -299,6 +307,32 @@ describe("SettingsView", () => {
   });
 
   describe("credential sections", () => {
+    it("uploads Codex auth.json without putting its contents in a text field", async () => {
+      const updateRuntimeCredentials = vi.fn().mockResolvedValue(true);
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({ updateRuntimeCredentials }),
+      );
+      render(<SettingsView />);
+
+      const authJSON = '{"tokens":{"access":"codex-secret"}}';
+      const file = new File([authJSON], "auth.json", {
+        type: "application/json",
+      });
+      await act(async () => {
+        fireEvent.change(screen.getByTestId("codex-auth-json-input"), {
+          target: { files: [file] },
+        });
+      });
+
+      await waitFor(() =>
+        expect(updateRuntimeCredentials).toHaveBeenCalledWith({
+          codex: { auth_json: authJSON },
+        }),
+      );
+      expect(screen.queryByDisplayValue(authJSON)).not.toBeInTheDocument();
+    });
+
     it("groups GitHub separately from remote runtime credentials", () => {
       mockUseBackendConfig.mockReturnValue(createMockHookReturn());
 

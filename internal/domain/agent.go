@@ -524,7 +524,7 @@ type Agent struct {
 	CreatedAt time.Time   `json:"created_at"`
 	UpdatedAt time.Time   `json:"updated_at"`
 
-	// LastProvision* records the latest eager Daytona lead provision attempt.
+	// LastProvision* records the latest eager remote lead provision attempt.
 	// It makes failures that occur before a placement row exists observable.
 	LastProvisionOutcome string     `json:"last_provision_outcome,omitempty"`
 	LastProvisionError   string     `json:"last_provision_error,omitempty"`

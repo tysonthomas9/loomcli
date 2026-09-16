@@ -18,6 +18,7 @@ interface UseSessionSeedingOptions {
   pendingIssueContext: IssueContext | undefined;
   onIssueContextConsumed?: (() => void) | undefined;
   pendingAgentName: string | undefined;
+  agentResolutionEpoch?: number | undefined;
   onAgentNameConsumed?: (() => void) | undefined;
   tabs: TabState[];
   setTabs: React.Dispatch<React.SetStateAction<TabState[]>>;
@@ -59,6 +60,7 @@ export function useSessionSeeding({
   pendingIssueContext,
   onIssueContextConsumed,
   pendingAgentName,
+  agentResolutionEpoch = 0,
   onAgentNameConsumed,
   tabs,
   setTabs,
@@ -154,13 +156,21 @@ export function useSessionSeeding({
   // key is ready, subsequent churn only reassigns the same state value.
   useEffect(() => {
     if (!pendingAgentName || !initializedRef.current) return;
-    setReadyAgentKey(`${workspaceIdRef.current}:${pendingAgentName}`);
-  }, [pendingAgentName, tabs, initializedRef, workspaceIdRef]);
+    setReadyAgentKey(
+      `${workspaceIdRef.current}:${pendingAgentName}:${agentResolutionEpoch}`,
+    );
+  }, [
+    pendingAgentName,
+    agentResolutionEpoch,
+    tabs,
+    initializedRef,
+    workspaceIdRef,
+  ]);
 
   // Handle pending agent name: resolve or switch to the agent's PTY terminal.
   useEffect(() => {
     if (!pendingAgentName) return;
-    const requestKey = `${workspaceIdRef.current}:${pendingAgentName}`;
+    const requestKey = `${workspaceIdRef.current}:${pendingAgentName}:${agentResolutionEpoch}`;
     if (readyAgentKey !== requestKey) return;
 
     const currentTabs = tabsRef.current;
@@ -300,6 +310,7 @@ export function useSessionSeeding({
     };
   }, [
     pendingAgentName,
+    agentResolutionEpoch,
     readyAgentKey,
     mergeExistingAgentTab,
     setActiveTabId,

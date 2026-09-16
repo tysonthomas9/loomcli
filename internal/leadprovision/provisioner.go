@@ -34,7 +34,7 @@ type Broker interface {
 	Provision(context.Context, placement.ProvisionRequest) (*placement.ProvisionResult, error)
 }
 
-// Provisioner eagerly provisions Daytona sandboxes for interactive lead agents.
+// Provisioner eagerly provisions remote sandboxes for interactive lead agents.
 type Provisioner struct {
 	broker           Broker
 	store            store.Store
@@ -88,7 +88,7 @@ func (p *Provisioner) ProvisionForAgent(ctx context.Context, workspaceKey, agent
 	return p.provisionForAgent(ctx, workspaceKey, agentName, false)
 }
 
-// ReviveForAgent re-drives provisioning for an existing Daytona lead and
+// ReviveForAgent re-drives provisioning for an existing remote lead and
 // forces the broker to verify the provider-side lead PTY.
 func (p *Provisioner) ReviveForAgent(ctx context.Context, workspaceKey, agentName string) error {
 	return p.provisionForAgent(ctx, workspaceKey, agentName, true)
@@ -118,7 +118,7 @@ func (p *Provisioner) provisionForAgent(ctx context.Context, workspaceKey, agent
 	// Post-POC: wire the claude arm instead of seeding Codex credentials into
 	// non-Codex leads. Ticket 08's boot probe refuses boot on wrong creds.
 	if backend != backendnames.Codex {
-		return fmt.Errorf("daytona lead provisioning supports only the codex backend; agent %q resolves to %q (post-POC: wire the claude arm)", name, backend)
+		return fmt.Errorf("remote lead provisioning supports only the codex backend; agent %q resolves to %q", name, backend)
 	}
 
 	authJSON, gitToken, err := p.runtimeCredentials()
@@ -127,7 +127,7 @@ func (p *Provisioner) provisionForAgent(ctx context.Context, workspaceKey, agent
 	}
 	promptText, err := placement.LeadPromptText(target.role)
 	if err != nil {
-		return fmt.Errorf("resolve lead prompt text for Daytona lead provisioning: %w", err)
+		return fmt.Errorf("resolve lead prompt text for remote lead provisioning: %w", err)
 	}
 
 	req := p.provisionRequest(ws, name, authJSON, gitToken, promptText, target.runtimeProvider())
@@ -137,7 +137,7 @@ func (p *Provisioner) provisionForAgent(ctx context.Context, workspaceKey, agent
 		return err
 	}
 	if result != nil && strings.TrimSpace(result.LeadStartError) != "" {
-		return fmt.Errorf("start Daytona lead process for agent %q: %w", name, errors.New(result.LeadStartError))
+		return fmt.Errorf("start remote lead process for agent %q: %w", name, errors.New(result.LeadStartError))
 	}
 	return nil
 }
@@ -145,14 +145,14 @@ func (p *Provisioner) provisionForAgent(ctx context.Context, workspaceKey, agent
 func (p *Provisioner) loadProvisionTarget(ctx context.Context, ws, name string) (provisionTarget, error) {
 	agent, err := p.store.Agents().Get(ctx, ws, name)
 	if err != nil {
-		return provisionTarget{}, fmt.Errorf("load agent %q in workspace %q for Daytona lead provisioning: %w", name, ws, err)
+		return provisionTarget{}, fmt.Errorf("load agent %q in workspace %q for remote lead provisioning: %w", name, ws, err)
 	}
 	if agent == nil {
-		return provisionTarget{}, fmt.Errorf("load agent %q in workspace %q for Daytona lead provisioning: nil agent", name, ws)
+		return provisionTarget{}, fmt.Errorf("load agent %q in workspace %q for remote lead provisioning: nil agent", name, ws)
 	}
 	role, err := p.store.Roles().Get(ctx, ws, agent.RoleName)
 	if err != nil {
-		return provisionTarget{}, fmt.Errorf("load role %q for Daytona lead provisioning: %w", agent.RoleName, err)
+		return provisionTarget{}, fmt.Errorf("load role %q for remote lead provisioning: %w", agent.RoleName, err)
 	}
 	return provisionTarget{agent: agent, role: role, profile: p.daemonProfile(ctx, ws)}, nil
 }
@@ -172,14 +172,14 @@ func (t provisionTarget) needsSandboxLeadProvision() bool {
 func (p *Provisioner) runtimeCredentials() (string, func() (string, error), error) {
 	settings, err := runtimesettings.Load(p.localSettingsDir)
 	if err != nil {
-		return "", nil, fmt.Errorf("load local settings for Daytona lead provisioning: %w", err)
+		return "", nil, fmt.Errorf("load local settings for remote lead provisioning: %w", err)
 	}
 	if strings.TrimSpace(settings.RuntimeCredentials.Codex.Sealed) == "" {
-		return "", nil, fmt.Errorf("codex runtime credential not configured; seal it via /api/local/settings before provisioning a Daytona lead")
+		return "", nil, fmt.Errorf("codex runtime credential not configured; upload auth.json in Loom Settings before provisioning a remote lead")
 	}
 	authJSON, err := runtimesettings.UnsealRuntimeCredential(p.localSettingsDir, settings, runtimesettings.RuntimeCredentialProviderCodex)
 	if err != nil {
-		return "", nil, fmt.Errorf("unseal codex runtime credential for Daytona lead provisioning: %w", err)
+		return "", nil, fmt.Errorf("unseal codex runtime credential for remote lead provisioning: %w", err)
 	}
 	return authJSON, p.gitTokenCallback(settings), nil
 }

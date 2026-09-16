@@ -1,7 +1,10 @@
 package exe
 
 import (
+	"bytes"
+	"compress/gzip"
 	"fmt"
+	"os"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -27,25 +30,49 @@ func (r clientRunner) RunStdin(cmd string, stdin []byte) (string, error) {
 }
 
 func (p *Provider) installBootstrapBinary(client *ssh.Client, sandboxID string, spec *placement.BootstrapBinarySpec) error {
-	return installBootstrapBinary(clientRunner{client}, sandboxID, spec)
+	executable := p.bootstrapBinaryPath
+	if executable == "" {
+		var err error
+		executable, err = os.Executable()
+		if err != nil {
+			return fmt.Errorf("exe resolve bootstrap binary for sandbox %q: %w", sandboxID, err)
+		}
+	}
+	binary, err := os.ReadFile(executable) //nolint:gosec // serve uploads its own fixed executable
+	if err != nil {
+		return fmt.Errorf("exe read bootstrap binary for sandbox %q: %w", sandboxID, err)
+	}
+	var compressed bytes.Buffer
+	zipper := gzip.NewWriter(&compressed)
+	if _, err := zipper.Write(binary); err != nil {
+		return fmt.Errorf("exe compress bootstrap binary for sandbox %q: %w", sandboxID, err)
+	}
+	if err := zipper.Close(); err != nil {
+		return fmt.Errorf("exe finish bootstrap compression for sandbox %q: %w", sandboxID, err)
+	}
+	return installBootstrapBinary(clientRunner{client}, sandboxID, spec, compressed.Bytes())
 }
 
 // installBootstrapBinary downloads serve's own loom binary and installs it
 // atomically, before anything else, so the lead boots the freshly served
 // binary rather than the one baked into the image.
-func installBootstrapBinary(client sshRunner, sandboxID string, spec *placement.BootstrapBinarySpec) error {
+func installBootstrapBinary(client sshRunner, sandboxID string, spec *placement.BootstrapBinarySpec, compressedBinary []byte) error {
 	mode := strings.TrimSpace(spec.Mode)
 	if mode == "" {
 		mode = "0755"
 	}
-	tmp := spec.Dest + ".loom-tmp"
+	// exe.dev already gives the provider an authenticated SSH stream. Upload
+	// serve's exact executable on stdin instead of exposing and redownloading it
+	// through a public HTTP tunnel. The command line contains no binary bytes.
+	tmp := "/tmp/loom-bootstrap.loom-tmp"
 	cmd := fmt.Sprintf(
-		"curl -fsSL --retry 3 --max-time 120 -o %s %s && chmod %s %s && mv -f %s %s",
-		shellQuote(tmp), shellQuote(spec.URL),
-		shellQuote(mode), shellQuote(tmp),
-		shellQuote(tmp), shellQuote(spec.Dest),
+		"umask 077; gzip -dc > %s && test -s %s && sudo -n install -m %s %s %s && %s --help >/dev/null 2>&1; rc=$?; rm -f %s; exit $rc",
+		shellQuote(tmp), shellQuote(tmp),
+		shellQuote(mode), shellQuote(tmp), shellQuote(spec.Dest),
+		shellQuote(spec.Dest),
+		shellQuote(tmp),
 	)
-	if out, err := client.Run(cmd); err != nil {
+	if out, err := client.RunStdin(cmd, compressedBinary); err != nil {
 		return fmt.Errorf("exe install bootstrap binary in sandbox %q: %w (%s)", sandboxID, err, firstLine(out))
 	}
 	return nil
@@ -70,7 +97,7 @@ func (p *Provider) cloneRepo(client *ssh.Client, sandboxID string, prep placemen
 //	something already went wrong.
 func cloneRepo(client sshRunner, sandboxID string, prep placement.LeadBootPrep) error {
 	repo := prep.Repo
-	checkout := strings.TrimSpace(repo.Checkout)
+	checkout := exeUserPath(repo.Checkout)
 	if checkout == "" {
 		return fmt.Errorf("exe clone in sandbox %q: checkout path required", sandboxID)
 	}
@@ -88,9 +115,13 @@ func cloneRepo(client sshRunner, sandboxID string, prep placement.LeadBootPrep) 
 		clone = fmt.Sprintf("git clone --depth 1 --branch %s %s %s",
 			shellQuote(ref), shellQuote(repo.RemoteURL), shellQuote(checkout))
 	}
+	guard := fmt.Sprintf(
+		"if [ -d %s ]; then test \"$(git -C %s config --get remote.origin.url)\" = %s && exit 0; exit 73; fi; ",
+		shellQuote(checkout+"/.git"), shellQuote(checkout), shellQuote(repo.RemoteURL),
+	)
 
 	if token == "" {
-		cmd := fmt.Sprintf("mkdir -p %s && %s", shellQuote(dirOf(checkout)), clone)
+		cmd := guard + fmt.Sprintf("mkdir -p %s && %s", shellQuote(dirOf(checkout)), clone)
 		if _, err := client.Run(cmd); err != nil {
 			// Never surface the output: it can echo credential material.
 			return fmt.Errorf("exe clone %q into sandbox %q failed: %w", repo.Name, sandboxID, err)
@@ -102,7 +133,7 @@ func cloneRepo(client sshRunner, sandboxID string, prep placement.LeadBootPrep) 
 	// The helper reads the token from stdin (cat), writes it with 0700, runs
 	// the clone, then removes the helper unconditionally and re-raises the
 	// clone's exit status so a failure is still a failure.
-	cmd := fmt.Sprintf(
+	cmd := guard + fmt.Sprintf(
 		"set -e; mkdir -p %s; "+
 			"umask 077; printf '#!/bin/sh\ncat %s\n' > %s; chmod 700 %s; "+
 			"cat > %s; chmod 600 %s; "+

@@ -240,8 +240,8 @@ func handleLifecycle(agentSvc service.AgentService, hub *realtime.Hub, provision
 	}
 }
 
-// kickLeadProvision eagerly (re)drives Daytona lead provisioning in the
-// background. ProvisionForAgent self-filters to interactive Daytona leads and
+// kickLeadProvision eagerly (re)drives remote lead provisioning in the
+// background. ProvisionForAgent self-filters to interactive remote leads and
 // is idempotent: an already-live placement is resumed, never duplicated, so it
 // is safe to call on both create and every start/restart. This is the only
 // recovery path when a create-time provision fails transiently (quota, provider

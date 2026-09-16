@@ -129,7 +129,7 @@ func parseCreatedAt(raw string) time.Time {
 // SSH, so content never has to survive shell quoting and can contain
 // credentials without appearing in a command line.
 func writeFile(client sshRunner, file placement.SandboxFile) error {
-	path := strings.TrimSpace(file.Path)
+	path := exeUserPath(file.Path)
 	if path == "" {
 		return fmt.Errorf("exe: sandbox file path required")
 	}
@@ -161,6 +161,20 @@ func writeFile(client sshRunner, file placement.SandboxFile) error {
 		return fmt.Errorf("write %q: %w", path, err)
 	}
 	return nil
+}
+
+// exeUserPath maps the broker's canonical root-home Lead paths into the home
+// of exe.dev's unprivileged SSH user. Provider-neutral plans deliberately use
+// one path shape; this boundary owns adapting it to the VM image.
+func exeUserPath(raw string) string {
+	path := strings.TrimSpace(raw)
+	if path == "/root" {
+		return "/home/exedev"
+	}
+	if strings.HasPrefix(path, "/root/") {
+		return "/home/exedev/" + strings.TrimPrefix(path, "/root/")
+	}
+	return path
 }
 
 func dirOf(path string) string {

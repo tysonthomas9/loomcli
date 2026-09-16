@@ -27,7 +27,7 @@ const (
 	LeadProvisionOutcomeFailed     = "failed"
 )
 
-// LeadProvisionAttempt is the durable evidence for an eager Daytona lead
+// LeadProvisionAttempt is the durable evidence for an eager remote lead
 // provision attempt. Empty Outcome means no attempt is known to be in flight.
 type LeadProvisionAttempt struct {
 	Outcome string
@@ -97,7 +97,7 @@ func LeadRuntimeAttachError(status LeadRuntimeStatus, detail string) string {
 		if detail != "" {
 			return "lead sandbox provisioning failed: " + detail
 		}
-		return "Daytona lead has no active placement to attach"
+		return "Remote lead has no active placement to attach"
 	case LeadRuntimeReady:
 		return ""
 	default:

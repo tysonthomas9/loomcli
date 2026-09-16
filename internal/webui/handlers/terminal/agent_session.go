@@ -147,7 +147,7 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 // rebuilds it (the stale PTY is killed by svc.PutTab → reattach on reload).
 // PTYAlive means "present in the manager", not "upstream alive" — a parked
 // sandbox leaves a tab that claims alive while every attach fails — so
-// launch-eligible Daytona leads consult the reviver even on this fast path; a
+// launch-eligible remote leads consult the reviver even on this fast path; a
 // placement-lookup failure keeps viewport semantics and returns the tab.
 func cachedAgentTerminalTab(ctx context.Context, st store.Store, workspace, agentName string, agent *domain.Agent, roleKind domain.RoleKind, existing *tabmeta.TabMetadata, launchAllowed bool, revivers []leadPlacementReviver) (*tabmeta.TabMetadata, error) {
 	if existing == nil || !existing.PTYAlive {
@@ -199,7 +199,7 @@ func ensureDaytonaLeadAttachable(ctx context.Context, st store.Store, workspace,
 	case errors.Is(err, leadprovision.ErrReviveTerminalState):
 		return service.ErrConflict("lead sandbox is in a terminal provider state and cannot be revived")
 	default:
-		return service.ErrInternal("lead sandbox revive failed", fmt.Errorf("revive Daytona lead %q: %w", agentName, err))
+		return service.ErrInternal("lead sandbox revive failed", fmt.Errorf("revive remote lead %q: %w", agentName, err))
 	}
 }
 

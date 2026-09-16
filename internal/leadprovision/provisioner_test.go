@@ -160,7 +160,7 @@ func TestProvisionForAgentFailsClosedWhenCodexCredentialMissing(t *testing.T) {
 	provisioner := New(broker, st, t.TempDir(), DefaultAllowlist(), daytona.DefaultSnapshotName, DefaultResource())
 
 	err := provisioner.ProvisionForAgent(ctx, "WS", "nova")
-	if err == nil || !strings.Contains(err.Error(), "codex runtime credential not configured; seal it via /api/local/settings before provisioning a Daytona lead") {
+	if err == nil || !strings.Contains(err.Error(), "codex runtime credential not configured; upload auth.json in Loom Settings before provisioning a remote lead") {
 		t.Fatalf("ProvisionForAgent = %v, want missing codex credential error", err)
 	}
 	if got := broker.callCount(); got != 0 {
@@ -176,7 +176,7 @@ func TestProvisionForAgentRejectsNonCodexBackend(t *testing.T) {
 	provisioner := New(broker, st, dir, DefaultAllowlist(), daytona.DefaultSnapshotName, DefaultResource())
 
 	err := provisioner.ProvisionForAgent(ctx, "WS", "nova")
-	if err == nil || !strings.Contains(err.Error(), `daytona lead provisioning supports only the codex backend; agent "nova" resolves to "claude"`) {
+	if err == nil || !strings.Contains(err.Error(), `remote lead provisioning supports only the codex backend; agent "nova" resolves to "claude"`) {
 		t.Fatalf("ProvisionForAgent = %v, want non-codex backend error", err)
 	}
 	if got := broker.callCount(); got != 0 {

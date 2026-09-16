@@ -84,6 +84,8 @@ interface TerminalViewProps {
    * has failed to attach, instead of surfacing the raw backend error string.
    */
   leadRuntimeStatus?: string | undefined;
+  /** Starts provisioning the selected Lead through the lifecycle API. */
+  onStartLead?: (() => Promise<void>) | undefined;
 }
 
 interface CliSetupGuide extends CliSetupRequest {
@@ -212,12 +214,18 @@ function leadRuntimeStateView(
 function LeadRuntimeStateCard({
   resolution,
   runtimeStatus,
+  onStartLead,
+  onRetryResolution,
 }: {
   resolution: "waking" | "failed";
   runtimeStatus?: string | undefined;
+  onStartLead?: (() => Promise<void>) | undefined;
+  onRetryResolution: () => void;
 }): JSX.Element {
   const view = leadRuntimeStateView(resolution, runtimeStatus);
   const failed = resolution === "failed";
+  const [starting, setStarting] = useState(false);
+  const canStart = onStartLead != null && !view.busy;
   return (
     <div
       className={styles.leadWaking}
@@ -237,6 +245,24 @@ function LeadRuntimeStateCard({
           {view.label}
         </span>
         <span className={styles.leadStateDetail}>{view.detail}</span>
+        {canStart && (
+          <button
+            type="button"
+            className={styles.reconnectButton}
+            disabled={starting}
+            onClick={async () => {
+              setStarting(true);
+              try {
+                await onStartLead();
+                onRetryResolution();
+              } finally {
+                setStarting(false);
+              }
+            }}
+          >
+            {starting ? "Starting…" : "Start Lead"}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -257,9 +283,11 @@ export function TerminalView({
   hideTabs = false,
   onSplitControlsChange,
   leadRuntimeStatus,
+  onStartLead,
 }: TerminalViewProps): JSX.Element {
   const [tabs, setTabs] = useState<TabState[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
+  const [agentResolutionEpoch, setAgentResolutionEpoch] = useState(0);
   const initializedRef = useRef(false);
   const { id: workspaceId } = useWorkspaceTabState({
     tabs,
@@ -374,6 +402,7 @@ export function TerminalView({
     pendingIssueContext,
     onIssueContextConsumed,
     pendingAgentName,
+    agentResolutionEpoch,
     onAgentNameConsumed,
     tabs,
     setTabs,
@@ -968,6 +997,10 @@ export function TerminalView({
         <LeadRuntimeStateCard
           resolution={agentResolutionState}
           runtimeStatus={leadRuntimeStatus}
+          onStartLead={onStartLead}
+          onRetryResolution={() =>
+            setAgentResolutionEpoch((value) => value + 1)
+          }
         />
       ) : (metaLoading || configLoading) && visibleTabs.length === 0 ? (
         <LoadingSkeleton.Terminal />

@@ -2917,7 +2917,7 @@ export interface components {
       repo_groups: string[];
       cross_repo: boolean;
       /**
-       * @description Latest eager Daytona lead provision-attempt outcome.
+       * @description Latest eager remote lead provision-attempt outcome.
        * @enum {string}
        */
       last_provision_outcome?: "in_progress" | "succeeded" | "failed";
