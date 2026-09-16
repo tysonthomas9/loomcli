@@ -116,7 +116,7 @@ func TestAgentInboxClaimNextReturnsClaimedBy(t *testing.T) {
 
 // fleet-db returns 403 when claimed_by does not match the live claim holder
 // (or is absent), and 410 while the stored claim is expired and nobody has
-// re-claimed. Both must reach the caller as a recognisable, typed refusal —
+// re-claimed. Both must reach the caller as a recognizable, typed refusal —
 // not the generic ErrConflict that hides the reason.
 func TestAgentInboxCompleteClaimRefusalsAreTyped(t *testing.T) {
 	tests := []struct {

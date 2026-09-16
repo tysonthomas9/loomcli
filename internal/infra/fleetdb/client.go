@@ -481,6 +481,14 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 		if strings.Contains(path, "/driver-runs/") {
 			return fmt.Errorf("%s: %w", prefix, domain.ErrNotOwner)
 		}
+		// An agent-inbox completion is claimer-only: 403 means claimed_by does
+		// not match the session holding the live claim (an absent claimed_by
+		// included, or a re-claim after our own lease ran out). Kept apart
+		// from the generic 4xx so a caller can tell a lost claim from any
+		// other refusal.
+		if strings.Contains(path, "/agent-inbox-messages") {
+			return fmt.Errorf("%s: %w", prefix, domain.ErrNotOwner)
+		}
 		if isSkillAPIPath(path) {
 			return fmt.Errorf("%s: %w", prefix, domain.ErrSkillForbidden)
 		}
