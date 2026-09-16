@@ -13,6 +13,7 @@
 // and upstream failures map onto the structured error envelope with the
 // connector-specific codes grant_denied, precondition_required,
 // stale_subject, rate_limited and upstream_error.
+
 package driverapi
 
 import (

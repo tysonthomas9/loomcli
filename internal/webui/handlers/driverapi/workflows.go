@@ -13,6 +13,7 @@
 //
 // Authentication is the standard run-scoped driver-op pipeline; wire shapes
 // are camelCase per the SDK v2 convention.
+
 package driverapi
 
 import (

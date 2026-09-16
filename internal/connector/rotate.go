@@ -20,6 +20,7 @@
 //
 // Both legs land in ONE ConnectorStore.RotateSecrets write, so a reader never
 // observes the new inbound secret without the new credential (or vice versa).
+
 package connector
 
 import (
