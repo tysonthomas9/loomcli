@@ -1,35 +1,42 @@
-# aft browser tests
+# AFT browser tests
 
-Live-server E2E suites for the Loom web UI, driven by
-[aft](https://github.com/tysonthomas9/aft) — deterministic YAML browser tests with a
-Claude recovery agent that diagnoses (`--strict`) or heals (`--heal`) failures.
+AFT is Loom's real-local browser E2E suite. It drives deterministic YAML scenarios
+against `loom serve`, embedded fleet-db, and a Vite preview in a fresh isolated
+workspace. It complements mocked Playwright tests by exercising server-to-browser
+behavior such as SSE updates.
 
-These complement the mocked Playwright suite: they run against the **real v5 stack**
-(`loom serve` + embedded fleet-db + vite preview, fresh isolated workspace, auth open),
-so they cover what mocks can't — above all that server-side mutations reach the UI via
-SSE.
-
-Poll-loop comments use these budget classes: `ui-click-retry` (3s) for browser clicks
-that can race route or popover mounting; `db-persist` (10-20s) for direct fleet-db/API
-write propagation and asynchronous action-created rows; `worktree-materialization`
-(10s) for local agent worktree creation after a row exists; `monitor-cache` (16-20s)
-for `/api/monitor/status` cache and join propagation; `context-delivery` (45s) for
-epic assignment delivery state crossing monitor/UI boundaries; and `terminal-launch`
-(40-120s) for PTY spawn plus terminal tab/session launch metadata.
-
-## Run
+## Start here
 
 ```bash
-make test-aft                      # deterministic, no model calls (what CI runs)
-make test-aft-real                 # opt-in real codex epic-runner tier
-make test-aft-terminal             # opt-in live-tmux Logs tab tier (real codex)
-make test-aft-strict               # failures get an agent diagnosis + suggested fix
-make test-aft-heal                 # local dev: agent may complete a broken step's intent
-tests/aft/run-aft.sh --record ...  # or call the harness directly with any aft flags
+make test-aft                                      # full deterministic suite
+make test-aft AFT_ARGS="--filter 'comments'"       # selected scenarios
+make test-aft AFT_ARGS="--screenshots --storyboard" # reviewable UI evidence
 ```
 
-Extra aft flags go through `AFT_ARGS`, e.g.
-`make test-aft AFT_ARGS="--screenshots --record-all"`.
+### Run modes
+
+Failure policy, model usage, and runtime tier are separate choices:
+
+| command | model usage | failed-step behavior | use for |
+|---|---|---|---|
+| `make test-aft` | none | stays failed | deterministic local runs and CI |
+| `make test-aft-strict` | Claude diagnoses read-only | stays failed | suggested root cause and fix |
+| `make test-aft-heal` | Claude may act in the browser | may become healed | local investigation only |
+
+`strict` is AFT's default failure policy: a failed step remains failed. Reports therefore
+say `STRICT` even when `--no-agent` disables all model calls. Strict does **not** select a
+different backend or add assertions. Accessibility enforcement is the separate
+`--a11y-strict` option.
+
+Real or live agent backends are opt-in runtime tiers, not run modes. They use separate
+targets such as `make test-aft-real`, `make test-aft-live-interactive`, and
+`make test-aft-terminal`; see [Runtime tiers](#real-codex-tier) before running them
+because they consume account capacity and may expose the host account.
+
+Extra AFT flags go through `AFT_ARGS`. You can also call
+`tests/aft/run-aft.sh` directly when you need harness environment overrides.
+
+### What the harness runs
 
 The harness starts `scripts/start-e2e-server.sh` (loom API on `E2E_PORT`, default 8090;
 vite preview on `E2E_FRONTEND_PORT`, default 3100, proxying `/api`), waits for readiness,
@@ -38,12 +45,30 @@ invocation** before tearing the stack down. Setting `AFT_SUITES` explicitly repl
 default with exactly one file or directory, which keeps the real-* tiers isolated. The
 primary workspace is `e2e-ws` with id **`E2E-WS`** — exported to suites/hooks as `AFT_WS`.
 
-Requirements: `go`, `node` >= 20 (24 for agent-browser), `agent-browser`, a **fleet-db**
-checkout (default `../fleet-db`; a sibling `../fleet-db-main` — e.g. a git worktree of
-origin/main — is preferred when present because the epic-runner needs the driver-runs
-domain), an aft checkout (default `../testing-app`, override `AFT_DIR`), a **flue**
-checkout at `../flue` (pinned commit in `internal/workflows/FLUE_COMMIT`, built with
-pnpm) for the agent-flow suite, and `claude` unless `--no-agent`.
+Requirements:
+
+- Go, Node 20 or newer (Node 24 for `agent-browser`), and `agent-browser`.
+- A fleet-db checkout at `../fleet-db`, or `../fleet-db-main` when available.
+- An AFT checkout at `../testing-app`; override it with `AFT_DIR`.
+- A flue checkout at `../flue` for the agent-flow suite.
+- Claude only for diagnostic or healing modes; deterministic runs use `--no-agent`.
+
+## Step budgets
+
+Polling steps use named budgets so slow behavior is visible and consistently bounded:
+
+| budget | limit | intended wait |
+|---|---:|---|
+| `ui-click-retry` | 3s | route or popover mounting |
+| `db-persist` | 10–20s | fleet-db/API propagation |
+| `worktree-materialization` | 10s | local agent worktree creation |
+| `monitor-cache` | 16–20s | monitor cache and join propagation |
+| `context-delivery` | 45s | epic assignment delivery |
+| `terminal-launch` | 40s | PTY and terminal-session launch |
+
+Add `budget: <class>` to new polling steps. The legacy comment form
+`# budget: <class> (<n>s)` remains supported. The run summary reports utilization;
+90% means the step is close to becoming flaky.
 
 ## Two suite tiers
 
@@ -76,7 +101,7 @@ imported files under `transitions/` contain ordinary AFT mechanics. AFT discover
 the manifest—not its fragments—and validates the complete DAG before opening a browser.
 
 `tests/aft/suites/issue-detail.graph/` is the first product-correctness pilot. Its shared
-UI-create prefix fans out to description save/cancel, type, priority/owner, label,
+UI-create prefix fans out to description save/cancel, type, owner, label,
 comment, lifecycle, title, dependency, and card-reopen journeys. Transition coverage
 selects twelve complete root-to-terminal paths; two named golden journeys run
 independently, for fourteen fresh-browser replays total. Every path gets a stable
