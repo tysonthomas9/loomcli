@@ -16,10 +16,17 @@ import {
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
+import type {
+  Event,
+  Issue,
+  IssueDetails,
+  IssueWithDependencyMetadata,
+  MutationPayload,
+} from "@/types";
 import type { SessionRecord } from "@/types/agent";
 import {
   updateIssue,
+  getIssueEvents,
   startWorkflowRun,
   createWorkspaceAgent,
   deleteWorkspaceAgent,
@@ -40,6 +47,7 @@ const {
   mockGetTaskSessions,
   mockShowToast,
   mockUseToast,
+  eventSubscription,
 } = vi.hoisted(() => ({
   mockUseRegisterEscapeLayer: vi.fn(),
   mockDeleteTabMetadata: vi.fn(() => Promise.resolve()),
@@ -101,6 +109,9 @@ const {
     dismissToast: vi.fn(),
     dismissAll: vi.fn(),
   })),
+  eventSubscription: {
+    callback: null as ((mutation: MutationPayload) => void) | null,
+  },
 }));
 
 // Mock the API module
@@ -162,7 +173,13 @@ vi.mock("@/hooks/workspace", async () => {
 vi.mock("@/hooks/common", async () => {
   const actual =
     await vi.importActual<typeof import("@/hooks/common")>("@/hooks/common");
-  return { ...actual, useAgentStoreInstance: mockUseAgentStoreInstance };
+  return {
+    ...actual,
+    useAgentStoreInstance: mockUseAgentStoreInstance,
+    useEventSubscription: (callback: (mutation: MutationPayload) => void) => {
+      eventSubscription.callback = callback;
+    },
+  };
 });
 
 vi.mock("@/hooks", async (importOriginal) => {
@@ -334,6 +351,9 @@ describe("IssueDetailPanel", () => {
     mockGetTaskSessions.mockReset();
     mockGetTaskSessions.mockResolvedValue([]);
     mockShowToast.mockReset();
+    eventSubscription.callback = null;
+    vi.mocked(getIssueEvents).mockReset();
+    vi.mocked(getIssueEvents).mockImplementation(() => new Promise(() => {}));
     mockUseToast.mockReset();
     mockUseToast.mockImplementation(() => ({
       toasts: [],
@@ -401,6 +421,50 @@ describe("IssueDetailPanel", () => {
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
       expect(screen.getByTestId("issue-detail-panel")).toBeInTheDocument();
+    });
+
+    it("refreshes activity events when the open issue receives an SSE mutation", async () => {
+      const created: Event = {
+        id: 1,
+        issue_id: "test-123",
+        event_type: "issue.created",
+        actor: "tester",
+        created_at: "2026-01-23T00:00:00Z",
+      };
+      const closed: Event = {
+        id: 2,
+        issue_id: "test-123",
+        event_type: "issue.closed",
+        actor: "agent",
+        created_at: "2026-01-23T00:01:00Z",
+      };
+      vi.mocked(getIssueEvents)
+        .mockResolvedValueOnce([created])
+        .mockResolvedValueOnce([created, closed]);
+
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssueDetails()}
+          onClose={() => {}}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getAllByTestId("activity-event")).toHaveLength(1);
+      });
+      expect(eventSubscription.callback).not.toBeNull();
+
+      eventSubscription.callback?.({
+        type: "status",
+        entity_type: "issue",
+        entity_id: "test-123",
+        timestamp: "2026-01-23T00:01:00Z",
+      });
+
+      await waitFor(() => {
+        expect(screen.getAllByTestId("activity-event")).toHaveLength(2);
+      });
     });
 
     it("renders the standard header controls for inline task detail", () => {

@@ -30,7 +30,11 @@ import {
 } from "@/hooks";
 import { useStore } from "zustand";
 
-import { useAgentStoreInstance, useIssueStoreInstance } from "@/hooks/common";
+import {
+  useAgentStoreInstance,
+  useEventSubscription,
+  useIssueStoreInstance,
+} from "@/hooks/common";
 import { useLocalSettings, useWorkspaceContext } from "@/hooks/workspace";
 import { useIssueTabPersistence } from "@/hooks/issues";
 import type {
@@ -825,6 +829,8 @@ function DefaultContent({
 
   // Fetch events when issue changes
   const eventIssueId = issue?.id;
+  const eventIssueIdRef = useRef(eventIssueId);
+  eventIssueIdRef.current = eventIssueId;
   useEffect(() => {
     if (!eventIssueId) {
       setEvents([]);
@@ -843,6 +849,34 @@ function DefaultContent({
       cancelled = true;
     };
   }, [eventIssueId]);
+
+  useEventSubscription(
+    useCallback(
+      (mutation) => {
+        const openIssueId = eventIssueIdRef.current;
+        if (
+          !openIssueId ||
+          (mutation.issue_id !== openIssueId &&
+            mutation.entity_id !== openIssueId)
+        ) {
+          return;
+        }
+
+        void getIssueEvents(workspaceId, openIssueId).then(
+          (data) => {
+            if (eventIssueIdRef.current === openIssueId) {
+              setEvents(data ?? []);
+            }
+          },
+          () => {
+            // Preserve the visible activity snapshot on a transient live
+            // refresh failure; the next mutation or issue reopen retries it.
+          },
+        );
+      },
+      [workspaceId],
+    ),
+  );
 
   // Handler for when a new comment is added
   const handleCommentAdded = useCallback((newComment: Comment) => {

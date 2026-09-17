@@ -5,7 +5,7 @@ import { renderHook, act, waitFor as _waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { getIssue } from "@/api/issues";
-import type { Issue, IssueDetails } from "@/types";
+import type { Issue, IssueDetails, MutationPayload } from "@/types";
 
 import { useIssueDetail } from "../useIssueDetail";
 
@@ -14,6 +14,16 @@ import { useIssueDetail } from "../useIssueDetail";
 // Mock the getIssue API function
 vi.mock("@/api/issues", () => ({
   getIssue: vi.fn(),
+}));
+
+const eventSubscription = vi.hoisted(() => ({
+  callback: null as ((mutation: MutationPayload) => void) | null,
+}));
+
+vi.mock("@/hooks/common/useEventProvider", () => ({
+  useEventSubscription: (callback: (mutation: MutationPayload) => void) => {
+    eventSubscription.callback = callback;
+  },
 }));
 
 vi.mock("@/hooks/workspace", async () => {
@@ -62,6 +72,7 @@ function createIssue(overrides: Partial<Issue> = {}): Issue {
 describe("useIssueDetail", () => {
   beforeEach(() => {
     mockGetIssue.mockReset();
+    eventSubscription.callback = null;
   });
 
   afterEach(() => {
@@ -181,6 +192,128 @@ describe("useIssueDetail", () => {
       rerender();
 
       expect(result.current.fetchIssue).toBe(initialFetchIssue);
+    });
+  });
+
+  describe("Live mutation refresh", () => {
+    it("refetches canonical details when the open issue receives an SSE mutation", async () => {
+      mockGetIssue
+        .mockResolvedValueOnce(
+          createIssueDetails({
+            id: "issue-1",
+            issue_type: "task",
+            comments: [],
+          }),
+        )
+        .mockResolvedValueOnce(
+          createIssueDetails({
+            id: "issue-1",
+            issue_type: "bug",
+            comments: [
+              {
+                id: "comment-1",
+                issue_id: "issue-1",
+                content: "streamed comment",
+                created_at: "2024-01-02T00:00:00Z",
+                author: "agent",
+              },
+            ],
+          }),
+        );
+
+      const { result } = renderHook(() => useIssueDetail());
+
+      await act(async () => {
+        await result.current.fetchIssue("issue-1");
+      });
+
+      expect(eventSubscription.callback).not.toBeNull();
+      act(() => {
+        eventSubscription.callback?.({
+          type: "comment",
+          entity_type: "comment",
+          entity_id: "issue-1",
+          timestamp: "2024-01-02T00:00:00Z",
+        });
+      });
+
+      await _waitFor(() => {
+        expect(result.current.issueDetails?.issue_type).toBe("bug");
+        expect(result.current.issueDetails?.comments?.[0]?.content).toBe(
+          "streamed comment",
+        );
+      });
+      expect(mockGetIssue).toHaveBeenCalledTimes(2);
+    });
+
+    it("ignores SSE mutations for another issue", async () => {
+      mockGetIssue.mockResolvedValueOnce(
+        createIssueDetails({ id: "issue-1", issue_type: "task" }),
+      );
+
+      const { result } = renderHook(() => useIssueDetail());
+      await act(async () => {
+        await result.current.fetchIssue("issue-1");
+      });
+
+      act(() => {
+        eventSubscription.callback?.({
+          type: "comment",
+          entity_type: "comment",
+          entity_id: "issue-2",
+          timestamp: "2024-01-02T00:00:00Z",
+        });
+      });
+
+      expect(mockGetIssue).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not let a stale issue refresh cancel navigation to another issue", async () => {
+      let resolveNavigation!: (details: IssueDetails) => void;
+      let resolveRefresh!: (details: IssueDetails) => void;
+      mockGetIssue
+        .mockResolvedValueOnce(createIssueDetails({ id: "issue-1" }))
+        .mockImplementationOnce(
+          () =>
+            new Promise<IssueDetails>((resolve) => {
+              resolveNavigation = resolve;
+            }),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise<IssueDetails>((resolve) => {
+              resolveRefresh = resolve;
+            }),
+        );
+
+      const { result } = renderHook(() => useIssueDetail());
+      await act(async () => {
+        await result.current.fetchIssue("issue-1");
+      });
+
+      let navigation!: Promise<void>;
+      act(() => {
+        navigation = result.current.fetchIssue("issue-2");
+      });
+      act(() => {
+        eventSubscription.callback?.({
+          type: "comment",
+          entity_type: "comment",
+          entity_id: "issue-1",
+          timestamp: "2024-01-02T00:00:00Z",
+        });
+      });
+
+      await act(async () => {
+        resolveNavigation(createIssueDetails({ id: "issue-2" }));
+        await navigation;
+      });
+      await act(async () => {
+        resolveRefresh(createIssueDetails({ id: "issue-1" }));
+      });
+
+      expect(result.current.issueDetails?.id).toBe("issue-2");
+      expect(result.current.isLoading).toBe(false);
     });
   });
 

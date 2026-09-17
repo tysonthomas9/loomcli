@@ -2298,7 +2298,7 @@ describe("App", () => {
       expect(screen.getByText("Detail Issue Title")).toBeInTheDocument();
     });
 
-    it("syncs loaded issue details from fresher live issue store updates", async () => {
+    it("does not overwrite canonical details with a sparse live list projection", async () => {
       const updateIssueDetails = vi.fn();
       const liveIssue = createMockIssue({
         id: "issue-1",
@@ -2324,9 +2324,8 @@ describe("App", () => {
 
       render(<App />);
 
-      await waitFor(() => {
-        expect(updateIssueDetails).toHaveBeenCalledWith(liveIssue);
-      });
+      await act(async () => {});
+      expect(updateIssueDetails).not.toHaveBeenCalled();
     });
 
     it("passes error state to IssueDetailPanel when fetch fails", () => {

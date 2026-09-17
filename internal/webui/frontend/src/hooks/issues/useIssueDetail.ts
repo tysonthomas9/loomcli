@@ -8,6 +8,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { getIssue } from "@/api/issues";
 import type { Issue, IssueDetails } from "@/types";
 
+import { useEventSubscription } from "@/hooks/common/useEventProvider";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
 /**
@@ -65,6 +66,7 @@ export function useIssueDetail(): UseIssueDetailReturn {
 
   // Track the current request ID to handle concurrent requests (latest wins)
   const currentRequestIdRef = useRef<number>(0);
+  const currentRefreshIdRef = useRef<number>(0);
 
   // Track if the component is mounted
   const mountedRef = useRef<boolean>(true);
@@ -86,6 +88,7 @@ export function useIssueDetail(): UseIssueDetailReturn {
 
       // Increment request ID to handle concurrent requests
       const requestId = ++currentRequestIdRef.current;
+      currentRefreshIdRef.current++; // Cancel background refreshes for the old issue
 
       setIsLoading(true);
       setError(null);
@@ -115,8 +118,45 @@ export function useIssueDetail(): UseIssueDetailReturn {
     [workspaceId],
   );
 
+  const refreshIssue = useCallback(
+    async (id: string): Promise<void> => {
+      const refreshId = ++currentRefreshIdRef.current;
+      try {
+        const details = await getIssue(workspaceId, id);
+        if (refreshId === currentRefreshIdRef.current && mountedRef.current) {
+          setIssueDetails((current) =>
+            current?.id === id ? details : current,
+          );
+        }
+      } catch {
+        // Keep the last canonical snapshot visible. Connection health and
+        // foreground fetches surface errors; a transient live refresh should
+        // not replace usable detail content with an error state.
+      }
+    },
+    [workspaceId],
+  );
+
+  useEventSubscription(
+    useCallback(
+      (mutation) => {
+        const openIssueId = issueDetails?.id;
+        if (!openIssueId) return;
+
+        const targetsOpenIssue =
+          mutation.issue_id === openIssueId ||
+          mutation.entity_id === openIssueId;
+        if (targetsOpenIssue) {
+          void refreshIssue(openIssueId);
+        }
+      },
+      [issueDetails?.id, refreshIssue],
+    ),
+  );
+
   const clearIssue = useCallback(() => {
     currentRequestIdRef.current++; // Cancel any in-flight requests
+    currentRefreshIdRef.current++; // Cancel any background live refresh
     setIssueDetails(null);
     setError(null);
     setIsLoading(false);
