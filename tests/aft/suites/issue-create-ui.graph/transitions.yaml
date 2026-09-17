@@ -139,7 +139,7 @@ transitions:
           done;
           echo "Show existing opened '$actual', expected '$expected'"; exit 1
         intent: A human author's visible issue id confirms Show existing opened the original issue identity
-      - click: { testid: header-close-button }
+      - press: Escape
       - wait:
           fn: >-
             !document.querySelector('[data-testid=issue-detail-panel]') ||
