@@ -142,57 +142,6 @@ states:
       - expect: { text: "Initial issue detail description ${RUN_ID:-local}-${AFT_CASE_ID}." }
       - expect: { notText: "discarded draft ${RUN_ID:-local}-${AFT_CASE_ID}" }
 
-  priority-saved:
-    intent: The open panel reflects the human's priority change.
-    assert:
-      - wait:
-          fn: >-
-            (() => {
-              const trigger = document.querySelector('[data-testid=priority-dropdown-trigger]');
-              return trigger?.getAttribute('data-priority') === '1' &&
-                trigger?.getAttribute('data-saving') !== 'true' &&
-                !document.querySelector('[data-testid=priority-saving]') &&
-                !document.querySelector('[data-testid=priority-error]');
-            })()
-        intent: Wait until the priority 1 save completes without an error.
-      - expect:
-          attr:
-            testid: priority-dropdown-trigger
-            name: data-priority
-            equals: "1"
-
-  priority-persisted:
-    intent: A fresh priority-filtered board renders the changed issue.
-    assert:
-      - wait:
-          fn: >-
-            document.querySelectorAll("section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}'][data-priority='1']").length === 1
-        intent: Wait until the filtered board renders this issue at priority 1.
-      - expect:
-          attr:
-            selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
-            name: data-priority
-            equals: "1"
-
-  priority-panel-reopened:
-    intent: The priority-filtered card reopens with the saved priority still reflected in the panel.
-    assert:
-      - wait:
-          fn: >-
-            (() => {
-              const panel = document.querySelector('[data-testid=issue-detail-panel]');
-              const trigger = document.querySelector('[data-testid=priority-dropdown-trigger]');
-              return panel?.getAttribute('data-state') === 'open' &&
-                panel?.getAttribute('data-loading') === 'false' &&
-                trigger?.getAttribute('data-priority') === '1';
-            })()
-        intent: Wait until the reopened panel reflects priority 1.
-      - expect:
-          attr:
-            testid: priority-dropdown-trigger
-            name: data-priority
-            equals: "1"
-
   owner-saved:
     intent: The open panel reflects the human's owner assignment.
     assert:
@@ -212,7 +161,7 @@ states:
       - expect: { count: { selector: "[data-testid=metadata-error-toast]", equals: 0 } }
 
   owner-persisted-on-card:
-    intent: A fresh priority-filtered board renders the case-specific owner badge on the issue card.
+    intent: A fresh board renders the case-specific owner badge on the issue card.
     terminal: true
     assert:
       - wait:
@@ -494,7 +443,6 @@ states:
         intent: Wait until the reopened editable issue panel is ready.
       - expect: { visible: { testid: issue-header } }
       - expect: { visible: { testid: status-dropdown } }
-      - expect: { visible: { testid: priority-dropdown-trigger } }
       - expect: { visible: { testid: label-editor } }
       - expect: { text: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}" }
 
