@@ -11,7 +11,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/agent/tsruntime"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -82,15 +81,7 @@ func runTask(cmd *cobra.Command, args []string) {
 
 	cli.SetDaemonMode(taskDaemonMode)
 
-	target, err := workspace.ResolveAgentTarget(argName, "")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		cli.ExitWithFlush(1)
-		return
-	}
-
-	worktreePath := target.WorkDir
-	agentName := target.AgentName
+	worktreePath, agentName := resolveAgentWorktreeOrExit(argName)
 
 	if taskSandboxMode {
 		handleSandboxMode("task", agentName, worktreePath, taskParentID, taskAutoMode)
