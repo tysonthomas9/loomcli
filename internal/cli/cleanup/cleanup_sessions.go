@@ -39,6 +39,8 @@ func cleanupSessionsDryRun(store *sessions.Store, maxAge time.Duration) (int, in
 	cutoff := time.Now().UTC().Add(-maxAge)
 
 	// Count sessions that would be purged.
+	// Deliberately unfiltered: maintenance must see every row, including rows
+	// from unconfigured agents that it is about to prune (PUPPET-340).
 	records, err := store.Query(sessions.Filter{})
 	if err != nil {
 		return 0, 0, fmt.Errorf("query sessions for dry-run: %w", err)

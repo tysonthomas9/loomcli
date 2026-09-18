@@ -25,6 +25,11 @@ const SessionsLedgerName = "sessions/index.jsonl"
 //
 // A missing index is not an error: the result is empty and the returned path
 // still names the file that was looked for.
+//
+// f.KnownAgents, when non-empty, restricts the read to those agent names. An
+// empty KnownAgents reads the whole ledger: the caller — not this function —
+// decides the allowlist, so a maintenance reader can see every row while a
+// reporting reader scopes itself to the workspace's configured agents.
 func ReadSessionUsage(runtimeDir string, f Filter) ([]SessionUsage, string, error) {
 	if runtimeDir == "" {
 		runtimeDir = "."
@@ -61,6 +66,8 @@ func sessionsFilter(f Filter) sessions.Filter {
 		Status:    sessions.SessionStatus(f.Status),
 		Since:     f.Since,
 		Until:     f.Until,
+
+		KnownAgents: f.KnownAgents,
 	}
 }
 
