@@ -264,12 +264,33 @@ func (s *Supervisor) maxRetriesBlockBackoff() time.Duration {
 	return defaultMaxRetriesBlockInterval
 }
 
-// applyNoWorkRestart resets retry counters for a NoWork exit and, if the
-// agent has failed over to a fallback backend, periodically returns to the
-// primary to test recovery. Caller holds ap.Mu. NoWork never counts toward
-// max_retries — task availability is not a backend-health signal.
+// applyNoWorkRestart handles a NoWork exit — the agent found nothing claimable
+// and went home — and, if the agent has failed over to a fallback backend,
+// periodically returns to the primary to test recovery. Caller holds ap.Mu.
+//
+// NoWork never CHARGES the restart budget: task availability is not a
+// backend-health signal, so an idle cycle is not a failure and RestartCount is
+// not incremented. It does not REFUND it either, which is the rule this
+// function used to get wrong. An idle cycle is no evidence that a failing
+// agent recovered — it is not even evidence that the agent ran, since the
+// pre-spawn claim gate decides NoWork before any process starts
+// (setPreflightError in claim.go). Zeroing RestartCount here therefore handed
+// a fresh budget to every agent whose failures interleaved with idle polls,
+// which on a mostly-idle fleet is all of them: max_retries became unreachable
+// and a failing-but-idle agent respawned forever.
+//
+// The budget is refunded by progress alone — applyCleanSuccessRestart on a
+// clean run, and applyMaxRetriesBlock when a spent budget converts to a
+// block-and-retry cycle. A healthy idle agent has nothing to refund: its
+// RestartCount is already 0 and stays there however long it polls. Preserving
+// the counter does not slow that polling down, because BPNoWork reads the
+// fixed no_work_backoff rather than the RestartCount-keyed exponential
+// schedule (computeBackoff).
+//
+// RateRetryCount still resets: it is the rate-limit schedule's own counter and
+// drives backend failover (FailoverAfter), both of which are backend-health
+// state that a completed idle cycle legitimately clears.
 func (s *Supervisor) applyNoWorkRestart(ap *AgentProcess) {
-	ap.RestartCount = 0
 	ap.RateRetryCount = 0
 	ap.NoWorkCount++
 	if ap.CurrentBackendIdx > 0 && shouldRetryPrimaryAfterNoWork(ap.NoWorkCount, s.getNoWorkBackoff()) {
