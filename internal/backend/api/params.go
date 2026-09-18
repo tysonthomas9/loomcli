@@ -108,6 +108,7 @@ func updateParamsToPatchRequest(params backend.UpdateParams) gen.PatchIssueReque
 		Parent:             params.Parent,
 		DueAt:              params.DueAt,
 		DeferUntil:         params.DeferUntil,
+		Repo:               params.Repo,
 	}
 	if params.Status != nil {
 		status := gen.PatchIssueRequestStatus(*params.Status)

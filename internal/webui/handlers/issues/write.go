@@ -44,6 +44,7 @@ func HandlePatchIssue(svc service.IssueService) http.HandlerFunc {
 			ExternalRef:        req.ExternalRef,
 			EstimatedMinutes:   req.EstimatedMinutes,
 			IssueType:          req.IssueType,
+			Repo:               req.Repo,
 			AddLabels:          req.AddLabels,
 			RemoveLabels:       req.RemoveLabels,
 			SetLabels:          req.SetLabels,

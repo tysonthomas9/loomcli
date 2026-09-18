@@ -77,6 +77,12 @@ var fleetUpdateIssueFields = map[string]bool{
 	"owner":               true,
 	"due_at":              true,
 	"external_ref":        true,
+	// fleet-db accepts "repo" on PATCH as the source-repo repair path
+	// (UpdateIssueRequest.Repo) from BrowserOperator/fleet-db#223 on. A
+	// fleet-db without it refuses the whole PATCH, but only when --source-repo
+	// is set: an unset Repo is omitted. Loom names the same field source_repo;
+	// the rename happens in the converter.
+	"repo": true,
 }
 
 // TestUpdateParamsToPatchRequest_SendsOnlyServerFields is the guard the
@@ -125,6 +131,7 @@ func TestUpdateParamsToPatchRequest_ForwardsEachSupportedField(t *testing.T) {
 		{"acceptance_criteria", backend.UpdateParams{
 			AcceptanceCriteria: strPtr("AC-1"),
 		}, "AC-1"},
+		{"repo", backend.UpdateParams{Repo: strPtr("fleet-db")}, "fleet-db"},
 	}
 
 	unset := updateParamsToPatchRequest(backend.UpdateParams{})
@@ -499,5 +506,46 @@ func TestCheckFleetUnsupportedFilters_SupportedFields(t *testing.T) {
 				t.Fatalf("checkFleetUnsupportedFilters: %v", err)
 			}
 		})
+	}
+}
+
+// TestUpdateParamsToPatchRequest_RenamesRepo pins the loom→fleet-db name
+// change for the source repo: loom's UpdateParams calls it Repo/source_repo,
+// fleet-db's UpdateIssueRequest calls it "repo" (the same name it uses on
+// create). Sending "source_repo" would be an unknown field and 400 the whole
+// PATCH.
+func TestUpdateParamsToPatchRequest_RenamesRepo(t *testing.T) {
+	req := updateParamsToPatchRequest(backend.UpdateParams{Repo: strPtr("loomcli")})
+	if _, ok := req["source_repo"]; ok {
+		t.Error("source_repo key must not be sent — fleet-db expects 'repo'")
+	}
+	if got, ok := req["repo"]; !ok || got != "loomcli" {
+		t.Errorf("repo = %v (present=%t), want %q", got, ok, "loomcli")
+	}
+}
+
+// TestUpdateParamsToPatchRequest_OmitsRepoWhenNil is the guard against
+// re-running the design_format outage. Until every deployed fleet-db accepts
+// "repo" on PATCH, an update that did not ask to change the source repo must
+// carry no repo key at all: fleet-db's strict decoder rejects the entire body
+// on an unknown field, so an always-present "repo" would 400 every update.
+func TestUpdateParamsToPatchRequest_OmitsRepoWhenNil(t *testing.T) {
+	req := updateParamsToPatchRequest(backend.UpdateParams{Status: strPtr("blocked"), Notes: strPtr("why")})
+	if _, ok := req["repo"]; ok {
+		t.Error("repo key present for a nil Repo — nil must omit the key entirely")
+	}
+}
+
+// TestUpdateParamsToPatchRequest_RepoEmptyStringClears covers the third
+// pointer state: a non-nil empty Repo is an explicit "clear it", so the key
+// must be present with an empty value rather than dropped.
+func TestUpdateParamsToPatchRequest_RepoEmptyStringClears(t *testing.T) {
+	req := updateParamsToPatchRequest(backend.UpdateParams{Repo: strPtr("")})
+	got, ok := req["repo"]
+	if !ok {
+		t.Fatal("repo key missing for an explicit empty value — that is a clear, not a no-op")
+	}
+	if got != "" {
+		t.Errorf("repo = %v, want empty string", got)
 	}
 }
