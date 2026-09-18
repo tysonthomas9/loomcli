@@ -101,7 +101,7 @@ var agentStopCmd = &cobra.Command{
 func init() {
 	agentAddCmd.Flags().StringVar(&agentAddRole, "role", "", "Role name (required)")
 	_ = agentAddCmd.MarkFlagRequired("role")
-	agentAddCmd.Flags().BoolVar(&agentAddAuto, "auto", false, "Auto-start on daemon up")
+	agentAddCmd.Flags().BoolVar(&agentAddAuto, "auto", true, "Daemon-supervise this agent (--auto=false registers it disabled)")
 	agentAddCmd.Flags().StringVar(&agentAddBackend, "backend", "", "AI backend override")
 	agentAddCmd.Flags().StringSliceVar(&agentAddRepos, "repos", nil, "Repo names (comma-separated or repeat flag)")
 	agentAddCmd.Flags().StringSliceVar(&agentAddRepoGroups, "repo-groups", nil, "Repo groups (comma-separated or repeat flag)")
@@ -126,6 +126,8 @@ func init() {
 	agentUpdateCmd.Flags().StringVar(&agentUpdateParent, "parent", "", "Epic ID to scope this agent to (pass an empty string to clear the scope)")
 	agentUpdateCmd.Flags().StringVar(&agentUpdateRole, "role", "", "Role name to switch this agent to")
 	agentUpdateCmd.Flags().StringVar(&agentUpdateMode, "mode", "", "Agent mode: ephemeral or service (empty clears it)")
+	agentUpdateCmd.Flags().BoolVar(&agentUpdateAuto, "auto", true,
+		"Daemon-supervise this agent; --auto=false durably disables it (the daemon stops supervising it and `agent start` refuses it)")
 
 	agentdefCmd.AddCommand(agentAddCmd, agentListCmd, agentShowCmd, agentRemoveCmd, agentStartCmd, agentStopCmd, agentUpdateCmd)
 	cli.RegisterCommand(agentdefCmd)
@@ -289,8 +291,8 @@ func runAgentList(_ *cobra.Command, _ []string) error {
 		}
 		for _, a := range agents {
 			auto := ""
-			if a.Auto {
-				auto = " auto"
+			if !a.Auto {
+				auto = " DISABLED"
 			}
 			mode := ""
 			if a.Mode != "" {
@@ -315,7 +317,11 @@ func runAgentShow(_ *cobra.Command, args []string) error {
 		fmt.Printf("Name:         %s\n", a.Name)
 		fmt.Printf("Role:         %s\n", a.RoleName)
 		fmt.Printf("State:        %s\n", a.State)
-		fmt.Printf("Auto-start:   %t\n", a.Auto)
+		disabledSuffix := ""
+		if !a.Auto {
+			disabledSuffix = "  (disabled: not supervised, agent start refused)"
+		}
+		fmt.Printf("Auto:         %t%s\n", a.Auto, disabledSuffix)
 		if a.Backend != "" {
 			fmt.Printf("Backend:      %s\n", a.Backend)
 		}
@@ -365,7 +371,7 @@ func runAgentRemove(_ *cobra.Command, args []string) error {
 }
 
 func runAgentStart(_ *cobra.Command, args []string) error {
-	return updateAgentDesiredState(args[0], domain.AgentDesiredRunning, domain.AgentStateActive, "start", nil)
+	return updateAgentDesiredState(args[0], domain.AgentDesiredRunning, domain.AgentStateActive, "start", nil, requireAutoEnabled)
 }
 
 func runAgentStop(_ *cobra.Command, args []string) error {
@@ -373,11 +379,45 @@ func runAgentStop(_ *cobra.Command, args []string) error {
 	if agentStopForce {
 		payload["force"] = "true"
 	}
-	return updateAgentDesiredState(args[0], domain.AgentDesiredStopped, domain.AgentStateStopped, "stop", payload)
+	// Stopping a disabled agent stays allowed: it is idempotent, and parking a
+	// still-running agent is exactly what you do while disabling it.
+	return updateAgentDesiredState(args[0], domain.AgentDesiredStopped, domain.AgentStateStopped, "stop", payload, allowDisabled)
 }
 
-func updateAgentDesiredState(name string, desired domain.AgentDesiredState, state domain.AgentState, commandType string, payload map[string]string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+// agentWithActiveWorkspace is cmdstore.WithActiveWorkspace behind a seam, so
+// the desired-state guards can be tested against a memstore.
+var agentWithActiveWorkspace = cmdstore.WithActiveWorkspace
+
+// autoPolicy says whether a desired-state transition must refuse a durably
+// disabled agent. Only start does; stop must keep working.
+type autoPolicy bool
+
+const (
+	allowDisabled      autoPolicy = false
+	requireAutoEnabled autoPolicy = true
+)
+
+func updateAgentDesiredState(
+	name string,
+	desired domain.AgentDesiredState,
+	state domain.AgentState,
+	commandType string,
+	payload map[string]string,
+	policy autoPolicy,
+) error {
+	return agentWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		if policy == requireAutoEnabled {
+			// Refuse client-side so the operator gets the reason now instead of
+			// a queued command that fails asynchronously in the daemon.
+			a, err := h.Store.Agents().Get(ctx, ws, name)
+			if err != nil {
+				return fmt.Errorf("get agent: %w", err)
+			}
+			if !a.Auto {
+				return fmt.Errorf("agent %s/%s is disabled (auto: false); run "+
+					"`loom agentdef update %s --auto` first", ws, a.Name, a.Name)
+			}
+		}
 		if _, err := h.Store.Agents().Update(ctx, ws, name, store.AgentUpdate{
 			DesiredState: &desired,
 			State:        &state,
