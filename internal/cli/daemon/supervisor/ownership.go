@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
@@ -525,4 +526,74 @@ func abandonedOwnerID(
 		return "", false
 	}
 	return lease.OwnerID, true
+}
+
+// shutdownLeaseReleaseTimeout bounds the lease sweep at the end of
+// StopWithBudget, and is the slice of the shutdown budget reserved for it: a
+// supervisor that exits still holding leases stalls every agent it owned for
+// the full lease TTL (30m). A var, not a const, so tests can shrink it.
+var shutdownLeaseReleaseTimeout = 5 * time.Second
+
+// releaseAllOwnershipLeases releases, in parallel and under a short deadline,
+// every agent-ownership lease still held when the supervisor stops. Reaching
+// a lease here is not routine — the normal unwind in superviseAgent releases
+// it — so anything found is logged at WARN with the agents named.
+//
+// releaseAgentOwnership is idempotent (it clears the token under ap.Mu and
+// returns early when empty), so racing a concurrent unwind is a no-op rather
+// than a double release.
+func (s *Supervisor) releaseAllOwnershipLeases() {
+	if s.ControlStore == nil || s.WorkspaceID == "" {
+		return
+	}
+	s.AgentsMu.RLock()
+	snapshot := make([]*AgentProcess, len(s.Agents))
+	copy(snapshot, s.Agents)
+	s.AgentsMu.RUnlock()
+
+	var (
+		wg   sync.WaitGroup
+		held []string
+	)
+	for _, ap := range snapshot {
+		ap.Mu.Lock()
+		token := ap.OwnershipLeaseToken
+		ap.Mu.Unlock()
+		if token == "" {
+			continue // already released by the normal unwind
+		}
+		held = append(held, ap.Entry.Worktree)
+		wg.Add(1)
+		go func(agent *AgentProcess) {
+			defer wg.Done()
+			s.releaseAgentOwnership(agent)
+		}(ap)
+	}
+	if len(held) == 0 {
+		return
+	}
+	slog.Warn("agent ownership leases still held at shutdown; releasing", "workspace", s.WorkspaceID, "worktrees", held)
+	if !waitGroupWithTimeout(&wg, shutdownLeaseReleaseTimeout) {
+		slog.Warn("agent ownership lease release did not complete before shutdown deadline",
+			"workspace", s.WorkspaceID, "worktrees", held, "timeout", shutdownLeaseReleaseTimeout)
+	}
+}
+
+// waitGroupWithTimeout reports whether wg finished before timeout elapsed.
+// The waiter goroutine outlives a timeout by design — it is parked on a
+// WaitGroup the process is about to abandon.
+func waitGroupWithTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
+	}
 }

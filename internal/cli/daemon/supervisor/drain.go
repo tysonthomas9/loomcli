@@ -621,13 +621,19 @@ func (s *Supervisor) StopWithBudget(budget time.Duration) StopReport {
 	outcomes, drainCompleted := s.drainAllWithGrace(snapshot, deadline)
 
 	// Wait for all superviseAgent goroutines to exit, bounded by the remaining
-	// budget.
+	// budget less the slice reserved for the lease sweep below.
 	wgDone := make(chan struct{})
 	go func() {
 		s.Wg.Wait()
 		close(wgDone)
 	}()
-	waitCompleted := waitUntil(wgDone, deadline)
+	waitCompleted := waitUntil(wgDone, deadline.Add(-shutdownLeaseReleaseTimeout))
+
+	// Strictly AFTER the drain: release any agent-ownership lease the supervise
+	// goroutines did not get to release themselves. Releasing one while its
+	// agent process is still alive would invite another supervisor to claim
+	// the agent and spawn a duplicate.
+	s.releaseAllOwnershipLeases()
 
 	return StopReport{
 		Budget:         budget,
