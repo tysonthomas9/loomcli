@@ -7176,6 +7176,8 @@ components:
           type: string
         parent:
           type: string
+        parent_title:
+          type: [string, "null"]
 
     IssueResponse:
       type: object
