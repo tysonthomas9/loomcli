@@ -88,6 +88,10 @@ func TestCheckPublishAuth_DirectoryServices(t *testing.T) {
 		if !strings.Contains(result.Detail, "501") {
 			t.Errorf("detail should name the uid it saw, got %q", result.Detail)
 		}
+		if !strings.Contains(result.Detail, "Relaunch the loom daemon") ||
+			strings.Contains(strings.ToLower(result.Detail), "pm2") {
+			t.Errorf("remediation must describe the action, not a process manager: %q", result.Detail)
+		}
 		if env.fillCalls != 0 {
 			t.Errorf("probe 1 must win outright; credential fill ran %d times", env.fillCalls)
 		}
@@ -97,7 +101,7 @@ func TestCheckPublishAuth_DirectoryServices(t *testing.T) {
 		env := newPublishAuthEnv(t, "darwin")
 		env.fillOut = "password=ghp_good\n"
 		deps, _, _, _, _ := NewTestDeps(t)
-		deps.Exec = execMock("oleh\n", "ghp_good\n", nil, "")
+		deps.Exec = execMock("dev\n", "ghp_good\n", nil, "")
 
 		result := checkPublishAuth(deps)
 
@@ -129,7 +133,7 @@ func TestCheckPublishAuth_Credentials(t *testing.T) {
 		env := newPublishAuthEnv(t, "linux")
 		env.fillOut = "protocol=https\nhost=github.com\nusername=x-access-token\npassword=ghp_secret\n"
 		deps, _, _, _, _ := NewTestDeps(t)
-		deps.Exec = execMock("oleh\n", "ghp_secret\n", nil, "")
+		deps.Exec = execMock("dev\n", "ghp_secret\n", nil, "")
 
 		result := checkPublishAuth(deps)
 
@@ -149,7 +153,7 @@ func TestCheckPublishAuth_Credentials(t *testing.T) {
 		env.fillOut = "password=ghp_secret\n"
 		env.fillErr = fmt.Errorf("git credential fill: exit status 1: fatal: failed to get: -50")
 		deps, _, _, _, _ := NewTestDeps(t)
-		deps.Exec = execMock("oleh\n", "ghp_secret\n", nil, "")
+		deps.Exec = execMock("dev\n", "ghp_secret\n", nil, "")
 
 		result := checkPublishAuth(deps)
 
@@ -172,7 +176,7 @@ func TestCheckPublishAuth_Credentials(t *testing.T) {
 		// What loom's helper emits when no token is in the environment.
 		env.fillOut = "username=x-access-token\npassword=\n"
 		deps, _, _, _, _ := NewTestDeps(t)
-		deps.Exec = execMock("oleh\n", "", fmt.Errorf("exit status 1"), "")
+		deps.Exec = execMock("dev\n", "", fmt.Errorf("exit status 1"), "")
 
 		result := checkPublishAuth(deps)
 
@@ -187,7 +191,7 @@ func TestCheckPublishAuth_Credentials(t *testing.T) {
 			return "git@github.com:tysonthomas9/loomcli.git", nil
 		}
 		deps, _, _, _, _ := NewTestDeps(t)
-		deps.Exec = execMock("oleh\n", "ghp_good\n", nil, "")
+		deps.Exec = execMock("dev\n", "ghp_good\n", nil, "")
 
 		result := checkPublishAuth(deps)
 
@@ -208,7 +212,7 @@ func TestCheckPublishAuth_GhToken(t *testing.T) {
 		env := newPublishAuthEnv(t, "linux")
 		env.fillOut = "password=ghp_secret\n"
 		deps, _, _, _, _ := NewTestDeps(t)
-		deps.Exec = execMock("oleh\n", "", fmt.Errorf("exit status 1"), "")
+		deps.Exec = execMock("dev\n", "", fmt.Errorf("exit status 1"), "")
 
 		result := checkPublishAuth(deps)
 
@@ -228,7 +232,7 @@ func TestCheckPublishAuth_GhToken(t *testing.T) {
 		env.fillOut = "password=ghp_secret\n"
 		t.Setenv("GITHUB_TOKEN", "ghp_from_env")
 		deps, _, _, _, _ := NewTestDeps(t)
-		deps.Exec = execMock("oleh\n", "", fmt.Errorf("gh not installed"), "")
+		deps.Exec = execMock("dev\n", "", fmt.Errorf("gh not installed"), "")
 
 		result := checkPublishAuth(deps)
 
@@ -255,7 +259,7 @@ func TestCheckPublishAuth_Fix(t *testing.T) {
 		}
 
 		deps, _, _, _, _ := NewTestDeps(t)
-		deps.Exec = execMock("oleh\n", "ghp_from_env\n", nil, "") // helper absent
+		deps.Exec = execMock("dev\n", "ghp_from_env\n", nil, "") // helper absent
 
 		result := checkPublishAuth(deps)
 
@@ -276,7 +280,7 @@ func TestCheckPublishAuth_Fix(t *testing.T) {
 		env.fillErr = fmt.Errorf("failed to get: -50")
 
 		deps, _, _, _, _ := NewTestDeps(t)
-		deps.Exec = execMock("oleh\n", "", fmt.Errorf("exit status 1"), "")
+		deps.Exec = execMock("dev\n", "", fmt.Errorf("exit status 1"), "")
 
 		result := checkPublishAuth(deps)
 
@@ -295,7 +299,7 @@ func TestCheckPublishAuth_Fix(t *testing.T) {
 		env.fillErr = fmt.Errorf("failed to get: -50")
 
 		deps, _, _, _, _ := NewTestDeps(t)
-		deps.Exec = execMock("oleh\n", "ghp_from_env\n", nil,
+		deps.Exec = execMock("dev\n", "ghp_from_env\n", nil,
 			"\n"+`!f() { test "$1" = get || exit 0; echo username=x-access-token; echo "password=${GITHUB_TOKEN:-$GH_TOKEN}"; }; f`+"\n")
 
 		result := checkPublishAuth(deps)

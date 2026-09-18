@@ -140,7 +140,7 @@ func probeDirectoryServices(deps *cli.Deps) (CheckResult, bool) {
 		Detail: fmt.Sprintf(
 			"The login keychain is unreadable, ssh aborts with \"No user exists for uid %s\", and\n"+
 				"git credential fill returns \"failed to get: -50\" for any host without an explicit helper.\n"+
-				"Relaunch the pm2 tree inside a user GUI session to restore it.\n"+
+				"Relaunch the loom daemon and its supervisor from a logged-in user session to restore it.\n"+
 				"Meanwhile https remotes still push with GITHUB_TOKEN set in the environment.", uid),
 	}, true
 }
