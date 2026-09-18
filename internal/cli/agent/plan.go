@@ -17,7 +17,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
-	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
@@ -90,15 +89,7 @@ func runPlan(cmd *cobra.Command, args []string) {
 
 	cli.SetDaemonMode(planDaemonMode)
 
-	target, err := workspace.ResolveAgentTarget(argName, "")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		cli.ExitWithFlush(1)
-		return
-	}
-
-	worktreePath := target.WorkDir
-	agentName := target.AgentName
+	worktreePath, agentName := resolveAgentWorktreeOrExit(argName)
 
 	if planSandboxMode {
 		handleSandboxMode("plan", agentName, worktreePath, planParentID, planAutoMode)
