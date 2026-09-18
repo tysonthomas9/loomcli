@@ -34,6 +34,8 @@ type agentWire struct {
 	MaxConcurrency   int                `json:"max_concurrency,omitempty"`
 	BudgetPolicy     string             `json:"budget_policy,omitempty"`
 	DesiredState     string             `json:"desired_state,omitempty"`
+	DrainNodeID      string             `json:"drain_node_id,omitempty"`
+	DrainExpiresAt   *time.Time         `json:"drain_expires_at,omitempty"`
 	Hooks            *domain.AgentHooks `json:"hooks,omitempty"`
 	CreatedAt        time.Time          `json:"created_at"`
 	UpdatedAt        time.Time          `json:"updated_at"`
@@ -66,6 +68,8 @@ func (a agentWire) toDomain() *domain.Agent {
 		MaxConcurrency:   a.MaxConcurrency,
 		BudgetPolicy:     a.BudgetPolicy,
 		DesiredState:     domain.AgentDesiredState(a.DesiredState),
+		DrainNodeID:      a.DrainNodeID,
+		DrainExpiresAt:   a.DrainExpiresAt,
 		Hooks:            a.Hooks.Clone(),
 		CreatedAt:        a.CreatedAt,
 		UpdatedAt:        a.UpdatedAt,
@@ -103,6 +107,8 @@ func (s *agentStore) Create(ctx context.Context, in store.AgentCreate) (*domain.
 		MaxConcurrency   int                `json:"max_concurrency,omitempty"`
 		BudgetPolicy     string             `json:"budget_policy,omitempty"`
 		DesiredState     string             `json:"desired_state,omitempty"`
+		DrainNodeID      string             `json:"drain_node_id,omitempty"`
+		DrainExpiresAt   *time.Time         `json:"drain_expires_at,omitempty"`
 		Hooks            *domain.AgentHooks `json:"hooks,omitempty"`
 	}{
 		Name:             in.Name,
@@ -119,6 +125,8 @@ func (s *agentStore) Create(ctx context.Context, in store.AgentCreate) (*domain.
 		MaxConcurrency:   in.MaxConcurrency,
 		BudgetPolicy:     in.BudgetPolicy,
 		DesiredState:     string(in.DesiredState),
+		DrainNodeID:      in.DrainNodeID,
+		DrainExpiresAt:   in.DrainExpiresAt,
 		Hooks:            in.Hooks.Clone(),
 	}
 	var resp agentWire
@@ -150,29 +158,37 @@ func (s *agentStore) List(ctx context.Context, ws string) ([]*domain.Agent, erro
 	return out, nil
 }
 
-func (s *agentStore) Update(ctx context.Context, ws, name string, patch store.AgentUpdate) (*domain.Agent, error) {
-	if !agentUpdateHasFleetDBFields(patch) {
-		return s.Get(ctx, ws, name)
-	}
-	body := struct {
-		RoleName         *string   `json:"role_name,omitempty"`
-		Auto             *bool     `json:"auto,omitempty"`
-		Backend          *string   `json:"backend,omitempty"`
-		FallbackBackends *[]string `json:"fallback_backends,omitempty"`
-		Repos            *[]string `json:"repos,omitempty"`
-		RepoGroups       *[]string `json:"repo_groups,omitempty"`
-		CrossRepo        *bool     `json:"cross_repo,omitempty"`
-		Parent           *string   `json:"parent,omitempty"`
-		State            *string   `json:"state,omitempty"`
-		Mode             *string   `json:"mode,omitempty"`
-		TaskFilter       *string   `json:"task_filter,omitempty"`
-		MaxConcurrency   *int      `json:"max_concurrency,omitempty"`
-		BudgetPolicy     *string   `json:"budget_policy,omitempty"`
-		DesiredState     *string   `json:"desired_state,omitempty"`
-		// A non-nil empty object is the explicit clear marker; omitempty only
-		// drops a nil pointer, so {} still reaches fleet-db.
-		Hooks *domain.AgentHooks `json:"hooks,omitempty"`
-	}{
+// agentUpdateWire is the PATCH body for an agent update, mirroring fleet-db's
+// strict update contract. Split out of Update so the request construction is
+// one named thing rather than a 50-line anonymous struct literal.
+type agentUpdateWire struct {
+	RoleName         *string   `json:"role_name,omitempty"`
+	Auto             *bool     `json:"auto,omitempty"`
+	Backend          *string   `json:"backend,omitempty"`
+	FallbackBackends *[]string `json:"fallback_backends,omitempty"`
+	Repos            *[]string `json:"repos,omitempty"`
+	RepoGroups       *[]string `json:"repo_groups,omitempty"`
+	CrossRepo        *bool     `json:"cross_repo,omitempty"`
+	Parent           *string   `json:"parent,omitempty"`
+	State            *string   `json:"state,omitempty"`
+	Mode             *string   `json:"mode,omitempty"`
+	TaskFilter       *string   `json:"task_filter,omitempty"`
+	MaxConcurrency   *int      `json:"max_concurrency,omitempty"`
+	BudgetPolicy     *string   `json:"budget_policy,omitempty"`
+	DesiredState     *string   `json:"desired_state,omitempty"`
+	// Drain metadata. fleet-db derives a clear from any desired_state that is
+	// not "draining", so these only ever need sending on a drain stamp.
+	DrainNodeID    *string    `json:"drain_node_id,omitempty"`
+	DrainExpiresAt *time.Time `json:"drain_expires_at,omitempty"`
+	// A non-nil empty object is the explicit clear marker; omitempty only
+	// drops a nil pointer, so {} still reaches fleet-db.
+	Hooks *domain.AgentHooks `json:"hooks,omitempty"`
+}
+
+// newAgentUpdateWire projects the store-level patch onto the wire body,
+// stringifying the typed enums that fleet-db carries as plain strings.
+func newAgentUpdateWire(patch store.AgentUpdate) agentUpdateWire {
+	body := agentUpdateWire{
 		RoleName:         patch.RoleName,
 		Auto:             patch.Auto,
 		Backend:          patch.Backend,
@@ -184,20 +200,30 @@ func (s *agentStore) Update(ctx context.Context, ws, name string, patch store.Ag
 		TaskFilter:       patch.TaskFilter,
 		MaxConcurrency:   patch.MaxConcurrency,
 		BudgetPolicy:     patch.BudgetPolicy,
+		DrainNodeID:      patch.DrainNodeID,
+		DrainExpiresAt:   patch.DrainExpiresAt,
 		Hooks:            patch.Hooks.Clone(),
 	}
 	if patch.State != nil {
-		s := string(*patch.State)
-		body.State = &s
+		v := string(*patch.State)
+		body.State = &v
 	}
 	if patch.Mode != nil {
-		s := string(*patch.Mode)
-		body.Mode = &s
+		v := string(*patch.Mode)
+		body.Mode = &v
 	}
 	if patch.DesiredState != nil {
-		s := string(*patch.DesiredState)
-		body.DesiredState = &s
+		v := string(*patch.DesiredState)
+		body.DesiredState = &v
 	}
+	return body
+}
+
+func (s *agentStore) Update(ctx context.Context, ws, name string, patch store.AgentUpdate) (*domain.Agent, error) {
+	if !agentUpdateHasFleetDBFields(patch) {
+		return s.Get(ctx, ws, name)
+	}
+	body := newAgentUpdateWire(patch)
 	var resp agentWire
 	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/agents/"+pathEscape(name), body, &resp); err != nil {
 		return nil, err
@@ -225,6 +251,8 @@ func agentUpdateHasFleetDBFields(patch store.AgentUpdate) bool {
 		patch.MaxConcurrency != nil ||
 		patch.BudgetPolicy != nil ||
 		patch.DesiredState != nil ||
+		patch.DrainNodeID != nil ||
+		patch.DrainExpiresAt != nil ||
 		patch.Hooks != nil
 }
 

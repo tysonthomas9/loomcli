@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
@@ -28,6 +29,9 @@ type AgentCreate struct {
 	MaxConcurrency int
 	BudgetPolicy   string
 	DesiredState   domain.AgentDesiredState
+	// Drain metadata, meaningful only alongside DesiredState "draining".
+	DrainNodeID    string
+	DrainExpiresAt *time.Time
 	Hooks          *domain.AgentHooks
 }
 
@@ -48,6 +52,12 @@ type AgentUpdate struct {
 	MaxConcurrency *int
 	BudgetPolicy   *string
 	DesiredState   *domain.AgentDesiredState
+	// DrainNodeID and DrainExpiresAt stamp a drain with the supervisor it is
+	// addressed to and when it lapses. Setting them without also setting
+	// DesiredState to draining is pointless: fleet-db derives a clear from any
+	// desired_state that is not "draining".
+	DrainNodeID    *string
+	DrainExpiresAt *time.Time
 	// Hooks replaces the whole completion pipeline. Nil leaves it untouched;
 	// a non-nil empty value clears it.
 	Hooks *domain.AgentHooks
