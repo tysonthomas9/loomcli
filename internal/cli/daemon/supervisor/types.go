@@ -47,7 +47,7 @@ type AgentProcess struct {
 	InputWaitPending       int               // interactive harness prompts currently awaiting an answer; a count (not a flag) so overlapping prompts nest — see input_wait.go
 	InputWaitSince         time.Time         // when InputWaitPending last rose from zero; anchors the bound that stops a suspension from outliving its cause
 
-	RestartCount   int       // consecutive restart attempts
+	RestartCount   int       // counted failures charged against max_retries since the last clean run or block; idle (NoWork) cycles neither charge nor refund it — see applyNoWorkRestart
 	LastStart      time.Time // when subprocess was last spawned
 	LastExit       time.Time // when subprocess last exited
 	LastExitCode   int       // exit code from last run
