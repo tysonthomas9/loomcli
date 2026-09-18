@@ -420,7 +420,8 @@ func (s *Supervisor) materializeSkills(ctx context.Context, ap *AgentProcess) er
 	}
 	ctx, cancel := context.WithTimeout(ctx, controlPlaneOperationTimeout)
 	defer cancel()
-	return skillmat.MaterializeLeased(ctx, s.ControlStore, s.WorkspaceID, ap.Entry.Role, ap.WorkDir())
+	return skillmat.MaterializeWithOptions(ctx, s.ControlStore, s.WorkspaceID, ap.Entry.Role, ap.WorkDir(),
+		skillmat.Options{LeasesDisabled: s.LeasesDisabled})
 }
 
 // materializeIdleSkills keeps an idle worker's worktree current while the

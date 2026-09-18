@@ -161,6 +161,7 @@ func (s commandPollerTestStore) Skills() store.SkillStore                   { re
 func (s commandPollerTestStore) SkillMaterializationLeases() store.SkillMaterializationLeaseStore {
 	return nil
 }
-func (s commandPollerTestStore) SkillPacks() store.SkillPackStore { return nil }
-func (s commandPollerTestStore) Daemon() store.DaemonProfileStore { return nil }
-func (s commandPollerTestStore) Close() error                     { return nil }
+func (s commandPollerTestStore) SkillPacks() store.SkillPackStore    { return nil }
+func (s commandPollerTestStore) Daemon() store.DaemonProfileStore    { return nil }
+func (s commandPollerTestStore) Capabilities() store.CapabilityStore { return nil }
+func (s commandPollerTestStore) Close() error                        { return nil }
