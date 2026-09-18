@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 // usageRecord is a lightweight fixture struct matching usage.SessionUsage JSON tags.
@@ -71,7 +73,7 @@ func runLoomUsage(t *testing.T, dir string, args ...string) (stdout, stderr stri
 	}
 	filtered = append(filtered, "LOOM_CONFIG_DIR="+emptyConfigDir)
 	filtered = append(filtered, "GIT_CONFIG_NOSYSTEM=1")
-	cmd.Env = filtered
+	cmd.Env = testutil.SandboxLoomRuntimeDir(filtered)
 
 	var stdoutBuf, stderrBuf strings.Builder
 	cmd.Stdout = &stdoutBuf

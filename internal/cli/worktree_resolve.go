@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
@@ -569,12 +570,45 @@ func (r *Resolver) SetRepoDefaultBranch(repoName, branch string) error {
 	return nil
 }
 
-// GetWorkspaceRuntimeDir returns the workspace root used for runtime files.
-// This is the configured workspace root path shared across repos.
-// The result is cached for the lifetime of the process.
+// GetWorkspaceRuntimeDir returns the workspace root used for runtime files —
+// the session ledger, the usage ledger, and everything else written per
+// workspace rather than per repo.
+//
+// Resolution order:
+//  1. LOOM_WORKSPACE_RUNTIME_DIR env var.
+//  2. The active workspace's configured path.
+//  3. "." when neither resolves.
+//
+// Under `go test` (testing.Testing()) step 1 is skipped when the value was
+// INHERITED from the environment the test binary was launched in. Every fleet
+// agent shell exports LOOM_WORKSPACE_RUNTIME_DIR pointing at the live
+// workspace, so honoring it makes `go test` append real rows to the
+// production session and usage ledgers (PUPPET-332). A value a test sets
+// itself differs from the inherited one and is deliberate, so it is honored
+// — that is what makes the guard invisible to ordinary tests. The one edge
+// case is a test that deliberately sets exactly the inherited value; it is
+// misrouted to the config fallback. That is accepted: it is vanishingly rare
+// and the alternative is writing to production data.
+//
+// The guard does NOT cross an exec boundary. A test that spawns the loom
+// binary, or any other subprocess, must pass LOOM_WORKSPACE_RUNTIME_DIR
+// explicitly — same caveat as bootstrap.LoomDir. scripts/test.sh scrubs the
+// variable for the whole `go test` process tree, which is the process-level
+// half of the same protection.
+//
+// The result is cached for the lifetime of the process via sync.Once, so a
+// test that manipulates the environment must call
+// ResetWorkspaceRuntimeDirCache() BEFORE the call it is exercising and again
+// from t.Cleanup afterwards, or it will read (and leave behind) another
+// test's value.
 func GetWorkspaceRuntimeDir() string {
 	workspaceRuntimeDirOnce.Do(func() {
-		if dir := os.Getenv("LOOM_WORKSPACE_RUNTIME_DIR"); dir != "" {
+		dir := os.Getenv("LOOM_WORKSPACE_RUNTIME_DIR")
+		if testing.Testing() && dir != "" && dir == inheritedRuntimeDir {
+			// Inherited from the launching agent shell — not ours to write to.
+			dir = ""
+		}
+		if dir != "" {
 			workspaceRuntimeDirCache = dir
 			return
 		}
@@ -610,6 +644,20 @@ var (
 	workspaceRuntimeDirCache string
 	workspaceRuntimeDirOnce  sync.Once
 )
+
+// inheritedRuntimeDir is LOOM_WORKSPACE_RUNTIME_DIR as it stood at process
+// start, captured at init before any test can call t.Setenv. See
+// GetWorkspaceRuntimeDir for what it is used for.
+var inheritedRuntimeDir = os.Getenv("LOOM_WORKSPACE_RUNTIME_DIR")
+
+// SetInheritedRuntimeDirForTest overrides the captured inherited value so a
+// test can simulate being launched from an agent shell. Returns a function
+// that restores the real value; tests must defer it.
+func SetInheritedRuntimeDirForTest(dir string) func() {
+	prev := inheritedRuntimeDir
+	inheritedRuntimeDir = dir
+	return func() { inheritedRuntimeDir = prev }
+}
 
 // Package-level default resolver (lazily initialized)
 var defaultResolver *Resolver

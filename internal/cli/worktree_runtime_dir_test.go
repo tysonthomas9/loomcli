@@ -201,3 +201,43 @@ func TestResetWorkspaceRuntimeDirCache(t *testing.T) {
 		t.Errorf("after reset: GetWorkspaceRuntimeDir() = %q, want %q", second, "/tmp/updated")
 	}
 }
+
+// TestGetWorkspaceRuntimeDir_IgnoresInheritedRuntimeDir covers the PUPPET-332
+// guard: a LOOM_WORKSPACE_RUNTIME_DIR that was inherited from the launching
+// agent shell must NOT be used under `go test`, because it points at the live
+// fleet workspace whose session and usage ledgers are production data.
+func TestGetWorkspaceRuntimeDir_IgnoresInheritedRuntimeDir(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+	ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(ResetWorkspaceRuntimeDirCache)
+
+	canary := t.TempDir()
+	restore := SetInheritedRuntimeDirForTest(canary)
+	t.Cleanup(restore)
+
+	// The env holds exactly the inherited value — the agent-shell situation.
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", canary)
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	if got := GetWorkspaceRuntimeDir(); got == canary {
+		t.Fatalf("GetWorkspaceRuntimeDir() = %q, want anything but the inherited value", got)
+	}
+}
+
+// TestGetWorkspaceRuntimeDir_DeliberateValueBeatsInherited pins the other half
+// of the guard: a value a test sets itself differs from the inherited one and
+// is honored, so the guard stays invisible to ordinary tests.
+func TestGetWorkspaceRuntimeDir_DeliberateValueBeatsInherited(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+	ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(ResetWorkspaceRuntimeDirCache)
+
+	restore := SetInheritedRuntimeDirForTest("/tmp/loom-inherited-canary")
+	t.Cleanup(restore)
+
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", "/tmp/loom-deliberate")
+
+	if got := GetWorkspaceRuntimeDir(); got != "/tmp/loom-deliberate" {
+		t.Errorf("GetWorkspaceRuntimeDir() = %q, want %q", got, "/tmp/loom-deliberate")
+	}
+}
