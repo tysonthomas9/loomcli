@@ -4504,3 +4504,41 @@ Two limits are structural:
   the repair there is the operator's provisioner.
 - Nothing in the daemon ever re-blesses. `--fix` is reachable only from an
   operator-typed command, so a harness upgrade always passes through a human.
+
+### `merge_in_progress`
+
+Reports any workspace repo clone or agent worktree left sitting in an
+unfinished `merge`, `rebase`, `cherry-pick`, `revert` or `bisect`. A worktree in
+that state blocks whoever works in it next, and nothing else reports it.
+
+An operation younger than `LOOM_DOCTOR_MERGE_STALE` (default `10m`) is skipped
+entirely: someone may be resolving it right now, and a presence gate would be
+noise. An operation whose age cannot be determined is reported, not suppressed.
+
+| Condition | Status | Summary |
+|-----------|--------|---------|
+| Nothing stuck | `pass` | `no stalled merges (N worktree(s) checked)` |
+| A worktree stuck past the threshold | `warn` | `N worktree(s) stuck mid-operation` |
+| Nothing to inspect at all | *(no output)* | the check is skipped entirely |
+
+`Detail` names each offender: the worktree, the path, the operation, the
+`MERGE_HEAD`/`REBASE_HEAD` sha, the unmerged path count and the age.
+
+The check never repairs, `--fix` included: a live agent may be mid-run in the
+worktree, and no lock covers that decision.
+
+### Recovery of a worktree left mid-operation
+
+When recovery runs after an agent exits (any exit that did not leave an
+incomplete run), it aborts an operation left in progress in the agent's
+worktree before its `git clean`, which would otherwise delete the operation's
+untracked files. The abort discards the agent's conflict resolutions, and a
+rebase abort moves the branch back past the commits the rebase had made, so a
+snapshot is written first to `<worktrees dir>/rescue/<worktree>-<op>-<timestamp>/`:
+`head.txt` (the HEAD commit before the abort), `status.txt`, `worktree.diff`
+(the full diff against HEAD, applicable with `git apply`), `unmerged.txt`, the
+`*_HEAD` files and a `README.txt`.
+
+If any part of the snapshot cannot be written, nothing is aborted and the
+`git clean` is skipped too: the worktree stays exactly as the agent left it,
+and recovery logs a warning.
