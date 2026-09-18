@@ -96,8 +96,8 @@ of booting a sandbox whose agent could never claim work.
 
 ## E. Live validation against OpenShell v0.0.53 (empirical) — Podman on macOS
 
-Installed OpenShell 0.0.53 (Homebrew) + Podman driver + gateway on macOS/arm64 and drove
-real sandboxes. Confirmed and fixed (one-shot, PR #118):
+OpenShell 0.0.53 + Podman driver + gateway on darwin/arm64, driving real sandboxes.
+Confirmed and fixed (one-shot, PR #118):
 
 - **Arch vs OS.** A sandbox is **Linux**; the M-series host is **darwin/arm64**. Proven in a
   live sandbox: a `GOOS=linux` ELF prints `hello from linux/arm64` (rc 0); the darwin Mach-O
