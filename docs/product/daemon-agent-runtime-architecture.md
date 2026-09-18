@@ -441,9 +441,9 @@ This supports:
 ### The Daemon-Owned Log
 
 The daemon writes its own log file and does not depend on the process manager
-to capture stderr. Every line is teed: stderr still carries it (so `pm2 logs`,
-`journalctl`, or a terminal keeps working) and a file the daemon opens itself
-carries it too.
+to capture stderr. Every line is teed: stderr still carries it (so the
+supervisor's log stream or a terminal keeps working) and a file the daemon
+opens itself carries it too.
 
 - Path: `<log_dir>/<workspace-id>/daemon.log`, where `log_dir` is the daemon's
   `log_dir` setting (default `.loom/logs`, resolved relative to the project
@@ -460,7 +460,7 @@ carries it too.
   supervising.
 
 This exists because a process manager's writer can break and stay broken. A
-transient ENOSPC broke pm2's stream to `~/.pm2/logs` and the daemon logged
+transient ENOSPC broke the supervisor's log stream and the daemon logged
 nothing for two hours while supervising normally. loomcli cannot repair another
 process's writer, so it stopped depending on it.
 
