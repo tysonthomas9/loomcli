@@ -1,14 +1,15 @@
 # OpenShell Sandbox Integration — port onto v5
 
-Restores Tyson's **OpenShell sandbox integration** (PR #20, originally on `falcon`)
-onto v5. Branch: `feat/sandbox-openshell-v5` (off `v5`).
+Restores the **OpenShell sandbox integration** of PR #20 onto v5, recovered from the
+rescue tag `rescue-sandbox-openshell-pr20` (`96dacab12`).
+Branch: `feat/sandbox-openshell-v5` (off `v5`).
 
 ## Status
 
 | Slice | State |
 |-------|-------|
 | **One-shot `loom task/plan <wt> --sandbox`** | ✅ **Implemented** — builds, `go vet` clean, unit-tested, `golangci-lint` 0 issues |
-| Daemon-mode `execution: sandbox` (supervised agents) | ⛔ **Deferred** — needs FleetDB/domain config plumbing (see below) |
+| Daemon-mode `execution: sandbox` (supervised agents) | ✅ **Implemented** — the config plumbing described below landed with the least-privilege FleetDB transport (RW1–RW6); remaining work is tracked in `docs/design/sandbox-remaining-work.md` |
 
 ## What's implemented (one-shot)
 
@@ -55,25 +56,25 @@ current branch. Recovered from the dangling commit and pinned:
   git checkout rescue-sandbox-openshell-pr20 -- internal/cli/execution_strategy.go internal/cli/sandbox_strategy.go
   ```
 
-## Deferred: daemon-mode sandbox (the larger piece)
+## Daemon-mode sandbox (the larger piece)
 
 v5 replaced `loom.yaml` with a **FleetDB/domain-backed config store**: `config.AgentEntry`
 is built from `domain.Agent` via `agentEntryFromDomain`, and `LoadProjectFile`/`ProjectFile`
-no longer exist. So letting *supervised* agents declare `execution: sandbox` requires
-plumbing new fields through the domain model + store (+ likely the separate `fleet-db`
-server repo), not just a struct field. Seam map for that work:
+no longer exist. So letting *supervised* agents declare `execution: sandbox` required
+plumbing new fields through the domain model + store (+ the separate `fleet-db`
+server repo), not just a struct field. Seam map, with what landed:
 
-- [ ] **AgentProcess fields** — add `Strategy`/`SandboxName` → `internal/cli/daemon/supervisor/types.go`
-- [ ] **Spawn** — branch to a sandbox command in `internal/cli/daemon/supervisor/spawn.go`
-      `buildCommand`/`buildAgentExecCmd` (v5 splits build from start; adapt the strategy
-      to a `BuildSpawnCommand(ap) (*exec.Cmd, error)` shape rather than build-and-start)
-- [ ] **Cleanup** — call after `waitForAgent` in `spawn.go` (fetch + ff-merge + delete)
-- [ ] **Kill** — append sandbox delete in `internal/cli/daemon/supervisor/health.go` `StopAgent`
-- [ ] **resolveStrategy** at agent creation → `supervisor/supervisor.go` (`ap := &AgentProcess{…}`, ~L114)
-- [ ] **Config** — add `Execution`/`Sandbox` to `config.AgentEntry`/`DaemonSettings`
-      (`internal/cli/config/project.go`) **and** to `domain.Agent`/`domain.DaemonProfile`
-      + `agentEntryFromDomain`/`daemonSettingsFromDomain` + the FleetDB store (+ fleet-db server)
-- [ ] **Validation** — `execution` ∈ {"","direct","sandbox"}; sandbox requires providers
+- [x] **AgentProcess fields** — `SandboxName` + `sandboxRevoke` → `internal/cli/daemon/supervisor/types.go`
+- [x] **Spawn** — `buildCommand` dispatches `ap.IsSandbox()` to `buildSandboxCommand` in
+      `internal/cli/daemon/supervisor/spawn.go` (build-only; the supervisor still starts it)
+- [x] **Cleanup** — `postExitCleanup` → `cleanupSandbox` (fetch + ff-merge + revoke + delete)
+- [x] **Config** — `Execution` on `config.AgentEntry`, `domain.Agent`, `store.Agent{Create,Update}`,
+      the fleetdb agent wire and `loom agentdef add --execution` (fleet-db side: fleet-db#76)
+- [ ] **Kill** — `internal/cli/daemon/supervisor/health.go` `StopAgent` does not delete the
+      sandbox itself; it relies on the killed process falling through to `postExitCleanup`,
+      so a hard daemon kill (SIGKILL) can leak a container
+- [ ] **Validation** — `execution` is accepted as a free-form string; an unrecognized value
+      silently means "host". Constrain it to {"","sandbox"}, and require providers for sandbox
 
 ## Build / test
 
