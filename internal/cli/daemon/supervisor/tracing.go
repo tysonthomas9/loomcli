@@ -7,6 +7,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/metrics/spawnmetrics"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -48,6 +49,24 @@ func recordErr(span trace.Span, err error, reason string) {
 	}
 	span.RecordError(err)
 	span.SetStatus(codes.Error, reason)
+}
+
+// recordSpawnFailure is the single exit for a failed spawn: it records the
+// error on the span with the class's bounded reason string, and counts the
+// failure against the role. Every failure branch in spawnAgent goes through
+// here, so a new branch cannot be tagged on the span but missed by the metric.
+//
+// role is a parameter rather than something read off the AgentProcess: the
+// call sites straddle ap.Mu (two before it is taken, one just after it is
+// released), so reaching for the lock in here would deadlock the supervisor.
+//
+// No-op on a nil err, matching recordErr, so it can be called unconditionally.
+func (s *Supervisor) recordSpawnFailure(span trace.Span, err error, role string, c spawnmetrics.Class) {
+	if err == nil {
+		return
+	}
+	recordErr(span, err, c.SpanReason())
+	s.SpawnMetrics.RecordFailure(role, c)
 }
 
 // errorTypeFromAgentErr maps an *agenterr.AgentError to the low-cardinality
