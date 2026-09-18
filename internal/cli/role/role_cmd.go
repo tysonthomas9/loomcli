@@ -319,7 +319,7 @@ func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 	case "model":
 		patch.Model = strPtr(value)
 	case "task_filter":
-		patch.TaskFilter = strPtr(value)
+		return taskFilterRolePatch(value)
 	case "executor":
 		// Closed vocabulary, validated client-side so a typo fails here with
 		// the accepted values instead of as a server 400: "" (clear, same as
@@ -426,6 +426,25 @@ func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 // yields a non-nil pointer to "" so unset of string fields lands as
 // "set to empty" on the wire.
 func strPtr(s string) *string { return &s }
+
+// taskFilterRolePatch canonicalizes a role's task_filter, or fails naming the
+// accepted values.
+//
+// The role's filter is the one the daemon router actually reads — an agentdef's
+// TaskFilter is never copied into config.AgentEntry — so an unrecognized value
+// stored here degrades routing silently: applyTaskFilter's default branch
+// behaves as has_design. Reject it at input time and store the canonical
+// spelling instead.
+//
+// Split out of buildRolePatch only to keep that switch under the
+// cognitive-complexity gate.
+func taskFilterRolePatch(value string) (store.RoleUpdate, error) {
+	canonical, err := cli.ValidateTaskFilter(value)
+	if err != nil {
+		return store.RoleUpdate{}, err
+	}
+	return store.RoleUpdate{TaskFilter: strPtr(canonical)}, nil
+}
 
 func normalizeRoleKindValue(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
