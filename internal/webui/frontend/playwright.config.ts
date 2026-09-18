@@ -27,6 +27,18 @@ const selfContainedPort = resolvePort("E2E_PORT", 8090);
 // Vite preview serves the frontend for integration tests (backed by preview.proxy).
 const selfContainedFrontendPort = resolvePort("E2E_FRONTEND_PORT", 3100);
 
+// Port map for the e2e suites:
+//   E2E_PORT          (8090) — `loom serve` in self-contained integration mode
+//   E2E_FRONTEND_PORT (3100) — Vite *preview*, serves the frontend for integration
+//   E2E_DEV_PORT      (3000) — Vite *dev*, serves the mocked `chromium` suite
+// E2E_REUSE_SERVER=1 opts into reusing an already-running dev server on
+// E2E_DEV_PORT (ignored under CI). See PUPPET-217.
+const devServerPort = resolvePort("E2E_DEV_PORT", 3000);
+const devServerURL = `http://localhost:${devServerPort}`;
+// The mocked chromium suite is the only mode that starts its own Vite dev
+// server; integration modes point at a user- or script-managed frontend.
+const usesDevServer = !isIntegration && !isLocalIntegration;
+
 /** Resolve API key from env or key file for authenticated test projects. */
 function resolveApiKey(): string {
   // Self-contained mode has auth disabled by default, no key needed
@@ -51,7 +63,7 @@ const frontendBaseURL = isSelfContained
   ? `http://localhost:${selfContainedFrontendPort}`
   : process.env.LOOM_FRONTEND_BASE_URL ||
     process.env.LOOM_BASE_URL ||
-    "http://localhost:3000";
+    devServerURL;
 const authHeaders: Record<string, string> = apiKey
   ? { Authorization: `Bearer ${apiKey}` }
   : {};
@@ -159,14 +171,33 @@ function resolveWebServer() {
     // Local server mode or local-integration: user manages server
     return undefined;
   }
-  // Chromium unit tests: Vite dev server
+  // Chromium unit tests: Vite dev server. Reuse is opt-in only — an implicit
+  // reuse silently runs the whole suite against whatever holds the port
+  // (PUPPET-217).
+  const allowReuse = !isCI && process.env.E2E_REUSE_SERVER === "1";
   return {
-    command: "PLAYWRIGHT_TEST=1 npm run dev",
-    url: "http://localhost:3000",
-    reuseExistingServer: !isCI,
+    command: `PLAYWRIGHT_TEST=1 npm run dev -- --port ${devServerPort} --strictPort`,
+    url: devServerURL,
+    reuseExistingServer: allowReuse,
     timeout: 60_000,
   };
 }
+
+const devServerCheckProject: NonNullable<
+  Parameters<typeof defineConfig>[0]["projects"]
+> = usesDevServer
+  ? [
+      {
+        name: "dev-server-check",
+        testMatch: "**/dev-server-identity.setup.ts",
+        use: { baseURL: devServerURL },
+        // Never retry a port collision: CI's retries: 3 would triple the wait
+        // before reporting it.
+        retries: 0,
+        timeout: 15_000,
+      },
+    ]
+  : [];
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -192,13 +223,17 @@ export default defineConfig({
   snapshotPathTemplate: "{snapshotDir}/{testFilePath}/{arg}{ext}",
 
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: devServerURL,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     video: useFailureVideo,
   },
 
   projects: [
+    // Pre-flight for the mocked suite: fail loudly when the dev-server port is
+    // held by something that is not the loom frontend (PUPPET-217). Not
+    // registered in integration modes, which have no dev server to probe.
+    ...devServerCheckProject,
     {
       name: "chromium",
       use: {
@@ -208,6 +243,7 @@ export default defineConfig({
           : {}),
       },
       testIgnore: isIntegration ? undefined : "**/*.integration.spec.ts",
+      dependencies: usesDevServer ? ["dev-server-check"] : [],
     },
     {
       // What CI gates on: the mocked chromium suite minus the quarantine.
