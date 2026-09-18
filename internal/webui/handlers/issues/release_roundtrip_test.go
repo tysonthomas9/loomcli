@@ -66,7 +66,7 @@ func TestReleaseRoundTrip_ReachesTheServiceThroughServe(t *testing.T) {
 	}
 }
 
-// The regression guard for the old behaviour: this call used to return
+// The regression guard for the old behavior: this call used to return
 // KindNotImplemented no matter what, which is indistinguishable at the call
 // site from "serve has no release route" and is what made the supervisor stop
 // trying.
@@ -105,7 +105,7 @@ func TestReleaseRoundTrip_ConflictSurvivesTheHop(t *testing.T) {
 //
 // A bare net/http mux answers a missing route with plain text, which the
 // client's envelope parser cannot read — so this only works if the 404 is
-// recognised by status code. Getting it wrong lands the case in
+// recognized by status code. Getting it wrong lands the case in
 // KindUnavailable, where a caller correctly treats it as transient and never
 // releases at all.
 func TestReleaseRoundTrip_OlderServeReportsNotImplemented(t *testing.T) {
