@@ -196,6 +196,39 @@ func HandleClaimIssue(svc service.IssueService) http.HandlerFunc {
 	}
 }
 
+// HandleReleaseIssue returns a handler that releases a claimed issue back to
+// open — the counterpart to HandleClaimIssue, and the route the serve-mediated
+// release path had no way to call.
+//
+// The optional X-Actor header scopes the release to the calling worker:
+// releasing a lock held by a different actor returns 409 rather than silently
+// un-claiming the worker still running on it.
+func HandleReleaseIssue(svc service.IssueService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		issueID := r.PathValue("id")
+		if issueID == "" {
+			handler.RespondError(w, http.StatusBadRequest, "missing issue ID")
+			return
+		}
+
+		actor, err := actorFromRequest(r)
+		if err != nil {
+			handler.RespondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		if err := svc.ReleaseIssue(r.Context(), service.ReleaseIssueParams{
+			IssueID: issueID,
+			Actor:   actor,
+		}); err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+
+		handler.WriteJSON(w, http.StatusOK, IssuesResponse{Success: true})
+	}
+}
+
 // ReopenRequest represents the JSON body for reopening a closed issue. All
 // fields optional; an empty body is valid and yields a status-only reopen.
 type ReopenRequest struct {

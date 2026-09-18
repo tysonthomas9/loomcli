@@ -3525,6 +3525,15 @@ type GetIssueEventsParams struct {
 	Since *string `form:"since,omitempty" json:"since,omitempty"`
 }
 
+// ReleaseIssueParams defines parameters for ReleaseIssue.
+type ReleaseIssueParams struct {
+	// XActor Identity of the worker performing the operation. Issue locks are
+	// arbitrated per actor, so without this header every worker behind one
+	// server collapses onto the server's own configured actor. Bounded at
+	// 128 characters; control characters are rejected with 400.
+	XActor *ActorHeader `json:"X-Actor,omitempty"`
+}
+
 // SaveIssueTabsJSONBody defines parameters for SaveIssueTabs.
 type SaveIssueTabsJSONBody struct {
 	ActiveTabId string     `json:"active_tab_id"`

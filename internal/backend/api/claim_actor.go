@@ -49,11 +49,47 @@ func (b *APIBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL t
 	return err
 }
 
-// ReleaseIssueAsActor releases the lock a specific worker holds. It maps onto
-// the same not-implemented answer as ReleaseIssueLock until serve exposes a
-// lock-only release route: an honest KindNotImplemented lets the supervisor
-// fall back to TTL expiry, whereas a silent success would report that a lock
-// was freed when it was not.
+// ReleaseIssueAsActor releases the lock a specific worker holds, via
+// POST /issues/{id}/release with the X-Actor header. Serve scopes the release
+// to that actor, so releasing a lock held by a different worker comes back as
+// KindConflict rather than silently un-claiming the sibling still running on
+// it.
+//
+// This used to map onto ReleaseIssueLock's KindNotImplemented because serve
+// exposed no release route. That was honest, but it made every release through
+// LOOM_SERVER_URL a no-op: the supervisor took the not-implemented answer as
+// "fall back to TTL expiry" and the claim sat at in_progress until the lock
+// aged out.
+//
+// A serve older than the route answers 404 with a plain-text body, because an
+// unregistered pattern is answered by net/http's mux and never reaches a
+// handler. That arrives here as an envelope parse failure, and it is reported
+// as KindNotImplemented: "this server cannot release" is what the caller needs
+// to know, and it must not be mistaken for a transient failure. The
+// distinction is load-bearing — a caller degrades to the unscoped status
+// transition on not-implemented, but must leave the task claimed on a
+// transient error, because an unscoped release can free a lock a live sibling
+// still holds.
+//
+// A 404 that does carry the API envelope came from the release handler itself
+// and means the issue is missing, so it stays KindNotFound.
 func (b *APIBackend) ReleaseIssueAsActor(ctx context.Context, id string, actor string) error {
-	return b.ReleaseIssueLock(ctx, id, actor)
+	if id == "" {
+		return backend.ErrValidation("ReleaseIssue", "id must not be empty")
+	}
+	if actor == "" {
+		return backend.ErrValidation("ReleaseIssue", "actor must not be empty")
+	}
+
+	path := "/issues/" + url.PathEscape(id) + "/release"
+	resp, statusCode, err := b.doRequestHeaders(ctx, http.MethodPost, path, nil,
+		map[string]string{actorHeader: actor})
+	if err != nil {
+		if statusCode == http.StatusNotFound {
+			return backend.ErrNotImplemented("ReleaseIssue",
+				"server exposes no issue release route; upgrade loom serve or rely on TTL expiry")
+		}
+		return classifyTransportError("ReleaseIssue", err)
+	}
+	return classifyHTTPError("ReleaseIssue", statusCode, *resp)
 }
