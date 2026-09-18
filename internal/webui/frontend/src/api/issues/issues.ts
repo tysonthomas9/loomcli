@@ -433,9 +433,7 @@ export async function createIssueWithMetadata(
     {
       params: { path: { ws: workspaceId } },
       body,
-      ...(options.force
-        ? { headers: { "X-Idempotency-Force": "true" } }
-        : {}),
+      ...(options.force ? { headers: { "X-Idempotency-Force": "true" } } : {}),
     },
   );
   if (error) throw apiErrorFromResponse(error, response);

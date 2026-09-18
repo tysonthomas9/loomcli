@@ -101,7 +101,10 @@ export function createIssueStore(
   let maxReconnectAttemptsTracked = 0;
   let eventUnsubscribe: (() => void) | null = null;
 
-  function invalidateIssueDetails(issueId: string, get: () => IssueStore): void {
+  function invalidateIssueDetails(
+    issueId: string,
+    get: () => IssueStore,
+  ): void {
     const versions = new Map(get().detailInvalidationVersions);
     versions.set(issueId, (versions.get(issueId) ?? 0) + 1);
     store.setState({ detailInvalidationVersions: versions });
@@ -119,9 +122,10 @@ export function createIssueStore(
       return undefined;
     }
 
-    // FleetDB identifies comment, label, and dependency mutations by their
-    // owning issue in entity_id. Older producers populated issue_id instead.
-    return mutation.issue_id || mutation.entity_id;
+    // Non-issue entity IDs identify the comment, label, or dependency itself.
+    // The backend projects the owning issue into issue_id from the event
+    // snapshot, which is the only safe key for detail invalidation.
+    return mutation.issue_id;
   }
 
   let onToast = initialConfig?.onToast ?? null;

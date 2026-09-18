@@ -1029,14 +1029,14 @@ describe("issueStore", () => {
       expect(store.getState().mutationCount).toBe(0);
     });
 
-    it("invalidates full issue details when a comment SSE mutation arrives", () => {
+    it("invalidates the owning issue when a comment SSE mutation arrives", () => {
       store.getState().applyMutation(
         makeMutation({
           type: "comment",
           entity_type: "comment",
-          entity_id: "task-1",
+          entity_id: "comment-1",
           action: "comment.create",
-          issue_id: undefined,
+          issue_id: "task-1",
         }),
       );
 
@@ -1046,13 +1046,29 @@ describe("issueStore", () => {
         makeMutation({
           type: "comment",
           entity_type: "comment",
-          entity_id: "task-1",
+          entity_id: "comment-2",
+          action: "comment.create",
+          issue_id: "task-1",
+        }),
+      );
+
+      expect(store.getState().detailInvalidationVersions.get("task-1")).toBe(2);
+    });
+
+    it("does not mistake a comment entity ID for its owning issue", () => {
+      store.getState().applyMutation(
+        makeMutation({
+          type: "comment",
+          entity_type: "comment",
+          entity_id: "comment-1",
           action: "comment.create",
           issue_id: undefined,
         }),
       );
 
-      expect(store.getState().detailInvalidationVersions.get("task-1")).toBe(2);
+      expect(store.getState().detailInvalidationVersions.has("comment-1")).toBe(
+        false,
+      );
     });
 
     it("reconciles a successful detail write into the issue projection", () => {

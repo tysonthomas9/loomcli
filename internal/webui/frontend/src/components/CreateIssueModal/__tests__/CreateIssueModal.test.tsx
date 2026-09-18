@@ -320,9 +320,9 @@ describe("CreateIssueModal", () => {
       });
       fireEvent.click(screen.getByTestId("create-issue-submit"));
 
-      expect(await screen.findByTestId("soft-duplicate-notice")).toHaveTextContent(
-        "An identical issue was created moments ago",
-      );
+      expect(
+        await screen.findByTestId("soft-duplicate-notice"),
+      ).toHaveTextContent("An identical issue was created moments ago");
       expect(onSuccess).not.toHaveBeenCalled();
 
       fireEvent.click(screen.getByTestId("soft-duplicate-show-existing"));

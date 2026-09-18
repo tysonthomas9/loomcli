@@ -4,14 +4,33 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	cliagent "github.com/tysonthomas9/loomcli/internal/cli/agent"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+var (
+	seedLogWorkspace string
+	seedLogAgent     string
+	seedLogFile      string
+)
+
+// daemonSeedLogCmd is part of the TEST-ONLY seeding seam (docs/adr/0001). It
+// appends content through the same archive-log writer used by the supervisor.
+var daemonSeedLogCmd = &cobra.Command{
+	Use:    "seed-log",
+	Short:  "TEST-ONLY: append content to an agent's archive log via the product's own writer",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	RunE:   runDaemonSeedLog,
+}
 
 var (
 	seedTranscriptWorkspace string
@@ -35,6 +54,12 @@ var daemonSeedTranscriptCmd = &cobra.Command{
 }
 
 func init() {
+	logFlags := daemonSeedLogCmd.Flags()
+	logFlags.StringVar(&seedLogWorkspace, "workspace", "", "Workspace key (required)")
+	logFlags.StringVar(&seedLogAgent, "agent", "", "Agent name (required)")
+	logFlags.StringVar(&seedLogFile, "content", "", "Log content file (default: stdin)")
+	daemonCmd.AddCommand(daemonSeedLogCmd)
+
 	f := daemonSeedTranscriptCmd.Flags()
 	f.StringVar(&seedTranscriptWorkspace, "workspace", "", "Workspace key (default: active)")
 	f.StringVar(&seedTranscriptSession, "session", "", "Agent session id (required)")
@@ -42,6 +67,32 @@ func init() {
 	f.StringVar(&seedTranscriptBackend, "backend", "codex", "Backend label")
 	f.StringVar(&seedTranscriptFile, "content", "", "Canonical NDJSON transcript file (default: stdin)")
 	daemonCmd.AddCommand(daemonSeedTranscriptCmd)
+}
+
+func runDaemonSeedLog(_ *cobra.Command, _ []string) error {
+	if err := requireTestSupport(); err != nil {
+		return err
+	}
+	if seedLogWorkspace == "" || seedLogAgent == "" {
+		return fmt.Errorf("--workspace and --agent are required")
+	}
+	data, err := readSeedContent(seedLogFile)
+	if err != nil {
+		return fmt.Errorf("read log content: %w", err)
+	}
+	if len(data) == 0 {
+		return fmt.Errorf("log content is empty")
+	}
+	f, err := cliagent.OpenAgentArchiveLog(seedLogWorkspace, seedLogAgent)
+	if err != nil {
+		return err
+	}
+	defer f.Close() //nolint:errcheck // best-effort close after explicit write check
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("append agent archive log: %w", err)
+	}
+	fmt.Printf("seeded log: ws=%s agent=%s bytes=%d path=%s\n", seedLogWorkspace, seedLogAgent, len(data), f.Name())
+	return nil
 }
 
 //nolint:funlen // CLI command wires validation, transcript parsing, store lookup, and session update in one path.
@@ -110,4 +161,20 @@ func runDaemonSeedTranscript(_ *cobra.Command, _ []string) error {
 		fmt.Printf("seeded transcript: ws=%s session=%s task=%s ref=%s bytes=%d\n", ws, seedTranscriptSession, seedTranscriptTask, ref, len(data))
 		return nil
 	})
+}
+
+// requireTestSupport gates the hidden seed-* commands that ship in the
+// production binary but are reserved for product-owned test setup.
+func requireTestSupport() error {
+	if os.Getenv("LOOM_TESTSUPPORT") != "1" {
+		return fmt.Errorf("seed commands are test support: set LOOM_TESTSUPPORT=1 to enable")
+	}
+	return nil
+}
+
+func readSeedContent(path string) ([]byte, error) {
+	if path == "" || path == "-" {
+		return io.ReadAll(os.Stdin)
+	}
+	return os.ReadFile(path) //nolint:gosec // G304: test-only CLI flag
 }

@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 
 import {
   ErrorBoundary,
+  ErrorToast,
   IssueTable,
   BulkActionToolbar,
   ConfirmDialog,
@@ -25,6 +26,7 @@ export function TablePage() {
   const [showCloseDialog, setShowCloseDialog] = useState(false);
   const [bulkStatus, setBulkStatus] = useState<Status>("in_progress");
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
   const {
     filteredIssues,
     issues,
@@ -49,13 +51,23 @@ export function TablePage() {
   } = useSelection({ visibleItems: filteredIssues });
 
   const finishBulkMutation = useCallback(() => {
+    setBulkError(null);
     clearSelection();
     void refetch();
   }, [clearSelection, refetch]);
 
   const { bulkClose, isLoading: isClosing } = useBulkClose({
-    onSuccess: finishBulkMutation,
-    onPartialSuccess: () => void refetch(),
+    onSuccess: () => {
+      setShowCloseDialog(false);
+      finishBulkMutation();
+    },
+    onPartialSuccess: (closedIds, failedIds) => {
+      setBulkError(
+        `Closed ${closedIds.length} of ${closedIds.length + failedIds.length} issues; ${failedIds.length} failed`,
+      );
+      void refetch();
+    },
+    onError: (error) => setBulkError(error.message),
   });
 
   const actions = useMemo(
@@ -65,7 +77,10 @@ export function TablePage() {
         label: "Change status",
         loading: isUpdatingStatus,
         disabled: isUpdatingStatus || isClosing,
-        onClick: () => setShowStatusDialog(true),
+        onClick: () => {
+          setBulkError(null);
+          setShowStatusDialog(true);
+        },
       },
       {
         id: "close",
@@ -73,7 +88,10 @@ export function TablePage() {
         variant: "danger" as const,
         loading: isClosing,
         disabled: isClosing || isUpdatingStatus,
-        onClick: () => setShowCloseDialog(true),
+        onClick: () => {
+          setBulkError(null);
+          setShowCloseDialog(true);
+        },
       },
     ],
     [isClosing, isUpdatingStatus],
@@ -82,21 +100,31 @@ export function TablePage() {
   const handleStatusConfirm = useCallback(async () => {
     setIsUpdatingStatus(true);
     try {
-      await Promise.all(
+      const results = await Promise.allSettled(
         Array.from(selectedIds, (id) =>
           updateIssue(workspaceId, id, { status: bulkStatus }),
         ),
       );
-      setShowStatusDialog(false);
-      finishBulkMutation();
+      const failedCount = results.filter(
+        (result) => result.status === "rejected",
+      ).length;
+      const updatedCount = results.length - failedCount;
+      if (failedCount === 0) {
+        setShowStatusDialog(false);
+        finishBulkMutation();
+      } else {
+        setBulkError(
+          `Updated ${updatedCount} of ${results.length} issues; ${failedCount} failed`,
+        );
+        if (updatedCount > 0) void refetch();
+      }
     } finally {
       setIsUpdatingStatus(false);
     }
-  }, [bulkStatus, finishBulkMutation, selectedIds, workspaceId]);
+  }, [bulkStatus, finishBulkMutation, refetch, selectedIds, workspaceId]);
 
   const handleCloseConfirm = useCallback(async () => {
     await bulkClose(selectedIds);
-    setShowCloseDialog(false);
   }, [bulkClose, selectedIds]);
 
   return (
@@ -158,7 +186,10 @@ export function TablePage() {
           }
           confirmLabel="Update issues"
           onConfirm={() => void handleStatusConfirm()}
-          onCancel={() => setShowStatusDialog(false)}
+          onCancel={() => {
+            setShowStatusDialog(false);
+            setBulkError(null);
+          }}
         />
         <ConfirmDialog
           isOpen={showCloseDialog}
@@ -167,8 +198,18 @@ export function TablePage() {
           confirmLabel="Close issues"
           variant="danger"
           onConfirm={() => void handleCloseConfirm()}
-          onCancel={() => setShowCloseDialog(false)}
+          onCancel={() => {
+            setShowCloseDialog(false);
+            setBulkError(null);
+          }}
         />
+        {bulkError && (
+          <ErrorToast
+            message={bulkError}
+            onDismiss={() => setBulkError(null)}
+            duration={0}
+          />
+        )}
       </IssueViewGuard>
     </ErrorBoundary>
   );

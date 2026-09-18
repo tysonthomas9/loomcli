@@ -2304,8 +2304,8 @@ func TestGetMutations_ActionFolding(t *testing.T) {
 			t.Errorf("got[%d] missing generic envelope fields: %+v", i, got[i])
 		}
 	}
-	if got[2].IssueID != "" || got[3].IssueID != "" || got[4].IssueID != "" {
-		t.Errorf("non-issue fleet mutations should not populate legacy issue_id: comment=%q label=%q workspace=%q", got[2].IssueID, got[3].IssueID, got[4].IssueID)
+	if got[2].IssueID != "c" || got[3].IssueID != "d" || got[4].IssueID != "" {
+		t.Errorf("issue-owned child mutations should project entity_id while workspace mutations must not: comment=%q label=%q workspace=%q", got[2].IssueID, got[3].IssueID, got[4].IssueID)
 	}
 	if got[0].IssueID != "a" || got[5].IssueID != "e" {
 		t.Errorf("issue fleet mutations should preserve legacy issue_id: update=%q unknown=%q", got[0].IssueID, got[5].IssueID)

@@ -414,7 +414,9 @@ export function CreateIssueModal({
               role="status"
             >
               <strong>An identical issue was created moments ago</strong>
-              <span>Open that issue, or create another copy intentionally.</span>
+              <span>
+                Open that issue, or create another copy intentionally.
+              </span>
               <div className={styles.duplicateActions}>
                 <button
                   type="button"

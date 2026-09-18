@@ -29,20 +29,23 @@ jobs:
       - uses: actions/checkout@v4
 
       # aft and fleet-db live in separate private repos. AFT_CHECKOUT_TOKEN must be
-      # a token with read access to both tysonthomas9/aft and tysonthomas9/fleet-db.
+      # a token with read access to both tysonthomas9/aft and BrowserOperator/fleet-db.
       - uses: actions/checkout@v4
         with:
           repository: tysonthomas9/aft
           token: ${{ secrets.AFT_CHECKOUT_TOKEN }}
           path: .aft
           # Pinned like the flue checkout below; update deliberately with AFT changes.
-          ref: 91e0615bf06f88958e1591325df43882295eaa22
+          ref: 9048c927365f94c2ac8d530b8dd1bbfdbe59b1d6
 
       - uses: actions/checkout@v4
         with:
-          repository: tysonthomas9/fleet-db
+          repository: BrowserOperator/fleet-db
           token: ${{ secrets.AFT_CHECKOUT_TOKEN }}
           path: .fleet-db
+          # Parent-child edges must be structural for epic-runner children to be
+          # claimable. Pin the cross-repo fix just like AFT and flue.
+          ref: 4029874207aad1d9048bee1e41612ec30d42ea14
 
       - uses: actions/setup-go@v5
         with:

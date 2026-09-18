@@ -165,10 +165,11 @@ tests:
             issue_type: "task"
             priority: 2
             parent: "${var:agentEpicId}"
+            design: "AFT stub-runner design ${RUN_ID:-local}"
           save:
             - from: "data.id"
               as: "agentTaskId"
-        intent: "An orchestration client creates the child task under the agent-flow epic"
+        intent: "An orchestration client creates the runnable designed child task under the agent-flow epic"
       - open: /ws/E2E-WS-AGENT/kanban
       - wait:
           fn: >-

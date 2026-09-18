@@ -557,13 +557,12 @@ func fleetEventToMutationData(e *fleetMutationEvent) backend.MutationData {
 		Actor:      e.Actor,
 		Timestamp:  e.Timestamp,
 	}
-	if e.EntityType == "issue" || (e.EntityType == "" && strings.HasPrefix(e.Action, "issue.")) {
-		md.IssueID = e.EntityID
-	}
+	md.IssueID = e.Metadata["issue_id"]
 	// Best-effort extraction from before/after snapshots. Errors are ignored —
 	// the minimum viable mutation already has Type/IssueID/Timestamp.
 	if e.After != "" {
 		var after struct {
+			IssueID  string `json:"issue_id"`
 			Title    string `json:"title"`
 			Status   string `json:"status"`
 			Assignee string `json:"assignee"`
@@ -572,6 +571,9 @@ func fleetEventToMutationData(e *fleetMutationEvent) backend.MutationData {
 			Repo     string `json:"repo"`
 		}
 		if err := json.Unmarshal([]byte(e.After), &after); err == nil {
+			if md.IssueID == "" {
+				md.IssueID = after.IssueID
+			}
 			md.Title = after.Title
 			md.Assignee = after.Assignee
 			md.NewStatus = after.Status
@@ -585,13 +587,46 @@ func fleetEventToMutationData(e *fleetMutationEvent) backend.MutationData {
 	}
 	if e.Before != "" {
 		var before struct {
-			Status string `json:"status"`
+			IssueID string `json:"issue_id"`
+			Status  string `json:"status"`
 		}
 		if err := json.Unmarshal([]byte(e.Before), &before); err == nil {
+			if md.IssueID == "" {
+				md.IssueID = before.IssueID
+			}
 			md.OldStatus = before.Status
 		}
 	}
+	md.IssueID = fleetIssueIDFallback(md.IssueID, e)
 	return md
+}
+
+func fleetIssueIDFallback(issueID string, e *fleetMutationEvent) string {
+	if issueID != "" {
+		return issueID
+	}
+	if fleetActionTargetsIssue(e.Action, e.EntityType) {
+		return e.EntityID
+	}
+	return ""
+}
+
+// fleetActionTargetsIssue mirrors FleetDB's event contract: issue actions and
+// issue-owned child mutations use EntityID for the owning issue even when the
+// entity type is comment, label, dependency, or metadata. Keep this
+// action-based so unrelated first-class entity IDs are never mistaken for
+// issue IDs.
+func fleetActionTargetsIssue(action, entityType string) bool {
+	if entityType == "issue" || (entityType == "" && strings.HasPrefix(action, "issue.")) {
+		return true
+	}
+	switch action {
+	case "comment.add", "dep.add", "dep.remove", "label.add", "label.remove",
+		"metadata.set", "metadata.remove":
+		return true
+	default:
+		return false
+	}
 }
 
 // fleetEventsToMutationData converts a slice of fleetMutationEvent to
