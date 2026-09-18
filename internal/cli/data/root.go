@@ -64,6 +64,8 @@ func init() {
 		claimCmd,
 		updateCmd,
 		closeCmd,
+		archiveCmd,
+		unarchiveCmd,
 		commentCmd,
 		monitorCmd,
 		agentsCmd,

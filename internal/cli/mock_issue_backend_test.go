@@ -99,6 +99,11 @@ type MockIssueBackend struct {
 	ReopenErr error
 	ReopenFn  func(ctx context.Context, id string, params backend.ReopenParams) error
 
+	ArchiveErr   error
+	ArchiveFn    func(ctx context.Context, id string, params backend.ArchiveParams) error
+	UnarchiveErr error
+	UnarchiveFn  func(ctx context.Context, id string) error
+
 	// Delete
 	DeleteErr error
 	DeleteFn  func(ctx context.Context, params backend.DeleteParams) error
@@ -364,6 +369,30 @@ func (m *MockIssueBackend) Close(ctx context.Context, id string, params backend.
 }
 
 // Reopen implements backend.IssueBackend.
+func (m *MockIssueBackend) Archive(ctx context.Context, id string, params backend.ArchiveParams) error {
+	m.mu.Lock()
+	m.record("Archive", id, params)
+	fn := m.ArchiveFn
+	resultErr := m.ArchiveErr
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, id, params)
+	}
+	return resultErr
+}
+
+func (m *MockIssueBackend) Unarchive(ctx context.Context, id string) error {
+	m.mu.Lock()
+	m.record("Unarchive", id, nil)
+	fn := m.UnarchiveFn
+	resultErr := m.UnarchiveErr
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, id)
+	}
+	return resultErr
+}
+
 func (m *MockIssueBackend) Reopen(ctx context.Context, id string, params backend.ReopenParams) error {
 	m.mu.Lock()
 	m.record("Reopen", id, params)

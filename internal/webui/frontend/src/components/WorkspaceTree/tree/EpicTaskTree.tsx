@@ -6,7 +6,12 @@
 import type React from "react";
 import { useState, useCallback, useRef, useEffect } from "react";
 
-import { updateIssue, closeIssue, createWorkspaceEpic } from "@/hooks/api";
+import {
+  updateIssue,
+  closeIssue,
+  archiveIssue,
+  createWorkspaceEpic,
+} from "@/hooks/api";
 import { useWorkspaceTree, useWorkspaceContext } from "@/hooks/workspace";
 import { useToast } from "@/hooks/ui";
 import { useInlineCreate } from "@/hooks/issues";
@@ -285,7 +290,7 @@ export function EpicTaskTree({
     if (!contextMenu) return;
     const { id, type } = contextMenu;
     try {
-      await updateIssue(workspaceId, id, { status: "tombstone" });
+      await archiveIssue(workspaceId, id);
       await refetch();
       showToast(`${type === "epic" ? "Epic" : "Task"} archived`, {
         type: "success",

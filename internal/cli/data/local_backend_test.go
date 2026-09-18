@@ -108,6 +108,14 @@ func (b *localBackendStub) Close(_ context.Context, id string, params backend.Cl
 	return &backend.CloseResult{}, nil
 }
 
+func (b *localBackendStub) Archive(context.Context, string, backend.ArchiveParams) error {
+	return nil
+}
+
+func (b *localBackendStub) Unarchive(context.Context, string) error {
+	return nil
+}
+
 func (b *localBackendStub) Reopen(context.Context, string, backend.ReopenParams) error {
 	return nil
 }
