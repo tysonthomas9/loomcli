@@ -94,6 +94,9 @@ func HandleListTaskSessions(svc service.SessionService) http.HandlerFunc {
 			})
 			return
 		}
+		if items == nil {
+			items = []service.SessionListItem{}
+		}
 
 		handler.WriteJSON(w, http.StatusOK, SessionListResponse{
 			Success: true,

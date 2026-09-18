@@ -1,0 +1,17 @@
+# Product-correct review queue empty-state coverage. Review actions were demoted
+# to surface-suites/review-actions because this gh-less stack has no reviewable
+# branch/commit content (FINDINGS §1.19).
+suite: review-queue
+classification: { area: reviews, feature: review-queue, surface: ui, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  # covers: LCLI-RA-001 partial (loom review rows; GitHub metadata rows untested)
+  - name: empty queue shows the no-pull-requests state
+    intent: A reviewer opening a workspace with no review-stage issues sees an explanatory empty state instead of an empty list
+    steps:
+      - open: /ws/E2E-WS/prs
+      - wait: { text: Pull Requests }
+      - expect: { text: No pull requests }
+      - expect: { text: When a task moves to review or an agent opens a PR on GitHub, it appears here for review. }

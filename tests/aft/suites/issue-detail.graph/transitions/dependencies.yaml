@@ -1,0 +1,66 @@
+kind: graph-transitions
+version: 1
+flow: issue-detail
+group: dependencies
+
+transitions:
+  create-blocker-issue:
+    intent: A human creates a case-specific blocker issue through the mounted New Issue form.
+    actor: human
+    via: ui
+    steps:
+      - click: { testid: new-issue-button }
+      - fill:
+          testid: create-issue-title
+          value: "aft issue detail blocker ${RUN_ID:-local}-${AFT_CASE_ID}"
+      - fill:
+          testid: create-issue-description
+          value: "Blocker for dependency graph case ${RUN_ID:-local}-${AFT_CASE_ID}."
+      - click: { testid: create-issue-submit }
+
+  reopen-original-from-blocker:
+    intent: A human closes the blocker panel and reopens the original case-specific card.
+    actor: human
+    via: ui
+    steps:
+      - press: Escape
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'closed'
+        intent: Wait until the blocker detail panel closes.
+      - click:
+          selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
+
+  add-blocking-dependency:
+    intent: A human adds the blocker issue through the mounted Blocked By dependency picker.
+    actor: human
+    via: ui
+    steps:
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find testid add-dependency-button click || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=dependency-search-input]')" | grep -q true && exit 0;
+          done; echo "add dependency click never opened the dependency search"; exit 1
+        intent: A human retries the add-dependency control until its mounted search input opens.
+      - fill:
+          testid: dependency-search-input
+          value: "aft issue detail blocker ${RUN_ID:-local}-${AFT_CASE_ID}"
+      - wait:
+          fn: >-
+            document.querySelectorAll("[data-testid^='search-result-']").length === 1
+        intent: Wait until the dependency picker returns exactly the case-specific blocker result.
+      - click:
+          selector: "[data-testid^='search-result-']"
+
+  reload-blocked-board:
+    intent: A human closes the panel and reloads the board to verify the original issue moved to Blocked.
+    actor: human
+    via: ui
+    steps:
+      - click: { testid: header-close-button }
+      - reload: true
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: Wait until the reloaded workspace board is ready after adding the blocker.

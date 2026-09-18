@@ -1,0 +1,16 @@
+#!/bin/sh
+# Stub for the GitHub CLI (`gh`) used in E2E tests.
+# Pins gh-less behavior everywhere and prevents deterministic AFT from falling
+# through to a real host gh. The web UI probe is CheckGhInstalled:
+# internal/webui/svcimpl/agent_service.go:266 -> internal/cli/git/pr.go:347-353
+# (`gh --version` exit code).
+
+set -e
+
+if [ "$#" -eq 1 ] && [ "${1:-}" = "--version" ]; then
+    echo "gh stub: deterministic aft tier simulates gh unavailable" >&2
+    exit 1
+fi
+
+echo "gh stub: deterministic aft tier must never invoke gh" >&2
+exit 1

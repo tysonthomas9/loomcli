@@ -106,6 +106,25 @@
   border-radius: var(--radius-sm);
 }
 
+.duplicateNotice {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 10px;
+  color: var(--color-text);
+  background: var(--color-warning-bg, #fff8c5);
+  border: 1px solid var(--color-warning, #bf8700);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.duplicateActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
 .actions {
   display: flex;
   justify-content: flex-end;

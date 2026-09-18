@@ -35,18 +35,40 @@ trap cleanup EXIT INT TERM
 
 # --- 0. Kill orphaned processes from previous runs ---
 # Previous test runs may have left server processes that hold file descriptors.
+port_listener_pids() {
+    local port="$1"
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -ti "TCP:$port" -sTCP:LISTEN 2>/dev/null || true
+    elif command -v fuser >/dev/null 2>&1; then
+        fuser "$port/tcp" 2>/dev/null | tr ' ' '\n' || true
+    fi
+}
+
+is_e2e_stack_cmd() {
+    local cmd="$1"
+    local port="$2"
+    case "$cmd" in
+        *"$LOOM_BIN"*|*"$FLEET_DB_BIN"*|*"vite preview"*"--port ${port}"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 kill_port_listeners() {
     local port="$1"
     local default_port="$2"
-    local pid
+    local pid cmd
     [[ "$port" == "$default_port" ]] && return 0
-    if command -v lsof >/dev/null 2>&1; then
-        while IFS= read -r pid; do
-            [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
-        done < <(lsof -ti "TCP:$port" -sTCP:LISTEN 2>/dev/null || true)
-    elif command -v fuser >/dev/null 2>&1; then
-        fuser -k "$port/tcp" >/dev/null 2>&1 || true
-    fi
+    while IFS= read -r pid; do
+        case "$pid" in
+            ""|*[!0-9]*) continue ;;
+        esac
+        cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+        if is_e2e_stack_cmd "$cmd" "$port"; then
+            kill "$pid" 2>/dev/null || true
+        else
+            echo "[e2e] leaving foreign listener on port $port alone: pid $pid - $cmd"
+        fi
+    done < <(port_listener_pids "$port")
 }
 
 # Only do this for non-default ports to avoid killing unrelated services.
@@ -124,6 +146,15 @@ if [[ "$frontend_needs_build" -eq 1 ]]; then
         fi
         npm run build
     )
+fi
+
+# vite preview loads vite.config.ts, which imports vite/@vitejs/plugin-react — so
+# node_modules must exist even when dist is fresh and no build ran (cleanup tools
+# sweep untracked node_modules but keep dist, which otherwise fails the preview
+# with ERR_MODULE_NOT_FOUND long after this point).
+if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
+    echo "[e2e] Frontend node_modules missing — installing..."
+    (cd "$FRONTEND_DIR" && npm ci --prefer-offline)
 fi
 
 # --- 3. Create isolated workspace for E2E tests ---

@@ -61,6 +61,12 @@ type IssueData struct {
 	// Blocker metadata for blocked-list projections.
 	BlockedByCount int      `json:"blocked_by_count,omitempty"`
 	BlockedBy      []string `json:"blocked_by,omitempty"`
+
+	// Create transport metadata is intentionally not serialized as part of an
+	// issue. It is carried just far enough for HTTP callers to preserve
+	// fleet-db's idempotency response headers.
+	IdempotencyReplayed bool   `json:"-"`
+	IdempotencyWarning  string `json:"-"`
 }
 
 // IssueDetailData is the full issue projection returned by Get.
