@@ -3,9 +3,11 @@ package issues
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+	"unicode"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -120,9 +122,45 @@ func HandleCloseIssue(svc service.IssueService) http.HandlerFunc {
 	}
 }
 
-// HandleClaimIssue returns a handler that atomically claims an issue by ID
-// for the server-side actor. Returns 409 if the issue is already claimed by
-// another agent.
+// maxActorHeaderLen bounds the X-Actor header before it is forwarded to the
+// backing store. fleet-db records the actor on the lock and on every event it
+// emits, so an unbounded value is written back many times over.
+const maxActorHeaderLen = 128
+
+// actorFromRequest extracts and validates the optional X-Actor header carrying
+// the calling worker's identity. An absent or blank header returns ("", nil):
+// the legacy path, where the operation is recorded against serve's own
+// configured actor.
+//
+// The value is forwarded verbatim to fleet-db, where it lands in the lock's
+// owner field and in the event stream — so bound its length and reject control
+// characters here, at the edge, rather than letting caller-controlled bytes
+// into log lines and audit records.
+//
+// Trust model unchanged from the claim path this extends: serve forwards a
+// client-supplied actor without binding it to the caller, matching fleet-db's
+// own X-Actor handling. Like the rest of the serve API it assumes a trusted
+// network.
+func actorFromRequest(r *http.Request) (string, error) {
+	actor := strings.TrimSpace(r.Header.Get("X-Actor"))
+	if actor == "" {
+		return "", nil
+	}
+	if len(actor) > maxActorHeaderLen {
+		return "", fmt.Errorf("X-Actor header exceeds %d characters", maxActorHeaderLen)
+	}
+	for _, c := range actor {
+		if unicode.IsControl(c) {
+			return "", errors.New("X-Actor header contains control characters")
+		}
+	}
+	return actor, nil
+}
+
+// HandleClaimIssue returns a handler that atomically claims an issue by ID.
+// The optional X-Actor header scopes the claim to the calling worker; without
+// it the claim is recorded against the server-side actor. Returns 409 if the
+// issue is already claimed by another agent.
 func HandleClaimIssue(svc service.IssueService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		issueID := r.PathValue("id")
@@ -133,10 +171,18 @@ func HandleClaimIssue(svc service.IssueService) http.HandlerFunc {
 
 		// X-Actor is the established convention for carrying a worker identity
 		// toward fleet-db; the serve-mediated claim was the one path that
-		// dropped it, so every sibling claimed as serve itself.
+		// dropped it, so every sibling claimed as serve itself. A malformed
+		// header is rejected rather than dropped: falling back to serve's own
+		// actor is the exact collapse this path exists to prevent.
+		actor, err := actorFromRequest(r)
+		if err != nil {
+			handler.RespondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
 		data, err := svc.ClaimIssue(r.Context(), service.ClaimIssueParams{
 			IssueID: issueID,
-			Actor:   strings.TrimSpace(r.Header.Get("X-Actor")),
+			Actor:   actor,
 		})
 		if err != nil {
 			handler.HandleServiceError(w, err)
@@ -147,6 +193,39 @@ func HandleClaimIssue(svc service.IssueService) http.HandlerFunc {
 			Success: true,
 			Data:    data,
 		})
+	}
+}
+
+// HandleReleaseIssue returns a handler that releases a claimed issue back to
+// open — the counterpart to HandleClaimIssue, and the route the serve-mediated
+// release path had no way to call.
+//
+// The optional X-Actor header scopes the release to the calling worker:
+// releasing a lock held by a different actor returns 409 rather than silently
+// un-claiming the worker still running on it.
+func HandleReleaseIssue(svc service.IssueService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		issueID := r.PathValue("id")
+		if issueID == "" {
+			handler.RespondError(w, http.StatusBadRequest, "missing issue ID")
+			return
+		}
+
+		actor, err := actorFromRequest(r)
+		if err != nil {
+			handler.RespondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		if err := svc.ReleaseIssue(r.Context(), service.ReleaseIssueParams{
+			IssueID: issueID,
+			Actor:   actor,
+		}); err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+
+		handler.WriteJSON(w, http.StatusOK, IssuesResponse{Success: true})
 	}
 }
 

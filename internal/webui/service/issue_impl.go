@@ -408,6 +408,53 @@ func (s *issueServiceImpl) ClaimIssue(ctx context.Context, params ClaimIssuePara
 	return out, nil
 }
 
+// ReleaseIssue releases a claimed issue back to open — the mirror of
+// ClaimIssue, and the half the serve-mediated path never had. Without it a
+// worker running behind LOOM_SERVER_URL had no way to hand a claim back at
+// all: its client answered not-implemented and the claim sat at in_progress
+// until the lock aged out.
+//
+// With an actor and an actor-capable backend the release is scoped to that
+// actor, so a lock held by a live sibling surfaces as ErrConflict (HTTP 409)
+// instead of being taken away from it. Otherwise it falls back to the legacy
+// status transition — a downgrade, but never a no-op.
+func (s *issueServiceImpl) ReleaseIssue(ctx context.Context, params ReleaseIssueParams) error {
+	if strings.TrimSpace(params.IssueID) == "" {
+		return ErrValidation("issue ID is required")
+	}
+
+	be, svcErr := s.resolveBackend(ctx)
+	if svcErr != nil {
+		return svcErr
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if params.Actor != "" {
+		if rb, ok := be.(backend.ActorReleaser); ok {
+			if err := rb.ReleaseIssueAsActor(ctx, params.IssueID, params.Actor); err != nil {
+				slog.Error("backend error in ReleaseIssue", "issue_id", params.IssueID, "actor", params.Actor, "err", err)
+				return translateBackendError(err)
+			}
+			return nil
+		}
+		// Falling back with an actor in hand is worth a line: it means the
+		// release is unscoped, which is how a stopped worker can free a lock a
+		// sibling still holds.
+		slog.Warn("ReleaseIssue: backend cannot scope a release to an actor; releasing via status transition",
+			"issue_id", params.IssueID, "requested_actor", params.Actor, "backend", be.BackendName())
+	}
+
+	open := "open"
+	unassigned := ""
+	if err := be.Update(ctx, params.IssueID, backend.UpdateParams{Status: &open, Assignee: &unassigned}); err != nil {
+		slog.Error("backend error in ReleaseIssue.Update", "issue_id", params.IssueID, "err", err)
+		return translateBackendError(err)
+	}
+	return nil
+}
+
 func ensureClaimable(ctx context.Context, be backend.IssueBackend, issueID string) *ServiceError {
 	detail, err := be.Get(ctx, issueID)
 	if err != nil {

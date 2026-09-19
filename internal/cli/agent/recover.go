@@ -101,7 +101,7 @@ func runRecover(cmd *cobra.Command, args []string) {
 	clearStaleLock(worktreePath, lockInfo.PID)
 
 	if lockInfo.TaskID != "" {
-		handleOrphanedTask(deps, worktreePath, lockInfo.TaskID, !recoverNoAnalyze)
+		handleOrphanedTask(deps, worktreePath, lockInfo.TaskID, lockInfo.AgentName, !recoverNoAnalyze)
 	}
 
 	resetOrphanedAgentTasks(deps, worktreePath, lockInfo.AgentName, lockInfo.TaskID, !recoverNoAnalyze)
@@ -111,6 +111,22 @@ func runRecover(cmd *cobra.Command, args []string) {
 	fmt.Println("=========================================")
 	fmt.Printf("✓ Agent '%s' recovered and ready for work\n", worktreeName)
 	fmt.Println("=========================================")
+}
+
+// releaseIssueLockAsAgent releases the lock under the agent's own identity
+// when the backend can scope a release, and falls back to the lock-only
+// release otherwise.
+//
+// The preference matters rather than being cosmetic: the client used when
+// LOOM_SERVER_URL is set cannot perform ReleaseIssueLock at all — it has no
+// way to name the lock's owner — so calling that first made every release
+// through a server a silent no-op, and the claim sat at in_progress until its
+// TTL expired. The actor-scoped call is the one it can serve.
+func releaseIssueLockAsAgent(ctx context.Context, ib backend.IssueBackend, taskID, agentName string) error {
+	if releaser, ok := ib.(backend.ActorReleaser); ok {
+		return releaser.ReleaseIssueAsActor(ctx, taskID, agentName)
+	}
+	return ib.ReleaseIssueLock(ctx, taskID, agentName)
 }
 
 // releaseFleetIssueLock issues a best-effort release of the fleet-db lock for
@@ -124,7 +140,7 @@ func releaseFleetIssueLock(deps *cli.Deps, agentName, taskID string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := deps.IssueBackend.ReleaseIssueLock(ctx, taskID, agentName); err != nil {
+	if err := releaseIssueLockAsAgent(ctx, deps.IssueBackend, taskID, agentName); err != nil {
 		if backend.IsKind(err, backend.KindNotFound) || backend.IsKind(err, backend.KindNotImplemented) {
 			return
 		}
@@ -220,7 +236,7 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int, incomplete bo
 			case exitCode != 0:
 				fmt.Printf("[recover] Agent %s exited with code %d, resetting task %s\n",
 					agentName, exitCode, lockInfo.TaskID)
-				resetTask(deps, lockInfo.TaskID)
+				resetTask(deps, lockInfo.TaskID, agentName)
 			case incomplete:
 				// Exited 0 but the claim was never released, so there is no
 				// agent-set status to trust here — the task is still sitting in
@@ -230,7 +246,7 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int, incomplete bo
 				// a status the agent DID set is never stomped.
 				fmt.Printf("[recover] Agent %s exited cleanly (code 0) without releasing its claim, returning task %s to the queue\n",
 					agentName, lockInfo.TaskID)
-				resetTask(deps, lockInfo.TaskID)
+				resetTask(deps, lockInfo.TaskID, agentName)
 			default:
 				// Clean exit: trust the agent updated task status correctly.
 				// Do NOT reset — the agent may have set status to review/closed.
