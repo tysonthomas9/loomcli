@@ -2458,3 +2458,12 @@ func TestBatch_Creates_Aggregated(t *testing.T) {
 		}
 	}
 }
+
+// Both production backends must satisfy the actor-scoped claim capability:
+// backend.ClaimAs refuses a claim when the backend cannot scope one, so losing
+// this method turns every actor-bearing claim into a hard failure instead of a
+// silent mis-attribution. Compile-time is the real guard.
+func TestFleetBackend_SatisfiesActorCapabilities(t *testing.T) {
+	var _ backend.ActorClaimer = (*FleetBackend)(nil)
+	var _ backend.ActorReleaser = (*FleetBackend)(nil)
+}
