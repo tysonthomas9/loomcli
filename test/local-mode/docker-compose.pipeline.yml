@@ -1,0 +1,37 @@
+# Overlay that wires a label-routed review pipeline on top of the
+# production-shaped topology:
+#
+#   critic claims un-criticized tasks and stamps `criticized`
+#   planner claims criticized tasks, runs 3 rounds, then ships
+#   worker waits for the ship label
+#
+# Layer it after docker-compose.topology.yml, which supplies the critic agent
+# and the max_agents headroom this wiring assumes:
+#
+#   LOCAL_MODE_COMPOSE_FILES="test/local-mode/docker-compose.topology.yml \
+#     test/local-mode/docker-compose.pipeline.yml" make local-mode-up
+#   make local-mode-pipeline-verify
+#
+# REQUIREMENT: gating a claim by label needs `loom role set <role> labels` and
+# `exclude_labels`. A build without those keys can still stamp labels through
+# the agentdef on_complete hooks, which produces a pipeline that labels
+# everything and routes nothing — indistinguishable from a working one from the
+# outside. The entrypoint therefore probes for the keys first and refuses to
+# start the stack if they are missing, rather than coming up half-wired.
+#
+# Same rules as the topology overlay: no `ports:`, no `image:`, no build
+# context — parallel stacks come from LOCAL_MODE_COMPOSE_PROJECT and the
+# LOCAL_MODE_*_PORT knobs.
+
+services:
+  loom-local:
+    environment:
+      # Wire the pipeline BEFORE the daemon starts. Applying the same config to
+      # a running workspace can stop every agent from spawning, permanently and
+      # with nothing recorded, so the ordering is not cosmetic.
+      LOOM_LOCAL_MODE_PIPELINE: "1"
+      LOOM_LOCAL_MODE_PIPELINE_STAGE: "critic:criticized:criticized"
+      LOOM_LOCAL_MODE_PIPELINE_CYCLE: "plan:3:criticized:ready-to-implement"
+      # The worker must wait for the ship label, or it claims the task before
+      # the loop starts — exclusion only binds agents that declare it.
+      LOOM_LOCAL_MODE_PIPELINE_SHIP_ROLE: "task"

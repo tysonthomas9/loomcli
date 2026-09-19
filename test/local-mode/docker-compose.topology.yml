@@ -1,0 +1,50 @@
+# Overlay that gives the local-mode stack a production-shaped agent topology:
+# three agents instead of the demo's two, and a second registered repo.
+#
+# Why three is a threshold and not a nicety: max_agents defaults to 2, and
+# exceeding it fails daemon CREATION — so every agent stops, not just the extra
+# one. A two-agent stack cannot reproduce a three-agent workspace's dispatch
+# behavior at all, and the failure presents as a stack that is up with nothing
+# running.
+#
+# Usage:
+#
+#   LOCAL_MODE_COMPOSE_FILES=test/local-mode/docker-compose.topology.yml \
+#     make local-mode-up
+#   make local-mode-pipeline-verify
+#
+# Layer docker-compose.pipeline.yml after this one to add label-routed review
+# stages on top (see that file for its one requirement).
+#
+# This overlay deliberately declares no `ports:`, no `image:` and no build
+# context. Running it beside the demo stack is the Makefile's job, and it
+# already does it: LOCAL_MODE_COMPOSE_PROJECT isolates the containers, the
+# volumes and — via LOCAL_MODE_*_IMAGE, which default to the project name — the
+# built image tags, while LOCAL_MODE_FLEETDB_PORT / _API_PORT / _UI_PORT move
+# the published ports. Compose merges `environment` maps but APPENDS `ports:`
+# sequences, so an overlay that published its own ports would keep the base
+# ones too and answer for the demo stack. Side by side:
+#
+#   LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-pipeline \
+#   LOCAL_MODE_FLEETDB_PORT=8380 LOCAL_MODE_API_PORT=8382 LOCAL_MODE_UI_PORT=8383 \
+#   LOCAL_MODE_COMPOSE_FILES=test/local-mode/docker-compose.topology.yml \
+#   LOCAL_MODE_COMPOSE_UP_FLAGS="--build -d" make local-mode-up
+#
+# Everything runs on the deterministic localdogfood backend, so no tokens are
+# spent and runs are reproducible.
+
+services:
+  loom-local:
+    environment:
+      # A reviewer alongside the planner and the worker. The localdogfood
+      # backend answers a critic/review role with a non-closing stage, so the
+      # hand-off survives the round instead of ending it.
+      LOOM_LOCAL_MODE_EXTRA_AGENTS: "critic:critic"
+
+      # A second repo, so repo selection is exercisable. One extra is enough to
+      # reach the no-selector fallback that a single-repo workspace
+      # short-circuits past.
+      LOOM_LOCAL_MODE_EXTRA_REPOS: "second-repo"
+
+      # Room for the three agents plus one under test.
+      LOOM_LOCAL_MODE_MAX_AGENTS: "6"
