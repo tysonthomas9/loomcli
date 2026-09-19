@@ -788,16 +788,19 @@ paths:
     post:
       operationId: claimIssue
       tags: [issues]
-      summary: Atomically claim an issue for the server-side actor
+      summary: Atomically claim an issue
       description: |
-        Claims an issue for the LOOM_AGENT_NAME configured on the server. Returns 409
-        Conflict if the issue is already claimed by another agent. The claim
-        operation is atomic — only one of N concurrent callers will succeed.
-        Blocked issues with open ready-work dependencies cannot be claimed.
-        Sets assignee and transitions status to in_progress in a single step.
+        Claims an issue for the actor named in the X-Actor header, or for the
+        LOOM_AGENT_NAME configured on the server when that header is absent.
+        Returns 409 Conflict if the issue is already claimed by another agent.
+        The claim operation is atomic — only one of N concurrent callers will
+        succeed. Blocked issues with open ready-work dependencies cannot be
+        claimed. Sets assignee and transitions status to in_progress in a
+        single step.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/IssueId"
+        - $ref: "#/components/parameters/ActorHeader"
       responses:
         "200":
           description: Issue claimed
@@ -4368,6 +4371,19 @@ components:
       description: Issue identifier
       schema:
         type: string
+
+    ActorHeader:
+      name: X-Actor
+      in: header
+      required: false
+      description: |
+        Identity of the worker performing the operation. Issue locks are
+        arbitrated per actor, so without this header every worker behind one
+        server collapses onto the server's own configured actor. Bounded at
+        128 characters; control characters are rejected with 400.
+      schema:
+        type: string
+        maxLength: 128
 
     AgentName:
       name: name
