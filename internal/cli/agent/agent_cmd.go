@@ -110,15 +110,7 @@ func runAgent(cmd *cobra.Command, args []string) {
 	// daemon spawn into a loud failure instead of a silent exit-0 no-op.
 	cli.SetDaemonMode(agentDaemonMode)
 
-	target, err := workspace.ResolveAgentTarget(argName, "")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		cli.ExitWithFlush(1)
-		return
-	}
-
-	worktreePath := target.WorkDir
-	agentName := target.AgentName
+	worktreePath, agentName := resolveAgentWorktreeOrExit(argName)
 	promptGen := makeCustomPromptGen(agentPromptFile)
 
 	if agentDaemonMode {
@@ -433,4 +425,19 @@ func withReadOnlyPreamble(prompt string) string {
 		return preamble + "\n\n" + prompt
 	}
 	return prompt
+}
+
+// resolveAgentWorktreeOrExit resolves an agent invocation's worktree path and
+// agent name, printing the error and exiting on failure. The task, plan and
+// generic agent commands all open with this identical block; it lives here so
+// the three stay in step (and so each caller's own body stays under the length
+// gate).
+func resolveAgentWorktreeOrExit(argName string) (worktreePath, agentName string) {
+	target, err := workspace.ResolveAgentTarget(argName, "")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		cli.ExitWithFlush(1)
+		return "", ""
+	}
+	return target.WorkDir, target.AgentName
 }
