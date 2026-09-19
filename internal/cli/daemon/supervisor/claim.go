@@ -17,15 +17,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
-// actorClaimBackend is the optional richer claim API: when the issue backend
-// implements it, claims are recorded against the agent's worktree identifier
-// rather than the generic process actor.
-type actorClaimBackend interface {
-	ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error
-}
+// The claim capability lives in internal/backend as backend.ActorClaimer, and
+// the supervisor reaches it through backend.ClaimAs rather than re-declaring a
+// private copy of the interface here: the duplicate assertions are how the
+// serve-mediated path lost the capability without anything failing to compile.
 
 // actorReleaseBackend is the optional symmetric counterpart of
-// actorClaimBackend. Backends that support this method allow the supervisor
+// backend.ActorClaimer. Backends that support this method allow the supervisor
 // to release the claim lock on a task when the agent that holds it exits,
 // rather than waiting for the lock's TTL to expire. Without this, an exited
 // agent's lock blocks every subsequent claim attempt for that issue (whether
@@ -236,16 +234,14 @@ func conflictHolder(err error) string {
 
 func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string) error {
 	claimCtx, claimCancel := s.operationContext(claimOperationTimeout)
-	var err error
-	if ap.Entry.Worktree != "" {
-		if actorBackend, ok := s.IssueBackend.(actorClaimBackend); ok {
-			err = actorBackend.ClaimIssueAsActor(claimCtx, taskID, 0, ap.Entry.Worktree)
-		} else {
-			err = s.IssueBackend.ClaimIssue(claimCtx, taskID, 0)
-		}
-	} else {
-		err = s.IssueBackend.ClaimIssue(claimCtx, taskID, 0)
-	}
+	// The worktree is the agent's identity (it is also what spawn exports as
+	// LOOM_AGENT_NAME). An empty worktree means this agent has no identity to
+	// lose, so backend.ClaimAs takes the plain claim; a worktree against a
+	// backend that cannot scope a claim is refused rather than recorded under
+	// the daemon's own actor, which would make the resume self-recovery check
+	// below (conflictHolder == Worktree) unable to recognize the agent's own
+	// lock and would let a sibling release it.
+	err := backend.ClaimAs(claimCtx, s.IssueBackend, taskID, 0, ap.Entry.Worktree)
 	claimCancel()
 	if err != nil {
 		return err

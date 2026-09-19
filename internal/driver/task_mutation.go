@@ -234,13 +234,13 @@ func hasAnyLabel(labels []string, set map[string]struct{}) bool {
 	return false
 }
 
+// claimIssue defers to backend.ClaimAs, which carries the single rule for what
+// happens when an actor is supplied but the backend cannot scope a claim to
+// one: refuse, rather than take the lock under this client's own identity.
+// Both driver call sites always derive an actor from the run, so the
+// plain-claim branch is reached only by callers that genuinely have none.
 func claimIssue(ctx context.Context, issueBackend backend.IssueBackend, issueID string, lockTTL time.Duration, actor string) error {
-	if actor != "" {
-		if actorBackend, ok := issueBackend.(backend.ActorClaimer); ok {
-			return actorBackend.ClaimIssueAsActor(ctx, issueID, lockTTL, actor)
-		}
-	}
-	return issueBackend.ClaimIssue(ctx, issueID, lockTTL)
+	return backend.ClaimAs(ctx, issueBackend, issueID, lockTTL, actor)
 }
 
 func claimedTaskFromIssue(issue backend.IssueData, actor string) *ClaimedTask {

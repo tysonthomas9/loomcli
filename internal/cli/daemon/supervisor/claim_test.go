@@ -311,3 +311,89 @@ func TestTaskIDForLifecycle_UsesAssignedFallback(t *testing.T) {
 		t.Fatalf("taskIDForLifecycle(lock) = %q, want task-lock", got)
 	}
 }
+
+// incapableClaimBackend cannot scope a claim to an actor — the shape
+// internal/backend/api had before the actor was threaded through serve. It
+// embeds backend.IssueBackend rather than the clitest mock precisely so the
+// actor-scoped method is NOT promoted onto it.
+type incapableClaimBackend struct {
+	backend.IssueBackend
+	ready       []backend.IssueData
+	plainClaims int
+}
+
+func (b *incapableClaimBackend) Ready(_ context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {
+	return append([]backend.IssueData(nil), b.ready...), nil
+}
+
+func (b *incapableClaimBackend) ClaimIssue(_ context.Context, _ string, _ time.Duration) error {
+	b.plainClaims++
+	return nil
+}
+
+// The supervisor is the claim path a spawned worker actually takes. Its actor
+// is the worktree, and it must not fall through to a plain claim on a backend
+// that cannot scope one: the lock would be recorded against the daemon, so the
+// resume check (conflictHolder == Worktree) could not recognize the agent's own
+// lock and a sibling could release it.
+func TestClaimTask_RefusesWhenBackendCannotScopeTheWorktreeActor(t *testing.T) {
+	be := &incapableClaimBackend{ready: []backend.IssueData{
+		{ID: "task-1", IssueType: "task", Status: "open", Priority: 1, Title: "Ready", Design: "plan"},
+	}}
+	s := &Supervisor{IssueBackend: be}
+	ap := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+
+	if s.claimTask(ap, "parent-1") {
+		t.Fatal("claimTask succeeded; it must refuse rather than claim as the daemon")
+	}
+	if be.plainClaims != 0 {
+		t.Errorf("plain ClaimIssue calls = %d, want 0", be.plainClaims)
+	}
+	if ap.AssignedTaskID != "" {
+		t.Errorf("AssignedTaskID = %q, want empty", ap.AssignedTaskID)
+	}
+}
+
+// An agent with no worktree has no identity to lose, so the plain claim stays
+// legitimate on the very same incapable backend.
+func TestClaimTask_NoWorktreeStillUsesPlainClaim(t *testing.T) {
+	be := &incapableClaimBackend{ready: []backend.IssueData{
+		{ID: "task-1", IssueType: "task", Status: "open", Priority: 1, Title: "Ready", Design: "plan"},
+	}}
+	s := &Supervisor{IssueBackend: be}
+	ap := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Role: "task"},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+
+	if !s.claimTask(ap, "parent-1") {
+		t.Fatal("claimTask returned false for an agent with no worktree")
+	}
+	if be.plainClaims != 1 {
+		t.Errorf("plain ClaimIssue calls = %d, want 1", be.plainClaims)
+	}
+}
+
+// The capable case: the worktree reaches the backend as the claiming actor.
+func TestClaimTask_CarriesTheWorktreeAsActor(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{
+		{ID: "task-1", IssueType: "task", Status: "open", Priority: 1, Title: "Ready", Design: "plan"},
+	}
+	s := &Supervisor{IssueBackend: mock}
+	ap := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+
+	if !s.claimTask(ap, "parent-1") {
+		t.Fatal("claimTask returned false")
+	}
+	claim := mock.Calls[len(mock.Calls)-1]
+	if claim.Method != "ClaimIssue" || len(claim.Args) != 3 || claim.Args[2] != "falcon" {
+		t.Fatalf("claim call = %#v, want the worktree actor recorded", claim)
+	}
+}
