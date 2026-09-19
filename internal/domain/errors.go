@@ -6,7 +6,10 @@
 // independently testable.
 package domain
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Sentinel errors returned by Store implementations and consumed by callers
 // via errors.Is. Implementations wrap these with context-specific detail
@@ -48,4 +51,62 @@ var (
 	// lease_expired). Distinct from ErrNotFound (never existed here) and
 	// ErrConflict (someone else holds it): re-acquire is safe.
 	ErrGone = errors.New("domain: gone")
+
+	// ErrRateLimited indicates the request was refused for backpressure
+	// (fleet-db 429), not because anything about it was wrong. It is
+	// retryable by construction and deliberately NOT ErrConflict: a
+	// conflict says "someone else won", a rate limit says "ask again
+	// shortly". The Store client's catch-all mapped every unmatched 4xx to
+	// ErrConflict, which made throttling indistinguishable from losing a
+	// race. Callers that want the server's pacing hint read it with
+	// RateLimitRetryAfter.
+	ErrRateLimited = errors.New("domain: rate limited")
 )
+
+// RateLimitError carries the server's pacing hint alongside ErrRateLimited.
+// It exists because a bare sentinel cannot answer "how long?" — and a caller
+// that guesses a backoff for a server that already told it the answer will
+// guess wrong in one of the two costly directions.
+type RateLimitError struct {
+	// RetryAfter is the upstream Retry-After header verbatim — delta-seconds
+	// ("30") or an HTTP-date, exactly as RFC 9110 allows both. Empty means
+	// the server did not say, which is different from "retry immediately":
+	// the caller's own backoff policy owns that case.
+	//
+	// Kept verbatim rather than parsed so it can be propagated unchanged to
+	// an HTTP client, which is the only consumer that needs it and the one
+	// place where re-rendering a parsed duration would lose the date form.
+	RetryAfter string
+	// Detail is the transport-level description (method, path, status, body
+	// message) for logs.
+	Detail string
+}
+
+func (e *RateLimitError) Error() string {
+	switch {
+	case e.Detail != "" && e.RetryAfter != "":
+		return fmt.Sprintf("%s: %s (retry after %s)", ErrRateLimited, e.Detail, e.RetryAfter)
+	case e.Detail != "":
+		return fmt.Sprintf("%s: %s", ErrRateLimited, e.Detail)
+	default:
+		return ErrRateLimited.Error()
+	}
+}
+
+// Unwrap makes errors.Is(err, ErrRateLimited) true for a *RateLimitError, so
+// callers that only care about the class need no type assertion.
+func (e *RateLimitError) Unwrap() error { return ErrRateLimited }
+
+// RateLimitRetryAfter returns the server's pacing hint carried by err, and
+// whether err is a rate-limit error at all. A rate limit with no hint
+// returns ("", true) — the class is known, the interval is not.
+func RateLimitRetryAfter(err error) (string, bool) {
+	if !errors.Is(err, ErrRateLimited) {
+		return "", false
+	}
+	var rl *RateLimitError
+	if errors.As(err, &rl) {
+		return rl.RetryAfter, true
+	}
+	return "", true
+}
