@@ -206,3 +206,60 @@ func (f *fakeReadyIssueBackend) ReleaseIssueAsActor(_ context.Context, id, actor
 	f.actorReleases = append(f.actorReleases, releaseCall{id: id, actor: actor})
 	return nil
 }
+
+// plainClaimOnlyBackend is a backend that cannot scope a claim to an actor —
+// the shape internal/backend/api had before #348, and the shape any future
+// backend (or wrapper that loses the method) will have.
+type plainClaimOnlyBackend struct {
+	backend.IssueBackend
+	ready  []backend.IssueData
+	claims []claimCall
+}
+
+func (f *plainClaimOnlyBackend) Ready(_ context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {
+	return append([]backend.IssueData(nil), f.ready...), nil
+}
+
+func (f *plainClaimOnlyBackend) ClaimIssue(_ context.Context, id string, ttl time.Duration) error {
+	f.claims = append(f.claims, claimCall{id: id, ttl: ttl})
+	return nil
+}
+
+// The weakness #348 left. A driver run always has an actor (both call sites
+// derive one from the run), so on a backend without the capability the old
+// fall-through claimed every sibling's task under the client's own identity
+// and fleet-db's per-actor arbitration never fired. It must refuse instead.
+func TestClaimReadyTaskRefusesWhenBackendCannotScopeTheActor(t *testing.T) {
+	fake := &plainClaimOnlyBackend{ready: []backend.IssueData{{ID: "TEST-1", Title: "one"}}}
+
+	claimed, err := ClaimReadyTask(context.Background(), fake, TaskClaimOptions{
+		EpicID: "EPIC-1",
+		Actor:  "driver-run:run-1",
+	})
+	if err == nil {
+		t.Fatalf("ClaimReadyTask succeeded (%+v); it must refuse rather than claim as the client's own actor", claimed)
+	}
+	if !backend.IsKind(err, backend.KindNotImplemented) {
+		t.Errorf("err = %v, want KindNotImplemented", err)
+	}
+	if len(fake.claims) != 0 {
+		t.Errorf("plain ClaimIssue was called %d times — the lock was taken under the wrong identity", len(fake.claims))
+	}
+}
+
+// No actor configured stays legitimate on the same incapable backend: there is
+// no identity to lose, so the plain claim is correct and must not regress.
+func TestClaimReadyTaskWithoutActorStillUsesPlainClaim(t *testing.T) {
+	fake := &plainClaimOnlyBackend{ready: []backend.IssueData{{ID: "TEST-1", Title: "one"}}}
+
+	claimed, err := ClaimReadyTask(context.Background(), fake, TaskClaimOptions{EpicID: "EPIC-1"})
+	if err != nil {
+		t.Fatalf("ClaimReadyTask: %v", err)
+	}
+	if claimed == nil || claimed.ID != "TEST-1" {
+		t.Fatalf("claimed = %+v, want TEST-1", claimed)
+	}
+	if len(fake.claims) != 1 {
+		t.Errorf("plain ClaimIssue calls = %d, want 1", len(fake.claims))
+	}
+}

@@ -241,19 +241,18 @@ func (t *tracedIssueBackend) ReleaseIssueAsActor(ctx context.Context, id, actor 
 	return err
 }
 
+// ClaimIssueAsActor is declared unconditionally (tracing is on by default for
+// the CLI, so this wrapper sits between every caller and the real backend and
+// answers the backend.ActorClaimer assertion on its behalf). The inner
+// dispatch therefore goes through backend.ClaimAs: an inner backend that
+// cannot scope the claim refuses rather than silently taking the lock under
+// the process's own actor — the wrapper must not launder the capability.
 func (t *tracedIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
 	ctx, span := t.startSpan(ctx, "ClaimIssueAsActor",
 		attribute.String("loom.task_id", id),
 		attribute.Int64("lock_ttl_ms", lockTTL.Milliseconds()),
 	)
-	if actorBackend, ok := t.inner.(interface {
-		ClaimIssueAsActor(context.Context, string, time.Duration, string) error
-	}); ok {
-		err := actorBackend.ClaimIssueAsActor(ctx, id, lockTTL, actor)
-		endSpan(span, err)
-		return err
-	}
-	err := t.inner.ClaimIssue(ctx, id, lockTTL)
+	err := backend.ClaimAs(ctx, t.inner, id, lockTTL, actor)
 	endSpan(span, err)
 	return err
 }

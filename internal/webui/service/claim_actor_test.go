@@ -61,15 +61,29 @@ func TestClaimAsActor_NoActorUsesPlainClaim(t *testing.T) {
 	}
 }
 
-// A backend that cannot scope a claim still works — it just cannot arbitrate,
-// which is why the API backend gaining the capability is the other half of
-// this change.
-func TestClaimAsActor_IncapableBackendFallsBack(t *testing.T) {
+// A backend that cannot scope a claim must NOT quietly claim anyway. The lock
+// would be recorded against serve's own identity: every sibling would appear
+// to win and any of them could release a lock it does not hold. Refusing is
+// visible and recoverable in minutes; a lock under the wrong name is not.
+func TestClaimAsActor_IncapableBackendRefuses(t *testing.T) {
 	be := &plainBackend{}
-	if err := claimAsActor(context.Background(), be, "T-1", "worker-7"); err != nil {
-		t.Fatalf("claimAsActor: %v", err)
+	err := claimAsActor(context.Background(), be, "T-1", "worker-7")
+	if err == nil {
+		t.Fatal("claimAsActor succeeded on a backend that cannot scope the claim")
 	}
-	if len(be.claimedAs) != 1 {
-		t.Fatalf("plain ClaimIssue not used: %v", be.claimedAs)
+	if !backend.IsKind(err, backend.KindNotImplemented) {
+		t.Errorf("err = %v, want KindNotImplemented", err)
+	}
+	if len(be.claimedAs) != 0 {
+		t.Fatalf("plain ClaimIssue was used anyway: %v", be.claimedAs)
+	}
+}
+
+// The refusal must reach the HTTP surface as a real error, not a 200 with a
+// lock nobody owns.
+func TestClaimIssue_IncapableBackendWithActorSurfacesTheError(t *testing.T) {
+	be := &plainBackend{}
+	if err := claimAsActor(context.Background(), be, "T-1", "worker-7"); translateBackendError(err) == nil {
+		t.Fatal("translateBackendError swallowed the refusal")
 	}
 }

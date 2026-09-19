@@ -210,6 +210,25 @@ func (m *MockIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL ti
 	}
 	return e
 }
+
+// ClaimIssueAsActor makes the mock model a real backend: both production
+// backends (fleet and api) implement backend.ActorClaimer, so a mock without
+// it would be the only "cannot scope a claim" backend in the tree — and
+// backend.ClaimAs refuses those rather than let the claim land under the
+// wrong identity. It records under the same "ClaimIssue" method name and runs
+// ClaimIssueFn so existing expectations keep working; the actor is appended as
+// a third recorded arg for tests that assert on it.
+func (m *MockIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
+	m.mu.Lock()
+	m.record("ClaimIssue", id, lockTTL, actor)
+	fn, e := m.ClaimIssueFn, m.ClaimIssueErr
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, id, lockTTL)
+	}
+	return e
+}
+
 func (m *MockIssueBackend) ReleaseIssueLock(ctx context.Context, id, actor string) error {
 	m.mu.Lock()
 	m.record("ReleaseIssueLock", id, actor)
