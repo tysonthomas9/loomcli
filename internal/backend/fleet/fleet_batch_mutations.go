@@ -327,10 +327,12 @@ type fleetBatchCreateIssueReq struct {
 	Repo        string   `json:"repo,omitempty"`
 	Design      string   `json:"design,omitempty"`
 	Notes       string   `json:"notes,omitempty"`
-	// omitempty is load-bearing: a fleet-db whose CreateIssueRequest predates
-	// acceptance_criteria rejects the whole batch on an unknown field, and the
-	// batch path has no compatibility retry (PUPPET-522).
+	// omitempty is load-bearing on both of these: a fleet-db whose
+	// CreateIssueRequest predates acceptance_criteria (PUPPET-522) or
+	// estimated_minutes (PUPPET-607) rejects the whole batch on an unknown
+	// field, and the batch path has no compatibility retry.
 	AcceptanceCriteria string `json:"acceptance_criteria,omitempty"`
+	EstimatedMinutes   *int   `json:"estimated_minutes,omitempty"`
 	DueAt              string `json:"due_at,omitempty"`
 	DeferUntil         string `json:"defer_until,omitempty"`
 }
@@ -362,6 +364,7 @@ func batchCreateIssueReq(op backend.BatchOp) (fleetBatchCreateIssueReq, error) {
 		Design:             p.Design,
 		Notes:              p.Notes,
 		AcceptanceCriteria: p.AcceptanceCriteria,
+		EstimatedMinutes:   p.EstimatedMinutes,
 		DueAt:              p.DueAt,
 		DeferUntil:         p.DeferUntil,
 	}, nil

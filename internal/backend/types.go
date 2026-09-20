@@ -415,12 +415,13 @@ type CreateParams struct {
 //   - "source_repo" → "repo"
 //
 // Dropped (no equivalent on fleet-db's CreateIssueRequest):
-//   - id, created_by, estimated_minutes, dependencies
+//   - id, created_by, dependencies
 //
 // If any of those need round-tripping, file a fleet-db ticket to extend
 // the CreateIssueRequest schema rather than smuggling them through here.
 // (acceptance_criteria used to be on this list; fleet-db's create and
-// update schemas gained it, so it is projected now — PUPPET-522.)
+// update schemas gained it, so it is projected now — PUPPET-522.
+// estimated_minutes left the list for the same reason — PUPPET-607.)
 //
 // This lives on CreateParams (not in the fleet package) because it is shared
 // by two consumers that must agree byte-for-byte: the fleet backend builds
@@ -447,6 +448,9 @@ func (p CreateParams) FleetCreateBody() map[string]interface{} {
 	setNonEmptyMapStr(req, "design", p.Design)
 	setNonEmptyMapStr(req, "notes", p.Notes)
 	setNonEmptyMapStr(req, "acceptance_criteria", p.AcceptanceCriteria)
+	if p.EstimatedMinutes != nil {
+		req["estimated_minutes"] = *p.EstimatedMinutes
+	}
 	setNonEmptyMapStr(req, "external_ref", p.ExternalRef)
 	setNonEmptyMapStr(req, "defer_until", p.DeferUntil)
 	setNonEmptyMapStr(req, "due_at", p.DueAt)
