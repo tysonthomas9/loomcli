@@ -715,38 +715,6 @@ tests:
           fi
         intent: "The local runtime reruns with repo A scope and proves the same designed task passes the availability gate"
 
-  # covers: TSK-D16; task-agent archive Logs tab; daemon seed-log; terminal/info archive mode
-  - name: task runner logs tab shows archive mode and seeded content
-    intent: An operator opens a Task Runner Logs tab, sees the empty archive state, then refreshes runtime-seeded archive content
-    steps:
-      - open: /ws/E2E-WS-TASK/agents/worker-a-${RUN_ID:-local}
-      - wait:
-          fn: *agentsPageReady
-        intent: "Wait until the worker-a agent detail page is ready"
-      - click: { role: button, name: Logs, exact: true }
-      - wait:
-          fn: >-
-            !!document.querySelector('[data-testid=log-viewer]')
-        intent: "Wait until the task agent archive log viewer is ready"
-      - expect: { visible: { testid: archive-empty } }
-      - expect: { text: No logs available for this agent yet. }
-      - api:
-          method: "GET"
-          path: "/api/workspaces/E2E-WS-TASK/agents/worker-a-${RUN_ID:-local}/terminal/info"
-          assert:
-            - path: "data.mode"
-              equals: "archive"
-        intent: "An operator confirms the task agent Logs tab is using archive mode, not a tmux session"
-      - run: >-
-          printf '%s\n' "worker-a task log line one" "AFT-TASK-LOG-MARKER ${RUN_ID:-local}" |
-          LOOM_TESTSUPPORT=1 LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" daemon seed-log --workspace E2E-WS-TASK --agent "worker-a-${RUN_ID:-local}" --content -
-        intent: "The local runtime seeds worker-a with an archived task-agent log marker"
-      - click: { testid: log-refresh-button }
-      - wait: { text: AFT-TASK-LOG-MARKER }
-      - expect: { visible: { testid: terminal-container } }
-      - expect: { attr: { testid: log-status, name: "data-state", equals: "connected" } }
-      - expect: { text: ARCHIVE SNAPSHOT }
-
   # covers: TSK-D17; agents rail; WorkspaceTree background group; monitor; deep-link tabs
   - name: task runner appears on every agent surface with background identity
     intent: An operator can discover a newly created Task Runner from the agents rail, workspace tree, monitor, and agent detail deep link
@@ -767,9 +735,9 @@ tests:
               const group = document.querySelector('[data-testid=agent-editor-groups]');
               if (!group) return false;
               const labels = Array.from(group.querySelectorAll('button[draggable="true"]')).map((b) => b.textContent.trim()).filter(Boolean);
-              return JSON.stringify(labels) === JSON.stringify(["Terminal", "Info", "Git", "Logs", "Diff", "Files"]);
+              return JSON.stringify(labels) === JSON.stringify(["Terminal", "Info", "Git", "Diff", "Files"]);
             })()
-        intent: "Wait until the agent detail route renders the expected six editor tabs"
+        intent: "Wait until the agent detail route renders the expected five editor tabs"
       - open: /ws/E2E-WS-TASK/monitor
       - wait:
           fn: >-

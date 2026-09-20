@@ -459,7 +459,7 @@ test-e2e: ensure-frontend-deps
 .PHONY: test-aft test-aft-strict test-aft-heal test-aft-real \
 	test-aft-real-claude test-aft-real-opencode test-aft-real-cursor \
 	test-aft-real-all test-aft-live-interactive test-aft-live-workers \
-	test-aft-terminal test-aft-podman
+	test-aft-podman
 test-aft:
 	@echo "Running AFT browser E2E tests (no recovery agent)..."
 	@tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
@@ -505,11 +505,6 @@ test-aft-live-workers:
 	 AFT_REAL_BACKEND="$$backend" \
 	 AFT_SUITES="$(PWD)/tests/aft/live-worker-suites" \
 	 tests/aft/run-aft.sh --live --with-daemon --no-agent --real-backend "$$backend" --max-real-cases 2 $(AFT_ARGS)
-
-test-aft-terminal:
-	@AFT_REAL_CODEX=1 \
-	 AFT_SUITES="$(PWD)/tests/aft/real-terminal-suites" \
-	 tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
 
 test-aft-podman:
 	@tests/aft/run-aft-podman.sh $(AFT_ARGS)
@@ -589,7 +584,7 @@ test-e2e-integration-local: ensure-frontend-deps
 # Run ALL Playwright integration e2e tests including cross-workspace and terminal-fleetdb-regression
 test-e2e-integration-full: ensure-frontend-deps
 	@echo "Running full Playwright integration e2e tests (self-contained)..."
-	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 RUN_LOCAL_INTEGRATION_TESTS=1 npx playwright test --project=integration --project=local-integration
+	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 npx playwright test --project=integration
 
 # Run auth service unit + security tests
 test-auth-service:

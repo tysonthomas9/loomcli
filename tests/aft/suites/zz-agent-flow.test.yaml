@@ -22,9 +22,9 @@ teardown: >-
   curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT" >/dev/null || true
 
 tests:
-  # covers: CreateAgentModal lead template; agent-definition visibility; Logs refresh; monitor activity
+  # covers: CreateAgentModal lead template; agent-definition visibility; monitor activity
   - name: created agent definition appears in agents page and monitor
-    intent: An operator creates a Lead agent through CreateAgentModal, observes it in the agents rail and monitor, and refreshes a runtime-seeded archive log
+    intent: An operator creates a Lead agent through CreateAgentModal and observes it in the agents rail and monitor
     steps:
       - open: /ws/E2E-WS-AGENT/agents
       - wait:
@@ -108,20 +108,6 @@ tests:
           fn: >-
             document.body.textContent.includes('nova')
         intent: "Wait until nova appears in the current agent surface"
-      - click: { role: button, name: Logs, exact: true }
-      - wait:
-          fn: >-
-            !!document.querySelector('[data-testid=log-viewer]')
-        intent: "Wait until the archived agent log viewer is ready"
-      - expect: { visible: { testid: archive-empty } }
-      - expect: { text: No logs available for this agent yet. }
-      - run: >-
-          printf '%s\n' "nova lead log line one" "nova lead AFT-LOG-MARKER $RUN_ID" |
-          LOOM_TESTSUPPORT=1 LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" daemon seed-log --workspace E2E-WS-AGENT --agent nova --content -
-        intent: "The local runtime seeds nova with an archived log marker"
-      - click: { testid: log-refresh-button }
-      - wait: { text: AFT-LOG-MARKER }
-      - expect: { visible: { testid: terminal-container } }
       - open: /ws/E2E-WS-AGENT/monitor
       - wait:
           fn: >-

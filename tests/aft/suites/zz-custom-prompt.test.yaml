@@ -393,7 +393,7 @@ tests:
           PY
         intent: "The local runtime probes codex argv with a per-test stub and verifies the custom prompt is final and literal"
 
-  # covers: CUS-D6; custom prompt negative rendering fence; agents detail Info and Logs tabs
+  # covers: CUS-D6; custom prompt negative rendering fence; agents detail Info tab
   - name: xss-shaped custom prompt is inert in agents UI
     intent: An operator's prompt containing executable HTML never becomes executable markup in the agents surface
     steps:
@@ -424,7 +424,6 @@ tests:
           fn: *agentsPageReady
         intent: "Wait until the custom agent detail page is ready"
       - click: { role: button, name: Info, exact: true }
-      - click: { role: button, name: Logs, exact: true }
       - wait: { ms: 250 }
       - wait:
           fn: >-
@@ -993,7 +992,7 @@ tests:
               const group = document.querySelector("[data-testid=agent-editor-groups]");
               if (!group) return false;
               const labels = Array.from(group.querySelectorAll('button[draggable="true"]')).map((b) => b.textContent.trim()).filter(Boolean);
-              return JSON.stringify(labels) === JSON.stringify(["Terminal", "Info", "Git", "Logs", "Diff", "Files"]);
+              return JSON.stringify(labels) === JSON.stringify(["Terminal", "Info", "Git", "Diff", "Files"]);
             })()
         intent: "Wait until the agent editor tab labels exactly match the promptless tab set"
       - expect: { notText: "AFT-PROMPT-MARKER" }

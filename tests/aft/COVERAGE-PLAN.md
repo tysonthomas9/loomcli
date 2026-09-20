@@ -121,8 +121,7 @@ Items 4 and 7 remain open.
 Deliberately deferred: `terminal/ws` + `terminal/setup` deep coverage (needs a ws step in
 the aft runner), `git/push-all` (mutates a remote; needs a seeded bare remote first),
 OpenInEditor click-through and `/api/editors/open` (launches a real editor on the host —
-needs an EDITOR stub), EmbeddedTerminal (tmux tier already covers it via
-test-aft-terminal), task quarantine (supervisor runtime, not browser-observable
+needs an EDITOR stub), task quarantine (supervisor runtime, not browser-observable
 deterministically).
 
 ---
@@ -149,11 +148,9 @@ use their mounted controls; completed task sessions open by expanding the idle-l
 than injecting localStorage. The terminal page records which healthy state rendered and asserts
 that branch's full contract.
 
-The test-only seeding seam now supplies the two agent-artifact stand-ins that previously required
-path fabrication:
+The test-only seeding seam supplies the agent-worktree stand-in that previously required path
+fabrication:
 
-- `loom daemon seed-log --workspace <ws> --agent <name> --content <file|->` appends through the
-  product archive-log writer/resolver.
 - `loom daemon seed-worktree --workspace <ws> --agent <name> [--repo <r>] [--file <rel>
   --content <file|-> --message <msg>]` uses the runtime worktree creation/registration flow and
   can commit an agent-change stand-in.

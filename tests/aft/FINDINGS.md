@@ -596,10 +596,10 @@ The "alphabetical + `zz-` runs last" ordering invariant is implicit and is exact
 prior suite's agent artifacts leak into a later suite. Per-suite workspace isolation (or an
 explicit ordering/isolation config) removes a whole class of flakiness.
 
-### 3.8 Real-codex phase 2 — live terminal
-The Logs tab's live-tmux / embedded-terminal mode is the one path still only unit-tested; a
-scenario behind `AFT_REAL_TERMINAL=1` (spawns a real lead) would close it. Riskier (real
-auto-spawn); ship after phase 3.
+### 3.8 Retired agent Logs surface
+The agent Logs tab and its live-tmux/browser coverage were removed. Agent terminal and archive
+APIs remain available to non-UI consumers; new UI coverage should target the surviving Terminal
+surface instead of recreating the retired tab.
 
 ### 3.9 Testability gaps found while landing the 2026-07-18 coverage set
 - **No deterministic staleness seam for PR review** — `pr-review-stale-banner` needs a real
@@ -616,10 +616,9 @@ auto-spawn); ship after phase 3.
 
 ### 3.10 Seeding seam extended for agent artifacts (2026-07-21)
 ADR-0001's hidden, `LOOM_TESTSUPPORT=1`-gated command family grew beyond
-`seed-transcript`: `seed-log` appends through the product archive-log writer/resolver, and
-`seed-worktree` creates/registers worktrees through the runtime's own flow and can commit a file
-as an agent-change stand-in. The remaining high-value candidate is `seed-session`, which would
-create a full session record rather than only transcript content.
+`seed-transcript`: `seed-worktree` creates/registers worktrees through the runtime's own flow and
+can commit a file as an agent-change stand-in. The remaining high-value candidate is
+`seed-session`, which would create a full session record rather than only transcript content.
 
 ---
 

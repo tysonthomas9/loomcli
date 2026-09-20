@@ -30,7 +30,6 @@
     "test:visual": "playwright test visual-regression",
     "test:visual:update": "playwright test visual-regression --update-snapshots",
     "test:e2e:integration": "RUN_INTEGRATION_TESTS=1 playwright test --project=integration",
-    "test:e2e:local-integration": "RUN_LOCAL_INTEGRATION_TESTS=1 playwright test --project=local-integration",
     "test:e2e:api": "RUN_INTEGRATION_TESTS=1 playwright test --project=api",
     "generate:types": "openapi-typescript ../../../api/openapi.yaml -o src/types/generated/openapi.ts && prettier --write src/types/generated/openapi.ts"
   },

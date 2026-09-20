@@ -7,7 +7,7 @@ import "@testing-library/jest-dom";
 import { AgentEditorGroups } from "../AgentEditorGroups";
 
 describe("AgentEditorGroups", () => {
-  it("renders all agent tabs in a single group by default", () => {
+  it("renders the supported agent tabs without Logs", () => {
     render(
       <AgentEditorGroups
         resetKey="agent-a"
@@ -22,7 +22,12 @@ describe("AgentEditorGroups", () => {
     expect(
       screen.getByRole("button", { name: "Terminal" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Logs" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Info" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Git" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Logs" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Diff" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Files" })).toBeInTheDocument();
   });
 
