@@ -130,9 +130,17 @@ const (
 	ClassPRBaseUnreachable Class = "pr-base-unreachable"
 )
 
-// maxChainDepth caps the base walk. A stack this deep is a mistake, not a
-// design, and the cap keeps a malformed graph from costing a poll per link.
-const maxChainDepth = 10
+// chainDepthCap bounds the base walk at the size of the graph it walks. A
+// cycle-free chain cannot visit more PRs than exist, so this can only fire on
+// a graph that the cycle guard somehow let through — it is a termination
+// proof, not a policy.
+//
+// It is NOT a fixed small number. Measured against this workspace on
+// 2026-09-20: 354 open loomcli PRs, 341 of them reaching v5, with the deepest
+// chain 136 links long. A cap of 10 (the first cut) answered "chain-too-deep"
+// for 123 of 153 items and cleared nothing at all — a test that never clears
+// is not a conservative test, it is a broken one.
+func chainDepthCap(graph int) int { return graph + 1 }
 
 // Poll defaults for the UNKNOWN re-poll: four looks spread over ~30s.
 const (
@@ -160,6 +168,12 @@ type PRChecker struct {
 	attempts int
 	backoff  time.Duration
 	sleep    func(time.Duration)
+	// prs caches one listing per clone for the life of the checker. Every
+	// ticket in a repo walks the same PR graph, and re-listing it per ticket
+	// cost 39 `gh pr list` calls over 354 PRs on this workspace's first live
+	// run. The cache is a snapshot on purpose: one sweep judges one graph, so
+	// two tickets cannot disagree about what the stack looked like.
+	prs map[string][]PR
 }
 
 // NewPRChecker returns a PRChecker backed by the real gh and git binaries.
@@ -173,8 +187,22 @@ func NewPRChecker() *PRChecker {
 	}
 }
 
-// OpenPRs exposes the PR listing so the sweep can scan for inverse drift.
-func (c *PRChecker) OpenPRs(clone string) ([]PR, error) { return c.gh.OpenPRs(clone) }
+// OpenPRs exposes the PR listing, cached per clone, so the sweep can scan for
+// inverse drift over the same snapshot the clear pass judged.
+func (c *PRChecker) OpenPRs(clone string) ([]PR, error) {
+	if prs, ok := c.prs[clone]; ok {
+		return prs, nil
+	}
+	prs, err := c.gh.OpenPRs(clone)
+	if err != nil {
+		return nil, err
+	}
+	if c.prs == nil {
+		c.prs = map[string][]PR{}
+	}
+	c.prs[clone] = prs
+	return prs, nil
+}
 
 // Check runs the three-part test for one ticket:
 //
@@ -197,7 +225,7 @@ func (c *PRChecker) Check(req PRCheckRequest) (PRCheck, error) {
 			"without a trunk no base chain can be judged to terminate", req.Clone)
 	}
 
-	prs, err := c.gh.OpenPRs(req.Clone)
+	prs, err := c.OpenPRs(req.Clone)
 	if err != nil {
 		return PRCheck{}, err
 	}
@@ -271,6 +299,7 @@ func (c *PRChecker) walk(req PRCheckRequest, pr PR, byHead map[string]PR) (PRChe
 	out := PRCheck{Number: pr.Number}
 	var links []string
 	seen := map[string]bool{}
+	depthCap := chainDepthCap(len(byHead))
 
 	for depth := 0; ; depth++ {
 		if seen[pr.HeadRefName] {
@@ -278,11 +307,11 @@ func (c *PRChecker) walk(req PRCheckRequest, pr PR, byHead map[string]PR) (PRChe
 				out.Number, pr.HeadRefName, chainOf(append(links, pr.HeadRefName)))
 		}
 		seen[pr.HeadRefName] = true
-		if depth >= maxChainDepth {
+		if depth >= depthCap {
 			out.Class, out.Reason = ClassPRBaseUnreachable, "chain-too-deep"
 			out.Chain = chainOf(links)
 			out.Detail = fmt.Sprintf("the base chain is deeper than %d links and was not followed to %s: %s",
-				maxChainDepth, req.Trunk, out.Chain)
+				depthCap, req.Trunk, out.Chain)
 			return out, nil
 		}
 
@@ -363,4 +392,25 @@ func (c *PRChecker) mergeableOf(req PRCheckRequest, pr PR) (string, error) {
 	return mergeable, nil
 }
 
-func chainOf(links []string) string { return strings.Join(links, " -> ") }
+// chainHead and chainTail bound how much of a long chain is rendered.
+const (
+	chainHead = 4
+	chainTail = 4
+)
+
+// chainOf renders the base chain, eliding the middle of a long one. This
+// workspace's stack runs past a hundred links, and a hundred-link string in a
+// report line and a ticket comment buries the two facts a reader needs: where
+// the chain starts and that it ends at the trunk. The elision names how many
+// links it dropped, and every dropped link is MERGEABLE by construction — a
+// link that is not terminates the walk, and those chains are short.
+func chainOf(links []string) string {
+	if len(links) <= chainHead+chainTail+1 {
+		return strings.Join(links, " -> ")
+	}
+	elided := len(links) - chainHead - chainTail
+	parts := append([]string{}, links[:chainHead]...)
+	parts = append(parts, fmt.Sprintf("... %d more links ...", elided))
+	parts = append(parts, links[len(links)-chainTail:]...)
+	return strings.Join(parts, " -> ")
+}
