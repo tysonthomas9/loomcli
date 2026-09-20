@@ -317,12 +317,6 @@ func (d *Daemon) hasTerminalEphemeralTaskSession(agentName string) bool {
 	return false
 }
 
-func (d *Daemon) setConfigAgentDesiredState(name string, desired domain.AgentDesiredState) {
-	d.reconcileMu.Lock()
-	defer d.reconcileMu.Unlock()
-	d.setConfigAgentDesiredStateLocked(name, desired)
-}
-
 func (d *Daemon) setConfigAgentDesiredStateLocked(name string, desired domain.AgentDesiredState) {
 	if d.config == nil {
 		return

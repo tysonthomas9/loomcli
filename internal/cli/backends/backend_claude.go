@@ -600,26 +600,6 @@ func (b *outputRingBuffer) String() string {
 	return strings.Join(result, "\n")
 }
 
-// newStreamLineHandler returns a line handler that captures the Claude session ID
-// (once) and forwards lines to displayStreamEvent and the usage collector.
-func newStreamLineHandler(workDir string, collector *usage.Collector) func(string) {
-	var sessionOnce sync.Once
-	return func(line string) {
-		if sid, ok := extractClaudeSessionID(line); ok {
-			sessionOnce.Do(func() {
-				SetLastCapturedSessionID(sid)
-				if err := cli.UpdateLockClaudeSessionID(workDir, sid); err != nil {
-					fmt.Fprintf(os.Stderr, "[loom] failed to persist claude session ID: %v\n", err)
-				}
-			})
-		}
-		displayStreamEvent(line)
-		if collector != nil {
-			collectClaudeStreamUsage(line, collector)
-		}
-	}
-}
-
 // scanStreamOutput reads stdout line by line through a buffered scanner and
 // calls handler for each line. Shared by Claude, Codex, and OpenCode backends.
 // It returns the last 50 lines so callers can classify invocation failures

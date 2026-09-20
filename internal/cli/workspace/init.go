@@ -167,12 +167,6 @@ func initWorkspaceIssueStorage(deps *cli.Deps, ws config.WorkspaceConfig) {
 	fmt.Println("→ Fleet-db issue storage is used; no local task database init required")
 }
 
-func initIssueStorageInWorkspace(deps *cli.Deps, wsPath string) {
-	_ = deps
-	_ = wsPath
-	fmt.Println("→ Fleet-db issue storage is used; no local task database init required")
-}
-
 func showWorkspaceSummary(ws config.WorkspaceConfig) {
 	fmt.Println("Workspace ready! 🎉")
 	fmt.Println("")

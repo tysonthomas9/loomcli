@@ -337,28 +337,6 @@ func resolveLeadName(flagValue string) string {
 	return strings.TrimSpace(os.Getenv(envAgentName))
 }
 
-func sanitizePrefix(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	var b strings.Builder
-	lastDash := false
-	for _, r := range value {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-			lastDash = false
-			continue
-		}
-		if b.Len() > 0 && !lastDash {
-			b.WriteByte('-')
-			lastDash = true
-		}
-	}
-	out := strings.Trim(b.String(), "-")
-	if out == "" {
-		return "epic"
-	}
-	return out
-}
-
 // signalContext returns a context cancelled by Ctrl-C / SIGTERM so the loop
 // exits cleanly on user interrupt without abandoning workers.
 func signalContext(parent context.Context) (context.Context, context.CancelFunc) {
