@@ -3,6 +3,7 @@ package uniondebt
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -509,5 +510,68 @@ func TestTaskIDsOf(t *testing.T) {
 	want := []string{"PUPPET-655", "WEB-3"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("taskIDsOf = %v, want %v", got, want)
+	}
+}
+
+// TestSweep_PRPendingDeepStackStillClears is the regression the first live
+// dry-run bought: this workspace runs ONE long stack — 354 open loomcli PRs,
+// the deepest chain 136 links — and a fixed cap of 10 answered
+// "chain-too-deep" for 123 of 153 items and cleared nothing. The walk is
+// bounded by the graph, not by a guess about how people stack.
+func TestSweep_PRPendingDeepStackStillClears(t *testing.T) {
+	const depth = 40
+	f := newFakeBackend()
+	f.add(prIssue("PUPPET-1", "loomcli"))
+
+	prs := []PR{{Number: 1000, State: "OPEN", Mergeable: MergeableYes, HeadRefName: "loom/PUPPET-1", BaseRefName: "stack/1"}}
+	for i := 1; i < depth; i++ {
+		base := fmt.Sprintf("stack/%d", i+1)
+		if i == depth-1 {
+			base = "v5"
+		}
+		prs = append(prs, PR{
+			Number: 1000 + i, State: "OPEN", Mergeable: MergeableYes,
+			HeadRefName: fmt.Sprintf("stack/%d", i), BaseRefName: base,
+		})
+	}
+	gh := &fakeGitHub{prs: prs}
+
+	item := onlyItem(t, runPR(t, f, gh, nil, Options{}))
+
+	if item.Action != ActionCleared {
+		t.Fatalf("item = %+v, want a %d-link chain to clear", item, depth)
+	}
+	if !strings.HasSuffix(item.Chain, "-> v5") {
+		t.Errorf("chain should be walked to the trunk, got %q", item.Chain)
+	}
+	// A 40-link chain is rendered elided: both ends, and a count of what was
+	// dropped. Printing all of it buries the two facts a reader needs.
+	if !strings.Contains(item.Chain, "more links") || !strings.HasPrefix(item.Chain, "#1000 MERGEABLE") {
+		t.Errorf("long chain should keep both ends and name the elision, got %q", item.Chain)
+	}
+	if n := strings.Count(item.Chain, "->"); n > chainHead+chainTail+1 {
+		t.Errorf("rendered %d links, want the middle elided: %q", n, item.Chain)
+	}
+}
+
+// TestSweep_PRPendingListsEachCloneOnce: every ticket in a repo walks the same
+// PR graph. The first live run listed it once per ticket — 39 `gh pr list`
+// calls over 354 PRs — so the listing is cached per clone for the sweep.
+func TestSweep_PRPendingListsEachCloneOnce(t *testing.T) {
+	f := newFakeBackend()
+	f.add(prIssue("PUPPET-1", "loomcli"))
+	f.add(prIssue("PUPPET-2", "loomcli"))
+	f.add(prIssue("PUPPET-3", "loomcli"))
+	gh := &fakeGitHub{prs: []PR{
+		{Number: 612, State: "OPEN", Mergeable: MergeableYes, HeadRefName: "loom/PUPPET-1", BaseRefName: "v5"},
+	}}
+
+	rep := runPR(t, f, gh, nil, Options{})
+
+	if len(rep.Items) != 3 {
+		t.Fatalf("items = %+v, want one per marked ticket", rep.Items)
+	}
+	if gh.listCalls != 1 {
+		t.Errorf("listed the clone %d times, want 1 cached listing per sweep", gh.listCalls)
 	}
 }
