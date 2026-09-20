@@ -96,6 +96,12 @@ type DaemonState struct {
 	// what makes it visible to an operator who is reading status rather than
 	// grepping a log file.
 	ProfileDrifts []supervisor.ProfileDrift `json:"profile_drifts,omitempty"`
+	// Walls lists the credential walls parking agents right now, with the
+	// scope and the credential each one belongs to. Without it "why is
+	// nothing spawning" is answerable only by grepping the daemon log, and
+	// the answer an operator needs first — whether this is the whole account
+	// or one broken profile — is exactly what the log line used to blur.
+	Walls []supervisor.WallInfo `json:"walls,omitempty"`
 }
 
 // Cobra command variables
@@ -531,7 +537,7 @@ func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths dae
 
 	startedAt := time.Now()
 	if err := writeStateFile(paths.stateFile, startedAt, daemon.Agents(), daemon.UnavailableAgents(), daemon.ParkedAgents(), daemon.QuarantinedTasks(), daemon.sup.Degradations(), maxRetries,
-		daemon.sup.ClaimHoldSnapshot()); err != nil {
+		stateExtras{Hold: daemon.sup.ClaimHoldSnapshot(), Walls: daemon.sup.WallSnapshot()}); err != nil {
 		fmt.Printf("Warning: failed to write initial state file: %v\n", err)
 	}
 
@@ -729,6 +735,7 @@ func printDaemonAgentTable(state *DaemonState, dir string) {
 	printProfileBlockedBanner(state.Agents)
 	printQuarantinedTasks(state.QuarantinedTasks)
 	printProfileDrifts(state.ProfileDrifts)
+	printWalls(state.Walls)
 }
 
 // pendingInputsForDir fetches every pending prompt from the control socket of
