@@ -440,6 +440,10 @@ var sweepDeadlineOrphans = func(s *Supervisor, worktreePath, taskID string) int 
 // survives — that is what this catches, scoped to the agent's own worktree so
 // the daemon never signals anything that is not ours.
 //
+// It is called from spawnAndWait on the same seam as recordTaskExitForQuarantine
+// and for the same reason: the lock is still present there, so the sweep's Warn
+// line can name the task the escaped process belongs to.
+//
 // It runs only for RunTurnDeadline exits: orphans are created when a turn is
 // cut short, and every other outcome ends its own children normally. Wholly
 // best-effort — an empty worktree path skips the sweep instead of sweeping
