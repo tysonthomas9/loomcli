@@ -47,10 +47,20 @@ re-derive it:
 
 The identifiers those triggers name are a stable contract, not descriptions: `source` is an
 `agenterr.EvidenceSource` (`internal/agenterr/evidence.go`), `rule=residual.auth` is an id on
-the `residualPatterns` table (`internal/agenterr/classify.go`), and the `screen.*` fields are
-`agenterr.ScreenEvidence`. Renaming any of them silently breaks the trigger it belongs to.
+the residual table, and the `screen.*` fields are `agenterr.ScreenEvidence`. Renaming any of
+them silently breaks the trigger it belongs to.
 `TestClassifyEvidenceOverBroadResidualAuth` in `internal/agenterr/classify_test.go` is the
 executable form of the third trigger.
+
+The residual table now lives in **harness-wrapper**, as the rows behind
+`wrapper.ClassifyFinishedOutput` (`pkg/wrapper/finished.go`), and reports which row matched as
+`Classification.Rule`; `agenterr.classificationEvidence` maps that onto `source=residual_pattern`
+with the same id. The move changed no row, no id and no verdict — the differential gate in
+`internal/agenterr/differential_test.go` replays the whole pipeline against a capture taken
+before it — so every trigger above reads exactly what it read when they were written. It does
+change WHO carries out the third trigger's remedy: narrowing `residual.auth` is now an edit in
+harness-wrapper, by the repository that knows which phrasing each CLI actually prints, which is
+the reason the table moved at all.
 
 ## Considered Options
 

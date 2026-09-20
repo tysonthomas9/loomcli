@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 )
 
 func boolp(b bool) *bool { return &b }
@@ -125,7 +127,12 @@ func TestRedactionBeforeStorage(t *testing.T) {
 		"401 Unauthorized: invalid api key",
 	}, "\n")
 
-	ev := newTextEvidence(EvidenceResidual, "residual.auth", residualPatterns[1].re, text)
+	// Through the REAL path: the residual rows live in harness-wrapper now, so
+	// building the evidence by hand would no longer test what production does.
+	ev := residualEvidence(wrapper.ClassifyFinishedOutput("claude", text), text)
+	if ev.Rule != "residual.auth" {
+		t.Fatalf("precondition: rule = %q, want residual.auth", ev.Rule)
+	}
 	ev.Detail = redactEvidence(text)
 
 	for field, v := range map[string]string{"Match": ev.Match, "Excerpt": ev.Excerpt, "Detail": ev.Detail} {
@@ -156,7 +163,10 @@ func TestEvidenceCapsOnRuneBoundaries(t *testing.T) {
 	// 1 MiB of a multi-byte glyph, with the match buried in the middle.
 	filler := strings.Repeat("❯", 350_000) // 3 bytes each -> ~1 MiB
 	text := filler + "401 Unauthorized" + filler
-	ev := newTextEvidence(EvidenceResidual, "residual.auth", residualPatterns[1].re, text)
+	ev := residualEvidence(wrapper.ClassifyFinishedOutput("claude", text), text)
+	if ev.Rule != "residual.auth" {
+		t.Fatalf("precondition: rule = %q, want residual.auth", ev.Rule)
+	}
 
 	if len(ev.Excerpt) > evidenceExcerptCap {
 		t.Errorf("Excerpt = %d bytes, want <= %d", len(ev.Excerpt), evidenceExcerptCap)

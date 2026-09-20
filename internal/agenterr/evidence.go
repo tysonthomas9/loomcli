@@ -19,7 +19,7 @@ type EvidenceSource string
 const (
 	EvidenceHarnessMarker EvidenceSource = "harness_marker"     // classifyHarnessMarkers
 	EvidenceWrapper       EvidenceSource = "wrapper_classifier" // fromClassification
-	EvidenceResidual      EvidenceSource = "residual_pattern"   // classifyWithPatterns
+	EvidenceResidual      EvidenceSource = "residual_pattern"   // wrapper residual row
 	EvidenceExitCode      EvidenceSource = "exit_code"          // classifyByExitCode fallback
 	EvidenceSupervisor    EvidenceSource = "supervisor"         // synthesized, never text-derived
 )
@@ -144,25 +144,30 @@ func newTextEvidence(src EvidenceSource, rule string, re *regexp.Regexp, text st
 		return ev
 	}
 	ev.Match = capString(redactEvidence(sanitizeText(text[loc[0]:loc[1]])), evidenceMatchCap)
+	ev.Excerpt = capString(redactEvidence(sanitizeText(excerptWindow(text, loc[0], loc[1]))), evidenceExcerptCap)
+	return ev
+}
 
-	start := loc[0] - evidenceWindow
+// excerptWindow returns evidenceWindow bytes either side of [lo, hi), widened
+// to rune boundaries so the window never splits a glyph before the sanitizer
+// sees it. Shared with residualEvidence, which locates its span by the matched
+// text the wrapper reports rather than by running a regex of its own.
+func excerptWindow(text string, lo, hi int) string {
+	start := lo - evidenceWindow
 	if start < 0 {
 		start = 0
 	}
-	end := loc[1] + evidenceWindow
+	end := hi + evidenceWindow
 	if end > len(text) {
 		end = len(text)
 	}
-	// Widen to rune boundaries so the window never splits a glyph before the
-	// sanitizer sees it.
 	for start > 0 && !utf8.RuneStart(text[start]) {
 		start--
 	}
 	for end < len(text) && !utf8.RuneStart(text[end]) {
 		end++
 	}
-	ev.Excerpt = capString(redactEvidence(sanitizeText(text[start:end])), evidenceExcerptCap)
-	return ev
+	return text[start:end]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

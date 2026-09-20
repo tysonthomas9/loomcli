@@ -290,21 +290,22 @@ func conversationInputResolver(policy *domain.RoleInputPolicy) func(chat.InputRe
 // taxonomy, carrying the harness's own terminal verdict when it named one —
 // the same mapping the one-shot path applies to ErrTurnErrored.
 //
-// The conversation is taken as an argument for its SCREEN. On a terminal
-// auth/usage turn the wrapper hands us a Reason and nothing else: every
-// producer of chat.ReasonAuthRequired on the pinned v0.7.7 leaves Turn.Text
-// empty (emitAuthRequiredTurn never sets it; authRelabel blanks it), so the
-// classifier downstream would see the marker over an empty window and record
-// Screen.Scanned=false on exactly the verdict that description exists for.
+// The conversation is taken as an argument for its SCREEN. On a terminal wall
+// turn the wrapper hands us a Reason and a Code and nothing else: every
+// producer of chat.ReasonAuthRequired leaves Turn.Text empty
+// (emitAuthRequiredTurn never sets it; authRelabel and the transcript-tag
+// relabel blank it), so the classifier downstream would see the marker over an
+// empty window and record Screen.Scanned=false on exactly the verdict that
+// description exists for.
 // Appending the live screen widens that window; it changes no class, no
 // disposition and no restart decision.
 func conversationTurnError(conv *chat.Conversation, turn chat.Turn) error {
+	if ie := terminalTurnInvocationError(turn, joinEvidence(turn.Text, screenEvidence(conv))); ie != nil {
+		return ie
+	}
 	reason := strings.TrimSpace(turn.Reason)
 	if reason == "" {
 		reason = "claude turn errored"
-	}
-	if ie := terminalTurnInvocationError(reason, joinEvidence(turn.Text, screenEvidence(conv))); ie != nil {
-		return ie
 	}
 	return &InvocationError{Err: errors.New(reason), OutputTail: turn.Text, ExitCode: 1}
 }
@@ -317,7 +318,14 @@ func authSentinelInvocationError(err error, conv *chat.Conversation) error {
 	if !errors.Is(err, chat.ErrAuthRequired) {
 		return nil
 	}
-	if ie := terminalTurnInvocationError(chat.ReasonAuthRequired, screenEvidence(conv)); ie != nil {
+	// The sentinel carries no Turn, so the auth verdict is stated here: this
+	// arm exists precisely because the harness refused before a turn could
+	// run, and terminalTurnInvocationError reads the code rather than the
+	// prose.
+	if ie := terminalTurnInvocationError(chat.Turn{
+		Code:   chat.CodeAuthRequired,
+		Reason: chat.ReasonAuthRequired,
+	}, screenEvidence(conv)); ie != nil {
 		return ie
 	}
 	return nil

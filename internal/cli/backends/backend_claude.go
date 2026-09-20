@@ -352,19 +352,19 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	outputTail := claudeRunTurnEvidence(res, "")
 	if err != nil {
 		if errors.Is(err, hwharness.ErrTurnErrored) {
+			// The harness may have declared WHY the turn is terminal. When it
+			// names an expired login, an exhausted quota or a billing wall,
+			// carry that verdict out as a marker so the supervisor's classifier
+			// acts on it directly instead of re-deriving it from the log tail —
+			// the difference between "renew the login" / "back off blamelessly"
+			// / "a human has to pay" and an Unknown that burns the restart
+			// budget on turns that cannot succeed.
+			if ie := terminalTurnInvocationError(res.Turn, claudeTerminalEvidence(res)); ie != nil {
+				return ie
+			}
 			reason := strings.TrimSpace(res.Turn.Reason)
 			if reason == "" {
 				reason = "claude turn errored"
-			}
-			// The harness may have declared WHY the turn is terminal. When it
-			// names an expired login or an exhausted quota, carry that verdict
-			// out as a marker so the supervisor's classifier acts on it
-			// directly instead of re-deriving it from the log tail — the
-			// difference between "renew the login" / "back off blamelessly"
-			// and an Unknown that burns the restart budget on a turn that
-			// cannot succeed.
-			if ie := terminalTurnInvocationError(reason, claudeTerminalEvidence(res)); ie != nil {
-				return ie
 			}
 			return &InvocationError{Err: errors.New(reason), OutputTail: outputTail, ExitCode: 1}
 		}
