@@ -1,0 +1,1970 @@
+[
+ {
+  "Name": "empty",
+  "Backend": "claude",
+  "Text": "",
+  "ExitCode": 1
+ },
+ {
+  "Name": "clean output",
+  "Backend": "claude",
+  "Text": "wrote 3 files, all tests pass",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit",
+  "Backend": "claude",
+  "Text": "Error: rate limit exceeded\nretry-after: 30",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit bare 429",
+  "Backend": "claude",
+  "Text": "upstream returned 429",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit try again at",
+  "Backend": "claude",
+  "Text": "please try again at 9",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit header casing",
+  "Backend": "claude",
+  "Text": "Error: too many requests\nRetry-After: 120",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth",
+  "Backend": "claude",
+  "Text": "request rejected: unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth 401",
+  "Backend": "claude",
+  "Text": "Error: 401 Unauthorized: invalid api key",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth env var name",
+  "Backend": "claude",
+  "Text": "reading ANTHROPIC_API_KEY from the environment",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth forbidden",
+  "Backend": "claude",
+  "Text": "HTTP 403 forbidden",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.billing",
+  "Backend": "claude",
+  "Text": "your billing needs attention",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.billing 402",
+  "Backend": "claude",
+  "Text": "402 payment required",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.model_version",
+  "Backend": "claude",
+  "Text": "this model requires a newer version",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.model_not_found",
+  "Backend": "claude",
+  "Text": "unsupported model",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.context",
+  "Backend": "claude",
+  "Text": "prompt too long",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.timeout",
+  "Backend": "claude",
+  "Text": "etimedout",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.timeout deadline",
+  "Backend": "claude",
+  "Text": "context deadline exceeded",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.transient",
+  "Backend": "claude",
+  "Text": "service unavailable",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.transient 529",
+  "Backend": "claude",
+  "Text": "upstream said 529",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap ratelimit+transient",
+  "Backend": "claude",
+  "Text": "upstream returned 429; also a 500 server error",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap auth+billing",
+  "Backend": "claude",
+  "Text": "401 unauthorized \u2014 check your billing",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap billing+model",
+  "Backend": "claude",
+  "Text": "payment required; unsupported model",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap timeout+transient",
+  "Backend": "claude",
+  "Text": "500 server error after connection timed out",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 429",
+  "Backend": "claude",
+  "Text": "API Error: 429 Too Many Requests",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 529",
+  "Backend": "claude",
+  "Text": "API Error: 529 Overloaded. This is a server-side issue, usually temporary \u2014 try again in a moment.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 500",
+  "Backend": "claude",
+  "Text": "API Error: 500 Internal server error.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper cost",
+  "Backend": "claude",
+  "Text": "ERROR: quota exceeded. try later.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper transport",
+  "Backend": "claude",
+  "Text": "request failed: connect ECONNREFUSED 127.0.0.1:443",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper transport hangup",
+  "Backend": "claude",
+  "Text": "Error: socket hang up",
+  "ExitCode": 1
+ },
+ {
+  "Name": "timeout refinement",
+  "Backend": "claude",
+  "Text": "Error: socket hang up\ncontext deadline exceeded while streaming",
+  "ExitCode": 1
+ },
+ {
+  "Name": "session limit banner",
+  "Backend": "claude",
+  "Text": "You've hit your session limit \u00b7 resets 10:20pm (Europe/Warsaw)",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker backend unavailable",
+  "Backend": "claude",
+  "Text": "loom: backend binary not on PATH: exec: \"claude\": executable file not found in $PATH",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker agent launch failed",
+  "Backend": "claude",
+  "Text": "loom: agent process failed to launch: fork/exec: exec format error",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker run-turn deadline",
+  "Backend": "claude",
+  "Text": "loom: run-turn deadline exceeded: context deadline exceeded after 3480s",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker auth required",
+  "Backend": "claude",
+  "Text": "loom: harness login expired or re-authentication required: auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker usage limited",
+  "Backend": "claude",
+  "Text": "loom: harness usage or session limit reached: usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)\nretry-after: 600",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker billing wall",
+  "Backend": "claude",
+  "Text": "loom: harness billing or credit wall reached: billing_wall: harness billing or credit wall reached \u2014 the account cannot run turns until billing is resolved (harness tag: billing_error)",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker outranks residual",
+  "Backend": "claude",
+  "Text": "loom: run-turn deadline exceeded: context deadline exceeded\n429 rate limit",
+  "ExitCode": 1
+ },
+ {
+  "Name": "logged-out screen for ScreenEvidence",
+  "Backend": "claude",
+  "Text": "Claude Code\n\nNot logged in \u00b7 Run /login\n\n\u276f \n401 unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "trust dialog screen",
+  "Backend": "claude",
+  "Text": "Claude Code\n\nDo you trust the files in this folder?\n\n\u276f 1. Yes\n401 unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "empty",
+  "Backend": "claude-code",
+  "Text": "",
+  "ExitCode": 1
+ },
+ {
+  "Name": "clean output",
+  "Backend": "claude-code",
+  "Text": "wrote 3 files, all tests pass",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit",
+  "Backend": "claude-code",
+  "Text": "Error: rate limit exceeded\nretry-after: 30",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit bare 429",
+  "Backend": "claude-code",
+  "Text": "upstream returned 429",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit try again at",
+  "Backend": "claude-code",
+  "Text": "please try again at 9",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit header casing",
+  "Backend": "claude-code",
+  "Text": "Error: too many requests\nRetry-After: 120",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth",
+  "Backend": "claude-code",
+  "Text": "request rejected: unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth 401",
+  "Backend": "claude-code",
+  "Text": "Error: 401 Unauthorized: invalid api key",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth env var name",
+  "Backend": "claude-code",
+  "Text": "reading ANTHROPIC_API_KEY from the environment",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth forbidden",
+  "Backend": "claude-code",
+  "Text": "HTTP 403 forbidden",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.billing",
+  "Backend": "claude-code",
+  "Text": "your billing needs attention",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.billing 402",
+  "Backend": "claude-code",
+  "Text": "402 payment required",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.model_version",
+  "Backend": "claude-code",
+  "Text": "this model requires a newer version",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.model_not_found",
+  "Backend": "claude-code",
+  "Text": "unsupported model",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.context",
+  "Backend": "claude-code",
+  "Text": "prompt too long",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.timeout",
+  "Backend": "claude-code",
+  "Text": "etimedout",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.timeout deadline",
+  "Backend": "claude-code",
+  "Text": "context deadline exceeded",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.transient",
+  "Backend": "claude-code",
+  "Text": "service unavailable",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.transient 529",
+  "Backend": "claude-code",
+  "Text": "upstream said 529",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap ratelimit+transient",
+  "Backend": "claude-code",
+  "Text": "upstream returned 429; also a 500 server error",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap auth+billing",
+  "Backend": "claude-code",
+  "Text": "401 unauthorized \u2014 check your billing",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap billing+model",
+  "Backend": "claude-code",
+  "Text": "payment required; unsupported model",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap timeout+transient",
+  "Backend": "claude-code",
+  "Text": "500 server error after connection timed out",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 429",
+  "Backend": "claude-code",
+  "Text": "API Error: 429 Too Many Requests",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 529",
+  "Backend": "claude-code",
+  "Text": "API Error: 529 Overloaded. This is a server-side issue, usually temporary \u2014 try again in a moment.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 500",
+  "Backend": "claude-code",
+  "Text": "API Error: 500 Internal server error.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper cost",
+  "Backend": "claude-code",
+  "Text": "ERROR: quota exceeded. try later.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper transport",
+  "Backend": "claude-code",
+  "Text": "request failed: connect ECONNREFUSED 127.0.0.1:443",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper transport hangup",
+  "Backend": "claude-code",
+  "Text": "Error: socket hang up",
+  "ExitCode": 1
+ },
+ {
+  "Name": "timeout refinement",
+  "Backend": "claude-code",
+  "Text": "Error: socket hang up\ncontext deadline exceeded while streaming",
+  "ExitCode": 1
+ },
+ {
+  "Name": "session limit banner",
+  "Backend": "claude-code",
+  "Text": "You've hit your session limit \u00b7 resets 10:20pm (Europe/Warsaw)",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker backend unavailable",
+  "Backend": "claude-code",
+  "Text": "loom: backend binary not on PATH: exec: \"claude\": executable file not found in $PATH",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker agent launch failed",
+  "Backend": "claude-code",
+  "Text": "loom: agent process failed to launch: fork/exec: exec format error",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker run-turn deadline",
+  "Backend": "claude-code",
+  "Text": "loom: run-turn deadline exceeded: context deadline exceeded after 3480s",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker auth required",
+  "Backend": "claude-code",
+  "Text": "loom: harness login expired or re-authentication required: auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker usage limited",
+  "Backend": "claude-code",
+  "Text": "loom: harness usage or session limit reached: usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)\nretry-after: 600",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker billing wall",
+  "Backend": "claude-code",
+  "Text": "loom: harness billing or credit wall reached: billing_wall: harness billing or credit wall reached \u2014 the account cannot run turns until billing is resolved (harness tag: billing_error)",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker outranks residual",
+  "Backend": "claude-code",
+  "Text": "loom: run-turn deadline exceeded: context deadline exceeded\n429 rate limit",
+  "ExitCode": 1
+ },
+ {
+  "Name": "logged-out screen for ScreenEvidence",
+  "Backend": "claude-code",
+  "Text": "Claude Code\n\nNot logged in \u00b7 Run /login\n\n\u276f \n401 unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "trust dialog screen",
+  "Backend": "claude-code",
+  "Text": "Claude Code\n\nDo you trust the files in this folder?\n\n\u276f 1. Yes\n401 unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "empty",
+  "Backend": "codex",
+  "Text": "",
+  "ExitCode": 1
+ },
+ {
+  "Name": "clean output",
+  "Backend": "codex",
+  "Text": "wrote 3 files, all tests pass",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit",
+  "Backend": "codex",
+  "Text": "Error: rate limit exceeded\nretry-after: 30",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit bare 429",
+  "Backend": "codex",
+  "Text": "upstream returned 429",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit try again at",
+  "Backend": "codex",
+  "Text": "please try again at 9",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit header casing",
+  "Backend": "codex",
+  "Text": "Error: too many requests\nRetry-After: 120",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth",
+  "Backend": "codex",
+  "Text": "request rejected: unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth 401",
+  "Backend": "codex",
+  "Text": "Error: 401 Unauthorized: invalid api key",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth env var name",
+  "Backend": "codex",
+  "Text": "reading ANTHROPIC_API_KEY from the environment",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth forbidden",
+  "Backend": "codex",
+  "Text": "HTTP 403 forbidden",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.billing",
+  "Backend": "codex",
+  "Text": "your billing needs attention",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.billing 402",
+  "Backend": "codex",
+  "Text": "402 payment required",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.model_version",
+  "Backend": "codex",
+  "Text": "this model requires a newer version",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.model_not_found",
+  "Backend": "codex",
+  "Text": "unsupported model",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.context",
+  "Backend": "codex",
+  "Text": "prompt too long",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.timeout",
+  "Backend": "codex",
+  "Text": "etimedout",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.timeout deadline",
+  "Backend": "codex",
+  "Text": "context deadline exceeded",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.transient",
+  "Backend": "codex",
+  "Text": "service unavailable",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.transient 529",
+  "Backend": "codex",
+  "Text": "upstream said 529",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap ratelimit+transient",
+  "Backend": "codex",
+  "Text": "upstream returned 429; also a 500 server error",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap auth+billing",
+  "Backend": "codex",
+  "Text": "401 unauthorized \u2014 check your billing",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap billing+model",
+  "Backend": "codex",
+  "Text": "payment required; unsupported model",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap timeout+transient",
+  "Backend": "codex",
+  "Text": "500 server error after connection timed out",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 429",
+  "Backend": "codex",
+  "Text": "API Error: 429 Too Many Requests",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 529",
+  "Backend": "codex",
+  "Text": "API Error: 529 Overloaded. This is a server-side issue, usually temporary \u2014 try again in a moment.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 500",
+  "Backend": "codex",
+  "Text": "API Error: 500 Internal server error.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper cost",
+  "Backend": "codex",
+  "Text": "ERROR: quota exceeded. try later.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper transport",
+  "Backend": "codex",
+  "Text": "request failed: connect ECONNREFUSED 127.0.0.1:443",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper transport hangup",
+  "Backend": "codex",
+  "Text": "Error: socket hang up",
+  "ExitCode": 1
+ },
+ {
+  "Name": "timeout refinement",
+  "Backend": "codex",
+  "Text": "Error: socket hang up\ncontext deadline exceeded while streaming",
+  "ExitCode": 1
+ },
+ {
+  "Name": "session limit banner",
+  "Backend": "codex",
+  "Text": "You've hit your session limit \u00b7 resets 10:20pm (Europe/Warsaw)",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker backend unavailable",
+  "Backend": "codex",
+  "Text": "loom: backend binary not on PATH: exec: \"claude\": executable file not found in $PATH",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker agent launch failed",
+  "Backend": "codex",
+  "Text": "loom: agent process failed to launch: fork/exec: exec format error",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker run-turn deadline",
+  "Backend": "codex",
+  "Text": "loom: run-turn deadline exceeded: context deadline exceeded after 3480s",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker auth required",
+  "Backend": "codex",
+  "Text": "loom: harness login expired or re-authentication required: auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker usage limited",
+  "Backend": "codex",
+  "Text": "loom: harness usage or session limit reached: usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)\nretry-after: 600",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker billing wall",
+  "Backend": "codex",
+  "Text": "loom: harness billing or credit wall reached: billing_wall: harness billing or credit wall reached \u2014 the account cannot run turns until billing is resolved (harness tag: billing_error)",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker outranks residual",
+  "Backend": "codex",
+  "Text": "loom: run-turn deadline exceeded: context deadline exceeded\n429 rate limit",
+  "ExitCode": 1
+ },
+ {
+  "Name": "logged-out screen for ScreenEvidence",
+  "Backend": "codex",
+  "Text": "Claude Code\n\nNot logged in \u00b7 Run /login\n\n\u276f \n401 unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "trust dialog screen",
+  "Backend": "codex",
+  "Text": "Claude Code\n\nDo you trust the files in this folder?\n\n\u276f 1. Yes\n401 unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "empty",
+  "Backend": "cursor",
+  "Text": "",
+  "ExitCode": 1
+ },
+ {
+  "Name": "clean output",
+  "Backend": "cursor",
+  "Text": "wrote 3 files, all tests pass",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit",
+  "Backend": "cursor",
+  "Text": "Error: rate limit exceeded\nretry-after: 30",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit bare 429",
+  "Backend": "cursor",
+  "Text": "upstream returned 429",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit try again at",
+  "Backend": "cursor",
+  "Text": "please try again at 9",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit header casing",
+  "Backend": "cursor",
+  "Text": "Error: too many requests\nRetry-After: 120",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth",
+  "Backend": "cursor",
+  "Text": "request rejected: unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth 401",
+  "Backend": "cursor",
+  "Text": "Error: 401 Unauthorized: invalid api key",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth env var name",
+  "Backend": "cursor",
+  "Text": "reading ANTHROPIC_API_KEY from the environment",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth forbidden",
+  "Backend": "cursor",
+  "Text": "HTTP 403 forbidden",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.billing",
+  "Backend": "cursor",
+  "Text": "your billing needs attention",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.billing 402",
+  "Backend": "cursor",
+  "Text": "402 payment required",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.model_version",
+  "Backend": "cursor",
+  "Text": "this model requires a newer version",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.model_not_found",
+  "Backend": "cursor",
+  "Text": "unsupported model",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.context",
+  "Backend": "cursor",
+  "Text": "prompt too long",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.timeout",
+  "Backend": "cursor",
+  "Text": "etimedout",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.timeout deadline",
+  "Backend": "cursor",
+  "Text": "context deadline exceeded",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.transient",
+  "Backend": "cursor",
+  "Text": "service unavailable",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.transient 529",
+  "Backend": "cursor",
+  "Text": "upstream said 529",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap ratelimit+transient",
+  "Backend": "cursor",
+  "Text": "upstream returned 429; also a 500 server error",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap auth+billing",
+  "Backend": "cursor",
+  "Text": "401 unauthorized \u2014 check your billing",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap billing+model",
+  "Backend": "cursor",
+  "Text": "payment required; unsupported model",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap timeout+transient",
+  "Backend": "cursor",
+  "Text": "500 server error after connection timed out",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 429",
+  "Backend": "cursor",
+  "Text": "API Error: 429 Too Many Requests",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 529",
+  "Backend": "cursor",
+  "Text": "API Error: 529 Overloaded. This is a server-side issue, usually temporary \u2014 try again in a moment.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 500",
+  "Backend": "cursor",
+  "Text": "API Error: 500 Internal server error.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper cost",
+  "Backend": "cursor",
+  "Text": "ERROR: quota exceeded. try later.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper transport",
+  "Backend": "cursor",
+  "Text": "request failed: connect ECONNREFUSED 127.0.0.1:443",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper transport hangup",
+  "Backend": "cursor",
+  "Text": "Error: socket hang up",
+  "ExitCode": 1
+ },
+ {
+  "Name": "timeout refinement",
+  "Backend": "cursor",
+  "Text": "Error: socket hang up\ncontext deadline exceeded while streaming",
+  "ExitCode": 1
+ },
+ {
+  "Name": "session limit banner",
+  "Backend": "cursor",
+  "Text": "You've hit your session limit \u00b7 resets 10:20pm (Europe/Warsaw)",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker backend unavailable",
+  "Backend": "cursor",
+  "Text": "loom: backend binary not on PATH: exec: \"claude\": executable file not found in $PATH",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker agent launch failed",
+  "Backend": "cursor",
+  "Text": "loom: agent process failed to launch: fork/exec: exec format error",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker run-turn deadline",
+  "Backend": "cursor",
+  "Text": "loom: run-turn deadline exceeded: context deadline exceeded after 3480s",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker auth required",
+  "Backend": "cursor",
+  "Text": "loom: harness login expired or re-authentication required: auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker usage limited",
+  "Backend": "cursor",
+  "Text": "loom: harness usage or session limit reached: usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)\nretry-after: 600",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker billing wall",
+  "Backend": "cursor",
+  "Text": "loom: harness billing or credit wall reached: billing_wall: harness billing or credit wall reached \u2014 the account cannot run turns until billing is resolved (harness tag: billing_error)",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker outranks residual",
+  "Backend": "cursor",
+  "Text": "loom: run-turn deadline exceeded: context deadline exceeded\n429 rate limit",
+  "ExitCode": 1
+ },
+ {
+  "Name": "logged-out screen for ScreenEvidence",
+  "Backend": "cursor",
+  "Text": "Claude Code\n\nNot logged in \u00b7 Run /login\n\n\u276f \n401 unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "trust dialog screen",
+  "Backend": "cursor",
+  "Text": "Claude Code\n\nDo you trust the files in this folder?\n\n\u276f 1. Yes\n401 unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "empty",
+  "Backend": "opencode",
+  "Text": "",
+  "ExitCode": 1
+ },
+ {
+  "Name": "clean output",
+  "Backend": "opencode",
+  "Text": "wrote 3 files, all tests pass",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit",
+  "Backend": "opencode",
+  "Text": "Error: rate limit exceeded\nretry-after: 30",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit bare 429",
+  "Backend": "opencode",
+  "Text": "upstream returned 429",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit try again at",
+  "Backend": "opencode",
+  "Text": "please try again at 9",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit header casing",
+  "Backend": "opencode",
+  "Text": "Error: too many requests\nRetry-After: 120",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth",
+  "Backend": "opencode",
+  "Text": "request rejected: unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth 401",
+  "Backend": "opencode",
+  "Text": "Error: 401 Unauthorized: invalid api key",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth env var name",
+  "Backend": "opencode",
+  "Text": "reading ANTHROPIC_API_KEY from the environment",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth forbidden",
+  "Backend": "opencode",
+  "Text": "HTTP 403 forbidden",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.billing",
+  "Backend": "opencode",
+  "Text": "your billing needs attention",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.billing 402",
+  "Backend": "opencode",
+  "Text": "402 payment required",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.model_version",
+  "Backend": "opencode",
+  "Text": "this model requires a newer version",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.model_not_found",
+  "Backend": "opencode",
+  "Text": "unsupported model",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.context",
+  "Backend": "opencode",
+  "Text": "prompt too long",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.timeout",
+  "Backend": "opencode",
+  "Text": "etimedout",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.timeout deadline",
+  "Backend": "opencode",
+  "Text": "context deadline exceeded",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.transient",
+  "Backend": "opencode",
+  "Text": "service unavailable",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.transient 529",
+  "Backend": "opencode",
+  "Text": "upstream said 529",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap ratelimit+transient",
+  "Backend": "opencode",
+  "Text": "upstream returned 429; also a 500 server error",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap auth+billing",
+  "Backend": "opencode",
+  "Text": "401 unauthorized \u2014 check your billing",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap billing+model",
+  "Backend": "opencode",
+  "Text": "payment required; unsupported model",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap timeout+transient",
+  "Backend": "opencode",
+  "Text": "500 server error after connection timed out",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 429",
+  "Backend": "opencode",
+  "Text": "API Error: 429 Too Many Requests",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 529",
+  "Backend": "opencode",
+  "Text": "API Error: 529 Overloaded. This is a server-side issue, usually temporary \u2014 try again in a moment.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 500",
+  "Backend": "opencode",
+  "Text": "API Error: 500 Internal server error.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper cost",
+  "Backend": "opencode",
+  "Text": "ERROR: quota exceeded. try later.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper transport",
+  "Backend": "opencode",
+  "Text": "request failed: connect ECONNREFUSED 127.0.0.1:443",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper transport hangup",
+  "Backend": "opencode",
+  "Text": "Error: socket hang up",
+  "ExitCode": 1
+ },
+ {
+  "Name": "timeout refinement",
+  "Backend": "opencode",
+  "Text": "Error: socket hang up\ncontext deadline exceeded while streaming",
+  "ExitCode": 1
+ },
+ {
+  "Name": "session limit banner",
+  "Backend": "opencode",
+  "Text": "You've hit your session limit \u00b7 resets 10:20pm (Europe/Warsaw)",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker backend unavailable",
+  "Backend": "opencode",
+  "Text": "loom: backend binary not on PATH: exec: \"claude\": executable file not found in $PATH",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker agent launch failed",
+  "Backend": "opencode",
+  "Text": "loom: agent process failed to launch: fork/exec: exec format error",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker run-turn deadline",
+  "Backend": "opencode",
+  "Text": "loom: run-turn deadline exceeded: context deadline exceeded after 3480s",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker auth required",
+  "Backend": "opencode",
+  "Text": "loom: harness login expired or re-authentication required: auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker usage limited",
+  "Backend": "opencode",
+  "Text": "loom: harness usage or session limit reached: usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)\nretry-after: 600",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker billing wall",
+  "Backend": "opencode",
+  "Text": "loom: harness billing or credit wall reached: billing_wall: harness billing or credit wall reached \u2014 the account cannot run turns until billing is resolved (harness tag: billing_error)",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker outranks residual",
+  "Backend": "opencode",
+  "Text": "loom: run-turn deadline exceeded: context deadline exceeded\n429 rate limit",
+  "ExitCode": 1
+ },
+ {
+  "Name": "logged-out screen for ScreenEvidence",
+  "Backend": "opencode",
+  "Text": "Claude Code\n\nNot logged in \u00b7 Run /login\n\n\u276f \n401 unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "trust dialog screen",
+  "Backend": "opencode",
+  "Text": "Claude Code\n\nDo you trust the files in this folder?\n\n\u276f 1. Yes\n401 unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "empty",
+  "Backend": "pi",
+  "Text": "",
+  "ExitCode": 1
+ },
+ {
+  "Name": "clean output",
+  "Backend": "pi",
+  "Text": "wrote 3 files, all tests pass",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit",
+  "Backend": "pi",
+  "Text": "Error: rate limit exceeded\nretry-after: 30",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit bare 429",
+  "Backend": "pi",
+  "Text": "upstream returned 429",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit try again at",
+  "Backend": "pi",
+  "Text": "please try again at 9",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit header casing",
+  "Backend": "pi",
+  "Text": "Error: too many requests\nRetry-After: 120",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth",
+  "Backend": "pi",
+  "Text": "request rejected: unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth 401",
+  "Backend": "pi",
+  "Text": "Error: 401 Unauthorized: invalid api key",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth env var name",
+  "Backend": "pi",
+  "Text": "reading ANTHROPIC_API_KEY from the environment",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth forbidden",
+  "Backend": "pi",
+  "Text": "HTTP 403 forbidden",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.billing",
+  "Backend": "pi",
+  "Text": "your billing needs attention",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.billing 402",
+  "Backend": "pi",
+  "Text": "402 payment required",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.model_version",
+  "Backend": "pi",
+  "Text": "this model requires a newer version",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.model_not_found",
+  "Backend": "pi",
+  "Text": "unsupported model",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.context",
+  "Backend": "pi",
+  "Text": "prompt too long",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.timeout",
+  "Backend": "pi",
+  "Text": "etimedout",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.timeout deadline",
+  "Backend": "pi",
+  "Text": "context deadline exceeded",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.transient",
+  "Backend": "pi",
+  "Text": "service unavailable",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.transient 529",
+  "Backend": "pi",
+  "Text": "upstream said 529",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap ratelimit+transient",
+  "Backend": "pi",
+  "Text": "upstream returned 429; also a 500 server error",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap auth+billing",
+  "Backend": "pi",
+  "Text": "401 unauthorized \u2014 check your billing",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap billing+model",
+  "Backend": "pi",
+  "Text": "payment required; unsupported model",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap timeout+transient",
+  "Backend": "pi",
+  "Text": "500 server error after connection timed out",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 429",
+  "Backend": "pi",
+  "Text": "API Error: 429 Too Many Requests",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 529",
+  "Backend": "pi",
+  "Text": "API Error: 529 Overloaded. This is a server-side issue, usually temporary \u2014 try again in a moment.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 500",
+  "Backend": "pi",
+  "Text": "API Error: 500 Internal server error.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper cost",
+  "Backend": "pi",
+  "Text": "ERROR: quota exceeded. try later.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper transport",
+  "Backend": "pi",
+  "Text": "request failed: connect ECONNREFUSED 127.0.0.1:443",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper transport hangup",
+  "Backend": "pi",
+  "Text": "Error: socket hang up",
+  "ExitCode": 1
+ },
+ {
+  "Name": "timeout refinement",
+  "Backend": "pi",
+  "Text": "Error: socket hang up\ncontext deadline exceeded while streaming",
+  "ExitCode": 1
+ },
+ {
+  "Name": "session limit banner",
+  "Backend": "pi",
+  "Text": "You've hit your session limit \u00b7 resets 10:20pm (Europe/Warsaw)",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker backend unavailable",
+  "Backend": "pi",
+  "Text": "loom: backend binary not on PATH: exec: \"claude\": executable file not found in $PATH",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker agent launch failed",
+  "Backend": "pi",
+  "Text": "loom: agent process failed to launch: fork/exec: exec format error",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker run-turn deadline",
+  "Backend": "pi",
+  "Text": "loom: run-turn deadline exceeded: context deadline exceeded after 3480s",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker auth required",
+  "Backend": "pi",
+  "Text": "loom: harness login expired or re-authentication required: auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker usage limited",
+  "Backend": "pi",
+  "Text": "loom: harness usage or session limit reached: usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)\nretry-after: 600",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker billing wall",
+  "Backend": "pi",
+  "Text": "loom: harness billing or credit wall reached: billing_wall: harness billing or credit wall reached \u2014 the account cannot run turns until billing is resolved (harness tag: billing_error)",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker outranks residual",
+  "Backend": "pi",
+  "Text": "loom: run-turn deadline exceeded: context deadline exceeded\n429 rate limit",
+  "ExitCode": 1
+ },
+ {
+  "Name": "logged-out screen for ScreenEvidence",
+  "Backend": "pi",
+  "Text": "Claude Code\n\nNot logged in \u00b7 Run /login\n\n\u276f \n401 unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "trust dialog screen",
+  "Backend": "pi",
+  "Text": "Claude Code\n\nDo you trust the files in this folder?\n\n\u276f 1. Yes\n401 unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "empty",
+  "Backend": "",
+  "Text": "",
+  "ExitCode": 1
+ },
+ {
+  "Name": "clean output",
+  "Backend": "",
+  "Text": "wrote 3 files, all tests pass",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit",
+  "Backend": "",
+  "Text": "Error: rate limit exceeded\nretry-after: 30",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit bare 429",
+  "Backend": "",
+  "Text": "upstream returned 429",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit try again at",
+  "Backend": "",
+  "Text": "please try again at 9",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit header casing",
+  "Backend": "",
+  "Text": "Error: too many requests\nRetry-After: 120",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth",
+  "Backend": "",
+  "Text": "request rejected: unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth 401",
+  "Backend": "",
+  "Text": "Error: 401 Unauthorized: invalid api key",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth env var name",
+  "Backend": "",
+  "Text": "reading ANTHROPIC_API_KEY from the environment",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth forbidden",
+  "Backend": "",
+  "Text": "HTTP 403 forbidden",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.billing",
+  "Backend": "",
+  "Text": "your billing needs attention",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.billing 402",
+  "Backend": "",
+  "Text": "402 payment required",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.model_version",
+  "Backend": "",
+  "Text": "this model requires a newer version",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.model_not_found",
+  "Backend": "",
+  "Text": "unsupported model",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.context",
+  "Backend": "",
+  "Text": "prompt too long",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.timeout",
+  "Backend": "",
+  "Text": "etimedout",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.timeout deadline",
+  "Backend": "",
+  "Text": "context deadline exceeded",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.transient",
+  "Backend": "",
+  "Text": "service unavailable",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.transient 529",
+  "Backend": "",
+  "Text": "upstream said 529",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap ratelimit+transient",
+  "Backend": "",
+  "Text": "upstream returned 429; also a 500 server error",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap auth+billing",
+  "Backend": "",
+  "Text": "401 unauthorized \u2014 check your billing",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap billing+model",
+  "Backend": "",
+  "Text": "payment required; unsupported model",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap timeout+transient",
+  "Backend": "",
+  "Text": "500 server error after connection timed out",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 429",
+  "Backend": "",
+  "Text": "API Error: 429 Too Many Requests",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 529",
+  "Backend": "",
+  "Text": "API Error: 529 Overloaded. This is a server-side issue, usually temporary \u2014 try again in a moment.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 500",
+  "Backend": "",
+  "Text": "API Error: 500 Internal server error.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper cost",
+  "Backend": "",
+  "Text": "ERROR: quota exceeded. try later.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper transport",
+  "Backend": "",
+  "Text": "request failed: connect ECONNREFUSED 127.0.0.1:443",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper transport hangup",
+  "Backend": "",
+  "Text": "Error: socket hang up",
+  "ExitCode": 1
+ },
+ {
+  "Name": "timeout refinement",
+  "Backend": "",
+  "Text": "Error: socket hang up\ncontext deadline exceeded while streaming",
+  "ExitCode": 1
+ },
+ {
+  "Name": "session limit banner",
+  "Backend": "",
+  "Text": "You've hit your session limit \u00b7 resets 10:20pm (Europe/Warsaw)",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker backend unavailable",
+  "Backend": "",
+  "Text": "loom: backend binary not on PATH: exec: \"claude\": executable file not found in $PATH",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker agent launch failed",
+  "Backend": "",
+  "Text": "loom: agent process failed to launch: fork/exec: exec format error",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker run-turn deadline",
+  "Backend": "",
+  "Text": "loom: run-turn deadline exceeded: context deadline exceeded after 3480s",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker auth required",
+  "Backend": "",
+  "Text": "loom: harness login expired or re-authentication required: auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker usage limited",
+  "Backend": "",
+  "Text": "loom: harness usage or session limit reached: usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)\nretry-after: 600",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker billing wall",
+  "Backend": "",
+  "Text": "loom: harness billing or credit wall reached: billing_wall: harness billing or credit wall reached \u2014 the account cannot run turns until billing is resolved (harness tag: billing_error)",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker outranks residual",
+  "Backend": "",
+  "Text": "loom: run-turn deadline exceeded: context deadline exceeded\n429 rate limit",
+  "ExitCode": 1
+ },
+ {
+  "Name": "logged-out screen for ScreenEvidence",
+  "Backend": "",
+  "Text": "Claude Code\n\nNot logged in \u00b7 Run /login\n\n\u276f \n401 unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "trust dialog screen",
+  "Backend": "",
+  "Text": "Claude Code\n\nDo you trust the files in this folder?\n\n\u276f 1. Yes\n401 unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "empty",
+  "Backend": "some-unknown-harness",
+  "Text": "",
+  "ExitCode": 1
+ },
+ {
+  "Name": "clean output",
+  "Backend": "some-unknown-harness",
+  "Text": "wrote 3 files, all tests pass",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit",
+  "Backend": "some-unknown-harness",
+  "Text": "Error: rate limit exceeded\nretry-after: 30",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit bare 429",
+  "Backend": "some-unknown-harness",
+  "Text": "upstream returned 429",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit try again at",
+  "Backend": "some-unknown-harness",
+  "Text": "please try again at 9",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.ratelimit header casing",
+  "Backend": "some-unknown-harness",
+  "Text": "Error: too many requests\nRetry-After: 120",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth",
+  "Backend": "some-unknown-harness",
+  "Text": "request rejected: unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth 401",
+  "Backend": "some-unknown-harness",
+  "Text": "Error: 401 Unauthorized: invalid api key",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth env var name",
+  "Backend": "some-unknown-harness",
+  "Text": "reading ANTHROPIC_API_KEY from the environment",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.auth forbidden",
+  "Backend": "some-unknown-harness",
+  "Text": "HTTP 403 forbidden",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.billing",
+  "Backend": "some-unknown-harness",
+  "Text": "your billing needs attention",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.billing 402",
+  "Backend": "some-unknown-harness",
+  "Text": "402 payment required",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.model_version",
+  "Backend": "some-unknown-harness",
+  "Text": "this model requires a newer version",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.model_not_found",
+  "Backend": "some-unknown-harness",
+  "Text": "unsupported model",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.context",
+  "Backend": "some-unknown-harness",
+  "Text": "prompt too long",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.timeout",
+  "Backend": "some-unknown-harness",
+  "Text": "etimedout",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.timeout deadline",
+  "Backend": "some-unknown-harness",
+  "Text": "context deadline exceeded",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.transient",
+  "Backend": "some-unknown-harness",
+  "Text": "service unavailable",
+  "ExitCode": 1
+ },
+ {
+  "Name": "residual.transient 529",
+  "Backend": "some-unknown-harness",
+  "Text": "upstream said 529",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap ratelimit+transient",
+  "Backend": "some-unknown-harness",
+  "Text": "upstream returned 429; also a 500 server error",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap auth+billing",
+  "Backend": "some-unknown-harness",
+  "Text": "401 unauthorized \u2014 check your billing",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap billing+model",
+  "Backend": "some-unknown-harness",
+  "Text": "payment required; unsupported model",
+  "ExitCode": 1
+ },
+ {
+  "Name": "overlap timeout+transient",
+  "Backend": "some-unknown-harness",
+  "Text": "500 server error after connection timed out",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 429",
+  "Backend": "some-unknown-harness",
+  "Text": "API Error: 429 Too Many Requests",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 529",
+  "Backend": "some-unknown-harness",
+  "Text": "API Error: 529 Overloaded. This is a server-side issue, usually temporary \u2014 try again in a moment.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper api error 500",
+  "Backend": "some-unknown-harness",
+  "Text": "API Error: 500 Internal server error.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper cost",
+  "Backend": "some-unknown-harness",
+  "Text": "ERROR: quota exceeded. try later.",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper transport",
+  "Backend": "some-unknown-harness",
+  "Text": "request failed: connect ECONNREFUSED 127.0.0.1:443",
+  "ExitCode": 1
+ },
+ {
+  "Name": "wrapper transport hangup",
+  "Backend": "some-unknown-harness",
+  "Text": "Error: socket hang up",
+  "ExitCode": 1
+ },
+ {
+  "Name": "timeout refinement",
+  "Backend": "some-unknown-harness",
+  "Text": "Error: socket hang up\ncontext deadline exceeded while streaming",
+  "ExitCode": 1
+ },
+ {
+  "Name": "session limit banner",
+  "Backend": "some-unknown-harness",
+  "Text": "You've hit your session limit \u00b7 resets 10:20pm (Europe/Warsaw)",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker backend unavailable",
+  "Backend": "some-unknown-harness",
+  "Text": "loom: backend binary not on PATH: exec: \"claude\": executable file not found in $PATH",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker agent launch failed",
+  "Backend": "some-unknown-harness",
+  "Text": "loom: agent process failed to launch: fork/exec: exec format error",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker run-turn deadline",
+  "Backend": "some-unknown-harness",
+  "Text": "loom: run-turn deadline exceeded: context deadline exceeded after 3480s",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker auth required",
+  "Backend": "some-unknown-harness",
+  "Text": "loom: harness login expired or re-authentication required: auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker usage limited",
+  "Backend": "some-unknown-harness",
+  "Text": "loom: harness usage or session limit reached: usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)\nretry-after: 600",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker billing wall",
+  "Backend": "some-unknown-harness",
+  "Text": "loom: harness billing or credit wall reached: billing_wall: harness billing or credit wall reached \u2014 the account cannot run turns until billing is resolved (harness tag: billing_error)",
+  "ExitCode": 1
+ },
+ {
+  "Name": "marker outranks residual",
+  "Backend": "some-unknown-harness",
+  "Text": "loom: run-turn deadline exceeded: context deadline exceeded\n429 rate limit",
+  "ExitCode": 1
+ },
+ {
+  "Name": "logged-out screen for ScreenEvidence",
+  "Backend": "some-unknown-harness",
+  "Text": "Claude Code\n\nNot logged in \u00b7 Run /login\n\n\u276f \n401 unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "trust dialog screen",
+  "Backend": "some-unknown-harness",
+  "Text": "Claude Code\n\nDo you trust the files in this folder?\n\n\u276f 1. Yes\n401 unauthorized",
+  "ExitCode": 1
+ },
+ {
+  "Name": "exit-code fallback 1",
+  "Backend": "claude",
+  "Text": "",
+  "ExitCode": 1
+ },
+ {
+  "Name": "exit-code fallback 1 w/ prose",
+  "Backend": "claude",
+  "Text": "some agent prose",
+  "ExitCode": 1
+ },
+ {
+  "Name": "exit-code fallback 137",
+  "Backend": "claude",
+  "Text": "",
+  "ExitCode": 137
+ },
+ {
+  "Name": "exit-code fallback 137 w/ prose",
+  "Backend": "claude",
+  "Text": "some agent prose",
+  "ExitCode": 137
+ },
+ {
+  "Name": "exit-code fallback 143",
+  "Backend": "claude",
+  "Text": "",
+  "ExitCode": 143
+ },
+ {
+  "Name": "exit-code fallback 143 w/ prose",
+  "Backend": "claude",
+  "Text": "some agent prose",
+  "ExitCode": 143
+ },
+ {
+  "Name": "exit-code fallback 0",
+  "Backend": "claude",
+  "Text": "",
+  "ExitCode": 0
+ },
+ {
+  "Name": "exit-code fallback 0 w/ prose",
+  "Backend": "claude",
+  "Text": "some agent prose",
+  "ExitCode": 0
+ }
+]
