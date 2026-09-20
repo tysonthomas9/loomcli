@@ -267,3 +267,113 @@ func TestBlock_PreservesObservability(t *testing.T) {
 		t.Error("status.LastErrorClass is empty, want the class that caused the block")
 	}
 }
+
+// lockConflictAgent is an agent whose last exit was a lost claim race against
+// a live sibling of the same role.
+func lockConflictAgent() *AgentProcess {
+	return &AgentProcess{
+		LastExitCode: 0,
+		LastStart:    time.Now(),
+		LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome)},
+	}
+}
+
+// TestShouldRestart_LockConflictIsUncounted pins the disposition at the
+// supervisor layer: a lost claim race restarts without eroding max_retries,
+// even from an already-exhausted budget.
+func TestShouldRestart_LockConflictIsUncounted(t *testing.T) {
+	maxRetries := 2
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{MaxRetries: &maxRetries}},
+	})
+	ap := lockConflictAgent()
+	ap.RestartCount = maxRetries
+
+	if !s.shouldRestart(ap) {
+		t.Fatal("shouldRestart = false, want true (contention is not a fault)")
+	}
+	if ap.RestartCount != 0 {
+		t.Errorf("RestartCount = %d, want 0 (uncounted)", ap.RestartCount)
+	}
+	if ap.BlockCount != 0 {
+		t.Errorf("BlockCount = %d, want 0 (no escalation)", ap.BlockCount)
+	}
+	if ap.StopReason != "" {
+		t.Errorf("StopReason = %q, want empty (alive, idle, losing races)", ap.StopReason)
+	}
+	if ap.NoWorkCount != 1 {
+		t.Errorf("NoWorkCount = %d, want 1 (idle-cycle counter)", ap.NoWorkCount)
+	}
+}
+
+// TestShouldRestart_LockConflictNeverFastFails is the regression test for
+// PUPPET-623: three coder agents against one claimable task used to leave two
+// of them Stopped: fast_fail after 3 block cycles, so surplus capacity
+// destroyed itself and stayed dead until a daemon restart.
+func TestShouldRestart_LockConflictNeverFastFails(t *testing.T) {
+	maxRetries := 2
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{MaxRetries: &maxRetries}},
+	})
+	ap := lockConflictAgent()
+
+	// Well past max_retries * (block budget + 1), i.e. past the old fast-fail.
+	for i := 1; i <= (maxRetries+1)*4+5; i++ {
+		if !s.shouldRestart(ap) {
+			t.Fatalf("cycle %d: shouldRestart = false, want true (StopReason=%q)", i, ap.StopReason)
+		}
+		if ap.StopReason == StopReasonFastFail {
+			t.Fatalf("cycle %d: StopReason = %q, want never fast-fail", i, ap.StopReason)
+		}
+		if ap.StopReason == StopReasonMaxRetriesBlocked {
+			t.Fatalf("cycle %d: agent blocked; contention must not escalate", i)
+		}
+	}
+}
+
+// TestShouldRestart_LockConflictPreservesBlockCount guards against laundering
+// the escalation budget: only a clean run counts as progress, so idling after
+// a genuine fault must not zero BlockCount.
+func TestShouldRestart_LockConflictPreservesBlockCount(t *testing.T) {
+	maxRetries := 2
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{MaxRetries: &maxRetries}},
+	})
+	ap := lockConflictAgent()
+	ap.BlockCount = 2 // earlier genuine fault
+
+	if !s.shouldRestart(ap) {
+		t.Fatal("shouldRestart = false, want true")
+	}
+	if ap.BlockCount != 2 {
+		t.Errorf("BlockCount = %d, want 2 (preserved)", ap.BlockCount)
+	}
+}
+
+// TestShouldRestart_LockConflictIgnoresRateLimitNoCount proves the uncounted
+// arm dispatches on the outcome, not on "not NoWork": with the rate-limit
+// opt-out set, a lock conflict must still take the idle path rather than
+// falling through to applyCountedRestart.
+func TestShouldRestart_LockConflictIgnoresRateLimitNoCount(t *testing.T) {
+	maxRetries := 2
+	cfg := &config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{MaxRetries: &maxRetries}},
+	}
+	cfg.Daemon.RestartPolicy.RateLimitNoCount = config.BoolPtr(false)
+	s := newTestSupervisorWithConfig(cfg)
+	ap := lockConflictAgent()
+	ap.RestartCount = maxRetries
+
+	if !s.shouldRestart(ap) {
+		t.Fatal("shouldRestart = false, want true")
+	}
+	if ap.RestartCount != 0 {
+		t.Errorf("RestartCount = %d, want 0 (still uncounted)", ap.RestartCount)
+	}
+	if ap.StopReason != "" {
+		t.Errorf("StopReason = %q, want empty", ap.StopReason)
+	}
+	if ap.NoWorkCount != 1 {
+		t.Errorf("NoWorkCount = %d, want 1 (idle path taken)", ap.NoWorkCount)
+	}
+}
