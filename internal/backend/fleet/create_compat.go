@@ -121,3 +121,67 @@ func createAcceptanceCriteriaPatchError(id string, err error) error {
 		err,
 	)
 }
+
+const unsupportedCreateEstimatedMinutesMessage = `unknown field "estimated_minutes"`
+
+// isCreateEstimatedMinutesUnsupported reports whether err is the strict-decode
+// rejection a fleet-db whose CreateIssueRequest predates estimated_minutes
+// returns. Such a server 400s the whole body, so the issue is not created at all
+// — the retry below re-creates it without the field.
+func isCreateEstimatedMinutesUnsupported(err error) bool {
+	var backendErr *backend.BackendError
+	return errors.As(err, &backendErr) &&
+		backendErr.Kind == backend.KindValidation &&
+		backendErr.Message == unsupportedCreateEstimatedMinutesMessage
+}
+
+// createWithoutEstimatedMinutes retries the create with the field stripped,
+// then attempts to apply it by PATCH. As with acceptance_criteria, the PATCH is
+// expected to fail on exactly the servers that need this retry — a fleet-db
+// that rejects estimated_minutes on create rejects it on PATCH too — so its
+// failure is reported as a descriptive error carrying the created issue rather
+// than being swallowed.
+func (b *FleetBackend) createWithoutEstimatedMinutes(
+	ctx context.Context,
+	params backend.CreateParams,
+) (*backend.IssueData, error) {
+	retryParams := params
+	retryParams.EstimatedMinutes = nil
+	retryKey, err := retryParams.FleetCreateIdempotencyKey(time.Now())
+	if err != nil {
+		return nil, backend.ErrInternal("Create", "derive compatibility idempotency key", err)
+	}
+	retryParams.IdempotencyKey = retryKey
+	result, err := b.createIssueOnce(ctx, retryParams)
+	if err != nil {
+		return nil, err
+	}
+
+	estimated := *params.EstimatedMinutes
+	if err := b.Update(ctx, result.ID, backend.UpdateParams{EstimatedMinutes: &estimated}); err != nil {
+		// The issue itself was created; return it alongside the classified
+		// error so callers that inspect the partial result can still see the ID.
+		return result, createEstimatedMinutesPatchError(result.ID, err)
+	}
+	// backend.IssueData is the slim projection and carries no estimated
+	// minutes field, so there is nothing to echo back here — the value is
+	// persisted and comes back on the next Get.
+	return result, nil
+}
+
+func createEstimatedMinutesPatchError(id string, err error) error {
+	kind := backend.KindInternal
+	var backendErr *backend.BackendError
+	if errors.As(err, &backendErr) {
+		kind = backendErr.Kind
+	}
+	return backend.NewBackendError(
+		kind,
+		"Create",
+		fmt.Sprintf(
+			"issue %s was created, but this fleet-db does not accept estimated_minutes (needs fleet-db PR #303)",
+			id,
+		),
+		err,
+	)
+}

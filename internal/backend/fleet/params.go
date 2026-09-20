@@ -321,9 +321,10 @@ func blockedServerOpts(opts backend.BlockedOpts) backend.BlockedOpts {
 // we drop loom-only fields here. If the caller relies on a dropped field
 // landing, the corresponding dedicated endpoint should be called instead.
 //
-// acceptance_criteria is NOT one of those: fleet-db has no acceptance-criteria
-// sub-route, PATCH is its only writer, and UpdateIssueRequest accepts it — so
-// it is forwarded here (PUPPET-522).
+// acceptance_criteria and estimated_minutes are NOT among those: fleet-db has
+// no acceptance-criteria or estimated-minutes sub-route, PATCH is their only
+// writer, and UpdateIssueRequest accepts both — so they are forwarded here
+// (PUPPET-522, PUPPET-607).
 func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interface{} {
 	req := make(map[string]interface{})
 	setStrField(req, "title", params.Title)
@@ -332,6 +333,7 @@ func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interfac
 	setStrField(req, "design", params.Design)
 	setStrField(req, "design_format", params.DesignFormat)
 	setStrField(req, "acceptance_criteria", params.AcceptanceCriteria)
+	setIntField(req, "estimated_minutes", params.EstimatedMinutes)
 	setStrField(req, "notes", params.Notes)
 	setStrField(req, "owner", params.Owner)
 	// Field rename: loom's IssueBackend uses "issue_type"; fleet-db's
