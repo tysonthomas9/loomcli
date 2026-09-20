@@ -122,10 +122,10 @@ func (s *Supervisor) decideRestart(ap *AgentProcess) (bool, string) {
 		return restart, ""
 	}
 
-	// Parked by the fleet-wide account wall: a block, not a failure (see
+	// Parked by a wall, of either scope: a block, not a failure (see
 	// gateAccountWall). Every counter stays intact and the agent resumes by
 	// itself at expiry.
-	if ap.StopReason == StopReasonAccountWall {
+	if ap.StopReason.IsWallPark() {
 		return true, ""
 	}
 
@@ -187,9 +187,11 @@ func (s *Supervisor) applyUncountedRestart(ap *AgentProcess, outcome agenterr.Ou
 		return true
 	}
 	// A usage-limit wall arrives here as a rate limit and retries forever, per
-	// agent, by design — so it is also recorded as a fleet-wide wall, parking
-	// the other agents while this one keeps its uncounted retry loop.
-	s.recordAccountWall(outcome, ap.LastError)
+	// agent, by design — so it is also recorded as a wall, parking whoever it
+	// covers while this one keeps its uncounted retry loop. Same scoping rule
+	// as applyFatalStop, and the same reason for reading the cached key: this
+	// runs with ap.Mu held.
+	s.recordWall(ap.CredentialKey, outcome, ap.LastError)
 	// Rate limits: unlimited uncounted retries by default; the
 	// rate_limit_no_count config opt-out routes them through the
 	// counted budget instead (the layer's config wins, pt7).
@@ -256,10 +258,13 @@ func (s *Supervisor) applyFatalStop(ap *AgentProcess, outcome agenterr.Outcome) 
 		ap.Entry.Worktree, outcome)
 	resetNoWork(ap)
 	ap.StopReason = StopReasonFatalError
-	// The wall is an account fact, not an agent fact: record it once so the
-	// pre-spawn gate parks the rest of the fleet. Takes only s.WallMu and
-	// touches no ap field — this runs with ap.Mu held.
-	s.recordAccountWall(outcome, ap.LastError)
+	// Record the wall once so the pre-spawn gate parks whoever it covers. Its
+	// blast radius is whatever owns the credential it is about: this agent's
+	// profile root for an auth failure, the whole account for billing and
+	// usage. ap.CredentialKey is the cached key (refreshed by gateAccountWall
+	// each cycle) and is read here because this runs with ap.Mu held;
+	// recordWall itself takes only s.WallMu and touches no ap field.
+	s.recordWall(ap.CredentialKey, outcome, ap.LastError)
 	if !outcome.IsClass(wrapper.ErrAuth) {
 		return ""
 	}
@@ -533,11 +538,12 @@ func (s *Supervisor) backendRecheckBackoff() time.Duration {
 // parkedStateBackoff returns the fixed interval for an agent parked by its own
 // state rather than by its last run's error, and ok=false when neither
 // applies. Split out of computeBackoff (funlen) with the checks unchanged.
-func (s *Supervisor) parkedStateBackoff(profileInvalid, blocked, walled bool) (time.Duration, bool) {
-	// Parked by the fleet-wide account wall: sleep exactly what the wall has
-	// left to run (PUPPET-106).
+func (s *Supervisor) parkedStateBackoff(profileInvalid, blocked, walled bool, credentialKey string) (time.Duration, bool) {
+	// Parked by a wall: sleep exactly what THAT wall has left to run — the one
+	// on this agent's own credential, so an agent never sleeps out a wall it
+	// does not own (PUPPET-106, PUPPET-272).
 	if walled {
-		return s.accountWallBackoff(), true
+		return s.wallBackoffFor(credentialKey), true
 	}
 
 	// Fixed recheck, like a missing backend binary: we are waiting on an
@@ -588,10 +594,12 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	noWorkCount := ap.NoWorkCount
 	blocked := ap.StopReason == StopReasonMaxRetriesBlocked
 	profileInvalid := ap.ProfileError != nil
-	walled := ap.StopReason == StopReasonAccountWall
+	// Read together: a wall park sleeps out the wall on the agent's OWN
+	// credential, so the reason and the key are one fact under this lock.
+	walled, credentialKey := ap.StopReason.IsWallPark(), ap.CredentialKey
 	ap.Mu.Unlock()
 
-	if wait, ok := s.parkedStateBackoff(profileInvalid, blocked, walled); ok {
+	if wait, ok := s.parkedStateBackoff(profileInvalid, blocked, walled, credentialKey); ok {
 		return wait
 	}
 

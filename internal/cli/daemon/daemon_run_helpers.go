@@ -39,7 +39,7 @@ func startStateUpdater(shutdown <-chan struct{}, stateFilePath string, startedAt
 				// transitions so a persistently full disk does not emit twelve
 				// lines a minute.
 				if err := writeStateFile(stateFilePath, startedAt, daemon.Agents(), daemon.UnavailableAgents(), daemon.ParkedAgents(), daemon.QuarantinedTasks(), daemon.sup.Degradations(), maxRetries,
-					daemon.sup.ClaimHoldSnapshot()); err != nil {
+					stateExtras{Hold: daemon.sup.ClaimHoldSnapshot(), Walls: daemon.sup.WallSnapshot()}); err != nil {
 					if daemon.sup.RecordDegradation(supervisor.DegradationStateWrite, err) {
 						slog.Error("daemon state file write failing", "path", stateFilePath, "err", err)
 						daemon.sup.PublishDegradation(supervisor.DegradationStateWrite)
