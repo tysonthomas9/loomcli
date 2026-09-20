@@ -163,8 +163,9 @@ func agentLaunchFailedInvocationError(reason, outputTail string) *InvocationErro
 // typing a prompt into an onboarding screen. That is a typed sentinel, not
 // text inferred from a rendered screen, which is why it survives the removal
 // of the screen-scrape detector. It cannot be routed through
-// terminalTurnInvocationError: that matches on chat.ReasonAuthRequired, and
-// ErrAuthRequired's text does not contain it.
+// terminalTurnInvocationError: that switches on a turn's Code, and
+// ErrAuthRequired is a typed error, not a Turn, so it carries no Turn.Code for
+// terminalTurnInvocationError to switch on.
 func authRequiredInvocationError(reason, outputTail string) *InvocationError {
 	msg := strings.TrimSpace(reason)
 	if msg == "" {
@@ -224,37 +225,63 @@ func runTurnDeadlineInvocationError(reason, outputTail string) *InvocationError 
 // the HARNESS declared terminal, carrying the marker that lets the outer
 // classifier act on the harness's verdict instead of re-deriving it from prose.
 //
-// It is used for the two blameless reasons harness-wrapper reports
-// categorically — an expired login and an exhausted quota window. Everything
-// else keeps the plain errored path: the marker means "the harness told us
-// what this is", and inventing one for a reason it did not name would recreate
-// the guessing this removes.
+// It switches on chat.Turn.Code, the stable machine token the wrapper stamps
+// at every producer of a wall reason. It used to substring-match
+// chat.ReasonAuthRequired inside the reason — necessarily, because the usage
+// reason is suffixed with the banner text so equality could not be used. That
+// made an editorial reword of operator copy in the library a silent behavior
+// change here: the marker would stop being raised and the verdict would fall
+// back to pattern inference, which for an expired login means burning an
+// agent's restart budget on turns that cannot succeed. A code is not operator
+// copy and is not reworded.
 //
-// Returns nil when the reason is not one of the two, so callers can fall
-// through to their existing handling with a single nil check. It is now the
-// ONLY way a wall marker is raised from a turn: loom no longer infers a wall
-// from rendered screen or turn text.
+// Three codes, three markers. The billing arm is the one that was missing: its
+// classification arm and its policy have existed since the wall subsystem
+// landed, with no emitter, because nothing upstream could name a billing
+// failure. harness-wrapper reads it off the harness's own transcript tag now,
+// so there is something to emit.
+//
+// Everything else keeps the plain errored path: a marker means "the harness
+// told us what this is", and inventing one for a failure it did not name would
+// recreate the guessing this removes.
+//
+// Returns nil when the turn carries no wall code, so callers can fall through
+// to their existing handling with a single nil check. It is the ONLY way a wall
+// marker is raised from a turn: loom infers a wall from neither rendered screen
+// nor turn text.
 //
 // outputTail is the CLASSIFIER'S EVIDENCE WINDOW, not a cosmetic log tail:
 // agenterr describes the screen behind every auth verdict out of exactly this
 // text (ScreenEvidence.BannerRule / ComposerWitnessed). The harness names the
-// reason but ships no screen with it — Turn.Text is empty on every v0.7.7
-// producer of ReasonAuthRequired — so callers should pass the rendered screen
-// here (conversation: screenEvidence; one-shot: claudeTerminalEvidence).
-// Passing only the reason yields a recorded Screen.Scanned=false, which is a
-// finding rather than a failure, but a needless one.
-func terminalTurnInvocationError(reason, outputTail string) *InvocationError {
+// reason but ships no screen with it — Turn.Text is empty on every producer of
+// ReasonAuthRequired, and the transcript-tag producer blanks it too — so
+// callers should pass the rendered screen here (conversation: screenEvidence;
+// one-shot: claudeTerminalEvidence). Passing only the reason yields a recorded
+// Screen.Scanned=false, which is a finding rather than a failure, but a
+// needless one.
+func terminalTurnInvocationError(turn chat.Turn, outputTail string) *InvocationError {
 	var marker string
-	switch {
-	case strings.Contains(reason, chat.ReasonAuthRequired):
+	switch turn.Code {
+	case chat.CodeAuthRequired:
 		marker = agenterr.AuthRequiredMarker
-	case strings.Contains(reason, chat.ReasonUsageLimited):
+	case chat.CodeUsageLimited:
 		marker = agenterr.UsageLimitedMarker
+	case chat.CodeBillingWall:
+		marker = agenterr.BillingWallMarker
 	default:
 		return nil
 	}
 
-	combined := marker + ": " + strings.TrimSpace(reason)
+	reason := strings.TrimSpace(turn.Reason)
+	if reason == "" {
+		// A code with no reason should not happen — every producer sets both —
+		// but the marker's reason tail is what agenterr records as the
+		// verdict's Detail, and an empty tail there reads as "we had nothing"
+		// rather than "we did not look".
+		reason = string(turn.Code)
+	}
+
+	combined := marker + ": " + reason
 	evidence := strings.TrimSpace(outputTail)
 	if evidence == "" {
 		evidence = combined

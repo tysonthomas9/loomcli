@@ -244,6 +244,8 @@ github.com/olesho/harness-wrapper v0.8.4 h1:jRST52X024GUkZ+AbF0iZJg50PkuqWKJy6dN
 github.com/olesho/harness-wrapper v0.8.4/go.mod h1:9hjgrBnwBW41rI1acbpP2oVeTV674w8WKYwLHXBg/FI=
 github.com/olesho/harness-wrapper v0.9.1 h1:SpvJ6ywbN7VKwoNvndhXe1EESWab6A/0McHW4auPK7k=
 github.com/olesho/harness-wrapper v0.9.1/go.mod h1:PxjWkOxe7gMaXSmL9+lzSVZrMSjYcbK9ksTJEWDAw4o=
+github.com/olesho/harness-wrapper v0.10.0 h1:a9+OncAFR6WIa/pOudNuRWRFxPDsa4DuNX1Ihbe1rhg=
+github.com/olesho/harness-wrapper v0.10.0/go.mod h1:PxjWkOxe7gMaXSmL9+lzSVZrMSjYcbK9ksTJEWDAw4o=
 github.com/pelletier/go-toml/v2 v2.2.4 h1:mye9XuhQ6gvn5h28+VilKrrPoQVanw5PMw/TB0t5Ec4=
 github.com/pelletier/go-toml/v2 v2.2.4/go.mod h1:2gIqNv+qfxSVS7cM2xJQKtLSTLUE9V8t9Stt+h56mCY=
 github.com/pierrec/lz4/v4 v4.1.21 h1:yOVMLb6qSIDP67pl/5F7RepeKYu/VmTyEXvuMI5d9mQ=

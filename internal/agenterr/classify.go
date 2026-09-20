@@ -22,24 +22,6 @@ type classifyResult struct {
 	Evidence   Evidence
 }
 
-// errorPattern defines a single regex→class mapping over the wrapper's
-// canonical harness-output taxonomy. It powers the residual table (signals
-// the wrapper's anchored matchers miss) rather than five near-identical
-// per-backend tables.
-type errorPattern struct {
-	// id is a STABLE CONTRACT: docs/adr/0002-authfailure-stays-terminal.md
-	// names these ids in its revisit triggers, so a rename silently breaks the
-	// trigger it belongs to. Add rows freely; do not rename existing ones.
-	id    string
-	re    *regexp.Regexp
-	class wrapper.ErrorClass
-	msg   string
-}
-
-// retryAfterRe extracts a Retry-After header value from log/output text.
-// The format is provider-independent.
-var retryAfterRe = regexp.MustCompile(`(?i)retry.?after[:\s]+(\d+)`)
-
 // BackendUnavailableMarker is the stable log marker the inner backend
 // subprocess emits when the configured CLI is not on PATH. classifyFromText
 // recognizes it before anything else so the supervisor gets a categorical
@@ -146,56 +128,6 @@ const RunTurnDeadlineMarker = "loom: run-turn deadline exceeded"
 
 // runTurnDeadlineRe is the precompiled matcher used by classifyHarnessMarkers.
 var runTurnDeadlineRe = regexp.MustCompile(regexp.QuoteMeta(RunTurnDeadlineMarker))
-
-// timeoutHintRe recognizes timeout-worded errors. The wrapper refines its
-// retry hits by the matched phrase; loom additionally upgrades a Transient
-// whose surrounding text names a timeout, preserving the distinct Timeout
-// class (its own backoff bucket) exactly as before the wrapper owned the
-// fine taxonomy.
-var timeoutHintRe = regexp.MustCompile(`(?i)\btimeout\b|etimedout|connection.?timed?.?out|timed?.?out|deadline.?exceeded`)
-
-// residualPatterns is the single, backend-agnostic fallback table. It encodes
-// the distinctions loom acts on that the harness-wrapper classifier does not
-// model — auth, billing, model-not-found, context overflow, timeout — plus the
-// bare numeric / timing / prose signals the wrapper's anchored matchers miss
-// (e.g. a bare 429 from an unknown harness, "try again at <time>"). It is only
-// consulted when the wrapper returns no actionable classification, so any
-// overlap with wrapper-owned cost/transport patterns is dead-but-safe.
-//
-// Ordered RateLimited-first, Transient-last, mirroring the precedence of the
-// former per-backend tables.
-var residualPatterns = []errorPattern{
-	{"residual.ratelimit", regexp.MustCompile(`(?i)\b429\b|too many requests|tokens per min|overloaded_error|resource.?exhausted|resource_exhausted|rate.?limit|usage.?limit|session.?limit|resets at|resets \d{1,2}:\d{2}|try again at\s+\d`), wrapper.ErrRateLimited, "rate limit exceeded"},
-	{"residual.auth", regexp.MustCompile(`(?i)\b401\b|unauthorized|unauthenticated|permission.?denied|forbidden|invalid.?api.?key|incorrect.?api.?key|invalid.*key|authentication.?failed|ANTHROPIC_API_KEY|OPENAI_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY|CURSOR_API_KEY`), wrapper.ErrAuth, "authentication failed"},
-	{"residual.billing", regexp.MustCompile(`(?i)\b402\b|payment.?required|insufficient.?(?:credits|quota)|insufficient_quota|exceeded.*quota|quota.?exceeded|\bquota\b|\bcredits\b|\bbilling\b`), wrapper.ErrBilling, "billing error"},
-	{"residual.model_version", regexp.MustCompile(`(?i)model requires a newer version|requires a newer version of (?:codex|claude)|upgrade to the latest (?:app or )?cli`), wrapper.ErrModelNotFound, "backend CLI is incompatible with the selected model"},
-	{"residual.model_not_found", regexp.MustCompile(`(?i)model.?not.?found|model.*not found|model.*does not exist|model.*not.*exist|model_not_found|unsupported.?model|unknown.?model|invalid.?model|selected model.*may not exist|selected model.*may not have access to it|\b404\b.*model`), wrapper.ErrModelNotFound, "model not found"},
-	{"residual.context", regexp.MustCompile(`(?i)context.?length|context.?window|context_length_exceeded|maximum context length|max.?tokens|max.*tokens|token.?limit|prompt.?too.?long|too.?long`), wrapper.ErrContextOverflow, "context length exceeded"},
-	{"residual.timeout", regexp.MustCompile(`(?i)\btimeout\b|etimedout|connection.?timed?.?out|timed?.?out|deadline.?exceeded`), wrapper.ErrTimeout, "connection timeout"},
-	{"residual.transient", regexp.MustCompile(`(?i)\b50[023]\b|\b529\b|server.?error|server_error|internal.?server.?error|internal.?error|service.?unavailable|backend.?error|overloaded`), wrapper.ErrTransient, "server error"},
-}
-
-// classifyWithPatterns runs an ordered pattern table against text, extracting a
-// Retry-After hint for rate-limit matches.
-func classifyWithPatterns(text string, patterns []errorPattern) *classifyResult {
-	if text == "" {
-		return nil
-	}
-	for _, p := range patterns {
-		if p.re.MatchString(text) {
-			r := &classifyResult{
-				Class:    OutcomeFromHarness(p.class),
-				Message:  p.msg,
-				Evidence: newTextEvidence(EvidenceResidual, p.id, p.re, text),
-			}
-			if p.class == wrapper.ErrRateLimited {
-				r.RetryAfter = parseRetryAfter(text)
-			}
-			return r
-		}
-	}
-	return nil
-}
 
 // ClassifyFromLog reads the tail of an agent log file and classifies the error.
 // It never returns nil — an Unknown classification is returned if nothing matches.
@@ -322,6 +254,16 @@ func classifyHarnessMarkers(text string) *classifyResult {
 		return &classifyResult{
 			Class:   OutcomeFromHarness(wrapper.ErrBilling),
 			Message: "harness billing or credit wall reached — the account cannot run turns until billing is resolved",
+			// This arm shipped without evidence because it shipped without an
+			// emitter: nothing could raise the marker, so nothing was ever
+			// recorded and the omission was invisible. It has one now
+			// (backends.terminalTurnInvocationError, off chat.CodeBillingWall),
+			// and a billing verdict is FATAL — it stops the supervisor and can
+			// gate the credential scope. ADR-0002's whole argument for keeping a
+			// fatal disposition is that a single occurrence has to be judgeable
+			// without a cluster, which takes a record saying which rule fired
+			// and on what text. Detail carries the harness's own tag.
+			Evidence: markerEvidence("BillingWallMarker", billingWallRe, BillingWallMarker, text),
 		}
 	}
 	if authRequiredRe.MatchString(text) {
@@ -377,29 +319,32 @@ func markerReason(marker, text string) string {
 	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), ":"))
 }
 
-// classifyFromText is the shared classification implementation. It is a thin
-// adapter over the harness-wrapper classifier (the single source of truth for
-// cost / rate-limit / transport / API-error fingerprints), with a small
-// loom-specific residual for the distinctions the wrapper does not model.
+// classifyFromText is the shared classification implementation, and it is now
+// three steps: markers → the wrapper's finished-output classifier → exit code.
+//
+// The middle step used to be two. loom carried its own residual regex table
+// for the signals the wrapper's anchored matchers missed, which meant the same
+// harness-output patterns were maintained here, in harness-wrapper, and in
+// meta-harness, with nothing holding the three copies together. The table now
+// lives behind wrapper.ClassifyFinishedOutput — the POST-EXIT entry point,
+// which runs the same per-harness classifier and only then consults the
+// residual rows. What loom keeps is what loom owns: marker precedence, the
+// domain outcomes, the exit-code fallback, evidence redaction, and policy.
 func classifyFromText(text string, exitCode int, backend string) *AgentError {
 	now := time.Now()
 
-	// Explicit markers and the harness's terminal verdict come first.
+	// 1. Explicit markers and the harness's own terminal verdict. Categorical
+	//    statements outrank every inference below.
 	result := classifyHarnessMarkers(text)
 
-	// 2. Primary: harness-wrapper owns the cost/rate-limit/transport/API-error
-	//    patterns. Run its classifier as a one-shot over the captured text and
-	//    map the structured Classification onto our ErrorClass.
+	// 2. harness-wrapper owns every harness-output pattern: the per-harness
+	//    cost/rate-limit/transport/API-error fingerprints AND the residual
+	//    rows behind them. One call, one structured Classification.
 	if result == nil && text != "" {
-		result = fromClassification(wrapper.ClassifyOutput(backend, text), text)
+		result = fromClassification(wrapper.ClassifyFinishedOutput(backend, text), text)
 	}
 
-	// 3. Residual: loom-specific distinctions the wrapper does not model.
-	if result == nil {
-		result = classifyWithPatterns(text, residualPatterns)
-	}
-
-	// 4. Exit-code fallback.
+	// 3. Exit-code fallback.
 	if result == nil {
 		result = &classifyResult{
 			Class:   OutcomeFromHarness(classifyByExitCode(exitCode)),
@@ -447,47 +392,67 @@ func exitCodeRule(exitCode int) string {
 	}
 }
 
-// fromClassification adapts a harness-wrapper Classification. The wrapper now
-// owns the fine taxonomy (Classification.Class), so this collapses to a thin
-// mapping: take the wrapper's class verbatim, fold the binary-not-found signal
-// into loom's BackendUnavailable domain outcome, and keep two loom-side
-// behaviors — (a) an ErrUnknown/ErrNone result is treated as "nothing
-// actionable" so the residual table and exit-code fallback can refine it
-// (e.g. a 403 "forbidden" → ErrAuth via the residual), and (b) a Transient
-// whose surrounding text names a timeout is upgraded to loom's distinct
-// Timeout backoff bucket, exactly as before.
+// fromClassification adapts a harness-wrapper Classification. The wrapper owns
+// the fine taxonomy (Classification.Class) and, since the residual table moved
+// there, the timeout refinement too — so this collapses to a mapping: take the
+// wrapper's class verbatim, fold the binary-not-found signal into loom's
+// BackendUnavailable domain outcome, and treat an ErrUnknown/ErrNone result as
+// "nothing actionable" so the exit-code fallback can still speak.
+//
+// The messages below are unchanged fallbacks, not overrides: every residual
+// row now arrives carrying its own Reason (the message it had when the row
+// lived here), so reasonOr takes the wrapper's word and the defaults only
+// apply where they always did.
 func fromClassification(c wrapper.Classification, text string) *classifyResult {
 	if c.Status == wrapper.StatusBinaryNotFound {
 		return &classifyResult{
 			Class:    OutcomeFromDomain(BackendUnavailableOutcome),
 			Message:  "backend binary not on PATH",
-			Evidence: wrapperEvidence(c, ""),
+			Evidence: classificationEvidence(c, text),
 		}
 	}
 	switch c.Class {
 	case wrapper.ErrNone, wrapper.ErrUnknown:
-		// Nothing actionable (idle / waiting_for_input / unmapped API code) —
-		// residual/exit-code decide.
+		// Nothing actionable (idle / waiting_for_input / unmapped API code, and
+		// no residual row matched either) — the exit code decides.
 		return nil
 	case wrapper.ErrTransient:
-		if timeoutHintRe.MatchString(text) {
-			// Name the rewrite explicitly so the Transient→Timeout upgrade
-			// stays visible in the record rather than looking like the
-			// wrapper's own verdict.
-			return &classifyResult{Class: OutcomeFromHarness(wrapper.ErrTimeout), Message: reasonOr(c.Reason, "connection timeout"), RetryAfter: c.RetryAfter, Evidence: wrapperEvidence(c, "wrapper/timeout_upgrade")}
-		}
-		return &classifyResult{Class: OutcomeFromHarness(wrapper.ErrTransient), Message: reasonOr(c.Reason, "transient error"), RetryAfter: c.RetryAfter, Evidence: wrapperEvidence(c, "")}
+		return &classifyResult{Class: OutcomeFromHarness(wrapper.ErrTransient), Message: reasonOr(c.Reason, "transient error"), RetryAfter: c.RetryAfter, Evidence: classificationEvidence(c, text)}
 	case wrapper.ErrRateLimited:
-		return &classifyResult{Class: OutcomeFromHarness(wrapper.ErrRateLimited), Message: reasonOr(c.Reason, "rate limit exceeded"), RetryAfter: retryAfterFrom(c, text), Evidence: wrapperEvidence(c, "")}
+		return &classifyResult{Class: OutcomeFromHarness(wrapper.ErrRateLimited), Message: reasonOr(c.Reason, "rate limit exceeded"), RetryAfter: c.RetryAfter, Evidence: classificationEvidence(c, text)}
 	default:
-		return &classifyResult{Class: OutcomeFromHarness(c.Class), Message: reasonOr(c.Reason, c.Class.String()), RetryAfter: c.RetryAfter, Evidence: wrapperEvidence(c, "")}
+		return &classifyResult{Class: OutcomeFromHarness(c.Class), Message: reasonOr(c.Reason, c.Class.String()), RetryAfter: c.RetryAfter, Evidence: classificationEvidence(c, text)}
 	}
 }
 
-// wrapperEvidence records a harness-wrapper verdict. rule defaults to
-// "<status>/<class>"; pass a non-empty override to name a loom-side rewrite of
-// the wrapper's answer.
-func wrapperEvidence(c wrapper.Classification, rule string) Evidence {
+// residualRulePrefix marks a Classification.Rule as a residual-table row
+// rather than a per-harness matcher. The ids themselves
+// (`residual.auth`, …) are a contract named by
+// docs/adr/0002-authfailure-stays-terminal.md; the wrapper owns the rows now
+// and keeps the ids, so the ADR's revisit trigger keeps reading what it always
+// read.
+const residualRulePrefix = "residual."
+
+// classificationEvidence records a wrapper verdict, splitting on WHICH matcher
+// produced it so the evidence source keeps meaning what it meant when the two
+// tables lived in different repositories.
+//
+// A residual row is recorded exactly as the table recorded it when it lived
+// here: source=residual_pattern, the row id as the rule, the matched text, and
+// a redacted window around it. That is what TestClassifyEvidenceOverBroadResidualAuth
+// asserts and what the ADR's third revisit trigger reads.
+//
+// Everything else stays source=wrapper_classifier with the wrapper's reason as
+// Detail — including the Transient→Timeout refinement, which keeps the rule id
+// it had when loom performed it (`wrapper/timeout_upgrade`). Its Match is
+// deliberately NOT recorded: the refinement's evidence is the wrapper's reason,
+// which Detail already carries, and adding a field to that record would change
+// what an operator reading a verdict sees for no new information.
+func classificationEvidence(c wrapper.Classification, text string) Evidence {
+	if strings.HasPrefix(c.Rule, residualRulePrefix) {
+		return residualEvidence(c, text)
+	}
+	rule := c.Rule
 	if rule == "" {
 		rule = string(c.Status) + "/" + c.Class.String()
 	}
@@ -499,6 +464,25 @@ func wrapperEvidence(c wrapper.Classification, rule string) Evidence {
 	}
 }
 
+// residualEvidence rebuilds the Match/Excerpt pair for a residual hit from the
+// matched text the wrapper reports. The regex no longer lives here, so the
+// window is located by finding that text — which is the same span
+// FindStringIndex returned, because the wrapper reports its FIRST match.
+func residualEvidence(c wrapper.Classification, text string) Evidence {
+	ev := Evidence{Source: EvidenceResidual, Rule: c.Rule}
+	if c.Match == "" || text == "" {
+		return ev
+	}
+	ev.Match = capString(redactEvidence(sanitizeText(c.Match)), evidenceMatchCap)
+	// No window when the matched text is not in the blob we were handed:
+	// better a record that says only what it knows than one built around a
+	// position we had to guess.
+	if i := strings.Index(text, c.Match); i >= 0 {
+		ev.Excerpt = capString(redactEvidence(sanitizeText(excerptWindow(text, i, i+len(c.Match)))), evidenceExcerptCap)
+	}
+	return ev
+}
+
 // reasonOr returns the wrapper's reason when present, else a fallback.
 func reasonOr(reason, fallback string) string {
 	if r := strings.TrimSpace(reason); r != "" {
@@ -507,14 +491,11 @@ func reasonOr(reason, fallback string) string {
 	return fallback
 }
 
-// retryAfterFrom prefers the wrapper's parsed hint, falling back to a
-// Retry-After token in the text.
-func retryAfterFrom(c wrapper.Classification, text string) time.Duration {
-	if c.RetryAfter > 0 {
-		return c.RetryAfter
-	}
-	return parseRetryAfter(text)
-}
+// retryAfterRe extracts a Retry-After header value from log/output text. The
+// wrapper parses its own for a classified result; this copy serves the ONE
+// remaining loom-side reader, the usage-limited marker's reason tail, where
+// the harness often states when the wall lifts.
+var retryAfterRe = regexp.MustCompile(`(?i)retry.?after[:\s]+(\d+)`)
 
 // parseRetryAfter extracts a "retry-after: N" value (seconds) from text.
 func parseRetryAfter(text string) time.Duration {
