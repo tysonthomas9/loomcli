@@ -218,31 +218,41 @@ func TestWrapInvocationErrorAuthRequired(t *testing.T) {
 // The keep path, pinned: a wall the HARNESS named is still detected and
 // classified exactly as before the screen-scrape detector was removed. This is
 // the only route to a wall marker that remains.
+//
+// The billing row is the one that was unreachable until harness-wrapper learned
+// to read the harness's own transcript tag: BillingWallMarker and its
+// classification arm have existed all along with nothing able to emit them.
 func TestTerminalTurnInvocationErrorHarnessNamedWalls(t *testing.T) {
 	tests := []struct {
 		name       string
-		reason     string
+		turn       chat.Turn
 		wantMarker string
 		wantClass  agenterr.Outcome
 	}{
 		{
 			name:       "auth_required",
-			reason:     chat.ReasonAuthRequired,
+			turn:       chat.Turn{Code: chat.CodeAuthRequired, Reason: chat.ReasonAuthRequired},
 			wantMarker: agenterr.AuthRequiredMarker,
 			wantClass:  agenterr.OutcomeFromHarness(wrapper.ErrAuth),
 		},
 		{
 			name:       "usage_limited",
-			reason:     chat.ReasonUsageLimited,
+			turn:       chat.Turn{Code: chat.CodeUsageLimited, Reason: chat.ReasonUsageLimited},
 			wantMarker: agenterr.UsageLimitedMarker,
 			wantClass:  agenterr.OutcomeFromHarness(wrapper.ErrRateLimited),
+		},
+		{
+			name:       "billing_wall",
+			turn:       chat.Turn{Code: chat.CodeBillingWall, Reason: chat.ReasonBillingWall},
+			wantMarker: agenterr.BillingWallMarker,
+			wantClass:  agenterr.OutcomeFromHarness(wrapper.ErrBilling),
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			ie := terminalTurnInvocationError(tc.reason, "some output tail")
+			ie := terminalTurnInvocationError(tc.turn, "some output tail")
 			if ie == nil {
-				t.Fatalf("terminalTurnInvocationError(%q) = nil, want a marked error", tc.reason)
+				t.Fatalf("terminalTurnInvocationError(%q) = nil, want a marked error", tc.turn.Code)
 			}
 			if !strings.Contains(ie.Error(), tc.wantMarker) {
 				t.Fatalf("error %q missing marker %q", ie.Error(), tc.wantMarker)
@@ -255,12 +265,44 @@ func TestTerminalTurnInvocationErrorHarnessNamedWalls(t *testing.T) {
 	}
 }
 
+// The marker comes from the CODE, never from the prose. Operator copy gets
+// reworded; a reword that silently stopped raising the marker would drop the
+// verdict back to pattern inference, which for an expired login means burning
+// an agent's restart budget on turns that cannot succeed.
+func TestTerminalTurnInvocationErrorIgnoresReasonProse(t *testing.T) {
+	// A reworded reason with the right code still raises the marker...
+	ie := terminalTurnInvocationError(chat.Turn{
+		Code:   chat.CodeAuthRequired,
+		Reason: "the login is no longer valid, whatever we call it next release",
+	}, "tail")
+	if ie == nil || !strings.Contains(ie.Error(), agenterr.AuthRequiredMarker) {
+		t.Fatalf("a reworded reason with a code lost its marker: %+v", ie)
+	}
+	// ...and the canonical prose WITHOUT a code raises nothing, because a turn
+	// that carries no code is not a wall.
+	if ie := terminalTurnInvocationError(chat.Turn{Reason: chat.ReasonAuthRequired}, "tail"); ie != nil {
+		t.Fatalf("a codeless turn acquired a marker from its prose: %q", ie.Error())
+	}
+	// A code this loom does not know — a newer wrapper naming a wall this
+	// build has no policy for — raises nothing either. Guessing a marker for
+	// it would pick a disposition (fatal? blameless? counted?) on no evidence.
+	if ie := terminalTurnInvocationError(chat.Turn{
+		Code:   chat.TurnCode("some_future_wall"),
+		Reason: "a wall this build has never heard of",
+	}, "tail"); ie != nil {
+		t.Fatalf("an unknown code acquired a marker: %q", ie.Error())
+	}
+}
+
 // The deliberate behavior change from removing the screen-scrape detector:
 // an errored turn whose TEXT contains a billing phrase no longer acquires a
 // wall marker. It classifies as an ordinary errored turn — retryable and
-// non-fatal, which is what the code did before the detector existed. Pinned so
-// it is not "fixed" back into a scrape by accident; the correct fix, if a real
-// billing wall is ever observed here, is a harness-named billing reason.
+// non-fatal, which is what the code did before the detector existed.
+//
+// This survives the billing arm above, and that is the whole point of taking
+// the verdict from a code: a wall marker now comes from a tag the HARNESS
+// wrote about its own API call, so an agent quoting a banner — which is what
+// all 11 of the removed detector's detections were — still cannot produce one.
 func TestConversationTurnErrorBillingTextIsUnmarked(t *testing.T) {
 	err := conversationTurnError(nil, chat.Turn{
 		State: chat.TurnStateErrored,

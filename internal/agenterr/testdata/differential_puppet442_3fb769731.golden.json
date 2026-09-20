@@ -1,0 +1,5108 @@
+[
+ {
+  "Name": "empty",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 1)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "clean output",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 1)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit",
+  "RetryAfterMS": 30000,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/RateLimited",
+   "detail": "rate limit",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit bare 429",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "upstream returned 429",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit try again at",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "please try again",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "please try again",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit header casing",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 120000,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "too many requests",
+   "excerpt": "Error: too many requests\nRetry-After: 120",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.auth",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "unauthorized",
+   "excerpt": "request rejected: unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth 401",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Error: 401 Unauthorized: invalid api key",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "claude.loggedout.invalid_api_key",
+    "banner_match": "Error: 401 Unauthorized: invalid api key",
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth env var name",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "ANTHROPIC_API_KEY",
+   "excerpt": "reading ANTHROPIC_API_KEY from the environment",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth forbidden",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "forbidden",
+   "excerpt": "HTTP 403 forbidden",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.billing",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "billing",
+   "excerpt": "your billing needs attention",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.billing 402",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "402",
+   "excerpt": "402 payment required",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.model_version",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "ModelNotFound",
+  "Message": "backend CLI is incompatible with the selected model",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.model_version",
+   "match": "model requires a newer version",
+   "excerpt": "this model requires a newer version",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.model_not_found",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "ModelNotFound",
+  "Message": "model not found",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.model_not_found",
+   "match": "unsupported model",
+   "excerpt": "unsupported model",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.context",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "ContextOverflow",
+  "Message": "context length exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.context",
+   "match": "prompt too long",
+   "excerpt": "prompt too long",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.timeout",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "connection timeout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.timeout",
+   "match": "etimedout",
+   "excerpt": "etimedout",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.timeout deadline",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "connection timeout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.timeout",
+   "match": "deadline exceeded",
+   "excerpt": "context deadline exceeded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.transient",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "service unavailable",
+   "excerpt": "service unavailable",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.transient 529",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "529",
+   "excerpt": "upstream said 529",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap ratelimit+transient",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "upstream returned 429; also a 500 server error",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap auth+billing",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "401 unauthorized \u2014 check your billing",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "codex.loggedout.401_unauthorized",
+    "banner_match": "401 unauthorized \u2014 check your billing",
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "overlap billing+model",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "payment required",
+   "excerpt": "payment required; unsupported model",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap timeout+transient",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "connection timeout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.timeout",
+   "match": "connection timed out",
+   "excerpt": "500 server error after connection timed out",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 429",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "api error 429: Too Many Requests",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "api_error/RateLimited",
+   "detail": "api error 429: Too Many Requests",
+   "http_code": 429,
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 529",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "api error 529: Overloaded. This is a server-side issue, usually temporary \u2014 try again in a moment.",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "api_error/Transient",
+   "detail": "api error 529: Overloaded. This is a server-side issue, usually temporary \u2014 try again in a moment.",
+   "http_code": 529,
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 500",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "api error 500: Internal server error.",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "api_error/Transient",
+   "detail": "api error 500: Internal server error.",
+   "http_code": 500,
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper cost",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "quota exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/BillingError",
+   "detail": "quota exceeded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper transport",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "econnrefused",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "econnrefused",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper transport hangup",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "socket hang up",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "socket hang up",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "timeout refinement",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "socket hang up",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "wrapper/timeout_upgrade",
+   "detail": "socket hang up",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "session limit banner",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "session limit reached, resumes at <resume-time>: You've hit your session limit \u00b7 resets 10:20pm (Europe/Warsaw)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/RateLimited",
+   "detail": "session limit reached, resumes at <resume-time>: You've hit your session limit \u00b7 resets 10:20pm (Europe/Warsaw)",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker backend unavailable",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "BackendUnavailable",
+  "Message": "backend binary not on PATH",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "BackendUnavailableMarker",
+   "detail": "exec: \"claude\": executable file not found in $PATH",
+   "match": "loom: backend binary not on PATH",
+   "excerpt": "loom: backend binary not on PATH: exec: \"claude\": executable file not found in $PATH",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker agent launch failed",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "SpawnFailure",
+  "Message": "agent process failed to launch (backend binary may be updating or incompatible)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "AgentLaunchFailedMarker",
+   "detail": "fork/exec: exec format error",
+   "match": "loom: agent process failed to launch",
+   "excerpt": "loom: agent process failed to launch: fork/exec: exec format error",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker run-turn deadline",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "RunTurnDeadline",
+  "Message": "the turn exceeded loom's per-turn deadline (the role's max_run_duration minus 120s) \u2014 raise the role's max_run_duration or split the task",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker auth required",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "harness login expired or re-authentication required \u2014 renew the harness login",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "AuthRequiredMarker",
+   "detail": "auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+   "match": "loom: harness login expired or re-authentication required",
+   "excerpt": "loom: harness login expired or re-authentication required: auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "marker usage limited",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "harness usage or session limit reached \u2014 retry after the quota window resets",
+  "RetryAfterMS": 600000,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "UsageLimitedMarker",
+   "detail": "usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)",
+   "match": "loom: harness usage or session limit reached",
+   "excerpt": "loom: harness usage or session limit reached: usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)\nretry-after: 600",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker billing wall",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "harness billing or credit wall reached \u2014 the account cannot run turns until billing is resolved",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker outranks residual",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "RunTurnDeadline",
+  "Message": "the turn exceeded loom's per-turn deadline (the role's max_run_duration minus 120s) \u2014 raise the role's max_run_duration or split the task",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "logged-out screen for ScreenEvidence",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Claude Code\n\nNot logged in \u00b7 Run /login\n\n\u276f \n401 unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "claude.loggedout.run_login",
+    "banner_match": "Not logged in \u00b7 Run /login",
+    "composer_witnessed": true,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "trust dialog screen",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Claude Code\n\nDo you trust the files in this folder?\n\n\u276f 1. Yes\n401 unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "codex.loggedout.401_unauthorized",
+    "banner_match": "401 unauthorized",
+    "composer_witnessed": true,
+    "dialog_witnessed": true
+   }
+  }
+ },
+ {
+  "Name": "empty",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 1)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "clean output",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 1)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit",
+  "RetryAfterMS": 30000,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/RateLimited",
+   "detail": "rate limit",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit bare 429",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "upstream returned 429",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit try again at",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "please try again",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "please try again",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit header casing",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 120000,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "too many requests",
+   "excerpt": "Error: too many requests\nRetry-After: 120",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.auth",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "unauthorized",
+   "excerpt": "request rejected: unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth 401",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Error: 401 Unauthorized: invalid api key",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "claude.loggedout.invalid_api_key",
+    "banner_match": "Error: 401 Unauthorized: invalid api key",
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth env var name",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "ANTHROPIC_API_KEY",
+   "excerpt": "reading ANTHROPIC_API_KEY from the environment",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth forbidden",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "forbidden",
+   "excerpt": "HTTP 403 forbidden",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.billing",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "billing",
+   "excerpt": "your billing needs attention",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.billing 402",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "402",
+   "excerpt": "402 payment required",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.model_version",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "ModelNotFound",
+  "Message": "backend CLI is incompatible with the selected model",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.model_version",
+   "match": "model requires a newer version",
+   "excerpt": "this model requires a newer version",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.model_not_found",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "ModelNotFound",
+  "Message": "model not found",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.model_not_found",
+   "match": "unsupported model",
+   "excerpt": "unsupported model",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.context",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "ContextOverflow",
+  "Message": "context length exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.context",
+   "match": "prompt too long",
+   "excerpt": "prompt too long",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.timeout",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "connection timeout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.timeout",
+   "match": "etimedout",
+   "excerpt": "etimedout",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.timeout deadline",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "connection timeout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.timeout",
+   "match": "deadline exceeded",
+   "excerpt": "context deadline exceeded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.transient",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "service unavailable",
+   "excerpt": "service unavailable",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.transient 529",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "529",
+   "excerpt": "upstream said 529",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap ratelimit+transient",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "upstream returned 429; also a 500 server error",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap auth+billing",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "401 unauthorized \u2014 check your billing",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "codex.loggedout.401_unauthorized",
+    "banner_match": "401 unauthorized \u2014 check your billing",
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "overlap billing+model",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "payment required",
+   "excerpt": "payment required; unsupported model",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap timeout+transient",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "connection timeout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.timeout",
+   "match": "connection timed out",
+   "excerpt": "500 server error after connection timed out",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 429",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "api error 429: Too Many Requests",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "api_error/RateLimited",
+   "detail": "api error 429: Too Many Requests",
+   "http_code": 429,
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 529",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "api error 529: Overloaded. This is a server-side issue, usually temporary \u2014 try again in a moment.",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "api_error/Transient",
+   "detail": "api error 529: Overloaded. This is a server-side issue, usually temporary \u2014 try again in a moment.",
+   "http_code": 529,
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 500",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "api error 500: Internal server error.",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "api_error/Transient",
+   "detail": "api error 500: Internal server error.",
+   "http_code": 500,
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper cost",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "quota exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/BillingError",
+   "detail": "quota exceeded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper transport",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "econnrefused",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "econnrefused",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper transport hangup",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "socket hang up",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "socket hang up",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "timeout refinement",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "socket hang up",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "wrapper/timeout_upgrade",
+   "detail": "socket hang up",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "session limit banner",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "session limit reached, resumes at <resume-time>: You've hit your session limit \u00b7 resets 10:20pm (Europe/Warsaw)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/RateLimited",
+   "detail": "session limit reached, resumes at <resume-time>: You've hit your session limit \u00b7 resets 10:20pm (Europe/Warsaw)",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker backend unavailable",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "BackendUnavailable",
+  "Message": "backend binary not on PATH",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "BackendUnavailableMarker",
+   "detail": "exec: \"claude\": executable file not found in $PATH",
+   "match": "loom: backend binary not on PATH",
+   "excerpt": "loom: backend binary not on PATH: exec: \"claude\": executable file not found in $PATH",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker agent launch failed",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "SpawnFailure",
+  "Message": "agent process failed to launch (backend binary may be updating or incompatible)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "AgentLaunchFailedMarker",
+   "detail": "fork/exec: exec format error",
+   "match": "loom: agent process failed to launch",
+   "excerpt": "loom: agent process failed to launch: fork/exec: exec format error",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker run-turn deadline",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "RunTurnDeadline",
+  "Message": "the turn exceeded loom's per-turn deadline (the role's max_run_duration minus 120s) \u2014 raise the role's max_run_duration or split the task",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker auth required",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "harness login expired or re-authentication required \u2014 renew the harness login",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "AuthRequiredMarker",
+   "detail": "auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+   "match": "loom: harness login expired or re-authentication required",
+   "excerpt": "loom: harness login expired or re-authentication required: auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "marker usage limited",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "harness usage or session limit reached \u2014 retry after the quota window resets",
+  "RetryAfterMS": 600000,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "UsageLimitedMarker",
+   "detail": "usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)",
+   "match": "loom: harness usage or session limit reached",
+   "excerpt": "loom: harness usage or session limit reached: usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)\nretry-after: 600",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker billing wall",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "harness billing or credit wall reached \u2014 the account cannot run turns until billing is resolved",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker outranks residual",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "RunTurnDeadline",
+  "Message": "the turn exceeded loom's per-turn deadline (the role's max_run_duration minus 120s) \u2014 raise the role's max_run_duration or split the task",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "logged-out screen for ScreenEvidence",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Claude Code\n\nNot logged in \u00b7 Run /login\n\n\u276f \n401 unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "claude.loggedout.run_login",
+    "banner_match": "Not logged in \u00b7 Run /login",
+    "composer_witnessed": true,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "trust dialog screen",
+  "Backend": "claude-code",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Claude Code\n\nDo you trust the files in this folder?\n\n\u276f 1. Yes\n401 unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "codex.loggedout.401_unauthorized",
+    "banner_match": "401 unauthorized",
+    "composer_witnessed": true,
+    "dialog_witnessed": true
+   }
+  }
+ },
+ {
+  "Name": "empty",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 1)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "clean output",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 1)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 30000,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/RateLimited",
+   "detail": "rate limit exceeded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit bare 429",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "upstream returned 429",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit try again at",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "please try again",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "please try again",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit header casing",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 120000,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "too many requests",
+   "excerpt": "Error: too many requests\nRetry-After: 120",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.auth",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "unauthorized",
+   "excerpt": "request rejected: unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth 401",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Error: 401 Unauthorized: invalid api key",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "claude.loggedout.invalid_api_key",
+    "banner_match": "Error: 401 Unauthorized: invalid api key",
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth env var name",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "ANTHROPIC_API_KEY",
+   "excerpt": "reading ANTHROPIC_API_KEY from the environment",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth forbidden",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "forbidden",
+   "excerpt": "HTTP 403 forbidden",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.billing",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "billing",
+   "excerpt": "your billing needs attention",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.billing 402",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "402",
+   "excerpt": "402 payment required",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.model_version",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "ModelNotFound",
+  "Message": "backend CLI is incompatible with the selected model",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.model_version",
+   "match": "model requires a newer version",
+   "excerpt": "this model requires a newer version",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.model_not_found",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "ModelNotFound",
+  "Message": "model not found",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.model_not_found",
+   "match": "unsupported model",
+   "excerpt": "unsupported model",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.context",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "ContextOverflow",
+  "Message": "context length exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.context",
+   "match": "prompt too long",
+   "excerpt": "prompt too long",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.timeout",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "connection timeout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.timeout",
+   "match": "etimedout",
+   "excerpt": "etimedout",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.timeout deadline",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "connection timeout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.timeout",
+   "match": "deadline exceeded",
+   "excerpt": "context deadline exceeded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.transient",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "service unavailable",
+   "excerpt": "service unavailable",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.transient 529",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "529",
+   "excerpt": "upstream said 529",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap ratelimit+transient",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "server error",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap auth+billing",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "401 unauthorized \u2014 check your billing",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "codex.loggedout.401_unauthorized",
+    "banner_match": "401 unauthorized \u2014 check your billing",
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "overlap billing+model",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "payment required",
+   "excerpt": "payment required; unsupported model",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap timeout+transient",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "wrapper/timeout_upgrade",
+   "detail": "server error",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 429",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "API Error: 429 Too Many Requests",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 529",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "529",
+   "excerpt": "API Error: 529 Overloaded. This is a server-side issue, usually temporary \u2014 try again in a moment.",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 500",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "server error",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper cost",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "api error 429: quota exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "api_error/RateLimited",
+   "detail": "api error 429: quota exceeded",
+   "http_code": 429,
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper transport",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "econnrefused",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "econnrefused",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper transport hangup",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "socket hang up",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "socket hang up",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "timeout refinement",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "socket hang up",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "wrapper/timeout_upgrade",
+   "detail": "socket hang up",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "session limit banner",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "session limit",
+   "excerpt": "You've hit your session limit \u00b7 resets 10:20pm (Europe/Warsaw)",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker backend unavailable",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "BackendUnavailable",
+  "Message": "backend binary not on PATH",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "BackendUnavailableMarker",
+   "detail": "exec: \"claude\": executable file not found in $PATH",
+   "match": "loom: backend binary not on PATH",
+   "excerpt": "loom: backend binary not on PATH: exec: \"claude\": executable file not found in $PATH",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker agent launch failed",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "SpawnFailure",
+  "Message": "agent process failed to launch (backend binary may be updating or incompatible)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "AgentLaunchFailedMarker",
+   "detail": "fork/exec: exec format error",
+   "match": "loom: agent process failed to launch",
+   "excerpt": "loom: agent process failed to launch: fork/exec: exec format error",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker run-turn deadline",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "RunTurnDeadline",
+  "Message": "the turn exceeded loom's per-turn deadline (the role's max_run_duration minus 120s) \u2014 raise the role's max_run_duration or split the task",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker auth required",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "harness login expired or re-authentication required \u2014 renew the harness login",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "AuthRequiredMarker",
+   "detail": "auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+   "match": "loom: harness login expired or re-authentication required",
+   "excerpt": "loom: harness login expired or re-authentication required: auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "marker usage limited",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "harness usage or session limit reached \u2014 retry after the quota window resets",
+  "RetryAfterMS": 600000,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "UsageLimitedMarker",
+   "detail": "usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)",
+   "match": "loom: harness usage or session limit reached",
+   "excerpt": "loom: harness usage or session limit reached: usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)\nretry-after: 600",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker billing wall",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "harness billing or credit wall reached \u2014 the account cannot run turns until billing is resolved",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker outranks residual",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "RunTurnDeadline",
+  "Message": "the turn exceeded loom's per-turn deadline (the role's max_run_duration minus 120s) \u2014 raise the role's max_run_duration or split the task",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "logged-out screen for ScreenEvidence",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Claude Code\n\nNot logged in \u00b7 Run /login\n\n\u276f \n401 unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "claude.loggedout.run_login",
+    "banner_match": "Not logged in \u00b7 Run /login",
+    "composer_witnessed": true,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "trust dialog screen",
+  "Backend": "codex",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Claude Code\n\nDo you trust the files in this folder?\n\n\u276f 1. Yes\n401 unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "codex.loggedout.401_unauthorized",
+    "banner_match": "401 unauthorized",
+    "composer_witnessed": true,
+    "dialog_witnessed": true
+   }
+  }
+ },
+ {
+  "Name": "empty",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 1)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "clean output",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 1)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit",
+  "RetryAfterMS": 30000,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/RateLimited",
+   "detail": "rate limit",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit bare 429",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "upstream returned 429",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit try again at",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "please try again",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "please try again",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit header casing",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "too many requests",
+  "RetryAfterMS": 120000,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/RateLimited",
+   "detail": "too many requests",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.auth",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "unauthorized",
+   "excerpt": "request rejected: unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth 401",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Error: 401 Unauthorized: invalid api key",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "claude.loggedout.invalid_api_key",
+    "banner_match": "Error: 401 Unauthorized: invalid api key",
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth env var name",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "ANTHROPIC_API_KEY",
+   "excerpt": "reading ANTHROPIC_API_KEY from the environment",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth forbidden",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "forbidden",
+   "excerpt": "HTTP 403 forbidden",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.billing",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "billing",
+   "excerpt": "your billing needs attention",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.billing 402",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "402",
+   "excerpt": "402 payment required",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.model_version",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "ModelNotFound",
+  "Message": "backend CLI is incompatible with the selected model",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.model_version",
+   "match": "model requires a newer version",
+   "excerpt": "this model requires a newer version",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.model_not_found",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "ModelNotFound",
+  "Message": "model not found",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.model_not_found",
+   "match": "unsupported model",
+   "excerpt": "unsupported model",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.context",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "ContextOverflow",
+  "Message": "context length exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.context",
+   "match": "prompt too long",
+   "excerpt": "prompt too long",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.timeout",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "etimedout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Timeout",
+   "detail": "etimedout",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.timeout deadline",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "connection timeout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.timeout",
+   "match": "deadline exceeded",
+   "excerpt": "context deadline exceeded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.transient",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "service unavailable",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "service unavailable",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.transient 529",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "529",
+   "excerpt": "upstream said 529",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap ratelimit+transient",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "upstream returned 429; also a 500 server error",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap auth+billing",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "401 unauthorized \u2014 check your billing",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "codex.loggedout.401_unauthorized",
+    "banner_match": "401 unauthorized \u2014 check your billing",
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "overlap billing+model",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "payment required",
+   "excerpt": "payment required; unsupported model",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap timeout+transient",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "timed out",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Timeout",
+   "detail": "timed out",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 429",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "too many requests",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/RateLimited",
+   "detail": "too many requests",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 529",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "overloaded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "overloaded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 500",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "internal server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "internal server error",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper cost",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "quota exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/BillingError",
+   "detail": "quota exceeded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper transport",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "econnrefused",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "econnrefused",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper transport hangup",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "socket hang up",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "socket hang up",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "timeout refinement",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "socket hang up",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "wrapper/timeout_upgrade",
+   "detail": "socket hang up",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "session limit banner",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "session limit",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/RateLimited",
+   "detail": "session limit",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker backend unavailable",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "BackendUnavailable",
+  "Message": "backend binary not on PATH",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "BackendUnavailableMarker",
+   "detail": "exec: \"claude\": executable file not found in $PATH",
+   "match": "loom: backend binary not on PATH",
+   "excerpt": "loom: backend binary not on PATH: exec: \"claude\": executable file not found in $PATH",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker agent launch failed",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "SpawnFailure",
+  "Message": "agent process failed to launch (backend binary may be updating or incompatible)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "AgentLaunchFailedMarker",
+   "detail": "fork/exec: exec format error",
+   "match": "loom: agent process failed to launch",
+   "excerpt": "loom: agent process failed to launch: fork/exec: exec format error",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker run-turn deadline",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "RunTurnDeadline",
+  "Message": "the turn exceeded loom's per-turn deadline (the role's max_run_duration minus 120s) \u2014 raise the role's max_run_duration or split the task",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker auth required",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "harness login expired or re-authentication required \u2014 renew the harness login",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "AuthRequiredMarker",
+   "detail": "auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+   "match": "loom: harness login expired or re-authentication required",
+   "excerpt": "loom: harness login expired or re-authentication required: auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "marker usage limited",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "harness usage or session limit reached \u2014 retry after the quota window resets",
+  "RetryAfterMS": 600000,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "UsageLimitedMarker",
+   "detail": "usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)",
+   "match": "loom: harness usage or session limit reached",
+   "excerpt": "loom: harness usage or session limit reached: usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)\nretry-after: 600",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker billing wall",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "harness billing or credit wall reached \u2014 the account cannot run turns until billing is resolved",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker outranks residual",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "RunTurnDeadline",
+  "Message": "the turn exceeded loom's per-turn deadline (the role's max_run_duration minus 120s) \u2014 raise the role's max_run_duration or split the task",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "logged-out screen for ScreenEvidence",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Claude Code\n\nNot logged in \u00b7 Run /login\n\n\u276f \n401 unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "claude.loggedout.run_login",
+    "banner_match": "Not logged in \u00b7 Run /login",
+    "composer_witnessed": true,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "trust dialog screen",
+  "Backend": "cursor",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Claude Code\n\nDo you trust the files in this folder?\n\n\u276f 1. Yes\n401 unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "codex.loggedout.401_unauthorized",
+    "banner_match": "401 unauthorized",
+    "composer_witnessed": true,
+    "dialog_witnessed": true
+   }
+  }
+ },
+ {
+  "Name": "empty",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 1)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "clean output",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 1)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit",
+  "RetryAfterMS": 30000,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/RateLimited",
+   "detail": "rate limit",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit bare 429",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "upstream returned 429",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit try again at",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "please try again",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "please try again",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit header casing",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 120000,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "too many requests",
+   "excerpt": "Error: too many requests\nRetry-After: 120",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.auth",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "unauthorized",
+   "excerpt": "request rejected: unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth 401",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Error: 401 Unauthorized: invalid api key",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "claude.loggedout.invalid_api_key",
+    "banner_match": "Error: 401 Unauthorized: invalid api key",
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth env var name",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "ANTHROPIC_API_KEY",
+   "excerpt": "reading ANTHROPIC_API_KEY from the environment",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth forbidden",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "forbidden",
+   "excerpt": "HTTP 403 forbidden",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.billing",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/BillingError",
+   "detail": "billing",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.billing 402",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "402",
+   "excerpt": "402 payment required",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.model_version",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "ModelNotFound",
+  "Message": "backend CLI is incompatible with the selected model",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.model_version",
+   "match": "model requires a newer version",
+   "excerpt": "this model requires a newer version",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.model_not_found",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "ModelNotFound",
+  "Message": "model not found",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.model_not_found",
+   "match": "unsupported model",
+   "excerpt": "unsupported model",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.context",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "ContextOverflow",
+  "Message": "context length exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.context",
+   "match": "prompt too long",
+   "excerpt": "prompt too long",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.timeout",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "connection timeout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.timeout",
+   "match": "etimedout",
+   "excerpt": "etimedout",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.timeout deadline",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "deadline exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Timeout",
+   "detail": "deadline exceeded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.transient",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "service unavailable",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "service unavailable",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.transient 529",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "529",
+   "excerpt": "upstream said 529",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap ratelimit+transient",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "upstream returned 429; also a 500 server error",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap auth+billing",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/BillingError",
+   "detail": "billing",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap billing+model",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "payment required",
+   "excerpt": "payment required; unsupported model",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap timeout+transient",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "connection timeout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.timeout",
+   "match": "connection timed out",
+   "excerpt": "500 server error after connection timed out",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 429",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "API Error: 429 Too Many Requests",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 529",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "overloaded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "overloaded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 500",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "500",
+   "excerpt": "API Error: 500 Internal server error.",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper cost",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "quota exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/BillingError",
+   "detail": "quota exceeded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper transport",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "econnrefused",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "econnrefused",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper transport hangup",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "socket hang up",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "socket hang up",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "timeout refinement",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "deadline exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Timeout",
+   "detail": "deadline exceeded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "session limit banner",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "session limit",
+   "excerpt": "You've hit your session limit \u00b7 resets 10:20pm (Europe/Warsaw)",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker backend unavailable",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "BackendUnavailable",
+  "Message": "backend binary not on PATH",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "BackendUnavailableMarker",
+   "detail": "exec: \"claude\": executable file not found in $PATH",
+   "match": "loom: backend binary not on PATH",
+   "excerpt": "loom: backend binary not on PATH: exec: \"claude\": executable file not found in $PATH",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker agent launch failed",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "SpawnFailure",
+  "Message": "agent process failed to launch (backend binary may be updating or incompatible)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "AgentLaunchFailedMarker",
+   "detail": "fork/exec: exec format error",
+   "match": "loom: agent process failed to launch",
+   "excerpt": "loom: agent process failed to launch: fork/exec: exec format error",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker run-turn deadline",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "RunTurnDeadline",
+  "Message": "the turn exceeded loom's per-turn deadline (the role's max_run_duration minus 120s) \u2014 raise the role's max_run_duration or split the task",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker auth required",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "harness login expired or re-authentication required \u2014 renew the harness login",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "AuthRequiredMarker",
+   "detail": "auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+   "match": "loom: harness login expired or re-authentication required",
+   "excerpt": "loom: harness login expired or re-authentication required: auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "marker usage limited",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "harness usage or session limit reached \u2014 retry after the quota window resets",
+  "RetryAfterMS": 600000,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "UsageLimitedMarker",
+   "detail": "usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)",
+   "match": "loom: harness usage or session limit reached",
+   "excerpt": "loom: harness usage or session limit reached: usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)\nretry-after: 600",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker billing wall",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "harness billing or credit wall reached \u2014 the account cannot run turns until billing is resolved",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker outranks residual",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "RunTurnDeadline",
+  "Message": "the turn exceeded loom's per-turn deadline (the role's max_run_duration minus 120s) \u2014 raise the role's max_run_duration or split the task",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "logged-out screen for ScreenEvidence",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Claude Code\n\nNot logged in \u00b7 Run /login\n\n\u276f \n401 unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "claude.loggedout.run_login",
+    "banner_match": "Not logged in \u00b7 Run /login",
+    "composer_witnessed": true,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "trust dialog screen",
+  "Backend": "opencode",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Claude Code\n\nDo you trust the files in this folder?\n\n\u276f 1. Yes\n401 unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "codex.loggedout.401_unauthorized",
+    "banner_match": "401 unauthorized",
+    "composer_witnessed": true,
+    "dialog_witnessed": true
+   }
+  }
+ },
+ {
+  "Name": "empty",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 1)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "clean output",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 1)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit",
+  "RetryAfterMS": 30000,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/RateLimited",
+   "detail": "rate limit",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit bare 429",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "upstream returned 429",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit try again at",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "please try again",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "please try again",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit header casing",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 120000,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "too many requests",
+   "excerpt": "Error: too many requests\nRetry-After: 120",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.auth",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "unauthorized",
+   "excerpt": "request rejected: unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth 401",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Error: 401 Unauthorized: invalid api key",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "claude.loggedout.invalid_api_key",
+    "banner_match": "Error: 401 Unauthorized: invalid api key",
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth env var name",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "ANTHROPIC_API_KEY",
+   "excerpt": "reading ANTHROPIC_API_KEY from the environment",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth forbidden",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "forbidden",
+   "excerpt": "HTTP 403 forbidden",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.billing",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/BillingError",
+   "detail": "billing",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.billing 402",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "402",
+   "excerpt": "402 payment required",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.model_version",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "ModelNotFound",
+  "Message": "backend CLI is incompatible with the selected model",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.model_version",
+   "match": "model requires a newer version",
+   "excerpt": "this model requires a newer version",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.model_not_found",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "ModelNotFound",
+  "Message": "model not found",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.model_not_found",
+   "match": "unsupported model",
+   "excerpt": "unsupported model",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.context",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "ContextOverflow",
+  "Message": "context length exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.context",
+   "match": "prompt too long",
+   "excerpt": "prompt too long",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.timeout",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "connection timeout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.timeout",
+   "match": "etimedout",
+   "excerpt": "etimedout",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.timeout deadline",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "deadline exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Timeout",
+   "detail": "deadline exceeded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.transient",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "service unavailable",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "service unavailable",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.transient 529",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "529",
+   "excerpt": "upstream said 529",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap ratelimit+transient",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "upstream returned 429; also a 500 server error",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap auth+billing",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/BillingError",
+   "detail": "billing",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap billing+model",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "payment required",
+   "excerpt": "payment required; unsupported model",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap timeout+transient",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "connection timeout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.timeout",
+   "match": "connection timed out",
+   "excerpt": "500 server error after connection timed out",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 429",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "API Error: 429 Too Many Requests",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 529",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "overloaded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "overloaded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 500",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "500",
+   "excerpt": "API Error: 500 Internal server error.",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper cost",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "quota exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/BillingError",
+   "detail": "quota exceeded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper transport",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "econnrefused",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "econnrefused",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper transport hangup",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "socket hang up",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "socket hang up",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "timeout refinement",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "deadline exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Timeout",
+   "detail": "deadline exceeded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "session limit banner",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "session limit",
+   "excerpt": "You've hit your session limit \u00b7 resets 10:20pm (Europe/Warsaw)",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker backend unavailable",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "BackendUnavailable",
+  "Message": "backend binary not on PATH",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "BackendUnavailableMarker",
+   "detail": "exec: \"claude\": executable file not found in $PATH",
+   "match": "loom: backend binary not on PATH",
+   "excerpt": "loom: backend binary not on PATH: exec: \"claude\": executable file not found in $PATH",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker agent launch failed",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "SpawnFailure",
+  "Message": "agent process failed to launch (backend binary may be updating or incompatible)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "AgentLaunchFailedMarker",
+   "detail": "fork/exec: exec format error",
+   "match": "loom: agent process failed to launch",
+   "excerpt": "loom: agent process failed to launch: fork/exec: exec format error",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker run-turn deadline",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "RunTurnDeadline",
+  "Message": "the turn exceeded loom's per-turn deadline (the role's max_run_duration minus 120s) \u2014 raise the role's max_run_duration or split the task",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker auth required",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "harness login expired or re-authentication required \u2014 renew the harness login",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "AuthRequiredMarker",
+   "detail": "auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+   "match": "loom: harness login expired or re-authentication required",
+   "excerpt": "loom: harness login expired or re-authentication required: auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "marker usage limited",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "harness usage or session limit reached \u2014 retry after the quota window resets",
+  "RetryAfterMS": 600000,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "UsageLimitedMarker",
+   "detail": "usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)",
+   "match": "loom: harness usage or session limit reached",
+   "excerpt": "loom: harness usage or session limit reached: usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)\nretry-after: 600",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker billing wall",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "harness billing or credit wall reached \u2014 the account cannot run turns until billing is resolved",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker outranks residual",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "RunTurnDeadline",
+  "Message": "the turn exceeded loom's per-turn deadline (the role's max_run_duration minus 120s) \u2014 raise the role's max_run_duration or split the task",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "logged-out screen for ScreenEvidence",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Claude Code\n\nNot logged in \u00b7 Run /login\n\n\u276f \n401 unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "claude.loggedout.run_login",
+    "banner_match": "Not logged in \u00b7 Run /login",
+    "composer_witnessed": true,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "trust dialog screen",
+  "Backend": "pi",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Claude Code\n\nDo you trust the files in this folder?\n\n\u276f 1. Yes\n401 unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "codex.loggedout.401_unauthorized",
+    "banner_match": "401 unauthorized",
+    "composer_witnessed": true,
+    "dialog_witnessed": true
+   }
+  }
+ },
+ {
+  "Name": "empty",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 1)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "clean output",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 1)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit",
+  "RetryAfterMS": 30000,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/RateLimited",
+   "detail": "rate limit",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit bare 429",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "upstream returned 429",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit try again at",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "try again at 9",
+   "excerpt": "please try again at 9",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit header casing",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 120000,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "too many requests",
+   "excerpt": "Error: too many requests\nRetry-After: 120",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.auth",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "unauthorized",
+   "excerpt": "request rejected: unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth 401",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Error: 401 Unauthorized: invalid api key",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "claude.loggedout.invalid_api_key",
+    "banner_match": "Error: 401 Unauthorized: invalid api key",
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth env var name",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "ANTHROPIC_API_KEY",
+   "excerpt": "reading ANTHROPIC_API_KEY from the environment",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth forbidden",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "forbidden",
+   "excerpt": "HTTP 403 forbidden",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.billing",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "billing",
+   "excerpt": "your billing needs attention",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.billing 402",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "402",
+   "excerpt": "402 payment required",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.model_version",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "ModelNotFound",
+  "Message": "backend CLI is incompatible with the selected model",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.model_version",
+   "match": "model requires a newer version",
+   "excerpt": "this model requires a newer version",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.model_not_found",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "ModelNotFound",
+  "Message": "model not found",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.model_not_found",
+   "match": "unsupported model",
+   "excerpt": "unsupported model",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.context",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "ContextOverflow",
+  "Message": "context length exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.context",
+   "match": "prompt too long",
+   "excerpt": "prompt too long",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.timeout",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "connection timeout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.timeout",
+   "match": "etimedout",
+   "excerpt": "etimedout",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.timeout deadline",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "connection timeout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.timeout",
+   "match": "deadline exceeded",
+   "excerpt": "context deadline exceeded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.transient",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "service unavailable",
+   "excerpt": "service unavailable",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.transient 529",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "529",
+   "excerpt": "upstream said 529",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap ratelimit+transient",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "upstream returned 429; also a 500 server error",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap auth+billing",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "401 unauthorized \u2014 check your billing",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "codex.loggedout.401_unauthorized",
+    "banner_match": "401 unauthorized \u2014 check your billing",
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "overlap billing+model",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "payment required",
+   "excerpt": "payment required; unsupported model",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap timeout+transient",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "connection timeout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.timeout",
+   "match": "connection timed out",
+   "excerpt": "500 server error after connection timed out",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 429",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "API Error: 429 Too Many Requests",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 529",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "529",
+   "excerpt": "API Error: 529 Overloaded. This is a server-side issue, usually temporary \u2014 try again in a moment.",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 500",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "500",
+   "excerpt": "API Error: 500 Internal server error.",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper cost",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "quota exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/BillingError",
+   "detail": "quota exceeded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper transport",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "econnrefused",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "econnrefused",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper transport hangup",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "socket hang up",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "socket hang up",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "timeout refinement",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "socket hang up",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "wrapper/timeout_upgrade",
+   "detail": "socket hang up",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "session limit banner",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "session limit",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/RateLimited",
+   "detail": "session limit",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker backend unavailable",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "BackendUnavailable",
+  "Message": "backend binary not on PATH",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "BackendUnavailableMarker",
+   "detail": "exec: \"claude\": executable file not found in $PATH",
+   "match": "loom: backend binary not on PATH",
+   "excerpt": "loom: backend binary not on PATH: exec: \"claude\": executable file not found in $PATH",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker agent launch failed",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "SpawnFailure",
+  "Message": "agent process failed to launch (backend binary may be updating or incompatible)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "AgentLaunchFailedMarker",
+   "detail": "fork/exec: exec format error",
+   "match": "loom: agent process failed to launch",
+   "excerpt": "loom: agent process failed to launch: fork/exec: exec format error",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker run-turn deadline",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "RunTurnDeadline",
+  "Message": "the turn exceeded loom's per-turn deadline (the role's max_run_duration minus 120s) \u2014 raise the role's max_run_duration or split the task",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker auth required",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "harness login expired or re-authentication required \u2014 renew the harness login",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "AuthRequiredMarker",
+   "detail": "auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+   "match": "loom: harness login expired or re-authentication required",
+   "excerpt": "loom: harness login expired or re-authentication required: auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "marker usage limited",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "harness usage or session limit reached \u2014 retry after the quota window resets",
+  "RetryAfterMS": 600000,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "UsageLimitedMarker",
+   "detail": "usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)",
+   "match": "loom: harness usage or session limit reached",
+   "excerpt": "loom: harness usage or session limit reached: usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)\nretry-after: 600",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker billing wall",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "harness billing or credit wall reached \u2014 the account cannot run turns until billing is resolved",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker outranks residual",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "RunTurnDeadline",
+  "Message": "the turn exceeded loom's per-turn deadline (the role's max_run_duration minus 120s) \u2014 raise the role's max_run_duration or split the task",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "logged-out screen for ScreenEvidence",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Claude Code\n\nNot logged in \u00b7 Run /login\n\n\u276f \n401 unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "claude.loggedout.run_login",
+    "banner_match": "Not logged in \u00b7 Run /login",
+    "composer_witnessed": true,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "trust dialog screen",
+  "Backend": "",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Claude Code\n\nDo you trust the files in this folder?\n\n\u276f 1. Yes\n401 unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "codex.loggedout.401_unauthorized",
+    "banner_match": "401 unauthorized",
+    "composer_witnessed": true,
+    "dialog_witnessed": true
+   }
+  }
+ },
+ {
+  "Name": "empty",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 1)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "clean output",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 1)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit",
+  "RetryAfterMS": 30000,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/RateLimited",
+   "detail": "rate limit",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit bare 429",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "upstream returned 429",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit try again at",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "try again at 9",
+   "excerpt": "please try again at 9",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.ratelimit header casing",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 120000,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "too many requests",
+   "excerpt": "Error: too many requests\nRetry-After: 120",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.auth",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "unauthorized",
+   "excerpt": "request rejected: unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth 401",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Error: 401 Unauthorized: invalid api key",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "claude.loggedout.invalid_api_key",
+    "banner_match": "Error: 401 Unauthorized: invalid api key",
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth env var name",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "ANTHROPIC_API_KEY",
+   "excerpt": "reading ANTHROPIC_API_KEY from the environment",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.auth forbidden",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "forbidden",
+   "excerpt": "HTTP 403 forbidden",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "residual.billing",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "billing",
+   "excerpt": "your billing needs attention",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.billing 402",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "402",
+   "excerpt": "402 payment required",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.model_version",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "ModelNotFound",
+  "Message": "backend CLI is incompatible with the selected model",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.model_version",
+   "match": "model requires a newer version",
+   "excerpt": "this model requires a newer version",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.model_not_found",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "ModelNotFound",
+  "Message": "model not found",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.model_not_found",
+   "match": "unsupported model",
+   "excerpt": "unsupported model",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.context",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "ContextOverflow",
+  "Message": "context length exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.context",
+   "match": "prompt too long",
+   "excerpt": "prompt too long",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.timeout",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "connection timeout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.timeout",
+   "match": "etimedout",
+   "excerpt": "etimedout",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.timeout deadline",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "connection timeout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.timeout",
+   "match": "deadline exceeded",
+   "excerpt": "context deadline exceeded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.transient",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "service unavailable",
+   "excerpt": "service unavailable",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "residual.transient 529",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "529",
+   "excerpt": "upstream said 529",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap ratelimit+transient",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "upstream returned 429; also a 500 server error",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap auth+billing",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "401 unauthorized \u2014 check your billing",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "codex.loggedout.401_unauthorized",
+    "banner_match": "401 unauthorized \u2014 check your billing",
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "overlap billing+model",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "billing error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.billing",
+   "match": "payment required",
+   "excerpt": "payment required; unsupported model",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "overlap timeout+transient",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "connection timeout",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.timeout",
+   "match": "connection timed out",
+   "excerpt": "500 server error after connection timed out",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 429",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "rate limit exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.ratelimit",
+   "match": "429",
+   "excerpt": "API Error: 429 Too Many Requests",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 529",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "529",
+   "excerpt": "API Error: 529 Overloaded. This is a server-side issue, usually temporary \u2014 try again in a moment.",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper api error 500",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "server error",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.transient",
+   "match": "500",
+   "excerpt": "API Error: 500 Internal server error.",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper cost",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "quota exceeded",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/BillingError",
+   "detail": "quota exceeded",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper transport",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "econnrefused",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "econnrefused",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "wrapper transport hangup",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "Transient",
+  "Message": "socket hang up",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "retry_later/Transient",
+   "detail": "socket hang up",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "timeout refinement",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "Timeout",
+  "Message": "socket hang up",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "wrapper/timeout_upgrade",
+   "detail": "socket hang up",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "session limit banner",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "session limit",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "wrapper_classifier",
+   "rule": "blocked_by_cost/RateLimited",
+   "detail": "session limit",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker backend unavailable",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "BackendUnavailable",
+  "Message": "backend binary not on PATH",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "BackendUnavailableMarker",
+   "detail": "exec: \"claude\": executable file not found in $PATH",
+   "match": "loom: backend binary not on PATH",
+   "excerpt": "loom: backend binary not on PATH: exec: \"claude\": executable file not found in $PATH",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker agent launch failed",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "SpawnFailure",
+  "Message": "agent process failed to launch (backend binary may be updating or incompatible)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "AgentLaunchFailedMarker",
+   "detail": "fork/exec: exec format error",
+   "match": "loom: agent process failed to launch",
+   "excerpt": "loom: agent process failed to launch: fork/exec: exec format error",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker run-turn deadline",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "RunTurnDeadline",
+  "Message": "the turn exceeded loom's per-turn deadline (the role's max_run_duration minus 120s) \u2014 raise the role's max_run_duration or split the task",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker auth required",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "harness login expired or re-authentication required \u2014 renew the harness login",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "AuthRequiredMarker",
+   "detail": "auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+   "match": "loom: harness login expired or re-authentication required",
+   "excerpt": "loom: harness login expired or re-authentication required: auth_required: harness login expired or re-authentication required \u2014 renew the harness login",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "composer_witnessed": false,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "marker usage limited",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "RateLimited",
+  "Message": "harness usage or session limit reached \u2014 retry after the quota window resets",
+  "RetryAfterMS": 600000,
+  "Evidence": {
+   "source": "harness_marker",
+   "rule": "UsageLimitedMarker",
+   "detail": "usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)",
+   "match": "loom: harness usage or session limit reached",
+   "excerpt": "loom: harness usage or session limit reached: usage_limit: harness usage or session limit reached \u2014 retry after the quota window resets (You've hit your session limit \u00b7 resets 10:20pm)\nretry-after: 600",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker billing wall",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "BillingError",
+  "Message": "harness billing or credit wall reached \u2014 the account cannot run turns until billing is resolved",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "marker outranks residual",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "RunTurnDeadline",
+  "Message": "the turn exceeded loom's per-turn deadline (the role's max_run_duration minus 120s) \u2014 raise the role's max_run_duration or split the task",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "logged-out screen for ScreenEvidence",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Claude Code\n\nNot logged in \u00b7 Run /login\n\n\u276f \n401 unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "claude.loggedout.run_login",
+    "banner_match": "Not logged in \u00b7 Run /login",
+    "composer_witnessed": true,
+    "dialog_witnessed": false
+   }
+  }
+ },
+ {
+  "Name": "trust dialog screen",
+  "Backend": "some-unknown-harness",
+  "ExitCode": 1,
+  "Class": "AuthFailure",
+  "Message": "authentication failed",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "residual_pattern",
+   "rule": "residual.auth",
+   "match": "401",
+   "excerpt": "Claude Code\n\nDo you trust the files in this folder?\n\n\u276f 1. Yes\n401 unauthorized",
+   "exit_code": 1,
+   "screen": {
+    "scanned": true,
+    "banner_rule": "codex.loggedout.401_unauthorized",
+    "banner_match": "401 unauthorized",
+    "composer_witnessed": true,
+    "dialog_witnessed": true
+   }
+  }
+ },
+ {
+  "Name": "exit-code fallback 1",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 1)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "exit-code fallback 1 w/ prose",
+  "Backend": "claude",
+  "ExitCode": 1,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 1)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default",
+   "exit_code": 1
+  }
+ },
+ {
+  "Name": "exit-code fallback 137",
+  "Backend": "claude",
+  "ExitCode": 137,
+  "Class": "Timeout",
+  "Message": "process killed by signal 9 (SIGKILL), exit code 137",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.137_sigkill",
+   "exit_code": 137
+  }
+ },
+ {
+  "Name": "exit-code fallback 137 w/ prose",
+  "Backend": "claude",
+  "ExitCode": 137,
+  "Class": "Timeout",
+  "Message": "process killed by signal 9 (SIGKILL), exit code 137",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.137_sigkill",
+   "exit_code": 137
+  }
+ },
+ {
+  "Name": "exit-code fallback 143",
+  "Backend": "claude",
+  "ExitCode": 143,
+  "Class": "Transient",
+  "Message": "process terminated by signal 15 (SIGTERM), exit code 143",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.143_sigterm",
+   "exit_code": 143
+  }
+ },
+ {
+  "Name": "exit-code fallback 143 w/ prose",
+  "Backend": "claude",
+  "ExitCode": 143,
+  "Class": "Transient",
+  "Message": "process terminated by signal 15 (SIGTERM), exit code 143",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.143_sigterm",
+   "exit_code": 143
+  }
+ },
+ {
+  "Name": "exit-code fallback 0",
+  "Backend": "claude",
+  "ExitCode": 0,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 0)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default"
+  }
+ },
+ {
+  "Name": "exit-code fallback 0 w/ prose",
+  "Backend": "claude",
+  "ExitCode": 0,
+  "Class": "Unknown",
+  "Message": "unclassified error (exit code 0)",
+  "RetryAfterMS": 0,
+  "Evidence": {
+   "source": "exit_code",
+   "rule": "exit.default"
+  }
+ }
+]
