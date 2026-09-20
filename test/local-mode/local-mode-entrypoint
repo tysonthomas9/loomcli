@@ -175,12 +175,25 @@ trust_codex_local_mode_paths() {
 }
 
 # allow_harness_prompts lets an agent answer the interactive prompts a TUI
-# harness raises before it will accept any input — the folder-trust dialog above
-# all. A role with no input_policy denies every prompt, and a denied trust
-# dialog is never dismissed: the harness sits on it, the composer never becomes
-# ready, and the run hangs at "Launching Claude agent (non-interactive)..."
-# until the watchdog kills it. The session then records zero assistant turns and
-# zero tokens, which reads as a silent no-op rather than a failure.
+# harness raises before it will accept any input. A role with no input_policy
+# denies every prompt, and the two claude-code screens then fail differently:
+#
+#   trust_prompt      the folder-trust dialog. Denied, it is never dismissed:
+#                     the harness sits on it, the composer never becomes ready,
+#                     and the run hangs at "Launching Claude agent
+#                     (non-interactive)..." until the watchdog kills it. The
+#                     session records zero assistant turns and zero tokens,
+#                     which reads as a silent no-op rather than a failure.
+#
+#   bypass_acceptance the --dangerously-skip-permissions acceptance screen,
+#                     which harness-wrapper v0.8.4 split into its own kind.
+#                     Denied, it is a HARD STOP rather than a stall: the screen
+#                     offers a real negative option, so loom answers "No, exit"
+#                     and claude exits at once. loom passes
+#                     --dangerously-skip-permissions on essentially every claude
+#                     run, so this screen is raised nearly always. Before v0.8.4
+#                     it arrived as trust_prompt and the grant below covered it;
+#                     it no longer does, and silence is a deny.
 #
 # Only TUI-driven backends need this. The deterministic localdogfood backend is
 # a shell script with no prompts, which is exactly why this stack looked healthy
@@ -193,9 +206,9 @@ allow_harness_prompts() {
   role=""
   for role in "$@"; do
     if ! loom role set "$role" input_policy \
-      "default=deny,trust_prompt=allow,approval_prompt=allow" >/dev/null 2>&1; then
+      "default=deny,trust_prompt=allow,approval_prompt=allow,bypass_acceptance=allow" >/dev/null 2>&1; then
       echo "[local-mode] FATAL: could not grant harness-prompt permissions to role ${role};" \
-        "a TUI backend would hang on the trust dialog" >&2
+        "a TUI backend would hang on the trust dialog, or exit on the bypass screen" >&2
       return 1
     fi
   done

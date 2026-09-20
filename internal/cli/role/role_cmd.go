@@ -5,6 +5,7 @@ package role
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -181,6 +182,9 @@ func runRoleAdd(_ *cobra.Command, args []string) error {
 			return fmt.Errorf("create role: %w", err)
 		}
 		fmt.Printf("Created role %s/%s\n", r.WorkspaceKey, r.Name)
+		if warning := inputPolicyBypassWarning(inputPolicy); warning != "" {
+			fmt.Fprintln(os.Stderr, warning)
+		}
 		return nil
 	})
 }
@@ -285,6 +289,13 @@ func runRoleSet(_ *cobra.Command, args []string) error {
 			return fmt.Errorf("update role: %w", err)
 		}
 		fmt.Printf("Set %s/%s.%s = %s\n", ws, name, key, value)
+		// After the write, not instead of it: the policy is valid and the
+		// operator asked for it. This only says what it will now cost.
+		if patch.InputPolicy != nil {
+			if warning := inputPolicyBypassWarning(*patch.InputPolicy); warning != "" {
+				fmt.Fprintln(os.Stderr, warning)
+			}
+		}
 		return nil
 	})
 }
@@ -532,6 +543,50 @@ func parseInputPolicySpec(entries []string) (*domain.RoleInputPolicy, error) {
 		return nil, err
 	}
 	return policy, nil
+}
+
+// Prompt kinds named here for one warning below. loom does no screen matching
+// of its own — a policy's keys are whatever the harness emits — but these two
+// are worth naming because their split is recent and silent.
+const (
+	inputPolicyTrustPromptKind      = "trust_prompt"
+	inputPolicyBypassAcceptanceKind = "bypass_acceptance"
+)
+
+// inputPolicyBypassWarning returns operator-facing advice when a policy allows
+// the folder-trust dialog but not the --dangerously-skip-permissions acceptance
+// screen, and "" when there is nothing to say.
+//
+// Those arrived as one kind until harness-wrapper v0.8.4 split the acceptance
+// screen out as `bypass_acceptance`. A policy written against the old shape
+// still parses and still validates, and now silently denies the screen loom
+// raises on essentially every claude run. Denying it is a HARD STOP rather than
+// a stall: the screen offers a real negative option, so loom answers "No, exit"
+// and claude exits. The role looks configured and the agent dies at launch.
+//
+// A warning and not an error, deliberately: the kinds are harness-defined, so
+// loom cannot know that a given deployment's harness raises this screen at all,
+// and refusing the write would make loom the authority on another program's
+// vocabulary. It resolves through DispositionFor, so `default=allow` already
+// covers the bypass screen and this says nothing.
+func inputPolicyBypassWarning(p *domain.RoleInputPolicy) string {
+	if p == nil {
+		return ""
+	}
+	if p.DispositionFor(inputPolicyTrustPromptKind) != domain.RoleInputAllow {
+		return ""
+	}
+	if p.DispositionFor(inputPolicyBypassAcceptanceKind) == domain.RoleInputAllow {
+		return ""
+	}
+	return fmt.Sprintf(
+		"warning: input_policy allows %q but not %q.\n"+
+			"  harness-wrapper v0.8.4 split the --dangerously-skip-permissions acceptance\n"+
+			"  screen into its own kind. loom raises it on nearly every claude run, and a\n"+
+			"  denied %s is answered \"No, exit\" — claude exits rather than stalls.\n"+
+			"  Add %s=allow unless this role never runs a TUI harness.",
+		inputPolicyTrustPromptKind, inputPolicyBypassAcceptanceKind,
+		inputPolicyBypassAcceptanceKind, inputPolicyBypassAcceptanceKind)
 }
 
 // buildAddInputPolicy merges `role add`'s two policy flags. The dedicated
