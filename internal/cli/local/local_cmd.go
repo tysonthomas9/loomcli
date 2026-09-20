@@ -594,10 +594,6 @@ func runStop(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func stopRuntimeProcess(pid int, timeout time.Duration) error {
-	return stopRuntimePIDs([]int{pid}, timeout)
-}
-
 func stopRuntimeProcesses(info *runtimeInfo, timeout time.Duration) error {
 	return stopRuntimePIDs(runtimePIDs(info), timeout)
 }

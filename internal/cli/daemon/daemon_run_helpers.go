@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"time"
@@ -66,15 +65,6 @@ func initOTelExporter(config *config.DaemonConfig, eventBus *events.Bus) *otelex
 	log.Printf("OTel exporter initialized: endpoint=%s traces=%v metrics=%v",
 		otelCfg.Endpoint, otelCfg.TracesEnabled(), otelCfg.MetricsEnabled())
 	return exp
-}
-
-// stopOTelExporter gracefully shuts down the OTel exporter with a timeout.
-func stopOTelExporter(exp *otelexport.Exporter) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := exp.Stop(ctx); err != nil {
-		log.Printf("warning: OTel shutdown error: %v", err)
-	}
 }
 
 // printDryRunInfo displays what would happen in dry-run mode.

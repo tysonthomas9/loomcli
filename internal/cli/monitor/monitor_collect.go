@@ -517,13 +517,6 @@ func processClosedIssues(issues []backend.IssueData, err error) []TaskInfo {
 	return tasks
 }
 
-// collectStoreSyncStatus reports the active issue store sync state. FleetDB no
-// longer shells out to a local issue tracker; remote sync health is represented
-// by the store/client calls used elsewhere in monitor collection.
-func collectStoreSyncStatus() SyncInfo {
-	return collectStoreSyncStatusDeps(cli.GetDeps(nil))
-}
-
 func collectStoreSyncStatusDeps(_ *cli.Deps) SyncInfo {
 	return SyncInfo{
 		DBSynced:   true,
@@ -550,18 +543,6 @@ func completeSyncStatus(info SyncInfo, agents []AgentStatus) SyncInfo {
 		}
 	}
 	return info
-}
-
-// collectSyncStatus is the original sequential version, kept for external callers.
-func collectSyncStatus(agents []AgentStatus) SyncInfo {
-	info := collectStoreSyncStatus()
-	return completeSyncStatus(info, agents)
-}
-
-func collectStatistics() MonitorStats {
-	d := *cli.GetDeps(nil)
-	d.IssueBackend = cli.DefaultIssueBackend()
-	return collectStatisticsDeps(&d)
 }
 
 func collectStatisticsDeps(deps *cli.Deps) MonitorStats {

@@ -145,23 +145,6 @@ func translateBackendError(err error) *ServiceError {
 	}
 }
 
-func (s *issueServiceImpl) acquireClient(ctx context.Context) (*rpc.Client, error) {
-	if s.pool == nil {
-		return nil, ErrUnavailable("connection pool not initialized")
-	}
-	client, err := s.pool.Get(ctx)
-	if err != nil {
-		if errors.Is(err, daemon.ErrDaemonStarting) {
-			return nil, ErrStarting("workspace is loading")
-		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, ErrTimeout("timeout connecting to issue backend")
-		}
-		return nil, ErrUnavailable("issue backend unavailable")
-	}
-	return client, nil
-}
-
 // releaseClient returns the connection to the pool when *ok is true, or
 // closes (Discards) it when *ok is false. Use the conditional defer pattern:
 //

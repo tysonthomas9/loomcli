@@ -14,10 +14,6 @@ var ConflictPromptGen func(sourceBranch, targetBranch string, conflicts []string
 // Set by agent package's init() to break import cycle.
 var ConflictPromptGenWithPush func(sourceBranch, targetBranch string, conflicts []string, pushRef string) string
 
-func resolveConflictsWithAgent(repoPath, sourceBranch, targetBranch string, conflicts []string) error {
-	return resolveConflictsWithAgentDeps(cli.GetDeps(nil), repoPath, sourceBranch, targetBranch, conflicts)
-}
-
 func resolveConflictsWithAgentDeps(deps *cli.Deps, repoPath, sourceBranch, targetBranch string, conflicts []string) error {
 	printConflictInfo(conflicts)
 	return invokeAgentForConflictsDeps(deps, repoPath, sourceBranch, targetBranch, conflicts)
@@ -35,10 +31,6 @@ func resolveLocalConflictsWithAgentDeps(deps *cli.Deps, repoPath, sourceBranch, 
 		}
 	}
 	return invokeAgentDeps(deps, repoPath, prompt, "")
-}
-
-func resolveConflictsDetached(repoPath, sourceBranch, targetBranch string, conflicts []string, pushRef string) error {
-	return resolveConflictsDetachedDeps(cli.GetDeps(nil), repoPath, sourceBranch, targetBranch, conflicts, pushRef)
 }
 
 func resolveConflictsDetachedDeps(deps *cli.Deps, repoPath, sourceBranch, targetBranch string, conflicts []string, pushRef string) error {

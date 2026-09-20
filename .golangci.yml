@@ -21,6 +21,7 @@ linters:
     - depguard
     - unconvert
     - unparam
+    - unused
 
   settings:
     gosec:
@@ -513,6 +514,55 @@ linters:
           - staticcheck
         text: "SA1019|SA1029|SA4000|SA4003|SA4006|SA5011|SA9003|S1021"
 
+      # === unused: pre-existing dead code, tracked for cleanup ===
+      # Enabling `unused` guards NEW code from day one; these 125 findings
+      # predate it. Same pattern as the funlen/cyclop entries above: the
+      # linter is on, the debt is named, and an exclusion is removed as the
+      # file is cleaned. 20 verifiably-dead production symbols were deleted
+      # in the same change; what is left needs a judgment call per symbol.
+      #
+      # Test files are excluded WHOLESALE and deliberately: test bridges,
+      # stubs, mocks and aliases exist to expose a surface across package
+      # boundaries, and a stub no current test calls is scaffolding rather
+      # than a defect.
+      - path: "_test\\.go"
+        linters: [unused]
+      # readyInterceptor and its four http.ResponseWriter methods: a
+      # response-capturing scaffold. Removing it is a cluster, not a symbol.
+      - path: "internal/webui/handlers/issues/ready\\.go"
+        linters: [unused]
+      # commit-graph helpers left by the graph endpoint rework
+      - path: "internal/webui/handlers/git/graph\\.go"
+        linters: [unused]
+      # response helpers kept for the handlers still being split out
+      - path: "internal/webui/respond\\.go"
+        linters: [unused]
+      # log helpers kept alongside webui/log's own
+      - path: "internal/webui/log\\.go"
+        linters: [unused]
+      # agentTerminalMode* consts name wire values the Go side does not read
+      - path: "internal/webui/handlers/terminal/agent\\.go"
+        linters: [unused]
+      - path: "internal/webui/handlers\\.go"
+        linters: [unused]
+      # recordErr — a tracing helper left by the OTLP revert (2026-09-12)
+      - path: "internal/notify/tracing\\.go"
+        linters: [unused]
+      # same OTLP revert
+      - path: "internal/cli/serve/metricscmd/(tracing|handlers)\\.go"
+        linters: [unused]
+      - path: "internal/cli/monitor/monitor_git\\.go"
+        linters: [unused]
+      - path: "internal/cli/local/runtime\\.go"
+        linters: [unused]
+      - path: "internal/cli/daemon_runtime\\.go"
+        linters: [unused]
+      - path: "internal/cli/config/project\\.go"
+        linters: [unused]
+      - path: "internal/cli/agent_event_bus\\.go"
+        linters: [unused]
+      - path: "internal/backend/api/backend\\.go"
+        linters: [unused]
       # === New linter exclusions ===
 
       # gocritic: exitAfterDefer in CLI exit paths - process terminates intentionally

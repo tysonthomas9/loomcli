@@ -62,12 +62,6 @@ func GetWorktreeGitSyncStatusDeps(deps *cli.Deps, path, defaultBranch string, ov
 	return ahead, behind
 }
 
-// getGitHubRemoteURL returns the GitHub HTTPS URL for the origin remote.
-// Returns empty string if not a GitHub remote or on error.
-func getGitHubRemoteURL(path string) string {
-	return getGitHubRemoteURLDeps(cli.GetDeps(nil), path)
-}
-
 func getGitHubRemoteURLDeps(deps *cli.Deps, path string) string {
 	output, err := runMonitorGit(deps, path, "remote", "get-url", "origin")
 	if err != nil {
@@ -164,11 +158,6 @@ func getWorktreeStatus(deps *cli.Deps, path string) (clean bool, uncommittedCoun
 		changes = append(changes, FileChange{Status: status, Path: filePath})
 	}
 	return false, len(lines), changes
-}
-
-// getWorktreeFileChanges returns uncommitted file changes from git status.
-func getWorktreeFileChanges(path string) []FileChange {
-	return getWorktreeFileChangesDeps(cli.GetDeps(nil), path)
 }
 
 func getWorktreeFileChangesDeps(deps *cli.Deps, path string) []FileChange {
