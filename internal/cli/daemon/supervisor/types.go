@@ -57,8 +57,8 @@ type AgentProcess struct {
 
 	LastError      *agenterr.AgentError // classified error from most recent exit (nil on clean exit)
 	RateRetryCount int                  // consecutive rate-limit retries (separate from RestartCount)
-	LastNoWork     bool                 // true if last exit was due to no claimable tasks
-	NoWorkCount    int                  // consecutive NoWork exits (reset on non-NoWork exit)
+	LastNoWork     bool                 // true if last exit was an idle non-fault: no claimable tasks OR all candidates locked by siblings
+	NoWorkCount    int                  // consecutive idle exits: no work OR lock contention (reset on non-idle exit)
 	BlockCount     int                  // block cycles since the last successful run (drives BlockBudget escalation; display-only in the state file, never hydrated across daemon restarts)
 
 	CurrentBackendIdx int       // 0=primary, 1+=fallback index into Entry.FallbackBackends
@@ -155,7 +155,7 @@ type SupervisedAgentStatus struct {
 	CurrentBackend         string     // effective backend (includes failover state)
 	StopReason             StopReason // why the agent stopped (empty while running)
 	LastErrorClass         string     // string representation of last error class (e.g. "RateLimited")
-	NoWorkCount            int        // consecutive NoWork exits
+	NoWorkCount            int        // consecutive idle exits: no work OR lock contention
 	BlockCount             int        // block cycles since the last successful run
 	BackoffUntil           time.Time  // when backoff sleep ends (zero if not in backoff)
 	RemoteBranch           string     // remote tracking ref (e.g. "origin/main")

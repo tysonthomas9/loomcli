@@ -203,6 +203,10 @@ func (s *Supervisor) tryClaimBestTask(ap *AgentProcess, issues []backend.IssueDa
 				conflicts++
 				lastConflictID = match.Issue.ID
 				lastConflictHolder = conflictHolder(err)
+				// The cap bounds the work done inside a SINGLE claim cycle.
+				// Reaching it is reported as LockConflict for operator
+				// visibility, not as an agent fault: the policy retries it
+				// uncounted on the no-work poll (see agentpolicy.decideDomain).
 				if conflicts >= claimConflictRetryLimit {
 					msg := fmt.Sprintf("no claimable tasks after %d conflicts (last: %s locked by %s)",
 						conflicts, lastConflictID, lastConflictHolder)
@@ -300,7 +304,9 @@ func (s *Supervisor) setPreflightError(ap *AgentProcess, class agenterr.Outcome,
 	ap.LastExitCode = 0
 	ap.LastExit = time.Now()
 	ap.LastError = &agenterr.AgentError{Class: class, Message: message}
-	ap.LastNoWork = class.Is(agenterr.NoWorkOutcome)
+	// "the last exit was an idle non-fault": true of an empty board AND of a
+	// board whose candidates are all locked by live siblings.
+	ap.LastNoWork = class.Is(agenterr.NoWorkOutcome) || class.Is(agenterr.LockConflictOutcome)
 	ap.Mu.Unlock()
 }
 

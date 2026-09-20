@@ -18,7 +18,7 @@ type Decision int
 
 const (
 	Retry          Decision = iota // restart; counts toward the layer's retry budget
-	RetryUncounted                 // restart; does NOT erode the budget (rate-limit, no-work)
+	RetryUncounted                 // restart; does NOT erode the budget (rate-limit, no-work, lock contention)
 	Block                          // budget exhausted: fixed-interval re-attempt instead of giving up
 	Failover                       // try the next configured backend
 	FastFail                       // deterministic failure: stop now, surface as failed
@@ -148,7 +148,20 @@ func decideDomain(d agenterr.DomainOutcome) Disposition {
 	case agenterr.BackendUnavailableOutcome:
 		return Disposition{Decision: Block, Backoff: BPBackendUnavailable}
 	case agenterr.LockConflictOutcome:
-		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
+		// Losing a claim race to a live sibling is the EXPECTED steady state
+		// whenever a role has more agents than ready work. It says nothing
+		// about the health of the agent that lost, so it must not erode
+		// max_retries — a counted retry here makes surplus capacity destroy
+		// itself (agents fast-fail and stay dead until a daemon restart).
+		// Uncounted, on the fixed no-work poll: from the agent's point of view
+		// "every candidate is taken" and "there are no candidates" are the same
+		// idle condition. The CLASS stays LockConflict so an operator reading
+		// status can still tell a contended board from an empty one.
+		// Unbounded polling is safe because the lock always clears:
+		// releaseAssignedTaskClaim drops it when the holder exits, and the
+		// fleet-db claim lock has a server-side TTL for a holder that died
+		// without releasing.
+		return Disposition{Decision: RetryUncounted, Backoff: BPNoWork}
 	case agenterr.SpawnFailureOutcome:
 		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
 	case agenterr.CompletionHookFailureOutcome:

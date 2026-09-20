@@ -223,6 +223,11 @@ func TestClaimTask_CapsConflictRetries(t *testing.T) {
 	if ap.LastError == nil || ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome) {
 		t.Fatalf("LastError = %#v, want LockConflict after conflict retry cap", ap.LastError)
 	}
+	// The class stays LockConflict for operator visibility, but the exit is an
+	// idle non-fault: every candidate is held by a live sibling.
+	if !ap.LastNoWork {
+		t.Fatal("LastNoWork = false, want true (lock contention is an idle exit)")
+	}
 }
 
 func TestClaimTask_NoMatchSetsNoWork(t *testing.T) {
