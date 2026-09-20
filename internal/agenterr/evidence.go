@@ -6,6 +6,9 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/olesho/harness-wrapper/pkg/chat"
+	"github.com/olesho/harness-wrapper/pkg/turns/harness/claudecode"
 )
 
 // EvidenceSource names WHICH classification step produced the verdict.
@@ -171,59 +174,37 @@ func excerptWindow(text string, lo, hi int) string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mirrored screen anchors.
+// Screen anchors come from harness-wrapper.
 //
-// These are COPIES of unexported regexes in harness-wrapper@v0.7.7
-// `pkg/chat/ready.go` (claudeOnboardingRE :225, codexOnboardingRE :229,
-// claudeLoggedOutRE :235, codexLoggedOutRE :240) and of the folder-trust /
-// bypass anchors in `pkg/turns/harness/claudecode/claudecode.go` :88-93. They
-// are mirrored rather than imported because the upstream identifiers are not
-// exported.
+// They used to be COPIES of unexported regexes in harness-wrapper@v0.7.7,
+// mirrored because the upstream identifiers were not exported, with a note
+// telling whoever bumped the wrapper to update them by hand. Nobody did: by
+// v0.10 this file held 4 of the 6 onboarding anchors — missing BOTH of
+// claude-code's OAuth sign-in walls — and its copies matched anywhere on screen
+// where the wrapper's are line-anchored, which is the same over-match shape as
+// PUPPET-431.
+//
+// harness-wrapper exports them now, ids and all. Claude Code and Codex change
+// fast; absorbing that is the wrapper's job, and a screen regex maintained here
+// is loom tracking a harness by hand.
 //
 // THEY DESCRIBE AND NEVER GATE. Nothing here changes a class, a disposition or
 // a restart decision; the ids only annotate a verdict that was already reached.
 //
 // Each `id` is a STABLE CONTRACT: docs/adr/0002-authfailure-stays-terminal.md
-// names them in its revisit triggers, so renaming one silently breaks the
-// trigger it belongs to. A wrapper bump that changes an upstream regex lands
-// here: update the pattern, keep the id, and bump the version named above.
-// evidence_test.go's mirror-drift pin is the guard.
+// names them in its revisit triggers. They are the wrapper's contract now, with
+// its own test spelling them out.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type screenAnchor struct {
-	id string
-	re *regexp.Regexp
-}
+// authAnchors are every harness's onboarding-then-logged-out anchors: this
+// describes a screen without knowing which harness drew it, and the wrapper
+// returns them in authRequired's own precedence, so the recorded id names the
+// arm the wrapper itself would have taken.
+func authAnchors() []chat.ScreenAnchor { return chat.AuthAnchors("") }
 
-// onboardingAnchors are evaluated BEFORE loggedOutAnchors, mirroring
-// chat.authRequired's `onboardingWall || loggedOut` precedence, so the recorded
-// id names the arm the wrapper itself would have taken.
-var onboardingAnchors = []screenAnchor{
-	{"claude.onboarding.theme_picker", regexp.MustCompile(`(?i)choose the text style`)},
-	{"claude.onboarding.select_login_method", regexp.MustCompile(`(?i)select login method`)},
-	{"codex.onboarding.sign_in_with_chatgpt", regexp.MustCompile(`(?i)sign in with chatgpt`)},
-	{"codex.onboarding.browser_signin", regexp.MustCompile(`(?i)finish signing in via your browser`)},
-}
-
-var loggedOutAnchors = []screenAnchor{
-	{"claude.loggedout.run_login", regexp.MustCompile(`(?i)\brun /login\b`)},
-	{"claude.loggedout.not_logged_in", regexp.MustCompile(`(?i)\bnot logged in\b`)},
-	{"claude.loggedout.invalid_api_key", regexp.MustCompile(`(?i)\binvalid api key\b`)},
-	{"codex.loggedout.401_unauthorized", regexp.MustCompile(`(?i)\b401 unauthorized\b`)},
-	{"codex.loggedout.missing_bearer", regexp.MustCompile(`(?i)missing bearer or basic authentication`)},
-	{"codex.loggedout.not_logged_in", regexp.MustCompile(`(?i)\bnot logged in\b`)},
-	{"codex.loggedout.codex_login", regexp.MustCompile(`(?i)\bcodex(?: mcp)? login\b`)},
-}
-
-// dialogAnchors mirror the blocking arms of claudecode.DetectInput — the
-// folder-trust dialog (two phrasings) and the bypass-acceptance screen. Both
-// paint the "Claude Code" header and a "❯" selector, so a verdict taken over
-// one of these screens is about a DIALOG, not a login.
-var dialogAnchors = []string{
-	"Do you trust the files in this folder?",
-	"Is this a project you created or one you trust?",
-	"Bypass Permissions mode",
-}
+// dialogAnchors are the blocking-dialog lines: a verdict taken over one of
+// these screens is about a DIALOG, not a login.
+func dialogAnchors() []string { return claudecode.DialogAnchors() }
 
 // describeScreen fills ScreenEvidence for auth-class verdicts only.
 //
@@ -237,19 +218,14 @@ func describeScreen(text string) *ScreenEvidence {
 	clean := sanitizeText(text)
 	ev := &ScreenEvidence{Scanned: true}
 
-	for _, group := range [][]screenAnchor{onboardingAnchors, loggedOutAnchors} {
-		for _, a := range group {
-			loc := a.re.FindStringIndex(clean)
-			if loc == nil {
-				continue
-			}
-			ev.BannerRule = a.id
-			ev.BannerMatch = capString(redactEvidence(lineAround(clean, loc[0])), evidenceMatchCap)
-			break
+	for _, a := range authAnchors() {
+		loc := a.RE.FindStringIndex(clean)
+		if loc == nil {
+			continue
 		}
-		if ev.BannerRule != "" {
-			break
-		}
+		ev.BannerRule = a.ID
+		ev.BannerMatch = capString(redactEvidence(lineAround(clean, loc[0])), evidenceMatchCap)
+		break
 	}
 
 	// Composer anchors mirror chat.readyForInput (ready.go:148-190): claude's
@@ -259,7 +235,7 @@ func describeScreen(text string) *ScreenEvidence {
 	composer := (strings.Contains(clean, "Claude Code") && strings.Contains(clean, "❯")) ||
 		strings.Contains(clean, "›")
 	dialog := false
-	for _, a := range dialogAnchors {
+	for _, a := range dialogAnchors() {
 		if strings.Contains(clean, a) {
 			dialog = true
 			break

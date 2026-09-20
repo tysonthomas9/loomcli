@@ -32,13 +32,24 @@ const (
 	differentialGolden = "testdata/differential_union_fe4b608ec.golden.json"
 )
 
-// declaredDeviations names the corpus rows whose verdict this change moves ON
+// declaredDeviations names the corpus rows whose verdict a change moves ON
 // PURPOSE, keyed by row name. Everything else must match the baseline exactly.
 //
 // Keep this list short and each entry argued. A deviation that cannot be
 // explained in a sentence is a regression wearing a note.
-var declaredDeviations = map[string]string{
-	"marker billing wall": "" +
+//
+// becomes is the class the row must now produce, or "" when the deviation is
+// evidence-only and the VERDICT must not have moved at all. The distinction is
+// the point: most intended changes should leave the class alone, and one that
+// does move it has to say so out loud and pin where it moved TO — so a second,
+// unintended drift on the same row still fails.
+type deviation struct {
+	why     string
+	becomes string
+}
+
+var declaredDeviations = map[string]deviation{
+	"marker billing wall": {becomes: "", why: "" +
 		"The billing arm gains an Evidence record (source=harness_marker, " +
 		"rule=BillingWallMarker). It shipped without one because it shipped " +
 		"without an EMITTER: nothing could raise the marker, so no production " +
@@ -46,17 +57,43 @@ var declaredDeviations = map[string]string{
 		"harness-wrapper names a billing wall now, so the arm is reachable — " +
 		"and it is FATAL, which by ADR-0002 is exactly the disposition that has " +
 		"to be judgeable from one occurrence. Nothing can regress: there is no " +
-		"prior behavior here to preserve.",
+		"prior behavior here to preserve."},
+
+	"residual.billing": {becomes: "Unknown", why: "" +
+		"`your billing needs attention` is not a billing wall. The row matched " +
+		"a bare `billing`, so an agent editing billing code — or a filename " +
+		"like docs/billing.md — classified ErrBilling, which is FATAL and arms " +
+		"an account-wide cooldown. The bare word rows are gone from " +
+		"harness-wrapper; a real wall is named by the harness's own transcript " +
+		"tag now, so the row no longer has to guess at one. Unknown is the safe " +
+		"direction: a bounded restart, not a fatal stop."},
+
+	"residual.auth env var name": {becomes: "Unknown", why: "" +
+		"`reading ANTHROPIC_API_KEY from the environment` is an agent naming a " +
+		"variable, not a credential failure. The row listed the five *_API_KEY " +
+		"names as literals, so printing one fatally stopped the agent. That is " +
+		"ADR-0002's third revisit trigger by construction — an AuthFailure from " +
+		"residual.auth whose Match is ordinary task output — and the ADR's own " +
+		"named remedy is to narrow the pattern, not the disposition. The name " +
+		"still classifies when a failure word keeps it company on the same " +
+		"line (`OPENAI_API_KEY is not set`), which is the case that mattered."},
 }
 
-// deviationMustBeEvidenceOnly bounds what a declared deviation is allowed to
-// change. A note may not quietly cover a moved CLASS — that is the verdict
-// itself, and no amount of explanation makes it a parity result.
-func deviationMustBeEvidenceOnly(t *testing.T, name string, got, want differentialRow) {
+// checkDeclaredDeviation enforces what a declared deviation may change. An
+// evidence-only entry must not move the verdict; a verdict entry must land on
+// exactly the class it declared.
+func checkDeclaredDeviation(t *testing.T, name string, d deviation, got, want differentialRow) {
 	t.Helper()
-	if got.Class != want.Class || got.Message != want.Message || got.RetryAfterMS != want.RetryAfterMS {
-		t.Errorf("declared deviation %q moved the VERDICT, not just its evidence:\n got  class=%q msg=%q retry=%d\n want class=%q msg=%q retry=%d",
-			name, got.Class, got.Message, got.RetryAfterMS, want.Class, want.Message, want.RetryAfterMS)
+	if d.becomes == "" {
+		if got.Class != want.Class || got.Message != want.Message || got.RetryAfterMS != want.RetryAfterMS {
+			t.Errorf("declared deviation %q is evidence-only but moved the VERDICT:\n got  class=%q msg=%q retry=%d\n want class=%q msg=%q retry=%d",
+				name, got.Class, got.Message, got.RetryAfterMS, want.Class, want.Message, want.RetryAfterMS)
+		}
+		return
+	}
+	if got.Class != d.becomes {
+		t.Errorf("declared deviation %q: class = %q, declared to become %q (baseline was %q)",
+			name, got.Class, d.becomes, want.Class)
 	}
 }
 
@@ -116,8 +153,8 @@ func TestDifferentialParityAgainstUnionBaseline(t *testing.T) {
 		if equalJSON(t, got, w) {
 			continue
 		}
-		if _, declared := declaredDeviations[in.Name]; declared {
-			deviationMustBeEvidenceOnly(t, in.Name, got, w)
+		if d, declared := declaredDeviations[in.Name]; declared {
+			checkDeclaredDeviation(t, in.Name, d, got, w)
 			continue
 		}
 		t.Errorf("verdict moved for %q (backend=%q, exit=%d):\n--- before the move ---\n%s\n--- after ---\n%s",

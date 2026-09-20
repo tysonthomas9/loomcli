@@ -365,16 +365,26 @@ func TestDescribeScreenEmptyIsAFinding(t *testing.T) {
 	}
 }
 
-// TestMirrorDriftPin guards the mirrored anchors against a silent
-// harness-wrapper bump. See the header comment in evidence.go.
-func TestMirrorDriftPin(t *testing.T) {
-	const upstream = "harness-wrapper@v0.7.7 pkg/chat/ready.go (claudeOnboardingRE :225, " +
-		"codexOnboardingRE :229, claudeLoggedOutRE :235, codexLoggedOutRE :240) and " +
-		"pkg/turns/harness/claudecode/claudecode.go :88-93"
-
+// TestAnchorFixturesCoverTheWrapper checks that every screen anchor
+// harness-wrapper exports is one this package can actually recognize, with a
+// fixture proving it.
+//
+// It replaces a "mirror drift pin" that could not do its job. That test walked
+// loom's OWN copies of the anchors and asserted each had a fixture — so it was
+// blind to the failure that actually happened: the wrapper GREW two anchors
+// (claude-code's OAuth sign-in walls, PUPPET-315) and the mirror simply did not
+// have them. Mirror ids and mirror fixtures both numbered 11, the count check
+// passed, and loom recorded "no banner seen" on a real sign-in wall for three
+// releases.
+//
+// Walking the wrapper's set instead makes an addition upstream a failure here,
+// which is the only direction that was ever unguarded.
+func TestAnchorFixturesCoverTheWrapper(t *testing.T) {
 	fixtures := map[string]string{
 		"claude.onboarding.theme_picker":        "Let's get started.\n  Choose the text style that looks best\n",
 		"claude.onboarding.select_login_method": "Select login method\n  1. Claude account with subscription\n",
+		"claude.onboarding.oauth_browser_open":  "  Browser didn't open? Use the url below to sign in\n",
+		"claude.onboarding.oauth_paste_code":    "  Paste code here if prompted > \n",
 		"claude.loggedout.run_login":            "Please run /login to continue\n",
 		"claude.loggedout.not_logged_in":        "You are not logged in\n",
 		"claude.loggedout.invalid_api_key":      "Invalid API key · Fix external API key\n",
@@ -386,31 +396,31 @@ func TestMirrorDriftPin(t *testing.T) {
 		"codex.loggedout.codex_login":           "run codex login to authenticate\n",
 	}
 
-	var ids []string
-	for _, group := range [][]screenAnchor{onboardingAnchors, loggedOutAnchors} {
-		for _, a := range group {
-			ids = append(ids, a.id)
-			fixture, ok := fixtures[a.id]
-			if !ok {
-				t.Errorf("anchor %q has no fixture: the mirrored anchor set drifted from %s — "+
-					"add the fixture here, or remove the anchor if upstream removed it", a.id, upstream)
-				continue
-			}
-			if !a.re.MatchString(fixture) {
-				t.Errorf("anchor %q no longer matches its fixture: it drifted from %s — "+
-					"update the pattern and KEEP the id (docs/adr/0002-authfailure-stays-terminal.md "+
-					"names it in a revisit trigger)", a.id, upstream)
-			}
+	seen := map[string]bool{}
+	for _, a := range authAnchors() {
+		seen[a.ID] = true
+		fixture, ok := fixtures[a.ID]
+		if !ok {
+			t.Errorf("harness-wrapper exports anchor %q and this package has no fixture for it — "+
+				"a new banner shipped upstream; add a fixture so the recorded evidence covers it", a.ID)
+			continue
+		}
+		if !a.RE.MatchString(fixture) {
+			t.Errorf("anchor %q no longer matches its fixture: the upstream pattern changed — "+
+				"update the FIXTURE, never the id (docs/adr/0002-authfailure-stays-terminal.md "+
+				"names it in a revisit trigger)", a.ID)
 		}
 	}
-	if len(ids) != len(fixtures) {
-		t.Errorf("anchor id set = %v (%d ids) but %d fixtures are documented; the mirror drifted from %s",
-			ids, len(ids), len(fixtures), upstream)
+	for id := range fixtures {
+		if !seen[id] {
+			t.Errorf("fixture %q names an anchor harness-wrapper no longer exports; if it was "+
+				"renamed, ADR-0002's revisit trigger needs updating with it", id)
+		}
 	}
 
-	for _, a := range dialogAnchors {
+	for _, a := range dialogAnchors() {
 		if got := describeScreen("Claude Code\n " + a + "\n❯ "); !eqBoolp(got.DialogWitnessed, boolp(true)) {
-			t.Errorf("dialog anchor %q no longer detected; it mirrors claudecode.DetectInput in %s", a, upstream)
+			t.Errorf("dialog anchor %q no longer detected", a)
 		}
 	}
 }
