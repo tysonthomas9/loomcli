@@ -3,6 +3,7 @@ package supervisor
 import (
 	"log"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
@@ -423,4 +424,41 @@ func (s *Supervisor) taskIDForLifecycle(ap *AgentProcess, lockInfo *cli.LockInfo
 	ap.Mu.Lock()
 	defer ap.Mu.Unlock()
 	return ap.AssignedTaskID
+}
+
+// sweepDeadlineOrphans is the seam the deadline backstop is tested through: a
+// unit test swaps it for a recorder rather than spawning real processes, since
+// the sweep it stands for signals pgroups.
+var sweepDeadlineOrphans = func(s *Supervisor, worktreePath, taskID string) int {
+	return s.sweepOrphanedBackendsForWorktree(worktreePath, taskID)
+}
+
+// sweepOrphansAfterDeadlineExit is the backstop for the group kill in
+// harness-wrapper: when a turn is ended by loom's own per-turn deadline, the
+// wrapper terminates the harness's process group, which reaps every descendant
+// that stayed in it. A descendant that called setsid() left that group and
+// survives — that is what this catches, scoped to the agent's own worktree so
+// the daemon never signals anything that is not ours.
+//
+// It is called from spawnAndWait on the same seam as recordTaskExitForQuarantine
+// and for the same reason: the lock is still present there, so the sweep's Warn
+// line can name the task the escaped process belongs to.
+//
+// It runs only for RunTurnDeadline exits: orphans are created when a turn is
+// cut short, and every other outcome ends its own children normally. Wholly
+// best-effort — an empty worktree path skips the sweep instead of sweeping
+// everything, and signal errors are swallowed downstream — so it can never
+// change the run's classification.
+func (s *Supervisor) sweepOrphansAfterDeadlineExit(ap *AgentProcess) int {
+	ap.Mu.Lock()
+	lastErr := ap.LastError
+	ap.Mu.Unlock()
+	if lastErr == nil || !lastErr.Class.Is(agenterr.RunTurnDeadlineOutcome) {
+		return 0
+	}
+	if strings.TrimSpace(ap.WorktreePath) == "" {
+		return 0
+	}
+	lockInfo, _, _ := cli.CheckLock(ap.WorktreePath)
+	return sweepDeadlineOrphans(s, ap.WorktreePath, s.taskIDForLifecycle(ap, lockInfo))
 }
