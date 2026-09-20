@@ -8,7 +8,14 @@
 # such seam. internal/cli grew one import for the same line of
 # work. Ratchet these back down (or remove the entries) when coupling is paid
 # down; do not raise them without recording why here.
-internal/cli/daemon/supervisor 22
+#
+# 22 -> 23 (PUPPET-624): the dispatch-time content gate. internal/taskcontent
+# is a leaf package holding one invariant — a task with no description, no
+# acceptance criteria and no design is never handed to a worker role — and the
+# supervisor's claim path is the single point every arrival path converges on,
+# so that is where it has to be named. One more seam of the same kind as the
+# ones above, not new coupling to an existing hub.
+internal/cli/daemon/supervisor 23
 internal/cli 19
 # The skills webui module adds the skills handler package to the app's module
 # wiring and the domain skill path policy to svcimpl's file index.
