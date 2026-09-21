@@ -30,6 +30,27 @@ var capturedEnvPrefixes = []string{"LOOM_", "OTEL_"}
 // secretEnvKeyPattern matches keys whose values must never be written out.
 var secretEnvKeyPattern = regexp.MustCompile(`(?i)(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)`)
 
+// secretEnvValuePatterns match VALUES that carry a credential even though the
+// key name does not admit it. Naming alone is not enough, and the two cases
+// below are not hypothetical — both are in this fleet's daemon environment:
+//
+//	LOOM_FLEETDB_REDIS_URL=redis://:hunter2@host:6379
+//	OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer abc123
+//
+// Neither key matches KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL, so both were
+// written verbatim into daemon-env.json and logged one line per key.
+var secretEnvValuePatterns = []*regexp.Regexp{
+	// URL userinfo carrying a password: scheme://[user]:pass@host. Requires a
+	// non-empty password, so a bare user@host (no credential) stays readable.
+	regexp.MustCompile(`://[^/@\s]*:[^/@\s]+@`),
+	// An auth-bearing header blob, as OTLP and friends spell it.
+	regexp.MustCompile(`(?i)\b(authorization|proxy-authorization)\b\s*[:=]`),
+	regexp.MustCompile(`(?i)\b(bearer|basic)\s+\S`),
+	// A secret-looking assignment nested inside a compound value, which is how
+	// header and DSN blobs smuggle one past a key-name check.
+	regexp.MustCompile(`(?i)\b\w*(api[-_]?key|token|secret|password|credential)\w*\s*=\s*\S`),
+}
+
 // DaemonEnvSnapshot is the daemon's own statement of the configuration it
 // resolved at startup. Written by the daemon, read by `loom doctor`.
 type DaemonEnvSnapshot struct {
@@ -65,10 +86,31 @@ func (s *DaemonEnvSnapshot) Plain(key string) string {
 	return v.Value
 }
 
-// IsSecretEnvKey reports whether a key's value must be fingerprinted instead of
-// recorded.
+// IsSecretEnvKey reports whether a key NAME marks its value as secret.
+//
+// Prefer MustRedactEnv: a key-name check alone misses a credential carried in
+// an innocuously named variable, which is the leak this package had.
 func IsSecretEnvKey(key string) bool {
 	return secretEnvKeyPattern.MatchString(key)
+}
+
+// IsSecretEnvValue reports whether a VALUE looks like it carries a credential
+// regardless of its key's name.
+func IsSecretEnvValue(value string) bool {
+	for _, re := range secretEnvValuePatterns {
+		if re.MatchString(value) {
+			return true
+		}
+	}
+	return false
+}
+
+// MustRedactEnv is the decision every writer uses: redact when either the key
+// name or the value says so. It errs toward redacting — a fingerprint still
+// detects drift, which is all this snapshot needs a value for, so a false
+// positive costs readability and a false negative costs a credential.
+func MustRedactEnv(key, value string) bool {
+	return IsSecretEnvKey(key) || IsSecretEnvValue(value)
 }
 
 // FingerprintEnvValue returns the first 8 hex characters of sha256(value). It is
@@ -101,7 +143,7 @@ func CaptureDaemonEnvSnapshot(environ []string, workspace string) DaemonEnvSnaps
 		if !ok || !IsCapturedEnvKey(key) {
 			continue
 		}
-		if IsSecretEnvKey(key) {
+		if MustRedactEnv(key, value) {
 			env[key] = EnvValue{Redacted: true, Fingerprint: FingerprintEnvValue(value)}
 			continue
 		}
