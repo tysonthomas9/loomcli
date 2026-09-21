@@ -102,11 +102,23 @@ func handleAutoTaskError(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error
 		return true
 	}
 
+	// A lock conflict is another uncounted outcome, and it is NOT a rate
+	// limit: routing it to handleRateLimitError would drive the rate-limit
+	// breaker and the maxConsecutiveRateLimits process exit off a claim race.
+	// Treat it like the idle case — re-poll and either claim something else or
+	// exit via the NoWork path above.
+	if ae.Class.Is(agenterr.LockConflictOutcome) {
+		fmt.Println("[auto] Task locked by another agent, retrying")
+		tryClearTaskID(ctx)
+		return true
+	}
+
 	// Rate limits are global API throttling, not per-task failures
-	// (RetryUncounted; NoWork — the only other uncounted outcome — exited
-	// above). Route them before per-task tracking so a sustained rate limit
-	// against a single task doesn't drain its stuck-task budget — and so the
-	// rate-limit breaker and ConsecutiveRateLimits counter record every hit.
+	// (RetryUncounted; the other uncounted outcomes — NoWork and LockConflict
+	// — are handled above). Route them before per-task tracking so a sustained
+	// rate limit against a single task doesn't drain its stuck-task budget —
+	// and so the rate-limit breaker and ConsecutiveRateLimits counter record
+	// every hit.
 	if d.Decision == agentpolicy.RetryUncounted {
 		return handleRateLimitError(ctx, ae, shutdown)
 	}
