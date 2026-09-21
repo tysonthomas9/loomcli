@@ -12,8 +12,8 @@ import (
 //
 // These exercise the loom→fleet-db field mapping. fleet-db's
 // UpdateIssueRequest schema is intentionally narrower than loom's
-// UpdateParams: status / claim / labels / agent_state / assignee /
-// estimated_minutes have dedicated endpoints
+// UpdateParams: status / claim / labels / agent_state / assignee have
+// dedicated endpoints
 // (close, reopen, claim, label.add, etc.) and aren't accepted on PATCH.
 // fleet-db enforces this with disallowUnknownFields, so loom must drop
 // those keys here rather than silently shipping them.
@@ -54,9 +54,10 @@ func TestUpdateParamsToPatchRequest_RenamesIssueTypeToType(t *testing.T) {
 //
 // Nothing links the two repos at build time, so this list is hand-maintained,
 // and it mirrors the fleet-db this build actually talks to — not necessarily
-// fleet-db's own trunk. acceptance_criteria below is the live example: it is
-// accepted by the deployed union build (fleet-db PR #244) and rejected by a
-// fleet-db built from main until that PR lands.
+// fleet-db's own trunk. acceptance_criteria and estimated_minutes below are
+// the live examples: they are accepted by the deployed union build (fleet-db
+// PR #244 and PR #303 respectively) and rejected by a fleet-db built from main
+// until those PRs land.
 // Adding a key here that fleet-db does not have is the design_format bug
 // again: disallowUnknownFields rejects the *whole* body, so the PATCH 400s
 // and every field traveling with the unknown one is lost with it — the
@@ -73,6 +74,7 @@ var fleetUpdateIssueFields = map[string]bool{
 	"design":              true,
 	"design_format":       true,
 	"acceptance_criteria": true,
+	"estimated_minutes":   true,
 	"notes":               true,
 	"owner":               true,
 	"due_at":              true,
@@ -125,6 +127,9 @@ func TestUpdateParamsToPatchRequest_ForwardsEachSupportedField(t *testing.T) {
 		{"acceptance_criteria", backend.UpdateParams{
 			AcceptanceCriteria: strPtr("AC-1"),
 		}, "AC-1"},
+		{"estimated_minutes", backend.UpdateParams{
+			EstimatedMinutes: intPtr(45),
+		}, 45},
 	}
 
 	unset := updateParamsToPatchRequest(backend.UpdateParams{})
@@ -246,18 +251,15 @@ func TestCreateParamsToBody_RenamesFields(t *testing.T) {
 }
 
 func TestCreateParamsToBody_DropsLoomOnlyFields(t *testing.T) {
-	estim := 30
 	req := createParamsToBody(backend.CreateParams{
-		Title:              "T",
-		IssueType:          "task",
-		ID:                 "explicit-id",
-		AcceptanceCriteria: "AC",
-		CreatedBy:          "bob",
-		EstimatedMinutes:   &estim,
-		Dependencies:       []string{"loom-2"},
+		Title:        "T",
+		IssueType:    "task",
+		ID:           "explicit-id",
+		CreatedBy:    "bob",
+		Dependencies: []string{"loom-2"},
 	})
 	for _, k := range []string{
-		"id", "created_by", "estimated_minutes", "dependencies",
+		"id", "created_by", "dependencies",
 	} {
 		if _, ok := req[k]; ok {
 			t.Errorf("field %q must be dropped — not on fleet-db CreateIssueRequest", k)
@@ -288,6 +290,44 @@ func TestCreateParamsToBody_KeepsAcceptanceCriteria(t *testing.T) {
 	})
 	if got, ok := req["acceptance_criteria"]; !ok || got != "AC" {
 		t.Errorf("acceptance_criteria = %v (present=%t), want %q", got, ok, "AC")
+	}
+}
+
+// TestCreateParamsToBody_KeepsEstimatedMinutes is the create half of
+// PUPPET-607: the field was carried through every loom layer and then dropped
+// here, so `loom data create --estimated-minutes` persisted null.
+func TestCreateParamsToBody_KeepsEstimatedMinutes(t *testing.T) {
+	req := createParamsToBody(backend.CreateParams{
+		Title:            "T",
+		IssueType:        "task",
+		EstimatedMinutes: intPtr(30),
+	})
+	if got, ok := req["estimated_minutes"]; !ok || got != 30 {
+		t.Errorf("estimated_minutes = %v (present=%t), want 30", got, ok)
+	}
+}
+
+// TestCreateParamsToBody_KeepsZeroEstimatedMinutes guards the pointer
+// semantics: --estimated-minutes 0 is only set when the flag was Changed, so
+// 0 is a caller-chosen value and a non-zero guard here would recreate the bug.
+func TestCreateParamsToBody_KeepsZeroEstimatedMinutes(t *testing.T) {
+	req := createParamsToBody(backend.CreateParams{
+		Title:            "T",
+		IssueType:        "task",
+		EstimatedMinutes: intPtr(0),
+	})
+	if got, ok := req["estimated_minutes"]; !ok || got != 0 {
+		t.Errorf("estimated_minutes = %v (present=%t), want 0", got, ok)
+	}
+}
+
+// TestCreateParamsToBody_OmitsUnsetEstimatedMinutes: a nil estimate must emit
+// no key at all. An emitted key 400s the whole body on a fleet-db whose
+// CreateIssueRequest predates the field.
+func TestCreateParamsToBody_OmitsUnsetEstimatedMinutes(t *testing.T) {
+	req := createParamsToBody(backend.CreateParams{Title: "T", IssueType: "task"})
+	if _, ok := req["estimated_minutes"]; ok {
+		t.Error("estimated_minutes present for a nil estimate — nil must omit the key")
 	}
 }
 

@@ -79,3 +79,54 @@ func TestBatchCreateIssueReq_OmitsUnsetAcceptanceCriteria(t *testing.T) {
 		t.Fatalf("body carries acceptance_criteria for an unset value: %s", body)
 	}
 }
+
+// TestBatchCreateIssueReq_CarriesEstimatedMinutes is the batch half of
+// PUPPET-607: fleetBatchCreateIssueReq is a hand-written body struct that
+// bypasses CreateParams.FleetCreateBody, so it dropped the field independently
+// of the single-create path.
+func TestBatchCreateIssueReq_CarriesEstimatedMinutes(t *testing.T) {
+	for _, want := range []int{30, 0} {
+		args, err := json.Marshal(backend.CreateParams{
+			Title:            "With estimate",
+			IssueType:        "task",
+			EstimatedMinutes: intPtr(want),
+		})
+		if err != nil {
+			t.Fatalf("Marshal CreateParams: %v", err)
+		}
+
+		req, err := batchCreateIssueReq(backend.BatchOp{Operation: "create", Args: args})
+		if err != nil {
+			t.Fatalf("batchCreateIssueReq: %v", err)
+		}
+		if req.EstimatedMinutes == nil || *req.EstimatedMinutes != want {
+			t.Fatalf("EstimatedMinutes = %v, want %d", req.EstimatedMinutes, want)
+		}
+	}
+}
+
+// The unset case must marshal to a body with no estimated_minutes key at all:
+// a fleet-db whose create schema predates the field rejects the *whole* batch
+// on an unknown one, and there is no per-item retry.
+func TestBatchCreateIssueReq_OmitsUnsetEstimatedMinutes(t *testing.T) {
+	args, err := json.Marshal(backend.CreateParams{Title: "No estimate", IssueType: "task"})
+	if err != nil {
+		t.Fatalf("Marshal CreateParams: %v", err)
+	}
+
+	req, err := batchCreateIssueReq(backend.BatchOp{Operation: "create", Args: args})
+	if err != nil {
+		t.Fatalf("batchCreateIssueReq: %v", err)
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("Marshal request: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("Unmarshal request: %v", err)
+	}
+	if _, ok := decoded["estimated_minutes"]; ok {
+		t.Fatalf("body carries estimated_minutes for an unset value: %s", body)
+	}
+}
