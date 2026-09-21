@@ -94,11 +94,21 @@ func resolveOperatorActor() string { return operatorid.Resolve() }
 // gets "", which the fleet backend treats as "keep the process identity" — the
 // write still lands, losing attribution but never the board.
 func operatorActorContext(r *http.Request, fallback string) context.Context {
-	actor := fallback
+	// A verified identity is carried as VERIFIED, never advisory. fleet-db
+	// returns "workspace access denied" both for the open-mode operator
+	// identity, which holds no role by construction, and for a signed-in user
+	// who is not authorised in this workspace. Stamping the second as advisory
+	// would let the backend retry it as the process actor — which is an
+	// authorisation bypass, not a fallback: any authenticated user without a
+	// role could write as the (admin) process identity. Their denial must
+	// surface so the role gets granted instead.
 	if verified, _, ok := middleware.VerifiedUserActorFromContext(r.Context()); ok {
-		actor = verified
+		return advisoryactor.WithVerified(r.Context(), verified)
 	}
-	return advisoryactor.With(r.Context(), actor)
+	// Open mode: nobody authenticated, and the operator identity is a label on
+	// this process's own writes. Attribution is the only thing at stake, so it
+	// stays advisory and the board never stops accepting writes.
+	return advisoryactor.With(r.Context(), fallback)
 }
 
 // validatePatchRequest extracts the issue ID and parses the JSON body from an HTTP request.

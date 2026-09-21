@@ -182,10 +182,13 @@ func (b *FleetBackend) doRequestAsEffectiveActor(ctx context.Context, method, pa
 		auth.Actor = actor
 	}
 
-	// Advisory only when the override is the identity the caller stamped and
-	// it differs from the process actor (equal actors make the retry a
-	// pointless resend).
-	advisory := actor != "" && actor != processActor && actor == advisoryactor.From(ctx)
+	// Advisory only when the caller stamped this identity AS advisory, and it
+	// differs from the process actor (equal actors make the retry a pointless
+	// resend). IsAdvisory is what keeps a verified user's denial from being
+	// retried as the process actor; it is false for an unstamped context, so
+	// any path that does not opt in fails closed.
+	advisory := actor != "" && actor != processActor &&
+		actor == advisoryactor.From(ctx) && advisoryactor.IsAdvisory(ctx)
 	if advisory && b.advisoryActorDenied(actor) {
 		auth.Actor = processActor
 		advisory = false
