@@ -108,25 +108,23 @@ func checkConfigDrift() CheckResult {
 	return reportConfigDrift(app, snap, declared)
 }
 
-// locateStackRegistry resolves the deploy registry path, honoring the operator
-// overrides before the conventional location.
+// locateStackRegistry resolves the deploy registry path from LOOM_STACK_REGISTRY.
+//
+// Opt-in only, and deliberately so. An earlier version also probed
+// $LOCAL_STACK_DIR and ~/local-stack/registry.json, which are one operator's
+// deployer layout rather than anything loomcli defines: on that machine the
+// check ran and reported drift, and everywhere else it silently found nothing
+// while still carrying the assumption. A deployment that wants this check
+// points at its own registry; every other deployment skips it.
 func locateStackRegistry() (string, bool) {
-	var candidates []string
-	if v := os.Getenv("LOOM_STACK_REGISTRY"); v != "" {
-		candidates = append(candidates, v)
+	path := strings.TrimSpace(os.Getenv("LOOM_STACK_REGISTRY"))
+	if path == "" {
+		return "", false
 	}
-	if v := os.Getenv("LOCAL_STACK_DIR"); v != "" {
-		candidates = append(candidates, filepath.Join(v, "registry.json"))
+	if _, err := os.Stat(path); err != nil {
+		return "", false
 	}
-	if home, err := os.UserHomeDir(); err == nil {
-		candidates = append(candidates, filepath.Join(home, "local-stack", "registry.json"))
-	}
-	for _, path := range candidates {
-		if _, err := os.Stat(path); err == nil {
-			return path, true
-		}
-	}
-	return "", false
+	return path, true
 }
 
 func loadStackRegistry(path string) (*stackRegistry, error) {
@@ -143,8 +141,12 @@ func loadStackRegistry(path string) (*stackRegistry, error) {
 
 // locateRegistryApp picks the registry entry describing this daemon.
 func locateRegistryApp(reg *stackRegistry, workspace string) (string, map[string]string, bool) {
+	// LOOM_STACK_APP names the entry outright. The guesses below it are a
+	// convenience for a registry that happens to use loom's own naming; a
+	// deployment whose apps are named anything else sets the variable rather
+	// than relying on loomcli to know its conventions.
 	var names []string
-	if v := os.Getenv("LOOM_STACK_APP"); v != "" {
+	if v := strings.TrimSpace(os.Getenv("LOOM_STACK_APP")); v != "" {
 		names = append(names, v)
 	}
 	if workspace != "" {
@@ -202,7 +204,7 @@ func reportConfigDrift(app string, snap *cfgpkg.DaemonEnvSnapshot, declared map[
 		lines = append(lines[:driftDetailCap:driftDetailCap], fmt.Sprintf("… and %d more", more))
 	}
 	lines = append(lines, fmt.Sprintf(
-		"remediation: curl -fsS -X PATCH http://index.local/apps/%s/env -H 'content-type: application/json' -d '{\"KEY\":\"value\"}'", app))
+		"remediation: update the %q entry in the registry named by LOOM_STACK_REGISTRY, then restart the daemon", app))
 
 	return CheckResult{
 		Name:   "config_drift",
@@ -235,20 +237,34 @@ func findDeclaredOnly(snap *cfgpkg.DaemonEnvSnapshot, declared map[string]string
 	return out
 }
 
-// envValueMatches compares a live value against a declared one. Secret keys are
-// compared by fingerprint, so a mismatch is detectable without either side's
-// value ever being written out.
-func envValueMatches(key string, live cfgpkg.EnvValue, declared string) bool {
-	if cfgpkg.IsSecretEnvKey(key) {
+// envValueMatches compares a live value against a declared one. A redacted
+// entry is compared by fingerprint, so a mismatch is detectable without either
+// side's value ever being written out.
+//
+// The decision follows live.Redacted rather than re-deriving it from the key.
+// Redaction depends on the VALUE as well as the key name (see
+// config.MustRedactEnv), and only the snapshot saw the runtime value — so
+// re-deriving here could read a fingerprint as a plain value, or print a
+// declared credential beside a redacted runtime one. The snapshot decided;
+// this follows.
+func envValueMatches(_ string, live cfgpkg.EnvValue, declared string) bool {
+	if live.Redacted {
 		return live.Fingerprint == cfgpkg.FingerprintEnvValue(declared)
 	}
 	return live.Value == declared
 }
 
 func describeValueDrift(key string, live cfgpkg.EnvValue, declared string) string {
-	if cfgpkg.IsSecretEnvKey(key) {
+	// Same rule, and the stakes are higher here: this string is printed. A
+	// declared value is redacted whenever the runtime one was, so a credential
+	// in the declaration cannot be echoed beside its own fingerprint.
+	if live.Redacted {
 		return fmt.Sprintf("value-differs %s (runtime %s, declared %s)",
 			key, live.Fingerprint, cfgpkg.FingerprintEnvValue(declared))
+	}
+	if cfgpkg.MustRedactEnv(key, declared) {
+		return fmt.Sprintf("value-differs %s (runtime %s, declared %s)",
+			key, cfgpkg.FingerprintEnvValue(live.Value), cfgpkg.FingerprintEnvValue(declared))
 	}
 	return fmt.Sprintf("value-differs %s (runtime %s, declared %s)", key, live.Value, declared)
 }
