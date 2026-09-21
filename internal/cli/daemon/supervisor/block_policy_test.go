@@ -292,8 +292,15 @@ func TestShouldRestart_LockConflictIsUncounted(t *testing.T) {
 	if !s.shouldRestart(ap) {
 		t.Fatal("shouldRestart = false, want true (contention is not a fault)")
 	}
-	if ap.RestartCount != 0 {
-		t.Errorf("RestartCount = %d, want 0 (uncounted)", ap.RestartCount)
+	// Uncounted means NOT INCREMENTED, not reset. Zeroing here would refund the
+	// budget of an agent that had already failed twice for real, which is the
+	// laundering this function refuses for BlockCount below and for
+	// RestartCount since the no-work refund was removed: an idle cycle is no
+	// evidence a failing agent recovered, and it is not even evidence the agent
+	// ran (the pre-spawn claim gate decides the outcome before any process
+	// starts). Only progress refunds — applyCleanSuccessRestart.
+	if ap.RestartCount != maxRetries {
+		t.Errorf("RestartCount = %d, want %d (uncounted: unchanged, not refunded)", ap.RestartCount, maxRetries)
 	}
 	if ap.BlockCount != 0 {
 		t.Errorf("BlockCount = %d, want 0 (no escalation)", ap.BlockCount)
@@ -367,8 +374,8 @@ func TestShouldRestart_LockConflictIgnoresRateLimitNoCount(t *testing.T) {
 	if !s.shouldRestart(ap) {
 		t.Fatal("shouldRestart = false, want true")
 	}
-	if ap.RestartCount != 0 {
-		t.Errorf("RestartCount = %d, want 0 (still uncounted)", ap.RestartCount)
+	if ap.RestartCount != maxRetries {
+		t.Errorf("RestartCount = %d, want %d (still uncounted: unchanged, not refunded)", ap.RestartCount, maxRetries)
 	}
 	if ap.StopReason != "" {
 		t.Errorf("StopReason = %q, want empty", ap.StopReason)
