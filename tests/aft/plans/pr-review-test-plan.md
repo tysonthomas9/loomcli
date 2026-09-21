@@ -298,7 +298,7 @@ Conversation states (`stream.go:135-172`, `harness_read.go:21-122, 178-191`):
 | `POST …/reviewer` → 503 `egress_unavailable`; `GET …/conversation` → 404 `reviewer_not_started` | `surface-suites/pr-contracts.test.yaml` | no messages/stream/repo-not-registered/invalid-path contracts |
 | approve / request-changes on hollow fixtures | `surface-suites/review-actions.test.yaml` | no PR, branch, or diff behind the decision — **and** its fixtures have no `external_ref`, so it only ever exercises the non-GitHub branch of `ReviewDecisionService.Apply`. The GitHub-linked branch (an outright refusal, `review_decision.go:63-65`) is untested: see PRR-D16b and B5 |
 | `/prs` empty state | `suites/review-queue.test.yaml` | `prs-github-warning` never asserted |
-| `pr-review-stale-banner`, `pr-chat-unavailable`, `pr-chat-composer`, `pr-chat-send`, `pr-chat-open-terminal`, `pr-discussion-tab-*`, `review-agent-button` (partly), `new-review-agent`, `pr-create-ticket` | **nothing** | FINDINGS §3.9 blocker |
+| `pr-review-stale-banner`, `pr-chat-unavailable`, `pr-chat-composer`, `pr-chat-send`, `pr-chat-open-terminal`, `pr-discussion-tab-*`, `review-agent-button` (partly), `new-review-agent`, `pr-create-ticket` | **nothing** | `LOOMCLI-214` / `LOOMCLI-219` blockers |
 | `PRReviewWorkspace.tsx:637-650` "+ New review agent…" prefill | **nothing** | |
 
 ---
@@ -833,7 +833,7 @@ fake-github REST server on 127.0.0.1   LOOM_CONNECTOR_GITHUB_BASE_URL
   clearing local error state. Closes the honest gap left by PRR-D8a.
 
 #### PRR-D15 — Stale PR head raises the stale banner
-- **Tier**: product-correctness. **Status**: blocked on S1+S2. Closes **FINDINGS §3.9** item 1.
+- **Tier**: product-correctness. **Status**: blocked on S1+S2. Closes the `LOOMCLI-214` staleness slice.
 - **Intent**: A reviewer whose pull request moved while they were reading it is told the diff
   was refreshed rather than silently reviewing a stale head.
 - **Steps**: with a working reviewer (PRR-D13 state), `run:` advance the fixture:
@@ -1023,7 +1023,7 @@ fake-github REST server on 127.0.0.1   LOOM_CONNECTOR_GITHUB_BASE_URL
 - **Edge rationale**: revision 1's single happy row proved none of the parameter contracts, and the
   `merged` bypass is a silent behavioral fork a refactor could lose. Splitting the case also
   documents that the PR list's `state` parameter is effectively dead UI-side — itself worth a
-  FINDINGS note.
+  local Loom issue.
 
 ---
 
@@ -1158,7 +1158,7 @@ conversation is readable from disk; `codex` is readable live over its app-server
 ## Part 3 — Blockers and new seams
 
 ### S1 — Hermetic GitHub: fake REST upstream + local "GitHub" bare repo
-**Blocks**: PRR-D11…D19, PRR-R2…R5. Resolves the first bullet of **FINDINGS §3.9**.
+**Blocks**: PRR-D11…D19, PRR-R2…R5. Resolves the first `LOOMCLI-214` testability slice.
 
 Two halves, both already half-built in the repo.
 
@@ -1269,7 +1269,7 @@ Why nothing cheaper works: `readReviewerSnapshot` dispatches on
 (`stream.go:140-150`). An absent provider takes the codex branch and reports `starting`, so
 seeding a transcript or removing a worktree changes nothing observable. The metadata is the gate.
 
-This is exactly the "remaining high-value candidate" named in **FINDINGS §3.10**. Spec,
+This is the `seed-session` candidate tracked by `LOOMCLI-219`. Spec,
 following ADR-0001 and the existing `seed-log` / `seed-worktree` shape
 (`internal/cli/daemon/seed_log_cmd.go`, `seed_worktree_cmd.go`, gated by
 `internal/cli/daemon/seed_gate.go:14-16`):
@@ -1296,8 +1296,8 @@ possible: seed `provider=claude` + a harness session id, write a claude-format t
 into the worktree's project dir, and assert real chat bubbles with no model call.
 
 ### S4 — gh-less review-content seed
-**Blocks**: promoting `surface-suites/review-actions.test.yaml` back to tier 1 (FINDINGS §3.9
-bullet 4, §1.19).
+**Blocks**: promoting `surface-suites/review-actions.test.yaml` back to tier 1
+(`LOOMCLI-214`).
 
 S1b largely delivers this: the bare-repo + working-checkout fixture *is* reviewable branch and
 commit content, and `seed-worktree` (`--file/--content/--message`) already commits
@@ -1326,7 +1326,7 @@ heading); PRR-R1 still owns literal human-visible model behavior.
 - `PRDiscussionPanel`'s Close button is matched only by `aria-label="Close discussion"`.
 - The reviewer agent chip (`PRReviewWorkspace.tsx:437-460`) has no testid, so
   "who is reviewing this PR" is only assertable through text.
-- `AddRepoModal` inputs and the diff components are already logged in FINDINGS §3.9; the PR
+- `AddRepoModal` inputs and the diff components are tracked by `LOOMCLI-219`; the PR
   plan depends on the diff ones for PRR-D12.
 
 ### S7 — The `gemini` stub gap (harness hermeticity, found in revision 2)
@@ -1388,7 +1388,7 @@ Worth a follow-up case once the stub exists.
 (`PRReviewWorkspace.tsx:637-644`), so the agent it offers to create is a background Task
 Runner, not the PR Review interactive template it is named after. PRR-D7 pins the current
 behavior; whether it should pass `defaultKind="interactive"` and pre-select `pr-review`
-belongs in FINDINGS §1 as a product decision, not in the test.
+belongs in a local product-decision issue, not in the test.
 
 ---
 
@@ -1457,10 +1457,10 @@ before they land):
 | PRR-D12 | compare diff renders in the review workspace | happy | product-correctness | **S1+S2** | — |
 | PRR-D13 | reviewer happy path: detached PR-head checkout | happy | product-correctness | **S1+S2** | `pr-contracts` pins only the 503/404 |
 | PRR-D14 | degraded → credential → Retry recovers | happy | product-correctness | **S1+S2** | — |
-| PRR-D15 | stale head → `pr-review-stale-banner` | edge | product-correctness | **S1+S2** | — (FINDINGS §3.9) |
+| PRR-D15 | stale head → `pr-review-stale-banner` | edge | product-correctness | **S1+S2** | — (`LOOMCLI-214`) |
 | PRR-D16a | review submission through the connector route (no UI caller) | happy | surface | **S1+S2** *(rev 2 wrongly had this as a UI approve click)* | `review-actions` (loom-issue side, non-PR issues only) |
 | PRR-D16b | approving a PR-linked issue reports the honest refusal | edge | product-correctness | ready **(G1)** **(new in rev 3)** | — |
-| PRR-D17 | `pr-chat-unavailable` (unsupported / failed) | edge | product-correctness | **S3** | — (FINDINGS §3.9) |
+| PRR-D17 | `pr-chat-unavailable` (unsupported / failed) | edge | product-correctness | **S3** | — (`LOOMCLI-219`) |
 | PRR-D18 | reviewer backend migration clears runtime metadata | edge | surface | **S1+S2+S3** *(rev 2 assertion was vacuous)* | — |
 | PRR-D19 | legacy reviewer retirement | edge | surface | **S1+S2** | — |
 | PRR-D21 | `rate_limited` / `upstream_error` class mappings (7 rows) | edge | surface | **S1+S2** (needs header-forcing fixture) **(new in rev 2)** | — |
@@ -1500,11 +1500,11 @@ credential inverts their expected behavior while sending real traffic.
    (Groups A + B + D together hold **20** ready cases; D7 is Group C, giving 21 — revision 2's
    "22" was wrong.)
 5. **S1 + S2 in full** — one fixture server, one bare repo, the credential flow, one teardown.
-   Unblocks 10 cases and retires the FINDINGS §3.9 staleness blocker (PRR-D15) plus its
+   Unblocks 10 cases and retires the `LOOMCLI-214` staleness blocker (PRR-D15) plus its
    gh-less review-content bullet (S4 rides along).
 6. **S7** — the missing `gemini` stub. Small, independent, closes another live hermeticity leak.
 7. **S3 `seed-session`** — unblocks D17, repairs D18, and makes deterministic reviewer
-   conversations possible; the last item FINDINGS §3.10 has queued.
+   conversations possible; the last item `LOOMCLI-219` has queued.
 8. **S5** — decline unless someone specifically wants the sentinel on screen without a model.
 
 **Product findings to file regardless of test work**: B5 (the UI's Approve cannot approve a GitHub

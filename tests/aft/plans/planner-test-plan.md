@@ -1,8 +1,8 @@
 # aft test plan — the Planner background agent (`role_name: "plan"`)
 
 Exhaustive coverage plan for **one** CreateAgentModal template: **Planner**. Companion to
-`../README.md` (tiers and how to run), `../COVERAGE-PLAN.md` (what to test next), and
-`../FINDINGS.md` (product bugs / stack gaps). Vocabulary follows `CONTEXT.md`:
+`../README.md` (tiers and how to run), `../coverage/scenario-map.yaml` (coverage gaps),
+and local Loom issues under `LOOMCLI-205` (product findings). Vocabulary follows `CONTEXT.md`:
 *seeding seam*, *seed command*, *actor fidelity*, *readback*, *surface suite*, *delegation*.
 
 No YAML is written by this document. Every case is specified to the point where the suite
@@ -75,8 +75,8 @@ real tiers, plus one retraction of my own.
    assertion.
 10. **Stale citations refreshed:** the zero-repo rejection in `agent_service.go` `:399-401` →
     **`:416-421`**;
-    `envfilter.go:37-38` → **`:39`** for the exact stub-var line; FINDINGS §3.9's
-    review-content bullet `:377-379` → **`:422-424`**. The changelog's self-referential
+    `envfilter.go:37-38` → **`:39`** for the exact stub-var line; the review-content
+    gap is now tracked by `LOOMCLI-214`. The changelog's self-referential
     plan-line number was removed rather than maintained.
 11. **Withdrawn by the reviewer:** the earlier "plan mislocates the badge synthesis" finding —
     the bad location was in the task brief, never in this document. Revision 2's item 10 is
@@ -437,7 +437,7 @@ matching the `iris-${RUN_ID:-local}` convention (`zz-agent-flow.test.yaml:249`).
 - **Intent:** `An operator creating a Planner in a workspace with no repos is told the agent will get workspace scope, then sees the create fail`
 - **Preconditions:** its own workspace created in-test via `api: POST /api/workspaces` with
   `{"name":"e2e-ws-planempty-<run>","type":"empty"}` and **no** `repos` (the Empty branch of
-  `CreateWorkspaceModal`, FINDINGS §1.14, is already proven by `workspaces`).
+  `CreateWorkspaceModal`, whose former empty-workspace gap is already proven by `workspaces`).
 - **Steps:** open that workspace's `/agents` → `+ Add agent` → Planner card →
   `expect: { visible: { testid: create-agent-no-repos } }` →
   `expect: { text: "No repos yet — add one from the sidebar first. This agent will run with workspace scope." }`
@@ -557,7 +557,7 @@ matching the `iris-${RUN_ID:-local}` convention (`zz-agent-flow.test.yaml:249`).
   `components/IssueDetailPanel/header/AgentStatusBadge.tsx:105`, testid at `:106`). The badge
   also carries `title="<name>: Planning"` and
   `aria-label="Agent <name>: Planning. Click to view logs."` (`:111-112`) — assert the `title`
-  too, since it is a content assertion in the FINDINGS §3.1 sense rather than a shape check.
+  too, since it is a content assertion rather than a shape check (`LOOMCLI-219`).
   Contrast case in the same test: repeat with the **task**-role agent and assert `working` —
   proving the branch is role-driven, not incidental.
 - **Edge rationale:** the single most plan-specific rendering branch in the whole UI, reachable
@@ -705,7 +705,7 @@ already dispatches on (`e2e/stubs/codex:125-136`).
   - Board: the card leaves the Ready column and appears under
     `section[data-status=review]` — assert with the same `Array.from(...).some(...)` shape as
     `zz-agent-flow.test.yaml:156` and `real-suites/zz-real-codex-epic.test.yaml:70-74`. Use the
-    **flat** board (`?groupBy=none`) if the epic-grouped lane proves flaky (FINDINGS §1.5 is
+    **flat** board (`?groupBy=none`) if the epic-grouped lane proves flaky (the completed-child bug is
     fixed, but the flat board is the settled assertion surface).
   - agents-list `run:` readback → the planner's `state` is not `active` after the process exits.
 - **Edge rationale:** the headline scenario. It is also the fixture every other case in Group C
@@ -779,12 +779,12 @@ already dispatches on (`e2e/stubs/codex:125-136`).
 - **Assertions:** `status == "closed"` — deliberately the **opposite** of PLN-D15 on the same
   kind of issue.
 - **Why surface:** it pins an inconsistency rather than a coherent user scenario. **File as a
-  FINDINGS entry:** one plan review, two Approve buttons, opposite outcomes (`open` vs
+  local Loom issue:** one plan review, two Approve buttons, opposite outcomes (`open` vs
   `closed`). Whichever is intended, the other is a bug; when unified, this case merges into
   PLN-D15.
-- **Narrowed promotion claim (r2):** revision 1 said a planner design promotes
-  FINDINGS §1.19/§3.9 outright. That is too broad — §1.19/§3.9 ask for **branch, commit, PR, or
-  diff** content for a reviewer to inspect (`FINDINGS.md:260-266`, `:377-379`), which a design
+- **Narrowed promotion claim (r2):** revision 1 said a planner design closes the gh-less
+  review-content gap outright. That is too broad — the gap requires **branch, commit, PR, or
+  diff** content for a reviewer to inspect (tracked by `LOOMCLI-214`), which a design
   does not supply. The accurate claim: a planner design makes the *plan-review* fixture
   non-hollow (there is now something to read before approving), so the plan-review scenario can
   live in the product-correctness tier; the **code-review** half still needs the git seeding
@@ -886,7 +886,7 @@ already dispatches on (`e2e/stubs/codex:125-136`).
   `expect: { count: { testid: markdown-content, equals: 0 } }`; readback
   `design_format == "html"` and `design` starts with an HTML block tag; and — reusing the
   markdown-safety discipline — a `wait.fn` asserting no injected global fired.
-- **Blocker note:** per-issue `design_format` on PATCH is FINDINGS §1.13 (whole-PATCH 400 on
+- **Blocker note:** per-issue `design_format` on PATCH is `LOOMCLI-206` (whole-PATCH 400 on
   fleetdb). This case deliberately uses the **workspace-level** toggle, which is the supported
   path, and the agent's own `loom data update` writes the per-issue value through the CLI
   backend rather than the webui PATCH surface. If that write 400s, that is a *new* datapoint
@@ -905,7 +905,7 @@ already dispatches on (`e2e/stubs/codex:125-136`).
   diff by design, so assert `has_diff == false`, `files_changed == 0`, and the disabled Diff
   sub-tab exactly as `zz-agent-flow.test.yaml:222-225` pins it for the stub task run.
 - **Edge rationale:** `files_changed == 0` is *correct* for a planner (unlike the task runner,
-  where FINDINGS' "suspected: local-task-runner stub sessions record zero diff evidence" flags
+  where the retired tracker flagged that local-task-runner stub sessions record zero diff evidence
   it as a possible gap). Pinning it here separates the two meanings.
 - **Seam caveat, narrowed in r2 — no `seed-session` needed.** Revision 1 assumed a CLI-launched
   planner might be invisible to `…/tasks/{id}/sessions` because the supervisor is what creates
@@ -991,7 +991,7 @@ already dispatches on (`e2e/stubs/codex:125-136`).
   | `{"name":"p4","role_name":"plan","backend":"not-a-backend"}` | **201** — there is *no* unknown-backend validation on create |
 - **Why surface:** these are standalone contract probes with no user scenario
   (`CONTEXT.md`: *surface suite*). Promotion condition: none — they are contracts by nature.
-- **Value:** the last row documents a real asymmetry worth a FINDINGS line (a planner can be
+- **Value:** the last row documents a real asymmetry worth a local Loom issue (a planner can be
   created pointing at a backend that can never resolve; the failure only surfaces later as
   `backend_unavailable`, which the UI cannot render — PLN-B5).
 - **Safety note (r2):** the `not-a-backend` row is safe precisely because nothing ever *starts*
@@ -1141,7 +1141,7 @@ than the HELLO.md task, so budget **~8 min** (four windows: three grace + one as
   `LOOM_DENIED_TOOLS` env vars the supervisor exports (`supervisor/spawn.go:126-132`) have **no
   production reader** — `ReadOnlyPreamble()` (`prompts.go:520-527`) is called from no non-test
   file. This test is the only mechanism that would catch a model deciding to implement anyway.
-  Log the dead flag as a FINDINGS entry (**PLN-B10**).
+  Log the dead flag as a local Loom issue (**PLN-B10**).
 
 ### PLN-R5a / PLN-R5b — missing backend auth fails fast, and carries an error class
 
@@ -1213,7 +1213,7 @@ than the HELLO.md task, so budget **~8 min** (four windows: three grace + one as
 
 ## Part 3 — Blockers & new seams needed
 
-Numbered so they can be lifted into `FINDINGS.md` §3 style entries.
+Numbered so actionable items can be lifted into local Loom issues.
 
 ### PLN-B1 — `STUB_CODEX_PLAN_RUNNER=1` in `e2e/stubs/codex` (+ env allowlist)
 
@@ -1316,8 +1316,8 @@ the planning agent's real entry point, satisfying actor fidelity the same way th
 
 **Downgraded in r2: this is a nice-to-have, not a blocker for any case in this plan.**
 
-FINDINGS §3.10 records: *"The remaining high-value candidate is `seed-session`, which would
-create a full session record rather than only transcript content."* Revision 1 claimed
+`LOOMCLI-219` tracks `seed-session`, which would create a full session record rather
+than only transcript content. Revision 1 claimed
 **PLN-D20** needed it, on the theory that a CLI-launched planner writes only a local session
 (`internal/sessions`) and no control-plane `AgentSession` (which the supervisor creates at
 `supervisor.go:517-563`). **That theory is wrong:** `ListTaskSessions` reads the control plane
@@ -1355,7 +1355,7 @@ The `--phase planning` flag is what makes it planner-relevant: it is the value
 `views/IssueDetailPage.tsx:173`); no rail, sidebar, or agents-page control removes an agent, and
 no frontend caller exists for `stop` / `restart` / `yield` either (only `startAgent`,
 `api/agents/agents.ts:33-42`). PLN-D11's delete leg is therefore API-only and must say so.
-FINDINGS-worthy as a **feature gap** in the same family as §1.10 ("a wrongly-added repo can't be
+Issue-worthy as a **feature gap** in the same family as the former repo-removal defect ("a wrongly-added repo can't be
 removed"), which was fixed by adding the DELETE + confirm dialog — the identical fix applies here.
 
 ### PLN-B5 — `backend_unavailable` has no deterministic writer, no PATCH path, and no renderer
@@ -1426,7 +1426,7 @@ Two walls, both verified:
    option (`actions/StartWorkButton.tsx:35,57,126-133`) — is **not mounted anywhere**. It is
    exported from `actions/index.ts:5-6`, imported by nothing in production, and referenced only
    by a stale comment (`IssueDetailPanel.tsx:603`). Revision 1 described this as "a prop with no
-   caller"; it is the stronger case — an entire unrendered component, in the family FINDINGS
+   caller"; it is the stronger case — an entire unrendered component, in the family of
    §2 already recorded ("7 dead components … shipped", fixed in `c30b9d989`).
 
 Net effect: a design-less task cannot be handed to a Planner from any issue surface, which
@@ -1443,18 +1443,17 @@ Whichever way it is resolved, PLN-D23 inverts.
 `AgentCard`, `AgentIconRail`, `AgentRail`, `SortableAgentRow`, `AgentDetailMain`'s empty states,
 `DiffTab`/`GitTab` and the whole agent-detail Git/Diff family carry **no** `data-testid`. Every
 Group B case above is forced onto `aria-label="Agent: <name>"` + `data-status` + class-name
-matching. Same family as the FINDINGS §3.9 note ("Missing stable testids — AddRepoModal inputs,
-DiffTab/DiffFileRow/DiffFileViewer. Cheap adds."). Requested minimum for this plan:
+matching. This is the same family as the stable-selector gaps maintained in
+`coverage/scenario-map.yaml`. Requested minimum for this plan:
 `agent-card-<name>` on the `AgentCard` root, `agent-role-badge` on its `.role` span,
 `agent-status-line` on `.statusLine`, and `agent-terminal-unavailable` on the stopped empty
 state.
 
-### PLN-B8 — *partial* review-content promotion (FINDINGS §1.19 / §3.9) — narrowed in r2
+### PLN-B8 — *partial* review-content promotion (`LOOMCLI-214`) — narrowed in r2
 
-The two review-action tests sit in the surface tier because "a review-status issue can render
+The two review-action tests sit in the surface tier because a review-status issue can render
 Approve and Request changes, but without a PR, branch, commit, or diff the reviewer has nothing
-to inspect" (`FINDINGS.md:260-266`), and §3.9 asks specifically for a *gh-less review-content
-seed* of "branch, commit, PR, or diff" (`:422-424`).
+to inspect. `LOOMCLI-214` tracks the required gh-less review-content seed.
 
 Revision 1 over-claimed that a planner design satisfies that. It does not — a design is not a
 branch, commit, PR, or diff. The accurate, narrower claim:
@@ -1463,9 +1462,9 @@ branch, commit, PR, or diff. The accurate, narrower claim:
   the thing a reviewer is supposed to inspect *is* the design. A planner-written design makes
   that fixture non-hollow, so **PLN-D15 (panel Approve → `open`) and PLN-D16 (panel Reject →
   `needs-revision`) belong in the product-correctness tier** once PLN-D13 exists.
-- For a **code** review, §1.19/§3.9 stand unchanged and still require the git seeding.
+- For a **code** review, `LOOMCLI-214` remains open and still requires the git seeding.
 
-So the FINDINGS note to add is a *scope split*, not a closure: §1.19 shrinks to the code-review
+So the issue update is a *scope split*, not a closure: `LOOMCLI-214` shrinks to the code-review
 half, and the plan-review half moves to tier 1. `surface-suites/review-actions.test.yaml` keeps
 its two tests as the generic-review-status guards (and PLN-D15b now pins the Approve divergence
 between the two surfaces).
@@ -1496,7 +1495,7 @@ Role configs and the router use `needs_plan` (`supervisor/role.go:63`,
 role's `TaskFilter` straight through as `--task-filter` (`spawn.go:108-110`,
 `agent_session.go:417-419`). A **custom** plan-like role therefore fails to launch.
 Out of scope for the Planner template itself (built-in `plan` never takes that path), but it is
-the same subsystem and belongs in the same FINDINGS entry.
+the same subsystem and belongs in the same local Loom issue.
 
 ### PLN-B12 — `daemon_planner_smoke_test.go` is an empty stub
 
@@ -1570,8 +1569,7 @@ Two ways to unblock, either sufficient for PLN-R5:
 2. **Record the class on the session.** Add `error_class` to the session metadata written by
    `finalizeAgentSession`, next to the exit code. Strictly better: it makes the class visible on
    the Runs tab for *every* failed run, deterministic and real tiers alike, with no directory
-   coupling — and it is the kind of forensics gap FINDINGS §1.4 already complains about in a
-   neighbouring subsystem.
+   coupling — and it is the kind of forensics gap `LOOMCLI-219` tracks for adjacent subsystems.
 
 Prefer (2). MED.
 
@@ -1652,7 +1650,7 @@ from "ready, defer" to blocked). Blockers: 14 → 14 live via two moves (−B14,
 3. **PLN-R1 on codex**, then the other three backends, then R4 (the do-not-implement negative),
    then R2/R3. **R5a** is the cheapest real case and can land any time. R5b waits on PLN-B15;
    R6 waits on a background-process protocol.
-4. **FINDINGS entries** for PLN-B4, B5 (with its projection wall), B6, B9, B10, B11, B12, B13,
+4. **Local Loom issues** for PLN-B4, B5 (with its projection wall), B6, B9, B10, B11, B12, B13,
    **B15**, the Approve divergence from PLN-D15b, and the §1.19 *scope split* from PLN-B8
    (plan-review half promotes; code-review half stays open). **Do not file B14** — it was false.
 

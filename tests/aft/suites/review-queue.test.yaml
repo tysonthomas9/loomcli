@@ -1,6 +1,6 @@
 # Product-correct review queue empty-state coverage. Review actions were demoted
 # to surface-suites/review-actions because this gh-less stack has no reviewable
-# branch/commit content (FINDINGS §1.19).
+# branch/commit content (LOOMCLI-214).
 suite: review-queue
 classification: { area: reviews, feature: review-queue, surface: ui, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"

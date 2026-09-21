@@ -585,7 +585,7 @@ func shouldAssignBeforeStatus(params backend.UpdateParams) bool {
 
 // applyTolerantPatch PATCHes req, dropping only fields fleet-db rejects as unknown
 // so one drifted field cannot take the rest of the update down with it (see
-// update_compat.go and FINDINGS §1.13).
+// update_compat.go and LOOMCLI-206).
 //
 // The dropped list is logged rather than swallowed: returning nil after silently
 // discarding a field the caller asked to write is the same data loss this exists to

@@ -39,8 +39,8 @@ def main():
     p.add_argument("--max-files-changed", type=int)
     p.add_argument("--require-diff", action="store_true")
     p.add_argument("--forbid-diff", action="store_true")
-    # Clause 4's source. The transcript endpoint cannot serve events (FINDINGS §1.2),
-    # so native evidence is read from the event stream the backend itself wrote.
+    # Clause 4's source. While LOOMCLI-166 keeps the session transcript incomplete,
+    # native evidence is read from the event stream the backend itself wrote.
     p.add_argument("--agent-log")
     args = p.parse_args()
 
@@ -72,7 +72,7 @@ def main():
     if args.max_files_changed is not None and changed > args.max_files_changed:
         raise SystemExit(f"files_changed {changed} > {args.max_files_changed}: {session}")
 
-    # PINNED KNOWN GAP — FINDINGS §1.27. HasTranscript is set only from a non-empty
+    # PINNED KNOWN GAP — LOOMCLI-166. HasTranscript is set only from a non-empty
     # native transcript file or event-store entries for that session id
     # (webui/svcimpl/session_service.go:185-190); a real codex worker session produces
     # neither, so it finalizes has_transcript=false. This is a CAPTURE gap and is NOT
@@ -81,7 +81,7 @@ def main():
     # transcripts start being captured, instead of silently lowering the bar forever.
     if session.get("has_transcript"):
         raise SystemExit(
-            "FINDINGS §1.27 looks fixed (has_transcript is true) — restore the "
+            "LOOMCLI-166 looks fixed (has_transcript is true) — restore the "
             f"transcript-entry assertion in this helper: {session}"
         )
     if args.require_diff and not session.get("has_diff"):

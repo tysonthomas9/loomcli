@@ -18,7 +18,7 @@ import (
 // hypothetical: `design_format` (params.go, added by #150) is absent from
 // fleet-db's UpdateIssueRequest, so a Planner writing its design lost the design
 // AND the accompanying fields, ending `has_design: false` with no user-visible
-// error (tests/aft/FINDINGS.md §1.13, confirmed against a live backend).
+// error (LOOMCLI-206, confirmed against a live backend).
 //
 // This mirrors createWithoutExternalRef's approach on the create path: when the
 // server names an unsupported field, drop exactly that field and retry, so the

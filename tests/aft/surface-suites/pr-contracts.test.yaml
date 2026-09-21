@@ -1,7 +1,7 @@
 # Surface tier: pins the degraded-mode PR reviewer API error contract (HTTP
 # status codes + code fields). The user-visible degraded behavior lives in the
 # tier-1 pr-workspace-degraded suite; promote or fold this back when a
-# fake-connector seam exists (FINDINGS §3.9 staleness note).
+# fake-connector seam exists (LOOMCLI-214).
 suite: pr-contracts-surface
 classification: { area: reviews, feature: pull-requests, surface: api, purpose: contract }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"

@@ -2,8 +2,10 @@
 
 Scope: one agent template — the **Custom prompt** card in `CreateAgentModal`. Everything
 below is derived from source read during this pass; every claim carries a `file:line`.
-Companion docs: `tests/aft/README.md` (tiers + how to run), `tests/aft/FINDINGS.md`
-(bug/seam tracker), `CONTEXT.md` (actor fidelity, readback, surface-wiring vocabulary).
+Companion sources: `tests/aft/README.md` (tiers and how to run),
+`tests/aft/coverage/scenario-map.yaml` (coverage gaps), local Loom issues under
+`LOOMCLI-205` (product findings), and `CONTEXT.md` (actor fidelity, readback,
+surface-wiring vocabulary).
 
 ---
 
@@ -726,7 +728,7 @@ Every workspace is seeded with roles `plan`, `task`, and `lead`
 
 ### CUS-D12 — the prompt is not editable (and not visible) after creation
 
-- **Tier:** product-correctness (negative assertion) + FINDINGS entry
+- **Tier:** product-correctness (negative assertion) + local Loom issue
 - **Intent:** An operator returning to their custom agent finds no way to read or revise the
   instructions they gave it.
 - **Steps:** open the agent detail for a CUS-D1 agent; enumerate the tab strip with
@@ -762,7 +764,7 @@ Every workspace is seeded with roles `plan`, `task`, and `lead`
   - P1 attempt → 201 (reconcile passes on identical prompt)
 - **Edge rationale:** a real user-visible dead end, and a **teardown hazard for this suite**:
   role rows survive `DELETE /agents/{name}`, so every case must use a `${RUN_ID}`-unique name
-  or a rerun inside one stack will fail on a stale role. FINDINGS **P-1**.
+  or a rerun inside one stack will fail on a stale role. Product candidate **P-1**.
 
 ### CUS-D14 — the custom prompt actually reaches the backend process argv (non-interactive path)
 
@@ -1094,7 +1096,7 @@ Every workspace is seeded with roles `plan`, `task`, and `lead`
     un-creatable in that workspace, permanently, with no UI remedy** (no role delete in the
     web UI)
 - **Edge rationale:** the highest-severity consequence found in this pass. It is a workspace-
-  scoped denial of a product feature triggered by a legal user action. FINDINGS **P-1**.
+  scoped denial of a product feature triggered by a legal user action. Product candidate **P-1**.
 
 ---
 
@@ -1232,8 +1234,8 @@ documented in the suite header the way `run-aft.sh`'s table documents the epic-r
 
 ## Part 3 — Blockers & new seams needed
 
-Numbering follows `FINDINGS.md` conventions: **P-n** are candidate §1 product entries,
-**S-n** are candidate §3 stack/test-framework entries.
+Numbering is local to this plan: **P-n** are product candidates and **S-n** are
+stack/test-framework candidates. Promote actionable items to local Loom issues.
 
 ### P-1 — Custom prompts share the workspace role namespace with built-in templates
 
@@ -1334,7 +1336,7 @@ backends remains open.
 
 ### S-2 — `seed-session` (ADR-0001 family)
 
-**Severity:** stack · **Status:** already the named next candidate (`FINDINGS.md:381-388`)
+**Severity:** stack · **Status:** candidate for local issue triage
 
 Not strictly required by this plan, but it would let a custom-prompt scenario assert a
 recorded orchestration session for the agent

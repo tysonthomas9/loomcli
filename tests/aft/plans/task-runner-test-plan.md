@@ -484,7 +484,7 @@ then a best-effort `pkill`-by-signature of any `loom … task <agent>` left runn
   - `expect {value: {testid: create-agent-name, equals: "worker-a-${RUN_ID:-local}"}}` — the form
     is **not** reset on error (`CreateAgentModal.tsx:355-365` resets only on success).
   - Readback: `GET /agents` still contains exactly one agent with that name.
-- **Edge rationale**: FINDINGS §1.6 was exactly this failure mode for issues (server warned, UI
+- **Edge rationale**: a former issue-creation regression had this exact failure mode (server warned, UI
   dropped it). The agent path has the same shape and no test.
 - **Status**: ready to write.
 
@@ -670,7 +670,7 @@ then a best-effort `pkill`-by-signature of any `loom … task <agent>` left runn
   - Agent readback: `state` unchanged (`idle` or unset), `live_status` not `working`.
 - **Edge rationale**: the availability check short-circuits *before* any backend invocation
   (`task.go:195-206`), so this case needs no stub work at all — it is the cheapest supervision-edge
-  test available and it pins the `has_design` gate that FINDINGS-adjacent regressions have broken
+  test available and it pins the `has_design` gate that adjacent contract regressions have broken
   before (`ready.go:225-230` documents a real "perpetual NoWork" incident).
 - **Status**: ready to write.
 
@@ -820,7 +820,7 @@ Revision 2 called this one case "ready" while its body required blocked TSK-D9. 
   - `GET /agents` no longer lists it; the agents rail and the monitor `agent-activity-panel` no longer
     contain the name (allow one 5 s store-poll cycle plus a reload, as `zz-agent-flow:78-86` does).
   - The worktree directory still exists on disk. Document this as the current contract; if it is
-    considered a leak, that is a FINDINGS entry, not a test failure.
+    considered a leak, that is a local Loom issue, not a test failure.
   - Re-creating an agent with the same name now succeeds (the 409 from TSK-D5 is gone).
 - **Status**: ready to write.
 
@@ -901,8 +901,8 @@ Revision 2 called this one case "ready" while its body required blocked TSK-D9. 
   `Quarantined` (`components/IssueCard/IssueCard.tsx:310-319`, **no testid**, see **B4**) — and the
   card sits in `section[data-status=blocked]`. Assert the `title` attribute carries the kill-timeline
   explanation.
-- **Edge rationale**: `COVERAGE-PLAN.md:125` deferred quarantine as "supervisor runtime, not
-  browser-observable deterministically". That is true of *entering* quarantine; the *rendering* is
+- **Edge rationale**: the historical coverage plan deferred quarantine as "supervisor runtime,
+  not browser-observable deterministically". That is true of *entering* quarantine; the *rendering* is
   browser-observable once an API actor writes the same state, and it is the operator-facing half.
   Daemon-driven entry into quarantine remains outside this deterministic scenario.
 - **Status**: ready to write.
@@ -1166,7 +1166,7 @@ restart budgets never run. Options:
   starts something" testable without a long-lived process.
 
 ### B3 — `seed-session` is still missing
-FINDINGS §3.10 already names it. `seed-transcript` creates a session record but hardcodes
+`LOOMCLI-219` tracks it. `seed-transcript` creates a session record but hardcodes
 `AgentID: "distributed-smoke-seed"` (`internal/cli/daemon/seed_transcript_cmd.go:75-84`), so it
 cannot stand in for *this* agent's run. A `loom daemon seed-session --workspace --agent --task
 --status --exit-code --files-changed [--diff <file>]` composing `sessions.Store` the way
@@ -1228,7 +1228,7 @@ Evidence, in the order it should be checked by anyone tempted to re-litigate thi
 
 The product story the field's own doc comment describes — "Lets the UI explain why a stalled agent
 stopped instead of showing a bare 'agent missing'" (`domain/agent.go:75-77`) — is **unimplemented**.
-That is the FINDINGS entry: not a rendering bug, a missing surface. The comment in
+That is the local issue: not a rendering bug, a missing surface. The comment in
 `IssueCard.agentRow.test.tsx` says live agent activity now belongs to "the issue detail panel and the
 epic header", so that is where a future implementation would land.
 
@@ -1243,7 +1243,7 @@ available even if B2 lands.
 filter in `buildClaimOpts` (`supervisor/claim.go:105-107`) and in the CLI's own availability check
 (`internal/cli/agent/task.go:196`) is dead for every UI-created agent. Repo scoping still works, but
 only through the `SourceRepos` path (`internal/cli/config/repos.go:14-60`). Two consequences: TSK-D13
-must assert the `SourceRepos` behavior, and this deserves a FINDINGS entry in its own right, because
+must assert the `SourceRepos` behavior, and this deserves a local Loom issue in its own right, because
 the two mechanisms are documented as if both were live. Related: `internal/cli/task_router.go:111-119`
 scores a repo mismatch at **5, not 0**, and `SelectBestTask` keeps anything above 0
 (`task_router.go:146`) — so if the backend `Ready` filter ever stops applying, repo scope degrades
@@ -1302,7 +1302,7 @@ that state fails: `SelectAgentRepos` returns nothing
 empty set with `workspace has no repos for agent` (`agent_service.go:416-422`), after which the
 compensating delete removes the row (`:384`). Either the copy should stop promising workspace scope,
 or zero-repo background agents should be creatable without a worktree. TSK-D6 asserts both halves so
-the contradiction is guarded whichever way it is resolved. Candidate FINDINGS entry.
+the contradiction is guarded whichever way it is resolved. Candidate local Loom issue.
 
 ### B12 — No injectable failure for `POST /agents/{name}/start`
 TSK-D8b needs the start call to fail while the agent stays in the dropdown's list. Today the only
@@ -1363,7 +1363,7 @@ Legend — **Status**: `ready` = writable today; `blocked:Bn` = needs the named 
 | TSK-D15 | start/stop/restart/yield contracts | edge | `surface-suites` | none | 200/200/202/202 + state pairs + 400/404/501 | ready |
 | TSK-D16 | Archive Logs branch for role=task | happy | `suites/zz-task-runner` | `zz-agent-flow` case 1 (lead) | `terminal/info mode == archive`; task role | ready |
 | TSK-D17 | Agent visible on all surfaces | happy | `suites/zz-task-runner` | `zz-agent-flow` case 1 (lead) | Background subgroup classification | ready |
-| TSK-D18 | API-seeded quarantine badge presentation | edge | `suites/zz-task-runner` | none (deferred in COVERAGE-PLAN) | rendering half only; daemon entry not asserted | ready |
+| TSK-D18 | API-seeded quarantine badge presentation | edge | `suites/zz-task-runner` | none (historically deferred) | rendering half only; daemon entry not asserted | ready |
 | TSK-D19 | Agent-health fields on the wire | edge | `surface-suites` | none | guards the contract; **no UI exists** (B6) | ready (low value) |
 | **TSK-R1** | **UI-created agent, real backend, e2e** | happy | `real-suites-task-agent` ×4 | `real-suites-*` cover path B only | path A + agent identity + worktree placement | ready (new tier) |
 | TSK-R2 | Multi-task epic, dependency-ordered | happy | `real-suites-task-agent` (codex) | `e2e/epic_runner_codex.sh` (CLI harness, stubbed) | real backend, supervisor loop, 3 sessions, real `depends_on` | ready |

@@ -184,7 +184,7 @@ tests:
           echo "epic assignment never reached delivered against the live runtime"
           echo "NOTE: delivery_state compares the lead's stored marker against the agent row's"
           echo "CURRENT UpdatedAt, so ANY later write to that row flips a genuinely delivered"
-          echo "assignment back to 'pending' permanently (FINDINGS §1.28). If the dump below"
+          echo "assignment back to 'pending' permanently (LOOMCLI-208). If the dump below"
           echo "shows parent set and an orchestrator_session_id present, this is very likely"
           echo "that known race rather than a delivery regression."
           cat "$AFT_WORK_DIR/ll1-monitor.json" 2>/dev/null || true

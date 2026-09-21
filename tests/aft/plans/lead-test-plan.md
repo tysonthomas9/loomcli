@@ -5,8 +5,9 @@ cards in `CreateAgentModal`. Covers creation, the two lead runtimes, the termina
 surfaces that launch them, and the lead-only UI (epic assignment, delivery state,
 inbox indicators).
 
-Companion docs: `tests/aft/README.md` (tier rules, step DSL), `tests/aft/FINDINGS.md`
-(§2a, §3.8, §3.9, §3.10), `tests/aft/COVERAGE-PLAN.md` (deferred terminal items).
+Companion sources: `tests/aft/README.md` (tier rules and step DSL),
+`tests/aft/coverage/scenario-map.yaml` (coverage gaps), and local Loom issues
+`LOOMCLI-200`, `LOOMCLI-201`, and `LOOMCLI-205` (actionable follow-ups).
 
 ---
 
@@ -243,8 +244,8 @@ profile `AgentBackend` (`agent_session.go:361-377`).
 
 **Consequence worth writing down:** because Terminal is the default tab,
 `zz-agent-flow` case 1's `open: /ws/E2E-WS-AGENT/agents/nova` **already spawns a
-`loom lead` PTY today**. It is entirely unasserted. See FINDINGS §2a for the
-matching observation on `/ws/:id/terminal`.
+`loom lead` PTY today**. It is entirely unasserted. The matching accepted behavior
+on `/ws/:id/terminal` should remain explicit in the scenario.
 
 ### The two lead runtimes
 
@@ -365,7 +366,7 @@ filter pills).
 
 Proposed home: **`tests/aft/suites/zz-lead-agent.test.yaml`**, own workspace
 `E2E-WS-LEAD` (zz- prefix + dedicated workspace, per README.md:158-161 and
-FINDINGS §3.7). Surface-tier cases go in
+the isolation follow-up `LOOMCLI-219`). Surface-tier cases go in
 **`tests/aft/surface-suites/lead-contracts.test.yaml`**.
 
 Shared suite header:
@@ -1461,7 +1462,7 @@ composition" rule.
 *Unlocks:* LED-D22; deterministic `inbox_failed_count` rendering; a deterministic
 `delivery_state` regression net.
 
-**B4 — `seed-session` (already named in FINDINGS §3.10).**
+**B4 — `seed-session` (tracked by `LOOMCLI-219`).**
 A command that fabricates an orchestration `AgentSession` with arbitrary metadata
 would let a deterministic test drive every `lead_runtime_status` value and every
 `delivery_state` transition (`monitor_store_data_source.go:254-269`) without a live
@@ -1513,7 +1514,7 @@ which is fragile in a page that also renders epic ids and agent names:
 | `lead-filter-{all\|running\|idle}` | work-panel filter pills | `AgentWorkPanel.tsx:403-430` |
 | `agent-tab-{terminal\|info\|git\|logs\|diff\|files}` | agent editor tab buttons | `views/AgentEditorGroups.tsx:16-40` |
 
-Same class of gap as FINDINGS §3.9 (DiffTab/DiffFileRow). Until they land, LED-D16 /
+Same class of stable-selector gap tracked by `LOOMCLI-219`. Until they land, LED-D16 /
 LED-D18 must scope through `role`/`aria-label` selectors, which exist only for the
 filter pills.
 
@@ -1573,7 +1574,7 @@ agent-specific `Controlled Codex stub connected:` fragments. A focused strict br
 run with screenshots passed on September 2, 2026. LED-D8b still uses the short
 `not installed` fragment when its separate PATH-isolation seam is available.
 
-**B11 — No `ws:` step in the aft DSL** (COVERAGE-PLAN.md:121-126).
+**B11 — No `ws:` step in the aft DSL.**
 Not a blocker for this plan: the browser is the actor for every lead terminal case, so
 the WebSocket is exercised through `terminal-wrapper` rather than directly.
 

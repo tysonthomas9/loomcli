@@ -581,9 +581,9 @@ stop_owned_daemon() {
     # root.go's trace-flush handler calls signal.Reset(SIGTERM) then re-raises, which
     # kills the process before the daemon's own handler drains anything — measured
     # exit 143 with zero shutdown markers, while SIGINT and SIGHUP both exit 0 with a
-    # full graceful shutdown (FINDINGS §1.24, reproduced 3/3). Sending TERM here made
+    # full graceful shutdown (LOOMCLI-209, reproduced 3/3). Sending TERM here made
     # every worker-tier run report daemon=failed for a product bug the harness cannot
-    # fix, masking whether cleanup actually worked. Revert to TERM once §1.24 lands.
+    # fix, masking whether cleanup actually worked. Revert to TERM once LOOMCLI-209 lands.
     kill -INT "$pid" 2>/dev/null || true
     # runDaemonMainLoop allows a bounded 30s supervisor drain plus 10s for its
     # state writer. Give that real graceful path room before declaring a leak.

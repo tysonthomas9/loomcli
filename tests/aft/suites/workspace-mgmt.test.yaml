@@ -95,7 +95,7 @@ tests:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
         intent: "Wait until the workspace board is ready"
-      # rename via the real browser path (FINDINGS §1.12 fixed): the
+      # rename via the real browser path (the former regression is fixed): the
       # per-workspace overflow → Rename now lives in the WorkspaceSwitcher
       # overlay. Open it and isolate the created workspace by search; the pinned
       # active row keeps its own overflow, so target the created workspace's exact

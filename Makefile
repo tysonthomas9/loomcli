@@ -481,7 +481,7 @@ test-aft-live-interactive:
 # The repo remote is a throwaway local bare repository; no hosted git mutation.
 # NO working spend ceiling exists for claude: --max-budget-usd is "--print only" per
 # `claude --help`, and the worker path deliberately omits -p, so LOOM_MAX_BUDGET_USD is
-# inert there (tests/aft/README.md and FINDINGS §1.25). Treat LIVE_BACKEND=claude as
+# inert there (LOOMCLI-207). Treat LIVE_BACKEND=claude as
 # uncapped spend.
 test-aft-live-workers:
 	@echo "Running aft LIVE WORKER tier against real $(LIVE_BACKEND) with an owned daemon (spends that account's rate window)..."

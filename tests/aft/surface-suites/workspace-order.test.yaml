@@ -1,5 +1,5 @@
-# Surface tier: workspace reorder is intentionally UI-unreachable (FINDINGS
-# §1.12); positional ordering was left out of the search-filtered quick switcher
+# Surface tier: workspace reorder is intentionally UI-unreachable; positional ordering
+# was left out of the search-filtered quick switcher
 # by design. This suite guards only the published API contract. Promote it when
 # a mounted human-facing reorder control exists.
 suite: workspace-order-surface

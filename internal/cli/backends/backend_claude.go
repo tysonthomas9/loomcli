@@ -294,7 +294,7 @@ func buildClaudeRunTurnArgs(resumeSessionID string) []string {
 	// comment here claimed the cap "carries over to the RunTurn path" — it does not,
 	// and that claim is what made an uncapped worker look capped. The flag is kept
 	// so the intent survives if Claude ever honors it interactively; the honest
-	// statement of today's behavior lives in tests/aft/FINDINGS.md §1.25.
+	// statement of today's behavior is tracked by LOOMCLI-207.
 	if budget := resolveMaxBudgetUSD(); budget != "" {
 		args = append(args, "--max-budget-usd", budget)
 	}

@@ -304,7 +304,7 @@ tests:
           import json, sys
           data = json.load(open(sys.argv[1])).get("data") or {}
           # is_active/status is the finalization marker. has_transcript is NOT: real
-          # codex worker sessions finish with has_transcript=false (FINDINGS §1.27 — no
+          # codex worker sessions finish with has_transcript=false (LOOMCLI-166 — no
           # native transcript file and no event-store entries are produced), so selecting
           # on it waits forever for a session that will never exist.
           finalized = [s for s in (data.get("sessions") or [])
@@ -340,7 +340,7 @@ tests:
           assert s.get("exit_code") == 0, s
           assert int(s.get("files_changed") or 0) >= 1, s
           assert s.get("has_diff") is True, s
-          # PINNED KNOWN GAP — FINDINGS §1.27. A real codex worker session finalizes with
+          # PINNED KNOWN GAP — LOOMCLI-166. A real codex worker session finalizes with
           # has_transcript=false. Mechanism, verified in source: HasTranscript is set only
           # from a native transcript FILE of non-zero size, or from event-store entries for
           # that session id (webui/svcimpl/session_service.go:185-190). For these runs
@@ -351,7 +351,7 @@ tests:
           # Asserting True would keep this tier permanently red; asserting False makes it a
           # tripwire that fires the moment transcripts start being captured.
           assert s.get("has_transcript") is False, \
-              ("FINDINGS §1.27 looks fixed — restore the transcript assertion here", s)
+              ("LOOMCLI-166 looks fixed — restore the transcript assertion here", s)
           evidence = s.get("evidence") or {}
           assert evidence.get("status") == "ok", evidence
           assert not evidence.get("conflicts"), evidence
@@ -641,7 +641,7 @@ tests:
           import json, sys
           data = json.load(open(sys.argv[1])).get("data") or {}
           # is_active/status is the finalization marker. has_transcript is NOT: real
-          # codex worker sessions finish with has_transcript=false (FINDINGS §1.27 — no
+          # codex worker sessions finish with has_transcript=false (LOOMCLI-166 — no
           # native transcript file and no event-store entries are produced), so selecting
           # on it waits forever for a session that will never exist.
           finalized = [s for s in (data.get("sessions") or [])
@@ -678,9 +678,8 @@ tests:
           fi
           curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS/issues/$task" > "$AFT_WORK_DIR/lw2-issue.json"
           # Native evidence comes from the agent's own event log, not the transcript
-          # endpoint: FINDINGS §1.2 (HIGH, open) means fleet-db serves no artifact
-          # content, so a real codex planning session finalizes with has_transcript=false
-          # and the transcript route cannot succeed. See the pinned tripwire below.
+          # endpoint. LOOMCLI-166 tracks the capture/finalization gap that leaves a real
+          # codex planning session with has_transcript=false. See the pinned tripwire below.
           ws_path="$(cat "$AFT_WORK_DIR/lw-workspace.path")"
           agent_log="${ws_path%/workspaces/*}/.loom/logs/E2E-WS/agents/lw-plan-$run.log"
           test -s "$agent_log" || { echo "no agent event log at $agent_log" >&2; exit 1; }
@@ -699,9 +698,9 @@ tests:
           assert len(design) >= 700, len(design)
           assert session.get("backend") == backend, session
           assert session.get("exit_code") == 0, session
-          # PINNED KNOWN GAP — FINDINGS §1.2 (HIGH, open). Tripwire: fails when fixed.
+          # PINNED KNOWN GAP — LOOMCLI-166. Tripwire: fails when fixed.
           assert session.get("has_transcript") is False, \
-              ("FINDINGS §1.27 looks fixed — restore the transcript assertion here", session)
+              ("LOOMCLI-166 looks fixed — restore the transcript assertion here", session)
           evidence = session.get("evidence") or {}
           assert evidence.get("status") == "ok", evidence
           assert not evidence.get("conflicts"), evidence

@@ -13,7 +13,7 @@ import (
 
 // A Planner writing its design sends design + design_format together. fleet-db
 // strict-decodes and rejects design_format, which used to fail the whole PATCH
-// and lose the design with it (FINDINGS §1.13). The design must still land.
+// and lose the design with it (LOOMCLI-206). The design must still land.
 func TestUpdateDropsUnknownFieldAndKeepsTheRest(t *testing.T) {
 	var bodies []map[string]interface{}
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {

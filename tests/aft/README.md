@@ -304,8 +304,11 @@ Every run writes `tests/aft/reports/report.html` — a self-contained run browse
 navigation, run history + trend, step screenshots, video playback with a step timeline,
 agent verdicts).
 
-Product bugs and stack-improvement work surfaced by these runs are tracked in
-[`FINDINGS.md`](FINDINGS.md).
+Product bugs surfaced by these runs are tracked as local Loom issues under
+`LOOMCLI-205` (`loom data show LOOMCLI-205`). Agent-review evidence follow-ups
+remain in `LOOMCLI-200` and `LOOMCLI-201`. Coverage gaps are maintained in
+[`coverage/scenario-map.yaml`](coverage/scenario-map.yaml), not in a parallel
+Markdown backlog.
 
 ## Coverage
 

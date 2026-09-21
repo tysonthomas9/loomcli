@@ -154,7 +154,7 @@ states:
                 !document.querySelector('[data-testid=owner-saving]');
             })()
         intent: Wait until the saved owner renders in the trigger without an error.
-      # FINDINGS §1.22: a stale board→details overwrite can revert the rendered
+      # LOOMCLI-216: a stale board→details overwrite can revert the rendered
       # owner moments later, so the instant expects pin only the stable no-error
       # contract; the next state proves persistence from a fresh load.
       - expect: { count: { selector: "[data-testid=owner-error]", equals: 0 } }

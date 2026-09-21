@@ -1,5 +1,5 @@
 # Surface tier: this fabricates legacy inline HTML because per-issue
-# design_format is blocked by FINDINGS §1.13. It guards DesignPanel's compatibility
+# design_format is blocked by LOOMCLI-206. It guards DesignPanel's compatibility
 # auto-detect, not a product-correct authoring scenario. Promote when the per-issue
 # format contract lands and a faithful actor can create formatted design content.
 suite: design-format-legacy-surface
