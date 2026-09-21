@@ -66,7 +66,13 @@ func checkProfileCredentials() CheckResult {
 		}
 	}
 
-	total := len(profiles)
+	return credentialCheckResult(hollow, unreadable, len(profiles))
+}
+
+// credentialCheckResult turns the buckets into the one CheckResult the check
+// reports. It is split out from checkProfileCredentials so the enumerate-and-
+// bucket loop and the three-way verdict each stay readable on their own.
+func credentialCheckResult(hollow, unreadable []credentialFault, total int) CheckResult {
 	switch {
 	case len(hollow) > 0:
 		detail := credentialFaultLines(hollow)
