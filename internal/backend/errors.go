@@ -96,7 +96,33 @@ func IsKind(err error, kind ErrorKind) bool {
 // state is already true, so callers may treat it as an idempotent success.
 // Deliberately narrow: other KindConflict closes (open blockers,
 // dependencies, claim races) must keep failing.
+//
+// It answers "was my close redundant?". For "is the write target terminal?"
+// — a different question about a different operation — use
+// IsIssueClosedConflict.
 func IsAlreadyClosedConflict(err error) bool {
+	return isClosedRowConflict(err)
+}
+
+// IsIssueClosedConflict reports whether err is a conflict raised because the
+// TARGET ISSUE IS TERMINAL — the server refusing a write with "issue is
+// closed". Callers use it to tell a lost race (retryable) from a decision
+// already taken (not retryable): no number of retries can write to a row that
+// is closed by design.
+//
+// It answers "is the target terminal?", where IsAlreadyClosedConflict answers
+// "was my close redundant?". The server phrases both the same way, so both
+// delegate to isClosedRowConflict; they are kept apart because the callers'
+// questions — and the right response to a true answer — differ.
+func IsIssueClosedConflict(err error) bool {
+	return isClosedRowConflict(err)
+}
+
+// isClosedRowConflict is the single matcher behind IsAlreadyClosedConflict and
+// IsIssueClosedConflict, so the substring list lives in exactly one place.
+// Blocker/dependency conflicts are excluded: they mention state that is not
+// the row's terminality and must keep failing their callers.
+func isClosedRowConflict(err error) bool {
 	if !IsKind(err, KindConflict) {
 		return false
 	}
