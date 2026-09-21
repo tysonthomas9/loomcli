@@ -605,6 +605,15 @@ var (
 // Keep it here rather than "tidying" it into agentprofile.
 var ErrProfileTokenUnreadable = errors.New("profile harness token unreadable")
 
+// Credential-content refusals. Aliases, exactly like the manifest sentinels
+// above, because two packages read this file: `loom doctor` reports it and the
+// spawn path refuses on it, and a second decoder of the same rule is how the
+// reporter and the gate silently stop agreeing.
+var (
+	ErrProfileCredentialsHollow     = agentprofile.ErrCredentialsHollow
+	ErrProfileCredentialsUnreadable = agentprofile.ErrCredentialsUnreadable
+)
+
 // profileHarnessEnvVar maps a profile harness root to the environment variable
 // that points the harness at it. Together with agentprofile.HarnessBinary this
 // is the whole export vocabulary; a new harness is one entry in each map.
@@ -719,9 +728,30 @@ func ProfileHarnessEnv(projectDir, agent, harness string) (string, []string, err
 // but must still pick up that root's credential rather than run on whatever
 // token the operator's shell happened to hold.
 //
+// It settles the root's credential situation AS A WHOLE: not only the token it
+// exports, but the harness-owned file in the same root that could shadow it.
+// Both callers route through here — the supervisor via ProfileHarnessEnv and
+// lead.applyLeadProfile directly on the inherited-config-root path — so one
+// call gates both and neither grows a second, weaker copy.
+//
 // Neither the token nor any prefix of it appears in the returned error, and it
 // is never logged: the only place the value may go is the child's environment.
 func ProfileSecretEnv(dir, harness string) ([]string, error) {
+	// A hollow .credentials.json in this root shadows whatever token we are
+	// about to export: the harness reads its config dir first and then blocks
+	// on an interactive login prompt, which presents as a silent turn-deadline
+	// reap rather than an auth failure. Refuse here rather than launch a
+	// process that holds a worktree and a PTY for a full deadline and achieves
+	// nothing.
+	//
+	// Only the hollow case blocks. An unreadable or unrecognized file falls
+	// through deliberately: the harness rewrites this file at runtime, so a
+	// read can lose that race, and a future format change must not refuse every
+	// boot in the fleet. Those surface in `loom doctor` as a warning instead.
+	if err := agentprofile.VerifyCredentials(dir, harness); errors.Is(err, agentprofile.ErrCredentialsHollow) {
+		return nil, err
+	}
+
 	name, envVar := profileTokenFile[harness], profileTokenEnvVar[harness]
 	if name == "" || envVar == "" || dir == "" {
 		return nil, nil
