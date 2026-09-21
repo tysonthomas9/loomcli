@@ -137,6 +137,27 @@ Three properties the implementation is built around:
   token, and no error carries it or any prefix of it — the child's environment
   is the only place the value goes. The file is mode 600, like the
   `.credentials.json` beside it.
+- **Content is checked, not just presence.** On 2026-09-11 five profiles
+  (planner, tester, worker, worker-2, worker-3) each held a structurally valid
+  281-byte `.credentials.json` — correct `scopes` and `subscriptionType`, empty
+  `accessToken` and `refreshToken`, twelve days old — and produced nothing for
+  roughly fourteen hours: processes alive at 0% CPU, zero input tokens, no
+  transcript, reaped on the per-turn deadline, while `loom doctor` stayed green.
+  The precedence is what makes it silent: `CLAUDE_CONFIG_DIR` points the harness
+  at the profile root and the harness reads that root *before* the environment,
+  so a hollow `.credentials.json` **shadows** the perfectly good
+  `CLAUDE_CODE_OAUTH_TOKEN` injected beside it and the harness blocks on an
+  interactive login prompt instead of failing. `agentprofile.VerifyCredentials`
+  now reads that file's content: a hollow one fails `loom doctor`'s
+  `agent_profile_credentials` check and refuses the spawn, while an unparseable
+  or unrecognized one only warns — the harness rewrites this file at runtime, so
+  a read can lose that race, and a format change must not brick a fleet at boot.
+  An **absent** file stays a first-class pass: it is how the profiles that never
+  broke are configured. The repair is `rm <profile>/.credentials.json`, stated
+  and never performed — `--fix` re-blesses a version pin and nothing else.
+  The durable fix is upstream of this repo: now that `oauth-token` is the
+  profile's identity, the operator's provisioner should stop seeding
+  `.credentials.json` at all, which removes the shadow rather than detecting it.
 
 `loom lead` applies the same rule, including when it *inherits* its config root
 from the workspace launcher: the launcher exports the directory and nothing

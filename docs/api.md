@@ -4336,3 +4336,61 @@ Two limits are structural:
   the repair there is the operator's provisioner.
 - Nothing in the daemon ever re-blesses. `--fix` is reachable only from an
   operator-typed command, so a harness upgrade always passes through a human.
+
+### `agent_profile_credentials`
+
+Inspects the **content** of each provisioned profile's harness-owned credential
+file, `<agent>/claude/.credentials.json`. This is the one file in a profile root
+that loom neither writes nor fingerprints — the harness owns it and rewrites it
+at runtime on token refresh, which is why it sits outside the manifest's
+allowlist and why nothing read it until a hollow one caused an outage.
+
+**Absent is a pass.** A profile with no `.credentials.json` is the recommended
+configuration: it authenticates with the `CLAUDE_CODE_OAUTH_TOKEN` the
+supervisor injects from `<profile>/oauth-token`, and there is nothing to shadow
+it. The pass summary says "or none" precisely so it never implies a file was
+found.
+
+**Why a hollow file is a fault.** `CLAUDE_CONFIG_DIR` points the harness at the
+profile root, and the harness reads its config dir *before* the environment. A
+`.credentials.json` whose `claudeAiOauth.accessToken` is empty therefore
+**shadows** the perfectly good injected token, and the harness blocks on an
+interactive login prompt under its PTY instead of exiting. That presents as
+silence — the process alive at 0% CPU, no transcript, zero input tokens — until
+the turn deadline reaps it. On 2026-09-11 five profiles sat in this state for
+roughly fourteen hours while every other check reported healthy.
+
+| Condition | Status | Summary |
+|-----------|--------|---------|
+| File absent, or `accessToken` non-empty | `pass` | `N agent profile(s) have a usable harness credential or none` |
+| `accessToken` key absent, empty, whitespace-only, or not a string | `fail` | `N of M agent profile(s) carry an empty harness credential` |
+| Unparseable or unreadable after one retry | `warn` | `N of M agent profile(s) have an unreadable harness credential` |
+| Valid JSON with no recognizable OAuth object | `warn` | *(same unreadable summary)* |
+| No `.loom/agent-profiles` at all | *(no output)* | the check is skipped entirely |
+
+The severity split is deliberate. A hollow file is stable and unambiguous, so it
+is a `fail` and the spawn path refuses to launch a profile carrying one. An
+unreadable or unrecognized file may be a read that lost the race with the
+harness's own rewrite, or a harness format change; refusing every boot on either
+would cost far more than the one turn deadline that is the status quo, so those
+warn and still launch.
+
+Only the access token is judged. An expired `expiresAt` is refreshed by the
+harness, and `refreshToken` and `scopes` are policy this check has no business
+deciding.
+
+`Detail` names each failing profile — the agent, its directory, the shadowing
+explanation, and the repair — sorted by agent. Healthy profiles never appear.
+
+**Repair:** `rm <profile>/.credentials.json`. The injected env token then takes
+over, which is exactly how the profiles that were never seeded a credential file
+kept working throughout the outage.
+
+**`--fix` never removes a credential file.** `loom doctor --fix` re-blesses a
+version pin and nothing else; deleting or renaming a credential is irreversible
+content mutation, and profile content routes to the operator's provisioner —
+the same boundary the manifest checks draw. A failing result says so explicitly
+when `--fix` was passed.
+
+No token bytes reach any error, summary, detail, log line or `--json` field:
+what is reported is the path and the reason only.
