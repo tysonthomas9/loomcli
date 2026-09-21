@@ -2,7 +2,8 @@
 
 Date: 2026-09-21 (America/Los_Angeles)
 
-Status: **blocked at provisioning; browser feasibility remains unverified**.
+Status: **blocked by the local Podman VM provider; browser feasibility remains
+unverified**.
 
 ## Observed host state
 
@@ -43,3 +44,48 @@ the shared machine is required before the runtime proof can proceed.
 
 The prototype preflight now requires `LOOM_KERNEL_PODMAN_MACHINE` and refuses
 `podman-machine-default`, so it cannot silently cross this boundary.
+
+## Dedicated-machine attempt
+
+After the user freed space, the data volume had 70 GiB available. The prototype
+created `loom-kernel-browser-221` with these explicit limits:
+
+- AppleHV, rootless, user-mode networking;
+- 4 CPUs;
+- 10 GiB memory and 2 GiB swap; and
+- 40 GiB maximum virtual disk.
+
+No shared machine was started. Podman 5.8.2 reported that the dedicated machine
+started successfully, but it never became reachable. Its serial log showed
+Fedora CoreOS 44.20260829.3.1 entering emergency mode during Ignition:
+
+```text
+creating or modifying user "core": exit status 10
+useradd: cannot lock /etc/group; try again later.
+Ignition failed: failed to create users/groups
+```
+
+This matches the failure shape tracked in upstream Podman issue #28439, where
+AppleHV reports startup success but the guest remains unusable after Ignition
+or root-filesystem failures:
+<https://github.com/containers/podman/issues/28439>.
+
+The installed Homebrew Podman has no usable fallback provider: QEMU is
+unsupported and `libkrun` has no installed `krunkit` binary. Installing a new
+provider or replacing Homebrew Podman is a separate host-software decision.
+
+The task-owned VM was stopped by terminating only its exact stuck Podman/vfkit
+processes after normal `podman machine stop` hung. `podman machine rm -f`
+removed the managed VM, and the three exact residual task files (lock, EFI
+variable store, and Ignition socket) were deleted. Final verification showed:
+
+- no managed prototype machine;
+- no prototype connection;
+- no prototype process or listener;
+- 70 GiB free; and
+- no Kernel image or container created.
+
+The runtime lifecycle proof therefore remains blocked, not failed: Kernel itself
+has not run. The next safe options are to install a supported libkrun/krunkit
+provider or replace the Homebrew Podman installation with Podman's recommended
+macOS installer, then recreate a new task-owned machine.

@@ -59,8 +59,10 @@ upstream headful launcher runs an 8 GiB privileged container; sharing the
 existing default machine would mix that trust and resource boundary with
 foreign containers.
 
-Provisioning is currently blocked rather than attempted: the macOS data volume
-had only 8.6 GiB free during the 2026-09-21 preflight. The existing default
-machine is stopped, has 8 GiB memory and a 60 GiB virtual disk, and was last
-running on 2026-09-06. See
+The initial capacity blocker was cleared when the macOS data volume reached
+70 GiB free. A dedicated AppleHV machine was then created, but Fedora CoreOS
+Ignition failed on first boot and left the guest in emergency mode. The failed
+task-owned machine and all of its residual files were removed. No Kernel image
+or container was created. Continuing now requires a supported Podman runtime
+path rather than another identical AppleHV retry. See
 [`evidence/LOOMCLI-221-preflight.md`](evidence/LOOMCLI-221-preflight.md).
