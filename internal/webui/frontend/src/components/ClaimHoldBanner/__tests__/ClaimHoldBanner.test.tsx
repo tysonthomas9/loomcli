@@ -205,7 +205,7 @@ describe("repo scope", () => {
   // a workspace-wide hold says so rather than leaving it blank.
   it("names every repo when the hold is unscoped", () => {
     mockUseClaimHold.mockReturnValue(holdState());
-    render(<ClaimHoldBanner />);
+    renderBanner();
     expect(screen.getByRole("status")).toHaveTextContent("all repos");
   });
 
@@ -213,7 +213,7 @@ describe("repo scope", () => {
     mockUseClaimHold.mockReturnValue(
       holdState({ repos: ["fleet-db", "loomcli"] }),
     );
-    render(<ClaimHoldBanner />);
+    renderBanner();
     expect(screen.getByRole("status")).toHaveTextContent(
       "repos fleet-db, loomcli",
     );
