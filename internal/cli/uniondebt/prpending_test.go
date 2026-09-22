@@ -18,6 +18,12 @@ import (
 // never reach the network.
 type fakeGitHub struct {
 	prs []PR
+	// all is the --state all listing the apply pass reads. Nil means "the
+	// same as prs": a test that declares only open PRs describes a repo whose
+	// every PR is open.
+	all      []PR
+	allErr   error
+	allCalls int
 	// views is the queue of mergeable values a re-poll of one PR sees, in
 	// order. The last value repeats once the queue is drained, so a PR that is
 	// permanently UNKNOWN needs a single entry.
@@ -33,6 +39,17 @@ func (f *fakeGitHub) OpenPRs(string) ([]PR, error) {
 		return nil, f.listErr
 	}
 	return append([]PR(nil), f.prs...), nil
+}
+
+func (f *fakeGitHub) AllPRs(string) ([]PR, error) {
+	f.allCalls++
+	if f.allErr != nil {
+		return nil, f.allErr
+	}
+	if f.all == nil {
+		return append([]PR(nil), f.prs...), nil
+	}
+	return append([]PR(nil), f.all...), nil
 }
 
 func (f *fakeGitHub) Mergeable(_ string, number int) (string, error) {
