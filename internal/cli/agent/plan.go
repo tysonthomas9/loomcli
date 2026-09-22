@@ -251,15 +251,35 @@ func adoptOrCreateSession(agentName, parentID, prompt, phase string) *sessions.S
 		if inheritedRuntimeDir == "" {
 			inheritedRuntimeDir = cli.GetWorkspaceRuntimeDir()
 		}
-		if prompt != "" {
-			if sessStore, err := sessions.NewStore(inheritedRuntimeDir); err == nil {
+		if sessStore, err := sessions.NewStore(inheritedRuntimeDir); err == nil {
+			if prompt != "" {
 				_ = sessStore.UpdatePrompt(inheritedSID, prompt)
 			}
+			stampAssignedTaskID(sessStore, inheritedSID)
 		}
 		backends.SetActiveSessionRuntimeEnv(inheritedRuntimeDir, inheritedSID)
 		return nil
 	}
 	return createAgentSession(agentName, parentID, prompt, phase)
+}
+
+// stampAssignedTaskID writes LOOM_ASSIGNED_TASK_ID into the session metadata
+// if the session doesn't carry a task_id yet. Daemon-created parent sessions
+// stamp it at creation; this covers sessions created before the task was
+// assigned so transcript serving can match the session to its task mid-run.
+// Unlocked read-modify-write: runs at worker startup before hook handlers
+// start patching metadata, so concurrent writers are not expected yet.
+func stampAssignedTaskID(sessStore *sessions.Store, sessionID string) {
+	assignedTaskID := os.Getenv("LOOM_ASSIGNED_TASK_ID")
+	if assignedTaskID == "" {
+		return
+	}
+	meta, err := sessStore.LoadMetadata(sessionID)
+	if err != nil || meta.TaskID != "" {
+		return
+	}
+	meta.TaskID = assignedTaskID
+	_ = sessStore.SaveMetadata(sessionID, meta)
 }
 
 // createAgentSession creates a new session for tracking.
@@ -271,6 +291,7 @@ func createAgentSession(agentName, parentID, prompt, phase string) *sessions.Ses
 	}
 	sess, _ := sessStore.CreateSession(sessions.CreateOptions{
 		AgentName: agentName, Backend: cli.ResolveBackendName(),
+		TaskID: os.Getenv("LOOM_ASSIGNED_TASK_ID"),
 		EpicID: parentID, Prompt: prompt, Phase: phase,
 	})
 	if sess != nil {

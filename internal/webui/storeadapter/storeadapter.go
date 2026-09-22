@@ -6,8 +6,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -244,6 +246,22 @@ func resolveWorkspacePath(key string) string {
 // need workspace summaries without materializing full WorkspaceData.
 func ResolveWorkspacePath(key string) string {
 	return resolveWorkspacePath(key)
+}
+
+// ExistingDefaultWorkspaceDir returns the deterministic local checkout root
+// (<LoomDir>/workspaces/<name>) when it already exists as a directory. It does
+// not create or heal workspace state. Keeping this lookup in storeadapter
+// preserves the webui -> bootstrap layering boundary for callers that already
+// depend on this adapter.
+func ExistingDefaultWorkspaceDir(name string) string {
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
+		return ""
+	}
+	dir := bootstrap.WorkspaceDir(name)
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return ""
+	}
+	return dir
 }
 
 // resolveRepoPath looks up the per-machine on-disk path for a repo within

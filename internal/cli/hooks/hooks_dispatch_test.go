@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -307,6 +308,169 @@ func TestDispatchHookEvent_SyncsSubagentTranscript(t *testing.T) {
 	}
 	if string(got) != string(subPayload) {
 		t.Errorf("subagent capture mismatch: got %q, want %q", got, subPayload)
+	}
+}
+
+// writeSessionMetadata creates sessions/<sid>/metadata.json with zero token
+// counts and returns the session directory.
+func writeSessionMetadata(t *testing.T, runtimeDir, sessionID string) string {
+	t.Helper()
+	sessDir := filepath.Join(runtimeDir, "sessions", sessionID)
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
+		t.Fatalf("create session dir: %v", err)
+	}
+	meta := map[string]interface{}{
+		"schema_version": 1,
+		"session_id":     sessionID,
+		"agent_name":     "nova",
+		"backend":        "claude",
+		"status":         "running",
+		"started_at":     "2026-03-28T10:00:00Z",
+		"exit_code":      0,
+		"input_tokens":   0,
+		"output_tokens":  0,
+	}
+	metaBytes, _ := json.MarshalIndent(meta, "", "  ")
+	if err := os.WriteFile(filepath.Join(sessDir, "metadata.json"), metaBytes, 0o600); err != nil {
+		t.Fatalf("write metadata.json: %v", err)
+	}
+	return sessDir
+}
+
+// writeUsageTranscript writes a one-line Claude transcript with the given
+// token totals and returns its path.
+func writeUsageTranscript(t *testing.T, input, output int) string {
+	t.Helper()
+	txPath := filepath.Join(t.TempDir(), "claude-transcript.jsonl")
+	line := `{"type":"assistant","message":{"id":"msg_001","role":"assistant","content":[],"usage":{"input_tokens":` +
+		strconv.Itoa(input) + `,"output_tokens":` + strconv.Itoa(output) + `,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}` + "\n"
+	if err := os.WriteFile(txPath, []byte(line), 0o600); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	return txPath
+}
+
+// backdateMetadata moves metadata.json's mtime well past the throttle window
+// so the next live capture is allowed.
+func backdateMetadata(t *testing.T, sessDir string) {
+	t.Helper()
+	old := time.Now().Add(-2 * tokenUsageThrottle)
+	if err := os.Chtimes(filepath.Join(sessDir, "metadata.json"), old, old); err != nil {
+		t.Fatalf("backdate metadata.json: %v", err)
+	}
+}
+
+func loadTokens(t *testing.T, runtimeDir, sessionID string) (int64, int64) {
+	t.Helper()
+	store, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	loaded, err := store.LoadMetadata(sessionID)
+	if err != nil {
+		t.Fatalf("LoadMetadata: %v", err)
+	}
+	return loaded.InputTokens, loaded.OutputTokens
+}
+
+func TestDispatchHookEvent_LiveEventCapturesWhenMetadataStale(t *testing.T) {
+	runtimeDir := t.TempDir()
+	sessionID := "test-session-live-capture"
+	sessDir := writeSessionMetadata(t, runtimeDir, sessionID)
+	backdateMetadata(t, sessDir)
+
+	event := &HookEvent{
+		Type:       HookTurnEnd,
+		SessionRef: writeUsageTranscript(t, 1000, 500),
+		Backend:    "claude",
+		Timestamp:  time.Now(),
+	}
+	if err := dispatchHookEvent(event, runtimeDir, sessionID); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+
+	in, out := loadTokens(t, runtimeDir, sessionID)
+	if in != 1000 || out != 500 {
+		t.Errorf("tokens = (%d, %d), want (1000, 500) — live event should capture when metadata is stale", in, out)
+	}
+}
+
+func TestDispatchHookEvent_LiveEventThrottledWhenMetadataFresh(t *testing.T) {
+	runtimeDir := t.TempDir()
+	sessionID := "test-session-live-throttled"
+	sessDir := writeSessionMetadata(t, runtimeDir, sessionID)
+	backdateMetadata(t, sessDir)
+
+	// First live dispatch captures and refreshes metadata.json's mtime.
+	first := &HookEvent{
+		Type:       HookTurnEnd,
+		SessionRef: writeUsageTranscript(t, 1000, 500),
+		Backend:    "claude",
+		Timestamp:  time.Now(),
+	}
+	if err := dispatchHookEvent(first, runtimeDir, sessionID); err != nil {
+		t.Fatalf("dispatch first: %v", err)
+	}
+
+	// Second live dispatch within the throttle window with different totals
+	// must NOT rewrite tokens.
+	second := &HookEvent{
+		Type:       HookTurnEnd,
+		SessionRef: writeUsageTranscript(t, 9000, 9000),
+		Backend:    "claude",
+		Timestamp:  time.Now(),
+	}
+	if err := dispatchHookEvent(second, runtimeDir, sessionID); err != nil {
+		t.Fatalf("dispatch second: %v", err)
+	}
+
+	in, out := loadTokens(t, runtimeDir, sessionID)
+	if in != 1000 || out != 500 {
+		t.Errorf("tokens = (%d, %d), want (1000, 500) — throttled live event must not rewrite", in, out)
+	}
+}
+
+func TestDispatchHookEvent_SessionEndBypassesThrottle(t *testing.T) {
+	runtimeDir := t.TempDir()
+	sessionID := "test-session-end-bypass"
+	sessDir := writeSessionMetadata(t, runtimeDir, sessionID)
+	backdateMetadata(t, sessDir)
+
+	first := &HookEvent{
+		Type:       HookTurnEnd,
+		SessionRef: writeUsageTranscript(t, 1000, 500),
+		Backend:    "claude",
+		Timestamp:  time.Now(),
+	}
+	if err := dispatchHookEvent(first, runtimeDir, sessionID); err != nil {
+		t.Fatalf("dispatch first: %v", err)
+	}
+
+	// metadata.json mtime is now fresh, but SessionEnd captures unconditionally.
+	end := &HookEvent{
+		Type:       HookSessionEnd,
+		SessionRef: writeUsageTranscript(t, 4000, 2000),
+		Backend:    "claude",
+		Timestamp:  time.Now(),
+	}
+	if err := dispatchHookEvent(end, runtimeDir, sessionID); err != nil {
+		t.Fatalf("dispatch end: %v", err)
+	}
+
+	in, out := loadTokens(t, runtimeDir, sessionID)
+	if in != 4000 || out != 2000 {
+		t.Errorf("tokens = (%d, %d), want (4000, 2000) — SessionEnd must bypass the throttle", in, out)
+	}
+}
+
+func TestShouldCaptureTokenUsage_MissingMetadata(t *testing.T) {
+	runtimeDir := t.TempDir()
+	store, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	if !shouldCaptureTokenUsage(store, "no-such-session", tokenUsageThrottle) {
+		t.Errorf("shouldCaptureTokenUsage = false for missing metadata.json, want true")
 	}
 }
 
