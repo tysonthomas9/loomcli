@@ -20,6 +20,39 @@ const (
 )
 
 // handlePatchIssue returns a handler that performs partial updates on an issue.
+// patchIssueParams maps a decoded PATCH body onto the service call. It is a
+// separate function because the mapping is the part that grows with the issue
+// schema, and inlining it pushed HandlePatchIssue past funlen's limit, which
+// fails `make check` for every branch that carries this handler.
+func patchIssueParams(issueID, actor string, req *PatchIssueRequest) service.PatchIssueParams {
+	return service.PatchIssueParams{
+		IssueID:            issueID,
+		Actor:              actor,
+		Title:              req.Title,
+		Description:        req.Description,
+		Status:             req.Status,
+		Priority:           req.Priority,
+		Assignee:           req.Assignee,
+		Owner:              req.Owner,
+		Design:             req.Design,
+		DesignFormat:       req.DesignFormat,
+		AcceptanceCriteria: req.AcceptanceCriteria,
+		Notes:              req.Notes,
+		ExternalRef:        req.ExternalRef,
+		EstimatedMinutes:   req.EstimatedMinutes,
+		IssueType:          req.IssueType,
+		Repo:               req.Repo,
+		AddLabels:          req.AddLabels,
+		RemoveLabels:       req.RemoveLabels,
+		SetLabels:          req.SetLabels,
+		Pinned:             req.Pinned,
+		Parent:             req.Parent,
+		DueAt:              req.DueAt,
+		DeferUntil:         req.DeferUntil,
+		AgentState:         req.AgentState,
+	}
+}
+
 func HandlePatchIssue(svc service.IssueService) http.HandlerFunc {
 	fallbackActor := resolveOperatorActor()
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -28,33 +61,7 @@ func HandlePatchIssue(svc service.IssueService) http.HandlerFunc {
 			return
 		}
 
-		params := service.PatchIssueParams{
-			IssueID:            issueID,
-			Actor:              operatorActor(r.Context(), fallbackActor),
-			Title:              req.Title,
-			Description:        req.Description,
-			Status:             req.Status,
-			Priority:           req.Priority,
-			Assignee:           req.Assignee,
-			Owner:              req.Owner,
-			Design:             req.Design,
-			DesignFormat:       req.DesignFormat,
-			AcceptanceCriteria: req.AcceptanceCriteria,
-			Notes:              req.Notes,
-			ExternalRef:        req.ExternalRef,
-			EstimatedMinutes:   req.EstimatedMinutes,
-			IssueType:          req.IssueType,
-			Repo:               req.Repo,
-			AddLabels:          req.AddLabels,
-			RemoveLabels:       req.RemoveLabels,
-			SetLabels:          req.SetLabels,
-			Pinned:             req.Pinned,
-			Parent:             req.Parent,
-			DueAt:              req.DueAt,
-			DeferUntil:         req.DeferUntil,
-			AgentState:         req.AgentState,
-		}
-
+		params := patchIssueParams(issueID, operatorActor(r.Context(), fallbackActor), req)
 		if err := svc.PatchIssue(r.Context(), params); err != nil {
 			handler.HandleServiceError(w, err)
 			return
