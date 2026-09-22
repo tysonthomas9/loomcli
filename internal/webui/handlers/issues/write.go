@@ -97,7 +97,7 @@ func operatorActorContext(r *http.Request, fallback string) context.Context {
 	// A verified identity is carried as VERIFIED, never advisory. fleet-db
 	// returns "workspace access denied" both for the open-mode operator
 	// identity, which holds no role by construction, and for a signed-in user
-	// who is not authorised in this workspace. Stamping the second as advisory
+	// who is not authorized in this workspace. Stamping the second as advisory
 	// would let the backend retry it as the process actor — which is an
 	// authorisation bypass, not a fallback: any authenticated user without a
 	// role could write as the (admin) process identity. Their denial must

@@ -19,7 +19,7 @@ func verifiedCtx(actor string) context.Context {
 // answers "workspace access denied" for TWO different situations. For the
 // open-mode operator identity it means "this label holds no role", and
 // retrying as the process actor only restores attribution the operator never
-// had. For an authenticated user it means "you are not authorised here" — and
+// had. For an authenticated user it means "you are not authorized here" — and
 // retrying THAT as the process actor would hand any signed-in user the process
 // actor's privileges, which is a bypass rather than a fallback.
 //
