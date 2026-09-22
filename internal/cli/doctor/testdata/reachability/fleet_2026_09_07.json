@@ -1,0 +1,24 @@
+{
+  "pid": 4242,
+  "started_at": "2026-09-03T06:00:00Z",
+  "agents": [
+    {
+      "worktree": "ci-verifier",
+      "role": "ci-verifier",
+      "status": "parked",
+      "desired_state": "stopped"
+    },
+    {
+      "worktree": "planner",
+      "role": "planner",
+      "status": "stopped",
+      "last_error_class": "NoWork"
+    },
+    {
+      "worktree": "worker",
+      "role": "coder",
+      "status": "stopped",
+      "last_error_class": "NoWork"
+    }
+  ]
+}
