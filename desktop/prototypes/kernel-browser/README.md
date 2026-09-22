@@ -22,7 +22,8 @@ The result is a **capability pass and production-readiness hold**. See
 - A Loom-owned pointer and keyboard surface that dispatches validated input
   through CDP while the embedded Neko viewer remains read-only. This bypasses
   the amd64 Xorg input driver, which deadlocks under Rosetta after sustained
-  pointer activity.
+  pointer activity. Pointer mapping accounts for Neko's aspect-fit letterbox
+  and the remote Chromium window chrome before producing page coordinates.
 - CDP-injected element selection that records DOM context and a cropped PNG.
 - A control/fixture server bound to `127.0.0.1:61300`. Colima's
   `host.lima.internal` forwarding can reach that loopback listener, so no LAN

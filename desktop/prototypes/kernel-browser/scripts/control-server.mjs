@@ -111,6 +111,7 @@ const annotationScript = (note) => `(() => {
       viewport: { width: innerWidth, height: innerHeight, deviceScaleFactor: devicePixelRatio },
       capturedAt: new Date().toISOString()
     };
+    document.removeEventListener('click', handler, true);
     window.__loomAnnotationCleanup = () => {
       element.style.outline = oldOutline;
       element.style.outlineOffset = oldOffset;
@@ -157,15 +158,17 @@ async function handleApi(req, url) {
 
   if (parts[1] === "input" && parts[3] === "pointer" && req.method === "POST") {
     const payload = await body(req);
-    await cdp(selected.cdpPort, async (send) => {
-      const viewportResult = await send("Runtime.evaluate", {
-        expression: "({ width: innerWidth, height: innerHeight })",
+    const pagePoint = await cdp(selected.cdpPort, async (send) => {
+      const geometryResult = await send("Runtime.evaluate", {
+        expression: "({ screen: { width: screen.width, height: screen.height }, window: { outerWidth, outerHeight, innerWidth, innerHeight, screenX, screenY } })",
         returnByValue: true,
       });
-      const params = pointerParams(payload, viewportResult.result.value);
+      const params = pointerParams(payload, geometryResult.result.value);
+      if (!params) return null;
       await send("Input.dispatchMouseEvent", params);
+      return { x: params.x, y: params.y };
     });
-    return { accepted: true };
+    return { accepted: pagePoint !== null, pagePoint };
   }
 
   if (parts[1] === "input" && parts[3] === "key" && req.method === "POST") {

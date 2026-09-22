@@ -22,6 +22,14 @@ Status: **passed**.
 - A click dispatched through the bridge changed the fixture from `Waiting for
   lead action` to `Workflow confirmed by lead agent`. Text typed through the
   actual Loom overlay produced `Hi there` in the focused remote input.
+- A follow-up regression found that iframe-relative coordinates incorrectly
+  treated Neko letterboxing and Chromium's 143 px window chrome as page
+  content. The corrected transform maps the visible fixture button to page
+  coordinate `(678, 298)` and the button activates in both browser apps.
+- Annotation selection is now one-shot. Its capture listener removes itself
+  after selecting one element, so subsequent human clicks are no longer
+  prevented. The regression sequence selected `section.target`, captured it,
+  and then activated `Confirm workflow` without reloading the page.
 - Annotation mode was injected through CDP into the same page. Selecting the
   fixture paragraph produced selector, tag, text, URL, title, note, bounding
   rectangle, viewport, scale factor, and timestamp. CDP captured the exact

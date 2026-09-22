@@ -20,7 +20,7 @@ let activeId: AppId = "app-a";
 let queuedEpoch = 0;
 let humanControlId: AppId | null = null;
 let inputQueue: Promise<unknown> = Promise.resolve();
-let pendingMove: { x: number; y: number } | null = null;
+let pendingMove: { surfaceX: number; surfaceY: number; surfaceWidth: number; surfaceHeight: number } | null = null;
 let moveQueued = false;
 
 const root = document.querySelector<HTMLDivElement>("#app");
@@ -130,11 +130,13 @@ async function api(path: string, body?: unknown) {
   return payload;
 }
 
-function normalizedPointer(event: PointerEvent | WheelEvent) {
+function surfacePointer(event: PointerEvent | WheelEvent) {
   const rect = document.querySelector<HTMLDivElement>("#human-input")!.getBoundingClientRect();
   return {
-    x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
-    y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)),
+    surfaceX: Math.max(0, Math.min(rect.width, event.clientX - rect.left)),
+    surfaceY: Math.max(0, Math.min(rect.height, event.clientY - rect.top)),
+    surfaceWidth: rect.width,
+    surfaceHeight: rect.height,
   };
 }
 
@@ -192,7 +194,7 @@ function scheduleMove() {
 }
 
 function queueMove(event: PointerEvent) {
-  pendingMove = normalizedPointer(event);
+  pendingMove = surfacePointer(event);
   scheduleMove();
 }
 
@@ -241,16 +243,16 @@ humanInput.addEventListener("pointerdown", (event) => {
   event.preventDefault();
   humanInput.focus();
   humanInput.setPointerCapture(event.pointerId);
-  enqueuePointer({ type: "mousePressed", ...normalizedPointer(event), button: mouseButton(event.button), clickCount: event.detail || 1 });
+  enqueuePointer({ type: "mousePressed", ...surfacePointer(event), button: mouseButton(event.button), clickCount: event.detail || 1 });
 });
 humanInput.addEventListener("pointerup", (event) => {
   event.preventDefault();
-  enqueuePointer({ type: "mouseReleased", ...normalizedPointer(event), button: mouseButton(event.button), clickCount: event.detail || 1 });
+  enqueuePointer({ type: "mouseReleased", ...surfacePointer(event), button: mouseButton(event.button), clickCount: event.detail || 1 });
   if (humanInput.hasPointerCapture(event.pointerId)) humanInput.releasePointerCapture(event.pointerId);
 });
 humanInput.addEventListener("wheel", (event) => {
   event.preventDefault();
-  enqueuePointer({ type: "mouseWheel", ...normalizedPointer(event), deltaX: event.deltaX, deltaY: event.deltaY });
+  enqueuePointer({ type: "mouseWheel", ...surfacePointer(event), deltaX: event.deltaX, deltaY: event.deltaY });
 }, { passive: false });
 humanInput.addEventListener("contextmenu", (event) => event.preventDefault());
 humanInput.addEventListener("keydown", enqueueKey);

@@ -3,42 +3,65 @@ import assert from "node:assert/strict";
 
 import { keyParams, pointerParams } from "./input-bridge.mjs";
 
-test("maps normalized pointer coordinates into the remote viewport", () => {
+const browserGeometry = {
+  screen: { width: 1920, height: 1080 },
+  window: { outerWidth: 1920, outerHeight: 1080, innerWidth: 1920, innerHeight: 937, screenX: 0, screenY: 0 },
+};
+
+test("maps the visible streamed desktop through letterboxing and browser chrome", () => {
   assert.deepEqual(
     pointerParams(
-      { type: "mouseMoved", x: 0.25, y: 0.75, button: "none" },
-      { width: 1920, height: 1080 },
+      {
+        type: "mouseMoved",
+        surfaceX: 328.55,
+        surfaceY: 237.05,
+        surfaceWidth: 932,
+        surfaceHeight: 570,
+        button: "none",
+      },
+      browserGeometry,
     ),
-    { type: "mouseMoved", x: 480, y: 810, button: "none" },
+    { type: "mouseMoved", x: 677, y: 298, button: "none" },
   );
 });
 
 test("preserves click and wheel details", () => {
   assert.deepEqual(
     pointerParams(
-      { type: "mousePressed", x: 0.5, y: 0.5, button: "left", clickCount: 1 },
-      { width: 1440, height: 900 },
+      { type: "mousePressed", surfaceX: 466, surfaceY: 237.05, surfaceWidth: 932, surfaceHeight: 570, button: "left", clickCount: 1 },
+      browserGeometry,
     ),
-    { type: "mousePressed", x: 720, y: 450, button: "left", clickCount: 1 },
+    { type: "mousePressed", x: 960, y: 298, button: "left", clickCount: 1 },
   );
 
   assert.deepEqual(
     pointerParams(
-      { type: "mouseWheel", x: 0.5, y: 0.25, deltaX: 3, deltaY: -12 },
-      { width: 1440, height: 900 },
+      { type: "mouseWheel", surfaceX: 466, surfaceY: 237.05, surfaceWidth: 932, surfaceHeight: 570, deltaX: 3, deltaY: -12 },
+      browserGeometry,
     ),
-    { type: "mouseWheel", x: 720, y: 225, button: "none", deltaX: 3, deltaY: -12 },
+    { type: "mouseWheel", x: 960, y: 298, button: "none", deltaX: 3, deltaY: -12 },
   );
 });
 
-test("rejects invalid coordinates and event types", () => {
+test("rejects invalid surface coordinates and event types", () => {
   assert.throws(
-    () => pointerParams({ type: "mouseMoved", x: 1.1, y: 0 }, { width: 1, height: 1 }),
-    /normalized pointer coordinates/,
+    () => pointerParams({ type: "mouseMoved", surfaceX: 2, surfaceY: 0, surfaceWidth: 1, surfaceHeight: 1 }, browserGeometry),
+    /pointer surface coordinates/,
   );
   assert.throws(
-    () => pointerParams({ type: "touchStart", x: 0, y: 0 }, { width: 1, height: 1 }),
+    () => pointerParams({ type: "touchStart", surfaceX: 0, surfaceY: 0, surfaceWidth: 1, surfaceHeight: 1 }, browserGeometry),
     /unsupported pointer event/,
+  );
+});
+
+test("ignores clicks on letterboxing or browser chrome", () => {
+  assert.equal(
+    pointerParams({ type: "mousePressed", surfaceX: 466, surfaceY: 10, surfaceWidth: 932, surfaceHeight: 570, button: "left" }, browserGeometry),
+    null,
+  );
+  assert.equal(
+    pointerParams({ type: "mousePressed", surfaceX: 466, surfaceY: 60, surfaceWidth: 932, surfaceHeight: 570, button: "left" }, browserGeometry),
+    null,
   );
 });
 

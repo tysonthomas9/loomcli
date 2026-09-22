@@ -8,21 +8,43 @@ function finiteNumber(value, label) {
   return value;
 }
 
-export function pointerParams(payload, viewport) {
+export function pointerParams(payload, geometry) {
   if (!pointerTypes.has(payload.type)) {
     throw Object.assign(new Error(`unsupported pointer event: ${String(payload.type)}`), { status: 400 });
   }
 
-  const x = finiteNumber(payload.x, "pointer x");
-  const y = finiteNumber(payload.y, "pointer y");
-  if (x < 0 || x > 1 || y < 0 || y > 1) {
-    throw Object.assign(new Error("normalized pointer coordinates must be between 0 and 1"), { status: 400 });
+  const surfaceX = finiteNumber(payload.surfaceX, "pointer surface x");
+  const surfaceY = finiteNumber(payload.surfaceY, "pointer surface y");
+  const surfaceWidth = finiteNumber(payload.surfaceWidth, "pointer surface width");
+  const surfaceHeight = finiteNumber(payload.surfaceHeight, "pointer surface height");
+  if (surfaceWidth <= 0 || surfaceHeight <= 0 || surfaceX < 0 || surfaceX > surfaceWidth || surfaceY < 0 || surfaceY > surfaceHeight) {
+    throw Object.assign(new Error("pointer surface coordinates must be inside positive surface dimensions"), { status: 400 });
   }
 
-  const width = finiteNumber(viewport.width, "viewport width");
-  const height = finiteNumber(viewport.height, "viewport height");
-  if (width <= 0 || height <= 0) {
-    throw Object.assign(new Error("viewport dimensions must be positive"), { status: 400 });
+  const screenWidth = finiteNumber(geometry.screen.width, "screen width");
+  const screenHeight = finiteNumber(geometry.screen.height, "screen height");
+  const outerWidth = finiteNumber(geometry.window.outerWidth, "window outer width");
+  const outerHeight = finiteNumber(geometry.window.outerHeight, "window outer height");
+  const innerWidth = finiteNumber(geometry.window.innerWidth, "window inner width");
+  const innerHeight = finiteNumber(geometry.window.innerHeight, "window inner height");
+  const screenX = finiteNumber(geometry.window.screenX, "window screen x");
+  const screenY = finiteNumber(geometry.window.screenY, "window screen y");
+  if ([screenWidth, screenHeight, outerWidth, outerHeight, innerWidth, innerHeight].some((value) => value <= 0)) {
+    throw Object.assign(new Error("browser geometry dimensions must be positive"), { status: 400 });
+  }
+
+  const streamScale = Math.min(surfaceWidth / screenWidth, surfaceHeight / screenHeight);
+  const streamOffsetX = (surfaceWidth - screenWidth * streamScale) / 2;
+  const streamOffsetY = (surfaceHeight - screenHeight * streamScale) / 2;
+  const remoteX = (surfaceX - streamOffsetX) / streamScale;
+  const remoteY = (surfaceY - streamOffsetY) / streamScale;
+  const contentOffsetX = screenX + (outerWidth - innerWidth) / 2;
+  const contentOffsetY = screenY + outerHeight - innerHeight;
+  const pageX = remoteX - contentOffsetX;
+  const pageY = remoteY - contentOffsetY;
+
+  if (remoteX < 0 || remoteX > screenWidth || remoteY < 0 || remoteY > screenHeight || pageX < 0 || pageX > innerWidth || pageY < 0 || pageY > innerHeight) {
+    return null;
   }
 
   const button = payload.button ?? "none";
@@ -32,8 +54,8 @@ export function pointerParams(payload, viewport) {
 
   const params = {
     type: payload.type,
-    x: Math.round(x * width),
-    y: Math.round(y * height),
+    x: Math.round(pageX),
+    y: Math.round(pageY),
     button,
   };
 
