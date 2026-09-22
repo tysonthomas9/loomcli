@@ -146,6 +146,48 @@ describe("SessionDetailView", () => {
       expect(screen.getByText("1")).toBeInTheDocument();
     });
 
+    // A session that has not exited carries no exit code: the wire format has no
+    // null channel, so it arrives as 0. Rendering that as "0 (success)" asserts
+    // an outcome the run has not reached.
+    it("does not report success for a session that has not exited", () => {
+      const session = createSession({
+        status: "running",
+        is_active: true,
+        ended_at: undefined,
+        duration_s: 0,
+        exit_code: 0,
+      });
+      render(<SessionDetailView taskId="task-1" session={session} />);
+      expect(screen.queryByText("0 (success)")).not.toBeInTheDocument();
+    });
+
+    // Same for usage: an unfinished run has reported no telemetry yet, so "0"
+    // tokens and "$0" are fabricated values, not measurements.
+    it("does not report zero tokens or zero cost for an unfinished session", () => {
+      const session = createSession({
+        status: "running",
+        is_active: true,
+        ended_at: undefined,
+        duration_s: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        estimated_cost_usd: 0,
+      });
+      render(<SessionDetailView taskId="task-1" session={session} />);
+      expect(screen.queryByText("$0")).not.toBeInTheDocument();
+      // Outcome still reports the truth.
+      expect(screen.getByText("Running")).toBeInTheDocument();
+    });
+
+    // An aborted run never reported an exit code either.
+    it("does not report success for an aborted session", () => {
+      const session = createSession({ status: "aborted", exit_code: 0 });
+      render(<SessionDetailView taskId="task-1" session={session} />);
+      expect(screen.queryByText("0 (success)")).not.toBeInTheDocument();
+    });
+
     it("shows failed run error class in an alert banner", () => {
       const session = createSession({
         status: "failed",

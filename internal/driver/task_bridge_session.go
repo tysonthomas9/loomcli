@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -213,6 +214,27 @@ func heartbeatFlueTaskSession(ctx context.Context, st store.Store, workspaceKey,
 	}
 }
 
+// encodeResultUsage carries the usage the runner reported onto the session
+// metadata. domain.AgentSession has no usage fields, so metadata is the carrier
+// (same as diff stats) — without this the WebUI Runs tab renders every
+// control-plane session as a zero-token, zero-cost run even though the driver
+// parsed real telemetry and forwarded it to the TaskRun. Only written when
+// something was actually reported, so "no telemetry" stays distinguishable from
+// "genuinely zero".
+func encodeResultUsage(metadata map[string]string, result TaskExecResult) {
+	usage := sessions.UsageStats{
+		InputTokens:      result.InputTokens,
+		OutputTokens:     result.OutputTokens,
+		CacheReadTokens:  result.CacheReadTokens,
+		CacheWriteTokens: result.CacheWriteTokens,
+		EstimatedCostUSD: result.EstimatedCostUSD,
+	}
+	if usage.Zero() {
+		return
+	}
+	sessions.EncodeUsageMetadata(metadata, usage)
+}
+
 func (e HostBridgeTaskExecutor) finishFlueTaskSession(ctx context.Context, req TaskExecRequest, session *flueTaskSession, result TaskExecResult, runner *bridgeTaskRunnerResult, execErr error) error {
 	if e.Store == nil || session == nil {
 		return nil
@@ -236,6 +258,7 @@ func (e HostBridgeTaskExecutor) finishFlueTaskSession(ctx context.Context, req T
 	if execErr != nil {
 		metadata["task_runner_error"] = execErr.Error()
 	}
+	encodeResultUsage(metadata, result)
 	exitCode := result.ExitCode
 	if status != domain.AgentSessionCompleted && exitCode == 0 {
 		exitCode = 1
