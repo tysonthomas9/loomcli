@@ -1,5 +1,5 @@
 /**
- * Hook for executing git actions (push, pull, sync, PR, reset, target update)
+ * Hook for executing retained worktree actions (pull, PR, reset, target update)
  * with loading state management and toast feedback.
  */
 
@@ -8,9 +8,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { ApiError } from "@/api/common";
 import { getIssue, updateIssue } from "@/api/issues/issues";
 import {
-  gitPush,
   gitPull,
-  gitSync,
   gitCreatePR,
   gitReset,
   gitUpdateTarget,
@@ -32,15 +30,11 @@ export interface GitActionState {
 }
 
 export interface UseGitActionsReturn {
-  push: (target?: string) => Promise<void>;
   pull: (source?: string) => Promise<void>;
-  sync: () => Promise<void>;
   createPR: (target?: string) => Promise<void>;
   reset: (branch?: string, force?: boolean) => Promise<void>;
   updateTarget: (branch: string) => Promise<void>;
-  pushState: GitActionState;
   pullState: GitActionState;
-  syncState: GitActionState;
   prState: GitActionState;
   resetState: GitActionState;
   targetState: GitActionState;
@@ -84,9 +78,7 @@ export function useGitActions({
     };
   }, []);
 
-  const [pushState, setPushState] = useState<GitActionState>(INITIAL_STATE);
   const [pullState, setPullState] = useState<GitActionState>(INITIAL_STATE);
-  const [syncState, setSyncState] = useState<GitActionState>(INITIAL_STATE);
   const [prState, setPrState] = useState<GitActionState>(INITIAL_STATE);
   const [resetState, setResetState] = useState<GitActionState>(INITIAL_STATE);
   const [targetState, setTargetState] = useState<GitActionState>(INITIAL_STATE);
@@ -130,28 +122,6 @@ export function useGitActions({
     [showToast],
   );
 
-  const push = useCallback(
-    async (target?: string) => {
-      if (!agentName) return;
-      setPushState({ isLoading: true, error: null });
-      try {
-        const result = await gitPush(workspaceId, agentName, target);
-        if (mountedRef.current) {
-          setPushState({ isLoading: false, error: null });
-          showToast(result.message || "Push successful", { type: "success" });
-          onStatusChangeRef.current?.();
-        }
-      } catch (err) {
-        if (mountedRef.current) {
-          const msg = handleApiError(err, "Push");
-          setPushState({ isLoading: false, error: msg });
-          onStatusChangeRef.current?.();
-        }
-      }
-    },
-    [workspaceId, agentName, showToast, handleApiError],
-  );
-
   const pull = useCallback(
     async (source?: string) => {
       if (!agentName) return;
@@ -173,25 +143,6 @@ export function useGitActions({
     },
     [workspaceId, agentName, showToast, handleApiError],
   );
-
-  const sync = useCallback(async () => {
-    if (!agentName) return;
-    setSyncState({ isLoading: true, error: null });
-    try {
-      await gitSync(workspaceId, agentName);
-      if (mountedRef.current) {
-        setSyncState({ isLoading: false, error: null });
-        showToast("Sync successful", { type: "success" });
-        onStatusChangeRef.current?.();
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        const msg = handleApiError(err, "Sync");
-        setSyncState({ isLoading: false, error: msg });
-        onStatusChangeRef.current?.();
-      }
-    }
-  }, [workspaceId, agentName, showToast, handleApiError]);
 
   const createPR = useCallback(
     async (target?: string) => {
@@ -294,23 +245,17 @@ export function useGitActions({
   );
 
   const anyLoading =
-    pushState.isLoading ||
     pullState.isLoading ||
-    syncState.isLoading ||
     prState.isLoading ||
     resetState.isLoading ||
     targetState.isLoading;
 
   return {
-    push,
     pull,
-    sync,
     createPR,
     reset,
     updateTarget,
-    pushState,
     pullState,
-    syncState,
     prState,
     resetState,
     targetState,

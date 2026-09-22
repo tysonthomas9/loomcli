@@ -71,9 +71,6 @@ func (m *mockGitOps) ResolveAgentWorktree(_, name string) (*ops.AgentWorktree, e
 	}
 	return nil, errors.New("not found")
 }
-func (m *mockGitOps) Push(_, _, _, _ string) (*ops.GitPushResult, error) {
-	return &ops.GitPushResult{}, nil
-}
 func (m *mockGitOps) Pull(_, _, _, _ string) (*ops.GitPullResult, error) {
 	return &ops.GitPullResult{}, nil
 }

@@ -21,26 +21,16 @@ func TestSyncCmd_RejectsArgs(t *testing.T) {
 	}
 }
 
-func TestSyncCmd_MutuallyExclusiveFlags(t *testing.T) {
-	t.Parallel()
-	// Test that Args validation still passes even with both flags set
-	// (validation happens in runFullSync, not Args)
-	err := syncCmd.Args(syncCmd, []string{})
-	if err != nil {
-		t.Errorf("Args validation should pass, got: %v", err)
-	}
-}
-
 func TestSyncCmd_Flags(t *testing.T) {
 	t.Parallel()
-	if pushOnlyFlag := syncCmd.Flags().Lookup("push-only"); pushOnlyFlag == nil {
-		t.Error("expected --push-only flag to be registered")
-	}
-	if pullOnlyFlag := syncCmd.Flags().Lookup("pull-only"); pullOnlyFlag == nil {
-		t.Error("expected --pull-only flag to be registered")
-	}
 	if wsFlag := syncCmd.Flags().Lookup("workspace"); wsFlag == nil {
 		t.Error("expected --workspace flag to be registered")
+	}
+	if pushOnlyFlag := syncCmd.Flags().Lookup("push-only"); pushOnlyFlag != nil {
+		t.Error("obsolete --push-only flag must not be registered")
+	}
+	if pullOnlyFlag := syncCmd.Flags().Lookup("pull-only"); pullOnlyFlag != nil {
+		t.Error("obsolete --pull-only flag must not be registered")
 	}
 }
 
@@ -48,40 +38,6 @@ func TestSyncCmd_GroupID(t *testing.T) {
 	t.Parallel()
 	if syncCmd.GroupID != "git" {
 		t.Errorf("expected sync command to be in 'git' group, got %q", syncCmd.GroupID)
-	}
-}
-
-func TestSyncCmd_PushOnlyFlagLogic(t *testing.T) {
-	t.Parallel()
-	// Verify that the pushOnly condition is correct
-	pushOnly := true
-	pullOnly := false
-	if !pushOnly {
-		t.Error("expected pushOnly to be true")
-	}
-	_ = pullOnly
-}
-
-func TestSyncCmd_PullOnlyFlagLogic(t *testing.T) {
-	t.Parallel()
-	// Verify that the pullOnly condition is correct
-	pushOnly := false
-	pullOnly := true
-	if !pullOnly {
-		t.Error("expected pullOnly to be true")
-	}
-	_ = pushOnly
-}
-
-func TestSyncCmd_MutuallyExclusiveFlagsRuntime(t *testing.T) {
-	t.Parallel()
-	pushOnly := true
-	pullOnly := true
-	if !pushOnly || !pullOnly {
-		t.Error("both flags should be set for this test")
-	}
-	if pushOnly && pullOnly {
-		// This is the condition that triggers the error in runFullSync
 	}
 }
 
@@ -113,18 +69,12 @@ func TestSyncSingleWorkspace_EmptyWorktrees(t *testing.T) {
 		t.Fatalf("failed to set workspace: %v", err)
 	}
 
-	syncSingleWorkspace(deps, resolver, false, false)
+	syncSingleWorkspace(deps, resolver)
 }
 
 func TestSyncCmd_ShorthandFlags(t *testing.T) {
 	t.Parallel()
 	if wsFlag := syncCmd.Flags().ShorthandLookup("W"); wsFlag == nil {
 		t.Error("expected -W shorthand flag to be registered")
-	}
-	if pushOnlyFlag := syncCmd.Flags().Lookup("push-only"); pushOnlyFlag == nil {
-		t.Error("expected --push-only flag to be registered")
-	}
-	if pullOnlyFlag := syncCmd.Flags().Lookup("pull-only"); pullOnlyFlag == nil {
-		t.Error("expected --pull-only flag to be registered")
 	}
 }

@@ -29,64 +29,6 @@ func writeAgentGitError(w http.ResponseWriter, err error, fallbackStatus int) {
 	handler.RespondError(w, fallbackStatus, err.Error())
 }
 
-// --- Push ---
-
-type gitPushRequest struct {
-	Target string `json:"target"`
-}
-
-// HandleGitPush handles POST /api/agents/{name}/git/push
-// Merges the agent's worktree branch INTO the target branch (loom push semantics).
-func HandleGitPush(svc service.AgentService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		agentName := r.PathValue("name")
-		wsID := middleware.WorkspaceFromContext(r.Context())
-
-		var req gitPushRequest
-		if r.Body != nil {
-			defer r.Body.Close()
-			_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req)
-		}
-
-		target := req.Target
-		if target != "" && (!validGitRef.MatchString(target) || strings.Contains(target, "..")) {
-			handler.RespondError(w, http.StatusBadRequest, "invalid target branch name")
-			return
-		}
-
-		result, err := svc.GitPush(r.Context(), wsID, agentName, target)
-		if err != nil {
-			writeAgentGitError(w, err, http.StatusBadGateway)
-			return
-		}
-
-		if !result.Success && len(result.ConflictedFiles) > 0 {
-			handler.WriteJSON(w, http.StatusConflict, result)
-			return
-		}
-
-		handler.WriteJSON(w, http.StatusOK, result)
-	}
-}
-
-// --- Push All ---
-
-// HandleGitPushAll handles POST /api/git/push-all
-// Pushes all agent worktree branches to their target branches.
-func HandleGitPushAll(svc service.AgentService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		wsID := middleware.WorkspaceFromContext(r.Context())
-
-		result, err := svc.GitPushAll(r.Context(), wsID)
-		if err != nil {
-			handler.RespondError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-
-		handler.WriteJSON(w, http.StatusOK, result)
-	}
-}
-
 // --- Pull ---
 
 type gitPullRequest struct {
@@ -124,36 +66,6 @@ func HandleGitPull(svc service.AgentService) http.HandlerFunc {
 		}
 
 		handler.WriteJSON(w, http.StatusOK, result)
-	}
-}
-
-// --- Sync ---
-
-// HandleGitSync handles POST /api/agents/{name}/git/sync
-// Full push+pull cycle: first push to target, then pull from target.
-func HandleGitSync(svc service.AgentService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		agentName := r.PathValue("name")
-		wsID := middleware.WorkspaceFromContext(r.Context())
-
-		result, err := svc.GitSync(r.Context(), wsID, agentName)
-		if err != nil {
-			writeAgentGitError(w, err, http.StatusBadGateway)
-			return
-		}
-
-		// Push conflict: return partial result
-		if result.PushResult != nil && !result.PushResult.Success && len(result.PushResult.ConflictedFiles) > 0 {
-			handler.WriteJSON(w, http.StatusConflict, result)
-			return
-		}
-
-		status := http.StatusOK
-		if result.PullResult != nil && !result.PullResult.Success && len(result.PullResult.ConflictedFiles) > 0 {
-			status = http.StatusConflict
-		}
-
-		handler.WriteJSON(w, status, result)
 	}
 }
 

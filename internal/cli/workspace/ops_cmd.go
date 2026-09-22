@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/daemonregistry"
 	"github.com/tysonthomas9/loomcli/internal/cli/local"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	gh "github.com/tysonthomas9/loomcli/internal/github"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -148,11 +149,12 @@ type WorkspaceOpsDaemon struct {
 }
 
 type WorkspaceOpsRepo struct {
-	Name       string   `json:"name"`
-	LocalPath  string   `json:"local_path,omitempty"`
-	RemoteURL  string   `json:"remote_url,omitempty"`
-	Groups     []string `json:"groups,omitempty"`
-	SourceRepo string   `json:"source_repo_id,omitempty"`
+	Name          string   `json:"name"`
+	LocalPath     string   `json:"local_path,omitempty"`
+	RemoteURL     string   `json:"remote_url,omitempty"`
+	DefaultBranch string   `json:"default_branch,omitempty"`
+	Groups        []string `json:"groups,omitempty"`
+	SourceRepo    string   `json:"source_repo_id,omitempty"`
 }
 
 type WorkspaceOpsAgent struct {
@@ -469,9 +471,15 @@ func collectOpsRepos(status *WorkspaceOpsStatus, repos []*domain.Repo, localStat
 		}
 		repoByName[repo.Name] = repo
 		status.Repos = append(status.Repos, WorkspaceOpsRepo{
-			Name:       repo.Name,
-			LocalPath:  repoLocalPath(localState, repo.Name),
-			RemoteURL:  repo.RemoteURL,
+			Name:      repo.Name,
+			LocalPath: repoLocalPath(localState, repo.Name),
+			RemoteURL: repo.RemoteURL,
+			DefaultBranch: func() string {
+				if repo.DefaultBranch != "" {
+					return repo.DefaultBranch
+				}
+				return "main"
+			}(),
 			Groups:     append([]string(nil), repo.Groups...),
 			SourceRepo: repo.SourceRepoID,
 		})
@@ -655,7 +663,8 @@ func agentWorktreePath(localState bootstrap.WorkspaceLocalState, repoByName map[
 // daemons launched from arbitrary directories are no longer reported as
 // missing.
 func workspaceOpsGlobalProblems(status *WorkspaceOpsStatus) []WorkspaceOpsProblem {
-	var problems []WorkspaceOpsProblem
+	problems := workspaceOpsMergeProblems(status, cli.GetDeps(nil).Exec)
+
 	if len(status.Repos) == 0 {
 		problems = append(problems, WorkspaceOpsProblem{
 			Severity: "info",
@@ -689,6 +698,29 @@ func workspaceOpsGlobalProblems(status *WorkspaceOpsStatus) []WorkspaceOpsProble
 			Message:  "both desktop-owned and workspace-local daemons appear to be running",
 			Fix:      "stop the manual workspace-local daemon and let desktop local runtime supervise agents",
 		})
+	}
+	return problems
+}
+
+func workspaceOpsMergeProblems(status *WorkspaceOpsStatus, exec cli.ExecRunner) []WorkspaceOpsProblem {
+	var problems []WorkspaceOpsProblem
+	for _, repo := range status.Repos {
+		slug, ok := gh.RepositorySlug(repo.RemoteURL)
+		if !ok {
+			continue
+		}
+		run := func(_ context.Context, name string, args ...string) (string, string, error) {
+			result := exec.Run(repo.LocalPath, name, args...)
+			return result.Stdout, result.Stderr, result.Err
+		}
+		if err := gh.BranchProtection(context.Background(), run, slug, repo.DefaultBranch); err != nil {
+			problems = append(problems, WorkspaceOpsProblem{
+				Severity: "warning",
+				Code:     "merge_disabled",
+				Message:  fmt.Sprintf("merge disabled: cannot verify protected default branch for %s", repo.Name),
+				Fix:      "verify GitHub branch protection before using loom merge",
+			})
+		}
 	}
 	return problems
 }

@@ -117,9 +117,11 @@ daemon     Supervise multiple agents with auto-restart
 
 ### Git Operations
 ```
-push       Push worktree branch to target with AI conflict resolution
+push       Publish one worktree feature branch through git
+merge      Merge a GitHub pull request through gh
+stack      Manage and merge stacked pull requests
 pull       Pull integration branch into worktrees with AI conflict resolution
-sync       Full sync: push all completed work, then pull into all worktrees
+sync       Pull protected default branches into all worktrees
 pr         Create GitHub PR from worktree branch
 reset      Hard reset worktree to a specific branch
 ```
@@ -150,9 +152,9 @@ loom plan falcon -a -t 30     # Exit after 30 min idle
 loom lead                     # Default interactive terminal agent
 
 # Git operations
-loom push --all               # Push all worktrees to main
 loom pull --all               # Pull main into all worktrees
-loom sync                     # Full sync: push all + pull all
+loom sync                     # Pull protected defaults into all worktrees
+loom push falcon              # Publish falcon's feature branch
 loom pr falcon                # Create PR from falcon to main
 
 # Monitoring
@@ -357,7 +359,7 @@ docker compose -f docker-compose.dev.yml up --build
 | Variable | Default | Description |
 |---|---|---|
 | `LOOM_BACKEND` | `claude` | AI backend CLI (claude, codex, opencode) |
-| `LOOM_DEFAULT_BRANCH` | `main` | Default integration branch |
+| `LOOM_DEFAULT_BRANCH` | `main` | Default protected branch |
 | `LOOM_WORKTREES_DIR` | `./worktrees` | Worktrees directory |
 | `LOOM_SERVER_PORT` | `8080` | Server port |
 | `LOOM_BIND_ADDR` | `127.0.0.1` | Server bind address |

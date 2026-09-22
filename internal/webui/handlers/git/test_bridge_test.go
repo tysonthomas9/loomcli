@@ -148,17 +148,8 @@ var handleDiffFiles = HandleDiffFiles
 // handleDiffFile → HandleDiffFile
 var handleDiffFile = HandleDiffFile
 
-// handleGitPush → HandleGitPush
-var handleGitPush = HandleGitPush
-
-// handleGitPushAll → HandleGitPushAll
-var handleGitPushAll = HandleGitPushAll
-
 // handleGitPull → HandleGitPull
 var handleGitPull = HandleGitPull
-
-// handleGitSync → HandleGitSync
-var handleGitSync = HandleGitSync
 
 // handleGitPR → HandleGitPR
 var handleGitPR = HandleGitPR
@@ -183,15 +174,6 @@ type AgentDiffStatResult = service.AgentDiffStatResult
 
 // MaxListLimit from handler package
 const MaxListLimit = handler.MaxListLimit
-
-// GitSyncResult → service.GitSyncResult
-type GitSyncResult = service.GitSyncResult
-
-// GitPushAllResult → service.GitPushAllResult
-type GitPushAllResult = service.GitPushAllResult
-
-// GitPushAllWorktreeResult → service.GitPushAllWorktreeResult
-type GitPushAllWorktreeResult = service.GitPushAllWorktreeResult
 
 // ---------------------------------------------------------------------------
 // stubDiffService implements service.DiffService with no-op defaults for module tests.
@@ -302,10 +284,7 @@ type mockAgentService struct {
 	generateTerminalTokenFunc func(ctx context.Context, wsID, agentName, userID string) (string, error)
 	getLogFunc                func(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*service.AgentLogResult, error)
 	getDiffStatFunc           func(ctx context.Context, wsID, agentName string) (*service.AgentDiffStatResult, error)
-	gitPushFunc               func(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error)
-	gitPushAllFunc            func(ctx context.Context, wsID string) (*service.GitPushAllResult, error)
 	gitPullFunc               func(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error)
-	gitSyncFunc               func(ctx context.Context, wsID, agentName string) (*service.GitSyncResult, error)
 	createPRFunc              func(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error)
 	gitResetFunc              func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error)
 	gitStatusFunc             func(ctx context.Context, wsID, agentName string) (*ops.GitStatusResult, error)
@@ -340,35 +319,11 @@ func (m *mockAgentService) GetDiffStat(ctx context.Context, wsID, agentName stri
 	return &service.AgentDiffStatResult{}, nil
 }
 
-func (m *mockAgentService) GitPush(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error) {
-	if m.gitPushFunc != nil {
-		return m.gitPushFunc(ctx, wsID, agentName, target)
-	}
-	return &ops.GitPushResult{Success: true, Message: "pushed"}, nil
-}
-
-func (m *mockAgentService) GitPushAll(ctx context.Context, wsID string) (*service.GitPushAllResult, error) {
-	if m.gitPushAllFunc != nil {
-		return m.gitPushAllFunc(ctx, wsID)
-	}
-	return &service.GitPushAllResult{}, nil
-}
-
 func (m *mockAgentService) GitPull(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error) {
 	if m.gitPullFunc != nil {
 		return m.gitPullFunc(ctx, wsID, agentName, source)
 	}
 	return &ops.GitPullResult{Success: true, Message: "pulled"}, nil
-}
-
-func (m *mockAgentService) GitSync(ctx context.Context, wsID, agentName string) (*service.GitSyncResult, error) {
-	if m.gitSyncFunc != nil {
-		return m.gitSyncFunc(ctx, wsID, agentName)
-	}
-	return &service.GitSyncResult{
-		PushResult: &ops.GitPushResult{Success: true},
-		PullResult: &ops.GitPullResult{Success: true},
-	}, nil
 }
 
 func (m *mockAgentService) CreatePR(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {

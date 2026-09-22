@@ -871,12 +871,15 @@ func TestTaskPromptsRequireStackedPRDelivery(t *testing.T) {
 		"loom stack publish <stack-id>",
 		"git branch -f <output-branch> HEAD",
 		"Do not use direct integration or direct branch pushes as the completion path.",
+		"loom data update <id> --status review",
+		"must remain open until its PR is merged",
 	}
 	notWantParts := []string{
 		"loom push \"test\"",
 		"git push origin HEAD",
 		"Stage and commit: git add -A",
 		"git add -A && git commit",
+		"loom data close <id>",
 	}
 
 	for name, prompt := range prompts {

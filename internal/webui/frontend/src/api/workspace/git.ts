@@ -19,23 +19,11 @@ export interface GitStatus {
   stash_count: number;
 }
 
-export interface GitPushResult {
-  success: boolean;
-  message: string;
-  already_up_to_date: boolean;
-  conflicted_files?: string[];
-}
-
 export interface GitPullResult {
   success: boolean;
   message: string;
   already_up_to_date: boolean;
   conflicted_files?: string[];
-}
-
-export interface GitSyncResult {
-  push_result: GitPushResult;
-  pull_result: GitPullResult;
 }
 
 export interface GitPRResult {
@@ -90,21 +78,6 @@ export async function fetchGitStatus(
   return get<GitStatus>(agentGitUrl(workspaceId, agentName, "status"));
 }
 
-/** POST /api/workspaces/{ws}/agents/{name}/git/push */
-export async function gitPush(
-  workspaceId: string,
-  agentName: string,
-  target?: string,
-): Promise<GitPushResult> {
-  return post<GitPushResult>(
-    agentGitUrl(workspaceId, agentName, "push"),
-    { target },
-    {
-      timeout: GIT_ACTION_TIMEOUT,
-    },
-  );
-}
-
 /** POST /api/workspaces/{ws}/agents/{name}/git/pull */
 export async function gitPull(
   workspaceId: string,
@@ -114,20 +87,6 @@ export async function gitPull(
   return post<GitPullResult>(
     agentGitUrl(workspaceId, agentName, "pull"),
     { source },
-    {
-      timeout: GIT_ACTION_TIMEOUT,
-    },
-  );
-}
-
-/** POST /api/workspaces/{ws}/agents/{name}/git/sync */
-export async function gitSync(
-  workspaceId: string,
-  agentName: string,
-): Promise<GitSyncResult> {
-  return post<GitSyncResult>(
-    agentGitUrl(workspaceId, agentName, "sync"),
-    {},
     {
       timeout: GIT_ACTION_TIMEOUT,
     },
@@ -164,17 +123,6 @@ export async function gitReset(
       timeout: GIT_ACTION_TIMEOUT,
     },
   );
-}
-
-/** POST /api/workspaces/{ws}/git/push-all — push all worktrees */
-export interface GitPushAllResult {
-  failed: number;
-  results: { name: string; success: boolean }[];
-}
-export async function gitPushAll(
-  workspaceId: string,
-): Promise<GitPushAllResult> {
-  return post<GitPushAllResult>(wsUrl(workspaceId, "/git/push-all"), {});
 }
 
 /** PATCH /api/workspaces/{ws}/agents/{name}/git/target */

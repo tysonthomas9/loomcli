@@ -136,7 +136,6 @@ Three functions with no test coverage:
 
 | Function | Untested Scenario | Severity |
 |---|---|---|
-| `gitPush()` | Push failure, auth failure, network timeout | Medium |
 | `gitPull()` | Merge conflict during pull | Medium |
 | `gitCheckout()` | Checkout with uncommitted changes | Medium |
 

@@ -9,14 +9,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
-// PushResult contains the structured result of a push operation.
-type PushResult struct {
-	Success         bool     `json:"success"`
-	Message         string   `json:"message"`
-	AlreadyUpToDate bool     `json:"already_up_to_date"`
-	ConflictedFiles []string `json:"conflicted_files,omitempty"`
-}
-
 // PullResult contains the structured result of a pull operation.
 type PullResult struct {
 	Success         bool     `json:"success"`
@@ -57,120 +49,6 @@ type GitStatusSummary struct {
 // PorcelainStatus maps a root-relative file path to the raw two-character
 // git status --porcelain XY code for that path.
 type PorcelainStatus map[string]string
-
-// PushBranchInRepoResult performs a push (merge-into-target) and returns a structured result.
-// This is the API-friendly equivalent of pushBranchInRepo. It does NOT launch an AI agent
-// for conflicts — it returns conflict info for the caller to handle.
-//
-// Note: "push" in loom terminology means merge the source branch INTO the target branch,
-// not a simple git push.
-func PushBranchInRepoResult(repoPath, sourceBranch, targetBranch, remote string) (*PushResult, error) {
-	if err := GitFetchRemote(repoPath, remote); err != nil {
-		return nil, fmt.Errorf("fetching: %v", err)
-	}
-
-	stashCleanup, err := stashIfDirty(repoPath)
-	if err != nil {
-		return nil, fmt.Errorf("stashing changes: %v", err)
-	}
-	defer stashCleanup()
-
-	restoreBranch, err := checkoutTarget(repoPath, targetBranch)
-	defer restoreBranch()
-	if err != nil {
-		if isWorktreeConflictErr(err) {
-			return pushBranchInRepoDetachedResult(repoPath, sourceBranch, targetBranch, remote)
-		}
-		return nil, fmt.Errorf("checking out %s: %v", targetBranch, err)
-	}
-
-	if err := GitPullRemote(repoPath, remote, targetBranch); err != nil {
-		return nil, fmt.Errorf("pulling %s: %v", targetBranch, err)
-	}
-
-	return pushMergeAndPush(repoPath, sourceBranch, targetBranch, remote)
-}
-
-// pushMergeAndPush checks for new commits, merges, and pushes to remote.
-func pushMergeAndPush(repoPath, sourceBranch, targetBranch, remote string) (*PushResult, error) {
-	r := resolveRemote(remote)
-
-	if upToDate, res := checkAlreadyUpToDate(repoPath, remote, targetBranch, sourceBranch); upToDate {
-		return res, nil
-	}
-
-	conflicts, mergeErr := mergeSource(repoPath, sourceBranch, targetBranch)
-	if mergeErr != nil {
-		return mergeResultToConflicts(conflicts, mergeErr)
-	}
-
-	if err := GitPushRemote(repoPath, remote, targetBranch); err != nil {
-		return nil, fmt.Errorf("pushing: %v", err)
-	}
-
-	return &PushResult{
-		Success: true,
-		Message: fmt.Sprintf("Pushed to %s/%s", r, targetBranch),
-	}, nil
-}
-
-// checkAlreadyUpToDate returns true with a success result if there are no new commits.
-func checkAlreadyUpToDate(repoPath, remote, targetBranch, sourceBranch string) (bool, *PushResult) {
-	hasCommits, err := HasCommitsBetweenRemote(repoPath, remote, targetBranch, sourceBranch)
-	if err == nil && !hasCommits {
-		return true, &PushResult{
-			Success:         true,
-			Message:         fmt.Sprintf("Already up to date (no new commits in %s)", sourceBranch),
-			AlreadyUpToDate: true,
-		}
-	}
-	return false, nil
-}
-
-// mergeResultToConflicts converts a merge error with optional conflicts into a PushResult.
-func mergeResultToConflicts(conflicts []string, mergeErr error) (*PushResult, error) {
-	if len(conflicts) > 0 {
-		return &PushResult{
-			Success:         false,
-			Message:         "merge conflicts detected",
-			ConflictedFiles: conflicts,
-		}, nil
-	}
-	return nil, mergeErr
-}
-
-func pushBranchInRepoDetachedResult(repoPath, sourceBranch, targetBranch, remote string) (*PushResult, error) {
-	r := resolveRemote(remote)
-	tempBranch := fmt.Sprintf("loom-push-temp-%d", time.Now().UnixNano())
-
-	if err := GitCheckoutDetached(repoPath, r+"/"+targetBranch); err != nil {
-		return nil, fmt.Errorf("checking out %s/%s detached: %v", r, targetBranch, err)
-	}
-	defer func() { _ = GitCheckout(repoPath, sourceBranch) }()
-
-	if upToDate, res := checkAlreadyUpToDate(repoPath, remote, targetBranch, sourceBranch); upToDate {
-		return res, nil
-	}
-
-	if err := GitCreateBranchFromHead(repoPath, tempBranch); err != nil {
-		return nil, fmt.Errorf("creating temp branch: %v", err)
-	}
-	defer func() { _ = GitDeleteBranch(repoPath, tempBranch, true) }()
-
-	conflicts, mergeErr := mergeSource(repoPath, sourceBranch, targetBranch)
-	if mergeErr != nil {
-		return mergeResultToConflicts(conflicts, mergeErr)
-	}
-
-	if err := GitPushRefspec(repoPath, remote, tempBranch, targetBranch); err != nil {
-		return nil, fmt.Errorf("pushing: %v", err)
-	}
-
-	return &PushResult{
-		Success: true,
-		Message: fmt.Sprintf("Pushed to %s/%s", r, targetBranch),
-	}, nil
-}
 
 // PullRepoWorktreeResult pulls a source branch into the worktree and returns a structured result.
 // Unlike pullRepoWorktree, it does NOT launch an AI agent for conflicts.

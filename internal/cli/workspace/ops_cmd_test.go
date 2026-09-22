@@ -257,6 +257,39 @@ func TestWorkspaceOpsGlobalProblemsDetectsDuplicateDaemonOwnership(t *testing.T)
 	}
 }
 
+func TestWorkspaceOpsMergeProblemsWarnsWhenProtectionCannotBeVerified(t *testing.T) {
+	status := &WorkspaceOpsStatus{Repos: []WorkspaceOpsRepo{{
+		Name:          "app",
+		LocalPath:     "/repo",
+		RemoteURL:     "https://github.com/acme/app.git",
+		DefaultBranch: "main",
+	}}}
+	exec := &MockExecRunner{Result: CommandResult{Stderr: "HTTP 404", Err: errors.New("exit status 1")}}
+
+	problems := workspaceOpsMergeProblems(status, exec)
+
+	if len(problems) != 1 || problems[0].Code != "merge_disabled" || problems[0].Severity != "warning" {
+		t.Fatalf("problems = %#v, want one merge_disabled warning", problems)
+	}
+	if len(exec.Calls) != 1 || exec.Calls[0].Dir != "/repo" || exec.Calls[0].Name != "gh" ||
+		strings.Join(exec.Calls[0].Args, " ") != "api repos/acme/app/branches/main/protection" {
+		t.Fatalf("calls = %#v, want GitHub protection check in repository", exec.Calls)
+	}
+}
+
+func TestWorkspaceOpsMergeProblemsAllowsVerifiedProtection(t *testing.T) {
+	status := &WorkspaceOpsStatus{Repos: []WorkspaceOpsRepo{{
+		Name:          "app",
+		LocalPath:     "/repo",
+		RemoteURL:     "git@github.com:acme/app.git",
+		DefaultBranch: "main",
+	}}}
+
+	if problems := workspaceOpsMergeProblems(status, &MockExecRunner{}); len(problems) != 0 {
+		t.Fatalf("problems = %#v, want no merge warning", problems)
+	}
+}
+
 func TestBuildLocalRuntimeFleetModeNotApplicable(t *testing.T) {
 	clearRuntimeRoutingEnv(t)
 	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")

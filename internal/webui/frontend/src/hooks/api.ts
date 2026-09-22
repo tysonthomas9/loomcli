@@ -19,11 +19,6 @@
 
 export * from "@/api";
 
-// gitPushAll is not in the @/api barrel (by design — the api barrel only
-// exports the canonical git verbs). Re-export it explicitly so components
-// can still reach it through the hooks layer.
-export { gitPushAll } from "@/api/workspace";
-
 // Session history is a thin sub-module that isn't in the @/api barrel.
 // Re-export what components need.
 export { listSessionHistory, getSessionScrollback } from "@/api/terminal";

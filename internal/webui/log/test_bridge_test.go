@@ -37,10 +37,7 @@ type mockAgentService struct {
 	generateTerminalTokenFunc func(ctx context.Context, wsID, agentName, userID string) (string, error)
 	getLogFunc                func(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*service.AgentLogResult, error)
 	getDiffStatFunc           func(ctx context.Context, wsID, agentName string) (*service.AgentDiffStatResult, error)
-	gitPushFunc               func(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error)
-	gitPushAllFunc            func(ctx context.Context, wsID string) (*service.GitPushAllResult, error)
 	gitPullFunc               func(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error)
-	gitSyncFunc               func(ctx context.Context, wsID, agentName string) (*service.GitSyncResult, error)
 	createPRFunc              func(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error)
 	gitResetFunc              func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error)
 	gitStatusFunc             func(ctx context.Context, wsID, agentName string) (*ops.GitStatusResult, error)
@@ -68,17 +65,8 @@ func (m *mockAgentService) GetLog(ctx context.Context, wsID, agentName string, l
 func (m *mockAgentService) GetDiffStat(ctx context.Context, wsID, agentName string) (*service.AgentDiffStatResult, error) {
 	return &service.AgentDiffStatResult{}, nil
 }
-func (m *mockAgentService) GitPush(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error) {
-	return &ops.GitPushResult{Success: true, Message: "pushed"}, nil
-}
-func (m *mockAgentService) GitPushAll(ctx context.Context, wsID string) (*service.GitPushAllResult, error) {
-	return &service.GitPushAllResult{}, nil
-}
 func (m *mockAgentService) GitPull(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error) {
 	return &ops.GitPullResult{Success: true, Message: "pulled"}, nil
-}
-func (m *mockAgentService) GitSync(ctx context.Context, wsID, agentName string) (*service.GitSyncResult, error) {
-	return &service.GitSyncResult{}, nil
 }
 func (m *mockAgentService) CreatePR(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {
 	return &ops.GitPRResult{}, nil

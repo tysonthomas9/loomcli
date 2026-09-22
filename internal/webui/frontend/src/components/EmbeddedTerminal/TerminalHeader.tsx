@@ -1,12 +1,10 @@
 /**
  * TerminalHeader component.
  * Header bar for embedded terminal tabs showing backend label,
- * connection state, worktree breadcrumb, and git action buttons.
+ * connection state and worktree breadcrumb.
  */
 
 import type { ConnectionState } from "@/components/TerminalView";
-import type { UseGitActionsReturn } from "@/hooks/workspace";
-
 import styles from "./EmbeddedTerminal.module.css";
 
 const BACKEND_DISPLAY: Record<string, { label: string; color: string }> = {
@@ -20,7 +18,6 @@ export interface TerminalHeaderProps {
   worktreePath?: string | undefined;
   agentName: string | null;
   connectionState: ConnectionState;
-  gitActions?: UseGitActionsReturn | undefined;
   onMaximize?: (() => void) | undefined;
   isMaximized?: boolean | undefined;
 }
@@ -37,9 +34,7 @@ function truncatePath(path: string): string {
 export function TerminalHeader({
   backend,
   worktreePath,
-  agentName,
   connectionState,
-  gitActions,
   onMaximize,
   isMaximized,
 }: TerminalHeaderProps): JSX.Element {
@@ -108,30 +103,6 @@ export function TerminalHeader({
             </svg>
           )}
         </button>
-      )}
-
-      {/* Right: git actions */}
-      {agentName !== null && gitActions && (
-        <div className={styles.actions} data-testid="git-actions">
-          <button
-            type="button"
-            className={styles.actionBtn}
-            disabled={gitActions.anyLoading}
-            onClick={() => gitActions.sync()}
-            data-testid="action-review-changes"
-          >
-            Review Changes
-          </button>
-          <button
-            type="button"
-            className={styles.actionBtn}
-            disabled={gitActions.anyLoading}
-            onClick={() => gitActions.push()}
-            data-testid="action-merge"
-          >
-            Merge
-          </button>
-        </div>
       )}
     </div>
   );

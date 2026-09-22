@@ -174,3 +174,20 @@ fourth kind of "blocked".
   context.
 - **daytona / atlas**: Loom deployment or provider concepts when referenced in
   design docs or runtime configuration.
+
+## GitHub publication language
+
+- **Push**: Publish exactly one worktree's feature branch to the same named
+  branch on its Git remote. It does not merge, stash, check out, or force-push.
+- **Merge**: Ask GitHub, through `gh pr merge`, to merge one pull request using
+  one explicitly selected method.
+- **Stack Merge**: Ask the official `github/gh-stack` extension to merge a
+  stack. Loom has no local fallback for this operation.
+- **Direct Integration**: The retired workflow that checked out a target,
+  merged a worktree branch, and pushed the target branch. It is not a Loom
+  publication operation.
+- **Protected Default Branch**: The repository's GitHub default branch, whose
+  protection and merge state are authoritative.
+- **Merge-Disabled Repository**: A repository where Loom cannot verify default
+  branch protection or GitHub merge state. Feature work and publication remain
+  available, but Loom merge commands are disabled.
