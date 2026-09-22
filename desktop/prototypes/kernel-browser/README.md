@@ -14,10 +14,13 @@ starting with `LOOMCLI-221`.
 
 - Worktree and prototype branch created from `origin/v5` at `32811a698`.
 - Architecture and pass/fail plan recorded.
-- Runtime preflight records the current container-runtime boundary without
-  starting a machine or touching existing containers.
-- No container, image, listener, or profile directory has been created by the
-  prototype yet.
+- Runtime preflight and two dedicated-machine attempts record the current
+  container-runtime boundary without touching existing containers.
+- Homebrew Podman was upgraded from 5.8.2 to 6.1.2. The upgrade fixed the
+  Fedora CoreOS Ignition failure, but AppleHV still could not provide a stable,
+  reachable machine.
+- The failed task-owned machines and temporary logs were removed. No Kernel
+  container, image, listener, or profile directory was created.
 
 Run the non-mutating preflight from the Loom repository root:
 
@@ -60,9 +63,12 @@ existing default machine would mix that trust and resource boundary with
 foreign containers.
 
 The initial capacity blocker was cleared when the macOS data volume reached
-70 GiB free. A dedicated AppleHV machine was then created, but Fedora CoreOS
-Ignition failed on first boot and left the guest in emergency mode. The failed
-task-owned machine and all of its residual files were removed. No Kernel image
-or container was created. Continuing now requires a supported Podman runtime
-path rather than another identical AppleHV retry. See
+70 GiB free. Podman 5.8.2 then failed during Fedora CoreOS Ignition. Upgrading
+Homebrew Podman to 6.1.2 allowed Fedora CoreOS to finish booting, but AppleHV
+and gvproxy could not keep the VM both running and reachable: ordinary starts
+lost the VM after the launcher exited, while a persistent launcher remained
+stuck in `Starting` and SSH reset. The failed task-owned machines and all
+residual files were removed. No Kernel image or container was created.
+Continuing now requires a non-AppleHV Podman runtime path rather than another
+identical retry. See
 [`evidence/LOOMCLI-221-preflight.md`](evidence/LOOMCLI-221-preflight.md).

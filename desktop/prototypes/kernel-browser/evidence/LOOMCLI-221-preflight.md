@@ -70,9 +70,8 @@ AppleHV reports startup success but the guest remains unusable after Ignition
 or root-filesystem failures:
 <https://github.com/containers/podman/issues/28439>.
 
-The installed Homebrew Podman has no usable fallback provider: QEMU is
-unsupported and `libkrun` has no installed `krunkit` binary. Installing a new
-provider or replacing Homebrew Podman is a separate host-software decision.
+The installed Homebrew Podman 5.8.2 had no usable fallback provider: QEMU was
+unsupported and `libkrun` had no installed `krunkit` binary.
 
 The task-owned VM was stopped by terminating only its exact stuck Podman/vfkit
 processes after normal `podman machine stop` hung. `podman machine rm -f`
@@ -85,7 +84,39 @@ variable store, and Ignition socket) were deleted. Final verification showed:
 - 70 GiB free; and
 - no Kernel image or container created.
 
-The runtime lifecycle proof therefore remains blocked, not failed: Kernel itself
-has not run. The next safe options are to install a supported libkrun/krunkit
-provider or replace the Homebrew Podman installation with Podman's recommended
-macOS installer, then recreate a new task-owned machine.
+## Homebrew Podman 6.1.2 retry
+
+With explicit user approval, Homebrew Podman was upgraded from 5.8.2 to 6.1.2.
+Homebrew removed the old keg, and the new client selected AppleHV. It did not
+install `krunkit`, so `libkrun` remained unavailable.
+
+A fresh `loom-kernel-browser-221` machine used the same bounded resources and
+Podman's 6.1 machine OS. This materially improved first boot:
+
+- Ignition completed successfully;
+- the guest reached `multi-user.target`;
+- `sshd.service`, `podman.socket`, and the Podman `ready.service` started; and
+- the prior `/etc/group` lock failure did not recur.
+
+The machine still did not become a stable Podman endpoint. A normal start
+reported success, but AppleHV exited with the launch command and the machine
+immediately returned to `stopped`. Keeping a managed launch session open kept
+AppleHV alive, but Podman remained indefinitely in `Starting`; SSH returned
+`Connection reset by peer`. In the host network log, gvproxy repeatedly sent
+ARP requests to the guest and received zero bytes back.
+
+Podman accepted `machine set --user-mode-networking=false` without error but
+left `UserModeNetworking` set to `true`. Recreating the machine without the flag
+also selected user-mode networking, so the supported CLI exposed no alternate
+AppleHV network path for this build.
+
+The second task-owned machine, its two zero-byte temporary start-log
+directories, and its exact residual lock and EFI-variable files were removed.
+Final verification again showed no prototype machine, connection, process,
+listener, or Kernel image/container. The pre-existing
+`podman-machine-default` connection records remain untouched.
+
+The runtime lifecycle proof remains blocked, not failed: Kernel itself has not
+run. The next safe option is a Podman distribution that includes the supported
+`libkrun`/`krunkit` provider, followed by a new task-owned machine and the same
+preflight.
