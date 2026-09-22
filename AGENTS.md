@@ -17,6 +17,9 @@ runbooks directly:
 - `.agent-skills/loom-pr-test/SKILL.md` - real Loom PR runtime testing with
   local-mode stacks, browser validation, FleetDB compatibility checks, and
   real Codex local-mode checks.
+- `.agent-skills/loom-project-lead/SKILL.md` - interactive FleetDB backlog,
+  epic, planner/runner, runtime-readiness, and agent-recovery operations with
+  approval gates for every task, repository, role, or agent mutation.
 - `docs/testing-terminology.md` - the canonical map of this repo's testing
   vocabulary along four axes (depth / realness / provisioning / polarity) plus
   the matrix shape, the trap words (`local`, `live`, `real`, `verify`, `gate`),
