@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"slices"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -288,6 +289,11 @@ func diffAgents(old, new []config.AgentEntry) (added, removed, modified []config
 		if oldEntry, exists := oldMap[name]; !exists {
 			added = append(added, newEntry)
 		} else if !oldEntry.Equal(newEntry) {
+			// Name the fields, not just the count: "modified=2" told an
+			// operator nothing when one of the two was an agent nobody had
+			// touched, and the churn hid behind the aggregate for a full
+			// debugging session.
+			slog.Info("agent entry modified", "worktree", name, "fields", agentEntryDiffFields(oldEntry, newEntry))
 			modified = append(modified, newEntry)
 		}
 	}
@@ -324,10 +330,59 @@ func includeRoleConfigChanges(oldRoles, newRoles map[string]config.RoleConfig, o
 		if !oldEntry.ShouldSuperviseWithRoles(oldRoles) && !newEntry.ShouldSuperviseWithRoles(newRoles) {
 			continue
 		}
+		slog.Info("agent swept into reconcile by role change",
+			"worktree", newEntry.Worktree, "role", newEntry.Role,
+			"fields", roleConfigDiffFields(oldRoles[newEntry.Role], newRoles[newEntry.Role]))
 		modified = append(modified, newEntry)
 		modifiedNames[newEntry.Worktree] = true
 	}
 	return modified
+}
+
+// agentEntryDiffFields names the fields that make Equal report a difference —
+// exactly Equal's field list, so a field Equal ignores can never be blamed.
+func agentEntryDiffFields(a, b config.AgentEntry) []string {
+	var out []string
+	scalar := []struct {
+		name   string
+		differ bool
+	}{
+		{"worktree", a.Worktree != b.Worktree},
+		{"role", a.Role != b.Role},
+		{"repo", a.Repo != b.Repo},
+		{"auto", a.Auto != b.Auto},
+		{"backend", a.Backend != b.Backend},
+		{"cross_repo", a.CrossRepo != b.CrossRepo},
+		{"parent", a.Parent != b.Parent},
+		{"mode", a.Mode != b.Mode},
+		{"task_filter", a.TaskFilter != b.TaskFilter},
+		{"desired_state", a.DesiredState != b.DesiredState},
+		{"hooks", !a.Hooks.Equal(b.Hooks)},
+		{"fallback_backends", !slices.Equal(a.FallbackBackends, b.FallbackBackends)},
+		{"path_patterns", !slices.Equal(a.PathPatterns, b.PathPatterns)},
+		{"repos", !slices.Equal(a.Repos, b.Repos)},
+		{"repo_groups", !slices.Equal(a.RepoGroups, b.RepoGroups)},
+	}
+	for _, f := range scalar {
+		if f.differ {
+			out = append(out, f.name)
+		}
+	}
+	return out
+}
+
+// roleConfigDiffFields names the RoleConfig fields DeepEqual trips on, in the
+// same semantics includeRoleConfigChanges uses to sweep agents.
+func roleConfigDiffFields(a, b config.RoleConfig) []string {
+	var out []string
+	av, bv := reflect.ValueOf(a), reflect.ValueOf(b)
+	t := av.Type()
+	for i := range t.NumField() {
+		if !reflect.DeepEqual(av.Field(i).Interface(), bv.Field(i).Interface()) {
+			out = append(out, t.Field(i).Name)
+		}
+	}
+	return out
 }
 
 // computeConfigHash returns a SHA-256 hex digest of the serialized config.DaemonConfig.

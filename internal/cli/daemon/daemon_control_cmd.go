@@ -56,9 +56,19 @@ func requestYieldOrFallback(socketPath, agentName string) bool {
 		return true
 	}
 
-	// agent_yield failed — check for "not running" / "already stopped"
-	if strings.Contains(resp.Error, "not running") || strings.Contains(resp.Error, "already stopped") {
-		fmt.Printf("Agent %q is not running.\n", agentName)
+	if strings.Contains(resp.Error, "already stopped") {
+		fmt.Printf("Agent %q is already stopped.\n", agentName)
+		return false
+	}
+	// "not running" here means idle BETWEEN runs, not parked: the agent is
+	// still supervised and respawns after its backoff. Treating it as done
+	// meant `daemon stop` on an idle agent parked nothing — the stop op that
+	// records StoppedAgents and persists desired_state=stopped was never
+	// sent, and the agent came back on the next restart. Nothing to yield,
+	// so go straight to the stop op.
+	if strings.Contains(resp.Error, "not running") {
+		fmt.Printf("Agent %q is idle; parking it so it stays stopped.\n", agentName)
+		forceStopAgent(socketPath, agentName)
 		return false
 	}
 	// "not found" — agent doesn't exist at all
