@@ -133,7 +133,7 @@ func TestCaptureDaemonEnvSnapshot_RedactsCredentialBearingValues(t *testing.T) {
 	rendered := string(data)
 	for _, secret := range []string{"hunter2", "abc123"} {
 		if strings.Contains(rendered, secret) {
-			t.Errorf("secret %q appears in the serialised snapshot", secret)
+			t.Errorf("secret %q appears in the serialized snapshot", secret)
 		}
 	}
 
