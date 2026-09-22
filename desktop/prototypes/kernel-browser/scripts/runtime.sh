@@ -8,7 +8,10 @@ readonly image="onkernel/chromium-headful@sha256:7aa6dc616440fbe3f8886cec700dc75
 readonly prototype_label="io.loom.prototype=local-kernel-browser"
 readonly runtime_label="io.loom.runtime-id=${runtime_id}"
 readonly chromium_flags="--user-data-dir=/home/kernel/user-data --disable-dev-shm-usage --start-maximized --remote-allow-origins=* --no-sandbox --no-zygote"
-readonly video_pipeline="ximagesrc display-name={display} show-pointer=true use-damage=true ! video/x-raw,framerate=25/1 ! videoconvert ! queue ! vp8enc name=encoder deadline=1 target-bitrate=1996800 cpu-used=4 threads=4 ! appsink name=appsink"
+# Human input is dispatched through Chromium CDP instead of Neko's emulated
+# amd64 Xorg input driver, which deadlocks after pointer activity on Apple silicon.
+readonly video_pipeline="ximagesrc display-name={display} show-pointer=false use-damage=true ! video/x-raw,framerate=25/1 ! videoconvert ! queue ! vp8enc name=encoder deadline=1 target-bitrate=1996800 cpu-used=4 threads=4 ! appsink name=appsink"
+readonly video_pipelines="{\"main\":{\"gst_pipeline\":\"${video_pipeline}\"},\"legacy\":{\"gst_pipeline\":\"${video_pipeline}\"}}"
 
 docker_cmd=(docker --context "$docker_context")
 
@@ -54,7 +57,9 @@ start_app() {
     -e WIDTH=1440 \
     -e TZ=America/Los_Angeles \
     -e ENABLE_WEBRTC=true \
-    -e "NEKO_CAPTURE_VIDEO_PIPELINE=$video_pipeline" \
+    -e NEKO_DESKTOP_INPUT_ENABLED=false \
+    -e NEKO_CAPTURE_VIDEO_IDS=main \
+    -e "NEKO_CAPTURE_VIDEO_PIPELINES=$video_pipelines" \
     -e "NEKO_WEBRTC_TCPMUX=${media_port}" \
     -e NEKO_WEBRTC_NAT1TO1=127.0.0.1 \
     -e RUN_AS_ROOT=true \

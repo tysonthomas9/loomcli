@@ -18,6 +18,10 @@ const apps: BrowserApp[] = [
 
 let activeId: AppId = "app-a";
 let queuedEpoch = 0;
+let humanControlId: AppId | null = null;
+let inputQueue: Promise<unknown> = Promise.resolve();
+let pendingMove: { x: number; y: number } | null = null;
+let moveQueued = false;
 
 const root = document.querySelector<HTMLDivElement>("#app");
 if (!root) throw new Error("missing app root");
@@ -64,7 +68,10 @@ root.innerHTML = `
           <span class="browser-title" id="browser-title">Research</span>
           <span class="browser-url">Kernel live view · same page as CDP</span>
         </div>
-        ${apps.map((app) => `<iframe class="live-view${app.id === activeId ? " active" : ""}" data-frame="${app.id}" title="${app.name} live browser"${app.id === activeId ? ` src="${app.liveUrl}"` : ""} referrerpolicy="strict-origin-when-cross-origin" allow="clipboard-read; clipboard-write; autoplay"></iframe>`).join("")}
+        <div class="browser-viewport">
+          ${apps.map((app) => `<iframe class="live-view${app.id === activeId ? " active" : ""}" data-frame="${app.id}" title="${app.name} live browser"${app.id === activeId ? ` src="${app.liveUrl}"` : ""} referrerpolicy="strict-origin-when-cross-origin" allow="clipboard-read; clipboard-write; autoplay"></iframe>`).join("")}
+          <div class="human-input" id="human-input" tabindex="0" aria-label="Human browser control surface"></div>
+        </div>
       </section>
     </section>
   </main>
@@ -97,7 +104,19 @@ function updateActiveView() {
   document.querySelector("#cdp")!.textContent = `:${app.cdpPort}`;
   document.querySelector("#browser-title")!.textContent = app.name;
   queuedEpoch = app.epoch;
+  humanControlId = null;
+  updateHumanControl();
   announce(`${app.name} browser selected.`);
+}
+
+function updateHumanControl() {
+  const active = humanControlId === activeId;
+  const surface = document.querySelector<HTMLDivElement>("#human-input")!;
+  const button = document.querySelector<HTMLButtonElement>("#take-control")!;
+  surface.classList.toggle("active", active);
+  surface.setAttribute("aria-hidden", String(!active));
+  button.textContent = active ? "Human control active" : "Take human control";
+  button.setAttribute("aria-pressed", String(active));
 }
 
 async function api(path: string, body?: unknown) {
@@ -109,6 +128,72 @@ async function api(path: string, body?: unknown) {
   const payload = await response.json();
   if (!response.ok) throw Object.assign(new Error(payload.error || `HTTP ${response.status}`), { status: response.status, payload });
   return payload;
+}
+
+function normalizedPointer(event: PointerEvent | WheelEvent) {
+  const rect = document.querySelector<HTMLDivElement>("#human-input")!.getBoundingClientRect();
+  return {
+    x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
+    y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)),
+  };
+}
+
+function mouseButton(button: number) {
+  if (button === 0) return "left";
+  if (button === 1) return "middle";
+  if (button === 2) return "right";
+  if (button === 3) return "back";
+  if (button === 4) return "forward";
+  return "none";
+}
+
+function enqueuePointer(payload: object) {
+  const appId = activeId;
+  inputQueue = inputQueue
+    .then(() => api(`/api/input/${appId}/pointer`, payload))
+    .catch((error) => announce((error as Error).message, "error"));
+}
+
+function keyboardModifiers(event: KeyboardEvent) {
+  return (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0);
+}
+
+function enqueueKey(event: KeyboardEvent) {
+  event.preventDefault();
+  const type = event.type === "keydown" ? "keyDown" : "keyUp";
+  const text = type === "keyDown" && event.key.length === 1 ? event.key : undefined;
+  const appId = activeId;
+  inputQueue = inputQueue
+    .then(() => api(`/api/input/${appId}/key`, {
+      type,
+      key: event.key,
+      code: event.code,
+      ...(text === undefined ? {} : { text }),
+      modifiers: keyboardModifiers(event),
+    }))
+    .catch((error) => announce((error as Error).message, "error"));
+}
+
+function scheduleMove() {
+  if (moveQueued || !pendingMove) return;
+  moveQueued = true;
+  const appId = activeId;
+  inputQueue = inputQueue.then(() => {
+    const move = pendingMove;
+    pendingMove = null;
+    if (move && humanControlId === appId) {
+      return api(`/api/input/${appId}/pointer`, { type: "mouseMoved", ...move, button: "none" });
+    }
+    return undefined;
+  }).catch((error) => announce((error as Error).message, "error")).finally(() => {
+    moveQueued = false;
+    scheduleMove();
+  });
+}
+
+function queueMove(event: PointerEvent) {
+  pendingMove = normalizedPointer(event);
+  scheduleMove();
 }
 
 document.querySelectorAll<HTMLButtonElement>(".tab").forEach((button) => {
@@ -141,13 +226,35 @@ document.querySelector<HTMLButtonElement>("#take-control")!.addEventListener("cl
     const result = await api(`/api/epoch/${app.id}/bump`, {});
     app.epoch = result.epoch;
     document.querySelector("#epoch")!.textContent = String(app.epoch);
-    const frame = document.querySelector<HTMLIFrameElement>(`[data-frame="${app.id}"]`)!;
-    frame.contentWindow?.postMessage({ type: "KERNEL_SET_READ_ONLY", readOnly: false, requestId: crypto.randomUUID() }, new URL(app.liveUrl).origin);
-    announce(`Human control active. Epoch is now ${app.epoch}; older lead actions are stale.`);
+    humanControlId = app.id;
+    updateHumanControl();
+    document.querySelector<HTMLDivElement>("#human-input")!.focus();
+    announce(`Human control active through Loom. Epoch is now ${app.epoch}; older lead actions are stale.`);
   } catch (error) {
     announce((error as Error).message, "error");
   }
 });
+
+const humanInput = document.querySelector<HTMLDivElement>("#human-input")!;
+humanInput.addEventListener("pointermove", (event) => queueMove(event));
+humanInput.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  humanInput.focus();
+  humanInput.setPointerCapture(event.pointerId);
+  enqueuePointer({ type: "mousePressed", ...normalizedPointer(event), button: mouseButton(event.button), clickCount: event.detail || 1 });
+});
+humanInput.addEventListener("pointerup", (event) => {
+  event.preventDefault();
+  enqueuePointer({ type: "mouseReleased", ...normalizedPointer(event), button: mouseButton(event.button), clickCount: event.detail || 1 });
+  if (humanInput.hasPointerCapture(event.pointerId)) humanInput.releasePointerCapture(event.pointerId);
+});
+humanInput.addEventListener("wheel", (event) => {
+  event.preventDefault();
+  enqueuePointer({ type: "mouseWheel", ...normalizedPointer(event), deltaX: event.deltaX, deltaY: event.deltaY });
+}, { passive: false });
+humanInput.addEventListener("contextmenu", (event) => event.preventDefault());
+humanInput.addEventListener("keydown", enqueueKey);
+humanInput.addEventListener("keyup", enqueueKey);
 
 document.querySelector<HTMLButtonElement>("#queue-action")!.addEventListener("click", () => {
   queuedEpoch = activeApp().epoch;

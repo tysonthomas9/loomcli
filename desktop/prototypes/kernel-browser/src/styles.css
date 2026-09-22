@@ -45,8 +45,12 @@ button:focus-visible, textarea:focus-visible { outline: 3px solid #22674f; outli
 .browser-chrome { display: flex; justify-content: space-between; gap: 1rem; padding: 0.625rem 0.875rem; color: #e8ece9; border-bottom: 1px solid #3e4743; }
 .browser-title { font-weight: 750; }
 .browser-url { color: #aeb8b3; font-size: 0.75rem; }
+.browser-viewport { position: relative; min-width: 0; min-height: 0; }
 .live-view { display: none; width: 100%; height: 100%; min-height: 32rem; border: 0; background: #101412; }
 .live-view.active { display: block; }
+.human-input { display: none; position: absolute; inset: 0; z-index: 2; cursor: default; touch-action: none; }
+.human-input.active { display: block; }
+.human-input:focus-visible { outline: 3px solid #44b78b; outline-offset: -3px; }
 
 @media (max-width: 760px) {
   .topbar { align-items: flex-start; }

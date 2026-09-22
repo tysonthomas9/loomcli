@@ -19,6 +19,10 @@ The result is a **capability pass and production-readiness hold**. See
   remains available to CDP without paying active video CPU cost.
 - Per-browser control epochs. Taking human control invalidates queued lead
   actions from an older epoch.
+- A Loom-owned pointer and keyboard surface that dispatches validated input
+  through CDP while the embedded Neko viewer remains read-only. This bypasses
+  the amd64 Xorg input driver, which deadlocks under Rosetta after sustained
+  pointer activity.
 - CDP-injected element selection that records DOM context and a cropped PNG.
 - A control/fixture server bound to `127.0.0.1:61300`. Colima's
   `host.lima.internal` forwarding can reach that loopback listener, so no LAN
@@ -75,6 +79,14 @@ Run the native shell:
 ```sh
 cd desktop/prototypes/kernel-browser
 ../../node_modules/.bin/tauri dev
+```
+
+After exercising human control, run the regression probe. It continuously
+checks both CDP and X11 for the failure mode that previously appeared after
+roughly 15-21 seconds of pointer activity:
+
+```sh
+desktop/prototypes/kernel-browser/scripts/verify-control-health.sh 30
 ```
 
 Use the development shell for this local HTTP/WebSocket prototype. A normally

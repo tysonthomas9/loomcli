@@ -35,15 +35,18 @@ The prototype must not become the production module unchanged:
   are not an acceptable invisible end-user dependency chain.
 - The tested Rosetta path requires a non-default Neko X11 capture pipeline;
   playback events alone did not detect black-frame failure.
+- The image's emulated Xorg input driver deadlocks under sustained pointer
+  activity. The POC bypasses it with a Loom-owned CDP input bridge, but a
+  production runtime still needs a supported native input path and IME tests.
 - TCP media and all CDP/live/control endpoints need a lease-based allocator,
   authentication, origin checks, and crash reconciliation.
 - A packaged Tauri page uses a secure custom origin, so production browser
   media and control must be available over authenticated HTTPS/WSS.
 - Control epochs currently live in one Node process. Production ownership must
   be durable and scoped to a browser page/session.
-- The locked macOS session prevented native pointer, keyboard, clipboard,
-  resize, and IME quality checks even though WKWebView connection/playback was
-  proven.
+- Pointer, click, wheel, and basic keyboard input are proven through the Loom
+  overlay. Clipboard, resize, accessibility input, and IME quality remain
+  untested.
 
 ## Suggested production shape
 

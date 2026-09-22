@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { keyParams, pointerParams } from "./input-bridge.mjs";
 
 const host = process.env.LOOM_KERNEL_CONTROL_HOST || "127.0.0.1";
 const port = Number(process.env.LOOM_KERNEL_CONTROL_PORT || 61300);
@@ -152,6 +153,25 @@ async function handleApi(req, url) {
   if (parts[1] === "epoch" && parts[3] === "bump" && req.method === "POST") {
     selected.epoch += 1;
     return { epoch: selected.epoch };
+  }
+
+  if (parts[1] === "input" && parts[3] === "pointer" && req.method === "POST") {
+    const payload = await body(req);
+    await cdp(selected.cdpPort, async (send) => {
+      const viewportResult = await send("Runtime.evaluate", {
+        expression: "({ width: innerWidth, height: innerHeight })",
+        returnByValue: true,
+      });
+      const params = pointerParams(payload, viewportResult.result.value);
+      await send("Input.dispatchMouseEvent", params);
+    });
+    return { accepted: true };
+  }
+
+  if (parts[1] === "input" && parts[3] === "key" && req.method === "POST") {
+    const payload = await body(req);
+    await cdp(selected.cdpPort, (send) => send("Input.dispatchKeyEvent", keyParams(payload)));
+    return { accepted: true };
   }
 
   if (parts[1] === "action" && req.method === "POST") {
