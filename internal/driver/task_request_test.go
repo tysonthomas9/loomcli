@@ -4,6 +4,7 @@ package driver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -12,6 +13,23 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+type classifiedPreflightTestError struct {
+	class string
+}
+
+func (e *classifiedPreflightTestError) Error() string { return "preflight failed" }
+
+func (e *classifiedPreflightTestError) PreflightClass() string { return e.class }
+
+func TestNormalizeTaskExecCompletionPreservesPreflightClass(t *testing.T) {
+	completion := normalizeTaskExecCompletion(TaskExecResult{ErrorClass: "stale_executor_class"}, fmt.Errorf("launch: %w", &classifiedPreflightTestError{
+		class: "local_backend_auth_missing",
+	}))
+	if completion.ErrorClass != "local_backend_auth_missing" || completion.ErrorMessage != "launch: preflight failed" {
+		t.Fatalf("completion = %+v, want canonical preflight class and wrapped message", completion)
+	}
+}
 
 // TestMain enables the test-only noop provider gate (§4.5) for the driver test
 // binary so the many legacy fixtures that drive the local-noop/noop provider

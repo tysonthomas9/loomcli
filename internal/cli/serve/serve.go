@@ -29,6 +29,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/usagecmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
@@ -320,6 +321,7 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 		MaxAttempts:      taskRunMaxAttempts,
 		APIBaseURL:       driverAPIBaseURL(),
 		LocalSettingsDir: bootstrap.LoomDir(),
+		PreflightChecker: runtimepreflight.NewLocalTaskRunnerChecker(st),
 	}
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)

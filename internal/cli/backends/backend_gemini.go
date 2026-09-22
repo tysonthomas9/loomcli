@@ -121,12 +121,23 @@ func (g *GeminiBackend) Meta() BackendMeta {
 
 // HealthCheck reports the installation and readiness status of the Gemini backend.
 func (g *GeminiBackend) HealthCheck() HealthStatus {
+	return g.healthCheck(true)
+}
+
+// HealthCheckForAdmission reports readiness without collecting the CLI version.
+func (g *GeminiBackend) HealthCheckForAdmission(context.Context) HealthStatus {
+	return g.healthCheck(false)
+}
+
+func (g *GeminiBackend) healthCheck(includeVersion bool) HealthStatus {
 	var hs HealthStatus
 	var issues []string
 
 	if _, err := exec.LookPath("gemini"); err == nil {
 		hs.Installed = true
-		hs.Version = detectBinaryVersion("gemini")
+		if includeVersion {
+			hs.Version = detectBinaryVersion("gemini")
+		}
 	} else {
 		issues = append(issues, "gemini binary not found on PATH")
 	}

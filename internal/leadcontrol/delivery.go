@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agentinbox"
+	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/skillmat"
@@ -99,15 +100,9 @@ func delivererForSession(session *domain.AgentSession) leadTurnDeliverer {
 }
 
 // IsControlledLeadBackend reports whether leads on the given backend run under
-// a controlled runtime that supports queued message delivery. Must stay in
-// sync with the launch dispatch in backends.RunControlledLeadRuntime.
+// a controlled runtime that supports queued message delivery.
 func IsControlledLeadBackend(backend string) bool {
-	switch strings.ToLower(strings.TrimSpace(backend)) {
-	case RuntimeProviderCodex, "claude", "gemini", "opencode", "cursor":
-		return true
-	default:
-		return false
-	}
+	return backendnames.IsControlledLeadBackend(backend)
 }
 
 func DeliverCurrentAssignment(ctx context.Context, st store.Store, workspace, leadName string) (*DeliveryResult, error) {

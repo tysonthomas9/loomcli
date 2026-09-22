@@ -15,6 +15,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -151,7 +152,18 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	// task runs to the local task runner, the resolved backend CLI must be
 	// installed and authenticated, else the run would fail deep in the worker.
 	if err := m.preflightRunnerForRun(r.Context(), ws, name, payload); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		var notReady *runtimepreflight.NotReadyError
+		if errors.As(err, &notReady) {
+			handler.WriteJSON(w, http.StatusBadRequest, struct {
+				Error     string                  `json:"error"`
+				Preflight runtimepreflight.Result `json:"preflight"`
+			}{
+				Error:     notReady.Result.Message,
+				Preflight: notReady.Result,
+			})
+			return
+		}
+		writeDomainError(w, err, err.Error())
 		return
 	}
 	run, err := driver.CreateDriverRun(r.Context(), m.store, driver.RunOptions{

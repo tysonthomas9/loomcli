@@ -17,12 +17,13 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
+	"github.com/tysonthomas9/loomcli/internal/localbackend"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
-	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
@@ -202,7 +203,7 @@ func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
 		r.Context(), ws, agentName, params.owner, params.repo, params.number,
 	); err != nil {
 		slog.Error("pr-review: ensure reviewer agent failed", "ws", ws, "agent", agentName, "err", err)
-		writePRReviewErrorCode(w, http.StatusInternalServerError, "internal", "failed to prepare the reviewer agent", false)
+		writePRReviewError(w, err)
 		return
 	}
 
@@ -335,12 +336,15 @@ func prepareReviewerCheckout(w http.ResponseWriter, spec reviewerCheckoutSpec) (
 }
 
 func (m *Module) ensureReviewerAgent(ctx context.Context, ws, agentName, repo string) error {
+	backend, err := m.reviewerBackend(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("resolve reviewer backend: %w", err)
+	}
 	if err := m.ensureReviewerRole(ctx, ws); err != nil {
 		return err
 	}
-	backend := m.reviewerBackend(ctx, ws)
 	repos := reviewerRepos(repo)
-	_, err := m.store.Agents().Create(ctx, store.AgentCreate{
+	_, err = m.store.Agents().Create(ctx, store.AgentCreate{
 		WorkspaceKey: ws,
 		Name:         agentName,
 		RoleName:     reviewerRoleName,
@@ -494,16 +498,24 @@ func (m *Module) reconcileReviewerRole(ctx context.Context, ws string, role *dom
 	return nil
 }
 
-// reviewerBackend resolves the backend for a reviewer agent: the workspace's
-// configured agent backend when it names a controlled lead runtime, else
-// codex. Controlled is required because the chat routes deliver messages via
-// the lead inbox; an uncontrolled backend would strand them.
-func (m *Module) reviewerBackend(ctx context.Context, ws string) string {
-	backend := strings.ToLower(runtimepreflight.ResolveLocalBackend(ctx, m.store, ws))
-	if !leadcontrol.IsControlledLeadBackend(backend) {
-		return leadcontrol.RuntimeProviderCodex
+// reviewerBackend resolves the backend for a reviewer agent. Controlled is
+// required because the chat routes deliver messages via the lead inbox; an
+// uncontrolled backend would strand them.
+func (m *Module) reviewerBackend(ctx context.Context, ws string) (string, error) {
+	backend, _, err := localbackend.Resolve(ctx, m.store, localbackend.Target{WorkspaceKey: ws})
+	if err != nil {
+		return "", err
 	}
-	return backend
+	backend = strings.ToLower(backend)
+	if !backendnames.IsControlledLeadBackend(backend) {
+		return "", fmt.Errorf(
+			"reviewer backend %q does not support controlled lead runtime; supported backends: %s: %w",
+			backend,
+			strings.Join(backendnames.ControlledLeadBackends(), ", "),
+			domain.ErrInvalid,
+		)
+	}
+	return backend, nil
 }
 
 // migrateReviewer switches an existing reviewer agent to the workspace's

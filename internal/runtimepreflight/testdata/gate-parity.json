@@ -1,0 +1,13 @@
+{
+  "workspace": "TEST",
+  "backend": "codex",
+  "health": {
+    "healthy": false,
+    "installed": true,
+    "version": "test",
+    "api_key_set": false,
+    "message": "parity probe: credentials missing"
+  },
+  "error_class": "local_backend_auth_missing",
+  "message": "backend codex is installed but not authenticated"
+}

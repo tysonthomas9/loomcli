@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -787,7 +788,10 @@ func (c *taskExecCompletion) applyExecutorError(execErr error) {
 	if c.ExitCode == 0 {
 		c.ExitCode = 1
 	}
-	if c.ErrorClass == "" {
+	var classified interface{ PreflightClass() string }
+	if errors.As(execErr, &classified) && strings.TrimSpace(classified.PreflightClass()) != "" {
+		c.ErrorClass = strings.TrimSpace(classified.PreflightClass())
+	} else if c.ErrorClass == "" {
 		c.ErrorClass = "task_executor_error"
 	}
 	if c.ErrorMessage == "" {

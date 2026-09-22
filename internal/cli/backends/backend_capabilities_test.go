@@ -102,6 +102,32 @@ func TestDetectBinaryVersionReadsFirstLine(t *testing.T) {
 	}
 }
 
+func TestAdmissionHealthCheckSkipsVersionProbe(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "version-probed")
+	binary := writeProbeScript(t, "gemini", ": > "+marker+"\necho 9.9.9")
+	t.Setenv("PATH", filepath.Dir(binary))
+	t.Setenv("GEMINI_API_KEY", "test-key")
+
+	admission, ok := CheckBackendHealthForAdmission(context.Background(), "gemini")
+	if !ok {
+		t.Fatal("CheckBackendHealthForAdmission(gemini) = false")
+	}
+	if !admission.Healthy || !admission.Installed || !admission.APIKeySet || admission.Version != "" {
+		t.Fatalf("admission health = %+v, want ready facts without version", admission)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("admission health spawned --version; marker stat error = %v", err)
+	}
+
+	full, ok := CheckBackendHealth("gemini")
+	if !ok || full.Version != "9.9.9" {
+		t.Fatalf("full health = %+v, %v; want version 9.9.9", full, ok)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("full health did not run version probe: %v", err)
+	}
+}
+
 func TestInspectCapabilities_NoOptionalInterfaces(t *testing.T) {
 	b := &mockBackend{name: "plain"}
 	caps := InspectCapabilities(b)
