@@ -24,13 +24,14 @@ const (
 // NOT live here — see the bootstrap state cache. Workspace is shared
 // across users in cloud mode and must stay machine-agnostic.
 type Workspace struct {
-	Key           string         `json:"key"`
-	Name          string         `json:"name"`
-	Description   string         `json:"description,omitempty"`
-	State         WorkspaceState `json:"state,omitempty"`
-	ErrorMessage  string         `json:"error_message,omitempty"`
-	DefaultBranch string         `json:"default_branch,omitempty"`
-	DesignFormat  string         `json:"design_format,omitempty"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
+	Key                     string                  `json:"key"`
+	Name                    string                  `json:"name"`
+	Description             string                  `json:"description,omitempty"`
+	State                   WorkspaceState          `json:"state,omitempty"`
+	ErrorMessage            string                  `json:"error_message,omitempty"`
+	DefaultBranch           string                  `json:"default_branch,omitempty"`
+	DesignFormat            string                  `json:"design_format,omitempty"`
+	TaskDeliveryRequirement TaskDeliveryRequirement `json:"task_delivery_requirement,omitempty"`
+	CreatedAt               time.Time               `json:"created_at"`
+	UpdatedAt               time.Time               `json:"updated_at"`
 }

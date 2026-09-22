@@ -40,15 +40,16 @@ func (s *repoStore) Create(_ context.Context, in store.RepoCreate) (*domain.Repo
 		source = in.Name
 	}
 	r := &domain.Repo{
-		WorkspaceKey:  in.WorkspaceKey,
-		Name:          in.Name,
-		RemoteURL:     in.RemoteURL,
-		Remote:        in.Remote,
-		DefaultBranch: in.DefaultBranch,
-		Groups:        append([]string(nil), in.Groups...),
-		SourceRepoID:  source,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		WorkspaceKey:            in.WorkspaceKey,
+		Name:                    in.Name,
+		RemoteURL:               in.RemoteURL,
+		Remote:                  in.Remote,
+		DefaultBranch:           in.DefaultBranch,
+		Groups:                  append([]string(nil), in.Groups...),
+		SourceRepoID:            source,
+		TaskDeliveryRequirement: in.TaskDeliveryRequirement,
+		CreatedAt:               now,
+		UpdatedAt:               now,
 	}
 	s.items[in.WorkspaceKey][in.Name] = r
 	return cloneRepo(r), nil
@@ -97,6 +98,9 @@ func (s *repoStore) Update(_ context.Context, ws, name string, patch store.RepoU
 	}
 	if patch.SourceRepoID != nil {
 		r.SourceRepoID = *patch.SourceRepoID
+	}
+	if patch.TaskDeliveryRequirement != nil {
+		r.TaskDeliveryRequirement = *patch.TaskDeliveryRequirement
 	}
 	r.UpdatedAt = time.Now().UTC()
 	return cloneRepo(r), nil

@@ -14,46 +14,50 @@ var _ store.RepoStore = (*repoStore)(nil)
 
 // repoWire mirrors fleet-db's models.Repo JSON shape.
 type repoWire struct {
-	WorkspaceKey  string    `json:"workspace_key"`
-	Name          string    `json:"name"`
-	RemoteURL     string    `json:"remote_url"`
-	Remote        string    `json:"remote,omitempty"`
-	DefaultBranch string    `json:"default_branch,omitempty"`
-	Groups        []string  `json:"groups,omitempty"`
-	SourceRepoID  string    `json:"source_repo_id,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	WorkspaceKey            string                         `json:"workspace_key"`
+	Name                    string                         `json:"name"`
+	RemoteURL               string                         `json:"remote_url"`
+	Remote                  string                         `json:"remote,omitempty"`
+	DefaultBranch           string                         `json:"default_branch,omitempty"`
+	Groups                  []string                       `json:"groups,omitempty"`
+	SourceRepoID            string                         `json:"source_repo_id,omitempty"`
+	TaskDeliveryRequirement domain.TaskDeliveryRequirement `json:"task_delivery_requirement,omitempty"`
+	CreatedAt               time.Time                      `json:"created_at"`
+	UpdatedAt               time.Time                      `json:"updated_at"`
 }
 
 func (r repoWire) toDomain() *domain.Repo {
 	return &domain.Repo{
-		WorkspaceKey:  r.WorkspaceKey,
-		Name:          r.Name,
-		RemoteURL:     r.RemoteURL,
-		Remote:        r.Remote,
-		DefaultBranch: r.DefaultBranch,
-		Groups:        r.Groups,
-		SourceRepoID:  r.SourceRepoID,
-		CreatedAt:     r.CreatedAt,
-		UpdatedAt:     r.UpdatedAt,
+		WorkspaceKey:            r.WorkspaceKey,
+		Name:                    r.Name,
+		RemoteURL:               r.RemoteURL,
+		Remote:                  r.Remote,
+		DefaultBranch:           r.DefaultBranch,
+		Groups:                  r.Groups,
+		SourceRepoID:            r.SourceRepoID,
+		TaskDeliveryRequirement: r.TaskDeliveryRequirement,
+		CreatedAt:               r.CreatedAt,
+		UpdatedAt:               r.UpdatedAt,
 	}
 }
 
 func (s *repoStore) Create(ctx context.Context, in store.RepoCreate) (*domain.Repo, error) {
 	body := struct {
-		Name          string   `json:"name"`
-		RemoteURL     string   `json:"remote_url"`
-		Remote        string   `json:"remote,omitempty"`
-		DefaultBranch string   `json:"default_branch,omitempty"`
-		Groups        []string `json:"groups,omitempty"`
-		SourceRepoID  string   `json:"source_repo_id,omitempty"`
+		Name                    string                         `json:"name"`
+		RemoteURL               string                         `json:"remote_url"`
+		Remote                  string                         `json:"remote,omitempty"`
+		DefaultBranch           string                         `json:"default_branch,omitempty"`
+		Groups                  []string                       `json:"groups,omitempty"`
+		SourceRepoID            string                         `json:"source_repo_id,omitempty"`
+		TaskDeliveryRequirement domain.TaskDeliveryRequirement `json:"task_delivery_requirement,omitempty"`
 	}{
-		Name:          in.Name,
-		RemoteURL:     in.RemoteURL,
-		Remote:        in.Remote,
-		DefaultBranch: in.DefaultBranch,
-		Groups:        in.Groups,
-		SourceRepoID:  in.SourceRepoID,
+		Name:                    in.Name,
+		RemoteURL:               in.RemoteURL,
+		Remote:                  in.Remote,
+		DefaultBranch:           in.DefaultBranch,
+		Groups:                  in.Groups,
+		SourceRepoID:            in.SourceRepoID,
+		TaskDeliveryRequirement: in.TaskDeliveryRequirement,
 	}
 	var resp repoWire
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/repos", body, &resp); err != nil {
@@ -92,17 +96,19 @@ func (s *repoStore) List(ctx context.Context, ws string) ([]*domain.Repo, error)
 
 func (s *repoStore) Update(ctx context.Context, ws, name string, patch store.RepoUpdate) (*domain.Repo, error) {
 	body := struct {
-		RemoteURL     *string   `json:"remote_url,omitempty"`
-		Remote        *string   `json:"remote,omitempty"`
-		DefaultBranch *string   `json:"default_branch,omitempty"`
-		Groups        *[]string `json:"groups,omitempty"`
-		SourceRepoID  *string   `json:"source_repo_id,omitempty"`
+		RemoteURL               *string                         `json:"remote_url,omitempty"`
+		Remote                  *string                         `json:"remote,omitempty"`
+		DefaultBranch           *string                         `json:"default_branch,omitempty"`
+		Groups                  *[]string                       `json:"groups,omitempty"`
+		SourceRepoID            *string                         `json:"source_repo_id,omitempty"`
+		TaskDeliveryRequirement *domain.TaskDeliveryRequirement `json:"task_delivery_requirement,omitempty"`
 	}{
-		RemoteURL:     patch.RemoteURL,
-		Remote:        patch.Remote,
-		DefaultBranch: patch.DefaultBranch,
-		Groups:        patch.Groups,
-		SourceRepoID:  patch.SourceRepoID,
+		RemoteURL:               patch.RemoteURL,
+		Remote:                  patch.Remote,
+		DefaultBranch:           patch.DefaultBranch,
+		Groups:                  patch.Groups,
+		SourceRepoID:            patch.SourceRepoID,
+		TaskDeliveryRequirement: patch.TaskDeliveryRequirement,
 	}
 	var resp repoWire
 	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/repos/"+pathEscape(name), body, &resp); err != nil {
