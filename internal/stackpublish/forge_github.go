@@ -40,11 +40,13 @@ func NewGitHubForge(token string, client *http.Client, baseURL string) *GitHubFo
 
 type ghPull struct {
 	Number   int     `json:"number"`
+	NodeID   string  `json:"node_id"`
 	State    string  `json:"state"`
 	Title    string  `json:"title"`
 	Body     string  `json:"body"`
 	HTMLURL  string  `json:"html_url"`
 	MergedAt *string `json:"merged_at"`
+	Draft    bool    `json:"draft"`
 	Head     struct {
 		Ref string `json:"ref"`
 	} `json:"head"`
@@ -55,8 +57,8 @@ type ghPull struct {
 
 func (p ghPull) toPR() PR {
 	return PR{
-		Number: p.Number, Head: p.Head.Ref, Base: p.Base.Ref,
-		State: p.State, Merged: p.MergedAt != nil && *p.MergedAt != "",
+		Number: p.Number, NodeID: p.NodeID, Head: p.Head.Ref, Base: p.Base.Ref,
+		State: p.State, Merged: p.MergedAt != nil && *p.MergedAt != "", Draft: p.Draft,
 		Title: p.Title, Body: p.Body, URL: p.HTMLURL,
 	}
 }
@@ -100,6 +102,21 @@ func (g *GitHubForge) apiErr(method, path string, status int, data []byte) error
 	return fmt.Errorf("github %s %s: %d: %s", method, path, status, strings.TrimSpace(scrubSecrets(string(data))))
 }
 
+func graphQLErr(data []byte) error {
+	var resp struct {
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return fmt.Errorf("github graphql decode: %w", err)
+	}
+	if len(resp.Errors) == 0 {
+		return nil
+	}
+	return fmt.Errorf("github graphql: %s", scrubSecrets(resp.Errors[0].Message))
+}
+
 func (g *GitHubForge) ListStackPRs(ctx context.Context, owner, repo, headPrefix string) ([]PR, error) {
 	path := fmt.Sprintf("/repos/%s/%s/pulls?state=all&per_page=100", owner, repo)
 	var out []PR
@@ -128,11 +145,15 @@ func (g *GitHubForge) ListStackPRs(ctx context.Context, owner, repo, headPrefix 
 	return out, nil
 }
 
-func (g *GitHubForge) CreatePR(ctx context.Context, owner, repo, head, base, title, body string) (PR, error) {
+func (g *GitHubForge) CreatePR(ctx context.Context, owner, repo, head, base string, opts PullRequestOptions) (PR, error) {
 	path := fmt.Sprintf("/repos/%s/%s/pulls", owner, repo)
-	status, data, _, err := g.do(ctx, http.MethodPost, path, map[string]any{
-		"title": title, "head": head, "base": base, "body": body, "draft": false,
-	})
+	payload := map[string]any{
+		"title": opts.Title, "head": head, "base": base, "body": opts.Body, "draft": opts.Draft,
+	}
+	if opts.MaintainerCanModifySet {
+		payload["maintainer_can_modify"] = opts.MaintainerCanModify
+	}
+	status, data, _, err := g.do(ctx, http.MethodPost, path, payload)
 	if err != nil {
 		return PR{}, err
 	}
@@ -155,6 +176,59 @@ func (g *GitHubForge) CreatePR(ctx context.Context, owner, repo, head, base, tit
 		}
 	}
 	return PR{}, g.apiErr("POST", "pulls", status, data)
+}
+
+func (g *GitHubForge) UpdatePRMetadata(ctx context.Context, owner, repo string, number int, opts PullRequestOptions) (PR, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, number)
+	payload := map[string]any{}
+	if opts.TitleSet {
+		payload["title"] = opts.Title
+	}
+	if opts.BodySet {
+		payload["body"] = opts.Body
+	}
+	if opts.MaintainerCanModifySet {
+		payload["maintainer_can_modify"] = opts.MaintainerCanModify
+	}
+	status, data, _, err := g.do(ctx, http.MethodPatch, path, payload)
+	if err != nil {
+		return PR{}, err
+	}
+	if status != http.StatusOK {
+		return PR{}, g.apiErr("PATCH", path, status, data)
+	}
+	var p ghPull
+	if err := json.Unmarshal(data, &p); err != nil {
+		return PR{}, fmt.Errorf("github update pr decode: %w", err)
+	}
+	return p.toPR(), nil
+}
+
+const convertPullRequestToDraftMutation = `mutation($id:ID!){convertPullRequestToDraft(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`
+const markPullRequestReadyMutation = `mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`
+
+func (g *GitHubForge) SetPRDraft(ctx context.Context, owner, repo string, pr PR, draft bool) error {
+	if pr.Draft == draft {
+		return nil
+	}
+	if strings.TrimSpace(pr.NodeID) == "" {
+		return fmt.Errorf("github PR #%d is missing node_id needed for draft conversion", pr.Number)
+	}
+	query := markPullRequestReadyMutation
+	if draft {
+		query = convertPullRequestToDraftMutation
+	}
+	status, data, _, err := g.do(ctx, http.MethodPost, "/graphql", map[string]any{
+		"query":     query,
+		"variables": map[string]any{"id": pr.NodeID},
+	})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return g.apiErr("POST", "/graphql", status, data)
+	}
+	return graphQLErr(data)
 }
 
 func (g *GitHubForge) UpdatePRBase(ctx context.Context, owner, repo string, number int, base string) error {

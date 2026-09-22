@@ -18,6 +18,7 @@ type Reconciler struct {
 // Options tunes a publish run.
 type Options struct {
 	DryRun bool
+	PR     PullRequestOptions
 	// Resolver, when set, auto-rebases descendants of merged predecessors onto the
 	// live base (resolving conflicts via the resolver) instead of failing closed.
 	Resolver ConflictResolver
@@ -318,9 +319,8 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 			if opts.PRMetaFor != nil {
 				meta, _ = opts.PRMetaFor(ctx, a.TaskID)
 			}
-			title := buildPRTitle(id, a.TaskID, meta, commit)
-			body := buildPRBody(a.TaskID, meta, commit, shortSHA(node.OutputSHA), node.BaseTaskID != "")
-			pr, cerr := r.Forge.CreatePR(ctx, owner, repo, a.Branch, a.DesiredBase, title, body)
+			prOpts := createPROptions(id, a, opts.PR, meta, commit, shortSHA(node.OutputSHA), node.BaseTaskID != "")
+			pr, cerr := r.Forge.CreatePR(ctx, owner, repo, a.Branch, a.DesiredBase, prOpts)
 			if cerr != nil {
 				return report, fmt.Errorf("phase4 create %s: %w", a.Branch, cerr)
 			}
@@ -331,21 +331,27 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 			report.Created = append(report.Created, a.TaskID)
 			report.PRURLs[a.TaskID] = pr.URL
 		case actReparent:
-			if err := r.markPublished(ctx, ws, id, a, repoPath, *a.PR); err != nil {
+			pr, uerr := r.applyPRUpdates(ctx, owner, repo, *a.PR, opts.PR)
+			if uerr != nil {
+				return report, fmt.Errorf("phase4 update #%d: %w", a.PR.Number, uerr)
+			}
+			if err := r.markPublished(ctx, ws, id, a, repoPath, pr); err != nil {
 				return report, fmt.Errorf("phase4 mark published %s: %w", a.TaskID, err)
 			}
-			liveByTask[a.TaskID] = *a.PR
+			liveByTask[a.TaskID] = pr
 			report.Reparented = append(report.Reparented, a.TaskID)
-			report.PRURLs[a.TaskID] = a.PR.URL
+			report.PRURLs[a.TaskID] = pr.URL
 		case actSkip:
-			if err := r.markPublished(ctx, ws, id, a, repoPath, *a.PR); err != nil {
+			pr, uerr := r.applyPRUpdates(ctx, owner, repo, *a.PR, opts.PR)
+			if uerr != nil {
+				return report, fmt.Errorf("phase4 update #%d: %w", a.PR.Number, uerr)
+			}
+			if err := r.markPublished(ctx, ws, id, a, repoPath, pr); err != nil {
 				return report, fmt.Errorf("phase4 mark published %s: %w", a.TaskID, err)
 			}
-			liveByTask[a.TaskID] = *a.PR
+			liveByTask[a.TaskID] = pr
 			report.Skipped = append(report.Skipped, a.TaskID)
-			if a.PR != nil {
-				report.PRURLs[a.TaskID] = a.PR.URL
-			}
+			report.PRURLs[a.TaskID] = pr.URL
 		case actMerged:
 			_ = r.Store.UpdateNode(ctx, ws, id, a.TaskID, func(n *sl.Node) error {
 				n.State = sl.NodeStateMerged
@@ -389,6 +395,36 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 		}
 	}
 	return report, nil
+}
+
+func createPROptions(id sl.StackID, a action, opts PullRequestOptions, meta PRMeta, commit commitText, sha string, hasStackDeps bool) PullRequestOptions {
+	if !opts.TitleSet {
+		opts.Title = buildPRTitle(id, a.TaskID, meta, commit)
+	}
+	if !opts.BodySet {
+		opts.Body = buildPRBody(a.TaskID, meta, commit, sha, hasStackDeps)
+	}
+	return opts
+}
+
+func (r *Reconciler) applyPRUpdates(ctx context.Context, owner, repo string, pr PR, opts PullRequestOptions) (PR, error) {
+	if !opts.HasAnyUpdate() {
+		return pr, nil
+	}
+	if opts.HasMetadataUpdate() {
+		updated, err := r.Forge.UpdatePRMetadata(ctx, owner, repo, pr.Number, opts)
+		if err != nil {
+			return pr, err
+		}
+		pr = updated
+	}
+	if opts.DraftSet {
+		if err := r.Forge.SetPRDraft(ctx, owner, repo, pr, opts.Draft); err != nil {
+			return pr, err
+		}
+		pr.Draft = opts.Draft
+	}
+	return pr, nil
 }
 
 func (r *Reconciler) markPublished(ctx context.Context, ws string, id sl.StackID, a action, repoPath string, pr PR) error {

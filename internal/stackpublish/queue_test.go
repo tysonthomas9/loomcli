@@ -42,6 +42,11 @@ type fakeForge struct {
 	bodyUpdated  bool
 	createdTitle string // title passed to the most recent CreatePR
 	createdBody  string // body passed to the most recent CreatePR
+	mergedNumber int
+	mergeOpts    MergeOptions
+	createdOpts  []PullRequestOptions
+	updatedOpts  []PullRequestOptions
+	draftUpdates []bool
 }
 
 func (f *fakeForge) PRStatuses(context.Context, string, string, string) (map[string]PRStatus, error) {
@@ -56,14 +61,59 @@ func (f *fakeForge) UpdatePRBody(context.Context, string, string, int, string) e
 func (f *fakeForge) ListStackPRs(context.Context, string, string, string) ([]PR, error) {
 	return f.prs, nil
 }
-func (f *fakeForge) CreatePR(_ context.Context, _, _, _, _, title, body string) (PR, error) {
+func (f *fakeForge) CreatePR(_ context.Context, _, _ string, head, base string, opts PullRequestOptions) (PR, error) {
 	f.mutated = true
-	f.createdTitle = title
-	f.createdBody = body
+	f.createdOpts = append(f.createdOpts, opts)
+	f.createdTitle = opts.Title
+	f.createdBody = opts.Body
 	if f.createPR.Number != 0 || f.createPR.URL != "" {
-		return f.createPR, nil
+		pr := f.createPR
+		if pr.Head == "" {
+			pr.Head = head
+		}
+		if pr.Base == "" {
+			pr.Base = base
+		}
+		if pr.Title == "" {
+			pr.Title = opts.Title
+		}
+		if pr.Body == "" {
+			pr.Body = opts.Body
+		}
+		pr.Draft = opts.Draft
+		return pr, nil
 	}
-	return PR{}, nil
+	return PR{
+		Number: len(f.createdOpts), NodeID: "PR_node", Head: head, Base: base,
+		State: "open", Draft: opts.Draft, Title: opts.Title, Body: opts.Body,
+		URL: "https://github.com/o/r/pull/1",
+	}, nil
+}
+func (f *fakeForge) UpdatePRMetadata(_ context.Context, _, _ string, number int, opts PullRequestOptions) (PR, error) {
+	f.mutated = true
+	f.updatedOpts = append(f.updatedOpts, opts)
+	for _, pr := range f.prs {
+		if pr.Number == number {
+			if opts.TitleSet {
+				pr.Title = opts.Title
+			}
+			if opts.BodySet {
+				pr.Body = opts.Body
+			}
+			return pr, nil
+		}
+	}
+	return PR{Number: number, State: "open", URL: "https://github.com/o/r/pull/1"}, nil
+}
+func (f *fakeForge) SetPRDraft(_ context.Context, _, _ string, pr PR, draft bool) error {
+	f.mutated = true
+	f.draftUpdates = append(f.draftUpdates, draft)
+	for i := range f.prs {
+		if f.prs[i].Number == pr.Number {
+			f.prs[i].Draft = draft
+		}
+	}
+	return nil
 }
 func (f *fakeForge) UpdatePRBase(context.Context, string, string, int, string) error {
 	f.mutated = true
@@ -80,6 +130,18 @@ func (f *fakeForge) PushBranches(context.Context, string, []BranchPush) error {
 func (f *fakeForge) QueuedPRNumbers(context.Context, string, string) (map[int]bool, error) {
 	f.queueChecked = true
 	return f.queued, nil
+}
+func (f *fakeForge) MergePR(_ context.Context, _ string, _, _ string, number int, opts MergeOptions) error {
+	f.mutated = true
+	f.mergedNumber = number
+	f.mergeOpts = opts
+	for i := range f.prs {
+		if f.prs[i].Number == number {
+			f.prs[i].State = "closed"
+			f.prs[i].Merged = true
+		}
+	}
+	return nil
 }
 
 type updateFailStore struct {
@@ -192,6 +254,58 @@ func TestPublish_DryRunSkipsQueueCheck(t *testing.T) {
 	assert.True(t, rep.DryRun)
 	assert.False(t, ff.queueChecked, "dry-run does not query the merge queue")
 	assert.False(t, ff.mutated)
+}
+
+func TestPublish_CreatesPRWithMetadataOptions(t *testing.T) {
+	ctx := context.Background()
+	id := sl.StackID("epic:Meta")
+	store := stackstore.New(t.TempDir())
+	require.NoError(t, store.EnsureStack(ctx, sl.Stack{ID: id, WorkspaceKey: "WS", RepoName: "r", RootBase: "main"}))
+	_, err := store.AddNode(ctx, "WS", id, "T1", "", "")
+	require.NoError(t, err)
+	repoPath := gitRepoWithBranches(t, id, "T1")
+	ff := &fakeForge{}
+	rec := &Reconciler{Store: store, Forge: ff}
+
+	_, err = rec.Publish(ctx, "WS", id, repoPath, Options{PR: PullRequestOptions{
+		Title: "custom title", TitleSet: true,
+		Body: "custom body", BodySet: true,
+		Draft: true, DraftSet: true,
+		MaintainerCanModify: false, MaintainerCanModifySet: true,
+	}})
+	require.NoError(t, err)
+	require.Len(t, ff.createdOpts, 1)
+	assert.Equal(t, "custom title", ff.createdOpts[0].Title)
+	assert.Equal(t, "custom body", ff.createdOpts[0].Body)
+	assert.True(t, ff.createdOpts[0].Draft)
+	assert.True(t, ff.createdOpts[0].MaintainerCanModifySet)
+	assert.False(t, ff.createdOpts[0].MaintainerCanModify)
+}
+
+func TestPublish_UpdatesExistingPRMetadataOptions(t *testing.T) {
+	ctx := context.Background()
+	id := sl.StackID("epic:Meta")
+	store := stackstore.New(t.TempDir())
+	require.NoError(t, store.EnsureStack(ctx, sl.Stack{ID: id, WorkspaceKey: "WS", RepoName: "r", RootBase: "main"}))
+	_, err := store.AddNode(ctx, "WS", id, "T1", "", "")
+	require.NoError(t, err)
+	repoPath := gitRepoWithBranches(t, id, "T1")
+	ff := &fakeForge{prs: []PR{{
+		Number: 7, NodeID: "PR_node", Head: sl.OutputBranchName(id, "T1"), Base: "main",
+		State: "open", Draft: true, URL: "https://github.com/o/r/pull/7",
+	}}}
+	rec := &Reconciler{Store: store, Forge: ff}
+
+	_, err = rec.Publish(ctx, "WS", id, repoPath, Options{PR: PullRequestOptions{
+		Title: "updated title", TitleSet: true,
+		Body: "updated body", BodySet: true,
+		Draft: false, DraftSet: true,
+	}})
+	require.NoError(t, err)
+	require.Len(t, ff.updatedOpts, 1)
+	assert.Equal(t, "updated title", ff.updatedOpts[0].Title)
+	assert.Equal(t, "updated body", ff.updatedOpts[0].Body)
+	assert.Equal(t, []bool{false}, ff.draftUpdates)
 }
 
 func TestQueuedPRNumbers_GraphQLParse(t *testing.T) {
