@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Loom Browser POC",
+  "version": "0.0.0",
+  "identifier": "com.loom.browser-poc",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://127.0.0.1:1421",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Loom · Lead browser POC",
+        "width": 1440,
+        "height": 960,
+        "minWidth": 900,
+        "minHeight": 680,
+        "contentProtected": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:61300 ws://127.0.0.1:*; frame-src http://127.0.0.1:61080 http://127.0.0.1:62080; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}

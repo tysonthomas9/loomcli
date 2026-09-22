@@ -1,0 +1,24 @@
+{
+  "selector": "p",
+  "tag": "p",
+  "id": null,
+  "classes": [],
+  "role": null,
+  "ariaLabel": null,
+  "text": "Select this panel from the live view. Loom will resolve the click to DOM context and capture its bounds.",
+  "url": "http://host.lima.internal:61300/fixture?app=a",
+  "title": "Loom host reachability fixture",
+  "note": "Check this element before continuing",
+  "bounds": {
+    "x": 606,
+    "y": 452.71875,
+    "width": 708,
+    "height": 42
+  },
+  "viewport": {
+    "width": 1920,
+    "height": 937,
+    "deviceScaleFactor": 1
+  },
+  "capturedAt": "2026-09-22T01:50:57.291Z"
+}

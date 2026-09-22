@@ -1,0 +1,11 @@
+[package]
+name = "loom-kernel-browser-poc"
+version = "0.0.0"
+description = "Throwaway Loom local Kernel browser prototype"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }

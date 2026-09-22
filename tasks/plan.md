@@ -137,3 +137,32 @@ inspect existing Podman state but must not reuse, stop, or mutate foreign
 containers, machines, ports, or profile directories. Building or pulling a
 Kernel image is a separate explicit step because it can consume substantial
 time, bandwidth, and disk.
+
+## Completed Result (2026-09-21)
+
+All five spike tasks produced evidence. The critical interaction checks pass:
+the native Tauri WKWebView plays Kernel's stream, CDP and the human operate the
+same Chromium page, takeover rejects stale actions, DOM annotations produce
+metadata plus a crop, two profiles remain isolated, and a forced VM loss is
+recoverable using exact ownership labels.
+
+Podman was not the successful runtime. Homebrew Podman 6.1.2 repaired the
+earlier Ignition failure, but AppleHV/gvproxy still could not keep a reachable
+machine. The completed proof uses a dedicated Colima 0.10.3 VZ VM with Rosetta
+and Docker compatibility. This is evidence about Kernel/Tauri feasibility, not
+an endorsement of that dependency chain for production.
+
+The decision is to preserve Tauri and continue only with a production runtime
+design. Do not transplant this prototype directly: the current browser image
+is amd64-only, privileged, about 1.25-1.87 GiB resident per browser in the
+observed run, and an active stream consumed about 45-49% of one reported CPU
+under Rosetta. The background-stream fix reduces an inactive browser to about
+0.15% CPU but does not address baseline memory or packaging.
+
+Evidence:
+
+- [`LOOMCLI-221`](../desktop/prototypes/kernel-browser/evidence/LOOMCLI-221-preflight.md)
+- [`LOOMCLI-222`](../desktop/prototypes/kernel-browser/evidence/LOOMCLI-222-live-view.md)
+- [`LOOMCLI-223`](../desktop/prototypes/kernel-browser/evidence/LOOMCLI-223-shared-control-annotation.md)
+- [`LOOMCLI-224`](../desktop/prototypes/kernel-browser/evidence/LOOMCLI-224-multiple-browsers-recovery.md)
+- [`LOOMCLI-225`](../desktop/prototypes/kernel-browser/evidence/LOOMCLI-225-verdict.md)

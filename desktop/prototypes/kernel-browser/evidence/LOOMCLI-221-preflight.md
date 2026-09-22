@@ -2,8 +2,7 @@
 
 Date: 2026-09-21 (America/Los_Angeles)
 
-Status: **blocked by the local Podman VM provider; browser feasibility remains
-unverified**.
+Status: **Podman path rejected; task-owned Colima fallback passed lifecycle**.
 
 ## Observed host state
 
@@ -120,3 +119,24 @@ The runtime lifecycle proof remains blocked, not failed: Kernel itself has not
 run. The next safe option is a Podman distribution that includes the supported
 `libkrun`/`krunkit` provider, followed by a new task-owned machine and the same
 preflight.
+
+## Final fallback and lifecycle result
+
+The reviewed Homebrew `krunkit`/libkrun path reproduced the same gvproxy
+reachability class and was removed. A dedicated Colima 0.10.3 profile then
+provided the safe fallback:
+
+- profile: `loom-kernel-browser-221`;
+- VZ, 4 CPUs, 10 GiB RAM, 40 GiB sparse disk, Docker runtime;
+- Rosetta enabled because Kernel's published Chromium image is amd64-only;
+- no activation of the global Docker context and no SSH-config mutation; and
+- exact image digest
+  `sha256:7aa6dc616440fbe3f8886cec700dc7533aa2a0ec29b999102aa6cad4ac3e6f50`.
+
+Two containers reached CDP readiness with the runtime harness. After a VM
+process loss, both persisted as `Exited (255)`. A new start correctly refused
+their occupied names. `runtime.sh stop` selected only containers carrying both
+`io.loom.prototype=local-kernel-browser` and
+`io.loom.runtime-id=LOOMCLI-221`, removed them, and a following start recreated
+both successfully. This closes the container lifecycle and ownership check;
+the external VM lifecycle remains a packaging concern for production.

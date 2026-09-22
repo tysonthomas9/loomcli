@@ -1,0 +1,11 @@
+{
+  "name": "@loom/prototype-kernel-browser",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "control": "node scripts/control-server.mjs",
+    "dev": "../../node_modules/.bin/vite --host 127.0.0.1 --port 1421",
+    "build": "../../node_modules/.bin/vite build"
+  }
+}
