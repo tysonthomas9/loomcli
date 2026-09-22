@@ -138,3 +138,5 @@ Tests
     ├── tests/e2e/integration/      # 2 real backend integration specs
     └── tests/e2e/api/              # 12 API contract test specs
 ```
+
+- [SSE replay regression](sse-replay-regression.md): pagination, replay/live handoff, checkpoint progress, and persistent-browser negative control.

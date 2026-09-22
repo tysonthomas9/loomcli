@@ -191,7 +191,7 @@ func parseMutationPayload(data string) (*realtime.MutationPayload, error) {
 // newLiveSSEServer creates an httptest.NewServer wired to realtime.NewHandler with the
 // given hub and getMutationsSince callback. The caller must call server.Close()
 // and hub.Stop() when done (use t.Cleanup).
-func newLiveSSEServer(t *testing.T, hub *realtime.Hub, getMutationsSince func(wsID string, since string) []rpc.MutationEvent) *httptest.Server {
+func newLiveSSEServer(t *testing.T, hub *realtime.Hub, getMutationsSince func(wsID string, since string) ([]rpc.MutationEvent, error)) *httptest.Server {
 	t.Helper()
 
 	handler := realtime.NewHandler(realtime.HandlerConfig{Hub: hub, GetMutationsSince: getMutationsSince, WorkspaceFromCtx: middleware.WorkspaceFromContext})
@@ -458,8 +458,8 @@ func TestSSELive_CatchUpOnReconnect(t *testing.T) {
 		},
 	}
 
-	getMutationsSince := func(wsID string, since string) []rpc.MutationEvent {
-		return catchUpEvents
+	getMutationsSince := func(wsID string, since string) ([]rpc.MutationEvent, error) {
+		return catchUpEvents, nil
 	}
 
 	server := newLiveSSEServer(t, hub, getMutationsSince)
@@ -512,9 +512,9 @@ func TestSSELive_LastEventIDHeader(t *testing.T) {
 	t.Cleanup(hub.Stop)
 
 	var capturedSince string
-	getMutationsSince := func(wsID string, since string) []rpc.MutationEvent {
+	getMutationsSince := func(wsID string, since string) ([]rpc.MutationEvent, error) {
 		capturedSince = since
-		return nil
+		return nil, nil
 	}
 
 	server := newLiveSSEServer(t, hub, getMutationsSince)

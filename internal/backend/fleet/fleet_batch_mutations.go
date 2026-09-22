@@ -570,22 +570,38 @@ func (b *FleetBackend) getMutationsAfter(ctx context.Context, op string, since s
 	if timeoutMs > 0 {
 		params.Set("timeout", strconv.FormatInt(timeoutMs, 10))
 	}
-	rawURL := b.baseWorkspaceV2 + "/events/mutations?" + params.Encode()
-	resp, err := b.execURL(ctx, op, "GET", rawURL, nil)
-	if err != nil {
-		return nil, err
+	var mutations []backend.MutationData
+	seen := map[string]bool{params.Get("since"): true}
+	for {
+		rawURL := b.baseWorkspaceV2 + "/events/mutations?" + params.Encode()
+		resp, err := b.execURL(ctx, op, "GET", rawURL, nil)
+		if err != nil {
+			return mutations, err
+		}
+		if !hasData(resp) {
+			return mutations, nil
+		}
+		var page fleetMutationsResponse
+		if err := json.Unmarshal(resp.Data, &page); err != nil {
+			return mutations, backend.ErrInternal(op, "unmarshal response", err)
+		}
+		mutations = append(mutations, fleetEventsToMutationData(page.Events)...)
+		// The shared subscriber consumes one long-poll page at a time. Reconnect
+		// replay must drain every page before the handler announces completion.
+		if timeoutMs > 0 || !page.HasMore {
+			return mutations, nil
+		}
+		if page.Cursor == "" || seen[page.Cursor] {
+			return mutations, backend.ErrInternal(op, "mutation pagination did not advance", nil)
+		}
+		seen[page.Cursor] = true
+		params.Set("since", page.Cursor)
 	}
-	if !hasData(resp) {
-		return []backend.MutationData{}, nil
-	}
-	var fresp fleetMutationsResponse
-	if err := json.Unmarshal(resp.Data, &fresp); err != nil {
-		return nil, backend.ErrInternal(op, "unmarshal response", err)
-	}
-	return fleetEventsToMutationData(fresp.Events), nil
 }
 
-// GetMutationsAfter returns mutation events after an opaque fleet-db cursor.
+// GetMutationsAfter drains mutation pages after an opaque fleet-db cursor.
+// On failure it returns the successfully read prefix and an error. Replay
+// callers may checkpoint that prefix but must not signal synchronization.
 func (b *FleetBackend) GetMutationsAfter(ctx context.Context, since string) ([]backend.MutationData, error) {
 	return b.getMutationsAfter(ctx, "GetMutationsAfter", since, 0)
 }

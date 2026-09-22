@@ -16,7 +16,7 @@ import (
 // do not emit noisy 404 console errors before connecting directly.
 type Module struct {
 	hub               *realtime.Hub
-	getMutationsSince func(wsID string, since string) []rpc.MutationEvent
+	getMutationsSince func(wsID string, since string) ([]rpc.MutationEvent, error)
 	workspaceFromCtx  func(context.Context) string
 	activateWorkspace func(context.Context, string)
 	sseTokens         *realtime.TokenStore // may be nil in open auth mode
@@ -25,7 +25,7 @@ type Module struct {
 // NewModule returns a Module. sseTokens may be nil in open auth mode.
 func NewModule(
 	hub *realtime.Hub,
-	getMutationsSince func(string, string) []rpc.MutationEvent,
+	getMutationsSince func(string, string) ([]rpc.MutationEvent, error),
 	workspaceFromCtx func(context.Context) string,
 	activateWorkspace func(context.Context, string),
 	sseTokens *realtime.TokenStore,

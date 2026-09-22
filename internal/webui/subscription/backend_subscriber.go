@@ -3,6 +3,7 @@ package subscription
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -99,15 +100,14 @@ func (s *BackendMutationSubscriber) Stop() {
 }
 
 // GetMutationDataSince returns mutations from the backend with timestamps
-// strictly greater than since (ms epoch). Used by the SSE reconnect
+// after the durable cursor. Used by the SSE reconnect
 // catch-up path; runs synchronously and is bounded by backendCatchUpTimeout.
-// Returns nil on backend error so the caller can fall through to the
-// connected event without aborting the SSE stream.
+// Errors abort catch-up: a failed read must never report synchronization.
 //
 // Method name matches the workspaceSubscriber interface in multi.go.
-func (s *BackendMutationSubscriber) GetMutationDataSince(since string) []backend.MutationData {
+func (s *BackendMutationSubscriber) GetMutationDataSince(since string) ([]backend.MutationData, error) {
 	if s.backend == nil {
-		return nil
+		return nil, fmt.Errorf("mutation backend unavailable")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), backendCatchUpTimeout)
 	defer cancel()
@@ -122,9 +122,9 @@ func (s *BackendMutationSubscriber) GetMutationDataSince(since string) []backend
 	}
 	if err != nil {
 		slog.Error("backend GetMutations error", "workspace", s.workspaceID, "err", err)
-		return nil
+		return muts, err
 	}
-	return muts
+	return muts, nil
 }
 
 // loop is the long-poll body. Blocks on WaitForMutations for up to

@@ -34,7 +34,7 @@ const (
 // HandlerConfig configures the SSE Handler.
 type HandlerConfig struct {
 	Hub               *Hub
-	GetMutationsSince func(wsID string, since string) []rpc.MutationEvent
+	GetMutationsSince func(wsID string, since string) ([]rpc.MutationEvent, error)
 	WorkspaceFromCtx  func(context.Context) string
 	TokenStore        *TokenStore // nil = open mode (no auth required)
 	// OnAuthenticated runs after the stream request passes handler-level auth.
@@ -44,7 +44,7 @@ type HandlerConfig struct {
 // Handler is an http.Handler for the SSE endpoint with configurable heartbeat.
 type Handler struct {
 	hub               *Hub
-	getMutationsSince func(wsID string, since string) []rpc.MutationEvent
+	getMutationsSince func(wsID string, since string) ([]rpc.MutationEvent, error)
 	heartbeatInterval time.Duration
 	tokenStore        *TokenStore
 	workspaceFromCtx  func(context.Context) string
@@ -131,7 +131,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("SSE client connected", "client_id", client.id, "remote_addr", r.RemoteAddr, "since", lastSince, "repos", sourceRepos, "workspace_id", workspaceID)
 
-	if err := h.sendCatchUp(sw, lastSince, workspaceID, sourceRepos); err != nil {
+	if err := h.sendCatchUp(sw, client, lastSince, workspaceID, sourceRepos); err != nil {
 		slog.Error("SSE client catch-up write failed", "client_id", client.id, "err", err)
 		handshakeSpan.RecordError(err)
 		handshakeSpan.SetStatus(codes.Error, "network")
@@ -176,21 +176,32 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	discSpan.End()
 }
 
-func (h *Handler) sendCatchUp(sw *Writer, since string, workspaceID string, sourceRepos []string) error {
+func (h *Handler) sendCatchUp(sw *Writer, client *Client, since string, workspaceID string, sourceRepos []string) error {
 	if since == "" || h.getMutationsSince == nil || workspaceID == "" {
 		return nil
 	}
-	for _, m := range h.getMutationsSince(workspaceID, since) {
+	mutations, replayErr := h.getMutationsSince(workspaceID, since)
+	for _, m := range mutations {
+		if m.Cursor != "" {
+			client.replayed[m.Cursor] = true
+		}
 		payload := RPCMutationToPayload(m)
 		payload.WorkspaceID = workspaceID
 		if !MatchesSourceRepoFilter(sourceRepos, payload.SourceRepo) {
+			// Excluded records still advance the workspace journal position. Publish
+			// no domain payload, but preserve progress if a later page fails.
+			if m.Cursor != "" {
+				if err := sw.WriteEventID(m.Cursor, "checkpoint", "{}"); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		if err := writeSSEEvent(sw, payload); err != nil {
 			return err
 		}
 	}
-	return nil
+	return replayErr
 }
 
 // streamLoop runs the long-lived event pump and returns the disconnect
@@ -212,6 +223,11 @@ func (h *Handler) streamLoop(sw *Writer, client *Client, ctx context.Context) (s
 				// Hub-side close: client.send was closed by UnregisterClient
 				// (server shutdown or hub-driven eviction).
 				return disconnectReasonServerClose, nil
+			}
+			// Live notifications may overlap replay, including delayed fanout.
+			// Compare opaque IDs by identity; never order them as timestamps.
+			if mutation.Cursor != "" && client.replayed[mutation.Cursor] {
+				continue
 			}
 			if err := writeSSEEvent(sw, mutation); err != nil {
 				slog.Error("SSE client write failed", "client_id", client.id, "err", err)

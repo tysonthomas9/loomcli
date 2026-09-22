@@ -180,11 +180,14 @@ export class WorkspaceSSEClient {
 
     try {
       this.eventSource = new EventSource(url);
-      this.eventSource.onopen = () => this.handleOpen();
       this.eventSource.onerror = () => this.handleError();
       this.eventSource.addEventListener("mutation", (e) =>
         this.handleMutation(e as MessageEvent),
       );
+      this.eventSource.addEventListener("checkpoint", (e) => {
+        const id = (e as MessageEvent).lastEventId;
+        if (id) this.lastEventId = id;
+      });
       this.eventSource.addEventListener("connected", () =>
         this.handleConnected(),
       );
@@ -311,7 +314,9 @@ export class WorkspaceSSEClient {
     }
   }
 
-  private handleOpen(): void {
+  // Transport open may precede hundreds of replay frames. Only the server's
+  // completion barrier makes the application synchronized.
+  private handleConnected(): void {
     const wasReconnecting = this.reconnectAttempts > 0;
     this.setState("connected");
     this.reconnectAttempts = 0;
@@ -319,9 +324,6 @@ export class WorkspaceSSEClient {
     if (wasReconnecting) {
       this.onReconnect?.(0);
     }
-  }
-
-  private handleConnected(): void {
     this.onConnected?.();
   }
 
