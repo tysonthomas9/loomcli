@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -37,6 +38,17 @@ func ResolveRoleConfigStatic(roleName string, config *cfgpkg.DaemonConfig, proje
 
 	if rc.PromptFile == "" {
 		return cfgpkg.RoleConfig{}, fmt.Errorf("custom role %q missing prompt_file", roleName)
+	}
+
+	// builtin: is resolved only by GenerateTerminalPrompt, for interactive
+	// terminal prompts. Joining it onto projectDir yields a path nobody wrote
+	// and fails daemon creation for every agent, not just this one — so name the
+	// real cause here rather than reporting a missing file.
+	if strings.HasPrefix(strings.TrimSpace(rc.PromptFile), "builtin:") {
+		return cfgpkg.RoleConfig{}, fmt.Errorf(
+			"role %q has prompt_file %q: built-in prompts are interactive-only and cannot be daemon-supervised; "+
+				"set prompt_file to a path relative to the workspace root",
+			roleName, rc.PromptFile)
 	}
 
 	promptPath := rc.PromptFile
