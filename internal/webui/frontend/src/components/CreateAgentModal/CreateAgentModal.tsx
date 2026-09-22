@@ -571,8 +571,9 @@ export function CreateAgentModal({
                 className={styles.emptyHint}
                 data-testid="create-agent-no-repos"
               >
-                No repos yet — add one from the sidebar first. This agent will
-                run with workspace scope.
+                {selectedKind === "background"
+                  ? "No repos in this workspace yet — background agents need at least one repo; interactive agents run with workspace scope."
+                  : "No repos yet — add one from the sidebar first. This agent will run with workspace scope."}
               </p>
             ) : (
               <div

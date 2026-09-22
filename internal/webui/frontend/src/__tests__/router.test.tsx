@@ -51,9 +51,6 @@ vi.mock("@/views/FilesPage", () => ({ FilesPage }));
 const SkillsPage = () => null;
 vi.mock("@/views/SkillsPage", () => ({ SkillsPage }));
 
-const IssueDetailPage = () => null;
-vi.mock("@/views/IssueDetailPage", () => ({ IssueDetailPage }));
-
 // Mock heavy dependencies pulled in by the router module
 vi.mock("@/App", () => ({ default: () => null }));
 vi.mock("@/components/WorkspaceLayout", () => ({
@@ -155,7 +152,7 @@ describe("router view routes", () => {
       ["workspace", WorkspacePage],
       ["files", FilesPage],
       ["skills", SkillsPage],
-      ["issues/:issueId", IssueDetailPage],
+      ["issues/:issueId", KanbanPage],
     ];
 
     it.each(lazyCases)(

@@ -106,7 +106,6 @@ const QUARANTINED_SPECS = [
   "**/keyboard-escape-layers.spec.ts",
   "**/keyboard-focus-management.spec.ts",
   "**/keyboard-global-shortcuts.spec.ts",
-  "**/log-streaming.spec.ts",
   "**/monitor-dashboard.spec.ts",
   "**/monitor-degradation.spec.ts",
   "**/monitor-visual-regression.spec.ts",
@@ -156,7 +155,7 @@ function resolveWebServer() {
     };
   }
   if (isIntegration || isLocalIntegration) {
-    // Local server mode or local-integration: user manages server
+    // Local server mode or local API integration: user manages server
     return undefined;
   }
   // Chromium unit tests: Vite dev server
@@ -272,23 +271,6 @@ export default defineConfig({
       globalTeardown: "./tests/e2e/integration/global-teardown.ts",
       timeout: 60000,
       workers: 1,
-    },
-    {
-      name: "local-integration",
-      testDir: "./tests/e2e/integration",
-      testMatch: "**/terminal-parity.integration.spec.ts",
-      testIgnore: isLocalIntegration
-        ? undefined
-        : "**/terminal-parity.integration.spec.ts",
-      use: {
-        ...devices["Desktop Chrome"],
-        ...(chromiumExecutablePath
-          ? { launchOptions: { executablePath: chromiumExecutablePath } }
-          : {}),
-        baseURL: frontendBaseURL,
-        extraHTTPHeaders: authHeaders,
-      },
-      timeout: 60000,
     },
     {
       name: "api",

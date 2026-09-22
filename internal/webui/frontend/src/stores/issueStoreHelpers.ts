@@ -110,6 +110,11 @@ export interface IssueStoreState {
   disconnectedSince: number | null;
   pendingIds: Set<string>;
   mutationCount: number;
+  /**
+   * Monotonic, issue-scoped revisions for full-detail collections that are not
+   * present in the list projection (comments, labels, dependencies).
+   */
+  detailInvalidationVersions: Map<string, number>;
 }
 
 /** Options for {@link IssueStoreActions.updateIssueStatus}. */
@@ -138,6 +143,8 @@ export interface IssueStoreActions {
   setReconnectAttempts: (attempts: number) => void;
   setLastEventId: (id: number | undefined) => void;
   retryConnection: () => void;
+  /** Reconcile a successful detail write into the list projection. */
+  reconcileIssue: (issue: Issue) => void;
   getIssue: (id: string) => Issue | undefined;
   reset: () => void;
   configure: (config: IssueStoreConfig) => void;
@@ -169,6 +176,7 @@ export const INITIAL_STATE: IssueStoreState = {
   disconnectedSince: null,
   pendingIds: new Set(),
   mutationCount: 0,
+  detailInvalidationVersions: new Map(),
 };
 
 // ---------------------------------------------------------------------------

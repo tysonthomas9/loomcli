@@ -1049,6 +1049,17 @@ func TestMaterializeStoreOutageLeavesProjectionUntouched(t *testing.T) {
 	}
 }
 
+func TestMaterializeMissingFleetDBSkillRouteIsUnavailable(t *testing.T) {
+	target := t.TempDir()
+	missingRoute := fmt.Errorf("fleetdb: GET /api/v1/WS/skills: HTTP 404: 404 page not found: %w", domain.ErrNotFound)
+	st := materializeStore{skills: staticSkillStore{err: missingRoute}}
+
+	err := materialize(t.Context(), st, "WS", "lead", target)
+	if !IsStoreUnavailable(err) || !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Materialize error = %v, want missing route as store-unavailable", err)
+	}
+}
+
 func TestMaterializeDoesNotDegradeOnNonOutageStoreError(t *testing.T) {
 	target := t.TempDir()
 	denied := fmt.Errorf("skill list forbidden: %w", domain.ErrConflict)

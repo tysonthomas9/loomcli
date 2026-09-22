@@ -101,6 +101,33 @@ export function createIssueStore(
   let maxReconnectAttemptsTracked = 0;
   let eventUnsubscribe: (() => void) | null = null;
 
+  function invalidateIssueDetails(
+    issueId: string,
+    get: () => IssueStore,
+  ): void {
+    const versions = new Map(get().detailInvalidationVersions);
+    versions.set(issueId, (versions.get(issueId) ?? 0) + 1);
+    store.setState({ detailInvalidationVersions: versions });
+  }
+
+  function detailIssueId(mutation: MutationPayload): string | undefined {
+    const detailEntity = mutation.entity_type;
+    if (
+      mutation.type !== "comment" &&
+      detailEntity !== "comment" &&
+      detailEntity !== "label" &&
+      detailEntity !== "dependency" &&
+      detailEntity !== "dep"
+    ) {
+      return undefined;
+    }
+
+    // Non-issue entity IDs identify the comment, label, or dependency itself.
+    // The backend projects the owning issue into issue_id from the event
+    // snapshot, which is the only safe key for detail invalidation.
+    return mutation.issue_id;
+  }
+
   let onToast = initialConfig?.onToast ?? null;
   let retryConnectionFn = initialConfig?.retryConnectionFn ?? null;
 
@@ -469,6 +496,11 @@ export function createIssueStore(
         }
       }
 
+      const invalidatedIssueId = detailIssueId(mutation);
+      if (invalidatedIssueId) {
+        invalidateIssueDetails(invalidatedIssueId, get);
+      }
+
       applyMutationToStore(mutation, set, get);
     },
 
@@ -642,6 +674,13 @@ export function createIssueStore(
       retryConnectionFn?.();
     },
 
+    reconcileIssue(issue: Issue): void {
+      const issuesMap = new Map(get().issuesMap);
+      const existing = issuesMap.get(issue.id);
+      issuesMap.set(issue.id, existing ? { ...existing, ...issue } : issue);
+      set({ issuesMap });
+    },
+
     getIssue(id: string): Issue | undefined {
       return get().issuesMap.get(id);
     },
@@ -686,7 +725,12 @@ export function createIssueStore(
       reconnectRecoveryPending = false;
       maxReconnectAttemptsTracked = 0;
 
-      set({ ...INITIAL_STATE, pendingIds: new Set(), issuesMap: new Map() });
+      set({
+        ...INITIAL_STATE,
+        pendingIds: new Set(),
+        issuesMap: new Map(),
+        detailInvalidationVersions: new Map(),
+      });
     },
   }));
 

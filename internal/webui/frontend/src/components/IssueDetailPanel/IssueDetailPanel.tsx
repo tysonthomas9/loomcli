@@ -71,7 +71,12 @@ import {
 } from "./sections";
 import { decisionButtonStyles } from "@/components/DecisionButton";
 import { IssueHeader } from "./header";
-import { AssigneeDropdown, RepoDropdown } from "./fields";
+import {
+  AssigneeDropdown,
+  LabelEditor,
+  RepoDropdown,
+  TypeDropdown,
+} from "./fields";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { MoveIssueDialog } from "./actions";
 import { SplitDetailSummary } from "./SplitDetailSummary";
@@ -82,7 +87,7 @@ import { useSplitRatio, useToast } from "@/hooks/ui";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { SessionsTab } from "./sessions";
 import styles from "./IssueDetailPanel.module.css";
-import { formatDate, formatIssueType, isIssueDetails } from "./utils";
+import { formatDate, isIssueDetails } from "./utils";
 
 /**
  * Blocking banner component - shows when issue is in blocked state with open dependencies.
@@ -457,6 +462,7 @@ function DefaultContent({
   const [isSavingStatus, setIsSavingStatus] = useState(false);
   const [isSavingAssignee, setIsSavingAssignee] = useState(false);
   const [isSavingRepo, setIsSavingRepo] = useState(false);
+  const [isSavingType, setIsSavingType] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [titleError, setTitleError] = useState<string | null>(null);
   const [showRejectForm, setShowRejectForm] = useState(false);
@@ -947,6 +953,45 @@ function DefaultContent({
     [issue, onIssueUpdate, workspaceId],
   );
 
+  const handleTypeSave = useCallback(
+    async (newType: Issue["issue_type"]) => {
+      if (!issue || !newType) return;
+
+      setIsSavingType(true);
+      try {
+        const updatedIssue = await updateIssue(workspaceId, issue.id, {
+          issue_type: newType,
+        });
+        onIssueUpdate?.(updatedIssue);
+      } finally {
+        setIsSavingType(false);
+      }
+    },
+    [issue, onIssueUpdate, workspaceId],
+  );
+
+  const handleAddLabel = useCallback(
+    async (label: string) => {
+      if (!issue) return;
+      const updatedIssue = await updateIssue(workspaceId, issue.id, {
+        add_labels: [label],
+      });
+      onIssueUpdate?.(updatedIssue);
+    },
+    [issue, onIssueUpdate, workspaceId],
+  );
+
+  const handleRemoveLabel = useCallback(
+    async (label: string) => {
+      if (!issue) return;
+      const updatedIssue = await updateIssue(workspaceId, issue.id, {
+        remove_labels: [label],
+      });
+      onIssueUpdate?.(updatedIssue);
+    },
+    [issue, onIssueUpdate, workspaceId],
+  );
+
   const handleRunEpicWorkflow = useCallback(async () => {
     if (!issue || issue.issue_type !== "epic" || isStartingEpicRun) return;
 
@@ -1256,15 +1301,11 @@ function DefaultContent({
         {/* Metadata Bar */}
         <div className={styles.metadataBar}>
           <span className={styles.metadataItem} data-testid="metadata-type">
-            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path
-                d="M2 4h12M2 8h12M2 12h8"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-            </svg>
-            {formatIssueType(issue.issue_type)}
+            <TypeDropdown
+              type={issue.issue_type}
+              onSave={handleTypeSave}
+              isSaving={isSavingType}
+            />
           </span>
           <AssigneeDropdown
             assignee={issue.assignee}
@@ -1537,6 +1578,13 @@ function DefaultContent({
 
             {/* Full-width sections below the columns */}
 
+            <LabelEditor
+              labels={issue.labels ?? []}
+              onAddLabel={handleAddLabel}
+              onRemoveLabel={handleRemoveLabel}
+              disabled={isLoading}
+            />
+
             {/* Epic roll-up: progress distribution + child tickets */}
             {issue.issue_type === "epic" && (
               <EpicRollup
@@ -1703,16 +1751,16 @@ export function IssueDetailPanel({
 }: IssueDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
 
-  // Open as a full content workspace by default, matching the PR review detail
-  // model. The header toggle still lets users collapse it to a side panel.
-  const [isMaximized, setIsMaximized] = useState(true);
+  // Issue details open as the right-side slide-over. Full-screen is an explicit
+  // operator choice through the header toggle, not the default presentation.
+  const [isMaximized, setIsMaximized] = useState(false);
   const toggleMaximize = useCallback(() => setIsMaximized((v) => !v), []);
-  // Each newly opened issue starts in the shared full-workspace detail model.
+  // Each newly opened issue returns to the compact slide-over model.
   useEffect(() => {
-    if (!isOpen) setIsMaximized(true);
+    if (!isOpen) setIsMaximized(false);
   }, [isOpen]);
   useEffect(() => {
-    setIsMaximized(true);
+    setIsMaximized(false);
   }, [issue?.id]);
 
   // Handle Escape key to close panel via global shortcut layer system.

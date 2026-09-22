@@ -2,6 +2,7 @@ package fleetdb
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -40,7 +41,14 @@ func (s *skillMaterializationLeaseStore) Acquire(ctx context.Context, in store.S
 	}
 	var out domain.SkillMaterializationLease
 	path := "/api/v1/" + pathEscape(in.WorkspaceKey) + "/skill-materialization-leases"
-	if _, _, err := s.client.doWithResponseNoRedirect(ctx, http.MethodPost, path, body, &out, nil); err != nil {
+	status, _, err := s.client.doWithResponseNoRedirect(ctx, http.MethodPost, path, body, &out, nil)
+	if err != nil {
+		// Older fleet-db deployments do not expose the lease route. Treat that
+		// capability gap like an unavailable lease store so callers can still
+		// materialize through the underlying skill store.
+		if status == http.StatusNotFound {
+			return nil, fmt.Errorf("skill materialization lease endpoint unavailable: %w", domain.ErrSkillMaterializationLeaseStoreUnavailable)
+		}
 		return nil, err
 	}
 	return &out, nil

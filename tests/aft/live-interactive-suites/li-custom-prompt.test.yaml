@@ -1,0 +1,270 @@
+# LIVE tier — a real AI backend behind a Custom-prompt interactive agent.
+#
+# Gated three ways: `--live`, `--real-backend <b>`, and this directory (run-aft.sh
+# refuses --live unless AFT_SUITES points at a live-* path). One real CLI resolves
+# on the server's PATH; every other agent CLI stays stubbed by the per-backend farm.
+# Run it with `make test-aft-live-interactive`. It consumes the selected account's
+# rate-limit window — do not loop it.
+#
+# WHERE THE ARTIFACT LANDS. Interactive agents deliberately get no worktree
+# (agent_service.go ensureLocalAgentWorktrees returns early for interactive roles),
+# so launch.cwd is empty and the PTY manager falls back to its own cwd — the
+# registered workspace path (pty_manager.go spawnSession: `cmd.Dir = m.cwd`). The
+# marker therefore lands in the WORKSPACE ROOT, not a worktree.
+#
+# THE WORKSPACE ROOT IS NOT A SECURITY BOUNDARY. Codex leads launch with
+# --dangerously-bypass-approvals-and-sandbox; setting a process cwd confines nothing.
+# The model runs with the operator's full permissions, and the negative-scope
+# assertion below only inspects this workspace — it can prove the model stayed in
+# scope, never that it could not leave. Treat the host account as exposed.
+#
+# WHY NO TRANSCRIPT ASSERTION. A background task run records a session with a
+# transcript and a diff. An interactive lead does not: controlled lead runtimes
+# update runtime metadata but never feed the task-session usage collector, and no
+# endpoint exposes an arbitrary lead's transcript. So the observable evidence here
+# is the artifact, the rendered terminal, and the orchestration session — and
+# readiness is asserted from real terminal output, never from pty_alive (which is
+# true for attachable metadata before any child has spawned).
+suite: li-custom-prompt
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-LIVE" >/dev/null || true
+  repo="$AFT_WORK_DIR/live-repo"
+  rm -rf "$repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit --allow-empty -m init -q
+  python3 -c 'import json,sys; print(json.dumps({"name":sys.argv[1],"type":"empty","repos":[sys.argv[2]]}))' "e2e-ws-live" "$repo" > "$AFT_WORK_DIR/live-workspace.json"
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/live-workspace.json" > "$AFT_WORK_DIR/live-workspace.resp.json"
+  python3 - "$AFT_WORK_DIR/live-workspace.resp.json" "$AFT_WORK_DIR/live-workspace.path" <<'PY'
+  import json, sys
+  data = json.load(open(sys.argv[1])).get("data") or {}
+  open(sys.argv[2], "w", encoding="utf-8").write(data["path"])
+  PY
+teardown: |
+  set +e
+  # Backstop only — each test closes its own tab fatally. A surviving tab here
+  # means a paid process outlived its test.
+  "$AFT_TESTS_DIR/scripts/live-close-agent-tab.sh" "live-cust-${RUN_ID:-local}" E2E-WS-LIVE
+  AFT_WS=E2E-WS-LIVE "$AFT_TESTS_DIR/scripts/close-open-issues.sh"
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-LIVE/agents/live-cust-${RUN_ID:-local}" >/dev/null || true
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-LIVE" >/dev/null || true
+  "$AFT_TESTS_DIR/scripts/real-backend-teardown.sh" "${AFT_REAL_BACKEND:-codex}" || true
+
+tests:
+  # covers: LI-1; CreateAgentModal custom-prompt template against a REAL backend;
+  # inline role prompt -> loom lead argv -> live model -> instructed artifact
+  - name: a real backend follows the custom prompt and writes the instructed artifact
+    intent: An operator defines a terminal teammate with inline instructions and the real backend carries them out at boot without any typed input
+    steps:
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          ws_path="$(cat "$AFT_WORK_DIR/live-workspace.path")"
+          # The prompt IS the fixture: the acceptance criterion is mechanically
+          # checkable, and the marker token exists only in this prompt, so the
+          # artifact proves three things at once — a real CLI ran (no stub writes
+          # it), THIS run's prompt was delivered, and the custom prompt was used
+          # rather than the built-in Lead persona.
+          cat > "$AFT_WORK_DIR/li1.prompt" <<EOF
+          Do this immediately, before saying anything, and without waiting for any further message.
+
+          Create a file named MARKER-$run.md in your current working directory.
+          Its entire contents must be exactly this one line:
+          AFT-LIVE-$run
+
+          Do not create, modify, or delete any other file. Do not run any git command.
+          Once the file exists, reply with the single word DONE and stop. Do not ask any questions.
+          EOF
+          # Baseline the workspace root: it is NOT clean (the stack writes response
+          # JSON after its seed commit), so "nothing else changed" has to be
+          # measured against a snapshot, never against an empty git status.
+          # Shared oracle (scripts/live-scope-baseline.sh): file digests + mode bits,
+          # and per-repo refs/HEAD. Extracted so every live case measures scope the
+          # same way instead of each carrying its own copy.
+          "$AFT_TESTS_DIR/scripts/live-scope-baseline.sh" "$ws_path" "$AFT_WORK_DIR/li1-baseline.txt"
+        intent: "An operator prepares the instructed-artifact prompt and snapshots the workspace baseline before any model runs"
+      - open: /ws/E2E-WS-LIVE/agents
+      - wait:
+          fn: >-
+            (() => {
+              const page = document.querySelector('[data-testid=agents-page]');
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+              if (!page || !settled) {
+                window.__aftAgentsPageStableSig = null;
+                window.__aftAgentsPageStableAt = 0;
+                return false;
+              }
+              if (window.__aftAgentsPageStableSig !== sig) {
+                window.__aftAgentsPageStableSig = sig;
+                window.__aftAgentsPageStableAt = Date.now();
+                return false;
+              }
+              return Date.now() - window.__aftAgentsPageStableAt >= 300;
+            })()
+        intent: "Wait until the live workspace agents page is ready"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait:
+          fn: >-
+            (() => {
+              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
+              if (overlay) {
+                window.__aftCreateAgentOverlayWaitStartedAt = 0;
+                return true;
+              }
+              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
+                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
+              }
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
+                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
+              }
+              return false;
+            })()
+        intent: "Wait until the agent creation dialog is open"
+      - click: { testid: create-agent-template-custom-prompt }
+      - fill: { testid: create-agent-name, value: "live-cust-${RUN_ID:-local}" }
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-testid=create-agent-backend] option').length > 1
+        intent: "Wait until backend options load before selecting the live backend"
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND:-codex}" }
+      - run: >-
+          agent-browser --session "$AFT_SESSION" find testid create-agent-interactive-prompt fill "$(cat "$AFT_WORK_DIR/li1.prompt")"
+        intent: "An operator pastes the instructed-artifact prompt into the custom prompt field"
+      - expect: { enabled: { testid: create-agent-submit, equals: true } }
+      - click: { testid: create-agent-submit }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=create-agent-overlay]') &&
+            document.body.textContent.includes('live-cust-${RUN_ID:-local}')
+        intent: "Wait until the live custom agent appears after submit"
+      - open: /ws/E2E-WS-LIVE/agents/live-cust-${RUN_ID:-local}
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=terminal-wrapper] .wterm')
+        intent: "Wait until the live agent terminal mounts its grid"
+      # Readiness must be a signal ONLY the controlled runtime can produce. "Any
+      # non-whitespace in the terminal" is not: `loom lead` prints its own
+      # "Starting LEAD mode" banner before it ever invokes the backend
+      # (cli/agent/lead/lead.go), so that assertion passed in 110ms on a run whose
+      # app-server never came up. "Launching controlled ... lead session" is printed
+      # only AFTER waitForCodexAppServer succeeds (leadcontrol/codex_runtime.go:163,
+      # harness_runtime.go:115) — reaching it proves the runtime actually started.
+      - wait:
+          fn: >-
+            (() => {
+              const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
+              if (!wrapper) return false;
+              const rows = Array.from(wrapper.querySelectorAll('.term-row')).map((el) => el.textContent || '').join('\n');
+              if (rows.includes('Error running agent') || rows.includes('backend is not installed')) {
+                throw new Error('lead runtime failed to start: ' + rows.slice(-400));
+              }
+              return /Launching controlled .*lead session/.test(rows);
+            })()
+        intent: "Wait until the controlled lead runtime reports it started, which only happens after the backend app-server is ready"
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          marker="$(cat "$AFT_WORK_DIR/live-workspace.path")/MARKER-$run.md"
+          # budget: live-model (110s per window) - a real turn is slower than any
+          # stub; each run: step is hard-capped at 120s, so the wait is chained.
+          for i in $(seq 1 55); do
+            [ -f "$marker" ] && exit 0
+            sleep 2
+          done
+          echo "marker not written yet (grace window 1)"
+          exit 0
+        intent: "An operator waits a first bounded window for the real backend to produce the instructed artifact"
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          marker="$(cat "$AFT_WORK_DIR/live-workspace.path")/MARKER-$run.md"
+          for i in $(seq 1 55); do
+            [ -f "$marker" ] && exit 0
+            sleep 2
+          done
+          echo "the real ${AFT_REAL_BACKEND:-codex} backend never produced $marker"
+          exit 1
+        intent: "An operator fails the run if the real backend never produced the instructed artifact"
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          ws_path="$(cat "$AFT_WORK_DIR/live-workspace.path")"
+          # Clause 3 — the artifact's CONTENT is pinned, not merely its existence. The
+          # earlier poll only proves the file exists; a model that wrote prose into it,
+          # or appended chatter after the token, has not followed the instruction.
+          #
+          # Precisely: the token must be the entire content apart from AT MOST ONE
+          # trailing newline. That is two accepted byte sequences, not one, so this is
+          # not literally byte-exact — the tolerance is deliberate (a trailing newline
+          # is near-universal model behaviour and not a instruction-following failure),
+          # but nothing else is allowed: no prefix, no suffix, no second line.
+          python3 - "$ws_path/MARKER-$run.md" "$run" <<'PY'
+          import pathlib, sys
+          got = pathlib.Path(sys.argv[1]).read_bytes()
+          want = f"AFT-LIVE-{sys.argv[2]}".encode()
+          assert got.rstrip(b"\n") == want, got[:200]
+          assert got.count(b"\n") <= 1, got[:200]
+          PY
+          # Clause 5 — symmetric scope check: additions, modifications, deletions
+          # and refs. The marker is the ONLY path this run is allowed to touch.
+          "$AFT_TESTS_DIR/scripts/live-scope-verify.sh" "$ws_path" "$AFT_WORK_DIR/li1-baseline.txt" "MARKER-$run.md"
+        intent: "An operator verifies the artifact contains exactly the run token (bar one optional trailing newline) and that the real backend changed nothing else"
+      - run: |
+          set -e
+          name="live-cust-${RUN_ID:-local}"
+          # budget: monitor-cache (20s) - the orchestration session must reach monitor status.
+          for i in $(seq 1 20); do
+            curl -sf "$AFT_BASE_URL/api/monitor/status?workspace=E2E-WS-LIVE" > "$AFT_WORK_DIR/li1-monitor.json" &&
+            python3 - "$AFT_WORK_DIR/li1-monitor.json" "$name" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          name = sys.argv[2]
+          matches = [a for a in d.get("agents", []) if a.get("name") == name]
+          assert matches, d.get("agents")
+          assert (matches[0].get("orchestrator_session_id") or "").startswith("lead-"), matches[0]
+          PY
+            sleep 1
+          done
+          echo "monitor never exposed an orchestration session for the live agent"
+          cat "$AFT_WORK_DIR/li1-monitor.json" 2>/dev/null || true
+          exit 1
+        intent: "An operator confirms the live agent registered a real orchestration session"
+      # Clause 1 (identity). An interactive lead records no task session, so the
+      # transcript/diff evidence the worker cases use does not exist here — the
+      # terminal tab is where identity is observable. Selecting one backend and
+      # silently running another is exactly the confusion this tier exists to catch,
+      # and without this the case would pass no matter which CLI answered.
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          name="live-cust-$run"
+          backend="${AFT_REAL_BACKEND:-codex}"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LIVE/terminal/tabs" > "$AFT_WORK_DIR/li1-tabs.json"
+          python3 - "$AFT_WORK_DIR/li1-tabs.json" "$name" "$backend" <<'PY'
+          import json, sys
+          tabs = json.load(open(sys.argv[1])).get("data") or []
+          name, backend = sys.argv[2], sys.argv[3]
+          matches = [t for t in tabs if t.get("agent_id") == name]
+          assert matches, tabs
+          tab = matches[0]
+          assert tab.get("backend") == backend, (tab.get("backend"), backend, tab)
+          assert tab.get("role") == name, tab
+          env = (tab.get("launch") or {}).get("env") or {}
+          assert env.get("LOOM_AGENT_NAME") == name, env
+          assert env.get("LOOM_AGENT_ROLE") == name, env
+          assert env.get("LOOM_BACKEND") == backend, env
+          PY
+        intent: "An operator confirms the live terminal is attributed to this agent and the backend they selected"
+      # Fatal, in-test cleanup: the PTY holds a billed process and suite teardown
+      # is report-only in aft, so this must fail the test if it cannot close.
+      - run: >-
+          "$AFT_TESTS_DIR/scripts/live-close-agent-tab.sh" "live-cust-${RUN_ID:-local}" E2E-WS-LIVE
+        intent: "An operator closes the live terminal and proves no paid process is left attached"

@@ -15,7 +15,7 @@
  *     /workspace                           → WorkspacePage (lazy)
  *     /files                               → FilesPage (lazy)
  *     /skills                              → SkillsPage (lazy)
- *     /issues/:issueId                     → IssueDetailPage (lazy)
+ *     /issues/:issueId                     → KanbanPage + issue slide-over
  *   /test/*                                → TestFixtures (dev only, preserved)
  *   *                                      → NotFound (404 page)
  */
@@ -181,8 +181,8 @@ const viewRoutes = [
   {
     path: "issues/:issueId",
     lazy: () =>
-      import("@/views/IssueDetailPage").then((m) => ({
-        Component: m.IssueDetailPage,
+      import("@/views/KanbanPage").then((m) => ({
+        Component: m.KanbanPage,
       })),
   },
   {

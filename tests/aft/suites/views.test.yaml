@@ -1,0 +1,97 @@
+# View switching via the board toolbar's ViewSubSwitcher (role=tab buttons
+# "Kanban" and "List"; List routes to /ws/:id/list, the data table stays at
+# /ws/:id/table). The suite seeds one issue so the views have data.
+suite: views
+classification: { area: issues, feature: views, surface: ui, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: >-
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues" -H "Content-Type: application/json"
+  -d "{\"title\":\"views seed $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}" >/dev/null
+  && echo "seeded 1 issue"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  # covers: LCLI-DV-002
+  - name: view tabs switch views and sync the URL
+    intent: An operator switches between Kanban and List with the toolbar tabs and sees the route and rendered view update
+    steps:
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - expect: { visible: { selector: "[role=tablist][aria-label='View mode']" } }
+      - wait: { text: views seed }
+      - click: { role: tab, name: List, exact: true }
+      - wait: { url: "**/ws/*/list**" }
+      - expect: { text: views seed }
+      - click: { role: tab, name: Kanban, exact: true }
+      - wait: { url: "**/ws/*/kanban**" }
+      - expect: { visible: { testid: board-toolbar } }
+
+  # covers: LCLI-DV-002
+  - name: a deep link straight to the table view works
+    intent: An operator follows a direct table link and sees the issue table without visiting the kanban first
+    steps:
+      - open: /ws/E2E-WS/table
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=issue-table]')
+        intent: "Wait until the issue table is ready"
+      - expect: { visible: { testid: issue-table } }
+      - expect: { text: views seed }
+
+  # covers: LCLI-DV-002
+  - name: search survives list switch and table deep link
+    intent: An agent creates matching and nonmatching issues through the API, then an operator sees a URL-backed search stay applied across Kanban, List, and a table deep link
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "views-filter-match-${RUN_ID:-local}"
+            issue_type: "task"
+            priority: 2
+        intent: "An agent creates the issue that matches the cross-view search"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "views-filter-miss-${RUN_ID:-local}"
+            issue_type: "task"
+            priority: 2
+        intent: "An agent creates the issue excluded by the cross-view search"
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('section[data-status=ready] article')).some((el) => el.textContent.includes('views-filter-match-${RUN_ID:-local}'))
+        intent: "Wait until the board renders the issue matching the view filter"
+      - fill: { testid: search-input-field, value: "views-filter-match-${RUN_ID:-local}" }
+      - wait: { url: "**search=views-filter-match-${RUN_ID:-local}**" }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+      - expect: { text: "views-filter-match-${RUN_ID:-local}" }
+      - expect: { notText: "views-filter-miss-${RUN_ID:-local}" }
+      - click: { role: tab, name: List, exact: true }
+      - wait: { url: "**/ws/*/list**search=views-filter-match-${RUN_ID:-local}**" }
+      - expect: { visible: { testid: list-page } }
+      - expect: { value: { testid: search-input-field, equals: "views-filter-match-${RUN_ID:-local}" } }
+      - expect: { text: "views-filter-match-${RUN_ID:-local}" }
+      - expect: { notText: "views-filter-miss-${RUN_ID:-local}" }
+      - open: /ws/E2E-WS/table?search=views-filter-match-${RUN_ID:-local}
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=issue-table]')
+        intent: "Wait until the issue table is ready"
+      - wait: { url: "**/ws/E2E-WS/table?search=views-filter-match-${RUN_ID:-local}**" }
+      - expect: { visible: { testid: issue-table } }
+      - expect: { value: { testid: search-input-field, equals: "views-filter-match-${RUN_ID:-local}" } }
+      - expect: { text: "views-filter-match-${RUN_ID:-local}" }
+      - expect: { notText: "views-filter-miss-${RUN_ID:-local}" }

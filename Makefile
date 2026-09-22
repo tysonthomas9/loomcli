@@ -455,6 +455,60 @@ test-e2e: ensure-frontend-deps
 	@cd $(FRONTEND_DIR) && npx playwright install --with-deps chromium 2>/dev/null || true
 	@cd $(FRONTEND_DIR) && npx playwright test --project=chromium --workers=1
 
+# Run AFT browser E2E suites using the self-contained deterministic stack.
+.PHONY: test-aft test-aft-strict test-aft-heal test-aft-real \
+	test-aft-real-claude test-aft-real-opencode test-aft-real-cursor \
+	test-aft-real-all test-aft-live-interactive test-aft-live-workers \
+	test-aft-podman
+test-aft:
+	@echo "Running AFT browser E2E tests (no recovery agent)..."
+	@tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+
+# Run AFT with agent diagnosis on failures (requires the Claude CLI).
+test-aft-strict:
+	@echo "Running AFT browser E2E tests (strict recovery mode)..."
+	@tests/aft/run-aft.sh --strict $(AFT_ARGS)
+
+# Run AFT with an agent allowed to heal failed steps locally.
+test-aft-heal:
+	@echo "Running AFT browser E2E tests (healing mode)..."
+	@tests/aft/run-aft.sh --heal $(AFT_ARGS)
+
+# Opt-in real-backend tiers. Each run consumes the selected account's usage
+# window, so these remain separate from the deterministic CI target.
+test-aft-real:
+	@AFT_REAL_CODEX=1 tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+
+test-aft-real-claude:
+	@AFT_REAL_BACKEND=claude tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+
+test-aft-real-opencode:
+	@AFT_REAL_BACKEND=opencode tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+
+test-aft-real-cursor:
+	@AFT_REAL_BACKEND=cursor tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+
+test-aft-real-all:
+	@$(MAKE) test-aft-real AFT_ARGS='$(AFT_ARGS)'
+	@$(MAKE) test-aft-real-claude AFT_ARGS='$(AFT_ARGS)'
+	@$(MAKE) test-aft-real-opencode AFT_ARGS='$(AFT_ARGS)'
+	@$(MAKE) test-aft-real-cursor AFT_ARGS='$(AFT_ARGS)'
+
+test-aft-live-interactive:
+	@backend="$${LIVE_BACKEND:-codex}"; \
+	 AFT_REAL_BACKEND="$$backend" \
+	 AFT_SUITES="$(PWD)/tests/aft/live-interactive-suites" \
+	 tests/aft/run-aft.sh --live --no-agent --real-backend "$$backend" --max-real-cases 1 $(AFT_ARGS)
+
+test-aft-live-workers:
+	@backend="$${LIVE_BACKEND:-codex}"; \
+	 AFT_REAL_BACKEND="$$backend" \
+	 AFT_SUITES="$(PWD)/tests/aft/live-worker-suites" \
+	 tests/aft/run-aft.sh --live --with-daemon --no-agent --real-backend "$$backend" --max-real-cases 2 $(AFT_ARGS)
+
+test-aft-podman:
+	@tests/aft/run-aft-podman.sh $(AFT_ARGS)
+
 # Run Playwright API e2e tests (self-contained: builds loom, starts server, runs tests)
 # Run the browser e2e suite exactly as CI does: the chromium-ci project, which
 # is the mocked chromium suite minus the quarantined specs listed in
@@ -530,7 +584,7 @@ test-e2e-integration-local: ensure-frontend-deps
 # Run ALL Playwright integration e2e tests including cross-workspace and terminal-fleetdb-regression
 test-e2e-integration-full: ensure-frontend-deps
 	@echo "Running full Playwright integration e2e tests (self-contained)..."
-	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 RUN_LOCAL_INTEGRATION_TESTS=1 npx playwright test --project=integration --project=local-integration
+	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 npx playwright test --project=integration
 
 # Run auth service unit + security tests
 test-auth-service:

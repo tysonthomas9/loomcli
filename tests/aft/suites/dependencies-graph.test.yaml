@@ -1,0 +1,242 @@
+# Dependency graph coverage. A blocks B is represented by making B depend on A:
+# POST /api/workspaces/:ws/issues/:B/dependencies with depends_on_id=A.
+suite: dependencies-graph
+classification: { area: issues, feature: dependencies, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+# The cross-workspace move journey needs a stable target even when this suite
+# runs before workspaces.test.yaml. Creating the named empty workspace is
+# idempotent for this fixture; the stack canonicalizes its id to E2E-WS-2.
+setup: >-
+  curl -s -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json"
+  -d '{"name":"e2e-ws-2","type":"empty"}' >/dev/null; echo "ensured e2e-ws-2"
+teardown: >-
+  "$AFT_TESTS_DIR/scripts/close-open-issues.sh";
+  AFT_WS=E2E-WS-2 "$AFT_TESTS_DIR/scripts/close-open-issues.sh";
+  curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-2/issues?include_blocked=true&limit=100" |
+  python3 -c 'import json,os,sys; title="graph move "+os.environ.get("RUN_ID", "local"); print("\\n".join(str(i["id"]) for i in json.load(sys.stdin).get("data", []) if i.get("title")==title))' |
+  while IFS= read -r id; do [ -z "$id" ] || curl -sf -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-2/issues/$id" >/dev/null; done
+
+tests:
+  # covers: LCLI-WP-004 partial (API-driven create/remove + board/graph reflection —
+  # issue-detail dependency controls and invalid-edit prevention untested);
+  # LCLI-DV-005 partial (graph surface only — BlockedSummary/ready-highlighting untested)
+  - name: blocking dependency drives board column and graph edge
+    intent: An agent creates and removes a blocking dependency through the workspace API while an operator observes the blocked issue move through the board and GraphView
+    steps:
+      - run: >-
+          blocker=$(curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"graph blocker $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])");
+          blocked=$(curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"graph blocked $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])");
+          printf "%s\n" "$blocker" > "$AFT_WORK_DIR/graph-blocker.id";
+          printf "%s\n" "$blocked" > "$AFT_WORK_DIR/graph-blocked.id";
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$blocked/dependencies"
+          -H "Content-Type: application/json"
+          -d "{\"depends_on_id\":\"$blocker\",\"dep_type\":\"blocks\"}"
+          >/dev/null
+        intent: "An agent provisions the blocker, blocked issue, and dependency relationship"
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - wait: { text: graph blocked }
+      - wait:
+          fn: >-
+            document.querySelectorAll('section[data-status=blocked] article').length === 1
+        intent: "Wait until the board renders exactly one blocked issue card"
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+      - expect: { count: { selector: "section[data-status=blocked] article", equals: 1 } }
+      - open: /ws/E2E-WS/graph
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=graph-view]')
+        intent: "Wait until the dependency graph is ready"
+      - expect: { visible: { testid: graph-view } }
+      - expect: { visible: { testid: graph-legend } }
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-testid=graph-view] .react-flow__node').length >= 2
+        intent: "Wait until the dependency graph renders both issue nodes"
+      - expect: { count: { selector: "[data-testid=graph-view] .react-flow__node", atLeast: 2 } }
+      # edges render a frame after nodes — wait for them instead of one-shot counting
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-testid=graph-view] .react-flow__edge').length >= 1
+        intent: "Wait until the dependency graph renders the blocking edge"
+      - expect: { count: { selector: "[data-testid=graph-view] .react-flow__edge", atLeast: 1 } }
+      - wait:
+          fn: >-
+            (() => { const text = document.querySelector('[data-testid=graph-view]')?.textContent || ''; return text.includes('graph blocker') && text.includes('graph blocked'); })()
+        intent: "Wait until the dependency graph labels both related issues"
+      - run: >-
+          curl -sf -X DELETE "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/graph-blocked.id")/dependencies/$(cat "$AFT_WORK_DIR/graph-blocker.id")"
+          >/dev/null
+        intent: "An agent provisions the blocker, blocked issue, and dependency relationship"
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - wait: { text: graph blocked }
+      - wait:
+          fn: >-
+            document.querySelectorAll('section[data-status=ready] article').length === 2
+        intent: "Wait until the board renders exactly two ready issue cards"
+      - expect: { count: { selector: "section[data-status=blocked] article", equals: 0 } }
+
+  # covers: LCLI-WP-004 partial; LCLI-DV-005 partial; BlockedBadge;
+  # GraphControls; NodeTooltip
+  - name: graph controls, blocker badge, and node preview remain interactive
+    intent: An operator inspects a blocking graph, sees its blocker badge and node preview, and uses every viewport control without losing the rendered graph
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "graph controls blocker ${RUN_ID:-local}"
+            issue_type: "task"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "graphControlsBlocker"
+        intent: "An agent creates the graph-controls blocker through the workspace API"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "graph controls blocked ${RUN_ID:-local}"
+            issue_type: "task"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "graphControlsBlocked"
+        intent: "An agent creates the issue that the graph controls will show as blocked"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:graphControlsBlocked}/dependencies"
+          body:
+            depends_on_id: "${var:graphControlsBlocker}"
+            dep_type: "blocks"
+        intent: "An agent creates the blocking dependency through the workspace API"
+      - open: /ws/E2E-WS/graph
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-testid=graph-view] .react-flow__node').length >= 2
+        intent: "Wait until the dependency graph renders both graph-control issues"
+      - expect: { visible: { testid: graph-controls } }
+      - expect: { visible: { testid: blocked-badge } }
+      - expect: { visible: { testid: zoom-in-button } }
+      - expect: { visible: { testid: zoom-out-button } }
+      - expect: { visible: { testid: fit-view-button } }
+      - wait:
+          fn: >-
+            (() => { const viewport = document.querySelector('[data-testid=graph-view] .react-flow__viewport'); const transform = viewport?.getAttribute('style') || ''; if (!transform) return false; window.__aftGraphViewportBeforeZoomIn = transform; return true; })()
+        intent: "Record the initial graph viewport before the operator zooms in"
+      - click: { testid: zoom-in-button }
+      - wait:
+          fn: >-
+            (() => { const transform = document.querySelector('[data-testid=graph-view] .react-flow__viewport')?.getAttribute('style') || ''; return !!transform && transform !== window.__aftGraphViewportBeforeZoomIn; })()
+        intent: "Wait until zoom in changes the rendered graph viewport"
+      - wait:
+          fn: >-
+            (() => { const transform = document.querySelector('[data-testid=graph-view] .react-flow__viewport')?.getAttribute('style') || ''; if (!transform) return false; window.__aftGraphViewportBeforeZoomOut = transform; return true; })()
+        intent: "Record the zoomed graph viewport before the operator zooms out"
+      - click: { testid: zoom-out-button }
+      - wait:
+          fn: >-
+            (() => { const transform = document.querySelector('[data-testid=graph-view] .react-flow__viewport')?.getAttribute('style') || ''; return !!transform && transform !== window.__aftGraphViewportBeforeZoomOut; })()
+        intent: "Wait until zoom out changes the rendered graph viewport"
+      - click: { testid: fit-view-button }
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-testid=graph-view] .react-flow__node').length >= 2
+        intent: "Wait until fit to view preserves the rendered graph nodes"
+      - run: >-
+          agent-browser --session "$AFT_SESSION" find first "[data-testid=graph-view] .react-flow__node" hover
+        intent: "An operator hovers a graph node to inspect its issue preview"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=node-tooltip]')
+        intent: "Wait until the hovered node preview is visible"
+      - expect: { visible: { testid: node-tooltip } }
+
+  # covers: LCLI-WP-004 partial; /api/workspaces/:ws/issues/:id/move;
+  # IssueDetailPanel; MoveIssueDialog
+  - name: issue detail move dialog moves an issue into the second workspace
+    intent: An operator opens a ready issue, selects the second workspace through its detail-panel move dialog, and observes the moved issue on that workspace board
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "graph move ${RUN_ID:-local}"
+            issue_type: "task"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "graphMoveSource"
+        intent: "An agent creates the ready issue that the operator will move"
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the source workspace board is ready"
+      - wait: { text: "graph move ${RUN_ID:-local}" }
+      - click: { selector: "section[data-status=ready] article[aria-label*='graph move ${RUN_ID:-local}']", first: true }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
+        intent: "Wait until the selected issue detail panel is open"
+      - expect: { visible: { testid: header-move-button } }
+      # The panel body replaces its initial issue projection with full details.
+      # Retry across that replacement so the click lands on the mounted header.
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find testid header-move-button click || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=move-dialog-overlay]')" | grep -q true && exit 0;
+          done; echo "move button click never opened the move dialog"; exit 1
+        intent: "A human retries the move action until the mounted dialog opens"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=move-dialog-overlay]')
+        intent: "Wait until the move dialog is open"
+      - expect: { visible: { testid: move-workspace-select } }
+      - select: { testid: move-workspace-select, value: E2E-WS-2 }
+      - click: { testid: move-dialog-confirm }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=move-dialog-overlay]')
+        intent: "Wait until the move dialog closes after the operator confirms the destination"
+      - open: /ws/E2E-WS-2/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the target workspace board is ready"
+      - wait: { text: "graph move ${RUN_ID:-local}" }
+      - expect: { count: { selector: "section[data-status=ready] article[aria-label*='graph move ${RUN_ID:-local}']", equals: 1 } }
+      - api:
+          method: "GET"
+          path: "/api/workspaces/E2E-WS-2/issues?include_blocked=true&limit=100"
+          save:
+            - from: "data"
+              as: "graphMoveTargetIssues"
+        intent: "An operator reads back the target workspace after moving the issue through the dialog"
+      - run: >-
+          python3 -c 'import json,os; title="graph move "+os.environ["RUN_ID"]; issues=json.load(open(os.environ["AFT_WORK_DIR"]+"/graphMoveTargetIssues")); assert sum(i.get("title")==title for i in issues)==1, issues'
+        intent: "An operator's readback confirms exactly one moved issue persisted in the target workspace"
+      - run: >-
+          id="$(python3 -c 'import json,os; title="graph move "+os.environ["RUN_ID"]; issues=json.load(open(os.environ["AFT_WORK_DIR"]+"/graphMoveTargetIssues")); print(next(i["id"] for i in issues if i.get("title")==title))')";
+          curl -sf -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-2/issues/$id" >/dev/null
+        intent: "An operator removes the moved fixture so the second workspace remains empty for later suites"
+      - open: /ws/E2E-WS-2/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the target workspace board rerenders after fixture removal"
+      - expect: { visible: { testid: empty-workspace-board } }
