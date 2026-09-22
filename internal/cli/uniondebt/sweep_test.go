@@ -25,7 +25,11 @@ type fakeBackend struct {
 	created  []backend.CreateParams
 	added    []string // "<id>:<label>"
 	removed  []string // "<id>:<label>"
-	comments map[string][]string
+	// ops is every write in the order it happened, so a test can assert that
+	// the comment precedes the label rather than merely that both occurred.
+	ops         []string
+	addLabelErr error
+	comments    map[string][]string
 	// designs holds the detail-only Design body per issue ID, so a test can
 	// exercise the recorded-tip lookup the slim list projection cannot serve.
 	designs   map[string]string
@@ -107,27 +111,72 @@ func (f *fakeBackend) Create(_ context.Context, p backend.CreateParams) (*backen
 }
 
 func (f *fakeBackend) AddLabel(_ context.Context, id, label string) error {
+	f.ops = append(f.ops, "add:"+id+":"+label)
+	if f.addLabelErr != nil {
+		return f.addLabelErr
+	}
 	f.added = append(f.added, id+":"+label)
 	return nil
 }
 
 func (f *fakeBackend) RemoveLabel(_ context.Context, id, label string) error {
+	f.ops = append(f.ops, "remove:"+id+":"+label)
 	f.removed = append(f.removed, id+":"+label)
 	return nil
 }
 
 func (f *fakeBackend) AddComment(_ context.Context, p backend.CommentAddParams) (*backend.CommentData, error) {
+	f.ops = append(f.ops, "comment:"+p.IssueID)
 	f.comments[p.IssueID] = append(f.comments[p.IssueID], p.Text)
 	return &backend.CommentData{}, nil
 }
 
-// stubProber returns a canned result per task ID.
+// stubProber returns a canned result per task ID. It also answers the apply
+// pass's three local-git reads from canned data, so a sweep-level test can
+// describe a union branch in one literal.
 type stubProber struct {
 	results map[string]ProbeResult
 	errs    map[string]error
 	calls   []string
 	// tips records the recordedTip the sweep passed, per task ID.
 	tips map[string]string
+	// merges is the union enumeration, tip its SHA, and mergesErr the failure
+	// to enumerate at all.
+	merges      []UnionMerge
+	tip         string
+	mergesErr   error
+	tipErr      error
+	landed      map[string]string // task ID -> reason; presence means landed
+	landedErrs  map[string]error
+	landedCalls []string
+}
+
+func (s *stubProber) UnionMerges(_, _, _ string) ([]UnionMerge, error) {
+	if s.mergesErr != nil {
+		return nil, s.mergesErr
+	}
+	return append([]UnionMerge(nil), s.merges...), nil
+}
+
+func (s *stubProber) UnionTip(_, _ string) (string, error) {
+	if s.tipErr != nil {
+		return "", s.tipErr
+	}
+	if s.tip == "" {
+		return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", nil
+	}
+	return s.tip, nil
+}
+
+func (s *stubProber) Landed(_, _, taskID string) (bool, string, error) {
+	s.landedCalls = append(s.landedCalls, taskID)
+	if err := s.landedErrs[taskID]; err != nil {
+		return false, "", err
+	}
+	if why, ok := s.landed[taskID]; ok {
+		return true, why, nil
+	}
+	return false, "not on the trunk", nil
 }
 
 func (s *stubProber) Probe(_, _, taskID, recordedTip string) (ProbeResult, error) {

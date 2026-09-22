@@ -10,10 +10,9 @@ package uniondebt
 // through githubClient (see prpending.go) so unit tests never reach the
 // network.
 //
-// The pass only ever CLEARS. A ticket that fails the test keeps its marker,
-// and a ticket that fails the test while carrying NO marker is reported as
-// drift and left alone: deriving a marker is a different question, answered by
-// PUPPET-653.
+// The pass only ever CLEARS. Applying a marker is the other half, and it lives
+// in prderive.go as the exact complement of the test below — same predicate,
+// opposite direction — so the two can never disagree about one ticket.
 
 import (
 	"context"
@@ -30,6 +29,7 @@ import (
 type prChecker interface {
 	Check(req PRCheckRequest) (PRCheck, error)
 	OpenPRs(clone string) ([]PR, error)
+	AllPRs(clone string) ([]PR, error)
 }
 
 // checker returns the pr-pending test, creating the real (gh-backed) one on
@@ -42,30 +42,29 @@ func (s *Sweeper) checker() prChecker {
 	return s.pr
 }
 
-// sweepPRPending runs the clear pass over the pr-pending ledger and, when
-// asked, the read-only drift scan. A single item's failure is an error item,
-// never an aborted run; only a ledger read that fails outright returns an
-// error, because a partial ledger would silently under-report.
-func (s *Sweeper) sweepPRPending(ctx context.Context, rep *Report) error {
+// prLedger is the set of tickets a later pass must not judge again, keyed by
+// ticket ID and valued by its source repo. It starts as the marker ledger this
+// pass owns and the apply pass adds its own rows to it, so every downstream
+// pass skips a ticket that already has a verdict in this report.
+type prLedger map[string]string
+
+// sweepPRPending runs the clear pass over the pr-pending ledger and returns
+// the tickets it judged. A single item's failure is an error item, never an
+// aborted run; only a ledger read that fails outright returns an error,
+// because a partial ledger would silently under-report.
+func (s *Sweeper) sweepPRPending(ctx context.Context, rep *Report) (prLedger, error) {
 	marker := s.labels().PRPending
 	ledger, err := s.issuesLabeled(ctx, marker)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	markered := make(map[string]bool, len(ledger))
+	markered := make(prLedger, len(ledger))
 	for _, iss := range ledger {
-		markered[iss.ID] = true
+		markered[iss.ID] = iss.SourceRepo
 		rep.add(s.handlePR(ctx, iss))
 	}
-
-	if !s.opts.PRDrift {
-		return nil
-	}
-	for _, item := range s.driftScan(ctx, markered) {
-		rep.add(item)
-	}
-	return nil
+	return markered, nil
 }
 
 // handlePR runs the three-part test for one marked ticket and clears the
@@ -180,7 +179,7 @@ func prClearedComment(item Item, lbl LabelSet) string {
 // PR in the workspace, and sleeping tens of seconds per UNKNOWN would make it
 // cost minutes; an UNKNOWN read as "not mergeable" is exactly the direction
 // this report may safely err in, because nothing is written either way.
-func (s *Sweeper) driftScan(ctx context.Context, markered map[string]bool) []Item {
+func (s *Sweeper) driftScan(ctx context.Context, markered prLedger) []Item {
 	var out []Item
 	for _, repo := range s.opts.Contract.Repos() {
 		if !s.wantRepo(repo) {
@@ -191,7 +190,7 @@ func (s *Sweeper) driftScan(ctx context.Context, markered map[string]bool) []Ite
 	return out
 }
 
-func (s *Sweeper) driftScanRepo(ctx context.Context, repo string, markered map[string]bool) []Item {
+func (s *Sweeper) driftScanRepo(ctx context.Context, repo string, markered prLedger) []Item {
 	item := s.prItem("", repo)
 	li, ok := s.opts.Contract.Lookup(repo)
 	if !ok {
@@ -208,8 +207,9 @@ func (s *Sweeper) driftScanRepo(ctx context.Context, repo string, markered map[s
 
 	var out []Item
 	for _, id := range taskIDsOf(prs) {
-		if markered[id] {
-			// Already judged by the clear pass above.
+		if _, judged := markered[id]; judged {
+			// Already judged by the clear or the apply pass above; a second
+			// row here would put two verdicts on one ticket.
 			continue
 		}
 		if drift, ok := s.driftOf(ctx, repo, id); ok {
