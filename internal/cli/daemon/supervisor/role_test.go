@@ -36,6 +36,39 @@ func TestMergeRoleConfig_MaxBudgetUSD(t *testing.T) {
 	})
 }
 
+// TestMergeRoleConfig_Labels guards the Labels/ExcludeLabels overlay: a
+// role-level Labels/ExcludeLabels must survive MergeRoleConfig (so it reaches
+// appendRoutingEnv in spawn.go), and an empty overlay must not clobber a base
+// that already has them set.
+func TestMergeRoleConfig_Labels(t *testing.T) {
+	t.Run("overlay labels override base", func(t *testing.T) {
+		got := MergeRoleConfig(cfgpkg.RoleConfig{}, cfgpkg.RoleConfig{
+			Labels:        []string{"plan-ready"},
+			ExcludeLabels: []string{"plan-reviewed"},
+		})
+		if len(got.Labels) != 1 || got.Labels[0] != "plan-ready" {
+			t.Errorf("Labels = %v, want [plan-ready]", got.Labels)
+		}
+		if len(got.ExcludeLabels) != 1 || got.ExcludeLabels[0] != "plan-reviewed" {
+			t.Errorf("ExcludeLabels = %v, want [plan-reviewed]", got.ExcludeLabels)
+		}
+	})
+
+	t.Run("empty overlay preserves base labels", func(t *testing.T) {
+		base := cfgpkg.RoleConfig{
+			Labels:        []string{"plan-ready"},
+			ExcludeLabels: []string{"plan-reviewed"},
+		}
+		got := MergeRoleConfig(base, cfgpkg.RoleConfig{})
+		if len(got.Labels) != 1 || got.Labels[0] != "plan-ready" {
+			t.Errorf("Labels = %v, want [plan-ready] (base preserved)", got.Labels)
+		}
+		if len(got.ExcludeLabels) != 1 || got.ExcludeLabels[0] != "plan-reviewed" {
+			t.Errorf("ExcludeLabels = %v, want [plan-reviewed] (base preserved)", got.ExcludeLabels)
+		}
+	})
+}
+
 func TestResolveRoleConfigStaticRejectsInteractiveKindRole(t *testing.T) {
 	cfg := &cfgpkg.DaemonConfig{
 		Roles: map[string]cfgpkg.RoleConfig{

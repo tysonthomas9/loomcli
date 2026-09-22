@@ -205,3 +205,37 @@ func TestLoadConfigFromStoreCopiesDesignFormat(t *testing.T) {
 		t.Errorf("WSPLAIN DesignFormat = %q, want empty", got)
 	}
 }
+
+func TestLoadDaemonConfigFromStoreProjectsRoleLabels(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	ctx := context.Background()
+	st := memstore.New()
+	t.Cleanup(func() { _ = st.Close() })
+
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey:  "WS1",
+		Name:          "task",
+		Labels:        []string{"plan-ready", "approved"},
+		ExcludeLabels: []string{"plan-reviewed"},
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+
+	dc, err := loadDaemonConfigFromStore(ctx, st, "WS1", newDefaultDaemonConfig(), t.TempDir())
+	if err != nil {
+		t.Fatalf("loadDaemonConfigFromStore() error = %v", err)
+	}
+	role, ok := dc.Roles["task"]
+	if !ok {
+		t.Fatal("role task not projected")
+	}
+	if len(role.Labels) != 2 || role.Labels[0] != "plan-ready" || role.Labels[1] != "approved" {
+		t.Errorf("Labels = %v, want [plan-ready approved]", role.Labels)
+	}
+	if len(role.ExcludeLabels) != 1 || role.ExcludeLabels[0] != "plan-reviewed" {
+		t.Errorf("ExcludeLabels = %v, want [plan-reviewed]", role.ExcludeLabels)
+	}
+}

@@ -191,6 +191,12 @@ type Role struct {
 	// nothing. See RoleInputPolicy.
 	InputPolicy *RoleInputPolicy `json:"input_policy,omitempty"`
 
+	// Labels/ExcludeLabels constrain which issues agents in this role may
+	// claim: every listed label must be present (AND), and no excluded label
+	// may be. Mirrors the server-side role fields.
+	Labels        []string `json:"labels,omitempty"`
+	ExcludeLabels []string `json:"exclude_labels,omitempty"`
+
 	MaxPriority    *int     `json:"max_priority,omitempty"`
 	MaxConcurrency *int     `json:"max_concurrency,omitempty"`
 	ReadOnly       bool     `json:"read_only,omitempty"`

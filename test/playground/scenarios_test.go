@@ -182,6 +182,8 @@ func scrubLoomAgentEnv(env []string) []string {
 			strings.HasPrefix(kv, "LOOM_YIELD_FILE="),
 			strings.HasPrefix(kv, "LOOM_ROLE="),
 			strings.HasPrefix(kv, "LOOM_ROLE_TASK_FILTER="),
+			strings.HasPrefix(kv, "LOOM_ROLE_LABELS="),
+			strings.HasPrefix(kv, "LOOM_ROLE_EXCLUDE_LABELS="),
 			strings.HasPrefix(kv, "LOOM_ASSIGNED_TASK_ID="):
 			continue
 		}

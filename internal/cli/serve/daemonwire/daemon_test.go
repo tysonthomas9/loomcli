@@ -21,11 +21,13 @@ func TestBuildStoreBackedDaemonConfigFnUsesFleetDBStore(t *testing.T) {
 	}
 	maxPriority := 2
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
-		WorkspaceKey: "WS1",
-		Name:         "task",
-		TaskFilter:   "ready",
-		Backend:      "codex",
-		MaxPriority:  &maxPriority,
+		WorkspaceKey:  "WS1",
+		Name:          "task",
+		TaskFilter:    "ready",
+		Backend:       "codex",
+		MaxPriority:   &maxPriority,
+		Labels:        []string{"plan-ready", "approved"},
+		ExcludeLabels: []string{"plan-reviewed"},
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
@@ -75,8 +77,15 @@ func TestBuildStoreBackedDaemonConfigFnUsesFleetDBStore(t *testing.T) {
 	if got.Daemon.MaxAgents == nil || *got.Daemon.MaxAgents != 7 {
 		t.Fatalf("max_agents = %v, want 7", got.Daemon.MaxAgents)
 	}
-	if role, ok := got.Roles["task"]; !ok || role.TaskFilter != "ready" || role.Backend != "codex" {
+	role, ok := got.Roles["task"]
+	if !ok || role.TaskFilter != "ready" || role.Backend != "codex" {
 		t.Fatalf("role task = %+v, ok=%v", role, ok)
+	}
+	if len(role.Labels) != 2 || role.Labels[0] != "plan-ready" || role.Labels[1] != "approved" {
+		t.Fatalf("role task Labels = %v, want [plan-ready approved]", role.Labels)
+	}
+	if len(role.ExcludeLabels) != 1 || role.ExcludeLabels[0] != "plan-reviewed" {
+		t.Fatalf("role task ExcludeLabels = %v, want [plan-reviewed]", role.ExcludeLabels)
 	}
 	if len(got.Agents) != 1 {
 		t.Fatalf("agents len = %d, want 1", len(got.Agents))
