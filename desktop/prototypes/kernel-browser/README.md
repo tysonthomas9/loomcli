@@ -25,6 +25,8 @@ The result is a **capability pass and production-readiness hold**. See
   wildcard bind is required.
 - An allowlisted embed-event recorder that proves the native WKWebView reaches
   `KERNEL_CONNECTED` and `KERNEL_PLAYING`.
+- A damage-based Neko X11 capture pipeline. The image default (`use-damage=false`)
+  deadlocks Xorg under Rosetta and produces a connected but black stream.
 
 ## Reproduce
 
@@ -74,6 +76,11 @@ Run the native shell:
 cd desktop/prototypes/kernel-browser
 ../../node_modules/.bin/tauri dev
 ```
+
+Use the development shell for this local HTTP/WebSocket prototype. A normally
+packaged Tauri app loads from the secure `tauri://` origin, so production must
+serve the browser stream over authenticated HTTPS/WSS rather than relying on
+plain loopback mixed content.
 
 Inspect or stop only task-owned containers:
 

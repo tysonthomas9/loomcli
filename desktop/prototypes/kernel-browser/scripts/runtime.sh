@@ -7,7 +7,8 @@ readonly runtime_id="${LOOM_KERNEL_RUNTIME_ID:-LOOMCLI-221}"
 readonly image="onkernel/chromium-headful@sha256:7aa6dc616440fbe3f8886cec700dc7533aa2a0ec29b999102aa6cad4ac3e6f50"
 readonly prototype_label="io.loom.prototype=local-kernel-browser"
 readonly runtime_label="io.loom.runtime-id=${runtime_id}"
-readonly chromium_flags="--user-data-dir=/home/kernel/user-data --disable-dev-shm-usage --disable-gpu --start-maximized --disable-software-rasterizer --remote-allow-origins=* --no-sandbox --no-zygote"
+readonly chromium_flags="--user-data-dir=/home/kernel/user-data --disable-dev-shm-usage --start-maximized --remote-allow-origins=* --no-sandbox --no-zygote"
+readonly video_pipeline="ximagesrc display-name={display} show-pointer=true use-damage=true ! video/x-raw,framerate=25/1 ! videoconvert ! queue ! vp8enc name=encoder deadline=1 target-bitrate=1996800 cpu-used=4 threads=4 ! appsink name=appsink"
 
 docker_cmd=(docker --context "$docker_context")
 
@@ -53,6 +54,7 @@ start_app() {
     -e WIDTH=1440 \
     -e TZ=America/Los_Angeles \
     -e ENABLE_WEBRTC=true \
+    -e "NEKO_CAPTURE_VIDEO_PIPELINE=$video_pipeline" \
     -e "NEKO_WEBRTC_TCPMUX=${media_port}" \
     -e NEKO_WEBRTC_NAT1TO1=127.0.0.1 \
     -e RUN_AS_ROOT=true \

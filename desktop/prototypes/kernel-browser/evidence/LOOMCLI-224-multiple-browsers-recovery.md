@@ -36,3 +36,9 @@ changing WebRTC from UDP to TCP mux.
 The final configuration uses TCP because the original UDP mapping did not
 produce a viable ICE path through Colima/Lima. Fixed per-browser media ports
 must be replaced by a real allocator before production.
+
+The final runtime also overrides Neko's default X11 capture pipeline with
+`use-damage=true`. Without that override, starting a viewer deadlocked Xorg
+under Rosetta and left a connected but black stream. This was found only when
+the native window was inspected directly; playback events alone were
+insufficient evidence.

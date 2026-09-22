@@ -7,6 +7,11 @@ const host = process.env.LOOM_KERNEL_CONTROL_HOST || "127.0.0.1";
 const port = Number(process.env.LOOM_KERNEL_CONTROL_PORT || 61300);
 const prototypeDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const artifactDir = join(prototypeDir, "evidence", "artifacts");
+const allowedOrigins = new Set([
+  "http://127.0.0.1:1421",
+  "http://tauri.localhost",
+  "tauri://localhost",
+]);
 
 const browsers = {
   "app-a": { cdpPort: 61222, epoch: 0 },
@@ -228,7 +233,11 @@ function fixture() {
 }
 
 const server = createServer(async (req, res) => {
-  res.setHeader("access-control-allow-origin", "http://127.0.0.1:1421");
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.has(origin)) {
+    res.setHeader("access-control-allow-origin", origin);
+    res.setHeader("vary", "origin");
+  }
   res.setHeader("access-control-allow-headers", "content-type");
   res.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
   if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }

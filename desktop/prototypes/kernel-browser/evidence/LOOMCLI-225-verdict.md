@@ -33,8 +33,12 @@ The prototype must not become the production module unchanged:
 - An active stream cost roughly 45-49% CPU per container in point samples.
 - Colima, Lima, Docker compatibility, Rosetta, and a separately provisioned VM
   are not an acceptable invisible end-user dependency chain.
+- The tested Rosetta path requires a non-default Neko X11 capture pipeline;
+  playback events alone did not detect black-frame failure.
 - TCP media and all CDP/live/control endpoints need a lease-based allocator,
   authentication, origin checks, and crash reconciliation.
+- A packaged Tauri page uses a secure custom origin, so production browser
+  media and control must be available over authenticated HTTPS/WSS.
 - Control epochs currently live in one Node process. Production ownership must
   be durable and scoped to a browser page/session.
 - The locked macOS session prevented native pointer, keyboard, clipboard,

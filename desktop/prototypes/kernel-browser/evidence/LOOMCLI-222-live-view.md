@@ -37,3 +37,25 @@ The macOS session was locked, so Computer Use could not capture the native
 window or manually verify keyboard, clipboard, resize, and IME behavior.
 Connection and playback in the real WKWebView are verified; those finer input
 qualities remain unverified and belong in a production integration test.
+
+## Hands-on correction
+
+A later visible-window check exposed a false-positive boundary in the initial
+evidence: `KERNEL_PLAYING` only proved an active media track. Kernel's default
+`ximagesrc use-damage=false` pipeline deadlocked the amd64 Xorg server under
+Rosetta, so the track contained black frames and new X clients timed out.
+
+The runtime now supplies Neko's documented custom capture pipeline with
+`use-damage=true`. With an active WKWebView stream, `xwd` completed rather than
+timing out, and the resulting 1920x1080 display capture showed the fixture and
+Chromium chrome. The WKWebView again emitted `KERNEL_CONNECTED` and
+`KERNEL_PLAYING`; the app's takeover/stale-action flow passed afterward.
+
+The macOS window-capture API still renders the WebRTC video layer as black, so
+the source-display artifact is the committed pixel evidence:
+[`artifacts/virtual-display-app-a.png`](artifacts/virtual-display-app-a.png).
+
+A regular packaged Tauri build also exposed the expected mixed-content
+boundary: its secure `tauri://` page cannot be the production host for plain
+HTTP/WebSocket media. The interactive test app therefore uses the localhost
+Vite origin. Production needs authenticated HTTPS/WSS endpoints.
