@@ -666,8 +666,33 @@ func (s *Supervisor) writeTaskDesign(ctx context.Context, taskID, reply string) 
 // crash recovery. If the status read fails the write proceeds as before.
 func (s *Supervisor) setTaskStatus(ctx context.Context, taskID string, action domain.AgentHookAction) error {
 	status := action.Value
-	if status != "deferred" {
-		if issue, err := s.IssueBackend.Get(ctx, taskID); err == nil && issue != nil && issue.Status == "deferred" {
+	// One status read, two holds it has to respect.
+	//
+	// `closed` (and fleet-db's internal `tombstone`) is TERMINAL. Someone or
+	// something closed the task while this run was in flight, and a hook that
+	// writes a status over a closed row silently REOPENS it and puts it back in
+	// the ready queue. Measured 2026-09-22: PUPPET-648 was closed at 16:05
+	// while a worker run that had started at 15:08 was still going; when that
+	// run ended at 16:49 its hooks (comment, add_label, set_status open)
+	// reopened the row and the fleet picked the ticket up again. fleet-db
+	// accepts writes to a closed row, so nothing upstream refuses this and the
+	// skip has to be here: executeCompletionHooks' sibling guard only fires
+	// when the backend REPORTS a closed-row conflict.
+	//
+	// `deferred` is the human hold: only an explicit deferred -> open releases
+	// it, and a completion hook is never that.
+	//
+	// Skipping and succeeding, rather than failing, matters for both: a failed
+	// hook demotes the run, burns the agent's block budget and hands the task to
+	// crash recovery, which is another automated status write. A failed status
+	// read keeps the old behaviour and writes.
+	if issue, err := s.IssueBackend.Get(ctx, taskID); err == nil && issue != nil {
+		switch {
+		case issue.Status == "closed" || issue.Status == "tombstone":
+			slog.InfoContext(ctx, "set_status skipped: task is closed (terminal)",
+				"task", taskID, "status", status, "task_status", issue.Status)
+			return nil
+		case issue.Status == "deferred" && status != "deferred":
 			slog.InfoContext(ctx, "set_status skipped: task is deferred (human hold)",
 				"task", taskID, "status", status)
 			return nil
