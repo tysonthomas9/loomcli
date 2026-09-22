@@ -1,0 +1,94 @@
+# WEB integration contract — the rules the coder, tester and integrator obey.
+#
+# WHY THIS IS DATA AND NOT PROSE IN A PROMPT
+#
+# "Merge to main, run the gate, push" was baked into the TEST integrator's
+# prompt. That works only while every repo behaves the same way. These three
+# agree on nothing that matters:
+#
+#   repo             trunk   workspace clone's origin        gate
+#   explorer         main    ~/Work/web/explorer (!)         pytest -q
+#   scraper          dev     ~/repos/scraper.git (bare)      pytest -q
+#   tree-clustering  main    GitHub olesho/tree-clustering   make gate
+#
+# A single policy gets each of them wrong differently: it merges scraper into a
+# `main` nobody develops on, and it pushes explorer INTO the owner's live
+# working checkout, which is that clone's origin.
+#
+# The agent reads this file and obeys it. It is not advisory: a stage that
+# cannot satisfy the contract for a repo must stop and say so, never improvise.
+
+defaults:
+  target_branch: main
+
+  # ff-only first: a fast-forward is the only merge that cannot silently
+  # resolve a semantic conflict. Fall back to a merge commit only on genuine
+  # divergence, never to a conflict resolution the agent invented.
+  merge_mode: ff-only
+  allow_merge_commit: true
+
+  # Publishing is a SEPARATE decision from merging — different blast radius,
+  # and one clone here pushes straight into the owner's working tree.
+  #
+  #   <remote>  push the trunk to that remote after verifying it
+  #   branch    push the TASK BRANCH only; the owner lands it themselves. For a
+  #             remote that refuses trunk pushes because the branch is checked
+  #             out somewhere live, or wherever a human should keep the final
+  #             say over what reaches the trunk.
+  #   never     verify locally and publish nothing.
+  #
+  # Verification does not change between them: the merged tree is built and
+  # gated in every mode. Only what leaves the machine differs.
+  push: origin
+
+  require_pr: never          # owner decision: personal repos, direct merge is fine
+
+  # The verification run on the MERGED tree. Per repo — there is no universal
+  # command, and a stage that "verifies" with one the repo does not have is
+  # worse than one that admits it cannot verify.
+  #
+  # EVERY gate command below pins PYTHONPATH to the tree being judged. That is
+  # not decoration. These packages are installed EDITABLE into the ambient
+  # Python, and an editable install points at the OWNER'S CHECKOUT — measured,
+  # not assumed: from inside the workspace clone, `import tree_clustering`
+  # resolved to ~/Work/web/tree-clustering/solution/src. Unpinned, an agent's
+  # gate imports the owner's code: it reports green whatever the agent changed,
+  # and it reads the owner's uncommitted work while doing it. A gate that tests
+  # the wrong tree is worse than no gate, because it is believed. PYTHONPATH
+  # precedes site-packages in sys.path, so the pin wins.
+  gate_command: null         # per repo; there is no universal one
+  gate_timeout: 600
+
+  # One task, one branch. TEST used a single shared `worker` branch and the
+  # consequence was measured: TEST-19's fast-forward carried TEST-20's and
+  # TEST-21's commits to main with it. Delivery was not atomic and no task
+  # could be reverted on its own. On real repos that is the difference between
+  # "revert that change" and "revert that afternoon".
+  branch_pattern: "loom/{task_id}"
+
+  # Every agent commit carries its task id, so trunk history answers "why is
+  # this here" without the board, `git log --grep` finds an agent's work, and
+  # the integrator can verify MECHANICALLY that a branch contains only the task
+  # it claims to (each commit's trailer matches).
+  commit_trailer: "Task: {task_id}"
+
+  # Merging INTO a dirty tree can conflict against uncommitted work or bury it
+  # in the merge. The owner's checkouts are separate clones, so this is about
+  # the workspace clone only.
+  require_clean_target: true
+
+  # Never `git add -A` / `git commit -a`. These repos generate untracked noise
+  # (__pycache__, node_modules, review-session captures, .env); blanket staging
+  # is how junk — and occasionally a secret — reaches a trunk.
+  explicit_staging: true
+
+  # A gate failure hands back to the coder. After this many attempts stop: a
+  # gate failing three times is an agent thrashing against a real regression,
+  # not converging on a fix.
+  max_integration_attempts: 2
+  on_gate_failure: hand_back
+  on_attempts_exhausted: escalate      # stamps integration-blocked, routes nowhere
+
+  # Delete the task branch after a successful publish (its commits are on the
+  # trunk). NEVER delete a branch whose work did not land.
+  delete_branch_after: on_success

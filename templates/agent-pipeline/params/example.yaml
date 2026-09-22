@@ -1,0 +1,17 @@
+# Example params — copy per workspace and fill in. The ONLY intended
+# per-workspace differences are these values: model, merge strategy
+# (pr-stack-local | direct-push), and the repo list / integration blocks.
+#
+# A rehearsal-rig pattern that has proven itself: keep one disposable TEST
+# workspace (sonnet, direct-push into a local bare origin) and prove every
+# wiring change there (flush → install → smoke) before it touches a real
+# workspace.
+workspace: MYWS
+workspace_dir: /path/to/.loom/workspaces/myws
+model: opus
+backend: claude
+strategy: pr-stack-local
+repos: [myrepo]
+repo_remotes:                # used by install.py --flush to re-attach repos after a board wipe (TEST only)
+  myrepo: {url: /path/to/origins/myrepo.git, branch: main}
+supervisor_app: loom-daemon-myws
