@@ -363,7 +363,7 @@ func TestShouldRestart(t *testing.T) {
 		}
 	})
 
-	t.Run("NoWork does not count toward retries and always restarts", func(t *testing.T) {
+	t.Run("NoWork does not count toward retries, always restarts, and preserves the failure budget", func(t *testing.T) {
 		config := makeSupervisorConfig(
 			[]cfgpkg.AgentEntry{{Worktree: "test", Role: "plan"}},
 			nil,
@@ -384,8 +384,11 @@ func TestShouldRestart(t *testing.T) {
 		if !result {
 			t.Error("shouldRestart() = false, want true for NoWork (always restart)")
 		}
-		if ap.RestartCount != 0 {
-			t.Errorf("restartCount = %d, want 0 (should be reset for NoWork)", ap.RestartCount)
+		// NoWork neither charges nor refunds the restart budget: the three
+		// prior counted failures are still on the books, so max_retries stays
+		// reachable for an agent whose failures interleave with idle polls.
+		if ap.RestartCount != 3 {
+			t.Errorf("restartCount = %d, want 3 (preserved across a NoWork cycle)", ap.RestartCount)
 		}
 		if ap.RateRetryCount != 0 {
 			t.Errorf("rateRetryCount = %d, want 0 (should be reset for NoWork)", ap.RateRetryCount)
