@@ -50,6 +50,7 @@ type Store struct {
 	workers    *workerStore
 	roles      *roleStore
 	skills     *skillStore
+	files      *workspaceFileStore
 	skillPacks *skillPackStore
 	daemon     *daemonStore
 	conns      *connectorStore
@@ -105,6 +106,7 @@ func New() *Store {
 		workers:    newWorkerStore(),
 		roles:      roles,
 		skills:     skills,
+		files:      newWorkspaceFileStore(),
 		skillPacks: newSkillPackStore(),
 		daemon:     newDaemonStore(),
 		conns:      newConnectorStore(),
@@ -244,6 +246,9 @@ func (s *Store) Roles() store.RoleStore { return s.roles }
 // Skills returns the SkillStore.
 func (s *Store) Skills() store.SkillStore { return s.skills }
 
+// WorkspaceFiles returns the provider-neutral immutable file-tree store.
+func (s *Store) WorkspaceFiles() store.WorkspaceFileStore { return s.files }
+
 // SkillMaterializationLeases is nil because memstore is process-local and
 // production materialization coordination belongs to fleet-db's Redis lease.
 func (s *Store) SkillMaterializationLeases() store.SkillMaterializationLeaseStore { return nil }
@@ -262,6 +267,10 @@ func (s *Store) SetSkillActor(actor string) {
 	s.skillPacks.actor = actor
 	s.skillPacks.mu.Unlock()
 }
+
+// SetWorkspaceFileActor swaps the identity recorded by subsequent tree
+// publications. It is the in-memory stand-in for an authenticated writer.
+func (s *Store) SetWorkspaceFileActor(actor string) { s.files.setActor(actor) }
 
 // Daemon returns the DaemonProfileStore.
 func (s *Store) Daemon() store.DaemonProfileStore { return s.daemon }
