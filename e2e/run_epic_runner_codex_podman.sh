@@ -7,8 +7,26 @@ IMAGE="${IMAGE:-loomcli-epic-runner-e2e}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FLEET_DB_REPO="${FLEET_DB_REPO:-$ROOT_DIR/../../fleet-db}"
 FLEET_DB_BIN="${FLEET_DB_BIN:-}"
+FLUE_REPO="${FLUE_REPO:-$ROOT_DIR/../flue}"
 
-podman build -f "$ROOT_DIR/e2e/Dockerfile" -t "$IMAGE" "$ROOT_DIR"
+if [[ ! -f "$FLUE_REPO/packages/cli/bin/flue.mjs" || ! -d "$FLUE_REPO/packages/runtime" ]]; then
+    echo "flue repo not found or not built at $FLUE_REPO" >&2
+    echo "Set FLUE_REPO to the pinned Flue checkout before running this E2E." >&2
+    exit 1
+fi
+
+FLUE_PIN="$(tr -d '[:space:]' < "$ROOT_DIR/internal/workflows/FLUE_COMMIT")"
+FLUE_HEAD="$(git -C "$FLUE_REPO" rev-parse HEAD)"
+if [[ "$FLUE_HEAD" != "$FLUE_PIN" ]]; then
+    echo "flue checkout $FLUE_HEAD does not match pinned commit $FLUE_PIN" >&2
+    exit 1
+fi
+
+podman build \
+    --build-context "flue=$FLUE_REPO" \
+    -f "$ROOT_DIR/e2e/Dockerfile" \
+    -t "$IMAGE" \
+    "$ROOT_DIR"
 
 IMAGE_ARCH="$(podman image inspect "$IMAGE" --format '{{.Architecture}}')"
 if [[ -z "$FLEET_DB_BIN" ]]; then
