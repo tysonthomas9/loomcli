@@ -1,0 +1,13 @@
+{
+  "pid": 4242,
+  "started_at": "2026-09-03T06:00:00Z",
+  "agents": [
+    {"worktree": "decomposer", "role": "decomposer", "status": "stopped", "last_error_class": "NoWork"},
+    {"worktree": "observer",   "role": "observer",   "status": "stopped", "last_error_class": "NoWork"},
+    {"worktree": "planner",    "role": "plan",       "status": "stopped", "last_error_class": "NoWork"},
+    {"worktree": "tester",     "role": "tester",     "status": "stopped", "last_error_class": "NoWork"},
+    {"worktree": "worker",     "role": "coder",      "status": "stopped", "last_error_class": "NoWork"},
+    {"worktree": "worker-2",   "role": "coder",      "status": "stopped", "last_error_class": "NoWork"},
+    {"worktree": "worker-3",   "role": "coder",      "status": "stopped", "last_error_class": "NoWork"}
+  ]
+}

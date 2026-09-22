@@ -1,0 +1,12 @@
+{
+  "pid": 4242,
+  "started_at": "2026-09-03T06:00:00Z",
+  "agents": [
+    {
+      "worktree": "dashboard-qa",
+      "role": "dashboard-qa",
+      "status": "parked",
+      "desired_state": "running"
+    }
+  ]
+}
