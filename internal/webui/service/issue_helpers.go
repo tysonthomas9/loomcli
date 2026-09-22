@@ -34,31 +34,6 @@ func validateCreateParams(params *CreateIssueParams) *ServiceError {
 	return nil
 }
 
-func toCreateArgs(params *CreateIssueParams) *rpc.CreateArgs {
-	return &rpc.CreateArgs{
-		ID:                 params.ID,
-		Parent:             params.Parent,
-		Title:              params.Title,
-		Description:        params.Description,
-		Status:             params.Status,
-		IssueType:          params.IssueType,
-		Priority:           params.Priority,
-		Design:             params.Design,
-		AcceptanceCriteria: params.AcceptanceCriteria,
-		Notes:              params.Notes,
-		Assignee:           params.Assignee,
-		ExternalRef:        params.ExternalRef,
-		EstimatedMinutes:   params.EstimatedMinutes,
-		Labels:             params.Labels,
-		Dependencies:       params.Dependencies,
-		CreatedBy:          params.CreatedBy,
-		Owner:              params.Owner,
-		DueAt:              params.DueAt,
-		DeferUntil:         params.DeferUntil,
-		SourceRepo:         params.SourceRepo,
-	}
-}
-
 func patchParamsToUpdateArgs(params *PatchIssueParams) *rpc.UpdateArgs {
 	return &rpc.UpdateArgs{
 		ID:                 params.IssueID,
