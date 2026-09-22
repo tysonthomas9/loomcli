@@ -19,6 +19,10 @@ var subprocessEnvAllowExact = map[string]struct{}{
 
 	"LOOM_CONFIG_DIR":       {},
 	"LOOM_FLUE_AGENT_MODEL": {},
+	// The workspace runtime dir is a non-secret host path; the scout leaf uses
+	// it as its explicit workspace-root anchor (falling back to
+	// LOOM_WORKTREE_PATH, with the "." fallback refused).
+	"LOOM_WORKSPACE_RUNTIME_DIR": {},
 
 	// Test helper marker for subprocess-backed driver tests.
 	"LOOM_HOST_BRIDGE_HELPER": {},

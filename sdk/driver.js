@@ -94,6 +94,9 @@ export class LoomDriverClient {
       complete: (input = {}) => this.completeTask(input),
       release: (input = {}) => this.releaseTask(input),
     });
+    this.issues = Object.freeze({
+      create: (input = {}) => this.createIssue(input),
+    });
     this.taskRuns = Object.freeze({
       request: (input = {}) => this.requestTaskRun(input),
       get: (input = {}) => this.getTaskRun(input),
@@ -388,6 +391,29 @@ export class LoomDriverClient {
     }
     const params = { taskId: String(taskId), actor: input.actor || "" };
     return this.#httpCall("release-task", params);
+  }
+
+  // createIssue (loom.issues.create) posts the run-scoped "create-issue" op.
+  // The server stamps the actor (driver-run:{runId}) from the verified run
+  // identity — there is no client override — and, when idempotencyKey is
+  // omitted, defaults it per run+day+body so retries within a run dedupe
+  // server-side while a later run always mints.
+  async createIssue(input = {}) {
+    if (!String(input.title || "").trim()) {
+      throw new Error("issues.create requires title");
+    }
+    return this.#httpCall("create-issue", {
+      title: String(input.title),
+      description: input.description || "",
+      issueType: input.issueType || "",
+      priority: input.priority || "",
+      labels: stringList(input.labels),
+      repo: input.repo || "",
+      parent: input.parent || "",
+      design: input.design || "",
+      status: input.status || "",
+      idempotencyKey: input.idempotencyKey || "",
+    });
   }
 
   // dispatchConnector posts one connector egress call to the run-scoped

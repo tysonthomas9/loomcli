@@ -278,11 +278,12 @@ func taskRunnerBaseEnv(env []string) []string {
 }
 
 // taskRunnerBaseEnvForRequest selects the subprocess base env for a task runner
-// by entrypoint: the local task runner gets the trusted-local provider-cred
-// superset (§4.3); every other runner (Daytona/remote/node-module) keeps the
-// strict filter so credentials never leak into a remote sandbox.
+// by entrypoint: the trusted-local CLI runners (local-task-runner and the scout
+// leaf) get the trusted-local provider-cred superset (§4.3); every other runner
+// (Daytona/remote/node-module) keeps the strict filter so credentials never
+// leak into a remote sandbox.
 func taskRunnerBaseEnvForRequest(req TaskExecRequest, env []string) []string {
-	if isLocalTaskRunner(req) {
+	if isTrustedLocalCLIRunner(req) {
 		return localTaskRunnerBaseEnv(env)
 	}
 	return taskRunnerBaseEnv(env)

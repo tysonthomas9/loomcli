@@ -88,6 +88,20 @@ export async function exerciseLoomDriverClientSurface(): Promise<void> {
   await client.taskRuns.active({ epicId: "EPIC-1", limit: 5 });
   await client.taskRuns.recoverStale({ maxAgeSeconds: 300, errorClass: "stale" });
 
+  // issues
+  const createdIssue = await client.issues.create({
+    title: "Add retry to sync",
+    description: "It flakes.",
+    issueType: "task",
+    priority: 2,
+    labels: ["recommended"],
+    repo: "loomcli",
+    idempotencyKey: "key-1",
+  });
+  expectType<string>(createdIssue.id);
+  expectType<number>(createdIssue.priority);
+  expectType<string | undefined>(createdIssue.createdBy);
+
   // connectors
   const granted: LoomConnectorCallResult = await client.connectors.github.merge({ expectedHeadSha: "sha-1" });
   expectType<"granted">(granted.decision);
@@ -145,6 +159,8 @@ export function exerciseFrozenEnums(client: LoomDriverClient): void {
   void badCode;
   // @ts-expect-error pattern is required on events.await
   void client.events.await({ timeoutMs: 1000 });
+  // @ts-expect-error title is required on issues.create
+  void client.issues.create({});
   // @ts-expect-error github.merge requires expectedHeadSha (irreversible op)
   void client.connectors.github.merge({});
   // @ts-expect-error connectors.dispatch requires action
