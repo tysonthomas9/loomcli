@@ -169,7 +169,7 @@ func TestReachability_OperatorQueueIsNamedNotDropped(t *testing.T) {
 
 	t.Run("stale human queue warns", func(t *testing.T) {
 		isolateRuntimeDir(t)
-		ready := agedIssues(3, 5*24*time.Hour, cli.OperatorLabel)
+		ready := agedIssues(3, 5*24*time.Hour, operatorLabel)
 		report := computeReachability(cfg, nil, state, ready, reachabilityReadyLimit, testNow)
 		result := renderReachability(report)
 		if result.Status != StatusWarn {
@@ -187,7 +187,7 @@ func TestReachability_OperatorQueueIsNamedNotDropped(t *testing.T) {
 
 	t.Run("fresh human queue passes and is still named", func(t *testing.T) {
 		isolateRuntimeDir(t)
-		ready := agedIssues(1, 10*time.Minute, cli.OperatorLabel)
+		ready := agedIssues(1, 10*time.Minute, operatorLabel)
 		result := renderReachability(computeReachability(cfg, nil, state, ready, reachabilityReadyLimit, testNow))
 		if result.Status != StatusPass {
 			t.Fatalf("status = %v, want pass (a 10-minute-old operator ticket is normal)", result.Status)
