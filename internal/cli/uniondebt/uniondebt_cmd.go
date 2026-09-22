@@ -19,6 +19,8 @@ var (
 	sweepDryRun   bool
 	sweepLimit    int
 	sweepPRDrift  bool
+	sweepPRDerive bool
+	sweepPRLimit  int
 	sweepOutput   string
 )
 
@@ -54,6 +56,16 @@ through open, mergeable PRs. GitHub computes mergeability lazily, so UNKNOWN is
 re-polled with bounded backoff and is never read as mergeable; CONFLICTING, a
 missing PR and a chain that stops short all keep the marker.
 
+It also DERIVES that ledger rather than waiting for a human to maintain it.
+The apply pass enumerates the tasks the local union branch carries that the
+trunk does not, and stamps the marker on every one whose work is not on the
+trunk and whose pull request cannot land today. That rule is the exact
+complement of the clear test above — the same PR check, read once per ticket,
+in the opposite direction — so one run can never clear a marker and re-apply it
+to the same ticket. A task whose PR CAN land is reported, not labeled, and the
+report's census prints both counts so the difference is readable without
+post-processing.
+
 The sweep never merges, never claims and never reopens: the closed original is
 touched only through its labels and comments. It also never runs git fetch —
 it reads the refs the clone already has and records the probe time and tip SHA
@@ -67,6 +79,8 @@ func init() {
 	sweepCmd.Flags().BoolVar(&sweepDryRun, "dry-run", false, "Classify and print without writing anything")
 	sweepCmd.Flags().IntVar(&sweepLimit, "limit", 10, "Maximum debt tickets to file per run (0 = unlimited)")
 	sweepCmd.Flags().BoolVar(&sweepPRDrift, "pr-drift", true, "Also report tickets that fail the pr-pending test while carrying no marker (read-only)")
+	sweepCmd.Flags().BoolVar(&sweepPRDerive, "pr-derive", true, "Derive the pr-pending ledger from the union branch: apply the marker to union-merged work that cannot land")
+	sweepCmd.Flags().IntVar(&sweepPRLimit, "pr-limit", 200, "Maximum pr-pending markers to apply per run (0 = unlimited)")
 	sweepCmd.Flags().StringVarP(&sweepOutput, "output", "o", "text", "Output format: text or json")
 	unionDebtCmd.AddCommand(sweepCmd)
 	cli.RegisterCommand(unionDebtCmd)
@@ -96,6 +110,8 @@ func runSweep(cmd *cobra.Command, _ []string) error {
 		DryRun:   sweepDryRun,
 		Limit:    sweepLimit,
 		PRDrift:  sweepPRDrift,
+		PRDerive: sweepPRDerive,
+		PRLimit:  sweepPRLimit,
 	})
 	report, err := sweeper.Run(cmdstore.RootContext())
 	if err != nil {
@@ -120,6 +136,11 @@ func runSweep(cmd *cobra.Command, _ []string) error {
 // that reads like a flag mistake rather than a missing schema field. Verified
 // live against the running fleet on 2026-09-02. Failing here names the actual
 // cause once, instead of once per ledger item.
+//
+// The apply pass added by PUPPET-673 writes only labels and comments
+// (AddLabel/AddComment, never Create), so it is unaffected by the missing
+// schema field — do not loosen this check on the strength of that. It is the
+// union-debt FILING path that needs Create, and it shares this command.
 //
 // A dry run writes nothing, so it is allowed against any backend.
 func preflightBackend() error {
@@ -159,13 +180,20 @@ func printReport(w io.Writer, rep *Report, lbl LabelSet) error {
 	}
 
 	if len(rep.Items) == 0 {
-		_, err := fmt.Fprintf(w, "No %s items found — the ledger is empty.\n", lbl.Marker)
-		return err
+		if _, err := fmt.Fprintf(w, "No %s items found — the ledger is empty.\n", lbl.Marker); err != nil {
+			return err
+		}
+		// The census still prints: "nothing to act on" and "nothing in the
+		// union" are different answers, and only the census distinguishes them.
+		return printCensus(w, rep)
 	}
 	for _, it := range rep.Items {
 		line := fmt.Sprintf("%-14s %-14s %-12s %s", it.OriginID, it.Repo, it.Class, it.Action)
 		if it.PR != 0 {
 			line += fmt.Sprintf(" #%d", it.PR)
+		}
+		if it.MergeSHA != "" {
+			line += " @" + abbrev(it.MergeSHA)
 		}
 		if it.DerivedID != "" {
 			line += " -> " + it.DerivedID
@@ -179,10 +207,57 @@ func printReport(w io.Writer, rep *Report, lbl LabelSet) error {
 			return err
 		}
 	}
+	if err := printCensus(w, rep); err != nil {
+		return err
+	}
 	verb := "acted on"
 	if sweepDryRun {
 		verb = "would act on"
 	}
 	_, err := fmt.Fprintf(w, "\n%s %d item(s), %d error(s).\n", verb, len(rep.Items), rep.Errors)
 	return err
+}
+
+// censusRow is one line of the derived census. The letters are the ticket's
+// own A-F buckets, kept verbatim so a reader can check the set differences
+// against the ticket without post-processing the JSON.
+type censusRow struct {
+	letter string
+	label  string
+	count  func(Census) int
+	note   string
+}
+
+var censusRows = []censusRow{
+	{"A", "union-merged, no landable PR, unlabeled", func(c Census) int { return c.A }, "applied"},
+	{"B", "labeled, no open PR", func(c Census) int { return c.B }, "(clear pass owns)"},
+	{"C", "union-merged, unlabeled, PR can land", func(c Census) int { return c.C }, "reported only"},
+	{"D", "labeled, no union merge", func(c Census) int { return c.D }, ""},
+	{"E", "labeled, open PR", func(c Census) int { return c.E }, "(clear pass owns)"},
+	{"F", "union-merged and already on the trunk", func(c Census) int { return c.F }, "reported only"},
+	{"-", "union-merged, no branch resolves", func(c Census) int { return c.NoBranch }, "reported only"},
+	{"-", "union-merged, excluded by label", func(c Census) int { return c.Excluded }, "skipped"},
+}
+
+// printCensus renders the derived census. The union tip SHA is printed with
+// the counts and not as a footnote: the union branch is rebuilt periodically,
+// and a count without the tip it came from means nothing a week later.
+func printCensus(w io.Writer, rep *Report) error {
+	for _, c := range rep.Census {
+		if _, err := fmt.Fprintf(w, "\nderived census (%s, union %s @ %s, trunk %s, %d union-only task(s)):\n",
+			c.Repo, c.Union, abbrev(c.UnionSHA), c.Trunk, c.Merges); err != nil {
+			return err
+		}
+		for _, row := range censusRows {
+			if _, err := fmt.Fprintf(w, "  %s  %-42s %4d  %s\n",
+				row.letter, row.label, row.count(c), row.note); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintf(w, "     applied %d, skipped by --pr-limit %d, errors %d\n",
+			c.Applied, c.Skipped, c.Errors); err != nil {
+			return err
+		}
+	}
+	return nil
 }

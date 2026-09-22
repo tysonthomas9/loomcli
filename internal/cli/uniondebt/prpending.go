@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -46,13 +47,41 @@ type githubClient interface {
 	// Only open PRs: a base chain that reaches a closed or merged-away branch
 	// must read as "no PR for that base" and keep the marker.
 	OpenPRs(clone string) ([]PR, error)
+	// AllPRs lists pull requests in EVERY state. The apply pass needs the
+	// closed and merged ones: "no open PR" is the condition it writes a
+	// marker on, and a row that says so is worth far more when it can name
+	// the closed PR that used to carry the work.
+	AllPRs(clone string) ([]PR, error)
 	// Mergeable re-reads one PR's mergeable value, for the UNKNOWN re-poll.
 	Mergeable(clone string, number int) (string, error)
 }
 
-// prListLimit caps one repo's PR listing. gh defaults to 30, which silently
-// truncates a repo with a long-lived queue of agent branches.
-const prListLimit = "500"
+// The two PR listing caps. gh defaults to 30, which silently truncates a repo
+// with a long-lived queue of agent branches, and gh gives NO "there are more"
+// signal — a listing that comes back exactly at its limit is the only evidence
+// of truncation there is, which is why both are guarded below.
+//
+// They are separate constants because they size different populations.
+// Measured on tysonthomas9/loomcli, 2026-09-22: 353 open PRs, 729 across all
+// states. The open listing feeds the clear pass, where an under-read keeps a
+// marker (safe); the all-states listing feeds the apply pass, where an
+// under-read turns a real PR into "no PR" and WRITES a marker (not safe). Size
+// the second one for growth and fail loudly when it is reached.
+const (
+	prListLimit    = 500
+	allPRListLimit = 2000
+)
+
+// guardTruncation refuses a listing that came back at its cap.
+func guardTruncation(clone, state string, got, limit int) error {
+	if got < limit {
+		return nil
+	}
+	return fmt.Errorf("gh pr list --state %s in %s returned %d PRs at the --limit of %d: "+
+		"gh reports no \"more results\" signal, so a listing AT the limit must be assumed "+
+		"truncated, and a truncated listing reads a real PR as \"no PR\"; raise the limit",
+		state, clone, got, limit)
+}
 
 type execGHClient struct{}
 
@@ -71,7 +100,15 @@ func (execGHClient) run(clone string, args ...string) ([]byte, error) {
 }
 
 func (g execGHClient) OpenPRs(clone string) ([]PR, error) {
-	out, err := g.run(clone, "pr", "list", "--state", "open", "--limit", prListLimit,
+	return g.list(clone, "open", prListLimit)
+}
+
+func (g execGHClient) AllPRs(clone string) ([]PR, error) {
+	return g.list(clone, "all", allPRListLimit)
+}
+
+func (g execGHClient) list(clone, state string, limit int) ([]PR, error) {
+	out, err := g.run(clone, "pr", "list", "--state", state, "--limit", strconv.Itoa(limit),
 		"--json", "number,state,mergeable,baseRefName,headRefName")
 	if err != nil {
 		return nil, err
@@ -79,6 +116,9 @@ func (g execGHClient) OpenPRs(clone string) ([]PR, error) {
 	var prs []PR
 	if err := json.Unmarshal(out, &prs); err != nil {
 		return nil, fmt.Errorf("parse gh pr list output in %s: %w", clone, err)
+	}
+	if err := guardTruncation(clone, state, len(prs), limit); err != nil {
+		return nil, err
 	}
 	return prs, nil
 }
@@ -130,6 +170,29 @@ const (
 	ClassPRBaseUnreachable Class = "pr-base-unreachable"
 )
 
+// The classes of the APPLY pass (prderive.go). Exactly one of them writes, and
+// it is the exact complement of ClassPRMergeable above: the marker goes ON when
+// the same Check that would take it OFF fails. One predicate, read once per
+// ticket per run, is what makes the two passes provably unable to disagree.
+const (
+	// ClassPRUnionDebt is union-merged, not landed on the trunk, and fails the
+	// clear test. The ONLY class this package applies a marker for.
+	ClassPRUnionDebt Class = "pr-union-debt"
+	// ClassPRUnionUnlanded is union-merged, not landed, and PASSES the clear
+	// test — its PR can land, it simply has not yet. Reported, never labeled:
+	// labeling it would hand the clear pass a marker to remove in the very
+	// next run.
+	ClassPRUnionUnlanded Class = "pr-union-unlanded"
+	// ClassPRLanded is union-merged and already on the trunk. Reported; a
+	// marker on one of these is stale, and REMOVING it is the clear pass's
+	// job under its own narrower rule.
+	ClassPRLanded Class = "pr-landed"
+	// ClassPRNoBranch is union-merged with no ref that resolves any more. A
+	// "waiting to land" marker on a ticket with no branch to land is noise;
+	// union-unreachable is the label that covers it.
+	ClassPRNoBranch Class = "pr-no-branch"
+)
+
 // chainDepthCap bounds the base walk at the size of the graph it walks. A
 // cycle-free chain cannot visit more PRs than exist, so this can only fire on
 // a graph that the cycle guard somehow let through — it is a termination
@@ -174,6 +237,10 @@ type PRChecker struct {
 	// run. The cache is a snapshot on purpose: one sweep judges one graph, so
 	// two tickets cannot disagree about what the stack looked like.
 	prs map[string][]PR
+	// allPRs caches the --state all listing separately. Two listings, not one
+	// filtered: deriving the open set from the bigger, likelier-to-truncate
+	// listing would couple the clear pass's snapshot to it.
+	allPRs map[string][]PR
 }
 
 // NewPRChecker returns a PRChecker backed by the real gh and git binaries.
@@ -201,6 +268,23 @@ func (c *PRChecker) OpenPRs(clone string) ([]PR, error) {
 		c.prs = map[string][]PR{}
 	}
 	c.prs[clone] = prs
+	return prs, nil
+}
+
+// AllPRs exposes the all-states PR listing, cached per clone, so the apply
+// pass can name the closed or merged PR behind a "no open PR" verdict.
+func (c *PRChecker) AllPRs(clone string) ([]PR, error) {
+	if prs, ok := c.allPRs[clone]; ok {
+		return prs, nil
+	}
+	prs, err := c.gh.AllPRs(clone)
+	if err != nil {
+		return nil, err
+	}
+	if c.allPRs == nil {
+		c.allPRs = map[string][]PR{}
+	}
+	c.allPRs[clone] = prs
 	return prs, nil
 }
 

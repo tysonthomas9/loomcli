@@ -37,6 +37,13 @@ type issueClient interface {
 // prober is the git layer, stubbed in tests.
 type prober interface {
 	Probe(clone, unionBranch, taskID, recordedTip string) (ProbeResult, error)
+	// UnionMerges lists the tasks the union branch carries that the trunk
+	// does not; UnionTip is the SHA that answer was derived from; Landed asks
+	// whether one task's work has since reached the trunk. All three are the
+	// apply pass's local-git half (unionmerges.go).
+	UnionMerges(clone, unionBranch, trunk string) ([]UnionMerge, error)
+	UnionTip(clone, unionBranch string) (string, error)
+	Landed(clone, trunk, taskID string) (bool, string, error)
 }
 
 // Action is what the sweep did about one ledger item.
@@ -59,9 +66,19 @@ const (
 	// is MERGEABLE, and its base chain reaches the repo's trunk.
 	ActionCleared Action = "cleared"
 	// ActionDrift means the pr-pending test FAILED on a ticket that carries no
-	// marker. It is reported and nothing is written: deriving a marker is a
-	// different question (PUPPET-653), and this sweep only ever clears.
+	// marker, and the ticket was not part of the derived census. It is
+	// reported and nothing is written.
 	ActionDrift Action = "drift"
+	// ActionApplied means the pr-pending marker was ADDED: the task is in the
+	// union branch, its work is not on the trunk, and its pull request cannot
+	// land today. This is the one write the apply pass performs.
+	ActionApplied Action = "applied"
+	// ActionReported means the row is part of the derived census and nothing
+	// was written. It differs from ActionDrift in where it comes from: drift
+	// is "fails the clear test while carrying no marker", found by scanning
+	// open PRs; reported is "union-merged, and here is its bucket", found by
+	// enumerating the union branch.
+	ActionReported Action = "reported"
 	// ActionError means the item could not be classified or acted on.
 	ActionError Action = "error"
 )
@@ -78,9 +95,14 @@ type Item struct {
 	Class       Class  `json:"class,omitempty"`
 	// PR, Mergeable and Chain describe the pr-pending test: the ticket's pull
 	// request, the value GitHub reported for it, and the base chain walked.
-	PR         int    `json:"pr,omitempty"`
-	Mergeable  string `json:"mergeable,omitempty"`
-	Chain      string `json:"chain,omitempty"`
+	PR        int    `json:"pr,omitempty"`
+	Mergeable string `json:"mergeable,omitempty"`
+	Chain     string `json:"chain,omitempty"`
+	// MergeSHA is the union merge that carries this task, and Landed says
+	// whether its work has reached the trunk. Both are the apply pass's
+	// evidence (prderive.go).
+	MergeSHA   string `json:"merge_sha,omitempty"`
+	Landed     bool   `json:"landed,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 	Action     Action `json:"action"`
 	DerivedID  string `json:"derived_id,omitempty"`
@@ -92,8 +114,14 @@ type Item struct {
 
 // Report is the whole sweep's outcome.
 type Report struct {
-	Items  []Item `json:"items"`
-	Errors int    `json:"errors"`
+	Items []Item `json:"items"`
+	// Census is the derived pr-pending census, one entry per swept repo. It is
+	// what makes the set differences readable off the report: the buckets the
+	// pass WROTE and the buckets it only reported are both counted, so a
+	// reader can see what a wider apply rule would have labeled without the
+	// pass having labeled it.
+	Census []Census `json:"census,omitempty"`
+	Errors int      `json:"errors"`
 }
 
 // Options configure one sweep.
@@ -113,6 +141,18 @@ type Options struct {
 	// `sweep` command turns it on; library callers (and every unit test) opt
 	// in explicitly, which is what keeps the package's tests network-free.
 	PRDrift bool
+	// PRDerive runs the APPLY pass: enumerate the union branch and stamp the
+	// pr-pending marker on every task whose work is neither on the trunk nor
+	// able to land today. It is OFF by default for the same reason PRDrift is
+	// — it reaches GitHub and git even when both ledgers are empty — and the
+	// `sweep` command turns it on. Every unit test opts in explicitly, which
+	// is what keeps the package's tests network-free.
+	PRDerive bool
+	// PRLimit caps markers APPLIED per run. It is a separate counter from
+	// Limit, which caps filed debt TICKETS and defaults to 10: sharing one
+	// would stop this pass after ten markers with no way to say so. Zero or
+	// negative means unlimited.
+	PRLimit int
 	// Now supplies the probe timestamp; nil uses time.Now.
 	Now func() time.Time
 }
@@ -159,8 +199,25 @@ func (s *Sweeper) Run(ctx context.Context) (*Report, error) {
 		item := s.handle(ctx, iss, &filed)
 		rep.add(item)
 	}
-	if err := s.sweepPRPending(ctx, rep); err != nil {
+
+	// Pass order is load-bearing. The clear pass owns every ticket that
+	// already carries the marker, so the apply pass never looks at one; the
+	// apply pass then hands both its written and its reported IDs forward, so
+	// the read-only drift scan cannot print a second, differently-worded
+	// verdict about a ticket that already has a row.
+	judged, err := s.sweepPRPending(ctx, rep)
+	if err != nil {
 		return nil, err
+	}
+	if s.opts.PRDerive {
+		for _, item := range s.sweepPRDerive(ctx, rep, judged) {
+			rep.add(item)
+		}
+	}
+	if s.opts.PRDrift {
+		for _, item := range s.driftScan(ctx, judged) {
+			rep.add(item)
+		}
 	}
 	return rep, nil
 }
