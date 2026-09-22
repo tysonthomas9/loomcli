@@ -1,4 +1,5 @@
 import "./styles.css";
+import { createQueuedActionState } from "../scripts/frontend-state.mjs";
 
 type AppId = "app-a" | "app-b";
 
@@ -10,18 +11,20 @@ type BrowserApp = {
   epoch: number;
 };
 
-const controlOrigin = "http://127.0.0.1:61300";
+const controlOrigin = import.meta.env.VITE_LOOM_KERNEL_CONTROL_ORIGIN || "http://127.0.0.1:61300";
 const apps: BrowserApp[] = [
-  { id: "app-a", name: "Research", liveUrl: "http://127.0.0.1:61080/?embed=1&readOnly=true", cdpPort: 61222, epoch: 0 },
-  { id: "app-b", name: "Operations", liveUrl: "http://127.0.0.1:62080/?embed=1&readOnly=true", cdpPort: 62222, epoch: 0 },
+  { id: "app-a", name: "Research", liveUrl: `${import.meta.env.VITE_LOOM_KERNEL_APP_A_LIVE_ORIGIN || "http://127.0.0.1:61080"}/?embed=1&readOnly=true`, cdpPort: Number(import.meta.env.VITE_LOOM_KERNEL_APP_A_CDP_PORT || 61222), epoch: 0 },
+  { id: "app-b", name: "Operations", liveUrl: `${import.meta.env.VITE_LOOM_KERNEL_APP_B_LIVE_ORIGIN || "http://127.0.0.1:62080"}/?embed=1&readOnly=true`, cdpPort: Number(import.meta.env.VITE_LOOM_KERNEL_APP_B_CDP_PORT || 62222), epoch: 0 },
 ];
 
 let activeId: AppId = "app-a";
-let queuedEpoch = 0;
+const queuedActions = createQueuedActionState(activeId);
 let humanControlId: AppId | null = null;
 let inputQueue: Promise<unknown> = Promise.resolve();
 let pendingMove: { surfaceX: number; surfaceY: number; surfaceWidth: number; surfaceHeight: number } | null = null;
+let latestMoveEvent: PointerEvent | null = null;
 let moveQueued = false;
+let pressedButton = "none";
 
 const root = document.querySelector<HTMLDivElement>("#app");
 if (!root) throw new Error("missing app root");
@@ -103,7 +106,7 @@ function updateActiveView() {
   document.querySelector("#epoch")!.textContent = String(app.epoch);
   document.querySelector("#cdp")!.textContent = `:${app.cdpPort}`;
   document.querySelector("#browser-title")!.textContent = app.name;
-  queuedEpoch = app.epoch;
+  queuedActions.select(app.id);
   humanControlId = null;
   updateHumanControl();
   announce(`${app.name} browser selected.`);
@@ -160,6 +163,10 @@ function keyboardModifiers(event: KeyboardEvent) {
   return (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0);
 }
 
+function pointerModifiers(event: PointerEvent) {
+  return (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0);
+}
+
 function enqueueKey(event: KeyboardEvent) {
   event.preventDefault();
   const type = event.type === "keydown" ? "keyDown" : "keyUp";
@@ -184,7 +191,14 @@ function scheduleMove() {
     const move = pendingMove;
     pendingMove = null;
     if (move && humanControlId === appId) {
-      return api(`/api/input/${appId}/pointer`, { type: "mouseMoved", ...move, button: "none" });
+      const event = latestMoveEvent;
+      return api(`/api/input/${appId}/pointer`, {
+        type: "mouseMoved",
+        ...move,
+        button: event && event.buttons !== 0 ? pressedButton : "none",
+        buttons: event?.buttons ?? 0,
+        modifiers: event ? pointerModifiers(event) : 0,
+      });
     }
     return undefined;
   }).catch((error) => announce((error as Error).message, "error")).finally(() => {
@@ -195,6 +209,7 @@ function scheduleMove() {
 
 function queueMove(event: PointerEvent) {
   pendingMove = surfacePointer(event);
+  latestMoveEvent = event;
   scheduleMove();
 }
 
@@ -227,6 +242,7 @@ document.querySelector<HTMLButtonElement>("#take-control")!.addEventListener("cl
     const app = activeApp();
     const result = await api(`/api/epoch/${app.id}/bump`, {});
     app.epoch = result.epoch;
+    queuedActions.setEpoch(app.id, app.epoch);
     document.querySelector("#epoch")!.textContent = String(app.epoch);
     humanControlId = app.id;
     updateHumanControl();
@@ -243,12 +259,39 @@ humanInput.addEventListener("pointerdown", (event) => {
   event.preventDefault();
   humanInput.focus();
   humanInput.setPointerCapture(event.pointerId);
-  enqueuePointer({ type: "mousePressed", ...surfacePointer(event), button: mouseButton(event.button), clickCount: event.detail || 1 });
+  pressedButton = mouseButton(event.button);
+  enqueuePointer({
+    type: "mousePressed",
+    ...surfacePointer(event),
+    button: pressedButton,
+    buttons: event.buttons,
+    modifiers: pointerModifiers(event),
+    clickCount: event.detail || 1,
+  });
 });
 humanInput.addEventListener("pointerup", (event) => {
   event.preventDefault();
-  enqueuePointer({ type: "mouseReleased", ...surfacePointer(event), button: mouseButton(event.button), clickCount: event.detail || 1 });
+  enqueuePointer({
+    type: "mouseReleased",
+    ...surfacePointer(event),
+    button: mouseButton(event.button),
+    buttons: event.buttons,
+    modifiers: pointerModifiers(event),
+    clickCount: event.detail || 1,
+  });
+  pressedButton = "none";
   if (humanInput.hasPointerCapture(event.pointerId)) humanInput.releasePointerCapture(event.pointerId);
+});
+humanInput.addEventListener("pointercancel", (event) => {
+  enqueuePointer({
+    type: "mouseReleased",
+    ...surfacePointer(event),
+    button: pressedButton,
+    buttons: 0,
+    modifiers: pointerModifiers(event),
+    clickCount: 0,
+  });
+  pressedButton = "none";
 });
 humanInput.addEventListener("wheel", (event) => {
   event.preventDefault();
@@ -259,15 +302,18 @@ humanInput.addEventListener("keydown", enqueueKey);
 humanInput.addEventListener("keyup", enqueueKey);
 
 document.querySelector<HTMLButtonElement>("#queue-action")!.addEventListener("click", () => {
-  queuedEpoch = activeApp().epoch;
-  announce(`Lead action queued at epoch ${queuedEpoch}. Take human control before running it to prove preemption.`);
+  const app = activeApp();
+  const queued = queuedActions.queue(app.id, app.epoch);
+  announce(`Lead action queued for ${app.name} at epoch ${queued.epoch}. Take human control before running it to prove preemption.`);
 });
 
 document.querySelector<HTMLButtonElement>("#run-action")!.addEventListener("click", async () => {
   try {
-    const app = activeApp();
-    await api(`/api/action/${app.id}`, { expectedEpoch: queuedEpoch });
-    announce(`Lead action ran in ${app.name} at epoch ${queuedEpoch}.`);
+    const queued = queuedActions.current();
+    if (!queued) throw new Error("Queue a lead action before running it.");
+    const app = apps.find((candidate) => candidate.id === queued.appId)!;
+    await api(`/api/action/${queued.appId}`, { expectedEpoch: queued.epoch });
+    announce(`Lead action ran in ${app.name} at epoch ${queued.epoch}.`);
   } catch (error) {
     const status = (error as { status?: number }).status;
     announce(status === 409 ? "Stale lead action rejected after human control changed." : (error as Error).message, status === 409 ? "normal" : "error");

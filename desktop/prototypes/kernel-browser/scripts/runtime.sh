@@ -3,10 +3,21 @@
 set -euo pipefail
 
 readonly docker_context="${LOOM_KERNEL_DOCKER_CONTEXT:-colima-loom-kernel-browser-221}"
-readonly runtime_id="${LOOM_KERNEL_RUNTIME_ID:-LOOMCLI-221}"
+readonly script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly state_dir="${LOOM_KERNEL_STATE_DIR:-$(dirname "$script_dir")/.runtime}"
+readonly runtime_id_file="$state_dir/runtime-id"
 readonly image="onkernel/chromium-headful@sha256:7aa6dc616440fbe3f8886cec700dc7533aa2a0ec29b999102aa6cad4ac3e6f50"
 readonly prototype_label="io.loom.prototype=local-kernel-browser"
-readonly runtime_label="io.loom.runtime-id=${runtime_id}"
+readonly app_a_live_port="${LOOM_KERNEL_APP_A_LIVE_PORT:-61080}"
+readonly app_a_cdp_port="${LOOM_KERNEL_APP_A_CDP_PORT:-61222}"
+readonly app_a_webdriver_port="${LOOM_KERNEL_APP_A_WEBDRIVER_PORT:-61224}"
+readonly app_a_api_port="${LOOM_KERNEL_APP_A_API_PORT:-61101}"
+readonly app_a_media_port="${LOOM_KERNEL_APP_A_MEDIA_PORT:-56000}"
+readonly app_b_live_port="${LOOM_KERNEL_APP_B_LIVE_PORT:-62080}"
+readonly app_b_cdp_port="${LOOM_KERNEL_APP_B_CDP_PORT:-62222}"
+readonly app_b_webdriver_port="${LOOM_KERNEL_APP_B_WEBDRIVER_PORT:-62224}"
+readonly app_b_api_port="${LOOM_KERNEL_APP_B_API_PORT:-62101}"
+readonly app_b_media_port="${LOOM_KERNEL_APP_B_MEDIA_PORT:-56100}"
 readonly chromium_flags="--user-data-dir=/home/kernel/user-data --disable-dev-shm-usage --start-maximized --remote-allow-origins=* --no-sandbox --no-zygote"
 # Human input is dispatched through Chromium CDP instead of Neko's emulated
 # amd64 Xorg input driver, which deadlocks after pointer activity on Apple silicon.
@@ -14,13 +25,33 @@ readonly video_pipeline="ximagesrc display-name={display} show-pointer=false use
 readonly video_pipelines="{\"main\":{\"gst_pipeline\":\"${video_pipeline}\"},\"legacy\":{\"gst_pipeline\":\"${video_pipeline}\"}}"
 
 docker_cmd=(docker --context "$docker_context")
+runtime_id=""
+runtime_token=""
+runtime_label=""
+
+init_runtime_id() {
+  local create="${1:-false}"
+  if [[ -n "${LOOM_KERNEL_RUNTIME_ID:-}" ]]; then
+    runtime_id="$LOOM_KERNEL_RUNTIME_ID"
+  elif [[ -f "$runtime_id_file" ]]; then
+    runtime_id="$(<"$runtime_id_file")"
+  elif [[ "$create" == true ]]; then
+    runtime_id="kernel-$(date -u +%Y%m%d%H%M%S)-$$-${RANDOM}"
+    mkdir -p "$state_dir"
+    (umask 077; printf '%s\n' "$runtime_id" > "$runtime_id_file")
+  else
+    return 1
+  fi
+  runtime_token="${runtime_id//[^a-zA-Z0-9_.-]/-}"
+  runtime_label="io.loom.runtime-id=${runtime_id}"
+}
 
 require_runtime() {
   "${docker_cmd[@]}" info >/dev/null
 }
 
 container_name() {
-  printf 'loom-kernel-browser-%s\n' "$1"
+  printf 'loom-kernel-browser-%s-%s\n' "$runtime_token" "$1"
 }
 
 start_app() {
@@ -93,8 +124,19 @@ stop_owned() {
   printf 'status=stopped runtime=%s\n' "$runtime_id"
 }
 
+cleanup_failed_start() {
+  local status=$?
+  trap - EXIT
+  if (( status != 0 )); then
+    set +e
+    stop_owned
+  fi
+  exit "$status"
+}
+
 case "${1:-}" in
   start)
+    init_runtime_id true
     require_runtime
     for app_id in app-a app-b; do
       name="$(container_name "$app_id")"
@@ -103,18 +145,29 @@ case "${1:-}" in
         exit 2
       fi
     done
-    trap stop_owned ERR
-    start_app app-a 61080 61222 61224 61101 56000
-    start_app app-b 62080 62222 62224 62101 56100
-    trap - ERR
+    trap cleanup_failed_start EXIT
+    start_app app-a "$app_a_live_port" "$app_a_cdp_port" "$app_a_webdriver_port" "$app_a_api_port" "$app_a_media_port"
+    start_app app-b "$app_b_live_port" "$app_b_cdp_port" "$app_b_webdriver_port" "$app_b_api_port" "$app_b_media_port"
+    trap - EXIT
     ;;
   status)
+    if ! init_runtime_id false; then
+      printf 'status=clean reason=no-runtime-id\n'
+      exit 0
+    fi
     require_runtime
     "${docker_cmd[@]}" ps --all --filter "label=$prototype_label" --filter "label=$runtime_label" --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
     ;;
   stop)
+    if ! init_runtime_id false; then
+      printf 'status=clean reason=no-runtime-id\n'
+      exit 0
+    fi
     require_runtime
     stop_owned
+    if [[ -z "${LOOM_KERNEL_RUNTIME_ID:-}" ]]; then
+      rm -f "$runtime_id_file"
+    fi
     ;;
   *)
     printf 'usage: %s {start|status|stop}\n' "$0" >&2

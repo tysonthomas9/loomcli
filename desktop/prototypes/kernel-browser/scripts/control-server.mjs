@@ -3,20 +3,18 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { keyParams, pointerParams } from "./input-bridge.mjs";
+import { chooseVisiblePage, createPendingCommands } from "./cdp-client.mjs";
+import { annotationGeometry } from "./annotation-geometry.mjs";
+import { allowedOrigins, originAllowed } from "./request-policy.mjs";
 
 const host = process.env.LOOM_KERNEL_CONTROL_HOST || "127.0.0.1";
 const port = Number(process.env.LOOM_KERNEL_CONTROL_PORT || 61300);
+const cdpTimeoutMs = Number(process.env.LOOM_KERNEL_CDP_TIMEOUT_MS || 5_000);
 const prototypeDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const artifactDir = join(prototypeDir, "evidence", "artifacts");
-const allowedOrigins = new Set([
-  "http://127.0.0.1:1421",
-  "http://tauri.localhost",
-  "tauri://localhost",
-]);
-
 const browsers = {
-  "app-a": { cdpPort: 61222, epoch: 0 },
-  "app-b": { cdpPort: 62222, epoch: 0 },
+  "app-a": { cdpPort: Number(process.env.LOOM_KERNEL_APP_A_CDP_PORT || 61222), epoch: 0 },
+  "app-b": { cdpPort: Number(process.env.LOOM_KERNEL_APP_B_CDP_PORT || 62222), epoch: 0 },
 };
 const embedEvents = [];
 
@@ -34,7 +32,7 @@ async function body(req) {
 }
 
 async function browserSocket(cdpPort) {
-  const response = await fetch(`http://127.0.0.1:${cdpPort}/json/version`);
+  const response = await fetch(`http://127.0.0.1:${cdpPort}/json/version`, { signal: AbortSignal.timeout(cdpTimeoutMs) });
   if (!response.ok) throw new Error(`CDP version failed: ${response.status}`);
   const version = await response.json();
   if (!version.webSocketDebuggerUrl) throw new Error("no CDP browser socket is ready");
@@ -43,38 +41,59 @@ async function browserSocket(cdpPort) {
 
 async function cdp(cdpPort, operations) {
   const socket = new WebSocket(await browserSocket(cdpPort));
-  const waiting = new Map();
+  const waiting = createPendingCommands();
   let nextId = 1;
 
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(String(event.data));
-    const pending = waiting.get(message.id);
-    if (!pending) return;
-    waiting.delete(message.id);
-    if (message.error) pending.reject(new Error(message.error.message));
-    else pending.resolve(message.result);
+    waiting.settle(message.id, message.error ? new Error(message.error.message) : null, message.result);
   });
 
-  await new Promise((resolve, reject) => {
-    socket.addEventListener("open", resolve, { once: true });
-    socket.addEventListener("error", () => reject(new Error("CDP websocket failed")), { once: true });
-  });
+  const rejectDisconnected = () => waiting.rejectAll(new Error("CDP websocket disconnected"));
+  socket.addEventListener("close", rejectDisconnected);
+  socket.addEventListener("error", rejectDisconnected);
 
-  const sendRaw = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("CDP websocket open timed out")), cdpTimeoutMs);
+      socket.addEventListener("open", () => { clearTimeout(timer); resolve(); }, { once: true });
+      socket.addEventListener("error", () => { clearTimeout(timer); reject(new Error("CDP websocket failed")); }, { once: true });
+    });
+  } catch (error) {
+    socket.close();
+    throw error;
+  }
+
+  const sendRaw = (method, params = {}, sessionId) => {
     const id = nextId++;
-    waiting.set(id, { resolve, reject });
-    socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
-  });
+    const result = waiting.add(id, cdpTimeoutMs);
+    try {
+      socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+    } catch (error) {
+      waiting.settle(id, error);
+    }
+    return result;
+  };
 
   try {
     const { targetInfos } = await sendRaw("Target.getTargets");
-    const pageTargets = targetInfos.filter((candidate) => candidate.type === "page" && !candidate.url.startsWith("devtools://"));
-    const target = pageTargets.find((candidate) => candidate.url.startsWith("http://") || candidate.url.startsWith("https://")) || pageTargets[0];
+    const sessions = new Map();
+    const target = await chooseVisiblePage(targetInfos, async (candidate) => {
+      const attached = await sendRaw("Target.attachToTarget", { targetId: candidate.targetId, flatten: true });
+      sessions.set(candidate.targetId, attached.sessionId);
+      const visibility = await sendRaw("Runtime.evaluate", { expression: "document.visibilityState", returnByValue: true }, attached.sessionId);
+      return visibility.result.value === "visible";
+    });
     if (!target) throw new Error("no CDP page target is ready");
-    const { sessionId } = await sendRaw("Target.attachToTarget", { targetId: target.targetId, flatten: true });
+    for (const [targetId, sessionId] of sessions) {
+      if (targetId !== target.targetId) await sendRaw("Target.detachFromTarget", { sessionId });
+    }
+    const sessionId = sessions.get(target.targetId)
+      || (await sendRaw("Target.attachToTarget", { targetId: target.targetId, flatten: true })).sessionId;
     const send = (method, params = {}) => sendRaw(method, params, sessionId);
     return await operations(send);
   } finally {
+    waiting.rejectAll(new Error("CDP connection closed"));
     socket.close();
   }
 }
@@ -83,6 +102,7 @@ const annotationScript = (note) => `(() => {
   const previous = window.__loomAnnotationCleanup;
   if (typeof previous === 'function') previous();
   window.__loomAnnotation = null;
+  window.__loomAnnotationElement = null;
   const handler = (event) => {
     const element = event.target;
     if (!(element instanceof Element)) return;
@@ -111,6 +131,7 @@ const annotationScript = (note) => `(() => {
       viewport: { width: innerWidth, height: innerHeight, deviceScaleFactor: devicePixelRatio },
       capturedAt: new Date().toISOString()
     };
+    window.__loomAnnotationElement = element;
     document.removeEventListener('click', handler, true);
     window.__loomAnnotationCleanup = () => {
       element.style.outline = oldOutline;
@@ -182,7 +203,12 @@ async function handleApi(req, url) {
     if (payload.expectedEpoch !== selected.epoch) {
       throw Object.assign(new Error(`stale epoch ${payload.expectedEpoch}; current epoch is ${selected.epoch}`), { status: 409 });
     }
-    const result = await cdp(selected.cdpPort, (send) => send("Runtime.evaluate", {
+    const result = await cdp(selected.cdpPort, (send) => {
+      if (payload.expectedEpoch !== selected.epoch) {
+        throw Object.assign(new Error(`stale epoch ${payload.expectedEpoch}; current epoch is ${selected.epoch}`), { status: 409 });
+      }
+      const dispatchEpoch = selected.epoch;
+      return send("Runtime.evaluate", {
       expression: `(() => {
         let banner = document.querySelector('[data-loom-lead-action]');
         if (!banner) {
@@ -191,12 +217,13 @@ async function handleApi(req, url) {
           Object.assign(banner.style, { position: 'fixed', zIndex: '2147483647', top: '12px', right: '12px', padding: '10px 14px', background: '#173f33', color: 'white', font: '600 14px system-ui', borderRadius: '4px' });
           document.body.appendChild(banner);
         }
-        banner.textContent = 'Lead action accepted · epoch ${selected.epoch}';
+        banner.textContent = 'Lead action accepted · epoch ${dispatchEpoch}';
         return { title: document.title, url: location.href };
       })()`,
       returnByValue: true,
-    }));
-    return { epoch: selected.epoch, page: result.result.value };
+      });
+    });
+    return { epoch: payload.expectedEpoch, page: result.result.value };
   }
 
   if (parts[1] === "annotation" && parts[3] === "arm" && req.method === "POST") {
@@ -210,13 +237,29 @@ async function handleApi(req, url) {
 
   if (parts[1] === "annotation" && parts[3] === "capture" && req.method === "POST") {
     const result = await cdp(selected.cdpPort, async (send) => {
-      const evaluation = await send("Runtime.evaluate", { expression: "window.__loomAnnotation || null", returnByValue: true });
+      const evaluation = await send("Runtime.evaluate", {
+        expression: `(() => {
+          const annotation = window.__loomAnnotation;
+          const element = window.__loomAnnotationElement;
+          if (!annotation || !(element instanceof Element) || !element.isConnected) return null;
+          const rect = element.getBoundingClientRect();
+          const pageLeft = window.visualViewport?.pageLeft ?? window.scrollX;
+          const pageTop = window.visualViewport?.pageTop ?? window.scrollY;
+          const geometry = (${annotationGeometry.toString()})(rect, { pageLeft, pageTop });
+          annotation.bounds = geometry.bounds;
+          annotation.documentBounds = geometry.documentBounds;
+          annotation.viewport = { width: innerWidth, height: innerHeight, deviceScaleFactor: devicePixelRatio };
+          annotation.capturedAt = new Date().toISOString();
+          return annotation;
+        })()`,
+        returnByValue: true,
+      });
       const annotation = evaluation.result.value;
-      if (!annotation) throw Object.assign(new Error("no element selected; click inside the live browser first"), { status: 409 });
-      const { x, y, width, height } = annotation.bounds;
+      if (!annotation) throw Object.assign(new Error("selected element is no longer available; select it again"), { status: 409 });
+      const { x, y, width, height } = annotation.documentBounds;
       const screenshot = await send("Page.captureScreenshot", {
         format: "png",
-        captureBeyondViewport: false,
+        captureBeyondViewport: true,
         clip: { x: Math.max(0, x), y: Math.max(0, y), width: Math.max(1, width), height: Math.max(1, height), scale: 1 },
       });
       return { annotation, screenshot: screenshot.data };
@@ -257,6 +300,11 @@ function fixture() {
 
 const server = createServer(async (req, res) => {
   const origin = req.headers.origin;
+  if (!originAllowed(origin)) {
+    res.writeHead(403, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "origin is not allowed" }));
+    return;
+  }
   if (origin && allowedOrigins.has(origin)) {
     res.setHeader("access-control-allow-origin", origin);
     res.setHeader("vary", "origin");

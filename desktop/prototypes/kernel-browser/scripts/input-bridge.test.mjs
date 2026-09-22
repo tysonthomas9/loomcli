@@ -43,6 +43,33 @@ test("preserves click and wheel details", () => {
   );
 });
 
+test("preserves held-button state while dragging", () => {
+  assert.deepEqual(
+    pointerParams(
+      { type: "mouseMoved", surfaceX: 466, surfaceY: 237.05, surfaceWidth: 932, surfaceHeight: 570, button: "left", buttons: 1, modifiers: 8 },
+      browserGeometry,
+    ),
+    { type: "mouseMoved", x: 960, y: 298, button: "left", buttons: 1, modifiers: 8 },
+  );
+});
+
+test("clamps a held drag and release to the page edge", () => {
+  assert.deepEqual(
+    pointerParams(
+      { type: "mouseMoved", surfaceX: 466, surfaceY: 10, surfaceWidth: 932, surfaceHeight: 570, button: "left", buttons: 1 },
+      browserGeometry,
+    ),
+    { type: "mouseMoved", x: 960, y: 0, button: "left", buttons: 1 },
+  );
+  assert.deepEqual(
+    pointerParams(
+      { type: "mouseReleased", surfaceX: 466, surfaceY: 10, surfaceWidth: 932, surfaceHeight: 570, button: "left", buttons: 0 },
+      browserGeometry,
+    ),
+    { type: "mouseReleased", x: 960, y: 0, button: "left" },
+  );
+});
+
 test("rejects invalid surface coordinates and event types", () => {
   assert.throws(
     () => pointerParams({ type: "mouseMoved", surfaceX: 2, surfaceY: 0, surfaceWidth: 1, surfaceHeight: 1 }, browserGeometry),

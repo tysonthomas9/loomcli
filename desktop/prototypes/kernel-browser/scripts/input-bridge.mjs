@@ -40,11 +40,18 @@ export function pointerParams(payload, geometry) {
   const remoteY = (surfaceY - streamOffsetY) / streamScale;
   const contentOffsetX = screenX + (outerWidth - innerWidth) / 2;
   const contentOffsetY = screenY + outerHeight - innerHeight;
-  const pageX = remoteX - contentOffsetX;
-  const pageY = remoteY - contentOffsetY;
+  let pageX = remoteX - contentOffsetX;
+  let pageY = remoteY - contentOffsetY;
 
+  const buttons = payload.buttons ?? 0;
+  if (!Number.isInteger(buttons) || buttons < 0 || buttons > 31) {
+    throw Object.assign(new Error("mouse buttons must be a bit field from 0 to 31"), { status: 400 });
+  }
+  const keepDragState = payload.type === "mouseReleased" || buttons !== 0;
   if (remoteX < 0 || remoteX > screenWidth || remoteY < 0 || remoteY > screenHeight || pageX < 0 || pageX > innerWidth || pageY < 0 || pageY > innerHeight) {
-    return null;
+    if (!keepDragState) return null;
+    pageX = Math.max(0, Math.min(innerWidth, pageX));
+    pageY = Math.max(0, Math.min(innerHeight, pageY));
   }
 
   const button = payload.button ?? "none";
@@ -58,6 +65,13 @@ export function pointerParams(payload, geometry) {
     y: Math.round(pageY),
     button,
   };
+
+  if (buttons !== 0) params.buttons = buttons;
+  const modifiers = payload.modifiers ?? 0;
+  if (!Number.isInteger(modifiers) || modifiers < 0 || modifiers > 15) {
+    throw Object.assign(new Error("pointer modifiers must be a bit field from 0 to 15"), { status: 400 });
+  }
+  if (modifiers !== 0) params.modifiers = modifiers;
 
   if (payload.clickCount !== undefined) {
     const clickCount = finiteNumber(payload.clickCount, "click count");
