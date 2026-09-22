@@ -355,6 +355,15 @@ func (s *issueServiceImpl) CloseIssue(ctx context.Context, params CloseIssuePara
 // behavior (and the response payload the FE expects), we follow ClaimIssue
 // with an Update(status=in_progress) and then a Get to return the canonical
 // post-claim issue body.
+// claimAsActor claims on behalf of the requesting worker. backend.ClaimAs holds
+// the rule: no actor is the legitimate web-UI case and takes the plain claim,
+// an actor on a capable backend is scoped to that worker, and an actor on a
+// backend that cannot scope one is refused rather than claimed under serve's
+// own identity.
+func claimAsActor(ctx context.Context, be backend.IssueBackend, issueID, actor string) error {
+	return backend.ClaimAs(ctx, be, issueID, 0, actor)
+}
+
 func (s *issueServiceImpl) ClaimIssue(ctx context.Context, params ClaimIssueParams) (json.RawMessage, error) {
 	if strings.TrimSpace(params.IssueID) == "" {
 		return nil, ErrValidation("issue ID is required")
@@ -372,8 +381,8 @@ func (s *issueServiceImpl) ClaimIssue(ctx context.Context, params ClaimIssuePara
 		return nil, err
 	}
 
-	if err := be.ClaimIssue(ctx, params.IssueID, 0); err != nil {
-		slog.Error("backend error in ClaimIssue", "issue_id", params.IssueID, "err", err)
+	if err := claimAsActor(ctx, be, params.IssueID, params.Actor); err != nil {
+		slog.Error("backend error in ClaimIssue", "issue_id", params.IssueID, "actor", params.Actor, "err", err)
 		return nil, translateBackendError(err)
 	}
 
