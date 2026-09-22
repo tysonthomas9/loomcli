@@ -109,6 +109,8 @@
       "method": "POST",
       "fields": ["connectorId", "action", "resource", "args", "preconditions", "callSeq"]
     },
+    "add-label": { "method": "POST", "fields": ["issueId", "label"] },
+    "remove-label": { "method": "POST", "fields": ["issueId", "label"] },
     "events/await": { "method": "POST", "fields": ["pattern", "actor", "timeoutMs", "awaitIndex"] },
     "events/awaits": { "method": "GET", "fields": [] },
     "workflows/start": { "method": "POST", "fields": ["workflowName", "idempotencyKey", "startIndex", "input"] },
@@ -122,7 +124,8 @@
       "taskRuns": ["request", "get", "await", "active", "recoverStale"],
       "connectors": ["dispatch", "github", "slack", "datadog"],
       "events": ["await", "list"],
-      "workflows": ["start", "await"]
+      "workflows": ["start", "await"],
+      "issues": ["addLabel", "removeLabel"]
     },
     "connectorMethods": {
       "github": {

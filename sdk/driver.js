@@ -113,6 +113,10 @@ export class LoomDriverClient {
       start: (input = {}) => this.startWorkflow(input),
       await: (input = {}) => this.awaitChildWorkflow(input),
     });
+    this.issues = Object.freeze({
+      addLabel: (input = {}) => this.addLabel(input),
+      removeLabel: (input = {}) => this.removeLabel(input),
+    });
   }
 
   completed(input = {}) {
@@ -388,6 +392,34 @@ export class LoomDriverClient {
     }
     const params = { taskId: String(taskId), actor: input.actor || "" };
     return this.#httpCall("release-task", params);
+  }
+
+  // Label writes are how a workflow advances the ticket state machine the
+  // issue-journal bridge reads back. Both ops are idempotent server-side
+  // (add is a no-op when present, remove when absent), so a retry is safe.
+  //
+  // Attribution: the journal records the actor of the fleet-db credential
+  // loomcli authenticates with, NOT this run's driver-run:<id> actor. Do not
+  // rely on an actor filter to keep a label-writing workflow from
+  // re-triggering itself through a journal-sourced binding; discriminate on
+  // event content (e.g. a sentinel label) instead.
+  async addLabel(input = {}) {
+    return this.#labelCall("add-label", "issues.addLabel", input);
+  }
+
+  async removeLabel(input = {}) {
+    return this.#labelCall("remove-label", "issues.removeLabel", input);
+  }
+
+  async #labelCall(op, method, input) {
+    const issueId = input.issueId ?? input.id;
+    if (!issueId) {
+      throw new Error(`${method} requires issueId`);
+    }
+    if (!input.label) {
+      throw new Error(`${method} requires label`);
+    }
+    return this.#httpCall(op, { issueId: String(issueId), label: String(input.label) });
   }
 
   // dispatchConnector posts one connector egress call to the run-scoped
