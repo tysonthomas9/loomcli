@@ -25,6 +25,10 @@ import {
   type MutationType,
 } from "@/api/common";
 import { useWorkspaceContext } from "@/hooks/workspace";
+import {
+  InvalidatedQueryRegistry,
+  InvalidatedQueryRegistryContext,
+} from "./invalidatedQueryRegistry";
 
 export type { ConnectionState } from "@/api/common";
 
@@ -53,6 +57,8 @@ export interface EventContextValue {
   lastError: string | null;
   /** Convenience boolean — true when state === 'connected' */
   isConnected: boolean;
+  /** Number of completed application-level SSE handshakes. */
+  connectionEpoch: number;
   /** Register a mutation listener. Returns an unsubscribe function. */
   subscribe: (
     callback: (mutation: MutationPayload) => void,
@@ -70,6 +76,7 @@ export const NO_EVENT_CONTEXT: EventContextValue = {
   reconnectAttempts: 0,
   lastError: null,
   isConnected: false,
+  connectionEpoch: 0,
   subscribe: () => () => {},
   retryNow: () => {},
   disconnect: () => {},
@@ -114,6 +121,16 @@ export function EventProvider({
   const [state, setState] = useState<ConnectionState>("disconnected");
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [connectionEpoch, setConnectionEpoch] = useState(0);
+
+  // One invalidated-query registry belongs to this workspace SSE owner.
+  const invalidatedQueryRegistryRef = useRef<InvalidatedQueryRegistry | null>(
+    null,
+  );
+  if (invalidatedQueryRegistryRef.current === null) {
+    invalidatedQueryRegistryRef.current = new InvalidatedQueryRegistry();
+  }
+  const invalidatedQueryRegistry = invalidatedQueryRegistryRef.current;
 
   // Ref-based subscriber registry — changes don't trigger re-renders
   const subscriberIdRef = useRef(0);
@@ -180,6 +197,7 @@ export function EventProvider({
     setState("disconnected");
     setReconnectAttempts(0);
     setLastError(null);
+    setConnectionEpoch(0);
 
     const client = new WorkspaceSSEClient(workspaceId, {
       onMutation: (mutation: MutationPayload) => {
@@ -224,6 +242,10 @@ export function EventProvider({
       onReconnect: (attempt: number) => {
         if (!mountedRef.current) return;
         setReconnectAttempts(attempt);
+      },
+      onConnected: () => {
+        if (!mountedRef.current) return;
+        setConnectionEpoch((epoch) => epoch + 1);
       },
     });
     clientRef.current = client;
@@ -283,6 +305,7 @@ export function EventProvider({
       reconnectAttempts,
       lastError,
       isConnected,
+      connectionEpoch,
       subscribe,
       retryNow,
       disconnect,
@@ -292,6 +315,7 @@ export function EventProvider({
       reconnectAttempts,
       lastError,
       isConnected,
+      connectionEpoch,
       subscribe,
       retryNow,
       disconnect,
@@ -299,7 +323,9 @@ export function EventProvider({
   );
 
   return (
-    <EventContext.Provider value={value}>{children}</EventContext.Provider>
+    <InvalidatedQueryRegistryContext.Provider value={invalidatedQueryRegistry}>
+      <EventContext.Provider value={value}>{children}</EventContext.Provider>
+    </InvalidatedQueryRegistryContext.Provider>
   );
 }
 
