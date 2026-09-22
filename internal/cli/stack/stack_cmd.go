@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,7 +34,7 @@ var stackCmd = &cobra.Command{
 func init() {
 	stackCmd.AddCommand(
 		initCmd(), listCmd(), showCmd(), statusCmd(), validateCmd(),
-		addCmd(), moveCmd(), setBaseCmd(), removeCmd(), publishCmd(), restackCmd(),
+		addCmd(), moveCmd(), setBaseCmd(), removeCmd(), publishCmd(), mergeCmd(), restackCmd(),
 	)
 	cli.RegisterCommand(stackCmd)
 }
@@ -552,6 +553,129 @@ func publishCmd() *cobra.Command {
 	c.Flags().BoolVar(&headless, "headless", false, "with --auto-rebase, resolve conflicts headlessly (non-interactive)")
 	c.Flags().BoolVar(&jsonOut, "json", false, "JSON output")
 	return c
+}
+
+func mergeCmd() *cobra.Command {
+	var repoPath, matchHead, authorEmail, subject, body, bodyFile string
+	var jsonOut, useMerge, useSquash, useRebase, auto, disableAuto, admin, deleteBranch bool
+	c := &cobra.Command{
+		Use:   "merge <stack-id> [<pr-number>|<url>|<branch>|<task-id>]",
+		Short: "Merge the stack's next-to-merge PR and reconcile the stack",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ws, st, id, err := loadCtx(args[0])
+			if err != nil {
+				return err
+			}
+			stack, err := st.GetStack(cmd.Context(), ws, id)
+			if err != nil {
+				return err
+			}
+			path, err := resolveRepoPath(ws, stack.RepoName, repoPath)
+			if err != nil {
+				return err
+			}
+			token := resolveGitHubToken(cmd.Context())
+			if token == "" {
+				return errors.New("no GitHub token (set GITHUB_TOKEN/GH_TOKEN or run `gh auth login`)")
+			}
+			opts, err := mergeOptionsFromFlags(cmd, useMerge, useSquash, useRebase, auto, disableAuto, admin, deleteBranch, matchHead, authorEmail, subject, body, bodyFile)
+			if err != nil {
+				return err
+			}
+			target := ""
+			if len(args) == 2 {
+				target = args[1]
+			}
+			rec := &stackpublish.Reconciler{
+				Store: st,
+				Forge: stackpublish.NewGitHubForge(token, nil, ""),
+			}
+			report, err := rec.MergeNext(cmd.Context(), ws, id, path, target, opts)
+			if err != nil {
+				return err
+			}
+			if jsonOut {
+				return cmdstore.WriteJSON(report)
+			}
+			fmt.Printf("merged: #%d %s (%s)\n", report.MergedPR.Number, report.MergedPR.URL, report.MergedPR.TaskID)
+			if len(report.NextToMerge) == 0 {
+				fmt.Println("nextToMerge: none")
+				return nil
+			}
+			fmt.Println("nextToMerge:")
+			for _, row := range report.NextToMerge {
+				pr := "-"
+				if row.PRNumber > 0 {
+					pr = fmt.Sprintf("#%d", row.PRNumber)
+				}
+				fmt.Printf("  %-16s %-5s %s\n", row.TaskID, pr, row.OutputBranch)
+			}
+			return nil
+		},
+	}
+	c.Flags().StringVar(&repoPath, "repo-path", "", "local checkout to reconcile after merge (default: from loom state)")
+	c.Flags().BoolVarP(&useMerge, "merge", "m", false, "merge the commits with the base branch")
+	c.Flags().BoolVarP(&useSquash, "squash", "s", false, "squash the commits into one commit and merge it")
+	c.Flags().BoolVarP(&useRebase, "rebase", "r", false, "rebase the commits onto the base branch")
+	c.Flags().BoolVar(&auto, "auto", false, "automatically merge after necessary requirements are met")
+	c.Flags().BoolVar(&disableAuto, "disable-auto", false, "disable auto-merge for this pull request")
+	c.Flags().BoolVar(&admin, "admin", false, "use administrator privileges to merge a pull request that does not meet requirements")
+	c.Flags().StringVar(&matchHead, "match-head-commit", "", "commit SHA that the pull request head must match to allow merge")
+	c.Flags().StringVarP(&authorEmail, "author-email", "A", "", "email text for merge commit author")
+	c.Flags().StringVarP(&subject, "subject", "t", "", "subject text for the merge commit")
+	c.Flags().StringVarP(&body, "body", "b", "", "body text for the merge commit")
+	c.Flags().StringVarP(&bodyFile, "body-file", "F", "", "read body text from file (use \"-\" to read from standard input)")
+	c.Flags().BoolVarP(&deleteBranch, "delete-branch", "d", false, "delete the local and remote branch after merge")
+	c.Flags().BoolVar(&jsonOut, "json", false, "JSON output")
+	c.MarkFlagsMutuallyExclusive("merge", "squash", "rebase")
+	c.MarkFlagsMutuallyExclusive("auto", "disable-auto")
+	c.MarkFlagsMutuallyExclusive("body", "body-file")
+	return c
+}
+
+func mergeOptionsFromFlags(cmd *cobra.Command, useMerge, useSquash, useRebase, auto, disableAuto, admin, deleteBranch bool, matchHead, authorEmail, subject, body, bodyFile string) (stackpublish.MergeOptions, error) {
+	opts := stackpublish.MergeOptions{
+		Auto: auto, DisableAuto: disableAuto, Admin: admin, DeleteBranch: deleteBranch,
+		MatchHeadCommit: strings.TrimSpace(matchHead),
+		AuthorEmail:     strings.TrimSpace(authorEmail),
+	}
+	switch {
+	case useMerge:
+		opts.Method = stackpublish.MergeMethodMerge
+	case useSquash:
+		opts.Method = stackpublish.MergeMethodSquash
+	case useRebase:
+		opts.Method = stackpublish.MergeMethodRebase
+	}
+	if cmd.Flags().Changed("subject") {
+		opts.Subject = subject
+		opts.SubjectSet = true
+	}
+	if cmd.Flags().Changed("body") {
+		opts.Body = body
+		opts.BodySet = true
+	}
+	if strings.TrimSpace(bodyFile) != "" {
+		data, err := readMergeBodyFile(bodyFile)
+		if err != nil {
+			return stackpublish.MergeOptions{}, err
+		}
+		opts.Body = string(data)
+		opts.BodySet = true
+	}
+	return opts, nil
+}
+
+func readMergeBodyFile(path string) ([]byte, error) {
+	if path == "-" {
+		return io.ReadAll(os.Stdin)
+	}
+	data, err := os.ReadFile(path) //nolint:gosec // explicit CLI-provided file path, matching gh's body-file behavior
+	if err != nil {
+		return nil, fmt.Errorf("read --body-file %q: %w", path, err)
+	}
+	return data, nil
 }
 
 // shared loaders -------------------------------------------------------------

@@ -305,10 +305,10 @@ func (d *Datadog) sanitizer(spec CallSpec) func(string) string {
 	apiKey, appKey := splitDatadogCredential(spec.Credential)
 	return func(msg string) string {
 		if apiKey != "" {
-			msg = strings.ReplaceAll(msg, apiKey, "[redacted]")
+			msg = strings.ReplaceAll(msg, apiKey, redactedMarker)
 		}
 		if appKey != "" {
-			msg = strings.ReplaceAll(msg, appKey, "[redacted]")
+			msg = strings.ReplaceAll(msg, appKey, redactedMarker)
 		}
 		return sanitizeUpstreamMessage(msg, spec.Credential)
 	}
