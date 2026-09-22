@@ -533,40 +533,66 @@ func spawnDetachedService(exe, dataDir string, port int) (*RuntimeStartResult, e
 	return &RuntimeStartResult{PID: pid}, nil
 }
 
+// RuntimeEnsureAction reports what EnsureRuntimeStarted actually did.
+//
+// "Ensure" covers three outcomes that are not interchangeable to a caller
+// reporting back to a human: the runtime was already healthy and nothing
+// happened, a recorded-but-unhealthy runtime was restarted, or a runtime was
+// started from nothing. Callers that collapse them announce a start that never
+// occurred.
+type RuntimeEnsureAction string
+
+const (
+	// RuntimeEnsureNoAction means the runtime was already healthy and was left
+	// untouched.
+	RuntimeEnsureNoAction RuntimeEnsureAction = "none"
+
+	// RuntimeEnsureStarted means no live runtime was recorded and one was
+	// started.
+	RuntimeEnsureStarted RuntimeEnsureAction = "started"
+
+	// RuntimeEnsureRestarted means a recorded runtime was not healthy and was
+	// restarted.
+	RuntimeEnsureRestarted RuntimeEnsureAction = "restarted"
+)
+
 // EnsureRuntimeStarted starts the local runtime if needed and waits until it
-// reports healthy or the caller's context expires.
-func EnsureRuntimeStarted(ctx context.Context, dataDir string, port int) (*RuntimeStatusSnapshot, error) {
+// reports healthy or the caller's context expires. The returned action says
+// which of those three things happened; see RuntimeEnsureAction.
+func EnsureRuntimeStarted(ctx context.Context, dataDir string, port int) (*RuntimeStatusSnapshot, RuntimeEnsureAction, error) {
 	if dataDir == "" {
 		var err error
 		dataDir, err = resolveDataDir("")
 		if err != nil {
-			return nil, err
+			return nil, RuntimeEnsureNoAction, err
 		}
 	}
 	status, err := readRuntimeStatusFn(ctx, dataDir)
 	if err == nil && status.Healthy {
-		return status, nil
+		return status, RuntimeEnsureNoAction, nil
 	}
+	action := RuntimeEnsureStarted
 	if status != nil && status.Runtime != nil && status.Runtime.PID > 0 {
+		action = RuntimeEnsureRestarted
 		if _, err := restartRuntimeFn(dataDir, port); err != nil {
-			return status, err
+			return status, action, err
 		}
 	} else if _, err := StartRuntime(dataDir, port); err != nil {
-		return status, err
+		return status, action, err
 	}
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		status, err = readRuntimeStatusFn(ctx, dataDir)
 		if err == nil && status.Healthy {
-			return status, nil
+			return status, action, nil
 		}
 		select {
 		case <-ctx.Done():
 			if err != nil {
-				return status, err
+				return status, action, err
 			}
-			return status, ctx.Err()
+			return status, action, ctx.Err()
 		case <-ticker.C:
 		}
 	}
