@@ -10,6 +10,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+. "$REPO_ROOT/scripts/lib/sandbox.sh"
 SPEC_PATH="$REPO_ROOT/api/openapi.yaml"
 CONFIG_PATH="$REPO_ROOT/api/oapi-codegen.yaml"
 GENERATED_PATH="$REPO_ROOT/internal/backend/api/gen/types.gen.go"
@@ -28,8 +29,8 @@ if [[ ! -f "$GENERATED_PATH" ]]; then
     exit 1
 fi
 
-tmp_dir=$(mktemp -d)
-trap 'rm -rf "$tmp_dir"' EXIT
+loom_mktemp_dir check-go-api-staleness; tmp_dir="$LOOM_SANDBOX_DIR"
+trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 
 spec_3_0="$tmp_dir/openapi-3.0.yaml"
 fresh_gen="$tmp_dir/gen-types.gen.go"

@@ -35,6 +35,7 @@ set -Eeuo pipefail
 # workflow bundle is built SERVER-SIDE by the untrusted submission endpoint.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/scripts/lib/sandbox.sh"
 FLEET_DB_REPO="${FLEET_DB_REPO:-$(cd "$ROOT/../fleet-db" 2>/dev/null && pwd || true)}"
 FLUE_REPO="${FLUE_REPO:-$(cd "$ROOT/../flue" 2>/dev/null && pwd || true)}"
 
@@ -47,7 +48,7 @@ PROBE_PORT="${PROBE_PORT:-18199}"
 FLEET_URL="http://127.0.0.1:${FLEET_PORT}"
 LOOM_URL="http://127.0.0.1:${LOOM_PORT}"
 
-TMP_ROOT="$(mktemp -d -t loom-step9-sandbox.XXXXXX)"
+loom_mktemp_dir test-step9-sandbox; TMP_ROOT="$LOOM_SANDBOX_DIR"
 BIN_DIR="$TMP_ROOT/bin"
 WORKDIR="$TMP_ROOT/work"
 LOOM_CONFIG_DIR="$TMP_ROOT/loom-config"
@@ -88,7 +89,7 @@ cleanup() {
     echo "kept step-9 workspace at $TMP_ROOT"
   fi
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 curl_fleet() {
   local method="$1" path="$2" body="${3:-}"

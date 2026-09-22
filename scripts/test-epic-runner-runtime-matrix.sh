@@ -12,6 +12,7 @@ set -Eeuo pipefail
 # RUN_DAYTONA=auto and DAYTONA_API_KEY is present.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/scripts/lib/sandbox.sh"
 FLEET_DB_REPO="${FLEET_DB_REPO:-$(cd "$ROOT/../fleet-db" 2>/dev/null && pwd || true)}"
 FLUE_REPO="${FLUE_REPO:-$(cd "$ROOT/../flue" 2>/dev/null && pwd || true)}"
 
@@ -27,7 +28,7 @@ RUN_DAYTONA="${RUN_DAYTONA:-auto}"
 DAYTONA_REPO_URL="${DAYTONA_REPO_URL:-https://github.com/tysonthomas9/loom-review-sandbox.git}"
 DAYTONA_SDK_IMPORT="${DAYTONA_SDK_IMPORT:-}"
 
-TMP_ROOT="$(mktemp -d -t loom-epic-runner-runtime-matrix.XXXXXX)"
+loom_mktemp_dir test-epic-runner-runtime-matrix; TMP_ROOT="$LOOM_SANDBOX_DIR"
 BIN_DIR="$TMP_ROOT/bin"
 WORKDIR="$TMP_ROOT/work"
 DIST_DIR="$WORKDIR/dist"
@@ -78,7 +79,7 @@ cleanup() {
     echo "kept epic-runner runtime matrix workspace at $TMP_ROOT"
   fi
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 curl_json() {
   local method="$1"

@@ -88,6 +88,7 @@
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/scripts/lib/sandbox.sh"
 STACK_DIR="$ROOT/deploy/podman-stack"
 ENV_FILE="$STACK_DIR/.env"
 COMPOSE=(podman compose -f "$STACK_DIR/compose.yaml" -f "$STACK_DIR/compose.e2e.yaml" --env-file "$ENV_FILE")
@@ -114,7 +115,7 @@ grep -q '^\.env$' "$STACK_DIR/.gitignore" 2>/dev/null ||
   die "$STACK_DIR/.gitignore must ignore .env before secrets are generated"
 
 umask 077
-TMP_ROOT="$(mktemp -d -t loom-podman-stack.XXXXXX)"
+loom_mktemp_dir loom-podman-stack; TMP_ROOT="$LOOM_SANDBOX_DIR"
 BIN_DIR="$TMP_ROOT/bin"
 KEY_DIR="$TMP_ROOT/keys"
 LOOM_CONFIG_DIR="$TMP_ROOT/loom-config"
@@ -178,7 +179,7 @@ cleanup() {
   fi
   exit "$status"
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 stage() {
   SUITE_STAGE="$1"
