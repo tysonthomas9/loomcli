@@ -25,19 +25,23 @@ func (s *Session) SessionID() string {
 }
 
 // SyncLatestCodexRollout mirrors the matching Codex rollout into this session.
+// Discovery is scoped to this session's agent, so a daemon-side finalize reads
+// the agent's own profile roots rather than the daemon's environment.
 func (s *Session) SyncLatestCodexRollout(workDir string, since time.Time) (string, error) {
 	if s == nil || s.store == nil {
 		return "", nil
 	}
-	return s.store.SyncLatestCodexRollout(s.Meta.SessionID, workDir, since)
+	return s.store.syncLatestCodexRolloutFor(s.Meta.AgentName, s.Meta.SessionID, workDir, since)
 }
 
 // SyncLatestClaudeTranscript mirrors the matching Claude Code transcript into
 // this session. claudeUUID is the session UUID captured from the agent's
-// stream output (empty falls back to newest-by-mtime).
+// stream output (empty falls back to newest-by-mtime). Discovery is scoped to
+// this session's agent, so a daemon-side finalize reads the agent's own
+// profile roots rather than the daemon's environment.
 func (s *Session) SyncLatestClaudeTranscript(workDir, claudeUUID string, since time.Time) (string, error) {
 	if s == nil || s.store == nil {
 		return "", nil
 	}
-	return s.store.SyncLatestClaudeTranscript(s.Meta.SessionID, workDir, claudeUUID, since)
+	return s.store.syncLatestClaudeTranscriptFor(s.Meta.AgentName, s.Meta.SessionID, workDir, claudeUUID, since)
 }

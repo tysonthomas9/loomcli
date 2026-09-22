@@ -89,6 +89,25 @@ export function HomePage(): JSX.Element {
     [workspaceId, refetch, showToast],
   );
 
+  // The queue card fires its actions with `void runAction(...)` and has only a
+  // try/finally around them, so a rejection from the canonical `handleReject`
+  // (which re-throws since PUPPET-146) would escape to the global
+  // unhandled-rejection reporter and never reach the operator. The card has no
+  // error surface of its own, so this view owns the toast.
+  const handleRejectFromQueue = useCallback(
+    async (issue: Issue, comment: string): Promise<void> => {
+      try {
+        await handleReject(issue, comment);
+      } catch (err) {
+        if (!mountedRef.current) return;
+        const message =
+          err instanceof Error ? err.message : "Failed to send the task back";
+        showToast(message, { type: "error" });
+      }
+    },
+    [handleReject, showToast],
+  );
+
   const handleUnblock = useCallback(
     async (issue: Issue): Promise<void> => {
       setOptimisticallyResolvedIds((current) => new Set(current).add(issue.id));
@@ -143,7 +162,7 @@ export function HomePage(): JSX.Element {
                       item={item}
                       agents={agents}
                       onApprove={handleApproveAndRoute}
-                      onReject={handleReject}
+                      onReject={handleRejectFromQueue}
                       onUnblock={handleUnblock}
                       onOpenIssue={handleIssueClick}
                       key={item.issue.id}

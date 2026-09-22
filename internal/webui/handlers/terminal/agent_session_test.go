@@ -50,7 +50,7 @@ func (s liveTabTerminalService) ListTabs(ctx context.Context, wsID string) ([]ta
 	}
 	for i := range tabs {
 		if tabs[i].SessionName == s.liveSession {
-			tabs[i].PTYAlive = true
+			tabs[i].Attachable = true
 		}
 	}
 	return tabs, nil
@@ -1170,8 +1170,8 @@ func TestEnsureAgentTerminalSessionDoesNotRelaunchStoppedExistingAgentTab(t *tes
 	if meta.Writable {
 		t.Fatal("writable = true, want false for stopped agent tab")
 	}
-	if meta.PTYAlive {
-		t.Fatal("PTYAlive = true, want false for stopped agent tab")
+	if meta.Attachable {
+		t.Fatal("Attachable = true, want false for stopped agent tab")
 	}
 }
 

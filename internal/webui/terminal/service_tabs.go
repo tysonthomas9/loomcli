@@ -31,7 +31,7 @@ func (s *terminalServiceImpl) ListTabs(ctx context.Context, wsID string) ([]tabm
 		tabs = []tabmeta.TabMetadata{}
 	}
 	for i := range tabs {
-		tabs[i].PTYAlive = s.ptyAttachable(wsID, &tabs[i])
+		tabs[i].Attachable = s.ptyAttachable(wsID, &tabs[i])
 		tabs[i].AttachedClients = s.attachedClients(wsID, tabs[i].SessionName)
 	}
 	return tabs, nil
@@ -52,7 +52,7 @@ func (s *terminalServiceImpl) GetTab(ctx context.Context, wsID, session string) 
 	if meta == nil {
 		return nil, service.ErrNotFound("tab metadata not found")
 	}
-	meta.PTYAlive = s.ptyAttachable(wsID, meta)
+	meta.Attachable = s.ptyAttachable(wsID, meta)
 	meta.AttachedClients = s.attachedClients(wsID, session)
 	return meta, nil
 }
@@ -73,7 +73,7 @@ func (s *terminalServiceImpl) PatchTab(ctx context.Context, wsID, session string
 		return nil, service.ErrInternal("failed to update tab metadata", err)
 	}
 	if meta != nil {
-		meta.PTYAlive = s.ptyAttachable(wsID, meta)
+		meta.Attachable = s.ptyAttachable(wsID, meta)
 		meta.AttachedClients = s.attachedClients(wsID, session)
 	}
 
@@ -115,7 +115,7 @@ func (s *terminalServiceImpl) PutTab(ctx context.Context, wsID string, meta *tab
 	// PATCH for that. If the PTY is live but metadata is missing, allow the
 	// create: the frontend can legitimately race metadata PUT with the first
 	// WebSocket attach that spawns the PTY.
-	if s.ptyAlive(wsID, meta.SessionName) {
+	if s.hasPTY(wsID, meta.SessionName) {
 		existing, err := s.tabStore.Get(ctx, wsID, meta.SessionName)
 		if err != nil {
 			return service.ErrInternal("failed to get existing tab metadata", err)
@@ -208,7 +208,7 @@ func (s *terminalServiceImpl) GetTerminalState(ctx context.Context, wsID string)
 	// metadata still exists (so the UI can render a "session ended" state
 	// on that tab). Clear it only when both are gone — otherwise the
 	// frontend would open the page and try to attach to a pure ghost.
-	if s.ptyAlive(wsID, activeTab) {
+	if s.hasPTY(wsID, activeTab) {
 		return activeTab, nil
 	}
 	if s.tabStore != nil {

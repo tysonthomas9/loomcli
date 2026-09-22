@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+STACK_FILE="${STACK_FILE:-$SCRIPT_DIR/../.stack}"
+
+if [ -n "${NAME:-}" ]; then
+  echo "stack-init: NAME is already set; explicit mode does not write .stack" >&2
+  exit 1
+fi
+if [ -e "$STACK_FILE" ]; then
+  echo "stack-init: $STACK_FILE already exists" >&2
+  exit 1
+fi
+command -v lsof >/dev/null || { echo "stack-init: lsof is required" >&2; exit 1; }
+command -v shasum >/dev/null || { echo "stack-init: shasum is required" >&2; exit 1; }
+
+# `tr` receives SIGPIPE after head has six characters, so suspend pipefail for
+# this exact entropy pipeline and restore it immediately afterwards.
+set +o pipefail
+suffix="$(LC_ALL=C tr -dc a-f0-9 </dev/urandom | head -c6)"
+set -o pipefail
+[ "${#suffix}" -eq 6 ] || { echo "stack-init: failed to read six random hex characters" >&2; exit 1; }
+name="loom-$suffix"
+
+hash_hex="$(printf '%s' "$name" | shasum | cut -c1-4)"
+base=$((18000 + 3 * (16#$hash_hex % 1000)))
+
+while :; do
+  busy=0
+  for port in "$base" "$((base + 1))" "$((base + 2))"; do
+    if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+      busy=1
+      break
+    fi
+  done
+  [ "$busy" -eq 1 ] || break
+  base=$((base + 3))
+done
+
+created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+temp="$(mktemp "${STACK_FILE}.tmp.XXXXXX")"
+trap 'if [ -f "$temp" ]; then unlink "$temp"; fi' EXIT
+printf 'NAME=%s\nTUNNEL_PORT_BASE=%s\nCREATED_AT=%s\n' \
+  "$name" "$base" "$created_at" >"$temp"
+mv "$temp" "$STACK_FILE"
+trap - EXIT
+
+echo "stack: minted NAME=$name TUNNEL_PORT_BASE=$base"

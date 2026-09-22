@@ -77,6 +77,29 @@ const reviewDetails2 = {
   comments: [],
 };
 
+// A `blocked` issue carrying notes is the "help" review type — the branch that
+// goes through the store's OPTIMISTIC status path, and the one the server
+// refuses to claim with a 409 (PUPPET-146).
+const blockedHelpIssue = {
+  id: "blocked-help-001",
+  title: "Decomposed parent needing help",
+  status: "blocked",
+  priority: 1,
+  issue_type: "task",
+  notes: "I need help with this task",
+  created_at: "2026-01-15T10:00:00Z",
+  updated_at: "2026-01-15T10:00:00Z",
+};
+
+const blockedHelpDetails = {
+  ...blockedHelpIssue,
+  description: "Parent issue that the server will not let anyone claim",
+  labels: [],
+  dependencies: [],
+  dependents: [],
+  comments: [],
+};
+
 // -- Common mock setup --
 
 function ok<T>(data: T): string {
@@ -633,5 +656,82 @@ test.describe("E2E Journey: Review and approve/reject agent plan", () => {
     await expect(page.getByTestId("review-action-bar")).toBeVisible();
     await expect(page.getByTestId("panel-approve-button")).toBeVisible();
     await expect(page.getByTestId("panel-reject-button")).toBeVisible();
+  });
+
+  // PUPPET-146 regression, end to end. Approving an issue the server refuses
+  // to claim used to flip the status control to "In Progress", show nothing at
+  // all, and leave Approve stuck on its "..." spinner — only a reload revealed
+  // that the database had never accepted the change.
+  test("approve rejected with 409: status reverts and the server message shows", async ({
+    page,
+  }) => {
+    // The issue must be in the LIST too: the optimistic path snapshots it from
+    // the store's issuesMap, and throws outright if it is not there.
+    await installIssuesMock(page, [blockedHelpIssue]);
+    await setupBaseMocks(page);
+
+    await page.route("**/workspaces/*/issues/blocked-help-001", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: ok(blockedHelpDetails),
+        });
+      } else {
+        await route.fallback();
+      }
+    });
+
+    // The server guard: this issue is not claimable.
+    await page.route("**/workspaces/*/issues/blocked-help-001", async (route) => {
+      if (route.request().method() === "PATCH") {
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: "issue is not claimable",
+            kind: "conflict",
+          }),
+        });
+      } else {
+        await route.fallback();
+      }
+    });
+
+    await page.goto("/ws/default/issues/blocked-help-001", {
+      waitUntil: "domcontentloaded",
+    });
+
+    // v5 renders a second status dropdown in the issue header; scope to the view.
+    const view = page.getByTestId("issue-detail-view");
+    const status = view.getByTestId("status-dropdown");
+    await expect(status).toHaveValue("blocked");
+    await expect(page.getByTestId("detail-approve-button")).toBeVisible();
+
+    // Arm the wait BEFORE the click. `route.fulfill` answers the PATCH from
+    // the test process, so the response can land before a post-click
+    // `waitForResponse` has subscribed — and that listener never sees it.
+    const patchResponse = page.waitForResponse(
+      (res) =>
+        res.url().includes("/issues/blocked-help-001") &&
+        res.request().method() === "PATCH",
+    );
+
+    await page.getByTestId("detail-approve-button").click();
+
+    await patchResponse;
+
+    // The server's own message, verbatim.
+    await expect(
+      page.getByTestId("detail-approve-blocked-reason"),
+    ).toHaveText("issue is not claimable");
+
+    // The status the database actually holds — not the optimistic lie.
+    await expect(status).toHaveValue("blocked");
+
+    // Approve is released from its spinner and disabled with the reason.
+    const approve = page.getByTestId("detail-approve-button");
+    await expect(approve).toBeDisabled();
+    await expect(approve).toHaveAttribute("title", "issue is not claimable");
   });
 });

@@ -43,3 +43,9 @@ export type {
 
 export { useTerminalMetadata } from "./useTerminalMetadata";
 export type { UseTerminalMetadataReturn } from "./useTerminalMetadata";
+
+export { useWorkspaceSessionCount } from "./useWorkspaceSessionCount";
+export type {
+  UseWorkspaceSessionCountOptions,
+  UseWorkspaceSessionCountReturn,
+} from "./useWorkspaceSessionCount";

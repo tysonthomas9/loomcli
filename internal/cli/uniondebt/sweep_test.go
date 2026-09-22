@@ -468,15 +468,21 @@ func TestSweep_EnumeratesLedgerPerStatus(t *testing.T) {
 	if len(rep.Items) != 0 {
 		t.Fatalf("empty ledger should yield no items, got %+v", rep.Items)
 	}
-	if len(f.listed) != len(ledgerStatuses) {
-		t.Fatalf("made %d List calls, want one per status (%d)", len(f.listed), len(ledgerStatuses))
+	// Two ledgers are read this way, not one: the union marker and the
+	// pr-pending marker, each one status at a time.
+	wantPerLabel := []string{defaultLabels.Marker, defaultLabels.PRPending}
+	if len(f.listed) != len(ledgerStatuses)*len(wantPerLabel) {
+		t.Fatalf("made %d List calls, want one per status (%d) per ledger (%d)",
+			len(f.listed), len(ledgerStatuses), len(wantPerLabel))
 	}
 	for i, call := range f.listed {
-		if call.status != ledgerStatuses[i] {
-			t.Errorf("List %d status = %q, want %q", i, call.status, ledgerStatuses[i])
+		wantStatus := ledgerStatuses[i%len(ledgerStatuses)]
+		wantLabel := wantPerLabel[i/len(ledgerStatuses)]
+		if call.status != wantStatus {
+			t.Errorf("List %d status = %q, want %q", i, call.status, wantStatus)
 		}
-		if len(call.labels) != 1 || call.labels[0] != defaultLabels.Marker {
-			t.Errorf("List %d labels = %v, want [%s]", i, call.labels, defaultLabels.Marker)
+		if len(call.labels) != 1 || call.labels[0] != wantLabel {
+			t.Errorf("List %d labels = %v, want [%s]", i, call.labels, wantLabel)
 		}
 	}
 }

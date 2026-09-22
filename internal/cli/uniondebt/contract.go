@@ -3,6 +3,7 @@ package uniondebt
 import (
 	"fmt"
 	"os"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 )
@@ -29,6 +30,9 @@ type LabelSet struct {
 	// Superseded replaces the marker when the branch was rebuilt or its work
 	// arrived by another route, so the recorded ref must not be merged.
 	Superseded string `yaml:"superseded"`
+	// PRPending marks a ticket whose pull request has not landed yet. The
+	// sweep only ever CLEARS it, and only when the pr-pending test passes.
+	PRPending string `yaml:"pr_pending"`
 	// Debt marks a derived, claimable debt ticket.
 	Debt string `yaml:"debt"`
 	// DebtOfPrefix + originID is the per-original dedupe label.
@@ -45,6 +49,7 @@ var defaultLabels = LabelSet{
 	Marker:       "union-pending",
 	Unreachable:  "union-unreachable",
 	Superseded:   "union-superseded",
+	PRPending:    "pr-pending",
 	Debt:         "union-debt",
 	DebtOfPrefix: "union-debt-of:",
 	Route:        "approved",
@@ -61,6 +66,9 @@ func (l LabelSet) withDefaults() LabelSet {
 	}
 	if l.Superseded == "" {
 		l.Superseded = defaultLabels.Superseded
+	}
+	if l.PRPending == "" {
+		l.PRPending = defaultLabels.PRPending
 	}
 	if l.Debt == "" {
 		l.Debt = defaultLabels.Debt
@@ -80,10 +88,12 @@ func (l LabelSet) withDefaults() LabelSet {
 // sweep failure.
 type contractFile struct {
 	Defaults struct {
+		TargetBranch     string            `yaml:"target_branch"`
 		LocalIntegration *LocalIntegration `yaml:"local_integration"`
 		Labels           *LabelSet         `yaml:"labels"`
 	} `yaml:"defaults"`
 	Repos map[string]struct {
+		TargetBranch     string            `yaml:"target_branch"`
 		LocalIntegration *LocalIntegration `yaml:"local_integration"`
 	} `yaml:"repos"`
 }
@@ -92,8 +102,10 @@ type contractFile struct {
 // lookup the sweeper performs.
 type Contract struct {
 	defaultBranch string
+	defaultTrunk  string
 	labels        LabelSet
 	repos         map[string]LocalIntegration
+	trunks        map[string]string
 }
 
 // LoadContract reads and parses integration.yaml at path.
@@ -107,7 +119,10 @@ func LoadContract(path string) (*Contract, error) {
 		return nil, fmt.Errorf("parse contract %s: %w", path, err)
 	}
 
-	c := &Contract{repos: make(map[string]LocalIntegration, len(cf.Repos))}
+	c := &Contract{
+		repos:  make(map[string]LocalIntegration, len(cf.Repos)),
+		trunks: make(map[string]string, len(cf.Repos)),
+	}
 	if cf.Defaults.Labels != nil {
 		c.labels = *cf.Defaults.Labels
 	}
@@ -115,7 +130,16 @@ func LoadContract(path string) (*Contract, error) {
 	if cf.Defaults.LocalIntegration != nil {
 		c.defaultBranch = cf.Defaults.LocalIntegration.Branch
 	}
+	c.defaultTrunk = cf.Defaults.TargetBranch
 	for id, entry := range cf.Repos {
+		// The trunk is recorded BEFORE the local_integration guard below: a
+		// repo may take part in no union and still have a trunk the
+		// pr-pending base chain must terminate at.
+		if trunk := entry.TargetBranch; trunk != "" {
+			c.trunks[id] = trunk
+		} else if c.defaultTrunk != "" {
+			c.trunks[id] = c.defaultTrunk
+		}
 		// A repo with no local_integration block (local-stack today) takes part
 		// in no union at all — record nothing so Lookup reports it as missing
 		// rather than handing back a clone-less entry.
@@ -151,4 +175,35 @@ func (c *Contract) Labels() LabelSet {
 		return defaultLabels
 	}
 	return c.labels.withDefaults()
+}
+
+// Trunk returns the branch a repo's pull requests must ultimately land on —
+// its `target_branch`, falling back to the contract's default. The second
+// result is false when neither is set, in which case no base chain can be
+// judged to terminate and the caller must not guess: loomcli's trunk is `v5`,
+// and a hardcoded "main" would clear markers on chains that reach nothing.
+func (c *Contract) Trunk(repoID string) (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	trunk, ok := c.trunks[repoID]
+	if !ok || trunk == "" {
+		return "", false
+	}
+	return trunk, true
+}
+
+// Repos returns the repo IDs the sweep can reach, sorted. A repo appears here
+// only when the contract gave it a clone to work in; one with no
+// local_integration block takes part in nothing this command does.
+func (c *Contract) Repos() []string {
+	if c == nil {
+		return nil
+	}
+	out := make([]string, 0, len(c.repos))
+	for id := range c.repos {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }

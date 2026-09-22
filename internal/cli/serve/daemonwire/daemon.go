@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
@@ -62,6 +63,25 @@ func BuildAgentInputFn() agentcontrol.AgentInputFn {
 	return func(op, agentName string, args json.RawMessage) (*agentcontrol.AgentControlResult, error) {
 		socketPath := resolveControlSocketPath(projectDir)
 		return sendControlRequestArgs(socketPath, op, agentName, args, 10*time.Second)
+	}
+}
+
+// BuildClaimHoldFn returns a callback that reads and sets the workspace claim
+// hold over the daemon control socket. Same resolution and failure contract as
+// BuildAgentControlFn. Setting a hold walks every supervised agent and probes
+// its process, so it gets the longer deadline; the read is cheap.
+func BuildClaimHoldFn() agentcontrol.ClaimHoldFn {
+	projectDir, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+	return func(op string, args json.RawMessage) (*agentcontrol.AgentControlResult, error) {
+		socketPath := resolveControlSocketPath(projectDir)
+		deadline := 10 * time.Second
+		if op == "claims_hold_get" {
+			deadline = 5 * time.Second
+		}
+		return sendControlRequestArgs(socketPath, op, "", args, deadline)
 	}
 }
 
@@ -177,36 +197,58 @@ func BuildDaemonSupervisorFn() func() (*webui.DaemonSupervisorData, error) {
 		if err != nil {
 			return nil, err // os.ErrNotExist if file missing
 		}
-		agents := make([]webui.DaemonAgentEntry, len(state.Agents))
-		for i, a := range state.Agents {
-			agents[i] = webui.DaemonAgentEntry{
-				Worktree:       a.Worktree,
-				Role:           a.Role,
-				Repo:           a.Repo,
-				PID:            a.PID,
-				Status:         a.Status,
-				TaskID:         a.TaskID,
-				EpicID:         a.EpicID,
-				CurrentBackend: a.CurrentBackend,
-				RestartCount:   a.RestartCount,
-				LastStart:      a.LastStart,
-				LastExit:       a.LastExit,
-				LastExitCode:   a.LastExitCode,
-				StopReason:     a.StopReason,
-				StoppedAt:      a.StoppedAt,
-				WorktreePath:   a.WorktreePath,
-				LastErrorClass: a.LastErrorClass,
-				NoWorkCount:    a.NoWorkCount,
-				BackoffUntil:   a.BackoffUntil,
-				RemoteBranch:   a.RemoteBranch,
-			}
-		}
 		return &webui.DaemonSupervisorData{
 			PID:           state.PID,
 			StartedAt:     state.StartedAt,
 			UptimeSeconds: time.Since(state.StartedAt).Seconds(),
-			Agents:        agents,
+			Agents:        daemonAgentEntries(state.Agents),
+			ClaimHold:     claimHoldEntry(state.ClaimHold),
 		}, nil
+	}
+}
+
+// daemonAgentEntries converts state-file agent records to webui DTOs.
+func daemonAgentEntries(agents []daemon.DaemonAgentStatus) []webui.DaemonAgentEntry {
+	out := make([]webui.DaemonAgentEntry, len(agents))
+	for i, a := range agents {
+		out[i] = webui.DaemonAgentEntry{
+			Worktree:       a.Worktree,
+			Role:           a.Role,
+			Repo:           a.Repo,
+			PID:            a.PID,
+			Status:         a.Status,
+			TaskID:         a.TaskID,
+			EpicID:         a.EpicID,
+			CurrentBackend: a.CurrentBackend,
+			RestartCount:   a.RestartCount,
+			LastStart:      a.LastStart,
+			LastExit:       a.LastExit,
+			LastExitCode:   a.LastExitCode,
+			StopReason:     a.StopReason,
+			StoppedAt:      a.StoppedAt,
+			WorktreePath:   a.WorktreePath,
+			LastErrorClass: a.LastErrorClass,
+			NoWorkCount:    a.NoWorkCount,
+			BackoffUntil:   a.BackoffUntil,
+			RemoteBranch:   a.RemoteBranch,
+			ClaimsGated:    a.ClaimsGated,
+		}
+	}
+	return out
+}
+
+// claimHoldEntry converts the persisted claim hold to its webui DTO. A nil
+// hold stays nil: the FE reads its absence as "claims are free".
+func claimHoldEntry(h *supervisor.ClaimHold) *webui.ClaimHoldEntry {
+	if h == nil {
+		return nil
+	}
+	return &webui.ClaimHoldEntry{
+		Held:      h.Held,
+		Actor:     h.Actor,
+		Reason:    h.Reason,
+		Since:     h.Since,
+		ExpiresAt: h.ExpiresAt,
 	}
 }
 

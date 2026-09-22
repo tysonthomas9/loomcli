@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
@@ -49,17 +50,36 @@ func TestFleetDBAgentRoutesUseStoreInsteadOfDaemonControl(t *testing.T) {
 	gitOps := &mockGitOps{}
 	app := &Server{
 		multiPool: daemon.NewMultiPool(middleware.WorkspaceFromContext, 1),
-		config:    webui.ServerConfig{Store: st, GitOps: gitOps},
-		agentSvc:  svcimpl.NewAgentService(gitOps, nil, nil, st),
+		config: webui.ServerConfig{
+			Store:  st,
+			GitOps: gitOps,
+			ClaimHoldFn: func(op string, _ json.RawMessage) (*agentcontrol.AgentControlResult, error) {
+				if op != "claims_hold_get" {
+					t.Fatalf("claim hold op = %q, want claims_hold_get", op)
+				}
+				return &agentcontrol.AgentControlResult{
+					Success: true,
+					Data:    json.RawMessage(`{"hold":null,"running":[],"gated":0}`),
+				}, nil
+			},
+		},
+		agentSvc: svcimpl.NewAgentService(gitOps, nil, nil, st),
 		wsExistsFn: func(id string) bool {
 			return id == "PARITY"
 		},
 	}
 	setupTestRoutes(t, app)
 
-	body := bytes.NewBufferString(`{"name":"worker-one","role_name":"builder","auto":true,"backend":"claude"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/PARITY/agents", body)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/PARITY/claims/hold", nil)
 	rr := httptest.NewRecorder()
+	app.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("claim hold status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	body := bytes.NewBufferString(`{"name":"worker-one","role_name":"builder","auto":true,"backend":"claude"}`)
+	req = httptest.NewRequest(http.MethodPost, "/api/workspaces/PARITY/agents", body)
+	rr = httptest.NewRecorder()
 	app.mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create agent status = %d, body = %s", rr.Code, rr.Body.String())

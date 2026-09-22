@@ -269,6 +269,12 @@
   margin-bottom: 24px;
 }
 
+.reviewBlockedReason {
+  align-self: center;
+  font-size: var(--font-size-sm);
+  color: var(--color-danger);
+}
+
 /* ============= Labels ============= */
 
 .labels {

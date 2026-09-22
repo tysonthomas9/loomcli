@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
@@ -130,6 +131,19 @@ type Supervisor struct {
 	// means use the package default (backendUnavailableRecheckInterval). Tests set a
 	// small value to avoid the 30s wait.
 	backendRecheckInterval time.Duration
+
+	// claimHold is the workspace-level refusal to START new work (see claim.go).
+	// Nil means no hold. Guarded by claimHoldMu; PersistClaimHold is injected by
+	// the daemon package so path resolution stays out of the supervisor.
+	claimHold                *ClaimHold
+	claimHoldMu              sync.RWMutex
+	claimHoldExpiryLogged    bool
+	claimHoldLastHeldLog     time.Time
+	claimHoldRecheckInterval time.Duration          // test override; 0 ⇒ package default
+	PersistClaimHold         func(*ClaimHold) error // injected by the daemon package
+	claimHoldLastReload      time.Time              // rate-limits ReloadClaimHold; see maybeReloadClaimHold
+	// ReloadClaimHold re-reads the hold when the FILE changed under this process. Injected by the daemon.
+	ReloadClaimHold func() (*ClaimHold, bool, error) // (hold, changed, err)
 
 	// maxRetriesBlockInterval is the fixed delay computeBackoff returns once an
 	// agent has exhausted its restart budget and blocked (StopReasonMaxRetriesBlocked).
@@ -370,47 +384,6 @@ func (s *Supervisor) checkAgentStopSignals(ap *AgentProcess) bool {
 	}
 }
 
-// setShutdownStopReason unconditionally records that this agent stopped
-// because of supervisor shutdown. Every caller (drain, signal handler,
-// ownership transfer) uses the same reason; if a new code path ever needs
-// a different reason, reintroduce the explicit parameter.
-func (s *Supervisor) setShutdownStopReason(ap *AgentProcess) {
-	ap.Mu.Lock()
-	ap.StopReason = StopReasonShutdown
-	ap.Mu.Unlock()
-}
-
-// SetStopReasonDefault sets the agent's stop reason only if not already set.
-func (s *Supervisor) setStopReasonDefault(ap *AgentProcess, reason StopReason) {
-	ap.Mu.Lock()
-	if ap.StopReason == "" {
-		ap.StopReason = reason
-	}
-	ap.Mu.Unlock()
-}
-
-// clearAgentSessionState resets session state between supervision cycles.
-func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
-	ap.Mu.Lock()
-	ap.Session = nil
-	ap.AgentSessionID = ""
-	ap.AgentLeaseID = ""
-	ap.AgentLeaseToken = ""
-	ap.TranscriptPath = ""
-	ap.BeforeRef = ""
-	ap.AssignedTaskID = ""
-	ap.ResumeTaskID = ""          // per-cycle; re-detected in preFlightSetup (ResumeFailures persists)
-	ap.RecoveryMode = recoverCold // per-cycle; re-classified in preFlightSetup
-	ap.LastActivity = time.Time{}
-	// A child that died while parked on an interactive prompt never sends its
-	// "end", so the in-flight count must not survive into the next cycle: a
-	// stale pending count would suspend the output-timeout watchdog for an
-	// agent that is no longer waiting on anything.
-	ap.InputWaitPending = 0
-	ap.InputWaitSince = time.Time{}
-	ap.Mu.Unlock()
-}
-
 // preFlightSetup verifies the backend is spawnable, then runs recovery,
 // assigns epic, creates session, and clears yield file.
 //
@@ -424,6 +397,11 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 // attempt's diff injected) before finally cold-starting a fresh task. See
 // detectRecovery.
 func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
+	// FIRST gate: a held workspace issues no Ready query, no ClaimIssue, runs
+	// no recovery and creates no session.
+	if !s.gateClaimsHeld(ap) {
+		return false
+	}
 	if err := s.gateBackendAvailable(ap); err != nil {
 		return false
 	}
@@ -970,6 +948,9 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 		}
 		if ap.LastError != nil {
 			result[i].LastErrorClass = ap.LastError.Class.String()
+			// Derived, not stored: the agent's last transition was a claim-hold
+			// gate. Clears itself on the next successful pre-flight.
+			result[i].ClaimsGated = ap.LastError.Class.Is(agenterr.ClaimsHeldOutcome)
 		}
 		ap.Mu.Unlock()
 		// Resolve backend name outside the lock (GetEffectiveBackend acquires ap.Mu)

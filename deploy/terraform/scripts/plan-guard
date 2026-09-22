@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Reads `tofu show -json <planfile>` on stdin and exits 1 if the plan would
+# create, destroy, or replace any resource. `make extend` may only update in
+# place: a create or destroy there means the rendered boot config changed and
+# the VM would be replaced, which is `make up`'s job, not extend's.
+set -euo pipefail
+
+exec python3 -c "
+import json
+import sys
+
+plan = json.load(sys.stdin)
+offending = []
+for change in plan.get(\"resource_changes\", []):
+    actions = change.get(\"change\", {}).get(\"actions\", [])
+    if any(action in (\"create\", \"delete\") for action in actions):
+        offending.append(change.get(\"address\", \"?\") + \": \" + \"/\".join(actions))
+
+if offending:
+    print(\"extend refused: the plan would create or destroy resources, and extend may only update in place:\", file=sys.stderr)
+    for line in offending:
+        print(\"  \" + line, file=sys.stderr)
+    print(\"if the stack should move to the current tree or settings, run \`make up\` instead\", file=sys.stderr)
+    sys.exit(1)
+"
