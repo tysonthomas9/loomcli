@@ -154,7 +154,7 @@ describe("RedirectToWorkspace", () => {
       renderComponent();
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-first/kanban", {
+        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-first/home", {
           replace: true,
         });
       });
@@ -171,7 +171,7 @@ describe("RedirectToWorkspace", () => {
       renderComponent();
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-first/kanban", {
+        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-first/home", {
           replace: true,
         });
       });
@@ -189,7 +189,7 @@ describe("RedirectToWorkspace", () => {
 
       await waitFor(() => {
         expect(mockClearLastWorkspaceId).toHaveBeenCalledWith("ws-stale");
-        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-default/kanban", {
+        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-default/home", {
           replace: true,
         });
       });
@@ -207,7 +207,7 @@ describe("RedirectToWorkspace", () => {
       renderComponent();
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-known/kanban", {
+        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-known/home", {
           replace: true,
         });
         expect(mockClearLastWorkspaceId).not.toHaveBeenCalled();
@@ -228,7 +228,7 @@ describe("RedirectToWorkspace", () => {
       renderComponent();
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-2/kanban", {
+        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-2/home", {
           replace: true,
         });
         // Must NOT navigate to the failed workspace
@@ -252,7 +252,7 @@ describe("RedirectToWorkspace", () => {
       renderComponent();
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-a/kanban", {
+        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-a/home", {
           replace: true,
         });
       });
@@ -343,7 +343,7 @@ describe("RedirectToWorkspace", () => {
 
       await waitFor(() => {
         // All workspaces available, should pick the first returned workspace.
-        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-a/kanban", {
+        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-a/home", {
           replace: true,
         });
       });
@@ -358,7 +358,7 @@ describe("RedirectToWorkspace", () => {
       renderComponent();
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-only/kanban", {
+        expect(mockNavigate).toHaveBeenCalledWith("/ws/ws-only/home", {
           replace: true,
         });
       });

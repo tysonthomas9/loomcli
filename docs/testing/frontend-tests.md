@@ -558,7 +558,6 @@ Located in `tests/e2e/`. These test the full UI in a real browser against mocked
 | `assembled-views.spec.ts`        | Full view assembly with all components | Integration of all UI pieces      |
 | `backlog-column.spec.ts`         | Backlog column behavior                | Backlog-specific UX               |
 | `kanban-column-redesign.spec.ts` | Redesigned column layout               | Updated column visuals            |
-| `log-streaming.spec.ts`          | Agent log streaming in browser         | Real-time log display             |
 | `monitor-backlog-label.spec.ts`  | Monitor dashboard backlog labels       | Correct backlog data display      |
 | `show-closed-toggle.spec.ts`     | Show/hide closed issues toggle         | Closed issue visibility           |
 | `stats-header.spec.ts`           | Project stats in header                | Summary stats display             |

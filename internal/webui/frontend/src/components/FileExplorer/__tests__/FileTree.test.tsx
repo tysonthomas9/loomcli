@@ -281,6 +281,54 @@ describe("FileTree", () => {
       expect(tree).toHaveAttribute("aria-activedescendant", "ft-alpha.go");
     });
 
+    it("ArrowUp exits to the root from the first visible node", () => {
+      const onExitToRoot = vi.fn();
+      render(
+        <FileTree
+          {...defaultProps}
+          treeData={rootTree}
+          onExitToRoot={onExitToRoot}
+        />,
+      );
+
+      fireEvent.keyDown(screen.getByRole("tree"), { key: "ArrowUp" });
+
+      expect(onExitToRoot).toHaveBeenCalledOnce();
+    });
+
+    it("ArrowUp still clamps at the first node without an exit callback", () => {
+      render(<FileTree {...defaultProps} treeData={rootTree} />);
+      const tree = screen.getByRole("tree");
+
+      fireEvent.keyDown(tree, { key: "ArrowUp" });
+
+      expect(tree).toHaveAttribute("aria-activedescendant", "ft-alpha.go");
+    });
+
+    it("ArrowLeft exits to the root from a top-level node", () => {
+      const onExitToRoot = vi.fn();
+      render(
+        <FileTree
+          {...defaultProps}
+          treeData={rootTree}
+          onExitToRoot={onExitToRoot}
+        />,
+      );
+
+      fireEvent.keyDown(screen.getByRole("tree"), { key: "ArrowLeft" });
+
+      expect(onExitToRoot).toHaveBeenCalledOnce();
+    });
+
+    it("ArrowLeft still leaves a top-level node active without an exit callback", () => {
+      render(<FileTree {...defaultProps} treeData={rootTree} />);
+      const tree = screen.getByRole("tree");
+
+      fireEvent.keyDown(tree, { key: "ArrowLeft" });
+
+      expect(tree).toHaveAttribute("aria-activedescendant", "ft-alpha.go");
+    });
+
     it("Enter activates the focused file", () => {
       const onSelectFile = vi.fn();
       render(

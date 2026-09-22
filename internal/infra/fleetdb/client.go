@@ -98,6 +98,9 @@ type Client struct {
 	awaits     *awaitStore
 	workers    *workerStore
 	roles      *roleStore
+	skills     *skillStore
+	matLeases  *skillMaterializationLeaseStore
+	skillPacks *skillPackStore
 	daemon     *daemonStore
 
 	connectors      *connectorStore
@@ -106,6 +109,8 @@ type Client struct {
 }
 
 // New constructs a fleet-db client. Returns an error if BaseURL is empty.
+//
+//nolint:funlen // One sub-store wire per line; splitting hides what the client serves.
 func New(cfg Config) (*Client, error) {
 	if cfg.BaseURL == "" {
 		return nil, fmt.Errorf("fleetdb: BaseURL required")
@@ -150,6 +155,9 @@ func New(cfg Config) (*Client, error) {
 	c.awaits = &awaitStore{client: c}
 	c.workers = &workerStore{client: c}
 	c.roles = &roleStore{client: c}
+	c.skills = &skillStore{client: c}
+	c.matLeases = &skillMaterializationLeaseStore{client: c}
+	c.skillPacks = &skillPackStore{client: c}
 	c.daemon = &daemonStore{client: c}
 	c.connectors = &connectorStore{client: c}
 	c.connectorGrants = &connectorGrantStore{client: c}
@@ -234,6 +242,17 @@ func (c *Client) Workers() store.WorkerStore { return c.workers }
 // Roles returns the RoleStore.
 func (c *Client) Roles() store.RoleStore { return c.roles }
 
+// Skills returns the SkillStore.
+func (c *Client) Skills() store.SkillStore { return c.skills }
+
+// SkillMaterializationLeases returns the ephemeral materialization lease store.
+func (c *Client) SkillMaterializationLeases() store.SkillMaterializationLeaseStore {
+	return c.matLeases
+}
+
+// SkillPacks returns the SkillPackStore.
+func (c *Client) SkillPacks() store.SkillPackStore { return c.skillPacks }
+
 // Daemon returns the DaemonProfileStore.
 func (c *Client) Daemon() store.DaemonProfileStore { return c.daemon }
 
@@ -266,8 +285,10 @@ func (c *Client) SetAPIKey(key string) {
 //   - 409 already_exists → domain.ErrAlreadyExists
 //   - 409 already_claimed → domain.ErrAlreadyClaimed
 //   - 409 invalid_transition → domain.ErrInvalidTransition
+//   - 409 skill_materialization_lease_conflict → typed holder metadata
 //   - 400/422 → domain.ErrInvalid
 //   - 4xx other → domain.ErrConflict (best fit; callers can inspect msg)
+//   - 503 skill_materialization_lease_store_unavailable → dedicated sentinel
 //   - 5xx → fmt.Errorf wrapping the body
 //
 // 204 No Content is treated as success with no body.
@@ -276,19 +297,49 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 }
 
 func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, out any, headers map[string]string) error {
+	_, _, err := c.doWithResponse(ctx, method, path, body, out, headers)
+	return err
+}
+
+// doWithResponse is doWithHeaders plus the parts of the response that are not
+// the body: the status code and the response headers.
+//
+// Both matter to conditional writes. The status separates a 201 create from a
+// 200 update on an upsert, which is what an import or a sync reports back, and
+// the headers carry the ETag a per-document read hands to the next write.
+func (c *Client) doWithResponse(ctx context.Context, method, path string, body, out any, headers map[string]string) (int, http.Header, error) {
+	return c.doWithResponseRedirectPolicy(ctx, method, path, body, out, headers, true)
+}
+
+// doWithResponseNoRedirect is the mutation transport for skills. A redirect
+// on a skill write is never legitimate: following a 307/308 replays the body
+// and can change the authorization lane selected by the original path.
+func (c *Client) doWithResponseNoRedirect(ctx context.Context, method, path string, body, out any, headers map[string]string) (int, http.Header, error) {
+	return c.doWithResponseRedirectPolicy(ctx, method, path, body, out, headers, false)
+}
+
+func (c *Client) doWithResponseRedirectPolicy(ctx context.Context, method, path string, body, out any, headers map[string]string, followRedirects bool) (int, http.Header, error) {
 	c.mu.RLock()
 	auth := fleethttp.Auth{BearerToken: c.authToken, APIKey: c.apiKey, Actor: c.actor}
 	c.mu.RUnlock()
 
 	req, err := fleethttp.BuildJSONRequest(ctx, method, c.baseURL+path, auth, body)
 	if err != nil {
-		return fmt.Errorf("fleetdb: %w", err)
+		return 0, nil, fmt.Errorf("fleetdb: %w", err)
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
 
-	return c.doRequest(req, method, path, out)
+	httpClient := c.http
+	if !followRedirects {
+		clone := *c.http
+		clone.CheckRedirect = func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+		httpClient = &clone
+	}
+	return c.doRequestResponseWithClient(httpClient, req, method, path, out)
 }
 
 func (c *Client) doRaw(ctx context.Context, method, path string, body io.Reader, contentType string, out any) error {
@@ -345,9 +396,18 @@ func (c *Client) doBytes(ctx context.Context, method, path string) ([]byte, erro
 }
 
 func (c *Client) doRequest(req *http.Request, method, path string, out any) error {
-	resp, err := c.http.Do(req)
+	_, _, err := c.doRequestResponse(req, method, path, out)
+	return err
+}
+
+func (c *Client) doRequestResponse(req *http.Request, method, path string, out any) (int, http.Header, error) {
+	return c.doRequestResponseWithClient(c.http, req, method, path, out)
+}
+
+func (c *Client) doRequestResponseWithClient(httpClient *http.Client, req *http.Request, method, path string, out any) (int, http.Header, error) {
+	resp, err := httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("fleetdb: %s %s: %w", method, path, err)
+		return 0, nil, fmt.Errorf("fleetdb: %s %s: %w", method, path, err)
 	}
 	defer func() {
 		// Drain so the underlying connection can be returned to the
@@ -356,27 +416,32 @@ func (c *Client) doRequest(req *http.Request, method, path string, out any) erro
 		resp.Body.Close()
 	}()
 
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		return resp.StatusCode, resp.Header, fmt.Errorf("fleetdb: %s %s: unexpected HTTP %d redirect", method, path, resp.StatusCode)
+	}
 	if resp.StatusCode >= 400 {
 		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 		if readErr != nil {
-			return fmt.Errorf("fleetdb: %s %s: HTTP %d (read body: %w)", method, path, resp.StatusCode, readErr)
+			return resp.StatusCode, resp.Header, fmt.Errorf("fleetdb: %s %s: HTTP %d (read body: %w)", method, path, resp.StatusCode, readErr)
 		}
-		return classifyHTTPError(method, path, resp.StatusCode, respBody)
+		return resp.StatusCode, resp.Header, classifyHTTPError(method, path, resp.StatusCode, respBody)
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
-		return nil
+		return resp.StatusCode, resp.Header, nil
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBody)).Decode(out); err != nil {
 		if errors.Is(err, io.EOF) {
-			return nil
+			return resp.StatusCode, resp.Header, nil
 		}
-		return fmt.Errorf("fleetdb: decode response (%s %s): %w", method, path, err)
+		return resp.StatusCode, resp.Header, fmt.Errorf("fleetdb: decode response (%s %s): %w", method, path, err)
 	}
-	return nil
+	return resp.StatusCode, resp.Header, nil
 }
 
 // classifyHTTPError maps an HTTP status + body into the appropriate
 // domain sentinel + descriptive wrap.
+//
+//nolint:cyclop,funlen // One status/code classification table; each arm is one sentinel.
 func classifyHTTPError(method, path string, status int, body []byte) error {
 	msg := extractErrorMessage(body)
 	code := extractErrorCode(body)
@@ -389,12 +454,20 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrNotFound)
 	case http.StatusConflict:
 		switch code {
+		case skillMaterializationLeaseConflictCode:
+			return skillMaterializationLeaseConflictError(prefix, body)
+		case skillMaterializationLeaseTokenMismatchCode:
+			return fmt.Errorf("%s: %w", prefix, domain.ErrSkillMaterializationLeaseTokenMismatch)
 		case "already_claimed":
 			return fmt.Errorf("%s: %w", prefix, domain.ErrAlreadyClaimed)
 		case "invalid_transition":
 			return fmt.Errorf("%s: %w", prefix, domain.ErrInvalidTransition)
 		case "conflict":
 			return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
+		case skillProvenanceConflictCode:
+			// Ownership refusal: kept apart from every other 409 because it is
+			// the one a caller cannot fix by retrying — see skill.go.
+			return skillProvenanceConflictError(prefix, body)
 		case "driver_run_already_resumed":
 			// Pending->suspend window: the await resolved before the suspend
 			// landed — the run must continue inline, never suspend.
@@ -408,6 +481,9 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 		if strings.Contains(path, "/driver-runs/") {
 			return fmt.Errorf("%s: %w", prefix, domain.ErrNotOwner)
 		}
+		if isSkillAPIPath(path) {
+			return fmt.Errorf("%s: %w", prefix, domain.ErrSkillForbidden)
+		}
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
 		// Structured await validation codes map back onto their domain
@@ -420,11 +496,36 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 		// fleet-db heartbeat: lease exists, token is ours, but it is no
 		// longer live (expired or released) — re-acquire is safe.
 		return fmt.Errorf("%s: %w", prefix, domain.ErrGone)
+	case http.StatusPreconditionFailed:
+		// A failed If-Match on a conditional write. Distinct from every 409
+		// above because this one a caller fixes by re-reading and merging.
+		if code == preconditionFailedCode {
+			return skillPreconditionError(prefix, body)
+		}
+	}
+	if status == http.StatusServiceUnavailable && code == skillMaterializationLeaseStoreUnavailableCode {
+		return fmt.Errorf("%s: %w", prefix, domain.ErrSkillMaterializationLeaseStoreUnavailable)
 	}
 	if status >= 400 && status < 500 {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
 	}
 	return errors.New(prefix)
+}
+
+// isSkillAPIPath identifies only the skill and skill-materialization lease
+// route families. A repository or another resource may legitimately be named
+// "skills"; its 403 must keep the generic classification rather than
+// acquiring skill-specific semantics.
+func isSkillAPIPath(requestPath string) bool {
+	requestPath, _, _ = strings.Cut(requestPath, "?")
+	segments := strings.Split(strings.Trim(requestPath, "/"), "/")
+	if len(segments) < 4 || segments[0] != "api" || segments[1] != "v1" {
+		return false
+	}
+	if segments[3] == "skills" || segments[3] == "skill-materialization-leases" {
+		return true
+	}
+	return len(segments) >= 6 && segments[3] == "roles" && segments[5] == "skills"
 }
 
 // extractErrorMessage delegates to fleethttp.ExtractErrorMessage and
@@ -455,6 +556,23 @@ func extractErrorCode(body []byte) string {
 		return ""
 	}
 	return structured.Error.Code
+}
+
+// extractErrorMeta pulls fleet-db's structured error meta out of the envelope.
+// The meta is where a machine-readable error carries the facts a caller has to
+// act on — which revision it held versus which one is stored, who owns the
+// record it was refused — that reconstructing from the message would mean
+// parsing prose.
+func extractErrorMeta(body []byte) map[string]string {
+	var structured struct {
+		Error struct {
+			Meta map[string]string `json:"meta"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &structured); err != nil {
+		return nil
+	}
+	return structured.Error.Meta
 }
 
 // pathEscape wraps url.PathEscape so call sites stay compact.

@@ -36,6 +36,8 @@ type tracedIssueBackend struct {
 	backendAttr attribute.KeyValue // cached at construction; backend name is stable
 }
 
+var _ backend.EventHistoryBackend = (*tracedIssueBackend)(nil)
+
 // wrapIssueBackendWithTracing returns a tracing-decorated IssueBackend.
 // nil-safe: passing nil returns nil so callers can wrap unconditionally.
 func wrapIssueBackendWithTracing(inner backend.IssueBackend) backend.IssueBackend {
@@ -402,6 +404,30 @@ func (t *tracedIssueBackend) ListEvents(ctx context.Context, id string, limit in
 	out, err := t.inner.ListEvents(ctx, id, limit)
 	if err == nil {
 		span.SetAttributes(attribute.Int("result.count", len(out)))
+	}
+	endSpan(span, err)
+	return out, err
+}
+
+func (t *tracedIssueBackend) ListEventHistory(
+	ctx context.Context,
+	id string,
+	params backend.EventHistoryParams,
+) (*backend.EventHistoryData, error) {
+	ctx, span := t.startSpan(ctx, "ListEventHistory",
+		attribute.String("loom.task_id", id),
+		attribute.Int("limit", params.Limit),
+		attribute.Bool("has_since", params.Since != nil),
+	)
+	historyBackend, ok := t.inner.(backend.EventHistoryBackend)
+	if !ok {
+		err := backend.ErrNotImplemented("ListEventHistory", "event history paging is not supported by this backend")
+		endSpan(span, err)
+		return nil, err
+	}
+	out, err := historyBackend.ListEventHistory(ctx, id, params)
+	if err == nil && out != nil {
+		span.SetAttributes(attribute.Int("result.count", len(out.Events)))
 	}
 	endSpan(span, err)
 	return out, err

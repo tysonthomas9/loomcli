@@ -67,6 +67,13 @@ func (b *Bus) Emit(e Event) error {
 	return nil
 }
 
+// Flush makes all successfully emitted events durable in the JSONL sink without
+// closing the bus. JSONLWriter serializes Flush with Write, so callers can use
+// this at a lifecycle boundary while other goroutines continue emitting.
+func (b *Bus) Flush() error {
+	return b.writer.Flush()
+}
+
 // Close flushes and closes the underlying writer.
 func (b *Bus) Close() error {
 	return b.writer.Close()

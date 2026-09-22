@@ -40,3 +40,40 @@ func TestClassifyHTTPError_ExistingMappingsUnchanged(t *testing.T) {
 		}
 	}
 }
+
+func TestClassifyHTTPError_SkillForbiddenStaysDistinct(t *testing.T) {
+	t.Parallel()
+	err := classifyHTTPError(http.MethodPut, "/api/v1/WS/roles/reviewer/skills/code-review/files/SKILL.md", http.StatusForbidden, nil)
+	if !errors.Is(err, domain.ErrSkillForbidden) {
+		t.Fatalf("err = %v, want errors.Is ErrSkillForbidden", err)
+	}
+	if errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("err = %v, skill forbidden must not collapse to ErrConflict", err)
+	}
+}
+
+func TestClassifyHTTPError_SkillForbiddenMatchesOnlySkillRouteFamilies(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		path      string
+		wantSkill bool
+	}{
+		{name: "workspace collection", path: "/api/v1/WS/skills", wantSkill: true},
+		{name: "workspace item", path: "/api/v1/WS/skills/code-review", wantSkill: true},
+		{name: "role file", path: "/api/v1/WS/roles/reviewer/skills/code-review/files/SKILL.md", wantSkill: true},
+		{name: "repo named skills", path: "/api/v1/WS/repos/skills", wantSkill: false},
+		{name: "unrelated suffix", path: "/api/v1/WS/things/skills", wantSkill: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := classifyHTTPError(http.MethodPut, tt.path, http.StatusForbidden, nil)
+			if got := errors.Is(err, domain.ErrSkillForbidden); got != tt.wantSkill {
+				t.Fatalf("errors.Is(%v, ErrSkillForbidden) = %t, want %t", err, got, tt.wantSkill)
+			}
+			if !tt.wantSkill && !errors.Is(err, domain.ErrConflict) {
+				t.Fatalf("err = %v, want generic ErrConflict", err)
+			}
+		})
+	}
+}

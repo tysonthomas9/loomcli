@@ -47,6 +47,29 @@ func TestBus_EmitWritesAndNotifies(t *testing.T) {
 	}
 }
 
+func TestBus_FlushWritesBufferedEvent(t *testing.T) {
+	dir := t.TempDir()
+	bus := NewBus(dir)
+	defer bus.Close()
+
+	e, _ := NewEvent(TaskClaimed, "a1", "task", "", TaskClaimedData{TaskID: "t1"})
+	e.Timestamp = time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
+	if err := bus.Emit(e); err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if err := bus.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "events-2026-03-04.jsonl"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("Flush did not make the emitted event durable")
+	}
+}
+
 func TestBus_AutoSetsTimestamp(t *testing.T) {
 	dir := t.TempDir()
 	bus := NewBus(dir)

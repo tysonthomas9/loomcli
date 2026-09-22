@@ -70,6 +70,13 @@ describe("KanbanPage", () => {
     expect(screen.getByTestId("swim-lane-board")).toBeInTheDocument();
   });
 
+  it("provides an iPad horizontal-navigation cue for the board", () => {
+    render(<KanbanPage />);
+    expect(
+      screen.getByText(/scroll horizontally to see all statuses/i),
+    ).toBeInTheDocument();
+  });
+
   it("wraps content in a kanbanShell div", () => {
     const { container } = render(<KanbanPage />);
     const shell = container.querySelector("div > div > div > div");

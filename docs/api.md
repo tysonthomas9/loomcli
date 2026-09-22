@@ -1930,20 +1930,28 @@ WebSocket endpoint for live terminal relay (tmux-backed). Supports bidirectional
   - `404` — workspace not found
   - `503` — terminal manager not initialized, or maximum terminal sessions reached (default 20)
 
-- **WebSocket Binary Protocol:**
-  - All frames are binary (`MessageBinary`)
-  - **Server → Client:** raw PTY output bytes (read buffer 4096 bytes)
-  - **Client → Server:** raw terminal input bytes OR resize message
-  - **Resize message format (in-band): exactly 5 bytes**
-    - Byte 0: `0x01` (resize marker)
-    - Bytes 1-2: cols as uint16 big-endian
-    - Bytes 3-4: rows as uint16 big-endian
-    - Example: 80×24 = `[0x01, 0x00, 0x50, 0x00, 0x18]`
+- **WebSocket Protocol:**
+  - **Server → Client:** the frame type is the discriminator.
+    - **Binary** frames are raw PTY output bytes (read buffer 4096 bytes) — this includes the scrollback replay, which begins with `\x1b[2J\x1b[H`.
+    - **Text** frames are JSON control messages. Clients must branch on frame type before rendering: a text frame written into the terminal emulator would appear as garbage.
+  - **Attach control frame (server → client, text):** sent once per attach, **after** the scrollback replay. The replay clears the screen, so a frame emitted before it would be erased.
+
+    ```json
+    {"type":"attach","reattached":false,"replaced":true,
+     "replaced_at":"2026-08-14T16:52:03Z","replaced_reason":"server_restart"}
+    ```
+
+    - `reattached` — this connection joined an existing live session (scrollback was replayed) rather than spawning one.
+    - `replaced` — this attach *is* the replacement: the tab's previous shell died with a previous server process and a fresh one was just spawned. True only on the attach that performed the replacement.
+    - `replaced_at` / `replaced_reason` — omitted when the tab has no replacement marker. Present on reattaches too, so a client that joined late learns of a replacement without a REST round-trip. The marker is persisted on the tab (`TabMetadata.replaced_at`) and dismissed with `PATCH /api/workspaces/{ws}/terminal/tabs/{session}` `{"replaced_at": ""}`.
+  - **Client → Server:** every message is read as a UTF-8 string: raw terminal input, or a resize control.
+  - **Resize message format (in-band, text):** `\x1b[RESIZE:{cols};{rows}]`
+    - Example: 80×24 = `\x1b[RESIZE:80;24]`
   - Max terminal size: 500 cols × 200 rows (values exceeding these are silently ignored)
   - Zero values for cols or rows: silently ignored (no resize performed)
   - Read limit: 32 KB per WebSocket message
   - Default terminal size: 80×24 (frontend sends resize immediately after connect)
-  - Non-matching binary messages (wrong length or missing `0x01` marker): treated as regular terminal input, written to PTY
+  - Any client message that is not a well-formed resize control is written to the PTY verbatim
 
 - **Close Codes:**
 
@@ -3538,6 +3546,100 @@ Remove the tab state for an issue.
 - **Response `400`:** Invalid issue ID (empty or contains disallowed characters)
 - **Response `500`:** Redis delete failure
 
+## Claim Hold
+
+A **claim hold** is a persistent, workspace-level, explicitly-owned refusal to
+START new work. While one is active the daemon claims no tasks and spawns no
+agents, and every run already in flight continues completely untouched — no
+yield file, no signal, no deadline. It exists so an operator (or a deploy
+script) can quiesce a workspace before redeploying loom itself.
+
+These routes are registered only in local daemon mode (`ServerConfig.ClaimHoldFn`
+non-nil) and sit behind the same authz boundary as the agent lifecycle routes:
+quiescing the whole workspace is at least as consequential as stopping one agent.
+
+A hold is **owned**. Replacing or releasing a hold taken by a different actor is
+refused with `409` unless `force` is set, so one operator cannot silently undo
+another's (or the deploy script's) quiesce.
+
+**Actor resolution**, most explicit source first: the request body's `actor` >
+the `X-Actor` header > the `LOOM_ACTOR` environment variable > the OS user.
+
+The current hold is also mirrored onto `GET /api/daemon/supervisor` as
+`data.claim_hold` (omitted when claims are free), and each gated agent carries
+`claims_gated: true` — so a dashboard can render the state without an extra
+socket round trip.
+
+### Data Model: ClaimHoldStatus
+
+All three routes answer with the same payload.
+
+```json
+{
+  "hold": {
+    "held": true,
+    "actor": "deployer",
+    "reason": "loom redeploy",
+    "since": "2026-08-19T01:00:00Z",
+    "expires_at": "2026-08-19T02:00:00Z"
+  },
+  "running": [
+    {"agent": "falcon", "task_id": "PUPPET-1", "pid": 4242, "started_at": "2026-08-19T00:41:00Z"}
+  ],
+  "gated": 6
+}
+```
+
+- `hold` is `null` when claims are free.
+- `expires_at` is omitted for an indefinite hold.
+- `running` lists agents whose runs were already in flight; a hold never touches
+  them, so this is what a quiesce is still waiting on.
+- `gated` counts agents that are cycling but refused at the claim gate.
+
+### `GET /api/workspaces/{ws}/claims/hold`
+
+- **Response `200 OK`:** `ClaimHoldStatus` (`hold: null` when free)
+- **Response `503`:** the agent supervisor is not running (no control socket)
+- **Response `504`:** the supervisor did not answer in time
+
+### `POST /api/workspaces/{ws}/claims/hold`
+
+Take, or idempotently refresh, the hold. A refresh by the same actor preserves
+the original `since` while updating `reason` and `expires_at`.
+
+- **Request body:**
+
+```json
+{"reason": "loom redeploy", "ttl_seconds": 3600, "actor": "deployer", "force": false}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `reason` | yes | Why the workspace is quiesced; shown in the UI banner and the daemon log |
+| `ttl_seconds` | no | Self-release after this many seconds (daemon default 3600, clamped to 60…86400). Omit for indefinite |
+| `actor` | no | Overrides the resolved actor |
+| `force` | no | Replace a hold owned by a different actor |
+
+- **Response `200 OK`:** `ClaimHoldStatus`
+- **Response `400`:** missing `reason`, negative `ttl_seconds`, or a malformed body
+- **Response `409`:** another actor holds the claims and `force` was not set
+- **Response `503` / `504`:** supervisor unreachable / did not answer in time
+
+### `DELETE /api/workspaces/{ws}/claims/hold`
+
+Release the hold. Releasing a hold when none is active succeeds (it is a no-op).
+
+`actor` and `force` may be given either as a JSON body or as query parameters
+(`?actor=alice&force=true`) — the web client's shared fetch helper cannot attach
+a body to a `DELETE`, and a release must not be the one operation the web UI
+cannot perform.
+
+- **Response `200 OK`:** `ClaimHoldStatus` (with `hold: null`)
+- **Response `409`:** the hold belongs to a different actor and `force` was not
+  set. The body carries the daemon's own wording, e.g.
+  `{"error": "claims held by deployer since 2026-08-19T01:00:00Z; use --force to release", "code": "claim_hold_conflict"}`
+- **Response `503` / `504`:** supervisor unreachable / did not answer in time
+
 ## Monitor Endpoints
 
 Monitor endpoints serve daemon-collected data (agent status, task distribution, metrics). They are injected from the cli package via `ServerConfig.MonitorHandlers`.
@@ -3835,15 +3937,20 @@ List events for an issue.
 - **Query Parameters:**
   | Parameter | Type | Default | Description |
   |-----------|------|---------|-------------|
-  | `limit` | int | 100 | Max events to return (max 500) |
+  | `limit` | int | 100 | Without `since`, max newest-tail size is 500. With `since`, returns one forward page capped at 200. |
+  | `since` | string | — | Opaque history cursor. Its presence selects oldest-first forward paging; bare `?since=` starts at the beginning. |
 
-Invalid or negative `limit` silently defaults to 100; values above 500 are clamped to 500.
+Invalid or negative `limit` silently defaults to 100. Without `since`, values above 500 are clamped to 500. With `since`, values above fleet-db's 200-event page maximum are clamped to 200.
+
+Without `since`, the endpoint preserves the activity feed's newest-tail behavior. That response never carries a cursor; if `has_more` is true, it was truncated and a client can retrieve history oldest-first by starting a separate request at `?since=`. With `since`, each response is exactly one forward page and its cursor advances the next request.
 
 - **Response `200`:**
 
 ```json
 {
   "success": true,
+  "has_more": true,
+  "total_events": 295,
   "data": [
     {
       "id": "event-id",
@@ -3859,7 +3966,9 @@ Invalid or negative `limit` silently defaults to 100; values above 500 are clamp
 
 Empty events list is returned as `[]` (not null).
 
-- **Errors:** `400` (missing ID), `404` (not found), `503` (pool unavailable), `504` (timeout)
+`has_more` is always present. On a newest-tail response it means that older events were trimmed; on a `since` page it means another forward page is available. `cursor` appears only on `since` pages. `total_events` is the complete count when known; a backend that cannot determine it reports zero internally and omits the field from JSON, so its absence means unknown rather than zero events.
+
+- **Errors:** `400` (missing ID or cursor paging unsupported by the active backend), `404` (not found), `503` (pool unavailable), `504` (timeout)
 
 #### `POST /api/workspaces/{ws}/issues/{id}/dependencies`
 
@@ -4179,3 +4288,51 @@ Error codes appear in the `code` field of error responses on issue-related endpo
 | `429` | Rate limit exceeded |
 | `503` | Service unavailable (daemon down, fleet not configured) |
 | `504` | Gateway timeout (daemon connection timeout) |
+
+## Doctor Checks (CLI)
+
+`loom doctor` runs local health checks and exits non-zero when any check fails.
+`--json` renders the same results as `{"checks": [...], "summary": {...}}`.
+
+### `agent_profiles`
+
+Verifies every provisioned per-agent harness profile under
+`<workspace runtime dir>/.loom/agent-profiles/<agent>/{claude,codex}` against the
+harness binary on `PATH`. Each profile carries a `.manifest.json` pinning both a
+content fingerprint and an exact harness version; a harness auto-update leaves
+the pin stale, and a stale pin refuses the agent's next spawn.
+
+The check walks the profile directory rather than the daemon's agent roster, so
+it also covers `lead`, which is not supervisor-spawned and which no
+daemon-driven check can see. The harness binary is probed once per distinct
+harness, not once per profile.
+
+| Condition | Status | Summary |
+|-----------|--------|---------|
+| Every profile verifies | `pass` | `N agent profile(s) verified against <version>` |
+| Version drift, no `--fix` | `fail` | `N of M agent profile(s) pin a stale harness version` |
+| Fingerprint mismatch, missing or unreadable manifest | `fail` | `N of M agent profile(s) failed verification` |
+| Harness binary produced no version | `warn` | `cannot verify: <binary> --version produced nothing` |
+| No `.loom/agent-profiles` at all | *(no output)* | the check is skipped entirely |
+
+`Detail` names each failing profile: the agent, its directory, both version
+strings (for drift) or both fingerprints (for a mismatch), and the exact repair
+command.
+
+### `loom doctor --fix` for `agent_profiles`
+
+`--fix` re-blesses every profile whose *only* fault is version drift: it rewrites
+the manifest's `harness_version` field and re-verifies. The result is `warn`, not
+`pass` — something was written and the operator should see it — so the command
+exits 0. Re-blessing a running agent needs no restart: the manifest is read once
+per spawn and no provisioned content is touched, so the agent's next spawn
+succeeds.
+
+Two limits are structural:
+
+- A fingerprint mismatch, a missing manifest and an unreadable manifest are
+  reported **unfixed** and keep the check at `fail`, even under `--fix`. Blessing
+  would launder unverified content past the check the manifest exists to make;
+  the repair there is the operator's provisioner.
+- Nothing in the daemon ever re-blesses. `--fix` is reachable only from an
+  operator-typed command, so a harness upgrade always passes through a human.

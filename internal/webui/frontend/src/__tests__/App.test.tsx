@@ -28,14 +28,19 @@ import {
   ONBOARDING_ISSUE_DESCRIPTION,
   ONBOARDING_ISSUE_TITLE,
 } from "@/utils/onboardingDefaults";
+import { ApiError } from "@/types";
 import type { Issue, Status } from "@/types";
 
 import App from "../App";
 
+const { mockUseParams } = vi.hoisted(() => ({
+  mockUseParams: vi.fn(() => ({ workspaceId: "test-ws-id" })),
+}));
+
 // Mock react-router-dom
 const mockNavigate = vi.fn();
 vi.mock("react-router-dom", () => ({
-  useParams: vi.fn(() => ({ workspaceId: "test-ws-id" })),
+  useParams: mockUseParams,
   useNavigate: vi.fn(() => mockNavigate),
   useSearchParams: vi.fn(() => [new URLSearchParams(), vi.fn()]),
   useLocation: vi.fn(() => ({
@@ -141,7 +146,7 @@ vi.mock("@/hooks/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/api")>();
   return {
     ...actual,
-    createIssue: mockCreateIssue,
+    createIssueWithMetadata: mockCreateIssue,
   };
 });
 
@@ -714,6 +719,7 @@ interface MockStoreStateOverrides {
   ) => Promise<void>;
   retryConnection: () => void;
   pendingIds: Set<string>;
+  detailInvalidationVersions: Map<string, number>;
   fetchIssues: () => Promise<void>;
   showStaleBanner: boolean;
   connectionLost: boolean;
@@ -750,6 +756,7 @@ function createMockUseIssuesReturn(
     connectionLost: false,
     disconnectedSince: null,
     pendingIds: new Set<string>(),
+    detailInvalidationVersions: new Map<string, number>(),
     mutationCount: 0,
     // Issue store actions
     fetchIssues: vi.fn().mockResolvedValue(undefined),
@@ -761,6 +768,7 @@ function createMockUseIssuesReturn(
     setConnectionState: vi.fn(),
     setReconnectAttempts: vi.fn(),
     setLastEventId: vi.fn(),
+    reconcileIssue: vi.fn(),
     getIssue: (id: string) => issuesMap.get(id),
     reset: vi.fn(),
     configure: vi.fn(),
@@ -934,6 +942,7 @@ vi.mock("@/components/WorkspaceTree/AgentSection", () => ({
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseParams.mockReturnValue({ workspaceId: "test-ws-id" });
     mockCreateWorkspaceAgent.mockResolvedValue({
       name: "planner",
       role_name: "plan",
@@ -943,7 +952,7 @@ describe("App", () => {
     });
     // Set up default store state for issue store selectors
     mockStoreState = createMockUseIssuesReturn({});
-    // Set up default useRouteView mock (kanban is the default view)
+    // Keep board-focused App tests on Kanban unless a case selects another view.
     mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
     vi.mocked(useFilterState).mockReturnValue([
       {},
@@ -1002,7 +1011,11 @@ describe("App", () => {
     // Set up default API mocks (resolve by default so existing tests aren't affected)
     mockUpdateIssue.mockResolvedValue({});
     mockAddComment.mockResolvedValue({});
-    mockCreateIssue.mockResolvedValue(createMockIssue({ id: "created-issue" }));
+    mockCreateIssue.mockResolvedValue({
+      issue: createMockIssue({ id: "created-issue" }),
+      warning: null,
+      replayed: false,
+    });
     mockStartAgent.mockResolvedValue(undefined);
     mockRunOnboardingFirstTask.mockResolvedValue({
       success: true,
@@ -2036,12 +2049,76 @@ describe("App", () => {
       const issueCard = screen.getByText("Test Issue");
       fireEvent.click(issueCard);
 
-      // Should open panel overlay (not navigate to issue-detail view)
+      // The slide-over gets a canonical URL and opens without becoming a
+      // separate full-page issue detail surface.
+      expect(mockNavigate).toHaveBeenCalledWith(
+        "/ws/test-ws-id/issues/issue-1",
+      );
       expect(mockOpenPanel).toHaveBeenCalledWith({
         type: "issue",
         id: "issue-1",
       });
       expect(fetchIssue).toHaveBeenCalledWith("issue-1");
+    });
+
+    it("restores the slide-over when an explicit issue URL is loaded", () => {
+      const fetchIssue = vi.fn();
+      mockUseParams.mockReturnValue({
+        workspaceId: "test-ws-id",
+        issueId: "issue-deep-link",
+      });
+      vi.mocked(useRouteView).mockReturnValue(
+        createViewStateReturn("issue-detail"),
+      );
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({ fetchIssue }),
+      );
+
+      const { rerender } = render(<App />);
+
+      expect(mockOpenPanel).toHaveBeenCalledWith({
+        type: "issue",
+        id: "issue-deep-link",
+      });
+      expect(fetchIssue).toHaveBeenCalledWith("issue-deep-link");
+
+      mockUseParams.mockReturnValue({ workspaceId: "test-ws-id" });
+      rerender(<App />);
+
+      expect(mockClosePanel).toHaveBeenCalled();
+    });
+
+    it("closes an explicit issue URL back to the kanban", () => {
+      mockUseParams.mockReturnValue({
+        workspaceId: "test-ws-id",
+        issueId: "issue-deep-link",
+      });
+      vi.mocked(useRouteView).mockReturnValue(
+        createViewStateReturn("issue-detail"),
+      );
+      mockUsePanelManager.mockReturnValue({
+        activePanel: { type: "issue", id: "issue-deep-link" },
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: mockIsOpen,
+      });
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: createMockIssue({
+            id: "issue-deep-link",
+            title: "Deep-linked issue",
+          }),
+        }),
+      );
+
+      render(<App />);
+      fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+
+      expect(mockClosePanel).toHaveBeenCalled();
+      expect(mockNavigate).toHaveBeenCalledWith("/ws/test-ws-id/kanban", {
+        replace: true,
+      });
     });
 
     it("calls fetchIssue with correct ID when issue is clicked", () => {
@@ -2244,6 +2321,160 @@ describe("App", () => {
       });
     });
 
+    it("refetches an open issue after an SSE detail invalidation", async () => {
+      const fetchIssue = vi.fn();
+      const issue = createMockIssue({ id: "issue-1" });
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [issue],
+        detailInvalidationVersions: new Map([["issue-1", 0]]),
+      });
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            ...issue,
+            comments: [],
+            dependencies: [],
+            dependents: [],
+          },
+          fetchIssue,
+        }),
+      );
+
+      const { rerender } = render(<App />);
+      fetchIssue.mockClear();
+
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [issue],
+        detailInvalidationVersions: new Map([["issue-1", 1]]),
+      });
+      rerender(<App />);
+
+      await waitFor(() => {
+        expect(fetchIssue).toHaveBeenCalledWith("issue-1");
+      });
+    });
+
+    // PUPPET-146 regression. `updateIssueStatus` stamps its optimistic issue
+    // with a fabricated fresh `updated_at`, but a rollback restores the
+    // snapshot's ORIGINAL (older) one — so the sync effect above filters the
+    // revert out and the detail surface keeps a status the server rejected.
+    // The settle-sync effect keys on the pending -> settled edge instead.
+    it("reverts loaded issue details when an optimistic update rolls back", async () => {
+      const updateIssueDetails = vi.fn();
+      const snapshot = createMockIssue({
+        id: "issue-1",
+        title: "Blocked Issue",
+        status: "blocked",
+        updated_at: "2024-01-01T00:00:00Z",
+      });
+      // Mid-flight: the map holds the optimistic value with a fresher stamp.
+      const optimistic = createMockIssue({
+        id: "issue-1",
+        title: "Blocked Issue",
+        status: "in_progress",
+        updated_at: "2024-01-01T00:05:00Z",
+      });
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [optimistic],
+        pendingIds: new Set(["issue-1"]),
+      });
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            id: "issue-1",
+            title: "Blocked Issue",
+            priority: 2,
+            status: "blocked",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+          updateIssueDetails,
+        }),
+      );
+
+      const { rerender } = render(<App />);
+
+      // The optimistic flip reaches the detail surface (fresher timestamp).
+      await waitFor(() => {
+        expect(updateIssueDetails).toHaveBeenCalledWith(optimistic);
+      });
+      updateIssueDetails.mockClear();
+
+      // Settle: the store rolls the map back to the snapshot (older stamp)
+      // and clears pendingIds in the same synchronous block. `issueDetails`
+      // now carries the optimistic value the flip above wrote into it — which
+      // is exactly the state the user is looking at when the 409 lands.
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            id: "issue-1",
+            title: "Blocked Issue",
+            priority: 2,
+            status: "in_progress",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:05:00Z",
+          },
+          updateIssueDetails,
+        }),
+      );
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [snapshot],
+        pendingIds: new Set<string>(),
+      });
+      rerender(<App />);
+
+      await waitFor(() => {
+        expect(updateIssueDetails).toHaveBeenCalledWith(snapshot);
+      });
+    });
+
+    // The settle edge fires on every pending -> settled transition, including
+    // the successful ones, so the effect narrows to a status difference. Left
+    // unguarded it would write on every settle and churn against the
+    // timestamp-guarded effect above.
+    it("does not resync details when the settled issue's status is unchanged", async () => {
+      const updateIssueDetails = vi.fn();
+      const settled = createMockIssue({
+        id: "issue-1",
+        title: "Blocked Issue",
+        status: "blocked",
+        updated_at: "2024-01-01T00:00:00Z",
+      });
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [settled],
+        pendingIds: new Set(["issue-1"]),
+      });
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            id: "issue-1",
+            title: "Blocked Issue",
+            priority: 2,
+            status: "blocked",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+          updateIssueDetails,
+        }),
+      );
+
+      const { rerender } = render(<App />);
+      updateIssueDetails.mockClear();
+
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [settled],
+        pendingIds: new Set<string>(),
+      });
+      rerender(<App />);
+
+      await waitFor(() => {
+        expect(updateIssueDetails).not.toHaveBeenCalled();
+      });
+    });
+
     it("passes error state to IssueDetailPanel when fetch fails", () => {
       const issues = [
         createMockIssue({
@@ -2316,6 +2547,17 @@ describe("App", () => {
   });
 
   describe("fetchIssues mode parameter based on activeView", () => {
+    it('calls fetchIssues with mode: "kanban" when activeView is "home"', () => {
+      mockStoreState = createMockUseIssuesReturn({});
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("home"));
+
+      render(<App />);
+
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "kanban" }),
+      );
+    });
+
     it('calls fetchIssues with mode: "kanban" when activeView is "kanban"', () => {
       mockStoreState = createMockUseIssuesReturn({});
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
@@ -2441,6 +2683,24 @@ describe("App", () => {
       expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
         expect.objectContaining({ mode: "ready" }),
       );
+    });
+  });
+
+  describe("operator queue navigation badge", () => {
+    it("derives the Home badge from the shared issue collection", () => {
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [
+          createMockIssue({
+            id: "blocked-1",
+            status: "blocked",
+            notes: "BLOCKED: waiting for access",
+          }),
+        ],
+      });
+
+      render(<App />);
+
+      expect(screen.getByTestId("nav-home-badge")).toHaveTextContent("1");
     });
   });
 
@@ -2765,7 +3025,11 @@ describe("App", () => {
         title: "Manual first task",
         issue_type: "task",
       });
-      mockCreateIssue.mockResolvedValue(createdIssue);
+      mockCreateIssue.mockResolvedValue({
+        issue: createdIssue,
+        warning: null,
+        replayed: false,
+      });
       mockStoreState = createMockUseIssuesReturn({
         issues: [],
         refetch,
@@ -2981,8 +3245,11 @@ describe("App", () => {
 
       render(<App />);
 
-      // Click first issue — should open panel, not navigate
+      // Click first issue — should navigate to its canonical panel URL.
       fireEvent.click(screen.getByLabelText(/Issue: First Issue/));
+      expect(mockNavigate).toHaveBeenCalledWith(
+        "/ws/test-ws-id/issues/issue-1",
+      );
       expect(mockOpenPanel).toHaveBeenCalledWith({
         type: "issue",
         id: "issue-1",
@@ -2991,6 +3258,9 @@ describe("App", () => {
 
       // Click second issue — same pattern
       fireEvent.click(screen.getByLabelText(/Issue: Second Issue/));
+      expect(mockNavigate).toHaveBeenCalledWith(
+        "/ws/test-ws-id/issues/issue-2",
+      );
       expect(mockOpenPanel).toHaveBeenCalledWith({
         type: "issue",
         id: "issue-2",
@@ -3300,6 +3570,8 @@ describe("App", () => {
           "help-issue",
           "in_progress",
           "test-ws-id",
+          // The caller renders the rejection itself (PUPPET-146).
+          { toastOnRollback: false },
         );
       });
 
@@ -3474,7 +3746,10 @@ describe("App", () => {
       });
     });
 
-    it("approve shows error toast on failure for code review type", async () => {
+    // PUPPET-146: App re-throws instead of toasting. The detail view's own
+    // ErrorToast is the single surface — App toasting as well stacked two
+    // identical toasts in the same corner for one failure.
+    it("code approve failure surfaces once, on the detail view", async () => {
       const mockCloseIssueFn = mockCloseIssue.mockRejectedValue(
         new Error("Network error"),
       );
@@ -3513,18 +3788,75 @@ describe("App", () => {
       fireEvent.click(approveButton);
 
       await waitFor(() => {
-        expect(showToast).toHaveBeenCalledWith("Network error", {
-          type: "error",
-        });
+        expect(screen.getByTestId("action-error-toast")).toHaveTextContent(
+          "Network error",
+        );
+      });
+      expect(showToast).not.toHaveBeenCalledWith("Network error", {
+        type: "error",
       });
       mockCloseIssueFn.mockReset();
     });
 
+    // PUPPET-146: the "help" branch used to SWALLOW the error — so the promise
+    // handleApprove returns resolved on failure, the caller's catch never
+    // ran, and the detail view stayed silent with its Approve button stuck
+    // on the "..." spinner. The re-throw is what makes both observable, and
+    // the store's own rollback toast is opted out of so the message appears
+    // exactly once.
+    it("help approve re-throws so the detail view surfaces the failure", async () => {
+      const updateIssueStatus = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      mockStoreState = createMockUseIssuesReturn({ updateIssueStatus });
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            id: "help-issue",
+            title: "Help Review Issue",
+            priority: 2,
+            status: "blocked",
+            notes: "I need help with this task",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+        }),
+      );
+      vi.mocked(useRouteView).mockReturnValue(
+        createViewStateReturn("issue-detail"),
+      );
+
+      render(<App />);
+
+      fireEvent.click(screen.getByTestId("detail-approve-button"));
+
+      // The component's own error surface only appears if the promise rejected.
+      await waitFor(() => {
+        expect(screen.getByTestId("action-error-toast")).toHaveTextContent(
+          "issue is not claimable",
+        );
+      });
+      // ...and the spinner was released rather than latched forever.
+      expect(screen.getByTestId("detail-approve-button")).not.toHaveTextContent(
+        "...",
+      );
+      expect(updateIssueStatus).toHaveBeenCalledWith(
+        "help-issue",
+        "in_progress",
+        expect.anything(),
+        { toastOnRollback: false },
+      );
+    });
+
     // Plan approve no longer goes through the optimistic path (it has to carry
-    // a label delta), so nothing rolls back or surfaces the error for it.
-    // Without a toast a failed approve is indistinguishable from a successful
-    // one — and the issue silently stays in review carrying needs-revision.
-    it("approve shows error toast on failure for plan review type", async () => {
+    // a label delta), so nothing in the store rolls back or reports for it.
+    // The failure has to reach the detail view, or a failed approve is
+    // indistinguishable from a successful one — and the issue silently stays
+    // in review carrying needs-revision.
+    it("plan approve failure surfaces once, on the detail view", async () => {
       mockUpdateIssue.mockRejectedValueOnce(new Error("Network error"));
       const updateIssueStatus = vi.fn();
       const showToast = vi.fn();
@@ -3569,15 +3901,90 @@ describe("App", () => {
 
       // The failure must surface: nothing else reports it for this branch.
       await waitFor(() => {
-        expect(showToast).toHaveBeenCalledWith("Network error", {
-          type: "error",
-        });
+        expect(screen.getByTestId("action-error-toast")).toHaveTextContent(
+          "Network error",
+        );
+      });
+      expect(showToast).not.toHaveBeenCalledWith("Network error", {
+        type: "error",
       });
       expect(updateIssueStatus).not.toHaveBeenCalled();
     });
   });
 
+  describe("sidebar suppression for views that own their chrome", () => {
+    function mockWorkspaceForSidebar() {
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: { name: "my-workspace" },
+        repos: [],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: "my-workspace",
+        setActiveWorkspace: vi.fn(),
+        defaultWorkspaceName: null,
+        setDefaultWorkspace: vi.fn().mockResolvedValue(undefined),
+        selectedRepoNames: new Set<string>(),
+        activeRepos: [],
+        activeRepoNames: [],
+        isAllSelected: true,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: undefined,
+        isMultiRepo: true,
+      });
+    }
+
+    // Both views render their own left tree, so the workspace sidebar would be
+    // a second tree competing with it.
+    it.each(["files", "skills"])(
+      "hides the WorkspaceTree sidebar on the %s view",
+      (view) => {
+        mockWorkspaceForSidebar();
+        mockUseRouteView.mockReturnValue(createViewStateReturn(view));
+        const mockReturn = createMockUseIssuesReturn({});
+        mockStoreState = mockReturn;
+
+        render(<App />);
+
+        expect(
+          screen.queryByLabelText(/workspace tree/i),
+        ).not.toBeInTheDocument();
+      },
+    );
+
+    it("keeps the WorkspaceTree sidebar on the kanban view", () => {
+      mockWorkspaceForSidebar();
+      mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
+      const mockReturn = createMockUseIssuesReturn({});
+      mockStoreState = mockReturn;
+
+      render(<App />);
+
+      expect(screen.getByLabelText(/workspace tree/i)).toBeInTheDocument();
+    });
+  });
+
   describe("sidebar isMultiRepo guard", () => {
+    it.each(["settings", "prs"] as const)(
+      "hides the workspace tree on the full-screen %s view",
+      (view) => {
+        mockUseRouteView.mockReturnValue(createViewStateReturn(view));
+
+        render(<App />);
+
+        expect(
+          screen.queryByLabelText(/workspace tree/i),
+        ).not.toBeInTheDocument();
+      },
+    );
+
     it("renders WorkspaceTree sidebar for workspace view regardless of isMultiRepo", () => {
       vi.mocked(useWorkspaceContext).mockReturnValue({
         workspace: null,
@@ -3910,13 +4317,50 @@ describe("App", () => {
       ).not.toBeInTheDocument();
       expect(
         screen.getByRole("button", {
-          name: "Loom home — return to Kanban board",
+          name: "Loom home",
         }),
       ).toBeInTheDocument();
     });
   });
 
   describe("workspace-driven repo filtering", () => {
+    it("never passes sourceRepos on Home, even with a repo subset selected", () => {
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: { name: "filtered-workspace" },
+        repos: [{ name: "repo-alpha" }, { name: "repo-beta" }],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: "filtered-workspace",
+        setActiveWorkspace: vi.fn(),
+        selectedRepoNames: new Set(["repo-alpha"]),
+        activeRepos: [{ name: "repo-alpha" }],
+        activeRepoNames: ["repo-alpha"],
+        isAllSelected: false,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: ["repo-alpha"],
+        isMultiRepo: true,
+      });
+      mockUseRouteView.mockReturnValue(createViewStateReturn("home"));
+      mockStoreState = createMockUseIssuesReturn({});
+
+      render(<App />);
+
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "kanban" }),
+      );
+      expect(mockStoreState.fetchIssues).not.toHaveBeenCalledWith(
+        expect.objectContaining({ sourceRepos: expect.anything() }),
+      );
+    });
+
     it("passes sourceReposFilter from workspace context to fetchIssues", () => {
       const sourceReposFilter = ["repo-alpha", "repo-beta"];
       vi.mocked(useWorkspaceContext).mockReturnValue({

@@ -19,6 +19,12 @@ const primaryBackendRetryCooldown = time.Minute
 // than an exponential backoff, and never count these retries toward max_retries.
 const backendUnavailableRecheckInterval = 30 * time.Second
 
+// defaultClaimHoldRecheckInterval is the fixed delay between re-checks while a
+// workspace-level claim hold is active. The hold is released by an operator (or
+// expires), so we poll on a fixed interval and never count these re-checks
+// toward max_retries — a quiesce is not an agent failure.
+const defaultClaimHoldRecheckInterval = 15 * time.Second
+
 // defaultMaxRetriesBlockInterval is the fixed delay between re-attempts after
 // an agent has exhausted its restart budget and blocked (policy OnExhaustion
 // Block). Rather than abandoning the agent (silent loss until a daemon
@@ -26,6 +32,25 @@ const backendUnavailableRecheckInterval = 30 * time.Second
 // transient root cause (a prerequisite landing, a rate-limit window passing,
 // a flaky dependency recovering) lets it self-resume.
 const defaultMaxRetriesBlockInterval = 60 * time.Second
+
+// setShutdownStopReason unconditionally records that this agent stopped
+// because of supervisor shutdown. Every caller (drain, signal handler,
+// ownership transfer) uses the same reason; if a new code path ever needs
+// a different reason, reintroduce the explicit parameter.
+func (s *Supervisor) setShutdownStopReason(ap *AgentProcess) {
+	ap.Mu.Lock()
+	ap.StopReason = StopReasonShutdown
+	ap.Mu.Unlock()
+}
+
+// setStopReasonDefault sets the agent's stop reason only if not already set.
+func (s *Supervisor) setStopReasonDefault(ap *AgentProcess, reason StopReason) {
+	ap.Mu.Lock()
+	if ap.StopReason == "" {
+		ap.StopReason = reason
+	}
+	ap.Mu.Unlock()
+}
 
 // shouldRestart determines if the agent should restart by consulting the
 // policy disposition for the classified outcome of the most recent exit
@@ -74,22 +99,34 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 		return false
 
 	case agentpolicy.RetryUncounted:
-		if outcome.Is(agenterr.NoWorkOutcome) {
-			s.applyNoWorkRestart(ap)
-			return true
-		}
-		// Rate limits: unlimited uncounted retries by default; the
-		// rate_limit_no_count config opt-out routes them through the
-		// counted budget instead (the layer's config wins, pt7).
-		if s.getRateLimitNoCount() {
-			s.applyRateLimitedRestart(ap)
-			return true
-		}
-		return s.applyCountedRestart(ap, d, maxRetries)
+		return s.applyUncountedRestart(ap, outcome, d, maxRetries)
 
 	default: // Retry
 		return s.applyCountedRestart(ap, d, maxRetries)
 	}
+}
+
+// applyUncountedRestart handles the RetryUncounted dispositions — a claim
+// hold, no work, and rate limiting — each of which restarts without eroding
+// the retry budget for its own reason. Caller holds ap.Mu.
+func (s *Supervisor) applyUncountedRestart(ap *AgentProcess, outcome agenterr.Outcome,
+	d agentpolicy.Disposition, maxRetries int) bool {
+	if outcome.Is(agenterr.ClaimsHeldOutcome) {
+		s.applyClaimsHeldRestart(ap)
+		return true
+	}
+	if outcome.Is(agenterr.NoWorkOutcome) {
+		s.applyNoWorkRestart(ap)
+		return true
+	}
+	// Rate limits: unlimited uncounted retries by default; the
+	// rate_limit_no_count config opt-out routes them through the
+	// counted budget instead (the layer's config wins, pt7).
+	if s.getRateLimitNoCount() {
+		s.applyRateLimitedRestart(ap)
+		return true
+	}
+	return s.applyCountedRestart(ap, d, maxRetries)
 }
 
 // stopAfterEphemeralTask stops the supervisor once an ephemeral agent has
@@ -255,6 +292,25 @@ func (s *Supervisor) applyBackendUnavailableRestart(ap *AgentProcess) {
 		ap.Entry.Worktree, s.backendRecheckBackoff())
 }
 
+// applyClaimsHeldRestart keeps an agent cycling while a claim hold is active.
+// Caller holds ap.Mu. It resets nothing and increments nothing: every counter
+// stays frozen at its pre-hold value so releasing the hold resumes exactly
+// where the fleet left off. StopReason is deliberately NOT set — the agent is
+// not stopped, only gated.
+func (s *Supervisor) applyClaimsHeldRestart(ap *AgentProcess) {
+	log.Printf("[daemon] Agent %s: claims held, will recheck in %s (not counted toward max_retries)",
+		ap.Entry.Worktree, s.claimHoldRecheckBackoff())
+}
+
+// claimHoldRecheckBackoff is the fixed delay between claim-hold re-checks
+// (configurable via claimHoldRecheckInterval; package default otherwise).
+func (s *Supervisor) claimHoldRecheckBackoff() time.Duration {
+	if s.claimHoldRecheckInterval > 0 {
+		return s.claimHoldRecheckInterval
+	}
+	return defaultClaimHoldRecheckInterval
+}
+
 // backendRecheckBackoff is the fixed delay between BackendUnavailable re-checks
 // (configurable via backendRecheckInterval; package default otherwise).
 func (s *Supervisor) backendRecheckBackoff() time.Duration {
@@ -283,10 +339,19 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 		return s.maxRetriesBlockBackoff()
 	}
 
-	var outcome agenterr.Outcome
-	if lastErr != nil {
-		outcome = lastErr.Class
+	// A clean success has no failure to back off from — which used to mean it
+	// waited only the small default and could respawn-claim in a tight loop.
+	// Success-loops have budgets nowhere else (a clean exit resets them all),
+	// so the floor below is the ONLY cadence bound on a pathological
+	// success cycle (a hook misroute, a task that "completes" without
+	// consuming its trigger): the next cycle may not START sooner than the
+	// floor after the previous one started. A run longer than the floor pays
+	// nothing.
+	if lastErr == nil {
+		return s.successCadenceRemaining(ap)
 	}
+
+	outcome := lastErr.Class
 	d := agentpolicy.Decide(outcome)
 
 	var initial int
@@ -299,6 +364,10 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 		// Fixed recheck: waiting for the backend CLI to reappear, not
 		// backing off a flaky run.
 		return s.backendRecheckBackoff()
+	case agentpolicy.BPClaimsHeld:
+		// Fixed recheck: waiting for an operator to release a hold, not
+		// backing off a flaky run.
+		return s.claimHoldRecheckBackoff()
 	case agentpolicy.BPBlock:
 		return s.maxRetriesBlockBackoff()
 	case agentpolicy.BPRateLimit:
@@ -318,6 +387,43 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 		hint = lastErr.RetryAfter
 	}
 	return exponentialBackoff(initial, retryN, maxBackoff, hint)
+}
+
+// envSuccessCadenceSeconds sets the minimum interval between successful claim
+// cycles per agent. Env-only for the same reason as the input-wait bound:
+// fleet-db's wire schema does not persist daemon restart-policy fields, so an
+// env var is the only knob that reaches a deployed daemon. <=0 disables the
+// floor (restores the pre-floor behavior); absent uses the default.
+const envSuccessCadenceSeconds = "LOOM_DAEMON_SUCCESS_CADENCE_SECONDS"
+
+// defaultSuccessCadenceSeconds: long enough to keep a degenerate
+// success-loop from burning billed turns every couple of seconds, short
+// enough to be irrelevant against any real agent run.
+const defaultSuccessCadenceSeconds = 5
+
+// successCadenceRemaining returns how long the agent must still wait so that
+// successful cycle STARTS are at least the cadence floor apart.
+func (s *Supervisor) successCadenceRemaining(ap *AgentProcess) time.Duration {
+	floor := time.Duration(defaultSuccessCadenceSeconds) * time.Second
+	if v := os.Getenv(envSuccessCadenceSeconds); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			if n <= 0 {
+				return 0
+			}
+			floor = time.Duration(n) * time.Second
+		}
+	}
+	ap.Mu.Lock()
+	lastStart := ap.LastStart
+	ap.Mu.Unlock()
+	if lastStart.IsZero() {
+		return floor
+	}
+	remaining := floor - time.Since(lastStart)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 // exponentialBackoff computes initial * 2^retryN seconds capped at maxBackoff
@@ -378,9 +484,9 @@ func (s *Supervisor) getBackoffMax() int {
 // GetOutputTimeout returns the configured output timeout in seconds.
 // LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS env var is honored when set — useful
 // for integration tests that need to trip the watchdog quickly (e.g.
-// test/playground/scenarios/). The env var wins over fleet-db config
-// because fleet-db's wire schema does not currently persist this field
-// (see internal/infra/fleetdb/daemon.go).
+// test/playground/scenarios/). fleet-db does persist this field now
+// (see internal/infra/fleetdb/daemon.go), so the env var is a deliberate
+// test override of the stored config, not a workaround for a wire gap.
 func (s *Supervisor) GetOutputTimeout() int {
 	if v := os.Getenv("LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {

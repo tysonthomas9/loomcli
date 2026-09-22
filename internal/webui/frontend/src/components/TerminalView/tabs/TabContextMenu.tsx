@@ -20,6 +20,8 @@ export interface TabContextMenuProps {
   onClose: () => void;
   onCloseOthers?: (() => void) | undefined;
   onCloseAll?: (() => void) | undefined;
+  /** Only supplied when the tab carries a restart marker to clear. */
+  onDismissRestartNotice?: (() => void) | undefined;
   onDismiss: () => void;
 }
 
@@ -35,6 +37,7 @@ export function TabContextMenu({
   onClose,
   onCloseOthers,
   onCloseAll,
+  onDismissRestartNotice,
   onDismiss,
 }: TabContextMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -84,6 +87,11 @@ export function TabContextMenu({
     onCloseOthers?.();
     onDismiss();
   }, [onCloseOthers, onDismiss]);
+
+  const handleDismissRestartNotice = useCallback(() => {
+    onDismissRestartNotice?.();
+    onDismiss();
+  }, [onDismissRestartNotice, onDismiss]);
 
   const handleCloseAll = useCallback(() => {
     onCloseAll?.();
@@ -137,9 +145,19 @@ export function TabContextMenu({
           {isPinned ? "Unpin" : "Pin"}
         </button>
       )}
-      {(onDuplicate || onRename || onPin) && tabCount > 1 && (
-        <div className={styles.contextMenuDivider} />
+      {onDismissRestartNotice && (
+        <button
+          type="button"
+          className={styles.contextMenuItem}
+          onClick={handleDismissRestartNotice}
+          role="menuitem"
+          data-testid="context-menu-dismiss-restart-notice"
+        >
+          Dismiss restart notice
+        </button>
       )}
+      {(onDuplicate || onRename || onPin || onDismissRestartNotice) &&
+        tabCount > 1 && <div className={styles.contextMenuDivider} />}
       {tabCount > 1 && (
         <button
           type="button"

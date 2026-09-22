@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, type MouseEvent } from "react";
 import type { FileBrowserTab } from "@/stores";
-import { checkoutSuffix, tabIdentityKey } from "@/utils/fileExplorerRefs";
+import { parseSkillPath } from "@/utils/skillsPaths";
+import { explorerSuffix, tabIdentityKey } from "@/utils/explorerRefs";
 import styles from "./FileExplorer.module.css";
 
 interface FileTabBarProps {
@@ -69,7 +70,9 @@ export function FileTabBar({
         const name = basename(tab.path);
         const hint =
           (duplicateNames.get(name) ?? 0) > 1
-            ? checkoutSuffix(tab.ref) || parentDirName(tab.path)
+            ? tab.ref.kind === "skills"
+              ? (parseSkillPath(tab.path)?.skill ?? explorerSuffix(tab.ref))
+              : explorerSuffix(tab.ref) || parentDirName(tab.path)
             : "";
         const closeOnMiddle = (e: MouseEvent) => {
           if (e.button === 1) {
@@ -83,7 +86,7 @@ export function FileTabBar({
             ref={active ? activeRef : undefined}
             className={styles.tab}
             data-active={active}
-            title={`${checkoutSuffix(tab.ref)}: ${tab.path}`}
+            title={`${explorerSuffix(tab.ref)}: ${tab.path}`}
             onAuxClick={closeOnMiddle}
           >
             <button

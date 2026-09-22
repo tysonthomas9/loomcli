@@ -1,0 +1,111 @@
+.page {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--color-bg-secondary);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 372px;
+  gap: 20px;
+  width: min(100%, var(--page-content-max));
+  margin: 0 auto;
+  padding: var(--page-padding-top) var(--page-padding-x) 26px;
+}
+
+.queueColumn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.header h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  /* Dark text on amber reads ≥8:1 in both themes; white reads 2.2:1 in light. */
+  color: #1a1a1a;
+  background: var(--color-warning);
+  border-radius: var(--radius-full);
+}
+
+.queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.queueEmpty {
+  overflow: hidden;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--surface-radius);
+}
+
+.queueStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0 var(--space-6) var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.queueStats span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.queueStats strong {
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+@media (width <= 1100px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (width <= 768px) {
+  .layout {
+    padding: var(--space-4) var(--space-4) var(--space-8);
+  }
+
+  .header {
+    flex-wrap: wrap;
+  }
+
+  .queueStats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-right: var(--space-3);
+    margin-left: var(--space-3);
+  }
+}

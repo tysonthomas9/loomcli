@@ -55,6 +55,7 @@ func (m *IssueModule) Register(mux *http.ServeMux) {
 
 	// Events
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/events", HandleGetIssueEvents(m.svc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/journey", HandleGetIssueJourney(m.svc))
 
 	// Dependencies
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/dependencies", HandleListDependencies(m.svc))

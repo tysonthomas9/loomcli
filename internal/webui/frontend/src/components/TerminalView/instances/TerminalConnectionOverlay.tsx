@@ -26,7 +26,11 @@ export interface TerminalConnectionOverlayProps {
 
 // ActionableState variants share the same "message + button + optional
 // subtext" shell; only copy, styling, and test IDs vary.
-type ActionableState = "session_ended" | "error" | "disconnected";
+type ActionableState =
+  | "session_ended"
+  | "spawn_failed"
+  | "error"
+  | "disconnected";
 const actionableStates: Record<
   ActionableState,
   {
@@ -48,6 +52,16 @@ const actionableStates: Record<
     buttonTestId: "terminal-restart-button",
     subtext:
       "The shell backing this tab is no longer running. Starting a new session will spawn a fresh shell (scrollback is lost).",
+  },
+  spawn_failed: {
+    backdrop: styles.errorBackdrop,
+    role: "alert",
+    message: "Shell keeps exiting",
+    buttonLabel: "Try again",
+    buttonAriaLabel: "Try starting the terminal session again",
+    buttonTestId: "terminal-spawn-failed-button",
+    subtext:
+      "Every attempt started and exited within seconds, so retrying was stopped. The shell's own error is printed above.",
   },
   error: {
     backdrop: styles.errorBackdrop,

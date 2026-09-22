@@ -69,6 +69,18 @@ export { useWorkspace } from "./useWorkspace";
 export type { UseWorkspaceOptions, UseWorkspaceReturn } from "./useWorkspace";
 
 export {
+  describeMutation,
+  mergeRecentActivity,
+  SEED_ISSUE_COUNT,
+  useRecentActivity,
+} from "./useRecentActivity";
+export type {
+  ActivityDescription,
+  ActivityMarker,
+  RecentActivityItem,
+} from "./useRecentActivity";
+
+export {
   WorkspaceProvider,
   useWorkspaceContext,
   WorkspaceContext,

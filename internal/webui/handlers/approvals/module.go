@@ -180,15 +180,7 @@ func (m *Module) postApproval(w http.ResponseWriter, r *http.Request) {
 // sessionActor resolves the verified approver identity from the session
 // context: the email when the token carries one, else the immutable user id.
 func sessionActor(r *http.Request) (actor, userID string, ok bool) {
-	identity, ok := middleware.UserIdentityFromContext(r.Context())
-	if !ok || strings.TrimSpace(identity.UserID) == "" {
-		return "", "", false
-	}
-	actor = strings.TrimSpace(identity.Email)
-	if actor == "" {
-		actor = strings.TrimSpace(identity.UserID)
-	}
-	return actor, strings.TrimSpace(identity.UserID), true
+	return middleware.VerifiedUserActorFromContext(r.Context())
 }
 
 // decodeApproval parses and normalizes the request body.

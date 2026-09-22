@@ -70,7 +70,31 @@ const reviewDetails1 = {
 const reviewDetails2 = {
   ...reviewIssue2,
   description: "Migrate from v1 to v2 API endpoints",
-  design: "## Migration Plan\n\n- Phase 1: Add v2 routes\n- Phase 2: Deprecate v1",
+  design:
+    "## Migration Plan\n\n- Phase 1: Add v2 routes\n- Phase 2: Deprecate v1",
+  labels: [],
+  dependencies: [],
+  dependents: [],
+  comments: [],
+};
+
+// A `blocked` issue carrying notes is the "help" review type — the branch that
+// goes through the store's OPTIMISTIC status path, and the one the server
+// refuses to claim with a 409 (PUPPET-146).
+const blockedHelpIssue = {
+  id: "blocked-help-001",
+  title: "Decomposed parent needing help",
+  status: "blocked",
+  priority: 1,
+  issue_type: "task",
+  notes: "I need help with this task",
+  created_at: "2026-01-15T10:00:00Z",
+  updated_at: "2026-01-15T10:00:00Z",
+};
+
+const blockedHelpDetails = {
+  ...blockedHelpIssue,
+  description: "Parent issue that the server will not let anyone claim",
   labels: [],
   dependencies: [],
   dependents: [],
@@ -185,13 +209,16 @@ async function setupBaseMocks(page: Page) {
   });
 
   // Terminal sessions-by-issue endpoint (workspace-scoped)
-  await page.route("**/workspaces/*/terminal/sessions/by-issue", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: ok({}),
-    });
-  });
+  await page.route(
+    "**/workspaces/*/terminal/sessions/by-issue",
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: ok({}),
+      });
+    },
+  );
 
   // SSE events endpoint (workspace-scoped: /api/workspaces/default/events)
   // Pattern must NOT match Vite module paths like /src/api/events.ts
@@ -203,7 +230,7 @@ async function setupBaseMocks(page: Page) {
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
       },
-      body: "event: connected\ndata: {\"message\":\"connected\"}\n\n",
+      body: 'event: connected\ndata: {"message":"connected"}\n\n',
     });
   });
 }
@@ -218,45 +245,42 @@ async function setupBaseMocks(page: Page) {
  * fetches return.
  */
 async function installIssuesMock(page: Page, initialIssues: unknown[]) {
-  await page.addInitScript(
-    (issues: unknown[]) => {
-      // Store mock data on window for dynamic updates
-      (window as any).__mockIssues = issues;
+  await page.addInitScript((issues: unknown[]) => {
+    // Store mock data on window for dynamic updates
+    (window as any).__mockIssues = issues;
 
-      const originalFetch = window.fetch.bind(window);
-      window.fetch = function (
-        input: RequestInfo | URL,
-        init?: RequestInit,
-      ): Promise<Response> {
-        const url =
-          input instanceof Request
-            ? input.url
-            : typeof input === "string"
-              ? input
-              : input.toString();
-        // Match: /api/workspaces/{id}/issues?... but NOT /api/workspaces/{id}/issues/{id}
-        if (
-          /\/api\/workspaces\/[^/]+\/issues(\?|$)/.test(url) &&
-          (init?.method ?? "GET") === "GET"
-        ) {
-          return Promise.resolve(
-            new Response(
-              JSON.stringify({
-                success: true,
-                data: (window as any).__mockIssues,
-              }),
-              {
-                status: 200,
-                headers: { "Content-Type": "application/json" },
-              },
-            ),
-          );
-        }
-        return originalFetch(input, init);
-      };
-    },
-    initialIssues,
-  );
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = function (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> {
+      const url =
+        input instanceof Request
+          ? input.url
+          : typeof input === "string"
+            ? input
+            : input.toString();
+      // Match: /api/workspaces/{id}/issues?... but NOT /api/workspaces/{id}/issues/{id}
+      if (
+        /\/api\/workspaces\/[^/]+\/issues(\?|$)/.test(url) &&
+        (init?.method ?? "GET") === "GET"
+      ) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              success: true,
+              data: (window as any).__mockIssues,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        );
+      }
+      return originalFetch(input, init);
+    };
+  }, initialIssues);
 }
 
 /**
@@ -281,36 +305,45 @@ test.describe("E2E Journey: Review and approve/reject agent plan", () => {
     await setupBaseMocks(page);
 
     // Mock GET /api/workspaces/default/issues/review-plan-001
-    await page.route("**/workspaces/*/issues/review-plan-001", async (route) => {
-      if (route.request().method() === "GET") {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: ok(reviewDetails1),
-        });
-      } else {
-        await route.fallback();
-      }
-    });
+    await page.route(
+      "**/workspaces/*/issues/review-plan-001",
+      async (route) => {
+        if (route.request().method() === "GET") {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: ok(reviewDetails1),
+          });
+        } else {
+          await route.fallback();
+        }
+      },
+    );
 
     // Mock PATCH /api/workspaces/default/issues/review-plan-001
     const patchCalls: Array<Record<string, unknown>> = [];
-    await page.route("**/workspaces/*/issues/review-plan-001", async (route) => {
-      if (route.request().method() === "PATCH") {
-        patchCalls.push(route.request().postDataJSON());
-        // Update browser mock data so refetch returns updated list
-        await page.evaluate((data) => {
-          (window as any).__mockIssues = data;
-        }, [reviewIssue2]);
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: ok({ ...reviewIssue1, status: "open" }),
-        });
-      } else {
-        await route.fallback();
-      }
-    });
+    await page.route(
+      "**/workspaces/*/issues/review-plan-001",
+      async (route) => {
+        if (route.request().method() === "PATCH") {
+          patchCalls.push(route.request().postDataJSON());
+          // Update browser mock data so refetch returns updated list
+          await page.evaluate(
+            (data) => {
+              (window as any).__mockIssues = data;
+            },
+            [reviewIssue2],
+          );
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: ok({ ...reviewIssue1, status: "open" }),
+          });
+        } else {
+          await route.fallback();
+        }
+      },
+    );
 
     // Navigate and wait for board
     await navigateAndWaitForBoard(page);
@@ -386,35 +419,44 @@ test.describe("E2E Journey: Review and approve/reject agent plan", () => {
     await installIssuesMock(page, [rejectedIssue, reviewIssue2]);
     await setupBaseMocks(page);
 
-    await page.route("**/workspaces/*/issues/review-plan-001", async (route) => {
-      if (route.request().method() === "GET") {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: ok(rejectedDetails),
-        });
-      } else {
-        await route.fallback();
-      }
-    });
+    await page.route(
+      "**/workspaces/*/issues/review-plan-001",
+      async (route) => {
+        if (route.request().method() === "GET") {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: ok(rejectedDetails),
+          });
+        } else {
+          await route.fallback();
+        }
+      },
+    );
 
     const patchCalls: Array<Record<string, unknown>> = [];
-    await page.route("**/workspaces/*/issues/review-plan-001", async (route) => {
-      if (route.request().method() === "PATCH") {
-        patchCalls.push(route.request().postDataJSON());
-        // The server applied the delta: status open, label gone.
-        await page.evaluate((data) => {
-          (window as any).__mockIssues = data;
-        }, [reviewIssue2]);
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: ok({ ...reviewIssue1, status: "open", labels: [] }),
-        });
-      } else {
-        await route.fallback();
-      }
-    });
+    await page.route(
+      "**/workspaces/*/issues/review-plan-001",
+      async (route) => {
+        if (route.request().method() === "PATCH") {
+          patchCalls.push(route.request().postDataJSON());
+          // The server applied the delta: status open, label gone.
+          await page.evaluate(
+            (data) => {
+              (window as any).__mockIssues = data;
+            },
+            [reviewIssue2],
+          );
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: ok({ ...reviewIssue1, status: "open", labels: [] }),
+          });
+        } else {
+          await route.fallback();
+        }
+      },
+    );
 
     await navigateAndWaitForBoard(page);
 
@@ -459,61 +501,70 @@ test.describe("E2E Journey: Review and approve/reject agent plan", () => {
     await setupBaseMocks(page);
 
     // Mock GET issue detail for review-plan-002
-    await page.route("**/workspaces/*/issues/review-plan-002", async (route) => {
-      if (route.request().method() === "GET") {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: ok(reviewDetails2),
-        });
-      } else {
-        await route.fallback();
-      }
-    });
+    await page.route(
+      "**/workspaces/*/issues/review-plan-002",
+      async (route) => {
+        if (route.request().method() === "GET") {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: ok(reviewDetails2),
+          });
+        } else {
+          await route.fallback();
+        }
+      },
+    );
 
     // Mock POST /api/workspaces/default/issues/review-plan-002/comments
     const commentCalls: Array<Record<string, unknown>> = [];
-    await page.route("**/workspaces/*/issues/review-plan-002/comments", async (route) => {
-      if (route.request().method() === "POST") {
-        commentCalls.push(route.request().postDataJSON());
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: ok({
-            id: 1,
-            issue_id: "review-plan-002",
-            author: "test-user",
-            text: route.request().postDataJSON().text,
-            created_at: new Date().toISOString(),
-          }),
-        });
-      } else {
-        await route.fallback();
-      }
-    });
+    await page.route(
+      "**/workspaces/*/issues/review-plan-002/comments",
+      async (route) => {
+        if (route.request().method() === "POST") {
+          commentCalls.push(route.request().postDataJSON());
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: ok({
+              id: 1,
+              issue_id: "review-plan-002",
+              author: "test-user",
+              text: route.request().postDataJSON().text,
+              created_at: new Date().toISOString(),
+            }),
+          });
+        } else {
+          await route.fallback();
+        }
+      },
+    );
 
     // Mock PATCH /api/workspaces/default/issues/review-plan-002
     const patchCalls: Array<Record<string, unknown>> = [];
-    await page.route("**/workspaces/*/issues/review-plan-002", async (route) => {
-      if (route.request().method() === "PATCH") {
-        patchCalls.push(route.request().postDataJSON());
-        // Update browser mock data so refetch returns empty list
-        await page.evaluate(() => {
-          (window as any).__mockIssues = [];
-        });
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: ok({
-            ...reviewIssue2,
-            status: "open",
-            labels: ["needs-revision"],
-          }),
-        });
-      } else {
-        await route.fallback();
-      }
-    });
+    await page.route(
+      "**/workspaces/*/issues/review-plan-002",
+      async (route) => {
+        if (route.request().method() === "PATCH") {
+          patchCalls.push(route.request().postDataJSON());
+          // Update browser mock data so refetch returns empty list
+          await page.evaluate(() => {
+            (window as any).__mockIssues = [];
+          });
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: ok({
+              ...reviewIssue2,
+              status: "open",
+              labels: ["needs-revision"],
+            }),
+          });
+        } else {
+          await route.fallback();
+        }
+      },
+    );
 
     // Navigate and wait for board
     await navigateAndWaitForBoard(page);
@@ -597,17 +648,20 @@ test.describe("E2E Journey: Review and approve/reject agent plan", () => {
     await setupBaseMocks(page);
 
     // Mock GET issue detail for review-plan-001
-    await page.route("**/workspaces/*/issues/review-plan-001", async (route) => {
-      if (route.request().method() === "GET") {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: ok(reviewDetails1),
-        });
-      } else {
-        await route.fallback();
-      }
-    });
+    await page.route(
+      "**/workspaces/*/issues/review-plan-001",
+      async (route) => {
+        if (route.request().method() === "GET") {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: ok(reviewDetails1),
+          });
+        } else {
+          await route.fallback();
+        }
+      },
+    );
 
     // Navigate and wait for board
     await navigateAndWaitForBoard(page);
@@ -633,5 +687,90 @@ test.describe("E2E Journey: Review and approve/reject agent plan", () => {
     await expect(page.getByTestId("review-action-bar")).toBeVisible();
     await expect(page.getByTestId("panel-approve-button")).toBeVisible();
     await expect(page.getByTestId("panel-reject-button")).toBeVisible();
+  });
+
+  // PUPPET-146 regression, end to end. Approving an issue the server refuses
+  // to claim used to flip the status control to "In Progress", show nothing at
+  // all, and leave Approve stuck on its "..." spinner — only a reload revealed
+  // that the database had never accepted the change.
+  test("approve rejected with 409: status reverts and the server message shows", async ({
+    page,
+  }) => {
+    // The issue must be in the LIST too: the optimistic path snapshots it from
+    // the store's issuesMap, and throws outright if it is not there.
+    await installIssuesMock(page, [blockedHelpIssue]);
+    await setupBaseMocks(page);
+
+    await page.route(
+      "**/workspaces/*/issues/blocked-help-001",
+      async (route) => {
+        if (route.request().method() === "GET") {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: ok(blockedHelpDetails),
+          });
+        } else {
+          await route.fallback();
+        }
+      },
+    );
+
+    // The server guard: this issue is not claimable.
+    await page.route(
+      "**/workspaces/*/issues/blocked-help-001",
+      async (route) => {
+        if (route.request().method() === "PATCH") {
+          await route.fulfill({
+            status: 409,
+            contentType: "application/json",
+            body: JSON.stringify({
+              error: "issue is not claimable",
+              kind: "conflict",
+            }),
+          });
+        } else {
+          await route.fallback();
+        }
+      },
+    );
+
+    await page.goto("/ws/default/issues/blocked-help-001", {
+      waitUntil: "domcontentloaded",
+    });
+
+    // A direct issue URL preserves the canonical deep link while opening the
+    // issue in the board's slide-over panel.
+    const panel = page.getByTestId("issue-detail-panel");
+    await expect(panel).toHaveAttribute("data-state", "open");
+    const status = panel.getByTestId("status-dropdown");
+    await expect(status).toHaveValue("blocked");
+    await expect(page.getByTestId("panel-approve-button")).toBeVisible();
+
+    // Arm the wait BEFORE the click. `route.fulfill` answers the PATCH from
+    // the test process, so the response can land before a post-click
+    // `waitForResponse` has subscribed — and that listener never sees it.
+    const patchResponse = page.waitForResponse(
+      (res) =>
+        res.url().includes("/issues/blocked-help-001") &&
+        res.request().method() === "PATCH",
+    );
+
+    await page.getByTestId("panel-approve-button").click();
+
+    await patchResponse;
+
+    // The server's own message, verbatim.
+    await expect(page.getByTestId("panel-approve-blocked-reason")).toHaveText(
+      "issue is not claimable",
+    );
+
+    // The status the database actually holds — not the optimistic lie.
+    await expect(status).toHaveValue("blocked");
+
+    // Approve is released from its spinner and disabled with the reason.
+    const approve = page.getByTestId("panel-approve-button");
+    await expect(approve).toBeDisabled();
+    await expect(approve).toHaveAttribute("title", "issue is not claimable");
   });
 });

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -292,6 +294,43 @@ func TestList_HappyPath(t *testing.T) {
 	}
 	if result[0].DependencyCount != 1 {
 		t.Errorf("DependencyCount = %d, want 1", result[0].DependencyCount)
+	}
+}
+
+func TestList_AllMergesActiveAndClosedWithoutDuplicates(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var queries []string
+	var limits []string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.Query().Get("status"))
+		limits = append(limits, r.URL.Query().Get("limit"))
+		if r.URL.Query().Get("status") == "closed" {
+			respondOK(w, []*types.IssueWithCounts{
+				{Issue: &types.Issue{ID: "closed", Title: "Closed", Status: types.StatusClosed, CreatedAt: now, UpdatedAt: now, ClosedAt: &now}},
+			})
+			return
+		}
+		respondOK(w, []*types.IssueWithCounts{
+			{Issue: &types.Issue{ID: "open", Title: "Open", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now}},
+			// Some FleetDB versions already include closed issues when status is
+			// omitted; the aggregate contract must still return each issue once.
+			{Issue: &types.Issue{ID: "closed", Title: "Closed", Status: types.StatusClosed, CreatedAt: now, UpdatedAt: now, ClosedAt: &now}},
+		})
+	})
+	defer ts.Close()
+
+	result, err := fb.List(context.Background(), backend.ListOpts{Status: "all", Limit: 10})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if !reflect.DeepEqual(queries, []string{"", "closed"}) {
+		t.Fatalf("status queries = %v, want active then closed", queries)
+	}
+	if !reflect.DeepEqual(limits, []string{"10", "10"}) {
+		t.Fatalf("limit queries = %v, want caller limit on both requests", limits)
+	}
+	if len(result) != 2 || result[0].ID != "open" || result[1].ID != "closed" {
+		t.Fatalf("result = %+v, want deduplicated active and closed issues", result)
 	}
 }
 
@@ -782,9 +821,12 @@ func TestUpdate_StatusInProgressWithAssigneeClaimsAsAssignee(t *testing.T) {
 
 	status := "in_progress"
 	assignee := "[H] Tyson"
+	// The operator Actor must not leak into the claim: the claim actor becomes
+	// the lock holder and assignee, so it stays the assignee's identity.
 	err := fb.Update(context.Background(), "test-1", backend.UpdateParams{
 		Status:   &status,
 		Assignee: &assignee,
+		Actor:    "operator@local",
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
@@ -1498,16 +1540,22 @@ func TestListEvents_HappyPath(t *testing.T) {
 		if !strings.HasSuffix(r.URL.Path, "/issues/test-1/history") {
 			t.Errorf("path = %q, want suffix /issues/test-1/history", r.URL.Path)
 		}
-		if r.URL.Query().Get("limit") != "10" {
-			t.Errorf("limit = %q, want %q", r.URL.Query().Get("limit"), "10")
+		if r.URL.Query().Get("limit") != "200" {
+			t.Errorf("limit = %q, want %q", r.URL.Query().Get("limit"), "200")
 		}
 		respondOK(w, map[string]any{
 			"history": []map[string]any{
 				{
-					"id":        "1",
+					"id":        "1787177211116-0",
 					"timestamp": now,
 					"actor":     "user",
-					"action":    "issue.created",
+					"action":    "issue.update",
+					"category":  "field_change",
+					"summary":   "Updated status",
+					"changes": []map[string]string{
+						{"field": "status", "before": "open", "after": "in_progress"},
+					},
+					"metadata": map[string]string{"source": "test"},
 				},
 			},
 		})
@@ -1521,24 +1569,82 @@ func TestListEvents_HappyPath(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("len = %d, want 1", len(result))
 	}
-	if result[0].Kind != "issue.created" {
-		t.Errorf("Kind = %q, want %q", result[0].Kind, "issue.created")
+	got := result[0]
+	if got.ID != "1787177211116-0" {
+		t.Errorf("ID = %q, want stream ID", got.ID)
+	}
+	if got.Kind != "issue.update" || got.Category != "field_change" || got.Summary != "Updated status" {
+		t.Errorf("event fields = %+v", got)
+	}
+	if len(got.Changes) != 1 || got.Changes[0] != (backend.FieldChange{Field: "status", Before: "open", After: "in_progress"}) {
+		t.Errorf("Changes = %+v", got.Changes)
+	}
+	if got.Metadata["source"] != "test" {
+		t.Errorf("Metadata = %+v", got.Metadata)
 	}
 }
 
-// --- Not implemented surfaces (partial — implemented methods moved out) ---
-//
-// Count, Batch, GetMutations, and WaitForMutations used to live here as
-// ErrNotImplemented stubs; they are now wired against fleet-db endpoints
-// (see tests above). The only remaining KindNotImplemented paths are:
-//
-//   - Count with GroupBy set — Count cannot return grouped data through its
-//     int return value; callers must use Stats or (future) a GroupedCount API.
-//     This is exercised by TestCount_GroupByRejected.
-//
-// If future refactors reintroduce unimplemented stubs, add cases here.
+func TestListEvents_ReturnsMostRecentPageAcrossHistoryPagination(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var requests int
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if got := r.URL.Query().Get("limit"); got != "200" {
+			t.Errorf("request %d limit = %q, want 200", requests, got)
+		}
 
-// --- Connection refused test ---
+		switch requests {
+		case 1:
+			if got := r.URL.Query().Get("since"); got != "" {
+				t.Errorf("first request since = %q, want empty", got)
+			}
+			history := make([]map[string]any, 200)
+			for index := range history {
+				history[index] = map[string]any{
+					"id":        strconv.Itoa(index+1) + "-0",
+					"timestamp": now.Add(time.Duration(index) * time.Second),
+					"actor":     "agent",
+					"action":    "issue.update",
+				}
+			}
+			respondOK(w, map[string]any{
+				"history":  history,
+				"cursor":   "200-0",
+				"has_more": true,
+			})
+		case 2:
+			if got := r.URL.Query().Get("since"); got != "200-0" {
+				t.Errorf("second request since = %q, want 200-0", got)
+			}
+			respondOK(w, map[string]any{
+				"history": []map[string]any{
+					{"id": "201-0", "timestamp": now.Add(200 * time.Second), "actor": "agent", "action": "issue.update"},
+					{"id": "202-0", "timestamp": now.Add(201 * time.Second), "actor": "agent", "action": "issue.update"},
+					{"id": "203-0", "timestamp": now.Add(202 * time.Second), "actor": "agent", "action": "issue.update"},
+				},
+				"cursor":   "203-0",
+				"has_more": false,
+			})
+		default:
+			t.Errorf("unexpected request %d", requests)
+		}
+	})
+	defer ts.Close()
+
+	result, err := fb.ListEvents(context.Background(), "test-1", 3)
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	if requests != 2 {
+		t.Errorf("requests = %d, want 2", requests)
+	}
+	if len(result) != 3 {
+		t.Fatalf("result length = %d, want 3", len(result))
+	}
+	if got := []string{result[0].ID, result[1].ID, result[2].ID}; !reflect.DeepEqual(got, []string{"201-0", "202-0", "203-0"}) {
+		t.Errorf("IDs = %v, want [201-0 202-0 203-0]", got)
+	}
+}
 
 func TestConnectionRefused(t *testing.T) {
 	fb, err := New(Config{
@@ -2198,8 +2304,8 @@ func TestGetMutations_ActionFolding(t *testing.T) {
 			t.Errorf("got[%d] missing generic envelope fields: %+v", i, got[i])
 		}
 	}
-	if got[2].IssueID != "" || got[3].IssueID != "" || got[4].IssueID != "" {
-		t.Errorf("non-issue fleet mutations should not populate legacy issue_id: comment=%q label=%q workspace=%q", got[2].IssueID, got[3].IssueID, got[4].IssueID)
+	if got[2].IssueID != "c" || got[3].IssueID != "d" || got[4].IssueID != "" {
+		t.Errorf("issue-owned child mutations should project entity_id while workspace mutations must not: comment=%q label=%q workspace=%q", got[2].IssueID, got[3].IssueID, got[4].IssueID)
 	}
 	if got[0].IssueID != "a" || got[5].IssueID != "e" {
 		t.Errorf("issue fleet mutations should preserve legacy issue_id: update=%q unknown=%q", got[0].IssueID, got[5].IssueID)

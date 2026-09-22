@@ -20,6 +20,7 @@ type fileIndexCacheEntry struct {
 	key            string
 	root           string
 	allowSensitive bool
+	policyIdentity string
 	result         service.FileIndexResult
 	size           int64
 	expiresAt      time.Time
@@ -47,10 +48,10 @@ func newFileIndexCache(maxEntries int, maxBytes int64, ttl time.Duration) *fileI
 	}
 }
 
-func (c *fileIndexCache) get(root string, allowSensitive bool) (*service.FileIndexResult, bool) {
+func (c *fileIndexCache) get(root string, allowSensitive bool, policyIdentity string) (*service.FileIndexResult, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	key := fileIndexCacheKey(root, allowSensitive)
+	key := fileIndexCacheKey(root, allowSensitive, policyIdentity)
 	element, ok := c.entries[key]
 	if !ok {
 		return nil, false
@@ -64,23 +65,25 @@ func (c *fileIndexCache) get(root string, allowSensitive bool) (*service.FileInd
 	return cloneFileIndexResult(&entry.result), true
 }
 
-func (c *fileIndexCache) put(root string, allowSensitive bool, result *service.FileIndexResult) {
-	c.putAtGeneration(root, allowSensitive, result, nil)
+//nolint:unparam // policyIdentity keys the cache; today's single policy is still part of the key.
+func (c *fileIndexCache) put(root string, allowSensitive bool, policyIdentity string, result *service.FileIndexResult) {
+	c.putAtGeneration(root, allowSensitive, policyIdentity, result, nil)
 }
 
-func (c *fileIndexCache) putIfGeneration(root string, allowSensitive bool, result *service.FileIndexResult, generation uint64) {
-	c.putAtGeneration(root, allowSensitive, result, &generation)
+func (c *fileIndexCache) putIfGeneration(root string, allowSensitive bool, policyIdentity string, result *service.FileIndexResult, generation uint64) {
+	c.putAtGeneration(root, allowSensitive, policyIdentity, result, &generation)
 }
 
-func (c *fileIndexCache) putAtGeneration(root string, allowSensitive bool, result *service.FileIndexResult, expectedGeneration *uint64) {
+func (c *fileIndexCache) putAtGeneration(root string, allowSensitive bool, policyIdentity string, result *service.FileIndexResult, expectedGeneration *uint64) {
 	if result == nil {
 		return
 	}
 	copyResult := cloneFileIndexResult(result)
 	entry := &fileIndexCacheEntry{
-		key:            fileIndexCacheKey(root, allowSensitive),
+		key:            fileIndexCacheKey(root, allowSensitive, policyIdentity),
 		root:           root,
 		allowSensitive: allowSensitive,
+		policyIdentity: policyIdentity,
 		result:         *copyResult,
 		size:           estimateFileIndexSize(copyResult),
 		expiresAt:      c.now().Add(c.ttl),
@@ -158,15 +161,16 @@ func estimateFileIndexSize(result *service.FileIndexResult) int64 {
 	return size
 }
 
-func fileIndexCacheKey(root string, allowSensitive bool) string {
+func fileIndexCacheKey(root string, allowSensitive bool, policyIdentity string) string {
+	key := root + "\x00skill-policy:" + policyIdentity
 	if allowSensitive {
-		return root + "\x00sensitive"
+		return key + "\x00sensitive"
 	}
-	return root + "\x00filtered"
+	return key + "\x00filtered"
 }
 
-func fileIndexBuildKey(root string, allowSensitive bool, generation uint64) string {
-	return fileIndexCacheKey(root, allowSensitive) + "\x00generation:" + strconv.FormatUint(generation, 10)
+func fileIndexBuildKey(root string, allowSensitive bool, policyIdentity string, generation uint64) string {
+	return fileIndexCacheKey(root, allowSensitive, policyIdentity) + "\x00generation:" + strconv.FormatUint(generation, 10)
 }
 
 func canonicalRootsOverlap(a, b string) bool {

@@ -160,6 +160,9 @@ func Execute() error {
 		defer cancel()
 		_ = traceShutdown(ctx)
 	}()
+	// Register after the trace defer so this runs first: buffered host-local
+	// agent events reach JSONL before the trace provider shuts down.
+	defer CloseAgentEventBus(context.Background())
 
 	// Wrap the entire CLI invocation in a root span so HTTP calls to fleet-db
 	// hang off it as children rather than fragmenting into per-call traces.

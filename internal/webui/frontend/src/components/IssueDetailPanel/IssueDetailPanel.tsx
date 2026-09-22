@@ -41,6 +41,7 @@ import type {
   Comment,
   Event,
 } from "@/types";
+import { ApiError } from "@/types";
 import type { Status } from "@/types/issue";
 import { formatStatusLabel, getReviewType, isPRUrl } from "@/utils/issue";
 import {
@@ -58,6 +59,7 @@ import type { SessionRecord } from "@/types/agent";
 
 import {
   ActivityLog,
+  Journey,
   CommentForm,
   DependencySection,
   EditableDescription,
@@ -67,8 +69,14 @@ import {
   PRSection,
   RejectCommentForm,
 } from "./sections";
+import { decisionButtonStyles } from "@/components/DecisionButton";
 import { IssueHeader } from "./header";
-import { AssigneeDropdown, RepoDropdown } from "./fields";
+import {
+  AssigneeDropdown,
+  LabelEditor,
+  RepoDropdown,
+  TypeDropdown,
+} from "./fields";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { MoveIssueDialog } from "./actions";
 import { SplitDetailSummary } from "./SplitDetailSummary";
@@ -79,7 +87,7 @@ import { useSplitRatio, useToast } from "@/hooks/ui";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { SessionsTab } from "./sessions";
 import styles from "./IssueDetailPanel.module.css";
-import { formatDate, formatIssueType, isIssueDetails } from "./utils";
+import { formatDate, isIssueDetails } from "./utils";
 
 /**
  * Blocking banner component - shows when issue is in blocked state with open dependencies.
@@ -277,6 +285,8 @@ const SESSIONS_TAB: DetailTab = {
   closable: false,
 };
 
+const ISSUE_EVENT_LIMIT = 200;
+
 function latestFailedRun(sessions: SessionRecord[]): SessionRecord | null {
   const sorted = [...sessions].sort(
     (a, b) =>
@@ -452,12 +462,23 @@ function DefaultContent({
   const [isSavingStatus, setIsSavingStatus] = useState(false);
   const [isSavingAssignee, setIsSavingAssignee] = useState(false);
   const [isSavingRepo, setIsSavingRepo] = useState(false);
+  const [isSavingType, setIsSavingType] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [titleError, setTitleError] = useState<string | null>(null);
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
   const [rejectError, setRejectError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  // Latched from a server 409: the issue is not claimable, so approving it will
+  // keep failing until the record changes (PUPPET-146). The revision the
+  // refusal was issued against is latched alongside it — see the clearing
+  // effect below for why the reason alone is not enough.
+  const [approveBlocked, setApproveBlocked] = useState<{
+    reason: string;
+    revision: string;
+  } | null>(null);
+  const approveBlockedReason = approveBlocked?.reason ?? null;
   const [showMoveDialog, setShowMoveDialog] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [isStartingEpicRun, setIsStartingEpicRun] = useState(false);
@@ -764,6 +785,7 @@ function DefaultContent({
 
   // Local state for events (activity log)
   const [events, setEvents] = useState<Event[]>([]);
+  const eventsRequestIdRef = useRef(0);
 
   // Sync local comments when issue changes (e.g., different issue selected)
   useEffect(() => {
@@ -774,26 +796,31 @@ function DefaultContent({
     }
   }, [issue]);
 
-  // Fetch events when issue changes
+  // Fetch one shared event list for Journey and Activity. The parent merges
+  // live issue mutations into this prop, including updated_at, so the revision
+  // is the same signal that refreshes the status pill.
   const eventIssueId = issue?.id;
+  const eventIssueRevision = issue?.updated_at;
   useEffect(() => {
+    const requestId = ++eventsRequestIdRef.current;
     if (!eventIssueId) {
       setEvents([]);
       return;
     }
-    let cancelled = false;
-    getIssueEvents(workspaceId, eventIssueId).then(
+    getIssueEvents(workspaceId, eventIssueId, ISSUE_EVENT_LIMIT).then(
       (data) => {
-        if (!cancelled) setEvents(data ?? []);
+        if (requestId === eventsRequestIdRef.current) setEvents(data ?? []);
       },
       () => {
-        if (!cancelled) setEvents([]);
+        if (requestId === eventsRequestIdRef.current) setEvents([]);
       },
     );
     return () => {
-      cancelled = true;
+      if (requestId === eventsRequestIdRef.current) {
+        eventsRequestIdRef.current += 1;
+      }
     };
-  }, [eventIssueId]);
+  }, [eventIssueId, eventIssueRevision, workspaceId]);
 
   // Handler for when a new comment is added
   const handleCommentAdded = useCallback((newComment: Comment) => {
@@ -926,6 +953,45 @@ function DefaultContent({
     [issue, onIssueUpdate, workspaceId],
   );
 
+  const handleTypeSave = useCallback(
+    async (newType: Issue["issue_type"]) => {
+      if (!issue || !newType) return;
+
+      setIsSavingType(true);
+      try {
+        const updatedIssue = await updateIssue(workspaceId, issue.id, {
+          issue_type: newType,
+        });
+        onIssueUpdate?.(updatedIssue);
+      } finally {
+        setIsSavingType(false);
+      }
+    },
+    [issue, onIssueUpdate, workspaceId],
+  );
+
+  const handleAddLabel = useCallback(
+    async (label: string) => {
+      if (!issue) return;
+      const updatedIssue = await updateIssue(workspaceId, issue.id, {
+        add_labels: [label],
+      });
+      onIssueUpdate?.(updatedIssue);
+    },
+    [issue, onIssueUpdate, workspaceId],
+  );
+
+  const handleRemoveLabel = useCallback(
+    async (label: string) => {
+      if (!issue) return;
+      const updatedIssue = await updateIssue(workspaceId, issue.id, {
+        remove_labels: [label],
+      });
+      onIssueUpdate?.(updatedIssue);
+    },
+    [issue, onIssueUpdate, workspaceId],
+  );
+
   const handleRunEpicWorkflow = useCallback(async () => {
     if (!issue || issue.issue_type !== "epic" || isStartingEpicRun) return;
 
@@ -1038,14 +1104,26 @@ function DefaultContent({
 
   // Approve handler
   const handleApprove = useCallback(async () => {
-    if (!issue || !onApprove || isApproving) return;
+    if (!issue || !onApprove || isApproving || approveBlockedReason !== null)
+      return;
+    // The revision the server is about to refuse — read before the optimistic
+    // update rewrites it, because that is the revision the rollback restores.
+    const attemptedRevision = `${issue.id}@${issue.updated_at ?? ""}`;
     setIsApproving(true);
+    setActionError(null);
     try {
       await onApprove(issue as Issue);
-    } catch {
+    } catch (err) {
       setIsApproving(false);
+      const message = err instanceof Error ? err.message : "Failed to approve";
+      setActionError(message);
+      // A 409 means the server refuses to claim this issue; retrying without a
+      // re-fetch can only fail the same way, so latch the reason and disable.
+      if (err instanceof ApiError && err.status === 409) {
+        setApproveBlocked({ reason: message, revision: attemptedRevision });
+      }
     }
-  }, [issue, onApprove, isApproving]);
+  }, [issue, onApprove, isApproving, approveBlockedReason]);
 
   // Reject button click - show form
   const handleRejectClick = useCallback(() => {
@@ -1102,10 +1180,31 @@ function DefaultContent({
     setIsApproving(false);
     setIsRejecting(false);
     setRejectError(null);
+    setActionError(null);
     setShowMoveDialog(false);
     setMoveError(null);
     setIsStartingEpicRun(false);
   }, [issue?.id]);
+
+  // Identity plus revision: an SSE update (the agent released its claim, the
+  // status moved) can make the very same issue claimable again.
+  const issueRevision = `${issue?.id ?? ""}@${issue?.updated_at ?? ""}`;
+
+  // Clear the latch on any new revision of the record, not just a different
+  // issue, or the operator stays stuck looking at a disabled Approve button
+  // until they navigate away.
+  //
+  // Except the revision the refusal itself was issued against. The optimistic
+  // status update stamps a fabricated `updated_at`, and the 409 rollback
+  // restores the original one, so the panel lands back on the pre-approve
+  // revision a beat AFTER the catch above latches the reason. Clearing
+  // unconditionally therefore erased the message it had just set and
+  // re-enabled Approve, which is the whole bug (PUPPET-146).
+  useEffect(() => {
+    setApproveBlocked((current) =>
+      current && current.revision === issueRevision ? current : null,
+    );
+  }, [issueRevision]);
 
   // Loading state
   if (isLoading) {
@@ -1202,15 +1301,11 @@ function DefaultContent({
         {/* Metadata Bar */}
         <div className={styles.metadataBar}>
           <span className={styles.metadataItem} data-testid="metadata-type">
-            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path
-                d="M2 4h12M2 8h12M2 12h8"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-            </svg>
-            {formatIssueType(issue.issue_type)}
+            <TypeDropdown
+              type={issue.issue_type}
+              onSave={handleTypeSave}
+              isSaving={isSavingType}
+            />
           </span>
           <AssigneeDropdown
             assignee={issue.assignee}
@@ -1262,23 +1357,36 @@ function DefaultContent({
         <div className={styles.reviewActionBar} data-testid="review-action-bar">
           <button
             type="button"
-            className={styles.reviewApproveButton}
+            className={`${decisionButtonStyles.button} ${decisionButtonStyles.approve}`}
             onClick={handleApprove}
-            disabled={isApproving}
+            disabled={isApproving || approveBlockedReason !== null}
+            title={approveBlockedReason ?? undefined}
             aria-label="Approve"
             data-testid="panel-approve-button"
           >
             {isApproving ? "..." : "\u2713"} Approve
           </button>
+          {/* Not disabled by an approve 409: reject is a different transition
+              (PATCH status=open) that the claim guard does not cover, and
+              sending the task back is often the way out. */}
           <button
             type="button"
-            className={styles.reviewRejectButton}
+            className={`${decisionButtonStyles.button} ${decisionButtonStyles.reject}`}
             onClick={handleRejectClick}
             aria-label="Reject"
             data-testid="panel-reject-button"
           >
             {"\u2717"} Reject
           </button>
+          {/* Inline so the reason outlives the toast's auto-dismiss. */}
+          {approveBlockedReason && (
+            <span
+              className={styles.reviewBlockedReason}
+              data-testid="panel-approve-blocked-reason"
+            >
+              {approveBlockedReason}
+            </span>
+          )}
         </div>
       )}
 
@@ -1470,6 +1578,13 @@ function DefaultContent({
 
             {/* Full-width sections below the columns */}
 
+            <LabelEditor
+              labels={issue.labels ?? []}
+              onAddLabel={handleAddLabel}
+              onRemoveLabel={handleRemoveLabel}
+              disabled={isLoading}
+            />
+
             {/* Epic roll-up: progress distribution + child tickets */}
             {issue.issue_type === "epic" && (
               <EpicRollup
@@ -1519,12 +1634,10 @@ function DefaultContent({
               </section>
             )}
 
-            {/* Activity Log (comments + events) */}
-            <ActivityLog
-              comments={localComments ?? []}
-              events={events}
-              issueId={issue.id}
-            />
+            <Journey events={events} eventLimit={ISSUE_EVENT_LIMIT} />
+
+            {/* Comments (audit events are nested in Journey spans) */}
+            <ActivityLog comments={localComments ?? []} issueId={issue.id} />
             <CommentForm
               issueId={issue.id}
               onCommentAdded={handleCommentAdded}
@@ -1558,6 +1671,15 @@ function DefaultContent({
           message={statusError}
           onDismiss={() => setStatusError(null)}
           testId="status-error-toast"
+        />
+      )}
+
+      {/* Error toast for approve/reject failures */}
+      {actionError && (
+        <ErrorToast
+          message={actionError}
+          onDismiss={() => setActionError(null)}
+          testId="action-error-toast"
         />
       )}
 
@@ -1629,11 +1751,11 @@ export function IssueDetailPanel({
 }: IssueDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
 
-  // Full-page maximize toggle for the slide-over.
+  // Issue details open as the right-side slide-over. Full-screen is an explicit
+  // operator choice through the header toggle, not the default presentation.
   const [isMaximized, setIsMaximized] = useState(false);
   const toggleMaximize = useCallback(() => setIsMaximized((v) => !v), []);
-  // Reset to the default slide-over width when the panel closes or the
-  // selected issue changes, so a maximized panel doesn't "stick" across opens.
+  // Each newly opened issue returns to the compact slide-over model.
   useEffect(() => {
     if (!isOpen) setIsMaximized(false);
   }, [isOpen]);

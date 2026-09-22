@@ -16,6 +16,23 @@ type actorClaimMockBackend struct {
 	ttl       time.Duration
 }
 
+type eventHistoryMockBackend struct {
+	*MockIssueBackend
+	result *backend.EventHistoryData
+	params backend.EventHistoryParams
+}
+
+var _ backend.EventHistoryBackend = (*eventHistoryMockBackend)(nil)
+
+func (m *eventHistoryMockBackend) ListEventHistory(
+	_ context.Context,
+	_ string,
+	params backend.EventHistoryParams,
+) (*backend.EventHistoryData, error) {
+	m.params = params
+	return m.result, nil
+}
+
 func (m *actorClaimMockBackend) ClaimIssueAsActor(_ context.Context, id string, ttl time.Duration, actor string) error {
 	m.claimedID = id
 	m.actor = actor
@@ -38,6 +55,47 @@ func TestTracedIssueBackendPreservesClaimIssueAsActor(t *testing.T) {
 	}
 	if inner.claimedID != "TASK-1" || inner.actor != "planner" || inner.ttl != time.Minute {
 		t.Fatalf("claim = id %q actor %q ttl %s", inner.claimedID, inner.actor, inner.ttl)
+	}
+}
+
+func TestTracedIssueBackendPreservesEventHistoryCapability(t *testing.T) {
+	since := "cursor-200"
+	inner := &eventHistoryMockBackend{
+		MockIssueBackend: NewMockIssueBackend(),
+		result: &backend.EventHistoryData{
+			Events:      []backend.EventData{{ID: "event-201"}},
+			Cursor:      "cursor-201",
+			HasMore:     true,
+			TotalEvents: 295,
+		},
+	}
+
+	historyBackend, ok := wrapIssueBackendWithTracing(inner).(backend.EventHistoryBackend)
+	if !ok {
+		t.Fatal("traced backend should preserve EventHistoryBackend")
+	}
+	result, err := historyBackend.ListEventHistory(context.Background(), "TASK-1", backend.EventHistoryParams{
+		Limit: 200,
+		Since: &since,
+	})
+	if err != nil {
+		t.Fatalf("ListEventHistory: %v", err)
+	}
+	if result.Cursor != "cursor-201" || result.TotalEvents != 295 {
+		t.Errorf("result = %+v, want forwarded event-history result", result)
+	}
+	if inner.params.Since == nil || *inner.params.Since != since || inner.params.Limit != 200 {
+		t.Errorf("params = %+v, want since %q and limit 200", inner.params, since)
+	}
+}
+
+func TestTracedIssueBackend_EventHistoryUnsupportedByInner(t *testing.T) {
+	historyBackend, ok := wrapIssueBackendWithTracing(NewMockIssueBackend()).(backend.EventHistoryBackend)
+	if !ok {
+		t.Fatal("traced backend should preserve EventHistoryBackend capability checks")
+	}
+	if _, err := historyBackend.ListEventHistory(context.Background(), "TASK-1", backend.EventHistoryParams{}); !backend.IsKind(err, backend.KindNotImplemented) {
+		t.Fatalf("error = %v, want KindNotImplemented", err)
 	}
 }
 

@@ -40,7 +40,8 @@ export {
 export type { FileCapabilitiesState } from "./useFileCapabilities";
 
 export { useScopedFileTree } from "./useScopedFileTree";
-export type { UseScopedFileTreeReturn } from "./useScopedFileTree";
+export { useScopedFileTreeCore } from "./useScopedFileTree";
+export type { DirLoader, UseScopedFileTreeReturn } from "./useScopedFileTree";
 
 export { useFolderPicker } from "./useFolderPicker";
 export type {
@@ -71,6 +72,16 @@ export type {
   SortDirection,
 } from "./useSort";
 
+export { useStableByKey } from "./useStableByKey";
+
+export {
+  useSkill,
+  useSkillCapabilities,
+  useSkillsActions,
+  useSkillsCatalog,
+  useSkillsTree,
+} from "./useSkills";
+
 export {
   StoreProvider,
   useIssueStoreInstance,
@@ -84,6 +95,7 @@ export {
   agentFileBrowserTabsStorageKey,
   FileBrowserStoreProvider,
   fileBrowserTabsStorageKey,
+  skillsFileBrowserTabsStorageKey,
   useFileBrowserStore,
   useFileBrowserStoreInstance,
 } from "@/stores";

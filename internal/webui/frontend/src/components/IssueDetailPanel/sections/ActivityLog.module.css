@@ -80,28 +80,3 @@
   line-height: 1.55;
   word-break: break-word;
 }
-
-/* Event entries - compact inline */
-.eventEntry {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-  position: relative;
-}
-
-.eventIcon {
-  width: 16px;
-  height: 16px;
-  color: var(--color-text-muted);
-  flex-shrink: 0;
-  /* Center on the timeline line (line is at 13px, icon is 16px) */
-  margin-left: 5px;
-}
-
-.eventDescription {
-  font-size: var(--font-size-base);
-  color: var(--color-text-muted);
-  flex: 1;
-  min-width: 0;
-}

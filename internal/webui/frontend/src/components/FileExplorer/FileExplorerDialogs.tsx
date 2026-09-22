@@ -19,10 +19,12 @@ import type {
 
 export function DeleteConfirmDialog({
   node,
+  allowSkip = true,
   onCancel,
   onConfirm,
 }: {
   node: FileTreeNodeInfo;
+  allowSkip?: boolean | undefined;
   onCancel: () => void;
   onConfirm: (skipFutureFileConfirms: boolean) => void;
 }) {
@@ -33,7 +35,7 @@ export function DeleteConfirmDialog({
         <p className={styles.dialogMessage}>
           Delete {node.isDir ? "folder" : "file"} {node.path}?
         </p>
-        {!node.isDir && (
+        {!node.isDir && allowSkip && (
           <label className={styles.checkboxRow}>
             <input
               type="checkbox"
@@ -123,13 +125,46 @@ export function ContextMenu({
   onDuplicate: (node: FileTreeNodeInfo) => void;
   onCopyPath: (node: FileTreeNodeInfo) => void;
 }) {
+  const skillsMenu = state.ref.kind === "skills";
+  const isSkillBody = state.node.path.endsWith("/SKILL.md");
   return (
     <div
       className={styles.contextMenu}
       style={{ left: state.x, top: state.y }}
       role="menu"
     >
-      {canWrite && (
+      {canWrite && skillsMenu && (
+        <>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => onNewFile(state.node)}
+          >
+            New file in skill
+          </button>
+          {state.node.depth === 0 ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => onDelete(state.node)}
+            >
+              Delete skill
+            </button>
+          ) : (
+            !state.node.isDir &&
+            !isSkillBody && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => onDelete(state.node)}
+              >
+                Delete file
+              </button>
+            )
+          )}
+        </>
+      )}
+      {canWrite && !skillsMenu && (
         <>
           <button
             type="button"

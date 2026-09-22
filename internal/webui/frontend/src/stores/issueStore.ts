@@ -16,6 +16,7 @@ import {
   fetchGraphIssues,
 } from "../api/issues";
 import type { Issue, WorkFilter, Status } from "../types";
+import { ApiError } from "../types/common";
 import {
   calculateBackoffDelay,
   type ReconnectConfig,
@@ -27,11 +28,13 @@ import {
   STALE_BANNER_DELAY_MS,
   AUTO_ROLLBACK_TIMEOUT_MS,
   REFRESH_DEBOUNCE_MS,
+  MAX_PROJECTION_REFRESH_WAIT_MS,
   MAX_AUTO_RETRIES,
   RETRY_BASE_DELAY_MS,
   RETRY_MAX_DELAY_MS,
   INITIAL_STATE,
   issuesAreEqual,
+  mergeKanbanProjection,
   extractErrorMessage,
   issueMutationAppliesToLocalIssue,
   issueMutationInvalidatesProjection,
@@ -43,6 +46,7 @@ import type {
   FetchIssuesParams,
   SubscribeFn,
   OptimisticEntry,
+  UpdateIssueStatusOptions,
 } from "./issueStoreHelpers";
 
 // Re-export public types and utilities
@@ -54,7 +58,18 @@ export type {
   IssueStoreConfig,
   FetchIssuesParams,
   SubscribeFn,
+  UpdateIssueStatusOptions,
 } from "./issueStoreHelpers";
+
+/**
+ * Whether a failed fetch is worth retrying automatically. Network failures
+ * and 5xx are; 4xx are not, except the two transient ones.
+ */
+export function isRetryableError(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return true;
+  if (err.status === 408 || err.status === 429) return true;
+  return err.status < 400 || err.status >= 500;
+}
 
 export function createIssueStore(
   initialConfig?: IssueStoreConfig,
@@ -71,6 +86,7 @@ export function createIssueStore(
   let activeController: AbortController | null = null;
   const deletedDuringFetch = new Set<string>();
   let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
+  let projectionRefreshPendingSince: number | null = null;
   let staleBannerTimeout: ReturnType<typeof setTimeout> | null = null;
   /** Pending auto-retry timer; cleared on new fetch, reset, or success. */
   let retryTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -85,15 +101,56 @@ export function createIssueStore(
   let maxReconnectAttemptsTracked = 0;
   let eventUnsubscribe: (() => void) | null = null;
 
+  function invalidateIssueDetails(
+    issueId: string,
+    get: () => IssueStore,
+  ): void {
+    const versions = new Map(get().detailInvalidationVersions);
+    versions.set(issueId, (versions.get(issueId) ?? 0) + 1);
+    store.setState({ detailInvalidationVersions: versions });
+  }
+
+  function detailIssueId(mutation: MutationPayload): string | undefined {
+    const detailEntity = mutation.entity_type;
+    if (
+      mutation.type !== "comment" &&
+      detailEntity !== "comment" &&
+      detailEntity !== "label" &&
+      detailEntity !== "dependency" &&
+      detailEntity !== "dep"
+    ) {
+      return undefined;
+    }
+
+    // Non-issue entity IDs identify the comment, label, or dependency itself.
+    // The backend projects the owning issue into issue_id from the event
+    // snapshot, which is the only safe key for detail invalidation.
+    return mutation.issue_id;
+  }
+
   let onToast = initialConfig?.onToast ?? null;
   let retryConnectionFn = initialConfig?.retryConnectionFn ?? null;
 
   function scheduleProjectionRefresh(get: () => IssueStore): void {
+    const now = Date.now();
+    if (projectionRefreshPendingSince === null) {
+      projectionRefreshPendingSince = now;
+    }
+
+    const maxWaitRemaining = Math.max(
+      0,
+      MAX_PROJECTION_REFRESH_WAIT_MS - (now - projectionRefreshPendingSince),
+    );
+
     if (refreshTimeout) clearTimeout(refreshTimeout);
-    refreshTimeout = setTimeout(() => {
-      refreshTimeout = null;
-      void get().refetch();
-    }, REFRESH_DEBOUNCE_MS);
+    refreshTimeout = setTimeout(
+      () => {
+        refreshTimeout = null;
+        projectionRefreshPendingSince = null;
+        void get().refetch();
+      },
+      Math.min(REFRESH_DEBOUNCE_MS, maxWaitRemaining),
+    );
   }
 
   /** Apply a mutation to the store, handling side effects from the pure result */
@@ -243,6 +300,10 @@ export function createIssueStore(
           data = await getReadyIssues(workspaceId, effectiveFilter, reqOpts);
         }
 
+        if (activeController !== internalController || mergedSignal.aborted) {
+          return;
+        }
+
         const deletedSnapshot = new Set(deletedDuringFetch);
         const currentMap = get().issuesMap;
         const mergedMap = new Map<string, Issue>();
@@ -270,7 +331,12 @@ export function createIssueStore(
           const currentTime = Date.parse(currentIssue.updated_at);
           const apiTime = Date.parse(apiIssue.updated_at);
           if (!isNaN(currentTime) && !isNaN(apiTime) && currentTime > apiTime) {
-            mergedMap.set(id, currentIssue);
+            mergedMap.set(
+              id,
+              mode === "kanban"
+                ? mergeKanbanProjection(currentIssue, apiIssue)
+                : currentIssue,
+            );
           }
         }
 
@@ -307,6 +373,20 @@ export function createIssueStore(
         // starting, 503+kind=starting) from other 503s like "daemon
         // unavailable" and route to the loading-variant UX accordingly.
         const message = extractErrorMessage(err);
+
+        // A client error (4xx) is deterministic — the same request will fail
+        // the same way — so retrying only hammers the server and hides the
+        // real message behind a countdown. 408 and 429 are the transient
+        // exceptions. Surface the error and stop.
+        if (!isRetryableError(err)) {
+          set({
+            error: message,
+            isLoading: false,
+            retryCount: MAX_AUTO_RETRIES,
+            nextRetryAt: null,
+          });
+          return;
+        }
 
         // Schedule exponential-backoff auto-retry if we haven't exhausted
         // the budget. The retry calls fetchIssues({ isAutoRetry: true }),
@@ -416,6 +496,11 @@ export function createIssueStore(
         }
       }
 
+      const invalidatedIssueId = detailIssueId(mutation);
+      if (invalidatedIssueId) {
+        invalidateIssueDetails(invalidatedIssueId, get);
+      }
+
       applyMutationToStore(mutation, set, get);
     },
 
@@ -423,6 +508,7 @@ export function createIssueStore(
       issueId: string,
       newStatus: Status,
       workspaceId: string,
+      options?: UpdateIssueStatusOptions,
     ): Promise<void> {
       const existingIssue = get().issuesMap.get(issueId);
       if (!existingIssue) {
@@ -498,9 +584,13 @@ export function createIssueStore(
             applyMutationToStore(m, set, get);
           }
 
-          const message =
-            err instanceof Error ? err.message : "Failed to update status";
-          onToast?.(message, { type: "error" });
+          // Suppressed when the caller renders the rejection itself; the
+          // error is re-thrown either way, so opting out loses nothing.
+          if (options?.toastOnRollback !== false) {
+            const message =
+              err instanceof Error ? err.message : "Failed to update status";
+            onToast?.(message, { type: "error" });
+          }
         }
         removeOptimisticEntry(issueId, get, set);
         throw err;
@@ -584,6 +674,13 @@ export function createIssueStore(
       retryConnectionFn?.();
     },
 
+    reconcileIssue(issue: Issue): void {
+      const issuesMap = new Map(get().issuesMap);
+      const existing = issuesMap.get(issue.id);
+      issuesMap.set(issue.id, existing ? { ...existing, ...issue } : issue);
+      set({ issuesMap });
+    },
+
     getIssue(id: string): Issue | undefined {
       return get().issuesMap.get(id);
     },
@@ -598,6 +695,7 @@ export function createIssueStore(
         clearTimeout(refreshTimeout);
         refreshTimeout = null;
       }
+      projectionRefreshPendingSince = null;
       if (staleBannerTimeout) {
         clearTimeout(staleBannerTimeout);
         staleBannerTimeout = null;
@@ -627,7 +725,12 @@ export function createIssueStore(
       reconnectRecoveryPending = false;
       maxReconnectAttemptsTracked = 0;
 
-      set({ ...INITIAL_STATE, pendingIds: new Set(), issuesMap: new Map() });
+      set({
+        ...INITIAL_STATE,
+        pendingIds: new Set(),
+        issuesMap: new Map(),
+        detailInvalidationVersions: new Map(),
+      });
     },
   }));
 

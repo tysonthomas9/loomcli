@@ -25,13 +25,24 @@ import (
 // counterpart of the hook-driven capture used outside fleet mode — agents run
 // by `loom plan|task` in fleet mode have no Claude Code hooks installed.
 func (s *Store) SyncLatestClaudeTranscript(sessionID, workDir, claudeUUID string, since time.Time) (string, error) {
+	return s.syncLatestClaudeTranscriptFor("", sessionID, workDir, claudeUUID, since)
+}
+
+// syncLatestClaudeTranscriptFor is SyncLatestClaudeTranscript scoped to an
+// agent: when that agent has a harness profile directory, the transcript is
+// read from there instead of from this process's own Claude config root. The
+// daemon finalizes a run AFTER the agent is reaped, so its environment carries
+// no CLAUDE_CONFIG_DIR — without the agent scope it would look under the
+// operator's ~/.claude and mirror nothing. An empty agent resolves exactly as
+// before.
+func (s *Store) syncLatestClaudeTranscriptFor(agent, sessionID, workDir, claudeUUID string, since time.Time) (string, error) {
 	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.SyncLatestClaudeTranscript",
 		attrLoomSessionID(sessionID),
 		attrLoomBackend("claude"),
 	)
 	defer span.End()
 
-	projectDir := claudeProjectDir(workDir)
+	projectDir := claudeProjectDirFor(s.RootDir(), agent, workDir)
 	if projectDir == "" {
 		return "", nil
 	}
@@ -46,13 +57,15 @@ func (s *Store) SyncLatestClaudeTranscript(sessionID, workDir, claudeUUID string
 	return srcPath, nil
 }
 
-// claudeProjectDir returns <claude-config-dir>/projects/<encoded-cwd> for
-// workDir, or "" if the config dir cannot be resolved or workDir is empty.
-func claudeProjectDir(workDir string) string {
+// claudeProjectDirFor returns <claude-config-dir>/projects/<encoded-cwd> for
+// workDir, or "" if the config dir cannot be resolved or workDir is empty. The
+// config dir is resolved for the named agent (profile dir → CLAUDE_CONFIG_DIR
+// → ~/.claude); an empty projectDir or agent yields the process-scoped root.
+func claudeProjectDirFor(projectDir, agent, workDir string) string {
 	if workDir == "" {
 		return ""
 	}
-	root := ClaudeConfigDir()
+	root := ClaudeConfigDirFor(projectDir, agent)
 	if root == "" {
 		return ""
 	}

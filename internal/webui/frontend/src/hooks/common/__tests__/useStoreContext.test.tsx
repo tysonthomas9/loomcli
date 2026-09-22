@@ -264,6 +264,17 @@ describe("useStoreContext", () => {
 
       expect(EventProviderSpy.lastSourceRepos).toBeUndefined();
     });
+
+    it("drops the repo scope from the event stream when unscopedEvents is set", () => {
+      mockWorkspace.sourceReposFilter = ["repo-a"];
+      const unscopedWrapper = ({ children }: { children: React.ReactNode }) => (
+        <StoreProvider unscopedEvents>{children}</StoreProvider>
+      );
+
+      renderHook(() => useIssueStoreInstance(), { wrapper: unscopedWrapper });
+
+      expect(EventProviderSpy.lastSourceRepos).toBeUndefined();
+    });
   });
 
   // -----------------------------------------------------------------------

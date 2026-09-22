@@ -983,6 +983,27 @@ describe("useWorkspaceContext", () => {
       expect(result.current.isAllSelected).toBe(false);
     });
 
+    it("is true when every repo is ticked, so repo-less tasks are not hidden", async () => {
+      const repos = [
+        createMockRepo({ name: "api" }),
+        createMockRepo({ name: "frontend" }),
+      ];
+      setupMockWorkspaceApi({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      await flushPromises();
+
+      act(() => {
+        result.current.selectRepos(["api", "frontend"]);
+      });
+
+      expect(result.current.isAllSelected).toBe(true);
+      expect(result.current.sourceReposFilter).toBeUndefined();
+    });
+
     it("becomes true again after selectAll", async () => {
       const repos = [
         createMockRepo({ name: "api" }),

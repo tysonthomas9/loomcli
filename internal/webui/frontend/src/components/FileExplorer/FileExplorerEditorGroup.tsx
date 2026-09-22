@@ -14,11 +14,16 @@ import {
   type FileBrowserGroup,
   type FileBrowserTab,
 } from "@/hooks";
+import { type CheckoutRef } from "@/utils/fileExplorerRefs";
 import {
-  checkoutRefKey,
+  asCheckoutRef,
+  checkoutExplorerRef,
+  explorerRefKey,
   tabIdentityKey,
-  type CheckoutRef,
-} from "@/utils/fileExplorerRefs";
+  type ExplorerRef,
+  type SkillsExplorerRef,
+} from "@/utils/explorerRefs";
+import { useSkillsActions } from "@/hooks";
 
 import {
   FileHistoryPanel,
@@ -30,11 +35,13 @@ import { FileRevisionPane } from "./FileRevisionPane";
 import { FileTabBar } from "./FileTabBar";
 import { computeGitGutterLineMarks, type GitGutterLineMark } from "./gitGutter";
 import { WorkspaceFilePane } from "./WorkspaceFilePane";
+import { SkillMetadataBar } from "./skills";
 import { buildContentDiffPatch } from "./fileExplorerLocalUtils";
 import styles from "./FileExplorer.module.css";
 import type {
   DiffViewState,
   LineTarget,
+  PatchDiffViewState,
   RevisionViewState,
 } from "./workspaceFileBrowserTypes";
 
@@ -52,15 +59,18 @@ function DiffEditorPane({
   onOpenFile: (ref: CheckoutRef, path: string) => void;
 }) {
   const { workspaceId } = useWorkspaceContext();
-  const [patch, setPatch] = useState<string | null>(diffView.patch ?? null);
-  const [isLoading, setIsLoading] = useState(!diffView.patch);
+  const initialPatch = diffView.kind === "patch" ? diffView.patch : null;
+  const [patch, setPatch] = useState<string | null>(initialPatch);
+  const [isLoading, setIsLoading] = useState(diffView.kind !== "patch");
   const [error, setError] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     let canceled = false;
-    setPatch(diffView.patch ?? null);
+    const suppliedPatch =
+      diffView.kind === "patch" ? diffView.patch : undefined;
+    setPatch(suppliedPatch ?? null);
     setError(undefined);
-    if (diffView.patch !== undefined) {
+    if (suppliedPatch !== undefined) {
       setIsLoading(false);
       return () => {
         canceled = true;
@@ -68,36 +78,41 @@ function DiffEditorPane({
     }
     setIsLoading(true);
     const branchAgent =
-      diffView.source === "branch" && diffView.ref.scope === "agent"
+      diffView.kind === "checkout" &&
+      diffView.source === "branch" &&
+      diffView.ref.scope === "agent"
         ? diffView.ref.target
         : undefined;
-    const loadPatch = branchAgent
-      ? fetchDiffFile(workspaceId, branchAgent, diffView.path, "HEAD").then(
-          (res) => {
-            if (canceled) return;
-            if (res.is_binary) {
-              setError("Binary file — no text diff.");
-              setPatch(null);
-              return;
-            }
-            if (res.is_too_large) {
-              setError("Diff too large to display.");
-              setPatch(null);
-              return;
-            }
-            setPatch(res.patch);
-          },
-        )
-      : diffScopedFile(
-          workspaceId,
-          diffView.ref,
-          diffView.path,
-          diffView.from,
-          diffView.to,
-        ).then((res) => {
-          if (canceled) return;
-          setPatch(res.patch);
-        });
+    const loadPatch =
+      branchAgent && diffView.kind === "checkout"
+        ? fetchDiffFile(workspaceId, branchAgent, diffView.path, "HEAD").then(
+            (res) => {
+              if (canceled) return;
+              if (res.is_binary) {
+                setError("Binary file — no text diff.");
+                setPatch(null);
+                return;
+              }
+              if (res.is_too_large) {
+                setError("Diff too large to display.");
+                setPatch(null);
+                return;
+              }
+              setPatch(res.patch);
+            },
+          )
+        : diffView.kind === "checkout"
+          ? diffScopedFile(
+              workspaceId,
+              diffView.ref,
+              diffView.path,
+              diffView.from,
+              diffView.to,
+            ).then((res) => {
+              if (canceled) return;
+              setPatch(res.patch);
+            })
+          : Promise.resolve();
     loadPatch
       .catch((err) => {
         if (!canceled)
@@ -119,33 +134,35 @@ function DiffEditorPane({
           <span className={styles.diffTitleMeta}>{diffView.title}</span>
         </div>
         <div className={styles.viewerActions}>
-          <button
-            type="button"
-            className={`${styles.saveButton} ${styles.historyToggle}`}
-            aria-pressed={historyOpen}
-            onClick={onToggleHistory}
-          >
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <circle
-                cx="8"
-                cy="8"
-                r="5.5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.4"
-              />
-              <path
-                d="M8 4.8V8l2.2 1.4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            <span>History</span>
-          </button>
-          {diffView.canOpenFile && (
+          {diffView.kind === "checkout" && (
+            <button
+              type="button"
+              className={`${styles.saveButton} ${styles.historyToggle}`}
+              aria-pressed={historyOpen}
+              onClick={onToggleHistory}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <circle
+                  cx="8"
+                  cy="8"
+                  r="5.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                />
+                <path
+                  d="M8 4.8V8l2.2 1.4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span>History</span>
+            </button>
+          )}
+          {diffView.kind === "checkout" && diffView.canOpenFile && (
             <button
               type="button"
               className={styles.saveButton}
@@ -215,6 +232,7 @@ export function FileExplorerEditorGroup({
   canWrite,
   lineTarget,
   onLineTargetApplied,
+  onDeleteSkill,
 }: {
   groupIndex: number;
   group: FileBrowserGroup;
@@ -225,9 +243,12 @@ export function FileExplorerEditorGroup({
   onSelectTab: (groupIndex: number, tabKey: string) => void;
   onCloseTab: (groupIndex: number, tabKey: string) => void;
   onSplitRight: (groupIndex: number) => void;
-  onNavigate: (ref: CheckoutRef, dirPath: string) => void;
+  onNavigate: (ref: ExplorerRef, dirPath: string) => void;
   onSaved: (tab: FileBrowserTab) => void;
-  onOpenDiff: (groupIndex: number, request: HistoryOpenDiffRequest) => void;
+  onOpenDiff: (
+    groupIndex: number,
+    request: HistoryOpenDiffRequest | PatchDiffViewState,
+  ) => void;
   onCloseDiff: (groupIndex: number) => void;
   onOpenRevision: (
     groupIndex: number,
@@ -243,18 +264,25 @@ export function FileExplorerEditorGroup({
   canWrite: boolean;
   lineTarget?: LineTarget | undefined;
   onLineTargetApplied: (tabKey: string, token: number) => void;
+  onDeleteSkill: (ref: SkillsExplorerRef, name: string) => void;
 }) {
   const { workspaceId } = useWorkspaceContext();
+  const skillActions = useSkillsActions(workspaceId);
   const activeTab =
     group.tabs.find((tab) => tabIdentityKey(tab) === group.active) ?? null;
-  const scopeRef = useMemo<CheckoutRef>(
-    () => activeTab?.ref ?? { scope: "workspace" },
+  const explorerRef = useMemo<ExplorerRef>(
+    () => activeTab?.ref ?? checkoutExplorerRef({ scope: "workspace" }),
     [activeTab],
   );
+  const checkoutRef = asCheckoutRef(explorerRef);
   const activePath = activeTab?.path ?? null;
   const activeKey = activeTab ? tabIdentityKey(activeTab) : null;
-  const scopeKey = checkoutRefKey(scopeRef);
-  const fileDocument = useFileDocument(workspaceId, scopeRef, activePath ?? "");
+  const scopeKey = explorerRefKey(explorerRef);
+  const fileDocument = useFileDocument(
+    workspaceId,
+    explorerRef,
+    activePath ?? "",
+  );
   const { fileData, isLoading, error } = fileDocument;
   const refreshDocumentRef = useRef(fileDocument.refresh);
   refreshDocumentRef.current = fileDocument.refresh;
@@ -269,12 +297,12 @@ export function FileExplorerEditorGroup({
   const [historyOpen, setHistoryOpen] = useState(false);
   const historySubject = useMemo<HistorySubject | null>(() => {
     if (diffView || revisionView || !activeTab || !activePath) return null;
-    return { ref: scopeRef, path: activePath };
-  }, [activePath, activeTab, diffView, revisionView, scopeRef]);
+    return checkoutRef ? { ref: checkoutRef, path: activePath } : null;
+  }, [activePath, activeTab, checkoutRef, diffView, revisionView]);
   const toggleHistory = useCallback(() => setHistoryOpen((open) => !open), []);
   const closeHistory = useCallback(() => setHistoryOpen(false), []);
   const renderHistoryPanel = () =>
-    historyOpen ? (
+    historyOpen && historySubject ? (
       <FileHistoryPanel
         subject={historySubject}
         refreshKey={historyRefreshKey}
@@ -293,12 +321,26 @@ export function FileExplorerEditorGroup({
 
   const canDisplayText =
     !!activePath && !!fileData && !fileData.binary && !fileData.truncated;
-  const canSave = canWrite && canDisplayText;
+  const effectiveCanWrite =
+    explorerRef.kind === "skills"
+      ? skillActions.canEdit(explorerRef.group)
+      : canWrite;
+  const canSave = effectiveCanWrite && canDisplayText;
 
   const loadBaseContent = useCallback(
     async (path: string) => {
+      if (!checkoutRef) {
+        setBasePath(null);
+        setBaseContent(null);
+        return;
+      }
       try {
-        const data = await readScopedFile(workspaceId, scopeRef, path, "HEAD");
+        const data = await readScopedFile(
+          workspaceId,
+          checkoutRef,
+          path,
+          "HEAD",
+        );
         if (!data.binary && !data.truncated) {
           setBasePath(path);
           setBaseContent(data.content ?? "");
@@ -311,7 +353,7 @@ export function FileExplorerEditorGroup({
         setBaseContent(null);
       }
     },
-    [scopeRef, workspaceId],
+    [checkoutRef, workspaceId],
   );
 
   const save = useCallback(async () => {
@@ -326,7 +368,7 @@ export function FileExplorerEditorGroup({
   const compareExternal = useCallback(() => {
     if (!activePath || !fileDocument.externalConflict) return;
     onOpenDiff(groupIndex, {
-      ref: scopeRef,
+      kind: "patch",
       path: activePath,
       title: "External vs local draft",
       patch: buildContentDiffPatch(
@@ -334,7 +376,6 @@ export function FileExplorerEditorGroup({
         fileDocument.externalConflict.content,
         fileDocument.content,
       ),
-      canOpenFile: false,
     });
   }, [
     activePath,
@@ -342,17 +383,23 @@ export function FileExplorerEditorGroup({
     fileDocument.externalConflict,
     groupIndex,
     onOpenDiff,
-    scopeRef,
   ]);
 
   const overwriteExternal = useCallback(async () => {
-    if (!canWrite || !activeTab || !activePath) return;
+    if (!effectiveCanWrite || !activeTab || !activePath) return;
     const result = await fileDocument.overwriteExternal();
     if (result) {
       onSaved(activeTab);
       void loadBaseContent(activePath);
     }
-  }, [activePath, activeTab, canWrite, fileDocument, loadBaseContent, onSaved]);
+  }, [
+    activePath,
+    activeTab,
+    effectiveCanWrite,
+    fileDocument,
+    loadBaseContent,
+    onSaved,
+  ]);
 
   const saveRef = useRef(save);
   saveRef.current = save;
@@ -416,7 +463,11 @@ export function FileExplorerEditorGroup({
     }
     setBlameLoading(true);
     setBlameError(null);
-    blameScopedFile(workspaceId, scopeRef, activePath)
+    if (!checkoutRef)
+      return () => {
+        canceled = true;
+      };
+    blameScopedFile(workspaceId, checkoutRef, activePath)
       .then((data) => {
         if (!canceled) setBlameData(data);
       })
@@ -432,7 +483,7 @@ export function FileExplorerEditorGroup({
     return () => {
       canceled = true;
     };
-  }, [activePath, blameEnabled, canDisplayText, scopeRef, workspaceId]);
+  }, [activePath, blameEnabled, canDisplayText, checkoutRef, workspaceId]);
 
   if (diffView) {
     return (
@@ -514,6 +565,16 @@ export function FileExplorerEditorGroup({
         onSelect={(key) => onSelectTab(groupIndex, key)}
         onClose={(key) => onCloseTab(groupIndex, key)}
       />
+      {activeTab?.ref.kind === "skills" && activePath && (
+        <SkillMetadataBar
+          workspaceId={workspaceId}
+          refInfo={activeTab.ref}
+          path={activePath}
+          onDelete={(name) =>
+            onDeleteSkill(activeTab.ref as SkillsExplorerRef, name)
+          }
+        />
+      )}
       <div className={styles.editorGroupBody}>
         <div className={styles.editorPrimaryPane}>
           <WorkspaceFilePane
@@ -525,7 +586,8 @@ export function FileExplorerEditorGroup({
             content={fileDocument.content}
             isDirty={fileDocument.dirty}
             isSaving={fileDocument.isSaving}
-            canWrite={canWrite}
+            canWrite={effectiveCanWrite}
+            showGitAffordances={!!checkoutRef}
             externalConflict={fileDocument.externalConflict}
             searchOpen={searchOpen}
             onContentChange={fileDocument.edit}
@@ -540,7 +602,7 @@ export function FileExplorerEditorGroup({
             onToggleHistory={toggleHistory}
             onToggleSearch={() => setSearchOpen((open) => !open)}
             onSplitRight={() => onSplitRight(groupIndex)}
-            onNavigate={(dirPath) => onNavigate(scopeRef, dirPath)}
+            onNavigate={(dirPath) => onNavigate(explorerRef, dirPath)}
             lineTarget={lineTarget}
             onLineTargetApplied={(_path, token) => {
               if (activeKey) onLineTargetApplied(activeKey, token);
@@ -555,8 +617,9 @@ export function FileExplorerEditorGroup({
             onToggleBlame={() => setBlameEnabled((enabled) => !enabled)}
             onOpenBlameCommit={(sha) => {
               if (!activePath) return;
+              if (!checkoutRef) return;
               onOpenDiff(groupIndex, {
-                ref: scopeRef,
+                ref: checkoutRef,
                 path: activePath,
                 from: `${sha}^`,
                 to: sha,

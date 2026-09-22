@@ -137,9 +137,14 @@ export function PerWorkspacePrefsProvider({
     [workspaceId],
   );
 
+  // "All" is both the empty selection and every repo ticked. The two must
+  // mean the same thing — no repo filter — or tasks that belong to no repo
+  // (research, ops) silently vanish when an operator ticks every box.
   const isAllSelected = useMemo(
-    () => selectedRepoNames.size === 0,
-    [selectedRepoNames],
+    () =>
+      selectedRepoNames.size === 0 ||
+      (repos.length > 0 && repos.every((r) => selectedRepoNames.has(r.name))),
+    [selectedRepoNames, repos],
   );
 
   const activeRepos = useMemo(() => {

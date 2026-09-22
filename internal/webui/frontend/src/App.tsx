@@ -51,6 +51,7 @@ import { AppLayout } from "@/components/AppLayout/AppLayout";
 import { WorkspaceBreadcrumb } from "@/components/WorkspaceBreadcrumb/WorkspaceBreadcrumb";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton/LoadingSkeleton";
 import { StaleDataBanner } from "@/components/StaleDataBanner/StaleDataBanner";
+import { ClaimHoldBanner } from "@/components/ClaimHoldBanner";
 import { ToastContainer } from "@/components/Toast/ToastContainer";
 import { SearchInput } from "@/components/search/SearchInput";
 import { SearchScopeIndicator } from "@/components/search/SearchScopeIndicator";
@@ -94,10 +95,12 @@ import {
 import { useIssueFilter } from "@/hooks/issues/useIssueFilter";
 import { useBlockedIssues } from "@/hooks/issues/useBlockedIssues";
 import { useIssueDetail } from "@/hooks/issues/useIssueDetail";
+import { useOperatorQueue } from "@/hooks/issues/useOperatorQueue";
 import { useSearchScope } from "@/hooks/issues/useSearchScope";
 import { useToast } from "@/hooks/ui/useToast";
 import { useTheme } from "@/hooks/ui/useTheme";
 import { useTerminalFont } from "@/hooks/terminal/useTerminalFont";
+import { useWorkspaceSessionCount } from "@/hooks/terminal/useWorkspaceSessionCount";
 import { usePanelManager } from "@/hooks/ui/usePanelManager";
 import { KeyboardShortcutProvider } from "@/hooks/ui/useKeyboardShortcuts";
 import { useWorkspaceContext } from "@/hooks/workspace/useWorkspaceContext";
@@ -245,6 +248,7 @@ function App() {
 
   const issuesMap = useStore(issueStore, (s) => s.issuesMap);
   const issues = useMemo(() => [...issuesMap.values()], [issuesMap]);
+  const operatorQueue = useOperatorQueue(issues);
   const hasOnboardingRepo = useMemo(
     () => workspaceRepos.some((repo) => isOnboardingRepo(repo)),
     [workspaceRepos],
@@ -279,6 +283,7 @@ function App() {
   );
   const retryConnection = useStore(issueStore, (s) => s.retryConnection);
   const fetchIssues = useStore(issueStore, (s) => s.fetchIssues);
+  const reconcileIssue = useStore(issueStore, (s) => s.reconcileIssue);
 
   // Wrap store's 3-arg updateIssueStatus to bind workspaceId (views expect 2-arg signature)
   const updateIssueStatus = useCallback(
@@ -290,6 +295,7 @@ function App() {
   // Drive issue fetching based on active view mode, workspace, and source repos
   const issueModeByView: Partial<Record<ViewMode, "graph" | "kanban">> = {
     graph: "graph",
+    home: "kanban",
     kanban: "kanban",
     list: "kanban",
     table: "kanban",
@@ -309,6 +315,12 @@ function App() {
   };
   const issueMode = issueModeByView[activeView] ?? ("ready" as const);
 
+  // Home is the workspace, never a repo: it reads the whole collection even
+  // when the operator has narrowed Kanban to a subset of repos. Derived here
+  // (not in the deps) so only crossing the Home boundary refetches.
+  const effectiveSourceRepos =
+    activeView === "home" ? undefined : sourceReposFilter;
+
   useEffect(() => {
     const controller = new AbortController();
     const params: Parameters<typeof fetchIssues>[0] = {
@@ -316,10 +328,10 @@ function App() {
       mode: issueMode,
       signal: controller.signal,
     };
-    if (sourceReposFilter) params.sourceRepos = sourceReposFilter;
+    if (effectiveSourceRepos) params.sourceRepos = effectiveSourceRepos;
     fetchIssues(params);
     return () => controller.abort();
-  }, [fetchIssues, workspaceId, issueMode, sourceReposFilter]);
+  }, [fetchIssues, workspaceId, issueMode, effectiveSourceRepos]);
 
   // Filter state with URL synchronization
   const [filters, filterActions] = useFilterState();
@@ -386,15 +398,16 @@ function App() {
     filterOptions,
   );
 
-  // Only fetch blocked issues separately when NOT in kanban mode (kanban mode includes it inline)
+  // Only fetch blocked issues separately when the active issue mode does not
+  // already include the enriched blocked fields inline.
   const { data: blockedIssuesData } = useBlockedIssues({
-    enabled: activeView !== "kanban",
+    enabled: activeView !== "kanban" && activeView !== "home",
   });
 
   // Derive blockedIssuesMap from enriched issue data (kanban mode) or separate fetch
   const blockedIssuesMap = useMemo(() => {
-    if (activeView === "kanban") {
-      // In kanban mode, blocked info is already in the issue data
+    if (activeView === "kanban" || activeView === "home") {
+      // In kanban-fetch modes, blocked info is already in the issue data.
       const map = new Map<string, BlockedInfo>();
       for (const issue of issues) {
         if (issue.is_blocked) {
@@ -460,10 +473,23 @@ function App() {
     clearIssue,
     updateIssueDetails,
   } = useIssueDetail();
+  const handleIssueDetailsUpdate = useCallback(
+    (updatedIssue: Issue) => {
+      reconcileIssue(updatedIssue);
+      updateIssueDetails(updatedIssue);
+    },
+    [reconcileIssue, updateIssueDetails],
+  );
+  const openDetailIssueId = issueDetails?.id ?? selectedIssueId;
+  const selectedIssueDetailInvalidation = useStore(issueStore, (s) =>
+    openDetailIssueId
+      ? (s.detailInvalidationVersions.get(openDetailIssueId) ?? 0)
+      : 0,
+  );
 
   // Previous view for issue-detail back navigation.
   // Tracks the last "content" view (excludes issue-detail, terminal, settings).
-  const previousViewRef = useRef<ViewMode>("kanban");
+  const previousViewRef = useRef<ViewMode>("home");
   if (
     activeView !== "issue-detail" &&
     activeView !== "terminal" &&
@@ -483,8 +509,9 @@ function App() {
     undefined,
   );
 
-  // Active terminal session count for badge display
-  const [activeSessionCount, setActiveSessionCount] = useState(0);
+  // Live terminal session count for badge display. Server-backed and always
+  // on, so the badge is correct on every route and survives workspace switches.
+  const { sessionCount } = useWorkspaceSessionCount();
 
   // Terminal unread output indicator
   const [hasTerminalUnread, setHasTerminalUnread] = useState(false);
@@ -570,11 +597,56 @@ function App() {
     }
   }, [repoFilterParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Deep-link: the canonical issue URL renders the board behind this panel.
+  // Keep the route and panel state synchronized so refresh/share/back retain
+  // the issue context without turning issue details into a full-page view.
+  const previousRouteIssueIdRef = useRef(routeIssueId);
+  useEffect(() => {
+    const previousRouteIssueId = previousRouteIssueIdRef.current;
+    previousRouteIssueIdRef.current = routeIssueId;
+    if (routeIssueId) {
+      openPanel({ type: "issue", id: routeIssueId });
+    } else if (previousRouteIssueId) {
+      // Browser back/forward is a first-class way to close the routed panel.
+      closePanel();
+    }
+  }, [routeIssueId, openPanel, closePanel]);
+
   // Deep-link: auto-fetch issue from URL; route changes are handled by useRouteView.
   useEffect(() => {
     if (selectedIssueId) fetchIssue(selectedIssueId);
     else if (activeView !== "issue-detail") clearIssue();
   }, [selectedIssueId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Full issue details own collections that the board/list projection omits.
+  // An issue-scoped SSE comment/label/dependency mutation advances this
+  // revision; refetch the already-open detail exactly once for that event.
+  const detailInvalidationBaselineRef = useRef<{
+    issueId: string | null;
+    version: number;
+  }>({ issueId: null, version: 0 });
+  useEffect(() => {
+    const previous = detailInvalidationBaselineRef.current;
+    detailInvalidationBaselineRef.current = {
+      issueId: openDetailIssueId,
+      version: selectedIssueDetailInvalidation,
+    };
+    if (
+      !openDetailIssueId ||
+      !issueDetails ||
+      issueDetails.id !== openDetailIssueId ||
+      previous.issueId !== openDetailIssueId ||
+      selectedIssueDetailInvalidation <= previous.version
+    ) {
+      return;
+    }
+    fetchIssue(openDetailIssueId);
+  }, [
+    selectedIssueDetailInvalidation,
+    openDetailIssueId,
+    issueDetails,
+    fetchIssue,
+  ]);
 
   // Keep the open detail panel in sync with live issue-list mutations.
   // The panel fetches full issue details, while SSE updates land in issuesMap.
@@ -609,6 +681,35 @@ function App() {
       updateIssueDetails(latestIssue);
     }
   }, [issueDetails, issuesMap, updateIssueDetails]);
+
+  // Force-resync the open detail surface when an optimistic update SETTLES.
+  //
+  // The effect above intentionally refuses staler data via its `updated_at`
+  // guard, which is right for SSE races but wrong here: `updateIssueStatus`
+  // stamps its optimistic issue with a fabricated `updated_at: now`, and a
+  // rollback restores the snapshot's ORIGINAL (older) timestamp. The guard
+  // therefore filters the revert out and the detail view keeps showing a
+  // status the server rejected until a full reload (PUPPET-146).
+  //
+  // Keyed on the pending -> settled edge instead of on timestamps. This relies
+  // on the store writing `issuesMap` BEFORE it clears `pendingIds` (both the
+  // rollback and the auto-rollback-timeout paths in issueStore.ts do); if that
+  // order is ever swapped, an intermediate render would see the settle edge
+  // while the map still holds the optimistic value and this would silently
+  // become a no-op.
+  const prevPendingIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const prev = prevPendingIdsRef.current;
+    prevPendingIdsRef.current = new Set(pendingIds);
+    if (!issueDetails) return;
+    const id = issueDetails.id;
+    // Still pending, or never was pending — nothing settled for this issue.
+    if (!prev.has(id) || pendingIds.has(id)) return;
+    const latest = issuesMap.get(id);
+    if (!latest) return;
+    // Status only: widening this would churn against the effect above.
+    if (latest.status !== issueDetails.status) updateIssueDetails(latest);
+  }, [pendingIds, issuesMap, issueDetails, updateIssueDetails]);
 
   // Deep-link error: toast + navigate away when a deep-linked issue fails to load
   useEffect(() => {
@@ -685,8 +786,9 @@ function App() {
         return;
       }
 
-      // From list/graph/monitor views — open panel overlay
-      // (mutual exclusivity + no-op guard handled by usePanelManager)
+      // From list/graph/monitor views, give the panel a canonical URL before
+      // opening it. The issues route renders the board behind the slide-over.
+      navigate(`/ws/${workspaceId}/issues/${encodeURIComponent(issue.id)}`);
       openPanel({ type: "issue", id: issue.id });
       fetchIssue(issue.id);
     },
@@ -696,98 +798,92 @@ function App() {
   // Handle panel close
   const handlePanelClose = useCallback(() => {
     closePanel();
+    if (routeIssueId) {
+      navigate(`/ws/${workspaceId}/kanban`, { replace: true });
+    }
     // Clear issue details after close animation completes
     setTimeout(() => {
       if (!mountedRef.current) return;
       clearIssue();
     }, 300);
-  }, [closePanel, clearIssue]);
+  }, [closePanel, clearIssue, routeIssueId, navigate, workspaceId]);
 
-  // Handle approve button click on review cards
+  // Handle approve button click on review cards.
+  //
+  // Failures are NOT caught here: every caller is a review surface that owns
+  // its own reporting (inline message, spinner release, disabled-with-reason).
+  // Toasting here as well put two identical toasts in the same corner of the
+  // screen for one failure (PUPPET-146).
   const handleApprove = useCallback(
     async (issue: Issue) => {
-      try {
-        const reviewType = getReviewType(issue);
+      const reviewType = getReviewType(issue);
 
-        if (reviewType === "code") {
-          // Code review: Close the issue (PR was reviewed and approved)
-          await closeIssue(
-            workspaceId,
-            issue.id,
-            "PR approved after code review",
-          );
-          await refetch();
-        } else if (reviewType === "plan") {
-          // Plan review: move to open AND clear the rejection marker.
-          //
-          // Removing the label is what makes the review workflow terminate.
-          // Reject stamps `needs-revision`; the planner selects on it
-          // (taskfilter.go: NeedsPlan = !HasDesign || HasNeedsRevision) and the
-          // worker is excluded by it (ReadyToImplement = HasDesign &&
-          // !HasNeedsRevision). Approving status-only leaves the label on, so
-          // the planner immediately re-claims the issue and the human is asked
-          // to approve the same plan again, forever — independent of how good
-          // the plan is.
-          //
-          // Uses updateIssue + refetch rather than the optimistic
-          // updateIssueStatus path (which carries status only), mirroring
-          // handleReject below. Removal is unconditional and idempotent, so
-          // approving a never-rejected issue is a no-op server-side.
-          await updateIssue(workspaceId, issue.id, {
-            status: "open",
-            remove_labels: [NEEDS_REVISION_LABEL],
-          });
-          await refetch();
-        } else if (reviewType === "help") {
-          // Needs help: Move to in_progress (unblock)
-          await updateIssueStatus(issue.id, "in_progress");
-        }
-
-        // Close the detail panel and clean up after successful approve
-        handlePanelClose();
-      } catch (err) {
-        // updateIssueStatus errors are handled by useOptimisticUpdate rollback,
-        // so the "help" branch stays silent here. The "code" (closeIssue) and
-        // "plan" (updateIssue) branches do NOT go through that path, so without
-        // a toast a failed approve would look identical to a successful one.
-        if (!mountedRef.current) return;
-        const reviewType = getReviewType(issue);
-        if (reviewType === "code" || reviewType === "plan") {
-          const message =
-            err instanceof Error ? err.message : "Failed to approve";
-          showToast(message, { type: "error" });
-        }
-      }
-    },
-    [workspaceId, updateIssueStatus, refetch, handlePanelClose, showToast],
-  );
-
-  // Handle reject button submission on review cards
-  const handleReject = useCallback(
-    async (issue: Issue, comment: string) => {
-      try {
-        const reviewType = getReviewType(issue);
-
-        // Add feedback comment
-        const prefix = reviewType === "code" ? "CODE REVIEW" : "FEEDBACK";
-        await addComment(workspaceId, issue.id, `${prefix}: ${comment}`);
-
-        // Add needs-revision label and set status to open
+      if (reviewType === "code") {
+        // Code review: Close the issue (PR was reviewed and approved)
+        await closeIssue(
+          workspaceId,
+          issue.id,
+          "PR approved after code review",
+        );
+        await refetch();
+      } else if (reviewType === "plan") {
+        // Plan review: move to open AND clear the rejection marker.
+        //
+        // Removing the label is what makes the review workflow terminate.
+        // Reject stamps `needs-revision`; the planner selects on it
+        // (taskfilter.go: NeedsPlan = !HasDesign || HasNeedsRevision) and the
+        // worker is excluded by it (ReadyToImplement = HasDesign &&
+        // !HasNeedsRevision). Approving status-only leaves the label on, so
+        // the planner immediately re-claims the issue and the human is asked
+        // to approve the same plan again, forever — independent of how good
+        // the plan is.
+        //
+        // Uses updateIssue + refetch rather than the optimistic
+        // updateIssueStatus path (which carries status only), mirroring
+        // handleReject below. Removal is unconditional and idempotent, so
+        // approving a never-rejected issue is a no-op server-side.
         await updateIssue(workspaceId, issue.id, {
           status: "open",
-          add_labels: [NEEDS_REVISION_LABEL],
+          remove_labels: [NEEDS_REVISION_LABEL],
         });
-
-        // Refetch to reflect label/status changes and close panel
         await refetch();
-        handlePanelClose();
-      } catch (err) {
-        if (!mountedRef.current) return;
-        const message = err instanceof Error ? err.message : "Failed to reject";
-        showToast(message, { type: "error" });
+      } else if (reviewType === "help") {
+        // Needs help: Move to in_progress (unblock). The store's rollback
+        // toast is suppressed: the caller shows this same message, and the
+        // error still propagates. The auto-rollback-timeout toast, which no
+        // caller ever sees, is untouched.
+        await storeUpdateIssueStatus(issue.id, "in_progress", workspaceId, {
+          toastOnRollback: false,
+        });
       }
+
+      // Close the detail panel and clean up after successful approve
+      handlePanelClose();
     },
-    [workspaceId, refetch, handlePanelClose, showToast],
+    [workspaceId, storeUpdateIssueStatus, refetch, handlePanelClose],
+  );
+
+  // Handle reject button submission on review cards. Errors propagate for the
+  // same reason as handleApprove above: the caller owns the surface.
+  const handleReject = useCallback(
+    async (issue: Issue, comment: string) => {
+      const reviewType = getReviewType(issue);
+
+      // Add feedback comment
+      const prefix = reviewType === "code" ? "CODE REVIEW" : "FEEDBACK";
+      await addComment(workspaceId, issue.id, `${prefix}: ${comment}`);
+
+      // Add needs-revision label and set status to open
+      await updateIssue(workspaceId, issue.id, {
+        status: "open",
+        add_labels: [NEEDS_REVISION_LABEL],
+      });
+
+      // Refetch to reflect label/status changes and close panel
+      await refetch();
+      handlePanelClose();
+    },
+    [workspaceId, refetch, handlePanelClose],
   );
 
   // Close all panels synchronously (no animation) for workspace switch
@@ -966,10 +1062,11 @@ function App() {
   const handleCreateIssueSuccess = useCallback(
     async (issue: Issue) => {
       await refetch();
+      navigate(`/ws/${workspaceId}/issues/${encodeURIComponent(issue.id)}`);
       openPanel({ type: "issue", id: issue.id });
       fetchIssue(issue.id);
     },
-    [fetchIssue, openPanel, refetch],
+    [fetchIssue, navigate, openPanel, refetch, workspaceId],
   );
   const workspaceOnboardingSteps: OnboardingStep[] = useMemo(
     () => [
@@ -1112,10 +1209,11 @@ function App() {
   // Handle tree issue select (wraps handleIssueClick with minimal Issue shape)
   const handleTreeIssueSelect = useCallback(
     (issueId: string) => {
+      navigate(`/ws/${workspaceId}/issues/${encodeURIComponent(issueId)}`);
       openPanel({ type: "issue", id: issueId });
       fetchIssue(issueId);
     },
-    [openPanel, fetchIssue],
+    [openPanel, fetchIssue, navigate, workspaceId],
   );
 
   const handleAgentNameConsumed = useCallback(() => {
@@ -1169,10 +1267,11 @@ function App() {
   const handleAgentTaskClick = useCallback(
     (taskId: string) => {
       // Mutual exclusivity handled by usePanelManager (closes agent panel first)
+      navigate(`/ws/${workspaceId}/issues/${encodeURIComponent(taskId)}`);
       openPanel({ type: "issue", id: taskId });
       fetchIssue(taskId);
     },
-    [openPanel, fetchIssue],
+    [openPanel, fetchIssue, navigate, workspaceId],
   );
 
   // -----------------------------------------------------------------------
@@ -1239,7 +1338,7 @@ function App() {
       updateIssueStatus,
       fetchIssue,
       clearIssue,
-      updateIssueDetails,
+      updateIssueDetails: handleIssueDetailsUpdate,
       openPanel,
       closePanel,
       handleIssueClick,
@@ -1259,7 +1358,7 @@ function App() {
       updateIssueStatus,
       fetchIssue,
       clearIssue,
-      updateIssueDetails,
+      handleIssueDetailsUpdate,
       openPanel,
       closePanel,
       handleIssueClick,
@@ -1278,6 +1377,7 @@ function App() {
 
   // Whether the current view depends on issue data (for stale banner suppression)
   const isIssueBasedView =
+    activeView === "home" ||
     activeView === "kanban" ||
     activeView === "list" ||
     activeView === "table" ||
@@ -1332,11 +1432,15 @@ function App() {
     activeView === "kanban" ||
     activeView === "list" ||
     activeView === "table" ||
-    activeView === "graph";
+    activeView === "graph" ||
+    activeView === "issue-detail";
   const boardToolbar = (
     <div className={styles.boardToolbar} data-testid="board-toolbar">
       <div className={styles.boardToolbarTabs}>
-        <ViewSubSwitcher activeView={activeView} onChange={navigateToView} />
+        <ViewSubSwitcher
+          activeView={activeView === "issue-detail" ? "kanban" : activeView}
+          onChange={navigateToView}
+        />
       </div>
       <div className={styles.boardToolbarSearch}>{searchControl}</div>
       <div className={styles.boardToolbarActions}>{newIssueButton}</div>
@@ -1347,8 +1451,8 @@ function App() {
     <button
       type="button"
       className={styles.brandButton}
-      onClick={() => navigateToView("kanban")}
-      aria-label="Loom home — return to Kanban board"
+      onClick={() => navigateToView("home")}
+      aria-label="Loom home"
     >
       <span className={styles.brandMark} aria-hidden="true">
         ◇
@@ -1386,6 +1490,14 @@ function App() {
     />
   );
 
+  // Views that bring their own left tree suppress the workspace sidebar, so
+  // the page owns its chrome instead of showing two trees side by side.
+  const viewOwnsChrome =
+    activeView === "files" ||
+    activeView === "skills" ||
+    activeView === "settings" ||
+    activeView === "prs";
+
   const terminalContainerClassName =
     activeView === "terminal"
       ? styles.terminalRouteContainer
@@ -1405,14 +1517,16 @@ function App() {
     >
       <SearchTermProvider value={activeSearchTerm}>
         <AppLayout
+          banner={<ClaimHoldBanner />}
           title={headerTitle}
-          onTitleClick={() => navigateToView("kanban")}
+          onTitleClick={() => navigateToView("home")}
           actions={headerActions}
           navRail={
             <NavRail
               activeView={activeView}
               onChange={handleNavChange}
-              sessionCount={activeSessionCount}
+              sessionCount={sessionCount}
+              operatorQueueCount={operatorQueue.length}
               badges={{ terminal: hasTerminalUnread }}
               workspaces={(workspace?.workspaces ?? []).map((ws) => ({
                 id: ws.id,
@@ -1423,7 +1537,7 @@ function App() {
               onAddWorkspace={() => setShowCreateWorkspace(true)}
             />
           }
-          sidebar={activeView === "files" ? null : sidebarContent}
+          sidebar={viewOwnsChrome ? null : sidebarContent}
         >
           <div
             className={
@@ -1461,7 +1575,6 @@ function App() {
                       onIssueContextConsumed={handleIssueContextConsumed}
                       pendingAgentName={pendingAgentName}
                       onAgentNameConsumed={handleAgentNameConsumed}
-                      onActiveSessionCountChange={setActiveSessionCount}
                       onUnreadChange={setHasTerminalUnread}
                       onTabLimitReached={(message) =>
                         showToast(message, { type: "error" })
@@ -1497,7 +1610,7 @@ function App() {
             onClose={handlePanelClose}
             onApprove={handleApprove}
             onReject={handleReject}
-            onIssueUpdate={updateIssueDetails}
+            onIssueUpdate={handleIssueDetailsUpdate}
             onCopyLink={handleCopyLink}
             onNavigateToIssue={handleIssueClick}
           />

@@ -1,0 +1,68 @@
+.root {
+  position: relative;
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+}
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  font-size: 0.84rem;
+  font-weight: var(--font-weight-semibold, 600);
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.root[data-variant="owner"] .avatar {
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px dashed var(--color-border-hover);
+}
+
+.statusDot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--color-bg, #fff);
+  border-radius: 50%;
+}
+
+.root[data-active="true"] .statusDot {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.root[data-size="compact"] {
+  width: 26px;
+  height: 26px;
+}
+
+.root[data-size="compact"] .avatar {
+  font-size: 0.58rem;
+  letter-spacing: -0.03em;
+}
+
+.root[data-size="compact"] .statusDot {
+  width: 6px;
+  height: 6px;
+  border-width: 1.5px;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
+}

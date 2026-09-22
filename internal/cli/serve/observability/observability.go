@@ -1,12 +1,10 @@
 package observability
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -37,13 +35,7 @@ type EventsResponse struct {
 }
 
 // EventReadOpts configures filtering and pagination for event reads.
-type EventReadOpts struct {
-	Page    int
-	PerPage int
-	Type    string
-	Agent   string
-	Since   string
-}
+type EventReadOpts = events.EventReadOpts
 
 // CachedValue wraps a collection function with TTL caching and request
 // coalescing (singleflight).
@@ -222,107 +214,13 @@ func parseEventReadOpts(r *http.Request) (EventReadOpts, error) {
 // ReadEventsFromJSONL reads events from JSONL files, applies filters, and paginates.
 // Events are returned in reverse chronological order (most recent first).
 func ReadEventsFromJSONL(dir string, opts EventReadOpts) ([]events.Event, int, error) {
-	if dir == "" {
-		return []events.Event{}, 0, nil
-	}
-
-	files, err := globEventFiles(dir)
-	if err != nil {
-		return nil, 0, err
-	}
-	if len(files) == 0 {
-		return []events.Event{}, 0, nil
-	}
-
-	all := collectFilteredEvents(files, opts)
-
-	sort.Slice(all, func(i, j int) bool {
-		return all[i].Timestamp.After(all[j].Timestamp)
-	})
-
-	return paginateEvents(all, opts.Page, opts.PerPage), len(all), nil
-}
-
-// globEventFiles returns event JSONL files sorted most-recent-first.
-func globEventFiles(dir string) ([]string, error) {
-	pattern := filepath.Join(dir, "events-*.jsonl")
-	files, err := filepath.Glob(pattern)
-	if err != nil {
-		return nil, fmt.Errorf("globbing events files: %w", err)
-	}
-	sort.Sort(sort.Reverse(sort.StringSlice(files)))
-	return files, nil
-}
-
-// collectFilteredEvents reads all event files and applies type/agent/since filters.
-func collectFilteredEvents(files []string, opts EventReadOpts) []events.Event {
-	var sinceTime time.Time
-	if opts.Since != "" {
-		sinceTime, _ = time.Parse(time.RFC3339, opts.Since)
-	}
-
-	var all []events.Event
-	for _, f := range files {
-		fileEvents, err := ReadJSONLFile(f)
-		if err != nil {
-			log.Printf("observability: skipping %s: %v", filepath.Base(f), err)
-			continue
-		}
-		for i := range fileEvents {
-			e := &fileEvents[i]
-			if opts.Type != "" && string(e.Type) != opts.Type {
-				continue
-			}
-			if opts.Agent != "" && e.Agent != opts.Agent {
-				continue
-			}
-			if !sinceTime.IsZero() && e.Timestamp.Before(sinceTime) {
-				continue
-			}
-			all = append(all, *e)
-		}
-	}
-	return all
-}
-
-// paginateEvents returns a page of events from a sorted slice.
-func paginateEvents(all []events.Event, page, perPage int) []events.Event {
-	total := len(all)
-	start := (page - 1) * perPage
-	if start >= total {
-		return []events.Event{}
-	}
-	end := start + perPage
-	if end > total {
-		end = total
-	}
-	return all[start:end]
+	return events.ReadEventsFromJSONL(dir, opts)
 }
 
 // ReadJSONLFile reads all events from a single JSONL file.
 // Malformed lines are skipped.
 func ReadJSONLFile(path string) ([]events.Event, error) {
-	// #nosec G304 - path from controlled glob pattern
-	f, err := os.Open(filepath.Clean(path))
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	var evts []events.Event
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
-	for scanner.Scan() {
-		var e events.Event
-		if err := json.Unmarshal(scanner.Bytes(), &e); err != nil {
-			continue
-		}
-		evts = append(evts, e)
-	}
-	if err := scanner.Err(); err != nil {
-		return evts, err
-	}
-	return evts, nil
+	return events.ReadJSONLFile(path)
 }
 
 // ParseIntParam parses an integer query parameter with a default value.

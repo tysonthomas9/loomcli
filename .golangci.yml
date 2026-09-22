@@ -117,8 +117,6 @@ linters:
               desc: "SDK-layer packages must not import infra packages"
             - pkg: github.com/tysonthomas9/loomcli/internal/testutil
               desc: "SDK-layer packages must not import infra packages"
-            - pkg: github.com/tysonthomas9/loomcli/internal/backend/beads
-              desc: "SDK-layer packages must not import infra packages"
             - pkg: github.com/tysonthomas9/loomcli/internal/backend/fleet
               desc: "SDK-layer packages must not import infra packages"
             - pkg: github.com/tysonthomas9/loomcli/internal/backend/agentipc
@@ -152,7 +150,6 @@ linters:
             - "**/internal/debug/**"
             - "**/internal/testutil/**"
             - "**/internal/backend/mapping/**"
-            - "**/internal/backend/beads/**"
             - "**/internal/backend/fleet/**"
             - "**/internal/backend/agentipc/**"
             - "**/internal/backend/api/**"
@@ -205,8 +202,6 @@ linters:
               desc: "cli/data must not import infra packages"
             - pkg: github.com/tysonthomas9/loomcli/internal/testutil
               desc: "cli/data must not import infra packages"
-            - pkg: github.com/tysonthomas9/loomcli/internal/backend/beads
-              desc: "cli/data must not use the beads backend (HTTP only)"
             - pkg: github.com/tysonthomas9/loomcli/internal/backend/fleet
               desc: "cli/data must not use the fleet backend (HTTP only)"
             - pkg: github.com/tysonthomas9/loomcli/internal/backend/agentipc
@@ -248,8 +243,8 @@ linters:
         linters:
           - revive
         text: "var-naming: avoid meaningless package names"
-      # "api" is the HTTP-API backend implementation, sibling to backend/beads,
-      # backend/fleet, etc. The full import path is self-describing.
+      # "api" is the HTTP-API backend implementation, sibling to backend/fleet,
+      # backend/agentipc, etc. The full import path is self-describing.
       - path: 'internal/backend/api/'
         linters:
           - revive
@@ -457,7 +452,7 @@ linters:
       - path: "internal/webui/service/issue_move\\.go"
         linters: [funlen]
 
-      # === Test file relaxations (matching beads patterns) ===
+      # === Test file relaxations ===
 
       # funlen: Table-driven tests naturally exceed function length limits
       - path: '_test\.go'

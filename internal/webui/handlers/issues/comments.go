@@ -77,6 +77,7 @@ func HandleListComments(svc service.IssueService) http.HandlerFunc {
 
 // handleAddComment returns a handler that adds a comment to an issue.
 func HandleAddComment(svc service.IssueService) http.HandlerFunc {
+	fallbackActor := resolveOperatorActor()
 	return func(w http.ResponseWriter, r *http.Request) {
 		issueID := r.PathValue("id")
 		if issueID == "" {
@@ -99,6 +100,7 @@ func HandleAddComment(svc service.IssueService) http.HandlerFunc {
 
 		comment, err := svc.AddComment(r.Context(), service.AddCommentParams{
 			IssueID: issueID,
+			Actor:   operatorActor(r.Context(), fallbackActor),
 			Author:  "web-ui",
 			Text:    req.Content(),
 		})

@@ -194,6 +194,9 @@ describe("AgentDetailPanel", () => {
 
       expect(screen.getByRole("tab", { name: "Info" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Git" })).toBeInTheDocument();
+      expect(
+        screen.queryByRole("tab", { name: "Logs" }),
+      ).not.toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Files" })).toBeInTheDocument();
     });

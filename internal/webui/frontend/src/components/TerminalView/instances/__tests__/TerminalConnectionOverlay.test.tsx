@@ -188,6 +188,53 @@ describe("TerminalConnectionOverlay", () => {
     });
   });
 
+  describe("spawn_failed state", () => {
+    it("renders the shell-keeps-exiting message and its own retry button", () => {
+      render(
+        <TerminalConnectionOverlay
+          {...defaultProps}
+          connectionState="spawn_failed"
+        />,
+      );
+
+      expect(screen.getByText("Shell keeps exiting")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("terminal-spawn-failed-button"),
+      ).toBeInTheDocument();
+      // Distinct from session_ended so the user is not told the shell simply
+      // ended when it is failing to start.
+      expect(screen.queryByText("Session ended")).not.toBeInTheDocument();
+    });
+
+    it("points the user at the shell's own error rather than auto-retrying", () => {
+      render(
+        <TerminalConnectionOverlay
+          {...defaultProps}
+          connectionState="spawn_failed"
+        />,
+      );
+
+      expect(screen.getByText(/error is printed above/i)).toBeInTheDocument();
+      expect(
+        screen.queryByText("Auto-reconnecting..."),
+      ).not.toBeInTheDocument();
+    });
+
+    it("fires onReconnect when the retry button is clicked", () => {
+      const onReconnect = vi.fn();
+      render(
+        <TerminalConnectionOverlay
+          {...defaultProps}
+          connectionState="spawn_failed"
+          onReconnect={onReconnect}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("terminal-spawn-failed-button"));
+      expect(onReconnect).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("onReconnect callback", () => {
     it("fires onReconnect when reconnect button is clicked in disconnected state", () => {
       const onReconnect = vi.fn();

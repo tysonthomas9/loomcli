@@ -28,6 +28,8 @@ const (
 	MetadataDeliveryAcknowledged   = "lead_assignment_acknowledged_version"
 	MetadataLeadMessageAttemptedAt = "lead_message_delivery_attempted_at"
 	MetadataLeadMessageError       = "lead_message_delivery_error"
+	MetadataLeadWorkDir            = "lead_workdir"
+	MetadataLeadRole               = "lead_role"
 	RuntimeProviderCodex           = "codex"
 	RuntimeStatusStarting          = "starting"
 	RuntimeStatusDisconnected      = "disconnected"

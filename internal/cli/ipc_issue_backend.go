@@ -38,6 +38,7 @@ type ipcIssueBackend struct {
 // Compile-time interface check.
 var _ backend.IssueBackend = (*ipcIssueBackend)(nil)
 var _ backend.ClaimReleaser = (*ipcIssueBackend)(nil)
+var _ backend.EventHistoryBackend = (*ipcIssueBackend)(nil)
 
 // newIPCIssueBackend returns an IPC-aware decorator.
 func newIPCIssueBackend(ipc ipcMutator, direct backend.IssueBackend) *ipcIssueBackend {
@@ -155,6 +156,18 @@ func (b *ipcIssueBackend) AddComment(ctx context.Context, params backend.Comment
 
 func (b *ipcIssueBackend) ListEvents(ctx context.Context, id string, limit int) ([]backend.EventData, error) {
 	return b.direct.ListEvents(ctx, id, limit)
+}
+
+func (b *ipcIssueBackend) ListEventHistory(
+	ctx context.Context,
+	id string,
+	params backend.EventHistoryParams,
+) (*backend.EventHistoryData, error) {
+	historyBackend, ok := b.direct.(backend.EventHistoryBackend)
+	if !ok {
+		return nil, backend.ErrNotImplemented("ListEventHistory", "event history paging is not supported by this backend")
+	}
+	return historyBackend.ListEventHistory(ctx, id, params)
 }
 
 func (b *ipcIssueBackend) Batch(ctx context.Context, ops []backend.BatchOp) ([]backend.BatchResult, error) {

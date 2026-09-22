@@ -1,0 +1,14 @@
+# Provider plugins and local state never belong in the repo.
+.terraform/
+.terraform-data/
+.loom-gcp-image-build.lock
+.stack
+.stack.last
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+
+# Real values; terraform.tfvars.example is the tracked template.
+terraform.tfvars
+*.auto.tfvars

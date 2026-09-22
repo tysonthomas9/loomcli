@@ -337,8 +337,8 @@ describe("ViewSwitcher", () => {
   });
 
   describe("exports", () => {
-    it("DEFAULT_VIEW is kanban", () => {
-      expect(DEFAULT_VIEW).toBe("kanban");
+    it("DEFAULT_VIEW is home", () => {
+      expect(DEFAULT_VIEW).toBe("home");
     });
   });
 });

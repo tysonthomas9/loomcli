@@ -14,16 +14,19 @@ var _ store.DaemonProfileStore = (*daemonStore)(nil)
 
 // daemonProfileWire mirrors fleet-db's models.DaemonProfile JSON.
 //
-// NOTE: fleet-db's RestartPolicy schema is narrower than loom's domain
-// type. Fields that exist only in loom (OutputTimeout, RateLimitBackoff,
-// RateLimitMaxWait, RateLimitNoCount, TimeoutBackoff, NoWorkBackoff,
-// IdlePollInterval, YieldTimeout, SigtermTimeout) are silently dropped
-// on Upsert and zeroed on Get. Same for OTel: loom's Protocol /
-// FlushIntervalMs / Traces / Metrics fields are not persisted.
+// NOTE: the whole of loom's domain.RestartPolicy now round-trips —
+// fleet-db's models.RestartPolicy models all twelve fields. What remains
+// unmapped is the reverse direction plus OTel:
 //
-// Future work: extend fleet-db's models.RestartPolicy + OTelSettings to
-// cover the full set, or split per-host-only fields out of the domain
-// type.
+//   - BackoffMultiplier / ResetAfterSuccess exist only in fleet-db and
+//     have no domain counterpart, so Get zeroes them and Upsert never
+//     sends them.
+//   - OTel: loom's Protocol / FlushIntervalMs / Traces / Metrics fields
+//     are not in fleet-db's schema, so they are dropped on Upsert and
+//     zeroed on Get.
+//
+// Future work: extend fleet-db's models.OTelSettings to cover the full
+// set, or split per-host-only fields out of the domain type.
 type daemonProfileWire struct {
 	WorkspaceKey   string                  `json:"workspace_key"`
 	PIDFile        string                  `json:"pid_file,omitempty"`
@@ -38,13 +41,24 @@ type daemonProfileWire struct {
 	UpdatedAt      time.Time               `json:"updated_at"`
 }
 
-// fleetRestartPolicyWire holds only the fields fleet-db understands.
+// fleetRestartPolicyWire holds the fields fleet-db understands. Tags are
+// identical to domain.RestartPolicy and to fleet-db's models.RestartPolicy;
+// BackoffMultiplier and ResetAfterSuccess have no domain counterpart.
 type fleetRestartPolicyWire struct {
-	MaxRetries        *int `json:"max_retries,omitempty"`
-	BackoffInitial    *int `json:"backoff_initial,omitempty"`
-	BackoffMax        *int `json:"backoff_max,omitempty"`
-	BackoffMultiplier *int `json:"backoff_multiplier,omitempty"`
-	ResetAfterSuccess *int `json:"reset_after_success,omitempty"`
+	MaxRetries        *int  `json:"max_retries,omitempty"`
+	BackoffInitial    *int  `json:"backoff_initial,omitempty"`
+	BackoffMax        *int  `json:"backoff_max,omitempty"`
+	BackoffMultiplier *int  `json:"backoff_multiplier,omitempty"`
+	ResetAfterSuccess *int  `json:"reset_after_success,omitempty"`
+	OutputTimeout     *int  `json:"output_timeout,omitempty"`
+	RateLimitBackoff  *int  `json:"rate_limit_backoff,omitempty"`
+	RateLimitMaxWait  *int  `json:"rate_limit_max_wait,omitempty"`
+	RateLimitNoCount  *bool `json:"rate_limit_no_count,omitempty"`
+	TimeoutBackoff    *int  `json:"timeout_backoff,omitempty"`
+	NoWorkBackoff     *int  `json:"no_work_backoff,omitempty"`
+	IdlePollInterval  *int  `json:"idle_poll_interval,omitempty"`
+	YieldTimeout      *int  `json:"yield_timeout,omitempty"`
+	SigtermTimeout    *int  `json:"sigterm_timeout,omitempty"`
 }
 
 // fleetOTelWire holds only the OTel fields fleet-db understands.
@@ -70,9 +84,18 @@ func (w daemonProfileWire) toDomain() *domain.DaemonProfile {
 	}
 	if w.RestartPolicy != nil {
 		out.RestartPolicy = domain.RestartPolicy{
-			MaxRetries:     w.RestartPolicy.MaxRetries,
-			BackoffInitial: w.RestartPolicy.BackoffInitial,
-			BackoffMax:     w.RestartPolicy.BackoffMax,
+			MaxRetries:       w.RestartPolicy.MaxRetries,
+			BackoffInitial:   w.RestartPolicy.BackoffInitial,
+			BackoffMax:       w.RestartPolicy.BackoffMax,
+			OutputTimeout:    w.RestartPolicy.OutputTimeout,
+			RateLimitBackoff: w.RestartPolicy.RateLimitBackoff,
+			RateLimitMaxWait: w.RestartPolicy.RateLimitMaxWait,
+			RateLimitNoCount: w.RestartPolicy.RateLimitNoCount,
+			TimeoutBackoff:   w.RestartPolicy.TimeoutBackoff,
+			NoWorkBackoff:    w.RestartPolicy.NoWorkBackoff,
+			IdlePollInterval: w.RestartPolicy.IdlePollInterval,
+			YieldTimeout:     w.RestartPolicy.YieldTimeout,
+			SigtermTimeout:   w.RestartPolicy.SigtermTimeout,
 			// BackoffMultiplier + ResetAfterSuccess are fleet-db-only;
 			// no domain mapping yet.
 		}
@@ -119,9 +142,18 @@ func domainToUpsertWire(p *domain.DaemonProfile) daemonProfileUpsertWire {
 	}
 	if hasRestartPolicy(p.RestartPolicy) {
 		out.RestartPolicy = &fleetRestartPolicyWire{
-			MaxRetries:     p.RestartPolicy.MaxRetries,
-			BackoffInitial: p.RestartPolicy.BackoffInitial,
-			BackoffMax:     p.RestartPolicy.BackoffMax,
+			MaxRetries:       p.RestartPolicy.MaxRetries,
+			BackoffInitial:   p.RestartPolicy.BackoffInitial,
+			BackoffMax:       p.RestartPolicy.BackoffMax,
+			OutputTimeout:    p.RestartPolicy.OutputTimeout,
+			RateLimitBackoff: p.RestartPolicy.RateLimitBackoff,
+			RateLimitMaxWait: p.RestartPolicy.RateLimitMaxWait,
+			RateLimitNoCount: p.RestartPolicy.RateLimitNoCount,
+			TimeoutBackoff:   p.RestartPolicy.TimeoutBackoff,
+			NoWorkBackoff:    p.RestartPolicy.NoWorkBackoff,
+			IdlePollInterval: p.RestartPolicy.IdlePollInterval,
+			YieldTimeout:     p.RestartPolicy.YieldTimeout,
+			SigtermTimeout:   p.RestartPolicy.SigtermTimeout,
 		}
 	}
 	if p.OTel != nil {
@@ -141,7 +173,18 @@ func domainToUpsertWire(p *domain.DaemonProfile) daemonProfileUpsertWire {
 // Avoids sending a fully-empty restart_policy block that would clobber
 // fleet-db's defaults.
 func hasRestartPolicy(rp domain.RestartPolicy) bool {
-	return rp.MaxRetries != nil || rp.BackoffInitial != nil || rp.BackoffMax != nil
+	return rp.MaxRetries != nil ||
+		rp.BackoffInitial != nil ||
+		rp.BackoffMax != nil ||
+		rp.OutputTimeout != nil ||
+		rp.RateLimitBackoff != nil ||
+		rp.RateLimitMaxWait != nil ||
+		rp.RateLimitNoCount != nil ||
+		rp.TimeoutBackoff != nil ||
+		rp.NoWorkBackoff != nil ||
+		rp.IdlePollInterval != nil ||
+		rp.YieldTimeout != nil ||
+		rp.SigtermTimeout != nil
 }
 
 func (s *daemonStore) Get(ctx context.Context, ws string) (*domain.DaemonProfile, error) {

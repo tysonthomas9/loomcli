@@ -32,6 +32,7 @@ func TestIssueModule_RegisterRoutes(t *testing.T) {
 		{"GET", "/api/workspaces/test-ws/issues/abc/comments"},
 		{"POST", "/api/workspaces/test-ws/issues/abc/comments"},
 		{"GET", "/api/workspaces/test-ws/issues/abc/events"},
+		{"GET", "/api/workspaces/test-ws/issues/abc/journey"},
 		{"GET", "/api/workspaces/test-ws/issues/abc/dependencies"},
 		{"POST", "/api/workspaces/test-ws/issues/abc/dependencies"},
 		{"DELETE", "/api/workspaces/test-ws/issues/abc/dependencies/dep1"},

@@ -217,10 +217,12 @@ export async function listScopedDir(
   workspaceId: string,
   scopeRef: FileScopeRef,
   path?: string,
+  requestOptions: { signal?: AbortSignal } = {},
 ): Promise<DirListData> {
-  return get<DirListData>(
-    scopedUrl(workspaceId, "/files/tree", scopeRef, path),
-  );
+  const url = scopedUrl(workspaceId, "/files/tree", scopeRef, path);
+  return requestOptions.signal
+    ? get<DirListData>(url, requestOptions)
+    : get<DirListData>(url);
 }
 
 /**

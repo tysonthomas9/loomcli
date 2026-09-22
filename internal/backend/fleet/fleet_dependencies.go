@@ -188,7 +188,7 @@ func (b *FleetBackend) waitForDependencyState(ctx context.Context, op, fromID, t
 	}
 }
 
-func (b *FleetBackend) clearBlockedStatusAfterDependencyRemoval(ctx context.Context, id string) error {
+func (b *FleetBackend) clearBlockedStatusAfterDependencyRemoval(ctx context.Context, id, actor string) error {
 	detail, err := b.Get(ctx, id)
 	if err != nil {
 		return err
@@ -196,9 +196,9 @@ func (b *FleetBackend) clearBlockedStatusAfterDependencyRemoval(ctx context.Cont
 	if detail == nil || detail.Status != string(types.StatusBlocked) || len(detail.Dependencies) > 0 {
 		return nil
 	}
-	_, err = b.exec(ctx, "RemoveDependency", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{
+	err = b.execAsActor(ctx, "RemoveDependency", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{
 		"status": string(types.StatusOpen),
-	})
+	}, actor)
 	return err
 }
 

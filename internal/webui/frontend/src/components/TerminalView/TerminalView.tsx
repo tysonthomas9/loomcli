@@ -19,7 +19,11 @@ import {
   TERMINAL_SIDEBAR_SELECT_EVENT,
 } from "@/utils/terminalSidebarBridge";
 
-import { NoBackendsEmptyState, useTabEditorGroups } from "./layout";
+import {
+  NoBackendsEmptyState,
+  TabMetadataErrorState,
+  useTabEditorGroups,
+} from "./layout";
 import groupStyles from "./layout/TerminalGroupLayout.module.css";
 import {
   TerminalPane,
@@ -64,7 +68,6 @@ interface TerminalViewProps {
   onIssueContextConsumed?: (() => void) | undefined;
   pendingTerminalInput?: TerminalInputRequest | undefined;
   onTerminalInputConsumed?: (() => void) | undefined;
-  onActiveSessionCountChange?: (count: number) => void;
   onUnreadChange?: (hasAnyUnread: boolean) => void;
   onTabLimitReached?: (message: string) => void;
   onNavigateToSettings?: () => void;
@@ -130,7 +133,6 @@ export function TerminalView({
   onIssueContextConsumed,
   pendingTerminalInput,
   onTerminalInputConsumed,
-  onActiveSessionCountChange,
   onUnreadChange,
   onTabLimitReached,
   onNavigateToSettings,
@@ -154,11 +156,13 @@ export function TerminalView({
     updatePinned,
     deleteTab,
     reorderTabs: reorderTabMeta,
+    dismissRestartNotice,
     isLoading: metaLoading,
+    isFetching: metaFetching,
     loadedFor: metaLoadedFor,
     unavailable: metaUnavailable,
     error: metaError,
-    refetch: refetchTabMetadata,
+    refetch: refetchTabMeta,
     // The app-level instance (hideTabs === false) is mounted for the whole
     // session and merely hidden when another view is on screen, and the
     // sidebar's Terminals section renders its tab list — so fetch regardless
@@ -346,14 +350,6 @@ export function TerminalView({
     };
   }, [activeTabId, workspaceId]);
 
-  // Report active (connected) session count to parent
-  useEffect(() => {
-    const count = visibleTabs.filter(
-      (t) => t.connectionState === "connected",
-    ).length;
-    onActiveSessionCountChange?.(count);
-  }, [visibleTabs, onActiveSessionCountChange]);
-
   // Drop agent tabs from the active selection in global Terminal view.
   useEffect(() => {
     if (hideTabs) return;
@@ -362,12 +358,6 @@ export function TerminalView({
     const fallback = visibleTabs[0];
     if (fallback) setActiveTabId(fallback.id);
   }, [hideTabs, activeTabId, tabs, visibleTabs, setActiveTabId]);
-
-  useEffect(() => {
-    return () => {
-      onActiveSessionCountChange?.(0);
-    };
-  }, [onActiveSessionCountChange]);
 
   const handleTabChange = useCallback(
     (tabId: string) => {
@@ -395,10 +385,19 @@ export function TerminalView({
     [moveTabToGroup, handleGroupTabChange],
   );
 
+  const metaBySession = useMemo(
+    () => new Map(tabMetadata.map((m) => [m.session_name, m])),
+    [tabMetadata],
+  );
+
   const toTerminalTabs = useCallback(
     (subset: TabState[]) =>
       subset.map((tab) => {
         const color = BACKEND_BRAND_COLORS[tab.backendName];
+        // Live metadata wins over the value seeded at restore, so a dismiss
+        // or a fresh replacement shows up without re-initialising tabs.
+        const meta = metaBySession.get(tab.sessionName);
+        const replacedAt = meta ? meta.replaced_at : tab.replacedAt;
         return {
           id: tab.id,
           label: tab.label,
@@ -406,9 +405,26 @@ export function TerminalView({
           ...(color != null && { brandColor: color }),
           ...(tabUnread.get(tab.id) && { hasUnread: true }),
           ...(tab.pinned && { isPinned: true }),
+          ...(replacedAt ? { replacedAt } : {}),
         };
       }),
-    [tabUnread],
+    [tabUnread, metaBySession],
+  );
+
+  const handleDismissRestartNotice = useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((t) => t.id === tabId);
+      if (!tab) return;
+      void dismissRestartNotice(tab.sessionName);
+      setTabs((current) =>
+        current.map((t) => {
+          if (t.id !== tabId) return t;
+          const { replacedAt: _dismissed, ...rest } = t;
+          return rest;
+        }),
+      );
+    },
+    [tabs, dismissRestartNotice, setTabs],
   );
 
   const tabsForGroup = useCallback(
@@ -804,10 +820,6 @@ export function TerminalView({
     [setFocusedPane],
   );
 
-  const metaBySession = useMemo(
-    () => new Map(tabMetadata.map((m) => [m.session_name, m])),
-    [tabMetadata],
-  );
   const paneTabs = useMemo(() => {
     if (!hideTabs) return visibleTabs;
 
@@ -842,13 +854,13 @@ export function TerminalView({
       const meta = metaBySession.get(tab.sessionName);
       // Undefined while metadata is still loading — preserves connect-on-
       // mount. Only concrete `false` gates auto-attach.
-      const ptyAlive = meta?.pty_alive;
+      const attachable = meta?.attachable;
       return (
         <TerminalPane
           tab={tab}
           isActive={paneIsActive}
           instanceRef={setInstanceRef(tab.id)}
-          ptyAlive={ptyAlive}
+          attachable={attachable}
           autoStartStaleSession={false}
           autoReconnect
           onConnectionStateChange={(state, hasConnected) =>
@@ -896,31 +908,17 @@ export function TerminalView({
   const containerClassName = styles.container;
   return (
     <div className={containerClassName} data-testid="terminal-view">
-      {(metaLoading || configLoading) && visibleTabs.length === 0 ? (
+      {metaError && !metaFetching && visibleTabs.length === 0 ? (
+        // A failed list load leaves the hook loading forever by design, so
+        // without this branch the skeleton below would never clear (PUPPET-125).
+        <TabMetadataErrorState
+          message={metaError.message}
+          onRetry={() => {
+            void refetchTabMeta();
+          }}
+        />
+      ) : (metaLoading || configLoading) && visibleTabs.length === 0 ? (
         <LoadingSkeleton.Terminal />
-      ) : metaError && visibleTabs.length === 0 ? (
-        // The tab list failed to load (a genuine failure — 404/503 is the
-        // supported "no metadata storage" mode and settles as empty). Offer a
-        // retry rather than an empty terminal: inventing tabs here is exactly
-        // what the readiness gate exists to prevent.
-        <div
-          className={styles.metaErrorState}
-          data-testid="terminal-metadata-error"
-          role="alert"
-        >
-          <h2 className={styles.metaErrorHeading}>
-            Couldn&apos;t load terminal tabs
-          </h2>
-          <p className={styles.metaErrorDescription}>{metaError.message}</p>
-          <button
-            type="button"
-            className={styles.metaErrorRetry}
-            onClick={() => void refetchTabMetadata()}
-            data-testid="terminal-metadata-retry"
-          >
-            Retry
-          </button>
-        </div>
       ) : visibleTabs.length === 0 ? (
         <NoBackendsEmptyState
           {...(onNavigateToSettings != null && {
@@ -948,6 +946,7 @@ export function TerminalView({
                 onTabPin={handleTabPin}
                 onCloseOthers={handleCloseOthers}
                 onReorderTabs={handleReorderTabs}
+                onDismissRestartNotice={handleDismissRestartNotice}
                 canSplitRight={canSplitRight}
                 onSplitRight={splitActiveTab}
                 totalTabCount={visibleTabs.length}
@@ -1051,6 +1050,7 @@ export function TerminalView({
                       maxTabsReached={visibleTabs.length >= MAX_TABS}
                       onTabPin={handleTabPin}
                       onCloseOthers={handleCloseOthers}
+                      onDismissRestartNotice={handleDismissRestartNotice}
                       showToolbarActions={groupIndex === 0}
                       groupDrag={{
                         onDragStart: (tabId) =>

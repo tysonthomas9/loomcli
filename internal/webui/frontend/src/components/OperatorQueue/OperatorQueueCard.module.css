@@ -1,0 +1,219 @@
+.card {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--surface-radius);
+  transition: border-color var(--transition-fast);
+}
+
+.card:hover {
+  border-color: var(--color-border-hover);
+}
+
+.cardOpenButton {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: inherit;
+  cursor: pointer;
+}
+
+.cardOpenButton:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+.card[data-kind="design-gate"] {
+  box-shadow: inset 3px 0 0 var(--color-status-review);
+}
+
+.card[data-kind="blocked"] {
+  box-shadow: inset 3px 0 0 var(--color-danger);
+}
+
+.card[data-kind="needs-revision"] {
+  box-shadow: inset 3px 0 0 var(--color-warning);
+}
+
+.topRow {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 11px var(--space-4) 0;
+  pointer-events: none;
+}
+
+.kind {
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.card[data-kind="design-gate"] .kind {
+  color: var(--color-status-review-text);
+  background: color-mix(in srgb, var(--color-status-review) 24%, transparent);
+  border-color: color-mix(in srgb, var(--color-status-review) 45%, transparent);
+}
+
+.card[data-kind="blocked"] .kind {
+  color: var(--color-status-danger-text);
+  background: var(--color-danger-bg);
+  border-color: color-mix(in srgb, var(--color-danger) 40%, transparent);
+}
+
+.card[data-kind="needs-revision"] .kind {
+  color: var(--color-status-warning-text);
+  background: var(--color-warning-bg);
+  border-color: color-mix(in srgb, var(--color-warning) 40%, transparent);
+}
+
+.waited {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.issueId {
+  margin-left: auto;
+  padding: 1px 7px;
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.repoChip {
+  padding: 1px 7px;
+  font-family: var(--font-family-mono);
+  font-size: 10.5px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.repoChip[data-no-repo="true"] {
+  color: var(--color-text-tertiary);
+}
+
+.body {
+  position: relative;
+  z-index: 2;
+  padding: 6px var(--space-4) 14px;
+  pointer-events: none;
+}
+
+.title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.summary {
+  margin: 5px 0 0;
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+}
+
+.summary strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.actor {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.metaRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 11px;
+}
+
+.statusPill,
+.labelPill,
+.metaPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+}
+
+.statusPill[data-status="review"] {
+  color: var(--color-status-review-text);
+  background: color-mix(in srgb, var(--color-status-review) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-status-review) 45%, transparent);
+}
+
+.statusPill[data-status="blocked"] {
+  color: var(--color-status-danger-text);
+  background: var(--color-danger-bg);
+  border-color: color-mix(in srgb, var(--color-danger) 40%, transparent);
+}
+
+.labelPill {
+  font-family: var(--font-family-mono);
+  font-size: 10.5px;
+}
+
+.blockedNote {
+  margin: 11px 0 0;
+  padding: 8px 11px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+}
+
+.footer {
+  position: relative;
+  z-index: 2;
+  background: color-mix(in srgb, var(--color-text-primary) 1.2%, transparent);
+  border-top: 1px solid var(--color-border-light);
+  pointer-events: none;
+}
+
+.actions button,
+.rejectForm {
+  pointer-events: auto;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: 11px var(--space-4);
+}
+
+@media (width <= 520px) {
+  .actions,
+  .actions button {
+    width: 100%;
+  }
+}

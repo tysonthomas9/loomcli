@@ -313,7 +313,9 @@ export function ListPage(): JSX.Element {
                           >
                             {formatStatusLabel(status)}
                           </span>
-                          {issue.assignee && <Avatar name={issue.assignee} />}
+                          <span className={styles.avatarSlot}>
+                            {issue.assignee && <Avatar name={issue.assignee} />}
+                          </span>
                         </button>
                       </li>
                     );

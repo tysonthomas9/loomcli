@@ -5,23 +5,47 @@ import {
   putTabMetadata,
   patchTabMetadata,
   deleteTabMetadata,
+  dismissTabRestartNotice,
 } from "@/api/terminal";
 import type { TabMetadata } from "@/api/terminal";
-import { ApiError, type MutationPayload } from "@/api/common";
+import type { MutationPayload } from "@/api/common";
+import { ApiError } from "@/types/common";
 
 export interface UseTerminalMetadataReturn {
+  /**
+   * Tab metadata for the workspace this hook is currently asked about, and
+   * nothing else. While a fetch for a newly requested workspace is still in
+   * flight this is empty rather than the previous workspace's list.
+   */
   tabs: TabMetadata[];
+  /**
+   * True until `tabs` is authoritative for the currently requested workspace.
+   * A consumer that sees `isLoading === false` may treat `tabs` as the truth
+   * for that workspace — in particular, an empty `tabs` then really means
+   * "this workspace has no terminal tabs" (see PUPPET-125).
+   */
   isLoading: boolean;
+  /**
+   * True while a list request is on the wire for the currently requested
+   * workspace. `isLoading` stays true after a *failed* load (the stamp is not
+   * advanced), so a consumer that wants to distinguish "still trying" from
+   * "gave up, offer a retry" reads this alongside `error`.
+   */
+  isFetching: boolean;
   error: Error | null;
   /**
-   * Workspace whose fetch last settled — either a success or the 404/503
-   * "metadata storage unavailable" outcome, which is a settled empty list.
-   * Null while unsettled. Consumers gate on `loadedFor === workspace` rather
-   * than on `!isLoading`, so readiness cannot be read stale in the commit
-   * where the workspace (or `enabled`) changes.
+   * The workspace whose list is currently held, or null whenever that list is
+   * not this workspace's — before the first load settles, after a genuine
+   * failure, and in the same render as a workspace change. Consumers gate on
+   * `loadedFor === workspaceId` so a list belonging to the previous workspace
+   * is never mistaken for this one's (PUPPET-32).
    */
   loadedFor: string | null;
-  /** True when the last settle was 404/503: metadata storage is not configured. */
+  /**
+   * True when metadata storage answered 404/503 — not configured, or down.
+   * That is a supported degraded mode and a *settled* empty list, distinct
+   * from a genuine failure, which leaves `error` set and `loadedFor` null.
+   */
   unavailable: boolean;
   createTab: (
     session: string,
@@ -35,6 +59,8 @@ export interface UseTerminalMetadataReturn {
   deleteTab: (session: string) => Promise<void>;
   linkToIssue: (session: string, issueId: string) => Promise<void>;
   unlinkFromIssue: (session: string) => Promise<void>;
+  /** Clear a tab's persisted session-replacement marker. */
+  dismissRestartNotice: (session: string) => Promise<void>;
   refetch: () => Promise<void>;
   /** Call this from an SSE onMutation handler to trigger debounced refetch */
   handleMutation: (mutation: MutationPayload) => void;
@@ -46,38 +72,76 @@ export interface UseTerminalMetadataOptions {
 
 const DEBOUNCE_MS = 100;
 
+/**
+ * Single module-level empty list so `tabs` keeps a stable identity across
+ * renders while no workspace-fresh data is held. `useTabInit` compares
+ * `tabMetadata` by reference (and lists it in an effect dep array), so a fresh
+ * `[]` per render would retrigger it needlessly.
+ */
+const EMPTY_TABS: TabMetadata[] = [];
+
+/** Tab metadata together with the workspace it was fetched for. */
+interface LoadedTabs {
+  workspace: string;
+  tabs: TabMetadata[];
+}
+
 export function useTerminalMetadata(
   workspace: string,
   options: UseTerminalMetadataOptions = {},
 ): UseTerminalMetadataReturn {
   const enabled = options.enabled ?? true;
-  const [tabs, setTabs] = useState<TabMetadata[]>([]);
-  const [isLoading, setIsLoading] = useState(Boolean(enabled && workspace));
-  const [error, setError] = useState<Error | null>(null);
-  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState<LoadedTabs>({
+    workspace: "",
+    tabs: EMPTY_TABS,
+  });
+  const [isFetching, setIsFetching] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
   const mountedRef = useRef(true);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The workspace the latest effect run asked for. Fetch resolutions compare
+  // against it so an out-of-order response cannot be stamped onto the wrong
+  // workspace.
+  const requestedWorkspaceRef = useRef("");
 
-  // The workspace this hook is currently fetching for. "" means "not fetching":
-  // either disabled, or the workspace has not resolved yet.
-  const fetchKey = enabled ? workspace : "";
-  const [syncedKey, setSyncedKey] = useState(fetchKey);
-  if (fetchKey !== syncedKey) {
-    // React's supported "adjust state during render" pattern: re-renders before
-    // children/effects, so consumers never observe the previous key's readiness.
-    setSyncedKey(fetchKey);
-    setTabs([]);
-    setLoadedFor(null);
-    setUnavailable(false);
-    setError(null);
-    setIsLoading(Boolean(enabled && workspace));
-  }
+  // A stamp of "" never matches: workspace === "" means "not resolved yet",
+  // and the hook must stay in the loading state there (see fetchTabs below).
+  const isFresh = workspace !== "" && loaded.workspace === workspace;
+  const tabs = isFresh ? loaded.tabs : EMPTY_TABS;
+  const isLoading = enabled && (!isFresh || isFetching);
+  // Readiness for THIS workspace, derived in render rather than in an effect:
+  // a list held for the previous workspace must read as "not ready" in the very
+  // commit where `workspace` changes, not one effect later. The stamp advances
+  // only on a settled load (success, or the 404/503 degraded mode below), never
+  // on a genuine failure.
+  const loadedFor = isFresh ? workspace : null;
 
-  // Mirrors the key so late settle handlers can tell whether their response
-  // still belongs to the workspace the hook is on.
-  const keyRef = useRef(fetchKey);
-  keyRef.current = fetchKey;
+  /**
+   * Apply an optimistic mutation, but only while the held data still belongs
+   * to the workspace this hook is asked about *and* to the workspace the
+   * mutation was issued for (`issuedFor`). A mutation that resolves after a
+   * workspace switch must neither resurrect the previous workspace's list nor
+   * let its rollback overwrite the new workspace's list.
+   */
+  const updateTabs = useCallback(
+    (issuedFor: string, updater: (current: TabMetadata[]) => TabMetadata[]) => {
+      setLoaded((current) => {
+        if (
+          current.workspace === "" ||
+          current.workspace !== issuedFor ||
+          current.workspace !== requestedWorkspaceRef.current
+        ) {
+          return current;
+        }
+        const next = updater(current.tabs);
+        return next === current.tabs
+          ? current
+          : { workspace: current.workspace, tabs: next };
+      });
+    },
+    [],
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -94,50 +158,64 @@ export function useTerminalMetadata(
       return;
     }
     if (!workspace) {
-      // Workspace not resolved yet — stay unsettled (loadedFor null) so
-      // downstream consumers (e.g. useTabInit) don't see "ready with zero
-      // tabs" and auto-create a default, locking out the real tab list that
-      // arrives when workspace resolves.
+      // Workspace not resolved yet — stay in the loading state so
+      // downstream consumers (e.g. useTabInit) don't see
+      // "ready with zero tabs" and auto-create a default, locking out
+      // the real tab list that arrives when workspace resolves.
       return;
     }
-    setIsLoading(true);
+    const requested = workspace;
+    if (requestedWorkspaceRef.current !== requested) {
+      // This closure belongs to a workspace the hook has since moved off (e.g.
+      // the `refetch` a late 409 reaches for). Touching `isFetching`/`error`
+      // here would strand the current workspace in the loading skeleton,
+      // because only the matching workspace's fetch resets them again.
+      return;
+    }
+    setIsFetching(true);
     setError(null);
-    // A settle only counts if the hook is still mounted AND still on the
-    // workspace this call was issued for; a late response for a superseded
-    // workspace must not mark the new one ready.
-    const settleable = () => mountedRef.current && keyRef.current === workspace;
     try {
-      const data = await listTabMetadata(workspace);
-      if (settleable()) {
-        setTabs(data);
+      const data = await listTabMetadata(requested);
+      if (mountedRef.current && requestedWorkspaceRef.current === requested) {
+        setLoaded({ workspace: requested, tabs: data });
         setUnavailable(false);
-        setLoadedFor(workspace);
       }
     } catch (err) {
-      if (!settleable()) return;
-      if (
-        err instanceof ApiError &&
-        (err.status === 404 || err.status === 503)
-      ) {
-        // Metadata storage is not configured (404) or is down (503). That is a
-        // supported degraded mode, and a settled empty list — not a failure.
-        setTabs([]);
-        setUnavailable(true);
-        setLoadedFor(workspace);
-      } else {
-        // A genuine failure leaves loadedFor null: no tabs are invented.
-        setError(err instanceof Error ? err : new Error(String(err)));
+      if (mountedRef.current && requestedWorkspaceRef.current === requested) {
+        if (
+          err instanceof ApiError &&
+          (err.status === 404 || err.status === 503)
+        ) {
+          // Metadata storage is not configured (404) or is down (503). That is
+          // a supported degraded mode and a settled empty list, not a failure,
+          // so the stamp DOES advance — otherwise the UI spins forever on a
+          // server that will never have tab metadata to give.
+          setLoaded({ workspace: requested, tabs: EMPTY_TABS });
+          setUnavailable(true);
+        } else {
+          // The stamp is deliberately NOT advanced: a failed load must leave
+          // the hook loading rather than report "this workspace has zero
+          // tabs", which would make useTabInit manufacture a terminal session.
+          setError(err instanceof Error ? err : new Error(String(err)));
+        }
       }
     } finally {
-      if (settleable()) {
-        setIsLoading(false);
+      if (mountedRef.current && requestedWorkspaceRef.current === requested) {
+        setIsFetching(false);
       }
     }
   }, [enabled, workspace]);
 
-  // Fetch when the workspace (or enabled) changes. The state reset for the new
-  // key already happened during render, above.
+  // Re-fetch when workspace changes, or when the hook is re-enabled.
   useEffect(() => {
+    if (requestedWorkspaceRef.current !== workspace) {
+      requestedWorkspaceRef.current = workspace;
+      // A failure in the previous workspace must not persist into this one,
+      // and neither must its degraded-mode verdict.
+      setError(null);
+      setUnavailable(false);
+      setIsFetching(false);
+    }
     if (!enabled) {
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
@@ -145,11 +223,15 @@ export function useTerminalMetadata(
       }
       return;
     }
+    // No setLoaded([]) here: staleness is expressed by the workspace stamp, so
+    // clearing is implicit and a workspace whose data is already correct is
+    // spared a gratuitous empty-list render.
     fetchTabs();
-  }, [enabled, fetchTabs]);
+  }, [enabled, workspace, fetchTabs]);
 
   const createTab = useCallback(
     async (session: string, label: string, sortOrder: number) => {
+      const issued = workspace;
       const now = new Date().toISOString();
       const optimistic: TabMetadata = {
         session_name: session,
@@ -160,16 +242,23 @@ export function useTerminalMetadata(
         created_at: now,
         updated_at: now,
         // Optimistic; next ListTabs refresh returns the server's truth.
-        pty_alive: true,
+        // `replaced_at` is deliberately absent: a tab created just now has
+        // never been replaced, and seeding it would flash a restart marker.
+        attachable: true,
         attached_clients: 0,
       };
-      let prev: TabMetadata[] = [];
-      setTabs((current) => {
+      // `prev` stays null when the optimistic apply was skipped (stale
+      // workspace, or no workspace-fresh list held yet). React runs queued
+      // state updaters in order, so the rollback below sees the assignment iff
+      // the optimistic update really applied — and otherwise leaves the held
+      // list alone instead of clobbering it with an empty array.
+      let prev: TabMetadata[] | null = null;
+      updateTabs(issued, (current) => {
         prev = current;
         return [...current, optimistic];
       });
       try {
-        await putTabMetadata(workspace, session, {
+        await putTabMetadata(issued, session, {
           session_name: session,
           label,
           sort_order: sortOrder,
@@ -177,82 +266,98 @@ export function useTerminalMetadata(
           pinned: false,
         });
       } catch (err) {
-        if (mountedRef.current) {
-          setTabs(prev);
+        if (err instanceof ApiError && err.status === 409) {
+          // The session already exists server-side with a live PTY — another
+          // browser tab created it, or this PUT lost the race with the first
+          // WS attach. Not an error: keep the optimistic tab and adopt the
+          // server's truth. Only refetch while this is still the requested
+          // workspace: `fetchTabs` here closes over the workspace the PUT was
+          // issued for, and the current one has already fetched for itself.
+          if (requestedWorkspaceRef.current === issued) {
+            void fetchTabs();
+          }
+          return;
+        }
+        if (mountedRef.current && requestedWorkspaceRef.current === issued) {
+          updateTabs(issued, (current) => prev ?? current);
           setError(err instanceof Error ? err : new Error(String(err)));
         }
       }
     },
-    [workspace],
+    [workspace, updateTabs, fetchTabs],
   );
 
   const updateLabel = useCallback(
     async (session: string, label: string) => {
-      let prev: TabMetadata[] = [];
-      setTabs((current) => {
+      const issued = workspace;
+      let prev: TabMetadata[] | null = null;
+      updateTabs(issued, (current) => {
         prev = current;
         return current.map((t) =>
           t.session_name === session ? { ...t, label } : t,
         );
       });
       try {
-        await patchTabMetadata(workspace, session, { label });
+        await patchTabMetadata(issued, session, { label });
       } catch (err) {
-        if (mountedRef.current) {
-          setTabs(prev);
+        if (mountedRef.current && requestedWorkspaceRef.current === issued) {
+          updateTabs(issued, (current) => prev ?? current);
           setError(err instanceof Error ? err : new Error(String(err)));
         }
       }
     },
-    [workspace],
+    [workspace, updateTabs],
   );
 
   const updateNotes = useCallback(
     async (session: string, notes: string) => {
-      let prev: TabMetadata[] = [];
-      setTabs((current) => {
+      const issued = workspace;
+      let prev: TabMetadata[] | null = null;
+      updateTabs(issued, (current) => {
         prev = current;
         return current.map((t) =>
           t.session_name === session ? { ...t, notes } : t,
         );
       });
       try {
-        await patchTabMetadata(workspace, session, { notes });
+        await patchTabMetadata(issued, session, { notes });
       } catch (err) {
-        if (mountedRef.current) {
-          setTabs(prev);
+        if (mountedRef.current && requestedWorkspaceRef.current === issued) {
+          updateTabs(issued, (current) => prev ?? current);
           setError(err instanceof Error ? err : new Error(String(err)));
         }
       }
     },
-    [workspace],
+    [workspace, updateTabs],
   );
 
   const updatePinned = useCallback(
     async (session: string, pinned: boolean) => {
-      let prev: TabMetadata[] = [];
-      setTabs((current) => {
+      const issued = workspace;
+      let prev: TabMetadata[] | null = null;
+      updateTabs(issued, (current) => {
         prev = current;
         return current.map((t) =>
           t.session_name === session ? { ...t, pinned } : t,
         );
       });
       try {
-        await patchTabMetadata(workspace, session, { pinned });
+        await patchTabMetadata(issued, session, { pinned });
       } catch (err) {
-        if (mountedRef.current) {
-          setTabs(prev);
+        if (mountedRef.current && requestedWorkspaceRef.current === issued) {
+          updateTabs(issued, (current) => prev ?? current);
           setError(err instanceof Error ? err : new Error(String(err)));
         }
       }
     },
-    [workspace],
+    [workspace, updateTabs],
   );
 
   const reorderTabs = useCallback(
     async (orderedSessionNames: string[]) => {
-      let prev: TabMetadata[] = [];
-      setTabs((current) => {
+      const issued = workspace;
+      let prev: TabMetadata[] | null = null;
+      updateTabs(issued, (current) => {
         prev = current;
         const byName = new Map(current.map((t) => [t.session_name, t]));
         return orderedSessionNames
@@ -267,63 +372,66 @@ export function useTerminalMetadata(
       try {
         await Promise.all(
           orderedSessionNames.map((name, i) =>
-            patchTabMetadata(workspace, name, { sort_order: i }),
+            patchTabMetadata(issued, name, { sort_order: i }),
           ),
         );
       } catch (err) {
-        if (mountedRef.current) {
-          setTabs(prev);
+        if (mountedRef.current && requestedWorkspaceRef.current === issued) {
+          updateTabs(issued, (current) => prev ?? current);
           setError(err instanceof Error ? err : new Error(String(err)));
         }
       }
     },
-    [workspace],
+    [workspace, updateTabs],
   );
 
   const deleteTab = useCallback(
     async (session: string) => {
-      let prev: TabMetadata[] = [];
-      setTabs((current) => {
+      const issued = workspace;
+      let prev: TabMetadata[] | null = null;
+      updateTabs(issued, (current) => {
         prev = current;
         return current.filter((t) => t.session_name !== session);
       });
       try {
-        await deleteTabMetadata(workspace, session);
+        await deleteTabMetadata(issued, session);
       } catch (err) {
-        if (mountedRef.current) {
-          setTabs(prev);
+        if (mountedRef.current && requestedWorkspaceRef.current === issued) {
+          updateTabs(issued, (current) => prev ?? current);
           setError(err instanceof Error ? err : new Error(String(err)));
         }
       }
     },
-    [workspace],
+    [workspace, updateTabs],
   );
 
   const linkToIssue = useCallback(
     async (session: string, issueId: string) => {
-      let prev: TabMetadata[] = [];
-      setTabs((current) => {
+      const issued = workspace;
+      let prev: TabMetadata[] | null = null;
+      updateTabs(issued, (current) => {
         prev = current;
         return current.map((t) =>
           t.session_name === session ? { ...t, issue_id: issueId } : t,
         );
       });
       try {
-        await patchTabMetadata(workspace, session, { issue_id: issueId });
+        await patchTabMetadata(issued, session, { issue_id: issueId });
       } catch (err) {
-        if (mountedRef.current) {
-          setTabs(prev);
+        if (mountedRef.current && requestedWorkspaceRef.current === issued) {
+          updateTabs(issued, (current) => prev ?? current);
           setError(err instanceof Error ? err : new Error(String(err)));
         }
       }
     },
-    [workspace],
+    [workspace, updateTabs],
   );
 
   const unlinkFromIssue = useCallback(
     async (session: string) => {
-      let prev: TabMetadata[] = [];
-      setTabs((current) => {
+      const issued = workspace;
+      let prev: TabMetadata[] | null = null;
+      updateTabs(issued, (current) => {
         prev = current;
         return current.map((t) => {
           if (t.session_name !== session) return t;
@@ -332,15 +440,37 @@ export function useTerminalMetadata(
         });
       });
       try {
-        await patchTabMetadata(workspace, session, { issue_id: "" });
+        await patchTabMetadata(issued, session, { issue_id: "" });
       } catch (err) {
-        if (mountedRef.current) {
-          setTabs(prev);
+        if (mountedRef.current && requestedWorkspaceRef.current === issued) {
+          updateTabs(issued, (current) => prev ?? current);
           setError(err instanceof Error ? err : new Error(String(err)));
         }
       }
     },
-    [workspace],
+    [workspace, updateTabs],
+  );
+
+  const dismissRestartNotice = useCallback(
+    async (session: string) => {
+      const issued = workspace;
+      let prev: TabMetadata[] | null = null;
+      updateTabs(issued, (current) => {
+        prev = current;
+        return current.map((t) =>
+          t.session_name === session ? { ...t, replaced_at: "" } : t,
+        );
+      });
+      try {
+        await dismissTabRestartNotice(issued, session);
+      } catch (err) {
+        if (mountedRef.current && requestedWorkspaceRef.current === issued) {
+          updateTabs(issued, (current) => prev ?? current);
+          setError(err instanceof Error ? err : new Error(String(err)));
+        }
+      }
+    },
+    [workspace, updateTabs],
   );
 
   const handleMutation = useCallback(
@@ -361,6 +491,7 @@ export function useTerminalMetadata(
   return {
     tabs,
     isLoading,
+    isFetching: enabled && isFetching,
     error,
     loadedFor,
     unavailable,
@@ -372,6 +503,7 @@ export function useTerminalMetadata(
     deleteTab,
     linkToIssue,
     unlinkFromIssue,
+    dismissRestartNotice,
     refetch: fetchTabs,
     handleMutation,
   };

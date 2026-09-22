@@ -242,3 +242,52 @@ func resolveControlSocketFromCwd() (string, error) {
 
 	return resolveDaemonSocketPath(projectDir, config.Daemon.PIDFile), nil
 }
+
+// Control-socket resolution sources, as printed to the user. They match the
+// Source values `loom daemon status` already reports.
+const (
+	controlSocketSourceCwd           = "cwd"
+	controlSocketSourceWorkspaceLock = "workspace-lock"
+)
+
+// resolveControlSocketForCommand resolves the daemon control socket without
+// assuming the caller's cwd is the daemon's project dir.
+//
+// Order:
+//  1. the cwd-derived path, when a socket actually exists there — unchanged
+//     behavior for anyone standing in the daemon's project dir;
+//  2. the workspace-lock sidecar's recorded socket path, which lets
+//     `loom daemon hold`/`release` reach the daemon from any directory;
+//  3. the cwd-derived path anyway, so the caller surfaces the familiar
+//     "no control socket at <path>" error rather than a new one.
+//
+// The sidecar is read straight off the filesystem: resolution must keep
+// working while fleet-db (and so daemonregistry) is being redeployed, which
+// is exactly when a hold is needed.
+func resolveControlSocketForCommand() (string, string, error) {
+	cwdPath, err := resolveControlSocketFromCwd()
+	if err != nil {
+		return "", "", err
+	}
+	if socketExists(cwdPath) {
+		return cwdPath, controlSocketSourceCwd, nil
+	}
+	if rt := detectWorkspaceDaemonRuntime(); rt.Running && rt.Socket != "" {
+		return rt.Socket, controlSocketSourceWorkspaceLock, nil
+	}
+	return cwdPath, controlSocketSourceCwd, nil
+}
+
+// socketExists reports whether something is present at path. It does not dial:
+// a stale socket file is still the caller's best guess, and the dial error it
+// produces is the one users already know.
+func socketExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// describeControlSocket renders the socket and how it was found, for the
+// waiting and error lines of the hold/release commands.
+func describeControlSocket(path, source string) string {
+	return fmt.Sprintf("socket %s (source: %s)", path, source)
+}

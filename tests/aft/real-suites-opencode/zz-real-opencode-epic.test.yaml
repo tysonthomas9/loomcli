@@ -1,0 +1,152 @@
+# REAL opencode tier — runs the operator's real `opencode` CLI through the serve epic-runner.
+# Gated: only runs under AFT_REAL_BACKEND=opencode (run-aft.sh points AFT_SUITES at
+# real-suites-opencode/). Needs a provider configured in opencode's own auth
+# (`opencode auth login`); loom's HealthCheck for opencode is binary-only, so a missing
+# provider surfaces as task-never-closed. Every other agent CLI is stubbed
+# (e2e/stubs-real-opencode). Named zz- defensively. NOT part of the default suites/ dir.
+suite: zz-real-opencode-epic
+classification: { area: agents, feature: real-agent-backends, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: >-
+  "$AFT_TESTS_DIR/scripts/close-open-issues.sh";
+  "$AFT_TESTS_DIR/scripts/real-backend-teardown.sh" opencode || true
+
+tests:
+  - name: real opencode epic-runner creates HELLO.md and closes the task
+    intent: The real opencode CLI, selected as the workspace default backend, claims the seeded child task via epic-runner, creates HELLO.md in a resolved task worktree, patches it back, records a real transcript+diff, and closes the task
+    steps:
+      # 0) select opencode as this workspace's default backend. The stack is freshly
+      #    booted per run, so this cannot leak into other suites or runs.
+      - api:
+          method: "PATCH"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/config/backend"
+          body:
+            backend: "opencode"
+        intent: "An operator selects opencode as the workspace default backend"
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/config/backend"
+          assert:
+            - path: "data.backend"
+              equals: "opencode"
+        intent: "An operator confirms opencode is the persisted workspace backend"
+      # 1) seed epic + one child task carrying a tiny, deterministic DESIGN (the opencode prompt).
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "real-opencode epic $RUN_ID"
+            issue_type: "epic"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "rocEpicId"
+        intent: "An operator seeds the real-opencode epic at priority 2"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "real-opencode task $RUN_ID"
+            issue_type: "task"
+            priority: 2
+            parent: "${var:rocEpicId}"
+            design: "Create a file named HELLO.md at the repository root whose entire contents are exactly the line: hello world. Do not create any other files. Do not modify any other files."
+          save:
+            - from: "data.id"
+              as: "rocTaskId"
+        intent: "An operator seeds the real-opencode child task with the HELLO.md design"
+      # 2) confirm the card is on the board (SSE) before triggering.
+      - open: /ws/E2E-WS/kanban
+      - wait: { fn: "!!document.querySelector('[data-testid=board-toolbar]')" }
+        intent: "Wait until the workspace board is ready"
+      - wait: { text: real-opencode task }
+      # 3) trigger epic-runner (workspace backend = opencode). POST carries the one-time flue
+      #    bundle build; still well under the 120s run-step ceiling.
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/workflows/epic-runner"
+          body:
+            epicId: "${var:rocEpicId}"
+        intent: "An operator starts epic-runner with the real opencode backend"
+      # 4) WAIT for completion by polling the API for status:closed (see real-codex suite for
+      #    why the board is not a usable completion signal). Chained grace polls keep each
+      #    run: step under aft's 120s ceiling — ~5.5 min total budget.
+      - run: >-
+          for i in $(seq 1 55); do curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/rocTaskId")" | grep -q '"status":"closed"' && exit 0; sleep 2; done; echo "not closed yet (grace window 1)"; exit 0
+        intent: "Wait until the real backend task reaches closed state in the workspace API"
+      - run: >-
+          for i in $(seq 1 55); do curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/rocTaskId")" | grep -q '"status":"closed"' && exit 0; sleep 2; done; echo "not closed yet (grace window 2)"; exit 0
+        intent: "Wait until the real backend task reaches closed state in the workspace API"
+      - run: >-
+          for i in $(seq 1 55); do curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/rocTaskId")" | grep -q '"status":"closed"' && exit 0; sleep 2; done; echo "task never closed"; exit 1
+        intent: "Wait until the real backend task reaches closed state in the workspace API"
+      # 5) board-level UX assert on the FLAT board, where closed cards do render in Done.
+      - open: /ws/E2E-WS/kanban?groupBy=none
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll("section[data-status=done] article"))
+              .some((el) => el.textContent.includes('real-opencode task ${RUN_ID:-local}'))
+        intent: "Wait until the flat board renders the completed real-backend task in Done"
+      # 6) a session was recorded, and it is a opencode/local run with a real diff
+      #    (files_changed>=1). Also capture the session id for the transcript check.
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/tasks/${var:rocTaskId}/sessions"
+          assert:
+            - path: "data.sessions.0.backend"
+              equals: "opencode"
+            - path: "data.sessions.0.exit_code"
+              equals: 0
+            - path: "data.sessions.0.evidence.status"
+              equals: "ok"
+            - path: "data.sessions.0.evidence.conflicts"
+              contains: "[]"
+          save:
+            - from: "data.sessions.0"
+              as: "rocSessionRecord"
+            - from: "data.sessions.0.session_id"
+              as: "rocSessionId"
+        intent: "An operator reads back the completed real-opencode session and captures its identity"
+      - run: >-
+          python3 -c 'import json,os; s=json.load(open(os.environ["AFT_WORK_DIR"]+"/rocSessionRecord")); assert s.get("backend")=="opencode", s; assert s.get("exit_code")==0, s; assert int(s.get("files_changed") or 0) >= 1, s; ev=s.get("evidence") or {}; assert ev.get("status")=="ok" and not ev.get("conflicts"), ev; usage=ev.get("usage_status"); assert usage in ("reported","unavailable"), ev; fields=("input_tokens","output_tokens","cache_read_tokens","cache_write_tokens","estimated_cost_usd"); assert (all(s.get(f) is None for f in fields) if usage=="unavailable" else all(isinstance(s.get(f),(int,float)) for f in fields)), s'
+        intent: "An operator confirms the real-opencode session carries non-stub execution evidence"
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/tasks/${var:rocTaskId}/sessions/${var:rocSessionId}"
+          assert:
+            - path: "data.has_transcript"
+              equals: true
+            - path: "data.has_diff"
+              equals: true
+            - path: "data.evidence.status"
+              equals: "ok"
+        intent: "An operator confirms the real-opencode session advertises healthy transcript and diff evidence"
+      # 7) transcript is real: >=1 non-system entry AND references the file it created / tool
+      #    activity (stub signature otherwise).
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/tasks/${var:rocTaskId}/sessions/${var:rocSessionId}/transcript"
+          status: 200
+          save:
+            - from: "data.entries"
+              as: "rocTranscriptEntries"
+        intent: "An operator reads the real-opencode session transcript"
+      - run: >-
+          python3 -c 'import json,os; ents=json.load(open(os.environ["AFT_WORK_DIR"]+"/rocTranscriptEntries")); nonsys=[e for e in ents if e.get("role")!="system"]; assert nonsys, "no non-system transcript entries"; blob=json.dumps(ents).lower(); assert "hello.md" in blob or any(e.get("role")=="tool" for e in ents) or "tool_use" in blob, "transcript lacks tool activity / HELLO.md reference (stub signature)"'
+        intent: "An operator confirms the real-opencode transcript contains non-system tool activity"
+      # 7b) the session diff is readable — content assertion, not a flag check.
+      - run: >-
+          code=$(curl -s -o "$AFT_WORK_DIR/roc-diff.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/tasks/$(cat "$AFT_WORK_DIR/rocTaskId")/sessions/$(cat "$AFT_WORK_DIR/rocSessionId")/diff");
+          [ "$code" = "200" ] || { echo "session diff returned $code (expected 200)"; cat "$AFT_WORK_DIR/roc-diff.json"; exit 1; };
+          grep -q 'HELLO.md' "$AFT_WORK_DIR/roc-diff.json" || { echo "diff does not mention HELLO.md"; head -c 400 "$AFT_WORK_DIR/roc-diff.json"; exit 1; }
+        intent: "An operator confirms the recorded session diff contains HELLO.md"
+      # 8) NEGATIVE GUARD via filesystem: the real opencode physically created HELLO.md with the
+      #    exact content. The stub creates NO file. This is the strongest real-vs-stub
+      #    discriminator and is independent of any serve projection gap.
+      - run: >-
+          ws="$AFT_TESTS_DIR/../../tmp/e2e-workspace";
+          f="$(find "$ws" -name HELLO.md -print 2>/dev/null | head -n1)";
+          test -n "$f" || { echo "HELLO.md not found on disk — stub likely ran, not real opencode"; exit 1; };
+          grep -qx "hello world" "$f" || { echo "HELLO.md content wrong: $(cat "$f")"; exit 1; };
+          echo "real opencode wrote $f"
+        intent: "An operator confirms the real backend wrote exactly HELLO.md with the expected content"

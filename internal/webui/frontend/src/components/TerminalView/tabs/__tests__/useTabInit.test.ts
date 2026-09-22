@@ -450,7 +450,7 @@ describe("useTabInit", () => {
         writable: true,
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
-        pty_alive: true,
+        attachable: true,
         attached_clients: 0,
       },
     ];
@@ -495,7 +495,7 @@ describe("useTabInit", () => {
         writable: true,
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
-        pty_alive: true,
+        attachable: true,
         attached_clients: 0,
       },
       {
@@ -506,7 +506,7 @@ describe("useTabInit", () => {
         pinned: false,
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
-        pty_alive: true,
+        attachable: true,
         attached_clients: 0,
       },
     ];
@@ -547,7 +547,7 @@ describe("useTabInit", () => {
         writable: true,
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
-        pty_alive: true,
+        attachable: true,
         attached_clients: 0,
       },
     ];
@@ -700,6 +700,75 @@ describe("useTabInit", () => {
     expect(tabs[0].backendName).toBe("claude");
     expect(setActiveTabId).toHaveBeenCalledWith("lead-claude-1");
     expect(createTab).toHaveBeenCalledTimes(1);
+  });
+
+  // PUPPET-125: re-entering the Terminal view after a workspace switch must
+  // not auto-create the default tab off a not-yet-fetched metadata list — the
+  // PUT that follows is rejected 409 by the still-live PTY. The readiness
+  // signal is `metaReady` (PUPPET-32), which subsumes the old `!metaLoading`
+  // check; this pins the consumer half, including the restore that follows.
+  it("does not auto-create when metadata has not settled after the view activates", () => {
+    const setTabs = vi.fn();
+    const setActiveTabId = vi.fn();
+    const createTab = vi.fn().mockResolvedValue(undefined);
+    const initializedRef = {
+      current: false,
+    } as React.MutableRefObject<boolean>;
+
+    const args = createArgs({
+      config: {
+        backend: "claude",
+        source: "config",
+        available: ["claude"],
+        agents: [],
+      },
+      setTabs: setTabs as unknown as React.Dispatch<
+        React.SetStateAction<TabState[]>
+      >,
+      setActiveTabId: setActiveTabId as unknown as React.Dispatch<
+        React.SetStateAction<string>
+      >,
+      createTab,
+      initializedRef,
+      isViewActive: false,
+      metaReady: false,
+      tabMetadata: [] as TabMetadata[],
+    });
+
+    const { rerender } = renderHook((a) => useTabInit(a), {
+      initialProps: args,
+    });
+
+    // The view activates while the new workspace's metadata is still in flight.
+    rerender({ ...args, isViewActive: true, metaReady: false });
+
+    expect(initializedRef.current).toBe(false);
+    expect(createTab).not.toHaveBeenCalled();
+    expect(setTabs).not.toHaveBeenCalled();
+
+    // The fetch lands with the workspace's real tab: restore, never create.
+    const metadata: TabMetadata[] = [
+      {
+        session_name: "lead-claude-1",
+        label: "Claude 1",
+        notes: "",
+        sort_order: 0,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      },
+    ];
+    rerender({
+      ...args,
+      isViewActive: true,
+      metaReady: true,
+      tabMetadata: metadata,
+    });
+
+    expect(initializedRef.current).toBe(true);
+    expect(createTab).not.toHaveBeenCalled();
+    const tabs = setTabs.mock.calls[0][0] as TabState[];
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0].sessionName).toBe("lead-claude-1");
   });
 
   it("adopts the fetched tabs when metadata settles non-empty after activation", () => {

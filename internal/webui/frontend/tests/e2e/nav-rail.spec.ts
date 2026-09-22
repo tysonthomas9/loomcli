@@ -5,7 +5,7 @@ import type { Page } from "@playwright/test";
  * E2E tests for NavRail component.
  *
  * Tests the icon-only vertical navigation rail for primary view switching
- * (Workspaces, Monitor, Settings), session count badges, unread indicators,
+ * (Workspaces, Terminal, Settings), session count badges, unread indicators,
  * tooltips, keyboard accessibility, and responsive layout (mobile bottom bar).
  */
 
@@ -299,6 +299,27 @@ function getNavButton(page: Page, label: string) {
   return getNavRail(page).getByRole("button", { name: label });
 }
 
+/**
+ * The primary view buttons, in DOM order. The rail also renders workspace
+ * avatar buttons ("Switch to …") among them, so assertions here filter to
+ * these labels rather than indexing every button in the rail.
+ */
+const VIEW_BUTTONS = [
+  "Workspaces",
+  "Pull Requests",
+  "Terminal",
+  "Files",
+  "Skills",
+  "Settings",
+];
+
+/** aria-labels of every button in the rail, in DOM order. */
+function railLabels(page: Page): Promise<string[]> {
+  return getNavRail(page)
+    .getByRole("button")
+    .evaluateAll((els) => els.map((el) => el.getAttribute("aria-label") ?? ""));
+}
+
 // -- Tests --
 
 test.describe("NavRail rendering", () => {
@@ -311,26 +332,17 @@ test.describe("NavRail rendering", () => {
     const nav = getNavRail(page);
     await expect(nav).toBeVisible();
 
-    const buttons = nav.getByRole("button");
-    await expect(buttons).toHaveCount(5);
-
-    await expect(getNavButton(page, "Workspaces")).toBeVisible();
-    await expect(getNavButton(page, "Pull Requests")).toBeVisible();
-    await expect(getNavButton(page, "Terminal")).toBeVisible();
-    await expect(getNavButton(page, "Files")).toBeVisible();
-    await expect(getNavButton(page, "Settings")).toBeVisible();
+    for (const label of VIEW_BUTTONS) {
+      await expect(getNavButton(page, label)).toBeVisible();
+    }
   });
 
   test("renders buttons in correct order", async ({ page }) => {
-    const nav = getNavRail(page);
-    const buttons = nav.getByRole("button");
-
-    // Verify DOM order: Workspaces, Pull Requests, Terminal, Files, Settings
-    await expect(buttons.nth(0)).toHaveAttribute("aria-label", "Workspaces");
-    await expect(buttons.nth(1)).toHaveAttribute("aria-label", "Pull Requests");
-    await expect(buttons.nth(2)).toHaveAttribute("aria-label", "Terminal");
-    await expect(buttons.nth(3)).toHaveAttribute("aria-label", "Files");
-    await expect(buttons.nth(4)).toHaveAttribute("aria-label", "Settings");
+    // Presence, uniqueness and order in one assertion, and immune to the
+    // workspace avatar buttons the rail renders alongside these.
+    expect(
+      (await railLabels(page)).filter((l) => VIEW_BUTTONS.includes(l)),
+    ).toEqual(VIEW_BUTTONS);
   });
 
   test("Workspaces button is active by default", async ({ page }) => {
@@ -339,7 +351,7 @@ test.describe("NavRail rendering", () => {
       "true",
     );
     // Other buttons should not be active
-    await expect(getNavButton(page, "Monitor")).not.toHaveAttribute(
+    await expect(getNavButton(page, "Terminal")).not.toHaveAttribute(
       "data-active",
     );
     await expect(getNavButton(page, "Settings")).not.toHaveAttribute(
@@ -358,9 +370,9 @@ test.describe("NavRail rendering", () => {
       "aria-label",
       "Workspaces",
     );
-    await expect(getNavButton(page, "Monitor")).toHaveAttribute(
+    await expect(getNavButton(page, "Terminal")).toHaveAttribute(
       "aria-label",
-      "Monitor",
+      "Terminal",
     );
     await expect(getNavButton(page, "Settings")).toHaveAttribute(
       "aria-label",
@@ -368,19 +380,18 @@ test.describe("NavRail rendering", () => {
     );
   });
 
-  test("all buttons have title attributes", async ({ page }) => {
-    await expect(getNavButton(page, "Workspaces")).toHaveAttribute(
-      "title",
-      "Workspaces",
-    );
-    await expect(getNavButton(page, "Monitor")).toHaveAttribute(
-      "title",
-      "Monitor",
-    );
-    await expect(getNavButton(page, "Settings")).toHaveAttribute(
-      "title",
-      "Settings",
-    );
+  // The rail used to carry a native `title` on each button; it now renders its
+  // own tooltip span instead, so this asserts the hover label the component
+  // actually has — for every view button, not just a sample.
+  test("every button carries a hover label", async ({ page }) => {
+    for (const label of VIEW_BUTTONS) {
+      const tooltip = getNavButton(page, label)
+        .locator("span")
+        .filter({ hasText: label })
+        .last();
+      await expect(tooltip).toBeAttached();
+      await expect(tooltip).toHaveText(label);
+    }
   });
 });
 
@@ -390,10 +401,8 @@ test.describe("NavRail view switching", () => {
     await navigateAndWait(page);
   });
 
-  test("clicking Monitor switches to terminal-backed monitor view", async ({
-    page,
-  }) => {
-    const monitorBtn = getNavButton(page, "Monitor");
+  test("clicking Terminal switches to the terminal view", async ({ page }) => {
+    const monitorBtn = getNavButton(page, "Terminal");
     await monitorBtn.click();
 
     await expect(monitorBtn).toHaveAttribute("data-active", "true");
@@ -447,7 +456,7 @@ test.describe("NavRail view switching", () => {
 
     // Still active, no errors, no other button became active
     await expect(workspacesBtn).toHaveAttribute("data-active", "true");
-    await expect(getNavButton(page, "Monitor")).not.toHaveAttribute(
+    await expect(getNavButton(page, "Terminal")).not.toHaveAttribute(
       "data-active",
     );
     await expect(getNavButton(page, "Settings")).not.toHaveAttribute(
@@ -456,8 +465,8 @@ test.describe("NavRail view switching", () => {
   });
 
   test("rapid view switching works correctly", async ({ page }) => {
-    // Click Monitor, Workspaces, then Settings rapidly
-    await getNavButton(page, "Monitor").click();
+    // Click Terminal, Workspaces, then Settings rapidly
+    await getNavButton(page, "Terminal").click();
     await getNavButton(page, "Workspaces").click();
     await getNavButton(page, "Settings").click();
 
@@ -469,7 +478,7 @@ test.describe("NavRail view switching", () => {
     await expect(getNavButton(page, "Workspaces")).not.toHaveAttribute(
       "data-active",
     );
-    await expect(getNavButton(page, "Monitor")).not.toHaveAttribute(
+    await expect(getNavButton(page, "Terminal")).not.toHaveAttribute(
       "data-active",
     );
   });
@@ -482,10 +491,10 @@ test.describe("NavRail session count badge", () => {
   });
 
   test("badge not shown when sessionCount is 0 or absent", async ({ page }) => {
-    const monitorBtn = getNavButton(page, "Monitor");
+    const monitorBtn = getNavButton(page, "Terminal");
     await expect(monitorBtn).toBeVisible();
 
-    // No badge element should exist on the Monitor button
+    // No badge element should exist on the Terminal button
     const badge = monitorBtn.locator('[aria-label*="active sessions"]');
     await expect(badge).toHaveCount(0);
   });
@@ -505,14 +514,14 @@ test.describe("NavRail unread indicator", () => {
 
   test("unread indicator not shown on active view", async ({ page }) => {
     // Switch to monitor/terminal (the only primary view that can have unread)
-    await getNavButton(page, "Monitor").click();
-    await expect(getNavButton(page, "Monitor")).toHaveAttribute(
+    await getNavButton(page, "Terminal").click();
+    await expect(getNavButton(page, "Terminal")).toHaveAttribute(
       "data-active",
       "true",
     );
 
     // Even if there were terminal activity, the active view shouldn't show unread
-    const monitorBtn = getNavButton(page, "Monitor");
+    const monitorBtn = getNavButton(page, "Terminal");
     const unreadDot = monitorBtn.locator('[aria-label="has unread output"]');
     await expect(unreadDot).toHaveCount(0);
   });
@@ -525,7 +534,7 @@ test.describe("NavRail tooltips", () => {
   });
 
   test("tooltips appear on hover", async ({ page }) => {
-    const labels = ["Workspaces", "Monitor", "Settings"];
+    const labels = ["Workspaces", "Terminal", "Settings"];
 
     for (const label of labels) {
       const button = getNavButton(page, label);
@@ -544,7 +553,7 @@ test.describe("NavRail tooltips", () => {
   });
 
   test("tooltips show correct labels", async ({ page }) => {
-    const expectedLabels = ["Workspaces", "Monitor", "Settings"];
+    const expectedLabels = ["Workspaces", "Terminal", "Settings"];
 
     for (const label of expectedLabels) {
       const button = getNavButton(page, label);
@@ -579,7 +588,7 @@ test.describe("NavRail responsive layout", () => {
     await navigateAndWait(page);
 
     await expect(getNavButton(page, "Workspaces")).toBeVisible();
-    await expect(getNavButton(page, "Monitor")).toBeVisible();
+    await expect(getNavButton(page, "Terminal")).toBeVisible();
     await expect(getNavButton(page, "Settings")).toBeVisible();
   });
 
@@ -618,13 +627,21 @@ test.describe("NavRail accessibility", () => {
     await workspacesBtn.focus();
     await expect(workspacesBtn).toBeFocused();
 
-    // Tab to next button
-    await page.keyboard.press("Tab");
-    await expect(getNavButton(page, "Monitor")).toBeFocused();
-
-    // Continue tabbing
-    await page.keyboard.press("Tab");
-    await expect(getNavButton(page, "Settings")).toBeFocused();
+    // Tab walks the rail in DOM order. Workspace avatar buttons are focusable
+    // too, so collect what gets focused and assert the view buttons come in
+    // order rather than assuming they are adjacent.
+    const focused: string[] = ["Workspaces"];
+    for (let i = 0; i < (await railLabels(page)).length - 1; i++) {
+      await page.keyboard.press("Tab");
+      focused.push(
+        await page.evaluate(
+          () => document.activeElement?.getAttribute("aria-label") ?? "",
+        ),
+      );
+    }
+    expect(focused.filter((l) => VIEW_BUTTONS.includes(l))).toEqual(
+      VIEW_BUTTONS,
+    );
   });
 
   test("active state communicated via data-active", async ({ page }) => {
@@ -634,9 +651,9 @@ test.describe("NavRail accessibility", () => {
       "true",
     );
 
-    // Switch to Monitor
-    await getNavButton(page, "Monitor").click();
-    await expect(getNavButton(page, "Monitor")).toHaveAttribute(
+    // Switch to Terminal
+    await getNavButton(page, "Terminal").click();
+    await expect(getNavButton(page, "Terminal")).toHaveAttribute(
       "data-active",
       "true",
     );

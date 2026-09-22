@@ -11,6 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/events"
@@ -35,7 +38,12 @@ func TestComputeBackoff_OverflowProtection(t *testing.T) {
 			Agents:        make([]*AgentProcess, 0),
 			EmitEvent:     func(events.Event) {},
 		}
-		ap := &AgentProcess{RestartCount: 31}
+		ap := &AgentProcess{
+			RestartCount: 31,
+			// A crash always classifies; the exponential arm needs the error
+			// attached (bare nil now means clean success -> cadence floor).
+			LastError: &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrUnknown)},
+		}
 		got := s.computeBackoff(ap)
 		if got != 300*time.Second {
 			t.Errorf("computeBackoff(restart=31) = %v, want %v", got, 300*time.Second)
@@ -56,7 +64,12 @@ func TestComputeBackoff_OverflowProtection(t *testing.T) {
 			Agents:        make([]*AgentProcess, 0),
 			EmitEvent:     func(events.Event) {},
 		}
-		ap := &AgentProcess{RestartCount: 50}
+		ap := &AgentProcess{
+			RestartCount: 50,
+			// A crash always classifies; the exponential arm needs the error
+			// attached (bare nil now means clean success -> cadence floor).
+			LastError: &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrUnknown)},
+		}
 		got := s.computeBackoff(ap)
 		if got != 300*time.Second {
 			t.Errorf("computeBackoff(restart=50) = %v, want %v", got, 300*time.Second)
@@ -77,7 +90,12 @@ func TestComputeBackoff_OverflowProtection(t *testing.T) {
 			Agents:        make([]*AgentProcess, 0),
 			EmitEvent:     func(events.Event) {},
 		}
-		ap := &AgentProcess{RestartCount: 100}
+		ap := &AgentProcess{
+			RestartCount: 100,
+			// A crash always classifies; the exponential arm needs the error
+			// attached (bare nil now means clean success -> cadence floor).
+			LastError: &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrUnknown)},
+		}
 		got := s.computeBackoff(ap)
 		if got != 300*time.Second {
 			t.Errorf("computeBackoff(restart=100) = %v, want %v", got, 300*time.Second)
@@ -98,7 +116,12 @@ func TestComputeBackoff_OverflowProtection(t *testing.T) {
 			Agents:        make([]*AgentProcess, 0),
 			EmitEvent:     func(events.Event) {},
 		}
-		ap := &AgentProcess{RestartCount: 5}
+		ap := &AgentProcess{
+			RestartCount: 5,
+			// A crash always classifies; the exponential arm needs the error
+			// attached (bare nil now means clean success -> cadence floor).
+			LastError: &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrUnknown)},
+		}
 		got := s.computeBackoff(ap)
 		if got != 0 {
 			t.Errorf("computeBackoff(BackoffMax=0) = %v, want 0", got)
@@ -119,7 +142,12 @@ func TestComputeBackoff_OverflowProtection(t *testing.T) {
 			Agents:        make([]*AgentProcess, 0),
 			EmitEvent:     func(events.Event) {},
 		}
-		ap := &AgentProcess{RestartCount: 25}
+		ap := &AgentProcess{
+			RestartCount: 25,
+			// A crash always classifies; the exponential arm needs the error
+			// attached (bare nil now means clean success -> cadence floor).
+			LastError: &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrUnknown)},
+		}
 		got := s.computeBackoff(ap)
 		if got < 0 {
 			t.Errorf("computeBackoff() = %v, want non-negative", got)

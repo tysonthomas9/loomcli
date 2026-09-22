@@ -1,0 +1,261 @@
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  align-self: start;
+  position: sticky;
+  top: calc(38px + var(--space-4));
+}
+
+/* A sticky rail taller than the viewport would pin its top and hide its
+   tail behind the fold, so only stick when the whole rail fits; otherwise
+   it scrolls with the page and every card stays reachable. */
+@media (height <= 1140px) {
+  .rail {
+    position: static;
+  }
+}
+
+.card {
+  /* The rail is a scrolling flex column: cards must never shrink to fit it,
+     or they clip their own rows instead of letting the rail scroll. */
+  flex-shrink: 0;
+  overflow: hidden;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  padding: 9px 13px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.head h3 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.head span {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.body {
+  padding: 12px 13px;
+}
+
+.runline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.runline strong {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.segmentBar {
+  display: flex;
+  height: 6px;
+  margin: 11px 0 9px;
+  overflow: hidden;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+}
+
+.segment {
+  display: block;
+  height: 100%;
+}
+
+.segment[data-status="closed"],
+.legend i[data-status="closed"] {
+  background: var(--color-status-closed);
+}
+
+.segment[data-status="in_progress"],
+.legend i[data-status="in_progress"] {
+  background: var(--color-status-in-progress);
+}
+
+.segment[data-status="review"],
+.legend i[data-status="review"] {
+  background: var(--color-status-review);
+}
+
+.segment[data-status="open"],
+.legend i[data-status="open"] {
+  background: var(--color-status-open);
+}
+
+.segment[data-status="blocked"],
+.legend i[data-status="blocked"] {
+  background: var(--color-blocked);
+}
+
+.segment[data-status="deferred"],
+.legend i[data-status="deferred"] {
+  background: var(--color-text-muted);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend span[data-zero="true"] {
+  color: var(--color-text-tertiary);
+}
+
+.legend i {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-sm);
+}
+
+.feed {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 2px 0;
+  list-style: none;
+}
+
+.feedScroll {
+  max-height: 420px;
+  margin-right: -6px;
+  padding-right: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.feedScroll:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.feed li {
+  display: grid;
+  grid-template-columns: 56px 10px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  padding: 5px 0;
+  font-size: 11.5px;
+}
+
+.feed time {
+  padding-top: 1px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-align: right;
+  color: var(--color-text-tertiary);
+}
+
+.marker {
+  width: 7px;
+  height: 7px;
+  margin-top: 4px;
+  background: var(--color-bg-card);
+  border: 2px solid var(--color-text-muted);
+  border-radius: var(--radius-full);
+}
+
+.marker[data-marker="op"] {
+  border-color: var(--text-primary);
+}
+
+.marker[data-marker="ok"] {
+  border-color: var(--color-success);
+}
+
+.marker[data-marker="bad"] {
+  border-color: var(--color-blocked);
+}
+
+.marker[data-marker="rev"] {
+  border-color: var(--color-status-review);
+}
+
+.activitySentence {
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.activitySentence strong {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.activitySentence strong[data-operator="true"] {
+  color: var(--text-primary);
+}
+
+.activitySentence code {
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-primary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.activityRepo {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 5px;
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+}
+
+.feedFoot {
+  margin: 8px -13px -12px;
+  padding: 8px 13px;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.emptyActivity {
+  margin: 0;
+  padding: 4px 0;
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+}
+
+@media (width <= 1100px) {
+  .rail {
+    position: static;
+  }
+}

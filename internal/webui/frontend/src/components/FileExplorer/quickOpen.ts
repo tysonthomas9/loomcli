@@ -1,4 +1,4 @@
-import type { CheckoutRef } from "@/utils/fileExplorerRefs";
+import type { ExplorerRef } from "@/utils/explorerRefs";
 
 export interface QuickOpenMatch {
   path: string;
@@ -8,7 +8,7 @@ export interface QuickOpenMatch {
 
 export interface QuickOpenItem {
   id: string;
-  ref: CheckoutRef;
+  ref: ExplorerRef;
   path: string;
   checkoutLabel: string;
 }

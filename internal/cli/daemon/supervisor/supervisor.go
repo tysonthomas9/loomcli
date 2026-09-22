@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
@@ -65,16 +66,36 @@ type Supervisor struct {
 	LivenessTimeout time.Duration
 
 	// livenessStreak counts how many consecutive scans each goroutine's tick
-	// has been observed stale. The watchdog only signals fatal once a tick has
-	// been stale for livenessStaleScansBeforeFatal scans in a row, so a single
-	// transient stall (a slow control-plane cycle, brief mutex contention) does
-	// not crash the daemon. lastLivenessScan records when scanTicks last ran so
-	// it can detect a process-wide suspension (sleep/swap/SIGSTOP) — after which
-	// every tick looks ancient — and skip the fatal for that scan. Both fields
-	// are owned exclusively by the single livenessWatchdog goroutine (tests call
-	// scanTicks serially), so they need no synchronization.
-	livenessStreak   map[string]int
-	lastLivenessScan time.Time
+	// has been observed stale, and livenessStreakStart records when each streak
+	// began. The watchdog only signals fatal once a tick has been stale for
+	// livenessStaleScansBeforeFatal scans in a row AND that streak has spanned
+	// livenessMinStaleSpan of real runtime, so neither a single transient stall
+	// (a slow control-plane cycle, brief mutex contention) nor several scans
+	// crammed into one macOS DarkWake burst crashes the daemon.
+	//
+	// lastLivenessScan and lastLivenessScanWall both record when scanTicks last
+	// ran, in two different clock domains, so the watchdog can tell "the process
+	// was suspended" from "a goroutine is wedged". Two clocks are needed because
+	// on darwin the monotonic clock (mach_absolute_time) is SUSPENDED while the
+	// machine sleeps: after a wake the monotonic scan gap reads a normal ~10s
+	// while tick ages — computed from time.Unix values that carry no monotonic
+	// reading, so Sub falls back to wall clock — include the entire sleep. A
+	// single-clock guard is therefore blind exactly when it is needed, and the
+	// daemon kills itself seconds after every wake. lastLivenessScanWall is
+	// stored via Round(0) so it is wall-only and its gap measures elapsed wall
+	// time regardless of suspension.
+	//
+	// livenessFatalSignaled is set once the watchdog has signaled fatal; the
+	// watchdog then stops scanning, because the daemon is already draining and
+	// further Error records plus goroutine dumps are pure noise.
+	//
+	// All of these fields are owned exclusively by the single livenessWatchdog
+	// goroutine (tests call scanTicks serially), so they need no synchronization.
+	livenessStreak        map[string]int
+	livenessStreakStart   map[string]time.Time
+	lastLivenessScan      time.Time
+	lastLivenessScanWall  time.Time
+	livenessFatalSignaled bool
 
 	Concurrency *ConcurrencyTracker
 	EventBus    EventEmitter
@@ -110,6 +131,19 @@ type Supervisor struct {
 	// means use the package default (backendUnavailableRecheckInterval). Tests set a
 	// small value to avoid the 30s wait.
 	backendRecheckInterval time.Duration
+
+	// claimHold is the workspace-level refusal to START new work (see claim.go).
+	// Nil means no hold. Guarded by claimHoldMu; PersistClaimHold is injected by
+	// the daemon package so path resolution stays out of the supervisor.
+	claimHold                *ClaimHold
+	claimHoldMu              sync.RWMutex
+	claimHoldExpiryLogged    bool
+	claimHoldLastHeldLog     time.Time
+	claimHoldRecheckInterval time.Duration          // test override; 0 ⇒ package default
+	PersistClaimHold         func(*ClaimHold) error // injected by the daemon package
+	claimHoldLastReload      time.Time              // rate-limits ReloadClaimHold; see maybeReloadClaimHold
+	// ReloadClaimHold re-reads the hold when the FILE changed under this process. Injected by the daemon.
+	ReloadClaimHold func() (*ClaimHold, bool, error) // (hold, changed, err)
 
 	// maxRetriesBlockInterval is the fixed delay computeBackoff returns once an
 	// agent has exhausted its restart budget and blocked (StopReasonMaxRetriesBlocked).
@@ -291,6 +325,7 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 		}
 
 		if !s.preFlightSetup(ap) {
+			s.materializeIdleSkills(ap)
 			s.Concurrency.Release(ap.Entry.Role)
 			releaseOwnership()
 			s.postExitCleanup(ap)
@@ -349,47 +384,6 @@ func (s *Supervisor) checkAgentStopSignals(ap *AgentProcess) bool {
 	}
 }
 
-// setShutdownStopReason unconditionally records that this agent stopped
-// because of supervisor shutdown. Every caller (drain, signal handler,
-// ownership transfer) uses the same reason; if a new code path ever needs
-// a different reason, reintroduce the explicit parameter.
-func (s *Supervisor) setShutdownStopReason(ap *AgentProcess) {
-	ap.Mu.Lock()
-	ap.StopReason = StopReasonShutdown
-	ap.Mu.Unlock()
-}
-
-// SetStopReasonDefault sets the agent's stop reason only if not already set.
-func (s *Supervisor) setStopReasonDefault(ap *AgentProcess, reason StopReason) {
-	ap.Mu.Lock()
-	if ap.StopReason == "" {
-		ap.StopReason = reason
-	}
-	ap.Mu.Unlock()
-}
-
-// clearAgentSessionState resets session state between supervision cycles.
-func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
-	ap.Mu.Lock()
-	ap.Session = nil
-	ap.AgentSessionID = ""
-	ap.AgentLeaseID = ""
-	ap.AgentLeaseToken = ""
-	ap.TranscriptPath = ""
-	ap.BeforeRef = ""
-	ap.AssignedTaskID = ""
-	ap.ResumeTaskID = ""          // per-cycle; re-detected in preFlightSetup (ResumeFailures persists)
-	ap.RecoveryMode = recoverCold // per-cycle; re-classified in preFlightSetup
-	ap.LastActivity = time.Time{}
-	// A child that died while parked on an interactive prompt never sends its
-	// "end", so the in-flight count must not survive into the next cycle: a
-	// stale pending count would suspend the output-timeout watchdog for an
-	// agent that is no longer waiting on anything.
-	ap.InputWaitPending = 0
-	ap.InputWaitSince = time.Time{}
-	ap.Mu.Unlock()
-}
-
 // preFlightSetup verifies the backend is spawnable, then runs recovery,
 // assigns epic, creates session, and clears yield file.
 //
@@ -403,6 +397,11 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 // attempt's diff injected) before finally cold-starting a fresh task. See
 // detectRecovery.
 func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
+	// FIRST gate: a held workspace issues no Ready query, no ClaimIssue, runs
+	// no recovery and creates no session.
+	if !s.gateClaimsHeld(ap) {
+		return false
+	}
 	if err := s.gateBackendAvailable(ap); err != nil {
 		return false
 	}
@@ -949,6 +948,9 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 		}
 		if ap.LastError != nil {
 			result[i].LastErrorClass = ap.LastError.Class.String()
+			// Derived, not stored: the agent's last transition was a claim-hold
+			// gate. Clears itself on the next successful pre-flight.
+			result[i].ClaimsGated = ap.LastError.Class.Is(agenterr.ClaimsHeldOutcome)
 		}
 		ap.Mu.Unlock()
 		// Resolve backend name outside the lock (GetEffectiveBackend acquires ap.Mu)

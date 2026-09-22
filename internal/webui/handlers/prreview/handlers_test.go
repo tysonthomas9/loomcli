@@ -1510,6 +1510,11 @@ func TestStreamReviewerEmitsMessages(t *testing.T) {
 	if strings.Count(body, "event: message") != 2 {
 		t.Fatalf("stream body = %q, want exactly two message events", body)
 	}
+	for _, idLine := range []string{"id: idle\n", "id: item-user\n", "id: item-agent\n"} {
+		if strings.Count(body, idLine) != 1 {
+			t.Fatalf("stream body = %q, want exactly one %q line", body, strings.TrimSpace(idLine))
+		}
+	}
 }
 
 func TestGetReviewerConversationStartingWhenNoSession(t *testing.T) {

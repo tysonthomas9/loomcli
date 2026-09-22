@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FileMutationData, FileReadData } from "@/api/workspace";
 import { ApiError } from "@/types/common";
+import { checkoutExplorerRef, skillsExplorerRef } from "@/utils/explorerRefs";
 import {
   FileDocumentRegistry,
   type FileDocumentOperations,
@@ -18,9 +19,11 @@ import {
 
 const workspaceRef: FileDocumentRef = {
   workspaceId: "ws-1",
-  scope: "workspace",
+  ref: checkoutExplorerRef({ scope: "workspace" }),
   path: "src/main.ts",
 };
+
+const unconditional = () => false;
 
 function file(
   content: string,
@@ -50,6 +53,7 @@ function setup(operations?: Partial<FileDocumentOperations>) {
   const defaults: FileDocumentOperations = {
     read: vi.fn().mockResolvedValue(file("server", "v1")),
     write: vi.fn().mockResolvedValue({ success: true, version: "v2" }),
+    conditionalSave: unconditional,
   };
   const registry = new FileDocumentRegistry(
     { ...defaults, ...operations },
@@ -69,11 +73,21 @@ describe("useFileDocument", () => {
   it("shares edits between two views and retains a dirty draft after close", async () => {
     const { registry, wrapper } = setup();
     const first = renderHook(
-      () => useFileDocument("ws-1", { scope: "workspace" }, "src/main.ts"),
+      () =>
+        useFileDocument(
+          "ws-1",
+          checkoutExplorerRef({ scope: "workspace" }),
+          "src/main.ts",
+        ),
       { wrapper },
     );
     const second = renderHook(
-      () => useFileDocument("ws-1", { scope: "workspace" }, "src/main.ts"),
+      () =>
+        useFileDocument(
+          "ws-1",
+          checkoutExplorerRef({ scope: "workspace" }),
+          "src/main.ts",
+        ),
       { wrapper },
     );
 
@@ -85,7 +99,12 @@ describe("useFileDocument", () => {
     first.unmount();
     second.unmount();
     const reopened = renderHook(
-      () => useFileDocument("ws-1", { scope: "workspace" }, "src/main.ts"),
+      () =>
+        useFileDocument(
+          "ws-1",
+          checkoutExplorerRef({ scope: "workspace" }),
+          "src/main.ts",
+        ),
       { wrapper },
     );
     expect(reopened.result.current.content).toBe("shared draft");
@@ -102,15 +121,23 @@ describe("useFileDocument", () => {
     const { registry, wrapper } = setup();
     const { result } = renderHook(
       () => ({
-        workspace: useFileDocument("ws-1", { scope: "workspace" }, "same.txt"),
+        workspace: useFileDocument(
+          "ws-1",
+          checkoutExplorerRef({ scope: "workspace" }),
+          "same.txt",
+        ),
         otherWorkspace: useFileDocument(
           "ws-2",
-          { scope: "workspace" },
+          checkoutExplorerRef({ scope: "workspace" }),
           "same.txt",
         ),
         agent: useFileDocument(
           "ws-1",
-          { scope: "agent", target: "atlas", repo: "repo-a" },
+          checkoutExplorerRef({
+            scope: "agent",
+            target: "atlas",
+            repo: "repo-a",
+          }),
           "same.txt",
         ),
       }),
@@ -131,7 +158,7 @@ describe("useFileDocument", () => {
       ref.path === "a.ts" ? a.promise : b.promise,
     );
     const { registry, wrapper } = setup({ read });
-    const scope = { scope: "workspace" as const };
+    const scope = checkoutExplorerRef({ scope: "workspace" });
     const hook = renderHook(
       ({ path }) => useFileDocument("ws-1", scope, path),
       { initialProps: { path: "a.ts" }, wrapper },
@@ -164,7 +191,12 @@ describe("useFileDocument", () => {
     });
     const { registry, wrapper } = setup({ read });
     const hook = renderHook(
-      () => useFileDocument("ws-1", { scope: "workspace" }, "slow.ts"),
+      () =>
+        useFileDocument(
+          "ws-1",
+          checkoutExplorerRef({ scope: "workspace" }),
+          "slow.ts",
+        ),
       { wrapper },
     );
     act(() => void hook.result.current.refresh());
@@ -185,7 +217,12 @@ describe("useFileDocument", () => {
     );
     const { registry, wrapper } = setup({ write });
     const hook = renderHook(
-      () => useFileDocument("ws-1", { scope: "workspace" }, "save.ts"),
+      () =>
+        useFileDocument(
+          "ws-1",
+          checkoutExplorerRef({ scope: "workspace" }),
+          "save.ts",
+        ),
       { wrapper },
     );
     await act(() => hook.result.current.refresh());
@@ -201,7 +238,7 @@ describe("useFileDocument", () => {
     expect(
       registry.get({
         workspaceId: "ws-1",
-        scope: "workspace",
+        ref: checkoutExplorerRef({ scope: "workspace" }),
         path: "save.ts",
       }),
     ).toMatchObject({ dirty: false, baseVersion: "v2" });
@@ -210,7 +247,7 @@ describe("useFileDocument", () => {
 
   it("keeps mounted hooks subscribed across reset and retarget", async () => {
     const { registry, wrapper } = setup();
-    const scope = { scope: "workspace" as const };
+    const scope = checkoutExplorerRef({ scope: "workspace" });
     const hook = renderHook(
       ({ path }) => useFileDocument("ws-1", scope, path),
       { initialProps: { path: "src/mounted.ts" }, wrapper },
@@ -247,6 +284,24 @@ describe("useFileDocument", () => {
 });
 
 describe("FileDocumentRegistry coordination", () => {
+  it("keeps checkout saves unconditional and byte-compatible", async () => {
+    const operations: FileDocumentOperations = {
+      read: vi.fn().mockResolvedValue(file("base", "v1")),
+      write: vi.fn().mockResolvedValue({ success: true, version: "v2" }),
+      conditionalSave: unconditional,
+    };
+    const registry = new FileDocumentRegistry(operations, undefined);
+    await registry.refresh(workspaceRef);
+    registry.edit(workspaceRef, "checkout draft");
+    await registry.save(workspaceRef);
+    expect(operations.write).toHaveBeenCalledWith(
+      workspaceRef,
+      "checkout draft",
+      expect.any(AbortSignal),
+    );
+    registry.dispose();
+  });
+
   it("installs exactly one beforeunload guard while any draft is dirty", () => {
     const listeners = new Set<(event: BeforeUnloadEvent) => void>();
     const target = {
@@ -514,6 +569,81 @@ describe("FileDocumentRegistry coordination", () => {
     registry.dispose();
   });
 
+  it("sends the skills base revision and turns a 412 into merge state", async () => {
+    const ref: FileDocumentRef = {
+      workspaceId: "ws-1",
+      ref: skillsExplorerRef({ kind: "role", role: "reviewer" }),
+      path: "audit/SKILL.md",
+    };
+    const operations: FileDocumentOperations = {
+      read: vi
+        .fn()
+        .mockResolvedValueOnce(file("server body", "body-v1", ref.path))
+        .mockResolvedValueOnce(file("external body", "body-v2", ref.path)),
+      write: vi.fn().mockRejectedValue(
+        new ApiError(412, "Precondition Failed", {
+          code: "precondition_failed",
+          error: "skill document changed",
+          revision: "body-v2",
+        }),
+      ),
+      conditionalSave: () => true,
+    };
+    const registry = new FileDocumentRegistry(operations, undefined);
+    await registry.refresh(ref);
+    registry.edit(ref, "local body");
+
+    await registry.save(ref);
+
+    expect(operations.write).toHaveBeenCalledWith(
+      ref,
+      "local body",
+      expect.any(AbortSignal),
+      "body-v1",
+    );
+    expect(registry.get(ref)).toMatchObject({
+      content: "local body",
+      dirty: true,
+      error: "skill document changed",
+      externalConflict: {
+        content: "external body",
+        version: "body-v2",
+      },
+    });
+    registry.dispose();
+  });
+
+  it("keeps a 409 ownership error plain with no overwrite conflict", async () => {
+    const ref: FileDocumentRef = {
+      workspaceId: "ws-1",
+      ref: skillsExplorerRef({ kind: "role", role: "reviewer" }),
+      path: "audit/SKILL.md",
+    };
+    const operations: FileDocumentOperations = {
+      read: vi.fn().mockResolvedValue(file("server", "v1", ref.path)),
+      write: vi.fn().mockRejectedValue(
+        new ApiError(409, "Conflict", {
+          code: "skill_provenance_conflict",
+          error: "skill is owned by loom skill sync",
+        }),
+      ),
+      conditionalSave: () => true,
+    };
+    const registry = new FileDocumentRegistry(operations, undefined);
+    await registry.refresh(ref);
+    registry.edit(ref, "local");
+
+    await registry.save(ref);
+
+    expect(registry.get(ref)).toMatchObject({
+      dirty: true,
+      error: "skill is owned by loom skill sync",
+      externalConflict: null,
+    });
+    expect(operations.read).toHaveBeenCalledTimes(1);
+    registry.dispose();
+  });
+
   it("retargets and explicitly resets retained drafts after path mutations", async () => {
     const operations: FileDocumentOperations = {
       read: vi.fn().mockResolvedValue(file("base", "v1")),
@@ -524,13 +654,22 @@ describe("FileDocumentRegistry coordination", () => {
     await registry.refresh(nested);
     registry.edit(nested, "retained draft");
 
-    registry.retargetPathPrefix("ws-1", { scope: "workspace" }, "src", "lib");
+    registry.retargetPathPrefix(
+      "ws-1",
+      checkoutExplorerRef({ scope: "workspace" }),
+      "src",
+      "lib",
+    );
     const moved = { ...nested, path: "lib/nested/file.ts" };
     expect(registry.get(moved)).toMatchObject({
       content: "retained draft",
       dirty: true,
     });
-    registry.resetPathPrefix("ws-1", { scope: "workspace" }, "lib");
+    registry.resetPathPrefix(
+      "ws-1",
+      checkoutExplorerRef({ scope: "workspace" }),
+      "lib",
+    );
     expect(registry.get(moved)).toMatchObject({ content: "", dirty: false });
     registry.dispose();
   });

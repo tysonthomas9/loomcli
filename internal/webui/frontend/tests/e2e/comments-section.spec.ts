@@ -376,18 +376,18 @@ test.describe("CommentsSection", () => {
       await expect(section).toBeVisible()
     })
 
-    test("section title shows Activity with count", async ({ page }) => {
+    test("section title shows Comments with count", async ({ page }) => {
       await setupMocks(page)
       await navigateToApp(page)
       await openIssuePanel(page, "Issue With Comments")
 
       const { section } = getCommentsSection(page)
       const heading = section.locator("h3")
-      await expect(heading).toContainText("Activity")
+      await expect(heading).toContainText("Comments")
       await expect(heading).toContainText("(3)")
     })
 
-    test("section title shows Activity without count when empty", async ({
+    test("section title shows Comments with zero count when empty", async ({
       page,
     }) => {
       await setupMocks(page)
@@ -396,7 +396,7 @@ test.describe("CommentsSection", () => {
 
       const { section } = getCommentsSection(page)
       const heading = section.locator("h3")
-      await expect(heading).toHaveText("Activity")
+      await expect(heading).toHaveText("Comments (0)")
     })
   })
 
@@ -470,7 +470,7 @@ test.describe("CommentsSection", () => {
       const { emptyState, items } = getCommentsSection(page)
       await expect(items).toHaveCount(0)
       await expect(emptyState).toBeVisible()
-      await expect(emptyState).toContainText("No activity")
+      await expect(emptyState).toContainText("No comments yet.")
     })
   })
 
@@ -594,7 +594,7 @@ test.describe("CommentsSection", () => {
       const { section } = getCommentsSection(page)
       const heading = section.locator("h3")
       await expect(heading).toBeVisible()
-      await expect(heading).toContainText("Activity")
+      await expect(heading).toContainText("Comments")
     })
 
     test("section uses section element for semantics", async ({ page }) => {

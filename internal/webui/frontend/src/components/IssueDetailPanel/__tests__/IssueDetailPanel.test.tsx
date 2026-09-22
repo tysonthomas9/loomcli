@@ -7,6 +7,7 @@
  */
 
 import {
+  act,
   render,
   screen,
   fireEvent,
@@ -16,13 +17,20 @@ import {
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
+import { ApiError } from "@/types";
+import type {
+  Event,
+  Issue,
+  IssueDetails,
+  IssueWithDependencyMetadata,
+} from "@/types";
 import type { SessionRecord } from "@/types/agent";
 import {
   updateIssue,
   startWorkflowRun,
   createWorkspaceAgent,
   deleteWorkspaceAgent,
+  getIssueEvents,
 } from "@/api";
 import { createAgentStore } from "@/stores/agentStore";
 
@@ -220,6 +228,28 @@ function createTestIssueDetails(
   };
 }
 
+function createTestEvent(overrides: Partial<Event> = {}): Event {
+  return {
+    id: "event-1",
+    issue_id: "test-123",
+    event_type: "issue.create",
+    actor: "alice",
+    created_at: "2026-01-23T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 /**
  * Create a test dependency issue.
  */
@@ -379,6 +409,9 @@ describe("IssueDetailPanel", () => {
     >;
     mockDeleteWorkspaceAgent.mockReset();
     mockDeleteWorkspaceAgent.mockResolvedValue(undefined);
+    const mockGetIssueEvents = vi.mocked(getIssueEvents);
+    mockGetIssueEvents.mockReset();
+    mockGetIssueEvents.mockImplementation(() => new Promise(() => {}));
   });
 
   // Reset body overflow after each test
@@ -393,6 +426,25 @@ describe("IssueDetailPanel", () => {
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
       expect(screen.getByTestId("issue-detail-panel")).toBeInTheDocument();
+    });
+
+    it("opens as a right-side panel and maximizes only when requested", () => {
+      const mockIssue = createTestIssue();
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      const panel = screen.getByTestId("issue-detail-panel");
+      expect(panel).not.toHaveAttribute("data-maximized");
+      const maximize = screen.getByRole("button", {
+        name: "Expand to full screen",
+      });
+
+      fireEvent.click(maximize);
+
+      expect(panel).toHaveAttribute("data-maximized", "true");
+      expect(
+        screen.getByRole("button", { name: "Exit full screen" }),
+      ).toBeInTheDocument();
     });
 
     // D-57: close_reason has been on the wire (and written by the bulk-close
@@ -533,7 +585,155 @@ describe("IssueDetailPanel", () => {
     });
   });
 
+  describe("event history", () => {
+    it("requests the full event window explicitly", async () => {
+      const mockGetIssueEvents = vi.mocked(getIssueEvents);
+      mockGetIssueEvents.mockResolvedValue([]);
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({ workspaceId: "workspace-1" }),
+      );
+
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssueDetails()}
+          onClose={() => {}}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(mockGetIssueEvents).toHaveBeenCalledWith(
+          "workspace-1",
+          "test-123",
+          200,
+        );
+      });
+    });
+
+    it("refreshes on the issue revision and ignores an older response", async () => {
+      const mockGetIssueEvents = vi.mocked(getIssueEvents);
+      const firstRequest = deferred<Event[]>();
+      const secondRequest = deferred<Event[]>();
+      mockGetIssueEvents
+        .mockReturnValueOnce(firstRequest.promise)
+        .mockReturnValueOnce(secondRequest.promise);
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({ workspaceId: "workspace-1" }),
+      );
+      const initialIssue = createTestIssueDetails({
+        status: "in_progress",
+        updated_at: "2026-01-23T00:00:00Z",
+      });
+      const { rerender } = render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={initialIssue}
+          onClose={() => {}}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(mockGetIssueEvents).toHaveBeenCalledTimes(1);
+      });
+
+      rerender(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={{
+            ...initialIssue,
+            status: "closed",
+            updated_at: "2026-01-23T00:00:01Z",
+          }}
+          onClose={() => {}}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(mockGetIssueEvents).toHaveBeenCalledTimes(2);
+      });
+
+      secondRequest.resolve([
+        createTestEvent(),
+        createTestEvent({
+          id: "event-2",
+          event_type: "issue.close",
+          actor: "worker-1",
+          created_at: "2026-01-23T00:00:01Z",
+        }),
+      ]);
+      await waitFor(() => {
+        expect(screen.getByTestId("journey-tail")).toHaveTextContent("Done");
+      });
+
+      await act(async () => {
+        firstRequest.resolve([
+          createTestEvent(),
+          createTestEvent({
+            id: "event-2",
+            event_type: "issue.claim",
+            actor: "worker-1",
+            created_at: "2026-01-23T00:00:01Z",
+          }),
+        ]);
+        await Promise.resolve();
+      });
+
+      expect(screen.getByTestId("journey-tail")).toHaveTextContent("Done");
+      expect(screen.queryByTestId("journey-now-line")).not.toBeInTheDocument();
+    });
+  });
+
   describe("close interactions", () => {
+    it("opens the move dialog from the header when another workspace exists", () => {
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({
+          workspaceId: "workspace-1",
+          workspace: {
+            id: "workspace-1",
+            name: "workspace-1",
+            path: "/tmp/workspace-1",
+            repos: [],
+            groups: [],
+            agents: [],
+            default_workspace: "workspace-1",
+            workspaces: [
+              {
+                id: "workspace-1",
+                name: "workspace-1",
+                path: "/tmp/workspace-1",
+                active: true,
+                repo_count: 1,
+                is_default: true,
+              },
+              {
+                id: "workspace-2",
+                name: "workspace-2",
+                path: "/tmp/workspace-2",
+                active: false,
+                repo_count: 0,
+                is_default: false,
+              },
+            ],
+          },
+        }),
+      );
+
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssue()}
+          onClose={() => {}}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("header-move-button"));
+
+      expect(screen.getByTestId("move-dialog-overlay")).toBeInTheDocument();
+      expect(screen.getByTestId("move-workspace-select")).toHaveValue(
+        "workspace-2",
+      );
+    });
+
     it("calls onClose when clicking overlay", () => {
       const mockIssue = createTestIssue();
       const onClose = vi.fn();
@@ -942,6 +1142,49 @@ describe("IssueDetailPanel", () => {
       expect(typeItem).toHaveTextContent("Task");
     });
 
+    it("persists issue type changes through the mounted editor", async () => {
+      const mockIssue = createTestIssueDetails({ issue_type: "task" });
+      vi.mocked(updateIssue).mockResolvedValue({
+        ...mockIssue,
+        issue_type: "bug",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("type-dropdown-trigger"));
+      fireEvent.click(screen.getByTestId("type-option-bug"));
+
+      await waitFor(() =>
+        expect(updateIssue).toHaveBeenCalledWith("", mockIssue.id, {
+          issue_type: "bug",
+        }),
+      );
+    });
+
+    it("persists labels through the mounted editor", async () => {
+      const mockIssue = createTestIssueDetails({ labels: [] });
+      vi.mocked(updateIssue).mockResolvedValue({
+        ...mockIssue,
+        labels: ["frontend"],
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("add-label-button"));
+      fireEvent.change(screen.getByTestId("label-input"), {
+        target: { value: "frontend" },
+      });
+      fireEvent.keyDown(screen.getByTestId("label-input"), { key: "Enter" });
+
+      await waitFor(() =>
+        expect(updateIssue).toHaveBeenCalledWith("", mockIssue.id, {
+          add_labels: ["frontend"],
+        }),
+      );
+    });
+
     it("does not render owner dropdown in metadata bar", () => {
       const mockIssue = createTestIssueDetails({
         owner: "john-doe",
@@ -1163,6 +1406,266 @@ describe("IssueDetailPanel", () => {
         expect(onApprove).toHaveBeenCalledTimes(1);
         expect(onApprove).toHaveBeenCalledWith(mockIssue);
       });
+    });
+
+    // PUPPET-146. The panel is the same review UI reached from kanban / list /
+    // agents, and had the identical swallowed-error defect as IssueDetailView:
+    // no message and an Approve button stuck on "..." until reload.
+    it("shows the server message verbatim when approve fails", async () => {
+      const mockIssue = createTestIssueDetails({
+        title: "Some task",
+        status: "review",
+      });
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("panel-approve-button"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("action-error-toast")).toHaveTextContent(
+          "issue is not claimable",
+        );
+      });
+      // Spinner released.
+      expect(screen.getByTestId("panel-approve-button")).not.toHaveTextContent(
+        "...",
+      );
+    });
+
+    it("disables only Approve, with the reason, after a 409", async () => {
+      const mockIssue = createTestIssueDetails({
+        title: "Some task",
+        status: "review",
+      });
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("panel-approve-button"));
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("panel-approve-blocked-reason"),
+        ).toHaveTextContent("issue is not claimable");
+      });
+      const approve = screen.getByTestId("panel-approve-button");
+      expect(approve).toBeDisabled();
+      expect(approve).toHaveAttribute("title", "issue is not claimable");
+      // Reject is a different transition (PATCH status=open) that the claim
+      // guard does not cover, so the 409 must not take it away.
+      expect(screen.getByTestId("panel-reject-button")).not.toBeDisabled();
+    });
+
+    // A network error is not the server refusing: retrying is legitimate.
+    it("leaves the buttons enabled after a non-409 failure", async () => {
+      const mockIssue = createTestIssueDetails({
+        title: "Some task",
+        status: "review",
+      });
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(new ApiError(0, "Network error"));
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("panel-approve-button"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("action-error-toast")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("panel-approve-button")).not.toBeDisabled();
+      expect(screen.getByTestId("panel-reject-button")).not.toBeDisabled();
+      expect(
+        screen.queryByTestId("panel-approve-blocked-reason"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("clears the error and the blocked latch when the issue changes", async () => {
+      const mockIssue = createTestIssueDetails({
+        title: "Some task",
+        status: "review",
+      });
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      const { rerender } = render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("panel-approve-button"));
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("panel-approve-blocked-reason"),
+        ).toBeInTheDocument();
+      });
+
+      rerender(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssueDetails({
+            id: "other-issue",
+            title: "Another task",
+            status: "review",
+          })}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("panel-approve-blocked-reason"),
+        ).not.toBeInTheDocument();
+      });
+      expect(
+        screen.queryByTestId("action-error-toast"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("panel-approve-button")).not.toBeDisabled();
+    });
+
+    // An SSE update can make the same issue claimable again, so the latch has
+    // to key on the record, not just on its identity.
+    it("clears the blocked latch when the same issue is updated", async () => {
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      const { rerender } = render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssueDetails({
+            title: "Some task",
+            status: "review",
+            updated_at: "2026-01-23T00:00:00Z",
+          })}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("panel-approve-button"));
+      await waitFor(() => {
+        expect(screen.getByTestId("panel-approve-button")).toBeDisabled();
+      });
+
+      rerender(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssueDetails({
+            title: "Some task",
+            status: "review",
+            updated_at: "2026-01-23T00:05:00Z",
+          })}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("panel-approve-blocked-reason"),
+        ).not.toBeInTheDocument();
+      });
+      expect(screen.getByTestId("panel-approve-button")).not.toBeDisabled();
+    });
+
+    // The optimistic status update stamps a fabricated `updated_at` and the
+    // rollback restores the original, so the panel lands back on the
+    // pre-approve revision just after the 409 latches. That revert is not a
+    // new revision and must not re-arm Approve (PUPPET-146).
+    it("keeps the blocked latch when the failed update rolls back", async () => {
+      const original = createTestIssueDetails({
+        title: "Some task",
+        status: "review",
+        updated_at: "2026-01-23T00:00:00Z",
+      });
+      const optimistic = createTestIssueDetails({
+        title: "Some task",
+        status: "in_progress",
+        updated_at: "2026-01-23T00:00:01Z",
+      });
+
+      let rejectApprove: (err: unknown) => void = () => {};
+      const onApprove = vi.fn(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectApprove = reject;
+          }),
+      );
+      const renderPanel = (issue: IssueDetails) => (
+        <IssueDetailPanel
+          isOpen={true}
+          issue={issue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />
+      );
+
+      const { rerender } = render(renderPanel(original));
+
+      fireEvent.click(screen.getByTestId("panel-approve-button"));
+
+      // The optimistic write reaches the panel while the PATCH is in flight,
+      // then the server refuses it.
+      rerender(renderPanel(optimistic));
+      await act(async () => {
+        rejectApprove(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      });
+
+      // The rollback puts the original revision back.
+      rerender(renderPanel(original));
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("panel-approve-blocked-reason"),
+        ).toHaveTextContent("issue is not claimable");
+      });
+      expect(screen.getByTestId("panel-approve-button")).toBeDisabled();
     });
 
     it("clicking Reject button shows the reject comment form", () => {

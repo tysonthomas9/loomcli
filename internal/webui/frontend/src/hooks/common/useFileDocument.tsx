@@ -7,30 +7,44 @@ import {
   type ReactNode,
 } from "react";
 
-import {
-  readScopedFile,
-  writeScopedFile,
-  type FileScopeRef,
-} from "@/api/workspace";
+import { readScopedFile, writeScopedFile } from "@/api/workspace";
 import {
   FileDocumentRegistry,
+  routeFileDocumentOperations,
+  type CheckoutDocumentRef,
   type FileDocumentRef,
   type FileDocumentState,
+  type FileDocumentTransport,
 } from "@/stores/fileDocumentRegistry";
+import { skillsFileDocumentTransport } from "@/stores/skillsStore";
+import {
+  checkoutExplorerRef,
+  skillsExplorerRef,
+  type ExplorerRef,
+} from "@/utils/explorerRefs";
 
-const sessionFileDocumentRegistry = new FileDocumentRegistry({
-  read: ({ workspaceId, path, ...scopeRef }, signal) =>
-    readScopedFile(workspaceId, scopeRef, path, undefined, { signal }),
-  write: ({ workspaceId, path, ...scopeRef }, content, signal, ifMatch) =>
-    writeScopedFile(
-      workspaceId,
-      scopeRef,
-      path,
-      content,
-      ifMatch ? { ifMatch } : {},
-      { signal },
-    ),
-});
+export const checkoutFileDocumentTransport: FileDocumentTransport<CheckoutDocumentRef> =
+  {
+    conditionalSave: false,
+    read: ({ workspaceId, path, ref }, signal) =>
+      readScopedFile(workspaceId, ref.checkout, path, undefined, { signal }),
+    write: ({ workspaceId, path, ref }, content, signal, ifMatch) =>
+      writeScopedFile(
+        workspaceId,
+        ref.checkout,
+        path,
+        content,
+        ifMatch ? { ifMatch } : {},
+        { signal },
+      ),
+  };
+
+const sessionFileDocumentRegistry = new FileDocumentRegistry(
+  routeFileDocumentOperations({
+    checkout: checkoutFileDocumentTransport,
+    skills: skillsFileDocumentTransport,
+  }),
+);
 
 const FileDocumentRegistryContext = createContext<FileDocumentRegistry>(
   sessionFileDocumentRegistry,
@@ -63,20 +77,37 @@ export interface UseFileDocumentReturn extends FileDocumentState {
 
 export function useFileDocument(
   workspaceId: string,
-  scopeRef: FileScopeRef,
+  explorerRef: ExplorerRef,
   path: string,
 ): UseFileDocumentReturn {
   const registry = useContext(FileDocumentRegistryContext);
-  const { scope, target, repo } = scopeRef;
+  const kind = explorerRef.kind;
+  const checkout = kind === "checkout" ? explorerRef.checkout : null;
+  const group = kind === "skills" ? explorerRef.group : null;
+  const groupKind = group?.kind;
+  const role = group?.kind === "role" ? group.role : null;
+  const stableExplorerRef = useMemo<ExplorerRef>(
+    () =>
+      kind === "checkout"
+        ? checkoutExplorerRef({
+            scope: checkout?.scope ?? "workspace",
+            ...(checkout?.target ? { target: checkout.target } : {}),
+            ...(checkout?.repo ? { repo: checkout.repo } : {}),
+          })
+        : skillsExplorerRef(
+            groupKind === "role"
+              ? { kind: "role", role: role ?? "" }
+              : { kind: "workspace" },
+          ),
+    [checkout?.repo, checkout?.scope, checkout?.target, groupKind, kind, role],
+  );
   const ref = useMemo<FileDocumentRef>(
     () => ({
       workspaceId,
-      scope,
-      ...(target ? { target } : {}),
-      ...(repo ? { repo } : {}),
+      ref: stableExplorerRef,
       path,
     }),
-    [path, repo, scope, target, workspaceId],
+    [path, stableExplorerRef, workspaceId],
   );
   const subscribe = useCallback(
     (listener: () => void) => registry.subscribe(ref, listener),

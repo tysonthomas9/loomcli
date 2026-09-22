@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	webuilog "github.com/tysonthomas9/loomcli/internal/webui/log"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/skillpaths"
 )
 
 // Compile-time check.
@@ -28,7 +29,7 @@ type fileServiceImpl struct {
 	fileOps       ops.FileOps
 	indexCache    *fileIndexCache
 	indexBuilds   singleflight.Group
-	indexBuilder  func(context.Context, string, string, bool) (*service.FileIndexResult, error)
+	indexBuilder  func(context.Context, string, string, bool, skillpaths.Policy) (*service.FileIndexResult, error)
 	mutationLocks pathLockSet
 
 	historyCleanupOnce sync.Once
@@ -52,7 +53,7 @@ func NewFileService(fileOps ops.FileOps) service.FileService {
 // listDirectoryAt lists one level under rootDir. hidden names path segments to
 // omit from the listing (e.g. ".git"); pass nil to list everything. Shared by
 // the scope-rooted listers.
-func listDirectoryAt(ctx context.Context, store *rootedFileStore, path string, hidden map[string]bool) (*service.FileTreeResult, error) {
+func listDirectoryAt(ctx context.Context, store *rootedFileStore, path string, hidden map[string]bool, skillPolicy skillpaths.Policy) (*service.FileTreeResult, error) {
 	cleanPath, err := normalizeFilePath(path, true)
 	if err != nil {
 		return nil, err
@@ -74,14 +75,14 @@ func listDirectoryAt(ctx context.Context, store *rootedFileStore, path string, h
 		return dirEntries[i].Name() < dirEntries[j].Name()
 	})
 
-	entries := convertDirEntries(ctx, cleanPath, dirEntries, hidden)
+	entries := convertDirEntries(ctx, cleanPath, dirEntries, hidden, skillPolicy)
 
 	return &service.FileTreeResult{Path: cleanPath, Entries: entries}, nil
 }
 
 // convertDirEntries converts os.DirEntry items to service.FileTreeEntry,
 // skipping symlinks and any entry whose name is in hidden (pass nil to keep all).
-func convertDirEntries(ctx context.Context, parent string, dirEntries []os.DirEntry, hidden map[string]bool) []service.FileTreeEntry {
+func convertDirEntries(ctx context.Context, parent string, dirEntries []os.DirEntry, hidden map[string]bool, skillPolicy skillpaths.Policy) []service.FileTreeEntry {
 	entries := make([]service.FileTreeEntry, 0, len(dirEntries))
 	for _, de := range dirEntries {
 		if de.Type()&os.ModeSymlink != 0 {
@@ -90,7 +91,11 @@ func convertDirEntries(ctx context.Context, parent string, dirEntries []os.DirEn
 		if isHiddenEntry(de.Name(), hidden) {
 			continue
 		}
-		if !service.FilePathAllowsSensitive(ctx, filepath.Join(parent, de.Name())) {
+		entryPath := filepath.Join(parent, de.Name())
+		if skillPolicy.Hidden(filepath.ToSlash(entryPath)) {
+			continue
+		}
+		if !service.FilePathAllowsSensitive(ctx, entryPath) {
 			continue
 		}
 		info, err := de.Info()
@@ -267,13 +272,41 @@ func (s *fileServiceImpl) resolveWorkspaceData(wsID string) (*ops.WorkspaceData,
 	return ws, nil
 }
 
+// skillPathPolicy derives hiding from the same configured checkout topology
+// used by the file browser's repo roots and git-status fan-out. Repo and agent
+// scope roots are already checkouts; workspace scope contains the configured
+// repo paths (which may be nested) plus agent worktrees.
+func (s *fileServiceImpl) skillPathPolicy(wsID string, root *scopedRoot) (skillpaths.Policy, error) {
+	switch root.scope {
+	case service.ScopeRepo, service.ScopeAgent:
+		return skillpaths.NewPolicy(""), nil
+	case service.ScopeWorkspace:
+		ws, err := s.resolveWorkspaceData(wsID)
+		if err != nil {
+			return skillpaths.Policy{}, err
+		}
+		checkouts := workspaceFileCheckouts(wsID, root.path, ws)
+		roots := make([]string, 0, len(checkouts))
+		for _, checkout := range checkouts {
+			roots = append(roots, filepath.ToSlash(checkout.prefix))
+		}
+		return skillpaths.NewPolicy(roots...), nil
+	default:
+		return skillpaths.Policy{}, service.ErrValidation(fmt.Sprintf("unsupported scope %q", root.scope))
+	}
+}
+
 func (s *fileServiceImpl) ListDirectoryScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileTreeResult, error) {
 	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
 	if err != nil {
 		return nil, err
 	}
 	defer root.Close()
-	return listDirectoryAt(ctx, root.store, path, hiddenScopeSegments)
+	skillPolicy, err := s.skillPathPolicy(wsID, root)
+	if err != nil {
+		return nil, err
+	}
+	return listDirectoryAt(ctx, root.store, path, hiddenScopeSegments, skillPolicy)
 }
 
 func (s *fileServiceImpl) ReadFileScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileReadResult, error) {
