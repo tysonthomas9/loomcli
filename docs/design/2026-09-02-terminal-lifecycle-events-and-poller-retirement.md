@@ -347,3 +347,33 @@ hidden state, stale responses, and reconnect repair.
    a reconnect test proves an authoritative snapshot or cursor replay, a
    two-tab test proves no missed mutation, and production metrics show no
    dropped-broadcast repair reliance.
+
+## Transport repair 1: browser reconnect on fetch-event-source (2026-09-02)
+
+This repair is client-only. `@microsoft/fetch-event-source` owns the retry
+loop, timer, and `Last-Event-ID`; the wrapper supplies its 1 second doubling,
+30 second capped backoff. A custom fetch exchanges a fresh token per attempt.
+Token 401/403 is fatal and enters the error path; a token 404 or `disabled`
+response means open mode, so the stream opens without a token. Every other
+token, HTTP, network, or stream failure retries. The wrapper
+intentionally overrides the server's `retry:` directive so all failures use
+one policy. Duplicate `connected` frames are ignored within one connection.
+
+This fixes a dead-tab path in the old client: if token exchange failed while
+the server restarted, `connect()` returned without `scheduleReconnect()`,
+leaving neither a stream nor a retry.
+
+Live proof stopped and started the Loom container with Podman. The existing
+tab reconnected without intervention, each tab held one stream, and each
+delivered mutation batch caused one refetch.
+
+This repair does not fix server cursor-0 replay on subscriber (re)activation,
+64-slot client-buffer eviction, or the `OnAuthenticated`-before-`RegisterClient`
+race. A live `Last-Event-ID` regression remains server work: cursor-0 replay
+delivers the oldest frames first; the tab consumed about 64 before hub
+eviction, moved its tracked ID about 7.8 hours backward, and every reconnect
+then began unbounded catch-up. The client deliberately honors every `id:` line.
+
+`go-sse` was evaluated for the server hub and rejected: publish is synchronous
+and its topic model does not fit per-client cursors. The custom provider had
+already reimplemented the hub, so this repair leaves that server design alone.
