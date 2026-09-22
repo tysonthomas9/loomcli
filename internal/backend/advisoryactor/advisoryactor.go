@@ -10,7 +10,7 @@
 // A VERIFIED actor is carried the same way but is NOT advisory, and that
 // distinction is the security boundary. fleet-db answers "workspace access
 // denied" both for the open-mode operator identity, which legitimately holds
-// no role, and for an authenticated user who simply is not authorised here.
+// no role, and for an authenticated user who simply is not authorized here.
 // Retrying the first as the process actor restores attribution the operator
 // never had; retrying the second hands an outsider the process actor's
 // privileges. Same message, opposite meanings — so the caller, which is the
