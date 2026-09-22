@@ -6,17 +6,20 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"os"
-	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/backend/advisoryactor"
+	"github.com/tysonthomas9/loomcli/internal/webui/operatorid"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
+// envOperatorActor / defaultOperatorActor mirror internal/webui/operatorid so
+// this package's tests and messages keep their local names. operatorid is the
+// single source of truth; `loom doctor` reads the same values.
 const (
-	envOperatorActor     = "LOOM_OPERATOR_ACTOR"
-	defaultOperatorActor = "operator@local"
+	envOperatorActor     = operatorid.EnvOperatorActor
+	defaultOperatorActor = operatorid.DefaultOperatorActor
 )
 
 // handlePatchIssue returns a handler that performs partial updates on an issue.
@@ -28,9 +31,10 @@ func HandlePatchIssue(svc service.IssueService) http.HandlerFunc {
 			return
 		}
 
+		ctx := operatorActorContext(r, fallbackActor)
 		params := service.PatchIssueParams{
 			IssueID:            issueID,
-			Actor:              operatorActor(r.Context(), fallbackActor),
+			Actor:              advisoryactor.From(ctx),
 			Title:              req.Title,
 			Description:        req.Description,
 			Status:             req.Status,
@@ -54,12 +58,12 @@ func HandlePatchIssue(svc service.IssueService) http.HandlerFunc {
 			AgentState:         req.AgentState,
 		}
 
-		if err := svc.PatchIssue(r.Context(), params); err != nil {
+		if err := svc.PatchIssue(ctx, params); err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
 
-		data, err := svc.GetIssue(r.Context(), issueID)
+		data, err := svc.GetIssue(ctx, issueID)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -74,18 +78,37 @@ func HandlePatchIssue(svc service.IssueService) http.HandlerFunc {
 
 // resolveOperatorActor is called when the route is constructed, so the
 // open-mode fallback is stable for the lifetime of the server.
-func resolveOperatorActor() string {
-	if actor := strings.TrimSpace(os.Getenv(envOperatorActor)); actor != "" {
-		return actor
-	}
-	return defaultOperatorActor
-}
+func resolveOperatorActor() string { return operatorid.Resolve() }
 
-func operatorActor(ctx context.Context, fallback string) string {
-	if actor, _, ok := middleware.VerifiedUserActorFromContext(ctx); ok {
-		return actor
+// operatorActorContext resolves the operator identity for this request and
+// returns a context carrying it as the *advisory* actor.
+//
+// This is the only way to obtain the operator actor — read it back with
+// advisoryactor.From(ctx) and hand the same ctx to the service call, so the
+// backend can tell "attribute this to the operator if you can" apart from an
+// actor override it must honor exactly (claim/release). Resolution and
+// stamping are inseparable on purpose: a handler cannot get the actor without
+// also getting the context that makes it safe.
+//
+// A future handler that forgets this and reads advisoryactor.From(r.Context())
+// gets "", which the fleet backend treats as "keep the process identity" — the
+// write still lands, losing attribution but never the board.
+func operatorActorContext(r *http.Request, fallback string) context.Context {
+	// A verified identity is carried as VERIFIED, never advisory. fleet-db
+	// returns "workspace access denied" both for the open-mode operator
+	// identity, which holds no role by construction, and for a signed-in user
+	// who is not authorized in this workspace. Stamping the second as advisory
+	// would let the backend retry it as the process actor — which is an
+	// authorisation bypass, not a fallback: any authenticated user without a
+	// role could write as the (admin) process identity. Their denial must
+	// surface so the role gets granted instead.
+	if verified, _, ok := middleware.VerifiedUserActorFromContext(r.Context()); ok {
+		return advisoryactor.WithVerified(r.Context(), verified)
 	}
-	return fallback
+	// Open mode: nobody authenticated, and the operator identity is a label on
+	// this process's own writes. Attribution is the only thing at stake, so it
+	// stays advisory and the board never stops accepting writes.
+	return advisoryactor.With(r.Context(), fallback)
 }
 
 // validatePatchRequest extracts the issue ID and parses the JSON body from an HTTP request.

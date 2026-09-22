@@ -3,10 +3,13 @@ package fleet
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
+	"net/http"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/backend/advisoryactor"
 )
 
 // classifyHTTPError maps an HTTP status code and response body to a
@@ -43,24 +46,38 @@ func classifyHTTPError(op string, statusCode int, body apiResponse) error {
 		return attachMeta(classified, body.Meta)
 	}
 
+	return attachMeta(classifyStatus(op, statusCode, msg), body.Meta)
+}
+
+// classifyStatus is classifyHTTPError's status-based fallback, split out to
+// keep that function under the cyclomatic-complexity ceiling.
+func classifyStatus(op string, statusCode int, msg string) error {
 	switch statusCode {
 	case 400, 422:
-		return attachMeta(backend.ErrValidation(op, msg), body.Meta)
-	case 401, 403:
-		return attachMeta(backend.ErrUnavailable(op, "authentication failed: "+msg, nil), body.Meta)
+		return backend.ErrValidation(op, msg)
+	case 401:
+		return backend.ErrUnavailable(op, "authentication failed: "+msg, nil)
+	case 403:
+		// Distinct from 401: the credentials were accepted, the identity
+		// they carry is not authorized. Saying "authentication failed"
+		// here sent operators hunting for a broken token when the actual
+		// fault was a missing ACL role. Kind is unchanged so no caller's
+		// kind-switch changes behavior; classifyAs names the actor and
+		// workspace when they are known.
+		return backend.ErrUnavailable(op, "not authorized: "+msg, nil)
 	case 404:
-		return attachMeta(backend.ErrNotFound(op, msg), body.Meta)
+		return backend.ErrNotFound(op, msg)
 	case 409:
-		return attachMeta(backend.ErrConflict(op, msg), body.Meta)
+		return backend.ErrConflict(op, msg)
 	case 429:
-		return attachMeta(backend.ErrUnavailable(op, "rate limited: "+msg, nil), body.Meta)
+		return backend.ErrUnavailable(op, "rate limited: "+msg, nil)
 	case 503:
-		return attachMeta(backend.ErrUnavailable(op, msg, nil), body.Meta)
+		return backend.ErrUnavailable(op, msg, nil)
 	case 504:
-		return attachMeta(backend.ErrTimeout(op, msg, nil), body.Meta)
+		return backend.ErrTimeout(op, msg, nil)
 	default:
 		if statusCode >= 400 {
-			return attachMeta(backend.ErrInternal(op, msg, nil), body.Meta)
+			return backend.ErrInternal(op, msg, nil)
 		}
 		return nil
 	}
@@ -148,4 +165,36 @@ func classifyTransportError(op string, err error) error {
 		return backend.ErrUnavailable(op, "fleet server unreachable: "+netErr.Error(), err)
 	}
 	return backend.ErrUnavailable(op, "fleet server communication failed: "+err.Error(), err)
+}
+
+// classifyAs is classifyHTTPError with the actor in hand. On a 403 it rewrites
+// the message to name the rejected actor and the workspace — the two facts an
+// operator needs and neither of which fleet-db's own message carries — and
+// appends the remediation when the actor was advisory (i.e. the operator
+// identity, whose writes have just silently fallen back).
+//
+// Kind and Meta are untouched: only the message changes.
+func (b *FleetBackend) classifyAs(ctx context.Context, op string, statusCode int, body apiResponse, actor, effectiveActor string) error {
+	err := classifyHTTPError(op, statusCode, body)
+	if err == nil || statusCode != http.StatusForbidden || actor == "" {
+		return err
+	}
+	var be *backend.BackendError
+	if !errors.As(err, &be) {
+		return err
+	}
+	be.Message = fmt.Sprintf("actor %q is not authorized in workspace %q (fleet-db returned: %s)",
+		actor, b.workspace, body.Error)
+	if effectiveActor != "" && effectiveActor != actor {
+		// The advisory fallback already ran and was denied too. Name both
+		// actors: blaming only the operator identity would send someone
+		// after the wrong role.
+		be.Message = fmt.Sprintf("actor %q is not authorized in workspace %q, and the fallback to "+
+			"process actor %q was denied as well (fleet-db returned: %s)",
+			actor, b.workspace, effectiveActor, body.Error)
+	}
+	if actor == advisoryactor.From(ctx) {
+		be.Message += ". Remediation: " + advisoryDenialRemediation(actor)
+	}
+	return err
 }
