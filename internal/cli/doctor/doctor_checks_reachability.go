@@ -213,7 +213,7 @@ func classifyReady(
 			continue
 		}
 		report.Evaluated++
-		if hasLabel(issue.Labels, cli.OperatorLabel) {
+		if hasLabel(issue.Labels, operatorLabel) {
 			// Reserved for a human. Named and aged in its own section — never
 			// in the FAIL set, and never silently dropped, which is how the
 			// operator queue went unwatched for two days.
@@ -609,7 +609,7 @@ func renderHumanQueueDetail(b *strings.Builder, report reachabilityReport) {
 	}
 	const shown = 10
 	fmt.Fprintf(b, "awaiting a human (label %q): %d issue(s), oldest %s\n",
-		cli.OperatorLabel, len(report.OperatorQueue), report.OperatorQueue[0].Age)
+		operatorLabel, len(report.OperatorQueue), report.OperatorQueue[0].Age)
 	for i, e := range report.OperatorQueue {
 		if i == shown {
 			fmt.Fprintf(b, "  ... and %d more\n", len(report.OperatorQueue)-shown)
