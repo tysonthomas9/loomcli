@@ -42,3 +42,12 @@ The final runtime also overrides Neko's default X11 capture pipeline with
 under Rosetta and left a connected but black stream. This was found only when
 the native window was inspected directly; playback events alone were
 insufficient evidence.
+
+## 2026-09-22 lifecycle hardening
+
+Each start now generates and persists a runtime ID, uses it in both container
+names and labels, and cleans up only containers bearing that exact ownership
+tuple if startup fails. The two-browser live rerun used runtime ID
+`kernel-20260922175536-83109-13716`. Runtime tests also prove configurable
+ports and exact failed-start cleanup. The POC still relies on one explicitly
+task-owned Colima VM; it does not claim multi-tenant production isolation.

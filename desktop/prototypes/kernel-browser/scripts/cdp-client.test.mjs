@@ -12,6 +12,12 @@ test("chooses the visible HTTP page rather than the first background target", as
   assert.equal(selected.targetId, "foreground");
 });
 
+test("chooses a visible initial browser page so navigation can bootstrap", async () => {
+  const targets = [{ targetId: "new-tab", type: "page", url: "chrome://newtab/" }];
+  const selected = await chooseVisiblePage(targets, async () => true);
+  assert.equal(selected.targetId, "new-tab");
+});
+
 test("rejects every pending CDP command when the socket closes", async () => {
   const pending = createPendingCommands();
   const command = pending.add(7, 1_000);

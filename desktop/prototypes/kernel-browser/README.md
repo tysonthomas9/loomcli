@@ -17,19 +17,30 @@ The result is a **capability pass and production-readiness hold**. See
 - One independently labelled Kernel container per isolated browser identity.
 - Only the selected tab opens a live WebRTC stream; the background browser
   remains available to CDP without paying active video CPU cost.
-- Per-browser control epochs. Taking human control invalidates queued lead
-  actions from an older epoch.
+- Per-browser control epochs. A queued lead action retains its browser identity
+  and epoch across tab switches; taking human control invalidates that exact
+  queued action. The epoch is checked again immediately before CDP dispatch.
 - A Loom-owned pointer and keyboard surface that dispatches validated input
   through CDP while the embedded Neko viewer remains read-only. This bypasses
   the amd64 Xorg input driver, which deadlocks under Rosetta after sustained
   pointer activity. Pointer mapping accounts for Neko's aspect-fit letterbox
   and the remote Chromium window chrome before producing page coordinates.
 - CDP-injected element selection that records DOM context and a cropped PNG.
+  Capture refreshes the selected element's geometry and records both viewport
+  and document coordinates.
+- Bounded CDP commands that reject on timeout or disconnect. Target selection
+  prefers the visible page while still accepting an initial `chrome://newtab/`
+  page so a fresh browser can be navigated.
 - A control/fixture server bound to `127.0.0.1:61300`. Colima's
   `host.lima.internal` forwarding can reach that loopback listener, so no LAN
   wildcard bind is required.
 - An allowlisted embed-event recorder that proves the native WKWebView reaches
   `KERNEL_CONNECTED` and `KERNEL_PLAYING`.
+- Browser requests are restricted to the POC's loopback development origins.
+  This is an origin guard, not authentication.
+- A generated runtime ID is persisted under `.runtime/`, included in container
+  names and ownership labels, and used for exact failed-start cleanup. Host
+  ports remain configurable for parallel task-owned runs.
 - A damage-based Neko X11 capture pipeline. The image default (`use-damage=false`)
   deadlocks Xorg under Rosetta and produces a connected but black stream.
 
@@ -113,4 +124,5 @@ match both labels. It mounts neither the repository nor the user's home.
 
 The dedicated VM is still necessary because the Kernel container is
 privileged and capped at 8 GiB. This POC does not make that runtime safe or
-small enough to ship to Loom users.
+small enough to ship to Loom users. Clipboard, IME, accessibility input, and
+resize behavior remain outside the demonstrated POC boundary.

@@ -146,6 +146,14 @@ same Chromium page, takeover rejects stale actions, DOM annotations produce
 metadata plus a crop, two profiles remain isolated, and a forced VM loss is
 recoverable using exact ownership labels.
 
+A 2026-09-22 regression pass hardened queued-action identity, the final epoch
+check, CDP disconnect/timeout handling, visible-page selection, sustained drag
+state, refreshed annotation geometry, request-origin checks, and generated
+runtime ownership. The automated suite passes 19 tests and the live pointer and
+annotation paths were rechecked against app-a. Clipboard, IME, accessibility
+input, and resize remain unverified; they are not required to answer this
+throwaway POC's feasibility question and remain production follow-up work.
+
 Podman was not the successful runtime. Homebrew Podman 6.1.2 repaired the
 earlier Ignition failure, but AppleHV/gvproxy still could not keep a reachable
 machine. The completed proof uses a dedicated Colima 0.10.3 VZ VM with Rosetta

@@ -45,3 +45,24 @@ Artifacts:
 
 The DOM descriptor is canonical; no attempt is made to infer an element from
 streamed pixels.
+
+## 2026-09-22 regression hardening
+
+- Queued actions now retain both `appId` and epoch when the visible tab changes.
+  A live UI sequence queued on Research, took human control, switched to
+  Operations, and correctly rejected the stale Research action.
+- The epoch is checked inside the CDP operation immediately before dispatch,
+  closing the race between the HTTP check and browser mutation.
+- CDP calls now time out and reject all pending commands when the socket closes.
+- Held-button state and modifiers survive coalesced pointer movement; drag and
+  release events outside the page clamp to its edge rather than being dropped.
+- A live pointer dispatch mapped stream coordinate `(328.5, 258.1)` to fixture
+  coordinate `(677, 297)` and changed `#action-status` to
+  `Workflow confirmed by lead agent`.
+- A live annotation dispatch selected the fixture paragraph through the same
+  pointer bridge. Capture returned current viewport bounds, document bounds,
+  DOM context, and a cropped screenshot.
+- The focused regression suite passes 19 tests. The corrected ownership-aware
+  health probe kept both live browsers' CDP and X11 paths healthy for a further
+  20-second run. Clipboard, IME,
+  accessibility-input, and resize quality remain unverified for this POC.

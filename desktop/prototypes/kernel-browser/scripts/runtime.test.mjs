@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 
 const runtimeScript = new URL("./runtime.sh", import.meta.url).pathname;
+const healthScript = new URL("./verify-control-health.sh", import.meta.url).pathname;
 
 async function fakeRuntime({ failSecondRun = false } = {}) {
   const root = await mkdtemp(join(tmpdir(), "loom-kernel-runtime-test-"));
@@ -49,4 +50,46 @@ test("start generates one runtime id and uses it in names and labels", async () 
   assert.ok(labels.length >= 2);
   assert.equal(new Set(labels).size, 1);
   assert.doesNotMatch(run.log, /--name loom-kernel-browser-app-a(?: |$)/);
+});
+
+test("health probe follows the persisted runtime id and configured CDP ports", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loom-kernel-health-test-"));
+  const state = join(root, "state");
+  const log = join(root, "calls.log");
+  await writeFile(join(root, "docker"), `#!/usr/bin/env bash
+printf 'docker %s\\n' "$*" >> "$FAKE_RUNTIME_LOG"
+exit 0
+`);
+  await writeFile(join(root, "curl"), `#!/usr/bin/env bash
+printf 'curl %s\\n' "$*" >> "$FAKE_RUNTIME_LOG"
+exit 0
+`);
+  await writeFile(join(root, "sleep"), "#!/usr/bin/env bash\nexit 0\n");
+  await Promise.all([
+    chmod(join(root, "docker"), 0o755),
+    chmod(join(root, "curl"), 0o755),
+    chmod(join(root, "sleep"), 0o755),
+  ]);
+  await mkdir(state);
+  await writeFile(join(state, "runtime-id"), "test runtime\n");
+
+  const result = spawnSync("bash", [healthScript, "1"], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${root}:${process.env.PATH}`,
+      FAKE_RUNTIME_LOG: log,
+      LOOM_KERNEL_STATE_DIR: state,
+      LOOM_KERNEL_APP_A_CDP_PORT: "41222",
+      LOOM_KERNEL_APP_B_CDP_PORT: "42222",
+      LOOM_KERNEL_HEALTH_INTERVAL_SECONDS: "1",
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const calls = await readFile(log, "utf8");
+  assert.match(calls, /127\.0\.0\.1:41222\/json\/version/);
+  assert.match(calls, /127\.0\.0\.1:42222\/json\/version/);
+  assert.match(calls, /exec loom-kernel-browser-test-runtime-app-a/);
+  assert.match(calls, /exec loom-kernel-browser-test-runtime-app-b/);
 });

@@ -33,7 +33,7 @@ export function createPendingCommands() {
 }
 
 export async function chooseVisiblePage(targets, isVisible) {
-  const pages = targets.filter((target) => target.type === "page" && /^https?:/.test(target.url));
+  const pages = targets.filter((target) => target.type === "page" && !target.url.startsWith("devtools://"));
   for (const target of pages) {
     if (await isVisible(target)) return target;
   }
