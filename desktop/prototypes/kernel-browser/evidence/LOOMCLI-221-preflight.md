@@ -115,10 +115,10 @@ Final verification again showed no prototype machine, connection, process,
 listener, or Kernel image/container. The pre-existing
 `podman-machine-default` connection records remain untouched.
 
-The runtime lifecycle proof remains blocked, not failed: Kernel itself has not
-run. The next safe option is a Podman distribution that includes the supported
-`libkrun`/`krunkit` provider, followed by a new task-owned machine and the same
-preflight.
+At that checkpoint the runtime lifecycle proof remained blocked rather than
+failed: Kernel itself had not run. The next attempted safe option was the
+supported `libkrun`/`krunkit` provider in another task-owned machine, followed
+by the Colima fallback below.
 
 ## Final fallback and lifecycle result
 
