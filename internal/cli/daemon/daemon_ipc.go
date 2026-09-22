@@ -286,6 +286,16 @@ func (d *Daemon) handleIPCClaim(req AgentIPCRequest) AgentIPCResponse {
 	if resp, ok := d.validateIPCLease(ctx, req); !ok {
 		return resp
 	}
+	// The agent self-selection path: an auto-mode agent picked this row out of
+	// `loom data ready` itself. Same content invariant as the supervisor's
+	// dispatch, enforced with the same (fail-open) gate.
+	if allowed, _ := d.contentGate.Allow(ctx, d.issueBackend, backend.IssueData{ID: req.IssueID}, req.IssueID); !allowed {
+		slog.Info("dispatch refused: bodyless task", "agent", req.AgentName, "task_id", req.IssueID, "path", "ipc claim")
+		return AgentIPCResponse{
+			Error: "task " + req.IssueID + " has no description or acceptance criteria; nothing to work on",
+			Kind:  string(backend.KindValidation),
+		}
+	}
 	if err := d.issueBackend.ClaimIssue(ctx, req.IssueID, lockTTL); err != nil {
 		return ipcErrorResponse(err)
 	}
