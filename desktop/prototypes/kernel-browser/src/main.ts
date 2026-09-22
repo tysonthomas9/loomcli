@@ -6,25 +6,25 @@ type AppId = "app-a" | "app-b";
 type BrowserApp = {
   id: AppId;
   name: string;
-  liveUrl: string;
   cdpPort: number;
   epoch: number;
 };
 
 const controlOrigin = import.meta.env.VITE_LOOM_KERNEL_CONTROL_ORIGIN || "http://127.0.0.1:61300";
 const apps: BrowserApp[] = [
-  { id: "app-a", name: "Research", liveUrl: `${import.meta.env.VITE_LOOM_KERNEL_APP_A_LIVE_ORIGIN || "http://127.0.0.1:61080"}/?embed=1&readOnly=true`, cdpPort: Number(import.meta.env.VITE_LOOM_KERNEL_APP_A_CDP_PORT || 61222), epoch: 0 },
-  { id: "app-b", name: "Operations", liveUrl: `${import.meta.env.VITE_LOOM_KERNEL_APP_B_LIVE_ORIGIN || "http://127.0.0.1:62080"}/?embed=1&readOnly=true`, cdpPort: Number(import.meta.env.VITE_LOOM_KERNEL_APP_B_CDP_PORT || 62222), epoch: 0 },
+  { id: "app-a", name: "Research", cdpPort: Number(import.meta.env.VITE_LOOM_KERNEL_APP_A_CDP_PORT || 61222), epoch: 0 },
+  { id: "app-b", name: "Operations", cdpPort: Number(import.meta.env.VITE_LOOM_KERNEL_APP_B_CDP_PORT || 62222), epoch: 0 },
 ];
 
 let activeId: AppId = "app-a";
 const queuedActions = createQueuedActionState(activeId);
-let humanControlId: AppId | null = null;
 let inputQueue: Promise<unknown> = Promise.resolve();
 let pendingMove: { surfaceX: number; surfaceY: number; surfaceWidth: number; surfaceHeight: number } | null = null;
 let latestMoveEvent: PointerEvent | null = null;
 let moveQueued = false;
 let pressedButton = "none";
+let frameGeneration = 0;
+let frameFailureAnnounced = false;
 
 const root = document.querySelector<HTMLDivElement>("#app");
 if (!root) throw new Error("missing app root");
@@ -46,14 +46,14 @@ root.innerHTML = `
         <div>
           <p class="section-label">Control handoff</p>
           <h2 id="controls-title">Lead + human</h2>
-          <p class="helper">Taking control increments this page's epoch. Any queued lead action from an older epoch is rejected.</p>
+          <p class="helper">Human input is always enabled. A click, wheel, or keypress advances this page's epoch so older queued lead actions are rejected.</p>
         </div>
         <dl class="facts">
           <div><dt>Active app</dt><dd id="active-name">Research</dd></div>
           <div><dt>Control epoch</dt><dd id="epoch">0</dd></div>
           <div><dt>CDP</dt><dd id="cdp">:61222</dd></div>
         </dl>
-        <button class="button primary" id="take-control">Take human control</button>
+        <div class="control-ready" role="status"><span class="dot"></span> Human control always available</div>
         <button class="button" id="queue-action">Queue lead action</button>
         <button class="button" id="run-action">Run queued action</button>
         <hr />
@@ -69,11 +69,11 @@ root.innerHTML = `
       <section class="browser-panel" aria-label="Live browser">
         <div class="browser-chrome">
           <span class="browser-title" id="browser-title">Research</span>
-          <span class="browser-url">Kernel live view · same page as CDP</span>
+          <span class="browser-url">CDP frame view · same page as agent control</span>
         </div>
         <div class="browser-viewport">
-          ${apps.map((app) => `<iframe class="live-view${app.id === activeId ? " active" : ""}" data-frame="${app.id}" title="${app.name} live browser"${app.id === activeId ? ` src="${app.liveUrl}"` : ""} referrerpolicy="strict-origin-when-cross-origin" allow="clipboard-read; clipboard-write; autoplay"></iframe>`).join("")}
-          <div class="human-input" id="human-input" tabindex="0" aria-label="Human browser control surface"></div>
+          <img class="live-view" id="live-view" alt="Research live browser" />
+          <div class="human-input active" id="human-input" tabindex="0" aria-label="Human browser control surface"></div>
         </div>
       </section>
     </section>
@@ -96,30 +96,53 @@ function updateActiveView() {
     const selected = button.dataset.app === activeId;
     button.setAttribute("aria-selected", String(selected));
   });
-  document.querySelectorAll<HTMLIFrameElement>(".live-view").forEach((frame) => {
-    const selected = frame.dataset.frame === activeId;
-    frame.classList.toggle("active", selected);
-    if (selected && (!frame.src || frame.src === "about:blank")) frame.src = app.liveUrl;
-    if (!selected && frame.src && frame.src !== "about:blank") frame.src = "about:blank";
-  });
+  document.querySelector<HTMLImageElement>("#live-view")!.alt = `${app.name} live browser`;
   document.querySelector("#active-name")!.textContent = app.name;
   document.querySelector("#epoch")!.textContent = String(app.epoch);
   document.querySelector("#cdp")!.textContent = `:${app.cdpPort}`;
   document.querySelector("#browser-title")!.textContent = app.name;
   queuedActions.select(app.id);
-  humanControlId = null;
-  updateHumanControl();
+  restartFrameLoop();
   announce(`${app.name} browser selected.`);
 }
 
-function updateHumanControl() {
-  const active = humanControlId === activeId;
-  const surface = document.querySelector<HTMLDivElement>("#human-input")!;
-  const button = document.querySelector<HTMLButtonElement>("#take-control")!;
-  surface.classList.toggle("active", active);
-  surface.setAttribute("aria-hidden", String(!active));
-  button.textContent = active ? "Human control active" : "Take human control";
-  button.setAttribute("aria-pressed", String(active));
+async function refreshFrame(generation: number, appId: AppId) {
+  try {
+    const result = await api(`/api/frame/${appId}`);
+    if (generation !== frameGeneration || appId !== activeId) return;
+    const frame = document.querySelector<HTMLImageElement>("#live-view")!;
+    frame.src = `data:${result.mimeType};base64,${result.image}`;
+    frame.dataset.ready = "true";
+    applyEpoch(appId, result);
+    if (frameFailureAnnounced) {
+      frameFailureAnnounced = false;
+      announce("Live browser frame restored.");
+    }
+  } catch (error) {
+    if (generation === frameGeneration && !frameFailureAnnounced) {
+      frameFailureAnnounced = true;
+      announce(`Live frame failed: ${(error as Error).message}`, "error");
+    }
+  } finally {
+    if (generation === frameGeneration) window.setTimeout(() => void refreshFrame(generation, appId), 250);
+  }
+}
+
+function restartFrameLoop() {
+  const generation = ++frameGeneration;
+  frameFailureAnnounced = false;
+  const frame = document.querySelector<HTMLImageElement>("#live-view")!;
+  delete frame.dataset.ready;
+  frame.removeAttribute("src");
+  void refreshFrame(generation, activeId);
+}
+
+function applyEpoch(appId: AppId, result: { epoch?: number }) {
+  if (typeof result.epoch !== "number") return;
+  const app = apps.find((candidate) => candidate.id === appId)!;
+  app.epoch = result.epoch;
+  queuedActions.setEpoch(appId, result.epoch);
+  if (appId === activeId) document.querySelector("#epoch")!.textContent = String(result.epoch);
 }
 
 async function api(path: string, body?: unknown) {
@@ -136,6 +159,7 @@ async function api(path: string, body?: unknown) {
 function surfacePointer(event: PointerEvent | WheelEvent) {
   const rect = document.querySelector<HTMLDivElement>("#human-input")!.getBoundingClientRect();
   return {
+    coordinateSpace: "page",
     surfaceX: Math.max(0, Math.min(rect.width, event.clientX - rect.left)),
     surfaceY: Math.max(0, Math.min(rect.height, event.clientY - rect.top)),
     surfaceWidth: rect.width,
@@ -156,6 +180,7 @@ function enqueuePointer(payload: object) {
   const appId = activeId;
   inputQueue = inputQueue
     .then(() => api(`/api/input/${appId}/pointer`, payload))
+    .then((result) => applyEpoch(appId, result))
     .catch((error) => announce((error as Error).message, "error"));
 }
 
@@ -180,6 +205,7 @@ function enqueueKey(event: KeyboardEvent) {
       ...(text === undefined ? {} : { text }),
       modifiers: keyboardModifiers(event),
     }))
+    .then((result) => applyEpoch(appId, result))
     .catch((error) => announce((error as Error).message, "error"));
 }
 
@@ -190,7 +216,7 @@ function scheduleMove() {
   inputQueue = inputQueue.then(() => {
     const move = pendingMove;
     pendingMove = null;
-    if (move && humanControlId === appId) {
+    if (move && activeId === appId) {
       const event = latestMoveEvent;
       return api(`/api/input/${appId}/pointer`, {
         type: "mouseMoved",
@@ -218,39 +244,6 @@ document.querySelectorAll<HTMLButtonElement>(".tab").forEach((button) => {
     activeId = button.dataset.app as AppId;
     updateActiveView();
   });
-});
-
-window.addEventListener("message", (event) => {
-  const app = apps.find((candidate) => {
-    const frame = document.querySelector<HTMLIFrameElement>(`[data-frame="${candidate.id}"]`);
-    return frame?.contentWindow === event.source && event.origin === new URL(candidate.liveUrl).origin;
-  });
-  if (!app || typeof event.data !== "object" || event.data === null) return;
-  const type = String((event.data as { type?: unknown }).type || "");
-  if (!["KERNEL_CONNECTED", "KERNEL_PLAYING", "KERNEL_READ_ONLY_CHANGED"].includes(type)) return;
-  void api(`/api/embed-event/${app.id}`, {
-    type,
-    readOnly: (event.data as { readOnly?: unknown }).readOnly,
-    userAgent: navigator.userAgent,
-    href: location.href,
-    at: new Date().toISOString(),
-  }).catch(() => undefined);
-});
-
-document.querySelector<HTMLButtonElement>("#take-control")!.addEventListener("click", async () => {
-  try {
-    const app = activeApp();
-    const result = await api(`/api/epoch/${app.id}/bump`, {});
-    app.epoch = result.epoch;
-    queuedActions.setEpoch(app.id, app.epoch);
-    document.querySelector("#epoch")!.textContent = String(app.epoch);
-    humanControlId = app.id;
-    updateHumanControl();
-    document.querySelector<HTMLDivElement>("#human-input")!.focus();
-    announce(`Human control active through Loom. Epoch is now ${app.epoch}; older lead actions are stale.`);
-  } catch (error) {
-    announce((error as Error).message, "error");
-  }
 });
 
 const humanInput = document.querySelector<HTMLDivElement>("#human-input")!;

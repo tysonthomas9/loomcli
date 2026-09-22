@@ -25,6 +25,31 @@ test("maps the visible streamed desktop through letterboxing and browser chrome"
   );
 });
 
+test("maps a CDP page frame through its own letterboxing", () => {
+  assert.deepEqual(
+    pointerParams(
+      {
+        type: "mouseMoved",
+        coordinateSpace: "page",
+        surfaceX: 328.55,
+        surfaceY: 202.25,
+        surfaceWidth: 932,
+        surfaceHeight: 570,
+        button: "none",
+      },
+      browserGeometry,
+    ),
+    { type: "mouseMoved", x: 677, y: 298, button: "none" },
+  );
+  assert.equal(
+    pointerParams(
+      { type: "mousePressed", coordinateSpace: "page", surfaceX: 466, surfaceY: 10, surfaceWidth: 932, surfaceHeight: 570, button: "left" },
+      browserGeometry,
+    ),
+    null,
+  );
+});
+
 test("preserves click and wheel details", () => {
   assert.deepEqual(
     pointerParams(

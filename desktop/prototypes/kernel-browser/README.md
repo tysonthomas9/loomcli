@@ -15,13 +15,15 @@ The result is a **capability pass and production-readiness hold**. See
 
 - A nested Tauri 2 application with two browser-app tabs.
 - One independently labelled Kernel container per isolated browser identity.
-- Only the selected tab opens a live WebRTC stream; the background browser
-  remains available to CDP without paying active video CPU cost.
-- Per-browser control epochs. A queued lead action retains its browser identity
-  and epoch across tab switches; taking human control invalidates that exact
-  queued action. The epoch is checked again immediately before CDP dispatch.
+- Only the selected tab is captured through CDP as a bounded JPEG frame. This
+  avoids the macOS WKWebView WebRTC layer that rendered valid video frames as
+  black in the POC. Background browsers remain available without a frame loop.
+- Per-browser control epochs. Human input is always enabled; a click, wheel, or
+  keypress advances the browser epoch automatically and invalidates older lead
+  actions. A queued action retains its browser identity and epoch across tab
+  switches. The epoch is checked again immediately before CDP dispatch.
 - A Loom-owned pointer and keyboard surface that dispatches validated input
-  through CDP while the embedded Neko viewer remains read-only. This bypasses
+  through CDP over the visible page-frame coordinate space. This bypasses
   the amd64 Xorg input driver, which deadlocks under Rosetta after sustained
   pointer activity. Pointer mapping accounts for Neko's aspect-fit letterbox
   and the remote Chromium window chrome before producing page coordinates.
@@ -34,8 +36,9 @@ The result is a **capability pass and production-readiness hold**. See
 - A control/fixture server bound to `127.0.0.1:61300`. Colima's
   `host.lima.internal` forwarding can reach that loopback listener, so no LAN
   wildcard bind is required.
-- An allowlisted embed-event recorder that proves the native WKWebView reaches
-  `KERNEL_CONNECTED` and `KERNEL_PLAYING`.
+- The Neko WebRTC endpoint remains available for transport diagnostics, but is
+  not the rendered desktop view after WebKit produced a user-visible black
+  video layer despite healthy decoded frames.
 - Browser requests are restricted to the POC's loopback development origins.
   This is an origin guard, not authentication.
 - A generated runtime ID is persisted under `.runtime/`, included in container

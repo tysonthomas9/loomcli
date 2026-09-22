@@ -33,22 +33,41 @@ export function pointerParams(payload, geometry) {
     throw Object.assign(new Error("browser geometry dimensions must be positive"), { status: 400 });
   }
 
-  const streamScale = Math.min(surfaceWidth / screenWidth, surfaceHeight / screenHeight);
-  const streamOffsetX = (surfaceWidth - screenWidth * streamScale) / 2;
-  const streamOffsetY = (surfaceHeight - screenHeight * streamScale) / 2;
-  const remoteX = (surfaceX - streamOffsetX) / streamScale;
-  const remoteY = (surfaceY - streamOffsetY) / streamScale;
-  const contentOffsetX = screenX + (outerWidth - innerWidth) / 2;
-  const contentOffsetY = screenY + outerHeight - innerHeight;
-  let pageX = remoteX - contentOffsetX;
-  let pageY = remoteY - contentOffsetY;
+  const coordinateSpace = payload.coordinateSpace ?? "desktop";
+  if (coordinateSpace !== "desktop" && coordinateSpace !== "page") {
+    throw Object.assign(new Error(`unsupported pointer coordinate space: ${String(coordinateSpace)}`), { status: 400 });
+  }
+
+  let pageX;
+  let pageY;
+  let outsidePage;
+  if (coordinateSpace === "page") {
+    const frameScale = Math.min(surfaceWidth / innerWidth, surfaceHeight / innerHeight);
+    const frameOffsetX = (surfaceWidth - innerWidth * frameScale) / 2;
+    const frameOffsetY = (surfaceHeight - innerHeight * frameScale) / 2;
+    pageX = (surfaceX - frameOffsetX) / frameScale;
+    pageY = (surfaceY - frameOffsetY) / frameScale;
+    outsidePage = pageX < 0 || pageX > innerWidth || pageY < 0 || pageY > innerHeight;
+  } else {
+    const streamScale = Math.min(surfaceWidth / screenWidth, surfaceHeight / screenHeight);
+    const streamOffsetX = (surfaceWidth - screenWidth * streamScale) / 2;
+    const streamOffsetY = (surfaceHeight - screenHeight * streamScale) / 2;
+    const remoteX = (surfaceX - streamOffsetX) / streamScale;
+    const remoteY = (surfaceY - streamOffsetY) / streamScale;
+    const contentOffsetX = screenX + (outerWidth - innerWidth) / 2;
+    const contentOffsetY = screenY + outerHeight - innerHeight;
+    pageX = remoteX - contentOffsetX;
+    pageY = remoteY - contentOffsetY;
+    outsidePage = remoteX < 0 || remoteX > screenWidth || remoteY < 0 || remoteY > screenHeight
+      || pageX < 0 || pageX > innerWidth || pageY < 0 || pageY > innerHeight;
+  }
 
   const buttons = payload.buttons ?? 0;
   if (!Number.isInteger(buttons) || buttons < 0 || buttons > 31) {
     throw Object.assign(new Error("mouse buttons must be a bit field from 0 to 31"), { status: 400 });
   }
   const keepDragState = payload.type === "mouseReleased" || buttons !== 0;
-  if (remoteX < 0 || remoteX > screenWidth || remoteY < 0 || remoteY > screenHeight || pageX < 0 || pageX > innerWidth || pageY < 0 || pageY > innerHeight) {
+  if (outsidePage) {
     if (!keepDragState) return null;
     pageX = Math.max(0, Math.min(innerWidth, pageX));
     pageY = Math.max(0, Math.min(innerHeight, pageY));

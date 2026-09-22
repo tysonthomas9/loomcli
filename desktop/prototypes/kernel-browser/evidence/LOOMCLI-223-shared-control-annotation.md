@@ -62,7 +62,14 @@ streamed pixels.
 - A live annotation dispatch selected the fixture paragraph through the same
   pointer bridge. Capture returned current viewport bounds, document bounds,
   DOM context, and a cropped screenshot.
-- The focused regression suite passes 19 tests. The corrected ownership-aware
+- The focused regression suite passes 22 tests. The corrected ownership-aware
   health probe kept both live browsers' CDP and X11 paths healthy for a further
   20-second run. Clipboard, IME,
   accessibility-input, and resize quality remain unverified for this POC.
+
+Human input is now always enabled. The explicit takeover button was removed;
+the control server advances the selected browser's epoch automatically on
+mouse press, wheel, or key down, while passive pointer movement and release do
+not churn the epoch. A live page-frame click mapped to `(677, 298)`, advanced
+the epoch to 1, and changed the shared fixture to
+`Workflow confirmed by lead agent`.

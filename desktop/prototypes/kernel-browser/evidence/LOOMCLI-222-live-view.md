@@ -55,6 +55,21 @@ The macOS window-capture API still renders the WebRTC video layer as black, so
 the source-display artifact is the committed pixel evidence:
 [`artifacts/virtual-display-app-a.png`](artifacts/virtual-display-app-a.png).
 
+## 2026-09-22 WebKit black-frame fallback
+
+The user still saw a black browser surface in the Tauri WKWebView. A separate
+task-scoped Chromium viewer proved the same Neko track was healthy: the video
+was playing at 1920x1080 and a canvas readback found all 2,304 sampled pixels
+non-black with mean luminance 240.7. The fault was therefore isolated to the
+WKWebView media-compositing path rather than X11, Chromium, Neko encoding, or
+transport.
+
+For this POC, the desktop view now polls bounded JPEG frames from the same page
+through CDP. The rendered pixels are visible to the user and macOS capture,
+while the existing CDP input and annotation paths continue to operate on that
+same browser identity. This is a POC fallback, not a production streaming
+architecture.
+
 A regular packaged Tauri build also exposed the expected mixed-content
 boundary: its secure `tauri://` page cannot be the production host for plain
 HTTP/WebSocket media. The interactive test app therefore uses the localhost

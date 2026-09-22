@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { keyParams, pointerParams } from "./input-bridge.mjs";
 import { chooseVisiblePage, createPendingCommands } from "./cdp-client.mjs";
+import { humanInputAdvancesEpoch } from "./control-epoch.mjs";
 import { annotationGeometry } from "./annotation-geometry.mjs";
 import { captureFrame } from "./frame-capture.mjs";
 import { allowedOrigins, originAllowed } from "./request-policy.mjs";
@@ -180,6 +181,7 @@ async function handleApi(req, url) {
 
   if (parts[1] === "input" && parts[3] === "pointer" && req.method === "POST") {
     const payload = await body(req);
+    const advancesEpoch = humanInputAdvancesEpoch(payload);
     const pagePoint = await cdp(selected.cdpPort, async (send) => {
       const geometryResult = await send("Runtime.evaluate", {
         expression: "({ screen: { width: screen.width, height: screen.height }, window: { outerWidth, outerHeight, innerWidth, innerHeight, screenX, screenY } })",
@@ -187,20 +189,24 @@ async function handleApi(req, url) {
       });
       const params = pointerParams(payload, geometryResult.result.value);
       if (!params) return null;
+      if (advancesEpoch) selected.epoch += 1;
       await send("Input.dispatchMouseEvent", params);
       return { x: params.x, y: params.y };
     });
-    return { accepted: pagePoint !== null, pagePoint };
+    return { accepted: pagePoint !== null, pagePoint, epoch: selected.epoch };
   }
 
   if (parts[1] === "input" && parts[3] === "key" && req.method === "POST") {
     const payload = await body(req);
-    await cdp(selected.cdpPort, (send) => send("Input.dispatchKeyEvent", keyParams(payload)));
-    return { accepted: true };
+    const params = keyParams(payload);
+    if (humanInputAdvancesEpoch(payload)) selected.epoch += 1;
+    await cdp(selected.cdpPort, (send) => send("Input.dispatchKeyEvent", params));
+    return { accepted: true, epoch: selected.epoch };
   }
 
   if (parts[1] === "frame" && req.method === "GET") {
-    return cdp(selected.cdpPort, (send) => captureFrame(send));
+    const frame = await cdp(selected.cdpPort, (send) => captureFrame(send));
+    return { ...frame, epoch: selected.epoch };
   }
 
   if (parts[1] === "action" && req.method === "POST") {
