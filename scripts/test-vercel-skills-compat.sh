@@ -64,6 +64,7 @@ import_ok() {
 }
 
 import_ok composition-patterns
+import_ok deploy-to-vercel
 import_ok react-best-practices
 import_ok react-native-skills
 import_ok react-view-transitions
@@ -72,17 +73,6 @@ import_ok vercel-optimize
 import_ok web-design-guidelines
 import_ok writing-guidelines
 
-binary_log="$tmp/import-deploy-to-vercel.log"
-if "$loom_bin" skill import "$VERCEL_SKILLS_REPO/skills/deploy-to-vercel" >"$binary_log" 2>&1; then
-  echo "deploy-to-vercel unexpectedly imported; update the compatibility manifest if binary skills are now supported" >&2
-  exit 1
-fi
-if ! grep -q "binary content is not supported: Archive.zip" "$binary_log"; then
-  echo "deploy-to-vercel failed for an unexpected reason" >&2
-  cat "$binary_log" >&2
-  exit 1
-fi
-
 list_log="$tmp/skill-list.log"
 list_stderr="$tmp/skill-list.stderr"
 if ! "$loom_bin" skill list >"$list_log" 2>"$list_stderr"; then
@@ -90,8 +80,8 @@ if ! "$loom_bin" skill list >"$list_log" 2>"$list_stderr"; then
   exit 1
 fi
 persisted_count="$(grep -c 'scope=workspace' "$list_log")"
-if [[ "$persisted_count" != "8" ]]; then
-  echo "persisted skill count is $persisted_count, want 8" >&2
+if [[ "$persisted_count" != "9" ]]; then
+  echo "persisted skill count is $persisted_count, want 9" >&2
   cat "$list_log" >&2
   exit 1
 fi
@@ -148,7 +138,47 @@ compare_skill() {
   fi
 }
 
+sha256_file() {
+  file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{ print $1 }'
+  else
+    shasum -a 256 "$file" | awk '{ print $1 }'
+  fi
+}
+
+verify_binary_file() {
+  source_name="$1"
+  relative_path="$2"
+  source_file="$VERCEL_SKILLS_REPO/skills/$source_name/$relative_path"
+  target_file="$materialized/.agents/skills/$source_name/$relative_path"
+
+  [[ -f "$source_file" ]] || {
+    echo "$source_name binary source is missing: $relative_path" >&2
+    exit 1
+  }
+  [[ -f "$target_file" ]] || {
+    echo "$source_name binary materialization is missing: $relative_path" >&2
+    exit 1
+  }
+
+  source_size="$(wc -c <"$source_file" | tr -d ' ')"
+  target_size="$(wc -c <"$target_file" | tr -d ' ')"
+  source_hash="$(sha256_file "$source_file")"
+  target_hash="$(sha256_file "$target_file")"
+
+  if [[ "$source_size" != "$target_size" || "$source_hash" != "$target_hash" ]] ||
+    ! cmp -s "$source_file" "$target_file"; then
+    echo "$source_name binary mismatch: $relative_path" >&2
+    echo "source size=$source_size sha256=$source_hash" >&2
+    echo "materialized size=$target_size sha256=$target_hash" >&2
+    exit 1
+  fi
+  echo "$source_name/$relative_path verified: size=$source_size sha256=$source_hash"
+}
+
 compare_skill composition-patterns vercel-composition-patterns 13
+compare_skill deploy-to-vercel deploy-to-vercel 3
 compare_skill react-best-practices vercel-react-best-practices 75
 compare_skill react-native-skills vercel-react-native-skills 41
 compare_skill react-view-transitions vercel-react-view-transitions 7
@@ -156,6 +186,7 @@ compare_skill vercel-cli-with-tokens vercel-cli-with-tokens 0
 compare_skill vercel-optimize vercel-optimize 155
 compare_skill web-design-guidelines web-design-guidelines 0
 compare_skill writing-guidelines writing-guidelines 0
+verify_binary_file deploy-to-vercel Archive.zip
 
 if ! grep -Fq "<ViewTransition>" \
   "$materialized/.agents/skills/vercel-react-view-transitions/SKILL.md"; then
@@ -167,4 +198,4 @@ if ! grep -Fq "<ViewTransition>" "$materialized/.agents/skills/INDEX.md"; then
   exit 1
 fi
 
-echo "PASS: pinned Vercel corpus imported through FleetDB and materialized (8 compatible, 1 expected binary rejection)"
+echo "PASS: pinned Vercel corpus imported through FleetDB and materialized (9 compatible skills)"
