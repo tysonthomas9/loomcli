@@ -44,11 +44,6 @@ const decomposedCheckName = "decomposed_without_children"
 
 const decomposedChildrenCheckName = "decomposed_children_all_closed"
 
-// defaultUnionMarkerLabel is the ledger marker assumed when the workspace names
-// none. It only ever adds context to a finding (which finished children are
-// still unshipped), so guessing it wrong loses detail, never a verdict.
-const defaultUnionMarkerLabel = "union-pending"
-
 // contractLabels is the slice of <workspace>/integration.yaml's
 // defaults.labels block these checks read. Only these keys are decoded:
 // integration.yaml is large and operator-owned, so a stricter view would turn
@@ -104,15 +99,19 @@ var decomposedLabel = func() string {
 	return readContractLabels().Decomposed
 }
 
-// unionMarkerLabel returns the workspace's union-pending ledger marker. Unlike
-// decomposedLabel this one falls back to a literal: an absent key must not
-// suppress a stranding finding, it may only cost that finding its
-// "and the children are still unshipped" clause.
+// unionMarkerLabel returns the workspace's union ledger marker, or "" when the
+// workspace names none. It is NOT defaulted to a literal, for the reason
+// labelboundary_test.go enforces: the name belongs to the agentic layer that
+// runs on this CLI, so the core must read it from the workspace's
+// integration.yaml rather than compile a guess in.
+//
+// An absent key costs a stranding finding its "and the children are still
+// unshipped" clause and nothing more: classifyDecomposedParent skips the marker
+// test when the marker is empty, so the verdict itself is unchanged. That is
+// the difference from decomposedLabel, whose absence means the check cannot run
+// at all and reports itself skipped.
 var unionMarkerLabel = func() string {
-	if m := readContractLabels().Marker; m != "" {
-		return m
-	}
-	return defaultUnionMarkerLabel
+	return readContractLabels().Marker
 }
 
 // decomposedUnconfiguredResult is what a check reports when the workspace names
