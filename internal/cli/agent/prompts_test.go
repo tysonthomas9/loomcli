@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
@@ -855,6 +856,28 @@ func TestGenerateFleetTaskPrompt(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGenerateFleetTaskPromptForHostDelivery(t *testing.T) {
+	prompt := GenerateFleetTaskPromptForHostDelivery("coder", "loom-test.1", nil, "codex", domain.TaskDeliveryWorkingCopy)
+
+	for _, want := range []string{
+		"Delivery requirement: working_copy",
+		"Stop after creating a clean commit",
+		"The Loom host owns publication",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("host-owned prompt missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"loom stack publish",
+		"Run loom data close <id>",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("host-owned completion step contains %q", forbidden)
+		}
 	}
 }
 

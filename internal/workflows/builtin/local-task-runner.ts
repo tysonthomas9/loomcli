@@ -133,7 +133,11 @@ export async function run(ctx = {}) {
   const args = backendArgs(backend, execWorktree, prompt);
   const usesStdinPrompt = backendUsesStdinPrompt(backend);
 
-  const openPR = booleanValue(inputValue(request, "openPullRequest"));
+  const frozenDeliveryPlan = inputValue(request, "deliveryPlan");
+  const deliveryRequirement = frozenDeliveryPlan && typeof frozenDeliveryPlan === "object"
+    ? stringValue(frozenDeliveryPlan.requirement)
+    : "";
+  const openPR = deliveryRequirement === "pull_request" || booleanValue(inputValue(request, "openPullRequest"));
   let exitCode;
   let stdout = "";
   let stderr = "";

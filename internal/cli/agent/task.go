@@ -10,8 +10,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent/tsruntime"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
+	"github.com/tysonthomas9/loomcli/internal/taskdelivery"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -136,18 +138,14 @@ func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
 	// carried forward in the lock instead of cold-starting (guarded). Done BEFORE
 	// building the prompt so it can skip the redundant checkpoint context.
 	maybeResumeDaemonSession(worktreePath, assignedTaskID)
-	// Record the assigned task on the worktree lock (AFTER the resume decision)
-	// so a crash leaves a resumable remnant for the next restart's
+	// Record the assigned task after resume selection so a crash leaves a remnant for the next restart's
 	// detectRecovery — the agent's own `loom claim` is CWD-dependent and can't be
 	// relied on to set this.
 	persistAssignedTaskToLock(worktreePath, assignedTaskID)
 
-	ws, _ := config.ResolveActiveWorkspace()
-	prompt := GenerateTaskPrompt(agentName, ws, taskParentID, cli.GetBackendName())
-	if assignedTaskID != "" {
-		prompt = GenerateFleetTaskPrompt(agentName, assignedTaskID, ws, cli.GetBackendName())
-	}
+	prompt, deliveryPlan := mustResolveDaemonTaskPrompt(deps.IssueBackend, agentName, assignedTaskID)
 	sess := adoptOrCreateSession(agentName, taskParentID, prompt, "implementation")
+	recordTaskDeliveryPlan(sess, deliveryPlan)
 
 	emitTaskClaimedFromEnv(agentName, assignedTaskID)
 
@@ -162,6 +160,16 @@ func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
 	shutdown := automode.SetupSignalHandler()
 	collector := usage.NewCollector(cli.GetBackendName(), agentName)
 	invokeErr := tsruntime.Invoker(deps.Agent).InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
+	if invokeErr == nil && deliveryPlan.PlanID != "" {
+		receipt, deliveryErr := finalizeDaemonTaskDelivery(cmdstore.RootContext(), deps.IssueBackend, deliveryPlan, assignedTaskID, worktreePath, beforeRef)
+		if deliveryErr != nil {
+			invokeErr = fmt.Errorf("host delivery finalization: %w", deliveryErr)
+		} else if encoded, encodeErr := taskdelivery.EncodeReceipt(receipt); encodeErr != nil {
+			invokeErr = encodeErr
+		} else if sess != nil {
+			sess.Meta.TaskDeliveryReceipt = encoded
+		}
+	}
 	if invokeErr == nil {
 		// Success: drop the carried session so the next restart starts the next
 		// task fresh. On failure we KEEP it (carry-forward → resume on respawn).
