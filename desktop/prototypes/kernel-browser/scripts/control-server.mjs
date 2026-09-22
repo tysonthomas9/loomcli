@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { keyParams, pointerParams } from "./input-bridge.mjs";
 import { chooseVisiblePage, createPendingCommands } from "./cdp-client.mjs";
 import { annotationGeometry } from "./annotation-geometry.mjs";
+import { captureFrame } from "./frame-capture.mjs";
 import { allowedOrigins, originAllowed } from "./request-policy.mjs";
 
 const host = process.env.LOOM_KERNEL_CONTROL_HOST || "127.0.0.1";
@@ -196,6 +197,10 @@ async function handleApi(req, url) {
     const payload = await body(req);
     await cdp(selected.cdpPort, (send) => send("Input.dispatchKeyEvent", keyParams(payload)));
     return { accepted: true };
+  }
+
+  if (parts[1] === "frame" && req.method === "GET") {
+    return cdp(selected.cdpPort, (send) => captureFrame(send));
   }
 
   if (parts[1] === "action" && req.method === "POST") {
