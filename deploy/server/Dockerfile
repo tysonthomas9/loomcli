@@ -6,7 +6,7 @@
 # Build: docker build -f deploy/server/Dockerfile -t loom-server .
 # Run:   docker run --rm -p 8080:8080 loom-server
 
-ARG GO_VERSION=1.25.6
+ARG GO_VERSION=1.26.0
 
 # ─── Stage 1: Build ──────────────────────────────────────────────────────────
 FROM golang:${GO_VERSION}-bookworm AS builder

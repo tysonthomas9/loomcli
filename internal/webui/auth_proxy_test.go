@@ -2,10 +2,19 @@ package webui
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
 	"strings"
 	"testing"
 )
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 func TestRewriteAuthProxyCookies_DropsMalformedCRLF(t *testing.T) {
 	req, _ := http.NewRequest("GET", "http://example/api/auth/x", nil)
@@ -107,6 +116,110 @@ func TestNewAuthProxy_InvalidURL(t *testing.T) {
 func TestNewAuthProxy_ValidURL(t *testing.T) {
 	if NewAuthProxy("https://auth.example.com", nil) == nil {
 		t.Error("expected non-nil for valid URL")
+	}
+}
+
+func TestNewAuthProxy_UsesRewriteOnly(t *testing.T) {
+	proxy, ok := NewAuthProxy("https://auth.example.com", nil).(*httputil.ReverseProxy)
+	if !ok {
+		t.Fatal("expected reverse proxy handler")
+	}
+	if proxy.Rewrite == nil {
+		t.Error("expected Rewrite callback")
+	}
+	if proxy.Director != nil {
+		t.Error("Director and Rewrite must not both be configured")
+	}
+}
+
+func TestNewAuthProxy_ForwardsTargetAndTrustedRequestMetadata(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Seen-Path", r.URL.EscapedPath())
+		w.Header().Set("X-Seen-Query", r.URL.RawQuery)
+		w.Header().Set("X-Seen-Host", r.Host)
+		w.Header().Set("X-Seen-Forwarded-For", r.Header.Get("X-Forwarded-For"))
+		w.Header().Set("X-Seen-Forwarded-Host", r.Header.Get("X-Forwarded-Host"))
+		w.Header().Set("X-Seen-Forwarded-Proto", r.Header.Get("X-Forwarded-Proto"))
+		w.Header().Add("Set-Cookie", "session=abc; Domain=auth.example.com; SameSite=None")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(upstream.Close)
+
+	handler := NewAuthProxy(upstream.URL+"/better-auth", nil)
+	req := httptest.NewRequest(http.MethodGet, "https://frontend.example/api/auth/session?next=%2Fhome", nil)
+	req.Header.Set("X-Forwarded-For", "spoofed-client")
+	req.Header.Set("X-Forwarded-Host", "spoofed.example")
+	req.Header.Set("X-Forwarded-Proto", "http")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+	resp := recorder.Result()
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+	if got, want := resp.Header.Get("X-Seen-Path"), "/better-auth/api/auth/session"; got != want {
+		t.Errorf("upstream path = %q, want %q", got, want)
+	}
+	if got, want := resp.Header.Get("X-Seen-Query"), "next=%2Fhome"; got != want {
+		t.Errorf("upstream query = %q, want %q", got, want)
+	}
+	if got, want := resp.Header.Get("X-Seen-Host"), strings.TrimPrefix(upstream.URL, "http://"); got != want {
+		t.Errorf("upstream Host = %q, want %q", got, want)
+	}
+	if got := resp.Header.Get("X-Seen-Forwarded-For"); got == "" || strings.Contains(got, "spoofed-client") {
+		t.Errorf("X-Forwarded-For = %q, want trusted client address only", got)
+	}
+	if got, want := resp.Header.Get("X-Seen-Forwarded-Host"), "frontend.example"; got != want {
+		t.Errorf("X-Forwarded-Host = %q, want %q", got, want)
+	}
+	if got, want := resp.Header.Get("X-Seen-Forwarded-Proto"), "https"; got != want {
+		t.Errorf("X-Forwarded-Proto = %q, want %q", got, want)
+	}
+	cookie := resp.Header.Get("Set-Cookie")
+	if strings.Contains(strings.ToLower(cookie), "domain=") {
+		t.Errorf("rewritten cookie retained Domain: %q", cookie)
+	}
+	if !strings.Contains(cookie, "SameSite=Lax") || !hasCookieFlag(cookie, "Secure") {
+		t.Errorf("TLS cookie = %q, want SameSite=Lax and Secure", cookie)
+	}
+}
+
+func TestNewAuthProxy_ForwardedTLSContextReachesCookieRewrite(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Add("Set-Cookie", "session=abc; SameSite=None")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(upstream.Close)
+
+	req := httptest.NewRequest(http.MethodGet, "http://frontend.example/api/auth/session", nil)
+	req.Header.Set("X-Forwarded-Proto", "https")
+	recorder := httptest.NewRecorder()
+	NewAuthProxy(upstream.URL, nil).ServeHTTP(recorder, req)
+
+	if cookie := recorder.Header().Get("Set-Cookie"); !hasCookieFlag(cookie, "Secure") {
+		t.Errorf("forwarded TLS cookie = %q, want Secure", cookie)
+	}
+}
+
+func TestNewAuthProxy_UpstreamErrorReturnsStableBadGateway(t *testing.T) {
+	proxy, ok := NewAuthProxy("https://auth.example.com", nil).(*httputil.ReverseProxy)
+	if !ok {
+		t.Fatal("expected reverse proxy handler")
+	}
+	proxy.Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("upstream unavailable")
+	})
+
+	recorder := httptest.NewRecorder()
+	proxy.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "http://frontend.example/api/auth/session", nil))
+
+	if got, want := recorder.Code, http.StatusBadGateway; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := recorder.Body.String(), "{\"error\":\"auth service unavailable\"}\n"; got != want {
+		t.Errorf("body = %q, want %q", got, want)
 	}
 }
 

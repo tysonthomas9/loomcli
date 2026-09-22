@@ -5,7 +5,7 @@
 # Builds a static loom binary, then runs a small deterministic backend so the
 # local supervised-agent product loop can be tested without external AI auth.
 
-ARG GO_VERSION=1.25.6
+ARG GO_VERSION=1.26.0
 ARG INSTALL_CODEX=false
 ARG CODEX_CLI_VERSION=latest
 ARG INSTALL_CLAUDE=false
