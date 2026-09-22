@@ -99,6 +99,7 @@ type Client struct {
 	workers    *workerStore
 	roles      *roleStore
 	skills     *skillStore
+	files      *workspaceFileStore
 	matLeases  *skillMaterializationLeaseStore
 	skillPacks *skillPackStore
 	daemon     *daemonStore
@@ -156,6 +157,7 @@ func New(cfg Config) (*Client, error) {
 	c.workers = &workerStore{client: c}
 	c.roles = &roleStore{client: c}
 	c.skills = &skillStore{client: c}
+	c.files = &workspaceFileStore{client: c}
 	c.matLeases = &skillMaterializationLeaseStore{client: c}
 	c.skillPacks = &skillPackStore{client: c}
 	c.daemon = &daemonStore{client: c}
@@ -244,6 +246,9 @@ func (c *Client) Roles() store.RoleStore { return c.roles }
 
 // Skills returns the SkillStore.
 func (c *Client) Skills() store.SkillStore { return c.skills }
+
+// WorkspaceFiles returns the provider-neutral immutable file-tree store.
+func (c *Client) WorkspaceFiles() store.WorkspaceFileStore { return c.files }
 
 // SkillMaterializationLeases returns the ephemeral materialization lease store.
 func (c *Client) SkillMaterializationLeases() store.SkillMaterializationLeaseStore {
