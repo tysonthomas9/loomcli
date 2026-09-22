@@ -150,6 +150,19 @@ func leadProfileRepair(err error, configDir string) string {
 	if errors.Is(err, supervisor.ErrProfileVersionDrift) {
 		return "loom doctor --fix"
 	}
+	if errors.Is(err, supervisor.ErrProfileCredentialsHollow) {
+		// Not a provisioning fault and not a minting fault: the file is the
+		// harness's own, and removing it is the whole repair — the env token
+		// loom already injects then takes over, which is exactly how the
+		// profiles that were never seeded one kept working.
+		//
+		// "claude" is hardcoded because it is the only harness with a
+		// credentials file; if that map grows, derive it from the config root's
+		// base name.
+		if path := agentprofile.CredentialsPath(configDir, "claude"); path != "" {
+			return fmt.Sprintf("rm %s", path)
+		}
+	}
 	if errors.Is(err, supervisor.ErrProfileTokenUnreadable) {
 		// A different script and a different act: provisioning copies files,
 		// while minting an identity is an interactive flow a human completes.
