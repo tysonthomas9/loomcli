@@ -69,6 +69,10 @@ export interface MutationPayload {
   priority?: number;
   source_repo?: string;
   workspace_id?: string;
+  pty_alive?: boolean;
+  exit_reason?: string;
+  kind?: string;
+  agent?: boolean;
 }
 
 /**

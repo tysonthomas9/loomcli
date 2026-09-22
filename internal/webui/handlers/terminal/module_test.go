@@ -14,7 +14,7 @@ import (
 // This guards against a typed-nil interface regression at the module wiring
 // boundary (modbuilder.TerminalModuleDeps.PTYMgr → Module.ptyMgr).
 func TestModule_Register_TerminalWSRoute_WithMultiPTYManager(t *testing.T) {
-	mm := webuterminal.NewMultiPTYManager("bash", 0)
+	mm := webuterminal.NewMultiPTYManager("bash", 0, nil)
 	t.Cleanup(func() { _ = mm.Close() })
 
 	// Assign through the PTYSource interface — this is how modbuilder

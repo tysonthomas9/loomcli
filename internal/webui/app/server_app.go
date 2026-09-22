@@ -201,7 +201,11 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	// SessionKey.Workspace. Per-workspace managers are created lazily on first
 	// AttachSession and use workspace.Path as the shell's cwd. Workspaces are
 	// registered via PTYHook (see appinfra.RegisterHooks wiring).
-	app.ptyMgr = terminal.NewMultiPTYManager(config.TerminalCmd, config.MaxTerminalSessions)
+	app.ptyMgr = terminal.NewMultiPTYManager(
+		config.TerminalCmd,
+		config.MaxTerminalSessions,
+		terminal.NewPTYLifecycleBroadcaster(app.hub),
+	)
 	cleanups = append(cleanups, func() { _ = app.ptyMgr.Close() })
 	logger.Info("multi pty manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
 
