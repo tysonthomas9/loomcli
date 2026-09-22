@@ -87,7 +87,7 @@ func (s *Store) SyncSubagentTranscript(sessionID, subagentID, srcPath string) er
 		return fmt.Errorf("read source subagent transcript: %w", err)
 	}
 
-	if redactionEnabled() {
+	if redact.Enabled() {
 		redacted, rerr := redact.JSONLBytes(data)
 		if rerr != nil {
 			recordErr(span, rerr)

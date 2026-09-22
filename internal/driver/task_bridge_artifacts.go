@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/sessions/redact"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -119,6 +120,22 @@ func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context
 	if result.RuntimeMetadata == nil {
 		result.RuntimeMetadata = map[string]string{}
 	}
+	var err error
+	result, err = e.persistRunnerTranscriptArtifact(ctx, req, session, runner, result)
+	if err != nil {
+		return TaskExecResult{}, err
+	}
+	result, err = e.persistRunnerLogArtifact(ctx, req, session, runner, result)
+	if err != nil {
+		return TaskExecResult{}, err
+	}
+	if result.ArtifactsRef == "" && len(result.ArtifactIDs) > 0 {
+		result.ArtifactsRef = "artifacts://" + req.TaskRunID
+	}
+	return result, nil
+}
+
+func (e HostBridgeTaskExecutor) persistRunnerTranscriptArtifact(ctx context.Context, req TaskExecRequest, session *flueTaskSession, runner bridgeTaskRunnerResult, result TaskExecResult) (TaskExecResult, error) {
 	if transcriptRef := firstNonEmpty(runner.TranscriptRef, runner.TranscriptRefCamel); transcriptRef != "" {
 		result.RuntimeMetadata["transcript_ref"] = transcriptRef
 	}
@@ -126,9 +143,13 @@ func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context
 	if err != nil {
 		return TaskExecResult{}, err
 	}
+	transcriptContent, err = redactRunnerTranscriptContent(transcriptContent)
+	if err != nil {
+		return TaskExecResult{}, err
+	}
 	if len(transcriptContent) > 0 && result.RuntimeMetadata["transcript_ref"] == "" {
 		artifactID := "transcript-" + req.TaskRunID
-		finalized, err := e.createContentArtifact(ctx, req, sessionIDFromFlueTaskSession(session), artifactID, "transcript", "task run transcript", "application/x-ndjson", transcriptContent)
+		finalized, err := e.createContentArtifact(ctx, req, sessionIDFromFlueTaskSession(session), artifactID, "transcript", "task run transcript", "application/x-ndjson", redactionStatusForContent(), transcriptContent)
 		if err != nil {
 			return TaskExecResult{}, err
 		}
@@ -139,14 +160,18 @@ func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context
 	if result.RuntimeMetadata["transcript_ref"] != "" && session != nil {
 		session.Metadata["transcript_ref"] = result.RuntimeMetadata["transcript_ref"]
 	}
+	return result, nil
+}
 
+func (e HostBridgeTaskExecutor) persistRunnerLogArtifact(ctx context.Context, req TaskExecRequest, session *flueTaskSession, runner bridgeTaskRunnerResult, result TaskExecResult) (TaskExecResult, error) {
 	logContent, err := e.runnerFileOrInlineBytes(runner.logsInline(), firstNonEmpty(runner.LogsPath, runner.LogsPathCamel), "logs")
 	if err != nil {
 		return TaskExecResult{}, err
 	}
+	logContent = redactRunnerLogContent(logContent)
 	if len(logContent) > 0 && result.LogsRef == "" {
 		artifactID := "logs-" + req.TaskRunID
-		finalized, err := e.createContentArtifact(ctx, req, sessionIDFromFlueTaskSession(session), artifactID, "logs", "task run logs", "text/plain; charset=utf-8", logContent)
+		finalized, err := e.createContentArtifact(ctx, req, sessionIDFromFlueTaskSession(session), artifactID, "logs", "task run logs", "text/plain; charset=utf-8", redactionStatusForContent(), logContent)
 		if err != nil {
 			return TaskExecResult{}, err
 		}
@@ -160,10 +185,25 @@ func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context
 			session.Metadata["logs_ref"] = result.LogsRef
 		}
 	}
-	if result.ArtifactsRef == "" && len(result.ArtifactIDs) > 0 {
-		result.ArtifactsRef = "artifacts://" + req.TaskRunID
-	}
 	return result, nil
+}
+
+func redactRunnerTranscriptContent(content []byte) ([]byte, error) {
+	if !redact.Enabled() || len(content) == 0 {
+		return content, nil
+	}
+	redacted, err := redact.JSONLBytes(content)
+	if err != nil {
+		return nil, fmt.Errorf("redact transcript artifact: %w", err)
+	}
+	return redacted, nil
+}
+
+func redactRunnerLogContent(content []byte) []byte {
+	if !redact.Enabled() || len(content) == 0 {
+		return content
+	}
+	return redact.Bytes(content)
 }
 
 func (r bridgeTaskRunnerResult) transcriptInline() []byte {
@@ -218,23 +258,31 @@ func (e HostBridgeTaskExecutor) runnerFileOrInlineBytes(inline []byte, filePath,
 	return content, nil
 }
 
-func (e HostBridgeTaskExecutor) createContentArtifact(ctx context.Context, req TaskExecRequest, sessionID, artifactID, artifactType, summary, mimeType string, content []byte) (*domain.Artifact, error) {
+func (e HostBridgeTaskExecutor) createContentArtifact(ctx context.Context, req TaskExecRequest, sessionID, artifactID, artifactType, summary, mimeType, redactionStatus string, content []byte) (*domain.Artifact, error) {
 	if e.Store == nil {
 		return nil, fmt.Errorf("store required for %s artifact finalization: %w", artifactType, domain.ErrInvalid)
 	}
 	return store.UploadContentArtifact(ctx, e.Store.Artifacts(), store.ArtifactCreate{
-		WorkspaceKey:  req.WorkspaceKey,
-		ArtifactID:    artifactID,
-		SessionID:     sessionID,
-		TaskID:        req.TaskID,
-		OwnerType:     "task_run",
-		OwnerID:       req.TaskRunID,
-		Type:          artifactType,
-		Summary:       summary,
-		MIMEType:      mimeType,
-		DurableStatus: "declared",
-		Metadata:      runnerArtifactMetadata(req),
+		WorkspaceKey:    req.WorkspaceKey,
+		ArtifactID:      artifactID,
+		SessionID:       sessionID,
+		TaskID:          req.TaskID,
+		OwnerType:       "task_run",
+		OwnerID:         req.TaskRunID,
+		Type:            artifactType,
+		Summary:         summary,
+		MIMEType:        mimeType,
+		RedactionStatus: redactionStatus,
+		DurableStatus:   "declared",
+		Metadata:        runnerArtifactMetadata(req),
 	}, content)
+}
+
+func redactionStatusForContent() string {
+	if redact.Enabled() {
+		return redact.StatusRedacted
+	}
+	return ""
 }
 
 func runnerArtifactMetadata(req TaskExecRequest) map[string]string {
