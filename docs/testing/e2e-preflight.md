@@ -92,3 +92,19 @@ rm -rf /tmp/loom-e2e /tmp/loom-e2e-embedded /tmp/loom-fdb.pid /tmp/loom-fleet-db
 # Sanity: no leaked subprocess fleet-db
 pgrep -a fleet-db || echo "no leaks"
 ```
+
+### Scoped teardown
+
+The cleanup above is deliberately scoped: it kills by recorded PID
+(`/tmp/loom-fdb.pid`) and by the test binary's unique path (`/tmp/fleet-db`),
+never by shared binary name. **Never run an unscoped `pkill -f` against
+`loom serve`, `loom daemon`, `fleet-db`, or `vite`** — that kills the shared
+production stack (this caused a ~15 min production outage). If a scratch
+process must die, kill its recorded PID or its listening port
+(`lsof -iTCP:<scratch-port> -sTCP:LISTEN -t | xargs kill`).
+
+Prefer `scripts/scratch-stack.sh` for ad-hoc stacks: `start <name> -- <cmd>`
+records each spawned PID in a pidfile, and `stop <name>` kills exactly those
+PIDs (with a PID-recycling guard). Note: per-project prompt overrides under
+`./loom-prompts/` that omit `{{ .SafetyBlock }}` won't receive these rules in
+agent prompts — keep the placeholder when overriding.
