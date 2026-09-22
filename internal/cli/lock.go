@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/atomicfile"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
@@ -137,6 +138,13 @@ func ResolveLockDir(path string) string {
 
 // resolveWorkspaceName returns the workspace name for the given path, or empty string if not in a workspace.
 func resolveWorkspaceName(path string) string {
+	// Cloud invocations have an explicit workspace key. Avoid the global
+	// workspace list here: scoped credentials cannot access it, and this value
+	// is only advisory lock-event attribution.
+	if bootstrap.DetectMode() == bootstrap.ModeCloud {
+		return os.Getenv(bootstrap.EnvWorkspace)
+	}
+
 	cfg, err := config.LoadConfig()
 	if err != nil || cfg == nil {
 		return ""
