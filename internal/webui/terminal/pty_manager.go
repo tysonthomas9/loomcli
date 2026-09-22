@@ -19,6 +19,7 @@
 //
 // The tmux-backed manager lives alongside in agent_tmux.go for the live
 // agent-terminal view; it is not used by the main web terminal path.
+
 package terminal
 
 import (
