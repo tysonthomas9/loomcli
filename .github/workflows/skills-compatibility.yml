@@ -1,0 +1,112 @@
+name: Skills compatibility
+
+on:
+  workflow_call:
+    inputs:
+      loom_ref:
+        description: LoomCLI git ref or commit to test
+        required: true
+        type: string
+      fleetdb_ref:
+        description: FleetDB git ref or commit to test
+        required: true
+        type: string
+    secrets:
+      LOOMCLI_TOKEN:
+        description: Token that can read the LoomCLI repository
+        required: false
+      FLEET_DB_TOKEN:
+        description: Token that can read the FleetDB repository
+        required: false
+  workflow_dispatch:
+    inputs:
+      loom_ref:
+        description: LoomCLI git ref or commit to test
+        required: true
+        default: v5
+        type: string
+      fleetdb_ref:
+        description: FleetDB git ref or commit to test
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    name: LoomCLI / FleetDB compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout LoomCLI
+        uses: actions/checkout@v4
+        with:
+          repository: tysonthomas9/loomcli
+          ref: ${{ inputs.loom_ref }}
+          path: loomcli
+          token: ${{ secrets.LOOMCLI_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Checkout FleetDB
+        uses: actions/checkout@v4
+        with:
+          repository: tysonthomas9/fleet-db
+          ref: ${{ inputs.fleetdb_ref }}
+          path: fleet-db
+          token: ${{ secrets.FLEET_DB_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Checkout pinned Vercel Agent Skills corpus
+        uses: actions/checkout@v4
+        with:
+          repository: vercel-labs/agent-skills
+          ref: dd089a8c752c966dee8bf0f27cb625ba193ffd9e
+          path: vercel-agent-skills
+          persist-credentials: false
+
+      - name: Record resolved revision pair
+        shell: bash
+        env:
+          REQUESTED_LOOM_REF: ${{ inputs.loom_ref }}
+          REQUESTED_FLEETDB_REF: ${{ inputs.fleetdb_ref }}
+        run: |
+          loom_sha="$(git -C loomcli rev-parse HEAD)"
+          fleetdb_sha="$(git -C fleet-db rev-parse HEAD)"
+          corpus_sha="$(git -C vercel-agent-skills rev-parse HEAD)"
+          {
+            echo "loomcli_sha=$loom_sha"
+            echo "fleetdb_sha=$fleetdb_sha"
+            echo "vercel_skills_sha=$corpus_sha"
+          } | tee skills-compatibility-revisions.txt
+          {
+            echo '### Skills compatibility revision pair'
+            echo
+            echo '| Repository | Requested ref | Resolved commit |'
+            echo '| --- | --- | --- |'
+            echo "| LoomCLI | \`$REQUESTED_LOOM_REF\` | \`$loom_sha\` |"
+            echo "| FleetDB | \`$REQUESTED_FLEETDB_REF\` | \`$fleetdb_sha\` |"
+            echo "| Vercel Agent Skills | pinned | \`$corpus_sha\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: loomcli/go.mod
+
+      - name: Run release skills compatibility proof
+        working-directory: loomcli
+        env:
+          FLEET_DB_REPO: ${{ github.workspace }}/fleet-db
+          VERCEL_SKILLS_REPO: ${{ github.workspace }}/vercel-agent-skills
+        run: make test-skills-release-compat
+
+      - name: Upload revision evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skills-compatibility-revisions-${{ github.run_id }}-${{ github.run_attempt }}
+          path: skills-compatibility-revisions.txt
+          if-no-files-found: error
+          retention-days: 90
