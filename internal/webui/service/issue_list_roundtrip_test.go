@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -124,7 +126,7 @@ func (f *fleetFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch path {
 	case "/issues":
-		f.writeOK(w, f.issues)
+		f.writeOK(w, pageOf(f.issues, r.URL.Query()))
 		return
 	case "/issues/blocked":
 		f.writeOK(w, f.blocked)
@@ -154,6 +156,31 @@ func (f *fleetFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "unexpected path "+path, http.StatusNotFound)
 	}
+}
+
+// pageOf answers one offset/limit window the way fleet-db does. fleet.List
+// pages while pages come back full, so a fixture that ignored the window would
+// make it re-read the same rows until its page cap.
+func pageOf(rows []map[string]interface{}, q url.Values) []map[string]interface{} {
+	off, _ := strconv.Atoi(q.Get("offset"))
+	if off > len(rows) {
+		off = len(rows)
+	}
+	rows = rows[off:]
+	if lim, _ := strconv.Atoi(q.Get("limit")); lim > 0 && lim < len(rows) {
+		rows = rows[:lim]
+	}
+	return rows
+}
+
+// extraPages is the list requests beyond the first. fleet.List asks for one
+// full page at a time, so a result larger than a page costs one more list
+// request per page: that is paging, not the per-row N+1 this test pins.
+func extraPages(by map[string]int) int {
+	if n := by["/issues"]; n > 1 {
+		return n - 1
+	}
+	return 0
 }
 
 // newFixtureService wires a real fleet backend at ts.URL into an issue service.
@@ -196,6 +223,7 @@ func TestListIssues_RoundTripCount_DoesNotScaleWithIssueCount(t *testing.T) {
 
 	small, smallBy := listCost(t, 20, 3, true)
 	large, largeBy := listCost(t, 200, 9, true)
+	small, large = small-extraPages(smallBy), large-extraPages(largeBy)
 	t.Logf("kanban round-trips: 20 issues/3 parents = %d, 200 issues/9 parents = %d "+
 		"(13 and 31 on the pre-fix code)", small, large)
 
@@ -212,6 +240,7 @@ func TestListIssues_RoundTripCount_DoesNotScaleWithIssueCount(t *testing.T) {
 
 	smallPlain, smallPlainBy := listCost(t, 20, 3, false)
 	largePlain, largePlainBy := listCost(t, 200, 9, false)
+	smallPlain, largePlain = smallPlain-extraPages(smallPlainBy), largePlain-extraPages(largePlainBy)
 	t.Logf("plain-list round-trips: 20 issues/3 parents = %d, 200 issues/9 parents = %d "+
 		"(10 and 28 on the pre-fix code)", smallPlain, largePlain)
 
