@@ -50,10 +50,77 @@ loudly while held, so the command is marked failed rather than retried.
 A hold applies to **one daemon / one workspace**, not to the fleet. `loom
 daemon status` says so explicitly; do not read the banner as fleet-wide.
 
+### Repo scope
+
+Within that workspace a hold covers **every repo by default**. `--repos` (wire
+field `repos`) narrows it to the named repos; an empty or absent `repos` is
+workspace-wide, which is exactly what every record written before the field
+existed already means, so no migration exists or is needed.
+
+Scope by **blast radius, not repo identity**. A deploy that restarts the
+supervisors every agent runs under, or the issue backend every agent claims
+through, stops the whole fleet however few repos it names, and must stay
+unscoped. `--repos` is for a deploy whose blast radius really is that repo, and
+for an operator quiescing one repo's branch.
+
+#### Two-level gate
+
+The gate runs **before** the ready query — that ordering is the feature — so at
+gate time there is no candidate and therefore no `source_repo` to compare
+against. Agent repo *binding* is the only repo fact available that early, and
+most fleets bind nothing. So a repo scope is applied in two places:
+
+- **Level 1 — the agent gate.** An **unscoped** hold gates exactly as it always
+  has: no ready query, no `ClaimIssue`, no recovery, no session. A **scoped**
+  hold also gates outright when the agent is *statically* bound and every repo
+  it is bound to is held. Otherwise the agent proceeds, carrying the held set
+  for Level 2.
+- **Level 2 — the candidate filter.** Held repos are dropped from the ready
+  results **before** task selection. This is a hard pre-filter, not a scoring
+  nudge: repo affinity in routing is soft (a mismatch still scores 5 and is
+  still selectable), so a scope can never be expressed there.
+
+The held set is read **once per cycle**, at the gate. Re-reading it in the claim
+path would run the snapshot's throttled disk reload and one-shot expiry side
+effects a second time, and the gate and the filter could then disagree across an
+expiry boundary.
+
+#### A scoped hold is not safe while fleet-db is down
+
+Level 2 necessarily costs **one ready query per agent cycle**. Only an
+**unscoped** hold keeps the zero-backend-call invariant, and only an unscoped
+hold is therefore usable while fleet-db itself is being redeployed — which is
+the case the hold was built for. `loom daemon status` prints this caveat under a
+scoped hold.
+
+#### Rules that follow
+
+- **An issue with an empty `source_repo` is never held.** It names no repo, so
+  it cannot be matched against a repo-named hold, and guessing would gate work
+  the hold never claimed to cover.
+- **Resume is exempt.** `claimResumeTask` re-acquires the agent's *own*
+  interrupted task; that is not starting new work, and the hold's whole promise
+  is to leave in-flight work alone. A **requested** task is new work and is
+  filtered like the queue.
+- **Emptied by the hold is not an empty board.** When candidates existed before
+  the filter and none after, the agent reports `ClaimsHeld`, not `NoWork`, so
+  `gated_agents` and the status banner still read "held".
+- **Unknown repo names are rejected**, not ignored: a typo'd `--repos flet-db`
+  would otherwise hold nothing while reporting a quiesce. Names are trimmed,
+  de-duplicated and sorted before they are persisted.
+- **The fail-safe hold is unscoped.** A corrupt `claim-hold.json` may have named
+  repos that can no longer be read, so the synthesized hold is the strictest one
+  available.
+- **`running` and `--wait-idle` follow the scope.** A workspace-wide wait under
+  a scoped hold could never reach idle, because agents on un-held repos keep
+  claiming. An agent whose repo cannot be determined — a repo-unbound agent —
+  is counted as running, fail-safe. On a repo-unbound fleet that degenerates to
+  the fleet-wide wait; that is correct, not a bug.
+
 ## Commands
 
 ```
-loom daemon hold --reason "..." [--ttl 60m] [--actor NAME] [--wait-idle] [--timeout 30m] [--force]
+loom daemon hold --reason "..." [--ttl 60m] [--actor NAME] [--repos a,b] [--wait-idle] [--timeout 30m] [--force]
 loom daemon release [--actor NAME] [--force]
 ```
 
@@ -69,8 +136,12 @@ loom daemon release [--actor NAME] [--force]
   IDs.
 - Releasing a hold owned by a different actor requires `--force`; the refusal
   names the holder and its `since`.
+- `--repos` limits the hold to the named repos; omit it for a workspace-wide
+  hold. See **Repo scope** above, including why it is unsafe while fleet-db
+  itself is down.
 - Re-holding as the same actor is an idempotent refresh: `Since` is preserved,
-  `Reason` and `ExpiresAt` are updated.
+  while `Reason`, `ExpiresAt` **and `Repos`** are updated — so re-holding with a
+  different scope narrows or widens the hold rather than being ignored.
 
 ## No daemon, or a daemon that is still starting
 
