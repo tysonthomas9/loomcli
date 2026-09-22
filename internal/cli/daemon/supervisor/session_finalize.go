@@ -685,7 +685,7 @@ func (s *Supervisor) setTaskStatus(ctx context.Context, taskID string, action do
 	// Skipping and succeeding, rather than failing, matters for both: a failed
 	// hook demotes the run, burns the agent's block budget and hands the task to
 	// crash recovery, which is another automated status write. A failed status
-	// read keeps the old behaviour and writes.
+	// read keeps the old behavior and writes.
 	if issue, err := s.IssueBackend.Get(ctx, taskID); err == nil && issue != nil {
 		switch {
 		case issue.Status == "closed" || issue.Status == "tombstone":
