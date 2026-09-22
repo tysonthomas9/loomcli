@@ -585,10 +585,10 @@ func TestUnionMarkerLabelFromContract(t *testing.T) {
 		}
 	})
 
-	t.Run("falls back when the key is absent", func(t *testing.T) {
+	t.Run("empty when the key is absent, never a compiled-in guess", func(t *testing.T) {
 		setupUnionWorkspace(t, "defaults:\n  labels:\n    decomposed: split\n")
-		if got := unionMarkerLabel(); got != defaultUnionMarkerLabel {
-			t.Fatalf("expected the fallback marker, got %q", got)
+		if got := unionMarkerLabel(); got != "" {
+			t.Fatalf("expected no marker, got %q", got)
 		}
 	})
 }
