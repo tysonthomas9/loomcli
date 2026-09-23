@@ -5,11 +5,10 @@ function browserIndex(id) {
   return match ? match[1].charCodeAt(0) - 96 : 0;
 }
 
-export function nextBrowserDefinition(existingBrowsers) {
-  const highestIndex = existingBrowsers.reduce((highest, browser) => Math.max(highest, browserIndex(browser.id)), 0);
-  const index = highestIndex + 1;
-  if (index > maxBrowsers) throw new Error(`prototype supports at most ${maxBrowsers} browser apps`);
-
+export function browserDefinition(index) {
+  if (!Number.isInteger(index) || index < 1 || index > maxBrowsers) {
+    throw new Error(`prototype supports browser indexes 1 through ${maxBrowsers}`);
+  }
   const portPrefix = 60 + index;
   return {
     id: `app-${String.fromCharCode(96 + index)}`,
@@ -21,4 +20,11 @@ export function nextBrowserDefinition(existingBrowsers) {
     mediaPort: 55900 + index * 100,
     epoch: 0,
   };
+}
+
+export function nextBrowserDefinition(existingBrowsers) {
+  const highestIndex = existingBrowsers.reduce((highest, browser) => Math.max(highest, browserIndex(browser.id)), 0);
+  const index = highestIndex + 1;
+  if (index > maxBrowsers) throw new Error(`prototype supports at most ${maxBrowsers} browser apps`);
+  return browserDefinition(index);
 }

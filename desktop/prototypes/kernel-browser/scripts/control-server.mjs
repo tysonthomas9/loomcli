@@ -10,7 +10,7 @@ import { humanInputAdvancesEpoch } from "./control-epoch.mjs";
 import { annotationGeometry } from "./annotation-geometry.mjs";
 import { captureFrame } from "./frame-capture.mjs";
 import { allowedOrigins, originAllowed } from "./request-policy.mjs";
-import { nextBrowserDefinition } from "./browser-registry.mjs";
+import { browserDefinition, nextBrowserDefinition } from "./browser-registry.mjs";
 
 const host = process.env.LOOM_KERNEL_CONTROL_HOST || "127.0.0.1";
 const port = Number(process.env.LOOM_KERNEL_CONTROL_PORT || 61300);
@@ -25,6 +25,18 @@ const browsers = {
 };
 const embedEvents = [];
 let browserCreationInProgress = false;
+
+await Promise.all(Array.from({ length: 6 }, async (_, offset) => {
+  const definition = browserDefinition(offset + 3);
+  try {
+    const response = await fetch(`http://127.0.0.1:${definition.cdpPort}/json/version`, {
+      signal: AbortSignal.timeout(300),
+    });
+    if (response.ok) browsers[definition.id] = definition;
+  } catch {
+    // A missing optional browser slot is the normal startup state.
+  }
+}));
 
 function browser(appId) {
   const item = browsers[appId];
@@ -99,7 +111,7 @@ async function cdp(cdpPort, operations) {
     const sessionId = sessions.get(target.targetId)
       || (await sendRaw("Target.attachToTarget", { targetId: target.targetId, flatten: true })).sessionId;
     const send = (method, params = {}) => sendRaw(method, params, sessionId);
-    return await operations(send);
+    return await operations(send, target);
   } finally {
     waiting.rejectAll(new Error("CDP connection closed"));
     socket.close();
@@ -331,7 +343,8 @@ async function handleApi(req, url) {
 
   if (parts[1] === "status") {
     const version = await fetch(`http://127.0.0.1:${selected.cdpPort}/json/version`).then((response) => response.json());
-    return { appId, epoch: selected.epoch, cdpPort: selected.cdpPort, browser: version.Browser };
+    const targetId = await cdp(selected.cdpPort, (_send, target) => target.targetId);
+    return { appId, epoch: selected.epoch, cdpPort: selected.cdpPort, targetId, browser: version.Browser };
   }
 
   throw Object.assign(new Error("unknown API route"), { status: 404 });

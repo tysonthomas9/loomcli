@@ -24,6 +24,10 @@ The result is a **capability pass and production-readiness hold**. See
   keypress advances the browser epoch automatically and invalidates older lead
   actions. A queued action retains its browser identity and epoch across tab
   switches. The epoch is checked again immediately before CDP dispatch.
+- A per-browser `agent-browser` CLI handoff. The lead view shows a copyable
+  wrapper command that resolves the selected browser's live CDP port and uses a
+  runtime-scoped, pinned agent-browser session so commands operate the same
+  page the human sees.
 - A Loom-owned pointer and keyboard surface that dispatches validated input
   through CDP over the visible page-frame coordinate space. This bypasses
   the amd64 Xorg input driver, which deadlocks under Rosetta after sustained
@@ -97,6 +101,18 @@ Run the native shell:
 cd desktop/prototypes/kernel-browser
 ../../node_modules/.bin/tauri dev
 ```
+
+From the repository root, drive any browser app through `agent-browser`:
+
+```sh
+desktop/prototypes/kernel-browser/scripts/agent-browser-control.sh app-a snapshot -i
+desktop/prototypes/kernel-browser/scripts/agent-browser-control.sh app-a click @e2
+```
+
+The wrapper resolves the current CDP port from the loopback control server and
+pins the CLI session to that browser page. Direct CLI commands share the page
+but do not participate in the prototype's queued-action epoch fence; a
+production broker must unify those two control paths.
 
 After exercising human control, run the regression probe. It continuously
 checks both CDP and X11 for the failure mode that previously appeared after

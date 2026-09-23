@@ -31,6 +31,8 @@ button:focus-visible, textarea:focus-visible { outline: 3px solid #22674f; outli
 .controls h2 { margin: 0.125rem 0 0; font-size: 1.125rem; }
 .helper { margin: 0.5rem 0 0; color: #5a6460; font-size: 0.8125rem; line-height: 1.45; }
 .control-ready { display: flex; align-items: center; gap: 0.5rem; padding: 0.625rem 0.75rem; border: 1px solid #a8c9bb; border-radius: 0.375rem; background: #e2eee8; color: #173f33; font-size: 0.8125rem; font-weight: 700; }
+.agent-cli { display: grid; gap: 0.5rem; padding: 0.75rem; border: 1px solid #d0d4cd; background: #e5e8e1; }
+.agent-cli code { display: block; overflow-wrap: anywhere; color: #27332f; font-size: 0.6875rem; line-height: 1.45; }
 .facts { margin: 0; padding: 0.75rem; background: #e5e8e1; border: 1px solid #d0d4cd; }
 .facts div { display: flex; justify-content: space-between; gap: 1rem; }
 .facts div + div { margin-top: 0.375rem; }
@@ -38,6 +40,7 @@ button:focus-visible, textarea:focus-visible { outline: 3px solid #22674f; outli
 .facts dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; font-weight: 700; }
 .button { width: 100%; border: 1px solid #aeb5b0; border-radius: 0.375rem; background: #fff; color: #1d2925; padding: 0.625rem 0.75rem; cursor: pointer; font-weight: 700; text-align: left; }
 .button:hover { background: #edf0eb; }
+.button.compact { padding: 0.4375rem 0.625rem; font-size: 0.75rem; }
 .button.primary { border-color: #1e684e; background: #256f55; color: #fff; }
 .button.primary:hover { background: #1d5d46; }
 .controls hr { width: 100%; border: 0; border-top: 1px solid #cbd0c9; margin: 0.25rem 0; }

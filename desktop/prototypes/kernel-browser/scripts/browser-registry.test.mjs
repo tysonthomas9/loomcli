@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { nextBrowserDefinition } from "./browser-registry.mjs";
+import { browserDefinition, nextBrowserDefinition } from "./browser-registry.mjs";
 
 test("allocates the next isolated browser with deterministic loopback ports", () => {
   const browser = nextBrowserDefinition([
@@ -36,4 +36,17 @@ test("caps the throwaway POC before its port layout becomes ambiguous", () => {
     () => nextBrowserDefinition(Array.from({ length: 8 }, (_, index) => ({ id: `app-${String.fromCharCode(97 + index)}` }))),
     /supports at most 8 browser apps/,
   );
+});
+
+test("reconstructs a dynamic browser definition during control-server recovery", () => {
+  assert.deepEqual(browserDefinition(3), {
+    id: "app-c",
+    name: "Browser 3",
+    livePort: 63080,
+    cdpPort: 63222,
+    webdriverPort: 63224,
+    apiPort: 63101,
+    mediaPort: 56200,
+    epoch: 0,
+  });
 });

@@ -19,3 +19,14 @@ export function createQueuedActionState(initialAppId = "app-a") {
     },
   };
 }
+
+export function agentBrowserCommand(appId) {
+  if (!/^app-[a-z]$/.test(appId)) throw new Error("invalid browser app id");
+  return `desktop/prototypes/kernel-browser/scripts/agent-browser-control.sh ${appId} snapshot -i`;
+}
+
+export function mergeBrowserApps(currentApps, discoveredApps) {
+  const merged = new Map(currentApps.map((app) => [app.id, app]));
+  for (const app of discoveredApps) merged.set(app.id, app);
+  return [...merged.values()].sort((left, right) => left.id.localeCompare(right.id));
+}

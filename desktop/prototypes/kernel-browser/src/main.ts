@@ -1,5 +1,5 @@
 import "./styles.css";
-import { createQueuedActionState } from "../scripts/frontend-state.mjs";
+import { agentBrowserCommand, createQueuedActionState, mergeBrowserApps } from "../scripts/frontend-state.mjs";
 
 type AppId = string;
 
@@ -55,6 +55,11 @@ root.innerHTML = `
           <div><dt>CDP</dt><dd id="cdp">:61222</dd></div>
         </dl>
         <div class="control-ready" role="status"><span class="dot"></span> Human control always available</div>
+        <section class="agent-cli" aria-labelledby="agent-cli-title">
+          <p class="section-label" id="agent-cli-title">Agent-browser CLI</p>
+          <code id="agent-browser-command"></code>
+          <button class="button compact" id="copy-agent-command" type="button">Copy command</button>
+        </section>
         <button class="button" id="queue-action">Queue lead action</button>
         <button class="button" id="run-action">Run queued action</button>
         <hr />
@@ -104,6 +109,19 @@ function renderTabs() {
   }));
 }
 
+async function discoverBrowsers() {
+  try {
+    const result = await api("/api/browsers");
+    const discovered = result.browsers as BrowserApp[];
+    apps.splice(0, apps.length, ...mergeBrowserApps(apps, discovered));
+    renderTabs();
+    updateActiveView();
+    announce(`${apps.length} browser apps are available.`);
+  } catch (error) {
+    announce(`Could not discover browser apps: ${(error as Error).message}`, "error");
+  }
+}
+
 function announce(message: string, kind: "normal" | "error" = "normal") {
   const notice = document.querySelector<HTMLDivElement>("#notice")!;
   notice.textContent = message;
@@ -121,6 +139,7 @@ function updateActiveView() {
   document.querySelector("#epoch")!.textContent = String(app.epoch);
   document.querySelector("#cdp")!.textContent = `:${app.cdpPort}`;
   document.querySelector("#browser-title")!.textContent = app.name;
+  document.querySelector("#agent-browser-command")!.textContent = agentBrowserCommand(app.id);
   queuedActions.select(app.id);
   restartFrameLoop();
   announce(`${app.name} browser selected.`);
@@ -282,6 +301,16 @@ document.querySelector<HTMLButtonElement>("#add-browser")!.addEventListener("cli
   }
 });
 
+document.querySelector<HTMLButtonElement>("#copy-agent-command")!.addEventListener("click", async () => {
+  const command = agentBrowserCommand(activeId);
+  try {
+    await navigator.clipboard.writeText(command);
+    announce(`Copied agent-browser command for ${activeApp().name}.`);
+  } catch {
+    announce("Clipboard access is unavailable. Select the visible agent-browser command instead.", "error");
+  }
+});
+
 const humanInput = document.querySelector<HTMLDivElement>("#human-input")!;
 humanInput.addEventListener("pointermove", (event) => queueMove(event));
 humanInput.addEventListener("pointerdown", (event) => {
@@ -372,3 +401,4 @@ document.querySelector<HTMLButtonElement>("#read-annotation")!.addEventListener(
 
 renderTabs();
 updateActiveView();
+void discoverBrowsers();
