@@ -29,6 +29,15 @@ browser's temporary profile and sign-in state. It does not stop the other
 browser identities or the shared VM. Deleting the selected browser moves the
 UI to another available browser, or to an empty state if none remain.
 
+`loom browser create` opens a new browser tab under the owning lead in the real
+Loom desktop UI. When that lead is on screen, Loom activates the Browser panel
+and selects the new tab automatically. The tab appears as **Starting…** when
+provisioning begins; when ready, it shows the browser's first page and accepts
+human input and annotations. If another lead is on screen, the new tab waits
+under its owner without changing the user's current view. This is the outer
+Loom browser tab for an isolated browser identity. Page tabs inside it remain
+visible through browser state and `agent-browser`.
+
 The browser commands use the same runtime identity and ownership checks as the
 POC. They return the browser ID and current state so the lead can immediately
 read the connection details. A request for an unknown or already deleted ID
@@ -38,6 +47,8 @@ returns a clear error; deletion never guesses a container from a port alone.
 
 1. The lead runs `loom browser state --json`, or first runs
    `loom browser create --name Research` when a new isolated browser is needed.
+   Creation immediately opens its tab under that lead and selects it when the
+   user is viewing the lead.
 2. Loom reports each open browser identity, its local CDP port, and its live
    page tabs. The result identifies the browser selected in the desktop view
    and the page currently shown there.
@@ -58,6 +69,8 @@ Example shape (illustrative IDs and ports):
     {
       "id": "app-a",
       "name": "Research",
+      "workspace": "CRITICAL-BUGS",
+      "leadName": "Claude",
       "selectedInLoom": true,
       "status": "ready",
       "cdpPort": 61222,
@@ -101,6 +114,17 @@ control-server restart does not resurrect a deleted browser or lose a rename.
 Creation should reuse a free browser slot after deletion, and a failed create
 should clean up only the container it attempted to start.
 
+Associate every browser with the workspace and lead that created it. The
+controlled lead runtime supplies that identity to `loom browser create` and
+`state`; UI queries use the selected lead. A browser created by Claude must
+not appear in Codex's browser list.
+
+Record a newly requested browser as `starting` before waiting for its container
+to become ready. Mark it `ready` when CDP responds, or `failed` with a visible
+reason if provisioning fails. Creating a browser also sets it as the selected
+browser. A later readiness update must not override a newer user selection.
+A failed entry can be deleted without affecting any other browser.
+
 Verification: create two browsers, rename and select one, then delete only that
 one. The other stays usable; its CDP endpoint and tabs remain unchanged. After
 a control-server restart, the deleted browser stays absent and the renamed
@@ -121,19 +145,41 @@ that selection synchronized with the control server and the `--select` update
 operation. Treat tab and connection details as live state, not a cached startup
 list. Tabs opened with `agent-browser` must appear on the next state request.
 
+### 3. Open the browser in the real lead view
+
+The UI currently discovers browser apps only at startup or after its own
+**New browser** click in the standalone prototype. The real lead view uses
+`AgentEditorGroups` for its Terminal/Info/Git/Diff/Files tabs and `AgentsPage`
+to render each pane. Add a Browser pane there for leads, with a tab for each
+browser identity owned by that lead. Poll the lightweight browser registry
+once per second while that view is open so a create issued from a lead terminal
+adds and selects the new browser tab without a reload. Reconcile by browser ID
+to avoid duplicates. Let `AgentsPage` request activation of the existing
+Browser editor tab in `AgentEditorGroups`, including when that tab is in a split
+group. Render the POC's proven live frame, human input, and annotation surface
+inside the selected browser tab.
+Show `starting`, `ready`, and `failed` states in the tab; once ready, display
+the first live frame. On lead-created browser discovery, activate the Browser
+pane if the owning lead is selected. Rename and delete operations must update
+and remove the same tab. If the human selects another browser while creation
+is underway, keep that newer choice when the new browser becomes ready.
+
 Verification: two browser identities and multiple tabs appear with distinct
 CDP ports and target IDs; switching the visible browser updates
-`selectedInLoom`; closing a tab removes it from the next response.
+`selectedInLoom`; closing a page tab removes it from the next response. A lead
+create opens a selected **Starting…** tab in that lead's already open Loom
+view, then shows the live page when ready. A failed create stays visible with
+an error and does not leave a false ready tab. Another lead's view remains
+unchanged.
 
-### 3. Add `loom browser` commands
+### 4. Add `loom browser` commands
 
 Register `browser create`, `browser state`, `browser update`, and
 `browser delete` in Loom's Cobra CLI. They call the POC control server;
 `state` prints a concise table by default or a structured response with
 `--json`. All four commands accept `--json` for machine-readable results.
-They must not invent
-connection values from static defaults. If no browser runtime is attached,
-return a clear error and a nonzero exit status.
+They must not invent connection values from static defaults. If no browser
+runtime is attached, return a clear error and a nonzero exit status.
 
 For this POC, the lead runtime receives the control origin as an environment
 value. The commands use the live control server as their source of truth. Loom
@@ -143,7 +189,7 @@ Verification: the commands create, read, update, and delete the same browser
 identities shown in the desktop view; `--json` remains machine readable;
 unavailable browsers are represented without hiding healthy ones.
 
-### 4. Expose the workflow to the lead
+### 5. Expose the workflow to the lead
 
 Ensure `agent-browser` is available on the lead's `PATH` and the lead can
 reach the returned loopback CDP port. Add a short lead instruction that says to
@@ -155,8 +201,9 @@ Verification in a real lead terminal: create a browser, run
 `loom browser state`, bind `agent-browser` to the page the human sees, take a
 snapshot, click a harmless fixture button, and see the result in the desktop
 view. Rename the browser, open a second tab, and delete the browser while
-another identity stays usable.
-Prove there is no accidental cross-browser or cross-tab control.
+another identity stays usable. Prove there is no accidental cross-browser or
+cross-tab control. Keep the desktop view open throughout, confirming that
+creation, loading, rename, selection, and deletion appear without a reload.
 
 ## Current POC Boundary
 
@@ -176,8 +223,11 @@ preemption, revisit a controller then, based on the observed workflow.
 ## Done When
 
 A lead can create, inspect, rename/select, and delete an isolated Loom browser
-from its terminal. `loom browser state` discovers every open browser and tab;
-`agent-browser` attaches to the tab visible to the human and performs page and
-tab actions. The desktop view reflects those operations. Deleting one browser
-never affects another, stale or unavailable connections report clearly, and
-the known concurrency limitation is documented in the lead instructions.
+from its terminal. Create immediately opens a browser tab under that lead and
+selects it when the lead is on screen; the live page appears when ready.
+`loom browser state` discovers every
+open browser and tab; `agent-browser` attaches to the tab visible to the human
+and performs page and tab actions. The desktop view reflects those operations.
+Deleting one browser never affects another, stale or unavailable connections
+report clearly, and the known concurrency limitation is documented in the lead
+instructions.
