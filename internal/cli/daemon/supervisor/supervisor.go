@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
+	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
@@ -406,6 +407,9 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 		return false
 	}
 	if err := s.gateSafetyKnobsEnforceable(ap); err != nil {
+		return false
+	}
+	if err := s.gatePlannerCapsEnforceable(ap); err != nil {
 		return false
 	}
 
@@ -948,13 +952,21 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 		}
 		if ap.LastError != nil {
 			result[i].LastErrorClass = ap.LastError.Class.String()
+			result[i].LastErrorMessage = ap.LastError.Message
 			// Derived, not stored: the agent's last transition was a claim-hold
 			// gate. Clears itself on the next successful pre-flight.
 			result[i].ClaimsGated = ap.LastError.Class.Is(agenterr.ClaimsHeldOutcome)
 		}
+		softWarn := ap.SoftKnobWarning
+		readOnly := ap.RoleConfig.ReadOnly
 		ap.Mu.Unlock()
 		// Resolve backend name outside the lock (GetEffectiveBackend acquires ap.Mu)
 		result[i].CurrentBackend = s.GetEffectiveBackend(ap)
+		if softWarn != "" {
+			result[i].EnforcementDetail = softWarn
+			result[i].EnforcementLevel = string(backends.EffectiveEnforcement(
+				result[i].CurrentBackend, readOnly))
+		}
 		// Resolve remote branch (reads immutable config, no mutex needed)
 		result[i].RemoteBranch = ap.ResolveRemoteBranch()
 	}

@@ -50,6 +50,15 @@ func printAgentDiagnostics(agent DaemonAgentStatus) {
 	if agent.LastErrorClass != "" {
 		fmt.Printf("      Last error: %s\n", agent.LastErrorClass)
 	}
+	if agent.LastErrorMessage != "" {
+		fmt.Printf("      Detail: %s\n", agent.LastErrorMessage)
+	}
+	if agent.EnforcementLevel != "" {
+		fmt.Printf("      Enforcement: %s\n", agent.EnforcementLevel)
+		if agent.EnforcementDetail != "" {
+			fmt.Printf("      %s\n", agent.EnforcementDetail)
+		}
+	}
 	if agent.ClaimsGated {
 		fmt.Printf("      gated (claims held)\n")
 	}

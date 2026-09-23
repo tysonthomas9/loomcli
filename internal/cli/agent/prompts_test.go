@@ -756,54 +756,51 @@ func TestGenerateTerminalPromptMissingFileErrors(t *testing.T) {
 	}
 }
 
-func TestGenerateFleetPlanningPrompt(t *testing.T) {
-	tests := []struct {
-		name      string
-		agentName string
-		taskID    string
-		wantParts []string
-	}{
-		{
-			name:      "spark agent with task",
-			agentName: "spark",
-			taskID:    "loomcli-kv6.4",
-			wantParts: []string{
-				"Your agent name is: spark",
-				"loomcli-kv6.4",
-				"Planning Task",
-				"Do NOT write any implementation code",
-				"pre-assigned",
-				"Fleet API",
-				"loom claim loomcli-kv6.4",
-				"loom data show loomcli-kv6.4",
-				"already claimed",
-				"--status review",
-				"needs-revision",
-			},
-		},
-		{
-			name:      "nova agent with different task",
-			agentName: "nova",
-			taskID:    "proj-abc.1",
-			wantParts: []string{
-				"Your agent name is: nova",
-				"proj-abc.1",
-				"loom claim proj-abc.1",
-				"loom data show proj-abc.1",
-			},
-		},
+func TestGenerateFleetPlanningPrompt_HostSubmitOmitsDesignCLI(t *testing.T) {
+	t.Setenv("LOOM_HOST_SUBMIT", "1")
+	// Avoid a real issue-backend fetch in unit tests.
+	t.Setenv("LOOM_ASSIGNED_TASK_ID", "loom-test.1")
+
+	prompt := GenerateFleetPlanningPrompt("spark", "loom-test.1", nil)
+
+	for _, forbidden := range []string{
+		"loom data update <id> --design=",
+		"--status review --assignee=\"\"",
+		"loom data show {{ .TaskID }}",
+		"loom data show loom-test.1'",
+		"Save your plan to the task's design field",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Errorf("host-submit prompt must not contain %q", forbidden)
+		}
 	}
+	// Affirmative agent-side design CLI must not appear; the forbid phrasing may.
+	if strings.Contains(prompt, "loom data update <id>") {
+		t.Error("host-submit prompt must not instruct loom data update <id>")
+	}
+	for _, want := range []string{
+		"Host-owned design submission",
+		"final assistant message",
+		"loom claim loom-test.1",
+		"Do NOT write any implementation code",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("host-submit prompt missing %q", want)
+		}
+	}
+}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			prompt := GenerateFleetPlanningPrompt(tc.agentName, tc.taskID, nil)
-
-			for _, part := range tc.wantParts {
-				if !strings.Contains(prompt, part) {
-					t.Errorf("prompt missing expected part: %q", part)
-				}
-			}
-		})
+func TestGenerateFleetPlanningPrompt_AgentSubmitKeepsDesignCLI(t *testing.T) {
+	t.Setenv("LOOM_HOST_SUBMIT", "")
+	prompt := GenerateFleetPlanningPrompt("spark", "loom-test.1", nil)
+	for _, want := range []string{
+		"loom data show loom-test.1",
+		"loom data update",
+		"--status review",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("agent-submit prompt missing %q", want)
+		}
 	}
 }
 

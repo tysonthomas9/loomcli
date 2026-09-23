@@ -139,6 +139,11 @@ Write a comprehensive plan that includes:
 - How to manually verify the implementation works
 
 ### Step 4: Save the Plan
+{{- if .HostSubmit }}
+Your **entire final assistant message** is the design. The host will persist it
+and move the task to review after a clean exit. Do NOT run
+`loom data update --design` or `--status`.
+{{- else }}
 Save your plan to the task's design field:
 ```
 loom data update <id> --design="<your complete plan here>" --design-format={{ .DesignFormat }}
@@ -165,10 +170,17 @@ This puts the task in review status where:
 ```
 loom complete
 ```
+{{- end }}
+{{- if .HostSubmit }}
+
+### Step 5: Exit Cleanly
+Exit successfully (`loom complete` when a shell is available, otherwise end the
+turn) so host completion hooks can write the design and set status to review.
+{{- end }}
 
 ### CRITICAL: STOP - DO NOT IMPLEMENT
 
-After completing Step 6, you are DONE.
+After completing the save/exit steps, you are DONE.
 - Do NOT write any implementation code
 - Do NOT create any new files for the feature
 - Do NOT pick up another task

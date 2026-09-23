@@ -9,6 +9,7 @@ import (
 
 	"github.com/olesho/harness-wrapper/pkg/chat"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -131,11 +132,12 @@ func TestAnswerInputRequest_DispositionsWithAndWithoutAMatchingOption(t *testing
 	}
 }
 
-// "ask" has no human wired to it yet. It must deny AND say so with the kind
-// named — a silent degrade would let an operator believe a prompt reached
-// someone, and treating it as allow would be the permissive reading of an
-// unfinished feature.
+// "ask" must deny when a human declines, and name the kind on stderr so an
+// operator can see which disposition degraded. The daemon round-trip is
+// stubbed: without a scripted human this test would depend on ambient IPC
+// env (agent name / issue id) and flake under clean gate environments.
 func TestAnswerInputRequest_AskDeniesAndLogsTheKind(t *testing.T) {
+	scriptedHuman(t, cli.IPCInputAnswer{Decline: true}, true)
 	policy := &domain.RoleInputPolicy{Kinds: map[string]string{"bypass_permissions": domain.RoleInputAsk}}
 	req := chat.InputRequest{
 		Kind:    "bypass_permissions",
@@ -152,8 +154,8 @@ func TestAnswerInputRequest_AskDeniesAndLogsTheKind(t *testing.T) {
 	if !strings.Contains(logged, "bypass_permissions") {
 		t.Errorf("log %q must name the kind that was degraded", logged)
 	}
-	if !strings.Contains(logged, "ask") || !strings.Contains(strings.ToLower(logged), "deny") {
-		t.Errorf("log %q must say that an \"ask\" was denied", logged)
+	if !strings.Contains(strings.ToLower(logged), "declin") {
+		t.Errorf("log %q must say that the ask was declined/denied", logged)
 	}
 }
 

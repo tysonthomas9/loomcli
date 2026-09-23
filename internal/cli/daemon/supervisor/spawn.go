@@ -52,7 +52,7 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 		fmt.Sprintf("LOOM_EVENTS_DIR=%s", ResolveDaemonPath(s.ProjectDir, cfg.Daemon.EventsDir)),
 	)
 
-	cmd.Env = appendRoleEnv(cmd.Env, ap)
+	cmd.Env = appendRoleEnv(cmd.Env, ap, s.currentCompletionHooks(ap))
 	cmd.Env = appendRoutingEnv(cmd.Env, ap)
 	// Both ends of a human answer wait need the same clock: the child's ask
 	// deadline runs slightly inside this bound so an unanswered prompt ends in
@@ -130,7 +130,7 @@ func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) (*exec.Cmd, err
 }
 
 // appendRoleEnv adds role constraint env vars (allowed/denied tools, read-only, repo).
-func appendRoleEnv(env []string, ap *AgentProcess) []string {
+func appendRoleEnv(env []string, ap *AgentProcess, hooks *domain.AgentHooks) []string {
 	if ap.Entry.Repo != "" {
 		env = append(env, fmt.Sprintf("LOOM_AGENT_REPO=%s", ap.Entry.Repo))
 	}
@@ -142,6 +142,11 @@ func appendRoleEnv(env []string, ap *AgentProcess) []string {
 	}
 	if ap.RoleConfig.ReadOnly {
 		env = append(env, "LOOM_READ_ONLY=1")
+	}
+	// Tell the agent prompt builder that host-owned design/status hooks will
+	// run on clean exit — prompts must not ask for loom data update --design.
+	if backends.HasHostDesignSubmit(hooks) && backends.HasHostStatusReview(hooks) {
+		env = append(env, "LOOM_HOST_SUBMIT=1")
 	}
 	// The input policy is structured, so unlike the tool lists it travels as
 	// JSON in one variable. Nothing is exported for a nil policy: the leaf

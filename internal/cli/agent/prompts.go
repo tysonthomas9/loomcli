@@ -32,6 +32,8 @@ type promptTemplateData struct {
 	ReadyJSON         string
 	ReadyFallback     string
 	TaskID            string
+	TaskDetail        string
+	HostSubmit        bool
 	TestStep          string
 	ReviewStep        string
 	InspectReviewStep string
@@ -287,6 +289,7 @@ func GeneratePlanningPrompt(agentName string, workspace *config.WorkspaceConfig,
 		ReadyJSON:      readyJSON,
 		ReadyFallback:  readyFallback,
 		DesignFormat:   resolveDesignFormat(workspace),
+		HostSubmit:     hostSubmitEnabled(),
 	})
 
 	// Inject the prior-attempt checkpoint as a FALLBACK — skipped when a session
@@ -332,14 +335,29 @@ func GenerateTaskPrompt(agentName string, workspace *config.WorkspaceConfig, par
 // GenerateFleetPlanningPrompt creates the prompt for a fleet planning agent with a pre-assigned task.
 // Fleet workers receive their task from the Fleet API and skip task selection/claiming.
 func GenerateFleetPlanningPrompt(agentName, taskID string, workspace *config.WorkspaceConfig) string {
+	hostSubmit := hostSubmitEnabled()
+	taskDetail := ""
+	if hostSubmit {
+		// Host-inject assignment context so read-only planners need not run
+		// loom data show through a shell the backend may have stripped.
+		taskDetail = customTaskDetailText(taskID)
+	}
 	prompt := renderPrompt("fleet_planning", promptTemplateData{
 		AgentName:      agentName,
 		WorkspaceBlock: buildWorkspaceContextBlock(workspace),
 		SafetyBlock:    buildSafetyGuardrailsBlock(),
 		TaskID:         taskID,
+		TaskDetail:     taskDetail,
+		HostSubmit:     hostSubmit,
 		DesignFormat:   resolveDesignFormat(workspace),
 	})
 	return injectCheckpointIfNotResuming(prompt)
+}
+
+// hostSubmitEnabled reports whether the supervisor exported LOOM_HOST_SUBMIT=1
+// because write_design + set_status review hooks will own design persistence.
+func hostSubmitEnabled() bool {
+	return os.Getenv("LOOM_HOST_SUBMIT") == "1"
 }
 
 // GenerateFleetTaskPrompt creates the prompt for a fleet implementation agent with a pre-assigned task.
@@ -557,7 +575,9 @@ func buildCheckpointBlock(cp *config.Checkpoint) string {
 	return sb.String()
 }
 
-const readOnlyPreamble = `IMPORTANT: You are running in READ-ONLY mode. You MUST NOT modify any files, create new files, or run destructive commands. You may only read files, search code, and provide analysis/comments. Use loom data commands to comment on tasks but do not make code changes.`
+const readOnlyPreamble = `IMPORTANT: You are running in READ-ONLY mode for the repository. You MUST NOT modify tracked files, create new source files, or run destructive commands. You may read files, search code, and provide analysis.
+
+Task metadata is separate from repo writes: when host-owned submission is active (LOOM_HOST_SUBMIT=1), the supervisor persists your final reply as the design — do not treat that as a repo write. Otherwise you may use loom data commands for task fields only when your shell can reach them. Never disable sandboxes or request Bash to bypass read_only.`
 
 // ReadOnlyPreamble returns the read-only instruction preamble if LOOM_READ_ONLY is set.
 // Returns empty string if not in read-only mode.
