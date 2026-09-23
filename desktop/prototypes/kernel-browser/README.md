@@ -13,7 +13,9 @@ The result is a **capability pass and production-readiness hold**. See
 
 ## What is implemented
 
-- A nested Tauri 2 application with two browser-app tabs.
+- A nested Tauri 2 application with two initial browser-app tabs and an
+  explicit **New browser** control that provisions another isolated profile on
+  demand (up to eight in this throwaway POC).
 - One independently labelled Kernel container per isolated browser identity.
 - Only the selected tab is captured through CDP as a bounded JPEG frame. This
   avoids the macOS WKWebView WebRTC layer that rendered valid video frames as

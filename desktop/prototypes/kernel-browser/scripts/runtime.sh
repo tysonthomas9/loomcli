@@ -134,6 +134,15 @@ cleanup_failed_start() {
   exit "$status"
 }
 
+validate_add_argument() {
+  local value="$1"
+  local pattern="$2"
+  [[ "$value" =~ $pattern ]] || {
+    printf 'status=blocked reason=invalid-add-argument value=%s\n' "$value" >&2
+    exit 2
+  }
+}
+
 case "${1:-}" in
   start)
     init_runtime_id true
@@ -149,6 +158,27 @@ case "${1:-}" in
     start_app app-a "$app_a_live_port" "$app_a_cdp_port" "$app_a_webdriver_port" "$app_a_api_port" "$app_a_media_port"
     start_app app-b "$app_b_live_port" "$app_b_cdp_port" "$app_b_webdriver_port" "$app_b_api_port" "$app_b_media_port"
     trap - EXIT
+    ;;
+  add)
+    [[ $# -eq 7 ]] || {
+      printf 'usage: %s add <app-id> <live-port> <cdp-port> <webdriver-port> <api-port> <media-port>\n' "$0" >&2
+      exit 2
+    }
+    validate_add_argument "$2" '^app-[a-z]$'
+    for port_value in "${@:3}"; do
+      validate_add_argument "$port_value" '^[0-9]{4,5}$'
+    done
+    init_runtime_id false || {
+      printf 'status=blocked reason=no-runtime-id\n' >&2
+      exit 2
+    }
+    require_runtime
+    name="$(container_name "$2")"
+    if "${docker_cmd[@]}" container inspect "$name" >/dev/null 2>&1; then
+      printf 'status=blocked reason=container-name-in-use name=%s\n' "$name" >&2
+      exit 2
+    fi
+    start_app "$2" "$3" "$4" "$5" "$6" "$7"
     ;;
   status)
     if ! init_runtime_id false; then
@@ -170,7 +200,7 @@ case "${1:-}" in
     fi
     ;;
   *)
-    printf 'usage: %s {start|status|stop}\n' "$0" >&2
+    printf 'usage: %s {start|add|status|stop}\n' "$0" >&2
     exit 2
     ;;
 esac

@@ -1,7 +1,7 @@
 import "./styles.css";
 import { createQueuedActionState } from "../scripts/frontend-state.mjs";
 
-type AppId = "app-a" | "app-b";
+type AppId = string;
 
 type BrowserApp = {
   id: AppId;
@@ -39,7 +39,8 @@ root.innerHTML = `
       <div class="runtime" role="status"><span class="dot"></span> Task-owned runtime</div>
     </header>
     <nav class="tabs" aria-label="Browser apps">
-      ${apps.map((app) => `<button class="tab" data-app="${app.id}" aria-selected="${app.id === activeId}">${app.name}<span>${app.id}</span></button>`).join("")}
+      <div class="tab-list" id="browser-tabs"></div>
+      <button class="add-tab" id="add-browser" type="button">+ New browser</button>
     </nav>
     <section class="workspace">
       <aside class="controls" aria-labelledby="controls-title">
@@ -82,6 +83,25 @@ root.innerHTML = `
 
 function activeApp(): BrowserApp {
   return apps.find((app) => app.id === activeId)!;
+}
+
+function renderTabs() {
+  const tabList = document.querySelector<HTMLDivElement>("#browser-tabs")!;
+  tabList.replaceChildren(...apps.map((app) => {
+    const button = document.createElement("button");
+    button.className = "tab";
+    button.dataset.app = app.id;
+    button.setAttribute("aria-selected", String(app.id === activeId));
+    button.textContent = app.name;
+    const id = document.createElement("span");
+    id.textContent = app.id;
+    button.append(id);
+    button.addEventListener("click", () => {
+      activeId = app.id;
+      updateActiveView();
+    });
+    return button;
+  }));
 }
 
 function announce(message: string, kind: "normal" | "error" = "normal") {
@@ -239,11 +259,27 @@ function queueMove(event: PointerEvent) {
   scheduleMove();
 }
 
-document.querySelectorAll<HTMLButtonElement>(".tab").forEach((button) => {
-  button.addEventListener("click", () => {
-    activeId = button.dataset.app as AppId;
+document.querySelector<HTMLButtonElement>("#add-browser")!.addEventListener("click", async (event) => {
+  const button = event.currentTarget as HTMLButtonElement;
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  button.textContent = "Starting browser…";
+  announce("Starting a new isolated browser. This can take up to a minute.");
+  try {
+    const result = await api("/api/browsers", {});
+    const created = result.browser as BrowserApp;
+    if (!apps.some((app) => app.id === created.id)) apps.push(created);
+    activeId = created.id;
+    renderTabs();
     updateActiveView();
-  });
+    announce(`${created.name} is ready and selected.`);
+  } catch (error) {
+    announce(`Could not start browser: ${(error as Error).message}`, "error");
+  } finally {
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
+    button.textContent = "+ New browser";
+  }
 });
 
 const humanInput = document.querySelector<HTMLDivElement>("#human-input")!;
@@ -334,4 +370,5 @@ document.querySelector<HTMLButtonElement>("#read-annotation")!.addEventListener(
   }
 });
 
+renderTabs();
 updateActiveView();

@@ -1,6 +1,8 @@
 import { createServer } from "node:http";
+import { execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { keyParams, pointerParams } from "./input-bridge.mjs";
 import { chooseVisiblePage, createPendingCommands } from "./cdp-client.mjs";
@@ -8,17 +10,21 @@ import { humanInputAdvancesEpoch } from "./control-epoch.mjs";
 import { annotationGeometry } from "./annotation-geometry.mjs";
 import { captureFrame } from "./frame-capture.mjs";
 import { allowedOrigins, originAllowed } from "./request-policy.mjs";
+import { nextBrowserDefinition } from "./browser-registry.mjs";
 
 const host = process.env.LOOM_KERNEL_CONTROL_HOST || "127.0.0.1";
 const port = Number(process.env.LOOM_KERNEL_CONTROL_PORT || 61300);
 const cdpTimeoutMs = Number(process.env.LOOM_KERNEL_CDP_TIMEOUT_MS || 5_000);
 const prototypeDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const artifactDir = join(prototypeDir, "evidence", "artifacts");
+const runtimeScript = join(prototypeDir, "scripts", "runtime.sh");
+const execFileAsync = promisify(execFile);
 const browsers = {
-  "app-a": { cdpPort: Number(process.env.LOOM_KERNEL_APP_A_CDP_PORT || 61222), epoch: 0 },
-  "app-b": { cdpPort: Number(process.env.LOOM_KERNEL_APP_B_CDP_PORT || 62222), epoch: 0 },
+  "app-a": { id: "app-a", name: "Research", cdpPort: Number(process.env.LOOM_KERNEL_APP_A_CDP_PORT || 61222), epoch: 0 },
+  "app-b": { id: "app-b", name: "Operations", cdpPort: Number(process.env.LOOM_KERNEL_APP_B_CDP_PORT || 62222), epoch: 0 },
 };
 const embedEvents = [];
+let browserCreationInProgress = false;
 
 function browser(appId) {
   const item = browsers[appId];
@@ -148,6 +154,35 @@ const annotationScript = (note) => `(() => {
 
 async function handleApi(req, url) {
   const parts = url.pathname.split("/").filter(Boolean);
+
+  if (parts[1] === "browsers" && req.method === "GET") {
+    return { browsers: Object.values(browsers) };
+  }
+
+  if (parts[1] === "browsers" && req.method === "POST") {
+    if (browserCreationInProgress) {
+      throw Object.assign(new Error("a browser is already starting"), { status: 409 });
+    }
+    browserCreationInProgress = true;
+    try {
+      const definition = nextBrowserDefinition(Object.values(browsers));
+      await execFileAsync(runtimeScript, [
+        "add",
+        definition.id,
+        String(definition.livePort),
+        String(definition.cdpPort),
+        String(definition.webdriverPort),
+        String(definition.apiPort),
+        String(definition.mediaPort),
+      ], { timeout: 60_000 });
+      browsers[definition.id] = definition;
+      const destination = `http://host.lima.internal:61300/fixture?app=${definition.id}`;
+      await cdp(definition.cdpPort, (send) => send("Page.navigate", { url: destination }));
+      return { browser: definition };
+    } finally {
+      browserCreationInProgress = false;
+    }
+  }
 
   if (parts[1] === "embed-events" && req.method === "GET") {
     return { events: embedEvents };

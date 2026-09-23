@@ -93,3 +93,42 @@ exit 0
   assert.match(calls, /exec loom-kernel-browser-test-runtime-app-a/);
   assert.match(calls, /exec loom-kernel-browser-test-runtime-app-b/);
 });
+
+test("add starts only the requested task-owned browser", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loom-kernel-add-test-"));
+  const state = join(root, "state");
+  const log = join(root, "calls.log");
+  await writeFile(join(root, "docker"), `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$FAKE_RUNTIME_LOG"
+if [[ "$*" == *"container inspect"* ]]; then exit 1; fi
+exit 0
+`);
+  await writeFile(join(root, "curl"), "#!/usr/bin/env bash\nexit 0\n");
+  await writeFile(join(root, "sleep"), "#!/usr/bin/env bash\nexit 0\n");
+  await Promise.all([
+    chmod(join(root, "docker"), 0o755),
+    chmod(join(root, "curl"), 0o755),
+    chmod(join(root, "sleep"), 0o755),
+  ]);
+  await mkdir(state);
+  await writeFile(join(state, "runtime-id"), "test-runtime\n");
+
+  const result = spawnSync("bash", [runtimeScript, "add", "app-c", "63080", "63222", "63224", "63101", "56200"], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${root}:${process.env.PATH}`,
+      FAKE_RUNTIME_LOG: log,
+      LOOM_KERNEL_STATE_DIR: state,
+      LOOM_KERNEL_DOCKER_CONTEXT: "fake-context",
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const calls = await readFile(log, "utf8");
+  assert.match(calls, /--name loom-kernel-browser-test-runtime-app-c/);
+  assert.match(calls, /io\.loom\.browser-app=app-c/);
+  assert.match(calls, /127\.0\.0\.1:63222:9222/);
+  assert.doesNotMatch(calls, /browser-app=app-a/);
+  assert.doesNotMatch(calls, /browser-app=app-b/);
+});

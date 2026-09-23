@@ -17,10 +17,14 @@ button:focus-visible, textarea:focus-visible { outline: 3px solid #22674f; outli
 .runtime { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; font-weight: 650; }
 .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: #16835d; box-shadow: 0 0 0 3px #d6eadf; }
 
-.tabs { display: flex; gap: 0.25rem; padding: 0.5rem 1rem 0; background: #f7f7f3; border-bottom: 1px solid #cbd0c9; }
+.tabs { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; padding: 0.5rem 1rem 0; background: #f7f7f3; border-bottom: 1px solid #cbd0c9; }
+.tab-list { display: flex; min-width: 0; overflow-x: auto; }
 .tab { border: 0; border-bottom: 3px solid transparent; background: transparent; color: #59615e; padding: 0.625rem 0.875rem 0.5rem; cursor: pointer; font-weight: 700; }
 .tab span { margin-left: 0.5rem; color: #838b87; font-size: 0.6875rem; font-weight: 600; }
 .tab[aria-selected="true"] { color: #173f33; border-bottom-color: #247657; }
+.add-tab { flex: none; margin-bottom: 0.4375rem; border: 1px solid #aeb5b0; border-radius: 0.25rem; background: #fff; color: #1d2925; padding: 0.375rem 0.625rem; cursor: pointer; font-size: 0.75rem; font-weight: 700; }
+.add-tab:hover { background: #edf0eb; }
+.add-tab:disabled { cursor: wait; color: #66706c; }
 
 .workspace { min-height: 0; display: grid; grid-template-columns: 18rem minmax(0, 1fr); }
 .controls { display: flex; flex-direction: column; gap: 0.75rem; padding: 1rem; background: #f2f3ee; border-right: 1px solid #cbd0c9; overflow: auto; }
