@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -237,5 +238,20 @@ func TestAgentCreateFromFlags_NoHooksByDefault(t *testing.T) {
 	}
 	if create.Hooks != nil {
 		t.Errorf("create.Hooks = %+v, want nil so existing behavior is preserved", create.Hooks)
+	}
+}
+
+func TestAgentCreateFromFlags_PlanRoleDefaultsHostSubmitHooks(t *testing.T) {
+	resetHookFlags(t)
+	agentAddRole = "plan"
+	t.Cleanup(func() { agentAddRole = "" })
+
+	create, err := agentCreateFromFlags("WS", "planner-1", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := backends.DefaultPlanHostHooks()
+	if !create.Hooks.Equal(want) {
+		t.Errorf("plan create.Hooks = %+v, want default host-submit pipeline %+v", create.Hooks, want.OnComplete)
 	}
 }

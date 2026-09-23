@@ -22,7 +22,7 @@ func TestAppendRoleEnv_MaxBudgetUSD(t *testing.T) {
 			},
 		}
 
-		env := appendRoleEnv(nil, ap)
+		env := appendRoleEnv(nil, ap, nil)
 
 		found := false
 		for _, entry := range env {
@@ -48,7 +48,7 @@ func TestAppendRoleEnv_MaxBudgetUSD(t *testing.T) {
 			},
 		}
 
-		env := appendRoleEnv(nil, ap)
+		env := appendRoleEnv(nil, ap, nil)
 
 		for _, entry := range env {
 			if strings.HasPrefix(entry, "LOOM_MAX_BUDGET_USD=") {
@@ -66,7 +66,7 @@ func TestAppendRoleEnv_MaxBudgetUSD(t *testing.T) {
 			},
 		}
 
-		env := appendRoleEnv(nil, ap)
+		env := appendRoleEnv(nil, ap, nil)
 
 		found := false
 		for _, entry := range env {
@@ -93,7 +93,7 @@ func TestAppendRoleEnv_Effort(t *testing.T) {
 		},
 	}
 
-	env := appendRoleEnv(nil, ap)
+	env := appendRoleEnv(nil, ap, nil)
 
 	want := map[string]bool{
 		"LOOM_AGENT_EFFORT=max":  false,
