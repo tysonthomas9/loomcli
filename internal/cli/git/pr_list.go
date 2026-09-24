@@ -70,32 +70,37 @@ func ListPullRequests(repoPath, state string, limit int) ([]ops.GitPullRequest, 
 
 	out := make([]ops.GitPullRequest, 0, len(items))
 	for _, item := range items {
-		// gh returns the base repository's PR URL, so it carries the identity.
-		var prKey string
-		if ref, ok := prref.FromURL(item.URL); ok {
-			prKey = ref.Key()
-		}
-		out = append(out, ops.GitPullRequest{
-			Number:         item.Number,
-			PRKey:          prKey,
-			NodeID:         item.ID,
-			HeadSHA:        item.HeadRefOid,
-			Title:          item.Title,
-			URL:            item.URL,
-			State:          strings.ToUpper(item.State),
-			IsDraft:        item.IsDraft,
-			HeadRefName:    item.HeadRefName,
-			BaseRefName:    item.BaseRefName,
-			AuthorLogin:    item.Author.Login,
-			CreatedAt:      item.CreatedAt,
-			UpdatedAt:      item.UpdatedAt,
-			ReviewDecision: item.ReviewDecision,
-			Additions:      item.Additions,
-			Deletions:      item.Deletions,
-			ChangedFiles:   item.ChangedFiles,
-		})
+		out = append(out, item.toPullRequest())
 	}
 	return out, nil
+}
+
+// toPullRequest maps one gh JSON row onto the shared DTO.
+func (item ghPRItem) toPullRequest() ops.GitPullRequest {
+	// gh returns the base repository's PR URL, so it carries the identity.
+	var prKey string
+	if ref, ok := prref.FromURL(item.URL); ok {
+		prKey = ref.Key()
+	}
+	return ops.GitPullRequest{
+		Number:         item.Number,
+		PRKey:          prKey,
+		NodeID:         item.ID,
+		HeadSHA:        item.HeadRefOid,
+		Title:          item.Title,
+		URL:            item.URL,
+		State:          strings.ToUpper(item.State),
+		IsDraft:        item.IsDraft,
+		HeadRefName:    item.HeadRefName,
+		BaseRefName:    item.BaseRefName,
+		AuthorLogin:    item.Author.Login,
+		CreatedAt:      item.CreatedAt,
+		UpdatedAt:      item.UpdatedAt,
+		ReviewDecision: item.ReviewDecision,
+		Additions:      item.Additions,
+		Deletions:      item.Deletions,
+		ChangedFiles:   item.ChangedFiles,
+	}
 }
 
 func normalizePRListLimit(limit int) int {
