@@ -1,4 +1,4 @@
-package serve
+package daemonwire
 
 import (
 	"log/slog"
@@ -22,10 +22,10 @@ const envBrowserOperatorGrants = "LOOM_BROWSER_OPERATOR_GRANTS"
 // It is no longer honored; setting it only logs an error.
 const envBrowserOperatorSubjectsRemoved = "LOOM_BROWSER_OPERATOR_SUBJECTS"
 
-// applyBrowserConfig wires the durable-browser dependencies. Every missing
+// ApplyBrowserConfig wires the durable-browser dependencies. Every missing
 // piece leaves the routes authenticating and answering a visible 503/403
 // instead of inventing an identity.
-func applyBrowserConfig(cfg *webui.ServerConfig, storeHandle *bootstrap.StoreHandle, logger *slog.Logger) {
+func ApplyBrowserConfig(cfg *webui.ServerConfig, storeHandle *bootstrap.StoreHandle, logger *slog.Logger) {
 	if logger == nil {
 		logger = slog.Default()
 	}

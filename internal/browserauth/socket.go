@@ -256,11 +256,15 @@ func CallOperatorSocket(ctx context.Context, path string, req SocketRequest) (So
 	if err != nil {
 		return SocketResponse{}, err
 	}
-	if _, err := conn.Write(append(data, '\n')); err != nil {
-		return SocketResponse{}, fmt.Errorf("operator socket write: %w", err)
-	}
+	// The server may answer (e.g. peer_rejected) and close before reading the
+	// request, so a failed write can race an already-sent reply (EPIPE on
+	// Linux). Prefer that reply; report the write error only if none arrived.
+	_, writeErr := conn.Write(append(data, '\n'))
 	line, err := bufio.NewReader(io.LimitReader(conn, maxSocketRequest)).ReadBytes('\n')
 	if err != nil && !(errors.Is(err, io.EOF) && len(line) > 0) {
+		if writeErr != nil {
+			return SocketResponse{}, fmt.Errorf("operator socket write: %w", writeErr)
+		}
 		return SocketResponse{}, fmt.Errorf("operator socket read: %w", err)
 	}
 	var resp SocketResponse

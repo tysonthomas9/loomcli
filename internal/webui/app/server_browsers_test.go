@@ -85,6 +85,14 @@ func newBrowserTestServer(t *testing.T, socketPath string) (*Server, *recordingB
 	return app, backend
 }
 
+// Launch-env keys the server writes for interactive agent terminals
+// (modbuilder.BrowserWiring.SpawnEnv).
+const (
+	launchEnvAgentName        = "LOOM_AGENT_NAME"
+	launchEnvAgentTerminalID  = "LOOM_AGENT_TERMINAL_ID"
+	launchEnvOrchestratorSess = "LOOM_ORCHESTRATOR_SESSION_ID"
+)
+
 func interactiveLaunch(agent, terminalID string) *tabmeta.LaunchSpec {
 	return &tabmeta.LaunchSpec{Env: map[string]string{
 		launchEnvAgentName: agent, launchEnvAgentTerminalID: terminalID, launchEnvOrchestratorSess: "orch-1",
@@ -101,16 +109,16 @@ func TestAgentBrowserSpawnEnvBindsOnlyServerBuiltAgentLaunches(t *testing.T) {
 		"terminal mismatch": interactiveLaunch("lead", "other-term"),
 		"no orchestrator":   {Env: map[string]string{launchEnvAgentName: "lead", launchEnvAgentTerminalID: "lead-term"}},
 	} {
-		if env := app.agentBrowserSpawnEnv(key, launch); env != nil {
+		if env := app.browsers.SpawnEnv(key, launch); env != nil {
 			t.Errorf("%s: bound a session: %v", name, env)
 		}
 	}
-	env := app.agentBrowserSpawnEnv(key, interactiveLaunch("lead", "lead-term"))
+	env := app.browsers.SpawnEnv(key, interactiveLaunch("lead", "lead-term"))
 	tok := env[browserauth.EnvAgentSessionToken]
 	if tok == "" || env[browserauth.EnvAgentBrowserURL] == "" {
 		t.Fatalf("env = %v", env)
 	}
-	b, err := app.agentBrowserSessions.Resolve(tok)
+	b, err := app.browsers.AgentSessions().Resolve(tok)
 	if err != nil || b.AgentName != "lead" || b.Workspace != "ws" || b.TerminalID != "lead-term" {
 		t.Fatalf("binding = %+v %v", b, err)
 	}
@@ -118,7 +126,7 @@ func TestAgentBrowserSpawnEnvBindsOnlyServerBuiltAgentLaunches(t *testing.T) {
 
 func TestAgentBrowserRoutesThroughServerMux(t *testing.T) {
 	app, backend := newBrowserTestServer(t, "")
-	env := app.agentBrowserSpawnEnv(terminal.SessionKey{Workspace: "ws", Name: "t1"}, interactiveLaunch("lead", "t1"))
+	env := app.browsers.SpawnEnv(terminal.SessionKey{Workspace: "ws", Name: "t1"}, interactiveLaunch("lead", "t1"))
 	tok := env[browserauth.EnvAgentSessionToken]
 
 	body, _ := json.Marshal(map[string]string{"name": "Docs", "request_id": "r1"})
@@ -151,7 +159,7 @@ func TestLocalOperatorSocketWiredIntoServer(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	sock := browserauth.OperatorSocketPath(dir)
 	app, backend := newBrowserTestServer(t, sock)
-	if app.browserOperatorSocket == nil {
+	if !app.browsers.OperatorBridgeListening() {
 		t.Fatal("operator socket not started in local mode")
 	}
 	resp, err := browserauth.CallOperatorSocket(context.Background(), sock, browserauth.SocketRequest{Op: browserauth.OpIssue, Workspace: "ws"})
@@ -174,7 +182,7 @@ func TestLocalOperatorSocketWiredIntoServer(t *testing.T) {
 	}
 
 	// Shutdown revokes every operator session.
-	app.closeBrowserBridge()
+	app.browsers.Close()
 	rec = httptest.NewRecorder()
 	app.mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
@@ -193,7 +201,7 @@ func TestOperatorSocketNeverStartsInRemoteMode(t *testing.T) {
 		BrowserOperatorSocketPath: browserauth.OperatorSocketPath(dir),
 	}}
 	app.buildBrowserModule()
-	if app.browserOperatorSocket != nil {
+	if app.browsers.OperatorBridgeListening() {
 		t.Fatal("local operator socket started in remote-auth mode")
 	}
 	if _, err := os.Stat(browserauth.OperatorSocketPath(dir)); !os.IsNotExist(err) {

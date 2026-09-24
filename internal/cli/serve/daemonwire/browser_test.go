@@ -1,4 +1,4 @@
-package serve
+package daemonwire
 
 import (
 	"context"
