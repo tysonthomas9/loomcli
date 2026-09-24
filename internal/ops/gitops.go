@@ -95,9 +95,15 @@ type GitPullResult struct {
 	ConflictedFiles []string `json:"conflicted_files,omitempty"`
 }
 
-// GitPullRequest is a GitHub pull request returned by gh pr list.
+// GitPullRequest is a GitHub pull request returned by gh pr list or the
+// GitHub connector. PRKey is the canonical prref key of the base repository;
+// NodeID is GitHub's global node ID, used to reconcile a renamed or
+// transferred repository.
 type GitPullRequest struct {
 	Number         int    `json:"number"`
+	PRKey          string `json:"pr_key,omitempty"`
+	NodeID         string `json:"node_id,omitempty"`
+	HeadSHA        string `json:"head_sha,omitempty"`
 	Title          string `json:"title"`
 	URL            string `json:"url"`
 	State          string `json:"state"`

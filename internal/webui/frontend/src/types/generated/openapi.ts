@@ -1454,6 +1454,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/pull-requests": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List pull requests across the workspace's registered repositories
+     * @description Lists GitHub pull requests for every registered repository, including PRs created outside Loom. Served by the GitHub connector when a token is configured and by the gh CLI otherwise. Per-repo failures are reported in warnings rather than failing the whole list.
+     */
+    get: operations["listPullRequests"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}": {
     parameters: {
       query?: never;
@@ -2516,6 +2536,39 @@ export interface components {
       mode: "daemon" | "fleet";
       workspace: string;
       reason?: string;
+    };
+    GitPullRequest: {
+      number: number;
+      /**
+       * @description Canonical identity "github:<owner>/<repo>#<number>", lowercased and taken from the PR's base repository as GitHub currently names it (never a fork head). Falls back to the registered remote.
+       * @example github:octo/hello#42
+       */
+      pr_key?: string;
+      /** @description GitHub global node ID. Survives repository rename or transfer and is used to reconcile pr_key. */
+      node_id?: string;
+      head_sha?: string;
+      title: string;
+      url: string;
+      /** @description OPEN, CLOSED or MERGED. */
+      state: string;
+      is_draft: boolean;
+      head_ref_name: string;
+      base_ref_name: string;
+      author_login?: string;
+      created_at?: string;
+      updated_at?: string;
+      review_decision?: string;
+      /** @description GitHub owner/repo of the base repository. */
+      repo_name: string;
+      /** @description Workspace-registered repository name. */
+      source_repo?: string;
+      additions?: number;
+      deletions?: number;
+      changed_files?: number;
+    };
+    GitPullRequestList: {
+      pull_requests: components["schemas"]["GitPullRequest"][];
+      warnings?: string[];
     };
     PullRequestDetail: {
       number: number;
@@ -6610,6 +6663,53 @@ export interface operations {
         };
         content: {
           "application/json": Record<string, never>;
+        };
+      };
+    };
+  };
+  listPullRequests: {
+    parameters: {
+      query?: {
+        state?: "all" | "open" | "closed" | "merged" | "review";
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Pull request list */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["GitPullRequestList"];
+          };
+        };
+      };
+      /** @description gh CLI listing failed */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No pull request source available */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
         };
       };
     };
