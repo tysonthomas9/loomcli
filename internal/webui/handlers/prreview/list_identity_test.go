@@ -197,6 +197,25 @@ func TestPullRequestFromSummaryIdentity(t *testing.T) {
 			wantURL: "https://github.com/Octo/Hello/pull/6",
 		},
 		{
+			// Remote still names the old org; GitHub reports the renamed one.
+			// url and pr_key must agree so issue external_refs keep joining.
+			name:    "renamed repo keys on html url",
+			owner:   "OldOrg",
+			repo:    "app",
+			body:    map[string]any{"number": 7, "htmlUrl": "https://github.com/NewOrg/app/pull/7", "nodeId": "PR_7"},
+			wantKey: "github:neworg/app#7",
+			wantURL: "https://github.com/NewOrg/app/pull/7",
+			wantID:  "PR_7",
+		},
+		{
+			name:    "unparseable html url falls back",
+			owner:   "octocat",
+			repo:    "hello",
+			body:    map[string]any{"number": 9, "htmlUrl": "https://example.com/octocat/hello/pull/9"},
+			wantKey: "github:octocat/hello#9",
+			wantURL: "https://github.com/octocat/hello/pull/9",
+		},
+		{
 			name:    "nil identity fields",
 			owner:   "octocat",
 			repo:    "hello",

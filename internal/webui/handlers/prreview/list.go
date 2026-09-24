@@ -220,16 +220,22 @@ func pullRequestsFromBody(owner, repo, sourceRepo string, body map[string]any) [
 func pullRequestFromSummary(owner, repo, sourceRepo string, body map[string]any) ops.GitPullRequest {
 	number := intValue(body["number"])
 	repoName := owner + "/" + repo
+	// Identity is the base repo, never a fork head. GitHub's html_url names the
+	// base repo's current owner/repo (it follows renames and transfers), so
+	// derive pr_key from it — as the gh fallback does — keeping url and pr_key
+	// in agreement. Fall back to the registered remote when it is absent.
 	htmlURL := stringValue(body["htmlUrl"])
-	if htmlURL == "" {
+	prKey := prref.Format(owner, repo, number)
+	if ref, ok := prref.FromURL(htmlURL); ok && ref.Number == number {
+		prKey = ref.Key()
+	} else {
 		htmlURL = fmt.Sprintf("https://github.com/%s/pull/%d", repoName, number)
 	}
 	// GitHub's REST list payload does not expose aggregate review decision,
 	// so ReviewDecision intentionally remains empty on the connector path.
-	// Identity comes from the registered base repo, never a fork head.
 	return ops.GitPullRequest{
 		Number:      number,
-		PRKey:       prref.Format(owner, repo, number),
+		PRKey:       prKey,
 		NodeID:      stringValue(body["nodeId"]),
 		HeadSHA:     stringValue(body["headSha"]),
 		Title:       stringValue(body["title"]),

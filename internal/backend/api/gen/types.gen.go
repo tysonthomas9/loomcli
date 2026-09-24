@@ -2069,7 +2069,7 @@ type GitPullRequest struct {
 	NodeId *string `json:"node_id,omitempty"`
 	Number int     `json:"number"`
 
-	// PrKey Canonical identity "github:<owner>/<repo>#<number>", lowercased and taken from the registered base repository (never a fork head).
+	// PrKey Canonical identity "github:<owner>/<repo>#<number>", lowercased and taken from the PR's base repository as GitHub currently names it (never a fork head). Falls back to the registered remote.
 	PrKey *string `json:"pr_key,omitempty"`
 
 	// RepoName GitHub owner/repo of the base repository.
