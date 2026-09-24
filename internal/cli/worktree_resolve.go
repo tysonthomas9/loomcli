@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,6 +22,10 @@ type Resolver struct {
 	Mode      ResolverMode
 	Config    *config.LoomConfig
 	Workspace string // active workspace name (workspace mode only)
+
+	// scoped is true when Config holds only the workspaces loaded on demand
+	// (see NewActiveWorkspaceResolver) rather than every configured workspace.
+	scoped bool
 }
 
 // NewResolver creates a workspace resolver from configured workspaces.
@@ -40,6 +46,52 @@ func NewResolver() (*Resolver, error) {
 		}, nil
 	}
 	return nil, fmt.Errorf("no workspaces configured")
+}
+
+// loadScopedWorkspace loads a single workspace projection. Tests replace it to
+// avoid starting fleet-db.
+var loadScopedWorkspace = config.LoadWorkspaceConfigCached
+
+// NewActiveWorkspaceResolver creates a resolver holding only the active
+// workspace (LOOM_WORKSPACE, else the workspace whose local root contains the
+// cwd). Unlike NewResolver it never enumerates other workspaces' repos, so an
+// unrelated workspace failing to load cannot break agent/daemon startup.
+// Errors loading the active workspace itself are returned.
+func NewActiveWorkspaceResolver() (*Resolver, error) {
+	name := strings.TrimSpace(os.Getenv(bootstrap.EnvWorkspace))
+	if name == "" {
+		name = workspaceKeyFromLocalStateCWD()
+	}
+	if name == "" {
+		return nil, bootstrap.ErrNoActiveWorkspace
+	}
+	key, ws, err := loadScopedWorkspace(name)
+	if err != nil {
+		if errors.Is(err, config.ErrWorkspaceNotFound) {
+			return nil, fmt.Errorf("workspace %q not found in config", name)
+		}
+		return nil, fmt.Errorf("load workspace %q: %w", name, err)
+	}
+	return &Resolver{
+		Mode:      ModeWorkspace,
+		Config:    &config.LoomConfig{Workspaces: map[string]config.WorkspaceConfig{key: *ws}},
+		Workspace: key,
+		scoped:    true,
+	}, nil
+}
+
+// workspaceKeyFromLocalStateCWD matches the cwd against machine-local
+// workspace roots from the bootstrap state cache. It reads no FleetDB state.
+func workspaceKeyFromLocalStateCWD() string {
+	sc, err := bootstrap.LoadStateCache()
+	if err != nil || sc == nil || len(sc.Workspaces) == 0 {
+		return ""
+	}
+	cfg := &config.LoomConfig{Workspaces: make(map[string]config.WorkspaceConfig, len(sc.Workspaces))}
+	for key, local := range sc.Workspaces {
+		cfg.Workspaces[key] = config.WorkspaceConfig{Path: local.Path}
+	}
+	return workspaceNameFromCWD(cfg)
 }
 
 func resolveActiveWorkspaceName(cfg *config.LoomConfig) (string, error) {
@@ -127,6 +179,20 @@ func (r *Resolver) SetWorkspace(name string) error {
 	if _, ok := r.Config.Workspaces[normalized]; ok {
 		r.Workspace = normalized
 		return nil
+	}
+	if r.scoped && strings.TrimSpace(name) != "" {
+		key, ws, err := loadScopedWorkspace(name)
+		if err == nil {
+			if r.Config.Workspaces == nil {
+				r.Config.Workspaces = make(map[string]config.WorkspaceConfig)
+			}
+			r.Config.Workspaces[key] = *ws
+			r.Workspace = key
+			return nil
+		}
+		if !errors.Is(err, config.ErrWorkspaceNotFound) {
+			return fmt.Errorf("load workspace %q: %w", name, err)
+		}
 	}
 	return fmt.Errorf("workspace %q not found in config", name)
 }
@@ -444,6 +510,25 @@ func (r *Resolver) ResolveWorkspaceByName(name string) (string, bool) {
 	if ws, ok := r.Config.Workspaces[name]; ok && ws.Path != "" {
 		return ws.Path, true
 	}
+	if r.scoped {
+		// A scoped resolver holds only the active workspace; other workspace
+		// roots are machine-local, so read them from the state cache instead
+		// of loading those workspaces from FleetDB.
+		return workspaceRootFromLocalState(name)
+	}
+	return "", false
+}
+
+func workspaceRootFromLocalState(name string) (string, bool) {
+	sc, err := bootstrap.LoadStateCache()
+	if err != nil || sc == nil {
+		return "", false
+	}
+	for _, key := range []string{name, strings.ToUpper(name)} {
+		if local, ok := sc.Workspaces[key]; ok && local.Path != "" {
+			return local.Path, true
+		}
+	}
 	return "", false
 }
 
@@ -579,23 +664,15 @@ func GetWorkspaceRuntimeDir() string {
 			return
 		}
 
-		cfg, err := config.LoadConfigCached()
-		if err != nil || cfg == nil || len(cfg.Workspaces) == 0 {
-			workspaceRuntimeDirCache = "."
-			return
-		}
-
-		ws, err := resolveActiveWorkspaceName(cfg)
+		r, err := NewActiveWorkspaceResolver()
 		if err != nil {
+			if !errors.Is(err, bootstrap.ErrNoActiveWorkspace) {
+				slog.Warn("resolve active workspace runtime dir failed; using cwd", "err", err)
+			}
 			workspaceRuntimeDirCache = "."
 			return
 		}
-
-		if wsConfig, ok := cfg.Workspaces[ws]; ok && wsConfig.Path != "" {
-			workspaceRuntimeDirCache = wsConfig.Path
-		} else {
-			workspaceRuntimeDirCache = "."
-		}
+		workspaceRuntimeDirCache = r.GetWorktreesDir()
 	})
 	return workspaceRuntimeDirCache
 }
@@ -614,10 +691,15 @@ var (
 // Package-level default resolver (lazily initialized)
 var defaultResolver *Resolver
 
+// GetDefaultResolver returns the process-wide resolver scoped to the active
+// workspace. It loads only that workspace (see NewActiveWorkspaceResolver).
 func GetDefaultResolver() *Resolver {
 	if defaultResolver == nil {
-		r, err := NewResolver()
+		r, err := NewActiveWorkspaceResolver()
 		if err != nil {
+			if !errors.Is(err, bootstrap.ErrNoActiveWorkspace) {
+				slog.Warn("resolve active workspace failed; workspace repos unavailable", "err", err)
+			}
 			r = &Resolver{Mode: ModeWorkspace, Config: &config.LoomConfig{Workspaces: map[string]config.WorkspaceConfig{}}}
 		}
 		defaultResolver = r
