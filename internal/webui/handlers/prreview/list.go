@@ -9,6 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/prref"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
@@ -219,12 +220,20 @@ func pullRequestsFromBody(owner, repo, sourceRepo string, body map[string]any) [
 func pullRequestFromSummary(owner, repo, sourceRepo string, body map[string]any) ops.GitPullRequest {
 	number := intValue(body["number"])
 	repoName := owner + "/" + repo
+	htmlURL := stringValue(body["htmlUrl"])
+	if htmlURL == "" {
+		htmlURL = fmt.Sprintf("https://github.com/%s/pull/%d", repoName, number)
+	}
 	// GitHub's REST list payload does not expose aggregate review decision,
 	// so ReviewDecision intentionally remains empty on the connector path.
+	// Identity comes from the registered base repo, never a fork head.
 	return ops.GitPullRequest{
 		Number:      number,
+		PRKey:       prref.Format(owner, repo, number),
+		NodeID:      stringValue(body["nodeId"]),
+		HeadSHA:     stringValue(body["headSha"]),
 		Title:       stringValue(body["title"]),
-		URL:         fmt.Sprintf("https://github.com/%s/pull/%d", repoName, number),
+		URL:         htmlURL,
 		State:       normalizePullState(stringValue(body["state"]), boolValue(body["merged"])),
 		IsDraft:     boolValue(body["draft"]),
 		HeadRefName: stringValue(body["headRef"]),

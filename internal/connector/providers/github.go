@@ -614,6 +614,8 @@ func nestedString(obj map[string]any, keys ...string) string {
 func pullSummary(pr map[string]any) map[string]any {
 	return map[string]any{
 		"number":      pr["number"],
+		"nodeId":      pr["node_id"],
+		"htmlUrl":     pr["html_url"],
 		"state":       pr["state"],
 		"title":       pr["title"],
 		"draft":       pr["draft"],

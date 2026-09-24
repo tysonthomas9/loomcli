@@ -91,8 +91,56 @@ export function normalizePrUrl(ref?: string | null): string | null {
   }
 }
 
+const PR_KEY_PREFIX = "github:";
+const PR_KEY_SEGMENT = /^[A-Za-z0-9_.-]+$/;
+
+function validPrKeySegment(segment: string): boolean {
+  return segment !== "." && segment !== ".." && PR_KEY_SEGMENT.test(segment);
+}
+
 /**
- * Stable join key for a PR reference: "owner/repo#number".
+ * Canonical PR identity key: "github:<owner>/<repo>#<number>", lowercased,
+ * built from the PR's base (registered) repository. Mirrors Go's
+ * `internal/prref.Format`; returns null for an invalid reference.
+ */
+export function formatPrKey(
+  owner: string,
+  repo: string,
+  number: number,
+): string | null {
+  const o = owner.trim();
+  const r = repo.trim();
+  if (!validPrKeySegment(o) || !validPrKeySegment(r)) return null;
+  if (!Number.isInteger(number) || number <= 0) return null;
+  return `${PR_KEY_PREFIX}${o.toLowerCase()}/${r.toLowerCase()}#${number}`;
+}
+
+/**
+ * Parse a canonical ("github:owner/repo#N") or legacy ("owner/repo#N") PR key
+ * into its lowercased parts. Mirrors Go's `internal/prref.Parse`.
+ */
+export function parsePrKey(
+  key?: string | null,
+): { owner: string; repo: string; number: number } | null {
+  if (!key) return null;
+  let raw = key.trim();
+  if (raw.toLowerCase().startsWith(PR_KEY_PREFIX)) {
+    raw = raw.slice(PR_KEY_PREFIX.length);
+  }
+  const match = /^([^/#]+)\/([^/#]+)#([1-9]\d*)$/.exec(raw);
+  if (!match?.[1] || !match[2] || !match[3]) return null;
+  if (!validPrKeySegment(match[1]) || !validPrKeySegment(match[2])) {
+    return null;
+  }
+  return {
+    owner: match[1].toLowerCase(),
+    repo: match[2].toLowerCase(),
+    number: Number.parseInt(match[3], 10),
+  };
+}
+
+/**
+ * Canonical PR key ("github:owner/repo#number") for a PR web URL.
  * Robust to URL variants that break exact-string matching (http vs https,
  * www host, trailing ".git", sub-paths like /pull/42/files, trailing slash).
  */
@@ -101,14 +149,29 @@ export function prKeyFromRef(ref?: string | null): string | null {
   try {
     const url = new URL(ref);
     if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (host !== "github.com") return null;
     const match = url.pathname.match(
       /^\/([^/]+)\/([^/]+?)(?:\.git)?\/pulls?\/(\d+)(?:\/|$)/i,
     );
     if (!match) return null;
-    return `${match[1]!.toLowerCase()}/${match[2]!.toLowerCase()}#${match[3]!}`;
+    return formatPrKey(match[1]!, match[2]!, Number.parseInt(match[3]!, 10));
   } catch {
     return null;
   }
+}
+
+/**
+ * Canonical key for a listed PR: the server-issued `pr_key` when present,
+ * otherwise derived from its URL (older servers, stub rows).
+ */
+export function pullRequestKey(pr: {
+  pr_key?: string | null;
+  url?: string | null;
+}): string | null {
+  const parsed = parsePrKey(pr.pr_key);
+  if (parsed) return formatPrKey(parsed.owner, parsed.repo, parsed.number);
+  return prKeyFromRef(pr.url);
 }
 
 /**
