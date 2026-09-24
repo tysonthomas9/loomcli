@@ -1732,8 +1732,11 @@ type CreateIssueRequest struct {
 	Owner              *string                     `json:"owner,omitempty"`
 	Parent             *string                     `json:"parent,omitempty"`
 	Priority           int                         `json:"priority"`
-	Status             *CreateIssueRequestStatus   `json:"status,omitempty"`
-	Title              string                      `json:"title"`
+
+	// SourceRepo Source repository for multi-repo workspaces
+	SourceRepo *string                   `json:"source_repo,omitempty"`
+	Status     *CreateIssueRequestStatus `json:"status,omitempty"`
+	Title      string                    `json:"title"`
 }
 
 // CreateIssueRequestIssueType defines model for CreateIssueRequest.IssueType.
