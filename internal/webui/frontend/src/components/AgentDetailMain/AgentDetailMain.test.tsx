@@ -2,26 +2,81 @@
  * @vitest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createAgentStore } from "@/stores/agentStore";
-import type { LoomAgentStatus } from "@/types";
+import type { AgentBrowser, LoomAgentStatus, MutationPayload } from "@/types";
 
 import { AgentDetailMain } from "./AgentDetailMain";
 
 const mocks = vi.hoisted(() => ({
   useAgentStoreInstance: vi.fn(),
+  listBrowsers: vi.fn(),
+  selectBrowser: vi.fn(),
+  subscribers: new Set<{ current: (m: MutationPayload) => void }>(),
 }));
 
-vi.mock("@/hooks", () => ({
-  useAgentStoreInstance: mocks.useAgentStoreInstance,
-}));
+vi.mock("@/hooks", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/hooks/agents/useAgentBrowsers")
+  >("@/hooks/agents/useAgentBrowsers");
+  return {
+    useAgentStoreInstance: mocks.useAgentStoreInstance,
+    useWorkspaceContext: () => ({ workspaceId: "E2E" }),
+    useAgentBrowsers: actual.useAgentBrowsers,
+  };
+});
+
+// Only the browser tab strip is needed from the AgentDetailPanel barrel.
+vi.mock("@/components/AgentDetailPanel", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/components/AgentDetailPanel/BrowserTab")
+  >("@/components/AgentDetailPanel/BrowserTab");
+  return { AgentBrowserTabs: actual.AgentBrowserTabs };
+});
+
+vi.mock("@/hooks/common", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+  return {
+    useEventSubscription: (callback: (m: MutationPayload) => void) => {
+      const ref = React.useRef(callback);
+      ref.current = callback;
+      React.useEffect(() => {
+        mocks.subscribers.add(ref);
+        return () => {
+          mocks.subscribers.delete(ref);
+        };
+      }, []);
+    },
+    useEventContext: () => ({ state: "connected" }),
+  };
+});
+
+vi.mock("@/api/agents/browsers", async () => {
+  const actual = await vi.importActual<typeof import("@/api/agents/browsers")>(
+    "@/api/agents/browsers",
+  );
+  return {
+    BrowserApiError: actual.BrowserApiError,
+    listAgentBrowsers: mocks.listBrowsers,
+    selectAgentBrowser: mocks.selectBrowser,
+    onBrowserOperatorSessionLost: () => () => {},
+  };
+});
 
 vi.mock("@/components/TerminalView", () => ({
   TerminalView: () => <div data-testid="terminal-view" />,
 }));
+
+beforeEach(() => {
+  mocks.listBrowsers.mockReset();
+  mocks.selectBrowser.mockReset();
+  mocks.subscribers.clear();
+  // Default: inventory never settles, so unrelated tests stay synchronous.
+  mocks.listBrowsers.mockReturnValue(new Promise(() => {}));
+});
 
 function completedWorkerAgent(): LoomAgentStatus {
   return {
@@ -266,5 +321,109 @@ describe("AgentDetailMain", () => {
       screen.getByRole("button", { name: "Open logs" }),
     ).toBeInTheDocument();
     expect(screen.queryByTestId("terminal-view")).not.toBeInTheDocument();
+  });
+
+  describe("durable browser tabs", () => {
+    function leadAgent(): LoomAgentStatus {
+      return {
+        name: "lead",
+        branch: "main",
+        status: "idle",
+        ahead: 0,
+        behind: 0,
+        workspace: "E2E",
+        role: "lead",
+        role_kind: "interactive",
+        state: "idle",
+      } as LoomAgentStatus;
+    }
+
+    const research: AgentBrowser = {
+      id: "11111111-1111-4111-8111-111111111111",
+      workspace_key: "E2E",
+      owner_agent_id: "lead",
+      created_by: "lead",
+      name: "Research",
+      desired_state: "running",
+      status: "starting",
+      request_id: "req-1",
+      selected: false,
+      created_at: "2026-09-23T10:00:00Z",
+      updated_at: "2026-09-23T10:00:00Z",
+    };
+
+    it("renders a browser tab strip next to the Terminal for interactive agents", async () => {
+      mocks.listBrowsers.mockResolvedValue([research]);
+      renderWithAgents([leadAgent()], "lead");
+
+      expect(
+        await screen.findByRole("tab", { name: "Research · Starting" }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Terminal" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      expect(screen.getByTestId("terminal-view")).toBeInTheDocument();
+      expect(mocks.listBrowsers).toHaveBeenCalledWith(
+        "E2E",
+        "lead",
+        expect.anything(),
+      );
+    });
+
+    it("adds a browser tab from SSE without reload while Terminal stays active", async () => {
+      mocks.listBrowsers.mockResolvedValueOnce([]);
+      renderWithAgents([leadAgent()], "lead");
+      expect(await screen.findByText("No browsers")).toBeInTheDocument();
+
+      mocks.listBrowsers.mockResolvedValueOnce([research]);
+      act(() => {
+        for (const sub of mocks.subscribers) {
+          sub.current({
+            type: "create",
+            entity_type: "browser",
+            entity_id: "lead",
+            workspace_id: "E2E",
+            timestamp: new Date().toISOString(),
+          });
+        }
+      });
+
+      expect(
+        await screen.findByRole("tab", { name: "Research · Starting" }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Terminal" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      expect(screen.getByTestId("terminal-view")).toBeVisible();
+      expect(screen.queryByTestId("browser-pane")).not.toBeInTheDocument();
+    });
+
+    it("renders no browser tabs and makes no browser calls for worker agents", () => {
+      renderWithAgents([activeWorkerAgent()], activeWorkerAgent().name);
+      expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+      expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+      expect(mocks.listBrowsers).not.toHaveBeenCalled();
+
+      renderWithAgents(
+        [
+          {
+            name: "planner-1",
+            branch: "planner-1",
+            status: "working",
+            ahead: 0,
+            behind: 0,
+            workspace: "E2E",
+            role: "planner",
+            role_kind: "worker",
+            state: "active",
+          } as LoomAgentStatus,
+        ],
+        "planner-1",
+      );
+      expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+      expect(mocks.listBrowsers).not.toHaveBeenCalled();
+    });
   });
 });

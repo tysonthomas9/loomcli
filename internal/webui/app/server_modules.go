@@ -71,6 +71,7 @@ func (app *Server) buildModules() {
 
 	app.buildTerminalModules()
 	app.buildInfraModules()
+	app.buildBrowserModule()
 }
 
 // buildTerminalModules adds terminal and issue-tab modules when their

@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
+	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -74,7 +75,10 @@ type Server struct {
 	initialWorkspaceID string
 
 	// Terminal
-	ptyMgr       *terminal.MultiPTYManager  // main web terminal (per-workspace dispatch)
+	ptyMgr *terminal.MultiPTYManager // main web terminal (per-workspace dispatch)
+
+	// Durable interactive-agent browsers (server_browsers.go).
+	browsers     *modbuilder.BrowserWiring
 	agentTmuxMgr *terminal.AgentTmuxManager // agent-view only; nil if tmux unavailable
 	termAuth     *appstores.TerminalAuth    // one-time token issuer (nil disables auth)
 
@@ -339,6 +343,9 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 	if app.sseTokens != nil {
 		app.sseTokens.Stop()
 	}
+
+	// Stop the local browser operator bridge (revokes operator sessions).
+	app.browsers.Close()
 
 	// Stop terminal managers (close PTYs; detach agent-view tmux attaches)
 	if app.ptyMgr != nil {

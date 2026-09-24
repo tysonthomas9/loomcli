@@ -10,3 +10,5 @@ export { DiffFileRow } from "./DiffFileRow";
 export { DiffFileViewer } from "./DiffFileViewer";
 export { GitActionBar } from "./GitActionBar";
 export { TargetBranchSelector } from "./TargetBranchSelector";
+export { AgentBrowserTabs, BrowserPane, browserStatusView } from "./BrowserTab";
+export type { AgentBrowserTabsProps, BrowserStatusView } from "./BrowserTab";

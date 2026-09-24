@@ -1,3 +1,5 @@
+mod browser_session;
+
 use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
@@ -52,12 +54,14 @@ fn relocation_init_script() -> String {
 pub fn run() {
     tauri::Builder::default()
         .manage(WorkspaceRecoveryState::default())
+        .manage(browser_session::BrowserSessionState::default())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             open_workspace_window,
             pick_folder,
             needs_relocation,
-            take_workspace_recovery_path
+            take_workspace_recovery_path,
+            browser_session::browser_operator_session
         ])
         .menu(build_menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -81,6 +85,17 @@ pub fn run() {
             RunEvent::Ready | RunEvent::Resumed => show_primary_window(app),
             RunEvent::Reopen { .. } => show_primary_window(app),
             RunEvent::Opened { .. } => show_primary_window(app),
+            // Best-effort revoke of every operator bearer this shell issued.
+            // The state is drained, so the second event is a no-op.
+            RunEvent::ExitRequested { .. } | RunEvent::Exit => {
+                browser_session::revoke_all_on_exit(app)
+            }
+            // A closed window's page memory is gone; revoke only its bearers.
+            RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::Destroyed,
+                ..
+            } => browser_session::revoke_webview_on_close(app, &label),
             _ => {}
         });
 }
@@ -402,6 +417,11 @@ fn open_workspace_window_native<R: Runtime>(
     force_new: bool,
 ) -> tauri::Result<()> {
     let url = workspace_entry_url(runtime_url)?;
+    // The launcher only opens a runtime after it reports healthy; its loopback
+    // origin becomes the sole origin allowed to request operator sessions.
+    if is_loopback_runtime_url(&url) {
+        browser_session::trust_runtime_origin(app, &url);
+    }
 
     if !force_new {
         if let Some(window) = app.get_webview_window(PRIMARY_WORKSPACE_WINDOW_LABEL) {

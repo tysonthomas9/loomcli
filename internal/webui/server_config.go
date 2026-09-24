@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/browsers"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -127,6 +128,20 @@ type ServerConfig struct {
 	// allowing the closure to construct a per-workspace fleet-db backend in
 	// cloud mode. Local wirings return the process-global fleet-db backend.
 	IssueBackendFn func(ctx context.Context) backend.IssueBackend
+
+	// Durable interactive-agent browsers. BrowserBackend and BrowserSigner
+	// are both required for any browser route to reach FleetDB; without them
+	// the routes still authenticate and then answer 503.
+	BrowserBackend browsers.Backend
+	BrowserSigner  browsers.Minter
+	// BrowserOperatorSocketPath enables the local desktop operator bridge: a
+	// per-user Unix socket through which the Tauri shell obtains operator
+	// sessions. Empty (or remote auth mode) keeps local operator routes
+	// disabled.
+	BrowserOperatorSocketPath string
+	// BrowserPermissionResolver authorizes remote users for browser operator
+	// routes. nil denies every remote operator request.
+	BrowserPermissionResolver browsers.PermissionResolver
 }
 
 // WorkspaceIDResolverFn resolves a workspace name to its stable UUID.

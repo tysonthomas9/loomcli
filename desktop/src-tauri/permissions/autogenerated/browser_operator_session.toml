@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-browser-operator-session"
+description = "Enables the browser_operator_session command without any pre-configured scope."
+commands.allow = ["browser_operator_session"]
+
+[[permission]]
+identifier = "deny-browser-operator-session"
+description = "Denies the browser_operator_session command without any pre-configured scope."
+commands.deny = ["browser_operator_session"]

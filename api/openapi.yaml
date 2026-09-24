@@ -52,6 +52,8 @@ tags:
     description: Per-agent terminal info and WebSocket
   - name: agent-control
     description: Agent lifecycle (start/stop/restart/yield)
+  - name: agent-browsers
+    description: Durable browser identities owned by interactive agents (FleetDB-backed)
   - name: git
     description: Git operations (status, push, pull, sync, PR, reset)
   - name: pull-requests
@@ -2294,6 +2296,112 @@ paths:
         "401":
           description: Invalid or expired token
 
+  # ── Agent Browsers ──────────────────────────────────────────────────────
+  /api/workspaces/{ws}/agents/{name}/browsers:
+    get:
+      operationId: listAgentBrowsers
+      tags: [agent-browsers]
+      summary: List an interactive agent's durable browsers
+      description: |
+        Workspace operator route. Returns the FleetDB-backed durable browser
+        identities owned by the named interactive agent. Entries carry no
+        runtime or page data; `status` is reported exactly as stored and an
+        unrecognized value must never be treated as ready. In local desktop
+        mode (`/api/config` mode `open`) the caller authenticates with a
+        native-issued `X-Loom-Operator-Session` bearer; in remote mode with the
+        user's `Authorization: Bearer` token.
+      security:
+        - BrowserOperatorSession: []
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Durable browsers owned by the agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrowserList"
+        "401":
+          $ref: "#/components/responses/BrowserUnauthorized"
+        "403":
+          $ref: "#/components/responses/BrowserForbidden"
+        "404":
+          $ref: "#/components/responses/BrowserNotFound"
+        "503":
+          $ref: "#/components/responses/BrowserUnavailable"
+
+  /api/workspaces/{ws}/agents/{name}/browsers/{id}:
+    get:
+      operationId: getAgentBrowser
+      tags: [agent-browsers]
+      summary: Get one durable browser owned by an interactive agent
+      security:
+        - BrowserOperatorSession: []
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+        - $ref: "#/components/parameters/BrowserId"
+      responses:
+        "200":
+          description: Durable browser
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Browser"
+        "400":
+          $ref: "#/components/responses/BrowserInvalid"
+        "401":
+          $ref: "#/components/responses/BrowserUnauthorized"
+        "403":
+          $ref: "#/components/responses/BrowserForbidden"
+        "404":
+          $ref: "#/components/responses/BrowserNotFound"
+        "503":
+          $ref: "#/components/responses/BrowserUnavailable"
+
+  /api/workspaces/{ws}/agents/{name}/browsers/{id}/select:
+    post:
+      operationId: selectAgentBrowser
+      tags: [agent-browsers]
+      summary: Mark one durable browser as the agent's selected browser
+      description: |
+        Durably selects the browser; exactly one browser per owner agent is
+        selected afterwards. The request body is an empty JSON object.
+      security:
+        - BrowserOperatorSession: []
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+        - $ref: "#/components/parameters/BrowserId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          description: The selected browser
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Browser"
+        "400":
+          $ref: "#/components/responses/BrowserInvalid"
+        "401":
+          $ref: "#/components/responses/BrowserUnauthorized"
+        "403":
+          $ref: "#/components/responses/BrowserForbidden"
+        "404":
+          $ref: "#/components/responses/BrowserNotFound"
+        "503":
+          $ref: "#/components/responses/BrowserUnavailable"
+
   # ── Agent Control ───────────────────────────────────────────────────────
   /api/workspaces/{ws}/interactive-prompts:
     get:
@@ -4320,6 +4428,16 @@ paths:
 
 components:
   securitySchemes:
+    BrowserOperatorSession:
+      type: apiKey
+      in: header
+      name: X-Loom-Operator-Session
+      description: |
+        Local desktop operator bearer for the agent-browser routes. Issued only
+        through the Loom Desktop native bridge (`loom local browser-session`),
+        workspace-bound, 20 minute idle / 12 hour absolute lifetime. Never
+        accepted from a URL, query string, or cookie.
+
     BearerAuth:
       type: http
       scheme: bearer
@@ -4377,6 +4495,60 @@ components:
       schema:
         type: string
 
+    BrowserId:
+      name: id
+      in: path
+      required: true
+      description: Immutable durable browser ID (UUID)
+      schema:
+        type: string
+
+  responses:
+    BrowserInvalid:
+      description: |
+        Malformed browser request.
+        Codes: `browser_invalid`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BrowserError"
+
+    BrowserUnauthorized:
+      description: |
+        Missing, expired, or revoked browser principal. Browser clients must clear their inventory and must not treat this as a global sign-out.
+        Codes: `browser_operator_session_required`, `browser_operator_session_expired`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BrowserError"
+
+    BrowserForbidden:
+      description: |
+        Authenticated but not permitted to act on this interactive agent.
+        Codes: `browser_forbidden`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BrowserError"
+
+    BrowserNotFound:
+      description: |
+        Unknown interactive agent or browser.
+        Codes: `browser_agent_not_found`, `browser_not_found`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BrowserError"
+
+    BrowserUnavailable:
+      description: |
+        FleetDB, the delegation signer, or the local operator bridge is unavailable. Never answered with a synthesized browser.
+        Codes: `browser_unavailable`, `browser_operator_bridge_unavailable`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BrowserError"
+
   schemas:
     # ── Response Envelopes ──────────────────────────────────────────────
     ErrorResponse:
@@ -4394,6 +4566,87 @@ components:
           type: boolean
         details:
           type: object
+
+    Browser:
+      type: object
+      description: |
+        Durable identity of one interactive-agent browser as stored in FleetDB.
+        Carries no runtime, CDP, or page data.
+      required:
+        [
+          id,
+          workspace_key,
+          owner_agent_id,
+          created_by,
+          name,
+          desired_state,
+          status,
+          request_id,
+          selected,
+          created_at,
+          updated_at,
+        ]
+      properties:
+        id:
+          type: string
+          description: Immutable durable browser ID (UUID).
+        workspace_key:
+          type: string
+        owner_agent_id:
+          type: string
+        created_by:
+          type: string
+        name:
+          type: string
+        desired_state:
+          type: string
+          description: Always `running` in this slice.
+        status:
+          type: string
+          description: |
+            Observed status as stored (`starting`, `failed`, `ready`, or a
+            future value). Clients must render unknown values explicitly and
+            never as ready.
+        request_id:
+          type: string
+        selected:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    BrowserList:
+      type: object
+      required: [browsers]
+      properties:
+        browsers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Browser"
+
+    BrowserError:
+      type: object
+      required: [error, code]
+      properties:
+        error:
+          type: string
+        code:
+          $ref: "#/components/schemas/BrowserErrorCode"
+
+    BrowserErrorCode:
+      type: string
+      enum:
+        - browser_operator_session_required
+        - browser_operator_session_expired
+        - browser_forbidden
+        - browser_agent_not_found
+        - browser_not_found
+        - browser_unavailable
+        - browser_operator_bridge_unavailable
+        - browser_invalid
 
     MessageResponse:
       type: object

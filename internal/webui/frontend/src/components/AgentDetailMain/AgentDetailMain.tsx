@@ -27,11 +27,12 @@ import {
 import { useStore } from "zustand";
 
 import { LoadingSkeleton } from "@/components";
+import { AgentBrowserTabs } from "@/components/AgentDetailPanel";
 import type {
   TerminalInputRequest,
   TerminalSplitControls,
 } from "@/components/TerminalView";
-import { useAgentStoreInstance } from "@/hooks";
+import { useAgentStoreInstance, useWorkspaceContext } from "@/hooks";
 import { wsUrl } from "@/hooks/api";
 import { type LoomAgentStatus, parseLoomStatus } from "@/types";
 import { isInteractiveAgent, isLeadRole } from "@/utils/agentRole";
@@ -56,6 +57,11 @@ interface AgentDetailMainProps {
   onTerminalSplitControlsChange?: (
     controls: TerminalSplitControls | null,
   ) => void;
+  /**
+   * Whether the editor surface hosting this view is visible. Interactive
+   * agents refetch their durable browser inventory when it becomes active.
+   */
+  isActive?: boolean;
 }
 
 const STATUS_DOT_COLOR: Record<string, string> = {
@@ -75,8 +81,10 @@ export function AgentDetailMain({
   pendingTerminalInput,
   onTerminalInputConsumed,
   onTerminalSplitControlsChange,
+  isActive = true,
 }: AgentDetailMainProps): JSX.Element {
   const agentStore = useAgentStoreInstance();
+  const { workspaceId } = useWorkspaceContext();
   const agents = useStore(agentStore, (s) => s.agents);
 
   const agent = useMemo<LoomAgentStatus | undefined>(
@@ -105,6 +113,48 @@ export function AgentDetailMain({
     agent != null && terminalUnavailable
       ? terminalUnavailableEmptyState(agent)
       : null;
+  // Only interactive agents own durable browsers; workers show no tabs.
+  const showBrowserTabs =
+    agent != null && isInteractiveAgent(agent) && Boolean(workspaceId);
+
+  const body = (
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0,
+        minWidth: 0,
+        display: "flex",
+        flexDirection: "column",
+        position: "relative",
+      }}
+    >
+      {ephemeralWorker ? (
+        <EphemeralWorkerSummary agent={agent} />
+      ) : terminalUnavailable && !shouldResolveLeadTerminal ? (
+        <EmptyState
+          message={terminalEmptyState?.message ?? "Agent is stopped"}
+          detail={
+            terminalEmptyState?.detail ??
+            "This agent does not have a live terminal session. Start the agent before attaching to its PTY."
+          }
+        />
+      ) : (
+        <Suspense fallback={<LoadingSkeleton.Terminal />}>
+          <TerminalView
+            isActive={true}
+            pendingAgentName={pendingAgentName}
+            onAgentNameConsumed={handleAgentNameConsumed}
+            pendingTerminalInput={pendingTerminalInput}
+            onTerminalInputConsumed={onTerminalInputConsumed}
+            hideTabs
+            {...(onTerminalSplitControlsChange != null && {
+              onSplitControlsChange: onTerminalSplitControlsChange,
+            })}
+          />
+        </Suspense>
+      )}
+    </div>
+  );
 
   if (!agentName) {
     return (
@@ -128,42 +178,16 @@ export function AgentDetailMain({
       }}
     >
       <Header agent={agent} agentName={agentName} />
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          minWidth: 0,
-          display: "flex",
-          flexDirection: "column",
-          position: "relative",
-        }}
+      {/* Always the same element tree so the terminal stays mounted when the
+          rail switches between interactive and worker agents. */}
+      <AgentBrowserTabs
+        enabled={showBrowserTabs}
+        workspaceId={workspaceId}
+        agentName={agentName}
+        surfaceActive={isActive}
       >
-        {ephemeralWorker ? (
-          <EphemeralWorkerSummary agent={agent} />
-        ) : terminalUnavailable && !shouldResolveLeadTerminal ? (
-          <EmptyState
-            message={terminalEmptyState?.message ?? "Agent is stopped"}
-            detail={
-              terminalEmptyState?.detail ??
-              "This agent does not have a live terminal session. Start the agent before attaching to its PTY."
-            }
-          />
-        ) : (
-          <Suspense fallback={<LoadingSkeleton.Terminal />}>
-            <TerminalView
-              isActive={true}
-              pendingAgentName={pendingAgentName}
-              onAgentNameConsumed={handleAgentNameConsumed}
-              pendingTerminalInput={pendingTerminalInput}
-              onTerminalInputConsumed={onTerminalInputConsumed}
-              hideTabs
-              {...(onTerminalSplitControlsChange != null && {
-                onSplitControlsChange: onTerminalSplitControlsChange,
-              })}
-            />
-          </Suspense>
-        )}
-      </div>
+        {body}
+      </AgentBrowserTabs>
     </div>
   );
 }
