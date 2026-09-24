@@ -123,24 +123,26 @@ func (l StackLineageLookup) BaseRefForTask(ctx context.Context, workspaceKey, re
 	return base, true, nil
 }
 
-// DefaultStackLineageLookup returns a lineage lookup backed by the per-user loom
-// stack store, or nil when the loom directory cannot be resolved.
-func DefaultStackLineageLookup() TaskLineageLookup {
-	store, err := stackstore.Default()
-	if err != nil {
+// DefaultStackLineageLookup returns a lineage lookup backed by the canonical
+// stack store for loomStore (FleetDB when loomStore reaches it; see
+// stackstore.ForStore), or nil when no stack store can be opened.
+func DefaultStackLineageLookup(loomStore store.Store) TaskLineageLookup {
+	stacks := DefaultStackStore(loomStore)
+	if stacks == nil {
 		return nil
 	}
-	return StackLineageLookup{Store: store}
+	return StackLineageLookup{Store: stacks}
 }
 
-// DefaultStackStore returns the per-user loom stack store, or nil when the loom
-// directory cannot be resolved.
-func DefaultStackStore() stackstore.Store {
-	store, err := stackstore.Default()
+// DefaultStackStore returns the canonical stack store for loomStore (FleetDB
+// when loomStore reaches it; see stackstore.ForStore), or nil when no stack
+// store can be opened.
+func DefaultStackStore(loomStore store.Store) stackstore.Store {
+	stacks, err := stackstore.ForStore(loomStore)
 	if err != nil {
 		return nil
 	}
-	return store
+	return stacks
 }
 
 // findTaskStack locates the single stack scoped to repoName that contains taskID.
