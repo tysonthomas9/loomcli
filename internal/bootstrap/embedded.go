@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/browserauth"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
@@ -381,6 +382,7 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 		"FLEET_REDIS_ADDR="+redisAddr,
 	)
 	cmd.Env = appendEmbeddedFleetDBEnvDefaults(cmd.Env)
+	cmd.Env = appendBrowserDelegationVerifierEnv(cmd.Env, dataDir, logger)
 	// Propagate the active trace context to the spawned fleet-db so its
 	// bootstrap work shows up as a child of the loom span that triggered
 	// the spawn. Per-request tracing flows through the inbound HTTP header
@@ -597,6 +599,25 @@ func appendEmbeddedFleetDBEnvDefaults(env []string) []string {
 	env = withDefaultEnv(env, EnvFleetRedisPoolSize, defaultEmbeddedFleetRedisPoolSize)
 	env = withDefaultEnv(env, EnvFleetRedisMinIdleConns, defaultEmbeddedFleetRedisMinIdleConns)
 	return env
+}
+
+// appendBrowserDelegationVerifierEnv configures the embedded fleet-db to
+// verify browser delegations signed with this data dir's local key (the same
+// key `loom serve` signs with). An explicit FLEET_BROWSER_DELEGATION_PUBLIC_KEYS
+// in the environment wins. If the key cannot be loaded, fleet-db starts with
+// browser routes unconfigured (they answer 503) rather than accepting anything.
+func appendBrowserDelegationVerifierEnv(env []string, dataDir string, logger *slog.Logger) []string {
+	for _, kv := range env {
+		if strings.HasPrefix(kv, browserauth.EnvFleetPublicKeys+"=") && strings.TrimSpace(strings.TrimPrefix(kv, browserauth.EnvFleetPublicKeys+"=")) != "" {
+			return env
+		}
+	}
+	kp, err := browserauth.LoadOrCreateLocalKey(dataDir)
+	if err != nil {
+		logger.Warn("embedded fleet-db: browser delegation key unavailable; durable browser routes stay disabled", "err", err)
+		return env
+	}
+	return append(env, kp.FleetVerifierEnv()...)
 }
 
 func withDefaultEnv(env []string, key, value string) []string {

@@ -387,6 +387,66 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the browser_operator_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-browser-operator-session",
+          "markdownDescription": "Enables the browser_operator_session command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the needs_relocation command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-needs-relocation",
+          "markdownDescription": "Enables the needs_relocation command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_workspace_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-workspace-window",
+          "markdownDescription": "Enables the open_workspace_window command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the pick_folder command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pick-folder",
+          "markdownDescription": "Enables the pick_folder command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the take_workspace_recovery_path command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-take-workspace-recovery-path",
+          "markdownDescription": "Enables the take_workspace_recovery_path command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the browser_operator_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-browser-operator-session",
+          "markdownDescription": "Denies the browser_operator_session command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the needs_relocation command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-needs-relocation",
+          "markdownDescription": "Denies the needs_relocation command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_workspace_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-workspace-window",
+          "markdownDescription": "Denies the open_workspace_window command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pick_folder command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pick-folder",
+          "markdownDescription": "Denies the pick_folder command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the take_workspace_recovery_path command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-take-workspace-recovery-path",
+          "markdownDescription": "Denies the take_workspace_recovery_path command without any pre-configured scope."
+        },
+        {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
           "type": "string",
           "const": "core:default",

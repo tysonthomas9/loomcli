@@ -34,6 +34,19 @@ type StoreHandle struct {
 
 	// embedded is the embedded fleet-db handle, set only in ModeLocal.
 	embedded *EmbeddedFleetDB
+
+	// client is the raw fleet-db client behind Store. Store may be wrapped
+	// (tracing), so browser wiring reaches the HTTP-only browser API here.
+	client *fleetdb.Client
+}
+
+// Browsers returns the fleet-db browser API client, or nil when the handle
+// has no fleet-db client.
+func (h *StoreHandle) Browsers() *fleetdb.BrowserClient {
+	if h == nil || h.client == nil {
+		return nil
+	}
+	return h.client.Browsers()
 }
 
 // Mode reports the deployment mode chosen at OpenStore time.
@@ -116,7 +129,7 @@ func openCloudStore(cfg fleetdb.Config, logger *slog.Logger) (*StoreHandle, erro
 		return nil, fmt.Errorf("openstore: cloud: %w", err)
 	}
 	logger.Info("opened cloud fleet-db client", "url", cfg.BaseURL)
-	return &StoreHandle{Store: client, mode: ModeCloud, url: cfg.BaseURL}, nil
+	return &StoreHandle{Store: client, client: client, mode: ModeCloud, url: cfg.BaseURL}, nil
 }
 
 func openLocalStore(ctx context.Context, dataDir string, cfg fleetdb.Config, logger *slog.Logger) (*StoreHandle, error) {
@@ -139,7 +152,7 @@ func openLocalStore(ctx context.Context, dataDir string, cfg fleetdb.Config, log
 		return nil, fmt.Errorf("openstore: local client: %w", err)
 	}
 	logger.Info("opened embedded fleet-db client", "url", cfg.BaseURL)
-	return &StoreHandle{Store: client, mode: ModeLocal, url: cfg.BaseURL, embedded: emb}, nil
+	return &StoreHandle{Store: client, client: client, mode: ModeLocal, url: cfg.BaseURL, embedded: emb}, nil
 }
 
 func tryReuseLocalStore(ctx context.Context, fleetDir string, cfg fleetdb.Config, logger *slog.Logger) (*StoreHandle, bool, error) {
@@ -156,7 +169,7 @@ func tryReuseLocalStore(ctx context.Context, fleetDir string, cfg fleetdb.Config
 		return nil, true, fmt.Errorf("openstore: local reused client: %w", err)
 	}
 	logger.Info("opened existing embedded fleet-db client", "url", cfg.BaseURL)
-	return &StoreHandle{Store: client, mode: ModeLocal, url: cfg.BaseURL}, true, nil
+	return &StoreHandle{Store: client, client: client, mode: ModeLocal, url: cfg.BaseURL}, true, nil
 }
 
 func waitAndOpenLocalStore(ctx context.Context, fleetDir string, cfg fleetdb.Config, logger *slog.Logger, lockErr error) (*StoreHandle, error) {
@@ -170,7 +183,7 @@ func waitAndOpenLocalStore(ctx context.Context, fleetDir string, cfg fleetdb.Con
 		return nil, fmt.Errorf("openstore: local waited client: %w", err)
 	}
 	logger.Info("opened existing embedded fleet-db client after startup wait", "url", cfg.BaseURL)
-	return &StoreHandle{Store: client, mode: ModeLocal, url: cfg.BaseURL}, nil
+	return &StoreHandle{Store: client, client: client, mode: ModeLocal, url: cfg.BaseURL}, nil
 }
 
 // resolveActor returns the X-Actor identity.

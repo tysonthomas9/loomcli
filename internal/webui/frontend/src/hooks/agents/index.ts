@@ -44,3 +44,11 @@ export type {
   ClaimHoldRunningAgent,
   UseClaimHoldReturn,
 } from "./useClaimHold";
+
+export { useAgentBrowsers } from "./useAgentBrowsers";
+export type {
+  AgentBrowsersError,
+  AgentBrowsersPhase,
+  UseAgentBrowsersOptions,
+  UseAgentBrowsersReturn,
+} from "./useAgentBrowsers";

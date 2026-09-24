@@ -15,10 +15,12 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
+	"github.com/tysonthomas9/loomcli/internal/browserauth"
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/browsers"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -74,9 +76,14 @@ type Server struct {
 	initialWorkspaceID string
 
 	// Terminal
-	ptyMgr       *terminal.MultiPTYManager  // main web terminal (per-workspace dispatch)
-	agentTmuxMgr *terminal.AgentTmuxManager // agent-view only; nil if tmux unavailable
-	termAuth     *appstores.TerminalAuth    // one-time token issuer (nil disables auth)
+	ptyMgr *terminal.MultiPTYManager // main web terminal (per-workspace dispatch)
+
+	// Durable interactive-agent browsers (server_browsers.go).
+	agentBrowserSessions  *browserauth.AgentSessionRegistry
+	browserOperatorSocket *browserauth.OperatorSocketServer
+	browserModule         *browsers.Module
+	agentTmuxMgr          *terminal.AgentTmuxManager // agent-view only; nil if tmux unavailable
+	termAuth              *appstores.TerminalAuth    // one-time token issuer (nil disables auth)
 
 	// SSE token exchange (external auth mode only)
 	sseTokens *appstores.TokenStore // nil if ExtAuthURL is empty
@@ -339,6 +346,9 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 	if app.sseTokens != nil {
 		app.sseTokens.Stop()
 	}
+
+	// Stop the local browser operator bridge (revokes operator sessions).
+	app.closeBrowserBridge()
 
 	// Stop terminal managers (close PTYs; detach agent-view tmux attaches)
 	if app.ptyMgr != nil {

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/browserauth"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
@@ -443,6 +444,10 @@ func localEnv(dataDir string, port int) []string {
 		"LOOM_WORKSPACE=",
 		"LOOM_FLEET_DB_URL=",
 		"LOOM_FLEET_URL=",
+		// The serve child hosts the local browser operator bridge.
+		browserauth.EnvOperatorSocket+"="+browserauth.OperatorSocketPath(dataDir),
+		// Never let an inherited agent credential reach the runtime.
+		browserauth.EnvAgentSessionToken+"=",
 	)
 	if exe, err := os.Executable(); err == nil {
 		exeDir := filepath.Dir(exe)

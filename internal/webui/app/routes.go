@@ -53,6 +53,8 @@ func (app *Server) registerCoreAPIRoutes(h *handlermux.Handlers) {
 	if h.GetBackendsHealth != nil {
 		app.mux.HandleFunc("GET /api/backends", h.GetBackendsHealth)
 	}
+	// Agent-session browser routes authenticate in their own handlers.
+	app.browserModule.RegisterAgentRoutes(app.mux)
 }
 
 // registerDaemonRoutes registers daemon supervisor and config endpoints.

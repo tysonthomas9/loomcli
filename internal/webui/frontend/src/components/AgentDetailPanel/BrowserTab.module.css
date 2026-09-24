@@ -1,0 +1,182 @@
+/* Interactive-agent surface tabs: [Terminal][durable browsers…] */
+
+.surface {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tabStrip {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--color-border, #ddd);
+  background: var(--color-panel-bg, var(--color-bg, #fdfcf8));
+  flex-shrink: 0;
+  overflow-x: auto;
+  min-height: 34px;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 5px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary, #555);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tab:hover {
+  color: var(--color-text-primary, #222);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--color-primary, #4477aa);
+  outline-offset: -2px;
+}
+
+.tabActive {
+  color: var(--color-text-primary, #222);
+  border-bottom-color: var(--color-text-primary, #222);
+}
+
+.tabSeparator {
+  color: var(--color-text-muted, #888);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid currentColor;
+}
+
+.badgeStarting {
+  color: var(--color-status-working, #a36f00);
+}
+
+.badgeFailed {
+  color: var(--color-status-error, #d14545);
+}
+
+.badgeUnknown {
+  color: var(--color-text-muted, #777);
+  border-style: dashed;
+}
+
+.notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--color-text-muted, #777);
+  white-space: nowrap;
+}
+
+.noticeError {
+  color: var(--color-status-error, #d14545);
+}
+
+.retry {
+  padding: 1px 8px;
+  border: 1px solid var(--color-border, #ddd);
+  border-radius: 4px;
+  background: var(--color-bg, #fdfcf8);
+  color: var(--color-text-primary, #333);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* The browser pane overlays the terminal so the PTY stays mounted and sized. */
+.pane {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 24px;
+  background: var(--color-bg, #fdfcf8);
+  color: var(--color-text-primary, #333);
+}
+
+.card {
+  width: min(560px, 100%);
+  border: 1px solid var(--color-border, #ddd);
+  border-radius: 6px;
+  background: var(--color-bg-card, #fff);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--color-text-muted, #666);
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 12px;
+  font-size: 12px;
+  margin: 0;
+}
+
+.fields dt {
+  color: var(--color-text-muted, #666);
+}
+
+.fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mono {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-secondary, #555);
+}

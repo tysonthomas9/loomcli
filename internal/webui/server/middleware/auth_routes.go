@@ -73,6 +73,8 @@ func isPublicRoute(method, path string) bool {
 //     fenced heartbeat) plus an optional shared bearer token
 //   - /api/task-run/: per-task-run lease-token bearer auth verified through
 //     the store's fenced task-run checks (taskrunapi)
+//   - /api/agent/browsers: Loom agent-session bearer (X-Loom-Agent-Session)
+//     bound at interactive-agent PTY spawn (handlers/browsers)
 //   - /api/auth/: proxied to the BetterAuth service, which handles its own
 //     auth; must bypass the GET-only gate because sign-in/sign-up use POST
 func hasOwnAuthPrefix(normalizedPath string) bool {
@@ -87,6 +89,11 @@ func hasOwnAuthPrefix(normalizedPath string) bool {
 		if strings.HasPrefix(normalizedPath, prefix) {
 			return true
 		}
+	}
+	// Agent-session browser routes verify the Loom-issued agent-session
+	// bearer in their handlers (handlers/browsers).
+	if normalizedPath == "/api/agent/browsers" || strings.HasPrefix(normalizedPath, "/api/agent/browsers/") {
+		return true
 	}
 	return false
 }
