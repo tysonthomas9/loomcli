@@ -160,15 +160,33 @@ func (m *Module) writeStandalonePRList(
 	prs []ops.GitPullRequest, warnings []string, continuation *standaloneContinuation,
 ) {
 	m.observeListedPullRequests(ws, prs)
-	grouped, groupWarnings, _ := m.loadActiveGroupedPRKeys(r, ws)
+	grouped, groupWarnings, membershipIncomplete := m.loadActiveGroupedPRKeys(r, ws)
 	warnings = append(warnings, groupWarnings...)
 	out := pullRequestsData{
 		PullRequests:           filterStandalonePullRequests(prs, grouped),
 		Warnings:               warnings,
 		StandaloneContinuation: continuation,
 	}
+	if membershipIncomplete {
+		// Partial membership must not be advertised as a confirmed standalone set.
+		markStandaloneContinuationIncomplete(&out)
+	}
 	m.attachDeliveryGroupsPage(r, ws, &out)
 	writeJSON(w, out)
+}
+
+// markStandaloneContinuationIncomplete forces complete=false while preserving
+// any connector continuation repos/has_more already attached to the response.
+func markStandaloneContinuationIncomplete(out *pullRequestsData) {
+	if out == nil {
+		return
+	}
+	if out.StandaloneContinuation == nil {
+		out.StandaloneContinuation = &standaloneContinuation{
+			Repos: []standaloneRepoContinuation{},
+		}
+	}
+	out.StandaloneContinuation.Complete = false
 }
 
 // connectorListPullRequests lists PRs for every connector-eligible workspace
@@ -419,7 +437,7 @@ func (m *Module) ghListFallback(w http.ResponseWriter, r *http.Request, ws, stat
 		m.observeListedPullRequests(ws, prs)
 	}
 
-	grouped, groupWarnings, membershipTruncated := m.loadActiveGroupedPRKeys(r, ws)
+	grouped, groupWarnings, membershipIncomplete := m.loadActiveGroupedPRKeys(r, ws)
 	warnings = append(warnings, groupWarnings...)
 	standalone := filterStandalonePullRequests(prs, grouped)
 
@@ -427,7 +445,7 @@ func (m *Module) ghListFallback(w http.ResponseWriter, r *http.Request, ws, stat
 		PullRequests: standalone,
 		Warnings:     warnings,
 	}
-	if !ghOK || membershipTruncated {
+	if !ghOK || membershipIncomplete {
 		// Honest: without complete local discovery / membership index we cannot
 		// claim a complete standalone set.
 		out.StandaloneContinuation = &standaloneContinuation{

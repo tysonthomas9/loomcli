@@ -498,8 +498,10 @@ func writeDeliveryGroupConflict(w http.ResponseWriter, conflict *domain.Delivery
 	writePRReviewErrorDetails(w, http.StatusConflict, conflict.Code, conflict.Error(), conflict.Retryable, details)
 }
 
-// groupedPRKeys collects active-group membership so list responses can mark
-// standalone discovered PRs (present in GitHub, not in any active group).
+// loadActiveGroupedPRKeys collects active-group membership so list responses
+// can mark standalone discovered PRs (present in GitHub, not in any active
+// group). The bool is true when membership is incomplete/unverified: bounded
+// page walk truncation, has_more without next_cursor, or a datastore error.
 func (m *Module) loadActiveGroupedPRKeys(r *http.Request, ws string) (map[string]string, []string, bool) {
 	grouped := map[string]string{}
 	if m == nil || m.deliveryGroups == nil {
@@ -522,7 +524,7 @@ func (m *Module) loadActiveGroupedPRKeys(r *http.Request, ws string) (map[string
 		})
 		if err != nil {
 			warnings = append(warnings, "delivery groups unavailable: "+sanitizeWarning(err))
-			return grouped, warnings, false
+			return grouped, warnings, true
 		}
 		for _, g := range page.Groups {
 			if g == nil || g.Inconsistent {

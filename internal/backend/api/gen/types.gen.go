@@ -3360,7 +3360,7 @@ type StaleDetectorStatus struct {
 
 // StandalonePRContinuation defines model for StandalonePRContinuation.
 type StandalonePRContinuation struct {
-	// Complete False when truncated, partial, or errored; never infer completeness from missing rows
+	// Complete False when connector discovery is truncated/partial/errored, or when active-group membership indexing is truncated or unavailable; never infer confirmed standalone membership from missing rows or complete=true alone when membership was unverified.
 	Complete bool `json:"complete"`
 
 	// HasMore True when any repo has more GitHub pages beyond this response

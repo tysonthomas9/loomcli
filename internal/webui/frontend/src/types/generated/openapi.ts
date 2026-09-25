@@ -1463,7 +1463,7 @@ export interface paths {
     };
     /**
      * List pull requests across the workspace's registered repositories
-     * @description Lists GitHub pull requests for every registered repository, including PRs created outside Loom. Served by the GitHub connector when a token is configured and by the gh CLI otherwise. Per-repo failures are reported in warnings rather than failing the whole list. Active delivery-group members are omitted from `pull_requests` (standalone only) and surfaced under `delivery_groups` with honest `delivery_groups_has_more` pagination. Connector discovery is bounded to five 100-item pages per repo; `standalone_continuation` reports whether more pages exist and how to continue via `standalone_repo` / `standalone_page`. Absence of a row in a truncated page must not be treated as a complete standalone set. Connector-unavailable, merged, and missing-repo fallbacks preserve Loom delivery groups with explicit upstream/partial/stale warnings and filter local PRs against active group membership; local gh failure returns 502 only when no delivery groups backend is available. Bounded `delivery_groups_*` cursor pages require FleetDB delivery-group pagination (PR #367 @ 502b365f) deployed alongside this facade — do not claim complete group pages against FleetDB #365 alone.
+     * @description Lists GitHub pull requests for every registered repository, including PRs created outside Loom. Served by the GitHub connector when a token is configured and by the gh CLI otherwise. Per-repo failures are reported in warnings rather than failing the whole list. Active delivery-group members are omitted from `pull_requests` (standalone only) and surfaced under `delivery_groups` with honest `delivery_groups_has_more` pagination. Connector discovery is bounded to five 100-item pages per repo; `standalone_continuation` reports whether more pages exist and how to continue via `standalone_repo` / `standalone_page`. Absence of a row in a truncated page must not be treated as a complete standalone set. When active-group membership indexing is truncated or unavailable, `standalone_continuation.complete` is false even if connector discovery finished — partial membership must not be treated as confirmed standalone. Connector-unavailable, merged, and missing-repo fallbacks preserve Loom delivery groups with explicit upstream/partial/stale warnings and filter local PRs against active group membership; local gh failure returns 502 only when no delivery groups backend is available. Bounded `delivery_groups_*` cursor pages require FleetDB delivery-group pagination (PR #367 @ 502b365f) deployed alongside this facade — do not claim complete group pages against FleetDB #365 alone.
      */
     get: operations["listPullRequests"];
     put?: never;
@@ -2745,7 +2745,7 @@ export interface components {
       repos: components["schemas"]["StandaloneRepoContinuation"][];
       /** @description True when any repo has more GitHub pages beyond this response */
       has_more: boolean;
-      /** @description False when truncated, partial, or errored; never infer completeness from missing rows */
+      /** @description False when connector discovery is truncated/partial/errored, or when active-group membership indexing is truncated or unavailable; never infer confirmed standalone membership from missing rows or complete=true alone when membership was unverified. */
       complete: boolean;
     };
     StandaloneRepoContinuation: {

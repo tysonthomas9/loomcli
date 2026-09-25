@@ -27,7 +27,10 @@ type fakeDeliveryGroups struct {
 	byPR    map[string]string
 	ops     map[string]*store.DeliveryGroupWriteResult
 	listErr error
-	writes  []string
+	// forceHasMoreNoCursor makes List report has_more with an empty next_cursor
+	// so membership indexing returns incomplete (truncated / unverified).
+	forceHasMoreNoCursor bool
+	writes               []string
 }
 
 func newFakeDeliveryGroups() *fakeDeliveryGroups {
@@ -78,7 +81,12 @@ func (f *fakeDeliveryGroups) List(ctx context.Context, ws string, opts store.Del
 	if hasMore {
 		out = out[:limit]
 	}
-	return &store.DeliveryGroupPage{Groups: out, Count: len(out), HasMore: hasMore}, nil
+	page := &store.DeliveryGroupPage{Groups: out, Count: len(out), HasMore: hasMore}
+	if f.forceHasMoreNoCursor {
+		page.HasMore = true
+		page.NextCursor = ""
+	}
+	return page, nil
 }
 
 func (f *fakeDeliveryGroups) Get(ctx context.Context, ws, groupID string) (*domain.DeliveryGroup, error) {
@@ -738,6 +746,86 @@ func TestDeliveryGroupHTTPStandaloneContinuation(t *testing.T) {
 	data = decodePullRequestsResponse(t, raw)
 	if len(data.PullRequests) != 2 || data.PullRequests[0].Number != 501 {
 		t.Fatalf("continued=%+v", data.PullRequests)
+	}
+}
+
+func TestConnectorListMembershipTruncatedMarksContinuationIncomplete(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	fake := newFakeDeliveryGroups()
+	fake.forceHasMoreNoCursor = true
+	h.module.SetDeliveryGroups(fake)
+	fake.put(&domain.DeliveryGroup{
+		WorkspaceKey: "WS", ID: "dg_01JABCDEFGHJKMNPQRSTVWXYZ0", Title: "g",
+		State: domain.DeliveryGroupActive, Revision: 1,
+		Members: []domain.DeliveryGroupMember{{
+			PRKey: "github:octocat/hello#7", RepoName: "hello", PRNumber: 7,
+			Source: domain.DeliveryGroupMemberManual, AddedAt: time.Now().UTC(),
+		}},
+		LastOpID: "old", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	})
+	h.github.setListPayload("octocat", "hello", []map[string]any{
+		{"number": 7, "state": "open", "title": "Grouped", "htmlUrl": "https://github.com/octocat/hello/pull/7",
+			"head": map[string]any{"sha": "h1", "ref": "a"}, "base": map[string]any{"sha": "b1", "ref": "main"}},
+		{"number": 8, "state": "open", "title": "Maybe standalone", "htmlUrl": "https://github.com/octocat/hello/pull/8",
+			"head": map[string]any{"sha": "h2", "ref": "b"}, "base": map[string]any{"sha": "b1", "ref": "main"}},
+	})
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK {
+		t.Fatalf("status=%d body=%s", status, raw)
+	}
+	data := decodePullRequestsResponse(t, raw)
+	if data.StandaloneContinuation == nil || data.StandaloneContinuation.Complete {
+		t.Fatalf("standalone_continuation=%+v, want complete=false when membership index is truncated", data.StandaloneContinuation)
+	}
+	foundWarn := false
+	for _, w := range data.Warnings {
+		if strings.Contains(w, "has_more without next_cursor") || strings.Contains(w, "membership index truncated") {
+			foundWarn = true
+			break
+		}
+	}
+	if !foundWarn {
+		t.Fatalf("warnings=%v, want truncated/incomplete membership notice", data.Warnings)
+	}
+	if len(data.PullRequests) != 1 || data.PullRequests[0].Number != 8 {
+		t.Fatalf("standalone=%+v, want filtered #8 with partial membership preserved", data.PullRequests)
+	}
+	if len(data.DeliveryGroups) != 1 {
+		t.Fatalf("delivery_groups=%+v, want durable group preserved", data.DeliveryGroups)
+	}
+}
+
+func TestConnectorListMembershipUnavailableMarksContinuationIncomplete(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	fake := newFakeDeliveryGroups()
+	fake.listErr = fmt.Errorf("fleet-db membership query failed")
+	h.module.SetDeliveryGroups(fake)
+	h.github.setListPayload("octocat", "hello", []map[string]any{
+		{"number": 7, "state": "open", "title": "Unknown membership", "htmlUrl": "https://github.com/octocat/hello/pull/7",
+			"head": map[string]any{"sha": "h1", "ref": "a"}, "base": map[string]any{"sha": "b1", "ref": "main"}},
+	})
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK {
+		t.Fatalf("status=%d body=%s", status, raw)
+	}
+	data := decodePullRequestsResponse(t, raw)
+	if data.StandaloneContinuation == nil || data.StandaloneContinuation.Complete {
+		t.Fatalf("standalone_continuation=%+v, want complete=false when membership is unverified", data.StandaloneContinuation)
+	}
+	foundWarn := false
+	for _, w := range data.Warnings {
+		if strings.Contains(w, "delivery groups unavailable") {
+			foundWarn = true
+			break
+		}
+	}
+	if !foundWarn {
+		t.Fatalf("warnings=%v, want delivery groups unavailable", data.Warnings)
+	}
+	if len(data.PullRequests) != 1 || data.PullRequests[0].Number != 7 {
+		t.Fatalf("pull_requests=%+v, want unknown-membership rows still returned", data.PullRequests)
 	}
 }
 
