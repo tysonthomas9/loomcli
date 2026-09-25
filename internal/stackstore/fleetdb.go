@@ -256,7 +256,10 @@ func (s *FleetDBStore) reconcileMoveOutcome(ctx context.Context, ws string, id s
 				lastErr = err
 				continue
 			}
-			return mapFleetErr(err)
+			// The Move may already be journaled, so a failed confirmation read
+			// leaves the outcome unknown; never report it as a plain read error.
+			return fmt.Errorf("stackstore: move %s after %s: %w: confirmation read failed after accepted write; re-read before retrying: %w",
+				taskID, afterTaskID, ErrUnknownWriteOutcome, mapFleetErr(err))
 		}
 		baseOK := false
 		for _, n := range st.Nodes {
