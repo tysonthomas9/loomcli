@@ -3,13 +3,23 @@
  */
 
 import "@testing-library/jest-dom";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import { MemoryRouter } from "react-router-dom";
 
 import type { GitPullRequest } from "@/api/workspace/pullRequests";
-import type { DeliveryGroupView } from "@/api/workspace/deliveryGroups";
+import {
+  getDeliveryGroup,
+  type DeliveryGroupView,
+} from "@/api/workspace/deliveryGroups";
+import { ApiError } from "@/api/common";
 import { StackedPRWorkspace } from "../StackedPRWorkspace";
 
 vi.mock("@/hooks/workspace/useWorkspaceContext", () => ({
@@ -58,6 +68,18 @@ vi.mock("@/hooks/api", () => ({
     repo_errors: [],
   }),
 }));
+
+vi.mock("@/api/workspace/deliveryGroups", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/api/workspace/deliveryGroups")
+  >("@/api/workspace/deliveryGroups");
+  return {
+    ...actual,
+    getDeliveryGroup: vi.fn(),
+  };
+});
+
+const getDeliveryGroupMock = vi.mocked(getDeliveryGroup);
 
 function pr(
   n: number,
@@ -185,6 +207,7 @@ function renderWorkspace(
 describe("StackedPRWorkspace", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getDeliveryGroupMock.mockReset();
   });
 
   it("renders delivery groups and standalone sections", () => {
@@ -340,6 +363,323 @@ describe("StackedPRWorkspace", () => {
       /GitHub identity unavailable/i,
     );
     // Display name must not silently match author PRs.
+    expect(
+      screen.queryByTestId("pr-row-acme/loomcli#3"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("selects the deep-linked group member from ?group=&pr=", () => {
+    renderWorkspace({
+      initialFocus: { groupId: "dg_test1", prKey: "github:acme/loomcli#2" },
+    });
+    expect(screen.getByTestId("pr-row-acme/loomcli#2")).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(screen.getByTestId("pr-row-acme/fleet-db#1")).not.toHaveAttribute(
+      "aria-current",
+    );
+    expect(getDeliveryGroupMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps focus pending when standalone rows arrive before the named group", async () => {
+    let resolveGroup!: (value: { group: DeliveryGroupView }) => void;
+    getDeliveryGroupMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveGroup = resolve;
+      }),
+    );
+
+    renderWorkspace({
+      deliveryGroups: [],
+      pullRequests: [pr(3)],
+      loading: false,
+      initialFocus: { groupId: "dg_late", prKey: "github:acme/loomcli#2" },
+    });
+
+    expect(screen.getByTestId("pr-row-acme/loomcli#3")).toBeInTheDocument();
+    expect(screen.getByTestId("pr-row-acme/loomcli#3")).not.toHaveAttribute(
+      "aria-current",
+    );
+    expect(
+      screen.queryByTestId("deep-link-focus-error"),
+    ).not.toBeInTheDocument();
+
+    resolveGroup({ group: { ...group(), id: "dg_late" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("Cross-repo delivery")).toBeInTheDocument();
+      expect(screen.getByTestId("pr-row-acme/loomcli#2")).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+    });
+    expect(screen.getByTestId("pr-row-acme/loomcli#3")).not.toHaveAttribute(
+      "aria-current",
+    );
+    expect(getDeliveryGroupMock).toHaveBeenCalledWith("STACKED-PRS", "dg_late");
+  });
+
+  it("resolves a named group beyond the first page via getDeliveryGroup", async () => {
+    const beyond = {
+      ...group(),
+      id: "dg_page2",
+      title: "Beyond first page",
+    };
+    getDeliveryGroupMock.mockResolvedValue({ group: beyond });
+
+    renderWorkspace({
+      deliveryGroups: [],
+      pullRequests: [pr(3)],
+      deliveryGroupsHasMore: true,
+      loading: false,
+      initialFocus: {
+        groupId: "dg_page2",
+        prKey: "github:acme/loomcli#2",
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Beyond first page")).toBeInTheDocument();
+      expect(screen.getByTestId("pr-row-acme/loomcli#2")).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+    });
+    expect(screen.getByTestId("pr-row-acme/loomcli#3")).not.toHaveAttribute(
+      "aria-current",
+    );
+    expect(getDeliveryGroupMock).toHaveBeenCalledWith(
+      "STACKED-PRS",
+      "dg_page2",
+    );
+  });
+
+  it("includes a beyond-page focused group in History", async () => {
+    const beyond = {
+      ...group(),
+      id: "dg_page2",
+      title: "Beyond first page",
+    };
+    getDeliveryGroupMock.mockResolvedValue({ group: beyond });
+
+    renderWorkspace({
+      deliveryGroups: [],
+      pullRequests: [pr(3)],
+      deliveryGroupsHasMore: true,
+      loading: false,
+      initialFocus: {
+        groupId: "dg_page2",
+        prKey: "github:acme/loomcli#2",
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Beyond first page")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^History$/i }));
+    expect(screen.getByTestId("stacked-pr-history")).toHaveTextContent(
+      /Beyond first page/,
+    );
+  });
+
+  it("uses the beyond-page group title for ordered preview", async () => {
+    const beyond = {
+      ...group(),
+      id: "dg_page2",
+      title: "Beyond first page",
+    };
+    getDeliveryGroupMock.mockResolvedValue({ group: beyond });
+
+    renderWorkspace({
+      deliveryGroups: [],
+      pullRequests: [pr(3)],
+      deliveryGroupsHasMore: true,
+      loading: false,
+      initialFocus: {
+        groupId: "dg_page2",
+        prKey: "github:acme/loomcli#2",
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("delivery-group-dg_page2")).toBeInTheDocument();
+    });
+
+    const groupCard = screen.getByTestId("delivery-group-dg_page2");
+    fireEvent.click(
+      within(groupCard).getByRole("button", { name: /^Ordered preview$/i }),
+    );
+    const overlay = await screen.findByTestId("merge-preview-overlay");
+    expect(overlay).toHaveTextContent(/Beyond first page · read-only/);
+  });
+
+  it("lists a beyond-page focused group in add-to-group choices", async () => {
+    const beyond = {
+      ...group(),
+      id: "dg_page2",
+      title: "Beyond first page",
+    };
+    getDeliveryGroupMock.mockResolvedValue({ group: beyond });
+
+    renderWorkspace({
+      deliveryGroups: [],
+      pullRequests: [pr(3)],
+      deliveryGroupsHasMore: true,
+      loading: false,
+      initialFocus: {
+        groupId: "dg_page2",
+        prKey: "github:acme/loomcli#2",
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Beyond first page")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("pr-row-acme/loomcli#3"));
+    const addSelect = await screen.findByRole("combobox", {
+      name: /Add to delivery group/i,
+    });
+    expect(addSelect).toHaveTextContent("Beyond first page");
+    const options = Array.from(addSelect.querySelectorAll("option")).map(
+      (o) => o.textContent,
+    );
+    expect(options.filter((t) => t === "Beyond first page")).toHaveLength(1);
+  });
+
+  it("shows an explicit error when the named group is not found", async () => {
+    getDeliveryGroupMock.mockRejectedValue(
+      new ApiError(404, "Not Found", {
+        code: "not_found",
+        message: "delivery group not found",
+      }),
+    );
+
+    renderWorkspace({
+      deliveryGroups: [],
+      pullRequests: [pr(3)],
+      loading: false,
+      initialFocus: {
+        groupId: "dg_missing",
+        prKey: "github:acme/loomcli#2",
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deep-link-focus-error")).toHaveTextContent(
+        /not found/i,
+      );
+    });
+    expect(screen.getByTestId("pr-row-acme/loomcli#3")).not.toHaveAttribute(
+      "aria-current",
+    );
+  });
+
+  it("dismisses the deep-link focus error when the user chooses another PR row", async () => {
+    getDeliveryGroupMock.mockRejectedValue(
+      new ApiError(404, "Not Found", {
+        code: "not_found",
+        message: "delivery group not found",
+      }),
+    );
+
+    renderWorkspace({
+      deliveryGroups: [],
+      pullRequests: [pr(3)],
+      loading: false,
+      initialFocus: {
+        groupId: "dg_missing",
+        prKey: "github:acme/loomcli#2",
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deep-link-focus-error")).toBeInTheDocument();
+    });
+    // Banner stays while nothing is chosen manually.
+    expect(screen.getByTestId("pr-row-acme/loomcli#3")).not.toHaveAttribute(
+      "aria-current",
+    );
+
+    fireEvent.click(screen.getByTestId("pr-row-acme/loomcli#3"));
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("deep-link-focus-error"),
+      ).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId("pr-row-acme/loomcli#3")).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+  });
+
+  it("dismisses the deep-link focus error on keyboard row navigation", async () => {
+    getDeliveryGroupMock.mockRejectedValue(
+      new ApiError(404, "Not Found", {
+        code: "not_found",
+        message: "delivery group not found",
+      }),
+    );
+
+    renderWorkspace({
+      deliveryGroups: [],
+      pullRequests: [pr(3)],
+      loading: false,
+      initialFocus: {
+        groupId: "dg_missing",
+        prKey: "github:acme/loomcli#2",
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deep-link-focus-error")).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "j" });
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("deep-link-focus-error"),
+      ).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId("pr-row-acme/loomcli#3")).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+  });
+
+  it("shows an explicit error when pr is not a member of the named group", async () => {
+    getDeliveryGroupMock.mockResolvedValue({ group: group() });
+
+    renderWorkspace({
+      deliveryGroups: [],
+      pullRequests: [pr(3)],
+      loading: false,
+      initialFocus: {
+        groupId: "dg_test1",
+        prKey: "github:acme/loomcli#99",
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deep-link-focus-error")).toHaveTextContent(
+        /not a member/i,
+      );
+    });
+    expect(screen.getByTestId("pr-row-acme/loomcli#3")).not.toHaveAttribute(
+      "aria-current",
+    );
+  });
+
+  it("seeds the epic filter from ?epic=", () => {
+    renderWorkspace({ initialFocus: { epicId: "STACKED-PRS-13" } });
+    const epicBox = screen
+      .getAllByRole("checkbox")
+      .find((el) => el.parentElement?.textContent?.includes("STACKED-PRS-13"));
+    expect(epicBox).toBeChecked();
+    expect(screen.getByText("Cross-repo delivery")).toBeInTheDocument();
+    // Standalone PR with no epic is filtered out.
     expect(
       screen.queryByTestId("pr-row-acme/loomcli#3"),
     ).not.toBeInTheDocument();
