@@ -630,6 +630,119 @@ func TestFleetDBMoveNode_MissingNode(t *testing.T) {
 	assert.ErrorIs(t, s.MoveNode(context.Background(), "WS", "epic:E1", "T1", "ghost"), ErrNodeNotFound)
 }
 
+// Fault injection: accepted Move + delayed projection / divergent follow-up -----
+
+// moveOutcomeFaultStub serves Get + Move where the first Move returns 503
+// stack_inconsistent (journal accepted). after503Get builds each subsequent
+// Get response so tests can delay projection or diverge without a second Move.
+func moveOutcomeFaultStub(t *testing.T, initial []fleetdb.StackNodeWire, revision int64, after503Get func(getN int, fencedRev int64) (nodes []fleetdb.StackNodeWire, rev int64, status int)) (*FleetDBStore, *[]recordedMove, *int) {
+	t.Helper()
+	var mu sync.Mutex
+	var calls []recordedMove
+	getsAfter503 := 0
+	moveDone := false
+	fenced := revision
+	live := append([]fleetdb.StackNodeWire(nil), initial...)
+	rev := revision
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/{workspace}/stacks/{stack_id}", func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !moveDone {
+			writeFleetJSON(w, 200, fleetdb.StackWire{
+				ID: "epic:E1", WorkspaceKey: "WS", Revision: rev,
+				Nodes: append([]fleetdb.StackNodeWire(nil), live...),
+			})
+			return
+		}
+		getsAfter503++
+		nodes, nextRev, status := after503Get(getsAfter503, fenced)
+		if status != 0 && status != 200 {
+			writeFleetErr(w, status, "stack_inconsistent", "stack change was recorded but not yet applied; re-read before retrying")
+			return
+		}
+		writeFleetJSON(w, 200, fleetdb.StackWire{
+			ID: "epic:E1", WorkspaceKey: "WS", Revision: nextRev,
+			Nodes: append([]fleetdb.StackNodeWire(nil), nodes...),
+		})
+	})
+	mux.HandleFunc("POST /api/v1/{workspace}/stacks/{stack_id}/nodes/{task_id}/move", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		var body fleetdb.StackMoveReq
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		taskID := r.PathValue("task_id")
+		calls = append(calls, recordedMove{taskID, body.AfterTaskID, body.ExpectedRevision})
+		if moveDone {
+			t.Errorf("Move re-issued after stack_inconsistent; reconcile must be read-only")
+			writeFleetErr(w, 500, "internal_error", "unexpected second move")
+			return
+		}
+		if body.ExpectedRevision == nil || *body.ExpectedRevision != rev {
+			writeFleetErr(w, 412, "precondition_failed", "stack changed since it was read")
+			return
+		}
+		fenced = rev
+		moveDone = true
+		// Apply intended topology into the after503 callback's eventual state
+		// by recording that the journal accepted the move; live stays stale
+		// until after503Get projects it.
+		writeFleetErr(w, 503, "stack_inconsistent", "stack change was recorded but not yet applied; re-read before retrying")
+	})
+	return newStubFleetDB(t, mux), &calls, &getsAfter503
+}
+
+func TestFleetDBMoveNode_AcceptedWriteDelayedProjection(t *testing.T) {
+	initial := wireChain(nil)
+	projected := append([]fleetdb.StackNodeWire(nil), initial...)
+	moved, status, code, msg := applyAtomicMove(projected, "T2", "T4")
+	require.True(t, moved)
+	require.Zero(t, status, "%s %s", code, msg)
+
+	s, calls, gets := moveOutcomeFaultStub(t, initial, 7, func(getN int, fencedRev int64) ([]fleetdb.StackNodeWire, int64, int) {
+		if getN < 3 {
+			// Projection lag: still at the pre-move revision/topology.
+			return append([]fleetdb.StackNodeWire(nil), initial...), fencedRev, 200
+		}
+		return append([]fleetdb.StackNodeWire(nil), projected...), fencedRev + 1, 200
+	})
+	require.NoError(t, s.MoveNode(context.Background(), "WS", "epic:E1", "T2", "T4"))
+	require.Len(t, *calls, 1, "exactly one atomic Move; reconcile is Get-only")
+	require.NotNil(t, (*calls)[0].expectedRevision)
+	assert.EqualValues(t, 7, *(*calls)[0].expectedRevision)
+	assert.GreaterOrEqual(t, *gets, 3)
+}
+
+func TestFleetDBMoveNode_AcceptedWriteDivergentFollowUp(t *testing.T) {
+	initial := wireChain(nil)
+	// Concurrent writer advanced the document to a different topology: T2 is
+	// no longer after T4 (and not at the requested position).
+	divergent := wireChain(nil)
+	divergent[1].BaseTaskID = "T3" // T2 after T3, not T4
+
+	s, calls, _ := moveOutcomeFaultStub(t, initial, 5, func(_ int, fencedRev int64) ([]fleetdb.StackNodeWire, int64, int) {
+		return append([]fleetdb.StackNodeWire(nil), divergent...), fencedRev + 2, 200
+	})
+	err := s.MoveNode(context.Background(), "WS", "epic:E1", "T2", "T4")
+	assert.ErrorIs(t, err, ErrUnknownWriteOutcome)
+	require.Len(t, *calls, 1, "must not overwrite a concurrent writer with a second Move")
+	assert.NotErrorIs(t, err, ErrConcurrentUpdate)
+	assert.Contains(t, err.Error(), "re-read")
+}
+
+func TestFleetDBMoveNode_AcceptedWriteUnconfirmedProjection(t *testing.T) {
+	initial := wireChain(nil)
+	s, calls, gets := moveOutcomeFaultStub(t, initial, 3, func(_ int, fencedRev int64) ([]fleetdb.StackNodeWire, int64, int) {
+		// Never catches up: always the fenced revision with old topology.
+		return append([]fleetdb.StackNodeWire(nil), initial...), fencedRev, 200
+	})
+	err := s.MoveNode(context.Background(), "WS", "epic:E1", "T2", "T4")
+	assert.ErrorIs(t, err, ErrUnknownWriteOutcome)
+	require.Len(t, *calls, 1)
+	assert.Equal(t, moveOutcomeReconcileAttempts, *gets)
+	assert.Contains(t, err.Error(), "could not confirm")
+}
+
 func TestStackClient_MoveNodeTypedContract(t *testing.T) {
 	var gotMethod, gotPath string
 	var gotBody fleetdb.StackMoveReq

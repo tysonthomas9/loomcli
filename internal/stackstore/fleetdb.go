@@ -182,12 +182,25 @@ func (s *FleetDBStore) readNode(ctx context.Context, ws string, id sl.StackID, t
 	return sl.Node{}, 0, ErrNodeNotFound
 }
 
+// moveOutcomeReconcileAttempts bounds re-reads after a 503 stack_inconsistent
+// MoveNode response. That status can mean the journal accepted the write before
+// projection caught up; we only confirm intent via Get, never by re-issuing Move.
+const moveOutcomeReconcileAttempts = 8
+
 // MoveNode splices taskID to sit immediately after afterTaskID via fleet-db's
 // atomic, revision-fenced MoveNode endpoint (one stack-document compare-and-set).
 // A mid-splice failure cannot leave a half-applied lineage: either the whole
 // move commits or the stack revision is unchanged. When another writer advances
 // the stack between the read and the fenced write, the call retries with the
 // fresh revision (same bound as UpdateNode).
+//
+// When fleet-db returns 503 stack_inconsistent after the fenced Move (journal
+// accepted, projection not yet visible), MoveNode boundedly re-reads and
+// succeeds only if the requested node is already immediately after afterTaskID
+// at an observed revision strictly newer than the fenced one. It never
+// re-issues Move in that path (would overwrite a concurrent writer) and never
+// treats a merely "similar" later topology as success. Unconfirmed outcomes
+// surface as ErrUnknownWriteOutcome with safe retry guidance.
 func (s *FleetDBStore) MoveNode(ctx context.Context, ws string, id sl.StackID, taskID, afterTaskID string) error {
 	if taskID == afterTaskID {
 		return sl.ErrCycle
@@ -213,12 +226,58 @@ func (s *FleetDBStore) MoveNode(ctx context.Context, ws string, id sl.StackID, t
 		if err == nil {
 			return nil
 		}
+		if isStackInconsistent(err) {
+			return s.reconcileMoveOutcome(ctx, ws, id, taskID, afterTaskID, rev, err)
+		}
 		if !isRetryableWrite(err) {
 			return mapFleetErr(err)
 		}
 		lastErr = err
 	}
 	return fmt.Errorf("stackstore: move %s after %s: %w: %w", taskID, afterTaskID, ErrConcurrentUpdate, mapFleetErr(lastErr))
+}
+
+// reconcileMoveOutcome confirms an accepted-but-unprojected Move without
+// writing again. fencedRev is the expected_revision sent with the Move that
+// returned stack_inconsistent.
+func (s *FleetDBStore) reconcileMoveOutcome(ctx context.Context, ws string, id sl.StackID, taskID, afterTaskID string, fencedRev int64, cause error) error {
+	var lastErr = cause
+	for attempt := range moveOutcomeReconcileAttempts {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("stackstore: move %s after %s: %w: %w", taskID, afterTaskID, ErrUnknownWriteOutcome, ctx.Err())
+			case <-time.After(updateNodeBackoff(attempt)):
+			}
+		}
+		st, err := s.api.Get(ctx, ws, string(id))
+		if err != nil {
+			if isStackInconsistent(err) {
+				lastErr = err
+				continue
+			}
+			return mapFleetErr(err)
+		}
+		baseOK := false
+		for _, n := range st.Nodes {
+			if n.TaskID == taskID {
+				baseOK = n.BaseTaskID == afterTaskID
+				break
+			}
+		}
+		if baseOK && st.Revision > fencedRev {
+			return nil
+		}
+		if st.Revision > fencedRev {
+			// Concurrent writer advanced the document; intent is not met.
+			// Do not re-issue Move — that would fence against a foreign revision.
+			return fmt.Errorf("stackstore: move %s after %s: %w: observed revision %d after fenced %d without confirming position; re-read and retry only if still unmet: %w",
+				taskID, afterTaskID, ErrUnknownWriteOutcome, st.Revision, fencedRev, cause)
+		}
+		lastErr = cause
+	}
+	return fmt.Errorf("stackstore: move %s after %s: %w: could not confirm after accepted write; re-read before retrying: %w",
+		taskID, afterTaskID, ErrUnknownWriteOutcome, lastErr)
 }
 
 // patch construction -----------------------------------------------------------
@@ -272,6 +331,16 @@ func isRetryableWrite(err error) bool {
 	}
 	return apiErr.Status == http.StatusPreconditionFailed ||
 		(apiErr.Status == http.StatusConflict && apiErr.Code == "conflict")
+}
+
+// isStackInconsistent reports fleet-db's 503 stack_inconsistent: the journal
+// may have accepted a stack write that projection has not yet made readable.
+func isStackInconsistent(err error) bool {
+	var apiErr *stackwire.APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.Status == http.StatusServiceUnavailable && apiErr.Code == "stack_inconsistent"
 }
 
 // lineageRules maps fleet-db's lineage rule messages onto the stacklineage
