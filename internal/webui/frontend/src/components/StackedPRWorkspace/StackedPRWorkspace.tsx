@@ -21,6 +21,7 @@ import {
 import type { GitPullRequest } from "@/api/workspace/pullRequests";
 import type { DeliveryGroupView } from "@/api/workspace/deliveryGroups";
 import type {
+  GitHubViewerIdentity,
   PullRequestReadinessView,
   StandalonePRContinuation,
 } from "@/api/workspace/pullRequests";
@@ -68,6 +69,8 @@ export interface StackedPRWorkspaceProps {
   deliveryGroups: DeliveryGroupView[];
   deliveryGroupsHasMore?: boolean;
   standaloneContinuation?: StandalonePRContinuation;
+  /** Verified GitHub viewer from usePullRequests — never Auth display name. */
+  githubViewer?: GitHubViewerIdentity;
   warnings: string[];
   loading: boolean;
   error: Error | null;
@@ -105,6 +108,7 @@ export function StackedPRWorkspace({
   deliveryGroups,
   deliveryGroupsHasMore = false,
   standaloneContinuation,
+  githubViewer,
   warnings,
   loading,
   error,
@@ -251,10 +255,15 @@ export function StackedPRWorkspace({
     return map;
   }, [pullRequests, deliveryGroups]);
 
-  // Auth exposes display name/email only — no verified GitHub login on the
-  // session/JWT. Mine matches author_login/assignee against that best-available
-  // identity; full GitHub-login parity needs an auth-surface field beyond this UI.
-  const mineIdentity = user?.name?.trim() || null;
+  // GitHub author Mine uses verified viewer.login only. Loom owner/assignee
+  // Mine uses email (preferred) or user id — never Better Auth display name.
+  const githubLogin =
+    githubViewer?.status === "available"
+      ? githubViewer.login?.trim() || null
+      : null;
+  const loomActor = user?.email?.trim() || user?.id?.trim() || null;
+  const githubIdentityMissing =
+    githubViewer != null && githubViewer.status !== "available";
 
   const filters = useMemo(
     () => ({
@@ -264,9 +273,19 @@ export function StackedPRWorkspace({
       epics: selectedEpics,
       kinds,
       mine,
-      mineIdentity,
+      githubLogin,
+      loomActor,
     }),
-    [tab, query, selectedRepos, selectedEpics, kinds, mine, mineIdentity],
+    [
+      tab,
+      query,
+      selectedRepos,
+      selectedEpics,
+      kinds,
+      mine,
+      githubLogin,
+      loomActor,
+    ],
   );
 
   const tabCounts = useMemo(
@@ -279,7 +298,8 @@ export function StackedPRWorkspace({
           epics: selectedEpics,
           kinds,
           mine,
-          mineIdentity,
+          githubLogin,
+          loomActor,
         },
         groupReadiness,
         prByKey,
@@ -291,7 +311,8 @@ export function StackedPRWorkspace({
       selectedEpics,
       kinds,
       mine,
-      mineIdentity,
+      githubLogin,
+      loomActor,
       groupReadiness,
       prByKey,
     ],
@@ -1346,19 +1367,45 @@ export function StackedPRWorkspace({
                 checked={mine}
                 onChange={() => setMine((v) => !v)}
                 aria-label={
-                  mineIdentity
-                    ? `Mine filter for ${mineIdentity}`
-                    : "Mine filter unavailable without signed-in identity"
+                  githubLogin
+                    ? `Mine filter for GitHub @${githubLogin}`
+                    : githubIdentityMissing
+                      ? "Mine filter — GitHub identity unavailable"
+                      : loomActor
+                        ? "Mine filter — GitHub login unavailable; Loom actor matching only"
+                        : "Mine filter — GitHub identity unavailable"
                 }
               />
               Mine
               <span
                 className={styles.count}
-                title="Auth display name (no verified GitHub login on session)"
+                title={
+                  githubLogin
+                    ? `Verified GitHub login (@${githubLogin})`
+                    : (githubViewer?.message ??
+                      "GitHub identity unavailable — display name is never used as login")
+                }
+                data-testid="mine-identity-chip"
               >
-                {mineIdentity ?? "—"}
+                {githubLogin
+                  ? `@${githubLogin}`
+                  : githubViewer == null
+                    ? "—"
+                    : "unavailable"}
               </span>
             </label>
+            {mine && githubIdentityMissing ? (
+              <p
+                className={styles.subtitle}
+                data-testid="mine-viewer-unavailable"
+                role="status"
+              >
+                GitHub identity unavailable
+                {githubViewer?.message ? `: ${githubViewer.message}` : ""}.
+                Author matching is paused; Loom owner/assignee matches still
+                apply when signed in.
+              </p>
+            ) : null}
           </section>
 
           <section>

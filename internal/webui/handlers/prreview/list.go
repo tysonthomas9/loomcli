@@ -18,6 +18,9 @@ import (
 type pullRequestsData struct {
 	PullRequests []ops.GitPullRequest `json:"pull_requests"`
 	Warnings     []string             `json:"warnings,omitempty"`
+	// GitHubViewer is the verified login for the same credential that lists
+	// registered-repo PRs. Always present; login only when status=available.
+	GitHubViewer githubViewerIdentity `json:"github_viewer"`
 	// DeliveryGroups is a page of durable groups from FleetDB (additive).
 	DeliveryGroups []deliveryGroupView `json:"delivery_groups,omitempty"`
 	// DeliveryGroupsCount is the page length only — never a workspace total.
@@ -149,6 +152,7 @@ func (m *Module) writeEmptyConnectorList(
 			continuation.Complete = false
 		}
 		m.attachDeliveryGroupsPage(r, ws, &out)
+		m.attachGitHubViewer(r, ws, &out, true)
 		writeJSON(w, out)
 		return
 	}
@@ -172,6 +176,7 @@ func (m *Module) writeStandalonePRList(
 		markStandaloneContinuationIncomplete(&out)
 	}
 	m.attachDeliveryGroupsPage(r, ws, &out)
+	m.attachGitHubViewer(r, ws, &out, true)
 	writeJSON(w, out)
 }
 
@@ -455,6 +460,7 @@ func (m *Module) ghListFallback(w http.ResponseWriter, r *http.Request, ws, stat
 		}
 	}
 	m.attachDeliveryGroupsPage(r, ws, &out)
+	m.attachGitHubViewer(r, ws, &out, false)
 	writeJSON(w, out)
 }
 

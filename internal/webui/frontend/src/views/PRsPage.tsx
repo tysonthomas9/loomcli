@@ -166,6 +166,7 @@ export function PRsPage(): JSX.Element {
     deliveryGroups,
     deliveryGroupsHasMore,
     standaloneContinuation,
+    githubViewer,
     loading,
     error,
     refetch,
@@ -257,6 +258,7 @@ export function PRsPage(): JSX.Element {
       deliveryGroups={deliveryGroups}
       deliveryGroupsHasMore={deliveryGroupsHasMore}
       {...(standaloneContinuation ? { standaloneContinuation } : {})}
+      githubViewer={githubViewer}
       warnings={warnings}
       loading={loading}
       error={error}

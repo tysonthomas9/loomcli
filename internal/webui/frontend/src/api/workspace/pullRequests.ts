@@ -17,6 +17,9 @@ export type PullRequestListState = "all" | "open" | "merged" | "review";
 type DeliveryGroupView = components["schemas"]["DeliveryGroupView"];
 export type StandalonePRContinuation =
   components["schemas"]["StandalonePRContinuation"];
+/** Verified GitHub login for the PR-list credential — never Auth display name. */
+export type GitHubViewerIdentity =
+  components["schemas"]["GitHubViewerIdentity"];
 
 export interface PullRequestList {
   pullRequests: GitPullRequest[];
@@ -29,12 +32,15 @@ export interface PullRequestList {
   deliveryGroupsNextCursor?: string;
   /** Honest bounded-discovery / membership-completeness contract. */
   standaloneContinuation?: StandalonePRContinuation;
+  /** Always present from the list envelope. */
+  githubViewer: GitHubViewerIdentity;
 }
 
 interface PullRequestsResponse {
   success: boolean;
   data: {
     pull_requests: GitPullRequest[];
+    github_viewer: GitHubViewerIdentity;
     warnings?: string[];
     delivery_groups?: DeliveryGroupView[];
     delivery_groups_count?: number;
@@ -92,6 +98,11 @@ export async function fetchPullRequests(
     ...(data?.standalone_continuation
       ? { standaloneContinuation: data.standalone_continuation }
       : {}),
+    githubViewer: data?.github_viewer ?? {
+      status: "unavailable",
+      source: "none",
+      message: "GitHub viewer missing from list response",
+    },
   };
 }
 

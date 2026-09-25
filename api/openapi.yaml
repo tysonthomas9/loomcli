@@ -5452,13 +5452,15 @@ components:
 
     GitPullRequestList:
       type: object
-      required: [pull_requests]
+      required: [pull_requests, github_viewer]
       properties:
         pull_requests:
           type: array
           description: Standalone discovered PRs not in an active delivery group
           items:
             $ref: "#/components/schemas/GitPullRequest"
+        github_viewer:
+          $ref: "#/components/schemas/GitHubViewerIdentity"
         warnings:
           type: array
           items:
@@ -5476,6 +5478,32 @@ components:
           type: string
         standalone_continuation:
           $ref: "#/components/schemas/StandalonePRContinuation"
+
+    GitHubViewerIdentity:
+      type: object
+      required: [status, source]
+      description: >-
+        Verified GitHub login for the same workspace credential that lists
+        registered-repo PRs. Never derived from Better Auth/JWT display name.
+      properties:
+        status:
+          type: string
+          enum: [available, unavailable, rate_limited, error]
+        login:
+          type: string
+          description: Present only when status=available. Exact GitHub login.
+        source:
+          type: string
+          enum: [connector, gh_cli, none]
+        connector_id:
+          type: string
+          description: e.g. github-webui when source=connector
+        observed_at:
+          type: string
+          format: date-time
+        message:
+          type: string
+          description: Operator-safe reason when not available (no token material).
 
     StandalonePRContinuation:
       type: object

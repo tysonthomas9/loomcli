@@ -6,6 +6,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 import {
   fetchPullRequests,
+  type GitHubViewerIdentity,
   type GitPullRequest,
   type PullRequestListState,
   type StandalonePRContinuation,
@@ -16,6 +17,12 @@ import { useWorkspaceContext } from "./useWorkspaceContext";
 
 const POLL_INTERVAL = 30_000;
 const MAX_POLL_INTERVAL = 5 * 60_000;
+
+const unavailableViewer = (): GitHubViewerIdentity => ({
+  status: "unavailable",
+  source: "none",
+  message: "GitHub viewer not loaded",
+});
 
 export interface UsePullRequestsOptions {
   state?: PullRequestListState;
@@ -30,6 +37,8 @@ export interface UsePullRequestsReturn {
   deliveryGroupsHasMore: boolean;
   deliveryGroupsNextCursor?: string;
   standaloneContinuation?: StandalonePRContinuation;
+  /** Verified GitHub login from the list credential; never Auth display name. */
+  githubViewer: GitHubViewerIdentity;
   loading: boolean;
   error: Error | null;
   refetch: () => Promise<void>;
@@ -50,6 +59,8 @@ export function usePullRequests({
   const [standaloneContinuation, setStandaloneContinuation] = useState<
     StandalonePRContinuation | undefined
   >();
+  const [githubViewer, setGithubViewer] =
+    useState<GitHubViewerIdentity>(unavailableViewer);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   // Monotonic sequence: bumped on every fetch and on effect cleanup, so a
@@ -83,6 +94,7 @@ export function usePullRequests({
         setDeliveryGroupsHasMore(result.deliveryGroupsHasMore);
         setDeliveryGroupsNextCursor(result.deliveryGroupsNextCursor);
         setStandaloneContinuation(result.standaloneContinuation);
+        setGithubViewer(result.githubViewer);
         setError(null);
         pollDelayRef.current = POLL_INTERVAL;
       }
@@ -111,6 +123,7 @@ export function usePullRequests({
     setDeliveryGroupsHasMore(false);
     setDeliveryGroupsNextCursor(undefined);
     setStandaloneContinuation(undefined);
+    setGithubViewer(unavailableViewer());
     setError(null);
     pollDelayRef.current = POLL_INTERVAL;
   }, [workspaceId, state]);
@@ -162,6 +175,7 @@ export function usePullRequests({
     deliveryGroupsHasMore,
     ...(deliveryGroupsNextCursor ? { deliveryGroupsNextCursor } : {}),
     ...(standaloneContinuation ? { standaloneContinuation } : {}),
+    githubViewer,
     loading,
     error,
     refetch: doFetch,

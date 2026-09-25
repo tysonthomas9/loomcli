@@ -57,6 +57,11 @@ type fakeGitHub struct {
 	lists   map[string]fakePullList
 	// graphql, when set, answers POST /graphql (see readiness_test.go).
 	graphql func(r *http.Request, body map[string]any) (int, map[string]string, any)
+	// Viewer GET /user controls (STACKED-PRS-66).
+	userLogin   string
+	userStatus  int
+	userMessage string
+	userHeader  map[string]string
 
 	server *httptest.Server
 }
@@ -91,6 +96,10 @@ func (g *fakeGitHub) handle(w http.ResponseWriter, r *http.Request) {
 	headSha := g.headSha
 	state := g.state
 	graphql := g.graphql
+	userLogin := g.userLogin
+	userStatus := g.userStatus
+	userMessage := g.userMessage
+	userHeader := g.userHeader
 	list, hasList := g.lists[r.URL.Path+"?page="+r.URL.Query().Get("page")]
 	if !hasList {
 		list, hasList = g.lists[r.URL.Path]
@@ -98,6 +107,28 @@ func (g *fakeGitHub) handle(w http.ResponseWriter, r *http.Request) {
 	g.mu.Unlock()
 
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/user":
+		if userStatus != 0 && userStatus != http.StatusOK {
+			for k, v := range userHeader {
+				w.Header().Set(k, v)
+			}
+			msg := userMessage
+			if msg == "" {
+				msg = "viewer failed"
+			}
+			writeUpstreamJSON(w, userStatus, map[string]any{"message": msg})
+			return
+		}
+		login := userLogin
+		if login == "" {
+			login = "tysonthomas9"
+		}
+		writeUpstreamJSON(w, http.StatusOK, map[string]any{
+			"login": login,
+			"id":    1,
+			"email": "secret@example.com",
+			"name":  "Tyson",
+		})
 	case r.Method == http.MethodGet && hasList:
 		if list.status == 0 {
 			list.status = http.StatusOK
@@ -172,6 +203,33 @@ func (g *fakeGitHub) setListStatus(owner, repo string, status int) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.lists["/repos/"+owner+"/"+repo+"/pulls"] = fakePullList{status: status}
+}
+
+func (g *fakeGitHub) setViewer(login string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.userLogin = login
+	g.userStatus = http.StatusOK
+	g.userMessage = ""
+	g.userHeader = nil
+}
+
+func (g *fakeGitHub) setViewerError(status int, message string, header map[string]string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.userStatus = status
+	g.userMessage = message
+	g.userHeader = header
+}
+
+func filterGitHubCalls(calls []fakeGitHubCall, path string) []fakeGitHubCall {
+	out := make([]fakeGitHubCall, 0, len(calls))
+	for _, c := range calls {
+		if c.path == path {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func fakePullRequestPage(first, count int) []map[string]any {
@@ -774,15 +832,25 @@ func TestListPullRequestsConnector(t *testing.T) {
 		t.Fatalf("third PR state = %q, want %q", got.State, "MERGED")
 	}
 	calls := h.github.snapshot()
-	if len(calls) != 1 || calls[0].path != "/repos/octocat/hello/pulls" {
-		t.Fatalf("calls = %+v, want one short-page PR list", calls)
-	}
-	for _, want := range []string{"state=all", "per_page=100", "page=1"} {
-		if !strings.Contains(calls[0].query, want) {
-			t.Fatalf("short-page query %q missing %q", calls[0].query, want)
+	var listCalls []fakeGitHubCall
+	for _, c := range calls {
+		if c.path == "/repos/octocat/hello/pulls" {
+			listCalls = append(listCalls, c)
 		}
 	}
-	assertGrantActions(t, h, prReadActions)
+	if len(listCalls) != 1 {
+		t.Fatalf("list calls = %+v, want one short-page PR list (all calls %+v)", listCalls, calls)
+	}
+	for _, want := range []string{"state=all", "per_page=100", "page=1"} {
+		if !strings.Contains(listCalls[0].query, want) {
+			t.Fatalf("short-page query %q missing %q", listCalls[0].query, want)
+		}
+	}
+	assertGrantActions(t, h, append(slices.Clone(prReadActions), providers.ActionGitHubViewerRead))
+	data := decodePullRequestsResponse(t, raw)
+	if data.GitHubViewer.Status != githubViewerStatusAvailable || data.GitHubViewer.Login == "" {
+		t.Fatalf("github_viewer = %+v, want available login", data.GitHubViewer)
+	}
 }
 
 func TestSSHRemoteAuthorizesAndListsPullRequests(t *testing.T) {
@@ -845,10 +913,11 @@ func TestListPullRequestsConnectorPaginatesWithDistinctCallSeq(t *testing.T) {
 	}
 
 	calls := h.github.snapshot()
-	if len(calls) != 2 {
-		t.Fatalf("GitHub calls = %d, want 2", len(calls))
+	listCalls := filterGitHubCalls(calls, "/repos/octocat/hello/pulls")
+	if len(listCalls) != 2 {
+		t.Fatalf("GitHub list calls = %d, want 2 (all %+v)", len(listCalls), calls)
 	}
-	for i, call := range calls {
+	for i, call := range listCalls {
 		for _, want := range []string{"state=all", "per_page=100", "page=" + strconv.Itoa(i+1)} {
 			if !strings.Contains(call.query, want) {
 				t.Fatalf("page %d query %q missing %q", i+1, call.query, want)
@@ -892,8 +961,8 @@ func TestListPullRequestsConnectorWarnsAtPageCap(t *testing.T) {
 	if data.StandaloneContinuation == nil || !data.StandaloneContinuation.HasMore || data.StandaloneContinuation.Complete {
 		t.Fatalf("standalone_continuation = %+v, want has_more incomplete page", data.StandaloneContinuation)
 	}
-	if calls := h.github.snapshot(); len(calls) != maxPullsListPages {
-		t.Fatalf("GitHub calls = %d, want capped %d", len(calls), maxPullsListPages)
+	if calls := filterGitHubCalls(h.github.snapshot(), "/repos/octocat/hello/pulls"); len(calls) != maxPullsListPages {
+		t.Fatalf("GitHub list calls = %d, want capped %d", len(calls), maxPullsListPages)
 	}
 }
 
@@ -1093,7 +1162,13 @@ func TestListPullRequestsPartialRepoErrorWarns(t *testing.T) {
 		t.Fatalf("warnings = %+v, want failed repo warning", decoded.Data.Warnings)
 	}
 	calls := h.github.snapshot()
-	if len(calls) != 2 {
+	listCalls := 0
+	for _, c := range calls {
+		if strings.HasSuffix(c.path, "/pulls") {
+			listCalls++
+		}
+	}
+	if listCalls != 2 {
 		t.Fatalf("calls = %+v, want both repo list attempts", calls)
 	}
 }

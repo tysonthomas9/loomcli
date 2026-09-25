@@ -43,9 +43,12 @@ export interface StackedPRFilters {
   repos: ReadonlySet<string>;
   epics: ReadonlySet<string>;
   kinds: ReadonlySet<QueueKind>;
-  /** When true, only items tied to mineIdentity. */
+  /** When true, only items tied to verified GitHub login and/or Loom actor. */
   mine: boolean;
-  mineIdentity?: string | null;
+  /** Verified GitHub viewer.login when status=available — never display name. */
+  githubLogin?: string | null;
+  /** Loom identity (JWT email preferred, else user id) for owner/assignee. */
+  loomActor?: string | null;
 }
 
 export interface FilterMatch {
@@ -208,13 +211,12 @@ export function matchStandalone(
   }
 
   if (filters.mine) {
-    if (
-      !identityMatches(
-        filters.mineIdentity,
-        item.pr.author_login,
-        item.assignee,
-      )
-    ) {
+    const authorMatch = identityMatches(
+      filters.githubLogin,
+      item.pr.author_login,
+    );
+    const assigneeMatch = identityMatches(filters.loomActor, item.assignee);
+    if (!authorMatch && !assigneeMatch) {
       return { matches: false, dimmed: false };
     }
   }
@@ -275,10 +277,13 @@ export function matchDeliveryGroup(
 
   if (filters.mine) {
     const authors = g.members.map((m) => prByKey.get(m.pr_key)?.author_login);
-    const mineOk =
-      identityMatches(filters.mineIdentity, g.owner, g.created_by) ||
-      authors.some((a) => identityMatches(filters.mineIdentity, a));
-    if (!mineOk) return { matches: false, dimmed: false, memberDimmed };
+    const loomMatch = identityMatches(filters.loomActor, g.owner, g.created_by);
+    const authorMatch = authors.some((a) =>
+      identityMatches(filters.githubLogin, a),
+    );
+    if (!loomMatch && !authorMatch) {
+      return { matches: false, dimmed: false, memberDimmed };
+    }
   }
 
   const statusKey = statusKeyForItem(item, readinessByKey);

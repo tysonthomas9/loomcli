@@ -35,6 +35,9 @@ const (
 	ActionGitHubCompareRead = "github.compare.read"
 	// ActionGitHubIssueCommentPost posts an issue/PR comment.
 	ActionGitHubIssueCommentPost = "github.issue_comment.post"
+	// ActionGitHubViewerRead reads the authenticated GitHub user (GET /user).
+	// Body is whitelisted to {login} only — never email or token material.
+	ActionGitHubViewerRead = "github.viewer.read"
 )
 
 // GitHubActions returns the actions the GitHub provider implements (a copy).
@@ -47,6 +50,7 @@ func GitHubActions() []string {
 		ActionGitHubCompareRead,
 		ActionGitHubIssueCommentPost,
 		ActionGitHubPullRequestReadinessRead,
+		ActionGitHubViewerRead,
 	}
 }
 
@@ -101,10 +105,44 @@ func (g *GitHub) Call(ctx context.Context, spec CallSpec) (CallResult, error) {
 		return g.issueCommentPost(ctx, spec)
 	case ActionGitHubPullRequestReadinessRead:
 		return g.pullRequestReadinessRead(ctx, spec)
+	case ActionGitHubViewerRead:
+		return g.viewerRead(ctx, spec)
 	default:
 		return CallResult{Decision: domain.ConnectorCallUpstreamError},
 			fmt.Errorf("github provider does not implement %q: %w", spec.Action, ErrUnknownAction)
 	}
+}
+
+// viewerRead fetches GET /user and returns only the public login.
+func (g *GitHub) viewerRead(ctx context.Context, spec CallSpec) (CallResult, error) {
+	res, err := g.do(ctx, spec, http.MethodGet, "/user", nil, nil)
+	if err != nil {
+		return CallResult{Decision: domain.ConnectorCallUpstreamError}, err
+	}
+	if res.status != http.StatusOK {
+		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError},
+			g.upstreamError(spec, res)
+	}
+	obj, err := decodeResponseObject(spec, res.status, res.body)
+	if err != nil {
+		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError}, err
+	}
+	login, _ := obj["login"].(string)
+	login = strings.TrimSpace(login)
+	if login == "" {
+		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError},
+			&UpstreamError{
+				Action:  spec.Action,
+				Class:   ClassClientError,
+				Status:  res.status,
+				Summary: "authenticated user response missing login",
+			}
+	}
+	return CallResult{
+		Status:   res.status,
+		Body:     map[string]any{"login": login},
+		Decision: domain.ConnectorCallGranted,
+	}, nil
 }
 
 // merge merges a pull request with GitHub's native sha precondition: the

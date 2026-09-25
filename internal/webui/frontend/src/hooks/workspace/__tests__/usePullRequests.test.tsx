@@ -49,6 +49,12 @@ describe("usePullRequests polling", () => {
       deliveryGroups: [],
       deliveryGroupsCount: 0,
       deliveryGroupsHasMore: false,
+      githubViewer: {
+        status: "available",
+        login: "tysonthomas9",
+        source: "connector",
+        connector_id: "github-webui",
+      },
     });
   });
 

@@ -255,11 +255,11 @@ describe("matchStandalone", () => {
     expect(match.matches).toBe(false);
   });
 
-  it("supports mine filter via author", () => {
+  it("supports mine filter via verified GitHub author login", () => {
     const item: StandalonePRItem = {
       kind: "standalone",
       prKey: "github:org/repo#9",
-      pr: pr({ number: 9, author_login: "nova" }),
+      pr: pr({ number: 9, author_login: "tysonthomas9" }),
     };
     expect(
       matchStandalone(
@@ -271,11 +271,13 @@ describe("matchStandalone", () => {
           epics: new Set(),
           kinds: new Set(["standalone"]),
           mine: true,
-          mineIdentity: "nova",
+          githubLogin: "tysonthomas9",
+          loomActor: "Tyson",
         },
         new Map(),
       ).matches,
     ).toBe(true);
+    // Display name must never match GitHub author_login.
     expect(
       matchStandalone(
         item,
@@ -286,11 +288,165 @@ describe("matchStandalone", () => {
           epics: new Set(),
           kinds: new Set(["standalone"]),
           mine: true,
-          mineIdentity: "other",
+          githubLogin: null,
+          loomActor: "Tyson",
         },
         new Map(),
       ).matches,
     ).toBe(false);
+    expect(
+      matchStandalone(
+        item,
+        {
+          tab: "all",
+          query: "",
+          repos: new Set(),
+          epics: new Set(),
+          kinds: new Set(["standalone"]),
+          mine: true,
+          githubLogin: "tyson",
+          loomActor: null,
+        },
+        new Map(),
+      ).matches,
+    ).toBe(false);
+  });
+
+  it("excludes external authors when Mine is on", () => {
+    const item: StandalonePRItem = {
+      kind: "standalone",
+      prKey: "github:org/repo#9",
+      pr: pr({ number: 9, author_login: "dependabot" }),
+    };
+    expect(
+      matchStandalone(
+        item,
+        {
+          tab: "all",
+          query: "",
+          repos: new Set(),
+          epics: new Set(),
+          kinds: new Set(["standalone"]),
+          mine: true,
+          githubLogin: "tysonthomas9",
+          loomActor: "t@example.com",
+        },
+        new Map(),
+      ).matches,
+    ).toBe(false);
+  });
+
+  it("matches Loom assignee without conflating display name as GitHub login", () => {
+    const item: StandalonePRItem = {
+      kind: "standalone",
+      prKey: "github:org/repo#9",
+      pr: pr({ number: 9, author_login: "dependabot" }),
+      assignee: "t@example.com",
+    };
+    expect(
+      matchStandalone(
+        item,
+        {
+          tab: "all",
+          query: "",
+          repos: new Set(),
+          epics: new Set(),
+          kinds: new Set(["standalone"]),
+          mine: true,
+          githubLogin: null,
+          loomActor: "t@example.com",
+        },
+        new Map(),
+      ).matches,
+    ).toBe(true);
+  });
+
+  it("matches delivery group via Loom owner separately from GitHub authors", () => {
+    const item: DeliveryGroupItem = {
+      kind: "group",
+      group: {
+        workspace_key: "WS",
+        id: "dg1",
+        title: "Group",
+        state: "active",
+        revision: 1,
+        owner: "t@example.com",
+        created_by: "other@example.com",
+        members: [
+          {
+            pr_key: "github:org/repo#1",
+            repo_name: "org/repo",
+            pr_number: 1,
+            source: "manual",
+            added_at: "2026-09-24T00:00:00Z",
+          },
+        ],
+        last_op_id: "op1",
+        created_at: "2026-09-24T00:00:00Z",
+        updated_at: "2026-09-24T00:00:00Z",
+      },
+    };
+    const prByKey = new Map([
+      ["github:org/repo#1", pr({ number: 1, author_login: "dependabot" })],
+    ]);
+    expect(
+      matchDeliveryGroup(
+        item,
+        {
+          tab: "all",
+          query: "",
+          repos: new Set(),
+          epics: new Set(),
+          kinds: new Set(["group"]),
+          mine: true,
+          githubLogin: "tysonthomas9",
+          loomActor: "t@example.com",
+        },
+        new Map(),
+        prByKey,
+      ).matches,
+    ).toBe(true);
+    expect(
+      matchDeliveryGroup(
+        item,
+        {
+          tab: "all",
+          query: "",
+          repos: new Set(),
+          epics: new Set(),
+          kinds: new Set(["group"]),
+          mine: true,
+          githubLogin: null,
+          loomActor: "Tyson",
+        },
+        new Map(),
+        prByKey,
+      ).matches,
+    ).toBe(false);
+  });
+
+  it("supports open-mode author Mine when viewer is available", () => {
+    const item: StandalonePRItem = {
+      kind: "standalone",
+      prKey: "github:org/repo#9",
+      pr: pr({ number: 9, author_login: "tysonthomas9" }),
+    };
+    expect(
+      matchStandalone(
+        item,
+        {
+          tab: "all",
+          query: "",
+          repos: new Set(),
+          epics: new Set(),
+          kinds: new Set(["standalone"]),
+          mine: true,
+          githubLogin: "tysonthomas9",
+          loomActor: null,
+        },
+        new Map(),
+      ).matches,
+    ).toBe(true);
   });
 });
 

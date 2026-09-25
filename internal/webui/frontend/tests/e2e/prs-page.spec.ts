@@ -198,6 +198,13 @@ interface PullRequestsMock {
   error?: string;
   deliveryGroups?: typeof deliveryGroups;
   membershipComplete?: boolean;
+  githubViewer?: {
+    status: "available" | "unavailable" | "rate_limited" | "error";
+    login?: string;
+    source: "connector" | "gh_cli" | "none";
+    connector_id?: string;
+    message?: string;
+  };
 }
 
 async function setupMocks(
@@ -298,11 +305,18 @@ async function setupMocks(
           return;
         }
         const groups = prMock.deliveryGroups ?? [];
+        const githubViewer = prMock.githubViewer ?? {
+          status: "available",
+          login: "nova",
+          source: "connector",
+          connector_id: "github-webui",
+        };
         await route.fulfill({
           status: 200,
           contentType: "application/json",
           body: ok({
             pull_requests: prMock.pullRequests ?? [],
+            github_viewer: githubViewer,
             ...(prMock.warnings?.length ? { warnings: prMock.warnings } : {}),
             delivery_groups: groups,
             delivery_groups_count: groups.length,
@@ -539,6 +553,50 @@ test.describe("PRs page — stacked workspace (mocked)", () => {
     const openReview = page.getByRole("button", { name: /Open review/i });
     await openReview.focus();
     await expect(openReview).toBeFocused();
+  });
+
+  test("Mine chip shows verified GitHub login and unavailable honesty", async ({
+    page,
+  }) => {
+    await setupMocks(page, {
+      pullRequests: githubPrs,
+      deliveryGroups,
+      githubViewer: {
+        status: "available",
+        login: "nova",
+        source: "connector",
+        connector_id: "github-webui",
+      },
+    });
+    await gotoPrsPage(page);
+    await expect(page.getByTestId("mine-identity-chip")).toHaveText(
+      "@nova",
+    );
+    await page
+      .getByRole("checkbox", { name: /Mine filter for GitHub @nova/i })
+      .check();
+    await expect(page.getByTestId("pr-row-org/repo#2").first()).toBeVisible();
+    await expect(page.getByTestId("pr-row-org/repo#9")).toHaveCount(0);
+
+    await setupMocks(page, {
+      pullRequests: githubPrs,
+      deliveryGroups,
+      githubViewer: {
+        status: "unavailable",
+        source: "none",
+        message: "GitHub credential unavailable for viewer lookup",
+      },
+    });
+    await page.reload();
+    await expect(page.getByTestId("mine-identity-chip")).toHaveText(
+      "unavailable",
+    );
+    await page
+      .getByRole("checkbox", {
+        name: /Mine filter — GitHub identity unavailable/i,
+      })
+      .check();
+    await expect(page.getByTestId("mine-viewer-unavailable")).toBeVisible();
   });
 
   test("mock visual: desktop and narrow widths", async ({ page }) => {

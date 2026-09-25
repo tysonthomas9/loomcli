@@ -17,7 +17,9 @@ vi.mock("@/hooks/workspace/useWorkspaceContext", () => ({
 }));
 
 vi.mock("@/contexts/AuthContext", () => ({
-  useAuth: () => ({ user: { id: "1", name: "tyson", email: "t@example.com" } }),
+  useAuth: () => ({
+    user: { id: "1", name: "Tyson", email: "t@example.com" },
+  }),
 }));
 
 vi.mock("@/hooks", async () => {
@@ -163,6 +165,12 @@ function renderWorkspace(
         issues={[]}
         pullRequests={[pr(3)]}
         deliveryGroups={[group()]}
+        githubViewer={{
+          status: "available",
+          login: "tysonthomas9",
+          source: "connector",
+          connector_id: "github-webui",
+        }}
         warnings={[]}
         loading={false}
         error={null}
@@ -277,5 +285,63 @@ describe("StackedPRWorkspace", () => {
     renderWorkspace();
     fireEvent.click(screen.getByRole("button", { name: /^History$/i }));
     expect(screen.getByTestId("stacked-pr-history")).toBeInTheDocument();
+  });
+
+  it("Mine uses verified GitHub login, not Better Auth display name", () => {
+    renderWorkspace({
+      pullRequests: [
+        pr(3, { author_login: "tysonthomas9" }),
+        pr(4, {
+          author_login: "dependabot",
+          pr_key: "github:acme/loomcli#4",
+          number: 4,
+        }),
+      ],
+      githubViewer: {
+        status: "available",
+        login: "tysonthomas9",
+        source: "connector",
+        connector_id: "github-webui",
+      },
+    });
+    const chip = screen.getByTestId("mine-identity-chip");
+    expect(chip).toHaveTextContent("@tysonthomas9");
+    expect(chip).not.toHaveTextContent("Tyson");
+
+    const mineBox = screen.getByRole("checkbox", {
+      name: /Mine filter for GitHub @tysonthomas9/i,
+    });
+    fireEvent.click(mineBox);
+    expect(screen.getByTestId("pr-row-acme/loomcli#3")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("pr-row-acme/loomcli#4"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("surfaces honest unavailable state without display-name fallback", () => {
+    renderWorkspace({
+      pullRequests: [pr(3, { author_login: "tysonthomas9" })],
+      githubViewer: {
+        status: "rate_limited",
+        source: "connector",
+        connector_id: "github-webui",
+        message: "GitHub rate limited viewer lookup (retry after 30s)",
+      },
+    });
+    expect(screen.getByTestId("mine-identity-chip")).toHaveTextContent(
+      "unavailable",
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /Mine filter — GitHub identity unavailable/i,
+      }),
+    );
+    expect(screen.getByTestId("mine-viewer-unavailable")).toHaveTextContent(
+      /GitHub identity unavailable/i,
+    );
+    // Display name must not silently match author PRs.
+    expect(
+      screen.queryByTestId("pr-row-acme/loomcli#3"),
+    ).not.toBeInTheDocument();
   });
 });
