@@ -2,14 +2,18 @@ import { describe, expect, it } from "vitest";
 
 import type { GitPullRequest } from "@/api/workspace/pullRequests";
 import type { DeliveryGroupView } from "@/api/workspace/deliveryGroups";
+import type { PullRequestReadinessView } from "@/api/workspace/pullRequests";
 import {
   buildHistoryEntries,
   buildWorkspaceItems,
   computeTabCounts,
   matchDeliveryGroup,
   matchStandalone,
+  repoOptionsFromItems,
+  statusKeyForItem,
   type StandalonePRItem,
   type DeliveryGroupItem,
+  type WorkspaceItem,
 } from "../stackedPrModel";
 
 function pr(
@@ -29,7 +33,19 @@ function pr(
   };
 }
 
-function group(members: string[]): DeliveryGroupView {
+function mergedReadiness(prKey: string): PullRequestReadinessView {
+  return {
+    pr_key: prKey,
+    freshness: "fresh",
+    age_seconds: 1,
+    current_verdict: "merged",
+    current_reasons: [],
+  };
+}
+
+function group(
+  members: Array<{ pr_key: string; repo_name: string }>,
+): DeliveryGroupView {
   return {
     workspace_key: "WS",
     id: "dg_01HABCDEFGHJKLMNPQRSTUVWXY",
@@ -37,9 +53,9 @@ function group(members: string[]): DeliveryGroupView {
     epic_id: "EPIC-1",
     state: "active",
     revision: 3,
-    members: members.map((pr_key, i) => ({
-      pr_key,
-      repo_name: pr_key.includes("fleet") ? "fleet-db" : "loomcli",
+    members: members.map((m, i) => ({
+      pr_key: m.pr_key,
+      repo_name: m.repo_name,
       pr_number: i + 1,
       source: "manual",
       added_at: "2026-09-24T00:00:00Z",
@@ -50,13 +66,125 @@ function group(members: string[]): DeliveryGroupView {
   };
 }
 
-describe("matchDeliveryGroup repo filter", () => {
-  it("keeps the group and dims out-of-filter members", () => {
+describe("statusKeyForItem group history", () => {
+  it("classifies all-merged groups as merged (never Ready)", () => {
     const item: DeliveryGroupItem = {
       kind: "group",
-      group: group(["github:o/loomcli#1", "github:o/fleet-db#2"]),
+      group: {
+        ...group([
+          { pr_key: "github:acme/loomcli#1", repo_name: "acme/loomcli" },
+          { pr_key: "github:acme/fleet-db#2", repo_name: "acme/fleet-db" },
+        ]),
+        members: [
+          {
+            pr_key: "github:acme/loomcli#1",
+            repo_name: "acme/loomcli",
+            pr_number: 1,
+            source: "manual",
+            added_at: "2026-09-24T00:00:00Z",
+            readiness: mergedReadiness("github:acme/loomcli#1"),
+          },
+          {
+            pr_key: "github:acme/fleet-db#2",
+            repo_name: "acme/fleet-db",
+            pr_number: 2,
+            source: "manual",
+            added_at: "2026-09-24T00:00:00Z",
+            readiness: mergedReadiness("github:acme/fleet-db#2"),
+          },
+        ],
+      },
+    };
+    expect(statusKeyForItem(item, new Map())).toBe("merged");
+    const counts = computeTabCounts(
+      [item],
+      {
+        query: "",
+        repos: new Set(),
+        epics: new Set(),
+        kinds: new Set(["group"]),
+        mine: false,
+      },
+      new Map(),
+    );
+    expect(counts.ready).toBe(0);
+    expect(counts.merged).toBe(1);
+  });
+
+  it("classifies empty groups as unknown (never Ready)", () => {
+    const item: DeliveryGroupItem = {
+      kind: "group",
+      group: group([]),
+    };
+    expect(statusKeyForItem(item, new Map())).toBe("unknown");
+    const counts = computeTabCounts(
+      [item],
+      {
+        query: "",
+        repos: new Set(),
+        epics: new Set(),
+        kinds: new Set(["group"]),
+        mine: false,
+      },
+      new Map(),
+    );
+    expect(counts.ready).toBe(0);
+    expect(counts.attention).toBe(1);
+  });
+});
+
+describe("matchDeliveryGroup repo filter", () => {
+  it("keeps the group and dims out-of-filter members using full owner/repo", () => {
+    const item: DeliveryGroupItem = {
+      kind: "group",
+      group: group([
+        { pr_key: "github:acme/loomcli#1", repo_name: "acme/loomcli" },
+        { pr_key: "github:acme/fleet-db#2", repo_name: "acme/fleet-db" },
+      ]),
     };
     const match = matchDeliveryGroup(
+      item,
+      {
+        tab: "all",
+        query: "",
+        repos: new Set(["acme/loomcli"]),
+        epics: new Set(),
+        kinds: new Set(["group"]),
+        mine: false,
+      },
+      new Map(),
+    );
+    expect(match.matches).toBe(true);
+    expect(match.memberDimmed.get("github:acme/loomcli#1")).toBe(false);
+    expect(match.memberDimmed.get("github:acme/fleet-db#2")).toBe(true);
+  });
+
+  it("does not collide distinct owners that share a basename", () => {
+    const item: DeliveryGroupItem = {
+      kind: "group",
+      group: group([
+        { pr_key: "github:acme/loomcli#1", repo_name: "acme/loomcli" },
+        { pr_key: "github:other/loomcli#2", repo_name: "other/loomcli" },
+      ]),
+    };
+    const matchAcme = matchDeliveryGroup(
+      item,
+      {
+        tab: "all",
+        query: "",
+        repos: new Set(["acme/loomcli"]),
+        epics: new Set(),
+        kinds: new Set(["group"]),
+        mine: false,
+      },
+      new Map(),
+    );
+    expect(matchAcme.matches).toBe(true);
+    expect(matchAcme.memberDimmed.get("github:acme/loomcli#1")).toBe(false);
+    expect(matchAcme.memberDimmed.get("github:other/loomcli#2")).toBe(true);
+
+    // Short basename must not match either owner/repo identity.
+    const matchShort = matchDeliveryGroup(
       item,
       {
         tab: "all",
@@ -68,9 +196,40 @@ describe("matchDeliveryGroup repo filter", () => {
       },
       new Map(),
     );
-    expect(match.matches).toBe(true);
-    expect(match.memberDimmed.get("github:o/loomcli#1")).toBe(false);
-    expect(match.memberDimmed.get("github:o/fleet-db#2")).toBe(true);
+    expect(matchShort.matches).toBe(false);
+  });
+});
+
+describe("repoOptionsFromItems", () => {
+  it("counts full owner/repo identities separately when basenames collide", () => {
+    const items: WorkspaceItem[] = [
+      {
+        kind: "standalone",
+        prKey: "github:acme/loomcli#1",
+        pr: pr({
+          number: 1,
+          repo_name: "acme/loomcli",
+          source_repo: "loomcli",
+          pr_key: "github:acme/loomcli#1",
+        }),
+      },
+      {
+        kind: "standalone",
+        prKey: "github:other/loomcli#2",
+        pr: pr({
+          number: 2,
+          repo_name: "other/loomcli",
+          source_repo: "loomcli",
+          pr_key: "github:other/loomcli#2",
+          url: "https://github.com/other/loomcli/pull/2",
+        }),
+      },
+    ];
+    const options = repoOptionsFromItems(items, new Map());
+    expect(options).toEqual([
+      ["acme/loomcli", 1],
+      ["other/loomcli", 1],
+    ]);
   });
 });
 
@@ -79,14 +238,14 @@ describe("matchStandalone", () => {
     const item: StandalonePRItem = {
       kind: "standalone",
       prKey: "github:org/repo#9",
-      pr: pr({ number: 9, source_repo: "other" }),
+      pr: pr({ number: 9, source_repo: "other", repo_name: "org/other" }),
     };
     const match = matchStandalone(
       item,
       {
         tab: "all",
         query: "",
-        repos: new Set(["repo"]),
+        repos: new Set(["org/repo"]),
         epics: new Set(),
         kinds: new Set(["standalone"]),
         mine: false,
@@ -181,7 +340,9 @@ describe("buildWorkspaceItems", () => {
 
   it("keeps groups and standalone separate", () => {
     const items = buildWorkspaceItems({
-      deliveryGroups: [group(["github:o/loomcli#1"])],
+      deliveryGroups: [
+        group([{ pr_key: "github:o/loomcli#1", repo_name: "o/loomcli" }]),
+      ],
       pullRequests: [pr({ number: 9, pr_key: "github:org/repo#9" })],
       membershipComplete: true,
     });
@@ -193,7 +354,9 @@ describe("buildWorkspaceItems", () => {
 describe("buildHistoryEntries", () => {
   it("includes group membership and merged standalone events", () => {
     const entries = buildHistoryEntries({
-      deliveryGroups: [group(["github:o/loomcli#1"])],
+      deliveryGroups: [
+        group([{ pr_key: "github:o/loomcli#1", repo_name: "o/loomcli" }]),
+      ],
       standalone: [
         {
           kind: "standalone",

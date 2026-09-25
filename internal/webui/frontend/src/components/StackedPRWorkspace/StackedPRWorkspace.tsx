@@ -20,8 +20,11 @@ import {
 
 import type { GitPullRequest } from "@/api/workspace/pullRequests";
 import type { DeliveryGroupView } from "@/api/workspace/deliveryGroups";
-import type { StandalonePRContinuation } from "@/api/workspace/pullRequests";
-import { fetchPullRequestReadiness } from "@/api/workspace/pullRequests";
+import type {
+  PullRequestReadinessView,
+  StandalonePRContinuation,
+} from "@/api/workspace/pullRequests";
+import { fetchPullRequestReadiness } from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks/workspace/useWorkspaceContext";
 import { useDeliveryGroupPreview } from "@/hooks/workspace/useDeliveryGroupPreview";
 import { useDeliveryGroupMembers } from "@/hooks/workspace/useDeliveryGroupMembers";
@@ -33,12 +36,12 @@ import {
   buildPrByKey,
   buildReadinessByKey,
   buildWorkspaceItems,
+  canonicalRepoIdentity,
   computeTabCounts,
   epicOptionsFromItems,
   matchDeliveryGroup,
   matchStandalone,
   memberRepo,
-  memberRepoName,
   repoOptionsFromItems,
   statusKeyForItem,
   type QueueKind,
@@ -130,7 +133,7 @@ export function StackedPRWorkspace({
   const [mobileDetail, setMobileDetail] = useState(false);
   const [previewGroupId, setPreviewGroupId] = useState<string | null>(null);
   const [extraReadiness, setExtraReadiness] = useState<
-    Map<string, import("@/api/workspace/pullRequests").PullRequestReadinessView>
+    Map<string, PullRequestReadinessView>
   >(() => new Map());
   const [writeBanner, setWriteBanner] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -248,6 +251,11 @@ export function StackedPRWorkspace({
     return map;
   }, [pullRequests, deliveryGroups]);
 
+  // Auth exposes display name/email only — no verified GitHub login on the
+  // session/JWT. Mine matches author_login/assignee against that best-available
+  // identity; full GitHub-login parity needs an auth-surface field beyond this UI.
+  const mineIdentity = user?.name?.trim() || null;
+
   const filters = useMemo(
     () => ({
       tab,
@@ -256,9 +264,9 @@ export function StackedPRWorkspace({
       epics: selectedEpics,
       kinds,
       mine,
-      mineIdentity: user?.name ?? null,
+      mineIdentity,
     }),
-    [tab, query, selectedRepos, selectedEpics, kinds, mine, user?.name],
+    [tab, query, selectedRepos, selectedEpics, kinds, mine, mineIdentity],
   );
 
   const tabCounts = useMemo(
@@ -271,7 +279,7 @@ export function StackedPRWorkspace({
           epics: selectedEpics,
           kinds,
           mine,
-          mineIdentity: user?.name ?? null,
+          mineIdentity,
         },
         groupReadiness,
         prByKey,
@@ -283,7 +291,7 @@ export function StackedPRWorkspace({
       selectedEpics,
       kinds,
       mine,
-      user?.name,
+      mineIdentity,
       groupReadiness,
       prByKey,
     ],
@@ -727,8 +735,11 @@ export function StackedPRWorkspace({
         {opts.crossFrom ? (
           <div className={styles.cross} aria-hidden="true">
             Delivery order crosses {opts.crossFrom} →{" "}
-            {pr?.source_repo || memberRepoName(pr?.repo_name)} (not a branch
-            link)
+            {canonicalRepoIdentity({
+              repo_name: pr?.repo_name,
+              source_repo: pr?.source_repo,
+            })}{" "}
+            (not a branch link)
           </div>
         ) : null}
         <button
@@ -762,7 +773,10 @@ export function StackedPRWorkspace({
             </span>
             <span className={styles.rowSub}>
               <span className={styles.chip}>
-                {pr?.source_repo || pr?.repo_name || "repo"}
+                {canonicalRepoIdentity({
+                  repo_name: pr?.repo_name,
+                  source_repo: pr?.source_repo,
+                })}
               </span>
               {pr?.head_ref_name ? (
                 <span className={styles.chipMono}>
@@ -911,7 +925,12 @@ export function StackedPRWorkspace({
                     </button>
                   </td>
                   <td>{item.pr.title}</td>
-                  <td>{item.pr.source_repo || item.pr.repo_name}</td>
+                  <td>
+                    {canonicalRepoIdentity({
+                      repo_name: item.pr.repo_name,
+                      source_repo: item.pr.source_repo,
+                    })}
+                  </td>
                   <td>
                     <ReadinessBadge display={d} compact />
                   </td>
@@ -1024,13 +1043,34 @@ export function StackedPRWorkspace({
           </p>
           <dl className={styles.kv}>
             <dt>Repo</dt>
-            <dd>{pr?.source_repo || pr?.repo_name || "—"}</dd>
+            <dd>
+              {canonicalRepoIdentity({
+                repo_name: pr?.repo_name,
+                source_repo: pr?.source_repo,
+              }) || "—"}
+            </dd>
             <dt>Branches</dt>
             <dd>
               {pr?.head_ref_name
                 ? `${pr.head_ref_name} → ${pr.base_ref_name}`
                 : "—"}
             </dd>
+            {pr &&
+            (pr.changed_files != null ||
+              pr.additions != null ||
+              pr.deletions != null) ? (
+              <>
+                <dt>Changes</dt>
+                <dd data-testid="selected-pr-changes-summary">
+                  {pr.changed_files != null
+                    ? `${pr.changed_files} file${pr.changed_files === 1 ? "" : "s"}`
+                    : "files unknown"}
+                  {pr.additions != null || pr.deletions != null
+                    ? ` · +${pr.additions ?? "?"} / −${pr.deletions ?? "?"}`
+                    : ""}
+                </dd>
+              </>
+            ) : null}
             {selectedStandalone?.issueId ||
             issueByPrKey.get(selectedKey)?.id ? (
               <>
@@ -1305,10 +1345,18 @@ export function StackedPRWorkspace({
                 type="checkbox"
                 checked={mine}
                 onChange={() => setMine((v) => !v)}
+                aria-label={
+                  mineIdentity
+                    ? `Mine filter for ${mineIdentity}`
+                    : "Mine filter unavailable without signed-in identity"
+                }
               />
               Mine
-              <span className={styles.count}>
-                {user?.name ? user.name : "—"}
+              <span
+                className={styles.count}
+                title="Auth display name (no verified GitHub login on session)"
+              >
+                {mineIdentity ?? "—"}
               </span>
             </label>
           </section>

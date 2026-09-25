@@ -68,6 +68,11 @@
   cursor: not-allowed;
 }
 
+.seg button:focus-visible {
+  outline: 2px solid var(--accent-text, var(--color-primary));
+  outline-offset: 2px;
+}
+
 .btn,
 .btnPrimary {
   display: inline-flex;
@@ -87,6 +92,12 @@
   background: var(--accent-bg, var(--color-primary));
   border-color: var(--accent-text, var(--color-primary));
   color: var(--accent-text, #fff);
+}
+
+.btn:focus-visible,
+.btnPrimary:focus-visible {
+  outline: 2px solid var(--accent-text, var(--color-primary));
+  outline-offset: 2px;
 }
 
 .btn:disabled {
@@ -252,6 +263,11 @@
   background: var(--color-bg-secondary);
 }
 
+.search:focus-within {
+  outline: 2px solid var(--accent-text, var(--color-primary));
+  outline-offset: 2px;
+}
+
 .search input {
   flex: 1;
   min-width: 0;
@@ -259,6 +275,10 @@
   background: none;
   outline: none;
   color: var(--color-text-primary);
+}
+
+.search input:focus-visible {
+  outline: none;
 }
 
 .countLabel {
@@ -382,6 +402,12 @@
 }
 
 .row:hover {
+  background: var(--color-bg-secondary);
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--accent-text, var(--color-primary));
+  outline-offset: -2px;
   background: var(--color-bg-secondary);
 }
 

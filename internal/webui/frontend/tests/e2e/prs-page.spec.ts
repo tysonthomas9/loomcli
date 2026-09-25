@@ -109,6 +109,9 @@ const githubPrs = [
     updated_at: "2026-06-04T00:00:00Z",
     repo_name: "org/repo",
     source_repo: "repo",
+    additions: 8,
+    deletions: 2,
+    changed_files: 1,
   },
 ];
 
@@ -123,7 +126,7 @@ const deliveryGroups = [
     members: [
       {
         pr_key: "github:org/fleet-db#1",
-        repo_name: "fleet-db",
+        repo_name: "org/fleet-db",
         pr_number: 1,
         source: "manual",
         added_at: "2026-06-01T00:00:00Z",
@@ -137,7 +140,7 @@ const deliveryGroups = [
       },
       {
         pr_key: "github:org/repo#2",
-        repo_name: "repo",
+        repo_name: "org/repo",
         pr_number: 2,
         source: "manual",
         added_at: "2026-06-02T00:00:00Z",
@@ -314,7 +317,10 @@ async function setupMocks(
         return;
       }
 
-      if (afterWs.startsWith("/delivery-groups/") && afterWs.includes("/preview")) {
+      if (
+        afterWs.startsWith("/delivery-groups/") &&
+        afterWs.includes("/preview")
+      ) {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
@@ -481,7 +487,9 @@ test.describe("PRs page — stacked workspace (mocked)", () => {
     const texts = await badges.allTextContents();
     expect(texts.some((t) => /Stale/i.test(t))).toBe(true);
     expect(texts.every((t) => t.trim() !== "Ready" || true)).toBe(true);
-    const stale = page.locator('[data-testid="readiness-badge"][data-key="stale"]');
+    const stale = page.locator(
+      '[data-testid="readiness-badge"][data-key="stale"]',
+    );
     await expect(stale.first()).toBeVisible();
     await expect(stale.first()).not.toHaveText("Ready");
 
@@ -502,6 +510,35 @@ test.describe("PRs page — stacked workspace (mocked)", () => {
     await expect(page.getByTestId("merge-preview-overlay")).toBeVisible();
     await expect(page.getByText(/read-only · no merge action/i)).toBeVisible();
     await expect(page.getByRole("button", { name: "Merge" })).toHaveCount(0);
+  });
+
+  test("keyboard focus rings and available changes summary", async ({
+    page,
+  }) => {
+    await setupMocks(page, {
+      pullRequests: githubPrs.filter((p) => p.number === 9),
+      deliveryGroups,
+    });
+    await gotoPrsPage(page);
+
+    const search = page.getByRole("searchbox", {
+      name: /search pull requests/i,
+    });
+    await search.focus();
+    await expect(search).toBeFocused();
+
+    const row = page.getByTestId("pr-row-org/repo#9");
+    await row.focus();
+    await expect(row).toBeFocused();
+    // Click selects without triggering the global Enter→open-review shortcut.
+    await row.click();
+    await expect(page.getByTestId("selected-pr-changes-summary")).toHaveText(
+      /1 file · \+8 \/ [−-]2/,
+    );
+
+    const openReview = page.getByRole("button", { name: /Open review/i });
+    await openReview.focus();
+    await expect(openReview).toBeFocused();
   });
 
   test("mock visual: desktop and narrow widths", async ({ page }) => {

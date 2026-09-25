@@ -8,7 +8,9 @@ import {
   fetchPullRequests,
   type GitPullRequest,
   type PullRequestListState,
+  type StandalonePRContinuation,
 } from "@/api/workspace/pullRequests";
+import type { DeliveryGroupView } from "@/api/workspace/deliveryGroups";
 
 import { useWorkspaceContext } from "./useWorkspaceContext";
 
@@ -24,10 +26,10 @@ export interface UsePullRequestsReturn {
   pullRequests: GitPullRequest[];
   /** Per-repo listing failures; non-fatal (e.g. gh missing for one repo). */
   warnings: string[];
-  deliveryGroups: import("@/api/workspace/deliveryGroups").DeliveryGroupView[];
+  deliveryGroups: DeliveryGroupView[];
   deliveryGroupsHasMore: boolean;
   deliveryGroupsNextCursor?: string;
-  standaloneContinuation?: import("@/api/workspace/pullRequests").StandalonePRContinuation;
+  standaloneContinuation?: StandalonePRContinuation;
   loading: boolean;
   error: Error | null;
   refetch: () => Promise<void>;
@@ -40,15 +42,13 @@ export function usePullRequests({
   const { workspaceId } = useWorkspaceContext();
   const [pullRequests, setPullRequests] = useState<GitPullRequest[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [deliveryGroups, setDeliveryGroups] = useState<
-    import("@/api/workspace/deliveryGroups").DeliveryGroupView[]
-  >([]);
+  const [deliveryGroups, setDeliveryGroups] = useState<DeliveryGroupView[]>([]);
   const [deliveryGroupsHasMore, setDeliveryGroupsHasMore] = useState(false);
   const [deliveryGroupsNextCursor, setDeliveryGroupsNextCursor] = useState<
     string | undefined
   >();
   const [standaloneContinuation, setStandaloneContinuation] = useState<
-    import("@/api/workspace/pullRequests").StandalonePRContinuation | undefined
+    StandalonePRContinuation | undefined
   >();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);

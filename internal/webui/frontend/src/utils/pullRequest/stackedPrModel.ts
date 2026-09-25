@@ -54,10 +54,31 @@ export interface FilterMatch {
   dimmed: boolean;
 }
 
-function repoNameOf(pr: GitPullRequest): string {
-  return pr.source_repo || pr.repo_name || "No repo";
+/**
+ * Canonical repo identity for filters, counts, and path markers.
+ * Prefer full `owner/repo` (`repo_name`) so distinct owners with the same
+ * basename never collide. Fall back to `source_repo` only when no full name
+ * is available.
+ */
+function canonicalRepoIdentity(input: {
+  repo_name?: string | null | undefined;
+  source_repo?: string | null | undefined;
+}): string {
+  const full = (input.repo_name ?? "").trim();
+  if (full) return full;
+  const short = (input.source_repo ?? "").trim();
+  if (short) return short;
+  return "No repo";
 }
 
+function repoNameOf(pr: GitPullRequest): string {
+  return canonicalRepoIdentity({
+    repo_name: pr.repo_name,
+    source_repo: pr.source_repo,
+  });
+}
+
+/** Basename-only helper for display; not used for filter identity. */
 function memberRepoName(repoName: string | undefined): string {
   const raw = repoName || "";
   if (raw.includes("/")) {
@@ -67,8 +88,14 @@ function memberRepoName(repoName: string | undefined): string {
   return raw || "No repo";
 }
 
-function memberRepo(member: { repo_name?: string }): string {
-  return memberRepoName(member.repo_name);
+function memberRepo(member: {
+  repo_name?: string;
+  source_repo?: string;
+}): string {
+  return canonicalRepoIdentity({
+    repo_name: member.repo_name,
+    source_repo: member.source_repo,
+  });
 }
 
 export function statusKeyForItem(
@@ -81,8 +108,12 @@ export function statusKeyForItem(
     if (item.pr.is_draft) return "draft";
     return readinessDisplay(view).key;
   }
-  // Group status = worst non-merged member by readiness.
-  let worst: ReadinessDisplayKey = "ready";
+  // Empty groups are never Ready — surface as Unknown.
+  if (item.group.members.length === 0) return "unknown";
+
+  // Group status = worst non-merged member by readiness. All-merged → Merged.
+  let worst: ReadinessDisplayKey | null = null;
+  let sawNonMerged = false;
   const rank: Record<ReadinessDisplayKey, number> = {
     ready: 0,
     queued: 1,
@@ -98,9 +129,11 @@ export function statusKeyForItem(
     const view = m.readiness ?? readinessByKey.get(m.pr_key);
     const key = readinessDisplay(view).key;
     if (key === "merged") continue;
-    if ((rank[key] ?? 0) > (rank[worst] ?? 0)) worst = key;
+    sawNonMerged = true;
+    if (worst === null || (rank[key] ?? 0) > (rank[worst] ?? 0)) worst = key;
   }
-  return worst;
+  if (!sawNonMerged) return "merged";
+  return worst ?? "unknown";
 }
 
 function tabMatches(tab: QueueTab, statusKey: ReadinessDisplayKey): boolean {
@@ -207,10 +240,7 @@ export function matchStandalone(
     return { matches: false, dimmed: false };
   }
 
-  const dimmed =
-    filters.repos.size > 0 &&
-    !filters.repos.has(repo) &&
-    !filters.repos.has(item.pr.repo_name ?? "");
+  const dimmed = filters.repos.size > 0 && !filters.repos.has(repo);
   if (filters.repos.size > 0 && dimmed) {
     // Standalone outside selected repos is hidden (no dependency context).
     return { matches: false, dimmed: false };
@@ -281,10 +311,7 @@ export function matchDeliveryGroup(
   let anyRepoMatch = filters.repos.size === 0;
   for (const m of g.members) {
     const repo = memberRepo(m);
-    const inFilter =
-      filters.repos.size === 0 ||
-      filters.repos.has(repo) ||
-      filters.repos.has(m.repo_name);
+    const inFilter = filters.repos.size === 0 || filters.repos.has(repo);
     memberDimmed.set(m.pr_key, filters.repos.size > 0 && !inFilter);
     if (inFilter) anyRepoMatch = true;
   }
@@ -568,4 +595,4 @@ export function epicOptionsFromItems(
   return [...counts.entries()].sort(([a], [b]) => a.localeCompare(b));
 }
 
-export { repoNameOf, memberRepo, memberRepoName };
+export { canonicalRepoIdentity, repoNameOf, memberRepo, memberRepoName };

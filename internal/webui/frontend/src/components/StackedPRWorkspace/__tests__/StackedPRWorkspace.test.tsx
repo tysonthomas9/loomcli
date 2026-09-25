@@ -47,21 +47,15 @@ vi.mock("@/hooks/workspace/useDeliveryGroupMembers", () => ({
   }),
 }));
 
-vi.mock("@/api/workspace/pullRequests", async () => {
-  const actual = await vi.importActual<
-    typeof import("@/api/workspace/pullRequests")
-  >("@/api/workspace/pullRequests");
-  return {
-    ...actual,
-    fetchPullRequestReadiness: vi.fn().mockResolvedValue({
-      server_now: "2026-09-25T00:00:00Z",
-      fresh_for_s: 60,
-      stale_after_s: 300,
-      pull_requests: [],
-      repo_errors: [],
-    }),
-  };
-});
+vi.mock("@/hooks/api", () => ({
+  fetchPullRequestReadiness: vi.fn().mockResolvedValue({
+    server_now: "2026-09-25T00:00:00Z",
+    fresh_for_s: 60,
+    stale_after_s: 300,
+    pull_requests: [],
+    repo_errors: [],
+  }),
+}));
 
 function pr(
   n: number,
@@ -94,7 +88,7 @@ function group(): DeliveryGroupView {
     members: [
       {
         pr_key: "github:acme/fleet-db#1",
-        repo_name: "fleet-db",
+        repo_name: "acme/fleet-db",
         pr_number: 1,
         source: "manual",
         added_at: "2026-09-24T00:00:00Z",
@@ -108,7 +102,7 @@ function group(): DeliveryGroupView {
       },
       {
         pr_key: "github:acme/loomcli#2",
-        repo_name: "loomcli",
+        repo_name: "acme/loomcli",
         pr_number: 2,
         source: "manual",
         added_at: "2026-09-24T01:00:00Z",
@@ -210,12 +204,43 @@ describe("StackedPRWorkspace", () => {
     renderWorkspace();
     const checkboxes = screen.getAllByRole("checkbox");
     const loomcliBox = checkboxes.find((el) =>
-      el.parentElement?.textContent?.includes("loomcli"),
+      el.parentElement?.textContent?.includes("acme/loomcli"),
     );
     expect(loomcliBox).toBeTruthy();
     fireEvent.click(loomcliBox!);
     const dimmed = document.querySelectorAll("[data-dimmed]");
     expect(dimmed.length).toBeGreaterThan(0);
+  });
+
+  it("exposes available diff stats in the selected PR summary", async () => {
+    renderWorkspace({
+      pullRequests: [pr(3, { additions: 12, deletions: 4, changed_files: 3 })],
+    });
+    fireEvent.click(screen.getByTestId("pr-row-acme/loomcli#3"));
+    expect(
+      await screen.findByTestId("selected-pr-changes-summary"),
+    ).toHaveTextContent("3 files · +12 / −4");
+  });
+
+  it("shows visible focus styles for row, search, and primary controls", () => {
+    renderWorkspace();
+    const row = screen.getByTestId("pr-row-acme/loomcli#3");
+    row.focus();
+    expect(row).toHaveFocus();
+    expect(row.className).toMatch(/row/);
+
+    const search = screen.getByRole("searchbox", {
+      name: /search pull requests/i,
+    });
+    search.focus();
+    expect(search).toHaveFocus();
+    expect(search.closest("label")?.className).toMatch(/search/);
+
+    fireEvent.click(row);
+    const openReview = screen.getByRole("button", { name: /Open review/i });
+    openReview.focus();
+    expect(openReview).toHaveFocus();
+    expect(openReview.className).toMatch(/btnPrimary/);
   });
 
   it("opens review for a selected standalone PR", async () => {
