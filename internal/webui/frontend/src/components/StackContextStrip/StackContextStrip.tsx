@@ -8,7 +8,7 @@
 
 import { Link } from "react-router-dom";
 
-import { ReadinessBadge } from "@/components/StackedPRWorkspace/ReadinessBadge";
+import { ReadinessBadge } from "@/components/StackedPRWorkspace";
 import {
   isExternalMember,
   useStackContext,
