@@ -236,7 +236,11 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	// stack store as ExecuteTask returns — the worker closes the task (unblocking
 	// successors) only afterwards, so a dependent's resolver reads a durable node.
 	if e.StackStore != nil {
-		defer func() { e.finalizeStackNode(ctx, req, resolvedWorktree, result, err) }()
+		defer func() {
+			if ferr := e.finalizeStackNode(ctx, req, resolvedWorktree, result, err); ferr != nil {
+				result = failStackFinalize(result, ferr)
+			}
+		}()
 	}
 	runBridge, err := e.bridgeRunner(ctx, req)
 	if err != nil {
