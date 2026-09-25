@@ -16,6 +16,12 @@ import (
 // deliveryGroupStore talks to FleetDB's DeliveryGroup REST API. Group writes
 // never call GitHub; membership identity is validated by FleetDB against
 // registered repositories.
+//
+// Deploy dependency: honest List cursor pagination (`limit`/`cursor`/
+// `has_more`/`next_cursor`) requires FleetDB PR #367 @
+// 502b365f313014c2c921f9b5f1089849151d23b5. Against FleetDB #365 alone those
+// query params are ignored and missing has_more decodes as false — do not
+// claim bounded group pages until #367 is deployed with this facade.
 type deliveryGroupStore struct{ client *Client }
 
 var _ store.DeliveryGroupStore = (*deliveryGroupStore)(nil)

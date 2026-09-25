@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/prref"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -391,6 +392,10 @@ func TestDeliveryGroupHTTPConflictsReplayAndStale(t *testing.T) {
 	if status != http.StatusConflict || !strings.Contains(string(raw), "pr_in_other_group") {
 		t.Fatalf("dup status=%d body=%s", status, raw)
 	}
+	assertErrorDetails(t, raw, map[string]any{
+		"pr_key":   "github:octocat/hello#7",
+		"group_id": "dg_01JABCDEFGHJKMNPQRSTVWXYZ0",
+	})
 
 	// Stale revision on update.
 	status, raw = h.patchJSON(t, "/api/workspaces/WS/delivery-groups/dg_01JABCDEFGHJKMNPQRSTVWXYZ0",
@@ -399,6 +404,10 @@ func TestDeliveryGroupHTTPConflictsReplayAndStale(t *testing.T) {
 	if status != http.StatusPreconditionFailed {
 		t.Fatalf("stale status=%d body=%s", status, raw)
 	}
+	assertErrorDetails(t, raw, map[string]any{
+		"expected_revision": float64(1),
+		"stored_revision":   float64(2),
+	})
 
 	// Idempotent replay of set-members.
 	members := map[string]any{"members": []map[string]any{
@@ -423,6 +432,211 @@ func TestDeliveryGroupHTTPConflictsReplayAndStale(t *testing.T) {
 	if status != http.StatusConflict || !strings.Contains(string(raw), "idempotency_key_reused") {
 		t.Fatalf("reuse status=%d body=%s", status, raw)
 	}
+}
+
+func assertErrorDetails(t *testing.T, raw []byte, want map[string]any) {
+	t.Helper()
+	var envelope map[string]any
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("decode error envelope: %v (body %s)", err, raw)
+	}
+	if _, hasMeta := envelope["meta"]; hasMeta {
+		t.Fatalf("error envelope must not emit meta; body=%s", raw)
+	}
+	details, ok := envelope["details"].(map[string]any)
+	if !ok {
+		t.Fatalf("details missing or not object: %s", raw)
+	}
+	for k, wantVal := range want {
+		got, exists := details[k]
+		if !exists {
+			t.Fatalf("details[%q] missing in %s", k, raw)
+		}
+		if got != wantVal {
+			t.Fatalf("details[%q]=%v (%T), want %v (%T)", k, got, got, wantVal, wantVal)
+		}
+	}
+}
+
+func TestGhListFallbackPreservesDeliveryGroupsAndFiltersMembership(t *testing.T) {
+	fallback := &fallbackAgentService{
+		result: &ops.GitPullRequestList{
+			PullRequests: []ops.GitPullRequest{
+				{
+					Number: 7, PRKey: "github:octocat/hello#7", Title: "Grouped",
+					State: "OPEN", RepoName: "octocat/hello",
+					URL: "https://github.com/octocat/hello/pull/7",
+				},
+				{
+					Number: 8, PRKey: "github:octocat/hello#8", Title: "Standalone",
+					State: "OPEN", RepoName: "octocat/hello",
+					URL: "https://github.com/octocat/hello/pull/8",
+				},
+			},
+		},
+	}
+	h := newPRReviewHarnessWithAgent(t, false, fallback)
+	fake := newFakeDeliveryGroups()
+	h.module.SetDeliveryGroups(fake)
+	fake.put(&domain.DeliveryGroup{
+		WorkspaceKey: "WS", ID: "dg_01JABCDEFGHJKMNPQRSTVWXYZ0", Title: "g",
+		State: domain.DeliveryGroupActive, Revision: 1,
+		Members: []domain.DeliveryGroupMember{{
+			PRKey: "github:octocat/hello#7", RepoName: "hello", PRNumber: 7,
+			Source: domain.DeliveryGroupMemberManual, AddedAt: time.Now().UTC(),
+		}},
+		LastOpID: "old", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	})
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK {
+		t.Fatalf("status=%d body=%s", status, raw)
+	}
+	if !fallback.called {
+		t.Fatal("expected gh fallback")
+	}
+	data := decodePullRequestsResponse(t, raw)
+	if len(data.DeliveryGroups) != 1 || data.DeliveryGroups[0].ID != "dg_01JABCDEFGHJKMNPQRSTVWXYZ0" {
+		t.Fatalf("delivery_groups=%+v, want preserved group", data.DeliveryGroups)
+	}
+	if len(data.PullRequests) != 1 || data.PullRequests[0].Number != 8 {
+		t.Fatalf("standalone=%+v, want only #8 (grouped #7 filtered)", data.PullRequests)
+	}
+}
+
+func TestGhListFallbackConnectorUnavailablePreservesGroups(t *testing.T) {
+	fallback := &fallbackAgentService{
+		result: &ops.GitPullRequestList{
+			PullRequests: []ops.GitPullRequest{{
+				Number: 8, PRKey: "github:octocat/hello#8", State: "OPEN",
+				RepoName: "octocat/hello", URL: "https://github.com/octocat/hello/pull/8",
+			}},
+		},
+	}
+	h := newPRReviewHarnessWithCredential(t, true, fallback, testCredentialNone, "")
+	fake := newFakeDeliveryGroups()
+	h.module.SetDeliveryGroups(fake)
+	fake.put(&domain.DeliveryGroup{
+		WorkspaceKey: "WS", ID: "dg_01JABCDEFGHJKMNPQRSTVWXYZ0", Title: "g",
+		State: domain.DeliveryGroupActive, Revision: 1,
+		Members: []domain.DeliveryGroupMember{{
+			PRKey: "github:octocat/hello#7", RepoName: "hello", PRNumber: 7,
+			Source: domain.DeliveryGroupMemberManual, AddedAt: time.Now().UTC(),
+		}},
+		LastOpID: "old", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	})
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK {
+		t.Fatalf("status=%d body=%s", status, raw)
+	}
+	data := decodePullRequestsResponse(t, raw)
+	if len(data.DeliveryGroups) != 1 {
+		t.Fatalf("groups=%+v warnings=%v", data.DeliveryGroups, data.Warnings)
+	}
+	if !slicesContains(data.Warnings, connectorUnavailableWarning) {
+		t.Fatalf("warnings=%v, want connector unavailable", data.Warnings)
+	}
+}
+
+func TestGhListFallbackMergedPreservesGroups(t *testing.T) {
+	fallback := &fallbackAgentService{
+		result: &ops.GitPullRequestList{
+			PullRequests: []ops.GitPullRequest{{
+				Number: 9, PRKey: "github:octocat/hello#9", Title: "Merged PR",
+				State: "MERGED", RepoName: "octocat/hello",
+			}},
+		},
+	}
+	h := newPRReviewHarnessWithAgent(t, true, fallback)
+	fake := newFakeDeliveryGroups()
+	h.module.SetDeliveryGroups(fake)
+	fake.put(&domain.DeliveryGroup{
+		WorkspaceKey: "WS", ID: "dg_01JABCDEFGHJKMNPQRSTVWXYZ0", Title: "g",
+		State: domain.DeliveryGroupActive, Revision: 1,
+		Members: []domain.DeliveryGroupMember{{
+			PRKey: "github:octocat/hello#7", RepoName: "hello", PRNumber: 7,
+			Source: domain.DeliveryGroupMemberManual, AddedAt: time.Now().UTC(),
+		}},
+		LastOpID: "old", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	})
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=merged")
+	if status != http.StatusOK {
+		t.Fatalf("status=%d body=%s", status, raw)
+	}
+	data := decodePullRequestsResponse(t, raw)
+	if len(data.DeliveryGroups) != 1 {
+		t.Fatalf("groups=%+v", data.DeliveryGroups)
+	}
+	if !slicesContains(data.Warnings, mergedStateGhFallbackWarning) {
+		t.Fatalf("warnings=%v, want merged fallback notice", data.Warnings)
+	}
+	if !fallback.called || fallback.state != "merged" {
+		t.Fatalf("fallback called=%v state=%q", fallback.called, fallback.state)
+	}
+}
+
+func TestGhListFallbackLocalFailureKeepsGroupsNot502(t *testing.T) {
+	fallback := &fallbackAgentService{err: fmt.Errorf("gh: authentication failed")}
+	h := newPRReviewHarnessWithAgent(t, false, fallback)
+	fake := newFakeDeliveryGroups()
+	h.module.SetDeliveryGroups(fake)
+	fake.put(&domain.DeliveryGroup{
+		WorkspaceKey: "WS", ID: "dg_01JABCDEFGHJKMNPQRSTVWXYZ0", Title: "g",
+		State: domain.DeliveryGroupActive, Revision: 1,
+		Members: []domain.DeliveryGroupMember{{
+			PRKey: "github:octocat/hello#7", RepoName: "hello", PRNumber: 7,
+			Source: domain.DeliveryGroupMemberManual, AddedAt: time.Now().UTC(),
+		}},
+		LastOpID: "old", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	})
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK {
+		t.Fatalf("status=%d body=%s (want 200 with groups, not 502)", status, raw)
+	}
+	data := decodePullRequestsResponse(t, raw)
+	if len(data.DeliveryGroups) != 1 {
+		t.Fatalf("groups=%+v", data.DeliveryGroups)
+	}
+	if len(data.PullRequests) != 0 {
+		t.Fatalf("pull_requests=%+v, want empty when gh failed", data.PullRequests)
+	}
+	found := false
+	for _, w := range data.Warnings {
+		if strings.Contains(w, localGhUnavailableWarning) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("warnings=%v, want local gh unavailable", data.Warnings)
+	}
+	if data.StandaloneContinuation == nil || data.StandaloneContinuation.Complete {
+		t.Fatalf("continuation=%+v, want incomplete when gh failed", data.StandaloneContinuation)
+	}
+}
+
+func TestGhListFallbackLocalFailureWithoutGroupsStill502(t *testing.T) {
+	fallback := &fallbackAgentService{err: fmt.Errorf("gh: authentication failed")}
+	h := newPRReviewHarnessWithAgent(t, false, fallback)
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusBadGateway {
+		t.Fatalf("status=%d body=%s, want 502 without delivery groups", status, raw)
+	}
+	if code := decodeErrorCode(t, raw); code != "upstream_error" {
+		t.Fatalf("code=%q, want upstream_error", code)
+	}
+}
+
+func slicesContains(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDeliveryGroupHTTPNoGitHubWriteOnEdits(t *testing.T) {

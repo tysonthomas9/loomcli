@@ -1463,7 +1463,7 @@ export interface paths {
     };
     /**
      * List pull requests across the workspace's registered repositories
-     * @description Lists GitHub pull requests for every registered repository, including PRs created outside Loom. Served by the GitHub connector when a token is configured and by the gh CLI otherwise. Per-repo failures are reported in warnings rather than failing the whole list. Active delivery-group members are omitted from `pull_requests` (standalone only) and surfaced under `delivery_groups` with honest `delivery_groups_has_more` pagination. Connector discovery is bounded to five 100-item pages per repo; `standalone_continuation` reports whether more pages exist and how to continue via `standalone_repo` / `standalone_page`. Absence of a row in a truncated page must not be treated as a complete standalone set.
+     * @description Lists GitHub pull requests for every registered repository, including PRs created outside Loom. Served by the GitHub connector when a token is configured and by the gh CLI otherwise. Per-repo failures are reported in warnings rather than failing the whole list. Active delivery-group members are omitted from `pull_requests` (standalone only) and surfaced under `delivery_groups` with honest `delivery_groups_has_more` pagination. Connector discovery is bounded to five 100-item pages per repo; `standalone_continuation` reports whether more pages exist and how to continue via `standalone_repo` / `standalone_page`. Absence of a row in a truncated page must not be treated as a complete standalone set. Connector-unavailable, merged, and missing-repo fallbacks preserve Loom delivery groups with explicit upstream/partial/stale warnings and filter local PRs against active group membership; local gh failure returns 502 only when no delivery groups backend is available. Bounded `delivery_groups_*` cursor pages require FleetDB delivery-group pagination (PR #367 @ 502b365f) deployed alongside this facade — do not claim complete group pages against FleetDB #365 alone.
      */
     get: operations["listPullRequests"];
     put?: never;
@@ -1523,7 +1523,7 @@ export interface paths {
     };
     /**
      * List durable delivery groups
-     * @description Returns one ID-ordered page of FleetDB delivery groups. `count` is the page length only; page on `has_more` / `next_cursor`. Members keep delivery order and are joined to the latest readiness observation when available. Partial GitHub failures never hide groups. Group reads do not write to GitHub.
+     * @description Returns one ID-ordered page of FleetDB delivery groups. `count` is the page length only; page on `has_more` / `next_cursor`. Honest cursor pagination requires FleetDB PR #367 (@ 502b365f) deployed — against FleetDB #365 alone `limit`/`cursor` are ignored and missing `has_more` decodes as false. Members keep delivery order and are joined to the latest readiness observation when available. Partial GitHub failures never hide groups. Group reads do not write to GitHub.
      */
     get: operations["listDeliveryGroups"];
     put?: never;
@@ -2499,7 +2499,10 @@ export interface components {
       error: string;
       code?: string;
       retryable?: boolean;
-      details?: Record<string, never>;
+      /** @description Structured facts for typed errors. Delivery-group 409 conflicts may include `pr_key`, `group_id`, and `revision`. Delivery-group 412 precondition failures include `expected_revision` and `stored_revision`. */
+      details?: {
+        [key: string]: unknown;
+      };
     };
     MessageResponse: {
       /** @constant */
@@ -7112,7 +7115,7 @@ export interface operations {
           };
         };
       };
-      /** @description gh CLI listing failed */
+      /** @description gh CLI listing failed and no delivery-groups backend is available to return durable groups with warnings */
       502: {
         headers: {
           [name: string]: unknown;

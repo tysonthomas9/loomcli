@@ -466,7 +466,7 @@ func writeDeliveryGroupError(w http.ResponseWriter, err error) {
 	case errors.As(err, &conflict):
 		writeDeliveryGroupConflict(w, conflict)
 	case errors.As(err, &pre):
-		writePRReviewErrorMeta(w, http.StatusPreconditionFailed, pre.Code, pre.Error(), false, map[string]any{
+		writePRReviewErrorDetails(w, http.StatusPreconditionFailed, pre.Code, pre.Error(), false, map[string]any{
 			"expected_revision": pre.ExpectedRevision,
 			"stored_revision":   pre.StoredRevision,
 		})
@@ -482,20 +482,20 @@ func writeDeliveryGroupError(w http.ResponseWriter, err error) {
 }
 
 func writeDeliveryGroupConflict(w http.ResponseWriter, conflict *domain.DeliveryGroupConflictError) {
-	meta := map[string]any{}
+	details := map[string]any{}
 	for k, v := range conflict.Meta {
-		meta[k] = v
+		details[k] = v
 	}
 	if conflict.PRKey != "" {
-		meta["pr_key"] = conflict.PRKey
+		details["pr_key"] = conflict.PRKey
 	}
 	if conflict.GroupID != "" {
-		meta["group_id"] = conflict.GroupID
+		details["group_id"] = conflict.GroupID
 	}
 	if conflict.Revision > 0 {
-		meta["revision"] = conflict.Revision
+		details["revision"] = conflict.Revision
 	}
-	writePRReviewErrorMeta(w, http.StatusConflict, conflict.Code, conflict.Error(), conflict.Retryable, meta)
+	writePRReviewErrorDetails(w, http.StatusConflict, conflict.Code, conflict.Error(), conflict.Retryable, details)
 }
 
 // groupedPRKeys collects active-group membership so list responses can mark

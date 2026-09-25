@@ -2151,7 +2151,9 @@ type EditorOpenRequest struct {
 
 // ErrorResponse defines model for ErrorResponse.
 type ErrorResponse struct {
-	Code      *string                 `json:"code,omitempty"`
+	Code *string `json:"code,omitempty"`
+
+	// Details Structured facts for typed errors. Delivery-group 409 conflicts may include `pr_key`, `group_id`, and `revision`. Delivery-group 412 precondition failures include `expected_revision` and `stored_revision`.
 	Details   *map[string]interface{} `json:"details,omitempty"`
 	Error     string                  `json:"error"`
 	Retryable *bool                   `json:"retryable,omitempty"`

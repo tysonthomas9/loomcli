@@ -60,10 +60,13 @@ func writePRReviewError(w http.ResponseWriter, err error) {
 }
 
 func writePRReviewErrorCode(w http.ResponseWriter, status int, code, message string, retryable bool) {
-	writePRReviewErrorMeta(w, status, code, message, retryable, nil)
+	writePRReviewErrorDetails(w, status, code, message, retryable, nil)
 }
 
-func writePRReviewErrorMeta(w http.ResponseWriter, status int, code, message string, retryable bool, meta map[string]any) {
+// writePRReviewErrorDetails emits the canonical ErrorResponse envelope. Structured
+// conflict/precondition facts use JSON "details" to match OpenAPI ErrorResponse
+// and other Loom handlers (not "meta").
+func writePRReviewErrorDetails(w http.ResponseWriter, status int, code, message string, retryable bool, details map[string]any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(struct {
@@ -72,13 +75,13 @@ func writePRReviewErrorMeta(w http.ResponseWriter, status int, code, message str
 		Error     string         `json:"error"`
 		Code      string         `json:"code"`
 		Retryable bool           `json:"retryable"`
-		Meta      map[string]any `json:"meta,omitempty"`
+		Details   map[string]any `json:"details,omitempty"`
 	}{
 		Success:   false,
 		Data:      nil,
 		Error:     message,
 		Code:      code,
 		Retryable: retryable,
-		Meta:      meta,
+		Details:   details,
 	})
 }

@@ -1,7 +1,6 @@
 package prreview
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -83,7 +82,7 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 		if m != nil && m.dispatcher != nil && !m.githubTokenConfigured() {
 			warnings = append(warnings, connectorUnavailableWarning)
 		}
-		m.ghListFallback(w, r.Context(), ws, state, warnings...)
+		m.ghListFallback(w, r, ws, state, warnings...)
 		return
 	}
 
@@ -91,13 +90,13 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 	// so serve that filter from gh directly instead of issuing N failing 422s
 	// and only then falling back.
 	if strings.EqualFold(state, "merged") {
-		m.ghListFallback(w, r.Context(), ws, state)
+		m.ghListFallback(w, r, ws, state, mergedStateGhFallbackWarning)
 		return
 	}
 
 	data, err := storeadapter.BuildWorkspaceDataForKey(r.Context(), m.store, ws)
 	if err != nil || data == nil || len(data.Repos) == 0 {
-		m.ghListFallback(w, r.Context(), ws, state)
+		m.ghListFallback(w, r, ws, state, missingWorkspaceReposWarning)
 		return
 	}
 
@@ -138,7 +137,7 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, out)
 			return
 		}
-		m.ghListFallback(w, r.Context(), ws, state, notice...)
+		m.ghListFallback(w, r, ws, state, notice...)
 		return
 	}
 
@@ -371,26 +370,69 @@ func (m *Module) connectorListAvailable() bool {
 // repo and we fell back to gh — so a broken connector isn't invisible.
 const connectorUnavailableWarning = "GitHub connector unavailable — showing local pull requests instead"
 
-func (m *Module) ghListFallback(w http.ResponseWriter, ctx context.Context, ws, state string, priorWarnings ...string) {
-	if m == nil || m.agentSvc == nil {
+// mergedStateGhFallbackWarning explains why list used local gh for state=merged.
+const mergedStateGhFallbackWarning = "merged filter uses local GitHub discovery — delivery groups may carry stale or partial upstream membership"
+
+// missingWorkspaceReposWarning is emitted when workspace repo data is absent
+// and list falls back to local gh while still surfacing Loom delivery groups.
+const missingWorkspaceReposWarning = "workspace repository data unavailable — using local GitHub discovery; delivery groups may be partial or stale"
+
+// localGhUnavailableWarning is emitted when local gh listing fails but Loom
+// delivery groups are still returned (never hide durable groups behind a 502).
+const localGhUnavailableWarning = "local GitHub discovery unavailable — showing Loom delivery groups with partial or stale upstream membership"
+
+func (m *Module) ghListFallback(w http.ResponseWriter, r *http.Request, ws, state string, priorWarnings ...string) {
+	warnings := append([]string{}, priorWarnings...)
+	prs := []ops.GitPullRequest{}
+	ghOK := false
+
+	if m != nil && m.agentSvc != nil {
+		res, err := m.agentSvc.ListPullRequests(r.Context(), ws, state)
+		if err != nil {
+			if m.deliveryGroups == nil {
+				writePRReviewErrorCode(w, http.StatusBadGateway, "upstream_error", err.Error(), true)
+				return
+			}
+			warnings = append(warnings, localGhUnavailableWarning+": "+sanitizeWarning(err))
+		} else {
+			ghOK = true
+			if res != nil {
+				if res.PullRequests != nil {
+					prs = res.PullRequests
+				}
+				warnings = append(warnings, res.Warnings...)
+			}
+		}
+	} else if m == nil || m.deliveryGroups == nil {
 		writePRReviewError(w, errEgressUnavailable)
 		return
+	} else {
+		warnings = append(warnings, localGhUnavailableWarning)
 	}
-	res, err := m.agentSvc.ListPullRequests(ctx, ws, state)
-	if err != nil {
-		writePRReviewErrorCode(w, http.StatusBadGateway, "upstream_error", err.Error(), true)
-		return
+
+	if ghOK {
+		m.observeListedPullRequests(ws, prs)
 	}
-	prs := []ops.GitPullRequest{}
-	warnings := append([]string{}, priorWarnings...)
-	if res != nil {
-		if res.PullRequests != nil {
-			prs = res.PullRequests
+
+	grouped, groupWarnings, membershipTruncated := m.loadActiveGroupedPRKeys(r, ws)
+	warnings = append(warnings, groupWarnings...)
+	standalone := filterStandalonePullRequests(prs, grouped)
+
+	out := pullRequestsData{
+		PullRequests: standalone,
+		Warnings:     warnings,
+	}
+	if !ghOK || membershipTruncated {
+		// Honest: without complete local discovery / membership index we cannot
+		// claim a complete standalone set.
+		out.StandaloneContinuation = &standaloneContinuation{
+			Repos:    []standaloneRepoContinuation{},
+			HasMore:  false,
+			Complete: false,
 		}
-		warnings = append(warnings, res.Warnings...)
 	}
-	m.observeListedPullRequests(ws, prs)
-	writeJSON(w, pullRequestsData{PullRequests: prs, Warnings: warnings})
+	m.attachDeliveryGroupsPage(r, ws, &out)
+	writeJSON(w, out)
 }
 
 func connectorListState(state string) string {
