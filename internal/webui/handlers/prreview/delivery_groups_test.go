@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -108,7 +109,13 @@ func (f *fakeDeliveryGroups) GetByPR(ctx context.Context, ws, prKey string) (*do
 	if !ok {
 		return nil, domain.ErrNotFound
 	}
-	return f.Get(ctx, ws, id)
+	g, ok := f.groups[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	cp := *g
+	cp.Members = append([]domain.DeliveryGroupMember(nil), g.Members...)
+	return &cp, nil
 }
 
 func (f *fakeDeliveryGroups) Create(ctx context.Context, ws, key string, in domain.DeliveryGroupCreate) (*store.DeliveryGroupWriteResult, error) {
@@ -987,6 +994,59 @@ func TestDeliveryGroupUnregisteredMemberRejected(t *testing.T) {
 	}, map[string]string{"X-Idempotency-Key": "bad"})
 	if status != http.StatusUnprocessableEntity {
 		t.Fatalf("status=%d body=%s", status, raw)
+	}
+}
+
+func TestGetDeliveryGroupByPR(t *testing.T) {
+	h, f, _ := newReadinessHarness(t)
+	fake := newFakeDeliveryGroups()
+	h.module.SetDeliveryGroups(fake)
+	key := "github:octocat/hello#7"
+	fake.put(&domain.DeliveryGroup{
+		WorkspaceKey: "WS", ID: "dg_01JABCDEFGHJKMNPQRSTVWXYZ0", Title: "stack",
+		State: domain.DeliveryGroupActive, Revision: 1,
+		Members: []domain.DeliveryGroupMember{{
+			PRKey: key, RepoName: "hello", PRNumber: 7,
+			Source: domain.DeliveryGroupMemberManual, AddedAt: time.Now().UTC(),
+		}},
+		LastOpID: "op", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	})
+	f.setNode("octocat/hello", map[string]any{
+		"number": 7, "isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+		"reviewDecision": "APPROVED", "state": "OPEN",
+		"headRefOid": "head", "baseRefOid": "base", "baseRefName": "main", "headRefName": "feat",
+		"statusCheckRollup": map[string]any{"state": "SUCCESS", "contexts": map[string]any{"nodes": []any{}}},
+	})
+
+	encoded := url.PathEscape(key)
+	status, raw := h.get(t, "/api/workspaces/WS/pull-request-delivery-groups/"+encoded)
+	if status != http.StatusOK {
+		t.Fatalf("status=%d body=%s", status, raw)
+	}
+	if !strings.Contains(string(raw), `"id":"dg_01JABCDEFGHJKMNPQRSTVWXYZ0"`) {
+		t.Fatalf("missing group id in %s", raw)
+	}
+	if !strings.Contains(string(raw), `"readiness"`) {
+		t.Fatalf("expected readiness decoration in %s", raw)
+	}
+	if !strings.Contains(string(raw), key) {
+		t.Fatalf("missing member key in %s", raw)
+	}
+
+	status, raw = h.get(t, "/api/workspaces/WS/pull-request-delivery-groups/"+url.PathEscape("github:octocat/hello#999"))
+	if status != http.StatusNotFound {
+		t.Fatalf("missing member status=%d body=%s", status, raw)
+	}
+
+	status, raw = h.get(t, "/api/workspaces/WS/pull-request-delivery-groups/"+url.PathEscape("not-a-key"))
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid key status=%d body=%s", status, raw)
+	}
+
+	h.module.SetDeliveryGroups(nil)
+	status, raw = h.get(t, "/api/workspaces/WS/pull-request-delivery-groups/"+encoded)
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("nil backend status=%d body=%s", status, raw)
 	}
 }
 

@@ -2979,6 +2979,60 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/workspaces/{ws}/pull-request-delivery-groups/{pr_key}:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+      - name: pr_key
+        in: path
+        required: true
+        description: >-
+          Canonical PR identity (`github:owner/repo#number` or legacy
+          `owner/repo#number`). Pass as a single URL-encoded path segment.
+        schema:
+          type: string
+          minLength: 1
+    get:
+      operationId: getDeliveryGroupByPr
+      tags: [pull-requests]
+      summary: Get the active delivery group that contains a PR
+      description: >-
+        Thin WebUI facade over FleetDB GetByPR. Returns the active group that
+        currently contains `pr_key`, with the same readiness decoration as
+        getDeliveryGroup. 404 means the PR is not in any active group — callers
+        must not page all delivery groups client-side as a membership fallback.
+        Distinct from `/delivery-groups/{group_id}/...` so Go ServeMux does not
+        treat `by-pr` as a `{group_id}` value.
+      responses:
+        "200":
+          description: Active delivery group containing the PR
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { type: boolean, const: true }
+                  data:
+                    $ref: "#/components/schemas/DeliveryGroupWrite"
+        "404":
+          description: PR is not a member of any active delivery group
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid pr_key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Delivery groups unavailable or inconsistent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/delivery-groups/{group_id}:
     parameters:
       - $ref: "#/components/parameters/WorkspaceId"

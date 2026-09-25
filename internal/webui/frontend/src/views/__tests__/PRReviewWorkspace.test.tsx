@@ -102,6 +102,24 @@ vi.mock("@/components/IssueDetailPanel/sessions/TaskSessionDiffPane", () => ({
   TaskSessionDiffPane: () => <div data-testid="task-session-diff" />,
 }));
 
+vi.mock("@/components/StackContextStrip", () => ({
+  StackContextStrip: ({
+    prKey,
+    onBack,
+  }: {
+    prKey: string;
+    onBack?: () => void;
+  }) => (
+    <div data-testid="stack-context-strip" data-pr-key={prKey}>
+      {onBack ? (
+        <button type="button" onClick={onBack}>
+          Back to queue
+        </button>
+      ) : null}
+    </div>
+  ),
+}));
+
 vi.mock("@/components/AgentWorkPanel/AgentWorkPanel", () => ({
   buildWorkerByTaskId: (
     agents: Array<{ name: string; task_id?: string | null }>,
@@ -363,6 +381,26 @@ describe("PRReviewWorkspace", () => {
       }),
     );
     expect(request).not.toHaveProperty("source_repo");
+  });
+
+  it("renders the stack context strip above the identity header without hiding diff controls", async () => {
+    renderWorkspace({
+      pullRequest: makePullRequest({
+        pr_key: "github:octocat/hello#7",
+      }),
+    });
+
+    await waitFor(() => {
+      expect(mocks.getPullRequestDetail).toHaveBeenCalled();
+    });
+
+    const strip = screen.getByTestId("stack-context-strip");
+    expect(strip).toHaveAttribute("data-pr-key", "github:octocat/hello#7");
+    expect(screen.getByTestId("pr-compare-diff-pane")).toBeInTheDocument();
+    expect(screen.getByTestId("pr-discuss-button")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Back to pull requests/i }),
+    ).toBeInTheDocument();
   });
 });
 

@@ -172,6 +172,26 @@ export async function getDeliveryGroup(
   return unwrapResponse(data, response);
 }
 
+/**
+ * Lookup the active delivery group that contains `prKey`.
+ *
+ * Thin facade over FleetDB GetByPR. 404 means not in an active group — do not
+ * page all delivery groups client-side as a membership fallback.
+ */
+export async function getDeliveryGroupByPr(
+  ws: string,
+  prKey: string,
+): Promise<DeliveryGroupWrite> {
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/pull-request-delivery-groups/{pr_key}",
+    {
+      params: { path: { ws, pr_key: prKey } },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrapResponse(data, response);
+}
+
 export async function previewDeliveryGroup(
   ws: string,
   groupId: string,

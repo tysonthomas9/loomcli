@@ -1538,6 +1538,31 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/pull-request-delivery-groups/{pr_key}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Canonical PR identity (`github:owner/repo#number` or legacy `owner/repo#number`). Pass as a single URL-encoded path segment. */
+        pr_key: string;
+      };
+      cookie?: never;
+    };
+    /**
+     * Get the active delivery group that contains a PR
+     * @description Thin WebUI facade over FleetDB GetByPR. Returns the active group that currently contains `pr_key`, with the same readiness decoration as getDeliveryGroup. 404 means the PR is not in any active group — callers must not page all delivery groups client-side as a membership fallback. Distinct from `/delivery-groups/{group_id}/...` so Go ServeMux does not treat `by-pr` as a `{group_id}` value.
+     */
+    get: operations["getDeliveryGroupByPr"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/delivery-groups/{group_id}": {
     parameters: {
       query?: never;
@@ -7348,6 +7373,62 @@ export interface operations {
       };
       /** @description Missing idempotency key */
       428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getDeliveryGroupByPr: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Canonical PR identity (`github:owner/repo#number` or legacy `owner/repo#number`). Pass as a single URL-encoded path segment. */
+        pr_key: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Active delivery group containing the PR */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["DeliveryGroupWrite"];
+          };
+        };
+      };
+      /** @description PR is not a member of any active delivery group */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Invalid pr_key */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Delivery groups unavailable or inconsistent */
+      503: {
         headers: {
           [name: string]: unknown;
         };
