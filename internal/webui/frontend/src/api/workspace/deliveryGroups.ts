@@ -13,6 +13,8 @@ import {
 import type { components } from "@/types/generated/openapi";
 
 export type DeliveryGroupView = components["schemas"]["DeliveryGroupView"];
+export type DeliveryGroupMemberView =
+  components["schemas"]["DeliveryGroupMemberView"];
 export type DeliveryGroupList = components["schemas"]["DeliveryGroupList"];
 export type DeliveryGroupWrite = components["schemas"]["DeliveryGroupWrite"];
 export type DeliveryGroupPreview =

@@ -54,6 +54,13 @@ export {
 } from "./useStackContext";
 export type { StackContextState } from "./useStackContext";
 
+export { useFocusedDeliveryGroup } from "./useFocusedDeliveryGroup";
+export type {
+  UseFocusedDeliveryGroupReturn,
+  FocusedDeliveryGroupError,
+  FocusedDeliveryGroupErrorKind,
+} from "./useFocusedDeliveryGroup";
+
 export { usePullRequestDiff } from "./usePullRequestDiff";
 export type {
   UsePullRequestDiffParams,

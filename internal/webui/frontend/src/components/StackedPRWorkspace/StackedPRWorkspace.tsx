@@ -29,6 +29,7 @@ import { fetchPullRequestReadiness } from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks/workspace/useWorkspaceContext";
 import { useDeliveryGroupPreview } from "@/hooks/workspace/useDeliveryGroupPreview";
 import { useDeliveryGroupMembers } from "@/hooks/workspace/useDeliveryGroupMembers";
+import { useFocusedDeliveryGroup } from "@/hooks/workspace/useFocusedDeliveryGroup";
 import { useRegisterEscapeLayer, LAYER_CONFIRM_DIALOG } from "@/hooks";
 import { isPRUrl, prKeyFromRef } from "@/utils/issue";
 import {
@@ -76,6 +77,16 @@ export interface StackedPRWorkspaceProps {
   error: Error | null;
   onOpenReview: (args: { issueId?: string; reviewPr?: string }) => void;
   onRefetch?: () => Promise<void>;
+  /**
+   * Deep-link focus from `/prs?group=&pr=&epic=` (e.g. epic-detail rollup).
+   * `prKey` (or the first member of `groupId`) is selected once visible;
+   * `epicId` seeds the epic filter.
+   */
+  initialFocus?: {
+    groupId?: string | undefined;
+    prKey?: string | undefined;
+    epicId?: string | undefined;
+  };
 }
 
 const TABS: { id: QueueTab; label: string }[] = [
@@ -114,6 +125,7 @@ export function StackedPRWorkspace({
   error,
   onOpenReview,
   onRefetch,
+  initialFocus,
 }: StackedPRWorkspaceProps): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
   const { user } = useAuth();
@@ -127,7 +139,11 @@ export function StackedPRWorkspace({
   const [query, setQuery] = useState("");
   const [railQuery, setRailQuery] = useState("");
   const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set());
-  const [selectedEpics, setSelectedEpics] = useState<Set<string>>(new Set());
+  const [selectedEpics, setSelectedEpics] = useState<Set<string>>(
+    () => new Set(initialFocus?.epicId ? [initialFocus.epicId] : []),
+  );
+  // Consumed once the deep-linked PR is visible (or data shows it is not).
+  const pendingFocusRef = useRef(initialFocus);
   const [kinds, setKinds] = useState<Set<QueueKind>>(
     () => new Set(["group", "standalone"]),
   );
@@ -141,6 +157,21 @@ export function StackedPRWorkspace({
   >(() => new Map());
   const [writeBanner, setWriteBanner] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  /** Named `?group=` / `?pr=` target could not be honored — never silently remap. */
+  const [focusTargetError, setFocusTargetError] = useState<string | null>(null);
+
+  const focusedGroupLookup = useFocusedDeliveryGroup(
+    initialFocus?.groupId,
+    deliveryGroups,
+  );
+
+  /** First-page groups plus a directly fetched deep-link target when absent. */
+  const workspaceGroups = useMemo(() => {
+    const focused = focusedGroupLookup.group;
+    if (!focused) return deliveryGroups;
+    if (deliveryGroups.some((g) => g.id === focused.id)) return deliveryGroups;
+    return [focused, ...deliveryGroups];
+  }, [deliveryGroups, focusedGroupLookup.group]);
 
   const membershipComplete = standaloneContinuation?.complete !== false;
 
@@ -198,13 +229,13 @@ export function StackedPRWorkspace({
   }, [issues]);
 
   const groupReadiness = useMemo(
-    () => buildReadinessByKey(deliveryGroups, [...extraReadiness.values()]),
-    [deliveryGroups, extraReadiness],
+    () => buildReadinessByKey(workspaceGroups, [...extraReadiness.values()]),
+    [workspaceGroups, extraReadiness],
   );
 
   const items = useMemo(() => {
     const base = buildWorkspaceItems({
-      deliveryGroups,
+      deliveryGroups: workspaceGroups,
       pullRequests,
       issueByPrKey,
       membershipComplete,
@@ -216,13 +247,13 @@ export function StackedPRWorkspace({
         .map((i) => i.prKey),
     );
     // Also cover PR keys that are only in groups.
-    for (const g of deliveryGroups) {
+    for (const g of workspaceGroups) {
       for (const m of g.members) covered.add(m.pr_key);
     }
     const loomOnly = buildLoomOnlyReviewItems(loomOnlyMeta, covered);
     return [...base, ...loomOnly];
   }, [
-    deliveryGroups,
+    workspaceGroups,
     pullRequests,
     issueByPrKey,
     membershipComplete,
@@ -232,7 +263,7 @@ export function StackedPRWorkspace({
 
   const prByKey = useMemo(() => {
     const map = buildPrByKey(pullRequests);
-    for (const g of deliveryGroups) {
+    for (const g of workspaceGroups) {
       for (const m of g.members) {
         if (map.has(m.pr_key)) continue;
         // Stub for grouped PRs absent from the standalone list.
@@ -253,7 +284,7 @@ export function StackedPRWorkspace({
       }
     }
     return map;
-  }, [pullRequests, deliveryGroups]);
+  }, [pullRequests, workspaceGroups]);
 
   // GitHub author Mine uses verified viewer.login only. Loom owner/assignee
   // Mine uses email (preferred) or user id — never Better Auth display name.
@@ -383,11 +414,14 @@ export function StackedPRWorkspace({
     const standalone = items.filter(
       (i): i is StandalonePRItem => i.kind === "standalone",
     );
-    return buildHistoryEntries({ deliveryGroups, standalone }).filter((h) => {
+    return buildHistoryEntries({
+      deliveryGroups: workspaceGroups,
+      standalone,
+    }).filter((h) => {
       if (!query.trim()) return true;
       return h.searchText.toLowerCase().includes(query.trim().toLowerCase());
     });
-  }, [deliveryGroups, items, query]);
+  }, [workspaceGroups, items, query]);
 
   const repoOptions = useMemo(
     () => repoOptionsFromItems(items, prByKey),
@@ -458,11 +492,85 @@ export function StackedPRWorkspace({
     mobileDetail && !previewGroupId && !helpOpen,
   );
 
-  // Select first visible PR when none selected.
+  // Select the deep-linked PR once visible; otherwise the first visible PR.
+  // Named `?group=` targets stay pending through list load and direct get —
+  // never fall through to a standalone row or another group.
   useEffect(() => {
     if (selectedKey && flatKeys.includes(selectedKey)) return;
+    const focus = pendingFocusRef.current;
+    if (focus && (focus.prKey || focus.groupId)) {
+      if (focus.groupId) {
+        if (focusedGroupLookup.loading || loading) return;
+
+        if (focusedGroupLookup.error) {
+          const kind = focusedGroupLookup.error.kind;
+          setFocusTargetError(
+            kind === "not_found"
+              ? "Requested delivery group not found."
+              : kind === "unavailable"
+                ? "Requested delivery group unavailable."
+                : "Couldn't load the requested delivery group.",
+          );
+          pendingFocusRef.current = undefined;
+          return;
+        }
+
+        const group =
+          focusedGroupLookup.group ??
+          workspaceGroups.find((g) => g.id === focus.groupId) ??
+          null;
+        if (!group) {
+          setFocusTargetError("Requested delivery group not found.");
+          pendingFocusRef.current = undefined;
+          return;
+        }
+
+        if (
+          focus.prKey &&
+          !group.members.some((m) => m.pr_key === focus.prKey)
+        ) {
+          setFocusTargetError(
+            "Pull request is not a member of the requested delivery group.",
+          );
+          pendingFocusRef.current = undefined;
+          return;
+        }
+
+        const wanted = focus.prKey ?? group.members[0]?.pr_key;
+        if (wanted) {
+          setFocusTargetError(null);
+          pendingFocusRef.current = undefined;
+          setSelectedKey(wanted);
+          return;
+        }
+        setFocusTargetError("Requested delivery group has no members.");
+        pendingFocusRef.current = undefined;
+        return;
+      }
+
+      // pr-only deep link (no named group).
+      if (focus.prKey && flatKeys.includes(focus.prKey)) {
+        pendingFocusRef.current = undefined;
+        setSelectedKey(focus.prKey);
+        return;
+      }
+      if (loading || flatKeys.length === 0) return;
+      pendingFocusRef.current = undefined;
+    }
+    if (focusTargetError) return;
+    // Keep a deep-linked selection even if filters hide it from the list.
+    if (selectedKey) return;
     if (flatKeys[0]) setSelectedKey(flatKeys[0]);
-  }, [flatKeys, selectedKey]);
+  }, [
+    flatKeys,
+    selectedKey,
+    workspaceGroups,
+    loading,
+    focusedGroupLookup.loading,
+    focusedGroupLookup.error,
+    focusedGroupLookup.group,
+    focusTargetError,
+  ]);
 
   const loadReadinessFor = useCallback(
     async (prKeys: string[], force = false) => {
@@ -491,6 +599,9 @@ export function StackedPRWorkspace({
   }, [selectedKey, loadReadinessFor]);
 
   const selectKey = useCallback((key: string, mobile = false) => {
+    // Explicit click / keyboard row choice dismisses a deep-link focus error;
+    // auto-selection paths use setSelectedKey and leave the banner alone.
+    setFocusTargetError(null);
     setSelectedKey(key);
     if (mobile) setMobileDetail(true);
   }, []);
@@ -613,7 +724,7 @@ export function StackedPRWorkspace({
         event.preventDefault();
         const idx = selectedKey ? flatKeys.indexOf(selectedKey) : -1;
         const next = flatKeys[Math.min(flatKeys.length - 1, idx + 1)];
-        if (next) setSelectedKey(next);
+        if (next) selectKey(next);
         return;
       }
       if (k === "k" || k === "ArrowUp") {
@@ -622,7 +733,7 @@ export function StackedPRWorkspace({
           ? flatKeys.indexOf(selectedKey)
           : flatKeys.length;
         const next = flatKeys[Math.max(0, idx - 1)];
-        if (next) setSelectedKey(next);
+        if (next) selectKey(next);
       }
     },
     [
@@ -634,6 +745,7 @@ export function StackedPRWorkspace({
       selectedGroupMember,
       selectedStandalone,
       items,
+      selectKey,
     ],
   );
 
@@ -1159,7 +1271,7 @@ export function StackedPRWorkspace({
                   Membership unverified — not confirmed standalone.
                 </p>
               ) : null}
-              {deliveryGroups.length > 0 && selectedStandalone ? (
+              {workspaceGroups.length > 0 && selectedStandalone ? (
                 <div className={styles.btns}>
                   <label className={styles.field}>
                     Add to group
@@ -1169,7 +1281,7 @@ export function StackedPRWorkspace({
                       onChange={(e) => {
                         const id = e.target.value;
                         e.target.value = "";
-                        const g = deliveryGroups.find((x) => x.id === id);
+                        const g = workspaceGroups.find((x) => x.id === id);
                         if (g && selectedStandalone) {
                           void addStandaloneToGroup(g, selectedStandalone);
                         }
@@ -1178,7 +1290,7 @@ export function StackedPRWorkspace({
                       <option value="" disabled>
                         Choose group…
                       </option>
-                      {deliveryGroups
+                      {workspaceGroups
                         .filter((g) => g.state === "active")
                         .map((g) => (
                           <option key={g.id} value={g.id}>
@@ -1307,6 +1419,15 @@ export function StackedPRWorkspace({
           data-testid="dg-write-error"
         >
           {writeBanner}
+        </p>
+      )}
+      {focusTargetError && (
+        <p
+          className={styles.warnBanner}
+          role="alert"
+          data-testid="deep-link-focus-error"
+        >
+          {focusTargetError}
         </p>
       )}
       {standaloneContinuation?.has_more && (
@@ -1525,7 +1646,7 @@ export function StackedPRWorkspace({
       <MergePreviewDialog
         open={Boolean(previewGroupId)}
         title={
-          deliveryGroups.find((g) => g.id === previewGroupId)?.title ??
+          workspaceGroups.find((g) => g.id === previewGroupId)?.title ??
           "Delivery group"
         }
         preview={preview.preview}

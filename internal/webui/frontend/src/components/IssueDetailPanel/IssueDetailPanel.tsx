@@ -1589,6 +1589,7 @@ function DefaultContent({
             {issue.issue_type === "epic" && (
               <EpicRollup
                 tickets={epicChildren}
+                epicId={issue.id}
                 {...(onNavigateToIssue !== undefined && {
                   onTicketClick: onNavigateToIssue,
                 })}
