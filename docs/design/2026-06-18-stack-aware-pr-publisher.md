@@ -371,7 +371,8 @@ unaffected), **name collision** (suffix applied).
 ## Open items / deferred
 
 - `squash_on_publish` collapses to `agent_commit` until a squash step lands.
-- fleet-db `FleetDBStore` swap-in (interface is ready) is a later iteration.
+- Cross-machine publish/reconcile serialization (STACKED-PRS-36): lineage is
+  shared via FleetDB, but publish/reconcile locks remain host-local.
 - SSH / fleet-db-secret auth sources (HTTPS+token ships first).
 - Execution-correctness layer (resolver base-selection + de-double-wrap) is
   tracked separately; when it lands, the publisher's branch materialization uses

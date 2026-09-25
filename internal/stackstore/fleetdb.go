@@ -192,8 +192,10 @@ func (s *FleetDBStore) readNode(ctx context.Context, ws string, id sl.StackID, t
 //  4. put taskID after afterTaskID.
 //
 // The plan is computed and validated against one snapshot before any write.
-// A failure part-way leaves a valid lineage with the move incomplete; the
-// returned error says so and re-running the move converges.
+// A failure after the first step rolls the completed SetBases back to that
+// snapshot so the lineage is restored and a later retry starts clean — a
+// naive re-plan against a half-applied move does not converge (the moved
+// node's successor can be detached onto the wrong base).
 func (s *FleetDBStore) MoveNode(ctx context.Context, ws string, id sl.StackID, taskID, afterTaskID string) error {
 	if taskID == afterTaskID {
 		return sl.ErrCycle
@@ -206,13 +208,42 @@ func (s *FleetDBStore) MoveNode(ctx context.Context, ws string, id sl.StackID, t
 	if err != nil {
 		return err
 	}
+	bases := make(map[string]string, len(nodes))
+	for _, n := range nodes {
+		bases[n.TaskID] = n.BaseTaskID
+	}
+	applied := make([]moveAppliedStep, 0, len(steps))
 	for i, st := range steps {
+		oldBase := bases[st.taskID]
 		if err := s.SetBase(ctx, ws, id, st.taskID, st.base); err != nil {
 			if i == 0 {
 				return err
 			}
-			return fmt.Errorf("stackstore: move %s after %s stopped at step %d of %d (lineage is valid; re-run the move): %w",
+			if rbErr := s.rollbackMove(ctx, ws, id, applied); rbErr != nil {
+				return fmt.Errorf("stackstore: move %s after %s stopped at step %d of %d (rollback failed; lineage may be incomplete): %w (rollback: %v)",
+					taskID, afterTaskID, i+1, len(steps), err, rbErr)
+			}
+			return fmt.Errorf("stackstore: move %s after %s stopped at step %d of %d (lineage restored): %w",
 				taskID, afterTaskID, i+1, len(steps), err)
+		}
+		bases[st.taskID] = st.base
+		applied = append(applied, moveAppliedStep{st.taskID, oldBase})
+	}
+	return nil
+}
+
+// moveAppliedStep records a SetBase that succeeded during MoveNode so a later
+// failure can restore the prior base.
+type moveAppliedStep struct{ taskID, oldBase string }
+
+// rollbackMove undoes applied SetBases in reverse order, restoring each node's
+// base from immediately before that step. Forward steps keep the lineage
+// valid, so the reverse sequence does too.
+func (s *FleetDBStore) rollbackMove(ctx context.Context, ws string, id sl.StackID, applied []moveAppliedStep) error {
+	for i := len(applied) - 1; i >= 0; i-- {
+		st := applied[i]
+		if err := s.SetBase(ctx, ws, id, st.taskID, st.oldBase); err != nil {
+			return err
 		}
 	}
 	return nil

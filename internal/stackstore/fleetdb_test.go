@@ -582,12 +582,15 @@ func moveStub(t *testing.T, nodes []fleetdb.StackNodeWire, failAt int) (*FleetDB
 	var mu sync.Mutex
 	var calls []recordedSetBase
 	requests := 0
+	setBaseCount := 0
+	live := append([]fleetdb.StackNodeWire(nil), nodes...)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/{workspace}/stacks/{stack_id}/nodes", func(w http.ResponseWriter, _ *http.Request) {
 		mu.Lock()
 		requests++
+		snapshot := append([]fleetdb.StackNodeWire(nil), live...)
 		mu.Unlock()
-		writeFleetJSON(w, 200, map[string]any{"nodes": nodes})
+		writeFleetJSON(w, 200, map[string]any{"nodes": snapshot})
 	})
 	mux.HandleFunc("PUT /api/v1/{workspace}/stacks/{stack_id}/nodes/{task_id}/base", func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
@@ -597,12 +600,23 @@ func moveStub(t *testing.T, nodes []fleetdb.StackNodeWire, failAt int) (*FleetDB
 			BaseTaskID string `json:"base_task_id"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
+		setBaseCount++
 		calls = append(calls, recordedSetBase{r.PathValue("task_id"), body.BaseTaskID})
-		if len(calls) == failAt {
+		// failAt is a 1-based index into SetBase calls for the whole stub
+		// lifetime, so a rolled-back move can be retried without re-arming.
+		if failAt > 0 && setBaseCount == failAt {
 			writeFleetErr(w, 409, "conflict", "stack is being modified concurrently; retry")
 			return
 		}
-		writeFleetJSON(w, 200, fleetdb.StackNodeWire{TaskID: r.PathValue("task_id"), BaseTaskID: body.BaseTaskID})
+		taskID := r.PathValue("task_id")
+		for i := range live {
+			if live[i].TaskID == taskID {
+				live[i].BaseTaskID = body.BaseTaskID
+				writeFleetJSON(w, 200, live[i])
+				return
+			}
+		}
+		writeFleetJSON(w, 200, fleetdb.StackNodeWire{TaskID: taskID, BaseTaskID: body.BaseTaskID})
 	})
 	return newStubFleetDB(t, mux), &calls, &requests
 }
@@ -653,12 +667,39 @@ func TestFleetDBMoveNode_PartialFailure(t *testing.T) {
 		assert.ErrorIs(t, err, ErrConcurrentUpdate)
 		assert.NotContains(t, err.Error(), "stopped at step")
 	})
+	t.Run("later step rolls back and retry converges", func(t *testing.T) {
+		// Move T3 after T1: plan is T3→"", T4→T2, T2→T3, T3→T1. Fail on the
+		// final attach; without rollback a re-plan would detach T2 onto "" and
+		// finish with T1→T3 plus T2→T4 instead of T1→T3→T2→T4.
+		s, calls, _ := moveStub(t, wireChain(nil), 4)
+		err := s.MoveNode(context.Background(), "WS", "epic:E1", "T3", "T1")
+		assert.ErrorIs(t, err, ErrConcurrentUpdate)
+		assert.Contains(t, err.Error(), "stopped at step 4 of 4")
+		assert.Contains(t, err.Error(), "lineage restored")
+		assert.Equal(t, []recordedSetBase{
+			{"T3", ""}, {"T4", "T2"}, {"T2", "T3"}, {"T3", "T1"}, // forward; final attach fails
+			{"T2", "T1"}, {"T4", "T3"}, {"T3", "T2"}, // reverse rollback
+		}, *calls)
+
+		nodes, listErr := s.ListNodes(context.Background(), "WS", "epic:E1")
+		require.NoError(t, listErr)
+		assert.Equal(t, map[string]string{"T1": "", "T2": "T1", "T3": "T2", "T4": "T3"}, baseMap(nodes))
+
+		*calls = (*calls)[:0]
+		require.NoError(t, s.MoveNode(context.Background(), "WS", "epic:E1", "T3", "T1"))
+		assert.Equal(t, []recordedSetBase{{"T3", ""}, {"T4", "T2"}, {"T2", "T3"}, {"T3", "T1"}}, *calls)
+		nodes, listErr = s.ListNodes(context.Background(), "WS", "epic:E1")
+		require.NoError(t, listErr)
+		assert.Equal(t, map[string]string{"T1": "", "T3": "T1", "T2": "T3", "T4": "T2"}, baseMap(nodes))
+	})
 	t.Run("later step reports progress", func(t *testing.T) {
 		s, calls, _ := moveStub(t, wireChain(nil), 2)
 		err := s.MoveNode(context.Background(), "WS", "epic:E1", "T2", "T4")
 		assert.ErrorIs(t, err, ErrConcurrentUpdate)
 		assert.Contains(t, err.Error(), "stopped at step 2 of 3")
-		assert.Len(t, *calls, 2, "stops at the failed step")
+		assert.Contains(t, err.Error(), "lineage restored")
+		// forward T2→"" fails next on T3→T1; rollback undoes T2→"" → T2→T1
+		assert.Equal(t, []recordedSetBase{{"T2", ""}, {"T3", "T1"}, {"T2", "T1"}}, *calls)
 	})
 }
 
