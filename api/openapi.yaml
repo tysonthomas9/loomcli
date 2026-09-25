@@ -2704,6 +2704,104 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/workspaces/{ws}/pull-requests/readiness:
+    get:
+      operationId: getPullRequestReadiness
+      tags: [pull-requests]
+      summary: Read timestamped merge readiness for pull requests
+      description: >-
+        Read-only. Re-reads GitHub (one GraphQL query per repository) for the
+        requested PRs whose snapshot is missing, invalidated by a newer head
+        or base, or older than 15 s; force=true always re-reads. Every fact is
+        pinned to the observed head/base SHA and observed_at. A repository
+        that fails (timeout, rate limit, no access) never fails the request:
+        its rows keep their last-known snapshot as history and the failure is
+        listed in repo_errors. current_verdict is never "ready" unless the
+        snapshot is fresh. Performs no GitHub write or merge.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: pr
+          in: query
+          required: true
+          description: PR key ("github:owner/repo#N"), repeated; at most 100.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: force
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Readiness views in request order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/PullRequestReadinessList"
+        "400":
+          description: Missing, malformed or too many PR keys
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/pull-requests/readiness/preview:
+    get:
+      operationId: getPullRequestReadinessPreview
+      tags: [pull-requests]
+      summary: Read-only ordered ready-prefix preview
+      description: >-
+        Re-reads every listed PR, then computes the ready prefix in the given
+        order (the first pr lands first). Merged members are skipped; the
+        prefix stops at the first member that is not currently ready or that
+        cannot land after its predecessor (same-repo lineage, same base
+        branch, order conflict). Performs no GitHub write or merge; the
+        fingerprint and expires_at let a later merge step reject a stale
+        preview.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: pr
+          in: query
+          required: true
+          description: Ordered, distinct PR keys; at most 50.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+      responses:
+        "200":
+          description: Ordered preview
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/PullRequestReadinessPreviewResponse"
+        "400":
+          description: Missing, malformed, duplicate or too many PR keys
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}:
     get:
       operationId: getPullRequestDetail
@@ -4929,6 +5027,299 @@ components:
           type: array
           items:
             type: string
+
+    PullRequestReadinessFact:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [known, computing, unknown, error]
+        value:
+          type: string
+        error:
+          $ref: "#/components/schemas/PullRequestReadinessErrorCode"
+        retry_after_s:
+          type: integer
+
+    PullRequestReadinessErrorCode:
+      type: string
+      enum:
+        - rate_limited
+        - timeout
+        - forbidden
+        - not_found
+        - repo_unregistered
+        - connector_unavailable
+        - upstream_error
+        - checks_truncated
+        - unrecognized_value
+
+    PullRequestReadinessVerdict:
+      type: string
+      enum: [ready, blocked, waiting, queued, merged, closed, unknown]
+
+    PullRequestCheckSummary:
+      type: object
+      required: [passed, pending, failed, total]
+      properties:
+        passed:
+          type: integer
+        pending:
+          type: integer
+        failed:
+          type: integer
+        total:
+          type: integer
+        failing_names:
+          type: array
+          items:
+            type: string
+        pending_names:
+          type: array
+          items:
+            type: string
+
+    PullRequestReadinessFacts:
+      type: object
+      required:
+        - lifecycle
+        - conflicts
+        - merge_state
+        - review
+        - required_checks
+        - required_check_counts
+        - optional_checks
+        - optional_check_counts
+        - queue
+      properties:
+        lifecycle:
+          $ref: "#/components/schemas/PullRequestReadinessFact"
+        conflicts:
+          $ref: "#/components/schemas/PullRequestReadinessFact"
+        merge_state:
+          $ref: "#/components/schemas/PullRequestReadinessFact"
+        review:
+          $ref: "#/components/schemas/PullRequestReadinessFact"
+        required_checks:
+          $ref: "#/components/schemas/PullRequestReadinessFact"
+        required_check_counts:
+          $ref: "#/components/schemas/PullRequestCheckSummary"
+        optional_checks:
+          $ref: "#/components/schemas/PullRequestReadinessFact"
+        optional_check_counts:
+          $ref: "#/components/schemas/PullRequestCheckSummary"
+        queue:
+          $ref: "#/components/schemas/PullRequestReadinessFact"
+
+    PullRequestReadinessSnapshot:
+      type: object
+      description: >-
+        Evidence for one PR pinned to the observed head/base and to the
+        server time it arrived. The fingerprint covers identity, refs and
+        every fact, not observed_at.
+      required:
+        - pr_key
+        - head_sha
+        - head_ref
+        - base_ref
+        - base_sha
+        - observed_at
+        - facts
+        - verdict
+        - reasons
+        - fingerprint
+      properties:
+        pr_key:
+          type: string
+        head_sha:
+          type: string
+        head_ref:
+          type: string
+        base_ref:
+          type: string
+        base_sha:
+          type: string
+        observed_at:
+          type: string
+          format: date-time
+        facts:
+          $ref: "#/components/schemas/PullRequestReadinessFacts"
+        verdict:
+          $ref: "#/components/schemas/PullRequestReadinessVerdict"
+        reasons:
+          type: array
+          items:
+            type: string
+        fingerprint:
+          type: string
+
+    PullRequestReadinessReadError:
+      type: object
+      required: [code, at]
+      properties:
+        code:
+          $ref: "#/components/schemas/PullRequestReadinessErrorCode"
+        retry_after_s:
+          type: integer
+        at:
+          type: string
+          format: date-time
+
+    PullRequestReadinessView:
+      type: object
+      description: >-
+        What a readiness surface renders for one PR. snapshot is the
+        last-known observation (history once not fresh); current_verdict is
+        the only verdict that may be shown as current and is never "ready"
+        unless freshness is "fresh".
+      required:
+        - pr_key
+        - freshness
+        - age_seconds
+        - current_verdict
+        - current_reasons
+      properties:
+        pr_key:
+          type: string
+        snapshot:
+          $ref: "#/components/schemas/PullRequestReadinessSnapshot"
+        freshness:
+          type: string
+          enum: [fresh, aging, stale, unknown]
+        age_seconds:
+          type: integer
+        invalidated:
+          type: string
+          enum: [head_moved, base_changed]
+        last_error:
+          $ref: "#/components/schemas/PullRequestReadinessReadError"
+        current_verdict:
+          $ref: "#/components/schemas/PullRequestReadinessVerdict"
+        current_reasons:
+          type: array
+          items:
+            type: string
+
+    PullRequestReadinessRepoError:
+      type: object
+      required: [repo, code, retryable, pr_keys]
+      properties:
+        repo:
+          type: string
+          description: owner/repo of the failing repository.
+        source_repo:
+          type: string
+          description: Workspace-registered repository name.
+        code:
+          $ref: "#/components/schemas/PullRequestReadinessErrorCode"
+        retryable:
+          type: boolean
+        retry_after_s:
+          type: integer
+        message:
+          type: string
+        pr_keys:
+          type: array
+          items:
+            type: string
+
+    PullRequestReadinessList:
+      type: object
+      required:
+        - server_now
+        - fresh_for_s
+        - stale_after_s
+        - pull_requests
+        - repo_errors
+      properties:
+        server_now:
+          type: string
+          format: date-time
+          description: Server clock; compute ages from this, not the client clock.
+        fresh_for_s:
+          type: integer
+        stale_after_s:
+          type: integer
+        pull_requests:
+          type: array
+          items:
+            $ref: "#/components/schemas/PullRequestReadinessView"
+        repo_errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/PullRequestReadinessRepoError"
+
+    PullRequestReadinessPreviewMember:
+      type: object
+      required: [index, readiness, position, reasons]
+      properties:
+        index:
+          type: integer
+        readiness:
+          $ref: "#/components/schemas/PullRequestReadinessView"
+        position:
+          type: string
+          enum: [merged, in_prefix, stop, after_stop]
+        reasons:
+          type: array
+          items:
+            type: string
+
+    PullRequestReadinessPreviewStop:
+      type: object
+      required: [pr_key, verdict, reasons]
+      properties:
+        pr_key:
+          type: string
+        verdict:
+          $ref: "#/components/schemas/PullRequestReadinessVerdict"
+        reasons:
+          type: array
+          items:
+            type: string
+
+    PullRequestReadinessPreview:
+      type: object
+      required: [members, ready_count, fingerprint]
+      properties:
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/PullRequestReadinessPreviewMember"
+        ready_count:
+          type: integer
+          description: Length of the ready prefix; the only source for ready counts.
+        stopped_by:
+          $ref: "#/components/schemas/PullRequestReadinessPreviewStop"
+        fingerprint:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+
+    PullRequestReadinessPreviewResponse:
+      type: object
+      required:
+        - server_now
+        - fresh_for_s
+        - stale_after_s
+        - preview
+        - repo_errors
+      properties:
+        server_now:
+          type: string
+          format: date-time
+        fresh_for_s:
+          type: integer
+        stale_after_s:
+          type: integer
+        preview:
+          $ref: "#/components/schemas/PullRequestReadinessPreview"
+        repo_errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/PullRequestReadinessRepoError"
 
     PullRequestDetail:
       type: object

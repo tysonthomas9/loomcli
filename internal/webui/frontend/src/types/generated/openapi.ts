@@ -1474,6 +1474,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/pull-requests/readiness": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read timestamped merge readiness for pull requests
+     * @description Read-only. Re-reads GitHub (one GraphQL query per repository) for the requested PRs whose snapshot is missing, invalidated by a newer head or base, or older than 15 s; force=true always re-reads. Every fact is pinned to the observed head/base SHA and observed_at. A repository that fails (timeout, rate limit, no access) never fails the request: its rows keep their last-known snapshot as history and the failure is listed in repo_errors. current_verdict is never "ready" unless the snapshot is fresh. Performs no GitHub write or merge.
+     */
+    get: operations["getPullRequestReadiness"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/pull-requests/readiness/preview": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read-only ordered ready-prefix preview
+     * @description Re-reads every listed PR, then computes the ready prefix in the given order (the first pr lands first). Merged members are skipped; the prefix stops at the first member that is not currently ready or that cannot land after its predecessor (same-repo lineage, same base branch, order conflict). Performs no GitHub write or merge; the fingerprint and expires_at let a later merge step reject a stale preview.
+     */
+    get: operations["getPullRequestReadinessPreview"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}": {
     parameters: {
       query?: never;
@@ -2569,6 +2609,136 @@ export interface components {
     GitPullRequestList: {
       pull_requests: components["schemas"]["GitPullRequest"][];
       warnings?: string[];
+    };
+    PullRequestReadinessFact: {
+      /** @enum {string} */
+      status: "known" | "computing" | "unknown" | "error";
+      value?: string;
+      error?: components["schemas"]["PullRequestReadinessErrorCode"];
+      retry_after_s?: number;
+    };
+    /** @enum {string} */
+    PullRequestReadinessErrorCode:
+      | "rate_limited"
+      | "timeout"
+      | "forbidden"
+      | "not_found"
+      | "repo_unregistered"
+      | "connector_unavailable"
+      | "upstream_error"
+      | "checks_truncated"
+      | "unrecognized_value";
+    /** @enum {string} */
+    PullRequestReadinessVerdict:
+      | "ready"
+      | "blocked"
+      | "waiting"
+      | "queued"
+      | "merged"
+      | "closed"
+      | "unknown";
+    PullRequestCheckSummary: {
+      passed: number;
+      pending: number;
+      failed: number;
+      total: number;
+      failing_names?: string[];
+      pending_names?: string[];
+    };
+    PullRequestReadinessFacts: {
+      lifecycle: components["schemas"]["PullRequestReadinessFact"];
+      conflicts: components["schemas"]["PullRequestReadinessFact"];
+      merge_state: components["schemas"]["PullRequestReadinessFact"];
+      review: components["schemas"]["PullRequestReadinessFact"];
+      required_checks: components["schemas"]["PullRequestReadinessFact"];
+      required_check_counts: components["schemas"]["PullRequestCheckSummary"];
+      optional_checks: components["schemas"]["PullRequestReadinessFact"];
+      optional_check_counts: components["schemas"]["PullRequestCheckSummary"];
+      queue: components["schemas"]["PullRequestReadinessFact"];
+    };
+    /** @description Evidence for one PR pinned to the observed head/base and to the server time it arrived. The fingerprint covers identity, refs and every fact, not observed_at. */
+    PullRequestReadinessSnapshot: {
+      pr_key: string;
+      head_sha: string;
+      head_ref: string;
+      base_ref: string;
+      base_sha: string;
+      /** Format: date-time */
+      observed_at: string;
+      facts: components["schemas"]["PullRequestReadinessFacts"];
+      verdict: components["schemas"]["PullRequestReadinessVerdict"];
+      reasons: string[];
+      fingerprint: string;
+    };
+    PullRequestReadinessReadError: {
+      code: components["schemas"]["PullRequestReadinessErrorCode"];
+      retry_after_s?: number;
+      /** Format: date-time */
+      at: string;
+    };
+    /** @description What a readiness surface renders for one PR. snapshot is the last-known observation (history once not fresh); current_verdict is the only verdict that may be shown as current and is never "ready" unless freshness is "fresh". */
+    PullRequestReadinessView: {
+      pr_key: string;
+      snapshot?: components["schemas"]["PullRequestReadinessSnapshot"];
+      /** @enum {string} */
+      freshness: "fresh" | "aging" | "stale" | "unknown";
+      age_seconds: number;
+      /** @enum {string} */
+      invalidated?: "head_moved" | "base_changed";
+      last_error?: components["schemas"]["PullRequestReadinessReadError"];
+      current_verdict: components["schemas"]["PullRequestReadinessVerdict"];
+      current_reasons: string[];
+    };
+    PullRequestReadinessRepoError: {
+      /** @description owner/repo of the failing repository. */
+      repo: string;
+      /** @description Workspace-registered repository name. */
+      source_repo?: string;
+      code: components["schemas"]["PullRequestReadinessErrorCode"];
+      retryable: boolean;
+      retry_after_s?: number;
+      message?: string;
+      pr_keys: string[];
+    };
+    PullRequestReadinessList: {
+      /**
+       * Format: date-time
+       * @description Server clock; compute ages from this, not the client clock.
+       */
+      server_now: string;
+      fresh_for_s: number;
+      stale_after_s: number;
+      pull_requests: components["schemas"]["PullRequestReadinessView"][];
+      repo_errors: components["schemas"]["PullRequestReadinessRepoError"][];
+    };
+    PullRequestReadinessPreviewMember: {
+      index: number;
+      readiness: components["schemas"]["PullRequestReadinessView"];
+      /** @enum {string} */
+      position: "merged" | "in_prefix" | "stop" | "after_stop";
+      reasons: string[];
+    };
+    PullRequestReadinessPreviewStop: {
+      pr_key: string;
+      verdict: components["schemas"]["PullRequestReadinessVerdict"];
+      reasons: string[];
+    };
+    PullRequestReadinessPreview: {
+      members: components["schemas"]["PullRequestReadinessPreviewMember"][];
+      /** @description Length of the ready prefix; the only source for ready counts. */
+      ready_count: number;
+      stopped_by?: components["schemas"]["PullRequestReadinessPreviewStop"];
+      fingerprint: string;
+      /** Format: date-time */
+      expires_at?: string;
+    };
+    PullRequestReadinessPreviewResponse: {
+      /** Format: date-time */
+      server_now: string;
+      fresh_for_s: number;
+      stale_after_s: number;
+      preview: components["schemas"]["PullRequestReadinessPreview"];
+      repo_errors: components["schemas"]["PullRequestReadinessRepoError"][];
     };
     PullRequestDetail: {
       number: number;
@@ -6705,6 +6875,85 @@ export interface operations {
       };
       /** @description No pull request source available */
       503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getPullRequestReadiness: {
+    parameters: {
+      query: {
+        /** @description PR key ("github:owner/repo#N"), repeated; at most 100. */
+        pr: string[];
+        force?: boolean;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Readiness views in request order */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["PullRequestReadinessList"];
+          };
+        };
+      };
+      /** @description Missing, malformed or too many PR keys */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getPullRequestReadinessPreview: {
+    parameters: {
+      query: {
+        /** @description Ordered, distinct PR keys; at most 50. */
+        pr: string[];
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Ordered preview */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["PullRequestReadinessPreviewResponse"];
+          };
+        };
+      };
+      /** @description Missing, malformed, duplicate or too many PR keys */
+      400: {
         headers: {
           [name: string]: unknown;
         };

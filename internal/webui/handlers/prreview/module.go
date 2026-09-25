@@ -45,6 +45,11 @@ type Module struct {
 	credentialSeedMu           sync.Mutex
 	credentialSeedGeneration   atomic.Uint64
 	beforeCredentialSeedCommit func()
+	// readiness caches the last-known PR readiness snapshots.
+	readiness readinessCache
+	// now and readinessBackoff are test seams (fake clock, no sleeps).
+	now              func() time.Time
+	readinessBackoff []time.Duration
 }
 
 type codexThreadReader interface {
@@ -89,6 +94,7 @@ func (m *Module) InvalidateCredentialSeeds() {
 	defer m.credentialSeedMu.Unlock()
 	m.seeded.Clear()
 	m.credentialSeedGeneration.Add(1)
+	m.readiness.clear()
 }
 
 // Register adds the workspace-scoped pull request review routes.
@@ -97,6 +103,8 @@ func (m *Module) Register(mux *http.ServeMux) {
 		return
 	}
 	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests", m.listPullRequests)
+	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests/readiness", m.getPullRequestReadiness)
+	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests/readiness/preview", m.getPullRequestReadinessPreview)
 	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}", m.getPullRequest)
 	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/diff", m.getPullRequestDiff)
 	mux.HandleFunc("POST /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/review", m.postReview)
