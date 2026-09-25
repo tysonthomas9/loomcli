@@ -83,7 +83,7 @@ func (f *fakeForge) QueuedPRNumbers(context.Context, string, string) (map[int]bo
 }
 
 type updateFailStore struct {
-	stackstore.Store
+	*stackstore.LocalStore
 	err error
 }
 
@@ -131,7 +131,7 @@ func TestPublishReturnsErrorWhenMarkPublishedFails(t *testing.T) {
 
 	persistErr := errors.New("persist published state")
 	forge := &fakeForge{createPR: PR{Number: 42, URL: "https://github.com/o/r/pull/42", Head: sl.OutputBranchName(id, "A"), Base: "main", State: "open"}}
-	rec := &Reconciler{Store: updateFailStore{Store: store, err: persistErr}, Forge: forge}
+	rec := &Reconciler{Store: updateFailStore{LocalStore: store, err: persistErr}, Forge: forge}
 
 	_, err = rec.Publish(ctx, "WS", id, repoPath, Options{})
 	require.ErrorIs(t, err, persistErr)

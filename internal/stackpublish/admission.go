@@ -114,16 +114,28 @@ func (r *Reconciler) withAdmission(ctx context.Context, ws string, id sl.StackID
 		return fmt.Errorf("stack publish admission unavailable: store %T does not implement PublishAdmittable: %w",
 			r.Store, domain.ErrStackPublishLeaseStoreUnavailable)
 	}
+	sess, sessCtx, err := r.beginAdmissionSession(ctx, admittable, ws, id)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = settleAdmission(err, ctx, sess, admittable, ws, id)
+	}()
+	return fn(sessCtx, sess)
+}
+
+// beginAdmissionSession acquires a grant and starts renew; caller must settle.
+func (r *Reconciler) beginAdmissionSession(ctx context.Context, admittable stackstore.PublishAdmittable, ws string, id sl.StackID) (*Session, context.Context, error) {
 	holder := strings.TrimSpace(r.Holder)
 	if holder == "" {
 		holder = HolderIdentity("loomcli")
 	}
 	grant, err := admittable.AcquirePublishAdmission(ctx, ws, id, holder)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	if grant == nil || strings.TrimSpace(grant.Token) == "" {
-		return fmt.Errorf("stack publish admission grant missing token: %w", domain.ErrStackPublishLeaseStoreUnavailable)
+		return nil, nil, fmt.Errorf("stack publish admission grant missing token: %w", domain.ErrStackPublishLeaseStoreUnavailable)
 	}
 	sessCtx, cancel := context.WithCancel(ctx)
 	renewEvery := r.AdmissionRenewInterval
@@ -139,29 +151,32 @@ func (r *Reconciler) withAdmission(ctx context.Context, ws string, id sl.StackID
 	}
 	sessCtx = context.WithValue(sessCtx, admissionCtxKey{}, sess)
 	sess.startRenewLoop(sessCtx)
-	defer func() {
-		// Close flight gate first so Do cannot Add after Wait begins; cancel so
-		// a Renew blocked on sessCtx exits; join renew; wait for local callbacks.
-		sess.closeForSettle()
-		releaseCtx, releaseCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer releaseCancel()
-		var settleErr error
-		if sess.Uncertain() {
-			// Skip clean FleetDB Release (preserves reuse_after). Local Abandon
-			// drops the flock fd but keeps the persisted cooldown.
-			settleErr = admittable.AbandonPublishAdmission(releaseCtx, ws, id, sess.token)
-		} else {
-			settleErr = admittable.ReleasePublishAdmission(releaseCtx, ws, id, sess.token)
-		}
-		if settleErr != nil {
-			if err == nil {
-				err = settleErr
-			} else {
-				err = errors.Join(err, settleErr)
-			}
-		}
-	}()
-	return fn(sessCtx, sess)
+	return sess, sessCtx, nil
+}
+
+// settleAdmission closes the flight gate then Release (clean) or Abandon
+// (uncertain). Ordering: closeForSettle before store end so renew/Do drain first.
+func settleAdmission(err error, ctx context.Context, sess *Session, admittable stackstore.PublishAdmittable, ws string, id sl.StackID) error {
+	// Close flight gate first so Do cannot Add after Wait begins; cancel so
+	// a Renew blocked on sessCtx exits; join renew; wait for local callbacks.
+	sess.closeForSettle()
+	releaseCtx, releaseCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer releaseCancel()
+	var settleErr error
+	if sess.Uncertain() {
+		// Skip clean FleetDB Release (preserves reuse_after). Local Abandon
+		// drops the flock fd but keeps the persisted cooldown.
+		settleErr = admittable.AbandonPublishAdmission(releaseCtx, ws, id, sess.token)
+	} else {
+		settleErr = admittable.ReleasePublishAdmission(releaseCtx, ws, id, sess.token)
+	}
+	if settleErr == nil {
+		return err
+	}
+	if err == nil {
+		return settleErr
+	}
+	return errors.Join(err, settleErr)
 }
 
 func (s *Session) startRenewLoop(ctx context.Context) {
@@ -377,7 +392,7 @@ func (s *Session) Do(ctx context.Context, fn func(context.Context) error) error 
 
 // boundLocal renews and applies the same ≤60s / remaining-validity-minus-skew
 // deadline as Do, but treats a settled local nonzero exit (contexts still live)
-// as known — the error is returned without marking uncertain or cancelling the
+// as known — the error is returned without marking uncertain or canceling the
 // session. Timeout, cancel, and renew loss still mark uncertain.
 func (s *Session) boundLocal(ctx context.Context, fn func(context.Context) error) error {
 	callCtx, cancel, err := s.prepareBound(ctx)

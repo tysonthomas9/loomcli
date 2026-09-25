@@ -129,7 +129,29 @@ func (s *LocalStore) AcquirePublishAdmission(_ context.Context, ws string, id sl
 		return nil, err
 	}
 	metaPath := s.publishMetaPath(lockDir)
+	f, err := tryAcquirePublishLock(lockDir, metaPath)
+	if err != nil {
+		return nil, err
+	}
+	if testingHookAfterPublishLock != nil {
+		testingHookAfterPublishLock()
+	}
+	// Authoritative cooldown / generation: read only under the held flock.
+	meta, err := readPublishMetaUnderLock(metaPath, f)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	if err := rejectIfCooldownActive(meta, now, f); err != nil {
+		return nil, err
+	}
+	return installHeldAdmission(lockDir, metaPath, meta, f, holder, now)
+}
 
+// tryAcquirePublishLock opens the lock file and takes a non-blocking exclusive
+// flock. On ErrLocked it closes the fd and returns StackPublishLeaseBusyError
+// from best-effort meta (fail closed if meta is missing/corrupt).
+func tryAcquirePublishLock(lockDir, metaPath string) (*os.File, error) {
 	lockPath := filepath.Join(lockDir, localPublishLockFileName)
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // path under loom dir
 	if err != nil {
@@ -154,30 +176,42 @@ func (s *LocalStore) AcquirePublishAdmission(_ context.Context, ws string, id sl
 		}
 		return nil, fmt.Errorf("stackstore: acquire publish lock: %w", err)
 	}
+	return f, nil
+}
 
-	if testingHookAfterPublishLock != nil {
-		testingHookAfterPublishLock()
-	}
-
-	// Authoritative cooldown / generation: read only under the held flock.
+// readPublishMetaUnderLock reads meta while flock is held. On error it unlocks
+// and closes f (fail closed on corrupt metadata).
+func readPublishMetaUnderLock(metaPath string, f *os.File) (*localPublishMeta, error) {
 	meta, err := readPublishMeta(metaPath)
 	if err != nil {
 		_ = lockfile.FlockUnlock(f)
 		_ = f.Close()
-		return nil, err // fail closed on corrupt metadata
+		return nil, err
 	}
-	now := time.Now().UTC()
-	if meta != nil && now.Before(meta.ReuseAfter) {
-		_ = lockfile.FlockUnlock(f)
-		_ = f.Close()
-		return nil, &domain.StackPublishLeaseBusyError{
-			Holder:     meta.Holder,
-			Generation: meta.Generation,
-			ExpiresAt:  meta.ExpiresAt,
-			ReuseAfter: meta.ReuseAfter,
-		}
-	}
+	return meta, nil
+}
 
+// rejectIfCooldownActive unlocks and closes f when reuse_after is still active.
+func rejectIfCooldownActive(meta *localPublishMeta, now time.Time, f *os.File) error {
+	if meta == nil || !now.Before(meta.ReuseAfter) {
+		return nil
+	}
+	_ = lockfile.FlockUnlock(f)
+	_ = f.Close()
+	return &domain.StackPublishLeaseBusyError{
+		Holder:     meta.Holder,
+		Generation: meta.Generation,
+		ExpiresAt:  meta.ExpiresAt,
+		ReuseAfter: meta.ReuseAfter,
+	}
+}
+
+// installHeldAdmission mints a token, bumps generation from under-lock meta,
+// persists the holder record, and registers the held fd. On any failure before
+// map insert it unlocks and closes f. Persist failure after map insert is not
+// reached here — write happens before insert so a failed write never leaves a
+// map entry without a matching on-disk record.
+func installHeldAdmission(lockDir, metaPath string, meta *localPublishMeta, f *os.File, holder string, now time.Time) (*PublishAdmission, error) {
 	token, err := randomToken()
 	if err != nil {
 		_ = lockfile.FlockUnlock(f)
@@ -215,12 +249,10 @@ func (s *LocalStore) AcquirePublishAdmission(_ context.Context, ws string, id sl
 		return nil, err
 	}
 
-	adm := &localHeldAdmission{
+	localAdmissions[lockDir] = &localHeldAdmission{
 		file: f, token: token, holder: holder, generation: gen,
 		expiresAt: expires, reuseAfter: reuse,
 	}
-	localAdmissions[lockDir] = adm
-
 	return &PublishAdmission{
 		Token: token, Holder: holder, Generation: gen,
 		ExpiresAt: expires, ReuseAfter: reuse,
