@@ -8,11 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -144,7 +144,6 @@ func (m *Module) resolveViewerViaConnector(r *http.Request, ws string) githubVie
 	if cached, ok := m.viewer.get(cacheKey, now); ok {
 		return cached
 	}
-
 	if err := m.ensureViewerGrant(r.Context(), ws); err != nil {
 		// Fixed message only — never forward grant/provider text (may hold secrets).
 		return githubViewerIdentity{
@@ -153,7 +152,14 @@ func (m *Module) resolveViewerViaConnector(r *http.Request, ws string) githubVie
 			Message: "GitHub viewer grant unavailable",
 		}
 	}
+	out := m.dispatchViewerRead(r, ws, now)
+	if out.Status == githubViewerStatusAvailable {
+		m.viewer.put(cacheKey, out, now.Add(viewerCacheTTL))
+	}
+	return out
+}
 
+func (m *Module) dispatchViewerRead(r *http.Request, ws string, now time.Time) githubViewerIdentity {
 	userID := "unknown"
 	if identity, ok := middleware.UserIdentityFromContext(r.Context()); ok && strings.TrimSpace(identity.UserID) != "" {
 		userID = strings.TrimSpace(identity.UserID)
@@ -180,15 +186,13 @@ func (m *Module) resolveViewerViaConnector(r *http.Request, ws string) githubVie
 			Message:     "GitHub viewer response missing login",
 		}
 	}
-	out := githubViewerIdentity{
+	return githubViewerIdentity{
 		Status:      githubViewerStatusAvailable,
 		Login:       login,
 		Source:      githubViewerSourceConnector,
 		ConnectorID: connectorID,
 		ObservedAt:  now.UTC().Format(time.RFC3339),
 	}
-	m.viewer.put(cacheKey, out, now.Add(viewerCacheTTL))
-	return out
 }
 
 func (m *Module) resolveViewerViaGh(ctx context.Context) githubViewerIdentity {
@@ -252,18 +256,24 @@ func classifyGhViewerError(err error) (status, message string) {
 }
 
 func defaultGhUserLookup(ctx context.Context) (string, error) {
-	result := cli.GetDeps(nil).ExecCtx.Run(ctx, "", "gh", "api", "user")
-	if result.Err != nil {
-		msg := strings.TrimSpace(result.Stderr)
+	// os/exec only — webui must not import internal/cli (depguard webui-isolation).
+	cmd := exec.CommandContext(ctx, "gh", "api", "user")
+	out, err := cmd.Output()
+	if err != nil {
+		msg := ""
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			msg = strings.TrimSpace(string(ee.Stderr))
+		}
 		if msg == "" {
-			msg = result.Err.Error()
+			msg = err.Error()
 		}
 		return "", errors.New(msg)
 	}
 	var payload struct {
 		Login string `json:"login"`
 	}
-	if err := json.Unmarshal([]byte(result.Stdout), &payload); err != nil {
+	if err := json.Unmarshal(out, &payload); err != nil {
 		return "", fmt.Errorf("decode gh api user: %w", err)
 	}
 	return strings.TrimSpace(payload.Login), nil
