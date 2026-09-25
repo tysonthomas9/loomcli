@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
+	"github.com/tysonthomas9/loomcli/internal/stackstore/stackwire"
 )
 
 // FleetDBStore implements Store against fleet-db's stack lineage API, the
@@ -19,7 +19,7 @@ import (
 // revisioned document, and reports failures that this adapter maps back onto
 // the stackstore and stacklineage sentinels so callers need not know which
 // store they hold.
-type FleetDBStore struct{ api *fleetdb.StackClient }
+type FleetDBStore struct{ api stackwire.API }
 
 var (
 	_ Store = (*FleetDBStore)(nil)
@@ -27,7 +27,7 @@ var (
 )
 
 // NewFleetDB returns a Store backed by fleet-db's stack API.
-func NewFleetDB(api *fleetdb.StackClient) *FleetDBStore { return &FleetDBStore{api: api} }
+func NewFleetDB(api stackwire.API) *FleetDBStore { return &FleetDBStore{api: api} }
 
 // updateNodeAttempts bounds UpdateNode's read-modify-CAS loop. A stack is one
 // revisioned document, so every write to any node of the stack can cost a
@@ -84,7 +84,7 @@ func (s *FleetDBStore) EnsureStack(ctx context.Context, in sl.Stack) error {
 	if in.WorkspaceKey == "" || in.ID == "" {
 		return errors.New("stackstore: stack workspaceKey and id are required")
 	}
-	_, err := s.api.Ensure(ctx, in.WorkspaceKey, string(in.ID), fleetdb.StackEnsure{
+	_, err := s.api.Ensure(ctx, in.WorkspaceKey, string(in.ID), stackwire.Ensure{
 		RepoName:          in.RepoName,
 		RootBase:          in.RootBase,
 		DefaultCommitMode: string(in.DefaultCommitMode),
@@ -293,15 +293,15 @@ func validateMovePlan(nodes []sl.Node, steps []setBaseStep) error {
 // patch construction -----------------------------------------------------------
 
 // nodePatch diffs fn's result against the node it was given.
-func nodePatch(cur, next sl.Node) (fleetdb.StackNodePatch, bool, error) {
+func nodePatch(cur, next sl.Node) (stackwire.NodePatch, bool, error) {
 	if next.TaskID != cur.TaskID || next.StackID != cur.StackID ||
 		next.BaseTaskID != cur.BaseTaskID || next.OutputBranch != cur.OutputBranch {
-		return fleetdb.StackNodePatch{}, false, fmt.Errorf("%w: lineage and identity fields (taskId, stackId, baseTaskId, outputBranch) are not writable through UpdateNode", ErrUnsupportedUpdate)
+		return stackwire.NodePatch{}, false, fmt.Errorf("%w: lineage and identity fields (taskId, stackId, baseTaskId, outputBranch) are not writable through UpdateNode", ErrUnsupportedUpdate)
 	}
 	if cur.LastPublishedAt != nil && next.LastPublishedAt == nil {
-		return fleetdb.StackNodePatch{}, false, fmt.Errorf("%w: lastPublishedAt cannot be cleared", ErrUnsupportedUpdate)
+		return stackwire.NodePatch{}, false, fmt.Errorf("%w: lastPublishedAt cannot be cleared", ErrUnsupportedUpdate)
 	}
-	var p fleetdb.StackNodePatch
+	var p stackwire.NodePatch
 	changed := false
 	if next.State != cur.State {
 		v := string(next.State)
@@ -335,7 +335,7 @@ func nodePatch(cur, next sl.Node) (fleetdb.StackNodePatch, bool, error) {
 // isRetryableWrite reports a lost revision race: a failed expected_revision
 // precondition (412) or fleet-db's own CAS contention (409 conflict).
 func isRetryableWrite(err error) bool {
-	var apiErr *fleetdb.StackAPIError
+	var apiErr *stackwire.APIError
 	if !errors.As(err, &apiErr) {
 		return false
 	}
@@ -362,7 +362,7 @@ func mapFleetErr(err error) error {
 	if err == nil {
 		return nil
 	}
-	var apiErr *fleetdb.StackAPIError
+	var apiErr *stackwire.APIError
 	if !errors.As(err, &apiErr) {
 		return err
 	}
@@ -403,7 +403,7 @@ func mapFleetErr(err error) error {
 
 // wire conversion ----------------------------------------------------------------
 
-func stackFromWire(w fleetdb.StackWire) sl.Stack {
+func stackFromWire(w stackwire.Stack) sl.Stack {
 	return sl.Stack{
 		ID:                sl.StackID(w.ID),
 		WorkspaceKey:      w.WorkspaceKey,
@@ -415,7 +415,7 @@ func stackFromWire(w fleetdb.StackWire) sl.Stack {
 	}
 }
 
-func nodesFromWire(id sl.StackID, in []fleetdb.StackNodeWire) []sl.Node {
+func nodesFromWire(id sl.StackID, in []stackwire.Node) []sl.Node {
 	if len(in) == 0 {
 		return nil
 	}
@@ -426,7 +426,7 @@ func nodesFromWire(id sl.StackID, in []fleetdb.StackNodeWire) []sl.Node {
 	return out
 }
 
-func nodeFromWire(id sl.StackID, w fleetdb.StackNodeWire) sl.Node {
+func nodeFromWire(id sl.StackID, w stackwire.Node) sl.Node {
 	return sl.Node{
 		StackID:         id,
 		TaskID:          w.TaskID,

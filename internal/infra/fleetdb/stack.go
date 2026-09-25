@@ -7,90 +7,35 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/fleethttp"
+	"github.com/tysonthomas9/loomcli/internal/stackstore/stackwire"
 )
 
-// StackClient is the wire client for fleet-db's stack lineage API
-// (/api/v1/{workspace}/stacks). It speaks fleet-db's JSON shapes; the
-// stackstore package adapts it to the stacklineage domain types and the
-// stackstore sentinel errors. It is deliberately not part of store.Store:
-// stack lineage has its own persistence contract (stackstore.Store).
+// StackClient is the HTTP client for fleet-db's stack lineage API
+// (/api/v1/{workspace}/stacks), implementing stackwire.API. stackstore adapts
+// it to the stacklineage domain types and the stackstore sentinel errors,
+// reaching it through the store.Store handle (see stackwire.Provider). It is
+// deliberately not part of store.Store: stack lineage has its own persistence
+// contract (stackstore.Store).
 type StackClient struct{ client *Client }
 
-// StackProvider is implemented by stores that can reach fleet-db's stack API.
-type StackProvider interface {
-	Stacks() *StackClient
-}
+var _ stackwire.API = (*StackClient)(nil)
 
-// Stacks returns the stack lineage wire client.
-func (c *Client) Stacks() *StackClient { return &StackClient{client: c} }
+// Stacks returns the stack lineage API client.
+func (c *Client) Stacks() stackwire.API { return &StackClient{client: c} }
 
-// StackWire mirrors fleet-db's models.Stack JSON shape.
-type StackWire struct {
-	WorkspaceKey      string          `json:"workspace_key"`
-	ID                string          `json:"id"`
-	RepoName          string          `json:"repo_name"`
-	RootBase          string          `json:"root_base"`
-	DefaultCommitMode string          `json:"default_commit_mode,omitempty"`
-	Revision          int64           `json:"revision"`
-	Nodes             []StackNodeWire `json:"nodes"`
-	CreatedAt         time.Time       `json:"created_at"`
-	UpdatedAt         time.Time       `json:"updated_at"`
-}
-
-// StackNodeWire mirrors fleet-db's models.StackNode JSON shape.
-type StackNodeWire struct {
-	TaskID          string     `json:"task_id"`
-	BaseTaskID      string     `json:"base_task_id,omitempty"`
-	OutputBranch    string     `json:"output_branch"`
-	CommitMode      string     `json:"commit_mode,omitempty"`
-	State           string     `json:"state"`
-	PRNumber        int        `json:"pr_number,omitempty"`
-	PRURL           string     `json:"pr_url,omitempty"`
-	OutputSHA       string     `json:"output_sha,omitempty"`
-	LastPublishedAt *time.Time `json:"last_published_at,omitempty"`
-	Revision        int64      `json:"revision"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
-}
-
-// StackEnsure is the body of PUT /stacks/{stack_id}.
-type StackEnsure struct {
-	RepoName          string `json:"repo_name"`
-	RootBase          string `json:"root_base"`
-	DefaultCommitMode string `json:"default_commit_mode,omitempty"`
-}
-
-// StackNodePatch is the body of PATCH /stacks/{stack_id}/nodes/{task_id}.
-// Nil fields are left unchanged; ExpectedRevision makes the write a
-// compare-and-set on the node's revision (412 on mismatch).
-type StackNodePatch struct {
-	State            *string    `json:"state,omitempty"`
-	CommitMode       *string    `json:"commit_mode,omitempty"`
-	PRNumber         *int       `json:"pr_number,omitempty"`
-	PRURL            *string    `json:"pr_url,omitempty"`
-	OutputSHA        *string    `json:"output_sha,omitempty"`
-	LastPublishedAt  *time.Time `json:"last_published_at,omitempty"`
-	ExpectedRevision *int64     `json:"expected_revision,omitempty"`
-}
-
-// StackAPIError is a non-2xx stack API response. It keeps the status, the
-// structured error code, and the message so callers can tell "stack not found"
-// from "stack node not found" (both 404 not_found) and name the violated
-// lineage rule of a 422. Unwrap yields the generic classification (a domain
-// sentinel such as domain.ErrNotFound), so errors.Is keeps working.
-type StackAPIError struct {
-	Status  int
-	Code    string
-	Message string
-	err     error
-}
-
-func (e *StackAPIError) Error() string { return e.err.Error() }
-func (e *StackAPIError) Unwrap() error { return e.err }
+// Wire shapes live in stackwire; these aliases keep call sites in this package
+// short.
+type (
+	StackWire      = stackwire.Stack
+	StackNodeWire  = stackwire.Node
+	StackEnsure    = stackwire.Ensure
+	StackNodePatch = stackwire.NodePatch
+	StackAPIError  = stackwire.APIError
+	StackProvider  = stackwire.Provider
+)
 
 func (s *StackClient) stackPath(ws, id string) string {
 	return "/api/v1/" + pathEscape(ws) + "/stacks/" + pathEscape(id)
@@ -224,7 +169,7 @@ func (s *StackClient) do(ctx context.Context, method, path string, body, out any
 		Status:  resp.StatusCode,
 		Code:    extractErrorCode(respBody),
 		Message: extractErrorMessage(respBody),
-		err:     classified,
+		Err:     classified,
 	}
 }
 

@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/stackstore/stackwire"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -47,9 +47,9 @@ func ForStore(s store.Store) (Store, error) {
 }
 
 // stackProvider finds the fleet-db stack API under any decorators of s.
-func stackProvider(s store.Store) fleetdb.StackProvider {
+func stackProvider(s store.Store) stackwire.Provider {
 	for depth := 0; s != nil && depth < 8; depth++ {
-		if p, ok := s.(fleetdb.StackProvider); ok {
+		if p, ok := s.(stackwire.Provider); ok {
 			return p
 		}
 		u, ok := s.(Unwrapper)
