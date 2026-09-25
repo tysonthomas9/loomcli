@@ -21,6 +21,7 @@ import {
   buildWorkerByTaskId,
   isWorkerTerminalOpenable,
 } from "@/components/AgentWorkPanel/AgentWorkPanel";
+import { StackContextStrip } from "@/components/StackContextStrip";
 import { PRDiscussionPanel } from "@/components/PRDiscussionPanel";
 import { PRCompareDiffPane, PRFilesTab } from "@/components/IssueDetailPanel";
 import { TaskSessionDiffPane } from "@/components/IssueDetailPanel/sessions/TaskSessionDiffPane";
@@ -32,7 +33,7 @@ import { useWorkspaceContext } from "@/hooks/workspace";
 import type { GitPullRequest } from "@/api/workspace";
 import type { Issue, LoomAgentStatus } from "@/types";
 import { parseLoomStatus } from "@/types";
-import { isPRUrl } from "@/utils/issue";
+import { formatPrKey, isPRUrl, pullRequestKey } from "@/utils/issue";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
 import styles from "./PRReviewWorkspace.module.css";
@@ -192,6 +193,17 @@ export function PRReviewWorkspace({
       resolvePullRequestRepo(pullRequest) ?? repoRefFromUrl(prUrl ?? undefined),
     [pullRequest, prUrl],
   );
+  const stackPrKey = useMemo(() => {
+    const fromPr = pullRequest ? pullRequestKey(pullRequest) : null;
+    if (fromPr) return fromPr;
+    if (pullRequestRepo && prNumber) {
+      const n = Number(prNumber);
+      if (Number.isFinite(n)) {
+        return formatPrKey(pullRequestRepo.owner, pullRequestRepo.repo, n);
+      }
+    }
+    return null;
+  }, [pullRequest, pullRequestRepo, prNumber]);
   const displayTitle = pullRequest?.title || issue?.title || "Pull request";
   const reviewStateLabel = (() => {
     if (pullRequest?.is_draft) return "Draft";
@@ -346,6 +358,14 @@ export function PRReviewWorkspace({
 
   return (
     <div className={styles.workspace} data-testid="pr-review-workspace">
+      {stackPrKey ? (
+        <StackContextStrip
+          workspaceId={workspaceId}
+          prKey={stackPrKey}
+          onBack={onBack}
+          {...(pullRequest ? { pullRequest } : {})}
+        />
+      ) : null}
       {/* Identity header (design rw-identity / rw-meta) */}
       <header className={styles.head}>
         <div className={styles.identity}>

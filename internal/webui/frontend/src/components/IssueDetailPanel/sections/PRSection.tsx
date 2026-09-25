@@ -5,9 +5,14 @@
  * with the PR number, state tag, and a "View PR" link. When a review issue
  * has no PR yet, renders the design's dashed "No pull request yet"
  * placeholder so the review surface explains itself instead of being blank.
+ *
+ * STACKED-PRS-11: when a PR URL is present, also shows the compact delivery
+ * group context strip beneath the card head (View PR stays intact).
  */
 
-import { isPRUrl } from "@/utils/issue";
+import { StackContextStrip } from "@/components/StackContextStrip";
+import { useWorkspaceContext } from "@/hooks/workspace";
+import { isPRUrl, prKeyFromRef } from "@/utils/issue";
 
 import styles from "./PRSection.module.css";
 
@@ -26,8 +31,10 @@ function prNumberFrom(ref: string | null | undefined): string | null {
 }
 
 export function PRSection({ issue }: PRSectionProps): JSX.Element | null {
+  const { workspaceId } = useWorkspaceContext();
   const hasPR = isPRUrl(issue.external_ref);
   const isReview = issue.status === "review";
+  const prKey = hasPR ? prKeyFromRef(issue.external_ref) : null;
 
   // Only render where the design does: a PR card whenever a PR exists, and
   // the "no PR yet" placeholder only on review-stage issues.
@@ -73,6 +80,11 @@ export function PRSection({ issue }: PRSectionProps): JSX.Element | null {
           View PR ↗
         </a>
       </div>
+      {prKey ? (
+        <div className={styles.stackFooter} data-testid="pr-section-stack">
+          <StackContextStrip workspaceId={workspaceId} prKey={prKey} />
+        </div>
+      ) : null}
     </section>
   );
 }

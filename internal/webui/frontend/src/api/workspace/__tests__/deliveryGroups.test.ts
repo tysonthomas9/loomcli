@@ -166,4 +166,41 @@ describe("deliveryGroups API", () => {
     expect(classified.kind).toBe("stale_revision");
     expect(classified.group?.members).toHaveLength(1);
   });
+
+  it("gets a delivery group by PR key via the pull-request-delivery-groups facade", async () => {
+    const common = await import("@/api/common");
+    const mockGet = vi.mocked(common.api.GET);
+    mockGet.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          group: {
+            workspace_key: "WS",
+            id: "dg_01HABCDEFGHJKLMNPQRSTUVWXY",
+            title: "G",
+            state: "active",
+            revision: 1,
+            members: [],
+            last_op_id: "op",
+            created_at: "2026-09-24T00:00:00Z",
+            updated_at: "2026-09-24T00:00:00Z",
+          },
+        },
+      },
+      error: undefined,
+      response: new Response(null, { status: 200 }),
+    } as never);
+
+    const { getDeliveryGroupByPr } = await import("../deliveryGroups");
+    const result = await getDeliveryGroupByPr("WS", "github:octocat/hello#7");
+    expect(mockGet).toHaveBeenCalledWith(
+      "/api/workspaces/{ws}/pull-request-delivery-groups/{pr_key}",
+      expect.objectContaining({
+        params: expect.objectContaining({
+          path: { ws: "WS", pr_key: "github:octocat/hello#7" },
+        }),
+      }),
+    );
+    expect(result.group.id).toBe("dg_01HABCDEFGHJKLMNPQRSTUVWXY");
+  });
 });

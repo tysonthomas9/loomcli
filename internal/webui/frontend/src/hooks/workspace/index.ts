@@ -47,6 +47,13 @@ export type {
   SetMembersResult,
 } from "./useDeliveryGroupMembers";
 
+export {
+  useStackContext,
+  resolveStackContext,
+  isExternalMember,
+} from "./useStackContext";
+export type { StackContextState } from "./useStackContext";
+
 export { usePullRequestDiff } from "./usePullRequestDiff";
 export type {
   UsePullRequestDiffParams,
