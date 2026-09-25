@@ -64,17 +64,9 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 		state = "all"
 	}
 
-	// Optional single-repo standalone continuation: fetch one additional
-	// bounded window starting at standalone_page for standalone_repo.
-	contRepo := strings.TrimSpace(r.URL.Query().Get("standalone_repo"))
-	contPage := 0
-	if raw := strings.TrimSpace(r.URL.Query().Get("standalone_page")); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 1 {
-			writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "standalone_page must be a positive integer", false)
-			return
-		}
-		contPage = n
+	contRepo, contPage, ok := parseStandaloneContinuationQuery(w, r)
+	if !ok {
+		return
 	}
 
 	if !m.connectorListAvailable() {
@@ -100,54 +92,78 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var (
-		prs               []ops.GitPullRequest
-		warnings          []string
-		attempted, failed int
-		continuation      *standaloneContinuation
-	)
-	if contRepo != "" {
-		if contPage < 1 {
-			contPage = 1
-		}
-		prs, warnings, continuation, attempted, failed = m.connectorContinueStandalone(r, ws, state, data.Repos, contRepo, contPage)
-	} else {
-		prs, warnings, continuation, attempted, failed = m.connectorListPullRequests(r, ws, state, data.Repos)
-	}
+	prs, warnings, continuation, attempted, failed := m.listViaConnector(r, ws, state, data.Repos, contRepo, contPage)
 
 	// Fall back to gh when the connector learned nothing: either no repo was
 	// parseable or every repo errored. When durable delivery groups are
 	// available, still return them with explicit warnings rather than failing
 	// the whole Pull Requests surface on a GitHub outage.
 	if len(prs) == 0 && (attempted == 0 || failed == attempted) && contRepo == "" {
-		notice := append([]string(nil), warnings...)
-		if attempted > 0 {
-			notice = append([]string{connectorUnavailableWarning}, notice...)
-		}
-		if m.deliveryGroups != nil {
-			out := pullRequestsData{
-				PullRequests:           []ops.GitPullRequest{},
-				Warnings:               notice,
-				StandaloneContinuation: continuation,
-			}
-			if continuation != nil {
-				continuation.Complete = false
-			}
-			m.attachDeliveryGroupsPage(r, ws, &out)
-			writeJSON(w, out)
-			return
-		}
-		m.ghListFallback(w, r, ws, state, notice...)
+		m.writeEmptyConnectorList(w, r, ws, state, warnings, continuation, attempted)
 		return
 	}
 
+	m.writeStandalonePRList(w, r, ws, prs, warnings, continuation)
+}
+
+func parseStandaloneContinuationQuery(w http.ResponseWriter, r *http.Request) (contRepo string, contPage int, ok bool) {
+	contRepo = strings.TrimSpace(r.URL.Query().Get("standalone_repo"))
+	if raw := strings.TrimSpace(r.URL.Query().Get("standalone_page")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "standalone_page must be a positive integer", false)
+			return "", 0, false
+		}
+		contPage = n
+	}
+	return contRepo, contPage, true
+}
+
+func (m *Module) listViaConnector(
+	r *http.Request, ws, state string, repos []ops.WorkspaceRepo, contRepo string, contPage int,
+) (prs []ops.GitPullRequest, warnings []string, continuation *standaloneContinuation, attempted, failed int) {
+	if contRepo != "" {
+		if contPage < 1 {
+			contPage = 1
+		}
+		return m.connectorContinueStandalone(r, ws, state, repos, contRepo, contPage)
+	}
+	return m.connectorListPullRequests(r, ws, state, repos)
+}
+
+func (m *Module) writeEmptyConnectorList(
+	w http.ResponseWriter, r *http.Request, ws, state string,
+	warnings []string, continuation *standaloneContinuation, attempted int,
+) {
+	notice := append([]string(nil), warnings...)
+	if attempted > 0 {
+		notice = append([]string{connectorUnavailableWarning}, notice...)
+	}
+	if m.deliveryGroups != nil {
+		out := pullRequestsData{
+			PullRequests:           []ops.GitPullRequest{},
+			Warnings:               notice,
+			StandaloneContinuation: continuation,
+		}
+		if continuation != nil {
+			continuation.Complete = false
+		}
+		m.attachDeliveryGroupsPage(r, ws, &out)
+		writeJSON(w, out)
+		return
+	}
+	m.ghListFallback(w, r, ws, state, notice...)
+}
+
+func (m *Module) writeStandalonePRList(
+	w http.ResponseWriter, r *http.Request, ws string,
+	prs []ops.GitPullRequest, warnings []string, continuation *standaloneContinuation,
+) {
 	m.observeListedPullRequests(ws, prs)
 	grouped, groupWarnings, _ := m.loadActiveGroupedPRKeys(r, ws)
 	warnings = append(warnings, groupWarnings...)
-	standalone := filterStandalonePullRequests(prs, grouped)
-
 	out := pullRequestsData{
-		PullRequests:           standalone,
+		PullRequests:           filterStandalonePullRequests(prs, grouped),
 		Warnings:               warnings,
 		StandaloneContinuation: continuation,
 	}
@@ -178,48 +194,22 @@ func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, re
 			continue
 		}
 		attempted++
-		if err := m.ensureConnectorAndGrants(r.Context(), ws, owner, repo, prReadActions); err != nil {
-			failed++
-			msg := repoWarning(owner, repo, err)
-			warnings = append(warnings, msg)
-			cont.Repos = append(cont.Repos, standaloneRepoContinuation{
-				Repo: owner + "/" + repo, SourceRepo: workspaceRepo.Name,
-				PageSize: pullsListPerPage, MaxPages: maxPullsListPages,
-				PartialError: msg, HasMore: false,
-			})
-			cont.Complete = false
-			continue
-		}
-		repoPRs, truncated, err := m.connectorListPullRequestsForRepo(
-			r, ws, state, owner, repo, workspaceRepo.Name, 1, maxPullsListPages,
+		repoPRs, repoCont, repoWarn, err := m.listConnectorRepoWindow(
+			r, ws, state, owner, repo, workspaceRepo.Name, 1, maxPullsListPages+1,
 		)
 		prs = append(prs, repoPRs...)
-		repoCont := standaloneRepoContinuation{
-			Repo:       owner + "/" + repo,
-			SourceRepo: workspaceRepo.Name,
-			Fetched:    len(repoPRs),
-			PageSize:   pullsListPerPage,
-			MaxPages:   maxPullsListPages,
-		}
+		warnings = append(warnings, repoWarn...)
+		cont.Repos = append(cont.Repos, repoCont)
 		if err != nil {
 			failed++
-			msg := repoWarning(owner, repo, err)
-			warnings = append(warnings, msg)
-			repoCont.PartialError = msg
 			cont.Complete = false
 		}
-		if truncated {
-			warnings = append(warnings, pullsListTruncationWarning(owner, repo))
-			repoCont.HasMore = true
-			repoCont.NextPage = maxPullsListPages + 1
-			repoCont.ContinuationOf = fmt.Sprintf(
-				"GET .../pull-requests?standalone_repo=%s/%s&standalone_page=%d",
-				owner, repo, maxPullsListPages+1,
-			)
+		if repoCont.HasMore {
 			cont.HasMore = true
 			cont.Complete = false
+		} else if repoCont.PartialError != "" {
+			cont.Complete = false
 		}
-		cont.Repos = append(cont.Repos, repoCont)
 	}
 	return prs, warnings, cont, attempted, failed
 }
@@ -238,50 +228,65 @@ func (m *Module) connectorContinueStandalone(
 			continue
 		}
 		attempted++
-		if err := m.ensureConnectorAndGrants(r.Context(), ws, owner, repo, prReadActions); err != nil {
-			failed++
-			msg := repoWarning(owner, repo, err)
-			warnings = append(warnings, msg)
-			cont.Repos = append(cont.Repos, standaloneRepoContinuation{
-				Repo: owner + "/" + repo, SourceRepo: workspaceRepo.Name,
-				PageSize: pullsListPerPage, MaxPages: maxPullsListPages,
-				PartialError: msg,
-			})
-			cont.Complete = false
-			return prs, warnings, cont, attempted, failed
-		}
-		repoPRs, truncated, err := m.connectorListPullRequestsForRepo(
-			r, ws, state, owner, repo, workspaceRepo.Name, startPage, maxPullsListPages,
+		repoPRs, repoCont, repoWarn, err := m.listConnectorRepoWindow(
+			r, ws, state, owner, repo, workspaceRepo.Name, startPage, startPage+maxPullsListPages,
 		)
 		prs = append(prs, repoPRs...)
-		repoCont := standaloneRepoContinuation{
-			Repo: owner + "/" + repo, SourceRepo: workspaceRepo.Name,
-			Fetched: len(repoPRs), PageSize: pullsListPerPage, MaxPages: maxPullsListPages,
-		}
+		warnings = append(warnings, repoWarn...)
+		cont.Repos = append(cont.Repos, repoCont)
 		if err != nil {
 			failed++
-			msg := repoWarning(owner, repo, err)
-			warnings = append(warnings, msg)
-			repoCont.PartialError = msg
 			cont.Complete = false
 		}
-		if truncated {
-			warnings = append(warnings, pullsListTruncationWarning(owner, repo))
-			repoCont.HasMore = true
-			repoCont.NextPage = startPage + maxPullsListPages
-			repoCont.ContinuationOf = fmt.Sprintf(
-				"GET .../pull-requests?standalone_repo=%s/%s&standalone_page=%d",
-				owner, repo, startPage+maxPullsListPages,
-			)
+		if repoCont.HasMore {
 			cont.HasMore = true
 			cont.Complete = false
+		} else if repoCont.PartialError != "" {
+			cont.Complete = false
 		}
-		cont.Repos = append(cont.Repos, repoCont)
 		return prs, warnings, cont, attempted, failed
 	}
 	warnings = append(warnings, wantRepo+": standalone_repo is not a registered GitHub repository")
 	cont.Complete = false
 	return prs, warnings, cont, attempted, failed
+}
+
+// listConnectorRepoWindow lists one bounded connector window for owner/repo.
+// nextPageHint is the 1-based page advertised when truncated (continuation).
+func (m *Module) listConnectorRepoWindow(
+	r *http.Request, ws, state, owner, repo, sourceRepo string, startPage, nextPageHint int,
+) (prs []ops.GitPullRequest, repoCont standaloneRepoContinuation, warnings []string, err error) {
+	repoCont = standaloneRepoContinuation{
+		Repo: owner + "/" + repo, SourceRepo: sourceRepo,
+		PageSize: pullsListPerPage, MaxPages: maxPullsListPages,
+	}
+	if err = m.ensureConnectorAndGrants(r.Context(), ws, owner, repo, prReadActions); err != nil {
+		msg := repoWarning(owner, repo, err)
+		warnings = append(warnings, msg)
+		repoCont.PartialError = msg
+		return nil, repoCont, warnings, err
+	}
+	repoPRs, truncated, listErr := m.connectorListPullRequestsForRepo(
+		r, ws, state, owner, repo, sourceRepo, startPage, maxPullsListPages,
+	)
+	prs = repoPRs
+	repoCont.Fetched = len(repoPRs)
+	if listErr != nil {
+		msg := repoWarning(owner, repo, listErr)
+		warnings = append(warnings, msg)
+		repoCont.PartialError = msg
+		err = listErr
+	}
+	if truncated {
+		warnings = append(warnings, pullsListTruncationWarning(owner, repo))
+		repoCont.HasMore = true
+		repoCont.NextPage = nextPageHint
+		repoCont.ContinuationOf = fmt.Sprintf(
+			"GET .../pull-requests?standalone_repo=%s/%s&standalone_page=%d",
+			owner, repo, nextPageHint,
+		)
+	}
+	return prs, repoCont, warnings, err
 }
 
 func (m *Module) connectorListPullRequestsForRepo(
