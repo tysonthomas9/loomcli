@@ -322,22 +322,22 @@ func (e FileCheckoutRepairRequestScope) Valid() bool {
 
 // Defines values for FileCheckoutRepairResponseMethod.
 const (
-	None      FileCheckoutRepairResponseMethod = "none"
-	Provision FileCheckoutRepairResponseMethod = "provision"
-	Recreate  FileCheckoutRepairResponseMethod = "recreate"
-	Repair    FileCheckoutRepairResponseMethod = "repair"
+	FileCheckoutRepairResponseMethodNone      FileCheckoutRepairResponseMethod = "none"
+	FileCheckoutRepairResponseMethodProvision FileCheckoutRepairResponseMethod = "provision"
+	FileCheckoutRepairResponseMethodRecreate  FileCheckoutRepairResponseMethod = "recreate"
+	FileCheckoutRepairResponseMethodRepair    FileCheckoutRepairResponseMethod = "repair"
 )
 
 // Valid indicates whether the value is a known member of the FileCheckoutRepairResponseMethod enum.
 func (e FileCheckoutRepairResponseMethod) Valid() bool {
 	switch e {
-	case None:
+	case FileCheckoutRepairResponseMethodNone:
 		return true
-	case Provision:
+	case FileCheckoutRepairResponseMethodProvision:
 		return true
-	case Recreate:
+	case FileCheckoutRepairResponseMethodRecreate:
 		return true
-	case Repair:
+	case FileCheckoutRepairResponseMethodRepair:
 		return true
 	default:
 		return false
@@ -383,6 +383,51 @@ func (e FilePartialReason) Valid() bool {
 	case FileSize:
 		return true
 	case ResultCount:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GitHubViewerIdentitySource.
+const (
+	GitHubViewerIdentitySourceConnector GitHubViewerIdentitySource = "connector"
+	GitHubViewerIdentitySourceGhCli     GitHubViewerIdentitySource = "gh_cli"
+	GitHubViewerIdentitySourceNone      GitHubViewerIdentitySource = "none"
+)
+
+// Valid indicates whether the value is a known member of the GitHubViewerIdentitySource enum.
+func (e GitHubViewerIdentitySource) Valid() bool {
+	switch e {
+	case GitHubViewerIdentitySourceConnector:
+		return true
+	case GitHubViewerIdentitySourceGhCli:
+		return true
+	case GitHubViewerIdentitySourceNone:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GitHubViewerIdentityStatus.
+const (
+	GitHubViewerIdentityStatusAvailable   GitHubViewerIdentityStatus = "available"
+	GitHubViewerIdentityStatusError       GitHubViewerIdentityStatus = "error"
+	GitHubViewerIdentityStatusRateLimited GitHubViewerIdentityStatus = "rate_limited"
+	GitHubViewerIdentityStatusUnavailable GitHubViewerIdentityStatus = "unavailable"
+)
+
+// Valid indicates whether the value is a known member of the GitHubViewerIdentityStatus enum.
+func (e GitHubViewerIdentityStatus) Valid() bool {
+	switch e {
+	case GitHubViewerIdentityStatusAvailable:
+		return true
+	case GitHubViewerIdentityStatusError:
+		return true
+	case GitHubViewerIdentityStatusRateLimited:
+		return true
+	case GitHubViewerIdentityStatusUnavailable:
 		return true
 	default:
 		return false
@@ -850,37 +895,37 @@ func (e PatchIssueRequestStatus) Valid() bool {
 
 // Defines values for PullRequestReadinessErrorCode.
 const (
-	ChecksTruncated      PullRequestReadinessErrorCode = "checks_truncated"
-	ConnectorUnavailable PullRequestReadinessErrorCode = "connector_unavailable"
-	Forbidden            PullRequestReadinessErrorCode = "forbidden"
-	NotFound             PullRequestReadinessErrorCode = "not_found"
-	RateLimited          PullRequestReadinessErrorCode = "rate_limited"
-	RepoUnregistered     PullRequestReadinessErrorCode = "repo_unregistered"
-	Timeout              PullRequestReadinessErrorCode = "timeout"
-	UnrecognizedValue    PullRequestReadinessErrorCode = "unrecognized_value"
-	UpstreamError        PullRequestReadinessErrorCode = "upstream_error"
+	PullRequestReadinessErrorCodeChecksTruncated      PullRequestReadinessErrorCode = "checks_truncated"
+	PullRequestReadinessErrorCodeConnectorUnavailable PullRequestReadinessErrorCode = "connector_unavailable"
+	PullRequestReadinessErrorCodeForbidden            PullRequestReadinessErrorCode = "forbidden"
+	PullRequestReadinessErrorCodeNotFound             PullRequestReadinessErrorCode = "not_found"
+	PullRequestReadinessErrorCodeRateLimited          PullRequestReadinessErrorCode = "rate_limited"
+	PullRequestReadinessErrorCodeRepoUnregistered     PullRequestReadinessErrorCode = "repo_unregistered"
+	PullRequestReadinessErrorCodeTimeout              PullRequestReadinessErrorCode = "timeout"
+	PullRequestReadinessErrorCodeUnrecognizedValue    PullRequestReadinessErrorCode = "unrecognized_value"
+	PullRequestReadinessErrorCodeUpstreamError        PullRequestReadinessErrorCode = "upstream_error"
 )
 
 // Valid indicates whether the value is a known member of the PullRequestReadinessErrorCode enum.
 func (e PullRequestReadinessErrorCode) Valid() bool {
 	switch e {
-	case ChecksTruncated:
+	case PullRequestReadinessErrorCodeChecksTruncated:
 		return true
-	case ConnectorUnavailable:
+	case PullRequestReadinessErrorCodeConnectorUnavailable:
 		return true
-	case Forbidden:
+	case PullRequestReadinessErrorCodeForbidden:
 		return true
-	case NotFound:
+	case PullRequestReadinessErrorCodeNotFound:
 		return true
-	case RateLimited:
+	case PullRequestReadinessErrorCodeRateLimited:
 		return true
-	case RepoUnregistered:
+	case PullRequestReadinessErrorCodeRepoUnregistered:
 		return true
-	case Timeout:
+	case PullRequestReadinessErrorCodeTimeout:
 		return true
-	case UnrecognizedValue:
+	case PullRequestReadinessErrorCodeUnrecognizedValue:
 		return true
-	case UpstreamError:
+	case PullRequestReadinessErrorCodeUpstreamError:
 		return true
 	default:
 		return false
@@ -2398,6 +2443,27 @@ type FileWriteRequest struct {
 	Repo *string `json:"repo,omitempty"`
 }
 
+// GitHubViewerIdentity Verified GitHub login for the same workspace credential that lists registered-repo PRs. Never derived from Better Auth/JWT display name.
+type GitHubViewerIdentity struct {
+	// ConnectorId e.g. github-webui when source=connector
+	ConnectorId *string `json:"connector_id,omitempty"`
+
+	// Login Present only when status=available. Exact GitHub login.
+	Login *string `json:"login,omitempty"`
+
+	// Message Operator-safe reason when not available (no token material).
+	Message    *string                    `json:"message,omitempty"`
+	ObservedAt *time.Time                 `json:"observed_at,omitempty"`
+	Source     GitHubViewerIdentitySource `json:"source"`
+	Status     GitHubViewerIdentityStatus `json:"status"`
+}
+
+// GitHubViewerIdentitySource defines model for GitHubViewerIdentity.Source.
+type GitHubViewerIdentitySource string
+
+// GitHubViewerIdentityStatus defines model for GitHubViewerIdentity.Status.
+type GitHubViewerIdentityStatus string
+
 // GitPullRequest defines model for GitPullRequest.
 type GitPullRequest struct {
 	Additions    *int    `json:"additions,omitempty"`
@@ -2439,6 +2505,9 @@ type GitPullRequestList struct {
 	DeliveryGroupsCount      *int    `json:"delivery_groups_count,omitempty"`
 	DeliveryGroupsHasMore    *bool   `json:"delivery_groups_has_more,omitempty"`
 	DeliveryGroupsNextCursor *string `json:"delivery_groups_next_cursor,omitempty"`
+
+	// GithubViewer Verified GitHub login for the same workspace credential that lists registered-repo PRs. Never derived from Better Auth/JWT display name.
+	GithubViewer GitHubViewerIdentity `json:"github_viewer"`
 
 	// PullRequests Standalone discovered PRs not in an active delivery group
 	PullRequests           []GitPullRequest          `json:"pull_requests"`

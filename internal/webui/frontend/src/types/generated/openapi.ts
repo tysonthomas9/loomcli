@@ -2733,6 +2733,7 @@ export interface components {
     GitPullRequestList: {
       /** @description Standalone discovered PRs not in an active delivery group */
       pull_requests: components["schemas"]["GitPullRequest"][];
+      github_viewer: components["schemas"]["GitHubViewerIdentity"];
       warnings?: string[];
       delivery_groups?: components["schemas"]["DeliveryGroupView"][];
       /** @description Length of this delivery_groups page only */
@@ -2740,6 +2741,21 @@ export interface components {
       delivery_groups_has_more?: boolean;
       delivery_groups_next_cursor?: string;
       standalone_continuation?: components["schemas"]["StandalonePRContinuation"];
+    };
+    /** @description Verified GitHub login for the same workspace credential that lists registered-repo PRs. Never derived from Better Auth/JWT display name. */
+    GitHubViewerIdentity: {
+      /** @enum {string} */
+      status: "available" | "unavailable" | "rate_limited" | "error";
+      /** @description Present only when status=available. Exact GitHub login. */
+      login?: string;
+      /** @enum {string} */
+      source: "connector" | "gh_cli" | "none";
+      /** @description e.g. github-webui when source=connector */
+      connector_id?: string;
+      /** Format: date-time */
+      observed_at?: string;
+      /** @description Operator-safe reason when not available (no token material). */
+      message?: string;
     };
     StandalonePRContinuation: {
       repos: components["schemas"]["StandaloneRepoContinuation"][];

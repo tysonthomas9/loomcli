@@ -18,8 +18,17 @@ const mockActions = { ...NO_WORKSPACE_VIEW_ACTIONS };
 const pullRequestsMock = vi.hoisted(() => ({
   pullRequests: [] as unknown[],
   warnings: [] as string[],
+  deliveryGroups: [] as unknown[],
+  deliveryGroupsHasMore: false,
+  githubViewer: {
+    status: "available" as const,
+    login: "tysonthomas9",
+    source: "connector" as const,
+    connector_id: "github-webui",
+  },
   loading: true,
   error: null as Error | null,
+  refetch: async () => undefined,
 }));
 
 vi.mock("@/contexts/WorkspaceViewContext", async (importOriginal) => {

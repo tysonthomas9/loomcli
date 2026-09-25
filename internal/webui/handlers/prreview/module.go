@@ -51,6 +51,10 @@ type Module struct {
 	beforeCredentialSeedCommit func()
 	// readiness caches the last-known PR readiness snapshots.
 	readiness readinessCache
+	// viewer caches verified GitHub login for the workspace list credential.
+	viewer viewerCache
+	// lookupGhUser is the gh-cli viewer seam (tests inject; production uses gh api user).
+	lookupGhUser func(ctx context.Context) (login string, err error)
 	// deliveryGroups is the optional FleetDB DeliveryGroup store. Nil when
 	// the backing store does not implement store.OptionalDeliveryGroups.
 	deliveryGroups deliveryGroupBackend
@@ -114,6 +118,7 @@ func (m *Module) InvalidateCredentialSeeds() {
 	m.seeded.Clear()
 	m.credentialSeedGeneration.Add(1)
 	m.readiness.clear()
+	m.viewer.clear()
 }
 
 // Register adds the workspace-scoped pull request review routes.

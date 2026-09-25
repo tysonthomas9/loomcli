@@ -38,6 +38,15 @@ export type {
   UsePullRequestsReturn,
 } from "./usePullRequests";
 
+export { useDeliveryGroupPreview } from "./useDeliveryGroupPreview";
+export type { UseDeliveryGroupPreviewReturn } from "./useDeliveryGroupPreview";
+
+export { useDeliveryGroupMembers } from "./useDeliveryGroupMembers";
+export type {
+  UseDeliveryGroupMembersReturn,
+  SetMembersResult,
+} from "./useDeliveryGroupMembers";
+
 export { usePullRequestDiff } from "./usePullRequestDiff";
 export type {
   UsePullRequestDiffParams,
