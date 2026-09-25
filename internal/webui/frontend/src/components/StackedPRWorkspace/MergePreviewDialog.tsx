@@ -93,8 +93,7 @@ export function MergePreviewDialog({
         {preview && (
           <div className={styles.body}>
             <p className={styles.summary} data-testid="merge-preview-summary">
-              Selected prefix:{" "}
-              <strong>{summary.readyCount}</strong> ready
+              Selected prefix: <strong>{summary.readyCount}</strong> ready
               {summary.stopLabel ? (
                 <>
                   {" · "}
@@ -114,8 +113,8 @@ export function MergePreviewDialog({
             {(preview.repo_errors?.length ?? 0) > 0 && (
               <p className={styles.warn} role="status">
                 Partial GitHub failure:{" "}
-                {preview.repo_errors!
-                  .map((e) => `${e.repo} (${e.code})`)
+                {preview
+                  .repo_errors!.map((e) => `${e.repo} (${e.code})`)
                   .join("; ")}
                 . Persisted members are still shown.
               </p>

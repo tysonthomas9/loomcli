@@ -12,7 +12,9 @@ import {
   type DeliveryGroupItem,
 } from "../stackedPrModel";
 
-function pr(overrides: Partial<GitPullRequest> & { number: number }): GitPullRequest {
+function pr(
+  overrides: Partial<GitPullRequest> & { number: number },
+): GitPullRequest {
   return {
     title: "PR",
     url: `https://github.com/org/repo/pull/${overrides.number}`,

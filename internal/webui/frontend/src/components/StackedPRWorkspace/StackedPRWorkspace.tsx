@@ -68,10 +68,7 @@ export interface StackedPRWorkspaceProps {
   warnings: string[];
   loading: boolean;
   error: Error | null;
-  onOpenReview: (args: {
-    issueId?: string;
-    reviewPr?: string;
-  }) => void;
+  onOpenReview: (args: { issueId?: string; reviewPr?: string }) => void;
   onRefetch?: () => Promise<void>;
 }
 
@@ -484,22 +481,25 @@ export function StackedPRWorkspace({
         if (ref) onOpenReview({ reviewPr: ref });
         return;
       }
-      const member = selectedGroupMember?.member.pr_key === key
-        ? selectedGroupMember
-        : (() => {
-            for (const item of items) {
-              if (item.kind !== "group") continue;
-              const idx = item.group.members.findIndex((m) => m.pr_key === key);
-              if (idx >= 0) {
-                return {
-                  group: item.group,
-                  member: item.group.members[idx]!,
-                  index: idx,
-                };
+      const member =
+        selectedGroupMember?.member.pr_key === key
+          ? selectedGroupMember
+          : (() => {
+              for (const item of items) {
+                if (item.kind !== "group") continue;
+                const idx = item.group.members.findIndex(
+                  (m) => m.pr_key === key,
+                );
+                if (idx >= 0) {
+                  return {
+                    group: item.group,
+                    member: item.group.members[idx]!,
+                    index: idx,
+                  };
+                }
               }
-            }
-            return null;
-          })();
+              return null;
+            })();
       if (member) {
         const link = issueByPrKey.get(key);
         if (link?.id) {
@@ -558,10 +558,10 @@ export function StackedPRWorkspace({
           (selectedStandalone
             ? null
             : items.find(
-                (i) =>
-                  i.kind === "group" &&
-                  i.group.members.some((m) => m.pr_key === selectedKey),
-              )?.kind === "group"
+                  (i) =>
+                    i.kind === "group" &&
+                    i.group.members.some((m) => m.pr_key === selectedKey),
+                )?.kind === "group"
               ? (
                   items.find(
                     (i) =>
@@ -589,7 +589,9 @@ export function StackedPRWorkspace({
       }
       if (k === "k" || k === "ArrowUp") {
         event.preventDefault();
-        const idx = selectedKey ? flatKeys.indexOf(selectedKey) : flatKeys.length;
+        const idx = selectedKey
+          ? flatKeys.indexOf(selectedKey)
+          : flatKeys.length;
         const next = flatKeys[Math.max(0, idx - 1)];
         if (next) setSelectedKey(next);
       }
@@ -725,8 +727,8 @@ export function StackedPRWorkspace({
         {opts.crossFrom ? (
           <div className={styles.cross} aria-hidden="true">
             Delivery order crosses {opts.crossFrom} →{" "}
-            {pr?.source_repo || memberRepoName(pr?.repo_name)}{" "}
-            (not a branch link)
+            {pr?.source_repo || memberRepoName(pr?.repo_name)} (not a branch
+            link)
           </div>
         ) : null}
         <button
@@ -859,7 +861,10 @@ export function StackedPRWorkspace({
               <div className={styles.empty}>No standalone PRs match.</div>
             ) : (
               <div className={styles.group}>
-                <ul className={styles.path} aria-label="Standalone pull requests">
+                <ul
+                  className={styles.path}
+                  aria-label="Standalone pull requests"
+                >
                   {solos.map(({ item }) =>
                     item.kind === "standalone"
                       ? renderMemberRow(item.prKey, null, {
@@ -911,9 +916,7 @@ export function StackedPRWorkspace({
                     <ReadinessBadge display={d} compact />
                   </td>
                   <td>
-                    {item.membershipUnverified
-                      ? "Unverified"
-                      : "Standalone"}
+                    {item.membershipUnverified ? "Unverified" : "Standalone"}
                   </td>
                 </tr>,
               ];
@@ -989,10 +992,7 @@ export function StackedPRWorkspace({
         </aside>
       );
     }
-    const pr =
-      selectedStandalone?.pr ??
-      prByKey.get(selectedKey) ??
-      null;
+    const pr = selectedStandalone?.pr ?? prByKey.get(selectedKey) ?? null;
     const title = pr?.title ?? shortPrKey(selectedKey);
     return (
       <aside
@@ -1060,7 +1060,9 @@ export function StackedPRWorkspace({
                     : "."}
                 </p>
               ) : (
-                <p className={styles.muted}>First step in the delivery order.</p>
+                <p className={styles.muted}>
+                  First step in the delivery order.
+                </p>
               )}
               <div className={styles.btns}>
                 <button
@@ -1077,10 +1079,7 @@ export function StackedPRWorkspace({
                   className={styles.btn}
                   disabled={membersApi.saving}
                   onClick={() =>
-                    void removeMember(
-                      selectedGroupMember.group,
-                      selectedKey,
-                    )
+                    void removeMember(selectedGroupMember.group, selectedKey)
                   }
                 >
                   Remove from group
@@ -1168,15 +1167,17 @@ export function StackedPRWorkspace({
                 <strong>{standaloneCount}</strong> standalone ·{" "}
                 <strong>{notCurrentCount}</strong> with evidence not current
                 {deliveryGroupsHasMore ? " · more groups available" : ""}
-                {!membershipComplete
-                  ? " · membership incomplete"
-                  : ""}
+                {!membershipComplete ? " · membership incomplete" : ""}
               </>
             )}
           </p>
         </div>
         <div className={styles.headerActions}>
-          <div className={styles.seg} role="group" aria-label="Queue or history">
+          <div
+            className={styles.seg}
+            role="group"
+            aria-label="Queue or history"
+          >
             <button
               type="button"
               aria-pressed={mode === "queue"}
@@ -1239,7 +1240,11 @@ export function StackedPRWorkspace({
         </p>
       )}
       {writeBanner && (
-        <p className={styles.warnBanner} role="alert" data-testid="dg-write-error">
+        <p
+          className={styles.warnBanner}
+          role="alert"
+          data-testid="dg-write-error"
+        >
           {writeBanner}
         </p>
       )}
@@ -1254,10 +1259,7 @@ export function StackedPRWorkspace({
         </p>
       )}
 
-      <div
-        className={styles.layout}
-        data-no-summary={!detailOpen || undefined}
-      >
+      <div className={styles.layout} data-no-summary={!detailOpen || undefined}>
         <aside className={styles.rail} aria-label="Pull request filters">
           <label className={styles.search}>
             <span aria-hidden="true">⌕</span>
@@ -1315,7 +1317,10 @@ export function StackedPRWorkspace({
             <header className={styles.railHead}>
               <h2 className={styles.railH}>Repos</h2>
               {selectedRepos.size > 0 && (
-                <button type="button" onClick={() => setSelectedRepos(new Set())}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedRepos(new Set())}
+                >
                   Clear
                 </button>
               )}
@@ -1337,7 +1342,10 @@ export function StackedPRWorkspace({
             <header className={styles.railHead}>
               <h2 className={styles.railH}>Epics</h2>
               {selectedEpics.size > 0 && (
-                <button type="button" onClick={() => setSelectedEpics(new Set())}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedEpics(new Set())}
+                >
                   Clear
                 </button>
               )}
@@ -1442,10 +1450,7 @@ export function StackedPRWorkspace({
           aria-label="Stacked PR shortcuts"
           onClick={() => setHelpOpen(false)}
         >
-          <div
-            className={styles.help}
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className={styles.help} onClick={(e) => e.stopPropagation()}>
             <h2>Shortcuts</h2>
             <ul>
               <li>
@@ -1473,7 +1478,11 @@ export function StackedPRWorkspace({
                 <kbd>Esc</kbd> Close dialog / detail
               </li>
             </ul>
-            <button type="button" className={styles.btn} onClick={() => setHelpOpen(false)}>
+            <button
+              type="button"
+              className={styles.btn}
+              onClick={() => setHelpOpen(false)}
+            >
               Close
             </button>
           </div>

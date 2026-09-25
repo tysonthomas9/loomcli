@@ -63,7 +63,10 @@ vi.mock("@/api/workspace/pullRequests", async () => {
   };
 });
 
-function pr(n: number, overrides: Partial<GitPullRequest> = {}): GitPullRequest {
+function pr(
+  n: number,
+  overrides: Partial<GitPullRequest> = {},
+): GitPullRequest {
   return {
     number: n,
     pr_key: `github:acme/loomcli#${n}`,
@@ -195,7 +198,9 @@ describe("StackedPRWorkspace", () => {
     const badges = screen.getAllByTestId("readiness-badge");
     const labels = badges.map((b) => b.textContent ?? "");
     expect(labels.some((l) => /Stale/i.test(l))).toBe(true);
-    expect(labels.filter((l) => l === "Ready").length).toBeGreaterThanOrEqual(1);
+    expect(labels.filter((l) => l === "Ready").length).toBeGreaterThanOrEqual(
+      1,
+    );
     // Stale row must not present bare Ready
     const stale = badges.find((b) => b.getAttribute("data-key") === "stale");
     expect(stale?.textContent).not.toBe("Ready");
@@ -221,7 +226,13 @@ describe("StackedPRWorkspace", () => {
     await waitFor(() => {
       expect(onOpenReview).toHaveBeenCalled();
     });
-    expect(onOpenReview.mock.calls.some((c) => c[0]?.reviewPr === "acme/loomcli#3" || c[0]?.reviewPr?.includes("loomcli#3"))).toBe(true);
+    expect(
+      onOpenReview.mock.calls.some(
+        (c) =>
+          c[0]?.reviewPr === "acme/loomcli#3" ||
+          c[0]?.reviewPr?.includes("loomcli#3"),
+      ),
+    ).toBe(true);
   });
 
   it("shows membership incomplete banner when continuation is incomplete", () => {

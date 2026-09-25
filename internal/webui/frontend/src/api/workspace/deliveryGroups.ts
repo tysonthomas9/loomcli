@@ -15,7 +15,8 @@ import type { components } from "@/types/generated/openapi";
 export type DeliveryGroupView = components["schemas"]["DeliveryGroupView"];
 export type DeliveryGroupList = components["schemas"]["DeliveryGroupList"];
 export type DeliveryGroupWrite = components["schemas"]["DeliveryGroupWrite"];
-export type DeliveryGroupPreview = components["schemas"]["DeliveryGroupPreview"];
+export type DeliveryGroupPreview =
+  components["schemas"]["DeliveryGroupPreview"];
 export type DeliveryGroupCreateRequest =
   components["schemas"]["DeliveryGroupCreateRequest"];
 export type DeliveryGroupUpdateRequest =
@@ -67,7 +68,10 @@ export function classifyDeliveryGroupWriteError(
     const body = errorBody(err.body);
     const code = body.code ?? "";
     const message =
-      body.message || err.statusText || err.message || "Delivery group write failed";
+      body.message ||
+      err.statusText ||
+      err.message ||
+      "Delivery group write failed";
     const group = body.data?.group;
 
     if (err.status === 412 || code === "stale_revision") {

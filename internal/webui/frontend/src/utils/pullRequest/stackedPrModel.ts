@@ -103,10 +103,7 @@ export function statusKeyForItem(
   return worst;
 }
 
-function tabMatches(
-  tab: QueueTab,
-  statusKey: ReadinessDisplayKey,
-): boolean {
+function tabMatches(tab: QueueTab, statusKey: ReadinessDisplayKey): boolean {
   switch (tab) {
     case "all":
       return true;
@@ -161,16 +158,19 @@ export function matchStandalone(
   const epic = item.epicId || item.epicTitle || "none";
   const statusKey = statusKeyForItem(item, readinessByKey);
 
-  if (filters.epics.size > 0 && !filters.epics.has(epic) && !filters.epics.has(item.epicTitle ?? "")) {
+  if (
+    filters.epics.size > 0 &&
+    !filters.epics.has(epic) &&
+    !filters.epics.has(item.epicTitle ?? "")
+  ) {
     // Also allow matching by epic title when options use titles.
-    const epicOk =
-      [...filters.epics].some(
-        (e) =>
-          e === epic ||
-          e === item.epicTitle ||
-          e === item.epicId ||
-          (e === "none" && !item.epicId && !item.epicTitle),
-      );
+    const epicOk = [...filters.epics].some(
+      (e) =>
+        e === epic ||
+        e === item.epicTitle ||
+        e === item.epicId ||
+        (e === "none" && !item.epicId && !item.epicTitle),
+    );
     if (!epicOk) return { matches: false, dimmed: false };
   }
 
@@ -208,7 +208,9 @@ export function matchStandalone(
   }
 
   const dimmed =
-    filters.repos.size > 0 && !filters.repos.has(repo) && !filters.repos.has(item.pr.repo_name ?? "");
+    filters.repos.size > 0 &&
+    !filters.repos.has(repo) &&
+    !filters.repos.has(item.pr.repo_name ?? "");
   if (filters.repos.size > 0 && dimmed) {
     // Standalone outside selected repos is hidden (no dependency context).
     return { matches: false, dimmed: false };
@@ -232,7 +234,11 @@ export function matchDeliveryGroup(
   const g = item.group;
   if (filters.epics.size > 0) {
     const epic = g.epic_id || "none";
-    if (![...filters.epics].some((e) => e === epic || e === "none" && !g.epic_id)) {
+    if (
+      ![...filters.epics].some(
+        (e) => e === epic || (e === "none" && !g.epic_id),
+      )
+    ) {
       return { matches: false, dimmed: false, memberDimmed };
     }
   }
@@ -257,7 +263,13 @@ export function matchDeliveryGroup(
     g.owner,
     ...g.members.map((m) => {
       const pr = prByKey.get(m.pr_key);
-      return [m.pr_key, m.repo_name, String(m.pr_number), pr?.title, pr?.author_login]
+      return [
+        m.pr_key,
+        m.repo_name,
+        String(m.pr_number),
+        pr?.title,
+        pr?.author_login,
+      ]
         .filter(Boolean)
         .join(" ");
     }),
@@ -345,8 +357,7 @@ export function repoOptionsFromItems(
   prByKey: ReadonlyMap<string, GitPullRequest>,
 ): Array<[string, number]> {
   const counts = new Map<string, number>();
-  const bump = (repo: string) =>
-    counts.set(repo, (counts.get(repo) ?? 0) + 1);
+  const bump = (repo: string) => counts.set(repo, (counts.get(repo) ?? 0) + 1);
 
   for (const item of items) {
     if (item.kind === "standalone") {
@@ -496,9 +507,7 @@ export function buildHistoryEntries(input: {
     entries.push({
       id: `grp-created-${g.id}`,
       at: g.created_at,
-      source: g.created_by
-        ? `Loom · ${g.created_by}`
-        : "Loom · delivery group",
+      source: g.created_by ? `Loom · ${g.created_by}` : "Loom · delivery group",
       text: `Created delivery group “${g.title}” (rev ${g.revision}).`,
       searchText: `${g.title} ${g.id} ${g.epic_id ?? ""}`,
     });
@@ -537,9 +546,7 @@ export function buildHistoryEntries(input: {
       searchText: `${s.prKey} ${s.pr.title} merged`,
     });
   }
-  return entries
-    .filter((e) => e.at)
-    .sort((a, b) => b.at.localeCompare(a.at));
+  return entries.filter((e) => e.at).sort((a, b) => b.at.localeCompare(a.at));
 }
 
 function shortKey(prKey: string): string {
@@ -550,8 +557,7 @@ export function epicOptionsFromItems(
   items: readonly WorkspaceItem[],
 ): Array<[string, number]> {
   const counts = new Map<string, number>();
-  const bump = (epic: string) =>
-    counts.set(epic, (counts.get(epic) ?? 0) + 1);
+  const bump = (epic: string) => counts.set(epic, (counts.get(epic) ?? 0) + 1);
   for (const item of items) {
     if (item.kind === "standalone") {
       bump(item.epicTitle || item.epicId || "No epic");

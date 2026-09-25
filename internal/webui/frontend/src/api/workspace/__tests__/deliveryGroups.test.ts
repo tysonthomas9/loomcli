@@ -73,7 +73,10 @@ describe("deliveryGroups API", () => {
     } as never);
 
     const { listDeliveryGroups } = await import("../deliveryGroups");
-    const result = await listDeliveryGroups("WS", { state: "active", limit: 20 });
+    const result = await listDeliveryGroups("WS", {
+      state: "active",
+      limit: 20,
+    });
     expect(mockGet).toHaveBeenCalledWith(
       "/api/workspaces/{ws}/delivery-groups",
       expect.objectContaining({
@@ -133,7 +136,8 @@ describe("deliveryGroups API", () => {
 
   it("classifies stale revision without dropping group payload", async () => {
     const { ApiError } = await import("@/api/common");
-    const { classifyDeliveryGroupWriteError } = await import("../deliveryGroups");
+    const { classifyDeliveryGroupWriteError } =
+      await import("../deliveryGroups");
     const group = {
       workspace_key: "WS",
       id: "dg_01HABCDEFGHJKLMNPQRSTUVWXY",
