@@ -637,7 +637,7 @@ func TestFleetDBMoveNode_MissingNode(t *testing.T) {
 // Get response so tests can delay projection or diverge without a second Move.
 // A 503 status replays stack_inconsistent, any other non-200 status answers
 // with a generic internal_error, and getTransportFailure drops the connection.
-func moveOutcomeFaultStub(t *testing.T, initial []fleetdb.StackNodeWire, revision int64, after503Get func(getN int, fencedRev int64) (nodes []fleetdb.StackNodeWire, rev int64, status int)) (*FleetDBStore, *[]recordedMove, *int) {
+func moveOutcomeFaultStub(t *testing.T, initial []fleetdb.StackNodeWire, revision int64, after503Get func(getN int, fencedRev int64) (nodes []fleetdb.StackNodeWire, rev int64, status int)) (*FleetDBStore, *[]recordedMove, func() int) {
 	t.Helper()
 	var mu sync.Mutex
 	var calls []recordedMove
@@ -708,7 +708,14 @@ func moveOutcomeFaultStub(t *testing.T, initial []fleetdb.StackNodeWire, revisio
 		// until after503Get projects it.
 		writeFleetErr(w, 503, "stack_inconsistent", "stack change was recorded but not yet applied; re-read before retrying")
 	})
-	return newStubFleetDB(t, mux), &calls, &getsAfter503
+	// Getter serializes with handler increments: a hijacked transport drop can
+	// wake the client before the handler unlocks, so bare *int reads race.
+	gets := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return getsAfter503
+	}
+	return newStubFleetDB(t, mux), &calls, gets
 }
 
 func TestFleetDBMoveNode_AcceptedWriteDelayedProjection(t *testing.T) {
@@ -729,7 +736,7 @@ func TestFleetDBMoveNode_AcceptedWriteDelayedProjection(t *testing.T) {
 	require.Len(t, *calls, 1, "exactly one atomic Move; reconcile is Get-only")
 	require.NotNil(t, (*calls)[0].expectedRevision)
 	assert.EqualValues(t, 7, *(*calls)[0].expectedRevision)
-	assert.GreaterOrEqual(t, *gets, 3)
+	assert.GreaterOrEqual(t, gets(), 3)
 }
 
 func TestFleetDBMoveNode_AcceptedWriteDivergentFollowUp(t *testing.T) {
@@ -758,7 +765,7 @@ func TestFleetDBMoveNode_AcceptedWriteUnconfirmedProjection(t *testing.T) {
 	err := s.MoveNode(context.Background(), "WS", "epic:E1", "T2", "T4")
 	assert.ErrorIs(t, err, ErrUnknownWriteOutcome)
 	require.Len(t, *calls, 1)
-	assert.Equal(t, moveOutcomeReconcileAttempts, *gets)
+	assert.Equal(t, moveOutcomeReconcileAttempts, gets())
 	assert.Contains(t, err.Error(), "could not confirm")
 }
 
@@ -776,7 +783,7 @@ func TestFleetDBMoveNode_AcceptedWriteFollowUpGetFails(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrUnknownWriteOutcome, "Move may be journaled; a failed read must not hide that")
 		require.Len(t, *calls, 1, "must not re-issue Move after stack_inconsistent")
-		assert.Equal(t, 1, *gets)
+		assert.Equal(t, 1, gets())
 		var apiErr *fleetdb.StackAPIError
 		require.ErrorAs(t, err, &apiErr, "underlying Get cause is preserved")
 		assert.Equal(t, http.StatusInternalServerError, apiErr.Status)
@@ -793,7 +800,7 @@ func TestFleetDBMoveNode_AcceptedWriteFollowUpGetFails(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrUnknownWriteOutcome, "Move may be journaled; a failed read must not hide that")
 		require.Len(t, *calls, 1, "must not re-issue Move after stack_inconsistent")
-		assert.GreaterOrEqual(t, *gets, 1)
+		assert.GreaterOrEqual(t, gets(), 1)
 		var urlErr *url.Error
 		assert.ErrorAs(t, err, &urlErr, "underlying transport cause is preserved")
 		var apiErr *fleetdb.StackAPIError
