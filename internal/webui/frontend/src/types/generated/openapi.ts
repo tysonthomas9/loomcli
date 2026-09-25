@@ -1463,7 +1463,7 @@ export interface paths {
     };
     /**
      * List pull requests across the workspace's registered repositories
-     * @description Lists GitHub pull requests for every registered repository, including PRs created outside Loom. Served by the GitHub connector when a token is configured and by the gh CLI otherwise. Per-repo failures are reported in warnings rather than failing the whole list.
+     * @description Lists GitHub pull requests for every registered repository, including PRs created outside Loom. Served by the GitHub connector when a token is configured and by the gh CLI otherwise. Per-repo failures are reported in warnings rather than failing the whole list. Active delivery-group members are omitted from `pull_requests` (standalone only) and surfaced under `delivery_groups` with honest `delivery_groups_has_more` pagination. Connector discovery is bounded to five 100-item pages per repo; `standalone_continuation` reports whether more pages exist and how to continue via `standalone_repo` / `standalone_page`. Absence of a row in a truncated page must not be treated as a complete standalone set. When active-group membership indexing is truncated, unavailable, or includes inconsistent rows, `standalone_continuation.complete` is false even if connector discovery finished — partial or uncertain membership must not be treated as confirmed standalone. Connector-unavailable, merged, and missing-repo fallbacks preserve Loom delivery groups with explicit upstream/partial/stale warnings and filter local PRs against active group membership; local gh failure returns 502 only when no delivery groups backend is available. Bounded `delivery_groups_*` cursor pages require FleetDB delivery-group pagination (PR #367 @ 502b365f) deployed alongside this facade — do not claim complete group pages against FleetDB #365 alone.
      */
     get: operations["listPullRequests"];
     put?: never;
@@ -1506,6 +1506,127 @@ export interface paths {
      * @description Re-reads every listed PR, then computes the ready prefix in the given order (the first pr lands first). Merged members are skipped; the prefix stops at the first member that is not currently ready or that cannot land after its predecessor (same-repo lineage, same base branch, order conflict). Performs no GitHub write or merge; the fingerprint and expires_at let a later merge step reject a stale preview.
      */
     get: operations["getPullRequestReadinessPreview"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/delivery-groups": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List durable delivery groups
+     * @description Returns one ID-ordered page of FleetDB delivery groups. `count` is the page length only; page on `has_more` / `next_cursor`. Honest cursor pagination requires FleetDB PR #367 (@ 502b365f) deployed — against FleetDB #365 alone `limit`/`cursor` are ignored and missing `has_more` decodes as false. Members keep delivery order and are joined to the latest readiness observation when available. Partial GitHub failures never hide groups. Group reads do not write to GitHub.
+     */
+    get: operations["listDeliveryGroups"];
+    put?: never;
+    /**
+     * Create a delivery group
+     * @description Creates a durable ordered delivery group. Requires X-Idempotency-Key. Validates registered-repo PR identities at the Loom API boundary. Never mutates GitHub. Same-key replay of validated intent returns the stored group with X-Idempotency-Replayed; a changed member identity (including adding or changing pr_key) returns idempotency_key_reused.
+     */
+    post: operations["createDeliveryGroup"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/delivery-groups/{group_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        group_id: string;
+      };
+      cookie?: never;
+    };
+    /** Get a delivery group with readiness observations */
+    get: operations["getDeliveryGroup"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update delivery group header
+     * @description Requires If-Match and X-Idempotency-Key. Never mutates GitHub.
+     */
+    patch: operations["updateDeliveryGroup"];
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/delivery-groups/{group_id}/members": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        group_id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Replace ordered delivery group members
+     * @description Atomically adds, removes, and reorders members. Requires If-Match and X-Idempotency-Key. Validates registered-repo identities. Never mutates GitHub.
+     */
+    put: operations["setDeliveryGroupMembers"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/delivery-groups/{group_id}/archive": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        group_id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Archive a delivery group
+     * @description Keeps members for history and releases PR index slots. Never mutates GitHub.
+     */
+    post: operations["archiveDeliveryGroup"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/delivery-groups/{group_id}/preview": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        group_id: string;
+      };
+      cookie?: never;
+    };
+    /**
+     * Read-only ordered ready-prefix preview for a delivery group
+     * @description Uses the group's canonical member order and the same readiness / observation model as pull-requests/readiness/preview. Marks stale, aging, unknown, and partial results explicitly; never labels a stale verdict currently Ready. Does not execute merges, retarget branches, or call GitHub write APIs.
+     */
+    get: operations["previewDeliveryGroup"];
     put?: never;
     post?: never;
     delete?: never;
@@ -2378,7 +2499,10 @@ export interface components {
       error: string;
       code?: string;
       retryable?: boolean;
-      details?: Record<string, never>;
+      /** @description Structured facts for typed errors. Delivery-group 409 conflicts may include `pr_key`, `group_id`, and `revision`. Delivery-group 412 precondition failures include `expected_revision` and `stored_revision`. */
+      details?: {
+        [key: string]: unknown;
+      };
     };
     MessageResponse: {
       /** @constant */
@@ -2607,7 +2731,124 @@ export interface components {
       changed_files?: number;
     };
     GitPullRequestList: {
+      /** @description Standalone discovered PRs not in an active delivery group */
       pull_requests: components["schemas"]["GitPullRequest"][];
+      warnings?: string[];
+      delivery_groups?: components["schemas"]["DeliveryGroupView"][];
+      /** @description Length of this delivery_groups page only */
+      delivery_groups_count?: number;
+      delivery_groups_has_more?: boolean;
+      delivery_groups_next_cursor?: string;
+      standalone_continuation?: components["schemas"]["StandalonePRContinuation"];
+    };
+    StandalonePRContinuation: {
+      repos: components["schemas"]["StandaloneRepoContinuation"][];
+      /** @description True when any repo has more GitHub pages beyond this response */
+      has_more: boolean;
+      /** @description False when connector discovery is truncated/partial/errored, or when active-group membership indexing is truncated, unavailable, or includes inconsistent rows; never infer confirmed standalone membership from missing rows or complete=true alone when membership was unverified. */
+      complete: boolean;
+    };
+    StandaloneRepoContinuation: {
+      repo: string;
+      source_repo?: string;
+      fetched: number;
+      page_size: number;
+      max_pages: number;
+      next_page?: number;
+      has_more: boolean;
+      partial_error?: string;
+      continuation_hint?: string;
+    };
+    /** @enum {string} */
+    DeliveryGroupMemberSource:
+      | "manual"
+      | "loom_task"
+      | "lineage_adopt"
+      | "native_stack_suggestion"
+      | "identity_heal";
+    DeliveryGroupMember: {
+      pr_key: string;
+      repo_name: string;
+      pr_number: number;
+      github_node_id?: string;
+      source: components["schemas"]["DeliveryGroupMemberSource"];
+      task_id?: string;
+      lineage_stack_id?: string;
+      /** Format: date-time */
+      added_at: string;
+      added_by?: string;
+    };
+    DeliveryGroupMemberView: components["schemas"]["DeliveryGroupMember"] & {
+      readiness?: components["schemas"]["PullRequestReadinessView"];
+      warnings?: string[];
+    };
+    DeliveryGroupView: {
+      workspace_key: string;
+      id: string;
+      title: string;
+      epic_id?: string;
+      owner?: string;
+      /** @enum {string} */
+      state: "active" | "archived";
+      /** Format: int64 */
+      revision: number;
+      members: components["schemas"]["DeliveryGroupMemberView"][];
+      last_op_id: string;
+      last_op_digest?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+      created_by?: string;
+      updated_by?: string;
+      integrity?: string;
+      inconsistent?: boolean;
+    };
+    DeliveryGroupList: {
+      delivery_groups: components["schemas"]["DeliveryGroupView"][];
+      count: number;
+      has_more: boolean;
+      next_cursor?: string;
+      warnings?: string[];
+    };
+    DeliveryGroupWrite: {
+      group: components["schemas"]["DeliveryGroupView"];
+      replayed?: boolean;
+    };
+    DeliveryGroupMemberInput: {
+      pr_key?: string;
+      repo_name?: string;
+      pr_number?: number;
+      github_node_id?: string;
+      source?: components["schemas"]["DeliveryGroupMemberSource"];
+      task_id?: string;
+      lineage_stack_id?: string;
+    };
+    DeliveryGroupCreateRequest: {
+      id: string;
+      title: string;
+      epic_id?: string;
+      owner?: string;
+      members?: components["schemas"]["DeliveryGroupMemberInput"][];
+    };
+    DeliveryGroupUpdateRequest: {
+      title?: string;
+      epic_id?: string;
+      owner?: string;
+    };
+    DeliveryGroupSetMembersRequest: {
+      members: components["schemas"]["DeliveryGroupMemberInput"][];
+    };
+    DeliveryGroupPreview: {
+      group_id: string;
+      /** Format: int64 */
+      revision: number;
+      /** Format: date-time */
+      server_now: string;
+      fresh_for_s: number;
+      stale_after_s: number;
+      preview: components["schemas"]["PullRequestReadinessPreview"];
+      repo_errors: components["schemas"]["PullRequestReadinessRepoError"][];
       warnings?: string[];
     };
     PullRequestReadinessFact: {
@@ -3870,6 +4111,10 @@ export interface components {
   parameters: {
     /** @description Workspace identifier */
     WorkspaceId: string;
+    /** @description Stable client intent key for create/update/archive/set-members */
+    DeliveryGroupIdempotencyKey: string;
+    /** @description Expected group revision as a strong ETag (`"3"`) or bare revision */
+    DeliveryGroupIfMatch: string;
     /** @description Issue identifier */
     IssueId: string;
     /** @description Agent worktree name */
@@ -6841,6 +7086,12 @@ export interface operations {
     parameters: {
       query?: {
         state?: "all" | "open" | "closed" | "merged" | "review";
+        /** @description owner/repo to continue standalone discovery for */
+        standalone_repo?: string;
+        /** @description 1-based GitHub list page to start a bounded continuation window */
+        standalone_page?: number;
+        delivery_groups_limit?: number;
+        delivery_groups_cursor?: string;
       };
       header?: never;
       path: {
@@ -6864,7 +7115,7 @@ export interface operations {
           };
         };
       };
-      /** @description gh CLI listing failed */
+      /** @description gh CLI listing failed and no delivery-groups backend is available to return durable groups with warnings */
       502: {
         headers: {
           [name: string]: unknown;
@@ -6954,6 +7205,401 @@ export interface operations {
       };
       /** @description Missing, malformed, duplicate or too many PR keys */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  listDeliveryGroups: {
+    parameters: {
+      query?: {
+        state?: "active" | "archived" | "all";
+        epic_id?: string;
+        limit?: number;
+        cursor?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Delivery group page */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["DeliveryGroupList"];
+          };
+        };
+      };
+      /** @description Invalid query */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Delivery groups unavailable or inconsistent */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  createDeliveryGroup: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Stable client intent key for create/update/archive/set-members */
+        "X-Idempotency-Key": components["parameters"]["DeliveryGroupIdempotencyKey"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DeliveryGroupCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Verified idempotent replay */
+      200: {
+        headers: {
+          ETag?: string;
+          "X-Idempotency-Replayed"?: "true";
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["DeliveryGroupWrite"];
+          };
+        };
+      };
+      /** @description Created */
+      201: {
+        headers: {
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["DeliveryGroupWrite"];
+          };
+        };
+      };
+      /** @description Conflict (duplicate membership, reused key, already exists) */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Invalid members */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing idempotency key */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getDeliveryGroup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        group_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Delivery group */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["DeliveryGroupWrite"];
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  updateDeliveryGroup: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Expected group revision as a strong ETag (`"3"`) or bare revision */
+        "If-Match": components["parameters"]["DeliveryGroupIfMatch"];
+        /** @description Stable client intent key for create/update/archive/set-members */
+        "X-Idempotency-Key": components["parameters"]["DeliveryGroupIdempotencyKey"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        group_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DeliveryGroupUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Updated or replayed */
+      200: {
+        headers: {
+          ETag?: string;
+          "X-Idempotency-Replayed"?: "true";
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["DeliveryGroupWrite"];
+          };
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Stale revision */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing If-Match or idempotency key */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  setDeliveryGroupMembers: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Expected group revision as a strong ETag (`"3"`) or bare revision */
+        "If-Match": components["parameters"]["DeliveryGroupIfMatch"];
+        /** @description Stable client intent key for create/update/archive/set-members */
+        "X-Idempotency-Key": components["parameters"]["DeliveryGroupIdempotencyKey"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        group_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DeliveryGroupSetMembersRequest"];
+      };
+    };
+    responses: {
+      /** @description Updated or replayed */
+      200: {
+        headers: {
+          ETag?: string;
+          "X-Idempotency-Replayed"?: "true";
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["DeliveryGroupWrite"];
+          };
+        };
+      };
+      /** @description Duplicate membership or reused key */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Stale revision */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Invalid members */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing If-Match or idempotency key */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  archiveDeliveryGroup: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Expected group revision as a strong ETag (`"3"`) or bare revision */
+        "If-Match": components["parameters"]["DeliveryGroupIfMatch"];
+        /** @description Stable client intent key for create/update/archive/set-members */
+        "X-Idempotency-Key": components["parameters"]["DeliveryGroupIdempotencyKey"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        group_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Archived or replayed */
+      200: {
+        headers: {
+          ETag?: string;
+          "X-Idempotency-Replayed"?: "true";
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["DeliveryGroupWrite"];
+          };
+        };
+      };
+      /** @description Stale revision */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing If-Match or idempotency key */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  previewDeliveryGroup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        group_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Ordered preview */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["DeliveryGroupPreview"];
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
         headers: {
           [name: string]: unknown;
         };

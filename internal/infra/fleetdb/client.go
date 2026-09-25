@@ -443,6 +443,9 @@ func (c *Client) doRequestResponseWithClient(httpClient *http.Client, req *http.
 //
 //nolint:cyclop,funlen // One status/code classification table; each arm is one sentinel.
 func classifyHTTPError(method, path string, status int, body []byte) error {
+	if err := classifyDeliveryGroupHTTPError(method, path, status, body); err != nil {
+		return err
+	}
 	msg := extractErrorMessage(body)
 	code := extractErrorCode(body)
 	prefix := fmt.Sprintf("fleetdb: %s %s: HTTP %d", method, path, status)
