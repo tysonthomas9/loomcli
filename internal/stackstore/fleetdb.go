@@ -182,143 +182,43 @@ func (s *FleetDBStore) readNode(ctx context.Context, ws string, id sl.StackID, t
 	return sl.Node{}, 0, ErrNodeNotFound
 }
 
-// MoveNode splices taskID to sit immediately after afterTaskID. fleet-db has
-// no single move operation, so the splice is a sequence of SetBase writes
-// ordered so the lineage is valid (linear, acyclic) after every step:
-//
-//  1. detach taskID into its own root (its successor rides along),
-//  2. reattach that successor to taskID's old base,
-//  3. hang afterTaskID's successor onto taskID,
-//  4. put taskID after afterTaskID.
-//
-// The plan is computed and validated against one snapshot before any write.
-// A failure after the first step rolls the completed SetBases back to that
-// snapshot so the lineage is restored and a later retry starts clean — a
-// naive re-plan against a half-applied move does not converge (the moved
-// node's successor can be detached onto the wrong base).
+// MoveNode splices taskID to sit immediately after afterTaskID via fleet-db's
+// atomic, revision-fenced MoveNode endpoint (one stack-document compare-and-set).
+// A mid-splice failure cannot leave a half-applied lineage: either the whole
+// move commits or the stack revision is unchanged. When another writer advances
+// the stack between the read and the fenced write, the call retries with the
+// fresh revision (same bound as UpdateNode).
 func (s *FleetDBStore) MoveNode(ctx context.Context, ws string, id sl.StackID, taskID, afterTaskID string) error {
 	if taskID == afterTaskID {
 		return sl.ErrCycle
 	}
-	nodes, err := s.ListNodes(ctx, ws, id)
-	if err != nil {
-		return err
-	}
-	steps, err := planMove(nodes, taskID, afterTaskID)
-	if err != nil {
-		return err
-	}
-	bases := make(map[string]string, len(nodes))
-	for _, n := range nodes {
-		bases[n.TaskID] = n.BaseTaskID
-	}
-	applied := make([]moveAppliedStep, 0, len(steps))
-	for i, st := range steps {
-		oldBase := bases[st.taskID]
-		if err := s.SetBase(ctx, ws, id, st.taskID, st.base); err != nil {
-			if i == 0 {
-				return err
-			}
-			if rbErr := s.rollbackMove(ctx, ws, id, applied); rbErr != nil {
-				return fmt.Errorf("stackstore: move %s after %s stopped at step %d of %d (rollback failed; lineage may be incomplete): %w (rollback: %v)",
-					taskID, afterTaskID, i+1, len(steps), err, rbErr)
-			}
-			return fmt.Errorf("stackstore: move %s after %s stopped at step %d of %d (lineage restored): %w",
-				taskID, afterTaskID, i+1, len(steps), err)
-		}
-		bases[st.taskID] = st.base
-		applied = append(applied, moveAppliedStep{st.taskID, oldBase})
-	}
-	return nil
-}
-
-// moveAppliedStep records a SetBase that succeeded during MoveNode so a later
-// failure can restore the prior base.
-type moveAppliedStep struct{ taskID, oldBase string }
-
-// rollbackMove undoes applied SetBases in reverse order, restoring each node's
-// base from immediately before that step. Forward steps keep the lineage
-// valid, so the reverse sequence does too.
-func (s *FleetDBStore) rollbackMove(ctx context.Context, ws string, id sl.StackID, applied []moveAppliedStep) error {
-	for i := len(applied) - 1; i >= 0; i-- {
-		st := applied[i]
-		if err := s.SetBase(ctx, ws, id, st.taskID, st.oldBase); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-type setBaseStep struct{ taskID, base string }
-
-// planMove returns the SetBase steps that splice taskID after afterTaskID, or
-// none when it is already there. It rejects the move up front when the result
-// would be invalid or would retarget a merged (terminal) node.
-func planMove(nodes []sl.Node, taskID, afterTaskID string) ([]setBaseStep, error) {
-	byTask := sl.ByTask(nodes)
-	node, ok := byTask[taskID]
-	if !ok {
-		return nil, ErrNodeNotFound
-	}
-	if _, ok := byTask[afterTaskID]; !ok {
-		return nil, ErrNodeNotFound
-	}
-	if node.BaseTaskID == afterTaskID {
-		return nil, nil
-	}
-	childOf := func(base, except string) string {
-		for _, n := range nodes {
-			if n.BaseTaskID == base && n.TaskID != except {
-				return n.TaskID
+	var lastErr error
+	for attempt := range updateNodeAttempts {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("stackstore: move %s after %s: %w", taskID, afterTaskID, ctx.Err())
+			case <-time.After(updateNodeBackoff(attempt)):
 			}
 		}
-		return ""
-	}
-	oldBase := node.BaseTaskID
-	succ := childOf(taskID, "") // rides with taskID in step 1
-	// Step 2 never changes afterTaskID's successor: it only repoints succ,
-	// whose base becomes oldBase, and afterTaskID == oldBase returned above.
-	afterSucc := childOf(afterTaskID, taskID)
-
-	var steps []setBaseStep
-	if oldBase != "" {
-		steps = append(steps, setBaseStep{taskID, ""})
-	}
-	if succ != "" {
-		steps = append(steps, setBaseStep{succ, oldBase})
-	}
-	if afterSucc != "" {
-		steps = append(steps, setBaseStep{afterSucc, taskID})
-	}
-	steps = append(steps, setBaseStep{taskID, afterTaskID})
-
-	if err := validateMovePlan(nodes, steps); err != nil {
-		return nil, err
-	}
-	return steps, nil
-}
-
-// validateMovePlan checks the lineage after steps and refuses to retarget
-// merged nodes, before any write, so a doomed move changes nothing.
-func validateMovePlan(nodes []sl.Node, steps []setBaseStep) error {
-	byTask := sl.ByTask(nodes)
-	final := make(map[string]string, len(nodes))
-	for _, n := range nodes {
-		final[n.TaskID] = n.BaseTaskID
-	}
-	for _, st := range steps {
-		if byTask[st.taskID].State.Terminal() && final[st.taskID] != st.base {
-			return ErrNodeTerminal
+		st, err := s.api.Get(ctx, ws, string(id))
+		if err != nil {
+			return mapFleetErr(err)
 		}
-		final[st.taskID] = st.base
+		rev := st.Revision
+		_, err = s.api.MoveNode(ctx, ws, string(id), taskID, stackwire.MoveRequest{
+			AfterTaskID:      afterTaskID,
+			ExpectedRevision: &rev,
+		})
+		if err == nil {
+			return nil
+		}
+		if !isRetryableWrite(err) {
+			return mapFleetErr(err)
+		}
+		lastErr = err
 	}
-	result := make([]sl.Node, 0, len(nodes))
-	for _, n := range nodes {
-		n.BaseTaskID = final[n.TaskID]
-		result = append(result, n)
-	}
-	_, err := sl.Ordered(result)
-	return err
+	return fmt.Errorf("stackstore: move %s after %s: %w: %w", taskID, afterTaskID, ErrConcurrentUpdate, mapFleetErr(lastErr))
 }
 
 // patch construction -----------------------------------------------------------

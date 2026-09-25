@@ -4,8 +4,9 @@
 // branch names and sentinel errors whichever store they hold.
 //
 // Env-gated like fleetdb's TestFleetDBAwaitConformanceRoundTrip: it needs a
-// fleet-db binary BUILT FROM A TREE THAT INCLUDES THE STACK API (an older
-// binary 404s every stack call). Run with:
+// fleet-db binary BUILT FROM A TREE THAT INCLUDES THE STACK API AND THE
+// ATOMIC MoveNode ENDPOINT (fleet-db PR #366 / STACKED-PRS-40). An older
+// binary 404s every stack call or the /move route. Run with:
 //
 //	LOOM_RUN_EMBEDDED_SMOKE=1 FLEET_DB_BIN=/path/to/fleet-db \
 //	  go test ./internal/stackstore/ -run Embedded -v -count=1

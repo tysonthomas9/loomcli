@@ -426,165 +426,35 @@ func TestFleetDBUpdateNode_Missing(t *testing.T) {
 	})
 }
 
-// planMove ----------------------------------------------------------------------------
+// Atomic MoveNode over the wire -----------------------------------------------------------
 
-// chainNodes builds nodes from "task:base" specs ("T1:" = root).
-func chainNodes(specs ...string) []sl.Node {
-	out := make([]sl.Node, 0, len(specs))
-	for _, s := range specs {
-		task, base, _ := strings.Cut(s, ":")
-		out = append(out, sl.Node{StackID: "epic:E1", TaskID: task, BaseTaskID: base, State: sl.NodeStatePending})
-	}
-	return out
+type recordedMove struct {
+	taskID           string
+	afterTaskID      string
+	expectedRevision *int64
 }
 
-func baseMap(nodes []sl.Node) map[string]string {
-	m := make(map[string]string, len(nodes))
-	for _, n := range nodes {
-		m[n.TaskID] = n.BaseTaskID
-	}
-	return m
-}
-
-func nodesWithBases(nodes []sl.Node, bases map[string]string) []sl.Node {
-	out := make([]sl.Node, 0, len(nodes))
-	for _, n := range nodes {
-		n.BaseTaskID = bases[n.TaskID]
-		out = append(out, n)
-	}
-	return out
-}
-
-// localMoveResult runs LocalStore.MoveNode on the same lineage.
-func localMoveResult(t *testing.T, nodes []sl.Node, taskID, after string) map[string]string {
-	t.Helper()
-	ctx := context.Background()
-	s := New(t.TempDir())
-	seedStack(t, s)
-	ordered, err := sl.Ordered(nodes)
-	require.NoError(t, err)
-	for _, n := range ordered {
-		_, err := s.AddNode(ctx, ws, "epic:E1", n.TaskID, n.BaseTaskID, "")
-		require.NoError(t, err)
-	}
-	require.NoError(t, s.MoveNode(ctx, ws, "epic:E1", taskID, after))
-	return baseMap(mustNodes(t, s))
-}
-
-func TestPlanMove(t *testing.T) {
-	chain4 := []string{"T1:", "T2:T1", "T3:T2", "T4:T3"}
-	cases := []struct {
-		name      string
-		specs     []string
-		merged    []string
-		task      string
-		after     string
-		wantOrder []string // lineage order of the result (single chain cases)
-	}{
-		{name: "middle later", specs: chain4, task: "T2", after: "T4", wantOrder: []string{"T1", "T3", "T4", "T2"}},
-		{name: "after own successor", specs: chain4, task: "T2", after: "T3", wantOrder: []string{"T1", "T3", "T2", "T4"}},
-		{name: "middle earlier", specs: chain4, task: "T3", after: "T1", wantOrder: []string{"T1", "T3", "T2", "T4"}},
-		{name: "tail after root", specs: chain4, task: "T4", after: "T1", wantOrder: []string{"T1", "T4", "T2", "T3"}},
-		{name: "root", specs: chain4, task: "T1", after: "T3", wantOrder: []string{"T2", "T3", "T1", "T4"}},
-		{name: "root after own successor", specs: chain4, task: "T1", after: "T2", wantOrder: []string{"T2", "T1", "T3", "T4"}},
-		{name: "root to after tail", specs: chain4, task: "T1", after: "T4", wantOrder: []string{"T2", "T3", "T4", "T1"}},
-		{name: "tail neighbor to after tail", specs: chain4, task: "T3", after: "T4", wantOrder: []string{"T1", "T2", "T4", "T3"}},
-		{name: "merged root untouched", specs: chain4, merged: []string{"T1"}, task: "T4", after: "T1", wantOrder: []string{"T1", "T4", "T2", "T3"}},
-		{name: "two nodes swap", specs: []string{"T1:", "T2:T1"}, task: "T1", after: "T2", wantOrder: []string{"T2", "T1"}},
-		{name: "across parallel chains", specs: []string{"A1:", "A2:A1", "B1:", "B2:B1"}, task: "B1", after: "A1"},
-		{name: "chain tail onto other chain", specs: []string{"A1:", "A2:A1", "B1:", "B2:B1"}, task: "B2", after: "A2"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			nodes := chainNodes(tc.specs...)
-			for i := range nodes {
-				for _, m := range tc.merged {
-					if nodes[i].TaskID == m {
-						nodes[i].State = sl.NodeStateMerged
-					}
-				}
-			}
-			steps, err := planMove(nodes, tc.task, tc.after)
-			require.NoError(t, err)
-			require.NotEmpty(t, steps)
-
-			bases := baseMap(nodes)
-			byTask := sl.ByTask(nodes)
-			for i, st := range steps {
-				if byTask[st.taskID].State.Terminal() {
-					assert.Equal(t, bases[st.taskID], st.base, "step %d retargets merged %s", i+1, st.taskID)
-				}
-				bases[st.taskID] = st.base
-				_, err := sl.Ordered(nodesWithBases(nodes, bases))
-				require.NoError(t, err, "lineage invalid after step %d (%+v) of %+v", i+1, st, steps)
-			}
-			assert.Equal(t, localMoveResult(t, nodes, tc.task, tc.after), bases, "final lineage matches LocalStore.MoveNode")
-			if tc.wantOrder != nil {
-				ordered, err := sl.Ordered(nodesWithBases(nodes, bases))
-				require.NoError(t, err)
-				got := make([]string, len(ordered))
-				for i, n := range ordered {
-					got[i] = n.TaskID
-				}
-				assert.Equal(t, tc.wantOrder, got)
-			}
-		})
-	}
-}
-
-func TestPlanMove_AlreadyInPlace(t *testing.T) {
-	nodes := chainNodes("T1:", "T2:T1", "T3:T2")
-	steps, err := planMove(nodes, "T3", "T2")
-	require.NoError(t, err)
-	assert.Empty(t, steps)
-}
-
-func TestPlanMove_Rejections(t *testing.T) {
-	chain := func(merged ...string) []sl.Node {
-		nodes := chainNodes("T1:", "T2:T1", "T3:T2", "T4:T3")
-		for i := range nodes {
-			for _, m := range merged {
-				if nodes[i].TaskID == m {
-					nodes[i].State = sl.NodeStateMerged
-				}
-			}
-		}
-		return nodes
-	}
-	cases := []struct {
-		name  string
-		nodes []sl.Node
-		task  string
-		after string
-		want  error
-	}{
-		{"merged node moved", chain("T2"), "T2", "T4", ErrNodeTerminal},
-		{"merged successor rides to old base", chain("T3"), "T2", "T4", ErrNodeTerminal},
-		{"merged after-successor rehung", chain("T2"), "T3", "T1", ErrNodeTerminal},
-		{"unknown task", chain(), "ghost", "T1", ErrNodeNotFound},
-		{"unknown after", chain(), "T1", "ghost", ErrNodeNotFound},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			steps, err := planMove(tc.nodes, tc.task, tc.after)
-			assert.ErrorIs(t, err, tc.want)
-			assert.Nil(t, steps)
-		})
-	}
-}
-
-// MoveNode over the wire -------------------------------------------------------------------
-
-type recordedSetBase struct{ taskID, base string }
-
-func moveStub(t *testing.T, nodes []fleetdb.StackNodeWire, failAt int) (*FleetDBStore, *[]recordedSetBase, *int) {
+// moveStub serves GET stack + POST .../move against an in-memory chain.
+// staleFirst, when true, answers the first Move with 412 then succeeds.
+func moveStub(t *testing.T, nodes []fleetdb.StackNodeWire, revision int64, staleFirst bool) (*FleetDBStore, *[]recordedMove, *int) {
 	t.Helper()
 	var mu sync.Mutex
-	var calls []recordedSetBase
+	var calls []recordedMove
 	requests := 0
-	setBaseCount := 0
 	live := append([]fleetdb.StackNodeWire(nil), nodes...)
+	rev := revision
+	staleArmed := staleFirst
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/{workspace}/stacks/{stack_id}", func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		requests++
+		snapshot := append([]fleetdb.StackNodeWire(nil), live...)
+		curRev := rev
+		mu.Unlock()
+		writeFleetJSON(w, 200, fleetdb.StackWire{
+			ID: "epic:E1", WorkspaceKey: "WS", Revision: curRev, Nodes: snapshot,
+		})
+	})
 	mux.HandleFunc("GET /api/v1/{workspace}/stacks/{stack_id}/nodes", func(w http.ResponseWriter, _ *http.Request) {
 		mu.Lock()
 		requests++
@@ -592,33 +462,85 @@ func moveStub(t *testing.T, nodes []fleetdb.StackNodeWire, failAt int) (*FleetDB
 		mu.Unlock()
 		writeFleetJSON(w, 200, map[string]any{"nodes": snapshot})
 	})
-	mux.HandleFunc("PUT /api/v1/{workspace}/stacks/{stack_id}/nodes/{task_id}/base", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/v1/{workspace}/stacks/{stack_id}/nodes/{task_id}/move", func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
 		requests++
-		var body struct {
-			BaseTaskID string `json:"base_task_id"`
-		}
+		var body fleetdb.StackMoveReq
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		setBaseCount++
-		calls = append(calls, recordedSetBase{r.PathValue("task_id"), body.BaseTaskID})
-		// failAt is a 1-based index into SetBase calls for the whole stub
-		// lifetime, so a rolled-back move can be retried without re-arming.
-		if failAt > 0 && setBaseCount == failAt {
-			writeFleetErr(w, 409, "conflict", "stack is being modified concurrently; retry")
+		taskID := r.PathValue("task_id")
+		calls = append(calls, recordedMove{taskID, body.AfterTaskID, body.ExpectedRevision})
+		if body.ExpectedRevision != nil && *body.ExpectedRevision != rev {
+			writeFleetErr(w, 412, "precondition_failed", "stack changed since it was read")
 			return
 		}
-		taskID := r.PathValue("task_id")
-		for i := range live {
-			if live[i].TaskID == taskID {
-				live[i].BaseTaskID = body.BaseTaskID
-				writeFleetJSON(w, 200, live[i])
-				return
+		if staleArmed {
+			staleArmed = false
+			rev++ // peer writer advanced the document
+			writeFleetErr(w, 412, "precondition_failed", "stack changed since it was read")
+			return
+		}
+		moved, errStatus, errCode, errMsg := applyAtomicMove(live, taskID, body.AfterTaskID)
+		if errStatus != 0 {
+			writeFleetErr(w, errStatus, errCode, errMsg)
+			return
+		}
+		if moved {
+			rev++
+		}
+		var node fleetdb.StackNodeWire
+		for _, n := range live {
+			if n.TaskID == taskID {
+				node = n
+				break
 			}
 		}
-		writeFleetJSON(w, 200, fleetdb.StackNodeWire{TaskID: taskID, BaseTaskID: body.BaseTaskID})
+		writeFleetJSON(w, 200, fleetdb.StackMoveResult{
+			Revision: rev,
+			Node:     node,
+			Nodes:    append([]fleetdb.StackNodeWire(nil), live...),
+		})
 	})
 	return newStubFleetDB(t, mux), &calls, &requests
+}
+
+// applyAtomicMove mutates live to match fleet-db MoveStackNode semantics.
+// Returns (wrote, status, code, msg); status 0 means success.
+func applyAtomicMove(live []fleetdb.StackNodeWire, taskID, afterTaskID string) (bool, int, string, string) {
+	if taskID == afterTaskID {
+		return false, 422, "validation_failed", "invalid stack lineage: stack lineage cycle detected"
+	}
+	var nodeIdx, afterIdx = -1, -1
+	for i, n := range live {
+		if n.TaskID == taskID {
+			nodeIdx = i
+		}
+		if n.TaskID == afterTaskID {
+			afterIdx = i
+		}
+	}
+	if nodeIdx < 0 || afterIdx < 0 {
+		return false, 404, "not_found", "stack node not found"
+	}
+	if live[nodeIdx].BaseTaskID == afterTaskID {
+		return false, 0, "", "" // no-op, including when the node is already merged
+	}
+	if live[nodeIdx].State == "merged" {
+		return false, 409, "invalid_transition", "stack node is merged and cannot be changed"
+	}
+	oldBase := live[nodeIdx].BaseTaskID
+	for i := range live {
+		if live[i].TaskID != taskID && live[i].BaseTaskID == taskID {
+			live[i].BaseTaskID = oldBase
+		}
+	}
+	for i := range live {
+		if live[i].TaskID != taskID && live[i].BaseTaskID == afterTaskID {
+			live[i].BaseTaskID = taskID
+		}
+	}
+	live[nodeIdx].BaseTaskID = afterTaskID
+	return true, 0, "", ""
 }
 
 func wireChain(states map[string]string) []fleetdb.StackNodeWire {
@@ -635,72 +557,141 @@ func wireChain(states map[string]string) []fleetdb.StackNodeWire {
 	return out
 }
 
-func TestFleetDBMoveNode_IssuesPlannedSetBases(t *testing.T) {
-	s, calls, _ := moveStub(t, wireChain(nil), 0)
+func baseMap(nodes []sl.Node) map[string]string {
+	m := make(map[string]string, len(nodes))
+	for _, n := range nodes {
+		m[n.TaskID] = n.BaseTaskID
+	}
+	return m
+}
+
+func TestFleetDBMoveNode_AtomicEndpoint(t *testing.T) {
+	s, calls, _ := moveStub(t, wireChain(nil), 7, false)
 	require.NoError(t, s.MoveNode(context.Background(), "WS", "epic:E1", "T2", "T4"))
-	assert.Equal(t, []recordedSetBase{{"T2", ""}, {"T3", "T1"}, {"T2", "T4"}}, *calls)
+	require.Len(t, *calls, 1)
+	assert.Equal(t, "T2", (*calls)[0].taskID)
+	assert.Equal(t, "T4", (*calls)[0].afterTaskID)
+	require.NotNil(t, (*calls)[0].expectedRevision)
+	assert.EqualValues(t, 7, *(*calls)[0].expectedRevision)
+
+	nodes, err := s.ListNodes(context.Background(), "WS", "epic:E1")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"T1": "", "T3": "T1", "T4": "T3", "T2": "T4"}, baseMap(nodes))
 }
 
-func TestFleetDBMoveNode_RejectsBeforeAnyWrite(t *testing.T) {
-	t.Run("self", func(t *testing.T) {
-		s, calls, requests := moveStub(t, wireChain(nil), 0)
-		assert.ErrorIs(t, s.MoveNode(context.Background(), "WS", "epic:E1", "T2", "T2"), sl.ErrCycle)
-		assert.Empty(t, *calls)
-		assert.Zero(t, *requests, "rejected without a round trip")
+func TestFleetDBMoveNode_RejectsSelfWithoutRoundTrip(t *testing.T) {
+	s, calls, requests := moveStub(t, wireChain(nil), 1, false)
+	assert.ErrorIs(t, s.MoveNode(context.Background(), "WS", "epic:E1", "T2", "T2"), sl.ErrCycle)
+	assert.Empty(t, *calls)
+	assert.Zero(t, *requests, "rejected without a round trip")
+}
+
+func TestFleetDBMoveNode_MergedRealMoveVsNoOp(t *testing.T) {
+	t.Run("real move of merged node is terminal", func(t *testing.T) {
+		s, calls, _ := moveStub(t, wireChain(map[string]string{"T2": "merged"}), 3, false)
+		err := s.MoveNode(context.Background(), "WS", "epic:E1", "T2", "T4")
+		assert.ErrorIs(t, err, ErrNodeTerminal)
+		require.Len(t, *calls, 1)
+		assert.Equal(t, "T2", (*calls)[0].taskID)
+		assert.Equal(t, "T4", (*calls)[0].afterTaskID)
 	})
-	t.Run("merged retarget", func(t *testing.T) {
-		s, calls, _ := moveStub(t, wireChain(map[string]string{"T2": "merged"}), 0)
-		assert.ErrorIs(t, s.MoveNode(context.Background(), "WS", "epic:E1", "T2", "T4"), ErrNodeTerminal)
-		assert.Empty(t, *calls)
-	})
-	t.Run("already in place", func(t *testing.T) {
-		s, calls, _ := moveStub(t, wireChain(nil), 0)
+	t.Run("already-positioned merged node is a no-op", func(t *testing.T) {
+		s, calls, _ := moveStub(t, wireChain(map[string]string{"T3": "merged"}), 5, false)
 		require.NoError(t, s.MoveNode(context.Background(), "WS", "epic:E1", "T3", "T2"))
-		assert.Empty(t, *calls)
+		require.Len(t, *calls, 1)
+		nodes, err := s.ListNodes(context.Background(), "WS", "epic:E1")
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"T1": "", "T2": "T1", "T3": "T2", "T4": "T3"}, baseMap(nodes))
+	})
+	t.Run("already in place pending is a no-op", func(t *testing.T) {
+		s, calls, _ := moveStub(t, wireChain(nil), 2, false)
+		require.NoError(t, s.MoveNode(context.Background(), "WS", "epic:E1", "T3", "T2"))
+		require.Len(t, *calls, 1)
 	})
 }
 
-func TestFleetDBMoveNode_PartialFailure(t *testing.T) {
-	t.Run("first step fails unwrapped", func(t *testing.T) {
-		s, _, _ := moveStub(t, wireChain(nil), 1)
-		err := s.MoveNode(context.Background(), "WS", "epic:E1", "T2", "T4")
-		assert.ErrorIs(t, err, ErrConcurrentUpdate)
-		assert.NotContains(t, err.Error(), "stopped at step")
-	})
-	t.Run("later step rolls back and retry converges", func(t *testing.T) {
-		// Move T3 after T1: plan is T3→"", T4→T2, T2→T3, T3→T1. Fail on the
-		// final attach; without rollback a re-plan would detach T2 onto "" and
-		// finish with T1→T3 plus T2→T4 instead of T1→T3→T2→T4.
-		s, calls, _ := moveStub(t, wireChain(nil), 4)
-		err := s.MoveNode(context.Background(), "WS", "epic:E1", "T3", "T1")
-		assert.ErrorIs(t, err, ErrConcurrentUpdate)
-		assert.Contains(t, err.Error(), "stopped at step 4 of 4")
-		assert.Contains(t, err.Error(), "lineage restored")
-		assert.Equal(t, []recordedSetBase{
-			{"T3", ""}, {"T4", "T2"}, {"T2", "T3"}, {"T3", "T1"}, // forward; final attach fails
-			{"T2", "T1"}, {"T4", "T3"}, {"T3", "T2"}, // reverse rollback
-		}, *calls)
+func TestFleetDBMoveNode_StaleRevisionRetries(t *testing.T) {
+	s, calls, _ := moveStub(t, wireChain(nil), 10, true)
+	require.NoError(t, s.MoveNode(context.Background(), "WS", "epic:E1", "T3", "T1"))
+	require.Len(t, *calls, 2, "first move 412s; second succeeds with refreshed revision")
+	require.NotNil(t, (*calls)[0].expectedRevision)
+	require.NotNil(t, (*calls)[1].expectedRevision)
+	assert.EqualValues(t, 10, *(*calls)[0].expectedRevision)
+	assert.EqualValues(t, 11, *(*calls)[1].expectedRevision)
 
-		nodes, listErr := s.ListNodes(context.Background(), "WS", "epic:E1")
-		require.NoError(t, listErr)
-		assert.Equal(t, map[string]string{"T1": "", "T2": "T1", "T3": "T2", "T4": "T3"}, baseMap(nodes))
+	nodes, err := s.ListNodes(context.Background(), "WS", "epic:E1")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"T1": "", "T3": "T1", "T2": "T3", "T4": "T2"}, baseMap(nodes))
+}
 
-		*calls = (*calls)[:0]
-		require.NoError(t, s.MoveNode(context.Background(), "WS", "epic:E1", "T3", "T1"))
-		assert.Equal(t, []recordedSetBase{{"T3", ""}, {"T4", "T2"}, {"T2", "T3"}, {"T3", "T1"}}, *calls)
-		nodes, listErr = s.ListNodes(context.Background(), "WS", "epic:E1")
-		require.NoError(t, listErr)
-		assert.Equal(t, map[string]string{"T1": "", "T3": "T1", "T2": "T3", "T4": "T2"}, baseMap(nodes))
+func TestFleetDBMoveNode_MissingNode(t *testing.T) {
+	s, _, _ := moveStub(t, wireChain(nil), 1, false)
+	assert.ErrorIs(t, s.MoveNode(context.Background(), "WS", "epic:E1", "ghost", "T1"), ErrNodeNotFound)
+	assert.ErrorIs(t, s.MoveNode(context.Background(), "WS", "epic:E1", "T1", "ghost"), ErrNodeNotFound)
+}
+
+func TestStackClient_MoveNodeTypedContract(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody fleetdb.StackMoveReq
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/{workspace}/stacks/{stack_id}/nodes/{task_id}/move", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.EscapedPath()
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+		writeFleetJSON(w, 200, fleetdb.StackMoveResult{
+			Revision: 42,
+			Node:     fleetdb.StackNodeWire{TaskID: "T2", BaseTaskID: "T4", State: "pending"},
+			Nodes: []fleetdb.StackNodeWire{
+				{TaskID: "T1", State: "pending"},
+				{TaskID: "T3", BaseTaskID: "T1", State: "pending"},
+				{TaskID: "T4", BaseTaskID: "T3", State: "pending"},
+				{TaskID: "T2", BaseTaskID: "T4", State: "pending"},
+			},
+		})
 	})
-	t.Run("later step reports progress", func(t *testing.T) {
-		s, calls, _ := moveStub(t, wireChain(nil), 2)
-		err := s.MoveNode(context.Background(), "WS", "epic:E1", "T2", "T4")
-		assert.ErrorIs(t, err, ErrConcurrentUpdate)
-		assert.Contains(t, err.Error(), "stopped at step 2 of 3")
-		assert.Contains(t, err.Error(), "lineage restored")
-		// forward T2→"" fails next on T3→T1; rollback undoes T2→"" → T2→T1
-		assert.Equal(t, []recordedSetBase{{"T2", ""}, {"T3", "T1"}, {"T2", "T1"}}, *calls)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c, err := fleetdb.New(fleetdb.Config{BaseURL: srv.URL})
+	require.NoError(t, err)
+
+	rev := int64(41)
+	out, err := c.Stacks().MoveNode(context.Background(), "WS", "epic:E1", "T2", fleetdb.StackMoveReq{
+		AfterTaskID:      "T4",
+		ExpectedRevision: &rev,
 	})
+	require.NoError(t, err)
+	assert.Equal(t, http.MethodPost, gotMethod)
+	assert.Equal(t, "/api/v1/WS/stacks/epic:E1/nodes/T2/move", gotPath)
+	assert.Equal(t, "T4", gotBody.AfterTaskID)
+	require.NotNil(t, gotBody.ExpectedRevision)
+	assert.EqualValues(t, 41, *gotBody.ExpectedRevision)
+	assert.EqualValues(t, 42, out.Revision)
+	assert.Equal(t, "T2", out.Node.TaskID)
+	assert.Equal(t, "T4", out.Node.BaseTaskID)
+	require.Len(t, out.Nodes, 4)
+}
+
+func TestStackClient_MoveNodeStaleRevision(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/{workspace}/stacks/{stack_id}/nodes/{task_id}/move", func(w http.ResponseWriter, _ *http.Request) {
+		writeFleetErr(w, 412, "precondition_failed", "stack changed since it was read")
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c, err := fleetdb.New(fleetdb.Config{BaseURL: srv.URL})
+	require.NoError(t, err)
+
+	rev := int64(9)
+	_, err = c.Stacks().MoveNode(context.Background(), "WS", "epic:E1", "T2", fleetdb.StackMoveReq{
+		AfterTaskID:      "T4",
+		ExpectedRevision: &rev,
+	})
+	require.Error(t, err)
+	var apiErr *fleetdb.StackAPIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, 412, apiErr.Status)
+	assert.Equal(t, "precondition_failed", apiErr.Code)
+	assert.ErrorIs(t, err, domain.ErrConflict)
 }
 
 // path encoding ------------------------------------------------------------------------------
@@ -736,6 +727,14 @@ func TestFleetDBStore_EscapesPathSegments(t *testing.T) {
 		record(r)
 		writeFleetJSON(w, 200, fleetdb.StackNodeWire{TaskID: taskID})
 	})
+	mux.HandleFunc("POST /api/v1/{workspace}/stacks/{stack_id}/nodes/{task_id}/move", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		writeFleetJSON(w, 200, fleetdb.StackMoveResult{
+			Revision: 1,
+			Node:     fleetdb.StackNodeWire{TaskID: taskID},
+			Nodes:    []fleetdb.StackNodeWire{{TaskID: taskID}},
+		})
+	})
 	mux.HandleFunc("DELETE /api/v1/{workspace}/stacks/{stack_id}/nodes/{task_id}", func(w http.ResponseWriter, r *http.Request) {
 		record(r)
 		w.WriteHeader(http.StatusNoContent)
@@ -748,17 +747,21 @@ func TestFleetDBStore_EscapesPathSegments(t *testing.T) {
 	assert.Equal(t, sl.StackID(stackID), st.ID)
 	require.NoError(t, s.UpdateNode(ctx, "WS", stackID, taskID, func(n *sl.Node) error { n.PRNumber = 1; return nil }))
 	require.NoError(t, s.SetBase(ctx, "WS", stackID, taskID, ""))
+	require.NoError(t, s.MoveNode(ctx, "WS", stackID, taskID, "after"))
 	require.NoError(t, s.RemoveNode(ctx, "WS", stackID, taskID))
 
-	require.Len(t, seen, 5, "every call routed to the stack_id pattern, none 404ed on an extra '/'")
+	// GetStack, UpdateNode(list+patch), SetBase, MoveNode(get+move), RemoveNode
+	require.Len(t, seen, 7, "every call routed to the stack_id pattern, none 404ed on an extra '/'")
 	escStack := "/stacks/" + url.PathEscape(stackID)
 	for _, p := range seen {
 		assert.Contains(t, p, "/stacks/manual:repo%2Ffeature%20x", "'/' and ' ' in the stack ID are percent-encoded")
 		assert.Contains(t, p, escStack)
 	}
-	for _, p := range seen[2:] {
+	taskPaths := []string{seen[2], seen[3], seen[5], seen[6]} // patch, base, move, delete
+	for _, p := range taskPaths {
 		assert.Contains(t, p, "/nodes/T%2F1:a")
 	}
+	assert.Contains(t, seen[5], "/move")
 	for _, got := range gotStack {
 		assert.Equal(t, stackID, got, "server decodes the original stack ID")
 	}

@@ -29,12 +29,14 @@ func (c *Client) Stacks() stackwire.API { return &StackClient{client: c} }
 // Wire shapes live in stackwire; these aliases keep call sites in this package
 // short.
 type (
-	StackWire      = stackwire.Stack
-	StackNodeWire  = stackwire.Node
-	StackEnsure    = stackwire.Ensure
-	StackNodePatch = stackwire.NodePatch
-	StackAPIError  = stackwire.APIError
-	StackProvider  = stackwire.Provider
+	StackWire       = stackwire.Stack
+	StackNodeWire   = stackwire.Node
+	StackEnsure     = stackwire.Ensure
+	StackNodePatch  = stackwire.NodePatch
+	StackMoveReq    = stackwire.MoveRequest
+	StackMoveResult = stackwire.MoveResult
+	StackAPIError   = stackwire.APIError
+	StackProvider   = stackwire.Provider
 )
 
 func (s *StackClient) stackPath(ws, id string) string {
@@ -111,6 +113,17 @@ func (s *StackClient) SetBase(ctx context.Context, ws, id, taskID, baseTaskID st
 	}{BaseTaskID: baseTaskID}
 	var out StackNodeWire
 	if err := s.do(ctx, http.MethodPut, s.nodePath(ws, id, taskID)+"/base", body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// MoveNode atomically splices taskID to sit immediately after req.AfterTaskID.
+// When req.ExpectedRevision is set, a stale stack document revision returns
+// 412 precondition_failed.
+func (s *StackClient) MoveNode(ctx context.Context, ws, id, taskID string, req stackwire.MoveRequest) (*stackwire.MoveResult, error) {
+	var out stackwire.MoveResult
+	if err := s.do(ctx, http.MethodPost, s.nodePath(ws, id, taskID)+"/move", req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

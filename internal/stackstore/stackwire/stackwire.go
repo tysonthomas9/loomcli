@@ -26,6 +26,10 @@ type API interface {
 	AddNode(ctx context.Context, ws, id, taskID, baseTaskID, mode string) (*Node, error)
 	// SetBase repoints taskID's predecessor ("" = root unit).
 	SetBase(ctx context.Context, ws, id, taskID, baseTaskID string) (*Node, error)
+	// MoveNode atomically splices taskID to sit immediately after
+	// req.AfterTaskID. When req.ExpectedRevision is set, a stale stack
+	// document revision returns 412 precondition_failed.
+	MoveNode(ctx context.Context, ws, id, taskID string, req MoveRequest) (*MoveResult, error)
 	// RemoveNode drops taskID, reparenting its successor onto its predecessor.
 	RemoveNode(ctx context.Context, ws, id, taskID string) error
 	// UpdateNode applies a publish-state patch to taskID.
@@ -84,6 +88,23 @@ type NodePatch struct {
 	OutputSHA        *string    `json:"output_sha,omitempty"`
 	LastPublishedAt  *time.Time `json:"last_published_at,omitempty"`
 	ExpectedRevision *int64     `json:"expected_revision,omitempty"`
+}
+
+// MoveRequest is the body of POST /stacks/{stack_id}/nodes/{task_id}/move.
+// AfterTaskID is the node that task_id should sit immediately after.
+// ExpectedRevision, when set, fences the move to one stack document revision
+// (412 when another writer already advanced it).
+type MoveRequest struct {
+	AfterTaskID      string `json:"after_task_id"`
+	ExpectedRevision *int64 `json:"expected_revision,omitempty"`
+}
+
+// MoveResult is the response of an atomic MoveNode: the stack revision after
+// the splice (unchanged on no-op), the moved node, and the ordered topology.
+type MoveResult struct {
+	Revision int64  `json:"revision"`
+	Node     Node   `json:"node"`
+	Nodes    []Node `json:"nodes"`
 }
 
 // APIError is a non-2xx stack API response. It keeps the status, the
