@@ -2,8 +2,10 @@ package prreview
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -204,5 +206,101 @@ func TestViewerCacheHonorsTTL(t *testing.T) {
 	got := decodePullRequestsResponse(t, raw)
 	if got.GitHubViewer.Login != "after-ttl" {
 		t.Fatalf("viewer = %+v, want after-ttl after TTL", got.GitHubViewer)
+	}
+}
+
+func TestGhViewerIdentitySwitchMidTTLDoesNotStale(t *testing.T) {
+	// gh_cli must not cache under a static workspace key: switching gh identity
+	// mid-TTL must surface the new login (or at least not keep the prior one).
+	fallback := &fallbackAgentService{result: &ops.GitPullRequestList{
+		PullRequests: []ops.GitPullRequest{{
+			Number: 3, Title: "from gh", State: "OPEN", AuthorLogin: "alice",
+			RepoName: "octocat/hello", URL: "https://github.com/octocat/hello/pull/3",
+		}},
+	}}
+	h := newPRReviewHarnessWithCredential(t, true, fallback, testCredentialNone, "")
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	h.module.now = func() time.Time { return now }
+
+	current := "alice"
+	h.module.lookupGhUser = func(ctx context.Context) (string, error) {
+		return current, nil
+	}
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK {
+		t.Fatalf("first status = %d body %s", status, raw)
+	}
+	first := decodePullRequestsResponse(t, raw)
+	if first.GitHubViewer.Login != "alice" || first.GitHubViewer.Source != githubViewerSourceGhCLI {
+		t.Fatalf("first viewer = %+v, want alice via gh_cli", first.GitHubViewer)
+	}
+
+	current = "bob"
+	// Still within connector TTL window — gh path must not serve alice.
+	now = now.Add(time.Minute)
+	status, raw = h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK {
+		t.Fatalf("second status = %d body %s", status, raw)
+	}
+	second := decodePullRequestsResponse(t, raw)
+	if second.GitHubViewer.Login != "bob" {
+		t.Fatalf("after gh switch viewer = %+v, want bob (no stale alice)", second.GitHubViewer)
+	}
+}
+
+func TestGhViewerMessageDoesNotLeakTokenMaterial(t *testing.T) {
+	fallback := &fallbackAgentService{result: &ops.GitPullRequestList{}}
+	h := newPRReviewHarnessWithCredential(t, true, fallback, testCredentialNone, "")
+	token := "ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD"
+	h.module.lookupGhUser = func(ctx context.Context) (string, error) {
+		return "", errors.New("HTTP 401: Bad credentials for token " + token)
+	}
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d body %s", status, raw)
+	}
+	data := decodePullRequestsResponse(t, raw)
+	if data.GitHubViewer.Login != "" {
+		t.Fatalf("login must be empty, got %q", data.GitHubViewer.Login)
+	}
+	if strings.Contains(data.GitHubViewer.Message, token) || strings.Contains(string(raw), token) {
+		t.Fatalf("viewer message leaked token material: %+v / %s", data.GitHubViewer, raw)
+	}
+	if data.GitHubViewer.Message == "" {
+		t.Fatal("expected operator-safe message")
+	}
+}
+
+func TestConnectorViewerTokenRotateChangesCacheKey(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	h.github.setViewer("tysonthomas9")
+	h.github.setListPayload("octocat", "hello", []map[string]any{{
+		"number": 1, "state": "open", "title": "a",
+		"user": map[string]any{"login": "tysonthomas9"},
+		"head": map[string]any{"sha": "a", "ref": "f"},
+		"base": map[string]any{"sha": "b", "ref": "main"},
+	}})
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK {
+		t.Fatalf("first status = %d body %s", status, raw)
+	}
+	if decodePullRequestsResponse(t, raw).GitHubViewer.Login != "tysonthomas9" {
+		t.Fatal("seed viewer failed")
+	}
+
+	h.github.setViewer("rotated-user")
+	// Rotate the configured token without InvalidateCredentialSeeds — fingerprint
+	// must change so Mine does not keep the prior available login.
+	t.Setenv(webuiGitHubTokenEnv, "rotated-token-value-for-fingerprint")
+	status, raw = h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK {
+		t.Fatalf("post-rotate status = %d body %s", status, raw)
+	}
+	after := decodePullRequestsResponse(t, raw)
+	if after.GitHubViewer.Login != "rotated-user" {
+		t.Fatalf("after token rotate viewer = %+v, want rotated-user", after.GitHubViewer)
 	}
 }

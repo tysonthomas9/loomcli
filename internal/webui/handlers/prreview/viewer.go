@@ -126,7 +126,7 @@ func (m *Module) resolveGitHubViewer(r *http.Request, ws string, preferConnector
 	if preferConnector && m != nil && m.connectorListAvailable() {
 		return m.resolveViewerViaConnector(r, ws)
 	}
-	return m.resolveViewerViaGh(r.Context(), ws)
+	return m.resolveViewerViaGh(r.Context())
 }
 
 func (m *Module) resolveViewerViaConnector(r *http.Request, ws string) githubViewerIdentity {
@@ -146,10 +146,11 @@ func (m *Module) resolveViewerViaConnector(r *http.Request, ws string) githubVie
 	}
 
 	if err := m.ensureViewerGrant(r.Context(), ws); err != nil {
+		// Fixed message only — never forward grant/provider text (may hold secrets).
 		return githubViewerIdentity{
 			Status:  githubViewerStatusUnavailable,
 			Source:  githubViewerSourceNone,
-			Message: "GitHub viewer grant unavailable: " + sanitizeWarning(err),
+			Message: "GitHub viewer grant unavailable",
 		}
 	}
 
@@ -190,12 +191,11 @@ func (m *Module) resolveViewerViaConnector(r *http.Request, ws string) githubVie
 	return out
 }
 
-func (m *Module) resolveViewerViaGh(ctx context.Context, ws string) githubViewerIdentity {
+func (m *Module) resolveViewerViaGh(ctx context.Context) githubViewerIdentity {
+	// Do not cache gh_cli viewer under a static workspace key. gh auth switch /
+	// GH_TOKEN rotation must not leave Mine matching a prior login for TTL.
+	// Connector path remains credential-fingerprint cached.
 	now := m.clock()
-	cacheKey := viewerCacheKey(ws, "gh_cli", githubViewerSourceGhCLI)
-	if cached, ok := m.viewer.get(cacheKey, now); ok {
-		return cached
-	}
 
 	lookup := m.lookupGhUser
 	if lookup == nil {
@@ -203,18 +203,7 @@ func (m *Module) resolveViewerViaGh(ctx context.Context, ws string) githubViewer
 	}
 	login, err := lookup(ctx)
 	if err != nil {
-		msg := sanitizeWarning(err)
-		if msg == "" {
-			msg = "local gh viewer lookup failed"
-		}
-		status := githubViewerStatusUnavailable
-		if strings.Contains(strings.ToLower(msg), "rate limit") {
-			status = githubViewerStatusRateLimited
-		} else if !strings.Contains(strings.ToLower(msg), "not found") &&
-			!strings.Contains(strings.ToLower(msg), "not installed") &&
-			!strings.Contains(strings.ToLower(msg), "auth") {
-			status = githubViewerStatusError
-		}
+		status, msg := classifyGhViewerError(err)
 		return githubViewerIdentity{
 			Status:     status,
 			Source:     githubViewerSourceGhCLI,
@@ -231,14 +220,35 @@ func (m *Module) resolveViewerViaGh(ctx context.Context, ws string) githubViewer
 			Message:    "gh api user returned empty login",
 		}
 	}
-	out := githubViewerIdentity{
+	return githubViewerIdentity{
 		Status:     githubViewerStatusAvailable,
 		Login:      login,
 		Source:     githubViewerSourceGhCLI,
 		ObservedAt: now.UTC().Format(time.RFC3339),
 	}
-	m.viewer.put(cacheKey, out, now.Add(viewerCacheTTL))
-	return out
+}
+
+// classifyGhViewerError maps gh stderr/errors to fixed operator-safe messages.
+// Classification may inspect the error text; the returned message never includes it.
+func classifyGhViewerError(err error) (status, message string) {
+	if err == nil {
+		return githubViewerStatusUnavailable, "local gh viewer lookup failed"
+	}
+	lower := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(lower, "rate limit"):
+		return githubViewerStatusRateLimited, "GitHub rate limited viewer lookup via gh"
+	case strings.Contains(lower, "auth"),
+		strings.Contains(lower, "login required"),
+		strings.Contains(lower, "not logged"):
+		return githubViewerStatusUnavailable, "local gh auth unavailable for viewer lookup"
+	case strings.Contains(lower, "not found"),
+		strings.Contains(lower, "not installed"),
+		strings.Contains(lower, "executable file not found"):
+		return githubViewerStatusUnavailable, "local gh CLI unavailable for viewer lookup"
+	default:
+		return githubViewerStatusError, "local gh viewer lookup failed"
+	}
 }
 
 func defaultGhUserLookup(ctx context.Context) (string, error) {
@@ -291,7 +301,8 @@ func (m *Module) mapViewerDispatchError(err error, ws, source, connID string) gi
 		Source:      source,
 		ConnectorID: connID,
 		ObservedAt:  now.UTC().Format(time.RFC3339),
-		Message:     "GitHub viewer lookup failed: " + sanitizeWarning(err),
+		// Fixed message only — never forward upstream body (may hold secrets).
+		Message: "GitHub viewer lookup failed",
 	}
 }
 
