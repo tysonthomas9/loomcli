@@ -3075,7 +3075,12 @@ export interface components {
        * @enum {string}
        */
       status?:
-        "open" | "in_progress" | "blocked" | "deferred" | "review" | "closed";
+        | "open"
+        | "in_progress"
+        | "blocked"
+        | "deferred"
+        | "review"
+        | "closed";
       priority: number;
       /** @enum {string} */
       issue_type?: "bug" | "feature" | "task" | "epic" | "chore";
@@ -3137,7 +3142,12 @@ export interface components {
       notes?: string;
       /** @enum {string} */
       status:
-        "open" | "in_progress" | "blocked" | "deferred" | "review" | "closed";
+        | "open"
+        | "in_progress"
+        | "blocked"
+        | "deferred"
+        | "review"
+        | "closed";
       priority: number;
       /** @enum {string} */
       issue_type: "bug" | "feature" | "task" | "epic" | "chore";
@@ -4730,7 +4740,12 @@ export interface operations {
     parameters: {
       query?: {
         status?:
-          "open" | "in_progress" | "blocked" | "deferred" | "review" | "closed";
+          | "open"
+          | "in_progress"
+          | "blocked"
+          | "deferred"
+          | "review"
+          | "closed";
         type?: "bug" | "feature" | "task" | "epic" | "chore";
         assignee?: string;
         /** @description Free-text search query */
