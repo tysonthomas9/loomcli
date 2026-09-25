@@ -9,6 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/connector/providers"
+	"github.com/tysonthomas9/loomcli/internal/prref"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -53,7 +54,10 @@ func (m *Module) getPullRequest(w http.ResponseWriter, r *http.Request) {
 		writePRReviewError(w, err)
 		return
 	}
-	writeJSON(w, pullRequestDetailFromBody(res.Body))
+	detail := pullRequestDetailFromBody(res.Body)
+	m.readiness.observeRefs(ws, prref.Format(params.owner, params.repo, params.number),
+		detail.HeadSha, detail.BaseRefName, m.readinessClock())
+	writeJSON(w, detail)
 }
 
 func (m *Module) getPullRequestDiff(w http.ResponseWriter, r *http.Request) {

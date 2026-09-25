@@ -46,6 +46,15 @@ describe("usePullRequests polling", () => {
     mocks.fetchPullRequests.mockResolvedValue({
       pullRequests: [],
       warnings: [],
+      deliveryGroups: [],
+      deliveryGroupsCount: 0,
+      deliveryGroupsHasMore: false,
+      githubViewer: {
+        status: "available",
+        login: "tysonthomas9",
+        source: "connector",
+        connector_id: "github-webui",
+      },
     });
   });
 

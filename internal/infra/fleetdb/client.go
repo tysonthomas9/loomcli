@@ -443,6 +443,9 @@ func (c *Client) doRequestResponseWithClient(httpClient *http.Client, req *http.
 //
 //nolint:cyclop,funlen // One status/code classification table; each arm is one sentinel.
 func classifyHTTPError(method, path string, status int, body []byte) error {
+	if err := classifyDeliveryGroupHTTPError(method, path, status, body); err != nil {
+		return err
+	}
 	msg := extractErrorMessage(body)
 	code := extractErrorCode(body)
 	prefix := fmt.Sprintf("fleetdb: %s %s: HTTP %d", method, path, status)
@@ -458,6 +461,10 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 			return skillMaterializationLeaseConflictError(prefix, body)
 		case skillMaterializationLeaseTokenMismatchCode:
 			return fmt.Errorf("%s: %w", prefix, domain.ErrSkillMaterializationLeaseTokenMismatch)
+		case stackPublishLeaseBusyCode:
+			return stackPublishLeaseBusyError(prefix, body)
+		case stackPublishLeaseTokenMismatchCode:
+			return fmt.Errorf("%s: %w", prefix, domain.ErrStackPublishLeaseTokenMismatch)
 		case "already_claimed":
 			return fmt.Errorf("%s: %w", prefix, domain.ErrAlreadyClaimed)
 		case "invalid_transition":
@@ -505,6 +512,9 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 	}
 	if status == http.StatusServiceUnavailable && code == skillMaterializationLeaseStoreUnavailableCode {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrSkillMaterializationLeaseStoreUnavailable)
+	}
+	if status == http.StatusServiceUnavailable && code == stackPublishLeaseStoreUnavailableCode {
+		return fmt.Errorf("%s: %w", prefix, domain.ErrStackPublishLeaseStoreUnavailable)
 	}
 	if status >= 400 && status < 500 {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)

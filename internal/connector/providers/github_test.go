@@ -471,12 +471,14 @@ func TestGitHubReads(t *testing.T) {
 	fake := newFakeGitHub(t)
 	fake.route(http.MethodGet, "/repos/octocat/hello/pulls/7", fakeResponse{
 		status: http.StatusOK,
-		body: `{"number":7,"state":"open","title":"feat","draft":false,"merged":false,
+		body: `{"number":7,"node_id":"PR_kwDOdetail7","html_url":"https://github.com/octocat/hello/pull/7",
+			"state":"open","title":"feat","draft":false,"merged":false,
 			"head":{"sha":"deadbeef","ref":"feat"},"base":{"sha":"aaa","ref":"main"}}`,
 	})
 	fake.route(http.MethodGet, "/repos/octocat/hello/pulls", fakeResponse{
 		status: http.StatusOK,
-		body: `[{"number":7,"state":"closed","title":"feat","merged_at":"2026-07-13T12:00:00Z",
+		body: `[{"number":7,"node_id":"PR_kwDOlist7","html_url":"https://github.com/octocat/hello/pull/7",
+			"state":"closed","title":"feat","merged_at":"2026-07-13T12:00:00Z",
 			"updated_at":"2026-07-13T13:00:00Z","user":{"login":"octocat"},
 			"head":{"sha":"deadbeef","ref":"feat"},"base":{"ref":"main"}}]`,
 	})
@@ -497,6 +499,10 @@ func TestGitHubReads(t *testing.T) {
 		}
 		if result.Body["headSha"] != "deadbeef" || result.Body["baseRef"] != "main" {
 			t.Errorf("body = %+v, want camelCase headSha/baseRef", result.Body)
+		}
+		if result.Body["nodeId"] != "PR_kwDOdetail7" ||
+			result.Body["htmlUrl"] != "https://github.com/octocat/hello/pull/7" {
+			t.Errorf("body = %+v, want nodeId/htmlUrl preserved", result.Body)
 		}
 		if result.Decision != domain.ConnectorCallGranted {
 			t.Errorf("decision = %q", result.Decision)
@@ -522,6 +528,11 @@ func TestGitHubReads(t *testing.T) {
 		if pulls[0]["merged"] != true || pulls[0]["authorLogin"] != "octocat" ||
 			pulls[0]["updatedAt"] != "2026-07-13T13:00:00Z" {
 			t.Errorf("projected list fields = %+v", pulls[0])
+		}
+		if pulls[0]["nodeId"] != "PR_kwDOlist7" ||
+			pulls[0]["htmlUrl"] != "https://github.com/octocat/hello/pull/7" ||
+			pulls[0]["headSha"] != "deadbeef" {
+			t.Errorf("identity fields = %+v, want nodeId/htmlUrl/headSha preserved", pulls[0])
 		}
 		reqs := fake.recorded()
 		last := reqs[len(reqs)-1]
@@ -755,4 +766,84 @@ func TestSanitizeUpstreamMessage(t *testing.T) {
 	if got := sanitizeUpstreamMessage(long, ""); len(got) > maxSanitizedLen+3 {
 		t.Errorf("sanitized length %d exceeds cap", len(got))
 	}
+}
+
+func TestGitHubViewerRead(t *testing.T) {
+	t.Run("whitelists login only", func(t *testing.T) {
+		fake := newFakeGitHub(t)
+		fake.route(http.MethodGet, "/user", fakeResponse{
+			status: http.StatusOK,
+			body:   `{"login":"tysonthomas9","id":1,"email":"secret@example.com","name":"Tyson","token":"should-not-leak"}`,
+		})
+		result, err := fake.provider().Call(context.Background(), CallSpec{
+			Action:     ActionGitHubViewerRead,
+			Resource:   "user:self",
+			Credential: testToken,
+		})
+		if err != nil {
+			t.Fatalf("viewer.read: %v", err)
+		}
+		if result.Decision != domain.ConnectorCallGranted {
+			t.Fatalf("decision = %q, want granted", result.Decision)
+		}
+		if result.Body["login"] != "tysonthomas9" {
+			t.Fatalf("body = %+v, want login tysonthomas9", result.Body)
+		}
+		if _, ok := result.Body["email"]; ok {
+			t.Fatalf("body leaked email: %+v", result.Body)
+		}
+		if _, ok := result.Body["name"]; ok {
+			t.Fatalf("body leaked name: %+v", result.Body)
+		}
+		if len(result.Body) != 1 {
+			t.Fatalf("body keys = %+v, want only login", result.Body)
+		}
+	})
+
+	t.Run("rate limited", func(t *testing.T) {
+		fake := newFakeGitHub(t)
+		fake.route(http.MethodGet, "/user", fakeResponse{
+			status: http.StatusTooManyRequests,
+			header: map[string]string{"Retry-After": "42"},
+			body:   `{"message":"API rate limit exceeded"}`,
+		})
+		result, err := fake.provider().Call(context.Background(), CallSpec{
+			Action:     ActionGitHubViewerRead,
+			Resource:   "user:self",
+			Credential: testToken,
+		})
+		if err == nil {
+			t.Fatal("expected rate limit error")
+		}
+		var rl *RateLimited
+		if !errors.As(err, &rl) {
+			t.Fatalf("err = %T (%v), want *RateLimited", err, err)
+		}
+		if rl.RetryAfter != 42*time.Second {
+			t.Fatalf("RetryAfter = %v, want 42s", rl.RetryAfter)
+		}
+		if result.Decision != domain.ConnectorCallUpstreamError {
+			t.Fatalf("decision = %q", result.Decision)
+		}
+	})
+
+	t.Run("missing login is error", func(t *testing.T) {
+		fake := newFakeGitHub(t)
+		fake.route(http.MethodGet, "/user", fakeResponse{
+			status: http.StatusOK,
+			body:   `{"id":1,"name":"Tyson"}`,
+		})
+		_, err := fake.provider().Call(context.Background(), CallSpec{
+			Action:     ActionGitHubViewerRead,
+			Resource:   "user:self",
+			Credential: testToken,
+		})
+		if err == nil {
+			t.Fatal("expected missing-login error")
+		}
+		var ue *UpstreamError
+		if !errors.As(err, &ue) {
+			t.Fatalf("err = %T (%v), want *UpstreamError", err, err)
+		}
+	})
 }

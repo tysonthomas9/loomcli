@@ -26,6 +26,7 @@ var prReadActions = []string{
 	providers.ActionGitHubPullRequestRead,
 	providers.ActionGitHubPullsList,
 	providers.ActionGitHubCompareRead,
+	providers.ActionGitHubPullRequestReadinessRead,
 }
 
 var prReviewSubmissionActions = []string{
@@ -34,13 +35,32 @@ var prReviewSubmissionActions = []string{
 }
 
 func (m *Module) ensureConnectorAndGrants(ctx context.Context, ws, owner, repo string, actions []string) error {
+	return m.ensureConnectorGrantsForResource(ctx, ws, prResource(owner, repo), actions, func(action string) string {
+		return grantID(owner, repo, action)
+	})
+}
+
+// ensureViewerGrant seeds github.viewer.read on resource user:self for the
+// same github-webui connector that lists registered-repo PRs.
+func (m *Module) ensureViewerGrant(ctx context.Context, ws string) error {
+	return m.ensureConnectorGrantsForResource(ctx, ws, viewerResource, viewerActions, func(action string) string {
+		return grantIDForPattern(viewerResource, action)
+	})
+}
+
+func (m *Module) ensureConnectorGrantsForResource(
+	ctx context.Context,
+	ws, resourcePattern string,
+	actions []string,
+	grantIDFn func(action string) string,
+) error {
 	if m == nil || m.dispatcher == nil {
 		return errEgressUnavailable
 	}
-	// Fast-path: once the connector + requested action set for this canonical repo are
+	// Fast-path: once the connector + requested action set for this resource are
 	// ensured, the sealed credential lives in the store and the dispatcher
 	// unseals it per call — so a polled read API need not re-seal/re-Create.
-	cacheKey := grantSeedCacheKey(ws, prResource(owner, repo), actions)
+	cacheKey := grantSeedCacheKey(ws, resourcePattern, actions)
 	for range credentialSeedAttempts {
 		generation := m.credentialSeedGeneration.Load()
 		if _, done := m.seeded.Load(cacheKey); done && generation == m.credentialSeedGeneration.Load() {
@@ -59,7 +79,7 @@ func (m *Module) ensureConnectorAndGrants(ctx context.Context, ws, owner, repo s
 			m.credentialSeedMu.Unlock()
 			continue
 		}
-		err = m.seedConnectorAndGrants(ctx, ws, owner, repo, token, sealer, sealed, actions)
+		err = m.seedConnectorAndGrantsForResource(ctx, ws, resourcePattern, token, sealer, sealed, actions, grantIDFn)
 		if err == nil && generation == m.credentialSeedGeneration.Load() {
 			m.seeded.Store(cacheKey, struct{}{})
 		}
@@ -92,6 +112,20 @@ func (m *Module) seedConnectorAndGrants(
 	sealed []byte,
 	actions []string,
 ) error {
+	return m.seedConnectorAndGrantsForResource(
+		ctx, ws, prResource(owner, repo), token, sealer, sealed, actions,
+		func(action string) string { return grantID(owner, repo, action) },
+	)
+}
+
+func (m *Module) seedConnectorAndGrantsForResource(
+	ctx context.Context,
+	ws, resourcePattern, token string,
+	sealer connector.Sealer,
+	sealed []byte,
+	actions []string,
+	grantIDFn func(action string) string,
+) error {
 	if _, err := m.store.Connectors().Create(ctx, store.ConnectorCreate{
 		WorkspaceKey:             ws,
 		ConnectorID:              connectorID,
@@ -108,11 +142,10 @@ func (m *Module) seedConnectorAndGrants(
 			return err
 		}
 	}
-	resourcePattern := prResource(owner, repo)
 	for _, action := range actions {
 		if _, err := m.store.ConnectorGrants().Create(ctx, store.ConnectorGrantCreate{
 			WorkspaceKey:    ws,
-			GrantID:         grantID(owner, repo, action),
+			GrantID:         grantIDFn(action),
 			ConnectorID:     connectorID,
 			BindingID:       bindingID,
 			Action:          action,
@@ -254,7 +287,11 @@ func grantSeedCacheKey(ws, resource string, actions []string) string {
 // dispatched resource — a permanent spurious 403). Distinct repos therefore
 // get distinct ids even when they fold to the same lowercased-dashed string.
 func grantID(owner, repo, action string) string {
-	sum := sha256.Sum256([]byte(prResource(owner, repo) + "#" + action))
+	return grantIDForPattern(prResource(owner, repo), action)
+}
+
+func grantIDForPattern(resourcePattern, action string) string {
+	sum := sha256.Sum256([]byte(resourcePattern + "#" + action))
 	return "grant-webui-review-" + hex.EncodeToString(sum[:8])
 }
 

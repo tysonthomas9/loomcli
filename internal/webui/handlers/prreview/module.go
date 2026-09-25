@@ -15,6 +15,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
+// deliveryGroupBackend is the durable FleetDB DeliveryGroup API. Optional:
+// when nil, group reads return empty pages and writes return 503.
+type deliveryGroupBackend = store.DeliveryGroupStore
+
 const (
 	bindingID   = "webui-review"
 	connectorID = "github-webui"
@@ -45,6 +49,18 @@ type Module struct {
 	credentialSeedMu           sync.Mutex
 	credentialSeedGeneration   atomic.Uint64
 	beforeCredentialSeedCommit func()
+	// readiness caches the last-known PR readiness snapshots.
+	readiness readinessCache
+	// viewer caches verified GitHub login for the workspace list credential.
+	viewer viewerCache
+	// lookupGhUser is the gh-cli viewer seam (tests inject; production uses gh api user).
+	lookupGhUser func(ctx context.Context) (login string, err error)
+	// deliveryGroups is the optional FleetDB DeliveryGroup store. Nil when
+	// the backing store does not implement store.OptionalDeliveryGroups.
+	deliveryGroups deliveryGroupBackend
+	// now and readinessBackoff are test seams (fake clock, no sleeps).
+	now              func() time.Time
+	readinessBackoff []time.Duration
 }
 
 type codexThreadReader interface {
@@ -64,7 +80,7 @@ func NewModule(
 	terminalSvc service.TerminalService,
 	localSettingsDir string,
 ) *Module {
-	return &Module{
+	m := &Module{
 		store:                   st,
 		dispatcher:              disp,
 		agentSvc:                agentSvc,
@@ -77,6 +93,18 @@ func NewModule(
 			return leadcontrol.DialCodexAppServer(ctx, endpoint)
 		},
 	}
+	if opt, ok := st.(store.OptionalDeliveryGroups); ok {
+		m.deliveryGroups = opt.DeliveryGroups()
+	}
+	return m
+}
+
+// SetDeliveryGroups overrides the delivery-group backend (tests).
+func (m *Module) SetDeliveryGroups(backend store.DeliveryGroupStore) {
+	if m == nil {
+		return
+	}
+	m.deliveryGroups = backend
 }
 
 // InvalidateCredentialSeeds forces subsequent connector ensures to re-resolve
@@ -89,6 +117,8 @@ func (m *Module) InvalidateCredentialSeeds() {
 	defer m.credentialSeedMu.Unlock()
 	m.seeded.Clear()
 	m.credentialSeedGeneration.Add(1)
+	m.readiness.clear()
+	m.viewer.clear()
 }
 
 // Register adds the workspace-scoped pull request review routes.
@@ -97,6 +127,16 @@ func (m *Module) Register(mux *http.ServeMux) {
 		return
 	}
 	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests", m.listPullRequests)
+	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests/readiness", m.getPullRequestReadiness)
+	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests/readiness/preview", m.getPullRequestReadinessPreview)
+	mux.HandleFunc("GET /api/workspaces/{ws}/delivery-groups", m.listDeliveryGroups)
+	mux.HandleFunc("POST /api/workspaces/{ws}/delivery-groups", m.createDeliveryGroup)
+	mux.HandleFunc("GET /api/workspaces/{ws}/pull-request-delivery-groups/{pr_key}", m.getDeliveryGroupByPR)
+	mux.HandleFunc("GET /api/workspaces/{ws}/delivery-groups/{group_id}", m.getDeliveryGroup)
+	mux.HandleFunc("PATCH /api/workspaces/{ws}/delivery-groups/{group_id}", m.updateDeliveryGroup)
+	mux.HandleFunc("PUT /api/workspaces/{ws}/delivery-groups/{group_id}/members", m.setDeliveryGroupMembers)
+	mux.HandleFunc("POST /api/workspaces/{ws}/delivery-groups/{group_id}/archive", m.archiveDeliveryGroup)
+	mux.HandleFunc("GET /api/workspaces/{ws}/delivery-groups/{group_id}/preview", m.previewDeliveryGroup)
 	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}", m.getPullRequest)
 	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/diff", m.getPullRequestDiff)
 	mux.HandleFunc("POST /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/review", m.postReview)

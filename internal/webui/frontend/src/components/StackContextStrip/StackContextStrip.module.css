@@ -1,0 +1,129 @@
+/**
+ * Compact stack-context strip — height-stable loading skeleton, two-row wrap.
+ */
+
+.strip {
+  flex-shrink: 0;
+  width: min(var(--page-content-max, 960px), 100%);
+  margin: 0 auto 10px;
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-bg-secondary, var(--color-bg-card));
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.title {
+  max-width: min(280px, 50vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+  color: var(--color-text);
+}
+
+.position {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+.cue {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.muted {
+  color: var(--color-text-muted);
+}
+
+.sep {
+  color: var(--color-text-muted);
+}
+
+.link {
+  color: var(--color-primary);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.link:hover,
+.link:focus-visible {
+  text-decoration: underline;
+}
+
+.textBtn {
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.textBtn:hover,
+.textBtn:focus-visible {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+.chip {
+  padding: 1px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm, 4px);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+}
+
+.warn {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm, 4px);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-warning, #8a6d00);
+  background: color-mix(
+    in srgb,
+    var(--color-warning, #b8860b) 12%,
+    transparent
+  );
+}
+
+.skeleton {
+  height: 28px;
+  border-radius: var(--radius-sm, 4px);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-text-muted) 8%, transparent) 0%,
+    color-mix(in srgb, var(--color-text-muted) 16%, transparent) 50%,
+    color-mix(in srgb, var(--color-text-muted) 8%, transparent) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.2s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}

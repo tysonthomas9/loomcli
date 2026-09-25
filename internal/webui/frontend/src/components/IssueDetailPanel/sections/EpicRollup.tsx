@@ -11,6 +11,9 @@
  * Lives inside the existing IssueDetailPanel (one panel system, one set of
  * tokens) rather than a parallel slide-over, so it can't drift from the panel
  * it lives in.
+ *
+ * When given the epic id, a sibling read-only "Delivery & lineage" section
+ * (EpicDeliveryLineage) follows the ticket progress.
  */
 import { useMemo } from "react";
 
@@ -18,6 +21,7 @@ import type { Issue } from "@/types";
 import { formatStatusLabel, isPRUrl } from "@/utils/issue";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
+import { EpicDeliveryLineage } from "./EpicDeliveryLineage";
 import styles from "./EpicRollup.module.css";
 
 export interface EpicRollupProps {
@@ -25,6 +29,8 @@ export interface EpicRollupProps {
   tickets: Issue[];
   /** Open a child ticket in the panel. */
   onTicketClick?: (issue: Issue) => void;
+  /** Epic id; when set, renders the read-only Delivery & lineage section. */
+  epicId?: string;
 }
 
 /** Coarse status bucket used for the distribution bar + dot/badge colors. */
@@ -87,6 +93,7 @@ function Avatar({ name }: { name: string }): JSX.Element {
 export function EpicRollup({
   tickets,
   onTicketClick,
+  epicId,
 }: EpicRollupProps): JSX.Element | null {
   const { counts, total, done } = useMemo(() => {
     const c: Record<Bucket, number> = {
@@ -125,90 +132,101 @@ export function EpicRollup({
     [tickets],
   );
 
+  const lineage = epicId ? <EpicDeliveryLineage epicId={epicId} /> : null;
+
   if (total === 0) {
     return (
-      <section className={styles.section} data-testid="epic-rollup">
-        <h3 className={styles.sectionTitle}>Epic Progress</h3>
-        <p className={styles.empty}>No child tickets yet.</p>
-      </section>
+      <>
+        <section className={styles.section} data-testid="epic-rollup">
+          <h3 className={styles.sectionTitle}>Epic Progress</h3>
+          <p className={styles.empty}>No child tickets yet.</p>
+        </section>
+        {lineage}
+      </>
     );
   }
 
   return (
-    <section className={styles.section} data-testid="epic-rollup">
-      <div className={styles.progressHead}>
-        <h3 className={styles.sectionTitle}>Epic Progress</h3>
-        <span className={styles.progressCaption}>
-          {done} of {total} complete
-        </span>
-      </div>
+    <>
+      <section className={styles.section} data-testid="epic-rollup">
+        <div className={styles.progressHead}>
+          <h3 className={styles.sectionTitle}>Epic Progress</h3>
+          <span className={styles.progressCaption}>
+            {done} of {total} complete
+          </span>
+        </div>
 
-      <div
-        className={styles.bar}
-        role="img"
-        aria-label={`${done} of ${total} tickets complete`}
-      >
-        {SEGMENTS.map((seg) =>
-          counts[seg.key] > 0 ? (
-            <span
-              key={seg.key}
-              className={styles.barSeg}
-              data-status={seg.key}
-              style={{ width: `${(counts[seg.key] / total) * 100}%` }}
-              title={`${seg.label}: ${counts[seg.key]}`}
-            />
-          ) : null,
-        )}
-      </div>
-
-      <h3 className={styles.ticketsTitle}>Tickets ({total})</h3>
-      <ul className={styles.ticketList}>
-        {sortedTickets.map((t) => {
-          const clickable = Boolean(onTicketClick);
-          const bucket = bucketFor(t.status);
-          const pr = prNumberFrom(t.external_ref);
-          return (
-            <li
-              key={t.id}
-              className={`${styles.ticket} ${clickable ? styles.clickable : ""}`}
-              onClick={clickable ? () => onTicketClick?.(t) : undefined}
-              role={clickable ? "button" : undefined}
-              tabIndex={clickable ? 0 : undefined}
-              onKeyDown={
-                clickable
-                  ? (e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        onTicketClick?.(t);
-                      }
-                    }
-                  : undefined
-              }
-            >
+        <div
+          className={styles.bar}
+          role="img"
+          aria-label={`${done} of ${total} tickets complete`}
+        >
+          {SEGMENTS.map((seg) =>
+            counts[seg.key] > 0 ? (
               <span
-                className={styles.dot}
-                data-status={bucket}
-                aria-hidden="true"
+                key={seg.key}
+                className={styles.barSeg}
+                data-status={seg.key}
+                style={{ width: `${(counts[seg.key] / total) * 100}%` }}
+                title={`${seg.label}: ${counts[seg.key]}`}
               />
-              <code className={styles.ticketId}>{t.id}</code>
-              <span className={styles.ticketTitle}>{t.title}</span>
-              {pr && (
-                <span className={styles.prChip} title={`Pull request #${pr}`}>
-                  #{pr}
+            ) : null,
+          )}
+        </div>
+
+        <h3 className={styles.ticketsTitle}>Tickets ({total})</h3>
+        <ul className={styles.ticketList}>
+          {sortedTickets.map((t) => {
+            const clickable = Boolean(onTicketClick);
+            const bucket = bucketFor(t.status);
+            const pr = prNumberFrom(t.external_ref);
+            return (
+              <li
+                key={t.id}
+                className={`${styles.ticket} ${clickable ? styles.clickable : ""}`}
+                onClick={clickable ? () => onTicketClick?.(t) : undefined}
+                role={clickable ? "button" : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                onKeyDown={
+                  clickable
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onTicketClick?.(t);
+                        }
+                      }
+                    : undefined
+                }
+              >
+                <span
+                  className={styles.dot}
+                  data-status={bucket}
+                  aria-hidden="true"
+                />
+                <code className={styles.ticketId}>{t.id}</code>
+                <span className={styles.ticketTitle}>{t.title}</span>
+                {pr && (
+                  <span className={styles.prChip} title={`Pull request #${pr}`}>
+                    #{pr}
+                  </span>
+                )}
+                <span className={styles.ticketStatus} data-status={bucket}>
+                  {formatStatusLabel(t.status ?? "open")}
                 </span>
-              )}
-              <span className={styles.ticketStatus} data-status={bucket}>
-                {formatStatusLabel(t.status ?? "open")}
-              </span>
-              {t.assignee ? (
-                <Avatar name={t.assignee} />
-              ) : (
-                <span className={styles.avatarEmpty} aria-label="Unassigned" />
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    </section>
+                {t.assignee ? (
+                  <Avatar name={t.assignee} />
+                ) : (
+                  <span
+                    className={styles.avatarEmpty}
+                    aria-label="Unassigned"
+                  />
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+      {lineage}
+    </>
   );
 }

@@ -38,6 +38,29 @@ export type {
   UsePullRequestsReturn,
 } from "./usePullRequests";
 
+export { useDeliveryGroupPreview } from "./useDeliveryGroupPreview";
+export type { UseDeliveryGroupPreviewReturn } from "./useDeliveryGroupPreview";
+
+export { useDeliveryGroupMembers } from "./useDeliveryGroupMembers";
+export type {
+  UseDeliveryGroupMembersReturn,
+  SetMembersResult,
+} from "./useDeliveryGroupMembers";
+
+export {
+  useStackContext,
+  resolveStackContext,
+  isExternalMember,
+} from "./useStackContext";
+export type { StackContextState } from "./useStackContext";
+
+export { useFocusedDeliveryGroup } from "./useFocusedDeliveryGroup";
+export type {
+  UseFocusedDeliveryGroupReturn,
+  FocusedDeliveryGroupError,
+  FocusedDeliveryGroupErrorKind,
+} from "./useFocusedDeliveryGroup";
+
 export { usePullRequestDiff } from "./usePullRequestDiff";
 export type {
   UsePullRequestDiffParams,
