@@ -34,6 +34,13 @@ type API interface {
 	RemoveNode(ctx context.Context, ws, id, taskID string) error
 	// UpdateNode applies a publish-state patch to taskID.
 	UpdateNode(ctx context.Context, ws, id, taskID string, patch NodePatch) (*Node, error)
+
+	// Publish-lease methods (STACKED-PRS-78/79). Fail closed when unavailable —
+	// there is no degrade-unlocked path. The token fences lease generations
+	// only; it does not fence GitHub.
+	AcquirePublishLease(ctx context.Context, ws, id string, in AcquirePublishLease) (*PublishLease, error)
+	RenewPublishLease(ctx context.Context, ws, id string, in RenewPublishLease) (*PublishLease, error)
+	ReleasePublishLease(ctx context.Context, ws, id, token string) error
 }
 
 // Provider is implemented by stores that can reach fleet-db's stack API.

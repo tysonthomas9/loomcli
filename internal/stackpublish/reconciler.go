@@ -13,6 +13,12 @@ import (
 type Reconciler struct {
 	Store stackstore.Store
 	Forge Forge
+	// Holder identifies this client on the FleetDB/local publish lease.
+	// Empty resolves to HolderIdentity("loomcli").
+	Holder string
+	// AdmissionRenewInterval overrides the background renew ticker. Zero uses
+	// DefaultStackPublishLeaseTTL/3. Tests may set a short interval.
+	AdmissionRenewInterval time.Duration
 }
 
 // Options tunes a publish run.
@@ -151,8 +157,29 @@ func queuedConflicts(targets []int, queued map[int]bool) []int {
 // desired commit; the reconciler pushes them in the safe order. Cursor-less and
 // idempotent: it re-derives everything from forge truth each run.
 //
+// Non-dry-run paths acquire one shared publish admission (FleetDB lease or local
+// flock) covering this Publish, nested auto-Restack, and any concurrent
+// Restack/epic reconcile of the same stack. Dry-run remains read-only.
+//
 //nolint:cyclop,funlen,gocognit // Publish coordinates preflight, restack safety, forge mutation, and reporting in one transaction.
 func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repoPath string, opts Options) (*Report, error) {
+	if opts.DryRun {
+		return r.publishBody(ctx, ws, id, repoPath, opts)
+	}
+	var report *Report
+	err := r.withAdmission(ctx, ws, id, func(ctx context.Context, sess *Session) error {
+		// Fresh plan from live GitHub under the lease (successor after grace /
+		// crash always replans before Phase 1).
+		rec := *r
+		rec.Forge = &leasingForge{inner: r.Forge, sess: sess}
+		var perr error
+		report, perr = rec.publishBody(ctx, ws, id, repoPath, opts)
+		return perr
+	})
+	return report, err
+}
+
+func (r *Reconciler) publishBody(ctx context.Context, ws string, id sl.StackID, repoPath string, opts Options) (*Report, error) {
 	stack, err := r.Store.GetStack(ctx, ws, id)
 	if err != nil {
 		return nil, err
@@ -227,7 +254,8 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 	// show duplicated changes — fail closed and ask for a re-materialize/rebase.
 	if !opts.DryRun {
 		// With a resolver, auto-rebase unsafe descendants first (resolving any
-		// conflicts via the agent); the guard below then passes.
+		// conflicts via the agent); the outer Publish admission covers nested
+		// Restack (one guard — no second flock/lease).
 		if opts.Resolver != nil {
 			if _, err := r.Restack(ctx, ws, id, repoPath, opts.Resolver); err != nil {
 				return nil, fmt.Errorf("auto-rebase: %w", err)
