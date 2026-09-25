@@ -223,29 +223,50 @@ func stackBindingForTask(ctx context.Context, store stackstore.Store, workspaceK
 }
 
 // finalizeStackNode records the completed task's stack node state/SHA before
-// ExecuteTask returns, so dependents read a durable predecessor node.
-func (e HostBridgeTaskExecutor) finalizeStackNode(ctx context.Context, req TaskExecRequest, wt TaskWorktree, result TaskExecResult, runErr error) {
+// ExecuteTask returns, so dependents read a durable predecessor node. A store
+// write failure is returned so the caller fails the run closed instead of
+// closing the task (and unblocking successors) against stale stack state.
+func (e HostBridgeTaskExecutor) finalizeStackNode(ctx context.Context, req TaskExecRequest, wt TaskWorktree, result TaskExecResult, runErr error) error {
 	if e.StackStore == nil || runErr != nil || result.Status != domain.TaskRunCompleted {
-		return
+		return nil
 	}
 	taskID := strings.TrimSpace(req.TaskID)
 	if taskID == "" {
-		return
+		return nil
 	}
 	repoName := strings.TrimSpace(wt.RepoName)
 	if repoName == "" {
 		repoName = e.resolveStackRepoName(ctx, req)
 	}
 	if repoName == "" {
-		return
+		return nil
 	}
 	state, sha, ok := stackOutcome(result.RuntimeMetadata)
 	if !ok {
-		return
+		return nil
 	}
 	if _, err := recordStackOutput(ctx, e.StackStore, req.WorkspaceKey, repoName, taskID, state, sha); err != nil {
 		slog.WarnContext(ctx, "stack finalize barrier: record node failed", "task", taskID, "repo", repoName, "err", err)
+		return fmt.Errorf("stack finalize: record %s node state %q for task %s: %w", repoName, state, taskID, err)
 	}
+	return nil
+}
+
+// stackFinalizePersistFailedClass marks a run whose forge output landed but whose
+// stack node write failed. Such runs are never auto-retried (see task_retry.go).
+const stackFinalizePersistFailedClass = "stack_finalize_persist_failed"
+
+// failStackFinalize turns a completed result into a failed one when the
+// finalize barrier could not persist the stack node, keeping the runtime
+// metadata (PR URL, head SHA) so the operator can see what the forge holds.
+func failStackFinalize(result TaskExecResult, err error) TaskExecResult {
+	result.Status = domain.TaskRunFailed
+	if result.ExitCode == 0 {
+		result.ExitCode = 1
+	}
+	result.ErrorClass = stackFinalizePersistFailedClass
+	result.ErrorMessage = err.Error() + " (the task's forge output is intact; fix the stack store and re-run `loom stack publish` before closing the task)"
+	return result
 }
 
 // stackOutcome maps runtime metadata to the stack-node state the finalize

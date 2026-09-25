@@ -2,6 +2,7 @@ package stackpublish
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -13,6 +14,17 @@ import (
 type Reconciler struct {
 	Store stackstore.Store
 	Forge Forge
+}
+
+// ErrStatePersist marks a publish that mutated the forge but could not persist
+// the resulting node state to the stack store. The forge side is already
+// correct; re-running publish reconciles the store from forge truth.
+var ErrStatePersist = errors.New("stack state not persisted after forge mutation")
+
+// persistFailure wraps a store write failure that followed a forge mutation so
+// callers never mistake it for success and operators get the recovery step.
+func persistFailure(phase string, id sl.StackID, taskID string, err error) error {
+	return fmt.Errorf("%s %s: %w: %w (re-run `loom stack publish %s` to reconcile; publish is idempotent)", phase, taskID, ErrStatePersist, err, id)
 }
 
 // Options tunes a publish run.
@@ -325,21 +337,21 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 				return report, fmt.Errorf("phase4 create %s: %w", a.Branch, cerr)
 			}
 			if err := r.markPublished(ctx, ws, id, a, repoPath, pr); err != nil {
-				return report, fmt.Errorf("phase4 mark published %s: %w", a.TaskID, err)
+				return report, persistFailure("phase4 mark published", id, a.TaskID, err)
 			}
 			liveByTask[a.TaskID] = pr
 			report.Created = append(report.Created, a.TaskID)
 			report.PRURLs[a.TaskID] = pr.URL
 		case actReparent:
 			if err := r.markPublished(ctx, ws, id, a, repoPath, *a.PR); err != nil {
-				return report, fmt.Errorf("phase4 mark published %s: %w", a.TaskID, err)
+				return report, persistFailure("phase4 mark published", id, a.TaskID, err)
 			}
 			liveByTask[a.TaskID] = *a.PR
 			report.Reparented = append(report.Reparented, a.TaskID)
 			report.PRURLs[a.TaskID] = a.PR.URL
 		case actSkip:
 			if err := r.markPublished(ctx, ws, id, a, repoPath, *a.PR); err != nil {
-				return report, fmt.Errorf("phase4 mark published %s: %w", a.TaskID, err)
+				return report, persistFailure("phase4 mark published", id, a.TaskID, err)
 			}
 			liveByTask[a.TaskID] = *a.PR
 			report.Skipped = append(report.Skipped, a.TaskID)
@@ -347,10 +359,12 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 				report.PRURLs[a.TaskID] = a.PR.URL
 			}
 		case actMerged:
-			_ = r.Store.UpdateNode(ctx, ws, id, a.TaskID, func(n *sl.Node) error {
+			if err := r.Store.UpdateNode(ctx, ws, id, a.TaskID, func(n *sl.Node) error {
 				n.State = sl.NodeStateMerged
 				return nil
-			})
+			}); err != nil {
+				return report, persistFailure("phase4 mark merged", id, a.TaskID, err)
+			}
 			report.Merged = append(report.Merged, a.TaskID)
 		case actEmpty:
 			// A unit that produced no changes gets no PR; if it had one (content
@@ -361,10 +375,12 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 				}
 				report.Closed = append(report.Closed, a.Branch)
 			}
-			_ = r.Store.UpdateNode(ctx, ws, id, a.TaskID, func(n *sl.Node) error {
+			if err := r.Store.UpdateNode(ctx, ws, id, a.TaskID, func(n *sl.Node) error {
 				n.State = sl.NodeStateEmpty
 				return nil
-			})
+			}); err != nil {
+				return report, persistFailure("phase4 mark empty", id, a.TaskID, err)
+			}
 			report.Empty = append(report.Empty, a.TaskID)
 		case actClose:
 			if err := r.Forge.ClosePR(ctx, owner, repo, a.PR.Number, "Closing: this unit was removed from the Loom stack."); err != nil {

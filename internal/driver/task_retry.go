@@ -28,7 +28,9 @@ func taskRunRetryDecision(claimed *domain.TaskRun, opts executeClaimedTaskRunOpt
 	}
 	attempt := taskRunAttempt(claimed) + 1
 	decision := taskRunRetryDecisionResult{Attempt: attempt, MaxAttempts: maxAttempts}
-	if completion.Status == domain.TaskRunFailed && attempt < maxAttempts {
+	// A finalize-persist failure already mutated the forge; re-running the task
+	// would redo that work, so it goes straight to blocked for a reconcile.
+	if completion.Status == domain.TaskRunFailed && attempt < maxAttempts && completion.ErrorClass != stackFinalizePersistFailedClass {
 		decision.Retry = true
 	}
 	return decision

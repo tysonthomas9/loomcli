@@ -2,8 +2,11 @@ package driver
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 )
@@ -103,5 +106,81 @@ func TestRecordStackOutputNoStackIsNoop(t *testing.T) {
 	// Nil store is inert.
 	if recorded, err := recordStackOutput(ctx, nil, "WS", "acme/widgets", "A", sl.NodeStatePublished, ""); err != nil || recorded {
 		t.Fatalf("recordStackOutput(nil store) = (%v,%v), want (false,nil)", recorded, err)
+	}
+}
+
+type updateFailStackStore struct {
+	stackstore.Store
+	err error
+}
+
+func (s updateFailStackStore) UpdateNode(context.Context, string, sl.StackID, string, func(*sl.Node) error) error {
+	return s.err
+}
+
+// A finalize barrier whose stack write fails must fail the run closed: the task
+// is not closed (so successors stay blocked) and the forge metadata survives.
+func TestFinalizeStackNodeFailsClosedOnPersistFailure(t *testing.T) {
+	ctx := context.Background()
+	const ws, repo = "WS", "acme/widgets"
+	base := stackstore.New(t.TempDir())
+	if err := base.EnsureStack(ctx, sl.Stack{ID: "epic:E", WorkspaceKey: ws, RepoName: repo, RootBase: "main"}); err != nil {
+		t.Fatalf("ensure stack: %v", err)
+	}
+	if _, err := base.AddNode(ctx, ws, "epic:E", "A", "", ""); err != nil {
+		t.Fatalf("add A: %v", err)
+	}
+	persistErr := errors.New("fleetdb write unavailable")
+	e := HostBridgeTaskExecutor{StackStore: updateFailStackStore{Store: base, err: persistErr}}
+	req := TaskExecRequest{WorkspaceKey: ws, TaskID: "A"}
+	wt := TaskWorktree{RepoName: repo}
+	meta := map[string]string{"delivery": "pull_request", "github_pr_url": "https://github.com/acme/widgets/pull/7", "github_head_sha": "abc123"}
+	completed := TaskExecResult{Status: domain.TaskRunCompleted, RuntimeMetadata: meta}
+
+	ferr := e.finalizeStackNode(ctx, req, wt, completed, nil)
+	if !errors.Is(ferr, persistErr) {
+		t.Fatalf("finalizeStackNode err = %v, want wrapping %v", ferr, persistErr)
+	}
+
+	failed := failStackFinalize(completed, ferr)
+	if failed.Status != domain.TaskRunFailed || failed.ExitCode == 0 {
+		t.Fatalf("failStackFinalize status/exit = %q/%d, want failed/non-zero", failed.Status, failed.ExitCode)
+	}
+	if failed.ErrorClass != "stack_finalize_persist_failed" {
+		t.Fatalf("ErrorClass = %q", failed.ErrorClass)
+	}
+	for _, want := range []string{"fleetdb write unavailable", "loom stack publish"} {
+		if !strings.Contains(failed.ErrorMessage, want) {
+			t.Fatalf("ErrorMessage %q missing %q", failed.ErrorMessage, want)
+		}
+	}
+	if failed.RuntimeMetadata["github_pr_url"] != meta["github_pr_url"] {
+		t.Fatalf("forge metadata dropped: %+v", failed.RuntimeMetadata)
+	}
+	completion := normalizeTaskExecCompletion(failed, nil)
+	if completion.Status != domain.TaskRunFailed {
+		t.Fatalf("normalized completion = %q, want failed", completion.Status)
+	}
+	// Retry budget remains, but a forge-mutated run must not be re-executed.
+	if d := taskRunRetryDecision(&domain.TaskRun{}, executeClaimedTaskRunOptions{MaxAttempts: 3}, completion); d.Retry {
+		t.Fatalf("finalize-persist failure must not auto-retry: %+v", d)
+	}
+	if d := taskRunRetryDecision(&domain.TaskRun{}, executeClaimedTaskRunOptions{MaxAttempts: 3}, taskExecCompletion{Status: domain.TaskRunFailed}); !d.Retry {
+		t.Fatalf("ordinary failure should still retry: %+v", d)
+	}
+
+	// The node keeps its prior state — nothing claims A was published.
+	nodes, _ := base.ListNodes(ctx, ws, "epic:E")
+	if len(nodes) != 1 || nodes[0].State == sl.NodeStatePublished {
+		t.Fatalf("node after failed finalize = %+v, want unchanged", nodes)
+	}
+
+	// Non-completed runs and a healthy store are untouched by the barrier.
+	if err := e.finalizeStackNode(ctx, req, wt, TaskExecResult{Status: domain.TaskRunFailed, RuntimeMetadata: meta}, nil); err != nil {
+		t.Fatalf("failed run should skip finalize, got %v", err)
+	}
+	healthy := HostBridgeTaskExecutor{StackStore: base}
+	if err := healthy.finalizeStackNode(ctx, req, wt, completed, nil); err != nil {
+		t.Fatalf("healthy finalize = %v", err)
 	}
 }
