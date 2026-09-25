@@ -70,6 +70,8 @@ func InvalidateConfigCache() {
 	daemonConfigCache.workspaceKey = ""
 	daemonConfigCache.projectDir = ""
 	daemonConfigCache.Unlock()
+
+	invalidateWorkspaceConfigCache()
 }
 
 // TestingPrimeConfigCacheFromStore projects st into the LoadConfigCached cache.

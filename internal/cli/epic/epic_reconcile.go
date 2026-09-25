@@ -14,6 +14,7 @@ import (
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // reconcileEpicStack runs the Stage-4 post-drain reconcile: once the epic has
@@ -26,7 +27,7 @@ import (
 // a reconcile failure is a warning, not an epic failure — it is fully
 // re-runnable via `loom stack publish <stack>`. It never uses os.Getwd(); the
 // checkout is provisioned by PublishFromOrigin in a temp dir.
-func reconcileEpicStack(ctx context.Context, ws string, proj *EpicStackProjection) error {
+func reconcileEpicStack(ctx context.Context, loomStore store.Store, ws string, proj *EpicStackProjection) error {
 	if proj == nil {
 		return nil
 	}
@@ -37,7 +38,7 @@ func reconcileEpicStack(ctx context.Context, ws string, proj *EpicStackProjectio
 	if token == "" {
 		return fmt.Errorf("no GitHub token (set GITHUB_TOKEN/GH_TOKEN or run `gh auth login`)")
 	}
-	sstore, err := stackstore.Default()
+	sstore, err := stackstore.ForStore(loomStore)
 	if err != nil {
 		return fmt.Errorf("open stack store: %w", err)
 	}

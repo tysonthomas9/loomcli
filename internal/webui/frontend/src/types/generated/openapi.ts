@@ -3380,6 +3380,8 @@ export interface components {
       dependencies?: string[];
       due_at?: string;
       defer_until?: string;
+      /** @description Source repository for multi-repo workspaces */
+      source_repo?: string;
     };
     /** @description All fields are optional for partial update. Pointer types in Go map to nullable here. */
     PatchIssueRequest: {

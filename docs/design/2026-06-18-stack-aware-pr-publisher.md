@@ -156,8 +156,13 @@ type Store interface {
 - `LocalStore` backs it with `~/.loom/stacks.json`, using the existing
   `configlock.WithLock` + atomic-write discipline (sibling to `state.json`; keeps
   `WorkspaceLocalState` lean and the boundary clean).
-- A future `FleetDBStore` implements the same interface against a fleet-db entity;
-  no caller changes. (This is why lineage is *not* folded into `state.json`.)
+- `FleetDBStore` (STACKED-PRS-4) implements the same interface against fleet-db's
+  stack API and is the canonical store in a FleetDB workspace:
+  `stackstore.ForStore` selects it from the loom store handle, and
+  `LOOM_STACK_STORE=local` forces `LocalStore` for offline use. `UpdateNode`
+  is a read-modify-CAS on the node revision (`expected_revision`), retried on a
+  lost race, so publish-state writes stay atomic across processes and machines.
+  (This is why lineage is *not* folded into `state.json`.)
 
 ### 3. `internal/stackpublish` — the GitHub publisher (repo-scoped)
 
@@ -342,8 +347,8 @@ delta from forge truth (Phase 0), and all four phases are individually idempoten
   re-run message (respect `Retry-After` later).
 - **Re-add a dropped task:** new PR by default; branch kept (decision 2) enables a
   future `--reopen`.
-- **Multi-machine:** `stacks.json` is machine-local; documented limitation until the
-  `FleetDBStore` swap. `stacks.json` carries `version: 1` for migration.
+- **Multi-machine:** `stacks.json` is machine-local; FleetDB workspaces now use
+  `FleetDBStore`. `stacks.json` carries `version: 1` for migration.
 - **`--dry-run`:** Phase 0 + plan only, JSON output; the plan doubles as audit.
 - **Observability:** `Node` gains `PRNumber`/`PRURL`/`OutputSHA`/`LastPublishedAt`;
   append-only `~/.loom/stack-publish-log.jsonl` for history.
@@ -366,7 +371,8 @@ unaffected), **name collision** (suffix applied).
 ## Open items / deferred
 
 - `squash_on_publish` collapses to `agent_commit` until a squash step lands.
-- fleet-db `FleetDBStore` swap-in (interface is ready) is a later iteration.
+- Cross-machine publish/reconcile serialization (STACKED-PRS-36): lineage is
+  shared via FleetDB, but publish/reconcile locks remain host-local.
 - SSH / fleet-db-secret auth sources (HTTPS+token ships first).
 - Execution-correctness layer (resolver base-selection + de-double-wrap) is
   tracked separately; when it lands, the publisher's branch materialization uses

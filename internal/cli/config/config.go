@@ -112,18 +112,12 @@ func GetConfigDir() string {
 // machine-local checkout paths from bootstrap state.json.
 func LoadConfig() (*LoomConfig, error) {
 	ctx := cmdstore.RootContext()
-	dataDir := bootstrap.LoomDir()
-	if dataDir == "" {
-		return nil, errors.New("cannot determine loom data directory")
-	}
-	handle, err := bootstrap.OpenStore(ctx, dataDir, nil)
+	st, closeFn, err := openConfigStore(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("open fleet-db store: %w", err)
+		return nil, err
 	}
-	// Apply store-level tracing (this path bypasses cmdstore.OpenStore).
-	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
-	defer func() { _ = handle.Close() }()
-	return loadConfigFromStore(ctx, handle.Store)
+	defer closeFn()
+	return loadConfigFromStore(ctx, st)
 }
 
 // GetWorkspaceDir returns the directory path for a named workspace.
@@ -132,7 +126,9 @@ func GetWorkspaceDir(name string) string {
 }
 
 // ResolveActiveWorkspace returns the active FleetDB workspace projected into the
-// historical WorkspaceConfig DTO used by prompt and daemon code.
+// historical WorkspaceConfig DTO used by prompt and daemon code. Only the
+// active workspace is loaded; other workspaces are never enumerated, so their
+// failures (for example FleetDB rate limiting) cannot block agent startup.
 func ResolveActiveWorkspace() (*WorkspaceConfig, error) {
 	ctx := cmdstore.RootContext()
 	key, err := bootstrap.ResolveActiveWorkspaceKey(ctx, nil)
@@ -142,27 +138,14 @@ func ResolveActiveWorkspace() (*WorkspaceConfig, error) {
 		}
 		return nil, err
 	}
-	dataDir := bootstrap.LoomDir()
-	if dataDir == "" {
-		return nil, errors.New("cannot determine loom data directory")
-	}
-	handle, err := bootstrap.OpenStore(ctx, dataDir, nil)
+	_, ws, err := LoadWorkspaceConfig(key)
 	if err != nil {
-		return nil, fmt.Errorf("open fleet-db store: %w", err)
+		if errors.Is(err, ErrWorkspaceNotFound) {
+			return nil, fmt.Errorf("active workspace %q not found in fleet-db", key)
+		}
+		return nil, fmt.Errorf("load active workspace %q: %w", key, err)
 	}
-	// Apply store-level tracing (this path bypasses cmdstore.OpenStore).
-	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
-	defer func() { _ = handle.Close() }()
-
-	cfg, err := loadConfigFromStore(ctx, handle.Store)
-	if err != nil {
-		return nil, err
-	}
-	ws, ok := cfg.Workspaces[key]
-	if !ok {
-		return nil, fmt.Errorf("active workspace %q not found in fleet-db", key)
-	}
-	return &ws, nil
+	return ws, nil
 }
 
 func loadConfigFromStore(ctx context.Context, st store.Store) (*LoomConfig, error) {

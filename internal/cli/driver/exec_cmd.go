@@ -155,8 +155,8 @@ func runDriverExecTask(_ *cobra.Command, _ []string) error {
 		}, driverpkg.HostBridgeTaskExecutor{
 			Store:            h.Store,
 			WorktreePath:     currentWorkingDir(),
-			WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{Store: h.Store, Lineage: driverpkg.DefaultStackLineageLookup()},
-			StackStore:       driverpkg.DefaultStackStore(),
+			WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{Store: h.Store, Lineage: driverpkg.DefaultStackLineageLookup(h.Store)},
+			StackStore:       driverpkg.DefaultStackStore(h.Store),
 		})
 		if err != nil {
 			return fmt.Errorf("exec task: %w", err)
@@ -215,8 +215,8 @@ func runDriverWorkTaskRun(_ *cobra.Command, _ []string) error {
 		}, driverpkg.HostBridgeTaskExecutor{
 			Store:            h.Store,
 			WorktreePath:     currentWorkingDir(),
-			WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{Store: h.Store, Lineage: driverpkg.DefaultStackLineageLookup()},
-			StackStore:       driverpkg.DefaultStackStore(),
+			WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{Store: h.Store, Lineage: driverpkg.DefaultStackLineageLookup(h.Store)},
+			StackStore:       driverpkg.DefaultStackStore(h.Store),
 		})
 		if err != nil {
 			return fmt.Errorf("work task run: %w", err)

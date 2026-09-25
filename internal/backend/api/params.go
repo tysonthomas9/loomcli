@@ -199,6 +199,9 @@ func setCreateStringFields(req *gen.CreateIssueRequest, params backend.CreatePar
 	if params.DeferUntil != "" {
 		req.DeferUntil = &params.DeferUntil
 	}
+	if params.SourceRepo != "" {
+		req.SourceRepo = &params.SourceRepo
+	}
 }
 
 // --- Helpers ---

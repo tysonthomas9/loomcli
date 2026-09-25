@@ -6740,6 +6740,9 @@ components:
           type: string
         defer_until:
           type: string
+        source_repo:
+          type: string
+          description: Source repository for multi-repo workspaces
 
     PatchIssueRequest:
       type: object
