@@ -58,6 +58,12 @@ var (
 	// ErrConcurrentUpdate: the write kept losing the revision race to other
 	// writers. Nothing was written; the caller may retry.
 	ErrConcurrentUpdate = errors.New("stackstore: stack modified concurrently")
+	// ErrUnknownWriteOutcome: a write may have been accepted (for example
+	// fleet-db returned 503 stack_inconsistent after journaling) but a
+	// bounded re-read could not confirm the requested intent. Do not assume
+	// success or failure; re-read the stack and retry the mutation only if
+	// the intent is still unmet — never blind-retry after this error.
+	ErrUnknownWriteOutcome = errors.New("stackstore: write outcome unknown; re-read before retrying")
 	// ErrUnsupportedUpdate: UpdateNode's fn changed a field the store cannot
 	// write through UpdateNode. Nothing was written.
 	ErrUnsupportedUpdate = errors.New("stackstore: unsupported node update")
