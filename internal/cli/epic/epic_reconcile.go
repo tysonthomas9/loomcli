@@ -5,13 +5,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/stack"
-	"github.com/tysonthomas9/loomcli/internal/configlock"
-	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -19,9 +15,12 @@ import (
 
 // reconcileEpicStack runs the Stage-4 post-drain reconcile: once the epic has
 // drained (every task pushed its canonical branch), it provisions an ephemeral
-// checkout of the repo origin under a per-stack lock, fetches the stack's
-// branches, and runs the publisher to open/link one PR per task with each PR's
-// base set to its predecessor's branch.
+// checkout of the repo origin and runs the publisher to open/link one PR per
+// task with each PR's base set to its predecessor's branch.
+//
+// Publish admission is acquired by PublishFromOrigin→Publish (FleetDB lease or
+// the shared per-stack host flock). Manual `loom stack publish` / `restack` use the
+// same guard — this path does not take a separate lock.
 //
 // It is fail-open at the call site: the task branches are already on origin, so
 // a reconcile failure is a warning, not an epic failure — it is fully
@@ -43,26 +42,15 @@ func reconcileEpicStack(ctx context.Context, loomStore store.Store, ws string, p
 		return fmt.Errorf("open stack store: %w", err)
 	}
 	rec := &stackpublish.Reconciler{
-		Store: sstore,
-		Forge: stackpublish.NewGitHubForge(token, nil, ""),
+		Store:  sstore,
+		Forge:  stackpublish.NewGitHubForge(token, nil, ""),
+		Holder: stackpublish.HolderIdentity("epic-reconcile"),
 	}
 	opts := stackpublish.Options{Resolver: stack.HeadlessResolver()}
 
-	lockDir, err := stackReconcileLockDir(proj.StackID)
+	report, err := rec.PublishFromOrigin(ctx, ws, proj.StackID, proj.RepoURL, token, opts)
 	if err != nil {
 		return err
-	}
-
-	// Per-stack lock: all three reconcile trigger sites (this post-drain hook, a
-	// manual `loom stack publish`, an epic re-run) share the deterministic stack
-	// id, so the lock serializes them on the same key.
-	var report *stackpublish.Report
-	if lockErr := configlock.WithLock(lockDir, func() error {
-		r, perr := rec.PublishFromOrigin(ctx, ws, proj.StackID, proj.RepoURL, token, opts)
-		report = r
-		return perr
-	}); lockErr != nil {
-		return lockErr
 	}
 
 	if report != nil {
@@ -74,37 +62,6 @@ func reconcileEpicStack(ctx context.Context, loomStore store.Store, ws string, p
 		}
 	}
 	return nil
-}
-
-// stackReconcileLockDir returns a per-stack lock directory under the loom dir, so
-// concurrent reconciles of different stacks never contend while same-stack
-// triggers serialize.
-func stackReconcileLockDir(id sl.StackID) (string, error) {
-	loomDir := bootstrap.LoomDir()
-	if loomDir == "" {
-		return "", stackstore.ErrLoomDirMissing
-	}
-	dir := filepath.Join(loomDir, "stack-locks", sanitizeLockSegment(string(id)))
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("create stack lock dir: %w", err)
-	}
-	return dir, nil
-}
-
-func sanitizeLockSegment(v string) string {
-	var b strings.Builder
-	for _, r := range v {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			b.WriteRune(r)
-		} else {
-			b.WriteByte('-')
-		}
-	}
-	out := strings.Trim(b.String(), "-")
-	if out == "" {
-		return "stack"
-	}
-	return out
 }
 
 // resolveGitHubToken mirrors `loom stack`'s token resolution: env first, then a
