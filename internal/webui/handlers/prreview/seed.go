@@ -26,6 +26,7 @@ var prReadActions = []string{
 	providers.ActionGitHubPullRequestRead,
 	providers.ActionGitHubPullsList,
 	providers.ActionGitHubCompareRead,
+	providers.ActionGitHubPullRequestReadinessRead,
 }
 
 var prReviewSubmissionActions = []string{

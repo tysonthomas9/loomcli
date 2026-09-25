@@ -46,6 +46,7 @@ func GitHubActions() []string {
 		ActionGitHubPullsList,
 		ActionGitHubCompareRead,
 		ActionGitHubIssueCommentPost,
+		ActionGitHubPullRequestReadinessRead,
 	}
 }
 
@@ -98,6 +99,8 @@ func (g *GitHub) Call(ctx context.Context, spec CallSpec) (CallResult, error) {
 		return g.compareRead(ctx, spec)
 	case ActionGitHubIssueCommentPost:
 		return g.issueCommentPost(ctx, spec)
+	case ActionGitHubPullRequestReadinessRead:
+		return g.pullRequestReadinessRead(ctx, spec)
 	default:
 		return CallResult{Decision: domain.ConnectorCallUpstreamError},
 			fmt.Errorf("github provider does not implement %q: %w", spec.Action, ErrUnknownAction)
@@ -543,7 +546,7 @@ func (g *GitHub) upstreamError(spec CallSpec, res httpResult) error {
 		return &RateLimited{
 			Action:     spec.Action,
 			Status:     res.status,
-			RetryAfter: parseRetryAfter(res.header),
+			RetryAfter: retryAfterFromHeaders(res.header, time.Now()),
 		}
 	}
 	class := ClassClientError
@@ -574,6 +577,22 @@ func parseRetryAfter(header http.Header) time.Duration {
 		return 0
 	}
 	return time.Duration(secs) * time.Second
+}
+
+// retryAfterFromHeaders prefers Retry-After and otherwise, when the primary
+// limit is exhausted, waits until the X-RateLimit-Reset epoch second.
+func retryAfterFromHeaders(header http.Header, now time.Time) time.Duration {
+	if d := parseRetryAfter(header); d > 0 {
+		return d
+	}
+	if header.Get("X-RateLimit-Remaining") != "0" {
+		return 0
+	}
+	reset, err := strconv.ParseInt(header.Get("X-RateLimit-Reset"), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return max(time.Unix(reset, 0).Sub(now), 0)
 }
 
 // extractMessage plucks GitHub's top-level "message" field from an error

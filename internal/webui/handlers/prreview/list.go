@@ -70,6 +70,7 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	m.observeListedPullRequests(ws, prs)
 	writeJSON(w, pullRequestsData{PullRequests: prs, Warnings: warnings})
 }
 
@@ -179,6 +180,7 @@ func (m *Module) ghListFallback(w http.ResponseWriter, ctx context.Context, ws, 
 		}
 		warnings = append(warnings, res.Warnings...)
 	}
+	m.observeListedPullRequests(ws, prs)
 	writeJSON(w, pullRequestsData{PullRequests: prs, Warnings: warnings})
 }
 

@@ -55,6 +55,8 @@ type fakeGitHub struct {
 	headSha string
 	state   string
 	lists   map[string]fakePullList
+	// graphql, when set, answers POST /graphql (see readiness_test.go).
+	graphql func(r *http.Request, body map[string]any) (int, map[string]string, any)
 
 	server *httptest.Server
 }
@@ -88,6 +90,7 @@ func (g *fakeGitHub) handle(w http.ResponseWriter, r *http.Request) {
 	})
 	headSha := g.headSha
 	state := g.state
+	graphql := g.graphql
 	list, hasList := g.lists[r.URL.Path+"?page="+r.URL.Query().Get("page")]
 	if !hasList {
 		list, hasList = g.lists[r.URL.Path]
@@ -135,6 +138,12 @@ func (g *fakeGitHub) handle(w http.ResponseWriter, r *http.Request) {
 			"id":    101,
 			"state": "APPROVED",
 		})
+	case r.Method == http.MethodPost && r.URL.Path == "/graphql" && graphql != nil:
+		status, header, payload := graphql(r, body)
+		for k, v := range header {
+			w.Header().Set(k, v)
+		}
+		writeUpstreamJSON(w, status, payload)
 	default:
 		writeUpstreamJSON(w, http.StatusNotFound, map[string]any{"message": "Not Found"})
 	}
@@ -1196,6 +1205,7 @@ func TestGrantSeedCacheKeyScopesCanonicalActionSet(t *testing.T) {
 		providers.ActionGitHubCompareRead,
 		providers.ActionGitHubPullRequestRead,
 		providers.ActionGitHubPullsList,
+		providers.ActionGitHubPullRequestReadinessRead,
 		providers.ActionGitHubPullRequestRead,
 	}
 	if got := grantSeedCacheKey(prReviewTestWorkspace, resource, reordered); got != readKey {

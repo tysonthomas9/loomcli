@@ -803,6 +803,168 @@ func (e PatchIssueRequestStatus) Valid() bool {
 	}
 }
 
+// Defines values for PullRequestReadinessErrorCode.
+const (
+	ChecksTruncated      PullRequestReadinessErrorCode = "checks_truncated"
+	ConnectorUnavailable PullRequestReadinessErrorCode = "connector_unavailable"
+	Forbidden            PullRequestReadinessErrorCode = "forbidden"
+	NotFound             PullRequestReadinessErrorCode = "not_found"
+	RateLimited          PullRequestReadinessErrorCode = "rate_limited"
+	RepoUnregistered     PullRequestReadinessErrorCode = "repo_unregistered"
+	Timeout              PullRequestReadinessErrorCode = "timeout"
+	UnrecognizedValue    PullRequestReadinessErrorCode = "unrecognized_value"
+	UpstreamError        PullRequestReadinessErrorCode = "upstream_error"
+)
+
+// Valid indicates whether the value is a known member of the PullRequestReadinessErrorCode enum.
+func (e PullRequestReadinessErrorCode) Valid() bool {
+	switch e {
+	case ChecksTruncated:
+		return true
+	case ConnectorUnavailable:
+		return true
+	case Forbidden:
+		return true
+	case NotFound:
+		return true
+	case RateLimited:
+		return true
+	case RepoUnregistered:
+		return true
+	case Timeout:
+		return true
+	case UnrecognizedValue:
+		return true
+	case UpstreamError:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PullRequestReadinessFactStatus.
+const (
+	PullRequestReadinessFactStatusComputing PullRequestReadinessFactStatus = "computing"
+	PullRequestReadinessFactStatusError     PullRequestReadinessFactStatus = "error"
+	PullRequestReadinessFactStatusKnown     PullRequestReadinessFactStatus = "known"
+	PullRequestReadinessFactStatusUnknown   PullRequestReadinessFactStatus = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the PullRequestReadinessFactStatus enum.
+func (e PullRequestReadinessFactStatus) Valid() bool {
+	switch e {
+	case PullRequestReadinessFactStatusComputing:
+		return true
+	case PullRequestReadinessFactStatusError:
+		return true
+	case PullRequestReadinessFactStatusKnown:
+		return true
+	case PullRequestReadinessFactStatusUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PullRequestReadinessPreviewMemberPosition.
+const (
+	PullRequestReadinessPreviewMemberPositionAfterStop PullRequestReadinessPreviewMemberPosition = "after_stop"
+	PullRequestReadinessPreviewMemberPositionInPrefix  PullRequestReadinessPreviewMemberPosition = "in_prefix"
+	PullRequestReadinessPreviewMemberPositionMerged    PullRequestReadinessPreviewMemberPosition = "merged"
+	PullRequestReadinessPreviewMemberPositionStop      PullRequestReadinessPreviewMemberPosition = "stop"
+)
+
+// Valid indicates whether the value is a known member of the PullRequestReadinessPreviewMemberPosition enum.
+func (e PullRequestReadinessPreviewMemberPosition) Valid() bool {
+	switch e {
+	case PullRequestReadinessPreviewMemberPositionAfterStop:
+		return true
+	case PullRequestReadinessPreviewMemberPositionInPrefix:
+		return true
+	case PullRequestReadinessPreviewMemberPositionMerged:
+		return true
+	case PullRequestReadinessPreviewMemberPositionStop:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PullRequestReadinessVerdict.
+const (
+	PullRequestReadinessVerdictBlocked PullRequestReadinessVerdict = "blocked"
+	PullRequestReadinessVerdictClosed  PullRequestReadinessVerdict = "closed"
+	PullRequestReadinessVerdictMerged  PullRequestReadinessVerdict = "merged"
+	PullRequestReadinessVerdictQueued  PullRequestReadinessVerdict = "queued"
+	PullRequestReadinessVerdictReady   PullRequestReadinessVerdict = "ready"
+	PullRequestReadinessVerdictUnknown PullRequestReadinessVerdict = "unknown"
+	PullRequestReadinessVerdictWaiting PullRequestReadinessVerdict = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the PullRequestReadinessVerdict enum.
+func (e PullRequestReadinessVerdict) Valid() bool {
+	switch e {
+	case PullRequestReadinessVerdictBlocked:
+		return true
+	case PullRequestReadinessVerdictClosed:
+		return true
+	case PullRequestReadinessVerdictMerged:
+		return true
+	case PullRequestReadinessVerdictQueued:
+		return true
+	case PullRequestReadinessVerdictReady:
+		return true
+	case PullRequestReadinessVerdictUnknown:
+		return true
+	case PullRequestReadinessVerdictWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PullRequestReadinessViewFreshness.
+const (
+	PullRequestReadinessViewFreshnessAging   PullRequestReadinessViewFreshness = "aging"
+	PullRequestReadinessViewFreshnessFresh   PullRequestReadinessViewFreshness = "fresh"
+	PullRequestReadinessViewFreshnessStale   PullRequestReadinessViewFreshness = "stale"
+	PullRequestReadinessViewFreshnessUnknown PullRequestReadinessViewFreshness = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the PullRequestReadinessViewFreshness enum.
+func (e PullRequestReadinessViewFreshness) Valid() bool {
+	switch e {
+	case PullRequestReadinessViewFreshnessAging:
+		return true
+	case PullRequestReadinessViewFreshnessFresh:
+		return true
+	case PullRequestReadinessViewFreshnessStale:
+		return true
+	case PullRequestReadinessViewFreshnessUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PullRequestReadinessViewInvalidated.
+const (
+	BaseChanged PullRequestReadinessViewInvalidated = "base_changed"
+	HeadMoved   PullRequestReadinessViewInvalidated = "head_moved"
+)
+
+// Valid indicates whether the value is a known member of the PullRequestReadinessViewInvalidated enum.
+func (e PullRequestReadinessViewInvalidated) Valid() bool {
+	switch e {
+	case BaseChanged:
+		return true
+	case HeadMoved:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PullRequestReviewRequestEvent.
 const (
 	PullRequestReviewRequestEventApprove        PullRequestReviewRequestEvent = "approve"
@@ -1444,19 +1606,19 @@ func (e ListIssuesParamsType) Valid() bool {
 
 // Defines values for GetGraphParamsStatus.
 const (
-	GetGraphParamsStatusAll    GetGraphParamsStatus = "all"
-	GetGraphParamsStatusClosed GetGraphParamsStatus = "closed"
-	GetGraphParamsStatusOpen   GetGraphParamsStatus = "open"
+	All    GetGraphParamsStatus = "all"
+	Closed GetGraphParamsStatus = "closed"
+	Open   GetGraphParamsStatus = "open"
 )
 
 // Valid indicates whether the value is a known member of the GetGraphParamsStatus enum.
 func (e GetGraphParamsStatus) Valid() bool {
 	switch e {
-	case GetGraphParamsStatusAll:
+	case All:
 		return true
-	case GetGraphParamsStatusClosed:
+	case Closed:
 		return true
-	case GetGraphParamsStatusOpen:
+	case Open:
 		return true
 	default:
 		return false
@@ -1465,25 +1627,25 @@ func (e GetGraphParamsStatus) Valid() bool {
 
 // Defines values for ListPullRequestsParamsState.
 const (
-	All    ListPullRequestsParamsState = "all"
-	Closed ListPullRequestsParamsState = "closed"
-	Merged ListPullRequestsParamsState = "merged"
-	Open   ListPullRequestsParamsState = "open"
-	Review ListPullRequestsParamsState = "review"
+	ListPullRequestsParamsStateAll    ListPullRequestsParamsState = "all"
+	ListPullRequestsParamsStateClosed ListPullRequestsParamsState = "closed"
+	ListPullRequestsParamsStateMerged ListPullRequestsParamsState = "merged"
+	ListPullRequestsParamsStateOpen   ListPullRequestsParamsState = "open"
+	ListPullRequestsParamsStateReview ListPullRequestsParamsState = "review"
 )
 
 // Valid indicates whether the value is a known member of the ListPullRequestsParamsState enum.
 func (e ListPullRequestsParamsState) Valid() bool {
 	switch e {
-	case All:
+	case ListPullRequestsParamsStateAll:
 		return true
-	case Closed:
+	case ListPullRequestsParamsStateClosed:
 		return true
-	case Merged:
+	case ListPullRequestsParamsStateMerged:
 		return true
-	case Open:
+	case ListPullRequestsParamsStateOpen:
 		return true
-	case Review:
+	case ListPullRequestsParamsStateReview:
 		return true
 	default:
 		return false
@@ -2678,6 +2840,16 @@ type PatchIssueRequestDesignFormat string
 // PatchIssueRequestStatus defines model for PatchIssueRequest.Status.
 type PatchIssueRequestStatus string
 
+// PullRequestCheckSummary defines model for PullRequestCheckSummary.
+type PullRequestCheckSummary struct {
+	Failed       int       `json:"failed"`
+	FailingNames *[]string `json:"failing_names,omitempty"`
+	Passed       int       `json:"passed"`
+	Pending      int       `json:"pending"`
+	PendingNames *[]string `json:"pending_names,omitempty"`
+	Total        int       `json:"total"`
+}
+
 // PullRequestDetail defines model for PullRequestDetail.
 type PullRequestDetail struct {
 	BaseRefName string `json:"base_ref_name"`
@@ -2704,6 +2876,143 @@ type PullRequestDiffFile struct {
 	Path      string `json:"path"`
 	Status    string `json:"status"`
 }
+
+// PullRequestReadinessErrorCode defines model for PullRequestReadinessErrorCode.
+type PullRequestReadinessErrorCode string
+
+// PullRequestReadinessFact defines model for PullRequestReadinessFact.
+type PullRequestReadinessFact struct {
+	Error       *PullRequestReadinessErrorCode `json:"error,omitempty"`
+	RetryAfterS *int                           `json:"retry_after_s,omitempty"`
+	Status      PullRequestReadinessFactStatus `json:"status"`
+	Value       *string                        `json:"value,omitempty"`
+}
+
+// PullRequestReadinessFactStatus defines model for PullRequestReadinessFact.Status.
+type PullRequestReadinessFactStatus string
+
+// PullRequestReadinessFacts defines model for PullRequestReadinessFacts.
+type PullRequestReadinessFacts struct {
+	Conflicts           PullRequestReadinessFact `json:"conflicts"`
+	Lifecycle           PullRequestReadinessFact `json:"lifecycle"`
+	MergeState          PullRequestReadinessFact `json:"merge_state"`
+	OptionalCheckCounts PullRequestCheckSummary  `json:"optional_check_counts"`
+	OptionalChecks      PullRequestReadinessFact `json:"optional_checks"`
+	Queue               PullRequestReadinessFact `json:"queue"`
+	RequiredCheckCounts PullRequestCheckSummary  `json:"required_check_counts"`
+	RequiredChecks      PullRequestReadinessFact `json:"required_checks"`
+	Review              PullRequestReadinessFact `json:"review"`
+}
+
+// PullRequestReadinessList defines model for PullRequestReadinessList.
+type PullRequestReadinessList struct {
+	FreshForS    int                             `json:"fresh_for_s"`
+	PullRequests []PullRequestReadinessView      `json:"pull_requests"`
+	RepoErrors   []PullRequestReadinessRepoError `json:"repo_errors"`
+
+	// ServerNow Server clock; compute ages from this, not the client clock.
+	ServerNow   time.Time `json:"server_now"`
+	StaleAfterS int       `json:"stale_after_s"`
+}
+
+// PullRequestReadinessPreview defines model for PullRequestReadinessPreview.
+type PullRequestReadinessPreview struct {
+	ExpiresAt   *time.Time                          `json:"expires_at,omitempty"`
+	Fingerprint string                              `json:"fingerprint"`
+	Members     []PullRequestReadinessPreviewMember `json:"members"`
+
+	// ReadyCount Length of the ready prefix; the only source for ready counts.
+	ReadyCount int                              `json:"ready_count"`
+	StoppedBy  *PullRequestReadinessPreviewStop `json:"stopped_by,omitempty"`
+}
+
+// PullRequestReadinessPreviewMember defines model for PullRequestReadinessPreviewMember.
+type PullRequestReadinessPreviewMember struct {
+	Index    int                                       `json:"index"`
+	Position PullRequestReadinessPreviewMemberPosition `json:"position"`
+
+	// Readiness What a readiness surface renders for one PR. snapshot is the last-known observation (history once not fresh); current_verdict is the only verdict that may be shown as current and is never "ready" unless freshness is "fresh".
+	Readiness PullRequestReadinessView `json:"readiness"`
+	Reasons   []string                 `json:"reasons"`
+}
+
+// PullRequestReadinessPreviewMemberPosition defines model for PullRequestReadinessPreviewMember.Position.
+type PullRequestReadinessPreviewMemberPosition string
+
+// PullRequestReadinessPreviewResponse defines model for PullRequestReadinessPreviewResponse.
+type PullRequestReadinessPreviewResponse struct {
+	FreshForS   int                             `json:"fresh_for_s"`
+	Preview     PullRequestReadinessPreview     `json:"preview"`
+	RepoErrors  []PullRequestReadinessRepoError `json:"repo_errors"`
+	ServerNow   time.Time                       `json:"server_now"`
+	StaleAfterS int                             `json:"stale_after_s"`
+}
+
+// PullRequestReadinessPreviewStop defines model for PullRequestReadinessPreviewStop.
+type PullRequestReadinessPreviewStop struct {
+	PrKey   string                      `json:"pr_key"`
+	Reasons []string                    `json:"reasons"`
+	Verdict PullRequestReadinessVerdict `json:"verdict"`
+}
+
+// PullRequestReadinessReadError defines model for PullRequestReadinessReadError.
+type PullRequestReadinessReadError struct {
+	At          time.Time                     `json:"at"`
+	Code        PullRequestReadinessErrorCode `json:"code"`
+	RetryAfterS *int                          `json:"retry_after_s,omitempty"`
+}
+
+// PullRequestReadinessRepoError defines model for PullRequestReadinessRepoError.
+type PullRequestReadinessRepoError struct {
+	Code    PullRequestReadinessErrorCode `json:"code"`
+	Message *string                       `json:"message,omitempty"`
+	PrKeys  []string                      `json:"pr_keys"`
+
+	// Repo owner/repo of the failing repository.
+	Repo        string `json:"repo"`
+	RetryAfterS *int   `json:"retry_after_s,omitempty"`
+	Retryable   bool   `json:"retryable"`
+
+	// SourceRepo Workspace-registered repository name.
+	SourceRepo *string `json:"source_repo,omitempty"`
+}
+
+// PullRequestReadinessSnapshot Evidence for one PR pinned to the observed head/base and to the server time it arrived. The fingerprint covers identity, refs and every fact, not observed_at.
+type PullRequestReadinessSnapshot struct {
+	BaseRef     string                      `json:"base_ref"`
+	BaseSha     string                      `json:"base_sha"`
+	Facts       PullRequestReadinessFacts   `json:"facts"`
+	Fingerprint string                      `json:"fingerprint"`
+	HeadRef     string                      `json:"head_ref"`
+	HeadSha     string                      `json:"head_sha"`
+	ObservedAt  time.Time                   `json:"observed_at"`
+	PrKey       string                      `json:"pr_key"`
+	Reasons     []string                    `json:"reasons"`
+	Verdict     PullRequestReadinessVerdict `json:"verdict"`
+}
+
+// PullRequestReadinessVerdict defines model for PullRequestReadinessVerdict.
+type PullRequestReadinessVerdict string
+
+// PullRequestReadinessView What a readiness surface renders for one PR. snapshot is the last-known observation (history once not fresh); current_verdict is the only verdict that may be shown as current and is never "ready" unless freshness is "fresh".
+type PullRequestReadinessView struct {
+	AgeSeconds     int                                  `json:"age_seconds"`
+	CurrentReasons []string                             `json:"current_reasons"`
+	CurrentVerdict PullRequestReadinessVerdict          `json:"current_verdict"`
+	Freshness      PullRequestReadinessViewFreshness    `json:"freshness"`
+	Invalidated    *PullRequestReadinessViewInvalidated `json:"invalidated,omitempty"`
+	LastError      *PullRequestReadinessReadError       `json:"last_error,omitempty"`
+	PrKey          string                               `json:"pr_key"`
+
+	// Snapshot Evidence for one PR pinned to the observed head/base and to the server time it arrived. The fingerprint covers identity, refs and every fact, not observed_at.
+	Snapshot *PullRequestReadinessSnapshot `json:"snapshot,omitempty"`
+}
+
+// PullRequestReadinessViewFreshness defines model for PullRequestReadinessView.Freshness.
+type PullRequestReadinessViewFreshness string
+
+// PullRequestReadinessViewInvalidated defines model for PullRequestReadinessView.Invalidated.
+type PullRequestReadinessViewInvalidated string
 
 // PullRequestReviewRequest defines model for PullRequestReviewRequest.
 type PullRequestReviewRequest struct {
@@ -3602,6 +3911,19 @@ type ListPullRequestsParams struct {
 
 // ListPullRequestsParamsState defines parameters for ListPullRequests.
 type ListPullRequestsParamsState string
+
+// GetPullRequestReadinessParams defines parameters for GetPullRequestReadiness.
+type GetPullRequestReadinessParams struct {
+	// Pr PR key ("github:owner/repo#N"), repeated; at most 100.
+	Pr    []string `form:"pr" json:"pr"`
+	Force *bool    `form:"force,omitempty" json:"force,omitempty"`
+}
+
+// GetPullRequestReadinessPreviewParams defines parameters for GetPullRequestReadinessPreview.
+type GetPullRequestReadinessPreviewParams struct {
+	// Pr Ordered, distinct PR keys; at most 50.
+	Pr []string `form:"pr" json:"pr"`
+}
 
 // ListReadyParams defines parameters for ListReady.
 type ListReadyParams struct {
