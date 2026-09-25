@@ -60,19 +60,25 @@ func writePRReviewError(w http.ResponseWriter, err error) {
 }
 
 func writePRReviewErrorCode(w http.ResponseWriter, status int, code, message string, retryable bool) {
+	writePRReviewErrorMeta(w, status, code, message, retryable, nil)
+}
+
+func writePRReviewErrorMeta(w http.ResponseWriter, status int, code, message string, retryable bool, meta map[string]any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(struct {
-		Success   bool   `json:"success"`
-		Data      any    `json:"data"`
-		Error     string `json:"error"`
-		Code      string `json:"code"`
-		Retryable bool   `json:"retryable"`
+		Success   bool           `json:"success"`
+		Data      any            `json:"data"`
+		Error     string         `json:"error"`
+		Code      string         `json:"code"`
+		Retryable bool           `json:"retryable"`
+		Meta      map[string]any `json:"meta,omitempty"`
 	}{
 		Success:   false,
 		Data:      nil,
 		Error:     message,
 		Code:      code,
 		Retryable: retryable,
+		Meta:      meta,
 	})
 }

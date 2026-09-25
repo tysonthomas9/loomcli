@@ -206,6 +206,51 @@ func (e CreateIssueRequestStatus) Valid() bool {
 	}
 }
 
+// Defines values for DeliveryGroupMemberSource.
+const (
+	IdentityHeal          DeliveryGroupMemberSource = "identity_heal"
+	LineageAdopt          DeliveryGroupMemberSource = "lineage_adopt"
+	LoomTask              DeliveryGroupMemberSource = "loom_task"
+	Manual                DeliveryGroupMemberSource = "manual"
+	NativeStackSuggestion DeliveryGroupMemberSource = "native_stack_suggestion"
+)
+
+// Valid indicates whether the value is a known member of the DeliveryGroupMemberSource enum.
+func (e DeliveryGroupMemberSource) Valid() bool {
+	switch e {
+	case IdentityHeal:
+		return true
+	case LineageAdopt:
+		return true
+	case LoomTask:
+		return true
+	case Manual:
+		return true
+	case NativeStackSuggestion:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeliveryGroupViewState.
+const (
+	DeliveryGroupViewStateActive   DeliveryGroupViewState = "active"
+	DeliveryGroupViewStateArchived DeliveryGroupViewState = "archived"
+)
+
+// Valid indicates whether the value is a known member of the DeliveryGroupViewState enum.
+func (e DeliveryGroupViewState) Valid() bool {
+	switch e {
+	case DeliveryGroupViewStateActive:
+		return true
+	case DeliveryGroupViewStateArchived:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ErrorResponseSuccess.
 const (
 	False ErrorResponseSuccess = false
@@ -1024,16 +1069,16 @@ func (e SessionHistoryRecordLauncher) Valid() bool {
 
 // Defines values for SessionHistoryRecordStatus.
 const (
-	Active    SessionHistoryRecordStatus = "active"
-	Completed SessionHistoryRecordStatus = "completed"
+	SessionHistoryRecordStatusActive    SessionHistoryRecordStatus = "active"
+	SessionHistoryRecordStatusCompleted SessionHistoryRecordStatus = "completed"
 )
 
 // Valid indicates whether the value is a known member of the SessionHistoryRecordStatus enum.
 func (e SessionHistoryRecordStatus) Valid() bool {
 	switch e {
-	case Active:
+	case SessionHistoryRecordStatusActive:
 		return true
-	case Completed:
+	case SessionHistoryRecordStatusCompleted:
 		return true
 	default:
 		return false
@@ -1268,6 +1313,27 @@ func (e ListBlockedParamsType) Valid() bool {
 	case ListBlockedParamsTypeFeature:
 		return true
 	case ListBlockedParamsTypeTask:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListDeliveryGroupsParamsState.
+const (
+	ListDeliveryGroupsParamsStateActive   ListDeliveryGroupsParamsState = "active"
+	ListDeliveryGroupsParamsStateAll      ListDeliveryGroupsParamsState = "all"
+	ListDeliveryGroupsParamsStateArchived ListDeliveryGroupsParamsState = "archived"
+)
+
+// Valid indicates whether the value is a known member of the ListDeliveryGroupsParamsState enum.
+func (e ListDeliveryGroupsParamsState) Valid() bool {
+	switch e {
+	case ListDeliveryGroupsParamsStateActive:
+		return true
+	case ListDeliveryGroupsParamsStateAll:
+		return true
+	case ListDeliveryGroupsParamsStateArchived:
 		return true
 	default:
 		return false
@@ -1606,19 +1672,19 @@ func (e ListIssuesParamsType) Valid() bool {
 
 // Defines values for GetGraphParamsStatus.
 const (
-	All    GetGraphParamsStatus = "all"
-	Closed GetGraphParamsStatus = "closed"
-	Open   GetGraphParamsStatus = "open"
+	GetGraphParamsStatusAll    GetGraphParamsStatus = "all"
+	GetGraphParamsStatusClosed GetGraphParamsStatus = "closed"
+	GetGraphParamsStatusOpen   GetGraphParamsStatus = "open"
 )
 
 // Valid indicates whether the value is a known member of the GetGraphParamsStatus enum.
 func (e GetGraphParamsStatus) Valid() bool {
 	switch e {
-	case All:
+	case GetGraphParamsStatusAll:
 		return true
-	case Closed:
+	case GetGraphParamsStatusClosed:
 		return true
-	case Open:
+	case GetGraphParamsStatusOpen:
 		return true
 	default:
 		return false
@@ -1930,6 +1996,121 @@ type CreateIssueRequestIssueType string
 
 // CreateIssueRequestStatus defines model for CreateIssueRequest.Status.
 type CreateIssueRequestStatus string
+
+// DeliveryGroupCreateRequest defines model for DeliveryGroupCreateRequest.
+type DeliveryGroupCreateRequest struct {
+	EpicId  *string                     `json:"epic_id,omitempty"`
+	Id      string                      `json:"id"`
+	Members *[]DeliveryGroupMemberInput `json:"members,omitempty"`
+	Owner   *string                     `json:"owner,omitempty"`
+	Title   string                      `json:"title"`
+}
+
+// DeliveryGroupList defines model for DeliveryGroupList.
+type DeliveryGroupList struct {
+	Count          int                 `json:"count"`
+	DeliveryGroups []DeliveryGroupView `json:"delivery_groups"`
+	HasMore        bool                `json:"has_more"`
+	NextCursor     *string             `json:"next_cursor,omitempty"`
+	Warnings       *[]string           `json:"warnings,omitempty"`
+}
+
+// DeliveryGroupMember defines model for DeliveryGroupMember.
+type DeliveryGroupMember struct {
+	AddedAt        time.Time                 `json:"added_at"`
+	AddedBy        *string                   `json:"added_by,omitempty"`
+	GithubNodeId   *string                   `json:"github_node_id,omitempty"`
+	LineageStackId *string                   `json:"lineage_stack_id,omitempty"`
+	PrKey          string                    `json:"pr_key"`
+	PrNumber       int                       `json:"pr_number"`
+	RepoName       string                    `json:"repo_name"`
+	Source         DeliveryGroupMemberSource `json:"source"`
+	TaskId         *string                   `json:"task_id,omitempty"`
+}
+
+// DeliveryGroupMemberInput defines model for DeliveryGroupMemberInput.
+type DeliveryGroupMemberInput struct {
+	GithubNodeId   *string                    `json:"github_node_id,omitempty"`
+	LineageStackId *string                    `json:"lineage_stack_id,omitempty"`
+	PrKey          *string                    `json:"pr_key,omitempty"`
+	PrNumber       *int                       `json:"pr_number,omitempty"`
+	RepoName       *string                    `json:"repo_name,omitempty"`
+	Source         *DeliveryGroupMemberSource `json:"source,omitempty"`
+	TaskId         *string                    `json:"task_id,omitempty"`
+}
+
+// DeliveryGroupMemberSource defines model for DeliveryGroupMemberSource.
+type DeliveryGroupMemberSource string
+
+// DeliveryGroupMemberView defines model for DeliveryGroupMemberView.
+type DeliveryGroupMemberView struct {
+	AddedAt        time.Time `json:"added_at"`
+	AddedBy        *string   `json:"added_by,omitempty"`
+	GithubNodeId   *string   `json:"github_node_id,omitempty"`
+	LineageStackId *string   `json:"lineage_stack_id,omitempty"`
+	PrKey          string    `json:"pr_key"`
+	PrNumber       int       `json:"pr_number"`
+
+	// Readiness What a readiness surface renders for one PR. snapshot is the last-known observation (history once not fresh); current_verdict is the only verdict that may be shown as current and is never "ready" unless freshness is "fresh".
+	Readiness *PullRequestReadinessView `json:"readiness,omitempty"`
+	RepoName  string                    `json:"repo_name"`
+	Source    DeliveryGroupMemberSource `json:"source"`
+	TaskId    *string                   `json:"task_id,omitempty"`
+	Warnings  *[]string                 `json:"warnings,omitempty"`
+}
+
+// DeliveryGroupPreview defines model for DeliveryGroupPreview.
+type DeliveryGroupPreview struct {
+	FreshForS   int                             `json:"fresh_for_s"`
+	GroupId     string                          `json:"group_id"`
+	Preview     PullRequestReadinessPreview     `json:"preview"`
+	RepoErrors  []PullRequestReadinessRepoError `json:"repo_errors"`
+	Revision    int64                           `json:"revision"`
+	ServerNow   time.Time                       `json:"server_now"`
+	StaleAfterS int                             `json:"stale_after_s"`
+	Warnings    *[]string                       `json:"warnings,omitempty"`
+}
+
+// DeliveryGroupSetMembersRequest defines model for DeliveryGroupSetMembersRequest.
+type DeliveryGroupSetMembersRequest struct {
+	Members []DeliveryGroupMemberInput `json:"members"`
+}
+
+// DeliveryGroupUpdateRequest defines model for DeliveryGroupUpdateRequest.
+type DeliveryGroupUpdateRequest struct {
+	EpicId *string `json:"epic_id,omitempty"`
+	Owner  *string `json:"owner,omitempty"`
+	Title  *string `json:"title,omitempty"`
+}
+
+// DeliveryGroupView defines model for DeliveryGroupView.
+type DeliveryGroupView struct {
+	CreatedAt    time.Time                 `json:"created_at"`
+	CreatedBy    *string                   `json:"created_by,omitempty"`
+	EpicId       *string                   `json:"epic_id,omitempty"`
+	Id           string                    `json:"id"`
+	Inconsistent *bool                     `json:"inconsistent,omitempty"`
+	Integrity    *string                   `json:"integrity,omitempty"`
+	LastOpDigest *string                   `json:"last_op_digest,omitempty"`
+	LastOpId     string                    `json:"last_op_id"`
+	Members      []DeliveryGroupMemberView `json:"members"`
+	Owner        *string                   `json:"owner,omitempty"`
+	Revision     int64                     `json:"revision"`
+	State        DeliveryGroupViewState    `json:"state"`
+	Title        string                    `json:"title"`
+	UpdatedAt    time.Time                 `json:"updated_at"`
+	UpdatedBy    *string                   `json:"updated_by,omitempty"`
+	WorkspaceKey string                    `json:"workspace_key"`
+}
+
+// DeliveryGroupViewState defines model for DeliveryGroupView.State.
+type DeliveryGroupViewState string
+
+// DeliveryGroupWrite defines model for DeliveryGroupWrite.
+type DeliveryGroupWrite struct {
+	Group    DeliveryGroupView `json:"group"`
+	Replayed *bool             `json:"replayed,omitempty"`
+}
 
 // Dependency Full dependency relation from types.Dependency
 type Dependency struct {
@@ -2250,8 +2431,17 @@ type GitPullRequest struct {
 
 // GitPullRequestList defines model for GitPullRequestList.
 type GitPullRequestList struct {
-	PullRequests []GitPullRequest `json:"pull_requests"`
-	Warnings     *[]string        `json:"warnings,omitempty"`
+	DeliveryGroups *[]DeliveryGroupView `json:"delivery_groups,omitempty"`
+
+	// DeliveryGroupsCount Length of this delivery_groups page only
+	DeliveryGroupsCount      *int    `json:"delivery_groups_count,omitempty"`
+	DeliveryGroupsHasMore    *bool   `json:"delivery_groups_has_more,omitempty"`
+	DeliveryGroupsNextCursor *string `json:"delivery_groups_next_cursor,omitempty"`
+
+	// PullRequests Standalone discovered PRs not in an active delivery group
+	PullRequests           []GitPullRequest          `json:"pull_requests"`
+	StandaloneContinuation *StandalonePRContinuation `json:"standalone_continuation,omitempty"`
+	Warnings               *[]string                 `json:"warnings,omitempty"`
 }
 
 // HourlyBucket defines model for HourlyBucket.
@@ -3166,6 +3356,29 @@ type StaleDetectorStatus struct {
 	TasksReconciled   int        `json:"tasks_reconciled"`
 }
 
+// StandalonePRContinuation defines model for StandalonePRContinuation.
+type StandalonePRContinuation struct {
+	// Complete False when truncated, partial, or errored; never infer completeness from missing rows
+	Complete bool `json:"complete"`
+
+	// HasMore True when any repo has more GitHub pages beyond this response
+	HasMore bool                         `json:"has_more"`
+	Repos   []StandaloneRepoContinuation `json:"repos"`
+}
+
+// StandaloneRepoContinuation defines model for StandaloneRepoContinuation.
+type StandaloneRepoContinuation struct {
+	ContinuationHint *string `json:"continuation_hint,omitempty"`
+	Fetched          int     `json:"fetched"`
+	HasMore          bool    `json:"has_more"`
+	MaxPages         int     `json:"max_pages"`
+	NextPage         *int    `json:"next_page,omitempty"`
+	PageSize         int     `json:"page_size"`
+	PartialError     *string `json:"partial_error,omitempty"`
+	Repo             string  `json:"repo"`
+	SourceRepo       *string `json:"source_repo,omitempty"`
+}
+
 // Statistics defines model for Statistics.
 type Statistics struct {
 	AverageLeadTimeHours    float64 `json:"average_lead_time_hours"`
@@ -3498,6 +3711,12 @@ type WorkspaceSummary struct {
 // AgentName defines model for AgentName.
 type AgentName = string
 
+// DeliveryGroupIdempotencyKey defines model for DeliveryGroupIdempotencyKey.
+type DeliveryGroupIdempotencyKey = string
+
+// DeliveryGroupIfMatch defines model for DeliveryGroupIfMatch.
+type DeliveryGroupIfMatch = string
+
 // IssueId defines model for IssueId.
 type IssueId = string
 
@@ -3641,6 +3860,50 @@ type ListBlockedParams struct {
 
 // ListBlockedParamsType defines parameters for ListBlocked.
 type ListBlockedParamsType string
+
+// ListDeliveryGroupsParams defines parameters for ListDeliveryGroups.
+type ListDeliveryGroupsParams struct {
+	State  *ListDeliveryGroupsParamsState `form:"state,omitempty" json:"state,omitempty"`
+	EpicId *string                        `form:"epic_id,omitempty" json:"epic_id,omitempty"`
+	Limit  *int                           `form:"limit,omitempty" json:"limit,omitempty"`
+	Cursor *string                        `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListDeliveryGroupsParamsState defines parameters for ListDeliveryGroups.
+type ListDeliveryGroupsParamsState string
+
+// CreateDeliveryGroupParams defines parameters for CreateDeliveryGroup.
+type CreateDeliveryGroupParams struct {
+	// XIdempotencyKey Stable client intent key for create/update/archive/set-members
+	XIdempotencyKey DeliveryGroupIdempotencyKey `json:"X-Idempotency-Key"`
+}
+
+// UpdateDeliveryGroupParams defines parameters for UpdateDeliveryGroup.
+type UpdateDeliveryGroupParams struct {
+	// IfMatch Expected group revision as a strong ETag (`"3"`) or bare revision
+	IfMatch DeliveryGroupIfMatch `json:"If-Match"`
+
+	// XIdempotencyKey Stable client intent key for create/update/archive/set-members
+	XIdempotencyKey DeliveryGroupIdempotencyKey `json:"X-Idempotency-Key"`
+}
+
+// ArchiveDeliveryGroupParams defines parameters for ArchiveDeliveryGroup.
+type ArchiveDeliveryGroupParams struct {
+	// IfMatch Expected group revision as a strong ETag (`"3"`) or bare revision
+	IfMatch DeliveryGroupIfMatch `json:"If-Match"`
+
+	// XIdempotencyKey Stable client intent key for create/update/archive/set-members
+	XIdempotencyKey DeliveryGroupIdempotencyKey `json:"X-Idempotency-Key"`
+}
+
+// SetDeliveryGroupMembersParams defines parameters for SetDeliveryGroupMembers.
+type SetDeliveryGroupMembersParams struct {
+	// IfMatch Expected group revision as a strong ETag (`"3"`) or bare revision
+	IfMatch DeliveryGroupIfMatch `json:"If-Match"`
+
+	// XIdempotencyKey Stable client intent key for create/update/archive/set-members
+	XIdempotencyKey DeliveryGroupIdempotencyKey `json:"X-Idempotency-Key"`
+}
 
 // SubscribeEventsParams defines parameters for SubscribeEvents.
 type SubscribeEventsParams struct {
@@ -3907,6 +4170,14 @@ type RunOnboardingFirstTaskJSONBody struct {
 // ListPullRequestsParams defines parameters for ListPullRequests.
 type ListPullRequestsParams struct {
 	State *ListPullRequestsParamsState `form:"state,omitempty" json:"state,omitempty"`
+
+	// StandaloneRepo owner/repo to continue standalone discovery for
+	StandaloneRepo *string `form:"standalone_repo,omitempty" json:"standalone_repo,omitempty"`
+
+	// StandalonePage 1-based GitHub list page to start a bounded continuation window
+	StandalonePage       *int    `form:"standalone_page,omitempty" json:"standalone_page,omitempty"`
+	DeliveryGroupsLimit  *int    `form:"delivery_groups_limit,omitempty" json:"delivery_groups_limit,omitempty"`
+	DeliveryGroupsCursor *string `form:"delivery_groups_cursor,omitempty" json:"delivery_groups_cursor,omitempty"`
 }
 
 // ListPullRequestsParamsState defines parameters for ListPullRequests.
@@ -4050,6 +4321,15 @@ type PatchWorkspaceBackendJSONRequestBody = WorkspaceBackendPatchRequest
 
 // PatchWorkspaceDesignFormatJSONRequestBody defines body for PatchWorkspaceDesignFormat for application/json ContentType.
 type PatchWorkspaceDesignFormatJSONRequestBody = WorkspaceDesignFormatPatchRequest
+
+// CreateDeliveryGroupJSONRequestBody defines body for CreateDeliveryGroup for application/json ContentType.
+type CreateDeliveryGroupJSONRequestBody = DeliveryGroupCreateRequest
+
+// UpdateDeliveryGroupJSONRequestBody defines body for UpdateDeliveryGroup for application/json ContentType.
+type UpdateDeliveryGroupJSONRequestBody = DeliveryGroupUpdateRequest
+
+// SetDeliveryGroupMembersJSONRequestBody defines body for SetDeliveryGroupMembers for application/json ContentType.
+type SetDeliveryGroupMembersJSONRequestBody = DeliveryGroupSetMembersRequest
 
 // WriteScopedFileJSONRequestBody defines body for WriteScopedFile for application/json ContentType.
 type WriteScopedFileJSONRequestBody = FileWriteRequest

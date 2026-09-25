@@ -889,6 +889,9 @@ func TestListPullRequestsConnectorWarnsAtPageCap(t *testing.T) {
 		!strings.Contains(data.Warnings[0], "truncated") {
 		t.Fatalf("warnings = %v, want repo-scoped truncation warning", data.Warnings)
 	}
+	if data.StandaloneContinuation == nil || !data.StandaloneContinuation.HasMore || data.StandaloneContinuation.Complete {
+		t.Fatalf("standalone_continuation = %+v, want has_more incomplete page", data.StandaloneContinuation)
+	}
 	if calls := h.github.snapshot(); len(calls) != maxPullsListPages {
 		t.Fatalf("GitHub calls = %d, want capped %d", len(calls), maxPullsListPages)
 	}

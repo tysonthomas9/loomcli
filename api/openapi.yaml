@@ -2667,7 +2667,14 @@ paths:
         Lists GitHub pull requests for every registered repository, including
         PRs created outside Loom. Served by the GitHub connector when a token
         is configured and by the gh CLI otherwise. Per-repo failures are
-        reported in warnings rather than failing the whole list.
+        reported in warnings rather than failing the whole list. Active
+        delivery-group members are omitted from `pull_requests` (standalone
+        only) and surfaced under `delivery_groups` with honest
+        `delivery_groups_has_more` pagination. Connector discovery is bounded
+        to five 100-item pages per repo; `standalone_continuation` reports
+        whether more pages exist and how to continue via `standalone_repo` /
+        `standalone_page`. Absence of a row in a truncated page must not be
+        treated as a complete standalone set.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - name: state
@@ -2677,6 +2684,32 @@ paths:
             type: string
             enum: [all, open, closed, merged, review]
             default: all
+        - name: standalone_repo
+          in: query
+          required: false
+          description: owner/repo to continue standalone discovery for
+          schema:
+            type: string
+        - name: standalone_page
+          in: query
+          required: false
+          description: 1-based GitHub list page to start a bounded continuation window
+          schema:
+            type: integer
+            minimum: 1
+        - name: delivery_groups_limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 200
+            default: 50
+        - name: delivery_groups_cursor
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: Pull request list
@@ -2797,6 +2830,369 @@ paths:
                     $ref: "#/components/schemas/PullRequestReadinessPreviewResponse"
         "400":
           description: Missing, malformed, duplicate or too many PR keys
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/delivery-groups:
+    get:
+      operationId: listDeliveryGroups
+      tags: [pull-requests]
+      summary: List durable delivery groups
+      description: >-
+        Returns one ID-ordered page of FleetDB delivery groups. `count` is the
+        page length only; page on `has_more` / `next_cursor`. Members keep
+        delivery order and are joined to the latest readiness observation when
+        available. Partial GitHub failures never hide groups. Group reads do
+        not write to GitHub.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [active, archived, all]
+            default: active
+        - name: epic_id
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 200
+            default: 50
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Delivery group page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/DeliveryGroupList"
+        "400":
+          description: Invalid query
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Delivery groups unavailable or inconsistent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: createDeliveryGroup
+      tags: [pull-requests]
+      summary: Create a delivery group
+      description: >-
+        Creates a durable ordered delivery group. Requires X-Idempotency-Key.
+        Validates registered-repo PR identities at the Loom API boundary.
+        Never mutates GitHub. Same-key replay of validated intent returns the
+        stored group with X-Idempotency-Replayed; a changed member identity
+        (including adding or changing pr_key) returns idempotency_key_reused.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/DeliveryGroupIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryGroupCreateRequest"
+      responses:
+        "200":
+          description: Verified idempotent replay
+          headers:
+            ETag:
+              schema: { type: string }
+            X-Idempotency-Replayed:
+              schema: { type: string, enum: ["true"] }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { type: boolean, const: true }
+                  data:
+                    $ref: "#/components/schemas/DeliveryGroupWrite"
+        "201":
+          description: Created
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { type: boolean, const: true }
+                  data:
+                    $ref: "#/components/schemas/DeliveryGroupWrite"
+        "409":
+          description: Conflict (duplicate membership, reused key, already exists)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid members
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "428":
+          description: Missing idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/delivery-groups/{group_id}:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^dg_[0-9A-HJKMNP-TV-Z]{26}$"
+    get:
+      operationId: getDeliveryGroup
+      tags: [pull-requests]
+      summary: Get a delivery group with readiness observations
+      responses:
+        "200":
+          description: Delivery group
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { type: boolean, const: true }
+                  data:
+                    $ref: "#/components/schemas/DeliveryGroupWrite"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateDeliveryGroup
+      tags: [pull-requests]
+      summary: Update delivery group header
+      description: Requires If-Match and X-Idempotency-Key. Never mutates GitHub.
+      parameters:
+        - $ref: "#/components/parameters/DeliveryGroupIfMatch"
+        - $ref: "#/components/parameters/DeliveryGroupIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryGroupUpdateRequest"
+      responses:
+        "200":
+          description: Updated or replayed
+          headers:
+            ETag:
+              schema: { type: string }
+            X-Idempotency-Replayed:
+              schema: { type: string, enum: ["true"] }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { type: boolean, const: true }
+                  data:
+                    $ref: "#/components/schemas/DeliveryGroupWrite"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "412":
+          description: Stale revision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "428":
+          description: Missing If-Match or idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/delivery-groups/{group_id}/members:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^dg_[0-9A-HJKMNP-TV-Z]{26}$"
+    put:
+      operationId: setDeliveryGroupMembers
+      tags: [pull-requests]
+      summary: Replace ordered delivery group members
+      description: >-
+        Atomically adds, removes, and reorders members. Requires If-Match and
+        X-Idempotency-Key. Validates registered-repo identities. Never mutates
+        GitHub.
+      parameters:
+        - $ref: "#/components/parameters/DeliveryGroupIfMatch"
+        - $ref: "#/components/parameters/DeliveryGroupIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryGroupSetMembersRequest"
+      responses:
+        "200":
+          description: Updated or replayed
+          headers:
+            ETag:
+              schema: { type: string }
+            X-Idempotency-Replayed:
+              schema: { type: string, enum: ["true"] }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { type: boolean, const: true }
+                  data:
+                    $ref: "#/components/schemas/DeliveryGroupWrite"
+        "409":
+          description: Duplicate membership or reused key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "412":
+          description: Stale revision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid members
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "428":
+          description: Missing If-Match or idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/delivery-groups/{group_id}/archive:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^dg_[0-9A-HJKMNP-TV-Z]{26}$"
+    post:
+      operationId: archiveDeliveryGroup
+      tags: [pull-requests]
+      summary: Archive a delivery group
+      description: Keeps members for history and releases PR index slots. Never mutates GitHub.
+      parameters:
+        - $ref: "#/components/parameters/DeliveryGroupIfMatch"
+        - $ref: "#/components/parameters/DeliveryGroupIdempotencyKey"
+      responses:
+        "200":
+          description: Archived or replayed
+          headers:
+            ETag:
+              schema: { type: string }
+            X-Idempotency-Replayed:
+              schema: { type: string, enum: ["true"] }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { type: boolean, const: true }
+                  data:
+                    $ref: "#/components/schemas/DeliveryGroupWrite"
+        "412":
+          description: Stale revision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "428":
+          description: Missing If-Match or idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/delivery-groups/{group_id}/preview:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^dg_[0-9A-HJKMNP-TV-Z]{26}$"
+    get:
+      operationId: previewDeliveryGroup
+      tags: [pull-requests]
+      summary: Read-only ordered ready-prefix preview for a delivery group
+      description: >-
+        Uses the group's canonical member order and the same readiness /
+        observation model as pull-requests/readiness/preview. Marks stale,
+        aging, unknown, and partial results explicitly; never labels a stale
+        verdict currently Ready. Does not execute merges, retarget branches,
+        or call GitHub write APIs.
+      responses:
+        "200":
+          description: Ordered preview
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { type: boolean, const: true }
+                  data:
+                    $ref: "#/components/schemas/DeliveryGroupPreview"
+        "404":
+          description: Not found
           content:
             application/json:
               schema:
@@ -4505,6 +4901,24 @@ components:
       schema:
         type: string
 
+    DeliveryGroupIdempotencyKey:
+      name: X-Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+      description: Stable client intent key for create/update/archive/set-members
+
+    DeliveryGroupIfMatch:
+      name: If-Match
+      in: header
+      required: true
+      schema:
+        type: string
+      description: Expected group revision as a strong ETag (`"3"`) or bare revision
+
     IssueId:
       name: id
       in: path
@@ -5021,12 +5435,211 @@ components:
       properties:
         pull_requests:
           type: array
+          description: Standalone discovered PRs not in an active delivery group
           items:
             $ref: "#/components/schemas/GitPullRequest"
         warnings:
           type: array
           items:
             type: string
+        delivery_groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeliveryGroupView"
+        delivery_groups_count:
+          type: integer
+          description: Length of this delivery_groups page only
+        delivery_groups_has_more:
+          type: boolean
+        delivery_groups_next_cursor:
+          type: string
+        standalone_continuation:
+          $ref: "#/components/schemas/StandalonePRContinuation"
+
+    StandalonePRContinuation:
+      type: object
+      required: [repos, has_more, complete]
+      properties:
+        repos:
+          type: array
+          items:
+            $ref: "#/components/schemas/StandaloneRepoContinuation"
+        has_more:
+          type: boolean
+          description: True when any repo has more GitHub pages beyond this response
+        complete:
+          type: boolean
+          description: False when truncated, partial, or errored; never infer completeness from missing rows
+
+    StandaloneRepoContinuation:
+      type: object
+      required: [repo, fetched, page_size, max_pages, has_more]
+      properties:
+        repo:
+          type: string
+        source_repo:
+          type: string
+        fetched:
+          type: integer
+        page_size:
+          type: integer
+        max_pages:
+          type: integer
+        next_page:
+          type: integer
+        has_more:
+          type: boolean
+        partial_error:
+          type: string
+        continuation_hint:
+          type: string
+
+    DeliveryGroupMemberSource:
+      type: string
+      enum: [manual, loom_task, lineage_adopt, native_stack_suggestion, identity_heal]
+
+    DeliveryGroupMember:
+      type: object
+      required: [pr_key, repo_name, pr_number, source, added_at]
+      properties:
+        pr_key: { type: string }
+        repo_name: { type: string }
+        pr_number: { type: integer }
+        github_node_id: { type: string }
+        source:
+          $ref: "#/components/schemas/DeliveryGroupMemberSource"
+        task_id: { type: string }
+        lineage_stack_id: { type: string }
+        added_at: { type: string, format: date-time }
+        added_by: { type: string }
+
+    DeliveryGroupMemberView:
+      allOf:
+        - $ref: "#/components/schemas/DeliveryGroupMember"
+        - type: object
+          properties:
+            readiness:
+              $ref: "#/components/schemas/PullRequestReadinessView"
+            warnings:
+              type: array
+              items: { type: string }
+
+    DeliveryGroupView:
+      type: object
+      required: [workspace_key, id, title, state, revision, members, last_op_id, created_at, updated_at]
+      properties:
+        workspace_key: { type: string }
+        id: { type: string }
+        title: { type: string }
+        epic_id: { type: string }
+        owner: { type: string }
+        state:
+          type: string
+          enum: [active, archived]
+        revision: { type: integer, format: int64 }
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeliveryGroupMemberView"
+        last_op_id: { type: string }
+        last_op_digest: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        created_by: { type: string }
+        updated_by: { type: string }
+        integrity: { type: string }
+        inconsistent: { type: boolean }
+
+    DeliveryGroupList:
+      type: object
+      required: [delivery_groups, count, has_more]
+      properties:
+        delivery_groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeliveryGroupView"
+        count: { type: integer }
+        has_more: { type: boolean }
+        next_cursor: { type: string }
+        warnings:
+          type: array
+          items: { type: string }
+
+    DeliveryGroupWrite:
+      type: object
+      required: [group]
+      properties:
+        group:
+          $ref: "#/components/schemas/DeliveryGroupView"
+        replayed: { type: boolean }
+
+    DeliveryGroupMemberInput:
+      type: object
+      additionalProperties: false
+      properties:
+        pr_key: { type: string }
+        repo_name: { type: string }
+        pr_number: { type: integer, minimum: 1 }
+        github_node_id: { type: string }
+        source:
+          $ref: "#/components/schemas/DeliveryGroupMemberSource"
+        task_id: { type: string }
+        lineage_stack_id: { type: string }
+
+    DeliveryGroupCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [id, title]
+      properties:
+        id:
+          type: string
+          pattern: "^dg_[0-9A-HJKMNP-TV-Z]{26}$"
+        title: { type: string, minLength: 1, maxLength: 200 }
+        epic_id: { type: string }
+        owner: { type: string }
+        members:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/DeliveryGroupMemberInput"
+
+    DeliveryGroupUpdateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        epic_id: { type: string }
+        owner: { type: string }
+
+    DeliveryGroupSetMembersRequest:
+      type: object
+      additionalProperties: false
+      required: [members]
+      properties:
+        members:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/DeliveryGroupMemberInput"
+
+    DeliveryGroupPreview:
+      type: object
+      required: [group_id, revision, server_now, fresh_for_s, stale_after_s, preview, repo_errors]
+      properties:
+        group_id: { type: string }
+        revision: { type: integer, format: int64 }
+        server_now: { type: string, format: date-time }
+        fresh_for_s: { type: integer }
+        stale_after_s: { type: integer }
+        preview:
+          $ref: "#/components/schemas/PullRequestReadinessPreview"
+        repo_errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/PullRequestReadinessRepoError"
+        warnings:
+          type: array
+          items: { type: string }
 
     PullRequestReadinessFact:
       type: object
