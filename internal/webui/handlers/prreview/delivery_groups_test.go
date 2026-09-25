@@ -829,6 +829,115 @@ func TestConnectorListMembershipUnavailableMarksContinuationIncomplete(t *testin
 	}
 }
 
+func TestConnectorListInconsistentMembershipMarksContinuationIncomplete(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	fake := newFakeDeliveryGroups()
+	h.module.SetDeliveryGroups(fake)
+	fake.put(&domain.DeliveryGroup{
+		WorkspaceKey: "WS", ID: "dg_01JABCDEFGHJKMNPQRSTVWXYZ0", Title: "g",
+		State: domain.DeliveryGroupActive, Revision: 1, Inconsistent: true,
+		Members: []domain.DeliveryGroupMember{{
+			PRKey: "github:octocat/hello#7", RepoName: "hello", PRNumber: 7,
+			Source: domain.DeliveryGroupMemberManual, AddedAt: time.Now().UTC(),
+		}},
+		LastOpID: "old", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	})
+	fake.put(&domain.DeliveryGroup{
+		WorkspaceKey: "WS", ID: "dg_01JABCDEFGHJKMNPQRSTVWXYZ1", Title: "ok",
+		State: domain.DeliveryGroupActive, Revision: 1,
+		Members: []domain.DeliveryGroupMember{{
+			PRKey: "github:octocat/hello#9", RepoName: "hello", PRNumber: 9,
+			Source: domain.DeliveryGroupMemberManual, AddedAt: time.Now().UTC(),
+		}},
+		LastOpID: "old", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	})
+	h.github.setListPayload("octocat", "hello", []map[string]any{
+		{"number": 7, "state": "open", "title": "Last-committed member", "htmlUrl": "https://github.com/octocat/hello/pull/7",
+			"head": map[string]any{"sha": "h1", "ref": "a"}, "base": map[string]any{"sha": "b1", "ref": "main"}},
+		{"number": 8, "state": "open", "title": "Maybe standalone", "htmlUrl": "https://github.com/octocat/hello/pull/8",
+			"head": map[string]any{"sha": "h2", "ref": "b"}, "base": map[string]any{"sha": "b1", "ref": "main"}},
+		{"number": 9, "state": "open", "title": "Consistent member", "htmlUrl": "https://github.com/octocat/hello/pull/9",
+			"head": map[string]any{"sha": "h3", "ref": "c"}, "base": map[string]any{"sha": "b1", "ref": "main"}},
+	})
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK {
+		t.Fatalf("status=%d body=%s", status, raw)
+	}
+	data := decodePullRequestsResponse(t, raw)
+	if data.StandaloneContinuation == nil || data.StandaloneContinuation.Complete {
+		t.Fatalf("standalone_continuation=%+v, want complete=false when an inconsistent active group exists", data.StandaloneContinuation)
+	}
+	foundWarn := false
+	for _, w := range data.Warnings {
+		if strings.Contains(w, "inconsistent") {
+			foundWarn = true
+			break
+		}
+	}
+	if !foundWarn {
+		t.Fatalf("warnings=%v, want inconsistent membership notice", data.Warnings)
+	}
+	if len(data.PullRequests) != 1 || data.PullRequests[0].Number != 8 {
+		t.Fatalf("standalone=%+v, want #8 only (best-effort filter of last-committed + consistent members)", data.PullRequests)
+	}
+	if len(data.DeliveryGroups) != 2 {
+		t.Fatalf("delivery_groups=%+v, want durable inconsistent + consistent rows preserved", data.DeliveryGroups)
+	}
+	var sawInconsistent bool
+	for _, g := range data.DeliveryGroups {
+		if g.Inconsistent {
+			sawInconsistent = true
+			break
+		}
+	}
+	if !sawInconsistent {
+		t.Fatalf("delivery_groups=%+v, want inconsistent flag preserved on durable row", data.DeliveryGroups)
+	}
+}
+
+func TestConnectorListInconsistentIdentityOnlyMarksContinuationIncomplete(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	fake := newFakeDeliveryGroups()
+	h.module.SetDeliveryGroups(fake)
+	fake.put(&domain.DeliveryGroup{
+		WorkspaceKey: "WS", ID: "dg_01JABCDEFGHJKMNPQRSTVWXYZ0", Title: "g",
+		State: domain.DeliveryGroupActive, Revision: 1, Inconsistent: true,
+		Members:  nil, // identity-only: last committed document unreadable
+		LastOpID: "old", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	})
+	h.github.setListPayload("octocat", "hello", []map[string]any{
+		{"number": 7, "state": "open", "title": "Uncertain membership", "htmlUrl": "https://github.com/octocat/hello/pull/7",
+			"head": map[string]any{"sha": "h1", "ref": "a"}, "base": map[string]any{"sha": "b1", "ref": "main"}},
+	})
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK {
+		t.Fatalf("status=%d body=%s", status, raw)
+	}
+	data := decodePullRequestsResponse(t, raw)
+	if data.StandaloneContinuation == nil || data.StandaloneContinuation.Complete {
+		t.Fatalf("standalone_continuation=%+v, want complete=false for identity-only inconsistent row", data.StandaloneContinuation)
+	}
+	foundWarn := false
+	for _, w := range data.Warnings {
+		if strings.Contains(w, "inconsistent") {
+			foundWarn = true
+			break
+		}
+	}
+	if !foundWarn {
+		t.Fatalf("warnings=%v, want inconsistent membership notice", data.Warnings)
+	}
+	// No members to filter: row may still appear, but never as confirmed standalone.
+	if len(data.PullRequests) != 1 || data.PullRequests[0].Number != 7 {
+		t.Fatalf("pull_requests=%+v, want discovered PR retained without confirmed-standalone claim", data.PullRequests)
+	}
+	if len(data.DeliveryGroups) != 1 || !data.DeliveryGroups[0].Inconsistent {
+		t.Fatalf("delivery_groups=%+v, want identity-only inconsistent durable row", data.DeliveryGroups)
+	}
+}
+
 func TestDeliveryGroupPreviewReadOnly(t *testing.T) {
 	h, f, _ := newReadinessHarness(t)
 	fake := newFakeDeliveryGroups()

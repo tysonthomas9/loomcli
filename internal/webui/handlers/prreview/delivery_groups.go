@@ -501,13 +501,15 @@ func writeDeliveryGroupConflict(w http.ResponseWriter, conflict *domain.Delivery
 // loadActiveGroupedPRKeys collects active-group membership so list responses
 // can mark standalone discovered PRs (present in GitHub, not in any active
 // group). The bool is true when membership is incomplete/unverified: bounded
-// page walk truncation, has_more without next_cursor, or a datastore error.
+// page walk truncation, has_more without next_cursor, a datastore error, or
+// any inconsistent active row (last-committed members are best-effort only).
 func (m *Module) loadActiveGroupedPRKeys(r *http.Request, ws string) (map[string]string, []string, bool) {
 	grouped := map[string]string{}
 	if m == nil || m.deliveryGroups == nil {
 		return grouped, nil, false
 	}
 	var warnings []string
+	incomplete := false
 	cursor := ""
 	pages := 0
 	const maxPages = 50 // bound Loom-side fanout; still reports has_more honestly via FleetDB
@@ -527,15 +529,12 @@ func (m *Module) loadActiveGroupedPRKeys(r *http.Request, ws string) (map[string
 			return grouped, warnings, true
 		}
 		for _, g := range page.Groups {
-			if g == nil || g.Inconsistent {
-				continue
-			}
-			for _, member := range g.Members {
-				grouped[member.PRKey] = g.ID
+			if indexActiveGroupMembers(grouped, &warnings, g) {
+				incomplete = true
 			}
 		}
 		if !page.HasMore {
-			return grouped, warnings, false
+			return grouped, warnings, incomplete
 		}
 		if page.NextCursor == "" {
 			warnings = append(warnings, "delivery groups reported has_more without next_cursor")
@@ -543,6 +542,32 @@ func (m *Module) loadActiveGroupedPRKeys(r *http.Request, ws string) (map[string
 		}
 		cursor = page.NextCursor
 	}
+}
+
+// indexActiveGroupMembers records members for one active group into grouped.
+// Inconsistent rows contribute last-committed members as a best-effort filter
+// and return true so callers mark the membership scan incomplete.
+func indexActiveGroupMembers(grouped map[string]string, warnings *[]string, g *domain.DeliveryGroup) bool {
+	if g == nil {
+		return false
+	}
+	if !g.Inconsistent {
+		for _, member := range g.Members {
+			grouped[member.PRKey] = g.ID
+		}
+		return false
+	}
+	id := strings.TrimSpace(g.ID)
+	if id == "" {
+		id = "unknown"
+	}
+	*warnings = append(*warnings, "active delivery group "+id+" is inconsistent; membership unverified — last-committed members used as best-effort filter only when present")
+	for _, member := range g.Members {
+		if key := strings.TrimSpace(member.PRKey); key != "" {
+			grouped[key] = g.ID
+		}
+	}
+	return true
 }
 
 // filterStandalonePullRequests drops PRs that belong to an active delivery
