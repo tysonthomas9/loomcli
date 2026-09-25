@@ -1,0 +1,372 @@
+/* Delivery & lineage rollup on epic detail. Tokens match EpicRollup and the
+   StackedPRWorkspace path (cross marker, step dots); no second design system. */
+
+.section {
+  margin-bottom: 28px;
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 8px;
+  margin-bottom: 10px;
+}
+
+/* Beat global h3 sizing, matching EpicRollup's section titles. */
+.head > h3.title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  line-height: var(--line-height-normal);
+}
+
+.caption {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.note {
+  margin: 0 0 8px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.warnBanner {
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  list-style: none;
+  font-size: var(--font-size-xs);
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+  border-radius: var(--radius-md);
+  overflow-wrap: anywhere;
+}
+
+.empty {
+  padding: 12px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+}
+
+.empty > p {
+  margin: 0;
+}
+
+.emptyHint {
+  margin-top: 4px !important;
+  font-size: var(--font-size-xs);
+}
+
+.errorBox {
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--color-danger-bg);
+}
+
+.errorTitle {
+  margin: 0;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-danger);
+}
+
+.errorDetail {
+  margin: 4px 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* Loading skeleton */
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skeletonBar {
+  display: block;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-active);
+}
+
+/* Group card */
+.group {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+
+.groupHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-bottom: 8px;
+}
+
+.groupHead > h4.groupTitle {
+  margin: 0;
+  flex: 1 1 12rem;
+  min-width: 0;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.groupMeta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.groupId,
+.taskId,
+.lineageChip,
+.branch {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  padding: 0;
+  background: none;
+  border-radius: 0;
+  overflow-wrap: anywhere;
+}
+
+.lineageChip + .lineageChip {
+  margin-left: 6px;
+}
+
+.chip,
+.repoChip {
+  display: inline-block;
+  max-width: 100%;
+  padding: 1px 6px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-active);
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+}
+
+.worst {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+/* Delivery path */
+.path {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.step {
+  min-width: 0;
+}
+
+.cross {
+  margin: 2px 0;
+  padding-left: 34px;
+  font-size: 10.5px;
+  color: var(--color-text-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.stepLink {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  color: inherit;
+  text-decoration: none;
+  transition: background-color var(--transition-fast);
+}
+
+.stepLink:hover {
+  background: var(--color-bg-hover);
+}
+
+.stepLink:focus-visible,
+.openLink:focus-visible,
+.loadMore:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.stepNum {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 10.5px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-active);
+}
+
+.stepNum[data-status="ready"],
+.stepNum[data-status="merged"] {
+  color: var(--color-success);
+  background: var(--color-success-bg);
+}
+
+.stepNum[data-status="blocked"] {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
+.stepNum[data-status="stale"],
+.stepNum[data-status="unknown"] {
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+
+.stepMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stepTitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  font-size: var(--font-size-base);
+  color: var(--color-text-primary);
+}
+
+.prNum {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-primary);
+}
+
+.externalChip {
+  padding: 1px 6px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-info);
+  background: var(--color-info-bg);
+  border-radius: var(--radius-sm);
+}
+
+.refs {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.memberWarn {
+  font-size: var(--font-size-xs);
+  color: var(--color-warning);
+  overflow-wrap: anywhere;
+}
+
+/* Same-repo branch-base footnotes */
+.ancestry {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--color-border);
+}
+
+.ancestryTitle {
+  margin: 0 0 4px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-muted);
+}
+
+.ancestryList {
+  margin: 0;
+  padding-left: 16px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.groupActions {
+  margin-top: 8px;
+}
+
+.openLink {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-primary);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+}
+
+.openLink:hover {
+  text-decoration: underline;
+}
+
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.pagerText {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.loadMore {
+  padding: 2px 10px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+  background: var(--color-bg-active);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.loadMore:disabled {
+  cursor: default;
+  opacity: 0.6;
+}

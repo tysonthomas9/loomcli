@@ -179,6 +179,10 @@ export function PRsPage(): JSX.Element {
   const discussOpen =
     searchParams.get("discuss") === "1" ||
     searchParams.get("discuss") === "true";
+  // Workspace deep-link focus (e.g. from the epic-detail Delivery rollup).
+  const focusGroup = searchParams.get("group") ?? undefined;
+  const focusPr = searchParams.get("pr") ?? undefined;
+  const focusEpic = searchParams.get("epic") ?? undefined;
 
   const rows = useMemo(
     () => buildPullRequestRows(issues, pullRequests),
@@ -253,6 +257,12 @@ export function PRsPage(): JSX.Element {
 
   return (
     <StackedPRWorkspace
+      key={`${focusGroup ?? ""}|${focusPr ?? ""}|${focusEpic ?? ""}`}
+      initialFocus={{
+        groupId: focusGroup,
+        prKey: focusPr,
+        epicId: focusEpic,
+      }}
       issues={issues}
       pullRequests={pullRequests}
       deliveryGroups={deliveryGroups}
