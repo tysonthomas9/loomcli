@@ -131,6 +131,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests/readiness/preview", m.getPullRequestReadinessPreview)
 	mux.HandleFunc("GET /api/workspaces/{ws}/delivery-groups", m.listDeliveryGroups)
 	mux.HandleFunc("POST /api/workspaces/{ws}/delivery-groups", m.createDeliveryGroup)
+	mux.HandleFunc("GET /api/workspaces/{ws}/pull-request-delivery-groups/{pr_key}", m.getDeliveryGroupByPR)
 	mux.HandleFunc("GET /api/workspaces/{ws}/delivery-groups/{group_id}", m.getDeliveryGroup)
 	mux.HandleFunc("PATCH /api/workspaces/{ws}/delivery-groups/{group_id}", m.updateDeliveryGroup)
 	mux.HandleFunc("PUT /api/workspaces/{ws}/delivery-groups/{group_id}/members", m.setDeliveryGroupMembers)

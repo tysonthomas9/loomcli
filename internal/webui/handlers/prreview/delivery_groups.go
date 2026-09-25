@@ -122,6 +122,35 @@ func (m *Module) getDeliveryGroup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, deliveryGroupWriteData{Group: view})
 }
 
+// getDeliveryGroupByPR is the thin WebUI facade over FleetDB GetByPR
+// (STACKED-PRS-11). It returns the active group containing pr_key with the
+// same readiness decoration as getDeliveryGroup.
+func (m *Module) getDeliveryGroupByPR(w http.ResponseWriter, r *http.Request) {
+	backend := m.requireDeliveryGroups(w)
+	if backend == nil {
+		return
+	}
+	ws := r.PathValue("ws")
+	prKey := strings.TrimSpace(r.PathValue("pr_key"))
+	if prKey == "" {
+		writePRReviewErrorCode(w, http.StatusUnprocessableEntity, domain.DeliveryGroupMembersInvalidCode,
+			"pr_key is required", false)
+		return
+	}
+	if _, err := prref.Parse(prKey); err != nil {
+		writePRReviewErrorCode(w, http.StatusUnprocessableEntity, domain.DeliveryGroupMembersInvalidCode,
+			"invalid pr_key", false)
+		return
+	}
+	group, err := backend.GetByPR(r.Context(), ws, prKey)
+	if err != nil {
+		writeDeliveryGroupError(w, err)
+		return
+	}
+	view, _ := m.decorateDeliveryGroup(r, ws, group, true)
+	writeJSON(w, deliveryGroupWriteData{Group: view})
+}
+
 func (m *Module) createDeliveryGroup(w http.ResponseWriter, r *http.Request) {
 	backend := m.requireDeliveryGroups(w)
 	if backend == nil {
