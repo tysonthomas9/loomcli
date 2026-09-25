@@ -14,10 +14,21 @@ export type GitPullRequest = components["schemas"]["GitPullRequest"];
 
 export type PullRequestListState = "all" | "open" | "merged" | "review";
 
+type DeliveryGroupView = components["schemas"]["DeliveryGroupView"];
+export type StandalonePRContinuation =
+  components["schemas"]["StandalonePRContinuation"];
+
 export interface PullRequestList {
   pullRequests: GitPullRequest[];
   /** Per-repo listing failures (non-GitHub remote, missing gh, auth, …). */
   warnings: string[];
+  /** Active delivery groups page joined by the facade (may be empty). */
+  deliveryGroups: DeliveryGroupView[];
+  deliveryGroupsCount: number;
+  deliveryGroupsHasMore: boolean;
+  deliveryGroupsNextCursor?: string;
+  /** Honest bounded-discovery / membership-completeness contract. */
+  standaloneContinuation?: StandalonePRContinuation;
 }
 
 interface PullRequestsResponse {
@@ -25,20 +36,62 @@ interface PullRequestsResponse {
   data: {
     pull_requests: GitPullRequest[];
     warnings?: string[];
+    delivery_groups?: DeliveryGroupView[];
+    delivery_groups_count?: number;
+    delivery_groups_has_more?: boolean;
+    delivery_groups_next_cursor?: string;
+    standalone_continuation?: StandalonePRContinuation;
   };
   error?: string;
+}
+
+export interface FetchPullRequestsOptions {
+  state?: PullRequestListState;
+  deliveryGroupsLimit?: number;
+  deliveryGroupsCursor?: string;
+  standaloneRepo?: string;
+  standalonePage?: number;
 }
 
 /** GET /api/workspaces/{ws}/pull-requests?state= */
 export async function fetchPullRequests(
   workspaceId: string,
-  state: PullRequestListState = "all",
+  stateOrOptions: PullRequestListState | FetchPullRequestsOptions = "all",
 ): Promise<PullRequestList> {
-  const url = `${wsUrl(workspaceId, "/pull-requests")}?state=${encodeURIComponent(state)}`;
+  const options: FetchPullRequestsOptions =
+    typeof stateOrOptions === "string"
+      ? { state: stateOrOptions }
+      : stateOrOptions;
+  const state = options.state ?? "all";
+  const params = new URLSearchParams();
+  params.set("state", state);
+  if (options.deliveryGroupsLimit != null) {
+    params.set("delivery_groups_limit", String(options.deliveryGroupsLimit));
+  }
+  if (options.deliveryGroupsCursor) {
+    params.set("delivery_groups_cursor", options.deliveryGroupsCursor);
+  }
+  if (options.standaloneRepo) {
+    params.set("standalone_repo", options.standaloneRepo);
+  }
+  if (options.standalonePage != null) {
+    params.set("standalone_page", String(options.standalonePage));
+  }
+  const url = `${wsUrl(workspaceId, "/pull-requests")}?${params.toString()}`;
   const result = await get<PullRequestsResponse>(url);
+  const data = result.data;
   return {
-    pullRequests: result.data?.pull_requests ?? [],
-    warnings: result.data?.warnings ?? [],
+    pullRequests: data?.pull_requests ?? [],
+    warnings: data?.warnings ?? [],
+    deliveryGroups: data?.delivery_groups ?? [],
+    deliveryGroupsCount: data?.delivery_groups_count ?? 0,
+    deliveryGroupsHasMore: data?.delivery_groups_has_more ?? false,
+    ...(data?.delivery_groups_next_cursor
+      ? { deliveryGroupsNextCursor: data.delivery_groups_next_cursor }
+      : {}),
+    ...(data?.standalone_continuation
+      ? { standaloneContinuation: data.standalone_continuation }
+      : {}),
   };
 }
 
@@ -56,6 +109,8 @@ export type PullRequestReadinessRepoError =
   components["schemas"]["PullRequestReadinessRepoError"];
 export type PullRequestReadinessList =
   components["schemas"]["PullRequestReadinessList"];
+export type PullRequestReadinessPreview =
+  components["schemas"]["PullRequestReadinessPreview"];
 export type PullRequestReadinessPreviewResponse =
   components["schemas"]["PullRequestReadinessPreviewResponse"];
 

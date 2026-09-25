@@ -1,20 +1,10 @@
 /**
- * PRsPage — Loom-first review queue with GitHub enrichment.
+ * PRsPage — stacked PR workspace with preserved review deep links.
  *
- * Loom issues are the primary row source: every issue in review (or carrying
- * a PR external_ref) appears even when gh is unavailable, so the queue keeps
- * working offline. GitHub metadata (gh pr list) enriches rows — title, draft/
- * merged state, review decision, author — joined by the stable owner/repo#n
- * key. GitHub PRs with no linked issue render as unlinked rows that open
- * externally, and gh failures degrade to a warning banner, never a blank page.
+ * Queue UI lives in StackedPRWorkspace. Linked (`?review=`) and unlinked
+ * (`?review-pr=`) paths still mount PRReviewWorkspace unchanged.
  */
-import {
-  useMemo,
-  useState,
-  type Dispatch,
-  type KeyboardEvent,
-  type SetStateAction,
-} from "react";
+import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import type { GitPullRequest } from "@/api/workspace";
@@ -28,19 +18,10 @@ import {
   prKeyFromRef,
   pullRequestKey,
 } from "@/utils/issue";
-import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
+import { StackedPRWorkspace } from "@/components/StackedPRWorkspace";
 
 import { PRReviewWorkspace } from "./PRReviewWorkspace";
 import styles from "./PRsPage.module.css";
-
-type PRFilter = "all" | "review" | "merged";
-type GroupMode = "none" | "repo" | "epic";
-
-const FILTERS: { id: PRFilter; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "review", label: "Needs review" },
-  { id: "merged", label: "Merged" },
-];
 
 export interface PullRequestRow {
   /** Loom issue backing the row — primary source when present. */
@@ -49,49 +30,7 @@ export interface PullRequestRow {
   pr?: GitPullRequest | undefined;
 }
 
-function isOpenPr(pr: GitPullRequest): boolean {
-  return pr.state === "OPEN" && !pr.is_draft;
-}
-
-function needsReview(row: PullRequestRow): boolean {
-  if (row.pr) {
-    return isOpenPr(row.pr) && row.pr.review_decision !== "APPROVED";
-  }
-  // Loom-only rows are in the queue exactly when the task awaits review
-  // (e.g. a plan review with no PR yet).
-  return row.issue?.status === "review";
-}
-
-function isOpenRow(row: PullRequestRow): boolean {
-  if (row.pr) return isOpenPr(row.pr);
-  return row.issue?.status === "review";
-}
-
-function matchesFilter(row: PullRequestRow, filter: PRFilter): boolean {
-  switch (filter) {
-    case "all":
-      return true;
-    case "review":
-      return needsReview(row);
-    case "merged":
-      return row.pr?.state === "MERGED";
-    default:
-      return true;
-  }
-}
-
-export function groupKeyFor(row: PullRequestRow, mode: GroupMode): string {
-  if (mode === "repo") {
-    if (row.pr) {
-      return (
-        row.pr.source_repo || row.pr.repo_name || row.issue?.repo || "No repo"
-      );
-    }
-    return row.issue?.repo || "No repo";
-  }
-  if (mode === "epic") return row.issue?.parent_title || "No epic";
-  return "";
-}
+type GroupMode = "none" | "repo" | "epic";
 
 /** Map GitHub PR metadata to a display label and CSS state key. */
 export function prStateFromGithub(
@@ -165,6 +104,19 @@ export function stubPullRequestFromSubject(
   };
 }
 
+export function groupKeyFor(row: PullRequestRow, mode: GroupMode): string {
+  if (mode === "repo") {
+    if (row.pr) {
+      return (
+        row.pr.source_repo || row.pr.repo_name || row.issue?.repo || "No repo"
+      );
+    }
+    return row.issue?.repo || "No repo";
+  }
+  if (mode === "epic") return row.issue?.parent_title || "No epic";
+  return "";
+}
+
 /**
  * Build the review queue: loom issues first (status=review or PR-linked),
  * enriched with GitHub metadata by owner/repo#number; then unlinked GitHub
@@ -206,57 +158,20 @@ export function buildPullRequestRows(
   });
 }
 
-/** Leading pull-request glyph for a row. */
-function PRGlyph(): JSX.Element {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <circle cx="4" cy="4" r="1.7" stroke="currentColor" strokeWidth="1.4" />
-      <circle cx="4" cy="12" r="1.7" stroke="currentColor" strokeWidth="1.4" />
-      <circle cx="12" cy="12" r="1.7" stroke="currentColor" strokeWidth="1.4" />
-      <path
-        d="M4 5.7v4.6M12 10.3V8a2 2 0 0 0-2-2H7"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-/** Small avatar circle for an assignee or PR author. */
-function Avatar({ name }: { name: string }): JSX.Element {
-  const initial =
-    name
-      .replace(/^\[H\]\s*/, "")
-      .charAt(0)
-      .toUpperCase() || "?";
-  const color = getAvatarColor(name);
-  return (
-    <span
-      className={styles.avatar}
-      style={{
-        background: color,
-        color: shouldUseWhiteText(color) ? "#fff" : "#111",
-      }}
-      title={name}
-      aria-label={`Assignee ${name}`}
-    >
-      {initial}
-    </span>
-  );
-}
-
 export function PRsPage(): JSX.Element {
   const { issues } = useWorkspaceViewData();
-  const { pullRequests, warnings, loading, error } = usePullRequests({
+  const {
+    pullRequests,
+    warnings,
+    deliveryGroups,
+    deliveryGroupsHasMore,
+    standaloneContinuation,
+    loading,
+    error,
+    refetch,
+  } = usePullRequests({
     state: "all",
   });
-  const [filter, setFilter] = useState<PRFilter>("review");
-  const groupMode: GroupMode = "none";
-  const [query, setQuery] = useState("");
-  const [railQuery, setRailQuery] = useState("");
-  const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set());
-  const [selectedEpics, setSelectedEpics] = useState<Set<string>>(new Set());
   const [searchParams, setSearchParams] = useSearchParams();
   const reviewId = searchParams.get("review");
   const reviewPrParam = searchParams.get("review-pr");
@@ -268,190 +183,6 @@ export function PRsPage(): JSX.Element {
     () => buildPullRequestRows(issues, pullRequests),
     [issues, pullRequests],
   );
-
-  // GitHub metadata is an enrichment: a fetch error or a warning (e.g. the
-  // connector fell back to local gh, or a per-repo issue) degrades to a banner
-  // while loom-backed rows keep rendering. Warnings are already self-describing.
-  const githubWarning = error
-    ? `GitHub metadata unavailable: ${error.message}`
-    : warnings.length > 0
-      ? `${warnings[0]}${warnings.length > 1 ? ` (+${warnings.length - 1} more)` : ""}`
-      : null;
-
-  const openCount = useMemo(() => rows.filter(isOpenRow).length, [rows]);
-
-  const counts = useMemo(() => {
-    const c: Record<PRFilter, number> = {
-      all: 0,
-      review: 0,
-      merged: 0,
-    };
-    for (const row of rows) {
-      for (const f of FILTERS) {
-        if (matchesFilter(row, f.id)) c[f.id] += 1;
-      }
-    }
-    return c;
-  }, [rows]);
-
-  const repoFor = (row: PullRequestRow): string =>
-    row.pr?.source_repo || row.pr?.repo_name || row.issue?.repo || "No repo";
-  const epicFor = (row: PullRequestRow): string =>
-    row.issue?.parent_title || "No epic";
-
-  const repoOptions = useMemo(() => {
-    const countsByRepo = new Map<string, number>();
-    for (const row of rows) {
-      const repo = repoFor(row);
-      countsByRepo.set(repo, (countsByRepo.get(repo) ?? 0) + 1);
-    }
-    return [...countsByRepo.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [rows]);
-
-  const epicOptions = useMemo(() => {
-    const countsByEpic = new Map<string, number>();
-    for (const row of rows) {
-      const epic = epicFor(row);
-      countsByEpic.set(epic, (countsByEpic.get(epic) ?? 0) + 1);
-    }
-    return [...countsByEpic.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [rows]);
-
-  const filtered = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    return rows.filter((row) => {
-      if (!matchesFilter(row, filter)) return false;
-      const repo = repoFor(row);
-      const epic = epicFor(row);
-      if (selectedRepos.size > 0 && !selectedRepos.has(repo)) return false;
-      if (selectedEpics.size > 0 && !selectedEpics.has(epic)) return false;
-      if (!normalizedQuery) return true;
-      const searchable = [
-        row.pr?.title,
-        row.pr?.number,
-        row.issue?.title,
-        row.issue?.id,
-        repo,
-        epic,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return searchable.includes(normalizedQuery);
-    });
-  }, [filter, query, rows, selectedEpics, selectedRepos]);
-
-  const toggleSelection = (
-    value: string,
-    setSelection: Dispatch<SetStateAction<Set<string>>>,
-  ): void => {
-    setSelection((current) => {
-      const next = new Set(current);
-      if (next.has(value)) next.delete(value);
-      else next.add(value);
-      return next;
-    });
-  };
-
-  const groups = useMemo(() => {
-    if (groupMode === "none") return null;
-    const map = new Map<string, PullRequestRow[]>();
-    for (const row of filtered) {
-      const key = groupKeyFor(row, groupMode);
-      const bucket = map.get(key);
-      if (bucket) bucket.push(row);
-      else map.set(key, [row]);
-    }
-    return [...map.entries()];
-  }, [filtered, groupMode]);
-
-  const openReview = (row: PullRequestRow): void => {
-    if (row.issue) {
-      setSearchParams({ review: row.issue.id });
-      return;
-    }
-    if (row.pr) {
-      const ref = prReviewRef(row.pr);
-      if (ref) {
-        setSearchParams({ "review-pr": ref });
-        return;
-      }
-      window.open(row.pr.url, "_blank", "noopener,noreferrer");
-    }
-  };
-
-  function renderRow(row: PullRequestRow): JSX.Element {
-    const { pr, issue } = row;
-    const state = rowState(row);
-    const showRepo =
-      groupMode !== "repo" && Boolean(pr?.repo_name || issue?.repo);
-    const showEpic = groupMode !== "epic" && Boolean(issue?.parent_title);
-    const avatarName = issue?.assignee || pr?.author_login;
-    const title = pr?.title || issue?.title || "Untitled pull request";
-    const handleKeyDown = (event: KeyboardEvent<HTMLLIElement>) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      openReview(row);
-    };
-
-    return (
-      <li
-        key={pr?.url ?? issue?.id}
-        className={styles.row}
-        role="button"
-        tabIndex={0}
-        aria-label={`Review ${title}`}
-        onClick={() => openReview(row)}
-        onKeyDown={handleKeyDown}
-      >
-        <span className={styles.rowIcon} aria-hidden="true">
-          <PRGlyph />
-        </span>
-        <div className={styles.rowMain}>
-          <span className={styles.rowHead}>
-            {pr && <code className={styles.key}>#{pr.number}</code>}
-            <span className={styles.status} data-pr-state={state.key}>
-              {state.label}
-            </span>
-            {showRepo && (
-              <span className={styles.repoChip}>
-                {pr?.repo_name || issue?.repo}
-              </span>
-            )}
-            {showEpic && (
-              <span
-                className={styles.epicChip}
-                title={issue?.parent_title ?? ""}
-              >
-                {issue?.parent_title}
-              </span>
-            )}
-            {issue && (
-              <span className={styles.ticketChip} title={issue.id}>
-                {issue.id}
-              </span>
-            )}
-            {!issue && pr && (
-              <span className={styles.ticketChip} title="No linked loom issue">
-                Unlinked
-              </span>
-            )}
-          </span>
-          <span className={styles.rowTitle}>{title}</span>
-        </div>
-        <div className={styles.rowRight}>
-          {avatarName ? (
-            <Avatar name={avatarName} />
-          ) : (
-            <span className={styles.avatarEmpty} aria-label="Unassigned" />
-          )}
-          <span className={styles.chevron} aria-hidden="true">
-            ›
-          </span>
-        </div>
-      </li>
-    );
-  }
 
   const reviewIssue = reviewId
     ? issues.find((i) => i.id === reviewId)
@@ -493,9 +224,6 @@ export function PRsPage(): JSX.Element {
     : undefined;
 
   if (reviewPrParam && (reviewPrRow?.pr || reviewPrSubject)) {
-    // Prefer the list-backed PR when available (real title/state). Otherwise
-    // mount immediately from the deep-link subject so kanban → review does not
-    // flash the PR list while usePullRequests is still cold.
     const pullRequest =
       reviewPrRow?.pr ?? stubPullRequestFromSubject(reviewPrSubject!);
     const linkedIssue = reviewPrRow?.issue ?? reviewPrLinkedIssue;
@@ -523,218 +251,25 @@ export function PRsPage(): JSX.Element {
   }
 
   return (
-    <div className={styles.page}>
-      <header className={styles.header}>
-        <h1 className={styles.title}>Pull Requests</h1>
-        <p className={styles.subtitle}>
-          {loading && rows.length === 0 ? (
-            <>Loading pull requests…</>
-          ) : rows.length > 0 ? (
-            <>
-              <strong className={styles.subtitleCount}>{openCount}</strong> open
-              {" · "}
-              <strong className={styles.subtitleCount}>
-                {counts.review}
-              </strong>{" "}
-              awaiting review
-            </>
-          ) : (
-            <>Review-stage tasks and GitHub pull requests in this workspace.</>
-          )}
-        </p>
-      </header>
-
-      {githubWarning && (
-        <p
-          className={styles.githubWarning}
-          role="status"
-          data-testid="prs-github-warning"
-        >
-          {githubWarning}
-        </p>
-      )}
-
-      {!loading && rows.length === 0 ? (
-        <div className={styles.empty}>
-          <p className={styles.emptyTitle}>No pull requests</p>
-          <p className={styles.emptyHint}>
-            When a task moves to review or an agent opens a PR on GitHub, it
-            appears here for review.
-          </p>
-        </div>
-      ) : rows.length > 0 ? (
-        <div className={styles.queueLayout}>
-          <aside
-            className={styles.filterRail}
-            aria-label="Pull request filters"
-          >
-            <label className={styles.railSearch}>
-              <span aria-hidden="true">⌕</span>
-              <input
-                type="search"
-                value={railQuery}
-                onChange={(event) => setRailQuery(event.target.value)}
-                placeholder="Filter repos & epics…"
-                aria-label="Filter repositories and epics"
-              />
-            </label>
-
-            <section className={styles.railSection}>
-              <h2 className={styles.railHeading}>View</h2>
-              <div
-                className={styles.filterPills}
-                role="tablist"
-                aria-label="Filter pull requests"
-              >
-                {FILTERS.map((f) => {
-                  const isActive = filter === f.id;
-                  return (
-                    <button
-                      key={f.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={isActive}
-                      className={styles.pill}
-                      data-active={isActive || undefined}
-                      onClick={() => setFilter(f.id)}
-                    >
-                      {f.label}
-                      <span className={styles.pillCount}>{counts[f.id]}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-
-            <section className={styles.railSection}>
-              <header className={styles.railSectionHead}>
-                <h2 className={styles.railHeading}>Repos</h2>
-                {selectedRepos.size > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedRepos(new Set())}
-                  >
-                    Clear
-                  </button>
-                )}
-              </header>
-              <div className={styles.checkList}>
-                {repoOptions
-                  .filter(([repo]) =>
-                    repo.toLowerCase().includes(railQuery.trim().toLowerCase()),
-                  )
-                  .map(([repo, count]) => (
-                    <button
-                      key={repo}
-                      type="button"
-                      className={styles.checkRow}
-                      aria-pressed={selectedRepos.has(repo)}
-                      onClick={() => toggleSelection(repo, setSelectedRepos)}
-                    >
-                      <span className={styles.checkbox} aria-hidden="true">
-                        {selectedRepos.has(repo) ? "✓" : ""}
-                      </span>
-                      <span className={styles.checkLabel}>{repo}</span>
-                      <span className={styles.checkCount}>{count}</span>
-                    </button>
-                  ))}
-              </div>
-            </section>
-
-            <section className={styles.railSection}>
-              <header className={styles.railSectionHead}>
-                <h2 className={styles.railHeading}>Epics</h2>
-                {selectedEpics.size > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedEpics(new Set())}
-                  >
-                    Clear
-                  </button>
-                )}
-              </header>
-              <div className={styles.checkList}>
-                {epicOptions
-                  .filter(([epic]) =>
-                    epic.toLowerCase().includes(railQuery.trim().toLowerCase()),
-                  )
-                  .map(([epic, count]) => (
-                    <button
-                      key={epic}
-                      type="button"
-                      className={styles.checkRow}
-                      aria-pressed={selectedEpics.has(epic)}
-                      onClick={() => toggleSelection(epic, setSelectedEpics)}
-                    >
-                      <span className={styles.checkbox} aria-hidden="true">
-                        {selectedEpics.has(epic) ? "✓" : ""}
-                      </span>
-                      <span className={styles.checkLabel}>{epic}</span>
-                      <span className={styles.checkCount}>{count}</span>
-                    </button>
-                  ))}
-              </div>
-            </section>
-          </aside>
-
-          <main className={styles.listPane}>
-            <div className={styles.toolbar}>
-              <label className={styles.listSearch}>
-                <span aria-hidden="true">⌕</span>
-                <input
-                  type="search"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search pull requests…"
-                  aria-label="Search pull requests"
-                />
-              </label>
-              <span className={styles.resultCount}>
-                {filtered.length} result{filtered.length === 1 ? "" : "s"}
-              </span>
-            </div>
-
-            {filtered.length === 0 ? (
-              <div className={styles.empty}>
-                <p className={styles.emptyTitle}>Nothing here</p>
-                <p className={styles.emptyHint}>
-                  No pull requests match this filter.
-                </p>
-              </div>
-            ) : groups ? (
-              <div
-                className={styles.scrollRegion}
-                role="region"
-                aria-label="Pull request list"
-              >
-                <div className={styles.groups}>
-                  {groups.map(([key, groupRows]) => (
-                    <section key={key} className={styles.group}>
-                      <header className={styles.groupHeader}>
-                        <span className={styles.groupName}>{key}</span>
-                        <span className={styles.groupCount}>
-                          {groupRows.length}
-                        </span>
-                      </header>
-                      <ul className={styles.list}>
-                        {groupRows.map(renderRow)}
-                      </ul>
-                    </section>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div
-                className={styles.scrollRegion}
-                role="region"
-                aria-label="Pull request list"
-              >
-                <ul className={styles.list}>{filtered.map(renderRow)}</ul>
-              </div>
-            )}
-          </main>
-        </div>
-      ) : null}
-    </div>
+    <StackedPRWorkspace
+      issues={issues}
+      pullRequests={pullRequests}
+      deliveryGroups={deliveryGroups}
+      deliveryGroupsHasMore={deliveryGroupsHasMore}
+      {...(standaloneContinuation ? { standaloneContinuation } : {})}
+      warnings={warnings}
+      loading={loading}
+      error={error}
+      onRefetch={refetch}
+      onOpenReview={({ issueId, reviewPr }) => {
+        if (issueId) {
+          setSearchParams({ review: issueId });
+          return;
+        }
+        if (reviewPr) {
+          setSearchParams({ "review-pr": reviewPr });
+        }
+      }}
+    />
   );
 }

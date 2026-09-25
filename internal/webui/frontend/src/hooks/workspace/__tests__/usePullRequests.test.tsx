@@ -46,6 +46,9 @@ describe("usePullRequests polling", () => {
     mocks.fetchPullRequests.mockResolvedValue({
       pullRequests: [],
       warnings: [],
+      deliveryGroups: [],
+      deliveryGroupsCount: 0,
+      deliveryGroupsHasMore: false,
     });
   });
 

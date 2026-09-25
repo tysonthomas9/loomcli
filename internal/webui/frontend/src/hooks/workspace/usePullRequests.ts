@@ -24,6 +24,10 @@ export interface UsePullRequestsReturn {
   pullRequests: GitPullRequest[];
   /** Per-repo listing failures; non-fatal (e.g. gh missing for one repo). */
   warnings: string[];
+  deliveryGroups: import("@/api/workspace/deliveryGroups").DeliveryGroupView[];
+  deliveryGroupsHasMore: boolean;
+  deliveryGroupsNextCursor?: string;
+  standaloneContinuation?: import("@/api/workspace/pullRequests").StandalonePRContinuation;
   loading: boolean;
   error: Error | null;
   refetch: () => Promise<void>;
@@ -36,6 +40,16 @@ export function usePullRequests({
   const { workspaceId } = useWorkspaceContext();
   const [pullRequests, setPullRequests] = useState<GitPullRequest[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [deliveryGroups, setDeliveryGroups] = useState<
+    import("@/api/workspace/deliveryGroups").DeliveryGroupView[]
+  >([]);
+  const [deliveryGroupsHasMore, setDeliveryGroupsHasMore] = useState(false);
+  const [deliveryGroupsNextCursor, setDeliveryGroupsNextCursor] = useState<
+    string | undefined
+  >();
+  const [standaloneContinuation, setStandaloneContinuation] = useState<
+    import("@/api/workspace/pullRequests").StandalonePRContinuation | undefined
+  >();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   // Monotonic sequence: bumped on every fetch and on effect cleanup, so a
@@ -65,6 +79,10 @@ export function usePullRequests({
       if (seq === requestSeqRef.current) {
         setPullRequests(result.pullRequests);
         setWarnings(result.warnings);
+        setDeliveryGroups(result.deliveryGroups);
+        setDeliveryGroupsHasMore(result.deliveryGroupsHasMore);
+        setDeliveryGroupsNextCursor(result.deliveryGroupsNextCursor);
+        setStandaloneContinuation(result.standaloneContinuation);
         setError(null);
         pollDelayRef.current = POLL_INTERVAL;
       }
@@ -89,6 +107,10 @@ export function usePullRequests({
   useEffect(() => {
     setPullRequests([]);
     setWarnings([]);
+    setDeliveryGroups([]);
+    setDeliveryGroupsHasMore(false);
+    setDeliveryGroupsNextCursor(undefined);
+    setStandaloneContinuation(undefined);
     setError(null);
     pollDelayRef.current = POLL_INTERVAL;
   }, [workspaceId, state]);
@@ -133,5 +155,15 @@ export function usePullRequests({
     };
   }, [enabled, doFetch, invalidatePendingRequest]);
 
-  return { pullRequests, warnings, loading, error, refetch: doFetch };
+  return {
+    pullRequests,
+    warnings,
+    deliveryGroups,
+    deliveryGroupsHasMore,
+    ...(deliveryGroupsNextCursor ? { deliveryGroupsNextCursor } : {}),
+    ...(standaloneContinuation ? { standaloneContinuation } : {}),
+    loading,
+    error,
+    refetch: doFetch,
+  };
 }

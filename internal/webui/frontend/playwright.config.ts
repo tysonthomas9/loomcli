@@ -111,7 +111,6 @@ const QUARANTINED_SPECS = [
   "**/monitor-visual-regression.spec.ts",
   "**/multi-workspace-monitoring.spec.ts",
   "**/priority-dropdown.spec.ts",
-  "**/prs-page.spec.ts",
   "**/repo-selector.spec.ts",
   "**/search.spec.ts",
   "**/search-filter-journey.spec.ts",
@@ -191,7 +190,7 @@ export default defineConfig({
   snapshotPathTemplate: "{snapshotDir}/{testFilePath}/{arg}{ext}",
 
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: frontendBaseURL,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     video: useFailureVideo,

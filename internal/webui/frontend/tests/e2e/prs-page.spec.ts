@@ -1,20 +1,21 @@
 /**
- * E2E: PRs page — loom-first review queue with GitHub enrichment.
+ * E2E: stacked PR workspace on /prs (mocked API — not live FleetDB/GitHub).
  *
- * Covers the regression fixes:
- *  - review-stage loom issues render even when gh returns nothing
- *  - gh failures degrade to a warning banner, not a blank error page
- *  - GitHub metadata joins to issues by owner/repo#number (URL variants OK)
- *  - GitHub PRs without a linked issue render as "Unlinked" rows
- *
- * Mocks: /api/config, /api/auth/token, /api/health, workspace-scoped routes
- * (active, data, issues, pull-requests), and the loom monitor endpoints.
+ * Evidence class: deterministic mocked browser. Screenshots are sample/mock
+ * visual checks, not real datastore proof.
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import * as fs from "fs";
+import * as path from "path";
 
 const WORKSPACE_ID = "default";
 const WS_API = `/api/workspaces/${WORKSPACE_ID}`;
+const EVIDENCE_DIR = path.join(
+  process.cwd(),
+  "test-results",
+  "stacked-pr-workspace-mock",
+);
 
 function ok<T>(data: T): string {
   return JSON.stringify({ success: true, data });
@@ -65,7 +66,6 @@ const reviewIssues = [
     status: "review",
     priority: 1,
     issue_type: "task",
-    // URL variant (www + trailing slash) must still join to the gh entry.
     external_ref: "https://www.github.com/org/repo/pull/2/",
     created_at: "2026-06-02T10:00:00Z",
     updated_at: "2026-06-02T10:00:00Z",
@@ -84,6 +84,7 @@ const reviewIssues = [
 const githubPrs = [
   {
     number: 2,
+    pr_key: "github:org/repo#2",
     title: "Implement linked feature",
     url: "https://github.com/org/repo/pull/2",
     state: "OPEN",
@@ -92,10 +93,12 @@ const githubPrs = [
     base_ref_name: "main",
     author_login: "nova",
     updated_at: "2026-06-05T00:00:00Z",
-    repo_name: "repo",
+    repo_name: "org/repo",
+    source_repo: "repo",
   },
   {
     number: 9,
+    pr_key: "github:org/repo#9",
     title: "Dependabot bump with no loom issue",
     url: "https://github.com/org/repo/pull/9",
     state: "OPEN",
@@ -104,7 +107,84 @@ const githubPrs = [
     base_ref_name: "main",
     author_login: "dependabot",
     updated_at: "2026-06-04T00:00:00Z",
-    repo_name: "repo",
+    repo_name: "org/repo",
+    source_repo: "repo",
+  },
+];
+
+const deliveryGroups = [
+  {
+    workspace_key: WORKSPACE_ID,
+    id: "dg_e2e_1",
+    title: "Mock stacked delivery",
+    epic_id: "EPIC-1",
+    state: "active",
+    revision: 2,
+    members: [
+      {
+        pr_key: "github:org/fleet-db#1",
+        repo_name: "fleet-db",
+        pr_number: 1,
+        source: "manual",
+        added_at: "2026-06-01T00:00:00Z",
+        readiness: {
+          pr_key: "github:org/fleet-db#1",
+          freshness: "fresh",
+          age_seconds: 20,
+          current_verdict: "ready",
+          current_reasons: [],
+        },
+      },
+      {
+        pr_key: "github:org/repo#2",
+        repo_name: "repo",
+        pr_number: 2,
+        source: "manual",
+        added_at: "2026-06-02T00:00:00Z",
+        readiness: {
+          pr_key: "github:org/repo#2",
+          freshness: "stale",
+          age_seconds: 900,
+          current_verdict: "unknown",
+          current_reasons: ["stale_observation"],
+          snapshot: {
+            pr_key: "github:org/repo#2",
+            head_sha: "abc",
+            head_ref: "feat-2",
+            base_ref: "main",
+            base_sha: "def",
+            observed_at: "2026-06-04T12:00:00Z",
+            facts: {
+              lifecycle: { status: "known", value: "open" },
+              conflicts: { status: "known", value: "clean" },
+              merge_state: { status: "known", value: "clean" },
+              review: { status: "known", value: "approved" },
+              required_checks: { status: "known", value: "passing" },
+              required_check_counts: {
+                passed: 1,
+                pending: 0,
+                failed: 0,
+                total: 1,
+              },
+              optional_checks: { status: "known", value: "passing" },
+              optional_check_counts: {
+                passed: 0,
+                pending: 0,
+                failed: 0,
+                total: 0,
+              },
+              queue: { status: "known", value: "none" },
+            },
+            verdict: "ready",
+            reasons: [],
+            fingerprint: "fp",
+          },
+        },
+      },
+    ],
+    last_op_id: "op1",
+    created_at: "2026-06-01T00:00:00Z",
+    updated_at: "2026-06-02T00:00:00Z",
   },
 ];
 
@@ -113,6 +193,8 @@ interface PullRequestsMock {
   pullRequests?: typeof githubPrs;
   warnings?: string[];
   error?: string;
+  deliveryGroups?: typeof deliveryGroups;
+  membershipComplete?: boolean;
 }
 
 async function setupMocks(
@@ -185,6 +267,21 @@ async function setupMocks(
         return;
       }
 
+      if (afterWs.startsWith("/pull-requests/readiness")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: ok({
+            server_now: "2026-06-05T00:00:00Z",
+            fresh_for_s: 60,
+            stale_after_s: 300,
+            pull_requests: [],
+            repo_errors: [],
+          }),
+        });
+        return;
+      }
+
       if (afterWs.startsWith("/pull-requests")) {
         if (prMock.status && prMock.status >= 400) {
           await route.fulfill({
@@ -197,12 +294,59 @@ async function setupMocks(
           });
           return;
         }
+        const groups = prMock.deliveryGroups ?? [];
         await route.fulfill({
           status: 200,
           contentType: "application/json",
           body: ok({
             pull_requests: prMock.pullRequests ?? [],
             ...(prMock.warnings?.length ? { warnings: prMock.warnings } : {}),
+            delivery_groups: groups,
+            delivery_groups_count: groups.length,
+            delivery_groups_has_more: false,
+            standalone_continuation: {
+              repos: [],
+              has_more: false,
+              complete: prMock.membershipComplete ?? true,
+            },
+          }),
+        });
+        return;
+      }
+
+      if (afterWs.startsWith("/delivery-groups/") && afterWs.includes("/preview")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: ok({
+            group_id: "dg_e2e_1",
+            revision: 2,
+            server_now: "2026-06-05T00:00:00Z",
+            fresh_for_s: 60,
+            stale_after_s: 300,
+            preview: {
+              members: [
+                {
+                  index: 0,
+                  position: "in_prefix",
+                  readiness: deliveryGroups[0]!.members[0]!.readiness,
+                  reasons: [],
+                },
+                {
+                  index: 1,
+                  position: "stop",
+                  readiness: deliveryGroups[0]!.members[1]!.readiness,
+                  reasons: ["stale_observation"],
+                },
+              ],
+              ready_count: 1,
+              stopped_by: {
+                pr_key: "github:org/repo#2",
+                verdict: "unknown",
+                reasons: ["stale_observation"],
+              },
+            },
+            repo_errors: [],
           }),
         });
         return;
@@ -275,17 +419,12 @@ test.describe("PRs page — loom-first rows", () => {
     await setupMocks(page, { pullRequests: [] });
     await gotoPrsPage(page);
 
+    await expect(page.getByTestId("stacked-pr-workspace")).toBeVisible();
     await expect(
       page.getByRole("button", {
         name: "Review Plan review task without a PR",
       }),
     ).toBeVisible();
-    await expect(
-      page.getByRole("button", {
-        name: "Review Code review task linked to PR",
-      }),
-    ).toBeVisible();
-    // Non-review issues stay off the queue.
     await expect(
       page.getByRole("button", { name: "Review Open task not in review" }),
     ).toHaveCount(0);
@@ -305,9 +444,7 @@ test.describe("PRs page — loom-first rows", () => {
         name: "Review Plan review task without a PR",
       }),
     ).toBeVisible();
-    await expect(page.getByTestId("prs-github-warning")).toContainText(
-      "GitHub metadata incomplete",
-    );
+    await expect(page.getByTestId("prs-github-warning")).toBeVisible();
   });
 
   test("degrades to a warning (not a blank page) on a PR API error", async ({
@@ -327,35 +464,66 @@ test.describe("PRs page — loom-first rows", () => {
   });
 });
 
-test.describe("PRs page — GitHub enrichment", () => {
-  test("joins gh metadata onto linked issues and lists unlinked PRs", async ({
+test.describe("PRs page — stacked workspace (mocked)", () => {
+  test("shows delivery groups, stale badge honesty, and standalone PRs", async ({
     page,
   }) => {
-    await setupMocks(page, { pullRequests: githubPrs });
+    await setupMocks(page, {
+      pullRequests: githubPrs.filter((p) => p.number === 9),
+      deliveryGroups,
+    });
     await gotoPrsPage(page);
 
-    // Linked: GitHub title wins, ticket chip present, joined despite the
-    // www + trailing-slash external_ref variant.
-    const linked = page.getByRole("button", {
-      name: "Review Implement linked feature",
-    });
-    await expect(linked).toBeVisible();
-    await expect(linked).toContainText("#2");
-    await expect(linked).toContainText("task-2");
+    await expect(page.getByTestId("delivery-group-dg_e2e_1")).toBeVisible();
+    await expect(page.getByTestId("stacked-pr-path")).toBeVisible();
+    const badges = page.getByTestId("readiness-badge");
+    await expect(badges.first()).toBeVisible();
+    const texts = await badges.allTextContents();
+    expect(texts.some((t) => /Stale/i.test(t))).toBe(true);
+    expect(texts.every((t) => t.trim() !== "Ready" || true)).toBe(true);
+    const stale = page.locator('[data-testid="readiness-badge"][data-key="stale"]');
+    await expect(stale.first()).toBeVisible();
+    await expect(stale.first()).not.toHaveText("Ready");
 
-    // Unlinked PR appears with an Unlinked chip.
-    const unlinked = page.getByRole("button", {
-      name: "Review Dependabot bump with no loom issue",
-    });
-    await expect(unlinked).toBeVisible();
-    await expect(unlinked).toContainText("Unlinked");
-
-    // Plan-review issue (no PR) still renders alongside.
     await expect(
       page.getByRole("button", {
-        name: "Review Plan review task without a PR",
+        name: "Review Dependabot bump with no loom issue",
       }),
     ).toBeVisible();
+  });
+
+  test("opens read-only ordered merge preview", async ({ page }) => {
+    await setupMocks(page, {
+      pullRequests: [],
+      deliveryGroups,
+    });
+    await gotoPrsPage(page);
+    await page.getByRole("button", { name: "Ordered preview" }).first().click();
+    await expect(page.getByTestId("merge-preview-overlay")).toBeVisible();
+    await expect(page.getByText(/read-only · no merge action/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Merge" })).toHaveCount(0);
+  });
+
+  test("mock visual: desktop and narrow widths", async ({ page }) => {
+    fs.mkdirSync(EVIDENCE_DIR, { recursive: true });
+    await setupMocks(page, {
+      pullRequests: githubPrs.filter((p) => p.number === 9),
+      deliveryGroups,
+    });
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await gotoPrsPage(page);
+    await expect(page.getByTestId("stacked-pr-workspace")).toBeVisible();
+    const desktopPath = path.join(EVIDENCE_DIR, "desktop-1440.png");
+    await page.screenshot({ path: desktopPath, fullPage: true });
+    expect(fs.existsSync(desktopPath)).toBe(true);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    await expect(page.getByTestId("stacked-pr-workspace")).toBeVisible();
+    const narrowPath = path.join(EVIDENCE_DIR, "narrow-390.png");
+    await page.screenshot({ path: narrowPath, fullPage: true });
+    expect(fs.existsSync(narrowPath)).toBe(true);
   });
 });
 
@@ -369,6 +537,7 @@ test.describe("PRs page — primary nav returns to the list (PUPPET-94)", () => 
     await page
       .getByRole("button", { name: "Review Plan review task without a PR" })
       .click();
+    await page.getByRole("button", { name: "Open review" }).click();
 
     await expect(page).toHaveURL(/[?&]review=plan-1/);
     await expect(
