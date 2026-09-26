@@ -7,9 +7,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
-// The v0.8.4 split is silent: a policy written when the acceptance screen still
-// arrived as `trust_prompt` parses and validates exactly as before, and only
-// stops working at launch. These cases pin when the operator is told.
 func TestInputPolicyBypassWarning(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -103,8 +100,6 @@ func TestInputPolicyBypassWarning(t *testing.T) {
 			if !tc.warn {
 				return
 			}
-			// The warning has to name the fix, or it is just noise at a
-			// terminal the operator will scroll past.
 			for _, want := range []string{"bypass_acceptance=allow", "v0.8.4"} {
 				if !strings.Contains(got, want) {
 					t.Errorf("warning does not mention %q:\n%s", want, got)
@@ -114,8 +109,6 @@ func TestInputPolicyBypassWarning(t *testing.T) {
 	}
 }
 
-// The warning must survive the spelling an operator actually types, since that
-// is the path `loom role set` takes.
 func TestInputPolicyBypassWarningFromParsedSpec(t *testing.T) {
 	t.Parallel()
 	policy, err := parseInputPolicySpec([]string{"default=deny", "trust_prompt=allow", "approval_prompt=allow"})
