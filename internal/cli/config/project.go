@@ -90,7 +90,9 @@ type RoleConfig struct {
 	// MaxRunDuration caps a single supervised run's wall-clock age, in
 	// seconds. Nil inherits the daemon-wide default; <= 0 disables the cap for
 	// this role. See supervisor/run_duration.go.
-	MaxRunDuration *int `yaml:"max_run_duration,omitempty"`
+	MaxRunDuration *int     `yaml:"max_run_duration,omitempty"`
+	Labels         []string `yaml:"labels,omitempty"`
+	ExcludeLabels  []string `yaml:"exclude_labels,omitempty"`
 }
 
 // AgentEntry defines a single agent assignment.
@@ -334,6 +336,8 @@ func roleConfigFromDomain(r *domain.Role) RoleConfig {
 		PathPatterns:   append([]string(nil), r.PathPatterns...),
 		Skills:         append([]string(nil), r.Skills...),
 		InputPolicy:    r.InputPolicy.Clone(),
+		Labels:         append([]string(nil), r.Labels...),
+		ExcludeLabels:  append([]string(nil), r.ExcludeLabels...),
 		MaxPriority:    cloneIntPtr(r.MaxPriority),
 		MaxConcurrency: cloneIntPtr(r.MaxConcurrency),
 		ReadOnly:       r.ReadOnly,

@@ -23,6 +23,8 @@ type RoleCreate struct {
 	PathPatterns   []string
 	Skills         []string
 	InputPolicy    *domain.RoleInputPolicy
+	Labels         []string
+	ExcludeLabels  []string
 	MaxPriority    *int
 	MaxConcurrency *int
 	ReadOnly       bool
@@ -49,6 +51,8 @@ type RoleUpdate struct {
 	// optional pointer fields: nil leaves it alone, &nil clears it back to the
 	// deny-everything zero value, and a pointer to a non-nil policy sets it.
 	InputPolicy    **domain.RoleInputPolicy
+	Labels         *[]string
+	ExcludeLabels  *[]string
 	MaxPriority    **int
 	MaxConcurrency **int
 	ReadOnly       *bool

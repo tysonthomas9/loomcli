@@ -42,6 +42,23 @@ func TestBuildRouterTaskCheck_NonNilWithMaxPriority(t *testing.T) {
 	}
 }
 
+// TestBuildRouterTaskCheck_NonNilWithExcludeLabelsOnly verifies non-nil returned
+// when a role has ONLY ExcludeLabels set -- mirrors the fix in
+// internal/cli/task_router.go's HasRoutingConstraints guard for automode's
+// independent copy of BuildRouterTaskCheck.
+func TestBuildRouterTaskCheck_NonNilWithExcludeLabelsOnly(t *testing.T) {
+	rc := RoleConfig{
+		Description:   "label gated role",
+		ExcludeLabels: []string{"plan-reviewed"},
+	}
+	ae := AgentEntry{Worktree: "falcon", Role: "task"}
+
+	check := BuildRouterTaskCheck(rc, ae, "")
+	if check == nil {
+		t.Error("BuildRouterTaskCheck() should return non-nil for role with only ExcludeLabels set")
+	}
+}
+
 // TestBuildRouterTaskCheck_NilWithOnlyPathPatterns verifies PathPatterns alone does NOT activate the router.
 func TestBuildRouterTaskCheck_NilWithOnlyPathPatterns(t *testing.T) {
 	// RoleConfig-level PathPatterns

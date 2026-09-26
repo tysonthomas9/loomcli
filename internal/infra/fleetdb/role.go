@@ -42,6 +42,8 @@ type roleWire struct {
 	MaxRunDuration *int                    `json:"max_run_duration,omitempty"`
 	CreatedAt      time.Time               `json:"created_at"`
 	UpdatedAt      time.Time               `json:"updated_at"`
+	Labels         []string                `json:"labels,omitempty"`
+	ExcludeLabels  []string                `json:"exclude_labels,omitempty"`
 }
 
 func (r roleWire) toDomain() *domain.Role {
@@ -60,6 +62,8 @@ func (r roleWire) toDomain() *domain.Role {
 		PathPatterns:   r.PathPatterns,
 		Skills:         r.Skills,
 		InputPolicy:    r.InputPolicy.Clone(),
+		Labels:         r.Labels,
+		ExcludeLabels:  r.ExcludeLabels,
 		MaxPriority:    r.MaxPriority,
 		MaxConcurrency: r.MaxConcurrency,
 		ReadOnly:       r.ReadOnly,
@@ -72,29 +76,37 @@ func (r roleWire) toDomain() *domain.Role {
 	}
 }
 
-func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Role, error) {
-	body := struct {
-		Name           string                  `json:"name"`
-		Kind           string                  `json:"kind,omitempty"`
-		Description    string                  `json:"description,omitempty"`
-		Prompt         string                  `json:"prompt,omitempty"`
-		PromptFile     string                  `json:"prompt_file,omitempty"`
-		Model          string                  `json:"model,omitempty"`
-		TaskFilter     string                  `json:"task_filter,omitempty"`
-		Executor       string                  `json:"executor,omitempty"`
-		Backend        string                  `json:"backend,omitempty"`
-		Effort         string                  `json:"effort,omitempty"`
-		PathPatterns   []string                `json:"path_patterns,omitempty"`
-		Skills         []string                `json:"skills,omitempty"`
-		InputPolicy    *domain.RoleInputPolicy `json:"input_policy,omitempty"`
-		MaxPriority    *int                    `json:"max_priority,omitempty"`
-		MaxConcurrency *int                    `json:"max_concurrency,omitempty"`
-		ReadOnly       bool                    `json:"read_only,omitempty"`
-		AllowedTools   []string                `json:"allowed_tools,omitempty"`
-		DeniedTools    []string                `json:"denied_tools,omitempty"`
-		MaxBudgetUSD   *float64                `json:"max_budget_usd,omitempty"`
-		MaxRunDuration *int                    `json:"max_run_duration,omitempty"`
-	}{
+// roleCreateBody is the create wire payload. It lives outside Create because
+// the struct literal alone is longer than the function-length limit — the
+// field list grew on two axes at once (label routing here, input policy and
+// the run caps on v5).
+type roleCreateBody struct {
+	Name           string                  `json:"name"`
+	Kind           string                  `json:"kind,omitempty"`
+	Description    string                  `json:"description,omitempty"`
+	Prompt         string                  `json:"prompt,omitempty"`
+	PromptFile     string                  `json:"prompt_file,omitempty"`
+	Model          string                  `json:"model,omitempty"`
+	TaskFilter     string                  `json:"task_filter,omitempty"`
+	Executor       string                  `json:"executor,omitempty"`
+	Backend        string                  `json:"backend,omitempty"`
+	Effort         string                  `json:"effort,omitempty"`
+	PathPatterns   []string                `json:"path_patterns,omitempty"`
+	Skills         []string                `json:"skills,omitempty"`
+	InputPolicy    *domain.RoleInputPolicy `json:"input_policy,omitempty"`
+	MaxPriority    *int                    `json:"max_priority,omitempty"`
+	MaxConcurrency *int                    `json:"max_concurrency,omitempty"`
+	ReadOnly       bool                    `json:"read_only,omitempty"`
+	AllowedTools   []string                `json:"allowed_tools,omitempty"`
+	DeniedTools    []string                `json:"denied_tools,omitempty"`
+	MaxBudgetUSD   *float64                `json:"max_budget_usd,omitempty"`
+	MaxRunDuration *int                    `json:"max_run_duration,omitempty"`
+	Labels         []string                `json:"labels,omitempty"`
+	ExcludeLabels  []string                `json:"exclude_labels,omitempty"`
+}
+
+func newRoleCreateBody(in store.RoleCreate) roleCreateBody {
+	return roleCreateBody{
 		Name:           in.Name,
 		Kind:           in.Kind,
 		Description:    in.Description,
@@ -108,6 +120,8 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 		PathPatterns:   in.PathPatterns,
 		Skills:         in.Skills,
 		InputPolicy:    in.InputPolicy,
+		Labels:         in.Labels,
+		ExcludeLabels:  in.ExcludeLabels,
 		MaxPriority:    in.MaxPriority,
 		MaxConcurrency: in.MaxConcurrency,
 		ReadOnly:       in.ReadOnly,
@@ -116,8 +130,11 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 		MaxBudgetUSD:   in.MaxBudgetUSD,
 		MaxRunDuration: in.MaxRunDuration,
 	}
+}
+
+func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Role, error) {
 	var resp roleWire
-	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/roles", body, &resp); err != nil {
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/roles", newRoleCreateBody(in), &resp); err != nil {
 		return nil, err
 	}
 	return resp.toDomain(), nil
@@ -164,6 +181,8 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 		Effort              *string                 `json:"effort,omitempty"`
 		PathPatterns        *[]string               `json:"path_patterns,omitempty"`
 		Skills              *[]string               `json:"skills,omitempty"`
+		Labels              *[]string               `json:"labels,omitempty"`
+		ExcludeLabels       *[]string               `json:"exclude_labels,omitempty"`
 		InputPolicy         *domain.RoleInputPolicy `json:"input_policy,omitempty"`
 		ClearInputPolicy    bool                    `json:"clear_input_policy,omitempty"`
 		MaxPriority         *int                    `json:"max_priority,omitempty"`
@@ -178,20 +197,22 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 		MaxRunDuration      *int                    `json:"max_run_duration,omitempty"`
 		ClearMaxRunDuration bool                    `json:"clear_max_run_duration,omitempty"`
 	}{
-		Description:  patch.Description,
-		Kind:         patch.Kind,
-		Prompt:       patch.Prompt,
-		PromptFile:   patch.PromptFile,
-		Model:        patch.Model,
-		TaskFilter:   patch.TaskFilter,
-		Executor:     patch.Executor,
-		Backend:      patch.Backend,
-		Effort:       patch.Effort,
-		PathPatterns: patch.PathPatterns,
-		Skills:       patch.Skills,
-		ReadOnly:     patch.ReadOnly,
-		AllowedTools: patch.AllowedTools,
-		DeniedTools:  patch.DeniedTools,
+		Description:   patch.Description,
+		Kind:          patch.Kind,
+		Prompt:        patch.Prompt,
+		PromptFile:    patch.PromptFile,
+		Model:         patch.Model,
+		TaskFilter:    patch.TaskFilter,
+		Executor:      patch.Executor,
+		Backend:       patch.Backend,
+		Effort:        patch.Effort,
+		PathPatterns:  patch.PathPatterns,
+		Skills:        patch.Skills,
+		ReadOnly:      patch.ReadOnly,
+		AllowedTools:  patch.AllowedTools,
+		DeniedTools:   patch.DeniedTools,
+		Labels:        patch.Labels,
+		ExcludeLabels: patch.ExcludeLabels,
 	}
 	// input_policy is `omitempty` on a pointer, so a &nil patch would serialize
 	// to nothing at all and read on the server as "leave it alone" — silently
