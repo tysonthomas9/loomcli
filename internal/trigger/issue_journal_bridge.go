@@ -83,13 +83,6 @@ const issueJournalReplayEnv = "LOOM_ISSUE_BRIDGE_REPLAY"
 // keeps failing is retried at most every 2^shift sweeps.
 const issueJournalMaxBackoffShift = 6
 
-// maxIssueJournalPagesPerSweep bounds how many journal pages one workspace may
-// drain in a single sweep. A server that keeps reporting has_more (a filtered
-// stream whose pages contain no matching events, a mis-sized limit) must never
-// hold the sweep loop hostage: on the cap the cursor is saved and the pass
-// returns, so the next tick resumes exactly where it stopped and the ticker —
-// not the journal — decides the request rate. Clock-free by construction, like
-// the failure backoff.
 const maxIssueJournalPagesPerSweep = 500
 
 // defaultIssueJournalActionAllowlist is the default set of journal actions the
@@ -148,16 +141,10 @@ type IssueJournalBridge struct {
 	// failures counts consecutive reader failures per workspace, driving the
 	// exponential skip backoff; reset on the first clean poll.
 	failures map[string]int
-	// stalls counts consecutive sweeps in which the journal cursor refused to
-	// advance while the reader still reported hasMore. It is deliberately
-	// SEPARATE from failures: a stalled server answers 200, so drainFrom's
-	// recordSuccess would wipe a shared counter every sweep and pin the backoff
-	// at one skipped sweep forever. Reset only by real cursor progress.
-	stalls map[string]int
+	stalls   map[string]int
 	// skipRemaining counts how many upcoming sweeps a workspace is still paused
 	// for by the failure backoff; decremented each pass, replenished on a fresh
-	// failure or stall (clock-free window — no wall clock needed in serve or
-	// tests).
+	// failure (clock-free window — no wall clock needed in serve or tests).
 	skipRemaining map[string]int
 }
 
@@ -239,12 +226,6 @@ func (b *IssueJournalBridge) bootstrap(ctx context.Context, ws string, out *Issu
 
 // journalTail pages the reader from the beginning purely to learn the latest
 // stream position, emitting nothing. The last batch's nextCursor is the tail.
-// It carries the same two liveness guards as drainFrom in fast-forward form —
-// it emits nothing, so the cursor precedence question does not arise: a page
-// whose nextCursor equals the cursor we asked with while hasMore stays true
-// makes no progress, and the page cap bounds an otherwise unbounded walk. Both
-// return the cursor reached so far rather than an error, so bootstrap still
-// records a resume position instead of re-walking the journal next sweep.
 func (b *IssueJournalBridge) journalTail(ctx context.Context, ws string) (string, error) {
 	cursor := ""
 	for pages := 0; ; pages++ {
@@ -277,26 +258,6 @@ func (b *IssueJournalBridge) journalTail(ctx context.Context, ws string) (string
 // durably handled the entry (success or dispatch-dedup), so a mid-batch Emit
 // failure resumes exactly there on the next pass without re-emitting handled
 // entries or skipping unhandled ones.
-//
-// CURSOR PRECEDENCE (three-way — the server cursor is a fallback for a fully
-// handled page, never a way to step over work):
-//
-//   - emitBatch advanced (next != ""): that id wins, whatever emitBatch's error
-//     says. It is the last entry we durably handled.
-//   - emitBatch advanced nothing and did not fail: the page held nothing for us
-//     (empty, or all entries filtered server-side), so resume from the SERVER's
-//     nextCursor. Skipping this is what livelocked the bridge: fleet-db applies
-//     limit before the entity_type filter, so it legitimately serves pages with
-//     zero matching events and has_more=true, and a client that derives its
-//     position solely from emitted event ids re-requests the same page forever.
-//   - emitBatch advanced nothing and DID fail: the page's very first entry is
-//     unhandled. Leave the cursor alone and do not save it — adopting the server
-//     cursor here would persist a position past that entry and silently drop it.
-//
-// LIVENESS. Even with the precedence right, a server can report has_more with a
-// cursor that never moves. Such a sweep stops (recordStall widens the same skip
-// window the failure backoff uses), and any sweep is bounded by
-// maxIssueJournalPagesPerSweep pages regardless.
 func (b *IssueJournalBridge) drainFrom(ctx context.Context, ws, cursor string, out *IssueJournalSweepResult) error {
 	for pages := 0; ; pages++ {
 		if ctx.Err() != nil {
@@ -325,7 +286,6 @@ func (b *IssueJournalBridge) drainFrom(ctx context.Context, ws, cursor string, o
 			b.saveCursor(ws, cursor)
 		}
 		if cursor != started {
-			// Real progress — not merely a 200 — clears the stall backoff.
 			b.clearStall(ws)
 		}
 		if perr != nil {
@@ -521,18 +481,6 @@ func (b *IssueJournalBridge) recordFailure(ws string) {
 	b.skipRemaining[ws] = (1 << shift) - 1
 }
 
-// recordStall bumps the workspace's consecutive-stall count and suspends the
-// next 2^min(stalls,cap)-1 sweeps — the same window recordFailure uses and
-// inBackoffWindow consumes, so a stalled journal backs off exactly like a
-// failing one without any new plumbing in sweepWorkspace.
-//
-// It keeps its OWN counter on purpose. drainFrom calls recordSuccess after every
-// clean read, and a stalled server reads cleanly, so reusing failures would see
-// the count cleared before it was re-set: the window would never exceed one
-// skipped sweep and the workspace would be re-probed at a constant half rate
-// forever. Clearing skipRemaining from recordSuccess is harmless here because a
-// sweep only reaches the read once inBackoffWindow has already spent this pass's
-// share of the window.
 func (b *IssueJournalBridge) recordStall(ws string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -550,8 +498,6 @@ func (b *IssueJournalBridge) recordStall(ws string) {
 	b.skipRemaining[ws] = (1 << shift) - 1
 }
 
-// clearStall resets the stall backoff after the cursor actually advanced. A
-// clean read alone is NOT progress and deliberately does not clear it.
 func (b *IssueJournalBridge) clearStall(ws string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
