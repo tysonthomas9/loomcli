@@ -97,10 +97,17 @@ var roleSetCmd = &cobra.Command{
 input_policy controls which interactive harness prompts an agent in this role
 may auto-answer. DISPOSITION is one of deny, allow, ask. The reserved KIND
 "default" sets the disposition for every kind not named; anything unnamed with
-no default is denied, and so is a role with no policy at all. "ask" has no
-human attached yet and currently behaves as deny (the agent logs when it does).
+no default is denied, and so is a role with no policy at all. "ask" hands the
+prompt to a person via the daemon and degrades to deny if nobody answers.
 
-  loom role set task input_policy "default=deny,trust_prompt=allow"`,
+KIND is the harness's own prompt-kind string. claude-code raises two that
+matter: "trust_prompt" (the folder-trust dialog) and "bypass_acceptance" (the
+--dangerously-skip-permissions acceptance screen). They are separate kinds, so
+allowing one does not allow the other — and because loom launches claude with
+--dangerously-skip-permissions, a denied "bypass_acceptance" is answered
+"No, exit" and the agent exits.
+
+  loom role set task input_policy "default=deny,trust_prompt=allow,bypass_acceptance=allow"`,
 	Args: cobra.ExactArgs(3),
 	RunE: runRoleSet,
 }
