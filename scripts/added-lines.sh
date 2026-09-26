@@ -71,7 +71,7 @@ git -c core.quotePath=false diff --no-ext-diff --no-color --no-textconv -U0 -M \
     --diff-filter=d --src-prefix=a/ --dst-prefix=b/ "$base" -- "$@" |
     awk '
         /^diff --git / { header = 1; next }
-        header && /^\+\+\+ / { path = substr($0, 7); next }
+        header && /^\+\+\+ / { path = substr($0, 7); sub(/\t$/, "", path); next }
         /^@@ / {
             header = 0
             n = split($3, a, ",")

@@ -157,6 +157,18 @@ test_added_line_starting_with_plus_plus() {
     expect_fail_with "Hunk lines starting with ++ do not confuse file tracking" "pkg/a.go:11: // tail"
 }
 
+test_spaced_path() {
+    reset_repo
+    mkdir -p "$REPO/my pkg"
+    printf '%s' "$BASELINE" >"$REPO/my pkg/a b.go"
+    commit_all
+    git_repo update-ref refs/remotes/origin/main HEAD
+    printf '%s' "${BASELINE/return 1/return 42}" >"$REPO/my pkg/a b.go"
+    expect_pass "Non-comment edit to a spaced-path file passes"
+    printf '%s\n// spaced\n' "$BASELINE" >"$REPO/my pkg/a b.go"
+    expect_fail_with "Added comment in a spaced-path file fails" "my pkg/a b.go:8: // spaced"
+}
+
 test_explicit_base_env() {
     reset_repo
     printf '%s\n// first\n' "$BASELINE" >"$REPO/pkg/a.go"
@@ -227,6 +239,7 @@ test_nolint_fails
 test_editing_code_near_existing_comment_passes
 test_non_go_files_ignored
 test_added_line_starting_with_plus_plus
+test_spaced_path
 test_explicit_base_env
 test_nearest_default_ref
 test_missing_default_ref_errors
