@@ -32,8 +32,9 @@ WORKERS="${LOOM_TLA_WORKERS:-auto}"
 CASES=(
   "a_pass|pass|"
   "a_pass_faults|pass|"
-  "a_fail_current|fail|NoStaleAttemptWrite"
-  "a_fail_token|fail|NoStaleAttemptWrite"
+  "a_fail_current|fail|NoSupersededWrite"
+  "a_fail_token|fail|NoSupersededWrite"
+  "a_fail_fence_eq|fail|NoWriteAfterRelease"
   "a_fail_unguarded|fail|SingleLiveProcess"
   "a_fail_drift|fail|SingleLiveProcess"
   "a_fail_pgskew|fail|SingleLiveProcess"
@@ -47,6 +48,9 @@ CASES=(
   "b_vacuity|fail|NeverClosed"
   "c_pass|pass|"
   "c_fail_no_guard|fail|TerminalOnce"
+  "c_fail_session_unfenced|fail|NoSupersededWrite"
+  "c_fail_stale_finalize|fail|NoSupersededFinalize"
+  "c_stranded_session|fail|NoStrandedSession"
   "c_vacuity|fail|NeverFinalized"
 )
 
@@ -79,7 +83,7 @@ want() {
 }
 
 failures=0
-printf '%-20s %-6s %-8s %s\n' CONFIG EXPECT RESULT DETAIL
+printf '%-24s %-6s %-8s %s\n' CONFIG EXPECT RESULT DETAIL
 for entry in "${CASES[@]}"; do
   IFS='|' read -r name expect inv <<<"$entry"
   want "$name" || continue
@@ -105,7 +109,17 @@ for entry in "${CASES[@]}"; do
   set +e; wait "$pid"; code=$?; set -e
   states="$(grep -Eo '[0-9,]+ distinct states found' "$log" | tail -1 || true)"
   if (( capped )); then
-    result=CAPPED; detail="scratch exceeded ${CAP_MB} MB; see $log"
+    # A killed TLC skips -cleanup, so remove this run's own metadir, but only
+    # after checking it is the per-config directory this script created.
+    if [[ "$(basename "$SCRATCH")" == loom-tla-daemon-attempt* \
+          && "$meta" == "$SCRATCH/$name" && -d "$meta" && ! -L "$meta" \
+          && -O "$meta" ]]; then
+      rm -rf -- "$meta"
+      detail="scratch exceeded ${CAP_MB} MB; run stopped and its metadir removed; see $log"
+    else
+      detail="scratch exceeded ${CAP_MB} MB; ownership check failed, left $meta; see $log"
+    fi
+    result=CAPPED
   elif [[ "$expect" == pass ]] && (( code == 0 )) && grep -q 'No error has been found' "$log"; then
     result=ok; detail="no violation; $states"
   elif [[ "$expect" == fail ]] && (( code == 12 )) && grep -q "Invariant $inv is violated" "$log"; then
@@ -114,7 +128,7 @@ for entry in "${CASES[@]}"; do
     result=UNEXPECTED; detail="exit $code; see $log"
   fi
   [[ "$result" == ok ]] || failures=$((failures + 1))
-  printf '%-20s %-6s %-8s %s\n' "$name" "$expect" "$result" "$detail"
+  printf '%-24s %-6s %-8s %s\n' "$name" "$expect" "$result" "$detail"
 done
 
 echo "TLC ${TLA_VERSION} ($JAR); logs and counterexamples under $SCRATCH"
