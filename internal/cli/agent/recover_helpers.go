@@ -184,7 +184,7 @@ func resetTask(deps *cli.Deps, taskID string) {
 func killProcess(pid int) error {
 	// Try graceful shutdown of the entire process group
 	err := syscall.Kill(-pid, syscall.SIGTERM)
-	if err == syscall.ESRCH {
+	if processGroupSignalGone(err, pid) {
 		return nil
 	}
 	if err != nil {
@@ -198,7 +198,7 @@ func killProcess(pid int) error {
 
 	// Force kill the entire process group if still running
 	err = syscall.Kill(-pid, syscall.SIGKILL)
-	if err == syscall.ESRCH {
+	if processGroupSignalGone(err, pid) {
 		return nil
 	}
 	if err != nil {
@@ -206,6 +206,13 @@ func killProcess(pid int) error {
 	}
 	_ = waitForProcessGroupExit(pid, time.Second)
 	return nil
+}
+
+func processGroupSignalGone(err error, pgid int) bool {
+	if err == syscall.ESRCH {
+		return true
+	}
+	return err == syscall.EPERM && !processGroupHasLiveMember(pgid)
 }
 
 func waitForProcessGroupExit(pgid int, timeout time.Duration) bool {
