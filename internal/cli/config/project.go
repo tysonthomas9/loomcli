@@ -178,7 +178,13 @@ type DaemonConfig struct {
 // FleetDB. If no workspace is set, it returns built-in defaults so first-run
 // commands can still render help and diagnostics.
 func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
-	ctx := cmdstore.RootContext()
+	return LoadDaemonConfigWithStore(cmdstore.RootContext(), nil, projectDir)
+}
+
+// LoadDaemonConfigWithStore behaves exactly like LoadDaemonConfig but reads through
+// an already-open store instead of opening (and closing) a fleet-db client per call.
+// st == nil falls back to opening one, so existing callers are unchanged.
+func LoadDaemonConfigWithStore(ctx context.Context, st store.Store, projectDir string) (*DaemonConfig, error) {
 	dc := newDefaultDaemonConfig()
 	key, err := bootstrap.ResolveActiveWorkspaceKey(ctx, nil)
 	if err != nil {
@@ -189,6 +195,11 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 	}
 	if cached, cacheErr, ok := lookupPrimedDaemonConfig(key, projectDir); ok {
 		return cached, cacheErr
+	}
+	if st != nil {
+		// Already-open store: it carries cmdstore's tracing wrapper, so wrapping
+		// again here would emit duplicate spans.
+		return loadDaemonConfigFromStore(ctx, st, key, dc, projectDir)
 	}
 	dataDir := bootstrap.LoomDir()
 	if dataDir == "" {

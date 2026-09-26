@@ -1,6 +1,4 @@
 
-# Use bd merge for beads JSONL files
-.beads/issues.jsonl merge=beads
 
 # Generated Flue bundles are embedded runtime artifacts, not source.
 internal/workflows/builtin-dist/** -diff

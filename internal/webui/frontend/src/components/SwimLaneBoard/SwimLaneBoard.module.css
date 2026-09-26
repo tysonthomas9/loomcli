@@ -22,8 +22,10 @@
 }
 
 .swimLaneBoard:has(> .toolbar) {
-  /* Match toolbar block size so lane headers stick flush beneath it */
-  --swim-lane-sticky-offset: calc(var(--space-2) * 2 + 1.625rem);
+  /* Keep sticky lane headers below both the toolbar and its visual gap. */
+  --swim-lane-sticky-offset: calc(
+    var(--space-2) * 2 + 1.625rem + var(--space-3)
+  );
 }
 
 /**
@@ -38,13 +40,13 @@
   align-items: center;
   justify-content: flex-start;
   gap: var(--space-2);
-  width: 100%;
-  min-width: 100%;
+  width: calc(100% + 2 * var(--kanban-board-inline-gap, 0px));
+  min-width: calc(100% + 2 * var(--kanban-board-inline-gap, 0px));
   padding: var(--space-2) var(--space-4);
-  margin-bottom: 0;
+  margin: 0 calc(-1 * var(--kanban-board-inline-gap, 0px)) var(--space-3);
   background-color: var(--color-bg);
-  border-bottom: 1px solid var(--color-border);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
+  border-bottom: 0;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 5%);
 }
 
 .toolbarButton {

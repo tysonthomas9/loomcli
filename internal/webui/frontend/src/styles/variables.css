@@ -45,6 +45,20 @@
   --color-status-in-progress: #f59e0b; /* amber-500 */
   --color-status-closed: #10b981; /* emerald-500 */
 
+  /* Task journey stages */
+  --color-journey-open: #60a5fa;
+  --color-journey-in-progress: #f59e0b;
+  --color-journey-blocked: #ef4444;
+  --color-journey-deferred: #a78bfa;
+  --color-journey-review: #818cf8;
+  --color-journey-closed: #34d399;
+  --color-journey-now: #f0f0f0;
+  --color-journey-supporting-text: #8a8a8a;
+  --color-journey-halt-title: #fca5a5;
+  --color-journey-halt-supporting-text: #e8b4b4;
+  --color-journey-halt-agent-text: #f59e0b;
+  --color-journey-unowned-rail: var(--color-text-muted);
+
   /* ===========================
    * Colors - State
    * =========================== */
@@ -58,6 +72,7 @@
   --color-status-working: #3b82f6; /* blue-500, actively working */
   --color-status-done: #10b981; /* emerald-500, completed */
   --color-status-review: #4f46e5; /* indigo-600, awaiting review */
+  --color-status-review-text: #a5b4fc;
   --color-status-idle: #9ca3af; /* gray-400, idle/waiting */
   --color-status-error: #ef4444; /* red-500, error state */
   --color-status-dirty: #f59e0b; /* amber-500, uncommitted changes */
@@ -71,6 +86,8 @@
   --color-success: #22c55e; /* green-500 */
   --color-warning: #f59e0b; /* amber-500 */
   --color-danger: #ef4444; /* red-500 */
+  --color-status-warning-text: #fcd34d;
+  --color-status-danger-text: #fca5a5;
   --color-info: #06b6d4; /* cyan-500 */
 
   /* Semantic Background Colors (darker variants for dark theme) */
@@ -120,7 +137,7 @@
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
   --color-text-tertiary: #888888;
-  --color-text-muted: #666666;
+  --color-text-muted: #7a7a7a;
   --color-text-inverse: #111111;
   --color-highlight: #854d0e;
   --color-focus: #3b82f6; /* blue-500, focus ring color */
@@ -179,6 +196,7 @@
    * Typography - Font Sizes
    * =========================== */
   --font-size-xs: 0.75rem; /* 12px */
+  --font-size-2xs: 0.625rem; /* 10px */
   --font-size-sm: 0.875rem; /* 14px */
   --font-size-base: 0.8125rem; /* 13px — Aether body base */
   --font-size-lg: 1.125rem; /* 18px */
@@ -211,6 +229,26 @@
   --radius-lg: 0.5rem; /* 8px */
   --radius-xl: 0.75rem; /* 12px */
   --radius-full: 9999px;
+
+  /* ===========================
+   * Shared Aether component geometry
+   * =========================== */
+  --surface-radius: var(--radius-xl);
+  --surface-shadow: 0 1px 2px rgb(0 0 0 / 18%);
+  --control-height: 36px;
+  --page-content-max: 1400px;
+  --page-padding-x: var(--space-6);
+  --page-padding-top: var(--space-6);
+  --color-selection-bg: color-mix(
+    in srgb,
+    var(--color-primary) 12%,
+    transparent
+  );
+  --color-selection-border: color-mix(
+    in srgb,
+    var(--color-primary) 28%,
+    transparent
+  );
 
   /* ===========================
    * Panel Layout Tokens
@@ -295,7 +333,7 @@
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
   --color-text-tertiary: #6b6661;
-  --color-text-muted: #a09b94;
+  --color-text-muted: #7d7870;
   --color-text-inverse: #ffffff;
   --color-highlight: #fef08a;
   --color-focus: #3b82f6;
@@ -304,6 +342,20 @@
   --color-primary: #2563eb;
   --color-primary-hover: #1d4ed8;
 
+  /* Task journey stages */
+  --color-journey-open: #2563eb;
+  --color-journey-in-progress: #b45309;
+  --color-journey-blocked: #dc2626;
+  --color-journey-deferred: #7c3aed;
+  --color-journey-review: #4f46e5;
+  --color-journey-closed: #047857;
+  --color-journey-now: #1a1a1a;
+  --color-journey-supporting-text: #625d58;
+  --color-journey-halt-title: #991b1b;
+  --color-journey-halt-supporting-text: #7f1d1d;
+  --color-journey-halt-agent-text: #92400e;
+  --color-journey-unowned-rail: var(--color-text-muted);
+
   /* Semantic background colors (light variants) */
   --color-primary-bg: #eff6ff;
   --color-success-bg: #dcfce7;
@@ -311,6 +363,9 @@
   --color-danger-bg: #fee2e2;
   --color-info-bg: #cffafe;
   --color-bg-warning: #fef3c7;
+  --color-status-review-text: #4338ca;
+  --color-status-warning-text: #92400e;
+  --color-status-danger-text: #b91c1c;
 
   /* Diff colors (light) */
   --color-diff-add: #16a34a;

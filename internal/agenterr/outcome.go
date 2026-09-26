@@ -17,6 +17,7 @@ const (
 	BackendUnavailableOutcome                  // backend CLI binary not on PATH (folded from wrapper ErrBinaryNotFound)
 	CompletionHookFailureOutcome               // the subprocess exited 0 but a configured on_complete hook write failed
 	IncompleteRunOutcome                       // agent exited 0 but never released its task claim (turn ended before the task did)
+	ClaimsHeldOutcome                          // a workspace-level claim hold is active: the supervisor refuses to START new work
 )
 
 func (d DomainOutcome) String() string {
@@ -33,6 +34,8 @@ func (d DomainOutcome) String() string {
 		return "CompletionHookFailure"
 	case IncompleteRunOutcome:
 		return "IncompleteRun"
+	case ClaimsHeldOutcome:
+		return "ClaimsHeld"
 	default:
 		return "None"
 	}

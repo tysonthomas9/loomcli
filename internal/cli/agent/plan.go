@@ -368,8 +368,19 @@ func emitTaskClaimedFromEnv(agentName, taskID string) {
 	if err != nil {
 		return
 	}
+	emitAndFlushTaskLifecycleEvent(bus, evt)
+}
+
+// emitAndFlushTaskLifecycleEvent leaves each lifecycle boundary durable before
+// its caller continues. It is best-effort: event-sink failures never change the
+// backend invocation outcome.
+func emitAndFlushTaskLifecycleEvent(bus *events.Bus, evt events.Event) {
 	if emitErr := bus.Emit(evt); emitErr != nil {
-		log.Printf("[agent] Failed to emit task_claimed event: %v", emitErr)
+		log.Printf("[agent] Failed to emit %s event: %v", evt.Type, emitErr)
+		return
+	}
+	if flushErr := bus.Flush(); flushErr != nil {
+		log.Printf("[agent] Failed to flush %s event: %v", evt.Type, flushErr)
 	}
 }
 
@@ -392,10 +403,18 @@ func emitTaskLifecycleResult(agentName, worktreePath string, startedAt time.Time
 		return
 	}
 	taskID := ""
+	var lockInfo *cli.LockInfo
 	if info, lockErr := cli.ReadLockFile(worktreePath); lockErr == nil && info != nil {
+		lockInfo = info
 		taskID = info.TaskID
 	}
 	if invokeErr == nil {
+		// A clean backend return does not necessarily end the task: the daemon
+		// preserves a still-held claim and session so the next turn can resume.
+		// Emit TaskCompleted only after loom complete released that claim.
+		if claimStillHeldForLock(lockInfo) {
+			return
+		}
 		duration := events.Duration{Duration: time.Since(startedAt)}
 		evt, err := events.NewEvent(events.TaskCompleted, agentName, "", "", events.TaskCompletedData{
 			TaskID:   taskID,
@@ -404,9 +423,7 @@ func emitTaskLifecycleResult(agentName, worktreePath string, startedAt time.Time
 		if err != nil {
 			return
 		}
-		if emitErr := bus.Emit(evt); emitErr != nil {
-			log.Printf("[agent] Failed to emit task_completed event: %v", emitErr)
-		}
+		emitAndFlushTaskLifecycleEvent(bus, evt)
 		return
 	}
 	// Failure path: classify the error so otelexport gets a stable
@@ -433,7 +450,5 @@ func emitTaskLifecycleResult(agentName, worktreePath string, startedAt time.Time
 	if err != nil {
 		return
 	}
-	if emitErr := bus.Emit(evt); emitErr != nil {
-		log.Printf("[agent] Failed to emit task_failed event: %v", emitErr)
-	}
+	emitAndFlushTaskLifecycleEvent(bus, evt)
 }

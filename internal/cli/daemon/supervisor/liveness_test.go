@@ -11,11 +11,32 @@ import (
 
 // scanRepeated runs scanTicks enough times to cross the consecutive-stale
 // threshold, so a tick that stays stale every scan triggers the watchdog's
-// fatal. The calls are back-to-back (gap well under livenessFreezeGap), so the
-// process-suspension guard never fires.
+// fatal. The calls are back-to-back (gap well under livenessFreezeGap and with
+// both clock domains in step), so the process-suspension guard never fires.
 func scanRepeated(s *Supervisor) {
-	for i := 0; i < livenessStaleScansBeforeFatal; i++ {
+	scanRepeatedN(s, livenessStaleScansBeforeFatal)
+}
+
+// scanRepeatedN runs n back-to-back scans, back-dating each stale streak's
+// start between them.
+//
+// The back-dating is what makes back-to-back scans represent production: the
+// watchdog also requires a streak to span livenessMinStaleSpan of REAL runtime
+// before it may go fatal, and n scans in a test loop span microseconds. Without
+// this the span guard would silently suppress every fatal these tests exist to
+// assert, and the whole suite would pass while detection was disabled.
+func scanRepeatedN(s *Supervisor, n int) {
+	for i := 0; i < n; i++ {
 		s.scanTicks(time.Now())
+		backdateStreakStarts(s, livenessMinStaleSpan)
+	}
+}
+
+// backdateStreakStarts shifts every recorded stale-streak start back by d,
+// standing in for the real elapsed time production's 10s scan cadence provides.
+func backdateStreakStarts(s *Supervisor, d time.Duration) {
+	for name, start := range s.livenessStreakStart {
+		s.livenessStreakStart[name] = start.Add(-d)
 	}
 }
 
@@ -188,11 +209,11 @@ func TestScanTicksToleratesTransientStall(t *testing.T) {
 	s := newHarnessSupervisor()
 	s.RegisterTick(GoroutineHealthChecker)
 
-	// Stale for (threshold-1) consecutive scans — one short of fatal.
+	// Stale for (threshold-1) consecutive scans — one short of fatal — with the
+	// real-time span requirement already satisfied, so the scan COUNT is the
+	// only thing holding the fatal back.
 	setTickForTest(s, GoroutineHealthChecker, time.Now().Add(-10*time.Minute))
-	for i := 0; i < livenessStaleScansBeforeFatal-1; i++ {
-		s.scanTicks(time.Now())
-	}
+	scanRepeatedN(s, livenessStaleScansBeforeFatal-1)
 	select {
 	case err := <-s.FatalChannel():
 		t.Fatalf("scanTicks killed daemon before sustained staleness: %v", err)
@@ -227,10 +248,10 @@ func TestScanTicksSkipsFatalOnProcessSuspension(t *testing.T) {
 	setTickForTest(s, GoroutineHealthChecker, time.Now().Add(-10*time.Minute))
 
 	// Prime a stale streak that is one short of fatal...
-	for i := 0; i < livenessStaleScansBeforeFatal-1; i++ {
-		s.scanTicks(time.Now())
-	}
-	// ...then simulate the process being suspended between scans.
+	scanRepeatedN(s, livenessStaleScansBeforeFatal-1)
+	// ...then simulate the process being suspended between scans. The value
+	// carries a monotonic reading, so this is the "monotonic clock kept running"
+	// freeze (SIGSTOP/swap thrash), not the sleep case.
 	s.lastLivenessScan = time.Now().Add(-2 * livenessFreezeGap)
 	s.scanTicks(time.Now())
 
@@ -241,6 +262,15 @@ func TestScanTicksSkipsFatalOnProcessSuspension(t *testing.T) {
 	}
 	if len(s.livenessStreak) != 0 {
 		t.Fatalf("streaks not cleared after suspension: %v", s.livenessStreak)
+	}
+	// Clearing streaks is not enough on its own — the tick must also have been
+	// re-primed, or the next scans re-flag it immediately.
+	last, ok := s.LoadTick(GoroutineHealthChecker)
+	if !ok {
+		t.Fatal("health checker tick disappeared")
+	}
+	if age := time.Since(last); age > time.Second {
+		t.Fatalf("tick not re-primed after suspension: age %s", age)
 	}
 }
 

@@ -13,7 +13,11 @@ import {
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { FileEntry, FileReadData } from "@/api/workspace";
+import type {
+  FileEntry,
+  FileReadData,
+  SkillCatalogGroup,
+} from "@/api/workspace";
 
 const mocks = vi.hoisted(() => ({
   showToast: vi.fn(),
@@ -67,6 +71,16 @@ const mocks = vi.hoisted(() => ({
     Promise.resolve({ results: [], limitHit: false }),
   ),
   scrollApplied: vi.fn(),
+  workspaceDataId: "ws-1",
+  repos: [
+    {
+      name: "loomcli",
+      path: "/tmp/loomcli",
+      default_branch: "main",
+      remote: "origin",
+      groups: [] as string[],
+    },
+  ],
   agents: [
     {
       name: "atlas",
@@ -83,6 +97,11 @@ const mocks = vi.hoisted(() => ({
   capabilitiesLoading: false,
   capabilitiesError: null as string | null,
   retryCapabilities: vi.fn(),
+  invalidateSkills: vi.fn(),
+  skillsCatalogStatus: "loaded" as "idle" | "loading" | "loaded" | "error",
+  skillsCatalogRevision: 1,
+  skillGroups: [] as SkillCatalogGroup[],
+  skillIndexPaths: [] as string[],
   documentExternalConflict: null as {
     content: string;
     version: string;
@@ -217,19 +236,24 @@ vi.mock("@/hooks", async () => {
   const stores = await import("@/stores");
   const documentKey = (
     workspaceId: string,
-    scopeRef: unknown,
+    explorerRef: unknown,
     path: string,
   ): string => {
-    const ref = scopeRef as {
+    const ref = explorerRef as {
+      kind?: string;
+      checkout?: { scope?: string; target?: string; repo?: string };
+      group?: { kind?: string; role?: string };
       scope?: string;
       target?: string;
       repo?: string;
     };
+    const checkout = ref.kind === "checkout" ? ref.checkout : ref;
+    const skills = ref.kind === "skills" ? ref.group : null;
     return [
       workspaceId,
-      ref.scope ?? "workspace",
-      ref.target ?? "",
-      ref.repo ?? "",
+      skills ? `skills:${skills.kind}` : (checkout?.scope ?? "workspace"),
+      skills?.role ?? checkout?.target ?? "",
+      checkout?.repo ?? "",
       path,
     ].join(":");
   };
@@ -253,15 +277,9 @@ vi.mock("@/hooks", async () => {
     if (had !== dirty) emitRegistryRevision();
   };
   const documentRegistry = {
-    get: (ref: {
-      workspaceId: string;
-      scope: string;
-      target?: string;
-      repo?: string;
-      path: string;
-    }) => ({
+    get: (ref: { workspaceId: string; ref: unknown; path: string }) => ({
       dirty: mocks.registryDirtyKeys.has(
-        documentKey(ref.workspaceId, ref, ref.path),
+        documentKey(ref.workspaceId, ref.ref, ref.path),
       ),
     }),
     dirtyPathsForPrefix: vi.fn(() => mocks.registryDirtyPaths),
@@ -269,6 +287,16 @@ vi.mock("@/hooks", async () => {
     refresh: mocks.registryRefresh,
     resetPathPrefix: mocks.registryReset,
     retargetPathPrefix: mocks.registryRetarget,
+  };
+  const skillActions = {
+    canEdit: (group: { kind: string }) => group.kind === "role",
+    createSkill: vi.fn(),
+    updateMetadata: vi.fn(),
+    deleteSkill: vi.fn(),
+    createFile: vi.fn(),
+    deleteFile: vi.fn(),
+    invalidate: mocks.invalidateSkills,
+    listIndexPaths: () => mocks.skillIndexPaths,
   };
   return {
     FileCapabilitiesProvider: ({ children }: { children: React.ReactNode }) =>
@@ -281,6 +309,7 @@ vi.mock("@/hooks", async () => {
     FileBrowserStoreProvider: stores.FileBrowserStoreProvider,
     agentFileBrowserTabsStorageKey: stores.agentFileBrowserTabsStorageKey,
     fileBrowserTabsStorageKey: stores.fileBrowserTabsStorageKey,
+    skillsFileBrowserTabsStorageKey: stores.skillsFileBrowserTabsStorageKey,
     useFileBrowserStore: stores.useFileBrowserStore,
     useFileBrowserStoreInstance: stores.useFileBrowserStoreInstance,
     useFileDocumentRegistry: () => documentRegistry,
@@ -301,17 +330,105 @@ vi.mock("@/hooks", async () => {
       error: mocks.capabilitiesError,
       retry: mocks.retryCapabilities,
     }),
+    useSkillCapabilities: () => ({
+      status: "loaded",
+      data: {
+        can_edit_role_scope: true,
+        workspace_scope: "read_only",
+      },
+      error: null,
+      retry: vi.fn(),
+    }),
+    useSkillsCatalog: () => ({
+      status: mocks.skillsCatalogStatus,
+      revision: mocks.skillsCatalogRevision,
+      groups: mocks.skillGroups,
+      error: null,
+      shadowedByRef: {},
+      shadowsByRef: {},
+      readOnlyRefs: new Set<string>(),
+      retry: vi.fn(),
+      invalidate: mocks.invalidateSkills,
+    }),
+    useSkillsActions: () => skillActions,
+    // Real implementation, not a stub: the component depends on this holding a
+    // reference steady across renders, and a pass-through would make the tests
+    // exercise a component that re-fetches on every render.
+    useStableByKey: <T,>(key: string, value: T): T => {
+      const held = React.useRef<{ key: string; value: T } | null>(null);
+      if (held.current === null || held.current.key !== key) {
+        held.current = { key, value };
+      }
+      return held.current.value;
+    },
+    useSkillsTree: (
+      _workspaceId: string,
+      group: { kind: string; role?: string },
+    ) => {
+      const catalogGroup = mocks.skillGroups.find((candidate) =>
+        group.kind === "workspace"
+          ? candidate.scope === "workspace"
+          : candidate.scope === "role" && candidate.role === group.role,
+      );
+      return {
+        status: "loaded",
+        revision: 1,
+        groups: mocks.skillGroups,
+        error: null,
+        shadowedByRef: {},
+        shadowsByRef: {},
+        readOnlyRefs: new Set<string>(),
+        retry: vi.fn(),
+        invalidate: mocks.invalidateSkills,
+        loader: vi.fn(),
+        skills: catalogGroup?.skills ?? [],
+        shadowed: new Set<string>(),
+        shadows: new Set<string>(),
+      };
+    },
+    useScopedFileTreeCore: () => ({
+      expanded: new Set(["audit"]),
+      treeData: new Map<string, FileEntry[]>([
+        ["", [entry("audit", true)]],
+        ["audit", [entry("SKILL.md")]],
+      ]),
+      selectedPath: null,
+      isLoading: false,
+      error: null,
+      filterText: "",
+      debouncedFilterText: "",
+      toggle: vi.fn(() => Promise.resolve()),
+      loadDir: vi.fn(() => Promise.resolve()),
+      revealPath: vi.fn(() => Promise.resolve()),
+      setFilterText: vi.fn(),
+      selectFile: vi.fn(),
+      isWorkspaceTree: false,
+    }),
+    useSkill: (
+      _workspaceId: string,
+      ref: { group: { kind: string; role?: string } } | null,
+      name: string | null,
+    ) => ({
+      skill:
+        ref && name
+          ? (mocks.skillGroups
+              .find((candidate) =>
+                ref.group.kind === "workspace"
+                  ? candidate.scope === "workspace"
+                  : candidate.scope === "role" &&
+                    candidate.role === ref.group.role,
+              )
+              ?.skills.find((skill) => skill.name === name) ?? null)
+          : null,
+      shadowedByRef: {},
+      shadowsByRef: {},
+    }),
     useWorkspaceContext: () => ({
       workspaceId: "ws-1",
-      repos: [
-        {
-          name: "loomcli",
-          path: "/tmp/loomcli",
-          default_branch: "main",
-          remote: "origin",
-          groups: [],
-        },
-      ],
+      // `workspace` is the polled payload the repo and agent lists come out of,
+      // so its id is what says which workspace they describe.
+      workspace: { id: mocks.workspaceDataId, repos: mocks.repos },
+      repos: mocks.repos,
       agents: mocks.agents,
     }),
     useEventContext: () => ({
@@ -375,7 +492,16 @@ vi.mock("@/hooks", async () => {
         save: async () => {
           if (content === baseContent) return null;
           setIsSaving(true);
-          await mocks.writeScopedFile("ws-1", _scopeRef, path, content);
+          const ref = _scopeRef as {
+            kind?: string;
+            checkout?: unknown;
+          };
+          await mocks.writeScopedFile(
+            "ws-1",
+            ref.kind === "checkout" ? ref.checkout : _scopeRef,
+            path,
+            content,
+          );
           setBaseContent(content);
           setRegistryDirty(_workspaceId, _scopeRef, path, false);
           setIsSaving(false);
@@ -419,6 +545,27 @@ function storeWorkingCompareMode(): void {
   localStorage.setItem("loom:ws-1:file-explorer-compare-mode", "working");
 }
 
+function reviewerSkillGroups(): SkillCatalogGroup[] {
+  return [
+    {
+      scope: "role",
+      role: "reviewer",
+      skills: [
+        {
+          name: "audit",
+          scope: "role",
+          role: "reviewer",
+          description: "Audit the implementation",
+          content_revision: "skill-v1",
+          files: [],
+          created_at: "2026-08-14T00:00:00Z",
+          updated_at: "2026-08-14T00:00:00Z",
+        },
+      ],
+    },
+  ];
+}
+
 describe("WorkspaceFileBrowser", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -433,11 +580,25 @@ describe("WorkspaceFileBrowser", () => {
     mocks.capabilities = { read: true, write: true, sensitive: true };
     mocks.capabilitiesLoading = false;
     mocks.capabilitiesError = null;
+    mocks.skillsCatalogStatus = "loaded";
+    mocks.skillsCatalogRevision = 1;
+    mocks.skillGroups = [];
+    mocks.skillIndexPaths = [];
     mocks.documentExternalConflict = null;
     mocks.registryDirtyPaths = [];
     mocks.registryDirtyKeys.clear();
     mocks.registryListeners.clear();
     mocks.registryRevision = 0;
+    mocks.workspaceDataId = "ws-1";
+    mocks.repos = [
+      {
+        name: "loomcli",
+        path: "/tmp/loomcli",
+        default_branch: "main",
+        remote: "origin",
+        groups: [],
+      },
+    ];
     mocks.agents = [
       {
         name: "atlas",
@@ -684,6 +845,347 @@ describe("WorkspaceFileBrowser", () => {
     ).toBeInTheDocument();
   });
 
+  it("rebuilds the Skills section Quick Open when the catalog loads", async () => {
+    // Was a workspace-mode test back when skills hung off the Files explorer.
+    // Skills only exist in the Skills section now, so the same rebuild-on-load
+    // behaviour is pinned there.
+    mocks.skillsCatalogStatus = "loading";
+    const view = render(<WorkspaceFileBrowser mode="skills" />);
+    fireEvent.keyDown(window, { key: "p", metaKey: true });
+    await screen.findByRole("dialog", { name: "Quick open" });
+    expect(screen.queryByText("SKILL.md")).toBeNull();
+
+    mocks.skillsCatalogStatus = "loaded";
+    mocks.skillsCatalogRevision = 2;
+    mocks.skillIndexPaths = ["audit/SKILL.md"];
+    view.rerender(<WorkspaceFileBrowser mode="skills" />);
+
+    expect(await screen.findByText("SKILL.md")).toBeInTheDocument();
+    // No checkout sits behind the Skills section, so Quick Open never indexes
+    // one — offering workspace files here would open tabs this browser's tab
+    // set is not allowed to keep.
+    expect(mocks.indexScopedFiles).not.toHaveBeenCalled();
+  });
+
+  it("drops a skills tab saved by the old Files explorer", async () => {
+    // A Files-section tab set written while skills still lived in this tree can
+    // hold a skills ref. Skills are not reachable here any more, so the stale
+    // tab is dropped — not silently re-homed into the Skills section's own tab
+    // set, which the Files section has no business writing to.
+    //
+    // The catalog really does carry this role — so the tab is dropped because
+    // the Files tree no longer admits skill refs, not because the role is gone.
+    mocks.skillGroups = [
+      {
+        scope: "role",
+        role: "reviewer",
+        skills: [
+          {
+            name: "audit",
+            scope: "role",
+            role: "reviewer",
+            description: "Audit the implementation",
+            content_revision: "skill-v1",
+            files: [],
+            created_at: "2026-08-14T00:00:00Z",
+            updated_at: "2026-08-14T00:00:00Z",
+          },
+        ],
+      },
+    ];
+    localStorage.setItem(
+      "loom:ws-1:file-browser-tabs:v3",
+      JSON.stringify({
+        v: 4,
+        groups: [
+          {
+            tabs: [
+              {
+                ref: { kind: "checkout", checkout: { scope: "workspace" } },
+                path: "main.ts",
+              },
+              {
+                ref: {
+                  kind: "skills",
+                  group: { kind: "role", role: "reviewer" },
+                },
+                path: "audit/SKILL.md",
+              },
+            ],
+            active: null,
+          },
+        ],
+        mru: [],
+      }),
+    );
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    const tabs = await screen.findByRole("tablist", { name: /Open files/ });
+    expect(within(tabs).getByText("main.ts")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(tabs).queryByText("SKILL.md")).toBeNull(),
+    );
+  });
+
+  // Tab pruning is the one thing that must survive scoping the skills catalog
+  // out of the checkout sections: it closes tabs and persists that, so a
+  // readiness gate wired to the wrong load either never fires or fires too
+  // early. The four tests below pin both halves in all three modes.
+  it("prunes stale Files tabs without waiting on the skills catalog", async () => {
+    // The Files section's valid refs come from the checkout listing; the
+    // catalog contributes nothing to them and is never loaded here.
+    mocks.skillsCatalogStatus = "idle";
+    localStorage.setItem(
+      "loom:ws-1:file-browser-tabs:v3",
+      JSON.stringify({
+        v: 4,
+        groups: [
+          {
+            tabs: [
+              {
+                ref: { kind: "checkout", checkout: { scope: "workspace" } },
+                path: "main.ts",
+              },
+              {
+                ref: {
+                  kind: "checkout",
+                  checkout: { scope: "repo", target: "ghost" },
+                },
+                path: "ghost.ts",
+              },
+            ],
+            active: null,
+          },
+        ],
+        mru: [],
+      }),
+    );
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    const tabs = await screen.findByRole("tablist", { name: /Open files/ });
+    await waitFor(() =>
+      expect(within(tabs).queryByText("ghost.ts")).toBeNull(),
+    );
+    expect(within(tabs).getByText("main.ts")).toBeInTheDocument();
+  });
+
+  it("prunes stale agent tabs without waiting on the skills catalog", async () => {
+    mocks.skillsCatalogStatus = "idle";
+    localStorage.setItem(
+      "loom:ws-1:file-browser-tabs:v3:agent:atlas",
+      JSON.stringify({
+        v: 4,
+        groups: [
+          {
+            tabs: [
+              {
+                ref: {
+                  kind: "checkout",
+                  checkout: {
+                    scope: "agent",
+                    target: "atlas",
+                    repo: "loomcli",
+                  },
+                },
+                path: "main.ts",
+              },
+              {
+                ref: {
+                  kind: "checkout",
+                  checkout: { scope: "repo", target: "ghost" },
+                },
+                path: "ghost.ts",
+              },
+            ],
+            active: null,
+          },
+        ],
+        mru: [],
+      }),
+    );
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    const tabs = await screen.findByRole("tablist", { name: /Open files/ });
+    await waitFor(() =>
+      expect(within(tabs).queryByText("ghost.ts")).toBeNull(),
+    );
+    expect(within(tabs).getByText("main.ts")).toBeInTheDocument();
+  });
+
+  it("prunes a Skills tab whose scope the loaded catalog does not have", async () => {
+    mocks.skillsCatalogStatus = "loaded";
+    mocks.skillGroups = [];
+    localStorage.setItem(
+      "loom:ws-1:file-browser-tabs:v3:skills",
+      JSON.stringify({
+        v: 4,
+        groups: [
+          {
+            tabs: [
+              {
+                ref: { kind: "skills", group: { kind: "workspace" } },
+                path: "audit/SKILL.md",
+              },
+              {
+                ref: {
+                  kind: "skills",
+                  group: { kind: "role", role: "ghost" },
+                },
+                path: "stale/reference.md",
+              },
+            ],
+            active: null,
+          },
+        ],
+        mru: [],
+      }),
+    );
+
+    render(<WorkspaceFileBrowser mode="skills" />);
+
+    const tabs = await screen.findByRole("tablist", { name: /Open files/ });
+    await waitFor(() =>
+      expect(within(tabs).queryByText("reference.md")).toBeNull(),
+    );
+    expect(within(tabs).getByText("SKILL.md")).toBeInTheDocument();
+  });
+
+  it("keeps a Skills tab while the catalog is still loading", async () => {
+    // A role scope the catalog has not reported yet is not a missing scope.
+    // Pruning before it loads would close a live tab and persist that.
+    mocks.skillsCatalogStatus = "loading";
+    mocks.skillGroups = [];
+    localStorage.setItem(
+      "loom:ws-1:file-browser-tabs:v3:skills",
+      JSON.stringify({
+        v: 4,
+        groups: [
+          {
+            tabs: [
+              {
+                ref: {
+                  kind: "skills",
+                  group: { kind: "role", role: "reviewer" },
+                },
+                path: "audit/reference.md",
+              },
+            ],
+            active: null,
+          },
+        ],
+        mru: [],
+      }),
+    );
+
+    const { rerender } = render(<WorkspaceFileBrowser mode="skills" />);
+    const tabs = await screen.findByRole("tablist", { name: /Open files/ });
+    await act(async () => {});
+    expect(within(tabs).getByText("reference.md")).toBeInTheDocument();
+
+    mocks.skillsCatalogStatus = "loaded";
+    mocks.skillGroups = [{ scope: "role", role: "reviewer", skills: [] }];
+    rerender(<WorkspaceFileBrowser mode="skills" />);
+    await act(async () => {});
+
+    expect(within(tabs).getByText("reference.md")).toBeInTheDocument();
+  });
+
+  it("keeps tabs while the workspace context still describes the previous workspace", async () => {
+    // A workspace switch changes workspaceId at once, but the repo and agent
+    // lists keep describing the workspace just left until the next poll lands.
+    // The checkout listing settles on the new workspace long before that, so
+    // pruning on it alone would close the new workspace's tabs against the old
+    // one's ref universe — and persist it.
+    mocks.workspaceDataId = "ws-0";
+    mocks.repos = [];
+    mocks.agents = [];
+    localStorage.setItem(
+      "loom:ws-1:file-browser-tabs:v3",
+      JSON.stringify({
+        v: 4,
+        groups: [
+          {
+            tabs: [
+              {
+                ref: {
+                  kind: "checkout",
+                  checkout: { scope: "repo", target: "loomcli" },
+                },
+                path: "main.ts",
+              },
+            ],
+            active: null,
+          },
+        ],
+        mru: [],
+      }),
+    );
+
+    const { rerender } = render(<WorkspaceFileBrowser mode="workspace" />);
+    const tabs = await screen.findByRole("tablist", { name: /Open files/ });
+    await act(async () => {});
+    expect(within(tabs).getByText("main.ts")).toBeInTheDocument();
+
+    mocks.workspaceDataId = "ws-1";
+    mocks.repos = [
+      {
+        name: "loomcli",
+        path: "/tmp/loomcli",
+        default_branch: "main",
+        remote: "origin",
+        groups: [],
+      },
+    ];
+    rerender(<WorkspaceFileBrowser mode="workspace" />);
+    await act(async () => {});
+
+    expect(within(tabs).getByText("main.ts")).toBeInTheDocument();
+  });
+
+  it("never offers skills in the Files section Quick Open", async () => {
+    mocks.skillIndexPaths = ["audit/SKILL.md"];
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    fireEvent.keyDown(window, { key: "p", metaKey: true });
+    await screen.findByRole("dialog", { name: "Quick open" });
+    await waitFor(() =>
+      expect(mocks.indexScopedFiles).toHaveBeenCalledTimes(1),
+    );
+
+    expect(await screen.findByText("other.ts")).toBeInTheDocument();
+    expect(screen.queryByText("SKILL.md")).toBeNull();
+  });
+
+  it("reuses the Files section Quick Open index while the catalog stays unloaded", async () => {
+    // The index cache used to require a loaded skills catalog to count as
+    // current. The Files section no longer loads one, so a cache keyed on it
+    // would re-index the whole workspace on every Cmd+P.
+    mocks.skillsCatalogStatus = "idle";
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    fireEvent.keyDown(window, { key: "p", metaKey: true });
+    await screen.findByRole("dialog", { name: "Quick open" });
+    await waitFor(() =>
+      expect(mocks.indexScopedFiles).toHaveBeenCalledTimes(1),
+    );
+
+    fireEvent.keyDown(screen.getByLabelText("Quick open file"), {
+      key: "Escape",
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Quick open" })).toBeNull(),
+    );
+
+    fireEvent.keyDown(window, { key: "p", metaKey: true });
+    await screen.findByRole("dialog", { name: "Quick open" });
+    await act(async () => {});
+
+    expect(mocks.indexScopedFiles).toHaveBeenCalledTimes(1);
+  });
+
   it("opens, edits, saves, and guards discarding a dirty file", async () => {
     const confirmSpy = vi.spyOn(window, "confirm");
     render(<WorkspaceFileBrowser mode="workspace" />);
@@ -732,7 +1234,7 @@ describe("WorkspaceFileBrowser", () => {
     await waitFor(() =>
       expect(mocks.registryDiscard).toHaveBeenCalledWith({
         workspaceId: "ws-1",
-        scope: "workspace",
+        ref: { kind: "checkout", checkout: { scope: "workspace" } },
         path: "main.ts",
       }),
     );
@@ -856,7 +1358,7 @@ describe("WorkspaceFileBrowser", () => {
     await waitFor(() =>
       expect(mocks.registryRefresh).toHaveBeenCalledWith({
         workspaceId: "ws-1",
-        ...agentRef,
+        ref: { kind: "checkout", checkout: agentRef },
         path: "main.ts",
       }),
     );
@@ -1795,7 +2297,7 @@ describe("WorkspaceFileBrowser", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows an empty History state when the open panel has no file subject", async () => {
+  it("unmounts History when the open panel has no file subject", async () => {
     render(<WorkspaceFileBrowser mode="workspace" />);
     await expandWorkspaceFiles();
 
@@ -1804,7 +2306,9 @@ describe("WorkspaceFileBrowser", () => {
     expect(await screen.findByLabelText("File history")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close main.ts" }));
 
-    expect(await screen.findByText("No file selected.")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByLabelText("File history")).not.toBeInTheDocument();
+    });
   });
 
   it("passes quick-diff gutter marks from HEAD to the visible editor", async () => {
@@ -1965,12 +2469,12 @@ describe("WorkspaceFileBrowser", () => {
     await waitFor(() => expect(mocks.moveScopedPath).toHaveBeenCalledTimes(2));
     expect(mocks.registryReset).toHaveBeenCalledWith(
       "ws-1",
-      { scope: "workspace" },
+      { kind: "checkout", checkout: { scope: "workspace" } },
       "src/main.ts",
     );
     expect(mocks.registryRetarget).toHaveBeenCalledWith(
       "ws-1",
-      { scope: "workspace" },
+      { kind: "checkout", checkout: { scope: "workspace" } },
       "main.ts",
       "src/main.ts",
     );
@@ -2070,7 +2574,7 @@ describe("WorkspaceFileBrowser", () => {
     await waitFor(() =>
       expect(mocks.registryRetarget).toHaveBeenCalledWith(
         "ws-1",
-        { scope: "workspace" },
+        { kind: "checkout", checkout: { scope: "workspace" } },
         "main.ts",
         "renamed.ts",
       ),
@@ -2124,7 +2628,7 @@ describe("WorkspaceFileBrowser", () => {
     await waitFor(() =>
       expect(mocks.registryRefresh).toHaveBeenCalledWith({
         workspaceId: "ws-1",
-        scope: "workspace",
+        ref: { kind: "checkout", checkout: { scope: "workspace" } },
         path: "main.ts",
       }),
     );
@@ -2219,5 +2723,159 @@ describe("WorkspaceFileBrowser", () => {
     expect(
       screen.getByRole("button", { name: "Close revision" }),
     ).toBeVisible();
+  });
+
+  it("opens workspace skill documents read-only without using checkout file APIs", async () => {
+    mocks.skillGroups = [
+      {
+        scope: "workspace",
+        skills: [
+          {
+            name: "audit",
+            scope: "workspace",
+            description: "Audit the implementation",
+            content_revision: "skill-v1",
+            files: [],
+            created_by: "operator",
+            source: "loom skill update",
+            created_at: "2026-08-14T00:00:00Z",
+            updated_at: "2026-08-14T00:00:00Z",
+          },
+        ],
+      },
+    ];
+    mocks.fileMap["audit/SKILL.md"] = {
+      path: "audit/SKILL.md",
+      content: "Review every changed seam.",
+      size: 26,
+      binary: false,
+      version: "skill-v1",
+    };
+    render(<WorkspaceFileBrowser mode="skills" />);
+    const skillsRoot = (await screen.findByText("Workspace")).closest("button");
+    expect(skillsRoot).not.toBeNull();
+
+    fireEvent.click(skillsRoot!);
+    fireEvent.click(await screen.findByLabelText("SKILL.md"));
+
+    expect(
+      await screen.findByDisplayValue("Review every changed seam."),
+    ).toHaveAttribute("data-readonly", "true");
+    expect(screen.getByText("Audit the implementation")).toBeVisible();
+    expect(screen.getByText(/Read-only.*loom skill update/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    // The Skills section touches no checkout API at all — not even git status.
+    expect(mocks.readScopedFile).not.toHaveBeenCalled();
+    expect(mocks.listScopedDir).not.toHaveBeenCalled();
+    expect(mocks.gitStatusScoped).not.toHaveBeenCalled();
+  });
+
+  it("offers no checkout History for a skills tab", async () => {
+    mocks.skillGroups = [
+      {
+        scope: "role",
+        role: "reviewer",
+        skills: [
+          {
+            name: "audit",
+            scope: "role",
+            role: "reviewer",
+            description: "Audit the implementation",
+            content_revision: "skill-v1",
+            files: [],
+            created_at: "2026-08-14T00:00:00Z",
+            updated_at: "2026-08-14T00:00:00Z",
+          },
+        ],
+      },
+    ];
+    mocks.fileMap["audit/SKILL.md"] = {
+      path: "audit/SKILL.md",
+      content: "Review every changed seam.",
+      size: 26,
+      binary: false,
+      version: "skill-v1",
+    };
+    // Previously this switched from a checkout tab to a skills tab inside one
+    // browser. That mix is unreachable now that each section keeps its own
+    // roots and tab set, so what survives is the invariant it was really
+    // guarding: a skills tab never grows checkout history affordances.
+    render(<WorkspaceFileBrowser mode="skills" />);
+
+    fireEvent.click((await screen.findByText("reviewer")).closest("button")!);
+    fireEvent.click(await screen.findByLabelText("SKILL.md"));
+
+    expect(
+      await screen.findByDisplayValue("Review every changed seam."),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "History" })).toBeNull();
+    expect(screen.queryByLabelText("File history")).not.toBeInTheDocument();
+    expect(screen.queryByText("No file selected.")).toBeNull();
+  });
+
+  it("offers no lens in the Skills section and asks for no checkouts", async () => {
+    // Files vs Changes is a choice between two views of a checkout. The Skills
+    // section has none, so the toggle is not offered — and nothing behind it is
+    // fetched either: no checkout listing, no branch diffs, no git status.
+    mocks.skillGroups = reviewerSkillGroups();
+    render(<WorkspaceFileBrowser mode="skills" />);
+
+    expect(await screen.findByText("reviewer")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("tablist", { name: "File explorer lens" }),
+    ).toBeNull();
+    expect(screen.queryByRole("tab", { name: /^Changes/ })).toBeNull();
+    expect(screen.queryByRole("tablist", { name: "Compare mode" })).toBeNull();
+
+    await waitFor(() => expect(mocks.listFileCheckouts).not.toHaveBeenCalled());
+    expect(mocks.fetchDiffFiles).not.toHaveBeenCalled();
+    expect(mocks.gitStatusScoped).not.toHaveBeenCalled();
+  });
+
+  it("pins the Skills section to Files even when Changes is the stored lens", async () => {
+    // The stored lens is shared per workspace. A Skills section that honoured it
+    // would open on a Changes list of checkouts it cannot reach.
+    localStorage.setItem("loom:ws-1:file-explorer-lens", "changes");
+    mocks.skillGroups = reviewerSkillGroups();
+    render(<WorkspaceFileBrowser mode="skills" />);
+
+    expect(await screen.findByText("reviewer")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Workspace changes")).toBeNull();
+    expect(screen.queryByText(/No (committed|uncommitted) changes/)).toBeNull();
+  });
+
+  it("leaves the Files section lens preference intact across a Skills visit", async () => {
+    storeWorkingCompareMode();
+    localStorage.setItem("loom:ws-1:file-explorer-lens", "changes");
+    mocks.skillGroups = reviewerSkillGroups();
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 2,
+        },
+      ],
+    });
+
+    const files = render(<WorkspaceFileBrowser mode="workspace" />);
+    expect(await screen.findByText("atlas · loomcli · 2")).toBeInTheDocument();
+    files.unmount();
+
+    const skills = render(<WorkspaceFileBrowser mode="skills" />);
+    expect(await screen.findByText("reviewer")).toBeInTheDocument();
+    skills.unmount();
+
+    // Visiting Skills must not clobber the preference the Files section owns.
+    expect(localStorage.getItem("loom:ws-1:file-explorer-lens")).toBe(
+      "changes",
+    );
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    expect(await screen.findByText("atlas · loomcli · 2")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("tab", { name: /Changes\s+2/ }),
+    ).toHaveAttribute("aria-selected", "true");
   });
 });

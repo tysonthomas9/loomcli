@@ -615,8 +615,14 @@ func withDefaultEnv(env []string, key, value string) []string {
 	return append(env, prefix+value)
 }
 
+// probeFleetDBBinaryTimeout bounds the --help probe run. A variable so the
+// test can widen it: under CI load even a tiny fake binary can take longer
+// than the interactive-diagnostics default to fork and exec, and a probe
+// timing out on a slow box must not read as "binary broken".
+var probeFleetDBBinaryTimeout = 2 * time.Second
+
 func probeFleetDBBinary(path string, checked []string, remediation string) FleetDBBinaryDiagnostic {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), probeFleetDBBinaryTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, "--help") //nolint:gosec // path was validated by discovery
 	out, err := cmd.CombinedOutput()

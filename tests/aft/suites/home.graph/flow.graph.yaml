@@ -1,0 +1,47 @@
+kind: graph
+version: 1
+classification: { area: platform, feature: home, surface: mixed, purpose: journey }
+flow: home-operator-queue
+intent: An operator reviews and resolves the work that needs human attention from workspace Home.
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+imports:
+  - shared-steps.yaml
+  - states.yaml
+  - transitions.yaml
+
+start: browser-ready
+
+graph:
+  browser-ready:
+    open-home: home-ready
+
+  home-ready:
+    create-ranked-queue: ranked-queue-visible
+    create-design-gate: design-gate-visible
+    create-blocked-task: blocked-task-visible
+    create-needs-revision-task: needs-revision-visible
+    create-live-activity: live-activity-visible
+    create-historical-activity: historical-activity-recorded
+
+  design-gate-visible:
+    approve-design-gate: design-gate-cleared
+
+  design-gate-cleared:
+    read-approved-design: design-gate-approved
+
+  blocked-task-visible:
+    unblock-task: blocked-task-cleared
+
+  blocked-task-cleared:
+    read-unblocked-task: blocked-task-unblocked
+
+  needs-revision-visible:
+    open-needs-revision-task: needs-revision-panel-open
+
+  historical-activity-recorded:
+    reload-home-activity: activity-history-restored
+
+coverage:
+  strategy: transition

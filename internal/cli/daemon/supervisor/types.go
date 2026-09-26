@@ -164,6 +164,7 @@ type SupervisedAgentStatus struct {
 	OwnershipLastHeartbeat time.Time
 	AssignedTaskID         string    // task currently claimed by this agent (empty when between tasks)
 	LastActivity           time.Time // most recent PTY output observed by the wrapper; zero if no observation yet
+	ClaimsGated            bool      // agent is cycling but gated by an active claim hold
 }
 
 // BuiltInRoles defines the built-in role names that use loom <role> command.

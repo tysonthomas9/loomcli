@@ -32,6 +32,7 @@ interface WorkspaceFilePaneProps {
   isDirty: boolean;
   isSaving: boolean;
   canWrite: boolean;
+  showGitAffordances?: boolean | undefined;
   externalConflict: ExternalFileConflict | null;
   searchOpen: boolean;
   onContentChange: (value: string) => void;
@@ -134,6 +135,7 @@ export function WorkspaceFilePane({
   isDirty,
   isSaving,
   canWrite,
+  showGitAffordances = true,
   externalConflict,
   searchOpen,
   onContentChange,
@@ -236,26 +238,28 @@ export function WorkspaceFilePane({
           />
           <div className={styles.viewerActions}>
             {isDirty && <span className={styles.dirtyLabel}>Modified</span>}
-            <button
-              type="button"
-              className={styles.iconButton}
-              aria-label="Toggle blame"
-              title="Toggle blame"
-              aria-pressed={!!blameEnabled}
-              onClick={onToggleBlame}
-              disabled={!fileData || fileData.binary || !!fileData.truncated}
-            >
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <path
-                  d="M4 3h8M4 8h5M4 13h8"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                />
-                <circle cx="12" cy="8" r="1.5" fill="currentColor" />
-              </svg>
-            </button>
+            {showGitAffordances && (
+              <button
+                type="button"
+                className={styles.iconButton}
+                aria-label="Toggle blame"
+                title="Toggle blame"
+                aria-pressed={!!blameEnabled}
+                onClick={onToggleBlame}
+                disabled={!fileData || fileData.binary || !!fileData.truncated}
+              >
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path
+                    d="M4 3h8M4 8h5M4 13h8"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                  />
+                  <circle cx="12" cy="8" r="1.5" fill="currentColor" />
+                </svg>
+              </button>
+            )}
             <button
               type="button"
               className={styles.iconButton}
@@ -327,32 +331,34 @@ export function WorkspaceFilePane({
                 />
               </svg>
             </button>
-            <button
-              type="button"
-              className={`${styles.saveButton} ${styles.historyToggle}`}
-              aria-pressed={historyOpen}
-              onClick={onToggleHistory}
-            >
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <circle
-                  cx="8"
-                  cy="8"
-                  r="5.5"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                />
-                <path
-                  d="M8 4.8V8l2.2 1.4"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <span>History</span>
-            </button>
+            {showGitAffordances && (
+              <button
+                type="button"
+                className={`${styles.saveButton} ${styles.historyToggle}`}
+                aria-pressed={historyOpen}
+                onClick={onToggleHistory}
+              >
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <circle
+                    cx="8"
+                    cy="8"
+                    r="5.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                  />
+                  <path
+                    d="M8 4.8V8l2.2 1.4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <span>History</span>
+              </button>
+            )}
             {canWrite && (
               <button
                 type="button"

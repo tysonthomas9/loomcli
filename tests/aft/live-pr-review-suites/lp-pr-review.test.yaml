@@ -1,0 +1,504 @@
+# PR Review template coverage against a REAL backend, fully hermetic.
+#
+# The directory name matters: run-aft.sh maps `live-pr-review*` to
+# AFT_LIVE_SUITE_KIND=prreview (run-aft.sh:127), which is the only tier that
+# starts the fake GitHub fixture (:669). Every other tier keeps the degraded
+# connector contract, so renaming this directory silently disables the fixture
+# and every case below fails on `503 egress_unavailable`.
+#
+# Hermeticity, in two halves:
+#   * REST — LOOM_CONNECTOR_GITHUB_BASE_URL points the connector at
+#     fixtures/fake-github/server.mjs. run-aft.sh strips LOOM_WEBUI_GITHUB_TOKEN,
+#     GH_TOKEN and GITHUB_TOKEN from the server launch, so an operator's real PAT
+#     can never reach real github.com from this suite.
+#   * git — a local bare repo holds refs/pull/7/head. `ensureReviewer` does a real
+#     `git fetch <remote> +refs/pull/7/head:refs/loom/pr/7/head`
+#     (localworkspace.go:225-231); verified by experiment that this resolves
+#     against a file:// bare repo.
+#
+# Register-then-repoint, NOT url.<base>.insteadOf: `gitRemoteURL` shells out to
+# `git remote get-url` (workspace_store.go:359-368), which EXPANDS insteadOf, so the
+# stored RemoteURL would become file://… and `parseGitHubOwnerRepo` (membership.go:36-50)
+# would reject every reviewer request as repo_not_registered. RemoteURL is captured
+# once at registration and never recomputed, so: add the github.com remote → register →
+# repoint to the local bare repo. The first step below reads it back.
+suite: lp-pr-review
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-PRLIVE" >/dev/null || true
+
+  : "${AFT_FAKE_GH_BASE:?fake-github fixture is not running — this suite must run under the prreview live tier}"
+
+  gh_bare="$AFT_WORK_DIR/prlive-gh.git"
+  repo="$AFT_WORK_DIR/prlive-widgets"
+  rm -rf "$gh_bare" "$repo"
+  git init -q --bare "$gh_bare"
+
+  git init -q "$repo"
+  git -C "$repo" config user.name "Loom AFT"
+  git -C "$repo" config user.email "aft@example.test"
+  # A small, obviously-wrong slice so the model has something concrete to find.
+  # The assertion never depends on the model's wording — only on it naming this file.
+  printf 'package widget\n\nfunc ParseName(s string) string {\n\treturn s\n}\n' > "$repo/widget.go"
+  git -C "$repo" add widget.go
+  git -C "$repo" commit -qm "add widget parser"
+  git -C "$repo" branch -M main
+  git -C "$repo" remote add origin "https://github.com/acme/widgets"
+  git -C "$repo" push -q "$gh_bare" main
+  base_sha="$(git -C "$repo" rev-parse HEAD)"
+
+  git -C "$repo" checkout -qb feature/auth
+  printf 'package widget\n\nfunc ParseName(s string) string {\n\treturn s[1:]\n}\n' > "$repo/widget.go"
+  git -C "$repo" commit -qam "trim leading character"
+  head_sha="$(git -C "$repo" rev-parse HEAD)"
+  git -C "$repo" push -q "$gh_bare" feature/auth
+  git -C "$repo" checkout -q main
+  # This is what makes the PR fetchable without GitHub.
+  git -C "$gh_bare" update-ref "refs/pull/7/head" "$head_sha"
+
+  # Register while origin still says github.com (RemoteURL is captured here, once).
+  python3 -c 'import json,sys; print(json.dumps({"name":sys.argv[1],"type":"empty","repos":[sys.argv[2]]}))' \
+    "e2e-ws-prlive" "$repo" > "$AFT_WORK_DIR/prlive-workspace.json"
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" \
+    -d @"$AFT_WORK_DIR/prlive-workspace.json" > "$AFT_WORK_DIR/prlive-workspace.resp.json"
+  python3 - "$AFT_WORK_DIR/prlive-workspace.resp.json" "$AFT_WORK_DIR" <<'PY'
+  import json, pathlib, sys
+  data = json.load(open(sys.argv[1])).get("data") or {}
+  work = pathlib.Path(sys.argv[2])
+  work.joinpath("prlive-workspace.path").write_text(data["path"], encoding="utf-8")
+  repos = data.get("repos") or []
+  assert repos, data
+  work.joinpath("prlive-repo.name").write_text(repos[0]["name"], encoding="utf-8")
+  PY
+
+  # Repoint AFTER registration so the fetch resolves locally while the stored
+  # RemoteURL keeps saying github.com.
+  git -C "$repo" remote set-url origin "file://$gh_bare"
+
+  # S2: install the fixture credential. Without it ensureConnectorAndGrants fails
+  # before any HTTP call (seed.go:36-49) and every case here 503s.
+  curl -sf -X PATCH "$AFT_BASE_URL/api/local/settings" -H "Content-Type: application/json" \
+    -d '{"runtime_credentials":{"github":{"token":"aft-fixture-token"}}}' >/dev/null
+
+  # Point the fixture at the SHAs git actually produced. EnsureDetachedGitWorktreeAtPRHead
+  # compares the fetched tip against the connector's head.sha and returns
+  # PRHeadChangedError on mismatch (localworkspace.go:238-241), so the fixture's default
+  # placeholder sha would fail every run with a misleading "stale_subject".
+  python3 - "$head_sha" "$base_sha" > "$AFT_WORK_DIR/prlive-fixture.json" <<'PY'
+  import json, sys
+  head, base = sys.argv[1], sys.argv[2]
+  print(json.dumps({
+      "pr": {
+          "number": 7, "state": "open", "title": "Trim leading character",
+          "draft": False, "merged_at": None, "user": {"login": "octocat"},
+          "updated_at": "2026-01-01T00:00:00Z",
+          "head": {"sha": head, "ref": "feature/auth"},
+          "base": {"sha": base, "ref": "main"},
+      },
+      "files": [{
+          "filename": "widget.go", "status": "modified",
+          "additions": 1, "deletions": 1,
+          "patch": "@@ -1,5 +1,5 @@\n package widget\n \n func ParseName(s string) string {\n-\treturn s\n+\treturn s[1:]\n }",
+      }],
+  }))
+  PY
+  curl -sf -X POST "$AFT_FAKE_GH_BASE/__fixture" -H "Content-Type: application/json" \
+    -d @"$AFT_WORK_DIR/prlive-fixture.json" >/dev/null
+  # Reset the request log AFTER seeding so the read-only assertion only sees
+  # requests the reviewer itself made.
+  curl -sf -X POST "$AFT_FAKE_GH_BASE/__reset" >/dev/null
+  curl -sf -X POST "$AFT_FAKE_GH_BASE/__fixture" -H "Content-Type: application/json" \
+    -d @"$AFT_WORK_DIR/prlive-fixture.json" >/dev/null
+teardown: |
+  # Best-effort: the in-test close step is the load-bearing one (aft treats suite
+  # teardown failure as report-only), and live-sweep.sh is the authoritative check.
+  name="$(cat "$AFT_WORK_DIR/lp1-agent.name" 2>/dev/null || true)"
+  [[ -n "$name" ]] && "$AFT_TESTS_DIR/scripts/live-close-agent-tab.sh" "$name" E2E-WS-PRLIVE || true
+  # Local settings are GLOBAL, not workspace-scoped, and aft runs suites in one
+  # process — leaving the credential installed would un-degrade every later suite
+  # that asserts 503 egress_unavailable.
+  curl -s -X PATCH "$AFT_BASE_URL/api/local/settings" -H "Content-Type: application/json" \
+    -d '{"runtime_credentials":{"github":{"token":""}}}' >/dev/null || true
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-PRLIVE" >/dev/null || true
+
+tests:
+  # covers: LP-1 (PRR-R2 + PRR-R4) — real reviewer, grounded review, read-only proven
+  - name: a real reviewer reviews a seeded defect and writes nothing
+    intent: An operator opens a pull request, asks a real backend to review it, gets a review that names the changed file, and the checkout plus the upstream are left exactly as they were
+    steps:
+      - run: |
+          set -e
+          "$AFT_TESTS_DIR/scripts/live-scope-baseline.sh" \
+            "$(cat "$AFT_WORK_DIR/prlive-workspace.path")" "$AFT_WORK_DIR/lp1-baseline.txt"
+          # The bare repo is the stand-in for GitHub. Snapshot every ref so a reviewer
+          # that pushes anything at all is provable, not merely unlikely.
+          git -C "$AFT_WORK_DIR/prlive-gh.git" for-each-ref --format='%(refname) %(objectname)' \
+            > "$AFT_WORK_DIR/lp1-upstream-refs.txt"
+          # Also snapshot the REGISTERED repo's refs, so the exact fetch delta can be
+          # pinned afterwards rather than allowing any ref in it to move.
+          git -C "$(cat "$AFT_WORK_DIR/prlive-workspace.path")/$(cat "$AFT_WORK_DIR/prlive-repo.name")" \
+            for-each-ref --format='%(refname) %(objectname)' \
+            > "$AFT_WORK_DIR/lp1-repo-refs.before.txt" 2>/dev/null || true
+        intent: "An operator snapshots the workspace and the upstream before any model runs"
+      - run: |
+          set -e
+          # The register-then-repoint guard. If a future resync recomputes RemoteURL from
+          # `git remote get-url`, this flips to file://… and every reviewer request 404s
+          # as repo_not_registered — a failure whose cause is very hard to see from the UI.
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PRLIVE/repos" > "$AFT_WORK_DIR/lp1-repos.json"
+          python3 - "$AFT_WORK_DIR/lp1-repos.json" <<'PY'
+          import json, sys
+          payload = json.load(open(sys.argv[1]))
+          # This endpoint returns {"success":..,"repos":[..]} — NOT the {"data":..}
+          # envelope most routes use (workspaces.go:76-79). Reading the wrong key
+          # yields [] and an assertion that fails for the wrong reason, so demand the
+          # shape explicitly rather than defaulting to an empty list.
+          repos = payload.get("repos")
+          assert isinstance(repos, list) and repos, payload
+          urls = [r.get("remote_url") or "" for r in repos]
+          assert any("github.com/acme/widgets" in u for u in urls), urls
+          assert not any(u.startswith("file://") for u in urls), urls
+          PY
+        intent: "An operator confirms the registered remote still identifies the repo as a GitHub repo"
+      - api:
+          method: "GET"
+          path: "/api/workspaces/E2E-WS-PRLIVE/pull-requests"
+          status: 200
+        intent: "An operator lists the workspace's open pull requests through the connector"
+      - run: |
+          set -e
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PRLIVE/pull-requests" > "$AFT_WORK_DIR/lp1-prs.json"
+          python3 - "$AFT_WORK_DIR/lp1-prs.json" <<'PY'
+          import json, sys
+          payload = json.load(open(sys.argv[1]))
+          data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+          items = data.get("pull_requests")
+          # `warnings` is where the connector reports itself unavailable (list.go:17-19).
+          # An empty list plus a warning means the credential or the base-URL override
+          # did not take effect — a completely different fix from "the PR is missing",
+          # so surface it instead of asserting into a bare empty list.
+          warnings = data.get("warnings") or []
+          assert isinstance(items, list), payload
+          assert items, f"no pull requests returned; connector warnings={warnings}"
+          numbers = [p.get("number") for p in items]
+          assert 7 in numbers, f"PR 7 missing; got {numbers}, warnings={warnings}"
+          PY
+        intent: "The seeded pull request is visible without any call reaching real GitHub"
+      - run: |
+          set -e
+          # Bring the reviewer up through its own endpoint. This is the step that does the
+          # real git fetch of refs/pull/7/head and materializes the detached worktree at
+          # .loom/pr-worktrees/<repo>/pr-7 (reviewer.go:292-300).
+          code="$(curl -s -o "$AFT_WORK_DIR/lp1-reviewer.json" -w '%{http_code}' \
+            -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-PRLIVE/pull-requests/acme/widgets/7/reviewer")"
+          if [[ "$code" != "200" && "$code" != "201" && "$code" != "202" ]]; then
+            echo "ensureReviewer returned $code" >&2
+            cat "$AFT_WORK_DIR/lp1-reviewer.json" >&2 || true
+            echo >&2
+            # stale_subject means the fixture's head.sha and the bare repo's
+            # refs/pull/7/head disagree — the single most likely wiring mistake here.
+            echo "fixture head sha vs upstream ref:" >&2
+            curl -sf "$AFT_FAKE_GH_BASE/repos/acme/widgets/pulls/7" >&2 || true
+            echo >&2
+            git -C "$AFT_WORK_DIR/prlive-gh.git" rev-parse refs/pull/7/head >&2 || true
+            exit 1
+          fi
+        intent: "An operator starts the read-only reviewer for the pull request"
+      - run: |
+          set -e
+          ws_path="$(cat "$AFT_WORK_DIR/prlive-workspace.path")"
+          repo_name="$(cat "$AFT_WORK_DIR/prlive-repo.name")"
+          checkout="$ws_path/.loom/pr-worktrees/$repo_name/pr-7"
+          echo "$checkout" > "$AFT_WORK_DIR/lp1-checkout.path"
+          # Discover the reviewer's agent name rather than reconstructing it: it is
+          # review-<owner>-<repo>-<sha256("owner/repo") prefix>-pr-<n>
+          # (reviewer.go:44-55), so any hardcoded guess silently stops matching the
+          # moment the hash length or segment-fitting changes.
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PRLIVE/agents" > "$AFT_WORK_DIR/lp1-agents.json" || true
+          python3 - "$AFT_WORK_DIR/lp1-agents.json" > "$AFT_WORK_DIR/lp1-agent.name" <<'PY' || true
+          import json, sys
+          agents = json.load(open(sys.argv[1])).get("data") or []
+          for a in agents:
+              if a.get("role_name") == "pr-reviewer":
+                  print(a["name"])
+                  break
+          PY
+          for i in $(seq 1 30); do
+            [[ -d "$checkout" ]] && exit 0
+            sleep 1
+          done
+          echo "reviewer worktree never appeared at $checkout" >&2
+          ls -la "$ws_path/.loom/pr-worktrees" 2>/dev/null >&2 || echo "(no pr-worktrees dir)" >&2
+          exit 1
+        intent: "The reviewer's isolated PR checkout is materialized on disk"
+      - run: |
+          set -e
+          checkout="$(cat "$AFT_WORK_DIR/lp1-checkout.path")"
+          head="$(git -C "$checkout" rev-parse HEAD)"
+          upstream="$(git -C "$AFT_WORK_DIR/prlive-gh.git" rev-parse refs/pull/7/head)"
+          [[ "$head" == "$upstream" ]] || { echo "checkout HEAD $head != PR head $upstream" >&2; exit 1; }
+          # Prove the reviewer is looking at the DEFECT, not at main. Without this the
+          # read-only assertions below could pass against an empty or wrong checkout.
+          grep -q 's\[1:\]' "$checkout/widget.go" || { echo "checkout does not contain the seeded defect" >&2; exit 1; }
+          echo "$head" > "$AFT_WORK_DIR/lp1-head.sha"
+        intent: "The checkout is pinned to the pull request head and contains the seeded defect"
+      # The reviewer's codex only boots once a TERMINAL IS ATTACHED: readCodexReviewerSnapshot
+      # returns state="starting" while rt.Endpoint/rt.ThreadID are empty, with the comment
+      # "terminal not attached / thread not discovered" (stream.go:157-162). POSTing
+      # .../reviewer creates the agent and the checkout but attaches nothing, so an
+      # API-only flow sits at "starting" forever — measured 226s of it. The discussion
+      # panel is what mounts the terminal, so drive it the way an operator does.
+      - open: /ws/E2E-WS-PRLIVE/prs
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=prs-github-warning]') ||
+            Array.from(document.querySelectorAll('[role=button]')).some((e) => (e.getAttribute('aria-label')||'').startsWith('Review '))
+        intent: "Wait until the pull request list renders"
+      - run: |
+          set -e
+          # Click-and-verify, per the Runs-tab lesson: a click that merely finds a node
+          # reports success even when the view never changes.
+          deadline=$((SECONDS + 30))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            if agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=pr-review-workspace]')" | grep -q true; then
+              exit 0
+            fi
+            agent-browser --session "$AFT_SESSION" eval "(() => { const r = Array.from(document.querySelectorAll('[role=button]')).find(e => (e.getAttribute('aria-label')||'').startsWith('Review ')); if (!r) return 'no-row'; r.click(); return 'clicked'; })()" >/dev/null 2>&1 || true
+            sleep 1
+          done
+          echo "PR review workspace never opened" >&2
+          agent-browser --session "$AFT_SESSION" eval "JSON.stringify({warning: document.querySelector('[data-testid=prs-github-warning]')?.textContent||null, rows: Array.from(document.querySelectorAll('[role=button]')).map(e=>e.getAttribute('aria-label')).filter(Boolean).slice(0,10)})" >&2 || true
+          exit 1
+        intent: "An operator opens the pull request's review workspace"
+      - run: |
+          set -e
+          deadline=$((SECONDS + 30))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            if agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=pr-chat-composer]')" | grep -q true; then
+              exit 0
+            fi
+            agent-browser --session "$AFT_SESSION" eval "(() => { const b = document.querySelector('[data-testid=pr-discuss-button]'); if (!b) return 'no-button'; if (!document.querySelector('[data-testid=pr-chat-composer]')) b.click(); return 'clicked'; })()" >/dev/null 2>&1 || true
+            sleep 1
+          done
+          echo "PR discussion panel never mounted (reviewer terminal never attached)" >&2
+          agent-browser --session "$AFT_SESSION" eval "JSON.stringify({discussButton: !!document.querySelector('[data-testid=pr-discuss-button]'), composer: !!document.querySelector('[data-testid=pr-chat-composer]')})" >&2 || true
+          exit 1
+        intent: "An operator opens the PR discussion, which attaches the reviewer's terminal"
+      - run: |
+          set -e
+          # The live model turn. Budget is deliberately large: this is a real backend
+          # reading a diff and composing a review, and aft caps a run: step at 120s
+          # (steps.ts:171), so the wait is split across steps rather than spent here.
+          for i in $(seq 1 55); do
+            if curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PRLIVE/pull-requests/acme/widgets/7/conversation" \
+              > "$AFT_WORK_DIR/lp1-conv.json"; then
+              python3 - "$AFT_WORK_DIR/lp1-conv.json" <<'PY' && exit 0
+          import json, sys
+          payload = json.load(open(sys.argv[1]))
+          conv = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+          msgs = conv.get("messages") or []
+          # Wait for a GROUNDED review, not merely the first assistant message. A real
+          # reviewer opens with an acknowledgement ("I'm reviewing the configured
+          # base-to-HEAD diff now...") seconds after the terminal attaches; polling for
+          # any assistant text passes on that preamble and then fails the grounding
+          # assertion one step later, which reads as "the model ignored the file" when
+          # it simply had not gotten there yet. The changed path is the substantive
+          # signal, and it is the same condition the next step verifies.
+          grounded = [m for m in msgs
+                      if m.get("role") == "assistant" and "widget.go" in (m.get("text") or "")]
+          assert grounded, conv.get("state")
+          PY
+            fi
+            sleep 2
+          done
+          # Soft window: aft hard-caps a run: step at 120s (steps.ts:171), so the wait is
+          # split across two steps. Timing out here is not a failure — the NEXT step is
+          # the one that fails, so a slow model gets ~220s total rather than 110s.
+          exit 0
+        intent: "Wait one bounded window for the real reviewer to produce its opening review"
+      - run: |
+          set -e
+          for i in $(seq 1 55); do
+            if curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PRLIVE/pull-requests/acme/widgets/7/conversation" \
+              > "$AFT_WORK_DIR/lp1-conv.json"; then
+              python3 - "$AFT_WORK_DIR/lp1-conv.json" <<'PY' && exit 0
+          import json, sys
+          payload = json.load(open(sys.argv[1]))
+          conv = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+          msgs = conv.get("messages") or []
+          # Wait for a GROUNDED review, not merely the first assistant message. A real
+          # reviewer opens with an acknowledgement ("I'm reviewing the configured
+          # base-to-HEAD diff now...") seconds after the terminal attaches; polling for
+          # any assistant text passes on that preamble and then fails the grounding
+          # assertion one step later, which reads as "the model ignored the file" when
+          # it simply had not gotten there yet. The changed path is the substantive
+          # signal, and it is the same condition the next step verifies.
+          grounded = [m for m in msgs
+                      if m.get("role") == "assistant" and "widget.go" in (m.get("text") or "")]
+          assert grounded, conv.get("state")
+          PY
+            fi
+            sleep 2
+          done
+          echo "reviewer never produced an assistant message" >&2
+          cat "$AFT_WORK_DIR/lp1-conv.json" 2>/dev/null >&2 || true
+          exit 1
+        intent: "Fail without retrying the model if the reviewer never speaks"
+      - run: |
+          set -e
+          python3 - "$AFT_WORK_DIR/lp1-conv.json" <<'PY'
+          import json, sys
+          payload = json.load(open(sys.argv[1]))
+          conv = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+          msgs = conv.get("messages") or []
+          assistant = [m for m in msgs if m.get("role") == "assistant"]
+          assert assistant, conv
+          # Grounding, not wording: the review must name the file that actually changed.
+          # Anything stronger would be asserting on model prose.
+          joined = "\n".join(m.get("text") or "" for m in assistant)
+          assert "widget.go" in joined, joined[:800]
+          # trimReviewerPreamble (stream.go:278-289) strips the hidden prompt bubble;
+          # if it regresses, the first message is the READ-ONLY PR REVIEWER preamble.
+          first = msgs[0]
+          assert not (first.get("role") == "user" and (first.get("text") or "").lstrip().startswith("## READ-ONLY PR REVIEWER")), first
+          PY
+        intent: "An operator reads a grounded review that names the changed file, with the hidden prompt kept out of the transcript"
+      - run: |
+          set -e
+          # Round-trip a human turn: postReviewerMessage → DeliverLeadMessageWithOptions →
+          # transcript (reviewer.go:585-606). The marker is run-scoped so a stale
+          # transcript cannot satisfy it.
+          marker="AFT-LP1-${RUN_ID:-local}"
+          echo "$marker" > "$AFT_WORK_DIR/lp1-marker.txt"
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-PRLIVE/pull-requests/acme/widgets/7/messages" \
+            -H "Content-Type: application/json" \
+            -d "$(python3 -c 'import json,sys; print(json.dumps({"text": "Reply with the token " + sys.argv[1] + " and nothing else."}))' "$marker")" \
+            > "$AFT_WORK_DIR/lp1-post.json"
+        intent: "An operator asks the running reviewer a follow-up question"
+      - run: |
+          set -e
+          marker="$(cat "$AFT_WORK_DIR/lp1-marker.txt")"
+          for i in $(seq 1 55); do
+            if curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PRLIVE/pull-requests/acme/widgets/7/conversation" \
+              > "$AFT_WORK_DIR/lp1-conv2.json"; then
+              python3 - "$AFT_WORK_DIR/lp1-conv2.json" "$marker" <<'PY' && exit 0
+          import json, sys
+          payload = json.load(open(sys.argv[1]))
+          conv = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+          msgs = conv.get("messages") or []
+          marker = sys.argv[2]
+          assert any(m.get("role") == "user" and marker in (m.get("text") or "") for m in msgs), [m.get("role") for m in msgs]
+          PY
+            fi
+            sleep 2
+          done
+          echo "the operator's turn never appeared in the reviewer transcript" >&2
+          cat "$AFT_WORK_DIR/lp1-conv2.json" 2>/dev/null >&2 || true
+          exit 1
+        intent: "The operator's own turn round-trips into the reviewer conversation"
+      - run: |
+          set -e
+          # READ-ONLY PROOF — the entire point of the hidden pr-review-checkout prompt.
+          checkout="$(cat "$AFT_WORK_DIR/lp1-checkout.path")"
+          expected="$(cat "$AFT_WORK_DIR/lp1-head.sha")"
+          status="$(git -C "$checkout" status --porcelain)"
+          [[ -z "$status" ]] || { echo "reviewer left uncommitted changes:" >&2; echo "$status" >&2; exit 1; }
+          now="$(git -C "$checkout" rev-parse HEAD)"
+          [[ "$now" == "$expected" ]] || { echo "reviewer moved HEAD: $expected -> $now" >&2; exit 1; }
+          stash="$(git -C "$checkout" stash list)"
+          [[ -z "$stash" ]] || { echo "reviewer left stashed work:" >&2; echo "$stash" >&2; exit 1; }
+          # The upstream must be byte-identical, including refs the reviewer could have
+          # created. A push would show up here even if the worktree looked clean.
+          git -C "$AFT_WORK_DIR/prlive-gh.git" for-each-ref --format='%(refname) %(objectname)' \
+            > "$AFT_WORK_DIR/lp1-upstream-refs.after.txt"
+          diff -u "$AFT_WORK_DIR/lp1-upstream-refs.txt" "$AFT_WORK_DIR/lp1-upstream-refs.after.txt" \
+            || { echo "reviewer changed the upstream repository" >&2; exit 1; }
+        # Scope, stated rather than implied: `git status --porcelain` does not report
+        # IGNORED files, and neither this nor the workspace scope oracle inspects `.git`
+        # internals (config, hooks, index flags, reflogs) or unreachable objects in the
+        # bare repo. A reviewer that wrote an ignored file, installed a hook, or ran
+        # `git hash-object -w` would still pass. What IS proven: no tracked-file change,
+        # HEAD pinned to the PR head sha, no stash, and every upstream ref identical.
+        intent: "An operator proves the reviewer left tracked files, HEAD, the stash and every upstream ref unchanged"
+      - run: |
+          set -e
+          # The other half of read-only: no mutating REST call. This is only meaningful
+          # because the fixture ACCEPTS writes (201) and records them — a reviewer that
+          # tried to post a review would succeed against the fixture and be caught here,
+          # rather than being stopped by a 404 and looking well-behaved.
+          curl -sf "$AFT_FAKE_GH_BASE/__requests" > "$AFT_WORK_DIR/lp1-requests.json"
+          python3 - "$AFT_WORK_DIR/lp1-requests.json" <<'PY'
+          import json, sys
+          reqs = json.load(open(sys.argv[1]))
+          mutating = [r for r in reqs if r.get("method") not in ("GET", "HEAD")]
+          assert not mutating, mutating[:5]
+          # Positive control against a dead fixture: if NOTHING ever called it, the
+          # "no writes" assertion above would be vacuously true.
+          #
+          # Honest scope: these GETs are NOT attributed to the model. The PR list and
+          # ensureReviewer both hit the fixture before the reviewer's terminal attaches,
+          # so this proves the connector path is live for this case — not that the model
+          # itself issued a request. The model-side evidence is the grounded review
+          # naming widget.go, asserted earlier.
+          reads = [r for r in reqs if r.get("method") == "GET"]
+          assert reads, "nothing called the fake upstream at all — the no-write proof would be vacuous"
+          PY
+        intent: "An operator proves no mutating upstream call was made, against a fixture that would have accepted one"
+      - run: |
+          set -e
+          # `refs:<repo>` allows that repo's refs to move but STILL checks its files.
+          # ensureReviewer performs a real `git fetch +refs/pull/7/head:refs/loom/pr/7/head`
+          # into the registered repo (localworkspace.go:225-231), so gaining that ref is
+          # the product doing its job, not the model writing anything. The two claims
+          # that actually matter are proven separately above and stay strict: the
+          # upstream bare repo is byte-identical ref-for-ref, and the checkout's HEAD,
+          # worktree and stash are unchanged.
+          "$AFT_TESTS_DIR/scripts/live-scope-verify.sh" \
+            "$(cat "$AFT_WORK_DIR/prlive-workspace.path")" "$AFT_WORK_DIR/lp1-baseline.txt" \
+            ".loom/pr-worktrees" "refs:$(cat "$AFT_WORK_DIR/prlive-repo.name")"
+          # `refs:<repo>` permits ANY ref in that repo to move, which is broader than the
+          # one fetch the product actually performs — a reviewer could create or
+          # force-move an unrelated branch and still pass. Pin the exact delta: the only
+          # new ref may be refs/loom/pr/7/head, and every pre-existing ref must be
+          # unchanged.
+          ws_repo="$(cat "$AFT_WORK_DIR/prlive-workspace.path")/$(cat "$AFT_WORK_DIR/prlive-repo.name")"
+          git -C "$ws_repo" for-each-ref --format='%(refname) %(objectname)' \
+            > "$AFT_WORK_DIR/lp1-repo-refs.after.txt"
+          python3 - "$AFT_WORK_DIR/lp1-repo-refs.before.txt" "$AFT_WORK_DIR/lp1-repo-refs.after.txt" <<'PY'
+          import sys
+          def load(p):
+              try:
+                  return dict(l.split(" ", 1) for l in open(p).read().splitlines() if " " in l)
+              except FileNotFoundError:
+                  return {}
+          before, after = load(sys.argv[1]), load(sys.argv[2])
+          # Two allowances, both product bookkeeping rather than reviewer action:
+          #   refs/loom/pr/7/head  — ensureReviewer's explicit PR fetch
+          #   refs/remotes/**      — remote-tracking refs any `git fetch` maintains.
+          #                          Setup pushes straight to the bare path, so none
+          #                          exist at baseline and loom's own sync creates them.
+          # Everything else stays strict: a reviewer creating a local branch or tag, or
+          # moving/deleting ANY existing ref, still fails. Allowing the whole repo (the
+          # earlier `refs:` shape) hid exactly this class of change.
+          def bookkeeping(r):
+              return r == "refs/loom/pr/7/head" or r.startswith("refs/remotes/")
+          added = {r for r in set(after) - set(before) if not bookkeeping(r)}
+          removed = set(before) - set(after)
+          moved = {r for r in set(before) & set(after)
+                   if before[r] != after[r] and not r.startswith("refs/remotes/")}
+          assert not added, f"reviewer created unexpected refs: {sorted(added)}"
+          assert not removed, f"reviewer deleted refs: {sorted(removed)}"
+          assert not moved, f"reviewer moved existing refs: {sorted(moved)}"
+          PY
+        intent: "An operator proves the reviewer changed nothing in the workspace outside its own PR checkout"
+      - run: |
+          set -e
+          name="$(cat "$AFT_WORK_DIR/lp1-agent.name" 2>/dev/null || true)"
+          if [[ -z "$name" ]]; then
+            echo "could not resolve the reviewer agent name; refusing to report clean cleanup" >&2
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PRLIVE/agents" >&2 || true
+            exit 1
+          fi
+          "$AFT_TESTS_DIR/scripts/live-close-agent-tab.sh" "$name" E2E-WS-PRLIVE
+        intent: "An operator closes the reviewer and proves no paid process is left attached"

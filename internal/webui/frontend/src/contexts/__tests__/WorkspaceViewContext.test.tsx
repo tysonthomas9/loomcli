@@ -88,8 +88,8 @@ describe("WorkspaceViewContext", () => {
     it("safe defaults have kanban as active view", () => {
       const { result } = renderHook(() => useWorkspaceViewData());
 
-      expect(result.current.activeView).toBe("kanban");
-      expect(result.current.previousView).toBe("kanban");
+      expect(result.current.activeView).toBe("home");
+      expect(result.current.previousView).toBe("home");
     });
 
     it("safe defaults have empty filters object", () => {

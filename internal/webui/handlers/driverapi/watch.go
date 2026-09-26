@@ -70,6 +70,9 @@ func (m *Module) handleWatchEpic(w http.ResponseWriter, r *http.Request) {
 	// Long-lived stream: the server-wide write deadline must not apply.
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 
+	if sw.WriteRetry(realtime.RetryMs) != nil {
+		return
+	}
 	if writeWatchSnapshot(sw, session.cursor, snapshot) != nil {
 		return
 	}

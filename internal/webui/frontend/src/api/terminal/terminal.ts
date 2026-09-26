@@ -80,19 +80,30 @@ export interface TabMetadata {
   created_at: string;
   updated_at: string;
   /**
-   * Whether the backend PTY for this tab is currently alive in the server
-   * process. false means the tab survived (e.g. a server restart) but its
-   * backing shell did not — connecting will spawn a fresh session, so the
+   * Whether connecting to this tab will yield a working PTY — true for a
+   * live PTY, and for a tab created during this server process (its PTY is
+   * spawned by the first WebSocket). Not a process-liveness check. false
+   * means the tab metadata outlived its server or its PTY exited, so the
    * UI should render the tab as "session ended" and prompt before
-   * reconnecting.
+   * reconnecting, since reconnecting spawns a fresh session.
    */
-  pty_alive: boolean;
+  attachable: boolean;
   /**
    * Number of concurrent WebSocket clients currently viewing this session.
    * 0 = no one attached; ≥2 = multi-viewer state the UI can surface before
    * destructive tab-close actions.
    */
   attached_clients: number;
+  /**
+   * RFC3339 timestamp of the last time this tab's backing shell was replaced
+   * (e.g. the server restarted and the next attach spawned a fresh PTY under
+   * the same tab identity). Persisted server-side, so the marker survives a
+   * reload and is visible to a second viewer. Empty string once dismissed;
+   * undefined for tabs that were never replaced.
+   */
+  replaced_at?: string;
+  /** Machine-readable reason for the replacement (e.g. "server_restart"). */
+  replaced_reason?: string;
 }
 
 export async function ensureAgentTerminalSession(
@@ -207,7 +218,10 @@ export async function patchTabMetadata(
   workspaceId: string,
   session: string,
   fields: Partial<
-    Pick<TabMetadata, "label" | "notes" | "pinned" | "sort_order" | "issue_id">
+    Pick<
+      TabMetadata,
+      "label" | "notes" | "pinned" | "sort_order" | "issue_id" | "replaced_at"
+    >
   >,
 ): Promise<TabMetadata> {
   const { data, error, response } = await api.PATCH(
@@ -222,6 +236,20 @@ export async function patchTabMetadata(
 }
 
 /**
+ * Clear the persisted session-replacement marker for a tab.
+ *
+ * The empty string is the cleared value the server persists, so the marker
+ * stays gone across reloads and for other viewers. A later replacement sets a
+ * fresh timestamp and re-marks the tab — that is a new event, not a relapse.
+ */
+export async function dismissTabRestartNotice(
+  workspaceId: string,
+  sessionName: string,
+): Promise<TabMetadata> {
+  return patchTabMetadata(workspaceId, sessionName, { replaced_at: "" });
+}
+
+/**
  * Put (create/replace) tab metadata via PUT /api/workspaces/{ws}/terminal/tabs/{session}.
  */
 export async function putTabMetadata(
@@ -229,7 +257,7 @@ export async function putTabMetadata(
   session: string,
   meta: Omit<
     TabMetadata,
-    "created_at" | "updated_at" | "pty_alive" | "attached_clients"
+    "created_at" | "updated_at" | "attachable" | "attached_clients"
   >,
 ): Promise<void> {
   const { error, response } = await api.PUT(

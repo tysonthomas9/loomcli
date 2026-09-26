@@ -1,0 +1,11 @@
+#!/bin/sh
+# Stub for the Gemini CLI used in E2E tests.
+# This is a paid-call firewall, not an uninstalled simulation: GeminiBackend.HealthCheck
+# uses exec.LookPath("gemini"), so this stub makes Installed=true while ensuring
+# deterministic AFT never reaches a real host CLI.
+# See internal/cli/backends/backend_gemini.go:117-123 and tests/aft/plans/lead-test-plan.md B9a.
+
+set -e
+
+echo "gemini stub: deterministic aft tier must never invoke gemini — see tests/aft/plans/lead-test-plan.md B9a" >&2
+exit 1

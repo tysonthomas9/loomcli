@@ -1,6 +1,6 @@
 /**
- * Zustand vanilla store for File Browser v3 tab state.
- * One store instance is created per workspace; each tab carries its checkout ref.
+ * Zustand vanilla store for File Browser v4 tab state.
+ * One store instance is created per workspace; each tab carries an explorer ref.
  */
 
 import {
@@ -15,19 +15,21 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 
 import type { FileScopeRef } from "@/api/workspace";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
+import { cleanPath } from "@/utils/fileExplorerRefs";
 import {
-  checkoutRefKey,
-  cleanPath,
-  normalizeCheckoutRef,
-  sameCheckoutRef,
+  checkoutExplorerRef,
+  explorerRefKey,
+  normalizeExplorerRef,
+  sameExplorerRef,
   tabIdentityKey,
-  type CheckoutRef,
-} from "@/utils/fileExplorerRefs";
+  type ExplorerRef,
+} from "@/utils/explorerRefs";
+import { parseSkillPath, validateRoleName } from "@/utils/skillsPaths";
 
 const FILE_BROWSER_TABS_STORAGE_KEY = "file-browser-tabs:v3";
 
 export interface FileBrowserTab {
-  ref: CheckoutRef;
+  ref: ExplorerRef;
   path: string;
 }
 
@@ -37,13 +39,13 @@ export interface FileBrowserGroup {
   active: string | null;
 }
 
-export interface PersistedFileBrowserTabsV3 {
-  v: 3;
+export interface PersistedFileBrowserTabsV4 {
+  v: 4;
   groups: FileBrowserGroup[];
   mru: FileBrowserTab[];
 }
 
-export interface FileBrowserStoreState extends PersistedFileBrowserTabsV3 {
+export interface FileBrowserStoreState extends PersistedFileBrowserTabsV4 {
   dirty: Record<string, boolean>;
   activeGroup: number;
 }
@@ -52,11 +54,26 @@ export interface FileBrowserStoreActions {
   openTab: (tab: FileBrowserTab, groupIndex?: number) => void;
   activateTab: (groupIndex: number, tabKey: string) => void;
   closeTab: (groupIndex: number, tabKey: string) => void;
-  closePathPrefix: (ref: CheckoutRef, path: string) => void;
+  closePathPrefix: (ref: ExplorerRef, path: string) => void;
   splitRight: (tab?: FileBrowserTab | null) => void;
   setDirty: (tabKey: string, dirty: boolean) => void;
-  retargetPathPrefix: (ref: CheckoutRef, from: string, to: string) => void;
-  pruneUnavailableRefs: (validRefs: CheckoutRef[]) => void;
+  retargetPathPrefix: (ref: ExplorerRef, from: string, to: string) => void;
+  /**
+   * Close every tab whose ref no longer exists, and persist that.
+   *
+   * `refsWorkspaceId` names the workspace `validRefs` was derived from. The
+   * caller's own sources of truth switch at different times — the route's
+   * workspace id changes the instant the user switches, while the agent and
+   * repo lists behind the ref universe still describe the workspace they just
+   * left — so a universe is only trustworthy once it says which workspace it
+   * belongs to and that answer matches this store's. Anything else (a mismatch,
+   * or a caller that cannot say) is treated as "not known yet" and prunes
+   * nothing: a destructive, persisted close is not a safe default.
+   */
+  pruneUnavailableRefs: (
+    validRefs: ExplorerRef[],
+    refsWorkspaceId: string | null | undefined,
+  ) => void;
   reset: () => void;
 }
 
@@ -64,12 +81,12 @@ export type FileBrowserStore = FileBrowserStoreState & FileBrowserStoreActions;
 
 export interface FileBrowserStoreConfig {
   workspaceId: string;
-  validRefs?: CheckoutRef[] | undefined;
+  validRefs?: ExplorerRef[] | undefined;
   storageKey?: string | undefined;
 }
 
-const EMPTY_FILE_BROWSER_STATE: PersistedFileBrowserTabsV3 = {
-  v: 3,
+const EMPTY_FILE_BROWSER_STATE: PersistedFileBrowserTabsV4 = {
+  v: 4,
   groups: [{ tabs: [], active: null }],
   mru: [],
 };
@@ -82,6 +99,13 @@ export function agentFileBrowserTabsStorageKey(agentName: string): string {
   return `${FILE_BROWSER_TABS_STORAGE_KEY}:agent:${agentName}`;
 }
 
+// The Skills section keeps its own tab set: it is a separate destination in the
+// nav rail, so a file opened there must not appear in the Files section's tabs
+// (or be pruned by it) just because both browsers share a store shape.
+export function skillsFileBrowserTabsStorageKey(): string {
+  return `${FILE_BROWSER_TABS_STORAGE_KEY}:skills`;
+}
+
 function tabKey(tab: FileBrowserTab): string {
   return tabIdentityKey(tab);
 }
@@ -91,55 +115,127 @@ function normalizeTab(raw: unknown): FileBrowserTab | null {
   const item = raw as { ref?: unknown; path?: unknown };
   if (typeof item.path !== "string" || item.path.trim() === "") return null;
   if (!item.ref || typeof item.ref !== "object") return null;
-  const ref = item.ref as FileScopeRef;
-  if (
-    ref.scope !== "workspace" &&
-    ref.scope !== "repo" &&
-    ref.scope !== "agent"
-  ) {
-    return null;
-  }
-  if ((ref.scope === "repo" || ref.scope === "agent") && !ref.target) {
+  const ref = item.ref as Partial<ExplorerRef>;
+  if (ref.kind === "checkout") {
+    const checkout = ref.checkout as FileScopeRef | undefined;
+    if (
+      !checkout ||
+      (checkout.scope !== "workspace" &&
+        checkout.scope !== "repo" &&
+        checkout.scope !== "agent") ||
+      ((checkout.scope === "repo" || checkout.scope === "agent") &&
+        !checkout.target)
+    ) {
+      return null;
+    }
+  } else if (ref.kind === "skills") {
+    const group = ref.group;
+    if (
+      !group ||
+      (group.kind !== "workspace" &&
+        (group.kind !== "role" ||
+          typeof group.role !== "string" ||
+          !!validateRoleName(group.role))) ||
+      !parseSkillPath(item.path)
+    ) {
+      return null;
+    }
+  } else {
     return null;
   }
   return {
-    ref: normalizeCheckoutRef(ref),
+    ref: normalizeExplorerRef(ref as ExplorerRef),
     path: cleanPath(item.path),
   };
 }
 
-function validRefSet(
-  validRefs?: CheckoutRef[] | undefined,
-): Set<string> | null {
+function normalizeLegacyTab(raw: unknown): FileBrowserTab | null {
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw as { ref?: unknown; path?: unknown };
+  if (typeof item.path !== "string" || item.path.trim() === "") return null;
+  if (!item.ref || typeof item.ref !== "object") return null;
+  const ref = item.ref as FileScopeRef;
+  if (
+    (ref.scope !== "workspace" &&
+      ref.scope !== "repo" &&
+      ref.scope !== "agent") ||
+    ((ref.scope === "repo" || ref.scope === "agent") && !ref.target)
+  ) {
+    return null;
+  }
+  return {
+    ref: checkoutExplorerRef(ref),
+    path: cleanPath(item.path),
+  };
+}
+
+/**
+ * Which tabs survive a rebuild of the persisted state. `refs` is the universe
+ * of explorer refs that currently exist; `retain` holds tab keys that survive
+ * whether or not their ref is in that universe. A null filter accepts every
+ * tab — the shape used when a caller is normalizing rather than pruning.
+ */
+interface TabFilter {
+  refs: Set<string>;
+  retain: Set<string>;
+}
+
+function refKeySet(validRefs: ExplorerRef[]): Set<string> {
+  return new Set(validRefs.map((ref) => explorerRefKey(ref)));
+}
+
+function tabFilter(
+  validRefs?: ExplorerRef[] | undefined,
+  retain: Iterable<string> = [],
+): TabFilter | null {
   if (!validRefs) return null;
-  return new Set(validRefs.map((ref) => checkoutRefKey(ref)));
+  return { refs: refKeySet(validRefs), retain: new Set(retain) };
 }
 
 function coerceTabToValidRef(
   tab: FileBrowserTab,
-  validRefs: CheckoutRef[],
+  validRefs: ExplorerRef[],
 ): FileBrowserTab {
-  const refs = validRefSet(validRefs);
-  if (refs?.has(checkoutRefKey(tab.ref))) return tab;
-  if (tab.ref.scope === "agent" && tab.ref.target && !tab.ref.repo) {
-    const fallback = validRefs.find(
-      (ref) => ref.scope === "agent" && ref.target === tab.ref.target,
-    );
-    if (fallback) return { ...tab, ref: fallback };
+  if (refKeySet(validRefs).has(explorerRefKey(tab.ref))) return tab;
+  if (
+    tab.ref.kind !== "checkout" ||
+    tab.ref.checkout.scope !== "agent" ||
+    !tab.ref.checkout.target ||
+    tab.ref.checkout.repo
+  ) {
+    return tab;
   }
-  return tab;
+  // A repo-less agent ref is a tab saved while the agent had a single,
+  // flattened checkout. Re-homing it is only unambiguous when the agent still
+  // has exactly one: with two or more, "whichever comes first" silently points
+  // the path the user opened at a different repo's file, and every tie-break
+  // rule picks a wrong file just as confidently. One candidate coerces; more
+  // than one leaves the tab alone, which closes it — honest, and recoverable
+  // by reopening from the tree.
+  const target = tab.ref.checkout.target;
+  const candidates = validRefs.filter(
+    (ref) =>
+      ref.kind === "checkout" &&
+      ref.checkout.scope === "agent" &&
+      ref.checkout.target === target,
+  );
+  const only = candidates.length === 1 ? candidates[0] : undefined;
+  return only ? { ...tab, ref: only } : tab;
 }
 
-function isValidTab(tab: FileBrowserTab, refs: Set<string> | null): boolean {
-  return !refs || refs.has(checkoutRefKey(tab.ref));
+function isValidTab(tab: FileBrowserTab, filter: TabFilter | null): boolean {
+  if (!filter) return true;
+  return (
+    filter.retain.has(tabKey(tab)) || filter.refs.has(explorerRefKey(tab.ref))
+  );
 }
 
 function matchesPathPrefix(
   tab: FileBrowserTab,
-  ref: CheckoutRef,
+  ref: ExplorerRef,
   prefix: string,
 ): boolean {
-  if (!sameCheckoutRef(tab.ref, ref)) return false;
+  if (!sameExplorerRef(tab.ref, ref)) return false;
   const p = cleanPath(tab.path);
   const base = cleanPath(prefix);
   return p === base || p.startsWith(`${base}/`);
@@ -156,23 +252,24 @@ function retargetPath(path: string, from: string, to: string): string {
 
 function uniqueTabs(
   tabs: FileBrowserTab[],
-  refs: Set<string> | null,
+  filter: TabFilter | null,
 ): FileBrowserTab[] {
   const seen = new Set<string>();
   const out: FileBrowserTab[] = [];
   for (const tab of tabs) {
-    if (!isValidTab(tab, refs)) continue;
+    if (!isValidTab(tab, filter)) continue;
     const key = tabKey(tab);
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ ref: normalizeCheckoutRef(tab.ref), path: cleanPath(tab.path) });
+    out.push({ ref: normalizeExplorerRef(tab.ref), path: cleanPath(tab.path) });
   }
   return out;
 }
 
 function normalizeGroups(
   rawGroups: unknown,
-  refs: Set<string> | null,
+  filter: TabFilter | null,
+  normalizer: (raw: unknown) => FileBrowserTab | null = normalizeTab,
 ): FileBrowserGroup[] {
   const source = Array.isArray(rawGroups) ? rawGroups : [];
   const next = source.slice(0, 2).map((raw) => {
@@ -180,10 +277,10 @@ function normalizeGroups(
     const tabs = uniqueTabs(
       Array.isArray(group.tabs)
         ? group.tabs
-            .map(normalizeTab)
+            .map(normalizer)
             .filter((tab): tab is FileBrowserTab => tab !== null)
         : [],
-      refs,
+      filter,
     );
     const active =
       typeof group.active === "string" &&
@@ -207,7 +304,8 @@ function normalizeGroups(
 function normalizeMru(
   rawMru: unknown,
   groups: FileBrowserGroup[],
-  refs: Set<string> | null,
+  filter: TabFilter | null,
+  normalizer: (raw: unknown) => FileBrowserTab | null = normalizeTab,
 ): FileBrowserTab[] {
   const open = new Map<string, FileBrowserTab>();
   for (const group of groups) {
@@ -219,8 +317,8 @@ function normalizeMru(
   const out: FileBrowserTab[] = [];
   if (Array.isArray(rawMru)) {
     for (const raw of rawMru) {
-      const tab = normalizeTab(raw);
-      if (!tab || !isValidTab(tab, refs)) continue;
+      const tab = normalizer(raw);
+      if (!tab || !isValidTab(tab, filter)) continue;
       const key = tabKey(tab);
       const openTab = open.get(key);
       if (openTab && !seen.has(key)) {
@@ -248,20 +346,21 @@ function normalizeMru(
 function persistedFromGroups(
   groups: unknown,
   mru: unknown,
-  refs: Set<string> | null,
-): PersistedFileBrowserTabsV3 {
-  const normalizedGroups = normalizeGroups(groups, refs);
+  filter: TabFilter | null,
+  normalizer: (raw: unknown) => FileBrowserTab | null = normalizeTab,
+): PersistedFileBrowserTabsV4 {
+  const normalizedGroups = normalizeGroups(groups, filter, normalizer);
   return {
-    v: 3,
+    v: 4,
     groups: normalizedGroups,
-    mru: normalizeMru(mru, normalizedGroups, refs),
+    mru: normalizeMru(mru, normalizedGroups, filter, normalizer),
   };
 }
 
-function parsePersistedV3(
+function parsePersistedV4(
   raw: string | null,
-  refs: Set<string> | null,
-): PersistedFileBrowserTabsV3 | null {
+  filter: TabFilter | null,
+): PersistedFileBrowserTabsV4 | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as {
@@ -269,8 +368,16 @@ function parsePersistedV3(
       groups?: unknown;
       mru?: unknown;
     };
+    if (parsed?.v === 4) {
+      return persistedFromGroups(parsed.groups, parsed.mru, filter);
+    }
     if (parsed?.v === 3) {
-      return persistedFromGroups(parsed.groups, parsed.mru, refs);
+      return persistedFromGroups(
+        parsed.groups,
+        parsed.mru,
+        filter,
+        normalizeLegacyTab,
+      );
     }
   } catch {
     return null;
@@ -280,11 +387,13 @@ function parsePersistedV3(
 
 function loadFileBrowserTabs(
   workspaceId: string,
-  validRefs?: CheckoutRef[] | undefined,
+  validRefs?: ExplorerRef[] | undefined,
   storageKey = FILE_BROWSER_TABS_STORAGE_KEY,
-): PersistedFileBrowserTabsV3 {
-  const refs = validRefSet(validRefs);
-  const loaded = parsePersistedV3(wsGet(workspaceId, storageKey), refs);
+): PersistedFileBrowserTabsV4 {
+  const loaded = parsePersistedV4(
+    wsGet(workspaceId, storageKey),
+    tabFilter(validRefs),
+  );
   if (loaded) return loaded;
   return EMPTY_FILE_BROWSER_STATE;
 }
@@ -292,7 +401,7 @@ function loadFileBrowserTabs(
 function persist(
   workspaceId: string,
   storageKey: string,
-  state: PersistedFileBrowserTabsV3,
+  state: PersistedFileBrowserTabsV4,
 ): void {
   wsSet(workspaceId, storageKey, JSON.stringify(state));
 }
@@ -308,8 +417,8 @@ function touchMru(
 function withPersistedState(
   workspaceId: string,
   storageKey: string,
-  partial: Omit<PersistedFileBrowserTabsV3, "v">,
-): PersistedFileBrowserTabsV3 {
+  partial: Omit<PersistedFileBrowserTabsV4, "v">,
+): PersistedFileBrowserTabsV4 {
   const persisted = persistedFromGroups(partial.groups, partial.mru, null);
   persist(workspaceId, storageKey, persisted);
   return persisted;
@@ -332,7 +441,7 @@ export function createFileBrowserStore(
 
     openTab: (rawTab, groupIndex = get().activeGroup) => {
       const tab = {
-        ref: normalizeCheckoutRef(rawTab.ref),
+        ref: normalizeExplorerRef(rawTab.ref),
         path: cleanPath(rawTab.path),
       };
       if (!tab.path) return;
@@ -472,7 +581,7 @@ export function createFileBrowserStore(
       const groups = normalizeGroups(state.groups, null).map((group) => {
         const tabs = uniqueTabs(
           group.tabs.map((tab) =>
-            sameCheckoutRef(tab.ref, ref) && matchesPathPrefix(tab, ref, from)
+            sameExplorerRef(tab.ref, ref) && matchesPathPrefix(tab, ref, from)
               ? { ...tab, path: retargetPath(tab.path, from, to) }
               : tab,
           ),
@@ -481,7 +590,7 @@ export function createFileBrowserStore(
         const activeTab = tabs.find((tab) =>
           group.active
             ? tabKey(tab) === group.active ||
-              (sameCheckoutRef(tab.ref, ref) &&
+              (sameExplorerRef(tab.ref, ref) &&
                 matchesPathPrefix(tab, ref, to) &&
                 tabKey({ ...tab, path: retargetPath(tab.path, to, from) }) ===
                   group.active)
@@ -500,7 +609,7 @@ export function createFileBrowserStore(
       for (const group of state.groups) {
         for (const tab of group.tabs) {
           if (
-            sameCheckoutRef(tab.ref, ref) &&
+            sameExplorerRef(tab.ref, ref) &&
             matchesPathPrefix(tab, ref, from)
           ) {
             const next = { ...tab, path: retargetPath(tab.path, from, to) };
@@ -515,7 +624,7 @@ export function createFileBrowserStore(
       const persisted = withPersistedState(workspaceId, storageKey, {
         groups,
         mru: state.mru.map((tab) =>
-          sameCheckoutRef(tab.ref, ref) && matchesPathPrefix(tab, ref, from)
+          sameExplorerRef(tab.ref, ref) && matchesPathPrefix(tab, ref, from)
             ? { ...tab, path: retargetPath(tab.path, from, to) }
             : tab,
         ),
@@ -523,15 +632,35 @@ export function createFileBrowserStore(
       set({ ...persisted, dirty });
     },
 
-    pruneUnavailableRefs: (validRefs) => {
-      const refs = validRefSet(validRefs);
+    pruneUnavailableRefs: (validRefs, refsWorkspaceId) => {
+      if (!refsWorkspaceId || refsWorkspaceId !== workspaceId) return;
       const state = get();
+      // A tab holding unsaved edits is user data, and a ref being absent from
+      // the universe is usually transient — a checkout mid-rebuild, a role
+      // scope the catalog has not listed yet. Closing such a tab would discard
+      // the draft with no warning and persist that, so dirty tabs survive
+      // pruning. They are recognised by tabKey, the same key `dirty` is keyed
+      // by, and they are also left un-coerced: retargeting a tab's ref changes
+      // its identity, which would strand the draft the editor holds under the
+      // old one. Once the edits are saved the tab is ordinary again and the
+      // next prune closes it if the ref is still gone.
+      const dirtyKeys = new Set(
+        Object.entries(state.dirty)
+          .filter(([, isDirty]) => isDirty)
+          .map(([key]) => key),
+      );
+      const settle = (tab: FileBrowserTab): FileBrowserTab =>
+        dirtyKeys.has(tabKey(tab)) ? tab : coerceTabToValidRef(tab, validRefs);
       const groups = state.groups.map((group) => ({
         ...group,
-        tabs: group.tabs.map((tab) => coerceTabToValidRef(tab, validRefs)),
+        tabs: group.tabs.map(settle),
       }));
-      const mru = state.mru.map((tab) => coerceTabToValidRef(tab, validRefs));
-      const persisted = persistedFromGroups(groups, mru, refs);
+      const mru = state.mru.map(settle);
+      const persisted = persistedFromGroups(
+        groups,
+        mru,
+        tabFilter(validRefs, dirtyKeys),
+      );
       const open = new Set(
         persisted.groups.flatMap((group) =>
           group.tabs.map((tab) => tabKey(tab)),
@@ -576,9 +705,9 @@ export function FileBrowserStoreProvider({
 
   useEffect(() => {
     if (validRefs) {
-      store.getState().pruneUnavailableRefs(validRefs);
+      store.getState().pruneUnavailableRefs(validRefs, workspaceId);
     }
-  }, [store, validRefs]);
+  }, [store, validRefs, workspaceId]);
 
   return (
     <FileBrowserStoreContext.Provider value={store}>

@@ -3,6 +3,7 @@ package workflows
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -313,6 +314,139 @@ func TestGetRunEventsReturnsDriverRunEvents(t *testing.T) {
 	if len(page.Events) != 1 || page.Events[0].EntityID != "run-1" || page.Events[0].EntityType != "driver_run" {
 		t.Fatalf("events page = %+v, want one driver_run event", page)
 	}
+}
+
+func TestStreamRunEventsUsesIDLessFrames(t *testing.T) {
+	ctx := context.Background()
+	st := seededWorkflowStore(t, ctx)
+	run, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey:    "TEST",
+		RunID:           "run-stream",
+		DriverID:        "demo",
+		DriverVersionID: "version-1",
+		Payload:         json.RawMessage(`{"ok":true}`),
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	t.Run("event", func(t *testing.T) {
+		body := serveWorkflowStreamOnce(t, st, run.RunID)
+		if !strings.Contains(body, "event: event\n") {
+			t.Fatalf("stream body = %q, want event frame", body)
+		}
+		if hasSSEIDLine(body) {
+			t.Fatalf("stream body = %q, want ID-less event frame", body)
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		streamErr := errors.New("events unavailable")
+		failingRuns := &failingEventsDriverRunStore{DriverRunStore: st.DriverRuns(), err: streamErr}
+		failingStore := &workflowStreamStore{Store: st, driverRuns: failingRuns}
+		body := serveWorkflowStreamOnce(t, failingStore, run.RunID)
+		if !strings.Contains(body, "event: error\n") || !strings.Contains(body, streamErr.Error()) {
+			t.Fatalf("stream body = %q, want error frame", body)
+		}
+		if hasSSEIDLine(body) {
+			t.Fatalf("stream body = %q, want ID-less error frame", body)
+		}
+	})
+}
+
+func TestStreamRunEventsCommitsResponseWithoutEvents(t *testing.T) {
+	ctx := context.Background()
+	st := seededWorkflowStore(t, ctx)
+	run, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey:    "TEST",
+		RunID:           "run-no-events",
+		DriverID:        "demo",
+		DriverVersionID: "version-1",
+		Payload:         json.RawMessage(`{"ok":true}`),
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	// Advance past every existing event so the stream's first page is empty,
+	// the shape a completed run presents to a late subscriber.
+	page, err := st.DriverRuns().(store.DriverRunEventsReader).Events(ctx, "TEST", run.RunID, "0", 100)
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+
+	reqCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/TEST/runs/"+run.RunID+"/stream?after="+page.Cursor, nil).WithContext(reqCtx)
+	recorder := httptest.NewRecorder()
+	mux := http.NewServeMux()
+	NewModule(st).Register(mux)
+	mux.ServeHTTP(recorder, req)
+
+	// The response must commit before the first event page so a client sees
+	// the stream open even when the run never produces another event.
+	if !recorder.Flushed {
+		t.Fatal("response was never flushed for an event-less stream")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "text/event-stream" {
+		t.Fatalf("content-type = %q, want text/event-stream", got)
+	}
+	if body := recorder.Body.String(); body != "" {
+		t.Fatalf("body = %q, want empty (no frames for an event-less run)", body)
+	}
+}
+
+func serveWorkflowStreamOnce(t *testing.T, st store.Store, runID string) string {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/TEST/runs/"+runID+"/stream?after=0", nil).WithContext(ctx)
+	recorder := &cancelOnFlushRecorder{ResponseRecorder: httptest.NewRecorder(), cancel: cancel}
+	mux := http.NewServeMux()
+	NewModule(st).Register(mux)
+	mux.ServeHTTP(recorder, req)
+	return recorder.Body.String()
+}
+
+func hasSSEIDLine(body string) bool {
+	return strings.HasPrefix(body, "id:") || strings.Contains(body, "\nid:")
+}
+
+type cancelOnFlushRecorder struct {
+	*httptest.ResponseRecorder
+	cancel  context.CancelFunc
+	flushes int
+}
+
+// Flush cancels on the second flush: the first is the handler's pre-loop
+// response commit, the second follows the first written frame.
+func (w *cancelOnFlushRecorder) Flush() {
+	w.ResponseRecorder.Flush()
+	w.flushes++
+	if w.flushes >= 2 {
+		w.cancel()
+	}
+}
+
+type workflowStreamStore struct {
+	store.Store
+	driverRuns store.DriverRunStore
+}
+
+func (s *workflowStreamStore) DriverRuns() store.DriverRunStore {
+	return s.driverRuns
+}
+
+type failingEventsDriverRunStore struct {
+	store.DriverRunStore
+	err error
+}
+
+func (s *failingEventsDriverRunStore) Events(context.Context, string, string, string, int) (*domain.PlatformEventsPage, error) {
+	return nil, s.err
 }
 
 func TestCreateWorkflowVersionRejectsPackageManifest(t *testing.T) {

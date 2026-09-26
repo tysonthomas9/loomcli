@@ -1,0 +1,798 @@
+# Planner template coverage. This suite owns E2E-WS-PLAN because planner
+# agents leave durable fleet-db rows and local worktrees behind.
+suite: zz-planner-agent
+classification: { area: agents, feature: planner-agents, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  run="${RUN_ID:-local}"
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN" >/dev/null || true
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-PLANEMPTY-$run" >/dev/null || true
+  repo="$AFT_WORK_DIR/plan-repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit --allow-empty -m init -q
+  python3 -c 'import json,sys; print(json.dumps({"name":sys.argv[1],"type":"empty","repos":[sys.argv[2]]}))' "e2e-ws-plan" "$repo" > "$AFT_WORK_DIR/plan-workspace.json"
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/plan-workspace.json" > "$AFT_WORK_DIR/plan-workspace.resp.json"
+  python3 - "$run" > "$AFT_WORK_DIR/plan-lead-companion.json" <<'PY'
+  import json, sys
+  run = sys.argv[1]
+  print(json.dumps({
+      "name": f"lead-{run}",
+      "role_name": "lead",
+      "auto": False,
+      "cross_repo": True,
+      "repos": [],
+      "backend": "codex",
+  }))
+  PY
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN/agents" \
+    -H "Content-Type: application/json" \
+    -d @"$AFT_WORK_DIR/plan-lead-companion.json" \
+    > "$AFT_WORK_DIR/plan-lead-companion.resp.json"
+teardown: |
+  set +e
+  run="${RUN_ID:-local}"
+  AFT_WS=E2E-WS-PLAN "$AFT_TESTS_DIR/scripts/close-open-issues.sh"
+  for agent in "planner-${RUN_ID:-local}" "planner-be-${RUN_ID:-local}" "planner-scope-${RUN_ID:-local}" "planner-task-${RUN_ID:-local}" "lead-${RUN_ID:-local}"; do
+    curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN/agents/$agent" >/dev/null || true
+  done
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-PLANEMPTY-$run" >/dev/null || true
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN" >/dev/null || true
+
+tests:
+  # covers: PLN-D1; CreateAgentModal Planner template; POST /api/workspaces/:ws/agents; GET /api/workspaces/:ws/agents
+  - name: planner template creates plan role agent
+    intent: An operator creates a Planner background agent through CreateAgentModal and confirms the workspace records it with the plan role and no auto-start
+    steps:
+      - open: /ws/E2E-WS-PLAN/agents
+      - wait:
+          fn: &agentsPageReady >-
+            (() => {
+              const page = document.querySelector('[data-testid=agents-page]');
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+              if (!page || !settled) {
+                window.__aftAgentsPageStableSig = null;
+                window.__aftAgentsPageStableAt = 0;
+                return false;
+              }
+              if (window.__aftAgentsPageStableSig !== sig) {
+                window.__aftAgentsPageStableSig = sig;
+                window.__aftAgentsPageStableAt = Date.now();
+                return false;
+              }
+              return Date.now() - window.__aftAgentsPageStableAt >= 300;
+            })()
+        intent: "Wait until the planner workspace agents page is ready"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait:
+          fn: &createAgentDialogOpen >-
+            (() => {
+              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
+              if (overlay) {
+                window.__aftCreateAgentOverlayWaitStartedAt = 0;
+                return true;
+              }
+              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
+                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
+              }
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
+                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
+              }
+              return false;
+            })()
+        intent: "Wait until the agent creation dialog is open"
+      - expect: { visible: { testid: create-agent-template-planner } }
+      - click: { testid: create-agent-template-planner }
+      - expect: { attr: { testid: create-agent-template-planner, name: aria-pressed, equals: "true" } }
+      - fill: { testid: create-agent-name, value: "planner-${RUN_ID:-local}" }
+      - click: { testid: create-agent-submit }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=create-agent-overlay]') &&
+            document.body.textContent.includes('planner-${RUN_ID:-local}')
+        intent: "Wait until the Planner modal closes and the new agent appears"
+      - run: |
+          set -e
+          name="planner-${RUN_ID:-local}"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN/agents" > "$AFT_WORK_DIR/pln-d1-agents.json"
+          python3 - "$AFT_WORK_DIR/pln-d1-agents.json" "$name" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          matches = [a for a in agents or [] if a.get("name") == sys.argv[2]]
+          assert len(matches) == 1, agents
+          a = matches[0]
+          assert a.get("role_name") == "plan", a
+          assert not a.get("auto"), a
+          assert not a.get("cross_repo"), a
+          assert len(a.get("repos") or []) == 1, a
+          assert not a.get("state") or a.get("state") == "idle", a
+          assert not a.get("mode"), a
+          PY
+        intent: "An operator filters the unordered agent list and verifies the Planner create contract"
+
+  # covers: PLN-D2; CreateAgentModal Planner name validation; STORED_AGENT_NAME_RE
+  - name: invalid planner name keeps create disabled
+    intent: An operator typing invalid Planner names sees Create stay disabled and no agent is created
+    steps:
+      - open: /ws/E2E-WS-PLAN/agents
+      - wait:
+          fn: *agentsPageReady
+        intent: "Wait until the planner workspace agents page is ready"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait:
+          fn: *createAgentDialogOpen
+        intent: "Wait until the agent creation dialog is open"
+      - click: { testid: create-agent-template-planner }
+      # canSubmit blocks invalid names before handleSubmit, so this path has no create-agent-error box.
+      - fill: { testid: create-agent-name, value: "-bad" }
+      - expect: { enabled: { testid: create-agent-submit, equals: false } }
+      - fill: { testid: create-agent-name, value: "has space" }
+      - expect: { enabled: { testid: create-agent-submit, equals: false } }
+      - fill: { testid: create-agent-name, value: "trailing." }
+      - expect: { enabled: { testid: create-agent-submit, equals: false } }
+      - fill: { testid: create-agent-name, value: "" }
+      - expect: { enabled: { testid: create-agent-submit, equals: false } }
+      - fill: { testid: create-agent-name, value: "planner-valid-${RUN_ID:-local}" }
+      - expect: { enabled: { testid: create-agent-submit, equals: true } }
+      - run: |
+          set -e
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN/agents" > "$AFT_WORK_DIR/pln-d2-agents.json"
+          python3 - "$AFT_WORK_DIR/pln-d2-agents.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          names = {a.get("name") for a in agents or []}
+          for bad in ("-bad", "has space", "trailing."):
+              assert bad not in names, names
+          PY
+        intent: "An operator confirms disabled invalid-name probes did not persist any agent"
+
+  # covers: PLN-D3; duplicate Planner name; CreateAgentModal create-agent-error; POST /api/workspaces/:ws/agents 409
+  - name: duplicate planner name surfaces server conflict
+    intent: An operator who reuses an existing Planner name sees the workspace duplicate error inside the Planner form and no second agent is created
+    steps:
+      - open: /ws/E2E-WS-PLAN/agents
+      - wait:
+          fn: *agentsPageReady
+        intent: "Wait until the planner workspace agents page is ready"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait:
+          fn: *createAgentDialogOpen
+        intent: "Wait until the agent creation dialog is open"
+      - click: { testid: create-agent-template-planner }
+      - fill: { testid: create-agent-name, value: "planner-${RUN_ID:-local}" }
+      - click: { testid: create-agent-submit }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=create-agent-error]')
+        intent: "Wait until the duplicate-name error is rendered before asserting visibility"
+      - expect: { visible: { testid: create-agent-error } }
+      - expect: { attr: { testid: create-agent-error, name: role, equals: "alert" } }
+      - expect: { text: "An agent with this name already exists." }
+      - expect: { visible: { testid: create-agent-overlay } }
+      - run: |
+          set -e
+          name="planner-${RUN_ID:-local}"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN/agents" > "$AFT_WORK_DIR/pln-d3-agents.json"
+          python3 - "$AFT_WORK_DIR/pln-d3-agents.json" "$name" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          matches = [a for a in agents or [] if a.get("name") == sys.argv[2]]
+          assert len(matches) == 1, agents
+          PY
+        intent: "An operator confirms the duplicate submit left exactly one Planner row"
+
+  # covers: PLN-D4; CreateAgentModal backend select; Planner backend persistence
+  - name: backend dropdown persists on planner
+    intent: An operator picks a non-default AI backend for the Planner and the workspace records that backend on the agent
+    steps:
+      - open: /ws/E2E-WS-PLAN/agents
+      - wait:
+          fn: *agentsPageReady
+        intent: "Wait until the planner workspace agents page is ready"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait:
+          fn: *createAgentDialogOpen
+        intent: "Wait until the agent creation dialog is open"
+      - click: { testid: create-agent-template-planner }
+      - fill: { testid: create-agent-name, value: "planner-be-${RUN_ID:-local}" }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=create-agent-backend]')?.options.length > 1
+        intent: "Wait until backend options from /api/backends have rendered before selecting claude"
+      - select: { testid: create-agent-backend, value: "claude" }
+      - expect: { value: { testid: create-agent-backend, equals: "claude" } }
+      - click: { testid: create-agent-submit }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=create-agent-overlay]') &&
+            document.body.textContent.includes('planner-be-${RUN_ID:-local}')
+        intent: "Wait until the claude-backed Planner appears after submit"
+      - run: |
+          set -e
+          name="planner-be-${RUN_ID:-local}"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN/agents" > "$AFT_WORK_DIR/pln-d4-agents.json"
+          python3 - "$AFT_WORK_DIR/pln-d4-agents.json" "$name" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          matches = [a for a in agents or [] if a.get("name") == sys.argv[2]]
+          assert len(matches) == 1, agents
+          a = matches[0]
+          assert a.get("role_name") == "plan", a
+          assert a.get("backend") == "claude", a
+          PY
+        intent: "An operator filters the unordered agent list and verifies the selected Planner backend"
+
+  # covers: PLN-D5; Planner repo chip deselect; cross_repo workspace scope
+  - name: repo chip deselect makes planner workspace scoped
+    intent: An operator deselects the preselected repo so the Planner gets workspace-wide scope and the workspace records cross-repo with no repos
+    steps:
+      - open: /ws/E2E-WS-PLAN/agents
+      - wait:
+          fn: *agentsPageReady
+        intent: "Wait until the planner workspace agents page is ready"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait:
+          fn: *createAgentDialogOpen
+        intent: "Wait until the agent creation dialog is open"
+      - click: { testid: create-agent-template-planner }
+      - expect: { text: "Pick every repo this agent works in. Leave all unselected for workspace scope." }
+      - click: { selector: "[data-testid='create-agent-repo-chips'] button", first: true }
+      - wait:
+          fn: >-
+            document.querySelector("[data-testid='create-agent-repo-chips'] button")?.getAttribute("aria-pressed") === "false"
+        intent: "Wait until the selected repo chip is visibly deselected"
+      - expect: { text: "No repo selected — the agent gets workspace-wide scope." }
+      - fill: { testid: create-agent-name, value: "planner-scope-${RUN_ID:-local}" }
+      - click: { testid: create-agent-submit }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=create-agent-overlay]') &&
+            document.body.textContent.includes('planner-scope-${RUN_ID:-local}')
+        intent: "Wait until the workspace-scoped Planner appears after submit"
+      - run: |
+          set -e
+          name="planner-scope-${RUN_ID:-local}"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN/agents" > "$AFT_WORK_DIR/pln-d5-agents.json"
+          python3 - "$AFT_WORK_DIR/pln-d5-agents.json" "$name" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          matches = [a for a in agents or [] if a.get("name") == sys.argv[2]]
+          assert len(matches) == 1, agents
+          a = matches[0]
+          assert a.get("cross_repo") is True, a
+          assert not a.get("repos"), a
+          PY
+        intent: "An operator filters the unordered agent list and verifies workspace-scope persistence"
+
+  # covers: PLN-D6; repo-less Planner create returns 400; PLN-B13 no-repos hint defect pin; flips when PLN-B13 lands
+  - name: repo-less planner creation shows promised scope then fails
+    intent: An operator creating a Planner in a workspace with no repos is told the agent will get workspace scope and then sees the create fail
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces"
+          body:
+            name: "e2e-ws-planempty-${RUN_ID:-local}"
+            type: "empty"
+          status: 201
+        intent: "An API client creates the repo-less workspace for the no-repos Planner defect pin"
+      - open: /ws/E2E-WS-PLANEMPTY-${RUN_ID:-local}/agents
+      - wait:
+          fn: *agentsPageReady
+        intent: "Wait until the repo-less workspace agents page is ready"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait:
+          fn: *createAgentDialogOpen
+        intent: "Wait until the agent creation dialog is open"
+      - click: { testid: create-agent-template-planner }
+      - expect: { visible: { testid: create-agent-no-repos } }
+      - wait:
+          fn: >-
+            (() => {
+              const text = document.querySelector('[data-testid=create-agent-no-repos]')?.textContent?.replace(/\s+/g, ' ').trim() || '';
+              return text === 'No repos in this workspace yet — background agents need at least one repo; interactive agents run with workspace scope.';
+            })()
+        intent: "Wait until the no-repos hint exactly explains the background-agent repo requirement"
+      - expect: { count: { testid: create-agent-repo-chips, equals: 0 } }
+      - fill: { testid: create-agent-name, value: "planner-empty-${RUN_ID:-local}" }
+      - click: { testid: create-agent-submit }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=create-agent-error]')
+        intent: "Wait until the repo-less create error is rendered before asserting visibility"
+      - expect: { visible: { testid: create-agent-error } }
+      - expect: { text: "This workspace has no repos yet — add one from the sidebar first." }
+      - expect: { visible: { testid: create-agent-overlay } }
+      - run: |
+          set -e
+          name="planner-empty-${RUN_ID:-local}"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PLANEMPTY-${RUN_ID:-local}/agents" > "$AFT_WORK_DIR/pln-d6-agents.json"
+          python3 - "$AFT_WORK_DIR/pln-d6-agents.json" "$name" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          assert isinstance(agents, list), d
+          assert not [a for a in agents or [] if a.get("name") == sys.argv[2]], agents
+          PY
+        intent: "An operator verifies the failed repo-less submit persisted no Planner row"
+
+  # covers: PLN-D7; Planner rail presentation; background subgroup; AgentCard role/status; /api/monitor/status
+  - name: planner appears in rail background group and monitor
+    intent: An operator sees the newly created Planner in the agents rail with its Plan role and idle status and in the monitor activity panel
+    steps:
+      - open: /ws/E2E-WS-PLAN/agents/planner-${RUN_ID:-local}
+      - wait:
+          fn: *agentsPageReady
+        intent: "Wait until the Planner detail route is ready"
+      - expect: { url: "**/agents/planner-${RUN_ID:-local}**" }
+      - wait:
+          fn: >-
+            document.body.textContent.includes('planner-${RUN_ID:-local}')
+        intent: "Wait until the Planner appears in the current agent surface"
+      - run: |
+          set -e
+          name="planner-${RUN_ID:-local}"
+          # budget: monitor-cache (16s) - monitor/status must observe the planner before rail assertions.
+          for i in $(seq 1 16); do
+            curl -sf "$AFT_BASE_URL/api/monitor/status?workspace=E2E-WS-PLAN" > "$AFT_WORK_DIR/pln-d7-monitor-before-rail.json" &&
+            python3 - "$AFT_WORK_DIR/pln-d7-monitor-before-rail.json" "$name" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          name = sys.argv[2]
+          matches = [a for a in d.get("agents", []) if a.get("name") == name]
+          assert matches, d.get("agents")
+          a = matches[0]
+          assert a.get("role") == "plan", a
+          assert (a.get("status") or "idle") in {"idle", "configured"}, a
+          PY
+            sleep 1
+          done
+          echo "monitor status never exposed planner before rail assertion"
+          cat "$AFT_WORK_DIR/pln-d7-monitor-before-rail.json" 2>/dev/null || true
+          exit 1
+        intent: "An operator polls monitor status before asserting monitor-derived Planner rail fields"
+      - reload: true
+      - wait:
+          fn: *agentsPageReady
+        intent: "Wait until the Planner detail route remounts after monitor polling"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=agent-section-background]')?.textContent.includes('planner-${RUN_ID:-local}')
+        intent: "Wait until the workspace tree renders the Planner under the Background subgroup after the monitor cache window"
+      - expect: { visible: { testid: agent-section-background } }
+      - wait:
+          fn: >-
+            (() => {
+              const el = document.querySelector("[aria-label='Agent: planner-${RUN_ID:-local}']");
+              const text = el?.textContent || '';
+              return !!el && text.includes('Plan') && text.includes('Idle');
+            })()
+        intent: "Wait until the Planner card renders its Plan role and Idle status"
+      - expect: { attr: { selector: "[aria-label='Agent: planner-${RUN_ID:-local}']", name: data-status, equals: "idle" } }
+      - click: { role: button, name: Info, exact: true }
+      - wait:
+          fn: >-
+            (() => {
+              const activePane = () => {
+                const root = document.querySelector('[data-testid=agent-editor-groups]');
+                return Array.from(root?.querySelectorAll('[role=tabpanel]:not([data-hidden])') || [])
+                  .find((pane) => !pane.parentElement?.closest('[role=tabpanel]'));
+              };
+              const pane = activePane();
+              const text = (pane?.textContent || '').replace(/\s+/g, ' ').trim();
+              return text.includes('Plan agent') && /Role\s*Plan/.test(text) &&
+                text.includes('Scope') && text.includes('plan-repo');
+            })()
+        intent: "Wait until the Info tab reports the Planner role and repo scope"
+      - open: /ws/E2E-WS-PLAN/monitor
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=agent-activity-panel]')
+        intent: "Wait until the monitor activity panel is mounted"
+      - run: |
+          set -e
+          name="planner-${RUN_ID:-local}"
+          # budget: monitor-cache (16s) - activity panel data follows the monitor/status cache.
+          for i in $(seq 1 16); do
+            curl -sf "$AFT_BASE_URL/api/monitor/status?workspace=E2E-WS-PLAN" > "$AFT_WORK_DIR/pln-d7-monitor.json" &&
+            python3 - "$AFT_WORK_DIR/pln-d7-monitor.json" "$name" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          name = sys.argv[2]
+          matches = [a for a in d.get("agents", []) if a.get("name") == name]
+          assert len(matches) == 1, d.get("agents")
+          a = matches[0]
+          assert a.get("role") == "plan", a
+          assert (a.get("status") or "idle") in {"idle", "configured"}, a
+          PY
+            sleep 1
+          done
+          echo "monitor status never exposed planner"
+          cat "$AFT_WORK_DIR/pln-d7-monitor.json" 2>/dev/null || true
+          exit 1
+        intent: "An operator polls monitor status until it exposes the Planner"
+      - reload: true
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=agent-activity-panel]')
+        intent: "Wait until the monitor activity panel remounts after the status-cache window"
+      - wait:
+          fn: >-
+            document.body.textContent.includes('planner-${RUN_ID:-local}')
+        intent: "Wait until the monitor UI includes the Planner name"
+      - expect: { notText: "No agents found" }
+
+  # covers: PLN-D8; modal-created Planner stays idle without daemon supervision
+  - name: modal-created planner claims no work without supervisor
+    intent: An operator confirms a newly created Planner claims no work on its own and a design-less task stays open and unassigned
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-PLAN/issues"
+          body:
+            title: "planner-idle ${RUN_ID:-local}"
+            issue_type: "task"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "plannerIdleTaskId"
+        intent: "An API client creates a design-less task that the daemonless Planner must not claim"
+      - open: /ws/E2E-WS-PLAN/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - wait: { text: "planner-idle ${RUN_ID:-local}" }
+        intent: "Wait until the design-less idle probe task appears on the board"
+      - wait: { ms: 8000 }
+        intent: "Wait one agent-store poll margin to prove the daemonless Planner does not claim the task"
+      - api:
+          method: "GET"
+          path: "/api/workspaces/E2E-WS-PLAN/issues/${var:plannerIdleTaskId}"
+          assert:
+            - path: "data.status"
+              equals: "open"
+            - path: "data.assignee"
+              exists: false
+            - path: "data.has_design"
+              equals: false
+            - path: "data.design"
+              exists: false
+        intent: "An operator confirms the design-less task remained open, unassigned, and unplanned"
+      - run: |
+          set -e
+          name="planner-${RUN_ID:-local}"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN/agents" > "$AFT_WORK_DIR/pln-d8-agents.json"
+          python3 - "$AFT_WORK_DIR/pln-d8-agents.json" "$name" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          matches = [a for a in agents or [] if a.get("name") == sys.argv[2]]
+          assert len(matches) == 1, agents
+          a = matches[0]
+          assert not a.get("state") or a.get("state") == "idle", a
+          assert not a.get("active_task_id"), a
+          PY
+        intent: "An operator verifies the Planner assignment itself is still idle with no active task"
+      - api:
+          method: "GET"
+          path: "/api/workspaces/E2E-WS-PLAN/tasks/${var:plannerIdleTaskId}/sessions"
+          assert:
+            - path: "data.sessions.0"
+              exists: false
+        intent: "An operator confirms no planning session was recorded for the untouched task"
+
+  # covers: PLN-D9; metricscmd planning status synthesis; AgentCard active-task badge; panel assignee chip
+  - name: assigned in-progress planner renders active task states and assignee chip
+    intent: An orchestration client assigns in-progress tasks and an operator sees planning and working states with active-task identity while the detail panel names the Planner assignee
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-PLAN/agents"
+          body:
+            name: "planner-task-${RUN_ID:-local}"
+            role_name: "task"
+            auto: false
+            cross_repo: false
+            repos: ["plan-repo"]
+            backend: "codex"
+          status: 201
+        intent: "An API client provisions a task-role contrast agent without starting it"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-PLAN/issues"
+          body:
+            title: "planner-planning ${RUN_ID:-local}"
+            issue_type: "task"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "plannerPlanningTaskId"
+        intent: "An orchestration client creates the design-less task used for the Planner planning badge"
+      - api:
+          method: "PATCH"
+          path: "/api/workspaces/E2E-WS-PLAN/issues/${var:plannerPlanningTaskId}"
+          body:
+            assignee: "planner-${RUN_ID:-local}"
+            status: "in_progress"
+        intent: "An orchestration client assigns the task to the Planner and marks it in progress"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-PLAN/issues"
+          body:
+            title: "planner-working-contrast ${RUN_ID:-local}"
+            issue_type: "task"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "plannerWorkingTaskId"
+        intent: "An orchestration client creates the contrast task for a task-role agent"
+      - api:
+          method: "PATCH"
+          path: "/api/workspaces/E2E-WS-PLAN/issues/${var:plannerWorkingTaskId}"
+          body:
+            assignee: "planner-task-${RUN_ID:-local}"
+            status: "in_progress"
+        intent: "An orchestration client assigns the contrast task to the task-role agent"
+      - open: /ws/E2E-WS-PLAN/agents/planner-${RUN_ID:-local}
+      - wait:
+          fn: *agentsPageReady
+        intent: "Wait until the Planner agents page is mounted before the monitor cache window"
+      - run: |
+          set -e
+          planner="planner-${RUN_ID:-local}"
+          task="planner-task-${RUN_ID:-local}"
+          # budget: monitor-cache (16s) - synthesized planner/task statuses flow through monitor/status.
+          for i in $(seq 1 16); do
+            curl -sf "$AFT_BASE_URL/api/monitor/status?workspace=E2E-WS-PLAN" > "$AFT_WORK_DIR/pln-d9-monitor.json" &&
+            python3 - "$AFT_WORK_DIR/pln-d9-monitor.json" "$planner" "$task" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          planner, task = sys.argv[2], sys.argv[3]
+          by_name = {a.get("name"): a for a in d.get("agents", [])}
+          assert (by_name.get(planner, {}).get("status") or "").startswith("planning"), by_name
+          assert (by_name.get(task, {}).get("status") or "").startswith("working"), by_name
+          PY
+            sleep 1
+          done
+          echo "monitor status never synthesized planner planning/task working"
+          cat "$AFT_WORK_DIR/pln-d9-monitor.json" 2>/dev/null || true
+          exit 1
+        intent: "An operator polls monitor status before checking synthesized agent statuses"
+      - reload: true
+      - wait:
+          fn: *agentsPageReady
+        intent: "Wait until the agents page remounts after the monitor cache window"
+      - wait:
+          fn: >-
+            (() => {
+              const planner = document.querySelector("[aria-label='Agent: planner-${RUN_ID:-local}']");
+              const task = document.querySelector("[aria-label='Agent: planner-task-${RUN_ID:-local}']");
+              const plannerTask = planner?.querySelector('[data-task=true]');
+              const taskTask = task?.querySelector('[data-task=true]');
+              return !!planner && planner.getAttribute('data-status') === 'planning' && !!plannerTask?.textContent?.trim() &&
+                !!task && task.getAttribute('data-status') === 'working' && !!taskTask?.textContent?.trim();
+            })()
+        intent: "Wait until metrics synthesis renders planning and working states with active-task badges"
+      - expect: { attr: { selector: "[aria-label='Agent: planner-${RUN_ID:-local}']", name: data-status, equals: "planning" } }
+      - expect: { attr: { selector: "[aria-label='Agent: planner-task-${RUN_ID:-local}']", name: data-status, equals: "working" } }
+      - open: /ws/E2E-WS-PLAN/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready before opening the issue panel"
+      - fill: { testid: search-input-field, value: "planner-planning ${RUN_ID:-local}" }
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll("article")).some((el) => el.textContent.includes('planner-planning ${RUN_ID:-local}'))
+        intent: "Wait until the assigned Planner issue is visible on the board"
+      - click: { selector: "article[aria-label*='planner-planning ${RUN_ID:-local}']", first: true }
+      # PINNED PRODUCT GAP: the panel AgentStatusBadge silently renders nothing
+      # for placeholder/unresolved agents (AgentStatusBadge.tsx:96), making an
+      # agent-assigned issue indistinguishable from a human-assigned one in the
+      # panel header.
+      - wait:
+          fn: >-
+            (() => {
+              const panel = document.querySelector('[data-testid=issue-detail-panel]');
+              const assignee = panel?.querySelector('[data-testid=assignee-dropdown-trigger]');
+              return panel?.getAttribute('data-state') === 'open' &&
+                assignee?.getAttribute('aria-label') === 'Assignee: planner-${RUN_ID:-local}. Click to change.' &&
+                (assignee.textContent || '').includes('planner-${RUN_ID:-local}');
+            })()
+        intent: "Wait until the issue detail panel renders the Planner assignee chip"
+      - expect: { attr: { testid: assignee-dropdown-trigger, name: aria-label, equals: "Assignee: planner-${RUN_ID:-local}. Click to change." } }
+
+  # covers: PLN-D10; AgentDetailMain stopped desired_state empty state; PATCH /api/workspaces/:ws/agents/:name
+  - name: stopped planner shows no terminal empty state
+    intent: An operator who stops the Planner sees the agents page explain that there is no live terminal session instead of attaching to one
+    steps:
+      # desired_state is the deterministic surface: monitor agents do not project domain state.
+      - api:
+          method: "PATCH"
+          path: "/api/workspaces/E2E-WS-PLAN/agents/planner-${RUN_ID:-local}"
+          body:
+            desired_state: "stopped"
+          status: 200
+        intent: "An API client stops the Planner by patching desired_state, not the unprojected state field"
+      - run: |
+          set -e
+          name="planner-${RUN_ID:-local}"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN/agents" > "$AFT_WORK_DIR/pln-d10-stopped.json"
+          python3 - "$AFT_WORK_DIR/pln-d10-stopped.json" "$name" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          matches = [a for a in agents or [] if a.get("name") == sys.argv[2]]
+          assert len(matches) == 1, agents
+          assert matches[0].get("desired_state") == "stopped", matches[0]
+          PY
+        intent: "An operator reads the unordered agent list and confirms desired_state stopped persisted"
+      - open: /ws/E2E-WS-PLAN/agents/planner-${RUN_ID:-local}
+      - wait:
+          fn: *agentsPageReady
+        intent: "Wait until the stopped Planner detail route is ready"
+      - wait:
+          fn: >-
+            document.body.textContent.includes('Agent is stopped') &&
+            document.body.textContent.includes('This agent does not have a live terminal session. Start the agent before attaching to its PTY.')
+        intent: "Wait until the stopped Planner empty state replaces the terminal"
+      - expect: { text: "Agent is stopped" }
+      - expect: { text: "This agent does not have a live terminal session. Start the agent before attaching to its PTY." }
+      - api:
+          method: "PATCH"
+          path: "/api/workspaces/E2E-WS-PLAN/agents/planner-${RUN_ID:-local}"
+          body:
+            desired_state: "running"
+          status: 200
+        intent: "An API client restores the Planner desired_state for later tests"
+      - run: |
+          set -e
+          name="planner-${RUN_ID:-local}"
+          # budget: db-persist (10s) - desired_state restore must reach list readback.
+          for i in $(seq 1 10); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN/agents" > "$AFT_WORK_DIR/pln-d10-running.json" &&
+            python3 - "$AFT_WORK_DIR/pln-d10-running.json" "$name" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          matches = [a for a in agents or [] if a.get("name") == sys.argv[2]]
+          assert matches and matches[0].get("desired_state") == "running", agents
+          PY
+            sleep 1
+          done
+          echo "Planner desired_state did not restore to running"
+          cat "$AFT_WORK_DIR/pln-d10-running.json" 2>/dev/null || true
+          exit 1
+        intent: "An operator polls the agent readback before reopening the restored Planner route"
+      - open: /ws/E2E-WS-PLAN/agents/planner-${RUN_ID:-local}
+      - wait:
+          fn: >-
+            (() => {
+              const page = document.querySelector('[data-testid=agents-page]');
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+              if (!page || !settled) {
+                window.__aftAgentsPageStableSig = null;
+                window.__aftAgentsPageStableAt = 0;
+                return false;
+              }
+              if (window.__aftAgentsPageStableSig !== sig) {
+                window.__aftAgentsPageStableSig = sig;
+                window.__aftAgentsPageStableAt = Date.now();
+                return false;
+              }
+              return Date.now() - window.__aftAgentsPageStableAt >= 300;
+            })() &&
+            !document.body.textContent.includes('Agent is stopped')
+        intent: "Wait until the stopped empty state disappears after desired_state is restored"
+
+  # covers: PLN-D11; API-only Planner delete; modal recreate under same name; PLN-B4 delete UI gap
+  - name: planner can be deleted and recreated
+    intent: An operator removes the Planner through the workspace API and recreates it from the modal under the same name
+    steps:
+      # API-only because no rail, sidebar, or agents-page control deletes agents today.
+      - api:
+          method: "DELETE"
+          path: "/api/workspaces/E2E-WS-PLAN/agents/planner-${RUN_ID:-local}"
+          status: 200
+          assert:
+            - path: "success"
+              equals: true
+            - path: "message"
+              equals: "agent deleted"
+        intent: "An API client removes the Planner assignment because there is no delete-agent UI control"
+      - run: |
+          set -e
+          name="planner-${RUN_ID:-local}"
+          # budget: db-persist (10s) - deleted planner must disappear from list readback.
+          for i in $(seq 1 10); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN/agents" > "$AFT_WORK_DIR/pln-d11-after-delete.json" &&
+            python3 - "$AFT_WORK_DIR/pln-d11-after-delete.json" "$name" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          assert isinstance(agents, list), d
+          assert not [a for a in agents or [] if a.get("name") == sys.argv[2]], agents
+          PY
+            sleep 1
+          done
+          echo "Planner still listed after delete"
+          cat "$AFT_WORK_DIR/pln-d11-after-delete.json" 2>/dev/null || true
+          exit 1
+        intent: "An operator polls the agent readback before asserting the deleted Planner disappears from the UI"
+      - open: /ws/E2E-WS-PLAN/agents
+      - wait:
+          fn: >-
+            (() => {
+              const page = document.querySelector('[data-testid=agents-page]');
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+              if (!page || !settled) {
+                window.__aftAgentsPageStableSig = null;
+                window.__aftAgentsPageStableAt = 0;
+                return false;
+              }
+              if (window.__aftAgentsPageStableSig !== sig) {
+                window.__aftAgentsPageStableSig = sig;
+                window.__aftAgentsPageStableAt = Date.now();
+                return false;
+              }
+              return Date.now() - window.__aftAgentsPageStableAt >= 300;
+            })() &&
+            !Array.from(document.querySelectorAll("[aria-label='Agent: planner-${RUN_ID:-local}']")).length
+        intent: "Wait until the Planner card is gone from the agents rail"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait:
+          fn: *createAgentDialogOpen
+        intent: "Wait until the agent creation dialog is open for recreate"
+      - click: { testid: create-agent-template-planner }
+      - fill: { testid: create-agent-name, value: "planner-${RUN_ID:-local}" }
+      - click: { testid: create-agent-submit }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=create-agent-overlay]') &&
+            document.body.textContent.includes('planner-${RUN_ID:-local}')
+        intent: "Wait until the recreated Planner appears after submit"
+      - run: |
+          set -e
+          name="planner-${RUN_ID:-local}"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PLAN/agents" > "$AFT_WORK_DIR/pln-d11-agents.json"
+          python3 - "$AFT_WORK_DIR/pln-d11-agents.json" "$name" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          matches = [a for a in agents or [] if a.get("name") == sys.argv[2]]
+          assert len(matches) == 1, agents
+          assert matches[0].get("role_name") == "plan", matches[0]
+          PY
+        intent: "An operator filters the unordered agent list and verifies the recreated Planner uses the plan role"

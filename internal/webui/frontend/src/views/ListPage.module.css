@@ -10,8 +10,9 @@
 }
 
 .inner {
-  width: 100%;
-  padding: var(--space-3) var(--space-4) var(--space-8);
+  width: min(100%, var(--page-content-max));
+  margin: 0 auto;
+  padding: var(--space-3) var(--page-padding-x) var(--space-8);
 }
 
 .empty {
@@ -126,6 +127,13 @@
 .statusChip[data-status="blocked"] {
   color: var(--color-danger);
   border-color: var(--color-danger);
+}
+
+.avatarSlot {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
 }
 
 .avatar {

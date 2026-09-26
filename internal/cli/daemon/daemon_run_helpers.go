@@ -27,7 +27,8 @@ func startStateUpdater(shutdown <-chan struct{}, stateFilePath string, startedAt
 			case <-shutdown:
 				return
 			case <-ticker.C:
-				if err := writeStateFile(stateFilePath, startedAt, daemon.Agents(), daemon.QuarantinedTasks(), maxRetries); err != nil {
+				if err := writeStateFile(stateFilePath, startedAt, daemon.Agents(), daemon.QuarantinedTasks(), maxRetries,
+					daemon.sup.ClaimHoldSnapshot()); err != nil {
 					fmt.Printf("Warning: failed to update state file: %v\n", err)
 				}
 				daemon.sup.RecordTick(supervisor.GoroutineStateUpdater)

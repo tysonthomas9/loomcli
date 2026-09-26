@@ -137,6 +137,12 @@
   background-color: var(--color-danger, #ef4444);
 }
 
+/* The tab outlived its shell: muted red, never the connected green. */
+.statusDot[data-status="session_ended"] {
+  background-color: var(--color-danger, #ef4444);
+  opacity: 0.55;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .statusDot[data-status="connecting"] {
     animation: none;

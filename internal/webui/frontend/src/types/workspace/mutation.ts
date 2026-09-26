@@ -50,6 +50,8 @@ export type MutationEntityType =
  * Matches the JSON delivered by GET /api/sse mutation events.
  */
 export interface MutationPayload {
+  /** Durable source event ID, shared with issue history when available. */
+  cursor?: string;
   type: MutationType;
   entity_type?: MutationEntityType;
   entity_id?: string;

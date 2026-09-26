@@ -168,11 +168,22 @@ func TestSupervisorHeartbeatsControlPlaneNodeUntilStop(t *testing.T) {
 	}
 
 	s.Stop()
-	stoppedHeartbeat := node.LastHeartbeat
+	// The baseline must be read AFTER Stop settles, not carried over from the
+	// poll loop above: at a 10ms interval, beats keep landing between the
+	// loop's last read and Stop, and one may still be mid-write when Stop
+	// returns — comparing against the stale pre-Stop value failed this test
+	// under CI load. Let any in-flight beat land, baseline, then require
+	// quiescence over several would-be intervals.
 	time.Sleep(30 * time.Millisecond)
 	node, err = st.Nodes().Get(t.Context(), "WS", "node-1")
 	if err != nil {
 		t.Fatalf("get stopped node: %v", err)
+	}
+	stoppedHeartbeat := node.LastHeartbeat
+	time.Sleep(50 * time.Millisecond)
+	node, err = st.Nodes().Get(t.Context(), "WS", "node-1")
+	if err != nil {
+		t.Fatalf("get quiesced node: %v", err)
 	}
 	if !node.LastHeartbeat.Equal(stoppedHeartbeat) {
 		t.Fatalf("heartbeat advanced after Stop: %s -> %s", stoppedHeartbeat, node.LastHeartbeat)

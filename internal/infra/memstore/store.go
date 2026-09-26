@@ -49,6 +49,8 @@ type Store struct {
 	awaits     *awaitStore
 	workers    *workerStore
 	roles      *roleStore
+	skills     *skillStore
+	skillPacks *skillPackStore
 	daemon     *daemonStore
 	conns      *connectorStore
 	grants     *connectorGrantStore
@@ -63,22 +65,17 @@ type Store struct {
 func New() *Store {
 	requireTestProcess()
 
-	drivers, versions, profiles, roles, services, bindings := newCatalogGraph()
+	drivers, versions, profiles, roles, services, bindings, skills := newCatalogGraph()
 	nodes := newNodeStore()
 	artifacts := newArtifactStore()
 	runs := newDriverRunStore(versions, bindings)
 	steps := newDriverStepStore(runs)
 	taskRuns := newTaskRunStore(runs, steps, artifacts, profiles, nodes)
-	runs.steps = steps
-	runs.taskRuns = taskRuns
-	steps.taskRuns = taskRuns
 	events := newTriggerEventStore()
 	deliveries := newTriggerDeliveryStore(bindings)
 	routes := &triggerRouteStore{bindings: bindings, events: events, deliveries: deliveries, runs: runs}
 	awaits := newAwaitStore(events)
-	// ResumeAwaiting's security gate: only a resolved (satisfied/timed_out)
-	// await releases its suspended run.
-	runs.setAwaitResumeEligible(awaits.resumeEligible)
+	linkRunGraph(runs, steps, taskRuns, awaits)
 	return &Store{
 		workspaces: newWorkspaceStore(),
 		repos:      newRepoStore(),
@@ -107,6 +104,8 @@ func New() *Store {
 		awaits:     awaits,
 		workers:    newWorkerStore(),
 		roles:      roles,
+		skills:     skills,
+		skillPacks: newSkillPackStore(),
 		daemon:     newDaemonStore(),
 		conns:      newConnectorStore(),
 		grants:     newConnectorGrantStore(),
@@ -114,20 +113,37 @@ func New() *Store {
 	}
 }
 
+// linkRunGraph closes the cycles between the run stores, which cannot be set
+// at construction because each needs a store the others are still building.
+func linkRunGraph(runs *driverRunStore, steps *driverStepStore, taskRuns *taskRunStore, awaits *awaitStore) {
+	runs.steps = steps
+	runs.taskRuns = taskRuns
+	steps.taskRuns = taskRuns
+	// ResumeAwaiting's security gate: only a resolved (satisfied/timed_out)
+	// await releases its suspended run.
+	runs.setAwaitResumeEligible(awaits.resumeEligible)
+}
+
 // newCatalogGraph wires the mutually-referencing catalog stores (drivers,
-// versions, profiles, roles, services, bindings) and returns the handles New
-// needs for the rest of the dependency graph.
-func newCatalogGraph() (*driverStore, *driverVersionStore, *workerProfileStore, *roleStore, *agentServiceStore, *triggerBindingStore) {
+// versions, profiles, roles, services, bindings, skills) and returns the
+// handles New needs for the rest of the dependency graph.
+func newCatalogGraph() (*driverStore, *driverVersionStore, *workerProfileStore, *roleStore, *agentServiceStore, *triggerBindingStore, *skillStore) {
 	drivers := newDriverStore()
 	versions := newDriverVersionStore(drivers)
 	profiles := newWorkerProfileStore()
 	roles := newRoleStore()
 	services := newAgentServiceStore(roles, profiles)
 	bindings := newTriggerBindingStore(versions, services)
+	skills := newSkillStore(roles)
 	services.bindings = bindings
 	roles.services = services
 	profiles.services = services
-	return drivers, versions, profiles, roles, services, bindings
+	// Mirrors the server's refusal to delete a role that still owns skills:
+	// cascading would destroy hand-written documents that may be the only copy,
+	// and re-scoping the orphans to workspace would promote one persona's
+	// instructions into every agent's context.
+	roles.skills = skills
+	return drivers, versions, profiles, roles, services, bindings, skills
 }
 
 func requireTestProcess() {
@@ -224,6 +240,28 @@ func (s *Store) Workers() store.WorkerStore { return s.workers }
 
 // Roles returns the RoleStore.
 func (s *Store) Roles() store.RoleStore { return s.roles }
+
+// Skills returns the SkillStore.
+func (s *Store) Skills() store.SkillStore { return s.skills }
+
+// SkillMaterializationLeases is nil because memstore is process-local and
+// production materialization coordination belongs to fleet-db's Redis lease.
+func (s *Store) SkillMaterializationLeases() store.SkillMaterializationLeaseStore { return nil }
+
+// SkillPacks returns the SkillPackStore.
+func (s *Store) SkillPacks() store.SkillPackStore { return s.skillPacks }
+
+// SetSkillActor swaps the identity skill writes are recorded under. memstore
+// has no credentials, so this is the stand-in for the authenticated actor
+// fleet-db takes from the API key (or X-Actor) — the sole input to the
+// ownership guard. A test plays a second writer by calling this between
+// writes.
+func (s *Store) SetSkillActor(actor string) {
+	s.skills.setActor(actor)
+	s.skillPacks.mu.Lock()
+	s.skillPacks.actor = actor
+	s.skillPacks.mu.Unlock()
+}
 
 // Daemon returns the DaemonProfileStore.
 func (s *Store) Daemon() store.DaemonProfileStore { return s.daemon }

@@ -179,8 +179,8 @@ func TestEnsureReviewerAgentMigratesExistingBackend(t *testing.T) {
 		t.Fatalf("create orchestration session: %v", err)
 	}
 	env.term.tabs = []tabmeta.TabMetadata{
-		{SessionName: "agent-review-hello-pr-7", Kind: terminalKindAgent, AgentID: agentName, PTYAlive: true},
-		{SessionName: "agent-other", Kind: terminalKindAgent, AgentID: "other-agent", PTYAlive: true},
+		{SessionName: "agent-review-hello-pr-7", Kind: terminalKindAgent, AgentID: agentName, Attachable: true},
+		{SessionName: "agent-other", Kind: terminalKindAgent, AgentID: "other-agent", Attachable: true},
 		{SessionName: "shell-1", Kind: "shell"},
 	}
 
@@ -232,7 +232,7 @@ func TestEnsureReviewerAgentMigratesExistingLeadRole(t *testing.T) {
 		t.Fatalf("create orchestration session: %v", err)
 	}
 	env.term.tabs = []tabmeta.TabMetadata{
-		{SessionName: "agent-review-hello-pr-7", Kind: terminalKindAgent, AgentID: agentName, PTYAlive: true},
+		{SessionName: "agent-review-hello-pr-7", Kind: terminalKindAgent, AgentID: agentName, Attachable: true},
 	}
 
 	if err := env.module.ensureReviewerAgent(ctx, prReviewTestWorkspace, agentName, "hello"); err != nil {
@@ -288,9 +288,9 @@ func TestEnsureReviewerAgentRetiresBothLegacyNamedAgents(t *testing.T) {
 		}
 	}
 	env.term.tabs = []tabmeta.TabMetadata{
-		{SessionName: "agent-repo-only-reviewer", Kind: terminalKindAgent, AgentID: legacyNames[0], PTYAlive: true},
-		{SessionName: "agent-unhashed-reviewer", Kind: terminalKindAgent, AgentID: legacyNames[1], PTYAlive: true},
-		{SessionName: "agent-current-reviewer", Kind: terminalKindAgent, AgentID: currentName, PTYAlive: true},
+		{SessionName: "agent-repo-only-reviewer", Kind: terminalKindAgent, AgentID: legacyNames[0], Attachable: true},
+		{SessionName: "agent-unhashed-reviewer", Kind: terminalKindAgent, AgentID: legacyNames[1], Attachable: true},
+		{SessionName: "agent-current-reviewer", Kind: terminalKindAgent, AgentID: currentName, Attachable: true},
 	}
 
 	if err := env.module.ensureReviewerAgentAndRetireLegacy(

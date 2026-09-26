@@ -40,7 +40,6 @@ const DiffTab = lazy(() =>
 import { OpenInEditor } from "../OpenInEditor";
 import { RepoBadge } from "../RepoBadge";
 import styles from "./AgentDetailPanel.module.css";
-import { AgentLogsTab } from "./AgentLogsTab";
 import { PendingInputBanner } from "./PendingInputBanner";
 import { GitTab } from "./GitTab";
 import {
@@ -72,7 +71,7 @@ export interface AgentDetailPanelProps {
 /**
  * AgentDetailPanel displays detailed agent information in a slide-out panel.
  */
-type TabType = "info" | "logs" | "git" | "diff" | "files";
+type TabType = "info" | "git" | "diff" | "files";
 
 export function AgentDetailPanel({
   isOpen,
@@ -268,17 +267,6 @@ export function AgentDetailPanel({
                 </button>
                 <button
                   type="button"
-                  className={`${styles.tab} ${activeTab === "logs" ? styles.activeTab : ""}`}
-                  onClick={() => setActiveTab("logs")}
-                  aria-selected={activeTab === "logs"}
-                  role="tab"
-                  id="agent-panel-tab-logs"
-                  aria-controls="agent-panel-tabpanel-logs"
-                >
-                  Logs
-                </button>
-                <button
-                  type="button"
                   className={`${styles.tab} ${activeTab === "diff" ? styles.activeTab : ""}`}
                   onClick={() => setActiveTab("diff")}
                   aria-selected={activeTab === "diff"}
@@ -426,18 +414,6 @@ export function AgentDetailPanel({
                 aria-labelledby="agent-panel-tab-git"
               >
                 <GitTab agent={agent} isActive={activeTab === "git"} />
-              </div>
-            ) : activeTab === "logs" ? (
-              <div
-                className={styles.scrollableContent}
-                id="agent-panel-tabpanel-logs"
-                role="tabpanel"
-                aria-labelledby="agent-panel-tab-logs"
-              >
-                <AgentLogsTab
-                  agentName={agent.name}
-                  isActive={activeTab === "logs"}
-                />
               </div>
             ) : activeTab === "diff" ? (
               /* Diff Tab */

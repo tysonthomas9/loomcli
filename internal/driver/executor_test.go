@@ -466,7 +466,12 @@ if (process.send) {
 		if out.result.Status != domain.DriverRunCancelled || out.result.ErrorClass != "driver_cancelled" {
 			t.Fatalf("result = %+v, want cancelled driver_cancelled", out.result)
 		}
-	case <-time.After(30 * time.Second):
+	case <-time.After(90 * time.Second):
+		// The healthy path returns in well under a second (the select fires on
+		// done). This bound only exists for the hung case, and 30s proved too
+		// tight under CI load: node boot plus the runner's internal
+		// signal-escalation grace ate the headroom and the test failed at
+		// exactly its own deadline while the code behaved correctly.
 		t.Fatal("NodeRunner.Run did not return after cancellation")
 	}
 	waitForFile(t, cancelledPath)

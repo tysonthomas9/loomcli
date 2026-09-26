@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 type testSSEEvent struct {
@@ -292,7 +295,13 @@ func TestSendLogChunk_JSONFormat(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	recorder := httptest.NewRecorder()
-	s.sendLogChunk(recorder, recorder, []byte("raw-data"), 42)
+	sw, err := realtime.NewWriter(recorder)
+	if err != nil {
+		t.Fatalf("NewWriter() error = %v", err)
+	}
+	if err := s.sendLogChunk(sw, []byte("raw-data"), 42); err != nil {
+		t.Fatalf("sendLogChunk() error = %v", err)
+	}
 	output := recorder.Body.String()
 	if !strings.Contains(output, "event: log-chunk") {
 		t.Fatalf("expected log-chunk event in output")
@@ -319,4 +328,61 @@ func TestSendLogChunk_JSONFormat(t *testing.T) {
 	if got := decodeChunkB64(t, payload); got != "raw-data" {
 		t.Fatalf("decoded chunk = %q, want %q", got, "raw-data")
 	}
+}
+
+func TestLogStreamer_StreamStopsOnWriteFailure(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	logDir := filepath.Join(tmpHome, ".loom", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("failed to create log dir: %v", err)
+	}
+	logFile := filepath.Join(logDir, "test.log")
+	if err := os.WriteFile(logFile, []byte("content"), 0o644); err != nil {
+		t.Fatalf("failed to write log file: %v", err)
+	}
+
+	s, err := NewLogStreamer(logFile)
+	if err != nil {
+		t.Fatalf("NewLogStreamer() error = %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	writeErr := errors.New("client disconnected")
+	rw := &failAtWriteResponseWriter{failAt: 2, err: writeErr}
+	if err := s.Stream(context.Background(), rw, 0); !errors.Is(err, writeErr) {
+		t.Fatalf("Stream() error = %v, want %v", err, writeErr)
+	}
+	if rw.flushes != 1 {
+		t.Fatalf("flush count = %d, want retry frame only", rw.flushes)
+	}
+}
+
+type failAtWriteResponseWriter struct {
+	header  http.Header
+	failAt  int
+	writes  int
+	flushes int
+	err     error
+}
+
+func (w *failAtWriteResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *failAtWriteResponseWriter) Write(p []byte) (int, error) {
+	w.writes++
+	if w.writes == w.failAt {
+		return 0, w.err
+	}
+	return len(p), nil
+}
+
+func (*failAtWriteResponseWriter) WriteHeader(int) {}
+
+func (w *failAtWriteResponseWriter) Flush() {
+	w.flushes++
 }

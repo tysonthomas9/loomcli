@@ -4,7 +4,7 @@
  * and renders child routes via <Outlet />.
  */
 
-import { useParams, useNavigate, Outlet } from "react-router-dom";
+import { useParams, useNavigate, useLocation, Outlet } from "react-router-dom";
 import { useEffect, useState } from "react";
 
 import { WorkspaceProvider, StoreProvider, useIssueSessionMap } from "@/hooks";
@@ -27,6 +27,10 @@ function IssueSessionWrapper({ children }: { children: React.ReactNode }) {
 export function WorkspaceLayout() {
   const { workspaceId } = useParams<{ workspaceId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  // Home is the workspace, never a repo: its live stream is not narrowed to
+  // the repo selector (the issue fetch is handled the same way in App).
+  const isHomeRoute = /^\/ws\/[^/]+\/home(?:\/|$)/.test(location.pathname);
   const [validating, setValidating] = useState(true);
   const [valid, setValid] = useState(false);
 
@@ -86,7 +90,7 @@ export function WorkspaceLayout() {
 
   return (
     <WorkspaceProvider workspaceId={workspaceId}>
-      <StoreProvider>
+      <StoreProvider unscopedEvents={isHomeRoute}>
         <IssueSessionWrapper>
           <Outlet />
         </IssueSessionWrapper>

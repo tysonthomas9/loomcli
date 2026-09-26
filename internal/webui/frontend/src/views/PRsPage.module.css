@@ -2,9 +2,9 @@
   display: flex;
   flex: 1 1 0;
   flex-direction: column;
-  max-width: 880px;
-  margin: 0 auto;
-  padding: 24px;
+  max-width: none;
+  margin: 0;
+  padding: var(--page-padding-top) var(--page-padding-x);
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -20,8 +20,8 @@
 
 .title {
   margin: 0;
-  font-size: var(--font-size-sm);
-  font-weight: 900;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
   letter-spacing: -0.01em;
   color: var(--color-text-primary);
 }
@@ -93,12 +93,181 @@
   scrollbar-gutter: stable;
 }
 
+.queueLayout {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 18px;
+}
+
+.filterRail {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  background: color-mix(in srgb, var(--color-bg-card) 82%, transparent);
+  border: 1px solid var(--color-border);
+  border-radius: var(--surface-radius);
+  scrollbar-width: thin;
+}
+
+.railSearch,
+.listSearch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.railSearch:focus-within,
+.listSearch:focus-within {
+  border-color: color-mix(
+    in srgb,
+    var(--color-primary) 55%,
+    var(--color-border)
+  );
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
+.railSearch input,
+.listSearch input {
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+
+.railSection {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border);
+}
+
+.railSectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+.railSectionHead button {
+  padding: 0;
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.railSectionHead button:hover {
+  color: var(--color-text-primary);
+}
+
+.railHeading {
+  margin: 0 0 6px;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+
+.railSectionHead .railHeading {
+  margin-bottom: 0;
+}
+
+.checkList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.checkRow {
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 6px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.checkRow:hover,
+.checkRow[aria-pressed="true"] {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.checkbox {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 800;
+  color: var(--color-bg-primary);
+  border: 1px solid var(--color-border-hover);
+  border-radius: 3px;
+}
+
+.checkRow[aria-pressed="true"] .checkbox {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.checkLabel {
+  overflow: hidden;
+  font-size: var(--font-size-xs);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkCount {
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+}
+
+.listPane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.listSearch {
+  flex: 1 1 260px;
+  max-width: 420px;
+}
+
+.resultCount {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
 .row {
   display: flex;
   align-items: stretch;
   gap: 8px;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--surface-radius);
   background: var(--color-bg-card);
   cursor: pointer;
   transition:
@@ -107,7 +276,11 @@
 }
 
 .row:hover {
-  border-color: var(--color-warning);
+  border-color: color-mix(
+    in srgb,
+    var(--color-primary) 45%,
+    var(--color-border)
+  );
   background: var(--color-bg-hover);
 }
 
@@ -293,26 +466,30 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
-  margin-bottom: 14px;
+  flex-shrink: 0;
+  margin-bottom: 12px;
 }
 
 .filterPills {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .pill {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
-  padding: 4px 10px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-secondary);
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition:
     color var(--transition-fast),
@@ -322,15 +499,15 @@
 
 .pill:hover {
   color: var(--color-text);
-  border-color: var(--color-border-hover);
+  background: var(--color-bg-hover);
 }
 
 /* Active filter uses the app's amber selection accent (matches the Aether
    active-state convention used by ticket cards / board tabs). */
 .pill[data-active] {
   color: var(--color-text-primary);
-  background: var(--color-warning-bg);
-  border-color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-primary) 11%, transparent);
+  border-color: color-mix(in srgb, var(--color-primary) 22%, transparent);
 }
 
 .pill:focus-visible {
@@ -433,4 +610,266 @@
   color: var(--color-text-secondary);
   background: var(--color-bg-card);
   border-radius: var(--radius-full);
+}
+
+/* Attached PR concept: compact filter rail and elevated review cards. */
+.page {
+  max-width: var(--page-content-max);
+  margin: 0 auto;
+  padding: var(--page-padding-top) var(--page-padding-x) 64px;
+}
+
+.header {
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 6px;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 650;
+}
+
+.subtitle {
+  margin: 0;
+  font-size: 13px;
+}
+
+.githubWarning {
+  margin: 14px 0 20px;
+  padding: 9px 14px;
+  font-size: 13px;
+  background: var(--color-bg-card);
+  border: 1px solid
+    color-mix(in srgb, var(--color-text-primary) 6%, transparent);
+  border-left: 3px solid var(--color-warning);
+  border-radius: 10px;
+}
+
+.queueLayout {
+  grid-template-columns: 248px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.filterRail {
+  position: sticky;
+  top: 20px;
+  padding: 8px;
+  background: var(--color-bg-card);
+  border: 0;
+  border-radius: var(--surface-radius);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 18%),
+    0 0 0 1px color-mix(in srgb, var(--color-text-primary) 7%, transparent);
+}
+
+.railSearch,
+.listSearch {
+  height: var(--control-height);
+  background: var(--color-bg-active);
+  border: 1px solid var(--color-border-hover);
+  border-radius: var(--radius-full);
+}
+
+.railSearch {
+  margin-bottom: 6px;
+}
+
+.railSearch:focus-within,
+.listSearch:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-selection-bg);
+}
+
+.railSection {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top-color: color-mix(
+    in srgb,
+    var(--color-text-primary) 6%,
+    transparent
+  );
+}
+
+.railHeading {
+  margin: 0 0 4px;
+  padding: 4px 10px 2px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+}
+
+.railSectionHead .railHeading {
+  padding-left: 10px;
+}
+
+.checkRow,
+.pill {
+  position: relative;
+  min-height: 34px;
+  padding: 7px 10px;
+  border-radius: 9px;
+}
+
+.checkbox {
+  border-radius: 5px;
+}
+
+.checkRow[aria-pressed="true"] .checkbox {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.pill[data-active] {
+  background: var(--color-selection-bg);
+  border-color: var(--color-selection-border);
+}
+
+.pill[data-active]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  background: var(--color-primary);
+  border-radius: 3px;
+}
+
+.listSearch {
+  max-width: none;
+  background: var(--color-bg-active);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 16%),
+    0 0 0 1px color-mix(in srgb, var(--color-text-primary) 7%, transparent);
+}
+
+.toolbar {
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.list {
+  gap: 10px;
+}
+
+.row {
+  gap: 14px;
+  background: var(--color-bg-card);
+  border: 0;
+  border-radius: var(--surface-radius);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 18%),
+    0 0 0 1px color-mix(in srgb, var(--color-text-primary) 7%, transparent);
+}
+
+.row:hover {
+  background: var(--color-bg-hover);
+  box-shadow:
+    0 6px 18px rgb(0 0 0 / 22%),
+    0 0 0 1px color-mix(in srgb, var(--color-text-primary) 11%, transparent);
+}
+
+.rowMain {
+  gap: 5px;
+  padding: 14px 0;
+}
+
+.rowIcon {
+  padding-left: 16px;
+}
+
+.rowRight {
+  padding-right: 16px;
+}
+
+.rowTitle {
+  font-size: 14.5px;
+  font-weight: 550;
+}
+
+.status[data-pr-state="review"] {
+  color: var(--color-status-review-text);
+  background: var(--color-primary-bg);
+}
+
+.repoChip {
+  padding: 0;
+  font-size: 11.5px;
+  background: transparent;
+  border: 0;
+}
+
+.ticketChip {
+  background: color-mix(in srgb, var(--color-text-primary) 5.5%, transparent);
+  border-radius: 6px;
+}
+
+.epicChip {
+  gap: 5px;
+  padding: 0;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--color-text-tertiary);
+  background: transparent;
+}
+
+.epicChip::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  background: var(--color-type-epic);
+  border-radius: 2.5px;
+}
+
+.avatar,
+.avatarEmpty {
+  width: 30px;
+  height: 30px;
+}
+
+@media (max-width: 900px) {
+  .page {
+    padding: 18px;
+  }
+
+  .queueLayout {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+
+  .filterRail {
+    overflow: visible;
+  }
+
+  .filterPills {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .checkList {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .listPane {
+    min-height: 420px;
+  }
+}
+
+@media (max-width: 560px) {
+  .toolbar {
+    align-items: stretch;
+  }
+
+  .listSearch {
+    max-width: none;
+  }
+
+  .checkList {
+    grid-template-columns: 1fr;
+  }
 }

@@ -544,6 +544,7 @@ describe("issues API", () => {
             query: expect.objectContaining({
               exclude_status: "tombstone",
               include_blocked: true,
+              status: "all",
             }),
           }),
         }),
@@ -564,6 +565,7 @@ describe("issues API", () => {
             query: expect.objectContaining({
               exclude_status: "tombstone",
               include_blocked: true,
+              status: "all",
             }),
           }),
         }),
@@ -584,6 +586,7 @@ describe("issues API", () => {
             query: expect.objectContaining({
               exclude_status: "tombstone",
               include_blocked: true,
+              status: "all",
               assignee: "dev1",
               priority: 2,
             }),
@@ -1524,6 +1527,7 @@ describe("issues API", () => {
         design: "Design notes",
         acceptance_criteria: "Must pass tests",
         notes: "Additional notes",
+        status: "deferred",
         assignee: "dev1",
         owner: "pm1",
         created_by: "user1",
@@ -1552,6 +1556,7 @@ describe("issues API", () => {
             id: "custom-id",
             parent: "parent-123",
             description: "Detailed description",
+            status: "deferred",
           }),
         }),
       );

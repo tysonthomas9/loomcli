@@ -34,7 +34,15 @@ var harnessSessionUUID = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a
 // Returns "" for a backend with no readable transcript layout, or when nothing
 // matched — callers treat that as "no usage available", never as an error.
 func LatestHarnessSessionID(backend, workDir, hintUUID string, since time.Time) string {
-	path := latestHarnessTranscriptPath(backend, workDir, strings.TrimSpace(hintUUID), since)
+	return LatestHarnessSessionIDFor("", "", backend, workDir, hintUUID, since)
+}
+
+// LatestHarnessSessionIDFor is LatestHarnessSessionID scoped to one agent's
+// harness profile under projectDir. Empty projectDir/agent resolves from the
+// process environment, which is what LatestHarnessSessionID passes — so every
+// existing caller keeps its behavior exactly.
+func LatestHarnessSessionIDFor(projectDir, agent, backend, workDir, hintUUID string, since time.Time) string {
+	path := latestHarnessTranscriptPath(projectDir, agent, backend, workDir, strings.TrimSpace(hintUUID), since)
 	if path == "" {
 		return ""
 	}
@@ -43,16 +51,16 @@ func LatestHarnessSessionID(backend, workDir, hintUUID string, since time.Time) 
 
 // latestHarnessTranscriptPath dispatches to the per-backend resolver already
 // used to mirror that backend's transcript onto a session.
-func latestHarnessTranscriptPath(backend, workDir, hintUUID string, since time.Time) string {
+func latestHarnessTranscriptPath(projectDir, agent, backend, workDir, hintUUID string, since time.Time) string {
 	switch backend {
 	case backendnames.Claude:
-		projectDir := claudeProjectDir(workDir)
-		if projectDir == "" {
+		claudeDir := claudeProjectDirFor(projectDir, agent, workDir)
+		if claudeDir == "" {
 			return ""
 		}
-		return resolveClaudeTranscript(projectDir, hintUUID, since)
+		return resolveClaudeTranscript(claudeDir, hintUUID, since)
 	case backendnames.Codex:
-		root := CodexSessionsRoot()
+		root := CodexSessionsRootFor(projectDir, agent)
 		if root == "" {
 			return ""
 		}

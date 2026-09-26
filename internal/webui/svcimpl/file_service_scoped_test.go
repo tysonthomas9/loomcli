@@ -503,6 +503,92 @@ func TestFileServiceImpl_ListDirectoryScoped_HidesCaseVariantGit(t *testing.T) {
 	}
 }
 
+func TestFileServiceImpl_HidesSkillsAtConfiguredNestedCheckoutRoots(t *testing.T) {
+	wsRoot := t.TempDir()
+	repoRoot := filepath.Join(wsRoot, "services", "api")
+	mustWrite(t, filepath.Join(repoRoot, ".agents", "skills", "managed", "SKILL.md"), "needle managed")
+	mustWrite(t, filepath.Join(repoRoot, ".claude", "skills", "managed", "SKILL.md"), "needle managed compatibility")
+	mustWrite(t, filepath.Join(repoRoot, ".agents", "hooks", "check.sh"), "needle hook")
+	// A similarly named tree outside a configured checkout is ordinary user
+	// content and must remain visible.
+	mustWrite(t, filepath.Join(wsRoot, ".agents", "skills", "committed", "SKILL.md"), "needle committed")
+
+	svc := NewFileService(scopedMockFileOps{
+		wsRoot: wsRoot,
+		wsData: &ops.WorkspaceData{
+			ID: "ws", Path: wsRoot,
+			Repos: []ops.WorkspaceRepo{{Name: "api", Path: "services/api"}},
+		},
+	})
+	ctx := context.Background()
+
+	listing, err := svc.ListDirectoryScoped(ctx, "ws", service.ScopeWorkspace, "", "", "services/api/.agents")
+	if err != nil {
+		t.Fatalf("ListDirectoryScoped: %v", err)
+	}
+	listed := make(map[string]bool, len(listing.Entries))
+	for _, entry := range listing.Entries {
+		listed[entry.Name] = true
+	}
+	if listed["skills"] || !listed["hooks"] {
+		t.Fatalf(".agents listing = %+v, want hooks visible and skills hidden", listing.Entries)
+	}
+
+	index, err := svc.IndexFilesScoped(ctx, "ws", service.ScopeWorkspace, "", "")
+	if err != nil {
+		t.Fatalf("IndexFilesScoped: %v", err)
+	}
+	for _, hidden := range []string{
+		"services/api/.agents/skills/managed/SKILL.md",
+		"services/api/.claude/skills/managed/SKILL.md",
+	} {
+		if containsPath(index.Paths, hidden) {
+			t.Fatalf("index exposed %q: %+v", hidden, index.Paths)
+		}
+	}
+	for _, visible := range []string{
+		"services/api/.agents/hooks/check.sh",
+		".agents/skills/committed/SKILL.md",
+	} {
+		if !containsPath(index.Paths, visible) {
+			t.Fatalf("index hid ordinary path %q: %+v", visible, index.Paths)
+		}
+	}
+
+	search, err := svc.SearchFilesScoped(ctx, "ws", service.ScopeWorkspace, "", "", service.FileSearchRequest{Query: "needle"})
+	if err != nil {
+		t.Fatalf("SearchFilesScoped: %v", err)
+	}
+	got := resultPaths(search.Results)
+	if strings.Join(got, ",") != ".agents/skills/committed/SKILL.md,services/api/.agents/hooks/check.sh" {
+		t.Fatalf("search paths = %+v, want only non-materialized files", got)
+	}
+}
+
+func TestFileServiceImpl_HidesSkillsWhenScopeRootIsCheckout(t *testing.T) {
+	wsRoot := t.TempDir()
+	agentRoot := filepath.Join(wsRoot, "worktrees", "api", "agent-a")
+	mustWrite(t, filepath.Join(agentRoot, ".agents", "skills", "managed", "SKILL.md"), "needle managed")
+	mustWrite(t, filepath.Join(agentRoot, ".agents", "hooks", "check.sh"), "needle hook")
+
+	svc := NewFileService(scopedMockFileOps{
+		wsRoot:    wsRoot,
+		agentRoot: agentRoot,
+		wsData: &ops.WorkspaceData{
+			ID: "ws", Path: wsRoot,
+			Repos:  []ops.WorkspaceRepo{{Name: "api", Path: "services/api"}},
+			Agents: []ops.WorkspaceAgentInfo{{Name: "agent-a", Repos: []string{"api"}}},
+		},
+	})
+	index, err := svc.IndexFilesScoped(context.Background(), "ws", service.ScopeAgent, "agent-a", "")
+	if err != nil {
+		t.Fatalf("IndexFilesScoped: %v", err)
+	}
+	if containsPath(index.Paths, ".agents/skills/managed/SKILL.md") || !containsPath(index.Paths, ".agents/hooks/check.sh") {
+		t.Fatalf("agent index = %+v, want hooks visible and skills hidden", index.Paths)
+	}
+}
+
 func TestRootedFileStore_RemainsAnchoredWhenScopePathIsReplaced(t *testing.T) {
 	parent := t.TempDir()
 	rootPath := filepath.Join(parent, "scope")

@@ -48,10 +48,13 @@ func init() {
 
 //nolint:funlen // CLI command wires validation, transcript parsing, store lookup, and session update in one path.
 func runDaemonSeedTranscript(_ *cobra.Command, _ []string) error {
+	if err := requireTestSupport(); err != nil {
+		return err
+	}
 	if seedTranscriptSession == "" || seedTranscriptTask == "" {
 		return fmt.Errorf("--session and --task are required")
 	}
-	data, err := readSeedTranscriptContent(seedTranscriptFile)
+	data, err := readSeedContent(seedTranscriptFile)
 	if err != nil {
 		return fmt.Errorf("read transcript content: %w", err)
 	}
@@ -111,9 +114,18 @@ func runDaemonSeedTranscript(_ *cobra.Command, _ []string) error {
 	})
 }
 
-func readSeedTranscriptContent(path string) ([]byte, error) {
+// requireTestSupport gates the hidden seed-* commands that ship in the
+// production binary but are reserved for product-owned test setup.
+func requireTestSupport() error {
+	if os.Getenv("LOOM_TESTSUPPORT") != "1" {
+		return fmt.Errorf("seed commands are test support: set LOOM_TESTSUPPORT=1 to enable")
+	}
+	return nil
+}
+
+func readSeedContent(path string) ([]byte, error) {
 	if path == "" || path == "-" {
 		return io.ReadAll(os.Stdin)
 	}
-	return os.ReadFile(path) //nolint:gosec // test-only CLI flag
+	return os.ReadFile(path) //nolint:gosec // G304: test-only CLI flag
 }

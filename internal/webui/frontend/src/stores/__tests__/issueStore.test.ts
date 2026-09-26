@@ -4,8 +4,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { ApiError } from "../../types/common";
 
 import { createIssueStore, issuesAreEqual } from "../issueStore";
+import { mergeKanbanProjection } from "../issueStoreHelpers";
 import type { IssueStore } from "../issueStore";
 import type { StoreApi } from "zustand/vanilla";
 import type { Issue } from "@/types/issue";
@@ -100,6 +102,7 @@ describe("issueStore", () => {
       expect(s.disconnectedSince).toBeNull();
       expect(s.pendingIds.size).toBe(0);
       expect(s.mutationCount).toBe(0);
+      expect(s.detailInvalidationVersions.size).toBe(0);
     });
   });
 
@@ -379,6 +382,34 @@ describe("issueStore", () => {
       expect(s.error).toBeNull();
     });
 
+    it("does not apply a late response from a superseded fetch", async () => {
+      let resolveKanban: (issues: Issue[]) => void;
+      mockGetKanbanIssues.mockImplementationOnce(
+        () =>
+          new Promise<Issue[]>((resolve) => {
+            resolveKanban = resolve;
+          }),
+      );
+      mockFetchGraphIssues.mockResolvedValueOnce([
+        makeIssue({ id: "from-graph" }),
+      ]);
+
+      const kanbanFetch = store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "kanban",
+      });
+      const graphFetch = store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "graph",
+      });
+
+      await graphFetch;
+      resolveKanban!([makeIssue({ id: "from-kanban" })]);
+      await kanbanFetch;
+
+      expect([...store.getState().issuesMap.keys()]).toEqual(["from-graph"]);
+    });
+
     it("passes sourceRepos to filter", async () => {
       mockGetReadyIssues.mockResolvedValue([]);
 
@@ -402,6 +433,41 @@ describe("issueStore", () => {
   // -----------------------------------------------------------------------
 
   describe("auto-retry", () => {
+    it("does not auto-retry a 4xx: the error is shown and retries are exhausted", async () => {
+      mockGetReadyIssues.mockRejectedValueOnce(
+        new ApiError(400, "Bad Request", {
+          error: 'invalid repo format "web": expected "org/repo"',
+        }),
+      );
+
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "ready",
+      });
+
+      const s = store.getState();
+      expect(s.error).toBe('invalid repo format "web": expected "org/repo"');
+      expect(s.nextRetryAt).toBeNull();
+      expect(s.isLoading).toBe(false);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mockGetReadyIssues).toHaveBeenCalledTimes(1);
+    });
+
+    it("still auto-retries a 5xx and a 429", async () => {
+      mockGetReadyIssues.mockRejectedValueOnce(
+        new ApiError(503, "Service Unavailable", { error: "rate limited" }),
+      );
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+      expect(store.getState().nextRetryAt).not.toBeNull();
+
+      store.getState().reset();
+      mockGetReadyIssues.mockRejectedValueOnce(
+        new ApiError(429, "Too Many Requests"),
+      );
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+      expect(store.getState().nextRetryAt).not.toBeNull();
+    });
+
     it("schedules an auto-retry when fetch fails with a non-abort error", async () => {
       mockGetReadyIssues.mockRejectedValueOnce(new Error("boom"));
 
@@ -865,6 +931,80 @@ describe("issueStore", () => {
       expect(refetchSpy).toHaveBeenCalledTimes(1);
     });
 
+    it("forces a projection refetch after five seconds of continual mutations", () => {
+      const refetchSpy = vi
+        .spyOn(store.getState(), "refetch")
+        .mockResolvedValue();
+
+      const applyRefreshMutation = () =>
+        store.getState().applyMutation(
+          makeMutation({
+            type: "refresh",
+            issue_id: "",
+          }),
+        );
+
+      applyRefreshMutation();
+      for (let index = 0; index < 5; index++) {
+        vi.advanceTimersByTime(900);
+        applyRefreshMutation();
+      }
+
+      vi.advanceTimersByTime(499);
+      expect(refetchSpy).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
+      expect(refetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("continues refreshing at the five-second ceiling under sustained traffic", () => {
+      const refetchSpy = vi
+        .spyOn(store.getState(), "refetch")
+        .mockResolvedValue();
+
+      const applyRefreshMutation = () =>
+        store.getState().applyMutation(
+          makeMutation({
+            type: "refresh",
+            issue_id: "",
+          }),
+        );
+
+      applyRefreshMutation();
+      for (let index = 0; index < 60; index++) {
+        vi.advanceTimersByTime(900);
+        applyRefreshMutation();
+      }
+
+      expect(refetchSpy).toHaveBeenCalledTimes(10);
+    });
+
+    it("keeps the one-second trailing delay for a burst 4.9 seconds after a refresh", () => {
+      const refetchSpy = vi
+        .spyOn(store.getState(), "refetch")
+        .mockResolvedValue();
+
+      const applyRefreshMutation = () =>
+        store.getState().applyMutation(
+          makeMutation({
+            type: "refresh",
+            issue_id: "",
+          }),
+        );
+
+      applyRefreshMutation();
+      vi.advanceTimersByTime(1_000);
+      expect(refetchSpy).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(4_900);
+      applyRefreshMutation();
+      vi.advanceTimersByTime(999);
+      expect(refetchSpy).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(1);
+      expect(refetchSpy).toHaveBeenCalledTimes(2);
+    });
+
     it("schedules projection refetch for generic issue-affecting entity events", () => {
       const refetchSpy = vi
         .spyOn(store.getState(), "refetch")
@@ -887,6 +1027,62 @@ describe("issueStore", () => {
 
       expect(refetchSpy).toHaveBeenCalledTimes(1);
       expect(store.getState().mutationCount).toBe(0);
+    });
+
+    it("invalidates the owning issue when a comment SSE mutation arrives", () => {
+      store.getState().applyMutation(
+        makeMutation({
+          type: "comment",
+          entity_type: "comment",
+          entity_id: "comment-1",
+          action: "comment.create",
+          issue_id: "task-1",
+        }),
+      );
+
+      expect(store.getState().detailInvalidationVersions.get("task-1")).toBe(1);
+
+      store.getState().applyMutation(
+        makeMutation({
+          type: "comment",
+          entity_type: "comment",
+          entity_id: "comment-2",
+          action: "comment.create",
+          issue_id: "task-1",
+        }),
+      );
+
+      expect(store.getState().detailInvalidationVersions.get("task-1")).toBe(2);
+    });
+
+    it("does not mistake a comment entity ID for its owning issue", () => {
+      store.getState().applyMutation(
+        makeMutation({
+          type: "comment",
+          entity_type: "comment",
+          entity_id: "comment-1",
+          action: "comment.create",
+          issue_id: undefined,
+        }),
+      );
+
+      expect(store.getState().detailInvalidationVersions.has("comment-1")).toBe(
+        false,
+      );
+    });
+
+    it("reconciles a successful detail write into the issue projection", () => {
+      store.setState({
+        issuesMap: new Map([
+          ["task-1", makeIssue({ id: "task-1", issue_type: "task" })],
+        ]),
+      });
+
+      store
+        .getState()
+        .reconcileIssue(makeIssue({ id: "task-1", issue_type: "bug" }));
+
+      expect(store.getState().issuesMap.get("task-1")?.issue_type).toBe("bug");
     });
 
     it("ignores generic non-issue entity events even when legacy issue_id is present", () => {
@@ -1240,6 +1436,83 @@ describe("issueStore", () => {
       expect(toastFn).toHaveBeenCalledWith("API Error", { type: "error" });
     });
 
+    // PUPPET-146: the caller that renders the rejection itself opts out, so
+    // one failure does not stack two identical toasts. The rollback and the
+    // re-throw are unaffected.
+    it("skips the rollback toast when toastOnRollback is false", async () => {
+      const toastFn = vi.fn();
+      store.getState().configure({ onToast: toastFn });
+
+      const issue = makeIssue({ id: "a", status: "open" });
+      store.setState({ issuesMap: new Map([["a", issue]]) });
+      mockUpdateIssue.mockRejectedValue(new Error("API Error"));
+
+      await expect(
+        store.getState().updateIssueStatus("a", "in_progress", "ws1", {
+          toastOnRollback: false,
+        }),
+      ).rejects.toThrow("API Error");
+
+      const s = store.getState();
+      expect(s.issuesMap.get("a")!.status).toBe("open");
+      expect(s.pendingIds.size).toBe(0);
+      expect(toastFn).not.toHaveBeenCalled();
+    });
+
+    // PUPPET-146: the whole detail-view bug rests on this. The optimistic
+    // issue carries a FABRICATED fresh `updated_at`, and the rollback restores
+    // the snapshot's ORIGINAL one — which reads as "stale" to any consumer
+    // ordering by timestamp, so the revert gets filtered out. App.tsx's
+    // settle-sync effect works around it by keying on `pendingIds` instead.
+    // If this ever changes, that effect deserves a second look.
+    it("restores the snapshot's original updated_at on rollback", async () => {
+      const issue = makeIssue({
+        id: "a",
+        status: "blocked",
+        updated_at: "2024-01-01T00:00:00Z",
+      });
+      store.setState({ issuesMap: new Map([["a", issue]]) });
+      mockUpdateIssue.mockRejectedValue(new Error("issue is not claimable"));
+
+      await expect(
+        store.getState().updateIssueStatus("a", "in_progress", "ws1"),
+      ).rejects.toThrow("issue is not claimable");
+
+      const rolledBack = store.getState().issuesMap.get("a")!;
+      expect(rolledBack.status).toBe("blocked");
+      expect(rolledBack.updated_at).toBe("2024-01-01T00:00:00Z");
+      expect(rolledBack).toEqual(issue);
+    });
+
+    // The settle-sync effect in App.tsx relies on the map being written BEFORE
+    // pendingIds is cleared: an intermediate render between the two would see
+    // the settle edge while the map still held the optimistic value, and the
+    // revert would silently never reach the detail surface.
+    it("writes the rolled-back map before clearing pendingIds", async () => {
+      const issue = makeIssue({ id: "a", status: "blocked" });
+      store.setState({ issuesMap: new Map([["a", issue]]) });
+      mockUpdateIssue.mockRejectedValue(new Error("API Error"));
+
+      const seen: Array<{ status?: string; pending: boolean }> = [];
+      const unsubscribe = store.subscribe((state) => {
+        seen.push({
+          status: state.issuesMap.get("a")?.status,
+          pending: state.pendingIds.has("a"),
+        });
+      });
+
+      await expect(
+        store.getState().updateIssueStatus("a", "in_progress", "ws1"),
+      ).rejects.toThrow("API Error");
+      unsubscribe();
+
+      // No observed state ever has the entry settled while the map still
+      // holds the optimistic value.
+      expect(seen.some((s) => !s.pending && s.status === "in_progress")).toBe(
+        false,
+      );
+    });
+
     it("throws if issue not found", async () => {
       await expect(
         store.getState().updateIssueStatus("nonexistent", "in_progress", "ws1"),
@@ -1320,6 +1593,9 @@ describe("issueStore", () => {
 
       const s = store.getState();
       expect(s.issuesMap.get("a")!.status).toBe("open");
+      // Same original-timestamp restore as the rejection path, which is why
+      // the settle-sync effect covers this route for free (PUPPET-146).
+      expect(s.issuesMap.get("a")!.updated_at).toBe(issue.updated_at);
       expect(s.pendingIds.size).toBe(0);
       expect(toastFn).toHaveBeenCalledWith(
         "Update timed out — changes reverted",
@@ -1670,6 +1946,118 @@ describe("issueStore", () => {
       const b = { ...makeIssue(), derived_projection: 2 } as Issue;
 
       expect(issuesAreEqual(a, b)).toBe(false);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // mergeKanbanProjection
+  // -----------------------------------------------------------------------
+
+  describe("mergeKanbanProjection", () => {
+    it("adopts every fetched projection field while keeping newer core fields", () => {
+      const current = makeIssue({
+        title: "Live title",
+        status: "blocked",
+        updated_at: "2026-01-02T00:00:00Z",
+        is_blocked: false,
+        is_ready: false,
+        is_deferred: true,
+        blocked_by_count: 1,
+        blocked_by: ["old-blocker"],
+        blocked_by_details: [
+          { id: "old-blocker", title: "Old blocker", priority: 1 },
+        ],
+      });
+      const fetched = makeIssue({
+        title: "Fetched title",
+        status: "open",
+        updated_at: "2026-01-01T00:00:00Z",
+        is_blocked: true,
+        is_ready: true,
+        is_deferred: false,
+        blocked_by_count: 2,
+        blocked_by: ["first-blocker", "second-blocker"],
+        blocked_by_details: [
+          { id: "first-blocker", title: "First blocker", priority: 2 },
+          { id: "second-blocker", title: "Second blocker", priority: 3 },
+        ],
+      });
+
+      const merged = mergeKanbanProjection(current, fetched);
+
+      expect(merged).toMatchObject({
+        title: "Live title",
+        status: "blocked",
+        updated_at: "2026-01-02T00:00:00Z",
+        is_blocked: true,
+        is_ready: true,
+        is_deferred: false,
+        blocked_by_count: 2,
+        blocked_by: ["first-blocker", "second-blocker"],
+        blocked_by_details: [
+          { id: "first-blocker", title: "First blocker", priority: 2 },
+          { id: "second-blocker", title: "Second blocker", priority: 3 },
+        ],
+      });
+    });
+
+    it("returns the current reference when every projection field matches", () => {
+      const current = makeIssue({
+        title: "Live title",
+        is_blocked: true,
+        is_ready: false,
+        is_deferred: false,
+        blocked_by_count: 1,
+        blocked_by: ["blocker"],
+        blocked_by_details: [
+          { id: "blocker", title: "Blocking task", priority: 2 },
+        ],
+      });
+      const fetched = makeIssue({
+        title: "Fetched title",
+        is_blocked: true,
+        is_ready: false,
+        is_deferred: false,
+        blocked_by_count: 1,
+        blocked_by: ["blocker"],
+        blocked_by_details: [
+          { id: "blocker", title: "Blocking task", priority: 2 },
+        ],
+      });
+
+      expect(mergeKanbanProjection(current, fetched)).toBe(current);
+    });
+
+    it("backfills projection fields that are undefined on the live issue", () => {
+      const current = makeIssue({
+        is_blocked: undefined,
+        is_ready: undefined,
+        is_deferred: undefined,
+        blocked_by_count: undefined,
+        blocked_by: undefined,
+        blocked_by_details: undefined,
+      });
+      const fetched = makeIssue({
+        is_blocked: true,
+        is_ready: true,
+        is_deferred: true,
+        blocked_by_count: 1,
+        blocked_by: ["blocker"],
+        blocked_by_details: [
+          { id: "blocker", title: "Blocking task", priority: 2 },
+        ],
+      });
+
+      expect(mergeKanbanProjection(current, fetched)).toMatchObject({
+        is_blocked: true,
+        is_ready: true,
+        is_deferred: true,
+        blocked_by_count: 1,
+        blocked_by: ["blocker"],
+        blocked_by_details: [
+          { id: "blocker", title: "Blocking task", priority: 2 },
+        ],
+      });
     });
   });
 

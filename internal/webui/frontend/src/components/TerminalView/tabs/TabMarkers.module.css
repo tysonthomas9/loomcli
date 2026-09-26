@@ -1,0 +1,40 @@
+/* Marker slot next to a tab label. Shared by every tab marker; today the
+   session-restart notice, tomorrow waiting-for-input and friends. */
+
+.markers {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: 3px;
+  flex-shrink: 0;
+  line-height: 0;
+}
+
+.marker[data-marker="restart"] {
+  color: var(--color-warning, #f59e0b);
+}
+
+.markerButton {
+  cursor: pointer;
+}
+
+.markerButton:hover {
+  background-color: var(--color-warning-bg, rgb(245 158 11 / 18%));
+}
+
+.markerButton:focus-visible {
+  outline: 1px solid var(--color-warning, #f59e0b);
+  outline-offset: 1px;
+}

@@ -1,4 +1,5 @@
 export { KanbanPage } from "./KanbanPage";
+export { HomePage } from "./HomePage";
 export { AgentsPage } from "./AgentsPage";
 export { ListPage } from "./ListPage";
 export { PRsPage } from "./PRsPage";
@@ -9,4 +10,5 @@ export { ObservabilityPage } from "./ObservabilityPage";
 export { SettingsPage } from "./SettingsPage";
 export { WorkspacePage } from "./WorkspacePage";
 export { FilesPage } from "./FilesPage";
+export { SkillsPage } from "./SkillsPage";
 export { IssueDetailPage } from "./IssueDetailPage";

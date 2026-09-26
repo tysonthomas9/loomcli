@@ -11,6 +11,8 @@ import {
   type KeyboardEvent,
 } from "react";
 
+import { decisionButtonStyles } from "@/components/DecisionButton";
+
 import styles from "./RejectCommentForm.module.css";
 
 /**
@@ -130,7 +132,7 @@ export function RejectCommentForm({
       <div className={styles.actions}>
         <button
           type="button"
-          className={styles.cancelButton}
+          className={`${decisionButtonStyles.button} ${decisionButtonStyles.neutral}`}
           onClick={handleCancel}
           disabled={isSubmitting}
           data-testid="reject-cancel"
@@ -139,7 +141,7 @@ export function RejectCommentForm({
         </button>
         <button
           type="submit"
-          className={styles.submitButton}
+          className={`${decisionButtonStyles.button} ${decisionButtonStyles.reject}`}
           disabled={!canSubmit}
           data-testid="reject-submit"
         >
