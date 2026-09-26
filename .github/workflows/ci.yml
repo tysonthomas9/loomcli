@@ -18,8 +18,12 @@ jobs:
     name: Go Quality Gate
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      LOOM_COMMENT_PUSH_BEFORE: ${{ github.event.before }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -50,8 +54,12 @@ jobs:
     name: Frontend Quality Gate
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      LOOM_COMMENT_PUSH_BEFORE: ${{ github.event.before }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
