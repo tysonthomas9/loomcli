@@ -416,9 +416,12 @@ Deliver(m) ==
                      /\ UNCHANGED <<lease, sess, term>>
                 ELSE UNCHANGED <<lease, issue, sess, staleW, foreignW, term>>
          [] m.k = "reset" ->
-              \* resetTask Update (decided on an earlier read) plus release
-              \* of the lock by actor.
-              IF Pass(m) /\ HolderOk(m)
+              \* resetTask Update (decided on the supervisor's earlier read)
+              \* plus release of the lock by actor. FleetDB UpdateIssue
+              \* re-reads the issue and rejects edits to a closed issue
+              \* (issue_service.go:371-404); that service read is modelled as
+              \* atomic with the append (the read/append race is not modelled).
+              IF Pass(m) /\ HolderOk(m) /\ issue[m.i].st # "closed"
                 THEN /\ issue' = [issue EXCEPT ![m.i] = [st |-> "open",
                                    asg |-> NoOne,
                                    holder |-> IF @.holder = m.a THEN NoOne ELSE @.holder,
