@@ -34,6 +34,7 @@ type agentWire struct {
 	MaxConcurrency   int                `json:"max_concurrency,omitempty"`
 	BudgetPolicy     string             `json:"budget_policy,omitempty"`
 	DesiredState     string             `json:"desired_state,omitempty"`
+	Execution        string             `json:"execution,omitempty"`
 	Hooks            *domain.AgentHooks `json:"hooks,omitempty"`
 	CreatedAt        time.Time          `json:"created_at"`
 	UpdatedAt        time.Time          `json:"updated_at"`
@@ -66,6 +67,7 @@ func (a agentWire) toDomain() *domain.Agent {
 		MaxConcurrency:   a.MaxConcurrency,
 		BudgetPolicy:     a.BudgetPolicy,
 		DesiredState:     domain.AgentDesiredState(a.DesiredState),
+		Execution:        a.Execution,
 		Hooks:            a.Hooks.Clone(),
 		CreatedAt:        a.CreatedAt,
 		UpdatedAt:        a.UpdatedAt,
@@ -103,6 +105,7 @@ func (s *agentStore) Create(ctx context.Context, in store.AgentCreate) (*domain.
 		MaxConcurrency   int                `json:"max_concurrency,omitempty"`
 		BudgetPolicy     string             `json:"budget_policy,omitempty"`
 		DesiredState     string             `json:"desired_state,omitempty"`
+		Execution        string             `json:"execution,omitempty"`
 		Hooks            *domain.AgentHooks `json:"hooks,omitempty"`
 	}{
 		Name:             in.Name,
@@ -119,6 +122,7 @@ func (s *agentStore) Create(ctx context.Context, in store.AgentCreate) (*domain.
 		MaxConcurrency:   in.MaxConcurrency,
 		BudgetPolicy:     in.BudgetPolicy,
 		DesiredState:     string(in.DesiredState),
+		Execution:        in.Execution,
 		Hooks:            in.Hooks.Clone(),
 	}
 	var resp agentWire
@@ -150,29 +154,35 @@ func (s *agentStore) List(ctx context.Context, ws string) ([]*domain.Agent, erro
 	return out, nil
 }
 
+// agentPatchWire is the fleet-db agent PATCH body. It is a named type rather
+// than an anonymous struct so Update's own body stays readable (and under the
+// function-length gate) as fields accrete.
+type agentPatchWire struct {
+	RoleName         *string   `json:"role_name,omitempty"`
+	Auto             *bool     `json:"auto,omitempty"`
+	Backend          *string   `json:"backend,omitempty"`
+	FallbackBackends *[]string `json:"fallback_backends,omitempty"`
+	Repos            *[]string `json:"repos,omitempty"`
+	RepoGroups       *[]string `json:"repo_groups,omitempty"`
+	CrossRepo        *bool     `json:"cross_repo,omitempty"`
+	Parent           *string   `json:"parent,omitempty"`
+	State            *string   `json:"state,omitempty"`
+	Mode             *string   `json:"mode,omitempty"`
+	TaskFilter       *string   `json:"task_filter,omitempty"`
+	MaxConcurrency   *int      `json:"max_concurrency,omitempty"`
+	BudgetPolicy     *string   `json:"budget_policy,omitempty"`
+	DesiredState     *string   `json:"desired_state,omitempty"`
+	Execution        *string   `json:"execution,omitempty"`
+	// A non-nil empty object is the explicit clear marker; omitempty only
+	// drops a nil pointer, so {} still reaches fleet-db.
+	Hooks *domain.AgentHooks `json:"hooks,omitempty"`
+}
+
 func (s *agentStore) Update(ctx context.Context, ws, name string, patch store.AgentUpdate) (*domain.Agent, error) {
 	if !agentUpdateHasFleetDBFields(patch) {
 		return s.Get(ctx, ws, name)
 	}
-	body := struct {
-		RoleName         *string   `json:"role_name,omitempty"`
-		Auto             *bool     `json:"auto,omitempty"`
-		Backend          *string   `json:"backend,omitempty"`
-		FallbackBackends *[]string `json:"fallback_backends,omitempty"`
-		Repos            *[]string `json:"repos,omitempty"`
-		RepoGroups       *[]string `json:"repo_groups,omitempty"`
-		CrossRepo        *bool     `json:"cross_repo,omitempty"`
-		Parent           *string   `json:"parent,omitempty"`
-		State            *string   `json:"state,omitempty"`
-		Mode             *string   `json:"mode,omitempty"`
-		TaskFilter       *string   `json:"task_filter,omitempty"`
-		MaxConcurrency   *int      `json:"max_concurrency,omitempty"`
-		BudgetPolicy     *string   `json:"budget_policy,omitempty"`
-		DesiredState     *string   `json:"desired_state,omitempty"`
-		// A non-nil empty object is the explicit clear marker; omitempty only
-		// drops a nil pointer, so {} still reaches fleet-db.
-		Hooks *domain.AgentHooks `json:"hooks,omitempty"`
-	}{
+	body := agentPatchWire{
 		RoleName:         patch.RoleName,
 		Auto:             patch.Auto,
 		Backend:          patch.Backend,
@@ -184,6 +194,7 @@ func (s *agentStore) Update(ctx context.Context, ws, name string, patch store.Ag
 		TaskFilter:       patch.TaskFilter,
 		MaxConcurrency:   patch.MaxConcurrency,
 		BudgetPolicy:     patch.BudgetPolicy,
+		Execution:        patch.Execution,
 		Hooks:            patch.Hooks.Clone(),
 	}
 	if patch.State != nil {

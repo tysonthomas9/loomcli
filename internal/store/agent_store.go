@@ -28,6 +28,7 @@ type AgentCreate struct {
 	MaxConcurrency int
 	BudgetPolicy   string
 	DesiredState   domain.AgentDesiredState
+	Execution      string
 	Hooks          *domain.AgentHooks
 }
 
@@ -48,6 +49,7 @@ type AgentUpdate struct {
 	MaxConcurrency *int
 	BudgetPolicy   *string
 	DesiredState   *domain.AgentDesiredState
+	Execution      *string
 	// Hooks replaces the whole completion pipeline. Nil leaves it untouched;
 	// a non-nil empty value clears it.
 	Hooks *domain.AgentHooks
