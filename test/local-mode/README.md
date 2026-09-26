@@ -135,6 +135,54 @@ Image tags default to the Compose project name for parallel builds. Override
 `LOCAL_MODE_FLEETDB_IMAGE`, `LOCAL_MODE_LOOM_IMAGE`, or
 `LOCAL_MODE_LOOM_CODEX_IMAGE` only when a run needs explicit image tags.
 
+Production-shaped topology:
+
+The base stack is a two-agent demo (plan + task). Two overlays reshape it into
+something a multi-agent workspace's dispatch behaviour can be reproduced
+against, without changing how the stack is built, tagged or published — both
+overlays set environment only.
+
+```sh
+# three agents (planner, worker, critic) + a second registered repo
+LOCAL_MODE_COMPOSE_FILES=test/local-mode/docker-compose.topology.yml \
+  make local-mode-up
+
+# ... plus a label-routed review pipeline on top
+LOCAL_MODE_COMPOSE_FILES="test/local-mode/docker-compose.topology.yml \
+test/local-mode/docker-compose.pipeline.yml" make local-mode-up
+
+make local-mode-pipeline-verify
+```
+
+The third agent is the point: `max_agents` defaults to 2 and exceeding it fails
+daemon *creation*, so a two-agent stack cannot reproduce a three-agent
+workspace at all — and the failure presents as a stack that is up with nothing
+running. `LOOM_LOCAL_MODE_MAX_AGENTS`, `LOOM_LOCAL_MODE_EXTRA_AGENTS`
+(`name:role` pairs) and `LOOM_LOCAL_MODE_EXTRA_REPOS` are the knobs; the
+overlays are a recorded set of values for them.
+
+`make local-mode-pipeline-verify` asserts the topology that came up, not the
+one that was requested: the agent count, the extra repos, the pipeline's label
+routing, and a live supervisor. Each covers a failure that is silent from the
+outside.
+
+Combine with the parallel-stack knobs above to run a shaped stack beside the
+demo one:
+
+```sh
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-pipeline \
+LOCAL_MODE_FLEETDB_PORT=8380 LOCAL_MODE_API_PORT=8382 LOCAL_MODE_UI_PORT=8383 \
+LOCAL_MODE_COMPOSE_FILES=test/local-mode/docker-compose.topology.yml \
+LOCAL_MODE_COMPOSE_UP_FLAGS="--build -d" make local-mode-up
+```
+
+The pipeline overlay needs a `loom` build whose `loom role set` accepts the
+`labels` and `exclude_labels` keys: they are what gates a claim. Without them
+the stages still stamp labels through the agentdef `on_complete` hooks, which
+yields a pipeline that labels everything and routes nothing — indistinguishable
+from a working one. The entrypoint probes for the keys before wiring anything
+and refuses to start rather than coming up half-wired.
+
 Troubleshooting:
 
 - On macOS Apple Silicon, Podman 5.8.x can report `podman machine start`

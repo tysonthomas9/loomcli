@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli test-skills-release-compat fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-ci test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli test-skills-release-compat fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-ci test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify local-mode-pipeline-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -316,6 +316,15 @@ local-mode-webhook-verify:
 # hook/pointer config) against a running local-mode stack. No model calls.
 local-mode-skills-verify:
 	@test/local-mode/verify-skills.sh
+
+# Assert that the production-shaped topology the test/local-mode overlays ask
+# for is the one that actually came up: the agent count max_agents would have
+# silently vetoed, the extra repos repo selection needs, the pipeline's label
+# routing, and a live supervisor. Needs a stack started with
+# LOCAL_MODE_COMPOSE_FILES=test/local-mode/docker-compose.topology.yml (plus
+# docker-compose.pipeline.yml for the routing stages). No model calls.
+local-mode-pipeline-verify:
+	@test/local-mode/verify-pipeline.sh
 
 # Live-model smoke: a long-lived agent session must learn about skills
 # added/removed after its session-start snapshot, via the managed
@@ -817,6 +826,7 @@ help:
 	@echo "  make local-mode-verify  - Verify deterministic local-mode stack"
 	@echo "  make local-mode-codex-verify - Verify Codex local-mode stack"
 	@echo "  make local-mode-skills-verify - Verify the skills vertical e2e (no model)"
+	@echo "  make local-mode-pipeline-verify - Verify the three-agent/label-pipeline topology (no model)"
 	@echo "  make local-mode-skill-pointer-verify - Live-model smoke of the skill catalog pointer"
 	@echo "  make local-mode-logs    - Tail selected local-mode stack logs"
 	@echo "  make local-mode-down    - Stop selected local-mode stack and volumes"
