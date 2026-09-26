@@ -379,6 +379,7 @@ func mustGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...) //nolint:norawexec // Test helper uses fixed git commands in temp repos.
 	cmd.Dir = dir
+	cmd.Env = fixtureGitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v failed: %v\n%s", args, err, out)
 	}
@@ -388,11 +389,23 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...) //nolint:norawexec // Test helper uses fixed git commands in temp repos.
 	cmd.Dir = dir
+	cmd.Env = fixtureGitEnv()
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("git %v output failed: %v", args, err)
 	}
 	return string(out)
+}
+
+func fixtureGitEnv() []string {
+	return append(os.Environ(),
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_AUTHOR_NAME=Test User",
+		"GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test User",
+		"GIT_COMMITTER_EMAIL=test@example.com",
+	)
 }
 
 func initGitRepo(t *testing.T, dir string) {
