@@ -4,9 +4,23 @@
 
 import { describe, it, expect } from "vitest";
 
-import { toBackendInfo, KNOWN_BACKEND_DEFAULTS } from "../backendDefaults";
+import {
+  isUserFacingBackend,
+  toBackendInfo,
+  KNOWN_BACKEND_DEFAULTS,
+} from "../backendDefaults";
 
 describe("backendDefaults", () => {
+  describe("isUserFacingBackend", () => {
+    it("hides Local Dogfood unless testing backends are enabled", () => {
+      expect(isUserFacingBackend("localdogfood", false)).toBe(false);
+      expect(isUserFacingBackend("local-dogfood", false)).toBe(false);
+      expect(isUserFacingBackend("local_dogfood", false)).toBe(false);
+      expect(isUserFacingBackend("localdogfood", true)).toBe(true);
+      expect(isUserFacingBackend("codex", false)).toBe(true);
+    });
+  });
+
   describe("KNOWN_BACKEND_DEFAULTS", () => {
     it("has defaults for claude, codex, opencode, gemini, cursor, browser, and shell", () => {
       expect(KNOWN_BACKEND_DEFAULTS).toHaveProperty("claude");

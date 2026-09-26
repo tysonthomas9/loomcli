@@ -11,6 +11,7 @@ import type { Page } from "@playwright/test";
 
 const WORKSPACE_ID = "test-ws";
 const BASE_PATH = `/ws/${WORKSPACE_ID}/`;
+const KANBAN_PATH = `/ws/${WORKSPACE_ID}/kanban`;
 const WS_API = `/api/workspaces/${WORKSPACE_ID}`;
 
 function ok<T>(data: T): string {
@@ -164,7 +165,10 @@ async function setupMocks(
           await route.fulfill({
             status: workspaceStatus,
             contentType: "application/json",
-            body: JSON.stringify({ success: false, error: "Internal Server Error" }),
+            body: JSON.stringify({
+              success: false,
+              error: "Internal Server Error",
+            }),
           });
           return;
         }
@@ -216,9 +220,11 @@ async function setupMocks(
 }
 
 async function expectGlobalHeader(page: Page) {
-  await expect(page.getByRole("banner").getByRole("heading", {
-    name: "Loom",
-  })).toBeVisible();
+  await expect(
+    page.getByRole("banner").getByRole("heading", {
+      name: "Loom",
+    }),
+  ).toBeVisible();
 }
 
 test.describe("global header and local workspace identity", () => {
@@ -250,7 +256,7 @@ test.describe("global header and local workspace identity", () => {
     await expectGlobalHeader(page);
   });
 
-  test("shows workspace name in the workspace tree, not the global heading", async ({
+  test("shows workspace name in the workspace tree, not the page heading", async ({
     page,
   }) => {
     await setupMocks(
@@ -263,7 +269,11 @@ test.describe("global header and local workspace identity", () => {
 
     await page.goto(BASE_PATH);
 
-    await expectGlobalHeader(page);
+    // The bare workspace route now resolves to Home, whose page heading is
+    // intentionally "Home". Workspace identity remains local to the tree.
+    await expect(
+      page.getByRole("banner").getByRole("heading", { name: "Home" }),
+    ).toBeVisible();
     await expect(
       page.getByRole("button", {
         name: /Active workspace: my-project\. Click to switch\./,
@@ -284,7 +294,7 @@ test.describe("global header and local workspace identity", () => {
       ]),
     );
 
-    await page.goto(BASE_PATH);
+    await page.goto(KANBAN_PATH);
 
     await expect(page.getByRole("tab", { name: "Kanban" })).toHaveAttribute(
       "aria-selected",

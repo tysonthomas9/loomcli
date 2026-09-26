@@ -5,7 +5,7 @@
 
 import { useState, useEffect } from "react";
 
-function formatElapsed(ms: number): string {
+export function formatElapsed(ms: number): string {
   if (ms <= 0) return "0s";
   const totalSeconds = Math.floor(ms / 1000);
   if (totalSeconds < 60) return `${totalSeconds}s`;

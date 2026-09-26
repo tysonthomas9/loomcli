@@ -249,6 +249,7 @@ type fleetDBIssueBackend struct{}
 
 var _ backend.IssueBackend = (*fleetDBIssueBackend)(nil)
 var _ backend.ClaimReleaser = (*fleetDBIssueBackend)(nil)
+var _ backend.EventHistoryBackend = (*fleetDBIssueBackend)(nil)
 
 func newFleetDBIssueBackend() backend.IssueBackend {
 	return &fleetDBIssueBackend{}
@@ -524,6 +525,24 @@ func (b *fleetDBIssueBackend) ListEvents(ctx context.Context, id string, limit i
 	err := b.withBackend(ctx, "ListEvents", func(ib backend.IssueBackend) error {
 		var err error
 		out, err = ib.ListEvents(ctx, id, limit)
+		return err
+	})
+	return out, err
+}
+
+func (b *fleetDBIssueBackend) ListEventHistory(
+	ctx context.Context,
+	id string,
+	params backend.EventHistoryParams,
+) (*backend.EventHistoryData, error) {
+	var out *backend.EventHistoryData
+	err := b.withBackend(ctx, "ListEventHistory", func(ib backend.IssueBackend) error {
+		historyBackend, ok := ib.(backend.EventHistoryBackend)
+		if !ok {
+			return backend.ErrNotImplemented("ListEventHistory", "event history paging is not supported by this backend")
+		}
+		var err error
+		out, err = historyBackend.ListEventHistory(ctx, id, params)
 		return err
 	})
 	return out, err

@@ -15,6 +15,7 @@ import { type ViewMode, DEFAULT_VIEW } from "@/types";
  * "issue-detail" is not a segment — it's derived from the issues/:issueId route.
  */
 const VALID_VIEW_SEGMENTS: ReadonlySet<string> = new Set<ViewMode>([
+  "home",
   "kanban",
   "list",
   "table",
@@ -27,7 +28,23 @@ const VALID_VIEW_SEGMENTS: ReadonlySet<string> = new Set<ViewMode>([
   "workspace",
   "settings",
   "files",
+  "skills",
   "agents",
+]);
+
+/**
+ * Search params that describe a *detail sub-state within a view* rather than
+ * workspace-wide state. Switching views via the nav rail resets the target
+ * section to its root, so these are dropped; anything else (repoFilter, repos,
+ * board filters) is preserved.
+ *
+ * Without this, /ws/:id/prs?review=X → "prs" rebuilt the identical URL and
+ * React Router no-op'd, stranding the user on the review detail view.
+ */
+const VIEW_SCOPED_SEARCH_PARAMS: ReadonlySet<string> = new Set([
+  "review", // PRsPage: issue-backed review detail
+  "review-pr", // PRsPage: PR-backed review detail
+  "discuss", // PRsPage: discussion panel within a review
 ]);
 
 export interface UseRouteViewReturn {
@@ -42,6 +59,7 @@ export interface UseRouteViewReturn {
 /**
  * Extract the view segment from the URL path.
  *
+ * /ws/abc/home         → "home"
  * /ws/abc/kanban       → "kanban"
  * /ws/abc/terminal     → "terminal"
  * /ws/abc/issues/T-5   → "issue-detail"
@@ -63,7 +81,24 @@ function deriveView(pathname: string, issueId: string | undefined): ViewMode {
 }
 
 /**
- * Build a route path for the given view, preserving current search params.
+ * Drop view-scoped detail params from a search string, keeping everything else.
+ * Never emits a bare trailing "?" — an unchanged URL is what caused the bug.
+ */
+function stripViewScopedParams(search: string): string {
+  if (!search) return "";
+
+  const params = new URLSearchParams(search);
+  for (const key of VIEW_SCOPED_SEARCH_PARAMS) {
+    params.delete(key);
+  }
+
+  const next = params.toString();
+  return next ? `?${next}` : "";
+}
+
+/**
+ * Build a route path for the given view, preserving workspace-scoped search
+ * params and discarding the ones scoped to a view's detail sub-state.
  */
 function buildViewPath(
   workspaceId: string,
@@ -71,8 +106,7 @@ function buildViewPath(
   search: string,
 ): string {
   const segment = view === "issue-detail" ? "" : view;
-  const base = `/ws/${workspaceId}/${segment}`;
-  return search ? `${base}${search}` : base;
+  return `/ws/${workspaceId}/${segment}${stripViewScopedParams(search)}`;
 }
 
 export function useRouteView(): UseRouteViewReturn {

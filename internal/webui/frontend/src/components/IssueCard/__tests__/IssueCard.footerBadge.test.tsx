@@ -61,15 +61,18 @@ describe("IssueCard footer badge", () => {
 
     const badge = screen.getByTestId("issue-card-agent");
     expect(badge).toHaveAttribute("title", "Working: lead-a");
-    expect(badge).toHaveTextContent("L");
+    expect(badge).toHaveAttribute("data-variant", "agent");
+    expect(badge).toHaveTextContent("LA");
+    expect(screen.getByLabelText("lead-a avatar")).toBeInTheDocument();
   });
 
-  it("shows owner badge when no agent is working or assigned", () => {
+  it("shows an empty owner badge when no agent is working or assigned", () => {
     renderWithAgents([], createTestIssue({ owner: "tyson" }));
 
     const badge = screen.getByTestId("issue-card-owner");
     expect(badge).toHaveAttribute("title", "Owner: tyson");
-    expect(badge).toHaveTextContent("T");
+    expect(badge).toHaveAttribute("data-variant", "owner");
+    expect(screen.getByLabelText("tyson avatar")).toBeEmptyDOMElement();
   });
 
   it("shows agent badge from assignee when owner is set but assignee is an agent", () => {
@@ -77,6 +80,19 @@ describe("IssueCard footer badge", () => {
 
     const badge = screen.getByTestId("issue-card-agent");
     expect(badge).toHaveAttribute("title", "Working: nova");
-    expect(badge).toHaveTextContent("N");
+    expect(badge).toHaveTextContent("NO");
+  });
+
+  it("uses the shared two-letter agent avatar on Kanban cards", () => {
+    renderWithAgents(
+      [agent({ name: "codex-coder", active_task_id: "LOCALMODE-5" })],
+      createTestIssue({ assignee: "codex-coder" }),
+    );
+
+    const badge = screen.getByTestId("issue-card-agent");
+    expect(badge).toHaveTextContent("CC");
+    expect(screen.getByLabelText("codex-coder avatar")).toHaveStyle({
+      backgroundColor: expect.any(String),
+    });
   });
 });

@@ -1,4 +1,23 @@
 import type { FileCheckout } from "@/api/workspace";
+import type { CheckoutRef } from "@/utils/fileExplorerRefs";
+
+export function checkoutRepairRequest(ref: CheckoutRef, force = false) {
+  if (ref.scope === "agent" && ref.target) {
+    const request = {
+      scope: "agent" as const,
+      target: ref.target,
+      force,
+    };
+    if (ref.repo) {
+      return { ...request, repo: ref.repo };
+    }
+    return request;
+  }
+  if (ref.scope === "repo" && ref.target) {
+    return { scope: "repo" as const, target: ref.target, force };
+  }
+  return null;
+}
 
 export function hasAvailableCheckoutStatus(
   checkout: Pick<FileCheckout, "exists" | "status_error">,

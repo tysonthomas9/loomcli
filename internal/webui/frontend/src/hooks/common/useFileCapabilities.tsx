@@ -27,14 +27,27 @@ const unavailableState: FileCapabilitiesState = {
   retry: () => {},
 };
 
+// What a consumer sees when the surrounding section declared it has no scoped
+// files: settled, not loading, not an error. Nothing is pending, so nothing
+// should render a "checking permissions" or "permissions unavailable" notice.
+const notApplicableState: FileCapabilitiesState = {
+  capabilities: null,
+  isLoading: false,
+  error: null,
+  retry: () => {},
+};
+
 const FileCapabilitiesContext =
   createContext<FileCapabilitiesState>(unavailableState);
 
 export function FileCapabilitiesProvider({
   workspaceId,
+  enabled = true,
   children,
 }: {
   workspaceId: string;
+  /** False for a section with no scoped files: never fetch /files/capabilities. */
+  enabled?: boolean | undefined;
   children: ReactNode;
 }): JSX.Element {
   const [capabilities, setCapabilities] =
@@ -45,6 +58,7 @@ export function FileCapabilitiesProvider({
   const retry = useCallback(() => setRequestToken((token) => token + 1), []);
 
   useEffect(() => {
+    if (!enabled) return;
     let canceled = false;
     setCapabilities(null);
     setIsLoading(true);
@@ -64,11 +78,12 @@ export function FileCapabilitiesProvider({
     return () => {
       canceled = true;
     };
-  }, [requestToken, workspaceId]);
+  }, [enabled, requestToken, workspaceId]);
 
   const value = useMemo(
-    () => ({ capabilities, isLoading, error, retry }),
-    [capabilities, error, isLoading, retry],
+    () =>
+      enabled ? { capabilities, isLoading, error, retry } : notApplicableState,
+    [capabilities, enabled, error, isLoading, retry],
   );
   return (
     <FileCapabilitiesContext.Provider value={value}>

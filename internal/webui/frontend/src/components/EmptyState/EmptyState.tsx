@@ -5,7 +5,11 @@
 
 import styles from "./EmptyState.module.css";
 
-export type EmptyStateVariant = "no-workspaces" | "no-issues" | "no-agents";
+export type EmptyStateVariant =
+  | "no-workspaces"
+  | "no-issues"
+  | "no-agents"
+  | "queue-clear";
 
 export interface EmptyStateProps {
   variant: EmptyStateVariant;
@@ -103,6 +107,31 @@ function getVariantContent(variant: EmptyStateVariant): VariantContent {
             Agents will appear here when launched. Start an agent with{" "}
             <code className={styles.code}>loom spawn</code> or use the terminal
             to interact directly.
+          </>
+        ),
+      };
+    case "queue-clear":
+      return {
+        icon: (
+          <svg
+            width="40"
+            height="40"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="m5 12 4 4L19 6" />
+          </svg>
+        ),
+        title: "Queue clear",
+        description: (
+          <>
+            The next thing that needs you will appear here — a design in review,
+            an agent that declared blocked, or a task sent back for revision.
           </>
         ),
       };

@@ -1,0 +1,80 @@
+# Product-correct coverage for clone validation, API provisioning with a local
+# repository and UI repo addition. API-only reorder coverage lives
+# in surface-suites/workspace-order.
+suite: workspace-mgmt
+classification: { area: workspaces, feature: workspace-management, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: >-
+  seed="$AFT_WORK_DIR/wm-seed"; extra="$AFT_WORK_DIR/wm-extra"; rm -rf "$seed" "$extra"; mkdir -p "$seed" "$extra"; git -C "$seed" init -q; printf '%s\n' "seed ${RUN_ID:-local}" > "$seed/README.md"; git -C "$seed" add README.md; git -C "$seed" -c user.email=e2e@x -c user.name=e2e commit -m init -q; git -C "$seed" branch -M main; git -C "$extra" init -q; printf '%s\n' "extra ${RUN_ID:-local}" > "$extra/README.md"; git -C "$extra" add README.md; git -C "$extra" -c user.email=e2e@x -c user.name=e2e commit -m init -q; git -C "$extra" branch -M main; basename "$extra" > "$AFT_WORK_DIR/wm-extra.repo"
+teardown: >-
+  name="aft-wm-${RUN_ID:-local}"; curl -sf "$AFT_BASE_URL/api/workspaces" > "$AFT_WORK_DIR/wm-workspaces.teardown.json" || exit 0; ws="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); target=sys.argv[2]; print(next((w.get("id","") for w in d.get("workspaces",[]) if w.get("name")==target or w.get("id")==target), ""))' "$AFT_WORK_DIR/wm-workspaces.teardown.json" "$name")"; [ -z "$ws" ] || curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/$ws" >/dev/null || true
+
+tests:
+  # covers: /api/workspaces; /api/workspaces/:ws/repos; CreateWorkspaceModal clone validation; AddRepoModal
+  - name: validate clone input then add a repo to a local workspace
+    intent: An operator sees the clone-only modal reject a file URL, an API client provisions the local fixture, and the operator adds a repository through the current workspace sidebar
+    steps:
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - click: { selector: "button[aria-label^='Active workspace:']" }
+      - click: { role: button, name: "+ New Workspace", exact: true }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=create-workspace-overlay]')
+        intent: "Wait until the workspace creation dialog is open"
+      - fill:
+          testid: create-workspace-name
+          value: "aft-wm-${RUN_ID:-local}"
+      - fill:
+          testid: create-workspace-clone-url
+          value: "file://${AFT_WORK_DIR}/wm-seed"
+      - click: { role: button, name: Add, exact: true }
+      - click: { testid: create-workspace-submit }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=create-workspace-error]')?.textContent.includes('clone URL must start with https:// or git@')
+        intent: "Wait until clone mode explains that the file URL is invalid"
+      - expect: { visible: { testid: create-workspace-error } }
+      - expect: { text: "clone URL must start with https:// or git@" }
+      - click: { testid: create-workspace-cancel }
+      - api:
+          method: POST
+          path: /api/workspaces
+          body:
+            name: "aft-wm-${RUN_ID:-local}"
+            type: empty
+            repos: ["${AFT_WORK_DIR}/wm-seed"]
+          save:
+            - from: data.id
+              as: wmWorkspaceId
+        intent: "An API client provisions the local-repository fixture after the operator verifies the clone-only UI boundary"
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$(cat "$AFT_WORK_DIR/wmWorkspaceId")/kanban"
+        intent: "An operator opens the server-assigned workspace route in the active browser session"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - click: { role: button, name: "+ Add Repo" }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=add-repo-overlay]')
+        intent: "Wait until the add-repository dialog is open"
+      - fill:
+          label: Repository URL
+          value: "${AFT_WORK_DIR}/wm-extra"
+      - fill:
+          label: Default branch
+          value: main
+      - click: { role: button, name: "Add Repository", exact: true }
+      - run: >-
+          ws="$(cat "$AFT_WORK_DIR/wmWorkspaceId")"; repo="$(cat "$AFT_WORK_DIR/wm-extra.repo")"; for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/workspaces/$ws/repos" > "$AFT_WORK_DIR/wm-repos.json" && python3 -c 'import json,sys; repo=sys.argv[2]; d=json.load(open(sys.argv[1])); assert any(r.get("name")==repo for r in d.get("repos",[])), d' "$AFT_WORK_DIR/wm-repos.json" "$repo" && exit 0; sleep 1; done; echo "added repo never appeared"; exit 1
+        intent: "An operator's readback waits for the added repository to persist"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('button[aria-label]')).some((button) => button.getAttribute('aria-label') === 'wm-extra')
+        intent: "Wait until the added repository appears in the workspace sidebar"
+      - expect: { visible: { selector: "button[aria-label='wm-extra']" } }

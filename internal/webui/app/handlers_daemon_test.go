@@ -419,3 +419,64 @@ func TestWorkspaceOpsModule_QueueRouteNotRegisteredWhenNil(t *testing.T) {
 		t.Errorf("expected 404 when agentQueueFn is nil, got %d", rec.Code)
 	}
 }
+
+// The FE's claim-hold banner reads the hold off the supervisor payload rather
+// than the socket route, so an absent `claim_hold` key would silently mean
+// "free" — which is exactly the failure a quiesce must not have.
+func TestHandleDaemonSupervisor_CarriesClaimHold(t *testing.T) {
+	since := time.Now().Add(-3 * time.Hour)
+	fn := func() (*webui.DaemonSupervisorData, error) {
+		return &webui.DaemonSupervisorData{
+			PID:       12345,
+			StartedAt: since,
+			Agents: []webui.DaemonAgentEntry{
+				{Worktree: "falcon", Role: "planner", Status: "running", ClaimsGated: true},
+			},
+			ClaimHold: &webui.ClaimHoldEntry{
+				Held: true, Actor: "deployer", Reason: "loom redeploy", Since: since,
+			},
+		}, nil
+	}
+
+	h := webui.HandleDaemonSupervisor(fn)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/daemon/supervisor", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var resp struct {
+		Data webui.DaemonSupervisorData `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Data.ClaimHold == nil {
+		t.Fatalf("claim_hold missing from payload: %s", rec.Body.String())
+	}
+	if resp.Data.ClaimHold.Actor != "deployer" || resp.Data.ClaimHold.Reason != "loom redeploy" {
+		t.Errorf("claim_hold = %+v, want deployer/loom redeploy", resp.Data.ClaimHold)
+	}
+	if !resp.Data.Agents[0].ClaimsGated {
+		t.Error("claims_gated did not survive the round trip")
+	}
+}
+
+func TestHandleDaemonSupervisor_OmitsClaimHoldWhenFree(t *testing.T) {
+	fn := func() (*webui.DaemonSupervisorData, error) {
+		return &webui.DaemonSupervisorData{PID: 1, StartedAt: time.Now()}, nil
+	}
+
+	rec := httptest.NewRecorder()
+	webui.HandleDaemonSupervisor(fn).ServeHTTP(rec, httptest.NewRequest("GET", "/api/daemon/supervisor", nil))
+
+	var resp struct {
+		Data webui.DaemonSupervisorData `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Data.ClaimHold != nil {
+		t.Errorf("claim_hold = %+v, want nil when no hold is active", resp.Data.ClaimHold)
+	}
+}

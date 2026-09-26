@@ -163,6 +163,24 @@ describe("useBackends", () => {
       expect(result.current.backends[2].name).toBe("opencode");
     });
 
+    it("hides testing-only backends in normal builds", async () => {
+      mockFetchBackends.mockResolvedValueOnce([
+        createMockHealthData({ name: "codex", display_name: "Codex" }),
+        createMockHealthData({
+          name: "localdogfood",
+          display_name: "Local Dogfood",
+        }),
+      ]);
+
+      const { result } = renderHook(() => useBackends());
+
+      await flushPromises();
+
+      expect(result.current.backends.map((backend) => backend.name)).toEqual([
+        "codex",
+      ]);
+    });
+
     it("passes healthMessage when API returns a message", async () => {
       mockFetchBackends.mockResolvedValueOnce([
         createMockHealthData({

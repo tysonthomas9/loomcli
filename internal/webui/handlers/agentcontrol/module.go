@@ -7,13 +7,27 @@ import "net/http"
 type Module struct {
 	controlFn AgentControlFn
 	inputFn   AgentInputFn
+	holdFn    ClaimHoldFn
+}
+
+// ClaimHoldModule registers only the workspace claim-hold routes. Store-backed
+// servers use their store-backed agent lifecycle module, but claim hold still
+// has to proxy to the local daemon control socket.
+type ClaimHoldModule struct {
+	holdFn ClaimHoldFn
 }
 
 // NewModule returns a Module that proxies agent lifecycle commands to the
-// daemon control socket via the given callback. inputFn may be nil, which
-// leaves the pending-input routes unregistered (older daemon, remote mode).
-func NewModule(controlFn AgentControlFn, inputFn AgentInputFn) *Module {
-	return &Module{controlFn: controlFn, inputFn: inputFn}
+// daemon control socket via the given callback. inputFn and holdFn may each be
+// nil, which leaves the pending-input and claim-hold routes respectively
+// unregistered (older daemon, remote mode).
+func NewModule(controlFn AgentControlFn, inputFn AgentInputFn, holdFn ClaimHoldFn) *Module {
+	return &Module{controlFn: controlFn, inputFn: inputFn, holdFn: holdFn}
+}
+
+// NewClaimHoldModule returns a module containing only claim-hold routes.
+func NewClaimHoldModule(holdFn ClaimHoldFn) *ClaimHoldModule {
+	return &ClaimHoldModule{holdFn: holdFn}
 }
 
 // Register implements webui.Module by registering the agent lifecycle
@@ -35,4 +49,19 @@ func (m *Module) Register(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/input", handlePendingInputGet(m.inputFn))
 		mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/answer", handleAgentAnswer(m.inputFn))
 	}
+	if m.holdFn != nil {
+		// The claim hold shares this module — and therefore the same authz
+		// boundary — with stop/start: quiescing the whole workspace is at
+		// least as consequential as stopping one agent.
+		mux.HandleFunc("GET /api/workspaces/{ws}/claims/hold", handleClaimHoldGet(m.holdFn))
+		mux.HandleFunc("POST /api/workspaces/{ws}/claims/hold", handleClaimHoldSet(m.holdFn))
+		mux.HandleFunc("DELETE /api/workspaces/{ws}/claims/hold", handleClaimHoldRelease(m.holdFn))
+	}
+}
+
+// Register implements webui.Module for the claim-hold-only surface.
+func (m *ClaimHoldModule) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/workspaces/{ws}/claims/hold", handleClaimHoldGet(m.holdFn))
+	mux.HandleFunc("POST /api/workspaces/{ws}/claims/hold", handleClaimHoldSet(m.holdFn))
+	mux.HandleFunc("DELETE /api/workspaces/{ws}/claims/hold", handleClaimHoldRelease(m.holdFn))
 }

@@ -79,6 +79,7 @@ function renderPanel(
 ) {
   return render(
     <FileExplorerTreePanel
+      workspaceId="ws-1"
       lens={overrides.lens ?? "changes"}
       changeCount={0}
       compareMode={overrides.compareMode ?? "branch"}
@@ -93,6 +94,7 @@ function renderPanel(
       expandedRoots={new Set()}
       repairingCheckoutKey={null}
       canWrite={true}
+      canEditSkills={vi.fn(() => true)}
       selectedTab={null as FileBrowserTab | null}
       inlineEdit={null}
       gitStatusByRef={{}}
@@ -106,6 +108,8 @@ function renderPanel(
       onToggleRoot={vi.fn()}
       onRepairCheckout={vi.fn()}
       onCheckoutContextMenu={vi.fn()}
+      onSkillGroupContextMenu={vi.fn()}
+      onNewSkill={vi.fn()}
       onOpenFile={vi.fn()}
       onContextMenu={vi.fn()}
       onRequestRename={vi.fn()}
@@ -136,6 +140,7 @@ describe("FileExplorerTreePanel", () => {
 
     rerender(
       <FileExplorerTreePanel
+        workspaceId="ws-1"
         lens="files"
         changeCount={7}
         compareMode="branch"
@@ -149,6 +154,7 @@ describe("FileExplorerTreePanel", () => {
         expandedRoots={new Set()}
         repairingCheckoutKey={null}
         canWrite={true}
+        canEditSkills={vi.fn(() => true)}
         selectedTab={null}
         inlineEdit={null}
         gitStatusByRef={{}}
@@ -162,6 +168,8 @@ describe("FileExplorerTreePanel", () => {
         onToggleRoot={vi.fn()}
         onRepairCheckout={vi.fn()}
         onCheckoutContextMenu={vi.fn()}
+        onSkillGroupContextMenu={vi.fn()}
+        onNewSkill={vi.fn()}
         onOpenFile={vi.fn()}
         onContextMenu={vi.fn()}
         onRequestRename={vi.fn()}
@@ -289,6 +297,7 @@ describe("FileExplorerTreePanel", () => {
 
     rerender(
       <FileExplorerTreePanel
+        workspaceId="ws-1"
         lens="changes"
         changeCount={0}
         compareMode="working"
@@ -302,6 +311,7 @@ describe("FileExplorerTreePanel", () => {
         expandedRoots={new Set()}
         repairingCheckoutKey={null}
         canWrite={true}
+        canEditSkills={vi.fn(() => true)}
         selectedTab={null}
         inlineEdit={null}
         gitStatusByRef={{}}
@@ -315,6 +325,8 @@ describe("FileExplorerTreePanel", () => {
         onToggleRoot={vi.fn()}
         onRepairCheckout={vi.fn()}
         onCheckoutContextMenu={vi.fn()}
+        onSkillGroupContextMenu={vi.fn()}
+        onNewSkill={vi.fn()}
         onOpenFile={vi.fn()}
         onContextMenu={vi.fn()}
         onRequestRename={vi.fn()}

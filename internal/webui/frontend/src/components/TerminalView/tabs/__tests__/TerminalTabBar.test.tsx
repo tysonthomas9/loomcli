@@ -1346,6 +1346,80 @@ describe("TerminalTabBar", () => {
     });
   });
 
+  describe("restart marker", () => {
+    it("renders a marker for a tab with replacedAt and none without", () => {
+      const tabs = makeTabs(2);
+      tabs[0] = { ...tabs[0]!, replacedAt: "2026-08-15T10:00:00Z" };
+      render(<TerminalTabBar {...defaultProps} tabs={tabs} />);
+
+      expect(
+        screen.getByTestId("tab-marker-restart-tab-1"),
+      ).toBeInTheDocument();
+      expect(screen.queryByTestId("tab-marker-restart-tab-2")).toBeNull();
+    });
+
+    it("renders the marker separately from the connection dot", () => {
+      const tabs = makeTabs(1);
+      tabs[0] = { ...tabs[0]!, replacedAt: "2026-08-15T10:00:00Z" };
+      render(<TerminalTabBar {...defaultProps} tabs={tabs} />);
+
+      // A replaced tab can still be connected — the two are independent.
+      expect(screen.getByTestId("terminal-tab-status-tab-1")).toHaveAttribute(
+        "data-status",
+        "connected",
+      );
+      expect(
+        screen.getByTestId("tab-marker-restart-tab-1"),
+      ).toBeInTheDocument();
+    });
+
+    it("clicking the marker dismisses the notice for that tab", () => {
+      const onDismissRestartNotice = vi.fn();
+      const onTabChange = vi.fn();
+      const tabs = makeTabs(2);
+      tabs[1] = { ...tabs[1]!, replacedAt: "2026-08-15T10:00:00Z" };
+      render(
+        <TerminalTabBar
+          {...defaultProps}
+          tabs={tabs}
+          onTabChange={onTabChange}
+          onDismissRestartNotice={onDismissRestartNotice}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("tab-marker-restart-tab-2"));
+
+      expect(onDismissRestartNotice).toHaveBeenCalledWith("tab-2");
+      // The click must not also select the tab underneath.
+      expect(onTabChange).not.toHaveBeenCalled();
+    });
+
+    it("offers the context-menu entry only for a tab with a marker", () => {
+      const onDismissRestartNotice = vi.fn();
+      const tabs = makeTabs(2);
+      tabs[0] = { ...tabs[0]!, replacedAt: "2026-08-15T10:00:00Z" };
+      render(
+        <TerminalTabBar
+          {...defaultProps}
+          tabs={tabs}
+          onDismissRestartNotice={onDismissRestartNotice}
+        />,
+      );
+
+      fireEvent.contextMenu(screen.getByTestId("terminal-tab-tab-2"));
+      expect(
+        screen.queryByTestId("context-menu-dismiss-restart-notice"),
+      ).toBeNull();
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      fireEvent.contextMenu(screen.getByTestId("terminal-tab-tab-1"));
+      fireEvent.click(
+        screen.getByTestId("context-menu-dismiss-restart-notice"),
+      );
+      expect(onDismissRestartNotice).toHaveBeenCalledWith("tab-1");
+    });
+  });
+
   describe("forwardRef support", () => {
     it("forwards ref to the outer container div", () => {
       const ref = { current: null as HTMLDivElement | null };

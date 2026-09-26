@@ -37,6 +37,16 @@ export function hasNeedsRevision(issue: { labels?: string[] }): boolean {
   return issue.labels?.includes(NEEDS_REVISION_LABEL) ?? false;
 }
 
+/**
+ * Whether an issue has a design, including collection responses that omit the
+ * hydrated design body and expose only has_design.
+ */
+export function hasDesign(issue: OpenStatusCheckable): boolean {
+  return (
+    !!issue.design || !!issue.design_artifact_id || issue.has_design === true
+  );
+}
+
 // --- Open status (was openStatus.ts — now checks labels) ---
 
 /**
@@ -47,9 +57,7 @@ export function hasNeedsRevision(issue: { labels?: string[] }): boolean {
  * SYNC: Must match taskfilter.go NeedsPlan() / ReadyToImplement()
  */
 export function getOpenStatus(issue: OpenStatusCheckable): OpenStatus {
-  const hasDesign =
-    !!issue.design || !!issue.design_artifact_id || issue.has_design === true;
-  if (hasDesign && !hasNeedsRevision(issue)) {
+  if (hasDesign(issue) && !hasNeedsRevision(issue)) {
     return "ready";
   }
   return "needs_plan";

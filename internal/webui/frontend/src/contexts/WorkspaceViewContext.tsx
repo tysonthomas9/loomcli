@@ -96,7 +96,7 @@ export const NO_WORKSPACE_VIEW_DATA: WorkspaceViewData = {
   filters: {},
   groupBy: "epic",
   debouncedSearch: "",
-  activeView: "kanban",
+  activeView: "home",
   selectedIssueId: null,
   workspaceId: "",
   isMultiRepo: false,
@@ -105,7 +105,7 @@ export const NO_WORKSPACE_VIEW_DATA: WorkspaceViewData = {
   issueDetails: null,
   isLoadingDetails: false,
   detailError: null,
-  previousView: "kanban",
+  previousView: "home",
 };
 
 export const NO_WORKSPACE_VIEW_ACTIONS: WorkspaceViewActions = {

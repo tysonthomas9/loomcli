@@ -47,6 +47,8 @@ const (
 	ctrlOpAgentYield   = "agent_yield"
 	ctrlOpInputGet     = "agent_input_get"
 	ctrlOpInputAnswer  = "agent_input_answer"
+	ctrlOpClaimHoldSet = "claims_hold_set"
+	ctrlOpClaimHoldGet = "claims_hold_get"
 )
 
 // startControlServer creates a Unix domain socket listener for per-agent control.
@@ -109,7 +111,14 @@ func (d *Daemon) handleControlConnection(conn net.Conn) {
 	writeDeadline := 30 * time.Second
 	_ = conn.SetWriteDeadline(time.Now().Add(writeDeadline))
 
-	var resp DaemonControlResponse
+	writeControlResponse(conn, d.dispatchControlOp(conn, req))
+}
+
+// dispatchControlOp routes one control request to its handler. Split out of
+// handleControlConnection so the connection lifecycle and the operation table
+// stay separately readable as the table grows. Operations that can outlast the
+// default 30s write deadline extend it on conn themselves.
+func (d *Daemon) dispatchControlOp(conn net.Conn, req DaemonControlRequest) DaemonControlResponse {
 	switch req.Operation {
 	case ctrlOpAgentStop:
 		if req.Force {
@@ -117,31 +126,33 @@ func (d *Daemon) handleControlConnection(conn net.Conn) {
 		} else {
 			_ = conn.SetWriteDeadline(time.Now().Add(d.sup.GetYieldTimeout() + 10*time.Second))
 		}
-		resp = d.handleAgentControlStop(req.AgentName, req.Force)
+		return d.handleAgentControlStop(req.AgentName, req.Force)
 	case ctrlOpAgentStart:
-		resp = d.handleAgentControlStart(req.AgentName, "")
+		return d.handleAgentControlStart(req.AgentName, "")
 	case ctrlOpAgentRestart:
 		_ = conn.SetWriteDeadline(time.Now().Add(d.sup.GetYieldTimeout() + 10*time.Second))
-		resp = d.handleAgentControlRestart(req.AgentName)
+		return d.handleAgentControlRestart(req.AgentName)
 	case ctrlOpAgentList:
-		resp = d.handleAgentControlList()
+		return d.handleAgentControlList()
 	case ctrlOpAgentYield:
-		resp = d.handleAgentControlYield(req.AgentName)
+		return d.handleAgentControlYield(req.AgentName)
 	case ctrlOpInputGet:
-		resp = d.handleAgentInputGet(req.AgentName)
+		return d.handleAgentInputGet(req.AgentName)
 	case ctrlOpInputAnswer:
-		resp = d.handleAgentInputAnswer(req.AgentName, req.Args)
+		return d.handleAgentInputAnswer(req.AgentName, req.Args)
+	case ctrlOpClaimHoldSet:
+		return d.handleClaimHoldSet(req.Args)
+	case ctrlOpClaimHoldGet:
+		return d.handleClaimHoldGet()
 	case ctrlOpGetMutations:
-		resp = d.handleControlGetMutations(req.Args)
+		return d.handleControlGetMutations(req.Args)
 	case ctrlOpWaitForMutations:
 		// Extend write deadline for long-poll
 		_ = conn.SetWriteDeadline(time.Now().Add(70 * time.Second))
-		resp = d.handleControlWaitForMutations(req.Args)
+		return d.handleControlWaitForMutations(req.Args)
 	default:
-		resp = DaemonControlResponse{Error: fmt.Sprintf("unknown operation: %q", req.Operation)}
+		return DaemonControlResponse{Error: fmt.Sprintf("unknown operation: %q", req.Operation)}
 	}
-
-	writeControlResponse(conn, resp)
 }
 
 // handleAgentControlStop stops a single agent and records it in StoppedAgents.
@@ -196,6 +207,14 @@ func (d *Daemon) handleAgentControlStart(name string, taskIDs ...string) DaemonC
 	}
 	if name == "" {
 		return DaemonControlResponse{Error: "agent name is required"}
+	}
+
+	// A held workspace refuses to START anything — loudly and immediately, so
+	// a control-plane or lead start is marked failed rather than retried. This
+	// precedes the config reload below: a held workspace does no reload either.
+	if h := d.sup.ClaimHoldSnapshot(); h.Active(time.Now()) {
+		return DaemonControlResponse{Error: fmt.Sprintf("claims held by %s since %s (%s)",
+			h.Actor, h.Since.Format(time.RFC3339), h.Reason)}
 	}
 
 	// Command-created agents may have been written to fleet-db after the last

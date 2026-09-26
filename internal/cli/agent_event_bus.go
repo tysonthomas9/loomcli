@@ -80,7 +80,10 @@ func initAgentEventBus() {
 }
 
 // CloseAgentEventBus flushes and closes the agent event bus if one was
-// constructed. Safe to call from cli.Execute's defer chain.
+// constructed. Safe to call from cli.Execute's defer chain and ExitWithFlush:
+// events.Bus.Close delegates to an idempotent JSONLWriter.Close, so both paths
+// can attempt shutdown without double-closing or holding the bus mutex while
+// the buffered writer flushes to disk.
 func CloseAgentEventBus(_ context.Context) {
 	if agentBus != nil {
 		_ = agentBus.Close()

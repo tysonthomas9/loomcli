@@ -61,8 +61,16 @@ vi.mock("@/hooks", () => ({
   WorkspaceProvider: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="workspace-provider">{children}</div>
   ),
-  StoreProvider: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="store-provider">{children}</div>
+  StoreProvider: ({
+    children,
+    unscopedEvents,
+  }: {
+    children: React.ReactNode;
+    unscopedEvents?: boolean;
+  }) => (
+    <div data-testid="store-provider" data-unscoped-events={unscopedEvents}>
+      {children}
+    </div>
   ),
   useIssueSessionMap: mockUseIssueSessionMap,
   useRouteView: mockUseRouteView,
@@ -105,13 +113,17 @@ function makeWorkspaceData(id: string) {
  * Render WorkspaceLayout under a MemoryRouter with the :workspaceId param set.
  * Outlet renders a simple sentinel so we can verify children mount.
  */
-function renderWithWorkspaceId(workspaceId: string) {
+function renderWithWorkspaceId(workspaceId: string, subpath = "") {
   return render(
-    <MemoryRouter initialEntries={[`/ws/${workspaceId}/`]}>
+    <MemoryRouter initialEntries={[`/ws/${workspaceId}/${subpath}`]}>
       <Routes>
         <Route path="/ws/:workspaceId/" element={<WorkspaceLayout />}>
           <Route
             index
+            element={<div data-testid="outlet-content">Outlet Content</div>}
+          />
+          <Route
+            path="*"
             element={<div data-testid="outlet-content">Outlet Content</div>}
           />
         </Route>
@@ -169,6 +181,34 @@ describe("WorkspaceLayout", () => {
       });
 
       expect(screen.queryByTestId("outlet-content")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("event stream scope by route", () => {
+    it("unscopes the event stream on /home (Home is the workspace, never a repo)", async () => {
+      mockFetchWorkspace.mockResolvedValueOnce(makeWorkspaceData("ws-1"));
+
+      renderWithWorkspaceId("ws-1", "home");
+
+      await waitFor(() => {
+        expect(screen.getByTestId("store-provider")).toHaveAttribute(
+          "data-unscoped-events",
+          "true",
+        );
+      });
+    });
+
+    it("keeps the repo-scoped event stream on other views", async () => {
+      mockFetchWorkspace.mockResolvedValueOnce(makeWorkspaceData("ws-1"));
+
+      renderWithWorkspaceId("ws-1", "kanban");
+
+      await waitFor(() => {
+        expect(screen.getByTestId("store-provider")).toHaveAttribute(
+          "data-unscoped-events",
+          "false",
+        );
+      });
     });
   });
 

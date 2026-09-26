@@ -41,7 +41,10 @@ var daemonProfileSetCmd = &cobra.Command{
   events_dir      string
   issue_backend   string (default: fleetdb)
   max_agents      integer
-  startup_timeout integer (seconds)`,
+  startup_timeout integer (seconds)
+  restart_policy.output_timeout     integer (seconds)
+  restart_policy.no_work_backoff    integer (seconds)
+  restart_policy.idle_poll_interval integer (seconds)`,
 	Args: cobra.ExactArgs(2),
 	RunE: runDaemonProfileSet,
 }
@@ -112,6 +115,15 @@ func runDaemonProfileShow(_ *cobra.Command, _ []string) error {
 		}
 		if p.StartupTimeout != nil {
 			fmt.Printf("Startup timeout: %ds\n", *p.StartupTimeout)
+		}
+		if p.RestartPolicy.OutputTimeout != nil {
+			fmt.Printf("Output timeout:  %ds\n", *p.RestartPolicy.OutputTimeout)
+		}
+		if p.RestartPolicy.NoWorkBackoff != nil {
+			fmt.Printf("No-work backoff: %ds\n", *p.RestartPolicy.NoWorkBackoff)
+		}
+		if p.RestartPolicy.IdlePollInterval != nil {
+			fmt.Printf("Idle poll:       %ds\n", *p.RestartPolicy.IdlePollInterval)
 		}
 		return nil
 	})
@@ -187,7 +199,41 @@ func applyProfileField(p *domain.DaemonProfile, key, value string, unset bool) e
 		}
 		p.StartupTimeout = &n
 	default:
-		return fmt.Errorf("unknown key %q (run 'loom daemon profile set --help' for supported keys)", key)
+		return applyRestartPolicyField(p, key, value, unset)
 	}
 	return nil
+}
+
+// applyRestartPolicyField handles the restart_policy.* keys. It is split
+// out of applyProfileField only so neither grows past the funlen limit;
+// an unknown key still reports the same error to the user.
+func applyRestartPolicyField(p *domain.DaemonProfile, key, value string, unset bool) error {
+	target := map[string]**int{
+		"restart_policy.output_timeout":     &p.RestartPolicy.OutputTimeout,
+		"restart_policy.no_work_backoff":    &p.RestartPolicy.NoWorkBackoff,
+		"restart_policy.idle_poll_interval": &p.RestartPolicy.IdlePollInterval,
+	}[key]
+	if target == nil {
+		return fmt.Errorf("unknown key %q (run 'loom daemon profile set --help' for supported keys)", key)
+	}
+	n, err := parseProfileInt(key, value, unset)
+	if err != nil {
+		return err
+	}
+	*target = n
+	return nil
+}
+
+// parseProfileInt returns nil for an unset, otherwise the parsed value.
+// Restart-policy fields are all *int, so the caller assigns the result
+// directly rather than branching on unset itself.
+func parseProfileInt(key, value string, unset bool) (*int, error) {
+	if unset {
+		return nil, nil
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return nil, fmt.Errorf("%s must be an integer (seconds): %w", key, err)
+	}
+	return &n, nil
 }

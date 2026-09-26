@@ -56,6 +56,7 @@ const (
 	BPNoWork                                   // fixed: getNoWorkBackoff
 	BPBackendUnavailable                       // fixed recheck: backendRecheckBackoff
 	BPBlock                                    // fixed: maxRetriesBlockBackoff
+	BPClaimsHeld                               // fixed recheck: claimHoldRecheckBackoff
 )
 
 // Disposition is the policy verdict for an Outcome.
@@ -156,6 +157,12 @@ func decideDomain(d agenterr.DomainOutcome) Disposition {
 		// permission) must still stop rather than spin — so bounded counted
 		// retry with the default backoff, then Block.
 		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
+	case agenterr.ClaimsHeldOutcome:
+		// A claim hold is an operator decision to stop STARTING work, not a
+		// failure of the agent, the task or the backend. Nothing may move:
+		// the agent re-checks on a fixed interval and resumes exactly where
+		// the fleet left off once the hold is released or expires.
+		return Disposition{Decision: RetryUncounted, Backoff: BPClaimsHeld}
 	case agenterr.IncompleteRunOutcome:
 		// The turn ended before the task did. Retrying is the right move — the
 		// worktree, the checkpoint and (across a daemon restart) the session id

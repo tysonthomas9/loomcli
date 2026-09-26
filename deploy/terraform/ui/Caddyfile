@@ -1,0 +1,23 @@
+{
+	auto_https off
+	admin off
+}
+
+:8080 {
+	# handle blocks are mutually exclusive: once /api/* matches, the static
+	# file_server below never fires for that request.
+	@api path /api/* /healthz /readyz /sse/* /ws-tab/*
+	handle @api {
+		reverse_proxy loom:8080 {
+			# -1 disables response buffering, which SSE and the terminal
+			# WebSocket both need; buffering makes them appear to hang.
+			flush_interval -1
+		}
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

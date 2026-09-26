@@ -108,6 +108,8 @@ export type LoomAgentStatus = Omit<
   path?: string;
   /** Absolute path to the agent's worktree */
   worktree_path?: string;
+  /** Runtime backend name when the monitor includes it. */
+  backend?: string;
   /** Control-plane assignment state returned by the fleet-backed agents API */
   state?: string;
   /** Lead assignment delivery state returned by the fleet-backed agents API */

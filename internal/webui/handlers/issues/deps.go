@@ -54,6 +54,7 @@ type DependencyResponse struct {
 
 // handleAddDependency creates a dependency from the issue to another issue.
 func HandleAddDependency(svc service.IssueService) http.HandlerFunc {
+	fallbackActor := resolveOperatorActor()
 	return func(w http.ResponseWriter, r *http.Request) {
 		issueID := r.PathValue("id")
 		if issueID == "" {
@@ -86,6 +87,7 @@ func HandleAddDependency(svc service.IssueService) http.HandlerFunc {
 
 		err := svc.AddDependency(r.Context(), service.AddDependencyParams{
 			IssueID:     issueID,
+			Actor:       operatorActor(r.Context(), fallbackActor),
 			DependsOnID: req.DependsOnID,
 			DepType:     req.DepType,
 		})
@@ -103,6 +105,7 @@ func HandleAddDependency(svc service.IssueService) http.HandlerFunc {
 
 // handleRemoveDependency removes a dependency from the issue.
 func HandleRemoveDependency(svc service.IssueService) http.HandlerFunc {
+	fallbackActor := resolveOperatorActor()
 	return func(w http.ResponseWriter, r *http.Request) {
 		issueID := r.PathValue("id")
 		depID := r.PathValue("depId")
@@ -125,6 +128,7 @@ func HandleRemoveDependency(svc service.IssueService) http.HandlerFunc {
 
 		err := svc.RemoveDependency(r.Context(), service.RemoveDependencyParams{
 			IssueID: issueID,
+			Actor:   operatorActor(r.Context(), fallbackActor),
 			DepID:   depID,
 		})
 		if err != nil {

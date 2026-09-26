@@ -1,7 +1,13 @@
-import type { FileEntry } from "@/api/workspace";
+import type { FileCheckout, FileEntry, RepoInfo } from "@/api/workspace";
+import {
+  agentFileBrowserTabsStorageKey,
+  fileBrowserTabsStorageKey,
+  skillsFileBrowserTabsStorageKey,
+} from "@/hooks";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import { resolveTreeDropMove } from "./gitDecorations";
+import type { FileBrowserMode } from "./treeRoots";
 import type { CompareMode, ExplorerLens } from "./workspaceFileBrowserTypes";
 
 export const TREE_WIDTH_KEY = "loom:file-browser:tree-width";
@@ -16,6 +22,40 @@ export const DEFAULT_GROUP_WIDTH = 560;
 export const MIN_GROUP_WIDTH = 320;
 export const MAX_GROUP_WIDTH = 1100;
 export const QUICK_OPEN_STALE_MS = 10_000;
+
+// Each section persists its own tab set: an agent's browser is per agent, the
+// Skills section is a separate nav destination, and the Files section keeps the
+// original key. Mode picks the destination; nothing else about tabs varies.
+export function modeTabsStorageKey(
+  mode: FileBrowserMode,
+  agentName: string | undefined,
+): string {
+  if (mode === "agent" && agentName) {
+    return agentFileBrowserTabsStorageKey(agentName);
+  }
+  return mode === "skills"
+    ? skillsFileBrowserTabsStorageKey()
+    : fileBrowserTabsStorageKey();
+}
+
+// The branch the "compare against branch" lens diffs against. Only meaningful
+// when every agent checkout on screen shares one default branch: with two, the
+// single label at the top of the lens would be wrong for one of them.
+export function resolveBranchBaseName(
+  repos: RepoInfo[],
+  checkouts: FileCheckout[],
+): string | undefined {
+  const repoByName = new Map(repos.map((repo) => [repo.name, repo]));
+  const defaultBranches = new Set<string>();
+  for (const checkout of checkouts) {
+    if (checkout.kind !== "agent" || !checkout.repo) continue;
+    const defaultBranch = repoByName.get(checkout.repo)?.default_branch.trim();
+    if (defaultBranch) defaultBranches.add(defaultBranch);
+  }
+  return defaultBranches.size === 1
+    ? defaultBranches.values().next().value
+    : undefined;
+}
 
 export function clampTreeWidth(w: number): number {
   return Math.min(MAX_TREE_WIDTH, Math.max(MIN_TREE_WIDTH, w));

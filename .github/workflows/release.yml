@@ -9,7 +9,45 @@ permissions:
   contents: write
 
 jobs:
+  skills-compatibility:
+    name: Skills compatibility (FleetDB main)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout LoomCLI release tag
+        uses: actions/checkout@v4
+
+      # Deliberately float with FleetDB main. Loom and FleetDB ship as one
+      # compatibility pair, so a Loom release must prove itself against the
+      # server revision operators will deploy with it rather than an old pin.
+      - name: Checkout FleetDB main
+        uses: actions/checkout@v4
+        with:
+          repository: tysonthomas9/fleet-db
+          ref: main
+          path: fleet-db
+          token: ${{ secrets.FLEET_DB_TOKEN || github.token }}
+
+      - name: Checkout pinned Vercel Agent Skills corpus
+        uses: actions/checkout@v4
+        with:
+          repository: vercel-labs/agent-skills
+          ref: dd089a8c752c966dee8bf0f27cb625ba193ffd9e
+          path: vercel-agent-skills
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Run release skills compatibility proof
+        env:
+          FLEET_DB_REPO: ${{ github.workspace }}/fleet-db
+          VERCEL_SKILLS_REPO: ${{ github.workspace }}/vercel-agent-skills
+        run: make test-skills-release-compat
+
   goreleaser:
+    needs: skills-compatibility
     # macOS runner so darwin binaries get valid linker signatures.
     # Cross-compiled darwin binaries from Linux are SIGKILL'd by
     # Gatekeeper on macOS 13+ (golang/go#63584).

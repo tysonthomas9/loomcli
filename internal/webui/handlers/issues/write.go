@@ -1,17 +1,27 @@
 package issues
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+)
+
+const (
+	envOperatorActor     = "LOOM_OPERATOR_ACTOR"
+	defaultOperatorActor = "operator@local"
 )
 
 // handlePatchIssue returns a handler that performs partial updates on an issue.
 func HandlePatchIssue(svc service.IssueService) http.HandlerFunc {
+	fallbackActor := resolveOperatorActor()
 	return func(w http.ResponseWriter, r *http.Request) {
 		issueID, req, ok := validatePatchRequest(w, r)
 		if !ok {
@@ -20,6 +30,7 @@ func HandlePatchIssue(svc service.IssueService) http.HandlerFunc {
 
 		params := service.PatchIssueParams{
 			IssueID:            issueID,
+			Actor:              operatorActor(r.Context(), fallbackActor),
 			Title:              req.Title,
 			Description:        req.Description,
 			Status:             req.Status,
@@ -59,6 +70,22 @@ func HandlePatchIssue(svc service.IssueService) http.HandlerFunc {
 			Data:    data,
 		})
 	}
+}
+
+// resolveOperatorActor is called when the route is constructed, so the
+// open-mode fallback is stable for the lifetime of the server.
+func resolveOperatorActor() string {
+	if actor := strings.TrimSpace(os.Getenv(envOperatorActor)); actor != "" {
+		return actor
+	}
+	return defaultOperatorActor
+}
+
+func operatorActor(ctx context.Context, fallback string) string {
+	if actor, _, ok := middleware.VerifiedUserActorFromContext(ctx); ok {
+		return actor
+	}
+	return fallback
 }
 
 // validatePatchRequest extracts the issue ID and parses the JSON body from an HTTP request.

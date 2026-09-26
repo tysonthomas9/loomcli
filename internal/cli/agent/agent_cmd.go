@@ -122,7 +122,10 @@ func runAgent(cmd *cobra.Command, args []string) {
 	promptGen := makeCustomPromptGen(agentPromptFile)
 
 	if agentDaemonMode {
-		runAgentDaemon(worktreePath, agentName, promptGen)
+		if err := runAgentDaemon(worktreePath, agentName, promptGen); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			cli.ExitWithFlush(1)
+		}
 		return
 	}
 
@@ -149,10 +152,9 @@ func validatePromptFile(path string) {
 
 // runAgentDaemon handles daemon mode: single task execution inside a tmux session.
 // The daemon manages its own lock; the parent reads the lock after exit.
-func runAgentDaemon(worktreePath, agentName string, promptGen func(string, *config.WorkspaceConfig) string) {
+func runAgentDaemon(worktreePath, agentName string, promptGen func(string, *config.WorkspaceConfig) string) error {
 	if err := cli.AcquireLock(worktreePath, "agent", agentName); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		cli.ExitWithFlush(1)
+		return err
 	}
 	// Lock intentionally NOT released here. Parent (RunAutoModeTmux)
 	// reads the lock after daemon exit to detect task claims, then
@@ -161,6 +163,15 @@ func runAgentDaemon(worktreePath, agentName string, promptGen func(string, *conf
 	if err := cli.UpdateLockState(worktreePath, cli.StateActive); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
 	}
+
+	assignedTaskID := strings.TrimSpace(os.Getenv("LOOM_ASSIGNED_TASK_ID"))
+	// Match plan/task daemon recovery: inspect the carried-forward lock before
+	// this run records its assignment, so a same-task retry can arm --resume.
+	maybeResumeDaemonSession(worktreePath, assignedTaskID)
+	// The supervisor pre-claims custom-role tasks before spawning this process.
+	// Persist that assignment so the shared terminal-event helper can recover
+	// the same TaskID from the lock after the backend invocation finishes.
+	persistAssignedTaskToLock(worktreePath, assignedTaskID)
 
 	ws, _ := config.ResolveActiveWorkspace()
 	prompt := promptGen(agentName, ws)
@@ -176,6 +187,10 @@ func runAgentDaemon(worktreePath, agentName string, promptGen func(string, *conf
 	sess := adoptOrCreateSession(agentName, agentParentID, prompt, "implementation")
 	defer backends.ClearActiveSessionEnv()
 
+	// v1 deliberately keeps custom-role task lifecycle events host-local in
+	// the events directory; propagating them to fleet-db is out of scope.
+	emitTaskClaimedFromEnv(agentName, assignedTaskID)
+
 	beforeRef := automode.CaptureHEADRef(worktreePath)
 	startedAt := time.Now()
 
@@ -188,15 +203,19 @@ func runAgentDaemon(worktreePath, agentName string, promptGen func(string, *conf
 	shutdown := automode.SetupSignalHandler()
 	collector := usage.NewCollector(cli.GetBackendName(), agentName)
 	invokeErr := cli.InvokeAgentNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
+	if invokeErr == nil {
+		// A completed run starts the next task fresh; an incomplete one keeps its
+		// carried session through clearDaemonResumeOnSuccess's claim-held guard.
+		clearDaemonResumeOnSuccess(worktreePath)
+	}
+
+	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)
 
 	// Finalize BEFORE the error exit: a failed run's tokens were still spent, and
 	// ExitWithFlush never returns, so an exit-first ordering would drop them.
 	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr, collector, startedAt, agentParentID)
 
-	if invokeErr != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", invokeErr)
-		cli.ExitWithFlush(1)
-	}
+	return invokeErr
 }
 
 // agentAutoOpts builds the common AutoModeOptions for auto mode invocations.

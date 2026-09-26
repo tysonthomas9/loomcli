@@ -4,5 +4,6 @@ export * from "./files";
 export * from "./git";
 export * from "./prReview";
 export * from "./pullRequests";
+export * from "./skills";
 export * from "./workspace";
 export * from "./workspaceConfig";

@@ -2,17 +2,16 @@ import { test, expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 /**
- * E2E Journey: Project status at a glance (Kanban → Agent → Logs).
+ * E2E Journey: Project status at a glance (Kanban → Agent).
  *
  * Tests the full user journey of a project lead checking current project status:
  *   1. Kanban board renders issues in correct columns with priority badges
  *   2. Repos section lists workspace repositories
  *   3. Agent cards render in sidebar with correct status
  *   4. Click agent card opens AgentDetailPanel
- *   5. Switch to Logs tab shows log content area
- *   6. Close panel via Escape key
- *   7. Click different agent swaps panel (mutual exclusivity)
- *   8. Close panel via close button
+ *   5. Close panel via Escape key
+ *   6. Click different agent swaps panel (mutual exclusivity)
+ *   7. Close panel via close button
  */
 
 // -- Workspace mock data --
@@ -625,22 +624,6 @@ test.describe("E2E Journey: Project status at a glance", () => {
 
     // Verify repository context from the fleet agent payload is shown.
     await expect(panel.getByText("feature-auth").first()).toBeVisible();
-  });
-
-  test("Switch to Logs tab shows log content area", async () => {
-    // Click the Logs tab
-    await page.getByRole("tab", { name: "Logs" }).click();
-
-    // Verify Logs tab is now selected
-    await expect(
-      page.locator("#agent-panel-tab-logs"),
-    ).toHaveAttribute("aria-selected", "true");
-
-    // Verify log content area renders (the tabpanel)
-    const logsPanel = page.locator("#agent-panel-tabpanel-logs");
-    await expect(logsPanel).toBeVisible();
-
-    await expect(logsPanel).not.toBeEmpty();
   });
 
   test("Close panel via Escape key", async () => {

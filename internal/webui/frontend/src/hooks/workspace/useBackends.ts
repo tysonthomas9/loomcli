@@ -3,7 +3,11 @@ import { useStore } from "zustand";
 
 import { backendsStore } from "@/stores";
 import type { BackendHealthData } from "@/api/workspace";
-import { toBackendInfo, type BackendInfo } from "@/utils/workspace";
+import {
+  isUserFacingBackend,
+  toBackendInfo,
+  type BackendInfo,
+} from "@/utils/workspace";
 
 export interface UseBackendsReturn {
   backends: BackendInfo[];
@@ -30,17 +34,19 @@ export function useBackends(): UseBackendsReturn {
 
   const backends = useMemo(
     () =>
-      rawBackends.map((item: BackendHealthData) => {
-        const apiData: Partial<BackendInfo> = {
-          available: item.available,
-          installed: item.installed,
-          apiKeySet: item.api_key_set,
-        };
-        if (item.display_name) apiData.displayName = item.display_name;
-        if (item.message) apiData.healthMessage = item.message;
-        if (item.version) apiData.version = item.version;
-        return toBackendInfo(item.name, apiData);
-      }),
+      rawBackends
+        .filter((item) => isUserFacingBackend(item.name))
+        .map((item: BackendHealthData) => {
+          const apiData: Partial<BackendInfo> = {
+            available: item.available,
+            installed: item.installed,
+            apiKeySet: item.api_key_set,
+          };
+          if (item.display_name) apiData.displayName = item.display_name;
+          if (item.message) apiData.healthMessage = item.message;
+          if (item.version) apiData.version = item.version;
+          return toBackendInfo(item.name, apiData);
+        }),
     [rawBackends],
   );
 

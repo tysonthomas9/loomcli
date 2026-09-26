@@ -1,0 +1,57 @@
+#!/bin/sh
+# Stub for the Cursor agent CLI (`cursor-agent`) used in E2E tests.
+# Mirrors the non-interactive invocation loom uses (backend_cursor.go /
+# local-task-runner.ts): `cursor-agent -p --output-format stream-json --force <prompt>`.
+#
+# Environment variables:
+#   STUB_CURSOR_EXIT_CODE  - exit code (default: 0)
+#   STUB_CURSOR_RESPONSE   - custom response text (default: built-in)
+#   STUB_CURSOR_DELAY      - seconds to sleep before responding (default: 0)
+
+set -e
+
+EXIT_CODE="${STUB_CURSOR_EXIT_CODE:-0}"
+RESPONSE="${STUB_CURSOR_RESPONSE:-I completed the requested task successfully.}"
+DELAY="${STUB_CURSOR_DELAY:-0}"
+
+# Handle SIGTERM gracefully (must be before sleep/cat which can block)
+trap 'exit 0' TERM
+
+if [ "$DELAY" != "0" ]; then
+    sleep "$DELAY"
+fi
+
+# Parse arguments
+IS_PRINT=false
+IS_STREAM_JSON=false
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -p) IS_PRINT=true ;;
+        --output-format)
+            shift
+            if [ "$1" = "stream-json" ]; then IS_STREAM_JSON=true; fi
+            ;;
+        --force) ;;
+    esac
+    shift
+done
+
+if [ "$IS_PRINT" = "true" ] && [ "$IS_STREAM_JSON" = "true" ]; then
+    # Non-interactive stream-json mode: prompt is positional; stdin gets
+    # immediate EOF from the harness, drain it defensively if piped.
+    if [ ! -t 0 ]; then
+        cat > /dev/null
+    fi
+    jq -nc --arg t "$RESPONSE" '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":$t}]}}'
+    jq -nc --arg t "$RESPONSE" '{"type":"result","subtype":"success","is_error":false,"result":$t}'
+else
+    # Interactive/other mode
+    echo "Cursor Agent"
+    echo ""
+    echo "$RESPONSE"
+    echo ""
+    echo "Done."
+fi
+
+exit "$EXIT_CODE"

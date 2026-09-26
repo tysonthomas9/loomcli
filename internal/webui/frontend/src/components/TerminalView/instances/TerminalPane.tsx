@@ -36,7 +36,7 @@ export interface TerminalPaneProps {
    * auto-connect and render the session-ended overlay so the user opts
    * in to spawning a new shell.
    */
-  ptyAlive?: boolean | undefined;
+  attachable?: boolean | undefined;
   /** Automatically replace stale PTYs for tabs where losing old scrollback is acceptable. */
   autoStartStaleSession?: boolean | undefined;
   /** Automatically reconnect after an unexpected WebSocket close. */
@@ -57,7 +57,7 @@ export function TerminalPane({
   onTerminalFocus,
   hasConnected,
   reconnectState,
-  ptyAlive,
+  attachable,
   autoStartStaleSession,
   autoReconnect,
 }: TerminalPaneProps) {
@@ -90,7 +90,7 @@ export function TerminalPane({
         onBackendCrash={onBackendCrash}
         onTerminalFocus={onTerminalFocus}
         writable={tab.writable}
-        ptyAlive={ptyAlive}
+        attachable={attachable}
         autoStartStaleSession={autoStartStaleSession}
         autoReconnect={autoReconnect}
       />

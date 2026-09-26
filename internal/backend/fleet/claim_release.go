@@ -24,7 +24,7 @@ func (b *FleetBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL
 	if err != nil {
 		return err
 	}
-	return b.execAsActor(ctx, "ClaimIssue", "/issues/"+url.PathEscape(id)+"/claim", body, actor)
+	return b.execAsActor(ctx, "ClaimIssue", "POST", "/issues/"+url.PathEscape(id)+"/claim", body, actor)
 }
 
 // ReleaseIssueLock releases only the operational lock on the issue without
@@ -49,7 +49,7 @@ func (b *FleetBackend) releaseIssueLock(ctx context.Context, op, id, actor strin
 	if actor == "" {
 		return backend.ErrValidation(op, "actor must not be empty")
 	}
-	return b.execAsActor(ctx, op, "/issues/"+url.PathEscape(id)+"/release-lock", nil, actor)
+	return b.execAsActor(ctx, op, "POST", "/issues/"+url.PathEscape(id)+"/release-lock", nil, actor)
 }
 
 // ReleaseIssueAsActor releases the claim lock on an issue, overriding the

@@ -276,10 +276,14 @@ test.describe("PRs page — loom-first rows", () => {
     await gotoPrsPage(page);
 
     await expect(
-      page.getByRole("button", { name: "Review Plan review task without a PR" }),
+      page.getByRole("button", {
+        name: "Review Plan review task without a PR",
+      }),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Review Code review task linked to PR" }),
+      page.getByRole("button", {
+        name: "Review Code review task linked to PR",
+      }),
     ).toBeVisible();
     // Non-review issues stay off the queue.
     await expect(
@@ -297,7 +301,9 @@ test.describe("PRs page — loom-first rows", () => {
     await gotoPrsPage(page);
 
     await expect(
-      page.getByRole("button", { name: "Review Plan review task without a PR" }),
+      page.getByRole("button", {
+        name: "Review Plan review task without a PR",
+      }),
     ).toBeVisible();
     await expect(page.getByTestId("prs-github-warning")).toContainText(
       "GitHub metadata incomplete",
@@ -311,7 +317,9 @@ test.describe("PRs page — loom-first rows", () => {
     await gotoPrsPage(page);
 
     await expect(
-      page.getByRole("button", { name: "Review Plan review task without a PR" }),
+      page.getByRole("button", {
+        name: "Review Plan review task without a PR",
+      }),
     ).toBeVisible();
     await expect(page.getByTestId("prs-github-warning")).toContainText(
       "GitHub metadata unavailable",
@@ -344,7 +352,57 @@ test.describe("PRs page — GitHub enrichment", () => {
 
     // Plan-review issue (no PR) still renders alongside.
     await expect(
-      page.getByRole("button", { name: "Review Plan review task without a PR" }),
+      page.getByRole("button", {
+        name: "Review Plan review task without a PR",
+      }),
+    ).toBeVisible();
+  });
+});
+
+test.describe("PRs page — primary nav returns to the list (PUPPET-94)", () => {
+  test("clicking Pull Requests from the review detail clears ?review=", async ({
+    page,
+  }) => {
+    await setupMocks(page, { pullRequests: [] });
+    await gotoPrsPage(page);
+
+    await page
+      .getByRole("button", { name: "Review Plan review task without a PR" })
+      .click();
+
+    await expect(page).toHaveURL(/[?&]review=plan-1/);
+    await expect(
+      page.getByRole("button", { name: "Back to pull requests" }),
+    ).toBeVisible();
+
+    await page
+      .getByRole("button", { name: "Pull Requests", exact: true })
+      .click();
+
+    await expect(page).not.toHaveURL(/review=/);
+    await expect(
+      page.getByRole("heading", { name: "Pull Requests" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: "Review Plan review task without a PR",
+      }),
+    ).toBeVisible();
+  });
+
+  test("clicking Pull Requests from another view still lands on /prs", async ({
+    page,
+  }) => {
+    await setupMocks(page, { pullRequests: [] });
+    await page.goto(`/ws/${WORKSPACE_ID}/files`);
+
+    await page
+      .getByRole("button", { name: "Pull Requests", exact: true })
+      .click();
+
+    await expect(page).toHaveURL(new RegExp(`/ws/${WORKSPACE_ID}/prs$`));
+    await expect(
+      page.getByRole("heading", { name: "Pull Requests" }),
     ).toBeVisible();
   });
 });

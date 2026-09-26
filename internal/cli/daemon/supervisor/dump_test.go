@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDumpGoroutines_WritesFramedStackTrace(t *testing.T) {
@@ -67,4 +68,37 @@ func TestDumpGoroutinesToLog_DoesNotPanic(t *testing.T) {
 	// Smoke test: the SIGUSR1/watchdog entrypoint writes to stderr and logs.
 	// We only assert it returns without panicking.
 	DumpGoroutinesToLog("unit-test")
+}
+
+// TestDumpThrottleSuppressesRepeats guards the log-flood half of the liveness
+// fix: the watchdog can ask for a dump on every 10s scan, and each dump is up
+// to 1 MiB of stderr.
+func TestDumpThrottleSuppressesRepeats(t *testing.T) {
+	resetGoroutineDumpThrottleForTest()
+	t.Cleanup(resetGoroutineDumpThrottleForTest)
+
+	base := time.Now()
+	now := base
+	prevNow := dumpNow
+	dumpNow = func() time.Time { return now }
+	t.Cleanup(func() { dumpNow = prevNow })
+
+	if !DumpGoroutinesToLogThrottled("first") {
+		t.Fatal("first dump was suppressed; the first dump must always go through")
+	}
+	if DumpGoroutinesToLogThrottled("immediate repeat") {
+		t.Fatal("repeat dump within the throttle window was not suppressed")
+	}
+
+	// Still inside the window.
+	now = base.Add(goroutineDumpMinInterval - time.Second)
+	if DumpGoroutinesToLogThrottled("just inside window") {
+		t.Fatal("dump one second before the window closed was not suppressed")
+	}
+
+	// Window elapsed.
+	now = base.Add(goroutineDumpMinInterval)
+	if !DumpGoroutinesToLogThrottled("after window") {
+		t.Fatal("dump after the throttle window elapsed was suppressed")
+	}
 }

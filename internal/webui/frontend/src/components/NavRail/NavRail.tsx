@@ -26,6 +26,7 @@ export interface NavRailProps {
   onChange: (view: ViewMode) => void;
   className?: string;
   sessionCount?: number;
+  operatorQueueCount?: number;
   badges?: Partial<Record<ViewMode, boolean>>;
   /** Workspaces shown as switcher avatars at the rail bottom. */
   workspaces?: NavRailWorkspace[];
@@ -45,6 +46,21 @@ type NavItem = {
 };
 
 const TOP_ITEMS: NavItem[] = [
+  {
+    id: "home",
+    label: "Home",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          d="M3 10 12 3l9 7v9a2 2 0 0 1-2 2h-5v-7h-4v7H5a2 2 0 0 1-2-2v-9Z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
+        />
+      </svg>
+    ),
+  },
   {
     id: "kanban",
     label: "Workspaces",
@@ -191,6 +207,36 @@ const TOP_ITEMS: NavItem[] = [
       </svg>
     ),
   },
+  {
+    id: "skills",
+    label: "Skills",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          d="M12 4L2 8.5 12 13l10-4.5L12 4z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M6 11v4.5c0 1.66 2.69 3 6 3s6-1.34 6-3V11"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M22 8.5v5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    ),
+  },
 ];
 
 const BOTTOM_ITEMS: NavItem[] = [
@@ -225,6 +271,7 @@ export function NavRail({
   onChange,
   className,
   sessionCount,
+  operatorQueueCount,
   badges,
   workspaces,
   activeWorkspaceId,
@@ -242,6 +289,10 @@ export function NavRail({
     const isActive = (item.activeForViews ?? [item.id]).includes(activeView);
     const showBadge =
       item.id === "terminal" && sessionCount != null && sessionCount > 0;
+    const showQueueBadge =
+      item.id === "home" &&
+      operatorQueueCount != null &&
+      operatorQueueCount > 0;
     const showUnread = !isActive && badges?.[item.id] === true;
     return (
       <button
@@ -259,6 +310,15 @@ export function NavRail({
             aria-label={`${sessionCount} active sessions`}
           >
             {sessionCount}
+          </span>
+        )}
+        {showQueueBadge && (
+          <span
+            className={styles.queueBadge}
+            data-testid="nav-home-badge"
+            aria-label={`${operatorQueueCount} items need you`}
+          >
+            {operatorQueueCount}
           </span>
         )}
         {showUnread && (
