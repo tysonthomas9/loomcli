@@ -43,6 +43,7 @@ type CheckResult struct {
 	Status  CheckStatus `json:"status"`
 	Summary string      `json:"summary"`
 	Detail  string      `json:"detail,omitempty"`
+	Data    any         `json:"data,omitempty"`
 }
 
 // DoctorOutput is the top-level JSON output for loom doctor.

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -370,7 +371,7 @@ func classifyDecomposedParent(parent backend.IssueData, kids []backend.IssueData
 		if !isTerminalStatus(kid.Status) {
 			return strandedParent{}, classPending
 		}
-		if marker != "" && hasLabel(kid.Labels, marker) {
+		if marker != "" && slices.Contains(kid.Labels, marker) {
 			unshipped = append(unshipped, kid.ID)
 		}
 		if kid.ClosedAt != nil && (last == nil || kid.ClosedAt.After(*last)) {

@@ -338,6 +338,30 @@ func TestCheckRedis(t *testing.T) {
 	})
 }
 
+func TestCheckResultJSONPayload(t *testing.T) {
+	for _, populated := range []bool{false, true} {
+		result := CheckResult{Name: "decomposed_children_all_closed", Status: StatusWarn}
+		if populated {
+			result.Data = map[string]int{"stranded": 1}
+		}
+		encoded, err := json.Marshal(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded map[string]json.RawMessage
+		if err := json.Unmarshal(encoded, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		payload, present := decoded["data"]
+		if present != populated {
+			t.Fatalf("populated=%v: data present=%v in %s", populated, present, encoded)
+		}
+		if populated && string(payload) != `{"stranded":1}` {
+			t.Fatalf("unexpected payload: %s", payload)
+		}
+	}
+}
+
 func TestDoctorJSONOutput(t *testing.T) {
 	t.Parallel()
 
