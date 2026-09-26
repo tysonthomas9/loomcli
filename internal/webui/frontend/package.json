@@ -19,6 +19,7 @@
     "check:dir-size": "node scripts/check-dir-size.mjs",
     "check:arch": "npm run check:loc && npm run check:no-raw-fetch && npm run check:no-hardcoded-urls && npm run check:boundaries",
     "check:generated": "node scripts/check-openapi-staleness.mjs",
+    "check:no-new-comments": "bash ../../../scripts/check-no-new-comments.sh ts",
     "test": "vitest run && playwright test",
     "test:unit": "vitest run",
     "test:coverage": "vitest run --coverage",

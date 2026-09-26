@@ -416,8 +416,9 @@ check-no-raw-exec:
 	@echo "Checking for raw exec.Command in unit tests..."
 	@./scripts/check-no-raw-exec.sh
 
-check-no-new-comments:
+check-no-new-comments: ensure-frontend-deps
 	@./scripts/check-no-new-comments.sh go
+	@./scripts/check-no-new-comments.sh ts
 
 check-no-beads-prod:
 	@echo "Checking for new production beads/bd references..."
@@ -685,17 +686,19 @@ check-go:
 
 # Frontend-only quality gate (no Go toolchain, no dist prerequisite)
 check-frontend: ensure-frontend-deps
-	@echo "=== [1/6] Frontend: format check ==="
+	@echo "=== [1/7] Frontend: format check ==="
 	@cd $(FRONTEND_DIR) && npm run format:check
-	@echo "=== [2/6] Frontend: typecheck ==="
+	@echo "=== [2/7] Frontend: typecheck ==="
 	@cd $(FRONTEND_DIR) && npm run typecheck
-	@echo "=== [3/6] Frontend: eslint ==="
+	@echo "=== [3/7] Frontend: eslint ==="
 	@cd $(FRONTEND_DIR) && npm run lint
-	@echo "=== [4/6] Frontend: architectural checks ==="
+	@echo "=== [4/7] Frontend: architectural checks ==="
 	@cd $(FRONTEND_DIR) && npm run check:arch
-	@echo "=== [5/6] Frontend: generated code staleness ==="
+	@echo "=== [5/7] Frontend: no new code comments ==="
+	@cd $(FRONTEND_DIR) && npm run check:no-new-comments
+	@echo "=== [6/7] Frontend: generated code staleness ==="
 	@cd $(FRONTEND_DIR) && npm run check:generated
-	@echo "=== [6/6] Frontend: unit tests + coverage (60% threshold) ==="
+	@echo "=== [7/7] Frontend: unit tests + coverage (60% threshold) ==="
 	@cd $(FRONTEND_DIR) && npm run test:coverage
 	@echo "=== Frontend quality gates PASSED ==="
 
@@ -805,7 +808,7 @@ help:
 	@echo "  make test-frontend-coverage - Run frontend tests with coverage threshold"
 	@echo "  make test-forkwatch    - Run tests under a fork-bomb/process-leak watchdog (PKG=./path/...)"
 	@echo "  make check-no-raw-exec - Check for raw exec.Command in unit tests"
-	@echo "  make check-no-new-comments - Fail when the change adds Go code comments"
+	@echo "  make check-no-new-comments - Fail when the change adds Go/TS/TSX code comments"
 	@echo "  make check-control-plane-paths - Check local/cloud fleet-db runtime path invariants"
 	@echo "  make check-loc-stale   - Check for stale LOC allowlist entries"
 	@echo "  make lint              - Run Go linter (golangci-lint)"

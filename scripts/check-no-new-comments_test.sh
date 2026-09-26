@@ -26,7 +26,7 @@ fail() {
 while IFS= read -r git_env; do
     unset "$git_env"
 done < <(git rev-parse --local-env-vars)
-unset LOOM_COMMENT_BASE LOOM_COMMENT_BASE_REFS LOOM_COMMENT_PUSH_BEFORE GITHUB_BASE_REF GITHUB_EVENT_NAME
+unset LOOM_COMMENT_FRONTEND_DIR LOOM_COMMENT_BASE LOOM_COMMENT_BASE_REFS LOOM_COMMENT_PUSH_BEFORE GITHUB_BASE_REF GITHUB_EVENT_NAME
 
 TEST_TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TEST_TMPDIR"' EXIT
@@ -229,6 +229,69 @@ test_unknown_language() {
     if [[ "$RUN_EXIT" -eq 2 ]]; then pass "Unknown language exits 2"; else fail "Unknown language exit $RUN_EXIT"; fi
 }
 
+TS_BASELINE='export const a = "http://example.com";
+// Existing comment stays allowed.
+export function f(): number {
+  return 1;
+}
+'
+
+HAVE_TS=0
+if [[ -f "$SCRIPT_DIR/../internal/webui/frontend/node_modules/typescript/package.json" ]]; then
+    HAVE_TS=1
+fi
+
+reset_ts_repo() {
+    reset_repo
+    mkdir -p "$REPO/web"
+    printf '%s' "$TS_BASELINE" >"$REPO/web/a.ts"
+    commit_all
+    git_repo update-ref refs/remotes/origin/main HEAD
+}
+
+test_ts_comments_fail() {
+    reset_ts_repo
+    printf '%s// new ts\n' "$TS_BASELINE" >"$REPO/web/a.ts"
+    expect_fail_with "TS // comment fails with location" "web/a.ts:6: // new ts" ts
+    printf '%s/* block */\n' "$TS_BASELINE" >"$REPO/web/a.ts"
+    expect_fail_with "TS /* */ comment fails" "web/a.ts:6: /* block */" ts
+    printf 'export const C = () => (\n  <div>\n    {/* jsx */}\n  </div>\n);\n' >"$REPO/web/c.tsx"
+    expect_fail_with "Untracked TSX JSX comment fails" "web/c.tsx:3: {/* jsx */}" ts
+}
+
+test_ts_suppressions_fail() {
+    reset_ts_repo
+    printf '%s// eslint-disable-next-line\nexport const b = 2;\n' "$TS_BASELINE" >"$REPO/web/a.ts"
+    expect_fail_with "TS eslint-disable fails" "eslint-disable-next-line" ts
+    printf '/// <reference types="vitest" />\n%s' "$TS_BASELINE" >"$REPO/web/a.ts"
+    expect_fail_with "TS triple-slash reference fails" "web/a.ts:1:" ts
+}
+
+test_ts_literals_pass() {
+    reset_ts_repo
+    printf '%sexport const u = "http://a//b";\nexport const t = `// ${u}`;\nexport const r = /\\/\\/x/;\n' "$TS_BASELINE" >"$REPO/web/a.ts"
+    commit_all
+    expect_pass "TS // inside string, template and regex literals passes" ts
+    printf '%s' "${TS_BASELINE/return 1/return 2}" >"$REPO/web/a.ts"
+    expect_pass "TS edit next to an existing comment passes" ts
+}
+
+test_ts_ignores_go() {
+    reset_ts_repo
+    printf '%s\n// go only\n' "$BASELINE" >"$REPO/pkg/a.go"
+    expect_pass "ts mode ignores Go files" ts
+}
+
+test_ts_missing_deps() {
+    reset_ts_repo
+    LOOM_COMMENT_FRONTEND_DIR="$TEST_TMPDIR/no-frontend" run_guard ts
+    if [[ "$RUN_EXIT" -eq 2 && "$RUN_OUTPUT" == *"ensure-frontend-deps"* ]]; then
+        pass "Missing frontend deps exit 2 with hint"
+    else
+        fail "Missing frontend deps (exit $RUN_EXIT): $RUN_OUTPUT"
+    fi
+}
+
 test_no_changes_pass
 test_committed_line_comment_fails
 test_uncommitted_block_comment_fails
@@ -246,6 +309,15 @@ test_missing_default_ref_errors
 test_ci_pull_request_base
 test_ci_push_before
 test_unknown_language
+test_ts_missing_deps
+if [[ "$HAVE_TS" -eq 1 ]]; then
+    test_ts_comments_fail
+    test_ts_suppressions_fail
+    test_ts_literals_pass
+    test_ts_ignores_go
+else
+    fail "TS cases need internal/webui/frontend/node_modules; run make ensure-frontend-deps"
+fi
 
 echo ""
 echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed"
