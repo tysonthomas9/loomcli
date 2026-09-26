@@ -53,9 +53,7 @@ const (
 // only shows up once you look at what the harness actually emits.
 // harness-wrapper's own unattended default (pkg/oneshot.AutoAcceptAnswer)
 // answers every prompt with its affirmative option, falling back to the first
-// option — and claude-code renders BOTH the harmless folder-trust dialog AND
-// the `--dangerously-skip-permissions` acceptance screen under the same prompt
-// kind. A blanket yes therefore accepts a skip-all-permissions launch with
+// option. A blanket yes therefore accepts a skip-all-permissions launch with
 // nobody having decided to, which would quietly undo the role safety knobs
 // (allowed_tools / denied_tools / read_only) that were just made real. Making
 // the policy per-role means a role names the kinds it is willing to

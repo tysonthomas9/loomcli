@@ -13,10 +13,7 @@ import (
 )
 
 // claudeTrustPrompt is claude-code's folder-trust dialog as pkg/chat presents
-// it. The option labels are the ones AffirmativeOption matches on ("proceed"),
-// which is exactly why a blanket auto-accept is dangerous: claude-code renders
-// the `--dangerously-skip-permissions` acceptance screen under this SAME kind,
-// with an equally affirmative-looking option.
+// it. The option labels are the ones AffirmativeOption matches on ("proceed").
 func claudeTrustPrompt() chat.InputRequest {
 	return chat.InputRequest{
 		ID:   "req-1",
@@ -25,6 +22,56 @@ func claudeTrustPrompt() chat.InputRequest {
 			{ID: "1", Alias: "proceed", Label: "Yes, proceed"},
 			{ID: "2", Alias: "deny", Label: "No, exit"},
 		},
+	}
+}
+
+func claudeBypassAcceptance() chat.InputRequest {
+	return chat.InputRequest{
+		ID:   "req-2",
+		Kind: "bypass_acceptance",
+		Options: []chat.InputOption{
+			{ID: "1", Alias: "proceed", Label: "Yes, I accept"},
+			{ID: "2", Alias: "deny", Label: "No, exit"},
+		},
+	}
+}
+
+func TestAnswerInputRequest_TrustPromptAllowDoesNotAllowBypassAcceptance(t *testing.T) {
+	policy := &domain.RoleInputPolicy{
+		Default: domain.RoleInputDeny,
+		Kinds:   map[string]string{"trust_prompt": domain.RoleInputAllow},
+	}
+
+	ans, ok := withStderr(t, func() (chat.InputAnswer, bool) {
+		return answerInputRequest(policy, claudeBypassAcceptance())
+	})
+	if !ok {
+		t.Fatalf("want the negative option answered, got a decline")
+	}
+	if ans.OptionID != "2" {
+		t.Fatalf("answer = %q, want the deny-aliased option %q — a trust_prompt allow must NOT carry over to bypass_acceptance", ans.OptionID, "2")
+	}
+
+	if ans, ok := answerInputRequest(policy, claudeTrustPrompt()); !ok || ans.OptionID != "1" {
+		t.Fatalf("trust_prompt under the same policy = (%+v, %v), want the affirmative option %q", ans, ok, "1")
+	}
+}
+
+func TestAnswerInputRequest_BypassAcceptanceAllowAnswersTheScreen(t *testing.T) {
+	policy := &domain.RoleInputPolicy{
+		Default: domain.RoleInputDeny,
+		Kinds:   map[string]string{"bypass_acceptance": domain.RoleInputAllow},
+	}
+
+	ans, ok := answerInputRequest(policy, claudeBypassAcceptance())
+	if !ok || ans.OptionID != "1" {
+		t.Fatalf("answer = (%+v, %v), want the affirmative option %q", ans, ok, "1")
+	}
+
+	if ans, ok := withStderr(t, func() (chat.InputAnswer, bool) {
+		return answerInputRequest(policy, claudeTrustPrompt())
+	}); !ok || ans.OptionID != "2" {
+		t.Fatalf("trust_prompt under the same policy = (%+v, %v), want the deny-aliased option %q", ans, ok, "2")
 	}
 }
 
