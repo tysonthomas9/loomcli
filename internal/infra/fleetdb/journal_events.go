@@ -54,7 +54,19 @@ type journalEventWire struct {
 // stall the bridge's forward progress.
 func (s *triggerEventStore) ListIssueEvents(ctx context.Context, ws, afterCursor string, limit int) ([]store.JournalEvent, string, bool, error) {
 	q := url.Values{}
-	q.Set("entity_type", "issue")
+	// NO entity_type FILTER. fleet-db's /events/mutations honors an exact,
+	// single-valued entity_type (api/event_filter.go), and an issue's lifecycle
+	// is NOT all one entity type: a label write is journaled as entity_type
+	// "label" (action label.add/label.remove) whose entity_id is the ISSUE id,
+	// and metadata/comment/dep writes are likewise their own types. Sending
+	// entity_type=issue silently drops every one of them — verified against a
+	// live fleet-db, where the filtered read returns issue.create only while the
+	// unfiltered read also returns the label.add for the same issue.
+	//
+	// The bridge's ActionAllowlist is the real gate on what gets re-emitted, so
+	// the cost of reading the whole stream is only page budget: entries the
+	// allowlist skips still advance the cursor, so a workspace busy with
+	// non-issue mutations makes forward progress rather than stalling.
 	since := afterCursor
 	if since == "" {
 		since = "0"
