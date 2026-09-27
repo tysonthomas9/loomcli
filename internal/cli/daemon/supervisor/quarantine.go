@@ -37,10 +37,17 @@ import (
 
 const (
 	defaultQuarantineThreshold = 3
-	quarantineLabel            = "loom:quarantined"
-	quarantineWriteTimeout     = 10 * time.Second
-	maxTrackedQuarantineTasks  = 512 // defensive cap on ledger size; oldest evicted
-	maxKillEventsRetained      = 10  // kill-timeline cap per task
+	// defaultDeadlineQuarantineThreshold is the SEPARATE, higher threshold for
+	// the run-turn-deadline bucket. A deadline expiry is loom's own designed
+	// clean stop rather than a crash, so it must not be 1-of-3 toward parking a
+	// ticket -- but a task that overruns its budget every single time still
+	// boomerangs forever, so it is counted, just further out. Override with
+	// LOOM_TASK_DEADLINE_QUARANTINE_THRESHOLD.
+	defaultDeadlineQuarantineThreshold = 6
+	quarantineLabel                    = "loom:quarantined"
+	quarantineWriteTimeout             = 10 * time.Second
+	maxTrackedQuarantineTasks          = 512 // defensive cap on ledger size; oldest evicted
+	maxKillEventsRetained              = 10  // kill-timeline cap per task
 
 	// The ledger is persisted next to daemon-agents.json so a daemon restart
 	// does not reset the counter. That mattered concretely: the failure mode
@@ -90,27 +97,44 @@ type killEvent struct {
 	NotCounted string `json:"not_counted,omitempty"`
 }
 
-// reason renders a compact kill descriptor for status output, e.g.
-// "watchdog/Timeout" or "crash/Unknown".
-func (ev killEvent) reason() string {
-	kind := ev.StopReason
-	if kind == "" {
-		kind = "crash"
+// killKind renders the kill's shape: the recorded StopReason when there is
+// one, else a fallback derived from the class.
+//
+// "crash" is the historical fallback and is wrong for exactly one class: a
+// run-turn deadline expiry is loom's OWN clean stop, so rendering it
+// "crash/RunTurnDeadline" reproduces one level down the same misnomer this
+// whole path exists to remove. It renders "expiry" instead.
+func (ev killEvent) killKind() string {
+	if ev.StopReason != "" {
+		return ev.StopReason
 	}
+	if ev.ErrClass == agenterr.RunTurnDeadlineOutcome.String() {
+		return "expiry"
+	}
+	return "crash"
+}
+
+// reason renders a compact kill descriptor for status output, e.g.
+// "watchdog/Timeout", "crash/Unknown" or "expiry/RunTurnDeadline".
+func (ev killEvent) reason() string {
+	kind := ev.killKind()
 	if ev.ErrClass == "" {
 		return kind
 	}
 	return kind + "/" + ev.ErrClass
 }
 
-// taskFailureRecord accumulates consecutive no-progress kills for one task.
-// Every persisted field is exported and tagged: the record round-trips through
-// encoding/json into daemon-quarantine.json with no shadow struct. inFlight is
-// deliberately unexported — it is a live-process guard, not durable state, and
-// is force-cleared on load.
+// taskFailureRecord accumulates consecutive eligible kills for one task, in
+// two independent buckets (see agentpolicy.QuarantineBucket). Either counter
+// reaching ITS OWN threshold quarantines the task; progress and the latch zero
+// both. Every persisted field is exported and tagged: the record round-trips
+// through encoding/json into daemon-quarantine.json with no shadow struct.
+// inFlight is deliberately unexported — it is a live-process guard, not
+// durable state, and is force-cleared on load.
 type taskFailureRecord struct {
-	Count int         `json:"count"` // consecutive eligible no-progress kills since last reset/quarantine
-	Kills []killEvent `json:"kills"` // capped timeline (last maxKillEventsRetained)
+	Count         int         `json:"count"`                    // consecutive no-progress kills (watchdog/ownership) since last reset/quarantine
+	DeadlineCount int         `json:"deadline_count,omitempty"` // consecutive run-turn-deadline expiries; separate, higher threshold
+	Kills         []killEvent `json:"kills"`                    // capped timeline (last maxKillEventsRetained), both buckets interleaved
 
 	// QuarantinedAt latches once the record is resolved: the daemon wrote
 	// blocked, OR the read-back guard found the task already terminal/
@@ -316,6 +340,20 @@ func (s *Supervisor) quarantineThreshold() int {
 	return defaultQuarantineThreshold
 }
 
+// deadlineQuarantineThreshold is the consecutive run-turn-deadline-expiry
+// count at which a task is quarantined. LOOM_TASK_DEADLINE_QUARANTINE_THRESHOLD
+// wins when set; <= 0 disables THAT BUCKET ONLY, leaving no-progress kills
+// counting as before. The whole-feature kill-switch stays
+// LOOM_TASK_QUARANTINE_THRESHOLD <= 0, which disables both.
+func (s *Supervisor) deadlineQuarantineThreshold() int {
+	if v := os.Getenv("LOOM_TASK_DEADLINE_QUARANTINE_THRESHOLD"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return defaultDeadlineQuarantineThreshold
+}
+
 // recordTaskExitForQuarantine is the ledger hook. It runs in spawnAndWait
 // immediately after classifyAgentExit: ap.LastError is set, the lock file is
 // still present (recovery has not cleared it), and ap.AgentSessionID has not
@@ -345,7 +383,11 @@ func (s *Supervisor) recordTaskExitForQuarantine(ap *AgentProcess, exitCode int)
 		q.evict(taskID)
 		return
 	}
-	if !agentpolicy.QuarantineEligible(snap.outcome) {
+	// The outcome class picks the bucket; quarantineBucketForKill routes an
+	// active run killed at its time cap to the deadline bucket too, so one
+	// policy (PUPPET-611) governs every turn-deadline kill.
+	bucket := quarantineBucketForKill(snap.event, agentpolicy.QuarantineBucketFor(snap.outcome))
+	if bucket == agentpolicy.QuarantineNone {
 		return
 	}
 	if countable, why := s.quarantineCountable(snap.event); !countable {
@@ -355,16 +397,28 @@ func (s *Supervisor) recordTaskExitForQuarantine(ap *AgentProcess, exitCode int)
 			"agent", ap.Entry.Worktree, "kill", snap.event.reason(), "why", why)
 		return
 	}
+	threshold := s.quarantineThreshold()
+	if bucket == agentpolicy.QuarantineDeadline {
+		// Its own threshold, and its own kill-switch: a non-positive value
+		// disables this bucket while leaving no-progress counting intact.
+		threshold = s.deadlineQuarantineThreshold()
+		if threshold <= 0 {
+			return
+		}
+	}
 	base, baselineKnown := s.fetchIssueBaseline(taskID)
-	count, progressed := q.recordEligibleKill(taskID, snap.event, base, baselineKnown)
+	count, progressed := q.recordEligibleKill(taskID, bucket, snap.event, base, baselineKnown)
 	if progressed {
 		slog.Info("task progressed between kills (design/notes/comment/label delta), dropping quarantine record",
 			"task", taskID, "agent", ap.Entry.Worktree)
 		return
 	}
-	slog.Info("recorded no-progress kill for task",
+	// "bucket" is what keeps this line honest: a deadline expiry is not a
+	// no-progress kill, and the threshold it is measured against is not the
+	// no-progress one either.
+	slog.Info("recorded eligible kill for task",
 		"task", taskID, "agent", ap.Entry.Worktree, "kill", snap.event.reason(),
-		"count", count, "threshold", s.quarantineThreshold())
+		"bucket", quarantineBucketName(bucket), "count", count, "threshold", threshold)
 }
 
 // quarantineCountable reports whether this kill says anything about the TASK.
@@ -403,13 +457,10 @@ func (s *Supervisor) quarantineCountable(ev killEvent) (bool, string) {
 		// Charging the task too double-counts one failure against two breakers.
 		return false, "agent_budget"
 	case StopReasonRunDurationExceeded:
-		// See applyRunDurationKill: the cap fires regardless of activity, so on
-		// its own it is not a no-progress signal. A run that was still talking
-		// when the ceiling hit it was working, however slowly; only a run that
-		// was ALSO silent is the wedge markRunDurationExceeded argues about.
-		if !ev.RunSilent {
-			return false, "duration_kill_while_active"
-		}
+		// Counted, but not as a no-progress kill unless the run was ALSO
+		// silent: see quarantineBucketForKill. PUPPET-198 exempted an active
+		// cap-kill outright; PUPPET-611's deadline bucket is now the single
+		// policy for a run that hit its time budget while still working.
 	}
 	// Collateral of a daemon restart lands in a burst right after boot and says
 	// nothing about any task. Zero BootedAt disables the grace — see the
@@ -418,6 +469,21 @@ func (s *Supervisor) quarantineCountable(ev killEvent) (bool, string) {
 		return false, "boot_grace"
 	}
 	return true, ""
+}
+
+// quarantineBucketForKill picks the counter a kill advances. The outcome class
+// decides (agentpolicy.QuarantineBucketFor) with one exception: a run the
+// duration cap stopped while it was still producing output was working, just
+// past its time budget. That is the same event as a RunTurnDeadline expiry
+// the child reports itself, so it advances the same, higher deadline bucket
+// instead of being exempted (PUPPET-198) or charged as a no-progress kill. A
+// run that was ALSO silent at the cap stays no-progress: that is the wedge
+// markRunDurationExceeded argues about.
+func quarantineBucketForKill(ev killEvent, b agentpolicy.QuarantineBucket) agentpolicy.QuarantineBucket {
+	if b != agentpolicy.QuarantineNone && StopReason(ev.StopReason) == StopReasonRunDurationExceeded && !ev.RunSilent {
+		return agentpolicy.QuarantineDeadline
+	}
+	return b
 }
 
 // recordUncountedKill files an infrastructure kill in an EXISTING record's
@@ -592,14 +658,22 @@ func (q *taskQuarantine) evict(taskID string) {
 	q.persistAfter()
 }
 
+// quarantineBucketName renders a bucket for logs.
+func quarantineBucketName(b agentpolicy.QuarantineBucket) string {
+	if b == agentpolicy.QuarantineDeadline {
+		return "deadline"
+	}
+	return "no-progress"
+}
+
 // recordEligibleKill folds one quarantine-eligible kill into the ledger and
-// returns the record's new count. Field-delta progress against a known
-// baseline — a changed Design/Notes hash, a NEW comment, or a changed label
-// set — evicts the record instead of incrementing: the task IS moving, just
-// not via commits. The comment and label arms are what make the review roles
-// visible; a critic that posted its verdict and was then reaped used to
-// register as a no-progress kill on the task it had just advanced.
-func (q *taskQuarantine) recordEligibleKill(taskID string, ev killEvent, base issueBaseline, baselineKnown bool) (count int, progressed bool) {
+// returns the new count OF THE BUCKET IT ADVANCED. Field-delta progress
+// against a known baseline — a changed Design/Notes hash, a NEW comment, or a
+// changed label set — evicts the record instead of incrementing: the task IS
+// moving, just not via commits. The comment and label arms are what make the
+// review roles visible; a critic that posted its verdict and was then reaped
+// used to register as a no-progress kill on the task it had just advanced.
+func (q *taskQuarantine) recordEligibleKill(taskID string, bucket agentpolicy.QuarantineBucket, ev killEvent, base issueBaseline, baselineKnown bool) (count int, progressed bool) {
 	// LIFO: the unlock runs first, so the save sees a consistent ledger and
 	// never re-enters the mutex while it is held.
 	defer q.persistAfter()
@@ -629,15 +703,22 @@ func (q *taskQuarantine) recordEligibleKill(taskID string, ev killEvent, base is
 		rec.DaemonWrote = false
 		rec.WriteFailed = false
 		rec.Count = 0
+		rec.DeadlineCount = 0
 	}
-	rec.Count++
+	if bucket == agentpolicy.QuarantineDeadline {
+		rec.DeadlineCount++
+		count = rec.DeadlineCount
+	} else {
+		rec.Count++
+		count = rec.Count
+	}
 	rec.Kills = append(rec.Kills, ev)
 	if len(rec.Kills) > maxKillEventsRetained {
 		rec.Kills = rec.Kills[len(rec.Kills)-maxKillEventsRetained:]
 	}
 	rec.LastKillReason = ev.reason()
 	rec.LastUpdated = time.Now()
-	return rec.Count, false
+	return count, false
 }
 
 // release clears inFlight leaving the record due (skipped this round): it
@@ -676,7 +757,12 @@ func (q *taskQuarantine) latch(taskID string, daemonWrote bool) {
 	if rec := q.rec[taskID]; rec != nil {
 		rec.inFlight = false
 		rec.QuarantineKills = rec.Count
+		if rec.Count == 0 {
+			// The deadline bucket is what topped out; report ITS count.
+			rec.QuarantineKills = rec.DeadlineCount
+		}
 		rec.Count = 0
+		rec.DeadlineCount = 0
 		rec.QuarantinedAt = time.Now()
 		rec.DaemonWrote = daemonWrote
 		rec.WriteFailed = false

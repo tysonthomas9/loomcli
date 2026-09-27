@@ -95,6 +95,33 @@ var (
 	usageLimitedRe = regexp.MustCompile(regexp.QuoteMeta(UsageLimitedMarker))
 )
 
+// RunTurnDeadlineMarker is the stable marker the inner loom subprocess emits
+// when the turn was ended by loom's OWN per-turn deadline — the ceiling
+// derived from the role's max_run_duration and exported as
+// LOOM_RUN_TURN_TIMEOUT_SECONDS, applied to a context derived inside
+// invokeClaudeRunTurn.
+//
+// It exists for the same reason the four markers above do: the side that KNOWS
+// the answer says so, categorically. Without it the expiry arrives here as a
+// bare "context deadline exceeded", the residual table's timeout pattern
+// matches it, and the verdict reads "connection timeout" — pointing an
+// operator at the network when the actual lever is the role's time budget.
+// That is not a wording nit: Timeout is quarantine-eligible, so every expiry
+// also recorded a no-progress kill against a ticket that had done nothing
+// wrong.
+//
+// The emitter only sets it when errors.Is(derivedCtx.Err(),
+// context.DeadlineExceeded) is true on the context IT created, so a daemon
+// shutdown (context.Canceled) and an upstream deadline from someone else's
+// context can never wear it.
+//
+// Stable string contract: changing it requires updating the emitter
+// (internal/cli/backends.runTurnDeadlineInvocationError).
+const RunTurnDeadlineMarker = "loom: run-turn deadline exceeded"
+
+// runTurnDeadlineRe is the precompiled matcher used by classifyHarnessMarkers.
+var runTurnDeadlineRe = regexp.MustCompile(regexp.QuoteMeta(RunTurnDeadlineMarker))
+
 // timeoutHintRe recognizes timeout-worded errors. The wrapper refines its
 // retry hits by the matched phrase; loom additionally upgrades a Transient
 // whose surrounding text names a timeout, preserving the distinct Timeout
@@ -175,8 +202,9 @@ func ClassifyFromOutput(output string, exitCode int, backend string) *AgentError
 
 // classifyHarnessMarkers matches the explicit, categorical markers that
 // outrank every pattern-based inference: the loom-side backend-missing
-// marker, a wrapper launch failure, and the harness's own terminal verdict
-// (auth required / usage limited). Returns nil when none apply.
+// marker, a wrapper launch failure, loom's own per-turn deadline expiry, and
+// the harness's own terminal verdict (auth required / usage limited).
+// Returns nil when none apply.
 func classifyHarnessMarkers(text string) *classifyResult {
 	// 1. Cross-cutting wrapper signal: the loom-side translator prepends this
 	//    marker when the backend CLI is missing. It outranks everything else.
@@ -192,6 +220,18 @@ func classifyHarnessMarkers(text string) *classifyResult {
 		return &classifyResult{
 			Class:   OutcomeFromDomain(SpawnFailureOutcome),
 			Message: "agent process failed to launch (backend binary may be updating or incompatible)",
+		}
+	}
+
+	// loom's OWN per-turn deadline. This arm MUST stay above the residual
+	// pattern table: the same text carries a bare "context deadline exceeded"
+	// from the wrapper, and `deadline.?exceeded` down there would render it as
+	// "connection timeout". The marker is a categorical statement from the
+	// side that owns the timer, not an inference from wording.
+	if runTurnDeadlineRe.MatchString(text) {
+		return &classifyResult{
+			Class:   OutcomeFromDomain(RunTurnDeadlineOutcome),
+			Message: "the turn exceeded loom's per-turn deadline (the role's max_run_duration minus 120s) — raise the role's max_run_duration or split the task",
 		}
 	}
 

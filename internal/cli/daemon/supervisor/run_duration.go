@@ -124,9 +124,21 @@ func maxRunDurationSecondsFor(ap *AgentProcess, daemonSeconds int) int {
 //
 // The margin is the whole point of exporting the deadline at all: it must fire
 // strictly before applyRunDurationKill (health.go) so an over-running turn ends
-// as a classified process exit — error class Timeout, checkpoint saved, recovery
-// armed — instead of the SIGKILL that skips all of it. The child reads the
-// result from LOOM_RUN_TURN_TIMEOUT_SECONDS; see backends.runTurnDeadline.
+// as a classified process exit — error class RunTurnDeadline, checkpoint saved,
+// recovery armed — instead of the SIGKILL that skips all of it. The child reads
+// the result from LOOM_RUN_TURN_TIMEOUT_SECONDS; see backends.runTurnDeadline.
+//
+// The class is RunTurnDeadline and not Timeout deliberately: the child emits
+// agenterr.RunTurnDeadlineMarker, so the expiry is a categorical loom signal
+// rather than a network fault inferred from the words "deadline exceeded". It
+// counts toward task quarantine in its OWN, higher bucket (see
+// agentpolicy.QuarantineDeadline) — one expiry is a time-budget event, not a
+// crash, and must not be 1-of-3 toward parking the ticket.
+//
+// applyRunDurationKill / markRunDurationExceeded, the SIGKILL cap path below,
+// is unchanged and stays Timeout / no-progress-eligible. It only fires when the
+// child's own deadline FAILED to end the turn 120s earlier — an agent that
+// ignored a clean stop, which is a genuinely worse signal.
 const runTurnDeadlineMarginSeconds = 120
 
 // runTurnTimeoutSecondsFor resolves the per-turn deadline to export to one

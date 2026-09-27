@@ -58,6 +58,7 @@ const ERROR_CLASS_LABELS: Record<string, string> = {
   ContextOverflow: "context overflow",
   ModelNotFound: "model not found",
   LockConflict: "lock conflict",
+  RunTurnDeadline: "turn time budget",
 };
 
 /** Map an error_class to a short badge label, or undefined when absent. */
