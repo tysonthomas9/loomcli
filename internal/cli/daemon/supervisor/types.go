@@ -72,6 +72,7 @@ type AgentProcess struct {
 	LastActivity           time.Time         // most recent PTY output observed by the agent's wrapper (driven by agent IPC heartbeats); zero between spawn and first observation
 	InputWaitPending       int               // interactive harness prompts currently awaiting an answer; a count (not a flag) so overlapping prompts nest — see input_wait.go
 	InputWaitSince         time.Time         // when InputWaitPending last rose from zero; anchors the bound that stops a suspension from outliving its cause
+	AbandonedRunsChecked   bool              // true once this process reconciled the agent's leftover unfinished sessions; the check is per daemon lifetime, not per cycle — within one process every run is finished by the exit path
 
 	LastRearm      time.Time // when the fleet-stall sweep last re-armed this agent's supervise goroutine (see checkFleetStall); zero if never
 	RestartCount   int       // consecutive restart attempts
@@ -118,7 +119,7 @@ type AgentProcess struct {
 	// task. False for every other stop reason.
 	RunSilentAtStop bool
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, SoftKnobWarning, ProfileError, restart tracking, IdleSince, AssignedEpicID, AssignedTaskID, AssignedTaskRepo, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, RunSilentAtStop, LastActivity, InputWaitPending, InputWaitSince
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, SoftKnobWarning, ProfileError, restart tracking, IdleSince, AssignedEpicID, AssignedTaskID, AssignedTaskRepo, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, RunSilentAtStop, LastActivity, InputWaitPending, InputWaitSince, AbandonedRunsChecked
 }
 
 // StopReason identifies why an agent was stopped.
