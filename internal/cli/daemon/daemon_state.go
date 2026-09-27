@@ -93,13 +93,18 @@ func ReadStateFile(path string) (*DaemonState, error) {
 
 // writeStateFile writes the daemon-agents.json state file.
 //
+// unavailable holds the agents the daemon could not construct. They are
+// appended as ordinary rows because this file is the whole fleet as the CLI and
+// the dashboard see it: leaving them out is what would make a misconfigured
+// agent silently vanish rather than show up as broken.
+//
 // hold is variadic to carry 0 or 1 claim-hold snapshots without disturbing the
 // existing positional signature (and its call sites).
-func writeStateFile(path string, startedAt time.Time, agents []supervisor.SupervisedAgentStatus, quarantined []supervisor.QuarantinedTaskInfo, maxRetries int, hold ...*supervisor.ClaimHold) error {
+func writeStateFile(path string, startedAt time.Time, agents []supervisor.SupervisedAgentStatus, unavailable []UnavailableAgent, quarantined []supervisor.QuarantinedTaskInfo, maxRetries int, hold ...*supervisor.ClaimHold) error {
 	state := DaemonState{
 		PID:              os.Getpid(),
 		StartedAt:        startedAt,
-		Agents:           make([]DaemonAgentStatus, len(agents)),
+		Agents:           make([]DaemonAgentStatus, len(agents), len(agents)+len(unavailable)),
 		QuarantinedTasks: quarantined,
 	}
 	if len(hold) > 0 {
@@ -107,6 +112,11 @@ func writeStateFile(path string, startedAt time.Time, agents []supervisor.Superv
 	}
 	for i, ap := range agents {
 		state.Agents[i] = toDaemonAgentStatus(ap, maxRetries)
+	}
+	// computeAgentStatus is deliberately not consulted here — it reads run
+	// history an unavailable agent does not have.
+	for _, u := range unavailable {
+		state.Agents = append(state.Agents, u.toDaemonAgentStatus())
 	}
 
 	data, err := json.MarshalIndent(state, "", "  ")
