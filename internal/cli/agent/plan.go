@@ -172,6 +172,9 @@ func runPlanDaemon(deps *cli.Deps, worktreePath, agentName string) {
 	if invokeErr == nil {
 		clearDaemonResumeOnSuccess(worktreePath)
 	}
+	// Stamp the run's end BEFORE any exit: the resume TTL is idle time since
+	// this moment, not the age of the task.
+	markDaemonRunEnded(worktreePath)
 
 	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)
 	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr, collector, startedAt, planParentID)
