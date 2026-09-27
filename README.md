@@ -344,13 +344,34 @@ After Phase 5 decoupling, the Go server is a pure API and the frontend runs
 on the Vite dev server. `make dev` starts both in parallel and handles
 cleanup on Ctrl-C. Open `http://localhost:3000` in your browser.
 
-For a containerized smoke test of the whole stack (including optional Redis
-for fleet), use:
+For a containerized smoke test of the whole stack — redis, fleet-db, the Go
+API and the nginx frontend — use:
 
 ```bash
-docker compose -f docker-compose.dev.yml up --build
-# add --profile fleet to also start Redis
+make compose-smoke        # build, start, assert, tear down
 ```
+
+Or drive it by hand. This requires a sibling `fleet-db` checkout at
+`../fleet-db` (the stack builds fleet-db from source, like the stacks under
+`test/`):
+
+```bash
+git clone https://github.com/BrowserOperator/fleet-db ../fleet-db
+docker compose -f docker-compose.dev.yml up --build -d
+docker compose -f docker-compose.dev.yml exec -T server bash -s < scripts/compose-dev-seed.sh
+open http://localhost:3000/ws/SMOKE/
+docker compose -f docker-compose.dev.yml down -v
+```
+
+The seed step is required before the Web UI terminal will work: the terminal
+resolves a workspace to a **local checkout** before spawning a PTY, and a
+fleet-db workspace record is not one. Without it the tab reports
+"Disconnected". Note also that this image carries no AI backend CLI, so a
+`lead-<backend>` tab exits immediately — use a `lead-shell` tab for a live
+prompt, or `make local-mode-up` for a full dogfood environment.
+
+`down -v` (rather than plain `down`) is what drops the `loom-data` volume;
+without it the seeded workspace and terminal tabs survive into the next run.
 
 ## Environment Variables
 
