@@ -1,0 +1,146 @@
+# Surface tier: pins the claim API contract for ready children of an open epic
+# (STACKED-PRS-29). A parent-child edge is structural containment, so a ready
+# child under an open epic must be claimable, while an open direct blocker on
+# the child or on its parent must still reject the claim. Agents drive claim
+# through the API; no operator control issues it directly.
+suite: claim-under-epic-contracts
+classification: { area: issues, feature: claim, surface: api, purpose: contract }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: >-
+  name="aft-cue-${RUN_ID:-local}"; list_code="$(curl -sS -o "$AFT_WORK_DIR/cue-workspaces.setup.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces")"; [ "$list_code" = 200 ] || { echo "workspace list failed with HTTP $list_code:"; cat "$AFT_WORK_DIR/cue-workspaces.setup.json"; exit 1; }; existing="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); target=sys.argv[2]; print(next((w.get("id","") for w in d.get("workspaces",[]) if w.get("name")==target or w.get("id")==target), ""))' "$AFT_WORK_DIR/cue-workspaces.setup.json" "$name")"; if [ -n "$existing" ]; then delete_code="$(curl -sS -o "$AFT_WORK_DIR/cue-delete-stale.resp.json" -w "%{http_code}" -X DELETE "$AFT_BASE_URL/api/workspaces/$existing")"; [ "$delete_code" = 200 ] || [ "$delete_code" = 404 ] || { echo "stale workspace delete failed with HTTP $delete_code:"; cat "$AFT_WORK_DIR/cue-delete-stale.resp.json"; exit 1; }; fi
+teardown: >-
+  if [ -s "$AFT_WORK_DIR/cueWs" ]; then AFT_WS="$(cat "$AFT_WORK_DIR/cueWs")" "$AFT_TESTS_DIR/scripts/close-open-issues.sh" || true; delete_code="$(curl -sS -o "$AFT_WORK_DIR/cue-delete-workspace.resp.json" -w "%{http_code}" -X DELETE "$AFT_BASE_URL/api/workspaces/$(cat "$AFT_WORK_DIR/cueWs")")"; [ "$delete_code" = 200 ] || [ "$delete_code" = 404 ] || { echo "workspace teardown delete failed with HTTP $delete_code:"; cat "$AFT_WORK_DIR/cue-delete-workspace.resp.json"; exit 1; }; fi
+
+tests:
+  # Surface-only because claim is an agent-facing API with no operator control;
+  # promote when a product surface issues the claim.
+  # covers: STACKED-PRS-29 claim/ready agreement for children of an open epic
+  - name: ready child under an open epic is claimable while blocked children are not
+    intent: An agent sees a ready child task under an open epic, claims it successfully, and is refused claims on a child with an open blocker and on a child whose epic is blocked
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces"
+          body: { name: "aft-cue-${RUN_ID:-local}", type: "empty" }
+          status: 201
+          assert:
+            - path: "data.id"
+              exists: true
+          save:
+            - { from: "data.id", as: "cueWs" }
+        intent: "An API client creates the isolated fixture workspace and captures its id"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${var:cueWs}/issues"
+          body: { title: "claim epic ${RUN_ID:-local}", issue_type: "epic", priority: 2 }
+          status: 201
+          save:
+            - { from: "data.id", as: "cueEpic" }
+        intent: "An agent creates the open epic"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${var:cueWs}/issues"
+          body: { title: "claim ready child ${RUN_ID:-local}", issue_type: "task", priority: 2, parent: "${var:cueEpic}" }
+          status: 201
+          assert:
+            - path: "data.status"
+              equals: "open"
+          save:
+            - { from: "data.id", as: "cueChild" }
+        intent: "An agent creates an unblocked child task under the open epic"
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${var:cueWs}/ready?parent_id=${var:cueEpic}"
+          status: 200
+          assert:
+            - path: "data"
+              contains: "${var:cueChild}"
+        intent: "An agent sees the child task in the workspace ready list"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${var:cueWs}/issues/${var:cueChild}/claim"
+          status: 200
+          assert:
+            - path: "success"
+              equals: true
+        intent: "An agent claims the ready child task"
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${var:cueWs}/issues/${var:cueChild}"
+          status: 200
+          assert:
+            - path: "data.status"
+              equals: "in_progress"
+        intent: "An agent confirms the claimed child task is now in progress"
+
+      # Control: an open direct blocker on the child still rejects the claim.
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${var:cueWs}/issues"
+          body: { title: "claim child blocker ${RUN_ID:-local}", issue_type: "task", priority: 2 }
+          status: 201
+          save:
+            - { from: "data.id", as: "cueChildBlocker" }
+        intent: "An agent creates an open task that will block a sibling child"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${var:cueWs}/issues"
+          body: { title: "claim blocked child ${RUN_ID:-local}", issue_type: "task", priority: 2, parent: "${var:cueEpic}" }
+          status: 201
+          save:
+            - { from: "data.id", as: "cueBlockedChild" }
+        intent: "An agent creates a second child task under the open epic"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${var:cueWs}/issues/${var:cueBlockedChild}/dependencies"
+          body: { depends_on_id: "${var:cueChildBlocker}", dep_type: "blocks" }
+        intent: "An agent adds an open blocking dependency to the second child"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${var:cueWs}/issues/${var:cueBlockedChild}/claim"
+          status: 409
+        intent: "An agent is refused the claim on the child with an open blocker"
+
+      # Control: a child whose parent epic has an open blocker inherits the blockage.
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${var:cueWs}/issues"
+          body: { title: "claim blocked epic ${RUN_ID:-local}", issue_type: "epic", priority: 2 }
+          status: 201
+          save:
+            - { from: "data.id", as: "cueBlockedEpic" }
+        intent: "An agent creates a second epic"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${var:cueWs}/issues"
+          body: { title: "claim epic blocker ${RUN_ID:-local}", issue_type: "task", priority: 2 }
+          status: 201
+          save:
+            - { from: "data.id", as: "cueEpicBlocker" }
+        intent: "An agent creates an open task that will block the second epic"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${var:cueWs}/issues/${var:cueBlockedEpic}/dependencies"
+          body: { depends_on_id: "${var:cueEpicBlocker}", dep_type: "blocks" }
+        intent: "An agent blocks the second epic on the open task"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${var:cueWs}/issues"
+          body: { title: "claim child of blocked epic ${RUN_ID:-local}", issue_type: "task", priority: 2, parent: "${var:cueBlockedEpic}" }
+          status: 201
+          save:
+            - { from: "data.id", as: "cueInheritedChild" }
+        intent: "An agent creates a child task under the blocked epic"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${var:cueWs}/issues/${var:cueInheritedChild}/claim"
+          status: 409
+        intent: "An agent is refused the claim on the child whose epic is blocked"
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${var:cueWs}/issues/${var:cueInheritedChild}"
+          status: 200
+          assert:
+            - path: "data.status"
+              equals: "open"
+        intent: "An agent confirms the refused child task stays open"

@@ -316,6 +316,8 @@ Surface wiring (`tests/aft/surface-suites/`):
 - `design-format-legacy` — legacy inline-HTML auto-detect and sanitization.
 - `api-contracts` — standalone health/config/readiness contract probes.
 - `pr-contracts` — PR reviewer endpoint degraded-mode status and error-code contracts.
+- `claim-under-epic-contracts` — claim API accepts a ready child of an open epic and rejects
+  children with an open blocker or a blocked parent.
 
 Suites that create issues declare `teardown: scripts/close-open-issues.sh`, so every
 suite starts against an empty board. Cross-step state goes through `$AFT_WORK_DIR`.
