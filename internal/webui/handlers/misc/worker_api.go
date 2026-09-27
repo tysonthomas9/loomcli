@@ -454,8 +454,11 @@ func SetupWorkerAPIRoutes(
 	workerMux.HandleFunc("POST /api/internal/workers/{id}/events", handleWorkerEvents(registry, resolveEventsDir))
 	workerMux.HandleFunc("POST /api/internal/workers/{id}/logs", handleWorkerLogs(registry, resolveLogPath))
 
-	// Wrap with auth middleware and mount on the main mux
-	authed := workerAuthMiddleware(workerToken, workerMux)
+	// Wrap with auth middleware and mount on the main mux. The JSON fallback
+	// goes INSIDE the auth middleware: an unauthenticated request to an unknown
+	// worker path must still get 401/403, so the route surface stays
+	// unenumerable without the token.
+	authed := workerAuthMiddleware(workerToken, handler.JSONFallbackMux(workerMux))
 	mux.Handle("/api/internal/workers/", authed)
 	mux.Handle("POST /api/internal/workers/register", authed)
 
