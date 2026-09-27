@@ -112,6 +112,63 @@ func TestBugReplay643(t *testing.T) {
 	}
 }
 
+func TestBugReplay640a(t *testing.T) {
+	handler := NewHandler(HandlerConfig{GetMutationsSince: func(_, _ string) ([]rpc.MutationEvent, error) {
+		return []rpc.MutationEvent{{Cursor: "2-0", Type: "update", IssueID: "other-repo", SourceRepo: "repo-b"}}, nil
+	}})
+	response := httptest.NewRecorder()
+	writer, err := NewWriter(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := NewClient(1, ClientSendBuf, "1-0", []string{"repo-a"}, "ws-replay")
+	if err := handler.sendCatchUp(writer, client, "1-0", "ws-replay", client.sourceRepos); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(response.Body.String(), "event: mutation\n") ||
+		!strings.Contains(response.Body.String(), "id: 2-0\nevent: checkpoint\n") {
+		t.Fatalf("filtered tail did not advance checkpoint without leaking payload: %s", response.Body.String())
+	}
+}
+
+func TestBugReplay612a(t *testing.T) {
+	hub := NewHub()
+	client := NewClient(1, 1, "0", nil, "ws-replay")
+	hub.RegisterClient(client)
+	hub.fanOutMutation(&MutationPayload{Cursor: "1-0", Type: "update", WorkspaceID: "ws-replay"})
+	hub.fanOutMutation(&MutationPayload{Cursor: "2-0", Type: "update", WorkspaceID: "ws-replay"})
+	if hub.ClientCount() != 1 {
+		t.Fatal("full client buffer silently evicted the subscriber instead of signaling resync")
+	}
+}
+
+func TestBugReplay644(t *testing.T) {
+	const resumeCursor = "2-0"
+	handler := NewHandler(HandlerConfig{GetMutationsSince: func(_, since string) ([]rpc.MutationEvent, error) {
+		if since != resumeCursor {
+			t.Fatalf("catch-up used %q, want %q", since, resumeCursor)
+		}
+		return nil, nil
+	}})
+	client := NewClient(1, ClientSendBuf, resumeCursor, nil, "ws-replay")
+	response := httptest.NewRecorder()
+	writer, err := NewWriter(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.sendCatchUp(writer, client, resumeCursor, "ws-replay", nil); err != nil {
+		t.Fatal(err)
+	}
+	client.send <- &MutationPayload{Cursor: "1-0", Type: "update", WorkspaceID: "ws-replay"}
+	close(client.send)
+	if _, err := handler.streamLoop(writer, client, context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(response.Body.String(), "id: 1-0\n") {
+		t.Fatalf("stale live frame moved resume cursor behind %s: %s", resumeCursor, response.Body.String())
+	}
+}
+
 // TestBugReplay626e holds a hub broadcast while the durable event is replayed,
 // then releases it to a new connection resuming from that replayed cursor.
 func TestBugReplay626e(t *testing.T) {
