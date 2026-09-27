@@ -33,7 +33,9 @@ func ResolveAgentTarget(name, repo string) (ResolvedTarget, error) {
 		}, nil
 	}
 
-	resolver, err := cli.NewResolver()
+	// Load only the active workspace: agent/daemon startup must not depend on
+	// unrelated workspaces being loadable from FleetDB.
+	resolver, err := cli.NewActiveWorkspaceResolver()
 	if err != nil {
 		if repo == "" && name == "" {
 			cwd, cwdErr := os.Getwd()
