@@ -331,7 +331,7 @@ func (s *Supervisor) checkAgentHealth() {
 	for _, ap := range snapshot {
 		ap.Mu.Lock()
 		pid := ap.Pid
-		worktreePath := ap.WorktreePath
+		worktreePath := ap.WorkDir()
 		worktreeName := ap.Entry.Worktree
 		logPath := ap.LogFilePath
 		lastStart := ap.LastStart
