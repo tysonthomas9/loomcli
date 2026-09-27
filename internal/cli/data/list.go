@@ -14,6 +14,7 @@ var (
 	listParent   string
 	listPriority int
 	listLimit    int
+	listLabels   []string
 )
 
 var listCmd = &cobra.Command{
@@ -30,6 +31,7 @@ var listCmd = &cobra.Command{
 			Status:    listStatus,
 			IssueType: listType,
 			ParentID:  listParent,
+			Labels:    listLabels,
 			Limit:     listLimit,
 		}
 		if cmd.Flags().Changed("priority") {
@@ -50,4 +52,8 @@ func init() {
 	listCmd.Flags().StringVar(&listParent, "parent", "", "Filter by parent issue ID")
 	listCmd.Flags().IntVar(&listPriority, "priority", 0, "Filter by priority (0-4)")
 	listCmd.Flags().IntVar(&listLimit, "limit", 0, "Maximum number of results (0 = server default)")
+	listCmd.Flags().StringArrayVar(&listLabels, "label", nil,
+		"Filter by label (repeatable; an issue must carry every label given). "+
+			"With more than one label, only the first is filtered server-side and the "+
+			"rest are matched afterwards, so --limit bounds the pre-filter fetch.")
 }
