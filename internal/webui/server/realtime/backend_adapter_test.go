@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -256,5 +257,36 @@ func TestRPCEventToMutationData_AllFields(t *testing.T) {
 	}
 	if !got.Timestamp.Equal(rm.Timestamp) {
 		t.Errorf("Timestamp drift: got=%v rpc=%v", got.Timestamp, rm.Timestamp)
+	}
+}
+
+// TestBackendMutationToPayload_CommentCarriesIssueID pins the end of the pipe
+// for PUPPET-412: a comment.add mutation is issue-scoped, so the encoded SSE
+// frame must carry issue_id alongside entity_id rather than having the
+// omitempty tag drop the key.
+func TestBackendMutationToPayload_CommentCarriesIssueID(t *testing.T) {
+	bm := backend.MutationData{
+		Cursor:     "42",
+		Type:       backend.MutationComment,
+		EntityType: "comment",
+		EntityID:   "WS-1",
+		Action:     "comment.add",
+		IssueID:    "WS-1",
+		Actor:      "agent-alpha",
+		Timestamp:  sharedFixtureTimestamp,
+	}
+	payload := BackendMutationToPayload(bm, "ws")
+	if payload.IssueID != "WS-1" {
+		t.Fatalf("payload.IssueID = %q, want %q", payload.IssueID, "WS-1")
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	frame := string(encoded)
+	for _, want := range []string{`"issue_id":"WS-1"`, `"entity_id":"WS-1"`, `"entity_type":"comment"`} {
+		if !strings.Contains(frame, want) {
+			t.Errorf("frame %s missing %s", frame, want)
+		}
 	}
 }
