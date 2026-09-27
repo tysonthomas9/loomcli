@@ -38,9 +38,14 @@ type SessionRecord struct {
 
 	// Agent context
 	AgentName string `json:"agent_name"`
-	Backend   string `json:"backend"`
-	Model     string `json:"model,omitempty"`
-	Phase     string `json:"phase,omitempty"` // "planning" or "implementation"
+	// Role is the agent's configured role ("worker", "tester", ...). AgentName
+	// is the worktree, which is not the role; stamping the role at creation
+	// keeps it stable, where resolving worktree→role at read time would drift
+	// and retroactively relabel history.
+	Role    string `json:"role,omitempty"`
+	Backend string `json:"backend"`
+	Model   string `json:"model,omitempty"`
+	Phase   string `json:"phase,omitempty"` // "planning" or "implementation"
 
 	// TranscriptFormat records how agent_transcript.jsonl is encoded ("raw" |
 	// "canonical"), so LoadNativeEvents dispatches deterministically instead of
@@ -97,6 +102,7 @@ type TranscriptEntry struct {
 // CreateOptions holds parameters for creating a new session.
 type CreateOptions struct {
 	AgentName  string `json:"agent_name"`
+	Role       string `json:"role,omitempty"`
 	Backend    string `json:"backend"`
 	EpicID     string `json:"epic_id,omitempty"`
 	Phase      string `json:"phase,omitempty"` // "planning" or "implementation"
