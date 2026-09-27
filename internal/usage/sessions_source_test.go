@@ -281,3 +281,62 @@ func TestReadSessionUsage_RunningSessionHasNoEndTime(t *testing.T) {
 		t.Errorf("input tokens = %d, want 42", recs[0].InputTokens)
 	}
 }
+
+// TestReadSessionUsage_KnownAgentsAllowlist scopes the read to one of the two
+// agents in the ledger, and pins that dedup still holds underneath it: s1 is
+// written twice and must come back once, with its finalized token counts.
+func TestReadSessionUsage_KnownAgentsAllowlist(t *testing.T) {
+	dir := fixtureIndex(t)
+
+	recs, _, err := ReadSessionUsage(dir, Filter{KnownAgents: []string{"nova"}})
+	if err != nil {
+		t.Fatalf("ReadSessionUsage: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Fatalf("got %d records, want 2 (nova's s1 and s3 only)", len(recs))
+	}
+	for _, r := range recs {
+		if r.AgentName != "nova" {
+			t.Errorf("record %q has agent %q, want only nova", r.SessionID, r.AgentName)
+		}
+	}
+	// s1's running row carries 1+1 tokens and its finalized row 100+200+300+400;
+	// s3 is a zero-token failure. Anything but 1000 means dedup broke.
+	if got := totalTokens(recs); got != 1000 {
+		t.Errorf("total tokens = %d, want 1000 (the finalized s1 row, counted once)", got)
+	}
+}
+
+// TestReadSessionUsage_EmptyKnownAgentsReadsEverything is the invariant that
+// keeps a workspace without configured agents behaving as it always has.
+func TestReadSessionUsage_EmptyKnownAgentsReadsEverything(t *testing.T) {
+	dir := fixtureIndex(t)
+
+	for name, f := range map[string]Filter{
+		"nil":   {KnownAgents: nil},
+		"empty": {KnownAgents: []string{}},
+	} {
+		recs, _, err := ReadSessionUsage(dir, f)
+		if err != nil {
+			t.Fatalf("%s: ReadSessionUsage: %v", name, err)
+		}
+		if len(recs) != 3 {
+			t.Errorf("%s: got %d records, want all 3", name, len(recs))
+		}
+	}
+}
+
+// TestReadSessionUsage_AgentNameAndKnownAgentsAreANDed: `loom usage --agent X`
+// against an allowlist that does not name X returns nothing. That is correct,
+// not a broken ledger — the empty-result message names the ledger path.
+func TestReadSessionUsage_AgentNameAndKnownAgentsAreANDed(t *testing.T) {
+	dir := fixtureIndex(t)
+
+	recs, _, err := ReadSessionUsage(dir, Filter{AgentName: "orion", KnownAgents: []string{"nova"}})
+	if err != nil {
+		t.Fatalf("ReadSessionUsage: %v", err)
+	}
+	if len(recs) != 0 {
+		t.Fatalf("got %d records, want 0 (AgentName and KnownAgents disagree)", len(recs))
+	}
+}

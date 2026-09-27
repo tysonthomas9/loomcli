@@ -300,3 +300,89 @@ func TestReadUsageRecords_StatusFilterNarrows(t *testing.T) {
 		t.Fatalf("--status failed got %+v, want only bad1", failed)
 	}
 }
+
+// writeUsageProfiles stages <dir>/profiles/<agent>, the shape the
+// configured-agent allowlist is read from.
+func writeUsageProfiles(t *testing.T, dir string, agents ...string) {
+	t.Helper()
+	for _, agent := range agents {
+		if err := os.MkdirAll(filepath.Join(dir, "profiles", agent), 0o700); err != nil {
+			t.Fatalf("mkdir profile %q: %v", agent, err)
+		}
+	}
+}
+
+// stageTwoAgentLedgers writes the same two-agent story into both ledgers, so
+// each source can be asserted against identical data.
+func stageTwoAgentLedgers(t *testing.T, dir string) {
+	t.Helper()
+	writeSessionsIndex(t, dir,
+		map[string]any{
+			"session_id": "s1", "agent_name": "nova", "backend": "claude",
+			"status": "completed", "started_at": "2026-08-29T09:00:00Z",
+			"ended_at": "2026-08-29T09:30:00Z", "duration_s": 1800,
+			"input_tokens": 1000, "output_tokens": 2000,
+		},
+		map[string]any{
+			"session_id": "s2", "agent_name": "go-test-writer", "backend": "claude",
+			"status": "completed", "started_at": "2026-08-29T10:00:00Z",
+			"ended_at": "2026-08-29T10:30:00Z", "duration_s": 1800,
+			"input_tokens": 5, "output_tokens": 5,
+		},
+	)
+	writeLegacyLedger(t, dir,
+		usage.SessionUsage{
+			AgentName: "nova", Backend: "claude", InputTokens: 1000, OutputTokens: 2000,
+			StartedAt: time.Date(2026, 8, 29, 9, 0, 0, 0, time.UTC),
+			EndedAt:   time.Date(2026, 8, 29, 9, 30, 0, 0, time.UTC),
+		},
+		usage.SessionUsage{
+			AgentName: "go-test-writer", Backend: "claude", InputTokens: 5, OutputTokens: 5,
+			StartedAt: time.Date(2026, 8, 29, 10, 0, 0, 0, time.UTC),
+			EndedAt:   time.Date(2026, 8, 29, 10, 30, 0, 0, time.UTC),
+		},
+	)
+}
+
+// TestReadUsageRecords_ScopesToConfiguredAgents: `loom usage` is a reporting
+// command, so both sources drop rows from agents the workspace never
+// configured — and they must agree, or --source becomes a way to get two
+// different answers to the same question.
+func TestReadUsageRecords_ScopesToConfiguredAgents(t *testing.T) {
+	dir := t.TempDir()
+	stageTwoAgentLedgers(t, dir)
+	writeUsageProfiles(t, dir, "nova")
+
+	for _, src := range []string{usageSourceSessions, usageSourceLegacy} {
+		t.Run(src, func(t *testing.T) {
+			setUsageSource(t, src)
+			recs, _, err := readUsageRecords(dir, usage.Filter{})
+			if err != nil {
+				t.Fatalf("readUsageRecords: %v", err)
+			}
+			if len(recs) != 1 || recs[0].AgentName != "nova" {
+				t.Fatalf("read %+v, want only the configured agent's record", recs)
+			}
+		})
+	}
+}
+
+// TestReadUsageRecords_NoProfilesDirReadsEverything is the invariant: without
+// profiles/ the allowlist is empty and both sources report the whole ledger.
+func TestReadUsageRecords_NoProfilesDirReadsEverything(t *testing.T) {
+	dir := t.TempDir()
+	stageTwoAgentLedgers(t, dir)
+
+	for _, src := range []string{usageSourceSessions, usageSourceLegacy} {
+		t.Run(src, func(t *testing.T) {
+			setUsageSource(t, src)
+			recs, _, err := readUsageRecords(dir, usage.Filter{})
+			if err != nil {
+				t.Fatalf("readUsageRecords: %v", err)
+			}
+			if len(recs) != 2 {
+				t.Fatalf("got %d records, want both (unfiltered)", len(recs))
+			}
+		})
+	}
+}
