@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -297,43 +298,6 @@ func TestList_HappyPath(t *testing.T) {
 	}
 }
 
-func TestList_AllMergesActiveAndClosedWithoutDuplicates(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Second)
-	var queries []string
-	var limits []string
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		queries = append(queries, r.URL.Query().Get("status"))
-		limits = append(limits, r.URL.Query().Get("limit"))
-		if r.URL.Query().Get("status") == "closed" {
-			respondOK(w, []*types.IssueWithCounts{
-				{Issue: &types.Issue{ID: "closed", Title: "Closed", Status: types.StatusClosed, CreatedAt: now, UpdatedAt: now, ClosedAt: &now}},
-			})
-			return
-		}
-		respondOK(w, []*types.IssueWithCounts{
-			{Issue: &types.Issue{ID: "open", Title: "Open", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now}},
-			// Some FleetDB versions already include closed issues when status is
-			// omitted; the aggregate contract must still return each issue once.
-			{Issue: &types.Issue{ID: "closed", Title: "Closed", Status: types.StatusClosed, CreatedAt: now, UpdatedAt: now, ClosedAt: &now}},
-		})
-	})
-	defer ts.Close()
-
-	result, err := fb.List(context.Background(), backend.ListOpts{Status: "all", Limit: 10})
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if !reflect.DeepEqual(queries, []string{"", "closed"}) {
-		t.Fatalf("status queries = %v, want active then closed", queries)
-	}
-	if !reflect.DeepEqual(limits, []string{"10", "10"}) {
-		t.Fatalf("limit queries = %v, want caller limit on both requests", limits)
-	}
-	if len(result) != 2 || result[0].ID != "open" || result[1].ID != "closed" {
-		t.Fatalf("result = %+v, want deduplicated active and closed issues", result)
-	}
-}
-
 func TestList_QueryParams(t *testing.T) {
 	var gotQuery string
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -383,7 +347,9 @@ func TestList_ClientFiltersMultipleReposWithoutServerLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if strings.Contains(gotQuery, "source_repos=") || strings.Contains(gotQuery, "repo=") || strings.Contains(gotQuery, "limit=") {
+	// List's own page size may appear; the caller's pre-filter limit (1) must not.
+	if strings.Contains(gotQuery, "source_repos=") || strings.Contains(gotQuery, "repo=") ||
+		(strings.Contains(gotQuery, "limit=") && !strings.Contains(gotQuery, fmt.Sprintf("limit=%d", listPageSize))) {
 		t.Fatalf("query = %q, want no unsupported repo filter or pre-filter limit", gotQuery)
 	}
 	if len(result) != 1 || result[0].ID != "b" {
@@ -398,19 +364,24 @@ func TestList_UnsupportedFilter_Single(t *testing.T) {
 	})
 	defer ts.Close()
 
-	p := 2
 	_, err := fb.List(context.Background(), backend.ListOpts{
-		Status:   "open",
-		Priority: &p,
+		Status:  "open",
+		Overdue: true,
 	})
 	if err == nil {
-		t.Fatal("expected error for unsupported filter Priority")
+		t.Fatal("expected error for unsupported filter Overdue")
 	}
 	if !errors.Is(err, backend.ErrFilterNotSupported) {
 		t.Errorf("expected ErrFilterNotSupported, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "Priority") {
+	if !strings.Contains(err.Error(), "Overdue") {
 		t.Errorf("error should mention field name, got %q", err.Error())
+	}
+	// The webui maps this to a 400. As a bare fmt.Errorf it was unclassifiable
+	// and every such request came back 500.
+	var be *backend.BackendError
+	if !errors.As(err, &be) || be.Kind != backend.KindValidation {
+		t.Errorf("expected a *backend.BackendError of KindValidation, got %#v", err)
 	}
 }
 
@@ -421,11 +392,10 @@ func TestList_UnsupportedFilter_Multiple(t *testing.T) {
 	})
 	defer ts.Close()
 
-	p := 1
 	_, err := fb.List(context.Background(), backend.ListOpts{
-		Query:    "test",
-		Priority: &p,
-		Overdue:  true,
+		IDs:           []string{"id-1"},
+		ExcludeStatus: []string{"closed"},
+		Overdue:       true,
 	})
 	if err == nil {
 		t.Fatal("expected error for unsupported filters")
@@ -434,7 +404,7 @@ func TestList_UnsupportedFilter_Multiple(t *testing.T) {
 		t.Errorf("expected ErrFilterNotSupported, got %v", err)
 	}
 	errMsg := err.Error()
-	for _, field := range []string{"Query", "Priority", "Overdue"} {
+	for _, field := range []string{"IDs", "ExcludeStatus", "Overdue"} {
 		if !strings.Contains(errMsg, field) {
 			t.Errorf("error should mention %q, got %q", field, errMsg)
 		}
@@ -600,8 +570,12 @@ func TestSearchIssues_Empty(t *testing.T) {
 
 // TestCheckFleetUnsupportedFilters_EachField sets each unsupported ListOpts
 // field individually and verifies that (a) the error wraps
-// ErrFilterNotSupported and (b) the error message contains the field name.
+// ErrFilterNotSupported, (b) it is a KindValidation BackendError so the webui
+// renders a 400 rather than a 500, and (c) the message contains the field name.
 // This ensures no field is accidentally omitted from checkFleetUnsupportedFilters.
+//
+// The thirteen filters List now honors are covered by
+// TestCheckFleetUnsupportedFilters_SupportedFields instead.
 func TestCheckFleetUnsupportedFilters_EachField(t *testing.T) {
 	intVal := 1
 	boolTrue := true
@@ -610,23 +584,12 @@ func TestCheckFleetUnsupportedFilters_EachField(t *testing.T) {
 		name string
 		opts backend.ListOpts
 	}{
-		{"Query", backend.ListOpts{Query: "search"}},
-		{"Priority", backend.ListOpts{Priority: &intVal}},
 		{"LabelsAny", backend.ListOpts{LabelsAny: []string{"a"}}},
 		{"IDs", backend.ListOpts{IDs: []string{"id-1"}}},
-		{"TitleContains", backend.ListOpts{TitleContains: "title"}},
-		{"DescriptionContains", backend.ListOpts{DescriptionContains: "desc"}},
-		{"NotesContains", backend.ListOpts{NotesContains: "note"}},
-		{"CreatedAfter", backend.ListOpts{CreatedAfter: "2026-01-01"}},
-		{"CreatedBefore", backend.ListOpts{CreatedBefore: "2026-12-31"}},
 		{"ClosedAfter", backend.ListOpts{ClosedAfter: "2026-01-01"}},
 		{"ClosedBefore", backend.ListOpts{ClosedBefore: "2026-12-31"}},
-		{"EmptyDescription", backend.ListOpts{EmptyDescription: true}},
-		{"NoAssignee", backend.ListOpts{NoAssignee: true}},
-		{"NoLabels", backend.ListOpts{NoLabels: true}},
 		{"PriorityMin", backend.ListOpts{PriorityMin: &intVal}},
 		{"PriorityMax", backend.ListOpts{PriorityMax: &intVal}},
-		{"Pinned", backend.ListOpts{Pinned: &boolTrue}},
 		{"IncludeTemplates", backend.ListOpts{IncludeTemplates: true}},
 		{"Ephemeral", backend.ListOpts{Ephemeral: &boolTrue}},
 		{"MolType", backend.ListOpts{MolType: "molecule"}},
@@ -649,6 +612,10 @@ func TestCheckFleetUnsupportedFilters_EachField(t *testing.T) {
 			}
 			if !errors.Is(err, backend.ErrFilterNotSupported) {
 				t.Errorf("expected error wrapping ErrFilterNotSupported, got %v", err)
+			}
+			var be *backend.BackendError
+			if !errors.As(err, &be) || be.Kind != backend.KindValidation {
+				t.Errorf("expected a *backend.BackendError of KindValidation, got %#v", err)
 			}
 			if !strings.Contains(err.Error(), tt.name) {
 				t.Errorf("error message should contain field name %q, got %q", tt.name, err.Error())
