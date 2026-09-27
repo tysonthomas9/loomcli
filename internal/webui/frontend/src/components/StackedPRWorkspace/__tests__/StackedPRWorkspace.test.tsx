@@ -210,12 +210,12 @@ describe("StackedPRWorkspace", () => {
 
   it("dims cross-repo members when a repo filter is selected", () => {
     renderWorkspace();
-    const checkboxes = screen.getAllByRole("checkbox");
-    const loomcliBox = checkboxes.find((el) =>
-      el.parentElement?.textContent?.includes("acme/loomcli"),
-    );
-    expect(loomcliBox).toBeTruthy();
-    fireEvent.click(loomcliBox!);
+    const loomcliRepo = screen.getByRole("button", {
+      name: "Filter repository acme/loomcli",
+    });
+    expect(loomcliRepo).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(loomcliRepo);
+    expect(loomcliRepo).toHaveAttribute("aria-pressed", "true");
     const dimmed = document.querySelectorAll("[data-dimmed]");
     expect(dimmed.length).toBeGreaterThan(0);
   });
@@ -283,7 +283,7 @@ describe("StackedPRWorkspace", () => {
 
   it("toggles history mode", () => {
     renderWorkspace();
-    fireEvent.click(screen.getByRole("button", { name: /^History$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Merge history/i }));
     expect(screen.getByTestId("stacked-pr-history")).toBeInTheDocument();
   });
 
