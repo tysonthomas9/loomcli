@@ -24,11 +24,13 @@ mkdir -p "$scratch_parent"
 scratch="$(mktemp -d "$scratch_parent/loom-tla-sse-live.XXXXXX")"
 echo "TLC scratch: $scratch (kept for review)"
 
-# id|property expected from its legacy config
+# id|property expected from legacy|fixed mechanism to disable (core only)
 cases=(
-  '626a|NoLostEvent' '626b|NoLostEvent' '626c|NoDoubleApply'
-  '626d|ConnectedImpliesReplayed' '642|CheckpointIsDurable'
-  '643|AdmissionOrder' '612a|NoLostEvent' '610a|NoDoubleApply'
+  '626a|NoLostEvent|page' '626b|NoLostEvent|register'
+  '626c|NoDoubleApply|dedup' '626d|ConnectedImpliesReplayed|connected'
+  '642|CheckpointIsDurable'
+  '643|AdmissionOrder|order' '612a|NoLostEvent|overflow'
+  '610a|NoDoubleApply'
   '644|CheckpointMonotonic' '640a|ReplayTerminates'
   '670|CursorBoundToSource' '672|ExpiredCursorForcesRecovery'
   'V1|ViewConvergesToDurable' '627b|CheckpointMonotonic'
@@ -51,10 +53,14 @@ want() {
 failures=0
 printf '%-18s %-8s %-12s %s\n' CONFIG EXPECT RESULT SCRATCH
 for entry in "${cases[@]}"; do
-  IFS='|' read -r id property <<<"$entry"
-  for variant in fixed legacy; do
+  IFS='|' read -r id property disable <<<"$entry"
+  for variant in fixed legacy mutation; do
+    [[ "$variant" != mutation || -n "$disable" ]] || continue
     name="$id-$variant"
+    if [[ "$variant" == mutation ]]; then name="$id-$disable-disabled"; fi
     want "$name" || continue
+    module=SSEScenario.tla
+    [[ -z "$disable" ]] || module=SSELive.tla
     free_mb="$(df -Pm "$scratch" | awk 'NR==2 {print $4}')"
     if (( free_mb < min_free_mb )); then
       echo "Stopping: only $free_mb MB free (minimum $min_free_mb MB). Scratch: $scratch" >&2
@@ -64,7 +70,7 @@ for entry in "${cases[@]}"; do
     log="$scratch/$name.log"
     (cd "$model_dir" && exec java -XX:ActiveProcessorCount=2 -Xmx512m \
       -cp "$jar" tlc2.TLC -deadlock -cleanup -checkpoint 0 \
-      -workers "$workers" -metadir "$meta" -config "$name.cfg" SSELive.tla) >"$log" 2>&1 &
+      -workers "$workers" -metadir "$meta" -config "$name.cfg" "$module") >"$log" 2>&1 &
     pid=$!
     capped=0
     while kill -0 "$pid" 2>/dev/null; do
@@ -81,14 +87,17 @@ for entry in "${cases[@]}"; do
     code=$?
     set -e
     used_kb="$(du -sk "$scratch" | awk '{print $1}')"
+    states="$(grep -Eo '[0-9,]+ distinct states found' "$log" | tail -1 | awk '{gsub(/,/, "", $1); print $1}' || true)"
     result=UNEXPECTED
     if (( capped )); then
       result=CAPPED
     elif [[ "$variant" == fixed ]] && (( code == 0 )) &&
          grep -q 'No error has been found' "$log" &&
-         grep -q '9 distinct states found' "$log"; then
+         [[ -n "$states" ]] &&
+         { { [[ -n "$disable" ]] && (( states > 9 )); } ||
+           { [[ -z "$disable" ]] && (( states >= 9 )); }; }; then
       result=ok
-    elif [[ "$variant" == legacy ]] &&
+    elif [[ "$variant" != fixed ]] &&
          { (( code == 12 )) ||
            { (( code == 13 )) &&
              [[ "$property" == EventuallyConnected || "$property" == ViewConvergesToDurable ]]; }; } &&
@@ -99,7 +108,7 @@ for entry in "${cases[@]}"; do
       result=ok
     fi
     [[ "$result" == ok ]] || failures=$((failures + 1))
-    printf '%-18s %-8s %-12s %s KiB\n' "$name" "$variant" "$result" "$used_kb"
+    printf '%-18s %-8s %-12s %s states, %s KiB\n' "$name" "$variant" "$result" "${states:-?}" "$used_kb"
     if [[ "$result" != ok ]]; then
       echo "  $name: exit $code; inspect $log" >&2
     fi

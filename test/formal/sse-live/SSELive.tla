@@ -1,244 +1,207 @@
 ------------------------------- MODULE SSELive -------------------------------
-EXTENDS Naturals, Sequences, FiniteSets, TLC
+EXTENDS Naturals, Sequences, FiniteSets
 
-\* A bounded, one-client handoff model. The durable journal has three ordered
-\* mutations. Scenario selects one catalogue stimulus; Legacy selects the
-\* faulty transition for that stimulus. The fixed transition is the contract,
-\* not a claim that every open PR has landed on this branch.
-CONSTANTS Scenario, Legacy
+\* A one-client, three-event model of #626's actual handoff. TLC may schedule
+\* each enabled action in any order. IDs are journal positions in one source
+\* incarnation; they are not production FleetDB cursor encodings.
+CONSTANTS Scenario, Legacy, Disable
+N == 3
+FastCap == 1
+RetryCap == 1
+ClientCap == 3
 
-VARIABLES step, durable, floor, source, resume, resumeSource, registered,
-          fast, retryQ, clientBuf, replayCursor, replayFence, replayDone,
-          subscriberEpoch, readEpoch, delivered, frameCursor, frameComplete,
-          checkpoint, oldCheckpoint, checkpointSource, applied, connected,
-          recovery, viewThrough, snapshotThrough, manifestThrough,
-          scope, frameScope
+FollowPages == ~(Legacy /\ Scenario = "626a") /\ Disable # "page"
+SyncRegister == ~(Legacy /\ Scenario = "626b") /\ Disable # "register"
+Deduplicate == ~(Legacy /\ Scenario = "626c") /\ Disable # "dedup"
+GuardConnected == ~(Legacy /\ Scenario = "626d") /\ Disable # "connected"
+OrderAdmission == ~(Legacy /\ Scenario = "643") /\ Disable # "order"
+SignalOverflow == Scenario = "612a" /\ ~Legacy /\ Disable # "overflow"
 
-vars == <<step, durable, floor, source, resume, resumeSource, registered,
-          fast, retryQ, clientBuf, replayCursor, replayFence, replayDone,
-          subscriberEpoch, readEpoch, delivered, frameCursor, frameComplete,
-          checkpoint, oldCheckpoint, checkpointSource, applied, connected,
-          recovery, viewThrough, snapshotThrough, manifestThrough,
-          scope, frameScope>>
-
-Fault(s) == Legacy /\ Scenario = s
+VARIABLE s
+vars == <<s>>
 
 Init ==
-  /\ step = 0
-  /\ durable = <<1, 2>>
-  /\ floor = 0
-  /\ source = 1
-  /\ resume = 0
-  /\ resumeSource = 1
-  /\ registered = FALSE
-  /\ fast = <<>>
-  /\ retryQ = <<>>
-  /\ clientBuf = <<>>
-  /\ replayCursor = 0
-  /\ replayFence = 3
-  /\ replayDone = FALSE
-  /\ subscriberEpoch = 1
-  /\ readEpoch = 1
-  /\ delivered = <<>>
-  /\ frameCursor = 0
-  /\ frameComplete = TRUE
-  /\ checkpoint = 0
-  /\ oldCheckpoint = 0
-  /\ checkpointSource = 1
-  /\ applied = <<>>
-  /\ connected = FALSE
-  /\ recovery = "idle"
-  /\ viewThrough = 0
-  /\ snapshotThrough = 0
-  /\ manifestThrough = 0
-  /\ scope = 1
-  /\ frameScope = 1
+  s = [log |-> <<>>, opened |-> FALSE, registerPending |-> FALSE,
+       registered |-> FALSE, disconnects |-> 0, replayCursor |-> 0,
+       replayDone |-> FALSE, pageCount |-> 0, catchupError |-> FALSE,
+       aborted |-> FALSE, connected |-> FALSE, subCursor |-> 0,
+       fast |-> <<>>, retryQ |-> <<>>, clientBuf |-> <<>>,
+       wire |-> <<>>, replayed |-> {}, applied |-> <<>>,
+       checkpoint |-> 0, oldCheckpoint |-> 0, admitted |-> <<>>,
+       delivered |-> <<>>, resync |-> FALSE, recovered |-> FALSE,
+       recoveryCovered |-> {}]
 
-\* Publish is a durable append; the third mutation can then race a reconnect.
-Publish ==
-  /\ step = 0
-  /\ step' = 1
-  /\ durable' = IF Scenario = "626b" THEN durable ELSE Append(durable, 3)
-  /\ UNCHANGED <<floor, source, resume, resumeSource, registered,
-                  fast, retryQ, clientBuf, replayCursor, replayFence,
-                  replayDone, subscriberEpoch, readEpoch, delivered,
-                  frameCursor, frameComplete, checkpoint, oldCheckpoint,
-                  checkpointSource, applied, connected, recovery, viewThrough,
-                  snapshotThrough, manifestThrough, scope, frameScope>>
+\* FleetDB commit and subscriber delivery are separate. An event may commit
+\* before open, during paged replay, or after replay but before hub admission.
+Commit ==
+  /\ Len(s.log) < N
+  /\ s' = [s EXCEPT !.log = Append(@, Len(s.log) + 1)]
 
-\* Opening registers before the storage read. The #626b mutation allows the
-\* asynchronous hub registration to be overtaken by a broadcast.
+\* #626 registers under the hub mutex before it reads storage. v5 enqueues
+\* registration for the hub loop, so a broadcast may overtake HubAddClient.
 Open ==
-  /\ step = 1
-  /\ step' = 2
-  /\ registered' = ~Fault("626b")
-  /\ replayFence' = IF Scenario = "626b" THEN 2 ELSE 3
-  /\ source' = IF Scenario = "670" THEN 2 ELSE source
-  /\ resumeSource' = IF Scenario = "670" /\ ~Legacy THEN 2 ELSE resumeSource
-  /\ floor' = IF Scenario = "672" \/ Scenario = "FD1" THEN 2 ELSE floor
-  /\ resume' = IF Scenario = "672" \/ Scenario = "FD1" THEN 1 ELSE resume
-  /\ oldCheckpoint' = IF Scenario = "644" \/ Scenario = "627b" \/ Scenario = "H2"
-                       THEN 3 ELSE oldCheckpoint
-  /\ checkpoint' = IF Scenario = "644" \/ Scenario = "627b" \/ Scenario = "H2"
-                    THEN 3 ELSE checkpoint
-  /\ scope' = scope
-  /\ UNCHANGED <<durable, fast, retryQ, clientBuf,
-                  replayCursor, replayDone, subscriberEpoch,
-                  readEpoch, delivered, frameCursor, frameComplete,
-                  checkpointSource, applied, connected, recovery, viewThrough,
-                  snapshotThrough, manifestThrough, frameScope>>
+  /\ ~s.opened
+  /\ s.disconnects <= 1
+  /\ s' = [s EXCEPT !.opened = TRUE,
+                    !.registerPending = ~SyncRegister,
+                    !.registered = SyncRegister,
+                    !.replayCursor = s.checkpoint,
+                    !.replayDone = FALSE,
+                    !.pageCount = 0,
+                    !.catchupError = FALSE,
+                    !.aborted = FALSE,
+                    !.connected = FALSE,
+                    !.replayed = {},
+                    !.clientBuf = <<>>,
+                    !.wire = <<>>]
 
-\* Replay is fenced at a captured head and follows pages. A subscription
-\* epoch belongs to one connection, even if the registry later replaces it.
-ReadPages ==
-  /\ step = 2
-  /\ step' = 3
-  /\ registered' = ~Fault("626b")
-  /\ replayCursor' = IF Fault("626a") \/ Fault("640a") THEN 1
-                     ELSE IF Scenario = "626b" THEN 2 ELSE 3
-  /\ replayDone' = ~(Fault("626d") \/ Fault("640b") \/ Fault("655"))
-  /\ readEpoch' = IF Fault("656") THEN 2 ELSE readEpoch
-  /\ fast' = IF Fault("643") THEN <<2>> ELSE <<1>>
-  /\ retryQ' = IF Fault("643") THEN <<1>> ELSE <<2>>
-  /\ clientBuf' = IF Scenario = "626b" THEN <<1, 2>>
-                   ELSE IF Fault("612a") THEN <<1, 3>> ELSE <<1, 2, 3>>
-  /\ UNCHANGED <<durable, floor, source, resume, resumeSource, replayFence,
-                  subscriberEpoch, delivered, frameCursor, frameComplete,
-                  checkpoint, oldCheckpoint, checkpointSource, applied,
-                  connected, recovery, viewThrough, snapshotThrough,
-                  manifestThrough, scope, frameScope>>
+HubAddClient ==
+  /\ s.opened /\ s.registerPending
+  /\ s' = [s EXCEPT !.registerPending = FALSE, !.registered = TRUE]
 
-\* The filter rebind is a separate browser-scope transition. A stale writer
-\* can still send from the old workspace in the H4 legacy configuration.
-Rebind ==
-  /\ step = 3
-  /\ Scenario # "626b"
-  /\ step' = 4
-  /\ scope' = IF Scenario = "H4" THEN 2 ELSE scope
-  /\ frameScope' = IF Scenario = "H4" /\ ~Legacy THEN 2 ELSE frameScope
-  /\ UNCHANGED <<durable, floor, source, resume, resumeSource, registered,
-                  fast, retryQ, clientBuf, replayCursor, replayFence,
-                  replayDone, subscriberEpoch, readEpoch, delivered,
-                  frameCursor, frameComplete, checkpoint, oldCheckpoint,
-                  checkpointSource, applied, connected, recovery, viewThrough,
-                  snapshotThrough, manifestThrough>>
+\* The subscriber visits committed events in order. With a nonempty retry
+\* queue, the fixed hub does not put a later event into the fast channel.
+\* Only #612a explores a full-both-queues drop; other cases hold admission
+\* until there is capacity, isolating their named handoff mechanisms.
+FastAdmissible == Len(s.fast) < FastCap /\ (~OrderAdmission \/ Len(s.retryQ) = 0)
+RetryAdmissible == Len(s.retryQ) < RetryCap
+Broadcast ==
+  /\ s.subCursor < Len(s.log)
+  /\ Scenario = "612a" \/ FastAdmissible \/ RetryAdmissible
+  /\ LET e == s.subCursor + 1
+         fastPath == FastAdmissible
+         retryPath == ~fastPath /\ RetryAdmissible
+     IN s' = [s EXCEPT !.subCursor = e,
+                       !.admitted = Append(@, e),
+                       !.fast = IF fastPath THEN Append(@, e) ELSE @,
+                       !.retryQ = IF retryPath THEN Append(@, e) ELSE @,
+                       !.resync = IF ~fastPath /\ ~retryPath /\ SignalOverflow
+                                   THEN TRUE ELSE @]
 
-\* The #626b publication occurs after the catch-up read, while an async
-\* registration is still pending. The fixed registration already owns it.
-PublishLate ==
-  /\ step = 3
-  /\ Scenario = "626b"
-  /\ step' = 4
-  /\ durable' = Append(durable, 3)
-  /\ clientBuf' = IF registered THEN Append(clientBuf, 3) ELSE clientBuf
-  /\ registered' = TRUE
-  /\ UNCHANGED <<floor, source, resume, resumeSource,
-                  fast, retryQ, replayCursor, replayFence,
-                  replayDone, subscriberEpoch, readEpoch, delivered,
-                  frameCursor, frameComplete, checkpoint, oldCheckpoint,
-                  checkpointSource, applied, connected, recovery, viewThrough,
-                  snapshotThrough, manifestThrough, scope, frameScope>>
+DrainRetry ==
+  /\ Len(s.fast) < FastCap /\ Len(s.retryQ) > 0
+  /\ s' = [s EXCEPT !.fast = Append(@, Head(s.retryQ)),
+                    !.retryQ = Tail(@)]
 
-\* The stream writer may overlap replay. The browser accepts only complete
-\* mutation frames; cursorless frames must leave the durable checkpoint alone.
-Deliver ==
-  /\ step = 4
-  /\ step' = 5
-  /\ delivered' = Append(fast \o retryQ, 3)
-  /\ frameCursor' = 3
-  /\ frameComplete' = ~Fault("657")
-  /\ checkpoint' = CASE Fault("642") \/ Fault("H1") -> 4
-                    [] Fault("644") \/ Fault("H2") -> 2
-                    [] Fault("627b") -> 0
-                    [] Fault("640a") -> 1
-                    [] Scenario = "644" \/ Scenario = "627b" \/ Scenario = "H2" -> 3
-                    [] OTHER -> 3
-  /\ checkpointSource' = IF Fault("670") THEN 1 ELSE source
-  /\ applied' = CASE Scenario = "626a" -> SubSeq(durable, 1, replayCursor)
-                [] Scenario = "626b" \/ Scenario = "612a" -> clientBuf
-                [] Fault("FD2") -> <<1, 3>>
-                [] Fault("626c") -> <<1, 2, 3, 2>>
-                [] Fault("610a") -> <<1, 2, 3, 1>>
-                [] Fault("657") -> <<1, 2>>
-                [] OTHER -> <<1, 2, 3>>
-  /\ connected' = IF Scenario = "672" \/ Scenario = "FD1"
-                   THEN Legacy ELSE ~Fault("655")
-  /\ recovery' = IF Fault("672") \/ Fault("FD1")
-                  THEN "idle" ELSE "running"
-  /\ frameScope' = IF Fault("H4") THEN 1 ELSE scope
-  /\ snapshotThrough' = 3
-  /\ manifestThrough' = IF Fault("669") THEN 2 ELSE 3
-  /\ UNCHANGED <<durable, floor, source, resume, resumeSource, registered,
-                  fast, retryQ, clientBuf, replayCursor, replayFence,
-                  replayDone, subscriberEpoch, readEpoch, oldCheckpoint,
-                  viewThrough, scope>>
+HubFanOut ==
+  /\ Len(s.fast) > 0
+  /\ LET e == Head(s.fast)
+         sent == s.registered /\ Len(s.clientBuf) < ClientCap
+     IN s' = [s EXCEPT !.fast = Tail(@),
+                       !.clientBuf = IF sent THEN Append(@, e) ELSE @,
+                       !.delivered = IF sent THEN Append(@, e) ELSE @,
+                       !.resync = IF s.registered /\ ~sent
+                                   THEN TRUE ELSE @]
 
-\* A lost connection offers a recovery manifest. The browser does not count
-\* that offer as a successful read.
+\* Page size is one. #626 follows all pages; the v5 mutation stops after
+\* the first. replayed is exactly the handler's client.replayed cursor set.
+CatchUpReadPage ==
+  /\ s.opened /\ ~s.replayDone /\ ~s.catchupError
+  /\ s.replayCursor < Len(s.log)
+  /\ LET e == s.replayCursor + 1
+     IN s' = [s EXCEPT !.replayCursor = e,
+                       !.pageCount = @ + 1,
+                       !.wire = Append(@, e),
+                       !.replayed = @ \cup {e},
+                       !.replayDone = (~FollowPages \/ e = Len(s.log))]
+
+FinishCatchUp ==
+  /\ s.opened /\ ~s.replayDone /\ ~s.catchupError
+  /\ s.replayCursor = Len(s.log)
+  /\ s' = [s EXCEPT !.replayDone = TRUE]
+
+\* A backend read error cannot be reported as successful replay. The legacy
+\* branch models the swallowed error that still permits connected.
+CatchUpError ==
+  /\ Scenario = "626d" /\ s.opened
+  /\ ~s.replayDone /\ ~s.catchupError
+  /\ s' = [s EXCEPT !.catchupError = TRUE,
+                    !.aborted = GuardConnected,
+                    !.replayDone = ~GuardConnected]
+
+\* streamLoop starts only after catch-up. #626 suppresses any queued live
+\* cursor already emitted by replay; legacy sends the overlap again.
+WriteLive ==
+  /\ s.opened /\ s.replayDone /\ Len(s.clientBuf) > 0
+  /\ LET e == Head(s.clientBuf)
+     IN s' = [s EXCEPT !.clientBuf = Tail(@),
+                       !.wire = IF Deduplicate /\ e \in s.replayed
+                                THEN @ ELSE Append(@, e)]
+
+\* SSE frames are applied in wire order. A completed mutation frame advances
+\* the browser checkpoint; a disconnected, unaccepted frame does not.
+BrowserApply ==
+  /\ s.opened /\ Len(s.wire) > 0
+  /\ LET e == Head(s.wire)
+     IN s' = [s EXCEPT !.wire = Tail(@),
+                       !.applied = Append(@, e),
+                       !.oldCheckpoint = s.checkpoint,
+                       !.checkpoint = IF e > s.checkpoint THEN e ELSE @]
+
+WriteConnected ==
+  /\ s.opened /\ s.replayDone /\ ~s.connected /\ ~s.aborted
+  /\ Len(s.wire) = 0
+  /\ (~GuardConnected \/ ~s.catchupError)
+  /\ s' = [s EXCEPT !.connected = TRUE]
+
 Disconnect ==
-  /\ step = 5
-  /\ step' = 6
-  /\ connected' = FALSE
-  /\ UNCHANGED <<durable, floor, source, resume, resumeSource, registered,
-                  fast, retryQ, clientBuf, replayCursor, replayFence,
-                  replayDone, subscriberEpoch, readEpoch, delivered,
-                  frameCursor, frameComplete, checkpoint, oldCheckpoint,
-                  checkpointSource, applied, recovery, viewThrough,
-                  snapshotThrough, manifestThrough, scope, frameScope>>
+  \* #626c checks catch-up/live overlap within one connection. A stale
+  \* broadcast across reconnect is a separate uncovered behaviour.
+  /\ Scenario # "626c"
+  /\ s.opened /\ s.disconnects = 0
+  /\ s' = [s EXCEPT !.opened = FALSE,
+                    !.registerPending = FALSE,
+                    !.registered = FALSE,
+                    !.disconnects = 1,
+                    !.replayDone = FALSE,
+                    !.connected = FALSE,
+                    !.clientBuf = <<>>,
+                    !.wire = <<>>]
 
-RecoveryOffer ==
-  /\ step = 6
-  /\ step' = 7
-  /\ recovery' = "running"
-  /\ UNCHANGED <<durable, floor, source, resume, resumeSource, registered,
-                  fast, retryQ, clientBuf, replayCursor, replayFence,
-                  replayDone, subscriberEpoch, readEpoch, delivered,
-                  frameCursor, frameComplete, checkpoint, oldCheckpoint,
-                  checkpointSource, applied, connected, viewThrough,
-                  snapshotThrough, manifestThrough, scope, frameScope>>
+\* A resync is a fresh durable read, not another application of the queued
+\* mutation frames. It replaces the browser view at a committed prefix.
+Recover ==
+  /\ s.resync /\ ~s.recovered /\ Len(s.log) = N
+  /\ s' = [s EXCEPT !.recovered = TRUE,
+                    !.recoveryCovered = {s.log[i] : i \in 1..Len(s.log)},
+                    !.applied = <<>>,
+                    !.oldCheckpoint = s.checkpoint,
+                    !.checkpoint = Len(s.log),
+                    !.replayCursor = Len(s.log),
+                    !.replayDone = TRUE,
+                    !.clientBuf = <<>>,
+                    !.wire = <<>>,
+                    !.replayed = {1, 2, 3}]
 
-\* A recovery offer is acknowledged only after a fresh successful read. An
-\* expired or foreign-source resume must recover before connected is reported.
-CommitView ==
-  /\ step = 7
-  /\ step' = 8
-  /\ recovery' = IF Fault("V1") \/ Fault("672") \/ Fault("FD1")
-                  THEN "idle" ELSE "ok"
-  /\ viewThrough' = IF Fault("V1") \/ Fault("645") THEN 1 ELSE 3
-  /\ connected' = ~Fault("655")
-  /\ UNCHANGED <<durable, floor, source, resume, resumeSource, registered,
-                  fast, retryQ, clientBuf, replayCursor, replayFence,
-                  replayDone, subscriberEpoch, readEpoch, delivered,
-                  frameCursor, frameComplete, checkpoint, oldCheckpoint,
-                  checkpointSource, applied, snapshotThrough,
-                  manifestThrough, scope, frameScope>>
-
-Next == Publish \/ Open \/ ReadPages \/ Rebind \/ PublishLate \/ Deliver \/
-        Disconnect \/ RecoveryOffer \/ CommitView
+Next == Commit \/ Open \/ HubAddClient \/ Broadcast \/ DrainRetry \/
+        HubFanOut \/ CatchUpReadPage \/ FinishCatchUp \/ CatchUpError \/
+        WriteLive \/ BrowserApply \/ WriteConnected \/ Disconnect \/ Recover
 Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
 
+AppliedSet == {s.applied[i] : i \in 1..Len(s.applied)}
+LogSet == {s.log[i] : i \in 1..Len(s.log)}
+Quiescent ==
+  /\ s.connected /\ Len(s.log) = N /\ s.subCursor = N
+  /\ Len(s.fast) = 0 /\ Len(s.retryQ) = 0
+  /\ Len(s.clientBuf) = 0 /\ Len(s.wire) = 0
+  /\ ~s.registerPending
+  /\ (~s.resync \/ s.recovered)
+
 TypeOK ==
-  /\ step \in 0..8
-  /\ checkpoint \in 0..4
-  /\ replayCursor \in 0..3
-  /\ applied \in Seq(0..3)
-
-NoLostEvent == step < 5 \/ {durable[i] : i \in 1..Len(durable)}
-                          \subseteq {applied[i] : i \in 1..Len(applied)}
-NoDoubleApply == \A i, j \in 1..Len(applied): i # j => applied[i] # applied[j]
-AdmissionOrder == step < 5 \/ delivered = durable
-CheckpointIsDurable == checkpoint \in 0..3 /\ (checkpoint = 0 \/ checkpointSource = source)
-CheckpointMonotonic == checkpoint >= oldCheckpoint
-CheckpointFromCompleteFrame == checkpoint <= oldCheckpoint \/ frameComplete
-ConnectedImpliesReplayed == ~connected \/ replayDone
-ReplayTerminates == step < 5 \/ (replayDone /\ checkpoint >= replayFence)
-CursorBoundToSource == resumeSource = source /\ readEpoch = subscriberEpoch
-ExpiredCursorForcesRecovery == floor <= resume \/ ~connected \/ recovery = "ok"
-SnapshotCursorConsistent == step < 5 \/ snapshotThrough = manifestThrough
-RecoverySuccessIsFresh == step < 8 \/ recovery # "ok" \/ viewThrough = 3
-FilterRespected == step < 5 \/ frameScope = scope
-
-EventuallyDone == <> (step = 8)
-EventuallyConnected == <> connected
-ViewConvergesToDurable == <> (viewThrough = 3)
+  /\ s.log \in Seq(1..N)
+  /\ s.applied \in Seq(1..N)
+  /\ s.replayCursor \in 0..N
+  /\ s.checkpoint \in 0..N
+  /\ s.disconnects \in 0..1
+NoLostEvent == ~Quiescent \/ LogSet \subseteq (AppliedSet \cup s.recoveryCovered)
+NoDoubleApply == \A i, j \in 1..Len(s.applied): i # j => s.applied[i] # s.applied[j]
+AdmissionOrder == \A i, j \in 1..Len(s.delivered): i < j => s.delivered[i] < s.delivered[j]
+CheckpointIsDurable == s.checkpoint \in 0..Len(s.log)
+CheckpointMonotonic == s.checkpoint >= s.oldCheckpoint
+ConnectedImpliesReplayed == ~s.connected \/ (s.replayDone /\ ~s.catchupError)
+ReplayTerminates == []((s.opened /\ Len(s.log) = N /\ ~s.catchupError)
+                      ~> (s.replayDone \/ s.catchupError \/ s.aborted))
+RecoveryProgress == []((s.resync /\ Len(s.log) = N) ~> s.recovered)
+EventuallyQuiescent == <> Quiescent
+EventuallySettled == <> (Quiescent \/ s.aborted)
 =============================================================================
