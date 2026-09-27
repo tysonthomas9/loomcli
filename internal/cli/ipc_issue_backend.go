@@ -114,6 +114,17 @@ func (b *ipcIssueBackend) Create(ctx context.Context, params backend.CreateParam
 	return b.direct.Create(ctx, params)
 }
 
+// Archive is not an IPC-routed mutation: the daemon's lease fence covers the
+// operational verbs an agent uses on its own task (Claim/Update/Close/Release),
+// and archiving is an operator action taken from the UI. It goes direct.
+func (b *ipcIssueBackend) Archive(ctx context.Context, id string, params backend.ArchiveParams) error {
+	return b.direct.Archive(ctx, id, params)
+}
+
+func (b *ipcIssueBackend) Unarchive(ctx context.Context, id string) error {
+	return b.direct.Unarchive(ctx, id)
+}
+
 func (b *ipcIssueBackend) Reopen(ctx context.Context, id string, params backend.ReopenParams) error {
 	return b.direct.Reopen(ctx, id, params)
 }
