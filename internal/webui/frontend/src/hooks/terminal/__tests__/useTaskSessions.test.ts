@@ -136,6 +136,39 @@ describe("useTaskSessions", () => {
       expect(mockGetSessions).toHaveBeenLastCalledWith("test-ws-id", "task-2");
     });
 
+    it.runIf(process.env.LOOM_SESSION_REPLAY === "1")(
+      "sessions replay #376: starts the new task fetch while the old one is pending",
+      async () => {
+        let resolveOld: ((value: SessionRecord[]) => void) | undefined;
+        mockGetSessions.mockImplementationOnce(
+          () =>
+            new Promise<SessionRecord[]>((resolve) => {
+              resolveOld = resolve;
+            }),
+        );
+        mockGetSessions.mockResolvedValueOnce([
+          createMockSession({ task_id: "task-2", session_id: "new-session" }),
+        ]);
+
+        const { result, rerender } = renderHook(
+          ({ taskId }: { taskId: string }) => useTaskSessions(taskId),
+          { initialProps: { taskId: "task-1" } },
+        );
+        rerender({ taskId: "task-2" });
+        await flushPromises();
+        expect(mockGetSessions).toHaveBeenCalledWith("test-ws-id", "task-2");
+
+        await act(async () => {
+          resolveOld?.([
+            createMockSession({ task_id: "task-1", session_id: "old-session" }),
+          ]);
+        });
+        expect(
+          result.current.sessions.map((session) => session.session_id),
+        ).toEqual(["new-session"]);
+      },
+    );
+
     it("clears sessions when taskId changes to null", async () => {
       mockGetSessions.mockResolvedValueOnce([
         createMockSession({ session_id: "s1" }),
