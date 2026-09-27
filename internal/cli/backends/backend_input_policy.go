@@ -20,9 +20,7 @@ import (
 // pkg/oneshot's turnConfig ships InputPolicy{"trust_prompt": answer "proceed"}
 // plus OnInputRequest = AutoAcceptAnswer, and AutoAcceptAnswer answers ANY
 // prompt with its affirmative option, falling back to the FIRST option when it
-// finds none. claude-code renders both the harmless folder-trust dialog and the
-// `--dangerously-skip-permissions` acceptance screen under the same prompt
-// kind, so adopting that default verbatim auto-accepts a skip-all-permissions
+// finds none. Adopting that default verbatim auto-accepts a skip-all-permissions
 // launch — undoing the role safety knobs (allowed_tools / denied_tools /
 // read_only) that were just made real. The role has to name the kinds it will
 // auto-accept, and everything it did not name is denied.

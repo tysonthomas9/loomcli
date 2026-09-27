@@ -193,9 +193,9 @@ allow_harness_prompts() {
   role=""
   for role in "$@"; do
     if ! loom role set "$role" input_policy \
-      "default=deny,trust_prompt=allow,approval_prompt=allow" >/dev/null 2>&1; then
+      "default=deny,trust_prompt=allow,approval_prompt=allow,bypass_acceptance=allow" >/dev/null 2>&1; then
       echo "[local-mode] FATAL: could not grant harness-prompt permissions to role ${role};" \
-        "a TUI backend would hang on the trust dialog" >&2
+        "a TUI backend would hang on the trust dialog, or exit on the bypass screen" >&2
       return 1
     fi
   done
