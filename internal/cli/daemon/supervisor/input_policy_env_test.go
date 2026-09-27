@@ -12,7 +12,7 @@ func roleEnvMap(t *testing.T, rc cfgpkg.RoleConfig) map[string]string {
 	t.Helper()
 	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"}, RoleConfig: rc}
 	out := make(map[string]string)
-	for _, entry := range appendRoleEnv(nil, ap) {
+	for _, entry := range appendRoleEnv(nil, ap, defaultMaxRunDurationSeconds) {
 		if idx := strings.IndexByte(entry, '='); idx >= 0 {
 			out[entry[:idx]] = entry[idx+1:]
 		}
