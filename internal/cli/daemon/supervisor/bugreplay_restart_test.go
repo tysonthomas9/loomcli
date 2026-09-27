@@ -737,3 +737,34 @@ func TestBugReplay_PR419_ShutdownIsBounded(t *testing.T) {
 		t.Fatal("Supervisor.Stop did not return within 30s with one wedged supervise goroutine (unbounded Wg.Wait)")
 	}
 }
+
+// #455: after one agent hits an account-level wall (auth, billing, usage
+// limit), siblings on the same account keep claiming into it and burn their
+// budgets. Root cause: restart.go:60-107 restart decisions are per agent,
+// with no shared wall that the pre-spawn gate consults.
+func TestBugReplay_PR455_AccountWallParksSiblings(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", tmp)
+	mock := &clitest.MockIssueBackend{ReadyResult: []backend.IssueData{{ID: "loom-455", Title: "work", Status: "open", IssueType: "task"}}}
+	s := restartSupervisor(nil)
+	s.ProjectDir = t.TempDir()
+	s.IssueBackend = mock
+
+	walled := &AgentProcess{Entry: config.AgentEntry{Worktree: "replay-455a", Role: "task"}}
+	restartHarnessError(walled, wrapper.ErrBilling, 1)
+	s.shouldRestart(walled) // agent A stops on the billing wall
+
+	sibling := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "replay-455b", Role: "task"},
+		WorktreePath: t.TempDir(),
+		StopCh:       make(chan struct{}),
+		Done:         make(chan struct{}),
+	}
+	s.preFlightSetup(sibling)
+	for _, c := range mock.Calls {
+		if c.Method == "Ready" || c.Method == "ClaimIssue" {
+			t.Fatalf("sibling ran %s into an account-level billing wall another agent just hit", c.Method)
+		}
+	}
+}

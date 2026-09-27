@@ -18,12 +18,12 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
-// #443: one agent with an unresolvable role (or worktree) aborts supervisor
-// init, so no agent in the workspace is supervised.
-// Root cause: daemon.go:320-323 initSupervisorAgents returns on the first
-// error. The result is discarded with `_ =` because the fix changes its type
-// (error -> []UnavailableAgent); the observable is sup.Agents.
-func TestBugReplay_PR443_OneBadAgentDoesNotAbortBoot(t *testing.T) {
+// restartBootOneBadAgent boots two agents, the first with an unresolvable
+// role, and returns how many were supervised. initSupervisorAgents is called
+// as a bare statement because its result type differs across the fix heads
+// (error on v5, []UnavailableAgent on #443, nothing on #648).
+func restartBootOneBadAgent(t *testing.T) *supervisor.Supervisor {
+	t.Helper()
 	cfg := &cfgpkg.DaemonConfig{}
 	sup := &supervisor.Supervisor{
 		ConfigSnapshot: func() *cfgpkg.DaemonConfig { return cfg },
@@ -33,9 +33,28 @@ func TestBugReplay_PR443_OneBadAgentDoesNotAbortBoot(t *testing.T) {
 		{Worktree: t.TempDir(), Role: "replay-no-such-role"}, // broken definition first
 		{Worktree: t.TempDir(), Role: "task"},                // healthy sibling
 	}
-	_ = initSupervisorAgents(sup, agents, cfg.Roles)
+	initSupervisorAgents(sup, agents, cfg.Roles)
+	return sup
+}
+
+// #443: one agent with an unresolvable role (or worktree) aborts supervisor
+// init, so no agent in the workspace is supervised.
+// Root cause: daemon.go:320-323 initSupervisorAgents returns on the first error.
+func TestBugReplay_PR443_OneBadAgentDoesNotAbortBoot(t *testing.T) {
+	sup := restartBootOneBadAgent(t)
 	if len(sup.Agents) != 1 || sup.Agents[0].Entry.Role != "task" {
 		t.Fatalf("supervised agents = %d; the healthy agent was dropped because a sibling's role is unresolvable", len(sup.Agents))
+	}
+}
+
+// #648 (reconstructs closed #321, history N11), item "one bad definition
+// aborts init": same root cause as #443 (daemon.go:320-323). The other #648
+// items (per-agent claim filters, reviving manually stopped agents in
+// daemon_reconciler.go:277 diffAgents) are not replayed here.
+func TestBugReplay_PR648_OneBadAgentDoesNotAbortBoot(t *testing.T) {
+	sup := restartBootOneBadAgent(t)
+	if len(sup.Agents) != 1 || sup.Agents[0].Entry.Role != "task" {
+		t.Fatalf("supervised agents = %d; one bad agent definition aborted init for the whole workspace", len(sup.Agents))
 	}
 }
 
