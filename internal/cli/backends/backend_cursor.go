@@ -38,7 +38,7 @@ var cursorAuthStatus = defaultCursorAuthStatus
 // buildCursorInteractiveCmd constructs the exec.Cmd for interactive Cursor invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildCursorInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
-	cmd := exec.Command("cursor-agent", "--force", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
+	cmd := exec.Command("cursor-agent", cursorInteractiveArgs(prompt)...) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
 	cmd.Dir = workDir
 	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
@@ -51,6 +51,27 @@ func buildCursorInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	return cmd
 }
 
+// cursorInteractiveArgs builds the interactive argv. An empty prompt means the
+// persona is suppressed (--prompt builtin:none) and no positional is passed:
+// `cursor-agent --force ""` is not the same as `cursor-agent --force`.
+func cursorInteractiveArgs(prompt string) []string {
+	args := []string{"--force"}
+	if prompt != "" {
+		args = append(args, prompt)
+	}
+	return args
+}
+
+// cursorNonInteractiveArgs builds the headless print-mode argv, omitting the
+// positional prompt when it is suppressed.
+func cursorNonInteractiveArgs(prompt string) []string {
+	args := []string{"-p", "--force"}
+	if prompt != "" {
+		args = append(args, prompt)
+	}
+	return args
+}
+
 func defaultCursorInvoker(workDir, prompt, agentName string) error {
 	if err := validateSafetyKnobsFromEnv("cursor"); err != nil {
 		return err
@@ -61,7 +82,7 @@ func defaultCursorInvoker(workDir, prompt, agentName string) error {
 		fmt.Println("Launching Cursor agent (non-interactive, no TTY)...")
 		fmt.Println("")
 
-		cmd := exec.Command("cursor-agent", "-p", "--force", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
+		cmd := exec.Command("cursor-agent", cursorNonInteractiveArgs(prompt)...) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
 		cmd.Dir = workDir
 		env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 		if agentName != "" {
