@@ -2,7 +2,7 @@ export { HomeRail } from "./HomeRail";
 export type { HomeRailProps } from "./HomeRail";
 export {
   ThisWorkspaceCard,
-  deriveThisWorkspaceCounts,
+  workspaceCountsFromStats,
 } from "./ThisWorkspaceCard";
 export type {
   ThisWorkspaceCardProps,

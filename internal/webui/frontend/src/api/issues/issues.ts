@@ -182,14 +182,19 @@ export async function getReadyIssues(
 /**
  * Get project statistics.
  */
-export async function getStats(workspaceId: string): Promise<Statistics> {
+export async function getStats(
+  workspaceId: string,
+  requestOptions?: { signal?: AbortSignal },
+): Promise<Statistics> {
   const { data, error, response } = await api.GET(
     "/api/workspaces/{ws}/stats",
-    { params: { path: { ws: workspaceId } } },
+    {
+      params: { path: { ws: workspaceId } },
+      ...(requestOptions?.signal ? { signal: requestOptions.signal } : {}),
+    },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  // This endpoint returns Statistics directly, not wrapped
-  return data as unknown as Statistics;
+  return unwrap(data, response) as Statistics;
 }
 
 /**
