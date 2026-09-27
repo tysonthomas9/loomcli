@@ -38,6 +38,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 )
 
 // maxDriverOpBodyBytes caps inbound driver-op payloads.
@@ -184,7 +185,7 @@ func defaultIssueBackends(baseURL string) func(ws, actor string) (backend.IssueB
 	}
 }
 
-func (m *Module) Register(mux *http.ServeMux) {
+func (m *Module) Register(mux route.Router) {
 	if m.store == nil {
 		return
 	}

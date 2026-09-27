@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -18,7 +19,7 @@ import (
 func setupWorkspaceTestRoutes(t *testing.T) *Server {
 	t.Helper()
 	app := &Server{}
-	app.mux = http.NewServeMux()
+	app.mux = route.NewRecorder()
 	app.multiPool = daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
 	t.Cleanup(func() { _ = app.multiPool.Close() })
 	app.buildHandlers()

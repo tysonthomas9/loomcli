@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -32,7 +33,7 @@ func NewModule(st store.Store, accessCfg ...middleware.FileAccessConfig) *Module
 // Register installs reads for both scopes and role-scope whole-skill and
 // per-document mutations. Workspace mutation patterns are also registered so
 // they return the A3-specific refusal instead of a generic 405.
-func (m *Module) Register(mux *http.ServeMux) {
+func (m *Module) Register(mux route.Router) {
 	if m == nil || m.handler == nil || m.handler.Store == nil {
 		return
 	}
