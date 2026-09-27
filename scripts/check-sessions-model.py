@@ -21,12 +21,12 @@ CASES = {
     "238-terminal-legacy": (12, "Invariant TaskSessionTerminalOnce is violated"),
     "240-legacy": (12, "Invariant NoCrossAttemptClose is violated"),
     "241-barrier-legacy": (12, "Invariant NoFinishFailure is violated"),
+    "241-barrier-stranded": (13, "Temporal properties were violated"),
     "241-sweep-legacy": (13, "Temporal properties were violated"),
-    "682-legacy": (12, "Invariant CompletionNotificationIssued is violated"),
-    "682-notify-mutation": (12, "Invariant CompletionNotificationIssued is violated"),
+    "682-legacy": (13, "Temporal properties were violated"),
     "682-poll-mutation": (13, "Temporal properties were violated"),
     "X1-legacy": (12, "Invariant NoHealWhileLive is violated"),
-    "X4-legacy": (12, "Invariant DriverLeaseLossNoticed is violated"),
+    "X4-legacy": (12, "Invariant NoWriteAfterDriverLeaseLoss is violated"),
     "evidence-fixed": (0, "No error has been found"),
     "373-legacy": (12, "Invariant CompletedImpliesEvidenceOrExplicitCaptureFailure is violated"),
     "H6-legacy": (12, "Invariant UsageNeverOverwrittenByZero is violated"),
@@ -37,9 +37,11 @@ MUTATIONS = {
     "238-terminal-legacy": {"TerminalGuard": "FALSE"},
     "240-legacy": {"AttemptFence": "FALSE"},
     "241-barrier-legacy": {"FinishBarrier": "FALSE"},
+    "241-barrier-stranded": {"FinishBarrier": "FALSE", "ParentSweep": "FALSE",
+                             "AllowCrash": "FALSE", "AllowNewAttempt": "FALSE",
+                             "AllowLeaseLoss": "FALSE"},
     "241-sweep-legacy": {"ParentSweep": "FALSE"},
     "682-legacy": {"NotifyOnFinish": "FALSE"},
-    "682-notify-mutation": {"NotifyOnFinish": "FALSE"},
     "682-poll-mutation": {"PollEnabled": "FALSE"},
     "X1-legacy": {"LivenessHeal": "FALSE"},
     "X4-legacy": {"NoticeLeaseLoss": "FALSE"},
@@ -103,6 +105,12 @@ def main() -> int:
         count = int(distinct[-1].replace(",", "")) if distinct else 0
         depth = int(depths[-1]) if depths else max([int(x) for x in traces + progress], default=0)
         ok = process.returncode == expected_code and diagnostic in body and count >= 10 and depth >= 2
+        if name == "241-barrier-stranded":
+            ok = ok and "<FinishSession " in body and "/\\ finishFailed = TRUE" in body \
+                and "<CrashBeforeFinish " not in body
+        if name == "X4-legacy":
+            ok = ok and "<Heartbeat " in body and "<FinishSession " in body \
+                and "/\\ lateWrite = TRUE" in body
         if not ok:
             failures += 1
         print(f"{name}: {'OK' if ok else 'UNEXPECTED'}; exit={process.returncode}; "

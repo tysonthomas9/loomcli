@@ -53,7 +53,7 @@ Finalize ==
         ELSE IF closeUsage = 0 THEN 0
         ELSE IF hookUsage # 3 THEN hookUsage
         ELSE IF HonestUsage THEN 3 ELSE 0
-  /\ fabricated' = (fabricated \/ (hookUsage = 3 /\ closeUsage = 3 /\ ~HonestUsage))
+  /\ fabricated' = (fabricated \/ (hookUsage = 3 /\ closeUsage = 3 /\ publishedUsage' = 0))
   /\ overwritten' = (overwritten \/ (hookUsage \in {1, 2} /\ publishedUsage' = 0))
   /\ UNCHANGED <<capture, hookUsage, closeUsage>>
 

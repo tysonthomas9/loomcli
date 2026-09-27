@@ -39,16 +39,18 @@ func TestSessionsReplay238ReopenTerminal(t *testing.T) {
 // #375: runner-reported usage must survive the driver session close.
 func TestSessionsReplay375UsageOnClose(t *testing.T) {
 	st := memstore.New()
+	metadata := map[string]string{"runtime": "flue", "task_run_id": "run-2"}
 	_, err := st.AgentSessions().Create(t.Context(), store.AgentSessionCreate{
 		WorkspaceKey: "WS", SessionID: "flue-run-2", AgentID: "worker",
 		Status: domain.AgentSessionRunning,
+		Metadata: metadata,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	executor := HostBridgeTaskExecutor{Store: st}
 	err = executor.finishFlueTaskSession(t.Context(), TaskExecRequest{WorkspaceKey: "WS"},
-		&flueTaskSession{SessionID: "flue-run-2", Metadata: map[string]string{}},
+		&flueTaskSession{SessionID: "flue-run-2", Metadata: metadata},
 		TaskExecResult{Status: domain.TaskRunCompleted, InputTokens: 1200, OutputTokens: 340}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
