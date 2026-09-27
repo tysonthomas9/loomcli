@@ -35,7 +35,15 @@
 # PUPPET-40). It cannot live in supervisor.go: that file is at 986 of the
 # 1000-line LOC ceiling, so folding ~400 lines in would trade this gate for
 # that one. Same sub-split end state applies.
-internal/cli/daemon/supervisor 33
+# Raised 33 -> 34 for account_wall.go (the wall subsystem: cooldown consts,
+# classification, recording, expiry and the pre-spawn gate, PUPPET-272). It is
+# a net MOVE, not new surface — the code came out of restart.go (1000 -> 895)
+# and backend.go (425 -> 361), both of which shrank — but it cannot go back
+# into either: restart.go stood at exactly 1000 of the 1000-line LOC ceiling
+# before this change, so the per-scope wall logic that follows had nowhere to
+# grow there. Same trade abandoned_run.go and quarantine_sweep.go were granted
+# above, and the same sub-split end state applies.
+internal/cli/daemon/supervisor 34
 # internal/cli gained the daemon input-await seam (agent_input_await.go) with
 # the human answer path; 26th file, same sub-split end state applies. The
 # hook-driven exit-code contract lives in exit.go rather than a file of its own,

@@ -91,6 +91,15 @@ func ReadStateFile(path string) (*DaemonState, error) {
 	return &state, nil
 }
 
+// stateExtras carries the whole-daemon conditions that belong in the state
+// file but not in any agent's row: the claim hold, and the credential walls
+// parking agents. Grouped into one struct so a further condition costs a field
+// here rather than another positional parameter at every call site.
+type stateExtras struct {
+	Hold  *supervisor.ClaimHold
+	Walls []supervisor.WallInfo
+}
+
 // writeStateFile writes the daemon-agents.json state file.
 // degradations are the supervisor's active degradation episodes; they ride in
 // the file so every out-of-band reader learns the daemon is impaired without
@@ -104,9 +113,9 @@ func ReadStateFile(path string) (*DaemonState, error) {
 // parked are the agents this daemon deliberately did not claim; they are not in
 // sup.Agents, so they are appended to Agents to stay visible.
 //
-// hold is variadic to carry 0 or 1 claim-hold snapshots without disturbing the
-// existing positional signature (and its call sites).
-func writeStateFile(path string, startedAt time.Time, agents []supervisor.SupervisedAgentStatus, unavailable []UnavailableAgent, parked []ParkedAgent, quarantined []supervisor.QuarantinedTaskInfo, degradations []supervisor.Degradation, maxRetries int, hold ...*supervisor.ClaimHold) error {
+// extras is variadic to carry 0 or 1 snapshots of the daemon-wide conditions
+// without disturbing the existing positional signature (and its call sites).
+func writeStateFile(path string, startedAt time.Time, agents []supervisor.SupervisedAgentStatus, unavailable []UnavailableAgent, parked []ParkedAgent, quarantined []supervisor.QuarantinedTaskInfo, degradations []supervisor.Degradation, maxRetries int, extras ...stateExtras) error {
 	state := DaemonState{
 		PID:              os.Getpid(),
 		StartedAt:        startedAt,
@@ -120,8 +129,9 @@ func writeStateFile(path string, startedAt time.Time, agents []supervisor.Superv
 		// `loom lead` too, which has no Supervisor at all.
 		ProfileDrifts: supervisor.ProfileDrifts(),
 	}
-	if len(hold) > 0 {
-		state.ClaimHold = hold[0]
+	if len(extras) > 0 {
+		state.ClaimHold = extras[0].Hold
+		state.Walls = extras[0].Walls
 	}
 	for i, ap := range agents {
 		state.Agents[i] = toDaemonAgentStatus(ap, maxRetries)
