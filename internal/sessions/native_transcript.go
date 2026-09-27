@@ -4,20 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/atomicfile"
 	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 	"github.com/tysonthomas9/loomcli/internal/sessions/redact"
 )
-
-// redactionEnabled reports whether transcript capture should run content
-// through the gitleaks+entropy redactor. Default on. Set the env var
-// LOOM_REDACT_TRANSCRIPTS=off to disable for local development.
-func redactionEnabled() bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("LOOM_REDACT_TRANSCRIPTS")))
-	return v != "off" && v != "0" && v != "false" && v != "no"
-}
 
 // NativeTranscriptFile is the filename used for the backend's own JSONL
 // transcript inside a session directory. Captured by SyncNativeTranscript
@@ -32,10 +23,8 @@ const NativeTranscriptFile = "agent_transcript.jsonl"
 //
 // format records the encoding (TranscriptFormatRaw | TranscriptFormatCanonical)
 // onto the session metadata so LoadNativeEvents dispatches deterministically.
-// It also selects the redaction policy: a "raw" backend stream is redacted here
-// (this is its only redaction), while a "canonical" stream from the TS leaf is
-// already redacted at the source (local-task-runner redactTranscriptSecrets — the
-// same redaction the driver's transcript artifact ships) and is NOT re-redacted.
+// Redaction policy is format-independent: Go's canonical redactor is the
+// authoritative host-side persistence boundary for raw and canonical streams.
 //
 // Returns nil if srcPath is empty or does not exist (the hook subprocess
 // must never exit nonzero; errors are informational only).
@@ -69,9 +58,7 @@ func (s *Store) SyncNativeTranscript(sessionID, srcPath, format string) error {
 		recordErr(span, err)
 		return fmt.Errorf("read source transcript: %w", err)
 	}
-	// Redact raw backend streams here (their only redaction). Canonical input is
-	// pre-redacted by the TS leaf, so re-redacting would be a duplicate pass.
-	if format != TranscriptFormatCanonical && redactionEnabled() {
+	if redact.Enabled() {
 		redacted, rerr := redact.JSONLBytes(data)
 		if rerr != nil {
 			recordErr(span, rerr)
