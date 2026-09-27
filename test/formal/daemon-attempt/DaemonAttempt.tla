@@ -25,6 +25,12 @@
 (* SharedActor: every agent claims through one FleetDB actor Srv (the      *)
 (* serve/worktree-less fallback of claim.go:237-248; open #761, #541,      *)
 (* #348, #92). FALSE = per-agent actor, as those fixes propose.            *)
+(* NonAtomicClaim splits claim preflight from its write (#538).             *)
+(* HookStatus/HookGuard and DeferredStatus/RespectDeferred model status     *)
+(* writes after exit and a human deferred hold (#780, #734).               *)
+(* LockOnlyRelease splits lock and assignment release for label-only       *)
+(* handoffs (#634); ReviewCrash/RecoverReview cover restart recovery       *)
+(* of review status (#381). All new switches are FALSE in old configs.     *)
 (*                                                                         *)
 (* Time is abstract ticks of the FleetDB Go clock. A daemon may believe   *)
 (* its lease is valid for up to Drift ticks past the server expiry (slow   *)
@@ -38,7 +44,9 @@ CONSTANTS Hosts, Agents, Issues, NoOne, Srv,
           STAGE, TTL, LockTTL, MaxTime, Drift, Pause, Grace, PgSkew,
           MaxFence, MaxInFlight, MaxInc,
           WriteCheck, HolderCheck, TerminalGuard, GuardedSpawn, SessionCheck,
-          Reconcile, SharedActor
+          Reconcile, SharedActor, NonAtomicClaim, HookStatus, HookGuard,
+          DeferredStatus, RespectDeferred, LockOnlyRelease, ReleaseAssignment,
+          ReviewCrash, RecoverReview
 
 ASSUME /\ STAGE \in {1, 2, 3}
        /\ WriteCheck \in {"none", "token", "fence_eq", "fence"}
@@ -46,6 +54,11 @@ ASSUME /\ STAGE \in {1, 2, 3}
        /\ HolderCheck \in BOOLEAN /\ TerminalGuard \in BOOLEAN
        /\ GuardedSpawn \in BOOLEAN
        /\ Reconcile \in BOOLEAN /\ SharedActor \in BOOLEAN
+       /\ NonAtomicClaim \in BOOLEAN /\ HookStatus \in BOOLEAN
+       /\ HookGuard \in BOOLEAN /\ DeferredStatus \in BOOLEAN
+       /\ RespectDeferred \in BOOLEAN /\ LockOnlyRelease \in BOOLEAN
+       /\ ReleaseAssignment \in BOOLEAN /\ ReviewCrash \in BOOLEAN
+       /\ RecoverReview \in BOOLEAN
        /\ \A n \in {TTL, LockTTL, MaxTime, Drift, Pause, Grace, PgSkew,
                     MaxFence, MaxInFlight, MaxInc} : n \in Nat
        /\ TTL > 0 /\ LockTTL > 0
@@ -134,6 +147,7 @@ StaleKinds(a, sid) ==
     \cup (IF sid = lease[a].sid /\ lease[a].active /\ now >= lease[a].exp
             THEN {"expired"} ELSE {})
 Stale(m) == StaleKinds(m.a, m.sid)
+HumanHeld(i) == issue[i].st \in {"closed", "deferred"}
 \* A release only ends a lease; releasing one's own expired lease is benign.
 StaleRel(m) == IF m.sid # lease[m.a].sid THEN {"superseded"} ELSE {}
 
@@ -145,7 +159,10 @@ Foreign(m) ==
     \/ /\ issue[m.i].st = "closed"
        /\ m.k = "reset"
 
-HolderOk(m) == ~HolderCheck \/ (issue[m.i].st = "in_progress" /\ issue[m.i].asg = ActorOf(m.a))
+HolderOk(m) == ~HolderCheck \/
+    (issue[m.i].asg = ActorOf(m.a) /\
+     (issue[m.i].st = "in_progress" \/
+      (DeferredStatus /\ issue[m.i].st = "deferred")))
 
 -----------------------------------------------------------------------------
 Init ==
@@ -190,7 +207,10 @@ Crash(h) ==
     /\ ph' = [ph EXCEPT ![h] = [a \in Agents |-> "idle"]]
     /\ my' = [my EXCEPT ![h] = [a \in Agents |-> NoAtt]]
     /\ hb' = [hb EXCEPT ![h] = [a \in Agents |-> FALSE]]
-    /\ UNCHANGED <<now, lease, nextFence, issue, sess, net, inc, staleW, foreignW, term, sagent>>
+    /\ staleW' = staleW \cup
+        (IF ReviewCrash /\ \E i \in Issues : issue[i].st = "review"
+         THEN {"review_crashed"} ELSE {})
+    /\ UNCHANGED <<now, lease, nextFence, issue, sess, net, inc, foreignW, term, sagent>>
 
 \* Restart with a new OwnerID; the startup orphan sweep kills old children.
 Restart(h) ==
@@ -296,6 +316,16 @@ ReconcileSessions(h, a) ==
 -----------------------------------------------------------------------------
 (* Issue claim: supervisor/claim.go; fleet-db service/issue_service.go.    *)
 
+\* #538: two agents can both finish a non-serializing backend preflight
+\* before either writes. The selected issue is held in my.iss locally.
+ClaimPreflight(h, a, i) ==
+    /\ NonAtomicClaim /\ STAGE >= 2
+    /\ up[h] /\ ph[h][a] = "owned" /\ my[h][a].iss = NoOne
+    /\ issue[i].st = "open" /\ issue[i].holder = NoOne
+    /\ my' = [my EXCEPT ![h][a].iss = i]
+    /\ UNCHANGED <<hb, now, lease, nextFence, issue, sess, net, up, inc, ph, proc,
+                   staleW, foreignW, term, sagent>>
+
 \* T5 ClaimTask (atomic lock + projection write in the model). A same-actor
 \* reclaim is idempotent; an expired lock allows a stale takeover. FleetDB
 \* sees the actor, so under SharedActor a sibling agent passes the
@@ -307,9 +337,11 @@ Claim(h, a, i) ==
     /\ LET I == issue[i]
            x  == ActorOf(a)
            lockFree == I.holder = NoOne \/ I.lexp <= now
-       IN /\ I.st # "closed"
-          /\ lockFree \/ I.holder = x
-          /\ I.st = "open" \/ I.asg = x \/ lockFree
+       IN IF NonAtomicClaim
+            THEN my[h][a].iss = i
+            ELSE /\ I.st # "closed"
+                 /\ lockFree \/ I.holder = x
+                 /\ I.st = "open" \/ I.asg = x \/ lockFree
     /\ PassNow(h, a)
     /\ issue' = [issue EXCEPT ![i] = [st |-> "in_progress", asg |-> ActorOf(a),
                                       holder |-> ActorOf(a), lexp |-> now + LockTTL,
@@ -317,6 +349,8 @@ Claim(h, a, i) ==
     /\ my' = [my EXCEPT ![h][a].iss = i]
     /\ ph' = [ph EXCEPT ![h][a] = "claimed"]
     /\ staleW' = staleW \cup StaleKinds(a, my[h][a].sid)
+                   \cup (IF DeferredStatus /\ issue[i].st = "deferred"
+                         THEN {"deferred_lost"} ELSE {})
     /\ UNCHANGED <<hb, now, lease, nextFence, sess, net, up, inc, proc, foreignW, term, sagent>>
 
 \* Preflight found no work or was gated (supervisor.go:320-330): go straight
@@ -384,6 +418,51 @@ ProcExit(h, a) ==
     /\ UNCHANGED <<hb, now, lease, nextFence, issue, sess, net, up, inc, my,
                    staleW, foreignW, term, sagent>>
 
+\* #780/#734: completion-hook set_status runs after cmd.Wait. A human may
+\* have closed or deferred the issue while the agent was running.
+HumanStatus(i, status) ==
+    /\ STAGE >= 2 /\ (HookStatus \/ DeferredStatus)
+    /\ status \in {"closed", "deferred"}
+    /\ issue[i].st = "in_progress"
+    /\ issue' = [issue EXCEPT ![i].st = status]
+    /\ UNCHANGED <<hb, now, lease, nextFence, sess, net, up, inc, ph, proc, my,
+                   staleW, foreignW, term, sagent>>
+
+HookSetStatus(h, a) ==
+    /\ HookStatus /\ STAGE >= 2
+    /\ up[h] /\ ph[h][a] = "exited" /\ my[h][a].iss # NoOne
+    /\ (~HookGuard \/ issue[my[h][a].iss].st # "closed")
+    /\ (~RespectDeferred \/ issue[my[h][a].iss].st # "deferred")
+    /\ LET i == my[h][a].iss
+       IN /\ issue' = [issue EXCEPT ![i].st = "open"]
+          /\ foreignW' = (foreignW \/ (issue[i].st = "closed"))
+          /\ staleW' = staleW \cup (IF issue[i].st = "deferred"
+                                     THEN {"deferred_lost"} ELSE {})
+    /\ UNCHANGED <<hb, now, lease, nextFence, sess, net, up, inc, ph, proc, my,
+                   term, sagent>>
+
+\* #381: an agent can mark review before the daemon crashes. The restart
+\* recovery pass decides whether review is completed work or needs requeue.
+AgentReview(h, a) ==
+    /\ ReviewCrash /\ STAGE >= 2
+    /\ up[h] /\ proc[h][a] = "run" /\ my[h][a].iss # NoOne
+    /\ issue[my[h][a].iss].st = "in_progress"
+    /\ issue' = [issue EXCEPT ![my[h][a].iss].st = "review"]
+    /\ UNCHANGED <<hb, now, lease, nextFence, sess, net, up, inc, ph, proc, my,
+                   staleW, foreignW, term, sagent>>
+
+RecoverReviewIssue(i) ==
+    /\ ReviewCrash /\ issue[i].st = "review"
+    /\ "review_crashed" \in staleW
+    /\ \E h \in Hosts : up[h] /\ inc[h] > 0
+    /\ IF RecoverReview
+         THEN /\ issue' = [issue EXCEPT ![i].st = "open"]
+              /\ UNCHANGED staleW
+         ELSE /\ staleW' = staleW \cup {"review_stranded"}
+              /\ UNCHANGED issue
+    /\ UNCHANGED <<hb, now, lease, nextFence, sess, net, up, inc, ph, proc, my,
+                   foreignW, term, sagent>>
+
 \* Inside spawnAndWait after cmd.Wait() (supervisor.go:795-816), still under
 \* ownership with the heartbeat running: completion hooks, T12
 \* finalizeAgentSession (session completion, claim release) and T13
@@ -396,12 +475,18 @@ Finalize(h, a) ==
     /\ LET fin == IF STAGE = 3 THEN {Msg("sfin", h, a, NoOne)} ELSE {}
            rc  == IF STAGE >= 2 /\ my[h][a].iss # NoOne
                     THEN {Msg("relclaim", h, a, my[h][a].iss)} ELSE {}
+           ra  == IF STAGE >= 2 /\ my[h][a].iss # NoOne
+                       /\ LockOnlyRelease /\ ReleaseAssignment
+                    THEN {Msg("relassign", h, a, my[h][a].iss)} ELSE {}
            R   == {i \in Issues :
                      \/ i = my[h][a].iss /\ issue[i].st # "closed"
                      \/ issue[i].st = "in_progress" /\ issue[i].asg = ActorOf(a)}
-           rs  == IF STAGE >= 2 THEN {Msg("reset", h, a, i) : i \in R}
+           \* Label-only clean exit has no failure reset; it only releases
+           \* the claim lock and (with the fix) the projected assignment.
+           rs  == IF STAGE >= 2 /\ ~LockOnlyRelease
+                    THEN {Msg("reset", h, a, i) : i \in R}
                                ELSE {Msg("aw", h, a, NoOne)}
-       IN Send(fin \cup rc \cup rs)
+       IN Send(fin \cup rc \cup ra \cup rs)
     /\ ph' = [ph EXCEPT ![h][a] = "recovered"]
     /\ UNCHANGED <<hb, now, lease, nextFence, issue, sess, up, inc, proc, my,
                    staleW, foreignW, term, sagent>>
@@ -446,14 +531,24 @@ Deliver(m) ==
                 ELSE UNCHANGED <<lease, issue, sess, staleW, foreignW, term, sagent>>
          [] m.k = "relclaim" ->
               \* issue_service release: projected assignee must equal actor.
-              IF Pass(m) /\ HolderOk(m) /\ issue[m.i].asg = ActorOf(m.a)
+              IF Pass(m) /\
+                 (IF LockOnlyRelease
+                    THEN issue[m.i].holder = ActorOf(m.a)
+                    ELSE HolderOk(m) /\ issue[m.i].asg = ActorOf(m.a))
                 THEN /\ issue' = [issue EXCEPT ![m.i] = [st |-> "open",
-                                   asg |-> NoOne,
+                                   asg |-> IF LockOnlyRelease THEN @.asg ELSE NoOne,
                                    holder |-> IF @.holder = ActorOf(m.a) THEN NoOne ELSE @.holder,
                                    lexp |-> @.lexp, who |-> NoOne]]
                      /\ staleW' = staleW \cup Stale(m)
+                          \cup (IF LockOnlyRelease /\ ~ReleaseAssignment
+                                 THEN {"assigned_leak"} ELSE {})
                      /\ foreignW' = (foreignW \/ Foreign(m))
                      /\ UNCHANGED <<lease, sess, term, sagent>>
+                ELSE UNCHANGED <<lease, issue, sess, staleW, foreignW, term, sagent>>
+         [] m.k = "relassign" ->
+              IF Pass(m) /\ issue[m.i].asg = ActorOf(m.a)
+                THEN /\ issue' = [issue EXCEPT ![m.i].asg = NoOne]
+                     /\ UNCHANGED <<lease, sess, staleW, foreignW, term, sagent>>
                 ELSE UNCHANGED <<lease, issue, sess, staleW, foreignW, term, sagent>>
          [] m.k = "reset" ->
               \* resetTask Update (decided on the supervisor's earlier read)
@@ -462,11 +557,14 @@ Deliver(m) ==
               \* (issue_service.go:371-404); that service read is modelled as
               \* atomic with the append (the read/append race is not modelled).
               IF Pass(m) /\ HolderOk(m) /\ issue[m.i].st # "closed"
+                 /\ (~RespectDeferred \/ issue[m.i].st # "deferred")
                 THEN /\ issue' = [issue EXCEPT ![m.i] = [st |-> "open",
                                    asg |-> NoOne,
                                    holder |-> IF @.holder = ActorOf(m.a) THEN NoOne ELSE @.holder,
                                    lexp |-> @.lexp, who |-> NoOne]]
                      /\ staleW' = staleW \cup Stale(m)
+                          \cup (IF issue[m.i].st = "deferred"
+                                 THEN {"deferred_lost"} ELSE {})
                      /\ foreignW' = (foreignW \/ Foreign(m))
                      /\ UNCHANGED <<lease, sess, term, sagent>>
                 ELSE UNCHANGED <<lease, issue, sess, staleW, foreignW, term, sagent>>
@@ -498,7 +596,10 @@ Next ==
               \/ NoWork(h, a) \/ WorkerHb(h, a) \/ ReconcileSessions(h, a)
               \/ Spawn(h, a) \/ AgentWrite(h, a) \/ AgentClose(h, a)
               \/ ProcExit(h, a) \/ Finalize(h, a) \/ ReleaseOwn(h, a)
-              \/ \E i \in Issues : Claim(h, a, i)
+              \/ HookSetStatus(h, a) \/ AgentReview(h, a)
+              \/ \E i \in Issues : Claim(h, a, i) \/ ClaimPreflight(h, a, i)
+    \/ \E i \in Issues : HumanStatus(i, "closed")
+                          \/ HumanStatus(i, "deferred") \/ RecoverReviewIssue(i)
     \/ \E m \in net : Deliver(m)
 
 Spec == Init /\ [][Next]_vars
@@ -508,14 +609,17 @@ Spec == Init /\ [][Next]_vars
 
 TypeOK ==
     /\ now \in 0..MaxTime
-    /\ staleW \subseteq {"superseded", "released", "expired", "superseded_finalize"}
+    /\ staleW \subseteq {"superseded", "released", "expired", "superseded_finalize",
+                         "deferred_lost", "assigned_leak", "review_crashed",
+                         "review_stranded"}
     /\ nextFence \in 0..MaxFence
     /\ \A a \in Agents : lease[a].owner \in Owners \cup {NoOne}
     /\ \A h \in Hosts, a \in Agents :
           /\ ph[h][a] \in Phases
           /\ hb[h][a] \in BOOLEAN
           /\ proc[h][a] \in AliveP \cup {"none"}
-    /\ \A i \in Issues : issue[i].st \in {"open", "in_progress", "closed"}
+    /\ \A i \in Issues : issue[i].st \in {"open", "in_progress", "closed",
+                                         "deferred", "review"}
     /\ \A s \in Sids : sess[s] \in {"none", "starting", "running", "completed", "failed"}
     /\ \A s \in Sids : sagent[s] \in Agents \cup {NoOne}
 
@@ -538,6 +642,9 @@ SingleLiveProcess ==
 \* B1: no issue write lands on another attempt's live claim, and no reset
 \* reopens a closed issue.
 NoForeignIssueWrite == ~foreignW
+NoDeferredStatusLoss == "deferred_lost" \notin staleW
+NoAssignedClaimLeak == "assigned_leak" \notin staleW
+NoStrandedReview == "review_stranded" \notin staleW
 
 \* B2: at most one supervised process works each issue (timing dependent).
 NoDoubleWork ==
