@@ -67,14 +67,25 @@ it("#577 retries a transient token exchange failure", async () => {
   client.destroy();
 });
 
-it("#627a stops a stream after a malformed mutation frame", async () => {
+it("#627a stops after a malformed frame without advancing past its checkpoint", async () => {
   const onError = vi.fn();
   const client = new WorkspaceSSEClient("ws-replay", {
     fetchToken: async () => ({ kind: "token", token: "ok" }),
     onError,
   });
   await client.connect();
+  ReplayEventSource.instances[0]!.emit(
+    "mutation",
+    '{"type":"update","timestamp":""}',
+    "0-0",
+  );
   ReplayEventSource.instances[0]!.emit("mutation", "{malformed", "1-0");
+  ReplayEventSource.instances[0]!.emit(
+    "mutation",
+    '{"type":"update","timestamp":""}',
+    "2-0",
+  );
+  expect(client.getLastEventId()).toBe("0-0");
   expect(onError).toHaveBeenCalledWith(expect.stringContaining("Malformed"));
   expect(client.getState()).toBe("disconnected");
   client.destroy();

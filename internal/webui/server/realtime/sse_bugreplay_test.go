@@ -87,6 +87,7 @@ func TestBugReplay642(t *testing.T) {
 
 func TestBugReplay643(t *testing.T) {
 	hub := NewHub()
+	hub.RegisterClient(NewClient(1, ClientSendBuf, "0", nil, "ws-replay"))
 	for i := 0; i < cap(hub.broadcast); i++ {
 		hub.Broadcast(&MutationPayload{Type: "update", IssueID: "filler", WorkspaceID: "ws-replay"})
 	}
@@ -137,9 +138,32 @@ func TestBugReplay612a(t *testing.T) {
 	hub.RegisterClient(client)
 	hub.fanOutMutation(&MutationPayload{Cursor: "1-0", Type: "update", WorkspaceID: "ws-replay"})
 	hub.fanOutMutation(&MutationPayload{Cursor: "2-0", Type: "update", WorkspaceID: "ws-replay"})
-	if hub.ClientCount() != 1 {
-		t.Fatal("full client buffer silently evicted the subscriber instead of signaling resync")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	response := &cancelOnResyncWriter{ResponseRecorder: httptest.NewRecorder(), cancel: cancel}
+	writer, err := NewWriter(response)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if _, err := (&Handler{}).streamLoop(writer, client, ctx); err != nil && ctx.Err() == nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(response.Body.String(), "event: resync\n") {
+		t.Fatalf("full client buffer ended without a resync frame: %s", response.Body.String())
+	}
+}
+
+type cancelOnResyncWriter struct {
+	*httptest.ResponseRecorder
+	cancel context.CancelFunc
+}
+
+func (w *cancelOnResyncWriter) Write(frame []byte) (int, error) {
+	n, err := w.ResponseRecorder.Write(frame)
+	if strings.Contains(string(frame), "event: resync\n") {
+		w.cancel()
+	}
+	return n, err
 }
 
 func TestBugReplay644(t *testing.T) {
