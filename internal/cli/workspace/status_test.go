@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -968,4 +969,140 @@ func TestBuildStatusDataIncludesRepo(t *testing.T) {
 	if strings.Contains(string(b), `"repo"`) {
 		t.Errorf("repo should be omitted for agent without repo, got: %s", string(b))
 	}
+}
+
+// ============================================================================
+// Daemon state-file staleness Tests
+// ============================================================================
+
+// writeRunningDaemonFixture makes tmpDir look like a workspace supervised by a
+// live daemon whose state file holds exactly stateJSON.
+func writeRunningDaemonFixture(t *testing.T, tmpDir, stateJSON string) {
+	t.Helper()
+	loomDir := filepath.Join(tmpDir, ".loom")
+	if err := os.MkdirAll(loomDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(loomDir, "daemon.pid"), []byte(strconv.Itoa(os.Getpid())+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(loomDir, "daemon-agents.json"), []byte(stateJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCollectDaemonStatus_CarriesWrittenAtAndDegradations(t *testing.T) {
+	tmpDir := t.TempDir()
+	written := time.Now().Add(-90 * time.Minute).UTC()
+	writeRunningDaemonFixture(t, tmpDir, `{
+	  "pid": `+strconv.Itoa(os.Getpid())+`,
+	  "started_at": "`+time.Now().Add(-3*time.Hour).UTC().Format(time.RFC3339)+`",
+	  "written_at": "`+written.Format(time.RFC3339)+`",
+	  "degradations": [{"kind":"state_write","count":7},{"kind":"log_write","count":1}]
+	}`)
+
+	info := collectDaemonStatusForDir(tmpDir)
+
+	if !info.Running {
+		t.Fatal("expected daemon to be running")
+	}
+	if !info.StateWrittenAt.Equal(written.Truncate(time.Second)) {
+		t.Errorf("StateWrittenAt = %v, want %v", info.StateWrittenAt, written.Truncate(time.Second))
+	}
+	if len(info.Degraded) != 2 || info.Degraded[0] != "state_write" || info.Degraded[1] != "log_write" {
+		t.Errorf("Degraded = %v, want [state_write log_write]", info.Degraded)
+	}
+}
+
+// Without written_at (a state file from an older binary) the reader falls back
+// to mtime, so StateWrittenAt is recent rather than the zero time — which would
+// otherwise render as a decades-stale daemon.
+func TestCollectDaemonStatus_ZeroWrittenAtFallsBackToMtime(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeRunningDaemonFixture(t, tmpDir, `{"pid":`+strconv.Itoa(os.Getpid())+`,"agents":[]}`)
+
+	info := collectDaemonStatusForDir(tmpDir)
+
+	if info.StateWrittenAt.IsZero() {
+		t.Fatal("StateWrittenAt is zero; want the file's mtime")
+	}
+	if age := time.Since(info.StateWrittenAt); age > daemonStateStaleAfter {
+		t.Errorf("age = %v, want a just-written file to read as fresh", age)
+	}
+	if len(info.Degraded) != 0 {
+		t.Errorf("Degraded = %v, want empty", info.Degraded)
+	}
+}
+
+func TestRenderStatusDaemon_StaleAndDegradedMarkers(t *testing.T) {
+	tests := []struct {
+		name    string
+		info    DaemonInfo
+		want    []string
+		notWant []string
+	}{
+		{
+			name:    "fresh and healthy",
+			info:    DaemonInfo{Running: true, PID: 42, Uptime: "3h0m", StateWrittenAt: time.Now()},
+			want:    []string{"running (pid 42"},
+			notWant: []string{"STALE", "DEGRADED"},
+		},
+		{
+			name:    "stale state file",
+			info:    DaemonInfo{Running: true, PID: 42, Uptime: "3h0m", StateWrittenAt: time.Now().Add(-2 * time.Hour)},
+			want:    []string{"STALE state file", "2h0m0s old"},
+			notWant: []string{"DEGRADED"},
+		},
+		{
+			name:    "degraded",
+			info:    DaemonInfo{Running: true, PID: 42, Uptime: "3h0m", StateWrittenAt: time.Now(), Degraded: []string{"state_write", "log_write"}},
+			want:    []string{"DEGRADED: state_write, log_write"},
+			notWant: []string{"STALE"},
+		},
+		{
+			name:    "unknown write time makes no claim",
+			info:    DaemonInfo{Running: true, PID: 42, Uptime: "3h0m"},
+			want:    []string{"running (pid 42"},
+			notWant: []string{"STALE"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := captureWorkspaceStdout(t, func() { renderStatusDaemon(tt.info) })
+			for _, want := range tt.want {
+				if !strings.Contains(out, want) {
+					t.Errorf("output %q missing %q", out, want)
+				}
+			}
+			for _, notWant := range tt.notWant {
+				if strings.Contains(out, notWant) {
+					t.Errorf("output %q must not contain %q", out, notWant)
+				}
+			}
+		})
+	}
+}
+
+// captureWorkspaceStdout returns everything fn printed to stdout.
+func captureWorkspaceStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+
+	fn()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close pipe writer: %v", err)
+	}
+	var buf strings.Builder
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("read pipe: %v", err)
+	}
+	return buf.String()
 }
