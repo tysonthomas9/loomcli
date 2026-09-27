@@ -113,10 +113,44 @@ func (s *Supervisor) sweepWorktreeBackends(ap *AgentProcess) {
 	}
 }
 
+// abandonResumeTarget drops the interrupted task from the worktree's preserved
+// lock so detectRecovery stops re-proposing it. Called when the task can never
+// be re-claimed; without it, the same lock feeds the same unclaimable task id
+// into every subsequent supervise cycle. Best-effort: a lock that is already
+// gone, or one whose PID came back to life, leaves the state as-is and the
+// bounded ResumeFailures ladder still caps the retries.
+func (s *Supervisor) abandonResumeTarget(ap *AgentProcess, taskID string) {
+	if err := cli.ClearStaleLockTaskID(ap.WorktreePath); err != nil {
+		slog.Warn("failed to clear abandoned resume target from lock",
+			"worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
+	}
+	ap.Mu.Lock()
+	ap.ResumeFailures = 0 // the target is gone; a future interruption may recover normally
+	ap.Mu.Unlock()
+}
+
+// recordRecoveryFailure advances the recovery-failure counter when a recovery
+// cycle aborts BEFORE the agent is spawned (e.g. the re-claim failed), so the
+// resume → checkpoint → cold-start ladder still escalates. recordResumeOutcome
+// cannot serve this path: it keys off LastExitCode, which setPreflightError
+// leaves at 0 (= clean exit), so calling it here would RESET the counter and
+// make the retry loop permanent.
+func (s *Supervisor) recordRecoveryFailure(ap *AgentProcess) {
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	if ap.RecoveryMode == recoverCold {
+		return // this cycle was not a recovery
+	}
+	ap.ResumeFailures++
+}
+
 // recordResumeOutcome updates the persisted recovery-failure counter after a
 // supervised run. Only recovery cycles (resume or checkpoint) count: a clean
 // exit clears the counter (the task progressed), a failure advances it toward
 // the cold-start ceiling. A non-recovery (cold) cycle is ignored.
+//
+// This covers the POST-SPAWN path only; a recovery cycle that aborts during
+// pre-flight is counted by recordRecoveryFailure.
 func (s *Supervisor) recordResumeOutcome(ap *AgentProcess) {
 	ap.Mu.Lock()
 	defer ap.Mu.Unlock()

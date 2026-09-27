@@ -311,3 +311,127 @@ func TestTaskIDForLifecycle_UsesAssignedFallback(t *testing.T) {
 		t.Fatalf("taskIDForLifecycle(lock) = %q, want task-lock", got)
 	}
 }
+
+// --- resume re-claim classification (PUPPET-127) ---
+
+// notClaimableErr is the error fleet-db's classifier produces for a claim
+// against an issue whose status left the claimable set (HTTP 422,
+// code "not_claimable").
+func notClaimableErr() error {
+	return &backend.BackendError{
+		Kind:    backend.KindConflict,
+		Op:      "ClaimIssue",
+		Message: "issue is not claimable",
+		Meta:    map[string]string{backend.MetaErrorCode: "not_claimable"},
+	}
+}
+
+func seedResumeLock(t *testing.T, worktree, taskID string) {
+	t.Helper()
+	writeLockFile(t, cli.ResolveLockDir(worktree), &cli.LockInfo{
+		PID:             deadPID,
+		TaskID:          taskID,
+		ClaudeSessionID: "sess-1",
+		TaskStartedAt:   time.Now(),
+	})
+}
+
+// TestClaimResumeTask_PermanentRejectionBreaksTheLoop is the PUPPET-127
+// regression: a resume target that can never be claimed again must be dropped
+// from the lock, so the NEXT detectRecovery cold-starts instead of re-deriving
+// the same doomed task id every restart interval.
+func TestClaimResumeTask_PermanentRejectionBreaksTheLoop(t *testing.T) {
+	wt := t.TempDir()
+	seedResumeLock(t, wt, "task-blocked")
+
+	mock := clitest.NewMockIssueBackend()
+	mock.ClaimIssueErr = notClaimableErr()
+	s := &Supervisor{IssueBackend: mock}
+	ap := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"},
+		WorktreePath: wt,
+	}
+
+	if s.claimResumeTask(ap, "task-blocked") {
+		t.Fatal("claimResumeTask returned true for a permanently rejected claim")
+	}
+
+	info, err := cli.ReadLockFile(wt)
+	if err != nil {
+		t.Fatalf("ReadLockFile: %v", err)
+	}
+	if info.TaskID != "" {
+		t.Fatalf("lock still names the abandoned task: %q", info.TaskID)
+	}
+	// The assertion that actually proves the loop is broken.
+	if gotTask, gotMode := s.detectRecovery(ap); gotTask != "" || gotMode != recoverCold {
+		t.Fatalf("next detectRecovery = (%q, %s), want (\"\", cold)", gotTask, modeName(gotMode))
+	}
+}
+
+func TestClaimResumeTask_SelfHeldConflictResumes(t *testing.T) {
+	wt := t.TempDir()
+	seedResumeLock(t, wt, "task-mine")
+
+	mock := clitest.NewMockIssueBackend()
+	mock.ClaimIssueErr = &backend.BackendError{
+		Kind: backend.KindConflict, Op: "ClaimIssue", Message: "issue already claimed",
+		Meta: map[string]string{"existing_owner": "falcon", backend.MetaErrorCode: "already_claimed"},
+	}
+	s := &Supervisor{IssueBackend: mock}
+	ap := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"},
+		WorktreePath: wt,
+	}
+
+	if !s.claimResumeTask(ap, "task-mine") {
+		t.Fatal("claimResumeTask returned false for our own held claim")
+	}
+	if ap.AssignedTaskID != "task-mine" {
+		t.Fatalf("AssignedTaskID = %q, want task-mine", ap.AssignedTaskID)
+	}
+	if info, err := cli.ReadLockFile(wt); err != nil || info.TaskID != "task-mine" {
+		t.Fatalf("lock mutated: info=%+v err=%v", info, err)
+	}
+}
+
+// A transient or contended failure must NOT abandon the task: it may well be
+// claimable on the next cycle.
+func TestClaimResumeTask_TransientFailureLeavesLockIntact(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{"foreign lock", &backend.BackendError{
+			Kind: backend.KindConflict, Op: "ClaimIssue", Message: "issue already claimed",
+			Meta: map[string]string{"existing_owner": "eagle", backend.MetaErrorCode: "already_claimed"},
+		}},
+		{"timeout", backend.ErrTimeout("ClaimIssue", "deadline exceeded", nil)},
+		{"unavailable", backend.ErrUnavailable("ClaimIssue", "fleet server unreachable", nil)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wt := t.TempDir()
+			seedResumeLock(t, wt, "task-1")
+
+			mock := clitest.NewMockIssueBackend()
+			mock.ClaimIssueErr = tc.err
+			s := &Supervisor{IssueBackend: mock}
+			ap := &AgentProcess{
+				Entry:        cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"},
+				WorktreePath: wt,
+			}
+
+			if s.claimResumeTask(ap, "task-1") {
+				t.Fatal("claimResumeTask returned true")
+			}
+			info, err := cli.ReadLockFile(wt)
+			if err != nil {
+				t.Fatalf("ReadLockFile: %v", err)
+			}
+			if info.TaskID != "task-1" {
+				t.Fatalf("TaskID = %q, want it left intact for a retryable failure", info.TaskID)
+			}
+		})
+	}
+}

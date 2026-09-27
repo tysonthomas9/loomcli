@@ -194,3 +194,84 @@ func TestPrepareCheckpointRetryClearsStaleOwnerSessionID(t *testing.T) {
 		t.Fatalf("ResumeTaskID = %q, want T-checkpoint", ap.ResumeTaskID)
 	}
 }
+
+// --- bounded recovery ladder (PUPPET-127) ---
+
+// TestRecordRecoveryFailure: a recovery cycle that aborts during pre-flight
+// (before any spawn) still advances the ladder, so a claim that keeps failing
+// for an unclassifiable reason cannot loop forever.
+func TestRecordRecoveryFailure(t *testing.T) {
+	s := &Supervisor{}
+
+	t.Run("cold cycle untouched", func(t *testing.T) {
+		ap := &AgentProcess{RecoveryMode: recoverCold, ResumeFailures: 1}
+		s.recordRecoveryFailure(ap)
+		if ap.ResumeFailures != 1 {
+			t.Errorf("ResumeFailures = %d, want 1 (untouched)", ap.ResumeFailures)
+		}
+	})
+
+	for _, mode := range []recoveryMode{recoverResume, recoverCheckpoint} {
+		t.Run(modeName(mode)+" advances counter", func(t *testing.T) {
+			ap := &AgentProcess{RecoveryMode: mode, ResumeFailures: 1}
+			s.recordRecoveryFailure(ap)
+			if ap.ResumeFailures != 2 {
+				t.Errorf("ResumeFailures = %d, want 2", ap.ResumeFailures)
+			}
+		})
+	}
+}
+
+// TestRecoveryLadderTerminatesWithoutAbandon: even when the lock cannot be
+// cleared (a live PID reclaimed the worktree, a read-only lock dir, ...), the
+// counter alone caps the retries at resume ×maxResumeFailures → checkpoint ×1 →
+// cold-start.
+func TestRecoveryLadderTerminatesWithoutAbandon(t *testing.T) {
+	wt := t.TempDir()
+	seedLock(t, wt, &cli.LockInfo{
+		PID: deadPID, TaskID: "T-stuck", ClaudeSessionID: "sess-1", TaskStartedAt: time.Now(),
+	})
+
+	s := &Supervisor{}
+	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "agent"}, WorktreePath: wt}
+
+	want := []recoveryMode{recoverResume, recoverResume, recoverCheckpoint, recoverCold}
+	for i, wantMode := range want {
+		gotTask, gotMode := s.detectRecovery(ap)
+		if gotMode != wantMode {
+			t.Fatalf("cycle %d: mode = %s, want %s", i, modeName(gotMode), modeName(wantMode))
+		}
+		if wantMode == recoverCold && gotTask != "" {
+			t.Fatalf("cycle %d: cold cycle still names task %q", i, gotTask)
+		}
+		ap.RecoveryMode = gotMode
+		s.recordRecoveryFailure(ap)
+	}
+}
+
+func TestAbandonResumeTarget(t *testing.T) {
+	wt := t.TempDir()
+	seedLock(t, wt, &cli.LockInfo{
+		PID: deadPID, TaskID: "T-gone", ClaudeSessionID: "sess-1", TaskStartedAt: time.Now(),
+	})
+
+	s := &Supervisor{}
+	ap := &AgentProcess{
+		Entry:          config.AgentEntry{Worktree: "agent"},
+		WorktreePath:   wt,
+		ResumeFailures: maxResumeFailures,
+	}
+
+	s.abandonResumeTarget(ap, "T-gone")
+
+	if ap.ResumeFailures != 0 {
+		t.Errorf("ResumeFailures = %d, want 0 (the target is gone)", ap.ResumeFailures)
+	}
+	info, err := cli.ReadLockFile(wt)
+	if err != nil {
+		t.Fatalf("ReadLockFile: %v", err)
+	}
+	if info.TaskID != "" {
+		t.Errorf("TaskID = %q, want cleared", info.TaskID)
+	}
+}
