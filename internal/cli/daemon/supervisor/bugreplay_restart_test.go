@@ -14,6 +14,7 @@ package supervisor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,13 +22,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/discovery"
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/backendcheck"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
 // ---------------------------------------------------------------------------
@@ -43,6 +47,7 @@ func restartSupervisor(cfg *config.DaemonConfig) *Supervisor {
 		Shutdown:       make(chan struct{}),
 		FatalCh:        make(chan error, 1),
 		StoppedAgents:  make(map[string]struct{}),
+		EmitEvent:      func(events.Event) {},
 	}
 }
 
@@ -489,5 +494,152 @@ func TestBugReplay_PR289_BuiltinPromptOnWorkerRoleNamesCause(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "not found") || !strings.Contains(err.Error(), "built-in") {
 		t.Fatalf("error blames a missing file instead of the builtin: prompt on a worker role: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Backend gate and issue-backend outages
+// ---------------------------------------------------------------------------
+
+func restartFakeBackendCheck(t *testing.T, installed func(call int) bool) *atomic.Int32 {
+	t.Helper()
+	var calls atomic.Int32
+	prev := backendcheck.CheckBackend
+	t.Cleanup(func() { backendcheck.CheckBackend = prev })
+	backendcheck.CheckBackend = func(name string) (discovery.Info, error) {
+		n := int(calls.Add(1))
+		ok := installed(n)
+		info := discovery.Info{Name: name, Binary: name, Installed: ok, VersionMatchesPin: true}
+		if !ok {
+			info.InstallHint = name + " not on PATH"
+		}
+		return info, nil
+	}
+	return &calls
+}
+
+// restartBackendGateParks runs preflight up to and including the backend
+// gate and reports whether the gate parked the agent as backend-unavailable.
+// preFlightSetup is used (its signature is stable across the fix heads, unlike
+// gateBackendAvailable's). A tool allow-list the fake backend cannot enforce
+// makes the NEXT gate (safety knobs) refuse, so preflight stops right after the
+// backend gate with no recovery, claim or session side effects.
+func restartBackendGateParks(s *Supervisor, ap *AgentProcess) bool {
+	ap.RoleConfig.AllowedTools = []string{"Read"}
+	s.preFlightSetup(ap)
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	return ap.StopReason == StopReasonBackendUnavailable
+}
+
+// #90: an agent whose backend CLI is missing still takes a role concurrency
+// slot before the backend gate notices, so it can starve siblings (and, when
+// the role is full, it never reaches the gate at all).
+// Root cause: supervisor.go:320 Concurrency.Acquire runs before
+// gateBackendAvailable at :405.
+func TestBugReplay_PR90_BackendGateRunsBeforeConcurrencySlot(t *testing.T) {
+	restartFakeBackendCheck(t, func(int) bool { return false })
+	one := 1
+	roles := map[string]config.RoleConfig{"task": {MaxConcurrency: &one}}
+	s := restartSupervisor(&config.DaemonConfig{Backend: "replay-missing-cli", Roles: roles})
+	s.Concurrency = NewConcurrencyTracker(roles)
+	s.backendRecheckInterval = 10 * time.Millisecond
+	if !s.Concurrency.Acquire("task") { // a sibling holds the only slot
+		t.Fatal("could not pre-acquire the role slot")
+	}
+	ap := &AgentProcess{
+		Entry:  config.AgentEntry{Worktree: "replay-90", Role: "task"},
+		StopCh: make(chan struct{}),
+		Done:   make(chan struct{}),
+	}
+	done := make(chan struct{})
+	go func() { defer close(done); s.superviseAgent(ap) }()
+	t.Cleanup(func() {
+		close(s.Shutdown)
+		s.Concurrency.Close()
+		<-done
+	})
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		ap.Mu.Lock()
+		reason := ap.StopReason
+		ap.Mu.Unlock()
+		if reason == StopReasonBackendUnavailable {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("agent with a missing backend never reached the backend gate: it is parked in Concurrency.Acquire behind a sibling")
+}
+
+// #433: one momentary PATH miss (e.g. while the CLI binary is being
+// replaced during an update) parks the agent as backend-unavailable.
+// Root cause: backend.go:32 gateBackendAvailable trusts a single lookup.
+func TestBugReplay_PR433_TransientPathMissIsDebounced(t *testing.T) {
+	calls := restartFakeBackendCheck(t, func(n int) bool { return n > 1 }) // miss once, then found
+	s := restartSupervisor(&config.DaemonConfig{Backend: "replay-cli"})
+	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "replay-433", Role: "task"}}
+	if restartBackendGateParks(s, ap) {
+		t.Fatalf("a single transient PATH miss parked the agent (StopReason=%q, lookups=%d)", ap.StopReason, calls.Load())
+	}
+}
+
+// Regression (passes on v5): a backend that stays missing is still parked.
+func TestBugReplay_PR433_PersistentMissStillParks(t *testing.T) {
+	restartFakeBackendCheck(t, func(int) bool { return false })
+	s := restartSupervisor(&config.DaemonConfig{Backend: "replay-cli"})
+	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "replay-433b", Role: "task"}}
+	if !restartBackendGateParks(s, ap) {
+		t.Fatalf("a persistently missing backend was not parked: StopReason=%q", ap.StopReason)
+	}
+}
+
+// #537: a fleet-db outage makes every ready query fail; each failure is
+// charged to the agent's restart budget, so the outage exhausts every agent
+// and strands work after recovery.
+// Root cause: claim.go:119-122 a ready-query error is ErrUnknown and counted.
+func TestBugReplay_PR537_IssueBackendOutageDoesNotSpendBudget(t *testing.T) {
+	const maxRetries = 2
+	s := restartSupervisor(restartMaxRetriesConfig(maxRetries))
+	s.IssueBackend = &clitest.MockIssueBackend{
+		ReadyErr: backend.ErrUnavailable("ready", "fleet-db unreachable", context.DeadlineExceeded),
+	}
+	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "replay-537", Role: "task"}}
+	for i := 0; i < maxRetries+3; i++ {
+		if s.claimTask(ap, "") {
+			t.Fatal("claim succeeded against an unavailable issue backend")
+		}
+		s.shouldRestart(ap)
+	}
+	budgetStop := ap.StopReason == StopReasonMaxRetries || ap.StopReason == StopReasonMaxRetriesBlocked || ap.StopReason == StopReasonFastFail
+	if ap.RestartCount != 0 || ap.BlockCount != 0 || budgetStop {
+		t.Fatalf("an issue-backend outage was charged to the agent: RestartCount=%d BlockCount=%d StopReason=%q class=%v",
+			ap.RestartCount, ap.BlockCount, ap.StopReason, ap.LastError)
+	}
+}
+
+// #467: an interrupted worker whose resume re-claim is permanently rejected
+// (task no longer claimable) keeps the stale lock target, so every cycle
+// retries the same rejected resume claim.
+// Root cause: claim.go:176-190 a failed resume clears only ResumeTaskID; the
+// lock's TaskID (read by resume_recovery.go:38) is kept.
+func TestBugReplay_PR467_RejectedResumeTargetIsAbandoned(t *testing.T) {
+	s := restartSupervisor(nil)
+	s.IssueBackend = &clitest.MockIssueBackend{
+		ClaimIssueErr: errors.New("claim loom-467: issue is not claimable (status closed)"),
+	}
+	ap := restartTaskAgent(t, "replay-467", "loom-467")
+	ap.Entry.Role = "task"
+	ap.ResumeTaskID = "loom-467"
+
+	s.claimTask(ap, "")
+
+	info, _, err := cli.CheckLock(ap.WorktreePath)
+	if err != nil {
+		t.Fatalf("read lock: %v", err)
+	}
+	if info != nil && info.TaskID == "loom-467" {
+		t.Fatal("lock still names the permanently rejected resume target; the next cycle will retry the same claim")
 	}
 }
