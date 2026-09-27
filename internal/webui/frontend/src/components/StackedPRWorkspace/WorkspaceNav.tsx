@@ -4,6 +4,7 @@
  * filters with real counts, the delivery-group explainer, and shortcuts.
  */
 
+import type { RouteChromeControls } from "@/contexts/RouteChromeContext";
 import type { QueueMode } from "@/utils/pullRequest/stackedPrModel";
 import {
   initialsFor,
@@ -26,6 +27,8 @@ export interface WorkspaceNavProps {
   onShowShortcuts: () => void;
   userName: string | null;
   userSub: string | null;
+  /** Live Loom shell controls when /prs owns the app chrome. */
+  chrome?: RouteChromeControls | null;
 }
 
 export function WorkspaceNav({
@@ -42,6 +45,7 @@ export function WorkspaceNav({
   onShowShortcuts,
   userName,
   userSub,
+  chrome = null,
 }: WorkspaceNavProps): JSX.Element {
   return (
     <nav
@@ -69,6 +73,17 @@ export function WorkspaceNav({
       </div>
 
       <p className={styles.sectionLabel}>Workspace</p>
+      {chrome ? (
+        <button
+          type="button"
+          className={styles.navItem}
+          onClick={chrome.onBackToWorkspace}
+          title="Back to workspace"
+        >
+          <Icon name="back" />
+          <span className={styles.navText}>Back to workspace</span>
+        </button>
+      ) : null}
       <button
         type="button"
         className={styles.navItem}

@@ -72,6 +72,37 @@ describe("requirementLines", () => {
     expect(lines.find((l) => l.id === "conflicts")?.state).toBe("failing");
   });
 
+  it("keeps fresh review=not_reported neutral, never met", () => {
+    const fresh = view(
+      { current_reasons: ["no_review_required"] },
+      { review: { status: "known", value: "not_reported" } },
+    );
+    const review = requirementLines(fresh).find((l) => l.id === "review");
+    expect(review).toEqual({
+      id: "review",
+      label: "No review decision reported",
+      state: "unknown",
+      detail: "GitHub did not say",
+    });
+    expect(review?.label).not.toMatch(/required/i);
+    // The helper only reads facts — backend verdict and warnings survive.
+    expect(fresh.current_verdict).toBe("ready");
+    expect(fresh.current_reasons).toEqual(["no_review_required"]);
+  });
+
+  it("keeps stale review=not_reported neutral, never met", () => {
+    const lines = requirementLines(
+      view(
+        { freshness: "stale" },
+        { review: { status: "known", value: "not_reported" } },
+      ),
+    );
+    const review = lines.find((l) => l.id === "review");
+    expect(review?.state).toBe("unknown");
+    expect(review?.label).toBe("No review decision reported");
+    expect(lines.every((l) => l.state !== "met")).toBe(true);
+  });
+
   it("is unknown when nothing was observed", () => {
     expect(
       requirementLines(undefined).every((l) => l.state === "unknown"),

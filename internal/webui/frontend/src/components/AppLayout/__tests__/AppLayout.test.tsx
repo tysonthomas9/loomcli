@@ -669,4 +669,41 @@ describe("AppLayout", () => {
       ).toBeInTheDocument();
     });
   });
+
+  describe("route chrome", () => {
+    it("drops the global header but keeps banner, skip link, and main", () => {
+      const { container } = render(
+        <AppLayout
+          chrome="route"
+          title="Loom"
+          actions={<button>Theme</button>}
+          banner={<div data-testid="claim-hold">Claim hold</div>}
+        >
+          <p>Routed view</p>
+        </AppLayout>,
+      );
+
+      expect(screen.queryByRole("banner")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Theme" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("claim-hold")).toHaveTextContent("Claim hold");
+      expect(screen.getByTestId("live-region-polite")).toBeInTheDocument();
+      expect(
+        screen.getByRole("link", { name: "Skip to main content" }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("main")).toHaveTextContent("Routed view");
+      expect(container.firstChild).toHaveAttribute("data-chrome", "route");
+    });
+
+    it("defaults to the shell header", () => {
+      const { container } = render(
+        <AppLayout>
+          <p>Content</p>
+        </AppLayout>,
+      );
+      expect(screen.getByRole("banner")).toBeInTheDocument();
+      expect(container.firstChild).toHaveAttribute("data-chrome", "shell");
+    });
+  });
 });

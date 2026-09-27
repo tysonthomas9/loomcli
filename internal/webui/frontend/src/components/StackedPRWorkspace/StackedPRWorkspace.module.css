@@ -498,16 +498,29 @@
 
 /* ---------- Main shell: breadcrumb + page ---------- */
 
+/* The breadcrumb bar stays fixed above the one page scroller; the summary
+   panel is sticky inside that scroller. */
 .mainShell {
   flex: 1 1 0;
   min-width: 0;
   min-height: 0;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--spr-bg);
+}
+
+.scroller {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .topbar {
   height: 59px;
+  flex: none;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -520,6 +533,24 @@
 .topbar svg {
   width: 14px;
   height: 14px;
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.topbarBack {
+  display: none;
+  margin-left: -8px;
+}
+
+.accountSlot {
+  display: flex;
+  align-items: center;
 }
 
 .crumb {
@@ -552,6 +583,39 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wsPill[data-switch] {
+  position: relative;
+  padding-right: 6px;
+}
+
+.wsPill[data-switch]:focus-within {
+  outline: 2px solid var(--spr-accent-border);
+  outline-offset: 2px;
+}
+
+.wsPill select {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font-size: 10px;
+  color: inherit;
+  max-width: 180px;
+  padding: 0 14px 0 0;
+  margin-right: -14px;
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+
+.wsPill select:focus {
+  outline: none;
+}
+
+.wsPill svg {
+  width: 11px;
+  height: 11px;
+  pointer-events: none;
 }
 
 .wsPill i {
@@ -2369,10 +2433,13 @@
   .detail {
     display: none;
   }
+  .topbarBack {
+    display: inline-flex;
+  }
   .detail[data-mobile-open] {
     display: block;
     position: fixed;
-    top: calc(var(--unified-header-height, 44px) + 12px);
+    top: 12px;
     right: 12px;
     bottom: 12px;
     width: 340px;
@@ -2428,8 +2495,17 @@
 }
 
 @media (max-width: 520px) {
-  .wsPill {
+  .crumb {
     display: none;
+  }
+  .crumbs .slash {
+    display: none;
+  }
+  .topbar {
+    gap: 6px;
+  }
+  .wsPill {
+    max-width: 120px;
   }
   .stackHeader {
     flex-wrap: wrap;

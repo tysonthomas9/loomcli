@@ -63,12 +63,14 @@ import {
   toneForKey,
 } from "@/utils/pullRequest/stackedPrPresentation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRouteChrome } from "@/contexts/RouteChromeContext";
 import { Icon } from "./Icon";
 import { MergePreviewDialog } from "./MergePreviewDialog";
 import { PRRow, type PathNodeState } from "./PRRow";
 import { ReadinessBadge } from "./ReadinessBadge";
 import { SummaryPanel, type GroupContext } from "./SummaryPanel";
 import { WorkspaceNav } from "./WorkspaceNav";
+import { WorkspaceTopbar } from "./WorkspaceTopbar";
 import styles from "./StackedPRWorkspace.module.css";
 
 export interface StackedPRWorkspaceProps {
@@ -125,9 +127,13 @@ export function StackedPRWorkspace({
 }: StackedPRWorkspaceProps): JSX.Element {
   const { workspaceId, workspace } = useWorkspaceContext();
   const { user } = useAuth();
+  // /prs owns the app chrome: one 212px nav, one 59px breadcrumb.
+  const chrome = useRouteChrome();
   const searchId = useId();
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  /** Set by j/k so only keyboard moves scroll the selection into view. */
+  const revealSelectionRef = useRef(false);
 
   const [tab, setTab] = useState<QueueTab>("all");
   const [mode, setMode] = useState<QueueMode>("queue");
@@ -496,6 +502,18 @@ export function StackedPRWorkspace({
     void loadReadinessFor([selectedKey]);
   }, [selectedKey, loadReadinessFor]);
 
+  // Keyboard moves keep the selected row visible inside the list scroller.
+  // Initial auto-selection and clicks never scroll, so the title and
+  // toolbar stay in view on load.
+  useEffect(() => {
+    if (!selectedKey || !revealSelectionRef.current) return;
+    revealSelectionRef.current = false;
+    const row = listRef.current?.querySelector<HTMLElement>(
+      `[data-testid="pr-row-${CSS.escape(selectedKey)}"]`,
+    );
+    row?.scrollIntoView({ block: "nearest" });
+  }, [selectedKey]);
+
   // Keyboard/selection moving into a collapsed group re-expands it.
   useEffect(() => {
     if (!selectedKey) return;
@@ -566,8 +584,28 @@ export function StackedPRWorkspace({
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
+      // Never steal browser/OS chords (Cmd+V, Ctrl+H, ...) or keys another
+      // handler already consumed.
+      if (
+        event.defaultPrevented ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey
+      ) {
+        return;
+      }
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName;
+      // Enter/Space on a focused control activate that control, not the
+      // selected PR's review.
+      if (
+        (event.key === "Enter" || event.key === " ") &&
+        target?.closest(
+          "button, a[href], summary, [role='button'], [role='tab'], [role='link'], [role='menuitem']",
+        )
+      ) {
+        return;
+      }
       if (
         tag === "INPUT" ||
         tag === "TEXTAREA" ||
@@ -582,7 +620,7 @@ export function StackedPRWorkspace({
       if (previewGroupId || helpOpen || guideOpen) return;
 
       const k = event.key;
-      if (k === "/" || (k === "s" && !event.metaKey && !event.ctrlKey)) {
+      if (k === "/" || k === "s") {
         event.preventDefault();
         searchRef.current?.focus();
         return;
@@ -635,7 +673,10 @@ export function StackedPRWorkspace({
         event.preventDefault();
         const idx = selectedKey ? flatKeys.indexOf(selectedKey) : -1;
         const next = flatKeys[Math.min(flatKeys.length - 1, idx + 1)];
-        if (next) setSelectedKey(next);
+        if (next) {
+          revealSelectionRef.current = true;
+          setSelectedKey(next);
+        }
         return;
       }
       if (k === "k" || k === "ArrowUp") {
@@ -644,7 +685,10 @@ export function StackedPRWorkspace({
           ? flatKeys.indexOf(selectedKey)
           : flatKeys.length;
         const next = flatKeys[Math.max(0, idx - 1)];
-        if (next) setSelectedKey(next);
+        if (next) {
+          revealSelectionRef.current = true;
+          setSelectedKey(next);
+        }
       }
     },
     [
@@ -1308,368 +1352,354 @@ export function StackedPRWorkspace({
         onShowShortcuts={() => setHelpOpen(true)}
         userName={userName}
         userSub={userSub}
+        chrome={chrome}
       />
 
       <div className={styles.mainShell}>
-        <div className={styles.topbar}>
-          <span className={styles.crumb}>
-            <Icon name="repo" /> All repositories
-          </span>
-          <span className={styles.slash} aria-hidden="true">
-            /
-          </span>
-          <span className={styles.crumbCurrent} aria-current="page">
-            {mode === "history" ? "Merge history" : "Pull requests"}
-          </span>
-          <span className={styles.spacer} />
-          <span className={styles.wsPill} title={`Workspace ${workspaceId}`}>
-            <i aria-hidden="true" />
-            {workspaceName}
-          </span>
-          <button
-            type="button"
-            className={styles.iconBtn}
-            aria-label="How delivery groups work"
-            onClick={() => setGuideOpen(true)}
-          >
-            <Icon name="info" />
-          </button>
-        </div>
+        <WorkspaceTopbar
+          current={mode === "history" ? "Merge history" : "Pull requests"}
+          workspaceName={workspaceName}
+          workspaceId={workspaceId}
+          chrome={chrome}
+          onShowGuide={() => setGuideOpen(true)}
+        />
 
-        <div className={styles.page}>
-          <header className={styles.pageHeading}>
-            <div>
-              <h1 className={styles.title}>Pull requests</h1>
-              <p className={styles.pageSub}>
-                {loading && items.length === 0 ? (
-                  <>Loading pull requests…</>
-                ) : (
-                  <>
-                    <span>{openCount} open PRs</span>
-                    <span className={styles.slash}>/</span>
-                    <span>
-                      {groupCount} delivery group{groupCount === 1 ? "" : "s"}
-                    </span>
-                    <span>
-                      · {standaloneCount} standalone across {repoCount} repo
-                      {repoCount === 1 ? "" : "s"}
-                    </span>
-                    {notCurrentCount > 0 ? (
-                      <span className={styles.warnText}>
-                        · {notCurrentCount} with evidence not current
+        <div className={styles.scroller} data-testid="stacked-pr-scroll">
+          <div className={styles.page}>
+            <header className={styles.pageHeading}>
+              <div>
+                <h1 className={styles.title}>Pull requests</h1>
+                <p className={styles.pageSub}>
+                  {loading && items.length === 0 ? (
+                    <>Loading pull requests…</>
+                  ) : (
+                    <>
+                      <span>{openCount} open PRs</span>
+                      <span className={styles.slash}>/</span>
+                      <span>
+                        {groupCount} delivery group{groupCount === 1 ? "" : "s"}
                       </span>
-                    ) : null}
-                    {deliveryGroupsHasMore ? (
-                      <span>· more groups available</span>
-                    ) : null}
-                    {!membershipComplete ? (
-                      <span className={styles.warnText}>
-                        · membership incomplete
+                      <span>
+                        · {standaloneCount} standalone across {repoCount} repo
+                        {repoCount === 1 ? "" : "s"}
                       </span>
-                    ) : null}
-                  </>
-                )}
-              </p>
-            </div>
-            <div className={styles.headingActions}>
-              <button
-                type="button"
-                className={styles.btn}
-                data-variant="ghost"
-                onClick={() => setGuideOpen(true)}
-              >
-                <Icon name="map" /> How groups work
-              </button>
-              <button
-                type="button"
-                className={styles.btn}
-                disabled={!previewTargetGroupId}
-                title={
-                  previewTargetGroupId
-                    ? "Read-only ordered merge preview"
-                    : "No delivery group to preview"
-                }
-                onClick={() =>
-                  previewTargetGroupId &&
-                  setPreviewGroupId(previewTargetGroupId)
-                }
-              >
-                <Icon name="merge" /> Preview merge
-              </button>
-            </div>
-          </header>
-
-          {mode === "queue" && (
-            <div
-              className={styles.tabs}
-              role="tablist"
-              aria-label="Readiness tabs"
-            >
-              {TABS.map((t) => (
+                      {notCurrentCount > 0 ? (
+                        <span className={styles.warnText}>
+                          · {notCurrentCount} with evidence not current
+                        </span>
+                      ) : null}
+                      {deliveryGroupsHasMore ? (
+                        <span>· more groups available</span>
+                      ) : null}
+                      {!membershipComplete ? (
+                        <span className={styles.warnText}>
+                          · membership incomplete
+                        </span>
+                      ) : null}
+                    </>
+                  )}
+                </p>
+              </div>
+              <div className={styles.headingActions}>
                 <button
-                  key={t.id}
                   type="button"
-                  role="tab"
-                  aria-selected={tab === t.id}
-                  className={styles.tab}
-                  onClick={() => setTab(t.id)}
+                  className={styles.btn}
+                  data-variant="ghost"
+                  onClick={() => setGuideOpen(true)}
                 >
-                  {t.label}
-                  <span className={styles.tabCount}>{tabCounts[t.id]}</span>
+                  <Icon name="map" /> How groups work
                 </button>
-              ))}
-            </div>
-          )}
+                <button
+                  type="button"
+                  className={styles.btn}
+                  disabled={!previewTargetGroupId}
+                  title={
+                    previewTargetGroupId
+                      ? "Read-only ordered merge preview"
+                      : "No delivery group to preview"
+                  }
+                  onClick={() =>
+                    previewTargetGroupId &&
+                    setPreviewGroupId(previewTargetGroupId)
+                  }
+                >
+                  <Icon name="merge" /> Preview merge
+                </button>
+              </div>
+            </header>
 
-          <div className={styles.toolbar}>
-            <label className={styles.search} htmlFor={searchId}>
-              <Icon name="search" />
-              <input
-                id={searchId}
-                ref={searchRef}
-                type="search"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search PRs, branches, or groups"
-                aria-label="Search pull requests"
-              />
-              <kbd className={styles.kbd} aria-hidden="true">
-                /
-              </kbd>
-            </label>
-            <label className={styles.selectWrap}>
-              <Icon name="stack" />
-              <select
-                aria-label="Filter by epic"
-                value={singleEpic}
-                onChange={(e) =>
-                  setSelectedEpics(
-                    e.target.value ? new Set([e.target.value]) : new Set(),
-                  )
+            {mode === "queue" && (
+              <div
+                className={styles.tabs}
+                role="tablist"
+                aria-label="Readiness tabs"
+              >
+                {TABS.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === t.id}
+                    className={styles.tab}
+                    onClick={() => setTab(t.id)}
+                  >
+                    {t.label}
+                    <span className={styles.tabCount}>{tabCounts[t.id]}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className={styles.toolbar}>
+              <label className={styles.search} htmlFor={searchId}>
+                <Icon name="search" />
+                <input
+                  id={searchId}
+                  ref={searchRef}
+                  type="search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search PRs, branches, or groups"
+                  aria-label="Search pull requests"
+                />
+                <kbd className={styles.kbd} aria-hidden="true">
+                  /
+                </kbd>
+              </label>
+              <label className={styles.selectWrap}>
+                <Icon name="stack" />
+                <select
+                  aria-label="Filter by epic"
+                  value={singleEpic}
+                  onChange={(e) =>
+                    setSelectedEpics(
+                      e.target.value ? new Set([e.target.value]) : new Set(),
+                    )
+                  }
+                >
+                  <option value="">
+                    {selectedEpics.size > 1
+                      ? `${selectedEpics.size} epics`
+                      : "All epics"}
+                  </option>
+                  {epicOptions.map(([epic, count]) => (
+                    <option key={epic} value={epic}>
+                      {epic} ({count})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className={styles.selectWrap}>
+                <Icon name="repo" />
+                <select
+                  aria-label="Filter by repository"
+                  value={singleRepo}
+                  onChange={(e) =>
+                    setSelectedRepos(
+                      e.target.value ? new Set([e.target.value]) : new Set(),
+                    )
+                  }
+                >
+                  <option value="">
+                    {selectedRepos.size > 1
+                      ? `${selectedRepos.size} repos`
+                      : "All repos"}
+                  </option>
+                  {repoOptions.map(([repo, count]) => (
+                    <option key={repo} value={repo}>
+                      {repo} ({count})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className={styles.selectWrap}>
+                <Icon name="pr" />
+                <select
+                  aria-label="Filter by kind"
+                  value={kindValue}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setKinds(
+                      new Set<QueueKind>(
+                        v === "group"
+                          ? ["group"]
+                          : v === "standalone"
+                            ? ["standalone"]
+                            : ["group", "standalone"],
+                      ),
+                    );
+                  }}
+                >
+                  <option value="all">Groups + standalone</option>
+                  <option value="group">Delivery groups ({groupCount})</option>
+                  <option value="standalone">
+                    Standalone ({standaloneCount})
+                  </option>
+                </select>
+              </label>
+              <label
+                className={styles.toggle}
+                title={
+                  githubLogin
+                    ? `Verified GitHub login (@${githubLogin})`
+                    : (githubViewer?.message ??
+                      "GitHub identity unavailable — display name is never used as login")
                 }
               >
-                <option value="">
-                  {selectedEpics.size > 1
-                    ? `${selectedEpics.size} epics`
-                    : "All epics"}
-                </option>
-                {epicOptions.map(([epic, count]) => (
-                  <option key={epic} value={epic}>
-                    {epic} ({count})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className={styles.selectWrap}>
-              <Icon name="repo" />
-              <select
-                aria-label="Filter by repository"
-                value={singleRepo}
-                onChange={(e) =>
-                  setSelectedRepos(
-                    e.target.value ? new Set([e.target.value]) : new Set(),
-                  )
-                }
+                <input
+                  type="checkbox"
+                  className={styles.toggleInput}
+                  checked={mine}
+                  onChange={() => setMine((v) => !v)}
+                  aria-label={mineLabel}
+                />
+                <span className={styles.toggleSwitch} aria-hidden="true" />
+                Mine
+                <span
+                  className={styles.mineChip}
+                  data-testid="mine-identity-chip"
+                >
+                  {githubLogin
+                    ? `@${githubLogin}`
+                    : githubViewer == null
+                      ? "—"
+                      : "unavailable"}
+                </span>
+              </label>
+              <span className={styles.spacer} />
+              <span className={styles.resultCount}>
+                {mode === "history"
+                  ? `${history.length} events`
+                  : `${visible.length} shown`}
+              </span>
+              <div
+                className={styles.viewSwitch}
+                role="group"
+                aria-label="Path or list"
               >
-                <option value="">
-                  {selectedRepos.size > 1
-                    ? `${selectedRepos.size} repos`
-                    : "All repos"}
-                </option>
-                {repoOptions.map(([repo, count]) => (
-                  <option key={repo} value={repo}>
-                    {repo} ({count})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className={styles.selectWrap}>
-              <Icon name="pr" />
-              <select
-                aria-label="Filter by kind"
-                value={kindValue}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setKinds(
-                    new Set<QueueKind>(
-                      v === "group"
-                        ? ["group"]
-                        : v === "standalone"
-                          ? ["standalone"]
-                          : ["group", "standalone"],
-                    ),
-                  );
+                <button
+                  type="button"
+                  aria-pressed={view === "path"}
+                  aria-label="Path view"
+                  title="Path view (v)"
+                  disabled={mode === "history"}
+                  onClick={() => setView("path")}
+                >
+                  <Icon name="map" />
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={view === "list"}
+                  aria-label="List view"
+                  title="List view (v)"
+                  disabled={mode === "history"}
+                  onClick={() => setView("list")}
+                >
+                  <Icon name="list" />
+                </button>
+              </div>
+              <button
+                type="button"
+                className={styles.btn}
+                aria-pressed={detailOpen}
+                onClick={() => {
+                  // Narrow layouts only show the summary as an overlay.
+                  if (isNarrow()) {
+                    setDetailOpen(true);
+                    setMobileDetail(Boolean(selectedKey));
+                    return;
+                  }
+                  setDetailOpen((v) => !v);
                 }}
               >
-                <option value="all">Groups + standalone</option>
-                <option value="group">Delivery groups ({groupCount})</option>
-                <option value="standalone">
-                  Standalone ({standaloneCount})
-                </option>
-              </select>
-            </label>
-            <label
-              className={styles.toggle}
-              title={
-                githubLogin
-                  ? `Verified GitHub login (@${githubLogin})`
-                  : (githubViewer?.message ??
-                    "GitHub identity unavailable — display name is never used as login")
-              }
-            >
-              <input
-                type="checkbox"
-                className={styles.toggleInput}
-                checked={mine}
-                onChange={() => setMine((v) => !v)}
-                aria-label={mineLabel}
-              />
-              <span className={styles.toggleSwitch} aria-hidden="true" />
-              Mine
-              <span
-                className={styles.mineChip}
-                data-testid="mine-identity-chip"
+                <Icon name="panel" />{" "}
+                {detailOpen ? "Hide summary" : "Show summary"}
+              </button>
+            </div>
+
+            {mine && githubIdentityMissing ? (
+              <p
+                className={styles.infoBanner}
+                data-testid="mine-viewer-unavailable"
+                role="status"
               >
-                {githubLogin
-                  ? `@${githubLogin}`
-                  : githubViewer == null
-                    ? "—"
-                    : "unavailable"}
-              </span>
-            </label>
-            <span className={styles.spacer} />
-            <span className={styles.resultCount}>
-              {mode === "history"
-                ? `${history.length} events`
-                : `${visible.length} shown`}
-            </span>
+                GitHub identity unavailable
+                {githubViewer?.message ? `: ${githubViewer.message}` : ""}.
+                Author matching is paused; Loom owner/assignee matches still
+                apply when signed in.
+              </p>
+            ) : null}
+            {githubWarning && (
+              <p
+                className={styles.warnBanner}
+                role="status"
+                data-testid="prs-github-warning"
+              >
+                <Icon name="warning" />
+                <span>
+                  {githubWarning}. Loom-backed delivery groups are still shown.
+                </span>
+              </p>
+            )}
+            {writeBanner && (
+              <p
+                className={styles.warnBanner}
+                role="alert"
+                data-testid="dg-write-error"
+              >
+                <Icon name="warning" />
+                <span>{writeBanner}</span>
+              </p>
+            )}
+            {standaloneContinuation?.has_more && (
+              <p className={styles.infoBanner} role="status">
+                More standalone PRs exist beyond this page
+                {standaloneContinuation.repos
+                  .filter((r) => r.has_more)
+                  .map((r) => ` (${r.source_repo || r.repo})`)
+                  .join("")}
+                .
+              </p>
+            )}
+
+            {mode === "queue" && view === "path" ? (
+              <div className={styles.legend} aria-hidden="true">
+                <span>
+                  <i data-tone="merged" /> Merged
+                </span>
+                <span>
+                  <i data-tone="ready" /> Ready
+                </span>
+                <span>
+                  <i data-tone="review" /> Waiting
+                </span>
+                <span>
+                  <i data-tone="blocked" /> Blocked
+                </span>
+                <span>
+                  <i data-tone="unknown" /> Stale / unknown
+                </span>
+              </div>
+            ) : null}
+
             <div
-              className={styles.viewSwitch}
-              role="group"
-              aria-label="Path or list"
+              className={styles.workArea}
+              data-no-summary={!detailOpen || undefined}
+              ref={listRef}
             >
-              <button
-                type="button"
-                aria-pressed={view === "path"}
-                aria-label="Path view"
-                title="Path view (v)"
-                disabled={mode === "history"}
-                onClick={() => setView("path")}
-              >
-                <Icon name="map" />
-              </button>
-              <button
-                type="button"
-                aria-pressed={view === "list"}
-                aria-label="List view"
-                title="List view (v)"
-                disabled={mode === "history"}
-                onClick={() => setView("list")}
-              >
-                <Icon name="list" />
-              </button>
+              <div className={styles.main}>
+                {mode === "history"
+                  ? renderHistory()
+                  : view === "list"
+                    ? renderListView()
+                    : renderPathView()}
+              </div>
+              {detailOpen ? renderDetail() : null}
             </div>
-            <button
-              type="button"
-              className={styles.btn}
-              aria-pressed={detailOpen}
-              onClick={() => {
-                // Narrow layouts only show the summary as an overlay.
-                if (isNarrow()) {
-                  setDetailOpen(true);
-                  setMobileDetail(Boolean(selectedKey));
-                  return;
-                }
-                setDetailOpen((v) => !v);
-              }}
-            >
-              <Icon name="panel" />{" "}
-              {detailOpen ? "Hide summary" : "Show summary"}
-            </button>
+            <p className={styles.footerNote}>
+              Loom · Every change has a clear path to main.
+            </p>
           </div>
-
-          {mine && githubIdentityMissing ? (
-            <p
-              className={styles.infoBanner}
-              data-testid="mine-viewer-unavailable"
-              role="status"
-            >
-              GitHub identity unavailable
-              {githubViewer?.message ? `: ${githubViewer.message}` : ""}. Author
-              matching is paused; Loom owner/assignee matches still apply when
-              signed in.
-            </p>
-          ) : null}
-          {githubWarning && (
-            <p
-              className={styles.warnBanner}
-              role="status"
-              data-testid="prs-github-warning"
-            >
-              <Icon name="warning" />
-              <span>
-                {githubWarning}. Loom-backed delivery groups are still shown.
-              </span>
-            </p>
-          )}
-          {writeBanner && (
-            <p
-              className={styles.warnBanner}
-              role="alert"
-              data-testid="dg-write-error"
-            >
-              <Icon name="warning" />
-              <span>{writeBanner}</span>
-            </p>
-          )}
-          {standaloneContinuation?.has_more && (
-            <p className={styles.infoBanner} role="status">
-              More standalone PRs exist beyond this page
-              {standaloneContinuation.repos
-                .filter((r) => r.has_more)
-                .map((r) => ` (${r.source_repo || r.repo})`)
-                .join("")}
-              .
-            </p>
-          )}
-
-          {mode === "queue" && view === "path" ? (
-            <div className={styles.legend} aria-hidden="true">
-              <span>
-                <i data-tone="merged" /> Merged
-              </span>
-              <span>
-                <i data-tone="ready" /> Ready
-              </span>
-              <span>
-                <i data-tone="review" /> Waiting
-              </span>
-              <span>
-                <i data-tone="blocked" /> Blocked
-              </span>
-              <span>
-                <i data-tone="unknown" /> Stale / unknown
-              </span>
-            </div>
-          ) : null}
-
-          <div
-            className={styles.workArea}
-            data-no-summary={!detailOpen || undefined}
-            ref={listRef}
-          >
-            <div className={styles.main}>
-              {mode === "history"
-                ? renderHistory()
-                : view === "list"
-                  ? renderListView()
-                  : renderPathView()}
-            </div>
-            {detailOpen ? renderDetail() : null}
-          </div>
-          <p className={styles.footerNote}>
-            Loom · Every change has a clear path to main.
-          </p>
         </div>
       </div>
 

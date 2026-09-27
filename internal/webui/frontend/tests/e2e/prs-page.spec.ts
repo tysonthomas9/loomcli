@@ -193,6 +193,8 @@ const deliveryGroups = [
 
 interface PullRequestsMock {
   status?: number;
+  /** Workspace list override (e.g. two workspaces to expose the switch). */
+  workspaces?: typeof workspaceData.workspaces;
   issues?: unknown[];
   pullRequests?: typeof githubPrs;
   warnings?: string[];
@@ -212,6 +214,9 @@ async function setupMocks(
   page: Page,
   prMock: PullRequestsMock = {},
 ): Promise<void> {
+  const wsData = prMock.workspaces
+    ? { ...workspaceData, workspaces: prMock.workspaces }
+    : workspaceData;
   await page.route("**/api/config", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname !== "/api/config") {
@@ -253,7 +258,7 @@ async function setupMocks(
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: ok(workspaceData),
+          body: ok(wsData),
         });
         return;
       }
@@ -273,7 +278,7 @@ async function setupMocks(
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: ok(workspaceData),
+          body: ok(wsData),
         });
         return;
       }
@@ -698,7 +703,13 @@ function fixtureReadiness(
     freshness: opts.stale ? "stale" : "fresh",
     age_seconds: opts.stale ? 1800 : 20,
     current_verdict: opts.stale ? "unknown" : verdict,
-    current_reasons: opts.stale ? ["stale"] : [],
+    // Mirrors prreadiness.evaluateReady: a null reviewDecision on a ready PR
+    // carries the no_review_required warning.
+    current_reasons: opts.stale
+      ? ["stale"]
+      : opts.review === "not_reported"
+        ? ["no_review_required"]
+        : [],
     snapshot: {
       pr_key: prKey,
       head_sha: "a1",
@@ -871,6 +882,7 @@ const FIXTURE_INVARIANTS: FixturePr[] = [
     head: "fix/orphan-children",
     author: "lee-p",
     verdict: "ready",
+    review: "not_reported",
   },
   {
     n: 172,
@@ -981,6 +993,7 @@ async function gotoFixture(
   page: Page,
   theme: "dark" | "light",
   viewport: { width: number; height: number },
+  opts: { select?: boolean; workspaces?: typeof workspaceData.workspaces } = {},
 ): Promise<void> {
   await page.addInitScript((t) => {
     try {
@@ -995,10 +1008,26 @@ async function gotoFixture(
     deliveryGroups:
       visualFixture.deliveryGroups as unknown as typeof deliveryGroups,
     issues: visualFixture.issues,
+    ...(opts.workspaces ? { workspaces: opts.workspaces } : {}),
   });
   await gotoPrsPage(page);
-  await page.getByTestId("pr-row-acme/loomcli#146").click();
-  await expect(page.getByTestId("selected-pr-detail")).toBeVisible();
+  if (opts.select !== false) {
+    await page.getByTestId("pr-row-acme/loomcli#146").click();
+  }
+  // Below 850px the summary is an overlay opened only by picking a row.
+  if (opts.select !== false || viewport.width > 850) {
+    await expect(page.getByTestId("selected-pr-detail")).toBeVisible();
+  }
+  // Playwright scrolls a clicked row into view; screenshots compare against
+  // the reference at scroll top.
+  await resetScroll(page);
+}
+
+/** The single page scroller under the fixed breadcrumb bar. */
+async function resetScroll(page: Page): Promise<void> {
+  await page.getByTestId("stacked-pr-scroll").evaluate((el) => {
+    el.scrollTo(0, 0);
+  });
 }
 
 test.describe("PRs page — reference composition (test-only visual fixture)", () => {
@@ -1050,6 +1079,19 @@ test.describe("PRs page — reference composition (test-only visual fixture)", (
     await expect(page.getByTestId("merge-requirements")).toContainText(
       "not current",
     );
+
+    // Fresh review=not_reported (GitHub gave no reviewDecision): neutral
+    // requirement line, backend Ready verdict untouched.
+    await page.getByTestId("pr-row-acme/fleetdb#171").click();
+    const reqs = page.getByTestId("merge-requirements");
+    await expect(reqs).toContainText("No review decision reported");
+    await expect(reqs).not.toContainText("No review required");
+    await expect(
+      reqs.locator("li", { hasText: "No review decision reported" }),
+    ).toHaveAttribute("data-state", "unknown");
+    await expect(
+      page.getByTestId("selected-pr-detail").getByTestId("readiness-badge"),
+    ).toHaveText(/Ready/);
   });
 
   test("1440x1000 light theme is respected", async ({ page }) => {
@@ -1078,11 +1120,8 @@ test.describe("PRs page — reference composition (test-only visual fixture)", (
       path: path.join(EVIDENCE_DIR, "fixture-dark-390-summary.png"),
     });
     await page.getByRole("button", { name: "Close details" }).click();
-    // The workspace scrolls inside its own shell, not the document.
-    const shell = page
-      .getByTestId("stacked-pr-workspace")
-      .locator("> div")
-      .last();
+    // The workspace scrolls inside its own scroller, not the document.
+    const shell = page.getByTestId("stacked-pr-scroll");
     await shell.evaluate((el) => el.scrollTo(0, 0));
     await page.screenshot({
       path: path.join(EVIDENCE_DIR, "fixture-dark-390-top.png"),
@@ -1090,6 +1129,199 @@ test.describe("PRs page — reference composition (test-only visual fixture)", (
     await shell.evaluate((el) => el.scrollTo(0, 700));
     await page.screenshot({
       path: path.join(EVIDENCE_DIR, "fixture-dark-390-path.png"),
+    });
+  });
+});
+
+/*
+ * Route-owned chrome (STACKED-PRS-85). Same TEST-ONLY mocked fixture as
+ * above: this proves the routed app composition in a browser, not runtime
+ * or GitHub behavior.
+ */
+test.describe("PRs page — route-owned chrome (test-only visual fixture)", () => {
+  const twoWorkspaces = [
+    ...workspaceData.workspaces,
+    {
+      id: "other",
+      name: "other",
+      path: "/tmp/other-ws",
+      active: false,
+      repo_count: 1,
+      is_default: false,
+    },
+  ];
+
+  test("1440x1000 at load: one nav, one breadcrumb, heading and toolbar in view", async ({
+    page,
+  }) => {
+    fs.mkdirSync(EVIDENCE_DIR, { recursive: true });
+    await gotoFixture(
+      page,
+      "dark",
+      { width: 1440, height: 1000 },
+      { select: false },
+    );
+
+    // Global header and NavRail are gone; /prs draws the only chrome.
+    await expect(page.locator('[data-chrome="route"]')).toHaveCount(1);
+    await expect(page.getByRole("banner")).toHaveCount(0);
+    await expect(page.getByRole("navigation", { name: "Primary" })).toHaveCount(
+      0,
+    );
+    const nav = await page.getByTestId("stacked-pr-nav").boundingBox();
+    expect(nav).toMatchObject({ x: 0, y: 0, width: 212 });
+    const bar = await page.getByTestId("stacked-pr-topbar").boundingBox();
+    expect(bar).toMatchObject({ x: 212, y: 0, height: 59 });
+
+    // Initial auto-selection never scrolls the page.
+    const scroll = page.getByTestId("stacked-pr-scroll");
+    expect(await scroll.evaluate((el) => el.scrollTop)).toBe(0);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Pull requests" }),
+    ).toBeInViewport();
+    await expect(page.getByLabel("Search pull requests")).toBeInViewport();
+    await expect(
+      page.getByRole("button", { name: /Hide summary/ }),
+    ).toBeInViewport();
+    await expect(page.getByTestId("selected-pr-detail")).toBeVisible();
+
+    const overflow = await page.evaluate(() => ({
+      doc: document.documentElement.scrollWidth - window.innerWidth,
+      scroller:
+        document.querySelector<HTMLElement>(
+          '[data-testid="stacked-pr-scroll"]',
+        )!.scrollWidth -
+        document.querySelector<HTMLElement>(
+          '[data-testid="stacked-pr-scroll"]',
+        )!.clientWidth,
+    }));
+    expect(overflow.doc).toBeLessThanOrEqual(0);
+    expect(overflow.scroller).toBeLessThanOrEqual(0);
+
+    await page.screenshot({
+      path: path.join(EVIDENCE_DIR, "route-dark-1440x1000-top.png"),
+    });
+
+    // j/k keeps the breadcrumb fixed; scrolling the list never moves it.
+    for (let i = 0; i < 6; i++) await page.keyboard.press("j");
+    await scroll.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+    expect((await page.getByTestId("stacked-pr-topbar").boundingBox())?.y).toBe(
+      0,
+    );
+  });
+
+  test("keyboard shortcuts do not hijack buttons, links, or chords", async ({
+    page,
+  }) => {
+    await gotoFixture(
+      page,
+      "dark",
+      { width: 1440, height: 1000 },
+      { select: false },
+    );
+    const guideButton = page.getByRole("button", { name: /How groups work/ });
+    await guideButton.focus();
+    await page.keyboard.press("Enter");
+    await expect(
+      page.getByRole("dialog", { name: "How delivery groups work" }),
+    ).toBeVisible();
+    expect(new URL(page.url()).searchParams.has("review")).toBe(false);
+    expect(new URL(page.url()).searchParams.has("review-pr")).toBe(false);
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+
+    // Space on a focused row selects that row, not the prior selection's review.
+    const row = page.getByTestId("pr-row-acme/fleetdb#144");
+    await row.focus();
+    await page.keyboard.press(" ");
+    await expect(row).toHaveAttribute("data-current", "true");
+    expect(new URL(page.url()).search).toBe("");
+
+    // Modifier chords (paste, history) stay with the browser.
+    const pathView = page.getByRole("button", { name: "Path view" });
+    await page.locator("body").focus();
+    await page.keyboard.press("ControlOrMeta+v");
+    await expect(pathView).toHaveAttribute("aria-pressed", "true");
+    await page.keyboard.press("v");
+    await expect(pathView).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test("live Loom controls: theme, workspace switch, back to workspace", async ({
+    page,
+  }) => {
+    await gotoFixture(
+      page,
+      "dark",
+      { width: 1440, height: 1000 },
+      { select: false, workspaces: twoWorkspaces },
+    );
+    const html = page.locator("html");
+    await expect(html).toHaveAttribute("data-theme", "dark");
+    await page.getByRole("button", { name: "Switch to light theme" }).click();
+    await expect(html).toHaveAttribute("data-theme", "light");
+    await page.getByRole("button", { name: "Switch to dark theme" }).click();
+    await expect(html).toHaveAttribute("data-theme", "dark");
+
+    const switcher = page.getByRole("combobox", { name: "Switch workspace" });
+    await expect(switcher).toHaveValue(WORKSPACE_ID);
+    await expect(switcher.locator("option")).toHaveCount(2);
+
+    // Back to workspace restores the standard shell for other views.
+    await page
+      .getByTestId("stacked-pr-nav")
+      .getByRole("button", { name: "Back to workspace" })
+      .click();
+    await expect(page).not.toHaveURL(/\/prs/);
+    await expect(
+      page.getByRole("navigation", { name: "Primary" }),
+    ).toBeVisible();
+    await expect(page.getByRole("banner")).toHaveCount(1);
+    await expect(page.locator('[data-chrome="shell"]')).toHaveCount(1);
+
+    // Returning through the NavRail hands the chrome back to /prs.
+    await page
+      .getByRole("navigation", { name: "Primary" })
+      .getByRole("button", { name: /Pull Requests/i })
+      .click();
+    await expect(page.getByTestId("stacked-pr-nav")).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Primary" })).toHaveCount(
+      0,
+    );
+
+    await switcher.selectOption("other");
+    await expect(page).toHaveURL(/\/ws\/other/);
+  });
+
+  test("390px: breadcrumb keeps Back to workspace, no horizontal scroll", async ({
+    page,
+  }) => {
+    fs.mkdirSync(EVIDENCE_DIR, { recursive: true });
+    await gotoFixture(
+      page,
+      "light",
+      { width: 390, height: 844 },
+      { select: false },
+    );
+    await expect(page.getByTestId("stacked-pr-nav")).toBeHidden();
+    await expect(page.getByRole("navigation", { name: "Primary" })).toHaveCount(
+      0,
+    );
+    await expect(
+      page
+        .getByTestId("stacked-pr-topbar")
+        .getByRole("button", { name: "Back to workspace" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Pull requests" }),
+    ).toBeInViewport();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth > window.innerWidth,
+      ),
+    ).toBe(false);
+    const bar = await page.getByTestId("stacked-pr-topbar").boundingBox();
+    expect(bar?.width).toBeLessThanOrEqual(390);
+    await page.screenshot({
+      path: path.join(EVIDENCE_DIR, "route-light-390-top.png"),
     });
   });
 });
