@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/sessions/redact"
 )
 
 // Preconditions carries the freshness assertions an egress call must hold.
@@ -275,23 +276,40 @@ func DecisionForError(err error) domain.ConnectorCallDecision {
 	return domain.ConnectorCallUpstreamError
 }
 
-// tokenPattern matches common credential shapes (bearer/token header echoes,
-// GitHub token prefixes) so sanitization holds even when the exact
-// credential string is unavailable or transformed.
-var tokenPattern = regexp.MustCompile(`(?i)(bearer\s+\S+|token\s+\S+|gh[pousr]_[A-Za-z0-9_]{4,}|github_pat_[A-Za-z0-9_]{4,})`)
+// tokenShapePattern matches credential shapes so sanitization holds even when
+// the exact credential is unavailable or transformed. It covers every provider
+// this connector talks to; redact.String backstops anything not enumerated
+// here. Datadog keys stay context-anchored so bare hex strings, including git
+// SHAs in upstream errors, remain readable.
+var tokenShapePattern = regexp.MustCompile(`(?i)(` +
+	`bearer\s+\S+` + // Authorization: Bearer <opaque> echo.
+	`|token\s+\S+` + // "token <opaque>" echo.
+	`|gh[pousr]_[A-Za-z0-9_]{4,}` + // GitHub ghp_/gho_/ghu_/ghs_/ghr_.
+	`|github_pat_[A-Za-z0-9_]{4,}` + // GitHub fine-grained PAT.
+	`|xox[a-z]-[A-Za-z0-9-]{8,}` + // Slack xoxb/xoxp/xoxa/xoxr/xoxs/xoxe/xoxo.
+	`|xapp-[A-Za-z0-9-]{8,}` + // Slack app-level token.
+	`|(?:dd[-_]?(?:api|app)[-_]?key|datadog[-_ ]?(?:api|app)?[-_ ]?key)["'\s:=]+[A-Fa-f0-9]{32,40}` + // Datadog key with context.
+	`)`)
 
-// maxSanitizedLen caps sanitized upstream messages so journals stay small.
-const maxSanitizedLen = 160
+const (
+	redactedMarker = "[redacted]"
+
+	// maxSanitizedLen caps sanitized upstream messages so journals stay small.
+	maxSanitizedLen = 160
+)
 
 // sanitizeUpstreamMessage strips credential material from upstream-provided
 // text before it can reach an error string or audit summary: the literal
-// credential is removed, token-shaped substrings are removed, control
-// characters collapse to spaces, and the result is length-capped.
+// credential is removed, token-shaped substrings are removed with the
+// connector-specific shape layer, the canonical redactor backstops future or
+// unenumerated secret shapes, control characters collapse to spaces, and the
+// result is length-capped.
 func sanitizeUpstreamMessage(msg, credential string) string {
 	if credential != "" {
-		msg = strings.ReplaceAll(msg, credential, "[redacted]")
+		msg = strings.ReplaceAll(msg, credential, redactedMarker)
 	}
-	msg = tokenPattern.ReplaceAllString(msg, "[redacted]")
+	msg = tokenShapePattern.ReplaceAllString(msg, redactedMarker)
+	msg = redact.String(msg)
 	msg = strings.Map(func(r rune) rune {
 		if r == '\n' || r == '\r' || r == '\t' {
 			return ' '
