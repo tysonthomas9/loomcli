@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/git"
 )
 
 // strPtr returns a pointer to s. Used for UpdateOpts.Assignee where
@@ -247,25 +249,18 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int, incomplete bo
 	}
 	resetOrphanedAgentTasks(deps, worktreePath, agentName, lockTaskID, false)
 
-	// 6. Clean untracked files (force=true, no prompting).
-	//
-	// Skipped for an incomplete run. `git clean` here excludes only
-	// cli.ProtectedRuntimePaths, so everything the turn produced but had not
-	// committed yet — new files, scratch notes, generated fixtures — is exactly
-	// what it deletes. That is correct after a crash we are abandoning; it is
-	// destruction of live work when the agent simply ran out of turn and the
-	// next cycle is meant to continue from where it stopped.
-	if !incomplete {
-		cleanUntrackedFiles(worktreePath, true)
-	}
+	// 6. Abort any in-progress git operation, then clean untracked files.
+	finishWorktreeCleanup(worktreePath, incomplete, rescueRoot())
 
 	return nil
 }
 
 // CleanAdoptedWorktree readies a worktree the supervisor has just re-pointed a
 // cycle onto (see supervisor.applyTaskPlacement) WITHOUT touching any task
-// claim. It drops a stale lock and cleans untracked files, so the agent's
-// BeforeRef and branch cut start from a known state.
+// claim. It drops a stale lock, then runs the same cleanup tail as recovery:
+// an operation left in progress is snapshotted and aborted before untracked
+// files are cleaned, and nothing is cleaned when that cannot be done safely.
+// The agent's BeforeRef and branch cut then start from a known state.
 //
 // It is deliberately NOT RecoverWorktree. That call releases and resets tasks:
 // the one it is handed, and every other in_progress task assigned to the agent.
@@ -299,6 +294,56 @@ func CleanAdoptedWorktree(worktreePath string) error {
 			return fmt.Errorf("failed to clear lock: %w", err)
 		}
 	}
-	cleanUntrackedFiles(worktreePath, true)
+	finishWorktreeCleanup(worktreePath, false, rescueRoot())
 	return nil
+}
+
+// finishWorktreeCleanup runs the destructive tail of recovery.
+//
+// Both steps are skipped for an incomplete run. `git clean` here excludes only
+// cli.ProtectedRuntimePaths, so everything the turn produced but had not
+// committed yet — new files, scratch notes, generated fixtures — is exactly
+// what it deletes. That is correct after a crash we are abandoning; it is
+// destruction of live work when the agent simply ran out of turn and the next
+// cycle is meant to continue from where it stopped.
+func finishWorktreeCleanup(worktreePath string, incomplete bool, snapshotRoot string) {
+	if incomplete {
+		return
+	}
+	// Abort BEFORE cleaning: `git clean` would delete the untracked files the
+	// operation introduced and leave the abort a dirtier tree. When the
+	// operation cannot be aborted safely, the clean is skipped too, so the
+	// worktree stays exactly as the agent left it.
+	if !abortInProgressGitOp(worktreePath, snapshotRoot) {
+		fmt.Printf("[recover] warning: skipped git clean in %s; it is still mid-operation\n", worktreePath)
+		return
+	}
+	cleanUntrackedFiles(worktreePath, true)
+}
+
+// abortInProgressGitOp snapshots and aborts a merge, rebase, cherry-pick,
+// revert or bisect left behind in an agent worktree. It reports false when an
+// operation was found and could not be aborted safely. A failure is a warning,
+// never a returned error: recovery must not fail the whole run over it.
+func abortInProgressGitOp(worktreePath, snapshotRoot string) bool {
+	line, err := git.AbortInProgressOp(worktreePath, snapshotRoot)
+	if err != nil {
+		fmt.Printf("[recover] warning: %v\n", err)
+		return false
+	}
+	if line != "" {
+		fmt.Printf("[recover] %s\n", line)
+	}
+	return true
+}
+
+// rescueRoot is where recovery keeps the snapshot of an operation it aborts:
+// a rescue directory beside the agent worktrees, or the temp dir when no
+// worktrees directory is configured.
+func rescueRoot() string {
+	dir := cli.GetWorktreesDir()
+	if dir == "" || dir == "." {
+		return filepath.Join(os.TempDir(), "loom-rescue")
+	}
+	return filepath.Join(dir, "rescue")
 }
