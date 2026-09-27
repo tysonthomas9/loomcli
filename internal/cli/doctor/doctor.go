@@ -120,7 +120,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	}
 
 	if summary.Fail > 0 {
-		cmd.SilenceErrors = true
+		// No SilenceErrors here: cmd/loom/main.go no longer prints the error
+		// itself, so silencing cobra would swallow the summary entirely.
 		return fmt.Errorf("doctor found %d failure(s)", summary.Fail)
 	}
 	return nil
