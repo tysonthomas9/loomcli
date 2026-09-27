@@ -147,8 +147,12 @@
  * =========================== */
 .skipLink {
   position: absolute;
+  top: 0;
   left: var(--space-4);
-  transform: translateY(-100%);
+  /* Anchor to the top so the hidden state is fully off-screen; without
+     top it sat at its static position below the header padding and the
+     -100% shift left it visible over the header. */
+  transform: translateY(-120%);
   background: var(--color-primary);
   color: var(--color-text-inverse);
   padding: var(--space-2) var(--space-4);

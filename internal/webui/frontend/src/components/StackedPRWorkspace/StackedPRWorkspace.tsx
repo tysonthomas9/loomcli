@@ -14,7 +14,6 @@ import {
   useRef,
   useState,
   type Dispatch,
-  type KeyboardEvent as ReactKeyboardEvent,
   type SetStateAction,
 } from "react";
 
@@ -53,14 +52,23 @@ import {
   type WorkspaceItem,
 } from "@/utils/pullRequest/stackedPrModel";
 import {
-  formatObservedAtLine,
   readinessDisplay,
   shortPrKey,
 } from "@/utils/pullRequest/readinessDisplay";
 import type { Issue } from "@/types";
+import {
+  checkCountLabel,
+  relativeAge,
+  repoBasename,
+  toneForKey,
+} from "@/utils/pullRequest/stackedPrPresentation";
 import { useAuth } from "@/contexts/AuthContext";
+import { Icon } from "./Icon";
 import { MergePreviewDialog } from "./MergePreviewDialog";
+import { PRRow, type PathNodeState } from "./PRRow";
 import { ReadinessBadge } from "./ReadinessBadge";
+import { SummaryPanel, type GroupContext } from "./SummaryPanel";
+import { WorkspaceNav } from "./WorkspaceNav";
 import styles from "./StackedPRWorkspace.module.css";
 
 export interface StackedPRWorkspaceProps {
@@ -81,7 +89,7 @@ export interface StackedPRWorkspaceProps {
 const TABS: { id: QueueTab; label: string }[] = [
   { id: "all", label: "All" },
   { id: "review", label: "Needs review" },
-  { id: "ready", label: "Ready" },
+  { id: "ready", label: "Ready to merge" },
   { id: "attention", label: "Needs attention" },
   { id: "merged", label: "Merged" },
 ];
@@ -115,7 +123,7 @@ export function StackedPRWorkspace({
   onOpenReview,
   onRefetch,
 }: StackedPRWorkspaceProps): JSX.Element {
-  const { workspaceId } = useWorkspaceContext();
+  const { workspaceId, workspace } = useWorkspaceContext();
   const { user } = useAuth();
   const searchId = useId();
   const searchRef = useRef<HTMLInputElement>(null);
@@ -125,7 +133,11 @@ export function StackedPRWorkspace({
   const [mode, setMode] = useState<QueueMode>("queue");
   const [view, setView] = useState<QueueViewMode>("path");
   const [query, setQuery] = useState("");
-  const [railQuery, setRailQuery] = useState("");
+  /** User expand/collapse choices per delivery group id. */
+  const [expandedOverride, setExpandedOverride] = useState<
+    Map<string, boolean>
+  >(() => new Map());
+  const [guideOpen, setGuideOpen] = useState(false);
   const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set());
   const [selectedEpics, setSelectedEpics] = useState<Set<string>>(new Set());
   const [kinds, setKinds] = useState<Set<QueueKind>>(
@@ -395,18 +407,6 @@ export function StackedPRWorkspace({
   );
   const epicOptions = useMemo(() => epicOptionsFromItems(items), [items]);
 
-  const filteredRepoOptions = useMemo(() => {
-    const q = railQuery.trim().toLowerCase();
-    if (!q) return repoOptions;
-    return repoOptions.filter(([name]) => name.toLowerCase().includes(q));
-  }, [repoOptions, railQuery]);
-
-  const filteredEpicOptions = useMemo(() => {
-    const q = railQuery.trim().toLowerCase();
-    if (!q) return epicOptions;
-    return epicOptions.filter(([name]) => name.toLowerCase().includes(q));
-  }, [epicOptions, railQuery]);
-
   const githubWarning = error
     ? `GitHub metadata unavailable: ${error.message}`
     : warnings.length > 0
@@ -452,10 +452,16 @@ export function StackedPRWorkspace({
 
   useRegisterEscapeLayer(
     LAYER_CONFIRM_DIALOG,
+    () => setGuideOpen(false),
+    guideOpen && !previewGroupId,
+  );
+
+  useRegisterEscapeLayer(
+    LAYER_CONFIRM_DIALOG,
     () => {
       setMobileDetail(false);
     },
-    mobileDetail && !previewGroupId && !helpOpen,
+    mobileDetail && !previewGroupId && !helpOpen && !guideOpen,
   );
 
   // Select first visible PR when none selected.
@@ -489,6 +495,22 @@ export function StackedPRWorkspace({
     if (!selectedKey) return;
     void loadReadinessFor([selectedKey]);
   }, [selectedKey, loadReadinessFor]);
+
+  // Keyboard/selection moving into a collapsed group re-expands it.
+  useEffect(() => {
+    if (!selectedKey) return;
+    const owner = deliveryGroups.find((g) =>
+      g.members.some((m) => m.pr_key === selectedKey),
+    );
+    if (!owner || expandedOverride.get(owner.id) !== false) return;
+    setExpandedOverride((prev) => {
+      const next = new Map(prev);
+      next.delete(owner.id);
+      return next;
+    });
+    // Only react to selection changes, not to manual collapse.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKey]);
 
   const selectKey = useCallback((key: string, mobile = false) => {
     setSelectedKey(key);
@@ -557,7 +579,7 @@ export function StackedPRWorkspace({
         }
         return;
       }
-      if (previewGroupId || helpOpen) return;
+      if (previewGroupId || helpOpen || guideOpen) return;
 
       const k = event.key;
       if (k === "/" || (k === "s" && !event.metaKey && !event.ctrlKey)) {
@@ -628,6 +650,7 @@ export function StackedPRWorkspace({
     [
       previewGroupId,
       helpOpen,
+      guideOpen,
       selectedKey,
       flatKeys,
       openReviewForKey,
@@ -723,92 +746,281 @@ export function StackedPRWorkspace({
   const readinessFor = (prKey: string) =>
     groupReadiness.get(prKey) ?? extraReadiness.get(prKey);
 
-  const renderMemberRow = (
-    prKey: string,
-    step: number | null,
-    opts: {
-      dimmed?: boolean;
-      group?: DeliveryGroupView;
-      crossFrom?: string;
-      titleOverride?: string;
-      prOverride?: GitPullRequest;
-    } = {},
+  // Grouped PRs are excluded from the standalone list, so prByKey holds only
+  // a stub for them. Fall back to the linked Loom task title and the
+  // readiness snapshot's head ref — both real data — before the bare key.
+  const realPrByKey = buildPrByKey(pullRequests);
+  const titleFor = (prKey: string): string =>
+    realPrByKey.get(prKey)?.title ??
+    issueByPrKey.get(prKey)?.title ??
+    shortPrKey(prKey);
+  const branchFor = (prKey: string): string | null =>
+    realPrByKey.get(prKey)?.head_ref_name ||
+    readinessFor(prKey)?.snapshot?.head_ref ||
+    null;
+
+  const numberLabelFor = (prKey: string, pr: GitPullRequest | undefined) =>
+    pr && pr.number > 0 ? `#${pr.number}` : shortPrKey(prKey);
+
+  const repoFor = (pr: GitPullRequest | undefined): string =>
+    canonicalRepoIdentity({
+      repo_name: pr?.repo_name,
+      source_repo: pr?.source_repo,
+    });
+
+  const isNarrow = () =>
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(max-width: 850px)").matches;
+
+  const isGroupExpanded = (g: DeliveryGroupView, index: number): boolean => {
+    const override = expandedOverride.get(g.id);
+    if (override != null) return override;
+    return index === 0 || g.members.some((m) => m.pr_key === selectedKey);
+  };
+
+  const toggleGroup = (g: DeliveryGroupView, expanded: boolean) => {
+    setExpandedOverride((prev) => {
+      const next = new Map(prev);
+      next.set(g.id, !expanded);
+      return next;
+    });
+  };
+
+  const memberDisplay = (prKey: string) => {
+    const pr = prByKey.get(prKey);
+    const d = readinessDisplay(readinessFor(prKey));
+    if (pr?.state === "MERGED" && d.key !== "merged") {
+      return { ...d, key: "merged" as const, label: "Merged" };
+    }
+    return d;
+  };
+
+  const renderGroupCard = (
+    g: DeliveryGroupView,
+    index: number,
+    memberDimmed: ReadonlyMap<string, boolean>,
   ): JSX.Element => {
-    const pr = opts.prOverride ?? prByKey.get(prKey);
-    const view = readinessFor(prKey);
-    const display = readinessDisplay(view);
-    const title = opts.titleOverride ?? pr?.title ?? shortPrKey(prKey);
-    const selected = selectedKey === prKey;
-    const onActivate = () => {
-      const narrow =
-        typeof window.matchMedia === "function" &&
-        window.matchMedia("(max-width: 900px)").matches;
-      selectKey(prKey, narrow);
-    };
-    const onKey = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        onActivate();
-      }
-    };
+    const expanded = isGroupExpanded(g, index);
+    const displays = g.members.map((m) => memberDisplay(m.pr_key));
+    const mergedCount = displays.filter((d) => d.key === "merged").length;
+    const readyCount = displays.filter((d) => d.key === "ready").length;
+    const blockedCount = displays.filter((d) => d.key === "blocked").length;
+    const notCurrent = displays.filter(
+      (d) => d.key === "stale" || d.key === "unknown",
+    ).length;
+    const repos = [...new Set(g.members.map((m) => memberRepo(m)))];
+    const nextIdx = displays.findIndex((d) => d.key !== "merged");
+    const nextMember = nextIdx >= 0 ? g.members[nextIdx] : undefined;
+    const epicTitle =
+      g.members
+        .map((m) => issueByPrKey.get(m.pr_key)?.epicTitle)
+        .find(Boolean) ?? g.epic_id;
+    const updated = relativeAge(g.updated_at);
+    const status =
+      g.members.length === 0
+        ? { text: "No members", tone: "bad" }
+        : mergedCount === g.members.length
+          ? { text: "All merged", tone: "good" }
+          : readyCount > 0
+            ? { text: `${readyCount} ready to merge`, tone: "good" }
+            : blockedCount > 0
+              ? { text: `${blockedCount} blocked`, tone: "bad" }
+              : notCurrent > 0
+                ? { text: "Evidence not current", tone: "bad" }
+                : { text: "Waiting for review", tone: "" };
+    const bodyId = `dg-body-${g.id}`;
     return (
-      <li key={prKey} className={styles.pathItem}>
-        {opts.crossFrom ? (
-          <div className={styles.cross} aria-hidden="true">
-            Delivery order crosses {opts.crossFrom} →{" "}
-            {canonicalRepoIdentity({
-              repo_name: pr?.repo_name,
-              source_repo: pr?.source_repo,
-            })}{" "}
-            (not a branch link)
-          </div>
-        ) : null}
+      <article
+        key={g.id}
+        className={styles.stackCard}
+        data-expanded={expanded || undefined}
+        data-testid={`delivery-group-${g.id}`}
+      >
         <button
           type="button"
-          className={styles.row}
-          data-current={selected || undefined}
-          data-dimmed={opts.dimmed || undefined}
-          aria-current={selected ? "true" : undefined}
-          aria-label={`Review ${title}`}
-          onClick={onActivate}
-          onKeyDown={onKey}
-          data-testid={`pr-row-${shortPrKey(prKey)}`}
+          className={styles.stackHeader}
+          aria-expanded={expanded}
+          aria-controls={bodyId}
+          onClick={() => toggleGroup(g, expanded)}
         >
-          {step != null ? (
-            <span
-              className={styles.step}
-              data-status={display.key}
-              aria-hidden="true"
-            >
-              {step}
-            </span>
-          ) : (
-            <span className={styles.stepSolo} aria-hidden="true">
-              ·
-            </span>
-          )}
-          <span className={styles.rowMain}>
-            <span className={styles.rowTitle}>
-              <code className={styles.key}>{shortPrKey(prKey)}</code>
-              <span className={styles.titleText}>{title}</span>
-            </span>
-            <span className={styles.rowSub}>
-              <span className={styles.chip}>
-                {canonicalRepoIdentity({
-                  repo_name: pr?.repo_name,
-                  source_repo: pr?.source_repo,
-                })}
+          <span className={styles.stackIcon} data-tone={index % 4}>
+            <Icon name="stack" />
+          </span>
+          <span className={styles.stackHeadingCopy}>
+            <span className={styles.stackTitle}>{g.title}</span>
+            <span className={styles.stackCaption}>
+              <span>
+                {g.members.length} PR{g.members.length === 1 ? "" : "s"}
               </span>
-              {pr?.head_ref_name ? (
-                <span className={styles.chipMono}>
-                  {pr.head_ref_name} → {pr.base_ref_name}
-                </span>
+              <i aria-hidden="true" />
+              <span>
+                {repos.length} repo{repos.length === 1 ? "" : "s"}
+              </span>
+              {epicTitle ? (
+                <>
+                  <i aria-hidden="true" />
+                  <span className={styles.captionEpic}>{epicTitle}</span>
+                </>
+              ) : null}
+              {updated ? (
+                <>
+                  <i aria-hidden="true" />
+                  <span>{updated}</span>
+                </>
               ) : null}
             </span>
           </span>
-          <ReadinessBadge display={display} />
+          <span className={styles.stackHeadRight}>
+            <span>
+              <span className={styles.stackProgress} aria-hidden="true">
+                {displays.map((d, i) => (
+                  <i key={i} data-tone={toneForKey(d.key)} />
+                ))}
+              </span>
+              <span className={styles.stackMiniStatus} data-tone={status.tone}>
+                {status.text}
+              </span>
+            </span>
+            <Icon name="chevron" className={styles.chevron} />
+          </span>
         </button>
-      </li>
+        {expanded ? (
+          <div className={styles.stackBody} id={bodyId}>
+            <div className={styles.pathCaption}>
+              {repos.map((r) => (
+                <span key={r} className={styles.targetPill} title={r}>
+                  <Icon name="repo" />
+                  {repoBasename(r)}
+                </span>
+              ))}
+              <span className={styles.metaChip}>rev {g.revision}</span>
+              {g.inconsistent ? (
+                <span className={styles.warnChip}>inconsistent</span>
+              ) : null}
+              <span className={styles.order}>
+                Merge order <Icon name="arrowDown" />
+              </span>
+            </div>
+            <ol className={styles.prPath} aria-label={`${g.title} path`}>
+              {g.members.map((m, i) => {
+                const pr = prByKey.get(m.pr_key);
+                const d = displays[i]!;
+                const prev = i > 0 ? g.members[i - 1] : undefined;
+                const prevMerged = i > 0 && displays[i - 1]!.key === "merged";
+                const cross =
+                  prev && memberRepo(prev) !== memberRepo(m)
+                    ? `Delivery order crosses ${repoBasename(memberRepo(prev))} → ${repoBasename(memberRepo(m))} (not a branch link)`
+                    : undefined;
+                const nodeState: PathNodeState =
+                  d.key === "merged"
+                    ? "merged"
+                    : i === nextIdx && d.key === "ready"
+                      ? "next"
+                      : "pending";
+                const checks = checkCountLabel(readinessFor(m.pr_key));
+                const meta = (
+                  <>
+                    {checks && d.key !== "merged" ? (
+                      <span
+                        className={styles.checks}
+                        data-current={d.freshness === "fresh" || undefined}
+                        title="Required checks passed (last observation)"
+                      >
+                        <Icon name="checkCircle" /> {checks}
+                      </span>
+                    ) : null}
+                    {prev && !prevMerged && d.key !== "merged" ? (
+                      <span>Needs {shortPrKey(prev.pr_key)} first</span>
+                    ) : pr?.updated_at ? (
+                      <span>{relativeAge(pr.updated_at)}</span>
+                    ) : null}
+                  </>
+                );
+                return (
+                  <PRRow
+                    key={m.pr_key}
+                    testKey={shortPrKey(m.pr_key)}
+                    numberLabel={numberLabelFor(m.pr_key, pr)}
+                    title={titleFor(m.pr_key)}
+                    repo={repoBasename(memberRepo(m))}
+                    branch={branchFor(m.pr_key)}
+                    display={d}
+                    authorLogin={pr?.author_login}
+                    meta={meta}
+                    selected={selectedKey === m.pr_key}
+                    dimmed={memberDimmed.get(m.pr_key) === true}
+                    step={i + 1}
+                    nodeState={nodeState}
+                    crossNote={cross}
+                    onActivate={() => selectKey(m.pr_key, isNarrow())}
+                  />
+                );
+              })}
+            </ol>
+            <footer className={styles.stackFooter}>
+              <Icon name="spark" />
+              <span>
+                {readyCount} PR{readyCount === 1 ? "" : "s"} can land now.{" "}
+                {g.members.length - mergedCount - readyCount} stay in progress.
+              </span>
+              <button
+                type="button"
+                className={styles.textLink}
+                onClick={() => setPreviewGroupId(g.id)}
+              >
+                View merge plan <Icon name="arrowRight" />
+              </button>
+            </footer>
+          </div>
+        ) : (
+          <div className={styles.collapsedPreview}>
+            <Icon name="branch" />
+            <span>
+              {mergedCount} merged
+              {nextMember
+                ? ` · Next up ${numberLabelFor(nextMember.pr_key, prByKey.get(nextMember.pr_key))}`
+                : ""}
+            </span>
+            {nextMember ? (
+              <ReadinessBadge display={displays[nextIdx]!} />
+            ) : null}
+          </div>
+        )}
+      </article>
+    );
+  };
+
+  const renderStandaloneRow = (item: StandalonePRItem): JSX.Element => {
+    const isLocal = item.prKey.startsWith("loom:");
+    const d =
+      item.pr.state === "MERGED"
+        ? {
+            ...readinessDisplay(readinessFor(item.prKey)),
+            key: "merged" as const,
+            label: "Merged",
+          }
+        : readinessDisplay(readinessFor(item.prKey));
+    return (
+      <PRRow
+        key={item.prKey}
+        testKey={shortPrKey(item.prKey)}
+        numberLabel={numberLabelFor(item.prKey, item.pr)}
+        title={item.pr.title}
+        repo={isLocal ? "Loom task" : repoBasename(repoFor(item.pr))}
+        branch={isLocal ? "no GitHub PR yet" : item.pr.head_ref_name || null}
+        display={d}
+        authorLogin={item.pr.author_login}
+        meta={
+          item.membershipUnverified ? (
+            <span className={styles.warnText}>membership unverified</span>
+          ) : item.pr.updated_at ? (
+            <span>{relativeAge(item.pr.updated_at)}</span>
+          ) : null
+        }
+        selected={selectedKey === item.prKey}
+        step={null}
+        onActivate={() => selectKey(item.prKey, isNarrow())}
+      />
     );
   };
 
@@ -816,71 +1028,28 @@ export function StackedPRWorkspace({
     const groups = visible.filter((v) => v.item.kind === "group");
     const solos = visible.filter((v) => v.item.kind === "standalone");
     return (
-      <div className={styles.queue} data-testid="stacked-pr-path">
-        {kinds.has("group") && (
-          <>
-            <h2 className={styles.sectionH}>
-              Delivery groups
-              <span className={styles.hint}>
-                numbered path · may cross registered repos
-              </span>
-            </h2>
-            {groups.length === 0 ? (
-              <div className={styles.empty}>No delivery groups match.</div>
-            ) : (
-              groups.map(({ item, memberDimmed }) => {
-                if (item.kind !== "group") return null;
-                const g = item.group;
-                return (
-                  <article
-                    key={g.id}
-                    className={styles.group}
-                    data-testid={`delivery-group-${g.id}`}
-                  >
-                    <header className={styles.groupHead}>
-                      <span className={styles.groupTitle}>{g.title}</span>
-                      <span className={styles.meta}>
-                        <span className={styles.chip}>rev {g.revision}</span>
-                        {g.epic_id ? (
-                          <span className={styles.chip}>{g.epic_id}</span>
-                        ) : null}
-                        {g.inconsistent ? (
-                          <span className={styles.warnChip}>inconsistent</span>
-                        ) : null}
-                      </span>
-                      <span className={styles.groupActions}>
-                        <button
-                          type="button"
-                          className={styles.btn}
-                          onClick={() => setPreviewGroupId(g.id)}
-                        >
-                          Ordered preview
-                        </button>
-                      </span>
-                    </header>
-                    <ol className={styles.path} aria-label={`${g.title} path`}>
-                      {g.members.map((m, i) => {
-                        const prev = i > 0 ? g.members[i - 1] : undefined;
-                        const cross =
-                          prev && memberRepo(prev) !== memberRepo(m)
-                            ? memberRepo(prev)
-                            : undefined;
-                        return renderMemberRow(m.pr_key, i + 1, {
-                          dimmed: memberDimmed.get(m.pr_key) === true,
-                          group: g,
-                          ...(cross ? { crossFrom: cross } : {}),
-                        });
-                      })}
-                    </ol>
-                  </article>
-                );
-              })
-            )}
-          </>
-        )}
+      <div className={styles.stackList} data-testid="stacked-pr-path">
+        {kinds.has("group") &&
+          (groups.length === 0 ? (
+            <div className={styles.emptyState}>
+              <Icon name="stack" />
+              <h3>No delivery groups match</h3>
+              <p>
+                Delivery groups are created explicitly in Loom — never inferred
+                from branches or labels.
+              </p>
+            </div>
+          ) : (
+            groups.map(({ item, memberDimmed }, i) =>
+              item.kind === "group"
+                ? renderGroupCard(item.group, i, memberDimmed)
+                : null,
+            )
+          ))}
         {kinds.has("standalone") && (
-          <>
-            <h2 className={styles.sectionH}>
+          <section aria-label="Standalone pull requests">
+            <h2 className={styles.flatHeading}>
+              <Icon name="pr" />
               Standalone PRs
               <span className={styles.hint}>
                 not in any delivery group · includes PRs opened outside Loom
@@ -888,32 +1057,28 @@ export function StackedPRWorkspace({
             </h2>
             {!membershipComplete && (
               <p className={styles.warnBanner} role="status">
+                <Icon name="warning" />
                 Active-group membership is incomplete or unverified. Rows below
                 are not confirmed standalone.
               </p>
             )}
             {solos.length === 0 ? (
-              <div className={styles.empty}>No standalone PRs match.</div>
+              <div className={styles.emptySmall}>No standalone PRs match.</div>
             ) : (
-              <div className={styles.group}>
-                <ul
-                  className={styles.path}
-                  aria-label="Standalone pull requests"
-                >
-                  {solos.map(({ item }) =>
-                    item.kind === "standalone"
-                      ? renderMemberRow(item.prKey, null, {
-                          dimmed: false,
-                          titleOverride: item.pr.title,
-                          prOverride: item.pr,
-                        })
-                      : null,
-                  )}
-                </ul>
-              </div>
+              <ul className={styles.flatList}>
+                {solos.map(({ item }) =>
+                  item.kind === "standalone" ? renderStandaloneRow(item) : null,
+                )}
+              </ul>
             )}
-          </>
+          </section>
         )}
+        <p className={styles.listHint}>
+          <Icon name="keyboard" />
+          <kbd className={styles.kbd}>J</kbd>
+          <kbd className={styles.kbd}>K</kbd> to move between PRs ·{" "}
+          <kbd className={styles.kbd}>/</kbd> to search
+        </p>
       </div>
     );
   };
@@ -923,11 +1088,11 @@ export function StackedPRWorkspace({
       <table className={styles.listTable}>
         <thead>
           <tr>
-            <th>PR</th>
-            <th>Title</th>
-            <th>Repo</th>
-            <th>Status</th>
-            <th>Kind</th>
+            <th scope="col">PR</th>
+            <th scope="col">Title</th>
+            <th scope="col">Repo</th>
+            <th scope="col">Status</th>
+            <th scope="col">Kind</th>
           </tr>
         </thead>
         <tbody>
@@ -946,12 +1111,7 @@ export function StackedPRWorkspace({
                     </button>
                   </td>
                   <td>{item.pr.title}</td>
-                  <td>
-                    {canonicalRepoIdentity({
-                      repo_name: item.pr.repo_name,
-                      source_repo: item.pr.source_repo,
-                    })}
-                  </td>
+                  <td>{repoFor(item.pr)}</td>
                   <td>
                     <ReadinessBadge display={d} compact />
                   </td>
@@ -962,8 +1122,7 @@ export function StackedPRWorkspace({
               ];
             }
             return item.group.members.map((m, i) => {
-              const pr = prByKey.get(m.pr_key);
-              const d = readinessDisplay(readinessFor(m.pr_key));
+              const d = memberDisplay(m.pr_key);
               return (
                 <tr
                   key={m.pr_key}
@@ -976,7 +1135,7 @@ export function StackedPRWorkspace({
                       {i + 1}. {shortPrKey(m.pr_key)}
                     </button>
                   </td>
-                  <td>{pr?.title ?? shortPrKey(m.pr_key)}</td>
+                  <td>{titleFor(m.pr_key)}</td>
                   <td>{memberRepo(m)}</td>
                   <td>
                     <ReadinessBadge display={d} compact />
@@ -992,28 +1151,38 @@ export function StackedPRWorkspace({
   );
 
   const renderHistory = (): JSX.Element => (
-    <div data-testid="stacked-pr-history">
-      <h2 className={styles.sectionH}>
-        History
-        <span className={styles.hint}>
-          derived from durable group fields and merged standalone PRs — not a
-          full audit log
-        </span>
-      </h2>
+    <div className={styles.stackList} data-testid="stacked-pr-history">
+      <p className={styles.historyCaption}>
+        <Icon name="history" />
+        Derived from durable group fields and merged standalone PRs — not a full
+        audit log.
+      </p>
       {history.length === 0 ? (
-        <div className={styles.empty}>No history matches.</div>
+        <div className={styles.emptyState}>
+          <Icon name="history" />
+          <h3>No merge history yet</h3>
+          <p>Merged standalone PRs and group changes appear here.</p>
+        </div>
       ) : (
-        <ol className={styles.timeline}>
+        <ol className={styles.historyList}>
           {history.map((h) => (
-            <li key={h.id}>
-              <time dateTime={h.at}>
-                {new Date(h.at).toISOString().slice(0, 16).replace("T", " ")}{" "}
-                UTC
-              </time>
-              <div>
-                {h.text}
-                <div className={styles.timelineSrc}>{h.source}</div>
-              </div>
+            <li key={h.id} className={styles.historyCard}>
+              <span className={styles.historyMark} aria-hidden="true">
+                <Icon name="merge" />
+              </span>
+              <span className={styles.historyCopy}>
+                <span className={styles.historyTitle}>{h.text}</span>
+                <span className={styles.historyMeta}>
+                  <time dateTime={h.at}>
+                    {new Date(h.at)
+                      .toISOString()
+                      .slice(0, 16)
+                      .replace("T", " ")}{" "}
+                    UTC
+                  </time>{" "}
+                  · {h.source}
+                </span>
+              </span>
             </li>
           ))}
         </ol>
@@ -1021,447 +1190,215 @@ export function StackedPRWorkspace({
     </div>
   );
 
-  const detailView = readinessFor(selectedKey ?? "");
-  const detailDisplay = readinessDisplay(detailView);
+  const selectedGroupContext = ((): GroupContext | null => {
+    if (!selectedGroupMember) return null;
+    const { group, index } = selectedGroupMember;
+    const prev = index > 0 ? group.members[index - 1] : undefined;
+    const next = group.members[index + 1];
+    const member = group.members[index]!;
+    return {
+      group,
+      index,
+      prevKey: prev?.pr_key,
+      prevMerged: prev ? memberDisplay(prev.pr_key).key === "merged" : false,
+      prevCrossRepo: prev ? memberRepo(prev) !== memberRepo(member) : false,
+      nextKey: next?.pr_key,
+      nextRepo: next ? memberRepo(next) : undefined,
+    };
+  })();
 
   const renderDetail = (): JSX.Element => {
     if (!selectedKey) {
       return (
         <aside className={styles.detail} aria-label="Selected PR">
-          <p className={styles.detailEmpty}>Select a pull request.</p>
+          <div className={styles.detailEmpty}>
+            <Icon name="pr" />
+            <p>Select a pull request to see its path to main.</p>
+          </div>
         </aside>
       );
     }
-    const pr = selectedStandalone?.pr ?? prByKey.get(selectedKey) ?? null;
-    const title = pr?.title ?? shortPrKey(selectedKey);
+    const pr = selectedStandalone?.pr ?? realPrByKey.get(selectedKey) ?? null;
+    const isLocalOnly = selectedKey.startsWith("loom:");
+    const view = readinessFor(selectedKey);
+    const display = selectedGroupMember
+      ? memberDisplay(selectedKey)
+      : readinessDisplay(view);
     return (
-      <aside
-        className={styles.detail}
-        data-mobile-open={mobileDetail || undefined}
-        aria-label="Selected PR summary"
-        data-testid="selected-pr-detail"
-      >
-        <header className={styles.detailHead}>
-          <span>Selected PR</span>
-          <button
-            type="button"
-            className={styles.detailClose}
-            aria-label="Close details"
-            onClick={() => {
-              setMobileDetail(false);
-              setDetailOpen(false);
-            }}
-          >
-            ✕
-          </button>
-        </header>
-        <div className={styles.detailBody}>
-          <h2>{title}</h2>
-          <code className={styles.key}>{shortPrKey(selectedKey)}</code>
-          <ReadinessBadge display={detailDisplay} />
-          <p className={styles.evidenceLine}>
-            {formatObservedAtLine(detailDisplay)}
-          </p>
-          <dl className={styles.kv}>
-            <dt>Repo</dt>
-            <dd>
-              {canonicalRepoIdentity({
-                repo_name: pr?.repo_name,
-                source_repo: pr?.source_repo,
-              }) || "—"}
-            </dd>
-            <dt>Branches</dt>
-            <dd>
-              {pr?.head_ref_name
-                ? `${pr.head_ref_name} → ${pr.base_ref_name}`
-                : "—"}
-            </dd>
-            {pr &&
-            (pr.changed_files != null ||
-              pr.additions != null ||
-              pr.deletions != null) ? (
-              <>
-                <dt>Changes</dt>
-                <dd data-testid="selected-pr-changes-summary">
-                  {pr.changed_files != null
-                    ? `${pr.changed_files} file${pr.changed_files === 1 ? "" : "s"}`
-                    : "files unknown"}
-                  {pr.additions != null || pr.deletions != null
-                    ? ` · +${pr.additions ?? "?"} / −${pr.deletions ?? "?"}`
-                    : ""}
-                </dd>
-              </>
-            ) : null}
-            {selectedStandalone?.issueId ||
-            issueByPrKey.get(selectedKey)?.id ? (
-              <>
-                <dt>Task</dt>
-                <dd>
-                  {selectedStandalone?.issueId ??
-                    issueByPrKey.get(selectedKey)?.id}
-                </dd>
-              </>
-            ) : null}
-          </dl>
-
-          {selectedGroupMember ? (
-            <div className={styles.box}>
-              <h3>Delivery group</h3>
-              <p>
-                Step {selectedGroupMember.index + 1} of{" "}
-                {selectedGroupMember.group.members.length} in “
-                {selectedGroupMember.group.title}”
-              </p>
-              {selectedGroupMember.prev ? (
-                <p className={styles.muted}>
-                  Delivers after {shortPrKey(selectedGroupMember.prev.pr_key)}
-                  {memberRepo(selectedGroupMember.prev) !==
-                  memberRepo(selectedGroupMember.member)
-                    ? " — a cross-repo delivery dependency, not branch ancestry."
-                    : "."}
-                </p>
-              ) : (
-                <p className={styles.muted}>
-                  First step in the delivery order.
-                </p>
-              )}
-              <div className={styles.btns}>
-                <button
-                  type="button"
-                  className={styles.btn}
-                  onClick={() =>
-                    setPreviewGroupId(selectedGroupMember.group.id)
-                  }
-                >
-                  Ordered preview
-                </button>
-                <button
-                  type="button"
-                  className={styles.btn}
-                  disabled={membersApi.saving}
-                  onClick={() =>
-                    void removeMember(selectedGroupMember.group, selectedKey)
-                  }
-                >
-                  Remove from group
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className={styles.box}>
-              <h3>Standalone</h3>
-              <p className={styles.muted}>
-                Not in a delivery group. Loom never infers membership from
-                branches, epics, labels, or GitHub stacks.
-              </p>
-              {selectedStandalone?.membershipUnverified ? (
-                <p className={styles.warnBanner} role="status">
-                  Membership unverified — not confirmed standalone.
-                </p>
-              ) : null}
-              {deliveryGroups.length > 0 && selectedStandalone ? (
-                <div className={styles.btns}>
-                  <label className={styles.field}>
-                    Add to group
-                    <select
-                      aria-label="Add to delivery group"
-                      defaultValue=""
-                      onChange={(e) => {
-                        const id = e.target.value;
-                        e.target.value = "";
-                        const g = deliveryGroups.find((x) => x.id === id);
-                        if (g && selectedStandalone) {
-                          void addStandaloneToGroup(g, selectedStandalone);
-                        }
-                      }}
-                    >
-                      <option value="" disabled>
-                        Choose group…
-                      </option>
-                      {deliveryGroups
-                        .filter((g) => g.state === "active")
-                        .map((g) => (
-                          <option key={g.id} value={g.id}>
-                            {g.title}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                </div>
-              ) : null}
-            </div>
-          )}
-
-          <div className={styles.btns}>
-            <button
-              type="button"
-              className={styles.btnPrimary}
-              onClick={() => openReviewForKey(selectedKey)}
-            >
-              Open review
-            </button>
-            <button
-              type="button"
-              className={styles.btn}
-              onClick={() => void loadReadinessFor([selectedKey], true)}
-            >
-              Refresh evidence
-            </button>
-          </div>
-        </div>
-      </aside>
+      <SummaryPanel
+        prKey={selectedKey}
+        pr={pr}
+        title={selectedStandalone?.pr.title ?? titleFor(selectedKey)}
+        repo={
+          isLocalOnly
+            ? "Loom task"
+            : selectedGroupMember
+              ? memberRepo(selectedGroupMember.member)
+              : repoFor(pr ?? undefined)
+        }
+        display={display}
+        view={view}
+        issueId={
+          selectedStandalone?.issueId ?? issueByPrKey.get(selectedKey)?.id
+        }
+        isLocalOnly={isLocalOnly}
+        groupContext={selectedGroupContext}
+        membershipUnverified={Boolean(selectedStandalone?.membershipUnverified)}
+        addableGroups={
+          selectedStandalone
+            ? deliveryGroups.filter((g) => g.state === "active")
+            : []
+        }
+        saving={membersApi.saving}
+        mobileOpen={mobileDetail}
+        onClose={() => {
+          setMobileDetail(false);
+          setDetailOpen(false);
+        }}
+        onOpenReview={() => openReviewForKey(selectedKey)}
+        onRefresh={() => void loadReadinessFor([selectedKey], true)}
+        onPreview={(id) => setPreviewGroupId(id)}
+        onRemove={(group) => void removeMember(group, selectedKey)}
+        onAdd={(id) => {
+          const g = deliveryGroups.find((x) => x.id === id);
+          if (g && selectedStandalone) {
+            void addStandaloneToGroup(g, selectedStandalone);
+          }
+        }}
+      />
     );
   };
 
+  // Header "Preview merge": the selected member's group, else the first
+  // visible group. Standalone-only views have nothing to preview.
+  const firstVisibleGroup = visible.find((v) => v.item.kind === "group")?.item;
+  const previewTargetGroupId =
+    selectedGroupMember?.group.id ??
+    (firstVisibleGroup?.kind === "group" ? firstVisibleGroup.group.id : null);
+
+  const repoCount = repoOptions.length;
+  const workspaceName = workspace?.name || workspaceId || "Workspace";
+  const userName = user?.name?.trim() || user?.email?.trim() || null;
+  const userSub = user?.email && user.email !== userName ? user.email : null;
+  const singleEpic = selectedEpics.size === 1 ? [...selectedEpics][0]! : "";
+  const singleRepo = selectedRepos.size === 1 ? [...selectedRepos][0]! : "";
+  const kindValue =
+    kinds.size === 2 ? "all" : kinds.has("group") ? "group" : "standalone";
+  const mineLabel = githubLogin
+    ? `Mine filter for GitHub @${githubLogin}`
+    : githubIdentityMissing
+      ? "Mine filter — GitHub identity unavailable"
+      : loomActor
+        ? "Mine filter — GitHub login unavailable; Loom actor matching only"
+        : "Mine filter — GitHub identity unavailable";
+
   return (
-    <div className={styles.page} data-testid="stacked-pr-workspace">
-      <header className={styles.header}>
-        <div>
-          <h1 className={styles.title}>Pull Requests</h1>
-          <p className={styles.subtitle}>
-            {loading && items.length === 0 ? (
-              <>Loading pull requests…</>
-            ) : (
-              <>
-                <strong>{openCount}</strong> open ·{" "}
-                <strong>{groupCount}</strong> delivery groups ·{" "}
-                <strong>{standaloneCount}</strong> standalone ·{" "}
-                <strong>{notCurrentCount}</strong> with evidence not current
-                {deliveryGroupsHasMore ? " · more groups available" : ""}
-                {!membershipComplete ? " · membership incomplete" : ""}
-              </>
-            )}
-          </p>
-        </div>
-        <div className={styles.headerActions}>
-          <div
-            className={styles.seg}
-            role="group"
-            aria-label="Queue or history"
-          >
-            <button
-              type="button"
-              aria-pressed={mode === "queue"}
-              onClick={() => setMode("queue")}
-            >
-              Queue
-            </button>
-            <button
-              type="button"
-              aria-pressed={mode === "history"}
-              onClick={() => setMode("history")}
-            >
-              History
-            </button>
-          </div>
-          <div className={styles.seg} role="group" aria-label="Path or list">
-            <button
-              type="button"
-              aria-pressed={view === "path"}
-              disabled={mode === "history"}
-              onClick={() => setView("path")}
-            >
-              Path
-            </button>
-            <button
-              type="button"
-              aria-pressed={view === "list"}
-              disabled={mode === "history"}
-              onClick={() => setView("list")}
-            >
-              List
-            </button>
-          </div>
+    <div className={styles.shell} data-testid="stacked-pr-workspace">
+      <WorkspaceNav
+        workspaceName={workspaceName}
+        mode={mode}
+        onModeChange={setMode}
+        queueCount={flatKeys.length}
+        historyCount={history.length}
+        repoOptions={repoOptions}
+        selectedRepos={selectedRepos}
+        onToggleRepo={(repo) => toggleSet(repo, setSelectedRepos)}
+        onClearRepos={() => setSelectedRepos(new Set())}
+        onShowGuide={() => setGuideOpen(true)}
+        onShowShortcuts={() => setHelpOpen(true)}
+        userName={userName}
+        userSub={userSub}
+      />
+
+      <div className={styles.mainShell}>
+        <div className={styles.topbar}>
+          <span className={styles.crumb}>
+            <Icon name="repo" /> All repositories
+          </span>
+          <span className={styles.slash} aria-hidden="true">
+            /
+          </span>
+          <span className={styles.crumbCurrent} aria-current="page">
+            {mode === "history" ? "Merge history" : "Pull requests"}
+          </span>
+          <span className={styles.spacer} />
+          <span className={styles.wsPill} title={`Workspace ${workspaceId}`}>
+            <i aria-hidden="true" />
+            {workspaceName}
+          </span>
           <button
             type="button"
-            className={styles.btn}
-            aria-pressed={detailOpen}
-            onClick={() => setDetailOpen((v) => !v)}
+            className={styles.iconBtn}
+            aria-label="How delivery groups work"
+            onClick={() => setGuideOpen(true)}
           >
-            Summary
-          </button>
-          <button
-            type="button"
-            className={styles.btn}
-            onClick={() => setHelpOpen(true)}
-            aria-label="Keyboard shortcuts"
-          >
-            ?
+            <Icon name="info" />
           </button>
         </div>
-      </header>
 
-      {githubWarning && (
-        <p
-          className={styles.warnBanner}
-          role="status"
-          data-testid="prs-github-warning"
-        >
-          {githubWarning}. Loom-backed delivery groups are still shown.
-        </p>
-      )}
-      {writeBanner && (
-        <p
-          className={styles.warnBanner}
-          role="alert"
-          data-testid="dg-write-error"
-        >
-          {writeBanner}
-        </p>
-      )}
-      {standaloneContinuation?.has_more && (
-        <p className={styles.infoBanner} role="status">
-          More standalone PRs exist beyond this page
-          {standaloneContinuation.repos
-            .filter((r) => r.has_more)
-            .map((r) => ` (${r.source_repo || r.repo})`)
-            .join("")}
-          .
-        </p>
-      )}
-
-      <div className={styles.layout} data-no-summary={!detailOpen || undefined}>
-        <aside className={styles.rail} aria-label="Pull request filters">
-          <label className={styles.search}>
-            <span aria-hidden="true">⌕</span>
-            <input
-              type="search"
-              value={railQuery}
-              onChange={(e) => setRailQuery(e.target.value)}
-              placeholder="Filter repos & epics…"
-              aria-label="Filter repositories and epics"
-            />
-          </label>
-
-          <section>
-            <h2 className={styles.railH}>Kind</h2>
-            {(
-              [
-                ["group", "Delivery groups"],
-                ["standalone", "Standalone PRs"],
-              ] as const
-            ).map(([k, label]) => (
-              <label key={k} className={styles.check}>
-                <input
-                  type="checkbox"
-                  checked={kinds.has(k)}
-                  onChange={() => {
-                    setKinds((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(k)) next.delete(k);
-                      else next.add(k);
-                      if (next.size === 0) next.add(k);
-                      return next;
-                    });
-                  }}
-                />
-                {label}
-                <span className={styles.count}>
-                  {k === "group" ? groupCount : standaloneCount}
-                </span>
-              </label>
-            ))}
-            <label className={styles.check}>
-              <input
-                type="checkbox"
-                checked={mine}
-                onChange={() => setMine((v) => !v)}
-                aria-label={
-                  githubLogin
-                    ? `Mine filter for GitHub @${githubLogin}`
-                    : githubIdentityMissing
-                      ? "Mine filter — GitHub identity unavailable"
-                      : loomActor
-                        ? "Mine filter — GitHub login unavailable; Loom actor matching only"
-                        : "Mine filter — GitHub identity unavailable"
-                }
-              />
-              Mine
-              <span
-                className={styles.count}
-                title={
-                  githubLogin
-                    ? `Verified GitHub login (@${githubLogin})`
-                    : (githubViewer?.message ??
-                      "GitHub identity unavailable — display name is never used as login")
-                }
-                data-testid="mine-identity-chip"
-              >
-                {githubLogin
-                  ? `@${githubLogin}`
-                  : githubViewer == null
-                    ? "—"
-                    : "unavailable"}
-              </span>
-            </label>
-            {mine && githubIdentityMissing ? (
-              <p
-                className={styles.subtitle}
-                data-testid="mine-viewer-unavailable"
-                role="status"
-              >
-                GitHub identity unavailable
-                {githubViewer?.message ? `: ${githubViewer.message}` : ""}.
-                Author matching is paused; Loom owner/assignee matches still
-                apply when signed in.
+        <div className={styles.page}>
+          <header className={styles.pageHeading}>
+            <div>
+              <h1 className={styles.title}>Pull requests</h1>
+              <p className={styles.pageSub}>
+                {loading && items.length === 0 ? (
+                  <>Loading pull requests…</>
+                ) : (
+                  <>
+                    <span>{openCount} open PRs</span>
+                    <span className={styles.slash}>/</span>
+                    <span>
+                      {groupCount} delivery group{groupCount === 1 ? "" : "s"}
+                    </span>
+                    <span>
+                      · {standaloneCount} standalone across {repoCount} repo
+                      {repoCount === 1 ? "" : "s"}
+                    </span>
+                    {notCurrentCount > 0 ? (
+                      <span className={styles.warnText}>
+                        · {notCurrentCount} with evidence not current
+                      </span>
+                    ) : null}
+                    {deliveryGroupsHasMore ? (
+                      <span>· more groups available</span>
+                    ) : null}
+                    {!membershipComplete ? (
+                      <span className={styles.warnText}>
+                        · membership incomplete
+                      </span>
+                    ) : null}
+                  </>
+                )}
               </p>
-            ) : null}
-          </section>
+            </div>
+            <div className={styles.headingActions}>
+              <button
+                type="button"
+                className={styles.btn}
+                data-variant="ghost"
+                onClick={() => setGuideOpen(true)}
+              >
+                <Icon name="map" /> How groups work
+              </button>
+              <button
+                type="button"
+                className={styles.btn}
+                disabled={!previewTargetGroupId}
+                title={
+                  previewTargetGroupId
+                    ? "Read-only ordered merge preview"
+                    : "No delivery group to preview"
+                }
+                onClick={() =>
+                  previewTargetGroupId &&
+                  setPreviewGroupId(previewTargetGroupId)
+                }
+              >
+                <Icon name="merge" /> Preview merge
+              </button>
+            </div>
+          </header>
 
-          <section>
-            <header className={styles.railHead}>
-              <h2 className={styles.railH}>Repos</h2>
-              {selectedRepos.size > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setSelectedRepos(new Set())}
-                >
-                  Clear
-                </button>
-              )}
-            </header>
-            {filteredRepoOptions.map(([repo, count]) => (
-              <label key={repo} className={styles.check}>
-                <input
-                  type="checkbox"
-                  checked={selectedRepos.has(repo)}
-                  onChange={() => toggleSet(repo, setSelectedRepos)}
-                />
-                {repo}
-                <span className={styles.count}>{count}</span>
-              </label>
-            ))}
-          </section>
-
-          <section>
-            <header className={styles.railHead}>
-              <h2 className={styles.railH}>Epics</h2>
-              {selectedEpics.size > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setSelectedEpics(new Set())}
-                >
-                  Clear
-                </button>
-              )}
-            </header>
-            {filteredEpicOptions.map(([epic, count]) => (
-              <label key={epic} className={styles.check}>
-                <input
-                  type="checkbox"
-                  checked={selectedEpics.has(epic)}
-                  onChange={() => toggleSet(epic, setSelectedEpics)}
-                />
-                <span className={styles.epicLabel} title={epic}>
-                  {epic}
-                </span>
-                <span className={styles.count}>{count}</span>
-              </label>
-            ))}
-          </section>
-        </aside>
-
-        <div className={styles.main} ref={listRef}>
           {mode === "queue" && (
             <div
               className={styles.tabs}
@@ -1483,35 +1420,257 @@ export function StackedPRWorkspace({
               ))}
             </div>
           )}
+
           <div className={styles.toolbar}>
             <label className={styles.search} htmlFor={searchId}>
-              <span aria-hidden="true">⌕</span>
+              <Icon name="search" />
               <input
                 id={searchId}
                 ref={searchRef}
                 type="search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search PRs, groups, branches…"
+                placeholder="Search PRs, branches, or groups"
                 aria-label="Search pull requests"
               />
+              <kbd className={styles.kbd} aria-hidden="true">
+                /
+              </kbd>
             </label>
-            <span className={styles.countLabel}>
+            <label className={styles.selectWrap}>
+              <Icon name="stack" />
+              <select
+                aria-label="Filter by epic"
+                value={singleEpic}
+                onChange={(e) =>
+                  setSelectedEpics(
+                    e.target.value ? new Set([e.target.value]) : new Set(),
+                  )
+                }
+              >
+                <option value="">
+                  {selectedEpics.size > 1
+                    ? `${selectedEpics.size} epics`
+                    : "All epics"}
+                </option>
+                {epicOptions.map(([epic, count]) => (
+                  <option key={epic} value={epic}>
+                    {epic} ({count})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={styles.selectWrap}>
+              <Icon name="repo" />
+              <select
+                aria-label="Filter by repository"
+                value={singleRepo}
+                onChange={(e) =>
+                  setSelectedRepos(
+                    e.target.value ? new Set([e.target.value]) : new Set(),
+                  )
+                }
+              >
+                <option value="">
+                  {selectedRepos.size > 1
+                    ? `${selectedRepos.size} repos`
+                    : "All repos"}
+                </option>
+                {repoOptions.map(([repo, count]) => (
+                  <option key={repo} value={repo}>
+                    {repo} ({count})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={styles.selectWrap}>
+              <Icon name="pr" />
+              <select
+                aria-label="Filter by kind"
+                value={kindValue}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setKinds(
+                    new Set<QueueKind>(
+                      v === "group"
+                        ? ["group"]
+                        : v === "standalone"
+                          ? ["standalone"]
+                          : ["group", "standalone"],
+                    ),
+                  );
+                }}
+              >
+                <option value="all">Groups + standalone</option>
+                <option value="group">Delivery groups ({groupCount})</option>
+                <option value="standalone">
+                  Standalone ({standaloneCount})
+                </option>
+              </select>
+            </label>
+            <label
+              className={styles.toggle}
+              title={
+                githubLogin
+                  ? `Verified GitHub login (@${githubLogin})`
+                  : (githubViewer?.message ??
+                    "GitHub identity unavailable — display name is never used as login")
+              }
+            >
+              <input
+                type="checkbox"
+                className={styles.toggleInput}
+                checked={mine}
+                onChange={() => setMine((v) => !v)}
+                aria-label={mineLabel}
+              />
+              <span className={styles.toggleSwitch} aria-hidden="true" />
+              Mine
+              <span
+                className={styles.mineChip}
+                data-testid="mine-identity-chip"
+              >
+                {githubLogin
+                  ? `@${githubLogin}`
+                  : githubViewer == null
+                    ? "—"
+                    : "unavailable"}
+              </span>
+            </label>
+            <span className={styles.spacer} />
+            <span className={styles.resultCount}>
               {mode === "history"
                 ? `${history.length} events`
                 : `${visible.length} shown`}
             </span>
+            <div
+              className={styles.viewSwitch}
+              role="group"
+              aria-label="Path or list"
+            >
+              <button
+                type="button"
+                aria-pressed={view === "path"}
+                aria-label="Path view"
+                title="Path view (v)"
+                disabled={mode === "history"}
+                onClick={() => setView("path")}
+              >
+                <Icon name="map" />
+              </button>
+              <button
+                type="button"
+                aria-pressed={view === "list"}
+                aria-label="List view"
+                title="List view (v)"
+                disabled={mode === "history"}
+                onClick={() => setView("list")}
+              >
+                <Icon name="list" />
+              </button>
+            </div>
+            <button
+              type="button"
+              className={styles.btn}
+              aria-pressed={detailOpen}
+              onClick={() => {
+                // Narrow layouts only show the summary as an overlay.
+                if (isNarrow()) {
+                  setDetailOpen(true);
+                  setMobileDetail(Boolean(selectedKey));
+                  return;
+                }
+                setDetailOpen((v) => !v);
+              }}
+            >
+              <Icon name="panel" />{" "}
+              {detailOpen ? "Hide summary" : "Show summary"}
+            </button>
           </div>
-          <div className={styles.scroll}>
-            {mode === "history"
-              ? renderHistory()
-              : view === "list"
-                ? renderListView()
-                : renderPathView()}
-          </div>
-        </div>
 
-        {detailOpen ? renderDetail() : null}
+          {mine && githubIdentityMissing ? (
+            <p
+              className={styles.infoBanner}
+              data-testid="mine-viewer-unavailable"
+              role="status"
+            >
+              GitHub identity unavailable
+              {githubViewer?.message ? `: ${githubViewer.message}` : ""}. Author
+              matching is paused; Loom owner/assignee matches still apply when
+              signed in.
+            </p>
+          ) : null}
+          {githubWarning && (
+            <p
+              className={styles.warnBanner}
+              role="status"
+              data-testid="prs-github-warning"
+            >
+              <Icon name="warning" />
+              <span>
+                {githubWarning}. Loom-backed delivery groups are still shown.
+              </span>
+            </p>
+          )}
+          {writeBanner && (
+            <p
+              className={styles.warnBanner}
+              role="alert"
+              data-testid="dg-write-error"
+            >
+              <Icon name="warning" />
+              <span>{writeBanner}</span>
+            </p>
+          )}
+          {standaloneContinuation?.has_more && (
+            <p className={styles.infoBanner} role="status">
+              More standalone PRs exist beyond this page
+              {standaloneContinuation.repos
+                .filter((r) => r.has_more)
+                .map((r) => ` (${r.source_repo || r.repo})`)
+                .join("")}
+              .
+            </p>
+          )}
+
+          {mode === "queue" && view === "path" ? (
+            <div className={styles.legend} aria-hidden="true">
+              <span>
+                <i data-tone="merged" /> Merged
+              </span>
+              <span>
+                <i data-tone="ready" /> Ready
+              </span>
+              <span>
+                <i data-tone="review" /> Waiting
+              </span>
+              <span>
+                <i data-tone="blocked" /> Blocked
+              </span>
+              <span>
+                <i data-tone="unknown" /> Stale / unknown
+              </span>
+            </div>
+          ) : null}
+
+          <div
+            className={styles.workArea}
+            data-no-summary={!detailOpen || undefined}
+            ref={listRef}
+          >
+            <div className={styles.main}>
+              {mode === "history"
+                ? renderHistory()
+                : view === "list"
+                  ? renderListView()
+                  : renderPathView()}
+            </div>
+            {detailOpen ? renderDetail() : null}
+          </div>
+          <p className={styles.footerNote}>
+            Loom · Every change has a clear path to main.
+          </p>
+        </div>
       </div>
 
       {mobileDetail && detailOpen ? (
@@ -1537,6 +1696,52 @@ export function StackedPRWorkspace({
         }}
       />
 
+      {guideOpen ? (
+        <div
+          className={styles.helpOverlay}
+          role="dialog"
+          aria-modal="true"
+          aria-label="How delivery groups work"
+          onClick={() => setGuideOpen(false)}
+        >
+          <div className={styles.help} onClick={(e) => e.stopPropagation()}>
+            <header className={styles.helpHead}>
+              <Icon name="map" />
+              <h2>How delivery groups work</h2>
+            </header>
+            <ol className={styles.guideSteps}>
+              <li>
+                <strong>Groups are explicit.</strong> A delivery group is an
+                ordered list of PRs saved in Loom. Loom never infers membership
+                from branches, epics, labels, or GitHub stacks.
+              </li>
+              <li>
+                <strong>Order is the merge path.</strong> Steps can cross
+                registered repos; a cross-repo step is a delivery dependency,
+                not branch ancestry.
+              </li>
+              <li>
+                <strong>Readiness is timestamped evidence.</strong> A PR is only
+                shown Ready while its GitHub observation is fresh. Stale, aging,
+                rate-limited, or unobserved evidence stays labeled.
+              </li>
+              <li>
+                <strong>Merge preview is read-only.</strong> It shows which
+                prefix is ready and the first blocker. It never merges, queues,
+                or retargets.
+              </li>
+            </ol>
+            <button
+              type="button"
+              className={styles.btn}
+              onClick={() => setGuideOpen(false)}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {helpOpen ? (
         <div
           className={styles.helpOverlay}
@@ -1546,31 +1751,34 @@ export function StackedPRWorkspace({
           onClick={() => setHelpOpen(false)}
         >
           <div className={styles.help} onClick={(e) => e.stopPropagation()}>
-            <h2>Shortcuts</h2>
-            <ul>
+            <header className={styles.helpHead}>
+              <Icon name="keyboard" />
+              <h2>Shortcuts</h2>
+            </header>
+            <ul className={styles.shortcutList}>
               <li>
-                <kbd>/</kbd> or <kbd>s</kbd> Focus search
+                Focus search <kbd>/</kbd>
               </li>
               <li>
-                <kbd>j</kbd> / <kbd>k</kbd> Next / previous PR
+                Next / previous PR <kbd>j</kbd> <kbd>k</kbd>
               </li>
               <li>
-                <kbd>o</kbd> Open review
+                Open review <kbd>o</kbd>
               </li>
               <li>
-                <kbd>m</kbd> Ordered merge preview (group member)
+                Ordered merge preview (group member) <kbd>m</kbd>
               </li>
               <li>
-                <kbd>v</kbd> Toggle Path / List
+                Toggle Path / List <kbd>v</kbd>
               </li>
               <li>
-                <kbd>h</kbd> Toggle History
+                Toggle merge history <kbd>h</kbd>
               </li>
               <li>
-                <kbd>?</kbd> This help
+                This help <kbd>?</kbd>
               </li>
               <li>
-                <kbd>Esc</kbd> Close dialog / detail
+                Close dialog / detail <kbd>Esc</kbd>
               </li>
             </ul>
             <button

@@ -193,6 +193,7 @@ const deliveryGroups = [
 
 interface PullRequestsMock {
   status?: number;
+  issues?: unknown[];
   pullRequests?: typeof githubPrs;
   warnings?: string[];
   error?: string;
@@ -385,7 +386,7 @@ async function setupMocks(
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: ok(reviewIssues),
+          body: ok(prMock.issues ?? reviewIssues),
         });
         return;
       }
@@ -428,7 +429,7 @@ async function setupMocks(
 async function gotoPrsPage(page: Page): Promise<void> {
   await page.goto(`/ws/${WORKSPACE_ID}/prs`);
   await expect(
-    page.getByRole("heading", { name: "Pull Requests" }),
+    page.getByRole("heading", { name: "Pull Requests", level: 1 }),
   ).toBeVisible();
 }
 
@@ -520,10 +521,12 @@ test.describe("PRs page — stacked workspace (mocked)", () => {
       deliveryGroups,
     });
     await gotoPrsPage(page);
-    await page.getByRole("button", { name: "Ordered preview" }).first().click();
+    await page.getByRole("button", { name: "View merge plan" }).first().click();
     await expect(page.getByTestId("merge-preview-overlay")).toBeVisible();
     await expect(page.getByText(/read-only · no merge action/i)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Merge" })).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Merge", exact: true }),
+    ).toHaveCount(0);
   });
 
   test("keyboard focus rings and available changes summary", async ({
@@ -569,9 +572,7 @@ test.describe("PRs page — stacked workspace (mocked)", () => {
       },
     });
     await gotoPrsPage(page);
-    await expect(page.getByTestId("mine-identity-chip")).toHaveText(
-      "@nova",
-    );
+    await expect(page.getByTestId("mine-identity-chip")).toHaveText("@nova");
     await page
       .getByRole("checkbox", { name: /Mine filter for GitHub @nova/i })
       .check();
@@ -645,7 +646,7 @@ test.describe("PRs page — primary nav returns to the list (PUPPET-94)", () => 
 
     await expect(page).not.toHaveURL(/review=/);
     await expect(
-      page.getByRole("heading", { name: "Pull Requests" }),
+      page.getByRole("heading", { name: "Pull Requests", level: 1 }),
     ).toBeVisible();
     await expect(
       page.getByRole("button", {
@@ -666,7 +667,429 @@ test.describe("PRs page — primary nav returns to the list (PUPPET-94)", () => 
 
     await expect(page).toHaveURL(new RegExp(`/ws/${WORKSPACE_ID}/prs$`));
     await expect(
-      page.getByRole("heading", { name: "Pull Requests" }),
+      page.getByRole("heading", { name: "Pull Requests", level: 1 }),
     ).toBeVisible();
+  });
+});
+
+/*
+ * TEST-ONLY VISUAL FIXTURE (STACKED-PRS-83). Populated delivery-group state
+ * shaped like the attached reference so the grouped path composition can be
+ * screenshotted. This is mocked browser evidence, NOT runtime proof — no
+ * production code reads these values.
+ */
+function minutesAgo(m: number): string {
+  return new Date(Date.now() - m * 60_000).toISOString();
+}
+
+function fixtureReadiness(
+  prKey: string,
+  verdict: "ready" | "merged" | "waiting" | "blocked",
+  opts: {
+    stale?: boolean;
+    review?: string;
+    checks?: [number, number];
+    head?: string;
+  } = {},
+) {
+  const [passed, total] = opts.checks ?? [8, 8];
+  return {
+    pr_key: prKey,
+    freshness: opts.stale ? "stale" : "fresh",
+    age_seconds: opts.stale ? 1800 : 20,
+    current_verdict: opts.stale ? "unknown" : verdict,
+    current_reasons: opts.stale ? ["stale"] : [],
+    snapshot: {
+      pr_key: prKey,
+      head_sha: "a1",
+      head_ref: opts.head ?? "feat",
+      base_ref: "main",
+      base_sha: "b1",
+      observed_at: minutesAgo(opts.stale ? 30 : 1),
+      facts: {
+        lifecycle: {
+          status: "known",
+          value: verdict === "merged" ? "merged" : "open",
+        },
+        conflicts: { status: "known", value: "none" },
+        merge_state: { status: "known", value: "clean" },
+        review: { status: "known", value: opts.review ?? "approved" },
+        required_checks: {
+          status: "known",
+          value: passed === total ? "passing" : "pending",
+        },
+        required_check_counts: {
+          passed,
+          pending: total - passed,
+          failed: 0,
+          total,
+        },
+        optional_checks: { status: "known", value: "none" },
+        optional_check_counts: { passed: 0, pending: 0, failed: 0, total: 0 },
+        queue: { status: "known", value: "not_queued" },
+      },
+      verdict,
+      reasons: [],
+      fingerprint: `fp-${prKey}`,
+    },
+  };
+}
+
+type FixturePr = {
+  n: number;
+  repo: string;
+  title: string;
+  head: string;
+  author: string;
+  state?: string;
+  draft?: boolean;
+  verdict: "ready" | "merged" | "waiting" | "blocked";
+  stale?: boolean;
+  review?: string;
+  checks?: [number, number];
+  diff?: [number, number, number];
+};
+
+function fixtureGroup(
+  id: string,
+  title: string,
+  epic: string,
+  updatedMin: number,
+  prs: FixturePr[],
+) {
+  return {
+    workspace_key: WORKSPACE_ID,
+    id,
+    title,
+    epic_id: epic,
+    state: "active",
+    revision: 3,
+    members: prs.map((p, i) => {
+      const key = `github:acme/${p.repo}#${p.n}`;
+      return {
+        pr_key: key,
+        repo_name: `acme/${p.repo}`,
+        pr_number: p.n,
+        source: "manual",
+        added_at: minutesAgo(600 - i),
+        readiness: fixtureReadiness(key, p.verdict, { ...p, head: p.head }),
+      };
+    }),
+    last_op_id: `op-${id}`,
+    created_at: minutesAgo(900),
+    updated_at: minutesAgo(updatedMin),
+  };
+}
+
+function fixturePullRequests(prs: FixturePr[]) {
+  return prs.map((p) => ({
+    number: p.n,
+    pr_key: `github:acme/${p.repo}#${p.n}`,
+    title: p.title,
+    url: `https://github.com/acme/${p.repo}/pull/${p.n}`,
+    state: p.state ?? "OPEN",
+    is_draft: p.draft ?? false,
+    head_ref_name: p.head,
+    base_ref_name: "main",
+    author_login: p.author,
+    created_at: minutesAgo(12),
+    updated_at: minutesAgo(12),
+    repo_name: `acme/${p.repo}`,
+    source_repo: p.repo,
+    ...(p.diff
+      ? {
+          changed_files: p.diff[0],
+          additions: p.diff[1],
+          deletions: p.diff[2],
+        }
+      : {}),
+  }));
+}
+
+const FIXTURE_HARDENING: FixturePr[] = [
+  {
+    n: 142,
+    repo: "loomcli",
+    title: "Isolate daemon worker lifecycle",
+    head: "feat/worker-lifecycle",
+    author: "ravi-s",
+    state: "MERGED",
+    verdict: "merged",
+  },
+  {
+    n: 144,
+    repo: "fleetdb",
+    title: "Guard the PATCH body against unknown fields",
+    head: "fix/patch-validation",
+    author: "sonal-b",
+    state: "MERGED",
+    verdict: "merged",
+  },
+  {
+    n: 146,
+    repo: "loomcli",
+    title: "Carry max_run_duration on the role wire",
+    head: "feat/run-duration",
+    author: "sonal-b",
+    verdict: "ready",
+    diff: [3, 48, 12],
+  },
+  {
+    n: 148,
+    repo: "console",
+    title: "Let humans answer a waiting agent",
+    head: "feat/prompt-resume",
+    author: "maya-c",
+    verdict: "waiting",
+    review: "review_required",
+  },
+  {
+    n: 149,
+    repo: "loomcli",
+    title: "Add a conversation executor for workers",
+    head: "feat/conversation-executor",
+    author: "sonal-b",
+    draft: true,
+    verdict: "waiting",
+    review: "review_required",
+    checks: [0, 0],
+  },
+];
+const FIXTURE_INVARIANTS: FixturePr[] = [
+  {
+    n: 170,
+    repo: "loomcli",
+    title: "Assert product truth on task close",
+    head: "feat/truth-close",
+    author: "lee-p",
+    verdict: "ready",
+  },
+  {
+    n: 171,
+    repo: "fleetdb",
+    title: "Reject orphaned epic children",
+    head: "fix/orphan-children",
+    author: "lee-p",
+    verdict: "ready",
+  },
+  {
+    n: 172,
+    repo: "loomcli",
+    title: "Snapshot invariants in AFT",
+    head: "test/aft-invariants",
+    author: "maya-c",
+    verdict: "waiting",
+    stale: true,
+  },
+];
+const FIXTURE_TRACES: FixturePr[] = [
+  {
+    n: 160,
+    repo: "console",
+    title: "Stream agent traces to the console",
+    head: "feat/trace-stream",
+    author: "ravi-s",
+    verdict: "waiting",
+    review: "review_required",
+    checks: [5, 8],
+  },
+  {
+    n: 161,
+    repo: "loomcli",
+    title: "Close sessions on lifecycle end",
+    head: "feat/session-close",
+    author: "ravi-s",
+    verdict: "blocked",
+    review: "changes_requested",
+  },
+];
+
+// Mirrors the real list contract: grouped PRs are NOT in pull_requests
+// (the server filters them out), so grouped titles come from linked Loom
+// tasks and branches from readiness snapshots.
+function fixtureIssues(epicId: string, epicTitle: string, prs: FixturePr[]) {
+  return prs.map((p) => ({
+    id: `SPR-${p.n}`,
+    title: p.title,
+    status: p.state === "MERGED" ? "closed" : "review",
+    priority: 2,
+    issue_type: "task",
+    parent: epicId,
+    parent_title: epicTitle,
+    external_ref: `https://github.com/acme/${p.repo}/pull/${p.n}`,
+    created_at: minutesAgo(90),
+    updated_at: minutesAgo(12),
+  }));
+}
+
+const visualFixture = {
+  deliveryGroups: [
+    fixtureGroup(
+      "dg_fixture_hardening",
+      "Agent runtime hardening",
+      "EPIC-RUNTIME",
+      12,
+      FIXTURE_HARDENING,
+    ),
+    fixtureGroup(
+      "dg_fixture_invariants",
+      "Product truth invariants",
+      "EPIC-AFT",
+      34,
+      FIXTURE_INVARIANTS,
+    ),
+    fixtureGroup(
+      "dg_fixture_traces",
+      "Agent traces & session lifecycle",
+      "EPIC-OBS",
+      120,
+      FIXTURE_TRACES,
+    ),
+  ],
+  issues: [
+    ...fixtureIssues(
+      "EPIC-RUNTIME",
+      "Daemon & runtime safety",
+      FIXTURE_HARDENING,
+    ),
+    ...fixtureIssues("EPIC-AFT", "AFT product correctness", FIXTURE_INVARIANTS),
+    ...fixtureIssues("EPIC-OBS", "Agent observability", FIXTURE_TRACES),
+  ],
+  pullRequests: fixturePullRequests([
+    {
+      n: 88,
+      repo: "loomcli",
+      title: "Bump vite to 6.4",
+      head: "deps/vite-6-4",
+      author: "dependabot",
+      verdict: "waiting",
+      diff: [2, 14, 9],
+    },
+    {
+      n: 91,
+      repo: "fleetdb",
+      title: "Document readiness freshness windows",
+      head: "docs/readiness-freshness",
+      author: "maya-c",
+      verdict: "waiting",
+      diff: [1, 32, 4],
+    },
+  ]),
+};
+
+async function gotoFixture(
+  page: Page,
+  theme: "dark" | "light",
+  viewport: { width: number; height: number },
+): Promise<void> {
+  await page.addInitScript((t) => {
+    try {
+      localStorage.setItem("cortex:theme", t);
+    } catch {
+      /* private mode */
+    }
+  }, theme);
+  await page.setViewportSize(viewport);
+  await setupMocks(page, {
+    pullRequests: visualFixture.pullRequests as typeof githubPrs,
+    deliveryGroups:
+      visualFixture.deliveryGroups as unknown as typeof deliveryGroups,
+    issues: visualFixture.issues,
+  });
+  await gotoPrsPage(page);
+  await page.getByTestId("pr-row-acme/loomcli#146").click();
+  await expect(page.getByTestId("selected-pr-detail")).toBeVisible();
+}
+
+test.describe("PRs page — reference composition (test-only visual fixture)", () => {
+  test("1440x1000 dark matches reference layout geometry", async ({ page }) => {
+    fs.mkdirSync(EVIDENCE_DIR, { recursive: true });
+    await gotoFixture(page, "dark", { width: 1440, height: 1000 });
+
+    const nav = await page.getByTestId("stacked-pr-nav").boundingBox();
+    expect(nav?.width).toBe(212);
+    const h1 = page.getByRole("heading", { level: 1, name: "Pull requests" });
+    expect(
+      await h1.evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
+    ).toBe(29);
+    const summary = await page.getByTestId("selected-pr-detail").boundingBox();
+    expect(summary?.width).toBeGreaterThanOrEqual(320);
+    // Grouped path: first card expanded with ordered steps; later collapsed.
+    await expect(
+      page
+        .getByTestId("delivery-group-dg_fixture_hardening")
+        .getByRole("listitem"),
+    ).toHaveCount(5);
+    await expect(
+      page
+        .getByTestId("delivery-group-dg_fixture_traces")
+        .getByText(/Next up #160/),
+    ).toBeVisible();
+    // Selected row carries the lime accent.
+    await expect(page.getByTestId("pr-row-acme/loomcli#146")).toHaveAttribute(
+      "data-current",
+      "true",
+    );
+    await page.screenshot({
+      path: path.join(EVIDENCE_DIR, "fixture-dark-1440x1000.png"),
+    });
+    await page.screenshot({
+      path: path.join(EVIDENCE_DIR, "fixture-dark-1440-full.png"),
+      fullPage: true,
+    });
+    // Stale evidence never renders as Ready or as met requirements.
+    await page
+      .getByTestId("delivery-group-dg_fixture_invariants")
+      .getByRole("button")
+      .first()
+      .click();
+    await page.getByTestId("pr-row-acme/loomcli#172").click();
+    await expect(
+      page.getByTestId("merge-requirements").locator('[data-state="met"]'),
+    ).toHaveCount(0);
+    await expect(page.getByTestId("merge-requirements")).toContainText(
+      "not current",
+    );
+  });
+
+  test("1440x1000 light theme is respected", async ({ page }) => {
+    fs.mkdirSync(EVIDENCE_DIR, { recursive: true });
+    await gotoFixture(page, "light", { width: 1440, height: 1000 });
+    const bg = await page
+      .getByTestId("stacked-pr-workspace")
+      .evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(bg).not.toBe("rgb(17, 17, 17)");
+    await page.screenshot({
+      path: path.join(EVIDENCE_DIR, "fixture-light-1440x1000.png"),
+    });
+  });
+
+  test("narrow 390 collapses nav and opens summary as overlay", async ({
+    page,
+  }) => {
+    fs.mkdirSync(EVIDENCE_DIR, { recursive: true });
+    await gotoFixture(page, "dark", { width: 390, height: 844 });
+    await expect(page.getByTestId("stacked-pr-nav")).toBeHidden();
+    const hScroll = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    );
+    expect(hScroll).toBe(false);
+    await page.screenshot({
+      path: path.join(EVIDENCE_DIR, "fixture-dark-390-summary.png"),
+    });
+    await page.getByRole("button", { name: "Close details" }).click();
+    // The workspace scrolls inside its own shell, not the document.
+    const shell = page
+      .getByTestId("stacked-pr-workspace")
+      .locator("> div")
+      .last();
+    await shell.evaluate((el) => el.scrollTo(0, 0));
+    await page.screenshot({
+      path: path.join(EVIDENCE_DIR, "fixture-dark-390-top.png"),
+    });
+    await shell.evaluate((el) => el.scrollTo(0, 700));
+    await page.screenshot({
+      path: path.join(EVIDENCE_DIR, "fixture-dark-390-path.png"),
+    });
   });
 });
