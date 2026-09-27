@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -641,5 +642,73 @@ func TestBugReplay_PR467_RejectedResumeTargetIsAbandoned(t *testing.T) {
 	}
 	if info != nil && info.TaskID == "loom-467" {
 		t.Fatal("lock still names the permanently rejected resume target; the next cycle will retry the same claim")
+	}
+}
+
+// #427: with both the daemon log and the archive log open, the child's
+// stdout/stderr is an io.MultiWriter. os/exec then copies through a pipe
+// goroutine, and a lingering descendant that inherited the pipe pins
+// cmd.Wait() until it exits. Root cause: spawn.go:402-403 io.MultiWriter sinks.
+func TestBugReplay_PR427_ChildStdoutIsAnOSFile(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", tmp)
+	t.Setenv("LOOM_CONFIG_DIR", "")
+	cfg := &config.DaemonConfig{Daemon: config.DaemonSettings{LogDir: filepath.Join(tmp, "logs")}}
+	s := restartSupervisor(cfg)
+	s.ProjectDir = tmp
+	s.WorkspaceID = "WS427"
+	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "replay-427", Role: "task"}}
+	cmd := exec.Command("true")
+
+	s.setupAgentLogFile(ap, cmd)
+	t.Cleanup(func() { ap.Mu.Lock(); closeAgentLogs(ap); ap.Mu.Unlock() })
+
+	if ap.LogFile == nil || ap.ArchiveLogFile == nil {
+		t.Skipf("precondition: both sinks must open (daemon=%v archive=%v)", ap.LogFile != nil, ap.ArchiveLogFile != nil)
+	}
+	if _, ok := cmd.Stdout.(*os.File); !ok {
+		t.Fatalf("child stdout is %T, not *os.File: os/exec adds a copy goroutine that a lingering descendant can pin", cmd.Stdout)
+	}
+	if _, ok := cmd.Stderr.(*os.File); !ok {
+		t.Fatalf("child stderr is %T, not *os.File", cmd.Stderr)
+	}
+}
+
+// #490: an agent whose harness profile fails verification (here: a profile
+// directory with no manifest) still claims a task in preflight; the refusal
+// only surfaces at spawn, after the claim, and a later outcome masks it.
+// Root cause: spawn.go:576 AppendProfileEnv runs at spawn, after the claim
+// (supervisor.go:437).
+func TestBugReplay_PR490_ProfileRefusalBeforeClaim(t *testing.T) {
+	prevProbe := probeHarnessVersion
+	probeHarnessVersion = func(string) string { return "2.1.234 (Claude Code)" }
+	resetHarnessVersionCache()
+	t.Cleanup(func() { probeHarnessVersion = prevProbe; resetHarnessVersionCache() })
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", tmp)
+
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, ".loom", AgentProfilesDirName, "replay-490", "claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mock := &clitest.MockIssueBackend{ReadyResult: []backend.IssueData{{ID: "loom-490", Title: "work", Status: "open", IssueType: "task"}}}
+	s := restartSupervisor(nil)
+	s.ProjectDir = project
+	s.IssueBackend = mock
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "replay-490", Role: "task"},
+		WorktreePath: t.TempDir(),
+		StopCh:       make(chan struct{}),
+		Done:         make(chan struct{}),
+	}
+
+	s.preFlightSetup(ap)
+
+	for _, c := range mock.Calls {
+		if c.Method == "ClaimIssue" || c.Method == "Ready" {
+			t.Fatalf("preflight ran %s although the agent's profile cannot verify (no manifest); calls=%v", c.Method, mock.Calls)
+		}
 	}
 }
