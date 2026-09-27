@@ -28,6 +28,7 @@ var (
 	updateAddLabels          []string
 	updateRemoveLabels       []string
 	updateSourceRepo         string
+	updateParent             string
 )
 
 var updateCmd = &cobra.Command{
@@ -144,6 +145,7 @@ func applyStringFlags(cmd *cobra.Command, params *backend.UpdateParams) bool {
 		{"acceptance-criteria", &updateAcceptanceCriteria, &params.AcceptanceCriteria},
 		{"title", &updateTitle, &params.Title},
 		{"source-repo", &updateSourceRepo, &params.Repo},
+		{"parent", &updateParent, &params.Parent},
 	}
 	changed := false
 	for _, f := range flags {
@@ -254,6 +256,7 @@ func init() {
 	updateCmd.Flags().StringVar(&updateAcceptanceCriteria, "acceptance-criteria", "", "Set acceptance criteria")
 	updateCmd.Flags().IntVar(&updatePriority, "priority", 0, "Set priority")
 	updateCmd.Flags().StringVar(&updateTitle, "title", "", "Set title")
+	updateCmd.Flags().StringVar(&updateParent, "parent", "", "Set parent issue ID (\"\" detaches); requires a fleet-db that accepts parent_id on PATCH — against an older server the whole update fails, not just this field")
 	updateCmd.Flags().StringVar(&updateDescription, "description", "", "Set description")
 	updateCmd.Flags().StringVar(&updateDescFile, "description-from-file", "", "Read description from file (use - for stdin)")
 	updateCmd.Flags().StringArrayVar(&updateAddDeps, "depends-on", nil, "Add dependency on issue ID (repeatable)")
