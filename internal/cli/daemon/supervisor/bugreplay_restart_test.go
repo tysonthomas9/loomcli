@@ -712,3 +712,28 @@ func TestBugReplay_PR490_ProfileRefusalBeforeClaim(t *testing.T) {
 		}
 	}
 }
+
+// #419: daemon shutdown waits on s.Wg.Wait() with no deadline. A supervise
+// goroutine wedged in cmd.Wait() (a descendant still holds the child's stdout)
+// keeps Stop from ever returning, so shutdown outlives its own watchdog.
+// Root cause: daemon.go:148-175 Stop waits on sup.Stop() without a deadline;
+// supervisor.go:286 bare Wg.Wait(). Real time: the fixed budget is
+// yield(1s)+sigterm(1s)+15s slack, so the test waits up to 30s.
+func TestBugReplay_PR419_ShutdownIsBounded(t *testing.T) {
+	one := 1
+	cfg := &config.DaemonConfig{Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{
+		YieldTimeout: &one, SigtermTimeout: &one,
+	}}}
+	s := restartSupervisor(cfg)
+	s.Concurrency = NewConcurrencyTracker(nil)
+	s.Wg.Add(1) // a supervise goroutine wedged in cmd.Wait()
+	t.Cleanup(s.Wg.Done)
+
+	returned := make(chan struct{})
+	go func() { s.Stop(); close(returned) }()
+	select {
+	case <-returned:
+	case <-time.After(30 * time.Second):
+		t.Fatal("Supervisor.Stop did not return within 30s with one wedged supervise goroutine (unbounded Wg.Wait)")
+	}
+}

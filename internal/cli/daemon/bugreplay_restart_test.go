@@ -15,6 +15,7 @@ import (
 
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 // #443: one agent with an unresolvable role (or worktree) aborts supervisor
@@ -70,5 +71,26 @@ func TestBugReplay_PR535_RefuseBootWithInheritedAgentIdentity(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "agent identity") {
 		t.Fatalf("daemon did not refuse the inherited agent identity; it went on to boot and failed later:\n%s", stderr.String())
+	}
+}
+
+// #442: desired_state=draining is a silent, indefinite veto on supervision.
+// A drain left over from an earlier supervisor (no owner, no expiry) parks the
+// agent forever across daemon restarts. Root cause: daemon.go:316-318
+// initSupervisorAgents skips any non-running desired state with no TTL/owner.
+func TestBugReplay_PR442_StaleDrainDoesNotParkForever(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv("LOOM_FLEET_DB_URL", "http://127.0.0.1:1")
+	cfg := &cfgpkg.DaemonConfig{Agents: []cfgpkg.AgentEntry{{
+		Worktree:     t.TempDir(),
+		Role:         "task",
+		DesiredState: domain.AgentDesiredDraining, // yielded under a previous daemon
+	}}}
+	d, err := NewDaemon(cfg, t.TempDir(), nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewDaemon: %v", err)
+	}
+	if len(d.sup.Agents) != 1 {
+		t.Fatalf("a drain with no owner or expiry, inherited from a previous daemon, still parks the agent after restart (supervised=%d)", len(d.sup.Agents))
 	}
 }
