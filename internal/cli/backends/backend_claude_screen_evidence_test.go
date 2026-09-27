@@ -67,10 +67,12 @@ func TestConversationTurnError_CarriesScreenToClassifier(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			withScreen(t, tc.screen)
 
-			// The turn the wrapper actually emits: a reason, and no text at all.
+			// The turn the wrapper actually emits: a code, its reason, and no
+			// text at all.
 			err := conversationTurnError(&chat.Conversation{}, chat.Turn{
 				Role:   chat.RoleAssistant,
 				State:  chat.TurnStateErrored,
+				Code:   chat.CodeAuthRequired,
 				Reason: chat.ReasonAuthRequired,
 			})
 			var ie *InvocationError
@@ -106,7 +108,7 @@ func TestConversationTurnError_CarriesScreenToClassifier(t *testing.T) {
 // travel: the marker is carried, and the classifier records "we had no screen"
 // rather than pretending it looked at one.
 func TestConversationTurnError_NoConversationStillClassifies(t *testing.T) {
-	err := conversationTurnError(nil, chat.Turn{Reason: chat.ReasonAuthRequired})
+	err := conversationTurnError(nil, chat.Turn{Code: chat.CodeAuthRequired, Reason: chat.ReasonAuthRequired})
 	var ie *InvocationError
 	if !errors.As(err, &ie) {
 		t.Fatalf("want *InvocationError, got %T", err)
@@ -135,7 +137,7 @@ func TestScreenEvidence_IsBounded(t *testing.T) {
 // must not repeat either.
 func TestClaudeTerminalEvidence_CarriesRawTailAndHistory(t *testing.T) {
 	res := claudeRunTurnResult{
-		Turn: chat.Turn{Reason: chat.ReasonAuthRequired, Text: bannerOnlyScreen},
+		Turn: chat.Turn{Code: chat.CodeAuthRequired, Reason: chat.ReasonAuthRequired, Text: bannerOnlyScreen},
 		History: []chat.Turn{
 			{Role: "assistant", Text: "working on the task"},
 		},
@@ -148,7 +150,7 @@ func TestClaudeTerminalEvidence_CarriesRawTailAndHistory(t *testing.T) {
 	}
 
 	agentErr := agenterr.ClassifyFromOutput(
-		terminalTurnInvocationError(chat.ReasonAuthRequired, evidence).OutputTail, 1, "claude")
+		terminalTurnInvocationError(res.Turn, evidence).OutputTail, 1, "claude")
 	if got := agentErr.Class.String(); got != "AuthFailure" {
 		t.Fatalf("Class = %q, want AuthFailure", got)
 	}
@@ -157,7 +159,7 @@ func TestClaudeTerminalEvidence_CarriesRawTailAndHistory(t *testing.T) {
 	}
 
 	// A turn with no history must not have its own text repeated twice.
-	bare := claudeRunTurnResult{Turn: chat.Turn{Reason: chat.ReasonAuthRequired, Text: "not logged in"}}
+	bare := claudeRunTurnResult{Turn: chat.Turn{Code: chat.CodeAuthRequired, Reason: chat.ReasonAuthRequired, Text: "not logged in"}}
 	if got := strings.Count(claudeTerminalEvidence(bare), "not logged in"); got != 1 {
 		t.Fatalf("bare turn text appears %d times, want 1: %q", got, claudeTerminalEvidence(bare))
 	}
