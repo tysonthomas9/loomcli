@@ -32,6 +32,11 @@ type buildFunc func(workDir, prompt, agentName string) *exec.Cmd
 
 func TestBuildInteractiveCmd_PromptInArgs(t *testing.T) {
 	t.Setenv("LOOM_OPENCODE_MODEL", "")
+	// Agent shells export LOOM_AGENT_MODEL, and claude's builder also consults
+	// the profile baseline, so both inputs are pinned: an argv assertion must
+	// not depend on who runs the suite.
+	t.Setenv("LOOM_AGENT_MODEL", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 
 	tests := []struct {
 		name    string
