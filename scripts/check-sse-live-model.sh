@@ -28,6 +28,7 @@ echo "TLC scratch: $scratch (kept for review)"
 cases=(
   '626a|NoLostEvent|page' '626b|NoLostEvent|register'
   '626c|NoDoubleApply|dedup' '626d|ConnectedImpliesReplayed|connected'
+  '626e|NoDoubleApply'
   '642|CheckpointIsDurable'
   '643|AdmissionOrder|order' '612a|NoLostEvent|overflow'
   '610a|NoDoubleApply'
@@ -55,12 +56,14 @@ printf '%-18s %-8s %-12s %s\n' CONFIG EXPECT RESULT SCRATCH
 for entry in "${cases[@]}"; do
   IFS='|' read -r id property disable <<<"$entry"
   for variant in fixed legacy mutation; do
+    [[ "$id" != 626e || "$variant" == legacy ]] || continue
     [[ "$variant" != mutation || -n "$disable" ]] || continue
     name="$id-$variant"
     if [[ "$variant" == mutation ]]; then name="$id-$disable-disabled"; fi
     want "$name" || continue
     module=SSEScenario.tla
     [[ -z "$disable" ]] || module=SSELive.tla
+    [[ "$id" != 626e ]] || module=SSELive.tla
     free_mb="$(df -Pm "$scratch" | awk 'NR==2 {print $4}')"
     if (( free_mb < min_free_mb )); then
       echo "Stopping: only $free_mb MB free (minimum $min_free_mb MB). Scratch: $scratch" >&2
