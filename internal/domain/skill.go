@@ -138,6 +138,14 @@ var (
 	ErrSkillMaterializationLeaseRouteMissing = fmt.Errorf(
 		"domain: skill materialization lease route not served by fleet-db: %w",
 		ErrSkillMaterializationLeaseStoreUnavailable)
+
+	// ErrCapabilityEndpointUnsupported reports that the fleet-db itself does
+	// not serve GET /api/v1/capabilities — the route 404s (or 405s) with no
+	// error envelope, which is what a fleet-db predating capability reporting
+	// looks like. It is deliberately NOT a transport error: the server
+	// answered, it just cannot say what it serves, so a client can only
+	// declare compatibility unverified rather than incompatible.
+	ErrCapabilityEndpointUnsupported = errors.New("domain: fleet-db capability endpoint is not supported")
 )
 
 // SkillRef is the scope-qualified identity of a Skill within a workspace.
