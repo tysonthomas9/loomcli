@@ -5,6 +5,7 @@ package role
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -97,10 +98,17 @@ var roleSetCmd = &cobra.Command{
 input_policy controls which interactive harness prompts an agent in this role
 may auto-answer. DISPOSITION is one of deny, allow, ask. The reserved KIND
 "default" sets the disposition for every kind not named; anything unnamed with
-no default is denied, and so is a role with no policy at all. "ask" has no
-human attached yet and currently behaves as deny (the agent logs when it does).
+no default is denied, and so is a role with no policy at all. "ask" hands the
+prompt to a person via the daemon and degrades to deny if nobody answers.
 
-  loom role set task input_policy "default=deny,trust_prompt=allow"`,
+KIND is the harness's own prompt-kind string. claude-code raises two that
+matter: "trust_prompt" (the folder-trust dialog) and "bypass_acceptance" (the
+--dangerously-skip-permissions acceptance screen). They are separate kinds, so
+allowing one does not allow the other — and because loom launches claude with
+--dangerously-skip-permissions, a denied "bypass_acceptance" is answered
+"No, exit" and the agent exits.
+
+  loom role set task input_policy "default=deny,trust_prompt=allow,bypass_acceptance=allow"`,
 	Args: cobra.ExactArgs(3),
 	RunE: runRoleSet,
 }
@@ -174,6 +182,9 @@ func runRoleAdd(_ *cobra.Command, args []string) error {
 			return fmt.Errorf("create role: %w", err)
 		}
 		fmt.Printf("Created role %s/%s\n", r.WorkspaceKey, r.Name)
+		if warning := inputPolicyBypassWarning(inputPolicy); warning != "" {
+			fmt.Fprintln(os.Stderr, warning)
+		}
 		return nil
 	})
 }
@@ -278,6 +289,11 @@ func runRoleSet(_ *cobra.Command, args []string) error {
 			return fmt.Errorf("update role: %w", err)
 		}
 		fmt.Printf("Set %s/%s.%s = %s\n", ws, name, key, value)
+		if patch.InputPolicy != nil {
+			if warning := inputPolicyBypassWarning(*patch.InputPolicy); warning != "" {
+				fmt.Fprintln(os.Stderr, warning)
+			}
+		}
 		return nil
 	})
 }
@@ -525,6 +541,31 @@ func parseInputPolicySpec(entries []string) (*domain.RoleInputPolicy, error) {
 		return nil, err
 	}
 	return policy, nil
+}
+
+const (
+	inputPolicyTrustPromptKind      = "trust_prompt"
+	inputPolicyBypassAcceptanceKind = "bypass_acceptance"
+)
+
+func inputPolicyBypassWarning(p *domain.RoleInputPolicy) string {
+	if p == nil {
+		return ""
+	}
+	if p.DispositionFor(inputPolicyTrustPromptKind) != domain.RoleInputAllow {
+		return ""
+	}
+	if p.DispositionFor(inputPolicyBypassAcceptanceKind) == domain.RoleInputAllow {
+		return ""
+	}
+	return fmt.Sprintf(
+		"warning: input_policy allows %q but not %q.\n"+
+			"  harness-wrapper v0.8.4 split the --dangerously-skip-permissions acceptance\n"+
+			"  screen into its own kind. loom raises it on nearly every claude run, and a\n"+
+			"  denied %s is answered \"No, exit\" — claude exits rather than stalls.\n"+
+			"  Add %s=allow unless this role never runs a TUI harness.",
+		inputPolicyTrustPromptKind, inputPolicyBypassAcceptanceKind,
+		inputPolicyBypassAcceptanceKind, inputPolicyBypassAcceptanceKind)
 }
 
 // buildAddInputPolicy merges `role add`'s two policy flags. The dedicated
