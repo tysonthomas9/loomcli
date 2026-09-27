@@ -17,7 +17,10 @@ class ReplayEventSource {
     ReplayEventSource.instances.push(this);
   }
 
-  addEventListener(type: string, listener: (event: MessageEvent) => void): void {
+  addEventListener(
+    type: string,
+    listener: (event: MessageEvent) => void,
+  ): void {
     const listeners = this.listeners.get(type) ?? [];
     listeners.push(listener);
     this.listeners.set(type, listeners);
@@ -48,7 +51,8 @@ afterEach(() => {
 });
 
 it("#577 retries a transient token exchange failure", async () => {
-  const fetchToken = vi.fn()
+  const fetchToken = vi
+    .fn()
     .mockResolvedValueOnce({ kind: "error", message: "serve restarting" })
     .mockResolvedValue({ kind: "token", token: "fresh" });
   const client = new WorkspaceSSEClient("ws-replay", {

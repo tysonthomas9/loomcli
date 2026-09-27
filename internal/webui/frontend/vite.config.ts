@@ -222,7 +222,9 @@ export default defineConfig(({ mode }) => ({
     exclude: [
       "tests/e2e/**",
       "node_modules/**",
-      ...(process.env.SSE_BUGREPLAY === "1" ? [] : ["**/*.bugreplay.test.{ts,tsx}"]),
+      ...(process.env.SSE_BUGREPLAY === "1"
+        ? []
+        : ["**/*.bugreplay.test.{ts,tsx}"]),
     ],
     pool: "forks",
     coverage: {
