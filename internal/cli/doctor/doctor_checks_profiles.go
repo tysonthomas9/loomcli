@@ -96,6 +96,12 @@ func checkAgentProfiles() CheckResult {
 		}
 	}
 
+	// Cross-profile, so it cannot live in the per-profile loop above: sharing
+	// is a property of a PAIR of roots. It is appended to broken deliberately
+	// — --fix must never see it, because the only repair is an interactive
+	// login and --fix exists to re-bless drift, not to touch credentials.
+	broken = append(broken, codexAuthSharingFaults(profiles)...)
+
 	var blessed []agentprofile.Profile
 	if doctorFix && len(drifted) > 0 {
 		// Every drifted profile leaves this call either blessed or broken:
@@ -117,6 +123,12 @@ func checkAgentProfiles() CheckResult {
 // exactly what distinguishes "never minted" from "minted then broken", and a
 // credential must not pass through a reporting path.
 func checkProfileCredential(p agentprofile.Profile) error {
+	// The identity shape first: codex owns a login file rather than carrying
+	// an injected token, and this is literally the function the boot path
+	// calls, not a twin of it that can drift from it.
+	if err := supervisor.CheckProfileAuth(p.Dir, p.Harness); err != nil {
+		return err
+	}
 	path := supervisor.ProfileTokenPath(p.Dir, p.Harness)
 	if path == "" {
 		return nil // this harness carries no credential of its own
@@ -274,6 +286,13 @@ func faultReason(f profileFault) string {
 		return fmt.Sprintf("cannot verify: %s --version produced nothing", binary)
 	case errors.Is(f.err, agentprofile.ErrFingerprintMismatch):
 		return "fingerprint mismatch: " + fingerprintPair(f.profile.Dir)
+	case errors.Is(f.err, supervisor.ErrProfileCodexAuthMissing),
+		errors.Is(f.err, errProfileCodexAuthShared):
+		// Both already name the file and the exact fault, and the shared-
+		// credential one names the peer it is shared with; restating either
+		// here would only lose that.
+		return f.err.Error()
+
 	case errors.Is(f.err, agentprofile.ErrManagedContentDrift):
 		// The error already names the file and the dotted JSON path of the
 		// divergence, which is the whole operator-facing value; restating it
@@ -300,6 +319,12 @@ func faultRepair(f profileFault) string {
 	if errors.Is(f.err, supervisor.ErrProfileTokenMissing) {
 		return fmt.Sprintf("scripts/setup-profile-token.sh %s   (interactive, then provision-profile.sh %s)",
 			f.profile.Agent, f.profile.Agent)
+	}
+	if errors.Is(f.err, supervisor.ErrProfileCodexAuthMissing) {
+		return fmt.Sprintf("CODEX_HOME=%s codex login   (--fix will not touch this: no automated path may drive an interactive login)", f.profile.Dir)
+	}
+	if errors.Is(f.err, errProfileCodexAuthShared) {
+		return fmt.Sprintf("CODEX_HOME=%s codex login   (mint a dedicated login; never copy auth.json)", f.profile.Dir)
 	}
 	if errors.Is(f.err, agentprofile.ErrVersionUnknown) {
 		return fmt.Sprintf("install or PATH-expose the %s binary, then re-run loom doctor", f.profile.Harness)
