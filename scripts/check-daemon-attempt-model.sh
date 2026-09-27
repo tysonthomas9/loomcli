@@ -52,6 +52,17 @@ CASES=(
   "c_fail_stale_finalize|fail|NoSupersededFinalize"
   "c_stranded_session|fail|NoStrandedSession"
   "c_vacuity|fail|NeverFinalized"
+  # Bug replays (Daemon bug catalogue, bucket B). #396: abandoned-run recorder.
+  "c_fail_stranded_reclaim|fail|NoStrandedBeforeClaim"
+  "c_fail_stranded_crash|fail|NoStrandedBeforeClaim"
+  "c_pass_reconcile|pass|"
+  "c_pass_reconcile_crash|pass|"
+  "c_fail_reconcile_pgskew|fail|NoStrandedBeforeClaim"
+  "c_stranded_reconcile|fail|NoStrandedSession"
+  # #761, #348, #92, #541: every agent claims as one FleetDB actor.
+  "b_fail_shared_actor|fail|NoForeignIssueWrite"
+  "b_fail_shared_actor_double|fail|NoDoubleWork"
+  "b_pass_actor_no_double|pass|"
 )
 
 command -v java >/dev/null || { echo "java not found (TLC needs Java 11+)" >&2; exit 2; }

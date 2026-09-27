@@ -20,6 +20,11 @@
 (* TerminalGuard: session updates never leave a terminal status.          *)
 (* GuardedSpawn: spawn only while the ownership heartbeat loop is live and *)
 (* local validity holds (proposed; current spawn has no ownership check).  *)
+(* Reconcile: after acquiring ownership, fail the agent's unfinished older  *)
+(* sessions before claiming work (open PR #396, abandoned-run recorder).   *)
+(* SharedActor: every agent claims through one FleetDB actor Srv (the      *)
+(* serve/worktree-less fallback of claim.go:237-248; open #761, #541,      *)
+(* #348, #92). FALSE = per-agent actor, as those fixes propose.            *)
 (*                                                                         *)
 (* Time is abstract ticks of the FleetDB Go clock. A daemon may believe   *)
 (* its lease is valid for up to Drift ticks past the server expiry (slow   *)
@@ -29,16 +34,18 @@
 (***************************************************************************)
 EXTENDS Naturals, FiniteSets, TLC
 
-CONSTANTS Hosts, Agents, Issues, NoOne,
+CONSTANTS Hosts, Agents, Issues, NoOne, Srv,
           STAGE, TTL, LockTTL, MaxTime, Drift, Pause, Grace, PgSkew,
           MaxFence, MaxInFlight, MaxInc,
-          WriteCheck, HolderCheck, TerminalGuard, GuardedSpawn, SessionCheck
+          WriteCheck, HolderCheck, TerminalGuard, GuardedSpawn, SessionCheck,
+          Reconcile, SharedActor
 
 ASSUME /\ STAGE \in {1, 2, 3}
        /\ WriteCheck \in {"none", "token", "fence_eq", "fence"}
        /\ SessionCheck \in BOOLEAN
        /\ HolderCheck \in BOOLEAN /\ TerminalGuard \in BOOLEAN
        /\ GuardedSpawn \in BOOLEAN
+       /\ Reconcile \in BOOLEAN /\ SharedActor \in BOOLEAN
        /\ \A n \in {TTL, LockTTL, MaxTime, Drift, Pause, Grace, PgSkew,
                     MaxFence, MaxInFlight, MaxInc} : n \in Nat
        /\ TTL > 0 /\ LockTTL > 0
@@ -58,22 +65,26 @@ VARIABLES
     hb,         \* ownership heartbeat goroutine running for host and agent
     staleW,     \* ghost: kinds of stale write FleetDB applied (see StaleKinds)
     foreignW,   \* ghost: an issue write hit another attempt's claim
-    term        \* ghost: session ids that were finalized
+    term,       \* ghost: session ids that were finalized (or reconciled)
+    sagent      \* agent that started each session id (server session row)
 
 vars == <<now, lease, nextFence, issue, sess, net, up, inc, ph, proc, my, hb,
-          staleW, foreignW, term>>
+          staleW, foreignW, term, sagent>>
 
 Owners   == Hosts \X (0..MaxInc)
 Sids     == 1..MaxFence
 Phases   == {"idle", "owned", "claimed", "running", "exited", "recovered"}
 AliveP   == {"run", "stop", "orphan"}
-Terminal == {"completed"}
+Terminal == {"completed", "failed"}
+Unfinished == {"starting", "running"}
 
 NoLease == [owner |-> NoOne, tok |-> 0, fence |-> 0, sid |-> 0, exp |-> 0,
             active |-> FALSE]
 NoAtt   == [tok |-> 0, fence |-> 0, sid |-> 0, iss |-> NoOne, sent |-> 0,
-            closed |-> FALSE]
-NoIssue == [st |-> "open", asg |-> NoOne, holder |-> NoOne, lexp |-> 0]
+            closed |-> FALSE, rec |-> FALSE]
+\* asg/holder are FleetDB actors; who is a ghost naming the claiming agent.
+NoIssue == [st |-> "open", asg |-> NoOne, holder |-> NoOne, lexp |-> 0,
+            who |-> NoOne]
 
 Symm == Permutations(Hosts) \cup Permutations(Agents) \cup Permutations(Issues)
 
@@ -81,6 +92,8 @@ Symm == Permutations(Hosts) \cup Permutations(Agents) \cup Permutations(Issues)
 (* Helpers *)
 
 Owner(h) == <<h, inc[h]>>
+\* FleetDB actor recorded on claims and compared by issue writes.
+ActorOf(a) == IF SharedActor THEN Srv ELSE a
 GoLive(a) == lease[a].active /\ now < lease[a].exp       \* Go-clock validity
 DbLive(a) == lease[a].active /\ now + PgSkew < lease[a].exp   \* PG acquire
 TokenOk(h, a) == lease[a].active /\ lease[a].tok = my[h][a].tok /\ now < lease[a].exp
@@ -128,11 +141,11 @@ StaleRel(m) == IF m.sid # lease[m.a].sid THEN {"superseded"} ELSE {}
 \* newer attempt of the same agent.
 Foreign(m) ==
     \/ /\ issue[m.i].st = "in_progress"
-       /\ (issue[m.i].asg # m.a \/ m.sid # lease[m.a].sid)
+       /\ (issue[m.i].who # m.a \/ m.sid # lease[m.a].sid)
     \/ /\ issue[m.i].st = "closed"
        /\ m.k = "reset"
 
-HolderOk(m) == ~HolderCheck \/ (issue[m.i].st = "in_progress" /\ issue[m.i].asg = m.a)
+HolderOk(m) == ~HolderCheck \/ (issue[m.i].st = "in_progress" /\ issue[m.i].asg = ActorOf(m.a))
 
 -----------------------------------------------------------------------------
 Init ==
@@ -151,6 +164,7 @@ Init ==
     /\ staleW = {}
     /\ foreignW = FALSE
     /\ term = {}
+    /\ sagent = [s \in Sids |-> NoOne]
 
 -----------------------------------------------------------------------------
 (* Environment *)
@@ -165,7 +179,7 @@ Tick ==
     /\ \A h \in Hosts, a \in Agents : Guarded(h, a) => now + 1 < DeadBy(h, a)
     /\ now' = now + 1
     /\ UNCHANGED <<hb, lease, nextFence, issue, sess, net, up, inc, ph, proc, my,
-                   staleW, foreignW, term>>
+                   staleW, foreignW, term, sagent>>
 
 \* Daemon crash: supervisor state is lost; children become orphans.
 Crash(h) ==
@@ -176,7 +190,7 @@ Crash(h) ==
     /\ ph' = [ph EXCEPT ![h] = [a \in Agents |-> "idle"]]
     /\ my' = [my EXCEPT ![h] = [a \in Agents |-> NoAtt]]
     /\ hb' = [hb EXCEPT ![h] = [a \in Agents |-> FALSE]]
-    /\ UNCHANGED <<now, lease, nextFence, issue, sess, net, inc, staleW, foreignW, term>>
+    /\ UNCHANGED <<now, lease, nextFence, issue, sess, net, inc, staleW, foreignW, term, sagent>>
 
 \* Restart with a new OwnerID; the startup orphan sweep kills old children.
 Restart(h) ==
@@ -185,7 +199,7 @@ Restart(h) ==
     /\ inc' = [inc EXCEPT ![h] = @ + 1]
     /\ proc' = [proc EXCEPT ![h] = [a \in Agents |->
                   IF proc[h][a] = "orphan" THEN "none" ELSE proc[h][a]]]
-    /\ UNCHANGED <<hb, now, lease, nextFence, issue, sess, net, ph, my, staleW, foreignW, term>>
+    /\ UNCHANGED <<hb, now, lease, nextFence, issue, sess, net, ph, my, staleW, foreignW, term, sagent>>
 
 -----------------------------------------------------------------------------
 (* Ownership lease: supervisor/ownership.go; fleet-db redis.go:218-277,    *)
@@ -206,7 +220,7 @@ Acquire(h, a) ==
                                           !.sid = f, !.sent = now]]
           /\ ph' = [ph EXCEPT ![h][a] = "owned"]
           /\ hb' = [hb EXCEPT ![h][a] = TRUE]
-    /\ UNCHANGED <<now, issue, sess, net, up, inc, proc, staleW, foreignW, term>>
+    /\ UNCHANGED <<now, issue, sess, net, up, inc, proc, staleW, foreignW, term, sagent>>
 
 \* T2 heartbeat success: sent-time becomes the local validity anchor.
 HbOk(h, a) ==
@@ -214,14 +228,14 @@ HbOk(h, a) ==
     /\ lease' = [lease EXCEPT ![a].exp = now + TTL]
     /\ my' = [my EXCEPT ![h][a].sent = now, ![h][a].fence = lease[a].fence]
     /\ UNCHANGED <<hb, now, nextFence, issue, sess, net, up, inc, ph, proc,
-                   staleW, foreignW, term>>
+                   staleW, foreignW, term, sagent>>
 
 \* Delayed/lost reply: the server renewed, the daemon cannot tell (rides out).
 HbLostReply(h, a) ==
     /\ up[h] /\ hb[h][a] /\ TokenOk(h, a)
     /\ lease' = [lease EXCEPT ![a].exp = now + TTL]
     /\ UNCHANGED <<hb, now, nextFence, issue, sess, net, up, inc, ph, proc, my,
-                   staleW, foreignW, term>>
+                   staleW, foreignW, term, sagent>>
 
 \* Typed heartbeat failure -> arbitrateOwnershipByReacquire (same attempt).
 \* Same owner and live keeps the Token and bumps the FencingToken. With no
@@ -247,7 +261,7 @@ HbTypedFail(h, a) ==
          ELSE /\ proc' = [proc EXCEPT ![h][a] = "stop"]   \* HeldByOther: kill
               /\ hb' = [hb EXCEPT ![h][a] = FALSE]
               /\ UNCHANGED <<lease, nextFence, my>>
-    /\ UNCHANGED <<now, issue, sess, net, up, inc, ph, staleW, foreignW, term>>
+    /\ UNCHANGED <<now, issue, sess, net, up, inc, ph, staleW, foreignW, term, sagent>>
 
 \* continueOwnershipIfWithinValidity gives up once local elapsed >= TTL.
 \* The latest point is enforced by Tick through DeadBy.
@@ -258,28 +272,52 @@ KillUnverifiable(h, a) ==
     /\ proc' = [proc EXCEPT ![h][a] = IF @ = "run" THEN "stop" ELSE @]
     /\ hb' = [hb EXCEPT ![h][a] = FALSE]
     /\ UNCHANGED <<now, lease, nextFence, issue, sess, net, up, inc, ph, my,
-                   staleW, foreignW, term>>
+                   staleW, foreignW, term, sagent>>
+
+\* Open PR #396 abandoned-run recorder, agent-wide pass: after AcquireOwnership
+\* and before claiming, mark every unfinished session the agent started in
+\* an earlier attempt as failed (abandoned_run). The recorder's RPCs are
+\* synchronous and need the ownership lease, so the pass is one atomic,
+\* WriteCheck-gated step; a failed pass leaves rec FALSE and the attempt
+\* cannot claim. Late delivery of recorder writes is not modelled.
+ReconcileSessions(h, a) ==
+    /\ Reconcile /\ STAGE = 3
+    /\ up[h] /\ ph[h][a] = "owned" /\ ~my[h][a].rec
+    /\ PassNow(h, a)
+    /\ LET old == {s \in Sids : /\ sagent[s] = a /\ s # my[h][a].sid
+                                /\ sess[s] \in Unfinished}
+       IN /\ sess' = [s \in Sids |-> IF s \in old THEN "failed" ELSE sess[s]]
+          /\ term' = term \cup old
+    /\ my' = [my EXCEPT ![h][a].rec = TRUE]
+    /\ staleW' = staleW \cup StaleKinds(a, my[h][a].sid)
+    /\ UNCHANGED <<hb, now, lease, nextFence, issue, net, up, inc, ph, proc,
+                   foreignW, sagent>>
 
 -----------------------------------------------------------------------------
 (* Issue claim: supervisor/claim.go; fleet-db service/issue_service.go.    *)
 
 \* T5 ClaimTask (atomic lock + projection write in the model). A same-actor
-\* reclaim is idempotent; an expired lock allows a stale takeover.
+\* reclaim is idempotent; an expired lock allows a stale takeover. FleetDB
+\* sees the actor, so under SharedActor a sibling agent passes the
+\* same-holder branch (claim.go:241-247).
 Claim(h, a, i) ==
     /\ STAGE >= 2
     /\ up[h] /\ ph[h][a] = "owned"
+    /\ (Reconcile /\ STAGE = 3) => my[h][a].rec
     /\ LET I == issue[i]
+           x  == ActorOf(a)
            lockFree == I.holder = NoOne \/ I.lexp <= now
        IN /\ I.st # "closed"
-          /\ lockFree \/ I.holder = a
-          /\ I.st = "open" \/ I.asg = a \/ lockFree
+          /\ lockFree \/ I.holder = x
+          /\ I.st = "open" \/ I.asg = x \/ lockFree
     /\ PassNow(h, a)
-    /\ issue' = [issue EXCEPT ![i] = [st |-> "in_progress", asg |-> a,
-                                      holder |-> a, lexp |-> now + LockTTL]]
+    /\ issue' = [issue EXCEPT ![i] = [st |-> "in_progress", asg |-> ActorOf(a),
+                                      holder |-> ActorOf(a), lexp |-> now + LockTTL,
+                                      who |-> a]]
     /\ my' = [my EXCEPT ![h][a].iss = i]
     /\ ph' = [ph EXCEPT ![h][a] = "claimed"]
     /\ staleW' = staleW \cup StaleKinds(a, my[h][a].sid)
-    /\ UNCHANGED <<hb, now, lease, nextFence, sess, net, up, inc, proc, foreignW, term>>
+    /\ UNCHANGED <<hb, now, lease, nextFence, sess, net, up, inc, proc, foreignW, term, sagent>>
 
 \* Preflight found no work or was gated (supervisor.go:320-330): go straight
 \* to ownership release. postExitCleanup is an empty hook (:830-833).
@@ -288,7 +326,7 @@ NoWork(h, a) ==
     /\ up[h] /\ ph[h][a] = "owned"
     /\ ph' = [ph EXCEPT ![h][a] = "recovered"]
     /\ UNCHANGED <<hb, now, lease, nextFence, issue, sess, net, up, inc, proc, my,
-                   staleW, foreignW, term>>
+                   staleW, foreignW, term, sagent>>
 
 \* Supervisor worker heartbeat during cmd.Wait(): renews the lock to LockTTL
 \* when the holder name matches; ownership_lost is ignored (HTTP 200).
@@ -296,11 +334,11 @@ WorkerHb(h, a) ==
     /\ STAGE >= 2
     /\ up[h] /\ proc[h][a] \in {"run", "stop"}
     /\ my[h][a].iss # NoOne
-    /\ issue[my[h][a].iss].holder = a
+    /\ issue[my[h][a].iss].holder = ActorOf(a)
     /\ PassNow(h, a)
     /\ issue' = [issue EXCEPT ![my[h][a].iss].lexp = now + LockTTL]
     /\ UNCHANGED <<hb, now, lease, nextFence, sess, net, up, inc, ph, proc, my,
-                   staleW, foreignW, term>>
+                   staleW, foreignW, term, sagent>>
 
 -----------------------------------------------------------------------------
 (* Attempt lifecycle: spawn, agent writes over IPC, exit, finalize, recover. *)
@@ -314,8 +352,9 @@ Spawn(h, a) ==
     /\ proc' = [proc EXCEPT ![h][a] = "run"]
     /\ IF STAGE = 3
          THEN /\ sess' = [sess EXCEPT ![my[h][a].sid] = "starting"]
+              /\ sagent' = [sagent EXCEPT ![my[h][a].sid] = a]
               /\ Send({Msg("srun", h, a, NoOne)})       \* status -> running
-         ELSE UNCHANGED <<sess, net>>
+         ELSE UNCHANGED <<sess, net, sagent>>
     /\ UNCHANGED <<hb, now, lease, nextFence, issue, up, inc, my,
                    staleW, foreignW, term>>
 
@@ -325,7 +364,7 @@ AgentWrite(h, a) ==
     /\ up[h] /\ proc[h][a] \in {"run", "stop"}
     /\ Send({Msg("aw", h, a, NoOne)})
     /\ UNCHANGED <<hb, now, lease, nextFence, issue, sess, up, inc, ph, proc, my,
-                   staleW, foreignW, term>>
+                   staleW, foreignW, term, sagent>>
 
 \* Stage 2+: the agent closes its issue through IPC (update/close do not
 \* check the claim in FleetDB).
@@ -336,14 +375,14 @@ AgentClose(h, a) ==
     /\ Send({Msg("close", h, a, my[h][a].iss)})
     /\ my' = [my EXCEPT ![h][a].closed = TRUE]
     /\ UNCHANGED <<hb, now, lease, nextFence, issue, sess, up, inc, ph, proc,
-                   staleW, foreignW, term>>
+                   staleW, foreignW, term, sagent>>
 
 ProcExit(h, a) ==
     /\ proc[h][a] \in {"run", "stop"}
     /\ proc' = [proc EXCEPT ![h][a] = "none"]
     /\ ph' = [ph EXCEPT ![h][a] = "exited"]
     /\ UNCHANGED <<hb, now, lease, nextFence, issue, sess, net, up, inc, my,
-                   staleW, foreignW, term>>
+                   staleW, foreignW, term, sagent>>
 
 \* Inside spawnAndWait after cmd.Wait() (supervisor.go:795-816), still under
 \* ownership with the heartbeat running: completion hooks, T12
@@ -359,13 +398,13 @@ Finalize(h, a) ==
                     THEN {Msg("relclaim", h, a, my[h][a].iss)} ELSE {}
            R   == {i \in Issues :
                      \/ i = my[h][a].iss /\ issue[i].st # "closed"
-                     \/ issue[i].st = "in_progress" /\ issue[i].asg = a}
+                     \/ issue[i].st = "in_progress" /\ issue[i].asg = ActorOf(a)}
            rs  == IF STAGE >= 2 THEN {Msg("reset", h, a, i) : i \in R}
                                ELSE {Msg("aw", h, a, NoOne)}
        IN Send(fin \cup rc \cup rs)
     /\ ph' = [ph EXCEPT ![h][a] = "recovered"]
     /\ UNCHANGED <<hb, now, lease, nextFence, issue, sess, up, inc, proc, my,
-                   staleW, foreignW, term>>
+                   staleW, foreignW, term, sagent>>
 
 \* T14 releaseOwnership after spawnAndWait returns (supervisor.go:337-341):
 \* stop the heartbeat, then send Release(token).
@@ -376,7 +415,7 @@ ReleaseOwn(h, a) ==
     /\ hb' = [hb EXCEPT ![h][a] = FALSE]
     /\ my' = [my EXCEPT ![h][a] = NoAtt]
     /\ UNCHANGED <<now, lease, nextFence, issue, sess, up, inc, proc,
-                   staleW, foreignW, term>>
+                   staleW, foreignW, term, sagent>>
 
 -----------------------------------------------------------------------------
 (* FleetDB applies a delayed request. *)
@@ -389,32 +428,33 @@ Deliver(m) ==
                  /\ (WriteCheck \in {"fence", "fence_eq"} => lease[m.a].fence = m.fence)
                 THEN /\ lease' = [lease EXCEPT ![m.a].active = FALSE]
                      /\ staleW' = staleW \cup StaleRel(m)
-                     /\ UNCHANGED <<issue, sess, foreignW, term>>
-                ELSE UNCHANGED <<lease, issue, sess, staleW, foreignW, term>>
+                     /\ UNCHANGED <<issue, sess, foreignW, term, sagent>>
+                ELSE UNCHANGED <<lease, issue, sess, staleW, foreignW, term, sagent>>
          [] m.k = "aw" ->
               IF Pass(m)
                 THEN /\ staleW' = staleW \cup Stale(m)
-                     /\ UNCHANGED <<lease, issue, sess, foreignW, term>>
-                ELSE UNCHANGED <<lease, issue, sess, staleW, foreignW, term>>
+                     /\ UNCHANGED <<lease, issue, sess, foreignW, term, sagent>>
+                ELSE UNCHANGED <<lease, issue, sess, staleW, foreignW, term, sagent>>
          [] m.k = "close" ->
               IF Pass(m) /\ HolderOk(m) /\ issue[m.i].st # "closed"
                 THEN /\ issue' = [issue EXCEPT ![m.i] = [st |-> "closed",
-                                   asg |-> NoOne, holder |-> NoOne, lexp |-> 0]]
+                                   asg |-> NoOne, holder |-> NoOne, lexp |-> 0,
+                                   who |-> NoOne]]
                      /\ staleW' = staleW \cup Stale(m)
                      /\ foreignW' = (foreignW \/ Foreign(m))
-                     /\ UNCHANGED <<lease, sess, term>>
-                ELSE UNCHANGED <<lease, issue, sess, staleW, foreignW, term>>
+                     /\ UNCHANGED <<lease, sess, term, sagent>>
+                ELSE UNCHANGED <<lease, issue, sess, staleW, foreignW, term, sagent>>
          [] m.k = "relclaim" ->
               \* issue_service release: projected assignee must equal actor.
-              IF Pass(m) /\ HolderOk(m) /\ issue[m.i].asg = m.a
+              IF Pass(m) /\ HolderOk(m) /\ issue[m.i].asg = ActorOf(m.a)
                 THEN /\ issue' = [issue EXCEPT ![m.i] = [st |-> "open",
                                    asg |-> NoOne,
-                                   holder |-> IF @.holder = m.a THEN NoOne ELSE @.holder,
-                                   lexp |-> @.lexp]]
+                                   holder |-> IF @.holder = ActorOf(m.a) THEN NoOne ELSE @.holder,
+                                   lexp |-> @.lexp, who |-> NoOne]]
                      /\ staleW' = staleW \cup Stale(m)
                      /\ foreignW' = (foreignW \/ Foreign(m))
-                     /\ UNCHANGED <<lease, sess, term>>
-                ELSE UNCHANGED <<lease, issue, sess, staleW, foreignW, term>>
+                     /\ UNCHANGED <<lease, sess, term, sagent>>
+                ELSE UNCHANGED <<lease, issue, sess, staleW, foreignW, term, sagent>>
          [] m.k = "reset" ->
               \* resetTask Update (decided on the supervisor's earlier read)
               \* plus release of the lock by actor. FleetDB UpdateIssue
@@ -424,18 +464,18 @@ Deliver(m) ==
               IF Pass(m) /\ HolderOk(m) /\ issue[m.i].st # "closed"
                 THEN /\ issue' = [issue EXCEPT ![m.i] = [st |-> "open",
                                    asg |-> NoOne,
-                                   holder |-> IF @.holder = m.a THEN NoOne ELSE @.holder,
-                                   lexp |-> @.lexp]]
+                                   holder |-> IF @.holder = ActorOf(m.a) THEN NoOne ELSE @.holder,
+                                   lexp |-> @.lexp, who |-> NoOne]]
                      /\ staleW' = staleW \cup Stale(m)
                      /\ foreignW' = (foreignW \/ Foreign(m))
-                     /\ UNCHANGED <<lease, sess, term>>
-                ELSE UNCHANGED <<lease, issue, sess, staleW, foreignW, term>>
+                     /\ UNCHANGED <<lease, sess, term, sagent>>
+                ELSE UNCHANGED <<lease, issue, sess, staleW, foreignW, term, sagent>>
          [] m.k = "srun" ->
               IF SessPass(m) /\ (~TerminalGuard \/ sess[m.sid] \notin Terminal)
                 THEN /\ sess' = [sess EXCEPT ![m.sid] = "running"]
                      /\ staleW' = staleW \cup Stale(m)
-                     /\ UNCHANGED <<lease, issue, foreignW, term>>
-                ELSE UNCHANGED <<lease, issue, sess, staleW, foreignW, term>>
+                     /\ UNCHANGED <<lease, issue, foreignW, term, sagent>>
+                ELSE UNCHANGED <<lease, issue, sess, staleW, foreignW, term, sagent>>
          [] m.k = "sfin" ->
               IF SessPass(m) /\ (~TerminalGuard \/ sess[m.sid] \notin Terminal)
                 THEN /\ sess' = [sess EXCEPT ![m.sid] = "completed"]
@@ -443,8 +483,8 @@ Deliver(m) ==
                      /\ staleW' = staleW \cup Stale(m)
                           \cup (IF "superseded" \in Stale(m)
                                  THEN {"superseded_finalize"} ELSE {})
-                     /\ UNCHANGED <<lease, issue, foreignW>>
-                ELSE UNCHANGED <<lease, issue, sess, staleW, foreignW, term>>
+                     /\ UNCHANGED <<lease, issue, foreignW, sagent>>
+                ELSE UNCHANGED <<lease, issue, sess, staleW, foreignW, term, sagent>>
     /\ UNCHANGED <<hb, now, nextFence, up, inc, ph, proc, my>>
 
 -----------------------------------------------------------------------------
@@ -455,7 +495,7 @@ Next ==
          \/ \E a \in Agents :
               \/ Acquire(h, a) \/ HbOk(h, a) \/ HbLostReply(h, a)
               \/ HbTypedFail(h, a) \/ KillUnverifiable(h, a)
-              \/ NoWork(h, a) \/ WorkerHb(h, a)
+              \/ NoWork(h, a) \/ WorkerHb(h, a) \/ ReconcileSessions(h, a)
               \/ Spawn(h, a) \/ AgentWrite(h, a) \/ AgentClose(h, a)
               \/ ProcExit(h, a) \/ Finalize(h, a) \/ ReleaseOwn(h, a)
               \/ \E i \in Issues : Claim(h, a, i)
@@ -476,7 +516,8 @@ TypeOK ==
           /\ hb[h][a] \in BOOLEAN
           /\ proc[h][a] \in AliveP \cup {"none"}
     /\ \A i \in Issues : issue[i].st \in {"open", "in_progress", "closed"}
-    /\ \A s \in Sids : sess[s] \in {"none", "starting", "running", "completed"}
+    /\ \A s \in Sids : sess[s] \in {"none", "starting", "running", "completed", "failed"}
+    /\ \A s \in Sids : sagent[s] \in Agents \cup {NoOne}
 
 \* A1 (contract P2): FleetDB never applies an agent-scoped write (issue,
 \* session, abstract stage-1 write, claim) unless the writer's attempt is the
@@ -513,13 +554,25 @@ TerminalOnce == \A s \in term : sess[s] \in Terminal
 \* supervisor still holds that attempt, so nothing in the model will ever
 \* finalize it. Expected to be VIOLATED even in the proposed design: the
 \* active-lease predicate rejects a completion delivered after release, and
-\* a crash drops the attempt. The model has no retry, ack-before-release,
-\* or reaper action, so terminal liveness is NOT established here.
+\* a crash drops the attempt. The model has no retry or ack-before-release;
+\* ReconcileSessions (Reconcile = TRUE) only reaches sessions of earlier
+\* attempts when the agent acquires again, so terminal liveness is NOT
+\* established here (see NoStrandedBeforeClaim for what it does establish).
 NoStrandedSession ==
     \A s \in Sids :
         ~ /\ sess[s] \in {"starting", "running"}
           /\ \A m \in net : ~(m.k = "sfin" /\ m.sid = s)
           /\ \A h \in Hosts, a \in Agents : my[h][a].sid # s
+
+\* C2 (open #396, safety form of P3 for earlier attempts): once an attempt
+\* of agent a holds a claim, no session a started in an earlier attempt is
+\* still unfinished. Covers both strand routes: a daemon crash and a
+\* completion rejected after release. The session of the agent's final
+\* attempt is not covered; NoStrandedSession above still shows that gap.
+NoStrandedBeforeClaim ==
+    \A h \in Hosts, a \in Agents :
+        ph[h][a] \in {"claimed", "running", "exited"} =>
+            \A s \in Sids : (sagent[s] = a /\ s < my[h][a].sid) => sess[s] \notin Unfinished
 
 \* Vacuity probes: these SHOULD be violated (the protocol makes progress).
 NeverClosed == \A i \in Issues : issue[i].st # "closed"
