@@ -266,6 +266,17 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 			},
 		},
 		{
+			// Regression: parent_id was parsed for /api/ready and /api/blocked
+			// but not here, so a child query silently returned the whole board.
+			name: "parent_id filter",
+			url:  "/api/issues?parent_id=PUPPET-284",
+			validate: func(t *testing.T, args *rpc.ListArgs) {
+				if args.ParentID != "PUPPET-284" {
+					t.Errorf("expected parent_id to be parsed, got %q", args.ParentID)
+				}
+			},
+		},
+		{
 			name: "status filter",
 			url:  "/api/issues?status=open",
 			validate: func(t *testing.T, args *rpc.ListArgs) {
