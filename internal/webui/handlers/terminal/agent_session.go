@@ -200,8 +200,14 @@ func agentTerminalLaunchSpecStale(
 func loadTerminalAgent(ctx context.Context, st store.Store, workspace, agentName string) (*domain.Agent, error) {
 	agent, err := st.Agents().Get(ctx, workspace, agentName)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
+		switch {
+		case errors.Is(err, domain.ErrNotFound):
 			return nil, service.ErrNotFound("agent not found")
+		case errors.Is(err, domain.ErrInvalid):
+			// fleet-db answers 400 invalid_parameter for a name outside its
+			// stored charset (uppercase, >100 chars); the client maps that to
+			// domain.ErrInvalid. Bad client input, not a store fault.
+			return nil, service.ErrValidation(fmt.Sprintf("invalid agent name %q", agentName))
 		}
 		return nil, service.ErrInternal("failed to load agent", err)
 	}
@@ -388,6 +394,9 @@ func loadAgentLaunchRole(ctx context.Context, st store.Store, workspace, roleNam
 	role, err := st.Roles().Get(ctx, workspace, roleName)
 	if errors.Is(err, domain.ErrNotFound) {
 		return nil, nil
+	}
+	if errors.Is(err, domain.ErrInvalid) {
+		return nil, service.ErrValidation(fmt.Sprintf("invalid role name %q", roleName))
 	}
 	if err != nil {
 		return nil, service.ErrInternal("failed to load agent role", err)

@@ -3,6 +3,7 @@ package terminal
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -1299,5 +1300,149 @@ func TestBuildAgentLaunchSpecFallsBackToWorkspaceBackend(t *testing.T) {
 	joined := strings.Join(launch.Argv, " ")
 	if !strings.Contains(joined, "--backend") || !strings.Contains(joined, "codex") {
 		t.Fatalf("launch argv missing --backend codex: %v", launch.Argv)
+	}
+}
+
+// agentGetErrorStore wraps a store so Agents().Get always fails with err.
+// memstore cannot produce domain.ErrInvalid (UPPER is a storable name there),
+// so the sentinel has to be injected to exercise the fleet-db error mapping.
+type agentGetErrorStore struct {
+	store.Store
+	err error
+}
+
+func (s agentGetErrorStore) Agents() store.AgentStore {
+	return errAgentStore{AgentStore: s.Store.Agents(), err: s.err}
+}
+
+type errAgentStore struct {
+	store.AgentStore
+	err error
+}
+
+func (s errAgentStore) Get(context.Context, string, string) (*domain.Agent, error) {
+	return nil, s.err
+}
+
+// roleGetErrorStore wraps a store so Roles().Get always fails with err.
+type roleGetErrorStore struct {
+	store.Store
+	err error
+}
+
+func (s roleGetErrorStore) Roles() store.RoleStore {
+	return errRoleStore{RoleStore: s.Store.Roles(), err: s.err}
+}
+
+type errRoleStore struct {
+	store.RoleStore
+	err error
+}
+
+func (s errRoleStore) Get(context.Context, string, string) (*domain.Role, error) {
+	return nil, s.err
+}
+
+func serviceErrorFrom(t *testing.T, err error) *service.ServiceError {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	var svcErr *service.ServiceError
+	if !errors.As(err, &svcErr) {
+		t.Fatalf("expected *service.ServiceError, got %T: %v", err, err)
+	}
+	return svcErr
+}
+
+func TestLoadTerminalAgent_InvalidNameIsValidation(t *testing.T) {
+	st := agentGetErrorStore{Store: memstore.New(), err: fmt.Errorf("get agent: %w", domain.ErrInvalid)}
+
+	_, err := loadTerminalAgent(context.Background(), st, "ws", "UPPER")
+
+	svcErr := serviceErrorFrom(t, err)
+	if svcErr.Kind != service.KindValidation {
+		t.Fatalf("kind = %q, want %q", svcErr.Kind, service.KindValidation)
+	}
+	if want := `invalid agent name "UPPER"`; svcErr.Message != want {
+		t.Fatalf("message = %q, want %q", svcErr.Message, want)
+	}
+}
+
+func TestLoadTerminalAgent_OverLongNameIsValidation(t *testing.T) {
+	name := strings.Repeat("a", 128)
+	st := agentGetErrorStore{Store: memstore.New(), err: fmt.Errorf("get agent: %w", domain.ErrInvalid)}
+
+	_, err := loadTerminalAgent(context.Background(), st, "ws", name)
+
+	svcErr := serviceErrorFrom(t, err)
+	if svcErr.Kind != service.KindValidation {
+		t.Fatalf("kind = %q, want %q", svcErr.Kind, service.KindValidation)
+	}
+	if !strings.Contains(svcErr.Message, name) {
+		t.Fatalf("message = %q, want it to name the offending value", svcErr.Message)
+	}
+}
+
+func TestLoadTerminalAgent_StoreErrorStaysInternal(t *testing.T) {
+	st := agentGetErrorStore{Store: memstore.New(), err: errors.New("boom")}
+
+	_, err := loadTerminalAgent(context.Background(), st, "ws", "agent-1")
+
+	svcErr := serviceErrorFrom(t, err)
+	if svcErr.Kind != service.KindInternal {
+		t.Fatalf("kind = %q, want %q", svcErr.Kind, service.KindInternal)
+	}
+}
+
+func TestLoadTerminalAgent_NotFoundStaysNotFound(t *testing.T) {
+	st := agentGetErrorStore{Store: memstore.New(), err: fmt.Errorf("get agent: %w", domain.ErrNotFound)}
+
+	_, err := loadTerminalAgent(context.Background(), st, "ws", "nosuchagent")
+
+	svcErr := serviceErrorFrom(t, err)
+	if svcErr.Kind != service.KindNotFound {
+		t.Fatalf("kind = %q, want %q", svcErr.Kind, service.KindNotFound)
+	}
+	if want := "agent not found"; svcErr.Message != want {
+		t.Fatalf("message = %q, want %q", svcErr.Message, want)
+	}
+}
+
+func TestLoadAgentLaunchRole_InvalidRoleIsValidation(t *testing.T) {
+	st := roleGetErrorStore{Store: memstore.New(), err: fmt.Errorf("get role: %w", domain.ErrInvalid)}
+
+	_, err := loadAgentLaunchRole(context.Background(), st, "ws", "ROLE")
+
+	svcErr := serviceErrorFrom(t, err)
+	if svcErr.Kind != service.KindValidation {
+		t.Fatalf("kind = %q, want %q", svcErr.Kind, service.KindValidation)
+	}
+	if want := `invalid role name "ROLE"`; svcErr.Message != want {
+		t.Fatalf("message = %q, want %q", svcErr.Message, want)
+	}
+}
+
+func TestLoadAgentLaunchRole_StoreErrorStaysInternal(t *testing.T) {
+	st := roleGetErrorStore{Store: memstore.New(), err: errors.New("boom")}
+
+	_, err := loadAgentLaunchRole(context.Background(), st, "ws", "role-1")
+
+	svcErr := serviceErrorFrom(t, err)
+	if svcErr.Kind != service.KindInternal {
+		t.Fatalf("kind = %q, want %q", svcErr.Kind, service.KindInternal)
+	}
+}
+
+func TestLoadAgentLaunchRole_NotFoundIsNotAnError(t *testing.T) {
+	st := roleGetErrorStore{Store: memstore.New(), err: fmt.Errorf("get role: %w", domain.ErrNotFound)}
+
+	role, err := loadAgentLaunchRole(context.Background(), st, "ws", "norole")
+
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if role != nil {
+		t.Fatalf("role = %+v, want nil", role)
 	}
 }
