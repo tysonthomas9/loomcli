@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
@@ -172,4 +174,55 @@ func TestPropertyRestartBackoffIsBounded(t *testing.T) {
 		}
 	}
 	t.Logf("iterations=%d depth=1 distinct_states=%d", iterations, len(states))
+}
+
+// #711/#520: a supervisor kill cannot become an agent fault because of the
+// exit code or the last log line. Shutdown also covers a drain whose reason
+// has not yet been written but whose shutdown channel is already closed.
+func TestPropertySupervisorKillsAreBlameless(t *testing.T) {
+	seed := propertySeed(t)
+	rng := rand.New(rand.NewSource(seed + 3))
+	const iterations = 100
+	const depth = 8
+	logPath := filepath.Join(t.TempDir(), "agent.log")
+	reasons := []StopReason{StopReasonShutdown, StopReasonManualStop, StopReasonConfigRemoved, ""}
+	outputs := []string{"authentication failed", "connection timed out", "ordinary task output"}
+	states := make(map[string]struct{})
+	executed, maxDepth := 0, 0
+	defer func() { t.Logf("iterations=%d max_depth=%d distinct_states=%d", executed, maxDepth, len(states)) }()
+	for iteration := 0; iteration < iterations; iteration++ {
+		executed++
+		trace := make([]string, 0, depth)
+		for step := 0; step < depth; step++ {
+			reason := reasons[rng.Intn(len(reasons))]
+			exitCode := [...]int{137, 143, 1}[rng.Intn(3)]
+			output := outputs[rng.Intn(len(outputs))]
+			if err := os.WriteFile(logPath, []byte(output), 0600); err != nil {
+				t.Fatal(err)
+			}
+			s := newTestSupervisorWithConfig(&config.DaemonConfig{})
+			ap := &AgentProcess{WorktreePath: t.TempDir(), LogFilePath: logPath,
+				StopReason: reason, StopCh: make(chan struct{})}
+			ap.Entry.Backend = "claude"
+			ap.AssignedTaskID = "task-1"
+			if reason == "" {
+				close(s.Shutdown) // drain signal arrives before StopReason
+			}
+			s.classifyAgentExit(ap, exitCode)
+			trace = append(trace, fmt.Sprintf("%q/%d/%q", reason, exitCode, output))
+			if len(trace) > maxDepth {
+				maxDepth = len(trace)
+			}
+			if ap.LastError == nil {
+				t.Fatalf("#711 seed=%d iteration=%d step=%d trace=%v: nonzero supervisor kill has no classified outcome", seed, iteration, step, trace)
+			}
+			outcome := ap.LastError.Class
+			decision := agentpolicy.Decide(outcome).Decision
+			eligible := agentpolicy.QuarantineEligible(outcome)
+			states[fmt.Sprintf("%q/%d/%s/%s/%t", reason, exitCode, outcome, decision, eligible)] = struct{}{}
+			if decision != agentpolicy.RetryUncounted || eligible {
+				t.Fatalf("#711/#520 seed=%d iteration=%d step=%d trace=%v: outcome=%s decision=%s quarantine=%t", seed, iteration, step, trace, outcome, decision, eligible)
+			}
+		}
+	}
 }
