@@ -20,6 +20,14 @@ const (
 	SlackBaseURLEnvVar = "LOOM_CONNECTOR_SLACK_BASE_URL"
 	// DatadogBaseURLEnvVar overrides the Datadog API base URL.
 	DatadogBaseURLEnvVar = "LOOM_CONNECTOR_DATADOG_BASE_URL"
+
+	// FakeProviderEnvVar installs the in-process recording provider instead
+	// of real upstream adapters when set to 1/true/recording. It is a hidden
+	// live-stack test seam; production deployments must leave it unset.
+	FakeProviderEnvVar = "LOOM_CONNECTOR_FAKE_PROVIDER"
+	// FakeProviderRecordPathEnvVar optionally appends recording-provider
+	// calls as JSONL so external e2e harnesses can inspect live serve egress.
+	FakeProviderRecordPathEnvVar = "LOOM_CONNECTOR_FAKE_PROVIDER_RECORD_PATH"
 )
 
 // DefaultProviderRegistry builds the standard provider registry — GitHub,
@@ -28,6 +36,9 @@ const (
 // client. Serve's connector wiring uses this so callers outside this package
 // never assemble provider sets themselves.
 func DefaultProviderRegistry(client *http.Client) *providers.Registry {
+	if fakeProviderEnabled() {
+		return fakeProviderRegistry()
+	}
 	registry := providers.NewRegistry()
 	// Register errors only on nil providers or duplicate kinds; neither can
 	// happen on this freshly built registry.
