@@ -226,3 +226,53 @@ func TestPropertySupervisorKillsAreBlameless(t *testing.T) {
 		}
 	}
 }
+
+// #760/#134/F15: after max_retries+1 counted failures without success,
+// the supervisor must stop or visibly park. The property leaves that policy
+// choice open; intervening idle polls may not postpone both outcomes forever.
+func TestPropertyCountedFailuresReachBound(t *testing.T) {
+	seed := propertySeed(t)
+	rng := rand.New(rand.NewSource(seed + 4))
+	const iterations = 200
+	states := make(map[string]struct{})
+	executed, maxDepth := 0, 0
+	defer func() { t.Logf("iterations=%d max_depth=%d distinct_states=%d", executed, maxDepth, len(states)) }()
+	for iteration := 0; iteration < iterations; iteration++ {
+		executed++
+		budget := 1 + rng.Intn(5)
+		s := newTestSupervisorWithConfig(&config.DaemonConfig{Daemon: config.DaemonSettings{
+			RestartPolicy: config.RestartPolicy{MaxRetries: &budget},
+		}})
+		ap := &AgentProcess{}
+		trace := make([]restartEvent, 0, 2*(budget+1))
+		bounded := false
+		for failure := 0; failure <= budget; failure++ {
+			setRestartEvent(ap, retryCrash)
+			restarted := s.shouldRestart(ap)
+			trace = append(trace, retryCrash)
+			states[fmt.Sprintf("budget=%d,count=%d,blocks=%d,stop=%s", budget, ap.RestartCount, ap.BlockCount, ap.StopReason)] = struct{}{}
+			if !restarted || ap.StopReason == StopReasonMaxRetriesBlocked {
+				bounded = true
+				break
+			}
+			if failure < budget {
+				// Generate intervening non-successes. Include a no-work
+				// poll after the first failure so the #760 mechanism is
+				// exercised in every sequence.
+				e := [...]restartEvent{idleNoWork, credentialWall, backendMissing, claimHold}[rng.Intn(4)]
+				if failure == 0 {
+					e = idleNoWork
+				}
+				setRestartEvent(ap, e)
+				s.shouldRestart(ap)
+				trace = append(trace, e)
+			}
+		}
+		if len(trace) > maxDepth {
+			maxDepth = len(trace)
+		}
+		if !bounded {
+			t.Fatalf("#760 seed=%d iteration=%d budget=%d trace=%v: %d counted failures reached neither stop nor block (count=%d)", seed, iteration, budget, trace, budget+1, ap.RestartCount)
+		}
+	}
+}
