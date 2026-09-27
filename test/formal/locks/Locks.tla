@@ -1,17 +1,16 @@
 ------------------------------- MODULE Locks --------------------------------
 EXTENDS Naturals, FiniteSets, TLC
 
-CONSTANTS Mode, Legacy
+CONSTANTS Mode, Legacy, CheckPID
 Processes == {1, 2, 3}
-ASSUME Mode \in {"agent", "daemon", "registry", "registry-label"}
+ASSUME Mode \in {"agent", "daemon"}
 ASSUME Legacy \in BOOLEAN
+ASSUME CheckPID \in BOOLEAN
 
 VARIABLES path, nextInode, fd, inodeOwner, phase, live,
-          recordPID, recordBirth, recordAge, observed, sidecar,
-          pidBirth, advertised, detected
+          recordPID, recordBirth, recordAge, observed, sidecar
 vars == <<path, nextInode, fd, inodeOwner, phase, live,
-          recordPID, recordBirth, recordAge, observed, sidecar,
-          pidBirth, advertised, detected>>
+          recordPID, recordBirth, recordAge, observed, sidecar>>
 
 Init ==
   /\ path = IF Mode = "agent" THEN 1 ELSE 0
@@ -20,14 +19,11 @@ Init ==
   /\ inodeOwner = [i \in 1..4 |-> 0]
   /\ phase = [p \in Processes |-> "ready"]
   /\ live = [p \in Processes |-> FALSE]
-  /\ recordPID = IF Mode = "registry-label" THEN 0 ELSE 9
+  /\ recordPID = 9
   /\ recordBirth = 1
   /\ recordAge = 2
   /\ observed = [p \in Processes |-> 0]
   /\ sidecar = 0
-  /\ pidBirth = 0
-  /\ advertised = (Mode # "registry-label")
-  /\ detected = FALSE
 
 \* A stale agent record has PID 9 and age 2. A sidecar lock protects the
 \* check/remove/create transaction; the legacy path has no such guard.
@@ -36,35 +32,34 @@ TakeSidecar(p) ==
   /\ phase[p] = "ready"
   /\ sidecar' = p
   /\ UNCHANGED <<path, nextInode, fd, inodeOwner, phase, live,
-                recordPID, recordBirth, recordAge, observed, pidBirth,
-                advertised, detected>>
+                recordPID, recordBirth, recordAge, observed>>
 
 Observe(p) ==
   /\ Mode = "agent" /\ phase[p] = "ready"
   /\ (Legacy \/ sidecar = p)
   /\ observed' = [observed EXCEPT ![p] = IF recordAge >= 2 /\
-                                             (recordPID = 9 \/ ~live[recordPID])
+                                             (recordPID = 9 \/ ~CheckPID \/ ~live[recordPID])
                                             THEN path ELSE 0]
   /\ phase' = [phase EXCEPT ![p] = "checked"]
   /\ UNCHANGED <<path, nextInode, fd, inodeOwner, live, recordPID,
-                recordBirth, recordAge, sidecar, pidBirth, advertised, detected>>
+                recordBirth, recordAge, sidecar>>
 
 RemoveStale(p) ==
   /\ Mode = "agent" /\ phase[p] = "checked"
   /\ observed[p] # 0
   /\ (Legacy \/ sidecar = p)
-  /\ path' = IF Legacy \/ path = observed[p] THEN 0 ELSE path
+  \* POSIX unlink is unconditional: the sidecar is the entire fix mechanism.
+  /\ path' = 0
   /\ phase' = [phase EXCEPT ![p] = "removed"]
   /\ UNCHANGED <<nextInode, fd, inodeOwner, live, recordPID,
-                recordBirth, recordAge, observed, sidecar, pidBirth,
-                advertised, detected>>
+                recordBirth, recordAge, observed, sidecar>>
 
 SkipLive(p) ==
   /\ Mode = "agent" /\ phase[p] = "checked" /\ observed[p] = 0
   /\ phase' = [phase EXCEPT ![p] = "done"]
   /\ sidecar' = IF Legacy THEN sidecar ELSE 0
   /\ UNCHANGED <<path, nextInode, fd, inodeOwner, live, recordPID,
-                recordBirth, recordAge, observed, pidBirth, advertised, detected>>
+                recordBirth, recordAge, observed>>
 
 CreateAgent(p) ==
   /\ Mode = "agent" /\ path = 0 /\ nextInode <= 4
@@ -79,7 +74,7 @@ CreateAgent(p) ==
   /\ recordBirth' = recordBirth + 1
   /\ recordAge' = 0
   /\ sidecar' = IF Legacy THEN sidecar ELSE 0
-  /\ UNCHANGED <<inodeOwner, observed, pidBirth, advertised, detected>>
+  /\ UNCHANGED <<inodeOwner, observed>>
 
 OpenDaemon(p) ==
   /\ Mode = "daemon" /\ phase[p] = "ready"
@@ -89,7 +84,7 @@ OpenDaemon(p) ==
   /\ fd' = [fd EXCEPT ![p] = path']
   /\ phase' = [phase EXCEPT ![p] = "opened"]
   /\ UNCHANGED <<inodeOwner, live, recordPID, recordBirth,
-                recordAge, observed, sidecar, pidBirth, advertised, detected>>
+                recordAge, observed, sidecar>>
 
 Flock(p) ==
   /\ Mode = "daemon" /\ phase[p] = "opened"
@@ -98,7 +93,7 @@ Flock(p) ==
   /\ phase' = [phase EXCEPT ![p] = "holding"]
   /\ live' = [live EXCEPT ![p] = TRUE]
   /\ UNCHANGED <<path, nextInode, fd, recordPID, recordBirth,
-                recordAge, observed, sidecar, pidBirth, advertised, detected>>
+                recordAge, observed, sidecar>>
 
 ReleaseDaemon(p) ==
   /\ Mode = "daemon" /\ phase[p] = "holding"
@@ -107,7 +102,7 @@ ReleaseDaemon(p) ==
   /\ phase' = [phase EXCEPT ![p] = "done"]
   /\ live' = [live EXCEPT ![p] = FALSE]
   /\ UNCHANGED <<nextInode, fd, recordPID, recordBirth,
-                recordAge, observed, sidecar, pidBirth, advertised, detected>>
+                recordAge, observed, sidecar>>
 
 Crash(p) ==
   /\ Mode \in {"agent", "daemon"} /\ phase[p] = "holding"
@@ -117,59 +112,24 @@ Crash(p) ==
                    THEN [inodeOwner EXCEPT ![fd[p]] = 0]
                    ELSE inodeOwner
   /\ UNCHANGED <<path, nextInode, fd, recordPID, recordBirth,
-                recordAge, observed, sidecar, pidBirth, advertised, detected>>
+                recordAge, observed, sidecar>>
 
 AgeRecord ==
   /\ Mode = "agent" /\ recordPID \in Processes
-  /\ ~live[recordPID] /\ recordAge < 2
+  /\ recordAge < 2
   /\ recordAge' = recordAge + 1
   /\ UNCHANGED <<path, nextInode, fd, inodeOwner, phase, live,
-                recordPID, recordBirth, observed, sidecar, pidBirth,
-                advertised, detected>>
-
-\* The registry row outlives a crashed daemon. The OS may recycle its PID.
-ReusePID ==
-  /\ Mode = "registry" /\ pidBirth = 0
-  /\ pidBirth' = 2
-  /\ UNCHANGED <<path, nextInode, fd, inodeOwner, phase, live,
-                recordPID, recordBirth, recordAge, observed, sidecar,
-                advertised, detected>>
-
-PublishRegistry ==
-  /\ Mode = "registry-label" /\ ~advertised
-  /\ advertised' = TRUE
-  /\ UNCHANGED <<path, nextInode, fd, inodeOwner, phase, live,
-                recordPID, recordBirth, recordAge, observed, sidecar,
-                pidBirth, detected>>
-
-ExpireRegistry ==
-  /\ Mode = "registry" /\ advertised
-  /\ advertised' = FALSE
-  /\ UNCHANGED <<path, nextInode, fd, inodeOwner, phase, live,
-                recordPID, recordBirth, recordAge, observed, sidecar,
-                pidBirth, detected>>
-
-DetectRegistry ==
-  /\ Mode \in {"registry", "registry-label"} /\ advertised
-  /\ detected' = (Legacy \/ recordPID > 0)
-                  /\ (Mode = "registry-label" \/ pidBirth # 0)
-                  /\ (Mode = "registry-label" \/ Legacy \/ pidBirth = recordBirth)
-  /\ UNCHANGED <<path, nextInode, fd, inodeOwner, phase, live,
-                recordPID, recordBirth, recordAge, observed, sidecar,
-                pidBirth, advertised>>
+                recordPID, recordBirth, observed, sidecar>>
 
 Next ==
   \/ \E p \in Processes: TakeSidecar(p) \/ Observe(p) \/ RemoveStale(p)
                          \/ SkipLive(p)
                          \/ CreateAgent(p) \/ OpenDaemon(p) \/ Flock(p)
                          \/ ReleaseDaemon(p) \/ Crash(p)
-  \/ AgeRecord \/ ReusePID \/ PublishRegistry \/ ExpireRegistry
-  \/ DetectRegistry
+  \/ AgeRecord
 
 AtMostOneHolder == Cardinality({p \in Processes: live[p]}) <= 1
 NoLiveTakeover == \A p \in Processes: live[p] => path = fd[p]
-NoGhostRegistry == detected => pidBirth = recordBirth
-NoUnlabelledDaemon == detected => recordPID > 0
 TypeOK == path \in 0..4 /\ nextInode \in 2..5
 Spec == Init /\ [][Next]_vars
 =============================================================================
