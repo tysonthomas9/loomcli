@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/olesho/harness-wrapper/pkg/chat"
 	"github.com/olesho/harness-wrapper/pkg/chat/memstore"
@@ -140,9 +141,9 @@ func runConversationTurn(ctx context.Context, conv *chat.Conversation, prompt st
 		defer cancel()
 	}
 
-	turnID, err := conv.Send(ctx, prompt)
+	turnID, err := sendConversationPrompt(ctx, conv, prompt)
 	if err != nil {
-		return chat.Turn{}, wrapInvocationError(fmt.Errorf("send prompt: %w", err), "")
+		return chat.Turn{}, err
 	}
 
 	events := conv.Events()
@@ -170,11 +171,33 @@ func runConversationTurn(ctx context.Context, conv *chat.Conversation, prompt st
 						return ev.Turn, nil
 					}
 				case chat.TurnStateErrored:
-					return ev.Turn, conversationTurnError(ev.Turn)
+					return ev.Turn, conversationTurnError(conv, ev.Turn)
 				}
 			}
 		}
 	}
+}
+
+// sendConversationPrompt sends the prompt and maps a send-time failure onto the
+// invocation-error taxonomy.
+//
+// The auth arm is UNREACHABLE on harness-wrapper@v0.7.7: Send catches its own
+// ErrAuthRequired at pkg/chat/send.go:45-56 and emits a terminal assistant turn
+// instead of returning the sentinel, so the auth verdict always arrives on the
+// errored-turn path in runConversationTurn. It exists so a future wrapper that
+// DOES propagate the sentinel degrades to a marked AuthFailure carrying the
+// screen, rather than silently to Unknown — and it is pinned by
+// TestConversationSend_AuthSurfacesAsErroredTurn, which fails first if a bump
+// ever flips that behavior.
+func sendConversationPrompt(ctx context.Context, conv *chat.Conversation, prompt string) (string, error) {
+	turnID, err := conv.Send(ctx, prompt)
+	if err == nil {
+		return turnID, nil
+	}
+	if ie := authSentinelInvocationError(err, conv); ie != nil {
+		return "", ie
+	}
+	return "", wrapInvocationError(fmt.Errorf("send prompt: %w", err), "")
 }
 
 // answerSurfacedRequest resolves one surfaced prompt: hand it to a human via
@@ -251,15 +274,95 @@ func conversationInputResolver(policy *domain.RoleInputPolicy) func(chat.InputRe
 // conversationTurnError maps an errored turn into the invocation-error
 // taxonomy, carrying the harness's own terminal verdict when it named one —
 // the same mapping the one-shot path applies to ErrTurnErrored.
-func conversationTurnError(turn chat.Turn) error {
+//
+// The conversation is taken as an argument for its SCREEN. On a terminal
+// auth/usage turn the wrapper hands us a Reason and nothing else: every
+// producer of chat.ReasonAuthRequired on the pinned v0.7.7 leaves Turn.Text
+// empty (emitAuthRequiredTurn never sets it; authRelabel blanks it), so the
+// classifier downstream would see the marker over an empty window and record
+// Screen.Scanned=false on exactly the verdict that description exists for.
+// Appending the live screen widens that window; it changes no class, no
+// disposition and no restart decision.
+func conversationTurnError(conv *chat.Conversation, turn chat.Turn) error {
 	reason := strings.TrimSpace(turn.Reason)
 	if reason == "" {
 		reason = "claude turn errored"
 	}
-	if ie := terminalTurnInvocationError(reason, turn.Text); ie != nil {
+	if ie := terminalTurnInvocationError(reason, joinEvidence(turn.Text, screenEvidence(conv))); ie != nil {
 		return ie
 	}
 	return &InvocationError{Err: errors.New(reason), OutputTail: turn.Text, ExitCode: 1}
+}
+
+// authSentinelInvocationError maps a propagated chat.ErrAuthRequired onto the
+// same marked InvocationError the errored-turn path produces, carrying the
+// screen as its evidence. Returns nil for every other error so the caller
+// falls through to its ordinary wrapping with a single nil check.
+func authSentinelInvocationError(err error, conv *chat.Conversation) error {
+	if !errors.Is(err, chat.ErrAuthRequired) {
+		return nil
+	}
+	if ie := terminalTurnInvocationError(chat.ReasonAuthRequired, screenEvidence(conv)); ie != nil {
+		return ie
+	}
+	return nil
+}
+
+// conversationScreenTailCap bounds the screen text carried into an
+// InvocationError. A rendered screen is a few KiB at most; the cap is there so
+// a pathological emulator state cannot push an unbounded blob into an error
+// that gets logged, stored in a state file and shipped as an event.
+const conversationScreenTailCap = 4 << 10
+
+// conversationScreenText reads the live screen behind a conversation. It is a
+// package var because chat.Conversation's screen is unexported and only
+// chat.Open can populate it, so a test that needs a specific screen behind
+// conversationTurnError has no other seam. The nil-conversation guard lives
+// here rather than in screenEvidence so a substituted reader owns the whole
+// decision.
+var conversationScreenText = func(conv *chat.Conversation) string {
+	if conv == nil {
+		return ""
+	}
+	return conv.ScreenSnapshot().Text
+}
+
+// screenEvidence returns the trailing, bounded screen text for a conversation,
+// or "" when there is no conversation to read (the two direct-Turn call sites
+// in the tests, and any future caller holding only a turn).
+func screenEvidence(conv *chat.Conversation) string {
+	return tailBytes(strings.TrimSpace(conversationScreenText(conv)), conversationScreenTailCap)
+}
+
+// joinEvidence concatenates the non-empty evidence fragments with a newline,
+// preserving their order and skipping a fragment already contained in what
+// came before it.
+func joinEvidence(parts ...string) string {
+	var kept []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if len(kept) > 0 && strings.Contains(strings.Join(kept, "\n"), p) {
+			continue
+		}
+		kept = append(kept, p)
+	}
+	return strings.Join(kept, "\n")
+}
+
+// tailBytes keeps the last max bytes of s, cut forward to the next rune
+// boundary so a truncated multi-byte glyph never reaches a log or an event.
+func tailBytes(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	cut := s[len(s)-max:]
+	for len(cut) > 0 && !utf8.ValidString(cut[:1]) {
+		cut = cut[1:]
+	}
+	return cut
 }
 
 // conversationHarnessSessionID reads the harness-level session id off the
