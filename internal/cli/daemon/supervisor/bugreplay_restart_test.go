@@ -1,0 +1,493 @@
+//go:build daemon_bugreplay
+
+// Bug-replay fault tests for the crash/restart/orphan, liveness-watchdog and
+// config/boot groups of the daemon bug catalogue (wave 2, restart group).
+//
+// Each live-bug test is named after its fix PR and asserts the behaviour the
+// fix restores, so it FAILS on v5 for the catalogued reason and PASSES on the
+// fix PR head. History (already fixed) rows get regression tests that pass on
+// v5. Tests use only APIs that exist on v5 so the same file compiles at the
+// fix heads. Helpers are prefixed "restart" so they cannot collide with the
+// other bug-replay groups that share this package.
+package supervisor
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
+)
+
+// ---------------------------------------------------------------------------
+// restart-group helpers
+// ---------------------------------------------------------------------------
+
+func restartSupervisor(cfg *config.DaemonConfig) *Supervisor {
+	if cfg == nil {
+		cfg = &config.DaemonConfig{}
+	}
+	return &Supervisor{
+		ConfigSnapshot: func() *config.DaemonConfig { return cfg },
+		Shutdown:       make(chan struct{}),
+		FatalCh:        make(chan error, 1),
+		StoppedAgents:  make(map[string]struct{}),
+	}
+}
+
+func restartMaxRetriesConfig(n int) *config.DaemonConfig {
+	return &config.DaemonConfig{Daemon: config.DaemonSettings{
+		RestartPolicy: config.RestartPolicy{MaxRetries: &n},
+	}}
+}
+
+func restartHarnessError(ap *AgentProcess, class wrapper.ErrorClass, exitCode int) {
+	ap.LastExitCode = exitCode
+	ap.LastStart = time.Now()
+	ap.LastNoWork = false
+	ap.LastError = &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(class), ExitCode: exitCode, Message: "replayed failure"}
+}
+
+func restartNoWork(ap *AgentProcess) {
+	ap.LastExitCode = 0
+	ap.LastStart = time.Now()
+	ap.LastNoWork = true
+	ap.LastError = &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), Message: "no claimable tasks"}
+}
+
+func restartWriteLock(t *testing.T, dir, taskID string) {
+	t.Helper()
+	data, err := json.Marshal(&cli.LockInfo{PID: 999999, Command: "task", AgentName: "replay", TaskID: taskID, StartedAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cli.ResolveLockDir(dir), cli.LockFileName), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// restartTaskAgent returns an agent whose worktree lock names taskID, so the
+// quarantine and classification hooks attribute its exit to that task.
+func restartTaskAgent(t *testing.T, worktree, taskID string) *AgentProcess {
+	t.Helper()
+	dir := t.TempDir()
+	restartWriteLock(t, dir, taskID)
+	return &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: worktree},
+		WorktreePath: dir,
+		StopCh:       make(chan struct{}),
+		Done:         make(chan struct{}),
+	}
+}
+
+// restartKill shapes ap as a task-holding run killed with the given stop
+// reason and harness class, then feeds it to the quarantine ledger hook.
+func restartKill(s *Supervisor, ap *AgentProcess, stop StopReason, class wrapper.ErrorClass, exitCode int) {
+	ap.Mu.Lock()
+	ap.StopReason = stop
+	ap.LastExitCode = exitCode
+	ap.LastError = &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(class), ExitCode: exitCode, Message: "killed"}
+	ap.Mu.Unlock()
+	s.recordTaskExitForQuarantine(ap, exitCode)
+}
+
+func restartLedgerCount(s *Supervisor, taskID string) int {
+	q := s.qrec()
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if rec := q.rec[taskID]; rec != nil {
+		return rec.Count
+	}
+	return 0
+}
+
+func restartSetTick(s *Supervisor, name string, at time.Time) {
+	v, ok := s.Ticks.Load(name)
+	if !ok {
+		return
+	}
+	v.(*atomic.Int64).Store(at.UnixNano())
+}
+
+// restartScanUntilFatal runs the watchdog scan enough times to cross both the
+// consecutive-scan and the real-span guards, back-dating streak starts the way
+// production's 10 s cadence would (same technique as liveness_test.go).
+func restartScanUntilFatal(s *Supervisor) {
+	for i := 0; i < livenessStaleScansBeforeFatal+1; i++ {
+		s.scanTicks(time.Now())
+		for name, start := range s.livenessStreakStart {
+			s.livenessStreakStart[name] = start.Add(-livenessMinStaleSpan)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Liveness watchdog
+// ---------------------------------------------------------------------------
+
+// #552 (history N1: #113, #117, #517): an agent whose supervise goroutine
+// returns for good leaves its liveness tick registered. The tick freezes, and
+// one threshold later the watchdog FATALs the whole daemon, killing every
+// healthy agent. Root cause: critical.go:107-112 supervisedAgentBody never
+// unregisters the tick.
+func TestBugReplay_PR552_ExitedAgentTickDoesNotFatalDaemon(t *testing.T) {
+	s := restartSupervisor(nil)
+	ap := &AgentProcess{
+		Entry:  config.AgentEntry{Worktree: "replay-552"},
+		StopCh: make(chan struct{}),
+		Done:   make(chan struct{}),
+	}
+	close(ap.StopCh) // agent removed from config: the supervise loop returns at once
+
+	s.startAgentSupervisor(ap)
+	select {
+	case <-ap.Done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("supervise goroutine did not exit after StopCh")
+	}
+
+	name := agentTickName(ap)
+	if _, still := s.Ticks.Load(name); still {
+		t.Errorf("tick %q is still registered after its supervise goroutine exited (critical.go supervisedAgentBody never unregisters it)", name)
+	}
+
+	// Replay the incident: the frozen tick ages past the agent threshold and
+	// the watchdog scans. A daemon with no live agents must not go fatal.
+	restartSetTick(s, name, time.Now().Add(-24*time.Hour))
+	restartScanUntilFatal(s)
+	select {
+	case err := <-s.FatalChannel():
+		t.Fatalf("watchdog FATALed the daemon on an exited agent's frozen tick: %v", err)
+	default:
+	}
+}
+
+// F16-F19 regression chain (R-fatal): the watchdog must still FATAL on a
+// genuinely wedged cadence goroutine, and must tolerate a single stale scan.
+// Passes on v5; guards against a #552 fix that disables detection outright.
+func TestBugReplay_RFatalChain_WedgedGoroutineStillFatal(t *testing.T) {
+	s := restartSupervisor(nil)
+	s.RegisterTick(GoroutineHealthChecker)
+	restartSetTick(s, GoroutineHealthChecker, time.Now().Add(-10*time.Minute))
+
+	s.scanTicks(time.Now()) // F18: one stale scan alone is not fatal
+	select {
+	case err := <-s.FatalChannel():
+		t.Fatalf("single stale scan went fatal (F18 streak regression): %v", err)
+	default:
+	}
+
+	restartScanUntilFatal(s)
+	select {
+	case err := <-s.FatalChannel():
+		if !strings.Contains(err.Error(), GoroutineHealthChecker) {
+			t.Errorf("fatal does not name the wedged goroutine: %v", err)
+		}
+	default:
+		t.Fatal("watchdog did not FATAL on a wedged cadence goroutine (F16 regression)")
+	}
+}
+
+// F19 (#429) regression: a scan-to-scan gap that only the wall clock sees
+// (darwin sleep pauses the monotonic clock) is a suspension, not a stall.
+func TestBugReplay_F19_SleepGapIsSuspension(t *testing.T) {
+	if _, ok := suspendedScanGap(10*time.Second, 2*time.Hour); !ok {
+		t.Fatal("a 2h wall gap with a 10s monotonic gap was not treated as suspension (F19 regression)")
+	}
+	if _, ok := suspendedScanGap(10*time.Second, 10*time.Second); ok {
+		t.Fatal("an in-step 10s gap was treated as suspension")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Restart budget
+// ---------------------------------------------------------------------------
+
+// #760 (history N2): a NoWork cycle refunds the restart budget, so an agent
+// whose failures alternate with idle polls never reaches max_retries.
+// Root cause: restart.go:272 applyNoWorkRestart sets RestartCount = 0.
+func TestBugReplay_PR760_NoWorkDoesNotRefundRestartBudget(t *testing.T) {
+	const maxRetries = 3
+	s := restartSupervisor(restartMaxRetriesConfig(maxRetries))
+	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "replay-760"}}
+
+	for i := 1; i <= maxRetries+1; i++ {
+		restartHarnessError(ap, wrapper.ErrUnknown, 1)
+		s.shouldRestart(ap)
+		if ap.StopReason == StopReasonMaxRetriesBlocked || ap.StopReason == StopReasonMaxRetries || ap.StopReason == StopReasonFastFail {
+			return // budget reached: fixed behaviour
+		}
+		restartNoWork(ap)
+		s.shouldRestart(ap)
+		if ap.RestartCount != i {
+			t.Fatalf("after failure %d and an idle poll RestartCount = %d, want %d (restart.go applyNoWorkRestart refunds the budget)", i, ap.RestartCount, i)
+		}
+	}
+	t.Fatalf("%d failures interleaved with idle polls never exhausted max_retries=%d (StopReason=%q)", maxRetries+1, maxRetries, ap.StopReason)
+}
+
+// F13/F14 regression (R-budget): BackendUnavailable does not erode the
+// budget, and one spawn failure counts once. Passes on v5.
+func TestBugReplay_F14_BackendUnavailableDoesNotEraseBudget(t *testing.T) {
+	s := restartSupervisor(restartMaxRetriesConfig(1))
+	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "replay-f14"}}
+	for i := 0; i < 5; i++ {
+		ap.LastExitCode = 1
+		ap.LastError = &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome)}
+		if !s.shouldRestart(ap) {
+			t.Fatalf("BackendUnavailable stopped the agent on cycle %d", i)
+		}
+	}
+	if ap.RestartCount != 0 {
+		t.Fatalf("BackendUnavailable charged the budget: RestartCount=%d", ap.RestartCount)
+	}
+}
+
+// #134: an agent that exhausts max_retries re-enters automatic retry cycles
+// (block and recheck every 60 s) instead of stopping in error.
+// Root cause: restart.go:248-259 applyMaxRetriesBlock resets the counters and
+// keeps restarting. The fix stops the agent and blocks its task.
+func TestBugReplay_PR134_MaxRetriesStopsAgent(t *testing.T) {
+	const maxRetries = 2
+	s := restartSupervisor(restartMaxRetriesConfig(maxRetries))
+	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "replay-134"}}
+	var restart bool
+	for i := 0; i <= maxRetries; i++ {
+		restartHarnessError(ap, wrapper.ErrTransient, 1)
+		restart = s.shouldRestart(ap)
+	}
+	if restart {
+		t.Fatalf("agent past max_retries=%d still restarts (StopReason=%q, RestartCount=%d); want an error stop", maxRetries, ap.StopReason, ap.RestartCount)
+	}
+}
+
+// #737 (1): one failover-only error (model not found) with no fallback left
+// stops the supervisor for good and strands its tasks.
+// Root cause: restart.go:97-98 applyFailoverExhaustedStop with no retry.
+func TestBugReplay_PR737_FailoverExhaustedGetsBoundedRetry(t *testing.T) {
+	s := restartSupervisor(nil)
+	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "replay-737"}}
+	restartHarnessError(ap, wrapper.ErrModelNotFound, 1)
+	if !s.shouldRestart(ap) {
+		t.Fatalf("first failover-only error stopped the supervisor for good (StopReason=%q); want a bounded retry", ap.StopReason)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Classification of supervisor-initiated kills
+// ---------------------------------------------------------------------------
+
+// #711: a kill the supervisor itself performed (shutdown, manual stop, config
+// removal) is log-classified as an agent fault and consumes restart budget.
+// Root cause: classify.go:52-58 sends every non-zero exit to ClassifyFromLog.
+func TestBugReplay_PR711_SupervisorStopDoesNotChargeBudget(t *testing.T) {
+	for _, stop := range []StopReason{StopReasonShutdown, StopReasonManualStop, StopReasonConfigRemoved} {
+		t.Run(string(stop), func(t *testing.T) {
+			s := restartSupervisor(restartMaxRetriesConfig(3))
+			ap := restartTaskAgent(t, "replay-711", "loom-711")
+			logPath := filepath.Join(t.TempDir(), "agent.log")
+			if err := os.WriteFile(logPath, []byte("error: connection reset by peer\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			ap.LogFilePath = logPath
+			ap.StopReason = stop
+
+			s.classifyAgentExit(ap, 143)
+			s.shouldRestart(ap)
+			if ap.RestartCount != 0 {
+				t.Fatalf("supervisor-initiated %s (exit 143) charged the restart budget: class=%v RestartCount=%d",
+					stop, ap.LastError, ap.RestartCount)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task quarantine ledger
+// ---------------------------------------------------------------------------
+
+// #520: kills caused by the daemon's own budget machinery and by the
+// duration cap on an agent that was still producing output are counted as
+// task stalls. Root cause: quarantine.go:136 recordTaskExitForQuarantine
+// counts every eligible kill.
+func TestBugReplay_PR520_InfraAndActiveDurationKillsNotQuarantined(t *testing.T) {
+	cases := []struct {
+		name string
+		stop StopReason
+	}{
+		{"active_duration_cap", StopReasonRunDurationExceeded},
+		{"budget_blocked", StopReasonMaxRetriesBlocked},
+		{"backend_unavailable", StopReasonBackendUnavailable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LOOM_TASK_QUARANTINE_THRESHOLD", "3")
+			s := restartSupervisor(nil)
+			ap := restartTaskAgent(t, "replay-520", "loom-520")
+			for i := 0; i < 3; i++ {
+				restartKill(s, ap, tc.stop, wrapper.ErrTimeout, 143)
+			}
+			if got := restartLedgerCount(s, "loom-520"); got != 0 {
+				t.Fatalf("%s kills counted toward task quarantine: count=%d (would quarantine at 3)", tc.stop, got)
+			}
+		})
+	}
+}
+
+// Regression (passes on v5): a genuine watchdog kill still counts.
+func TestBugReplay_Quarantine_WatchdogKillStillCounts(t *testing.T) {
+	t.Setenv("LOOM_TASK_QUARANTINE_THRESHOLD", "3")
+	s := restartSupervisor(nil)
+	ap := restartTaskAgent(t, "replay-q", "loom-q")
+	restartKill(s, ap, StopReasonWatchdog, wrapper.ErrTimeout, 137)
+	restartKill(s, ap, StopReasonWatchdog, wrapper.ErrTimeout, 137)
+	if got := restartLedgerCount(s, "loom-q"); got != 2 {
+		t.Fatalf("two watchdog kills gave ledger count %d, want 2", got)
+	}
+}
+
+// #522: a review agent that progresses through comments or label changes is
+// killed and quarantined as stalled. Root cause: quarantine.go:136-184 the
+// progress fingerprint hashes only Design and Notes (hashIssueField :246).
+func TestBugReplay_PR522_CommentProgressResetsQuarantine(t *testing.T) {
+	t.Setenv("LOOM_TASK_QUARANTINE_THRESHOLD", "3")
+	var calls atomic.Int32
+	mock := &clitest.MockIssueBackend{
+		GetFn: func(_ context.Context, id string) (*backend.IssueDetailData, error) {
+			n := int64(calls.Add(1))
+			d := &backend.IssueDetailData{}
+			d.ID = id
+			d.Design, d.Notes = "same design", "same notes"
+			for c := int64(1); c <= n; c++ { // one new comment per kill
+				d.Comments = append(d.Comments, backend.CommentData{ID: c, IssueID: id, Text: "review note"})
+			}
+			return d, nil
+		},
+	}
+	s := restartSupervisor(nil)
+	s.IssueBackend = mock
+	ap := restartTaskAgent(t, "replay-522", "loom-522")
+	restartKill(s, ap, StopReasonWatchdog, wrapper.ErrTimeout, 137)
+	restartKill(s, ap, StopReasonWatchdog, wrapper.ErrTimeout, 137)
+	restartKill(s, ap, StopReasonWatchdog, wrapper.ErrTimeout, 137)
+	if got := restartLedgerCount(s, "loom-522"); got >= 2 {
+		t.Fatalf("a task that gained a comment between every kill has ledger count %d; comments are progress", got)
+	}
+}
+
+// #456: the quarantine ledger lives only in memory, so a daemon restart
+// erases it and the threshold is never reached across restarts.
+// Root cause: supervisor.go:119 quarantine is an in-memory map.
+func TestBugReplay_PR456_QuarantineLedgerSurvivesRestart(t *testing.T) {
+	t.Setenv("LOOM_TASK_QUARANTINE_THRESHOLD", "3")
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, ".loom"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ap := restartTaskAgent(t, "replay-456", "loom-456")
+
+	before := restartSupervisor(nil)
+	before.ProjectDir = project
+	restartKill(before, ap, StopReasonWatchdog, wrapper.ErrTimeout, 137)
+	restartKill(before, ap, StopReasonWatchdog, wrapper.ErrTimeout, 137)
+
+	after := restartSupervisor(nil) // the daemon restarted
+	after.ProjectDir = project
+	restartKill(after, ap, StopReasonWatchdog, wrapper.ErrTimeout, 137)
+	if got := restartLedgerCount(after, "loom-456"); got != 3 {
+		t.Fatalf("after a daemon restart the ledger count is %d, want 3 (two kills before the restart were lost)", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Orphans
+// ---------------------------------------------------------------------------
+
+// #727: the startup orphan sweep misses reparented processes whose cwd
+// differs from the configured worktree path only in letter case (the kernel
+// reports the on-disk case). Root cause: proctree.go:186 case-sensitive
+// HasPrefix.
+func TestBugReplay_PR727_OrphanCwdMatchesCaseInsensitively(t *testing.T) {
+	base := t.TempDir()
+	worktree := filepath.Join(base, "Replay727")
+	if err := os.MkdirAll(filepath.Join(worktree, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lower := filepath.Join(base, "replay727")
+	if st, err := os.Stat(lower); err != nil || !st.IsDir() {
+		t.Skip("filesystem is case-sensitive; #727 only applies to case-insensitive volumes")
+	}
+	resolvedBase, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphanCwd := filepath.Join(resolvedBase, "replay727", "sub") // kernel-reported spelling
+
+	saved := procInspector
+	t.Cleanup(func() { procInspector = saved })
+	procInspector = processInspector{
+		List: func() ([]procInfo, error) { return []procInfo{{PID: 424242, PPID: 1, PGID: 424242}}, nil },
+		CWD:  func(int) (string, error) { return orphanCwd, nil },
+	}
+	if got := findWorktreeOrphans([]string{worktree}); len(got) != 1 {
+		t.Fatalf("orphan with cwd %q under worktree %q (case differs only) not found: %v", orphanCwd, worktree, got)
+	}
+}
+
+// F11/F12 regression (R-orphan): the sweep finds an exact-case orphan and
+// never signals the daemon's own process group. Passes on v5.
+func TestBugReplay_F11F12_OrphanSweepFindsExactAndSkipsOwnPgroup(t *testing.T) {
+	worktree := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := procInspector
+	t.Cleanup(func() { procInspector = saved })
+	procInspector = processInspector{
+		List: func() ([]procInfo, error) {
+			return []procInfo{{PID: 5001, PPID: 1, PGID: 5001}, {PID: 5002, PPID: 1, PGID: 777}}, nil
+		},
+		CWD: func(int) (string, error) { return filepath.Join(resolved, "x"), nil },
+	}
+	got := findWorktreeOrphans([]string{worktree})
+	if len(got) != 2 {
+		t.Fatalf("exact-case orphans found = %d, want 2", len(got))
+	}
+	kept := signalableOrphans(got, 777)
+	if len(kept) != 1 || kept[0].PGID != 5001 {
+		t.Fatalf("signalableOrphans did not drop the daemon's own pgroup: %v", kept)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Config/boot
+// ---------------------------------------------------------------------------
+
+// #289: a worker role with prompt_file=builtin:... is joined onto the
+// workspace path and reported as a missing file nobody wrote, failing daemon
+// creation with a misleading cause. Root cause: role.go:39-48 has no builtin:
+// check. The fix names the real cause.
+func TestBugReplay_PR289_BuiltinPromptOnWorkerRoleNamesCause(t *testing.T) {
+	cfg := &config.DaemonConfig{Roles: map[string]config.RoleConfig{
+		"replay-reviewer": {PromptFile: "builtin:pr-review"},
+	}}
+	_, err := ResolveRoleConfigStatic("replay-reviewer", cfg, t.TempDir())
+	if err == nil {
+		t.Fatal("worker role with a builtin: prompt resolved without error")
+	}
+	if strings.Contains(err.Error(), "not found") || !strings.Contains(err.Error(), "built-in") {
+		t.Fatalf("error blames a missing file instead of the builtin: prompt on a worker role: %v", err)
+	}
+}
