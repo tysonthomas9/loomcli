@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run the bounded SSE handoff model. Deliberate legacy failures must name the
-# expected property; fixed configs must exhaust the state space cleanly.
+# Run the bounded SSE handoff model. Deliberate legacy and open failures must
+# name the expected property; fixed configs must exhaust the state space cleanly.
 # Every invocation creates a fresh scratch tree and leaves it for inspection.
 set -euo pipefail
 
@@ -55,8 +55,9 @@ failures=0
 printf '%-18s %-8s %-12s %s\n' CONFIG EXPECT RESULT SCRATCH
 for entry in "${cases[@]}"; do
   IFS='|' read -r id property disable <<<"$entry"
-  for variant in fixed legacy mutation; do
-    [[ "$id" != 626e || "$variant" == legacy ]] || continue
+  for variant in fixed legacy mutation open; do
+    [[ "$id" != 626e || "$variant" == open ]] || continue
+    [[ "$id" == 626e || "$variant" != open ]] || continue
     [[ "$variant" != mutation || -n "$disable" ]] || continue
     name="$id-$variant"
     if [[ "$variant" == mutation ]]; then name="$id-$disable-disabled"; fi
