@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -136,15 +137,23 @@ func kanbanRPCToKanbanIssue(ki *rpc.KanbanIssueRPC) KanbanIssue {
 // absent and every list query has to hit the fleet HTTP API instead.
 //
 // This port covers the standard (non-kanban) list shape and enriches kanban
-// blocked state from IssueBackend.Blocked. Parent-title enrichment requires
-// extra Get calls per issue and is skipped — the FE shows the parent ID
-// without a title, which the kanban handles as a graceful fallback (see
-// kanbanIssue.go in the FE).
+// blocked state from IssueBackend.Blocked.
 //
-// The composite ListKanban RPC's per-issue parent-title and full
-// blocked-by-details lookups are intentionally not reproduced: matching them
-// would mean N extra Gets. The blocked summary uses one backend Blocked call
-// instead, which preserves kanban correctness without the p95 hit.
+// Parent titles are enriched without an N+1: the board fetches essentially the
+// whole workspace, so nearly every parent is already present in the same
+// result set. resolveParentTitles builds an id → title index over the issues
+// already in hand and fills ParentTitle from it — O(n), zero extra round-trips.
+// Only parents absent from the result set (filtered out, or past the limit)
+// need a Get, and that backfill is bounded: at most parentTitleBackfillMax
+// distinct IDs, fetched concurrently under a short sub-context, every failure
+// logged at debug and skipped. Past the cap no Get is issued at all and those
+// issues carry no ParentTitle — the FE then renders the bare parent ID, which
+// is a graceful fallback rather than an error.
+//
+// The composite ListKanban RPC's full blocked-by-details lookups are still not
+// reproduced: matching them would mean N extra Gets. The blocked summary uses
+// one backend Blocked call instead, which preserves kanban correctness without
+// the p95 hit.
 func (s *issueServiceImpl) listIssuesViaBackend(
 	ctx context.Context, be backend.IssueBackend, params ListIssuesParams,
 ) (*ListIssuesResult, error) {
@@ -156,7 +165,8 @@ func (s *issueServiceImpl) listIssuesViaBackend(
 	issues = excludeBackendIssuesByStatus(issues, params.ExcludeStatus)
 
 	if !params.IncludeBlocked {
-		return &ListIssuesResult{Issues: backendIssuesWithParent(issues)}, nil
+		titles := s.resolveParentTitles(ctx, be, issues)
+		return &ListIssuesResult{Issues: backendIssuesWithParent(issues, titles)}, nil
 	}
 
 	blockedByID, err := s.blockedIssueMap(ctx, be, params.Args)
@@ -174,7 +184,127 @@ func (s *issueServiceImpl) listIssuesViaBackend(
 	issues = appendMissingBlockedIssues(issues, blockedByID)
 	issues = appendMissingDeferredIssues(issues, deferredByID)
 
-	return &ListIssuesResult{KanbanIssues: backendKanbanIssues(issues, blockedByID, readyByID, deferredByID)}, nil
+	// After the appends, so issues pulled in by the blocked/deferred merge both
+	// contribute to the index and benefit from it.
+	titles := s.resolveParentTitles(ctx, be, issues)
+
+	return &ListIssuesResult{
+		KanbanIssues: backendKanbanIssues(issues, titles, blockedByID, readyByID, deferredByID),
+	}, nil
+}
+
+// Parent-title backfill bounds. The in-result index resolves the overwhelming
+// majority of parents; these cap what the residual is allowed to cost.
+const (
+	// parentTitleBackfillMax is the largest number of distinct unresolved
+	// parent IDs worth fetching. Past it the backfill is skipped entirely
+	// rather than degrading list latency.
+	parentTitleBackfillMax = 16
+	// parentTitleBackfillConcurrency bounds in-flight backfill Gets.
+	parentTitleBackfillConcurrency = 4
+	// parentTitleBackfillTimeout caps the whole backfill; a list request must
+	// never wait long on a cosmetic lookup.
+	parentTitleBackfillTimeout = time.Second
+)
+
+// parentTitleIndex maps issue ID → title over the issues already in hand.
+// Issues with an empty ID or an empty title are skipped: an empty title is
+// indistinguishable from "unresolved" and must not surface as parent_title "".
+// On duplicate IDs the first entry wins.
+func parentTitleIndex(issues []backend.IssueData) map[string]string {
+	index := make(map[string]string, len(issues))
+	for _, d := range issues {
+		if d.ID == "" || d.Title == "" {
+			continue
+		}
+		if _, exists := index[d.ID]; exists {
+			continue
+		}
+		index[d.ID] = d.Title
+	}
+	return index
+}
+
+// unresolvedParentIDs returns the distinct parent IDs referenced by issues that
+// the index cannot already resolve.
+func unresolvedParentIDs(issues []backend.IssueData, index map[string]string) []string {
+	var missing []string
+	seen := make(map[string]bool)
+	for _, d := range issues {
+		if d.Parent == "" || seen[d.Parent] {
+			continue
+		}
+		if _, ok := index[d.Parent]; ok {
+			continue
+		}
+		seen[d.Parent] = true
+		missing = append(missing, d.Parent)
+	}
+	return missing
+}
+
+// resolveParentTitles builds the parent-title lookup for a backend list result:
+// the in-result index first, then a bounded best-effort backfill for parents
+// that are not in the result set. Never returns an error — a failed title
+// lookup degrades to a missing title, never to a failed list.
+func (s *issueServiceImpl) resolveParentTitles(
+	ctx context.Context, be backend.IssueBackend, issues []backend.IssueData,
+) map[string]string {
+	titles := parentTitleIndex(issues)
+	missing := unresolvedParentIDs(issues, titles)
+	if len(missing) == 0 {
+		return titles
+	}
+	if len(missing) > parentTitleBackfillMax {
+		slog.Debug("parent-title backfill skipped: over cap",
+			"missing", len(missing), "cap", parentTitleBackfillMax)
+		return titles
+	}
+	for id, title := range backfillParentTitles(ctx, be, missing) {
+		titles[id] = title
+	}
+	return titles
+}
+
+// backfillParentTitles fetches the given parent IDs concurrently, returning
+// whatever resolved. Misses are logged at debug and dropped.
+func backfillParentTitles(
+	ctx context.Context, be backend.IssueBackend, ids []string,
+) map[string]string {
+	fetchCtx, cancel := context.WithTimeout(ctx, parentTitleBackfillTimeout)
+	defer cancel()
+
+	var (
+		mu     sync.Mutex
+		wg     sync.WaitGroup
+		out    = make(map[string]string, len(ids))
+		tokens = make(chan struct{}, parentTitleBackfillConcurrency)
+	)
+	for _, id := range ids {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			tokens <- struct{}{}
+			defer func() { <-tokens }()
+
+			detail, err := be.Get(fetchCtx, id)
+			if err != nil {
+				slog.Debug("parent-title backfill: get failed", "issue_id", id, "err", err)
+				return
+			}
+			// Get returns *IssueDetailData; a nil pointer with a nil error is
+			// a legal "not found" from some backends. An empty title counts as
+			// unresolved, same as the in-result index.
+			if detail == nil || detail.Title == "" {
+				return
+			}
+			mu.Lock()
+			out[id] = detail.Title
+			mu.Unlock()
+		}(id)
+	}
+	wg.Wait()
+	return out
 }
 
 // Apply ExcludeStatus client-side. fleet-db's ListOpts has a single Status
@@ -197,20 +327,23 @@ func excludeBackendIssuesByStatus(issues []backend.IssueData, excludeStatus []st
 	return filtered
 }
 
-func backendIssuesWithParent(issues []backend.IssueData) []IssueWithParent {
+func backendIssuesWithParent(issues []backend.IssueData, titles map[string]string) []IssueWithParent {
 	out := make([]IssueWithParent, len(issues))
 	for i, d := range issues {
-		out[i] = backendIssueWithParent(d)
+		out[i] = backendIssueWithParent(d, titles)
 	}
 	return out
 }
 
-func backendIssueWithParent(d backend.IssueData) IssueWithParent {
+func backendIssueWithParent(d backend.IssueData, titles map[string]string) IssueWithParent {
 	iwc := backendIssueDataToWithCounts(&d)
 	iwp := IssueWithParent{IssueWithCounts: iwc}
 	if d.Parent != "" {
 		p := d.Parent
 		iwp.Parent = &p
+		if title := titles[d.Parent]; title != "" {
+			iwp.ParentTitle = &title
+		}
 	}
 	if d.SourceRepo != "" {
 		r := d.SourceRepo
@@ -254,6 +387,7 @@ func appendMissingIssueData(
 
 func backendKanbanIssues(
 	issues []backend.IssueData,
+	titles map[string]string,
 	blockedByID map[string]backend.IssueData,
 	readyByID map[string]bool,
 	deferredByID map[string]backend.IssueData,
@@ -261,17 +395,26 @@ func backendKanbanIssues(
 	out := make([]KanbanIssue, len(issues))
 	for i, d := range issues {
 		_, deferred := deferredByID[d.ID]
-		out[i] = backendKanbanIssue(d, blockedByID[d.ID], readyByID[d.ID], deferred)
+		out[i] = backendKanbanIssue(d, titles, blockedByID[d.ID], readyByID[d.ID], deferred)
 	}
 	return out
 }
 
-func backendKanbanIssue(d backend.IssueData, blocked backend.IssueData, ready bool, deferred bool) KanbanIssue {
+func backendKanbanIssue(
+	d backend.IssueData,
+	titles map[string]string,
+	blocked backend.IssueData,
+	ready bool,
+	deferred bool,
+) KanbanIssue {
 	iwc := backendIssueDataToWithCounts(&d)
 	ki := KanbanIssue{IssueWithCounts: iwc}
 	if d.Parent != "" {
 		p := d.Parent
 		ki.Parent = &p
+		if title := titles[d.Parent]; title != "" {
+			ki.ParentTitle = &title
+		}
 	}
 	if d.SourceRepo != "" {
 		r := d.SourceRepo
