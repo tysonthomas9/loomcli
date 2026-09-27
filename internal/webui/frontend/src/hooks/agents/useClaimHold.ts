@@ -21,6 +21,9 @@ import {
 import { useWorkspaceContext } from "@/hooks/workspace";
 
 const POLL_MS = 10000;
+// Cadence for a workspace whose server can reach no agent supervisor: nothing
+// can take a hold there, so a hold cannot appear between polls either.
+const IDLE_POLL_MS = 60000;
 
 export interface UseClaimHoldReturn {
   /** null when claims are free. */
@@ -46,6 +49,7 @@ export function useClaimHold(): UseClaimHoldReturn {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [canForceRelease, setCanForceRelease] = useState(false);
+  const [supervisorAvailable, setSupervisorAvailable] = useState(true);
   const mounted = useRef(true);
   const activeWorkspace = useRef(workspaceId);
   activeWorkspace.current = workspaceId;
@@ -61,10 +65,15 @@ export function useClaimHold(): UseClaimHoldReturn {
       setRunning(status.running ?? []);
       setGated(status.gated ?? 0);
       if (!status.hold?.held) setCanForceRelease(false);
+      setSupervisorAvailable(status.supervisor_available !== false);
     } catch {
       // A daemon without the claim-hold route (older build, remote mode, or
       // simply not running) is not an error state for a banner — there is
-      // just nothing to show.
+      // just nothing to show. The transport no longer reports these 503s
+      // either (isOutageExemptPath in @/api/common), so do not "fix" one half
+      // and leave the other. Reachability is deliberately NOT inferred here:
+      // an older server that still 503s carries no field, and the slow poll
+      // simply does not engage.
       if (mounted.current && activeWorkspace.current === requestedWorkspace) {
         setHold(null);
         setRunning([]);
@@ -73,6 +82,10 @@ export function useClaimHold(): UseClaimHoldReturn {
     }
   }, [workspaceId]);
 
+  // Reset-and-prime: keyed on refresh identity (i.e. workspaceId) only, so a
+  // workspace switch clears the banner and starts optimistic. It must NOT
+  // depend on supervisorAvailable — this body fetches, and a
+  // reachability-keyed re-run would re-fetch immediately and loop.
   useEffect(() => {
     mounted.current = true;
     setHold(null);
@@ -81,13 +94,25 @@ export function useClaimHold(): UseClaimHoldReturn {
     setBusy(false);
     setError(null);
     setCanForceRelease(false);
+    setSupervisorAvailable(true);
     void refresh();
-    const timer = setInterval(() => void refresh(), POLL_MS);
     return () => {
       mounted.current = false;
-      clearInterval(timer);
     };
   }, [refresh]);
+
+  // Cadence: the only effect that knows about reachability. Its body creates
+  // and clears a timer and does nothing else — no state writes, no refresh()
+  // call — so re-running it on a reachability change cannot cause a fetch.
+  // A host with no supervisor answers "no hold" forever; polling that at 10 s
+  // was the entire client-error rate of the dashboard (PUPPET-529).
+  useEffect(() => {
+    const timer = setInterval(
+      () => void refresh(),
+      supervisorAvailable ? POLL_MS : IDLE_POLL_MS,
+    );
+    return () => clearInterval(timer);
+  }, [refresh, supervisorAvailable]);
 
   const release = useCallback(
     async (force = false): Promise<boolean> => {
