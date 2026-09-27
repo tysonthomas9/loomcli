@@ -404,10 +404,26 @@ func (b *fleetDBIssueBackend) ReleaseClaim(ctx context.Context, id, actor string
 	return b.withBackend(ctx, "ReleaseClaim", func(ib backend.IssueBackend) error {
 		r, ok := ib.(backend.ClaimReleaser)
 		if !ok {
+			slog.Warn("claim release unsupported by issue backend",
+				"issue", id, "backend_type", fmt.Sprintf("%T", ib))
 			return nil
 		}
 		return r.ReleaseClaim(ctx, id, actor)
 	})
+}
+
+// ConfiguredActor forwards the underlying backend's authenticated identity,
+// which is the actor fleet-db attributes this process's claims to. Returns ""
+// when the backend is unavailable or does not expose one.
+func (b *fleetDBIssueBackend) ConfiguredActor() string {
+	var actor string
+	_ = b.withBackend(context.Background(), "ConfiguredActor", func(ib backend.IssueBackend) error {
+		if c, ok := ib.(interface{ ConfiguredActor() string }); ok {
+			actor = c.ConfiguredActor()
+		}
+		return nil
+	})
+	return actor
 }
 
 func (b *fleetDBIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
