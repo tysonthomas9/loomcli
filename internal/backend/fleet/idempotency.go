@@ -46,6 +46,7 @@ func (b *FleetBackend) doRequestHeaders(ctx context.Context, method, path string
 	if err != nil {
 		return nil, resp.StatusCode, resp.Header, err
 	}
+	captureRetryAfter(apiResp, resp.Header)
 	return apiResp, resp.StatusCode, resp.Header, nil
 }
 

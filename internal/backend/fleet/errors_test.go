@@ -2,7 +2,9 @@ package fleet
 
 import (
 	"context"
+	"errors"
 	"net"
+	"net/http"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -28,7 +30,8 @@ func TestClassifyHTTPError_StatusCodes(t *testing.T) {
 		{"403 forbidden", 403, apiResponse{Error: "forbidden"}, backend.KindUnavailable},
 		{"404 not found", 404, apiResponse{Error: "issue not found"}, backend.KindNotFound},
 		{"409 conflict", 409, apiResponse{Error: "already claimed"}, backend.KindConflict},
-		{"429 rate limit", 429, apiResponse{Error: "too many requests"}, backend.KindUnavailable},
+		{"429 rate limit", 429, apiResponse{Error: "too many requests"}, backend.KindRateLimited},
+		{"429 wins over string matcher", 429, apiResponse{Error: "invalid burst"}, backend.KindRateLimited},
 		{"500 internal", 500, apiResponse{Error: "server error"}, backend.KindInternal},
 		{"503 unavailable", 503, apiResponse{Error: "maintenance"}, backend.KindUnavailable},
 		{"504 timeout", 504, apiResponse{Error: "gateway timeout"}, backend.KindTimeout},
@@ -150,6 +153,46 @@ func TestClassifyTransportError(t *testing.T) {
 			}
 			if !backend.IsKind(result, tt.wantKind) {
 				t.Fatalf("expected kind %s, got %v", tt.wantKind, result)
+			}
+		})
+	}
+}
+
+func TestDoRequest_CapturesRetryAfterHeader(t *testing.T) {
+	tests := []struct {
+		name       string
+		retryAfter string
+		wantMeta   string
+	}{
+		{name: "header present", retryAfter: "30", wantMeta: "30"},
+		{name: "header absent"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if tt.retryAfter != "" {
+					w.Header().Set("Retry-After", tt.retryAfter)
+				}
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":"rate limit exceeded"}`))
+			})
+			defer ts.Close()
+
+			_, err := fb.List(context.Background(), backend.ListOpts{})
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			var be *backend.BackendError
+			if !errors.As(err, &be) {
+				t.Fatalf("error is not a *backend.BackendError: %v", err)
+			}
+			if be.Kind != backend.KindRateLimited {
+				t.Errorf("kind = %s, want %s", be.Kind, backend.KindRateLimited)
+			}
+			if got := be.Meta[backend.MetaRetryAfter]; got != tt.wantMeta {
+				t.Errorf("Meta[%s] = %q, want %q", backend.MetaRetryAfter, got, tt.wantMeta)
 			}
 		})
 	}

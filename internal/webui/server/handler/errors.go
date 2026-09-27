@@ -55,7 +55,12 @@ func HandleServiceError(w http.ResponseWriter, err error) {
 			"msg", svcErr.Message,
 			"err", err,
 		)
-		if svcErr.Kind == service.KindStarting {
+		// Prefer an upstream-supplied interval; fall back to the fixed
+		// hint for a workspace that is still starting.
+		switch {
+		case svcErr.RetryAfter != "":
+			w.Header().Set("Retry-After", svcErr.RetryAfter)
+		case svcErr.Kind == service.KindStarting:
 			w.Header().Set("Retry-After", "5")
 		}
 		// Include the kind in the body so frontends can branch on a
