@@ -31,6 +31,9 @@ const PATHS = {
   spark: "m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z",
   panel: "M15 4v16m-6-10 2 2-2 2",
   dash: "M6 12h12",
+  back: "M19 12H5m6-6-6 6 6 6",
+  sun: "M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4",
+  moon: "M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z",
 } as const;
 
 export type IconName = keyof typeof PATHS;
@@ -62,6 +65,8 @@ function Extras({ name }: { name: IconName }): JSX.Element | null {
       return <circle cx="12" cy="12" r="9" />;
     case "search":
       return <circle cx="10.5" cy="10.5" r="6.5" />;
+    case "sun":
+      return <circle cx="12" cy="12" r="4" />;
     case "map":
       return (
         <>

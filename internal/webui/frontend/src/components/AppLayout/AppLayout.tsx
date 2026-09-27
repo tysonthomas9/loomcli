@@ -35,6 +35,13 @@ export interface AppLayoutProps {
   onTitleClick?: () => void;
   /** Additional CSS class name */
   className?: string;
+  /**
+   * "shell" (default) renders the global header. "route" drops it for a
+   * routed view that draws its own breadcrumb and navigation; the skip link,
+   * live region, banner slot and main landmark stay. Callers should also
+   * omit navRail/sidebar in route mode.
+   */
+  chrome?: "shell" | "route";
 }
 
 /**
@@ -52,41 +59,48 @@ export function AppLayout({
   title = "Loom",
   onTitleClick,
   className,
+  chrome = "shell",
 }: AppLayoutProps): JSX.Element {
-  const rootClassName = className
-    ? `${styles.appLayout} ${className}`
-    : styles.appLayout;
+  const rootClassName = [
+    styles.appLayout,
+    chrome === "route" ? styles.routeChrome : null,
+    className,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <div className={rootClassName}>
+    <div className={rootClassName} data-chrome={chrome}>
       <LiveRegion />
       <a href="#main-content" className={styles.skipLink}>
         Skip to main content
       </a>
-      <header className={styles.header} role="banner">
-        <div className={styles.headerContent}>
-          <div className={styles.brand}>
-            {onTitleClick ? (
-              <button
-                type="button"
-                className={styles.brandButton}
-                onClick={onTitleClick}
-                aria-label="Go home"
-              >
+      {chrome === "shell" && (
+        <header className={styles.header} role="banner">
+          <div className={styles.headerContent}>
+            <div className={styles.brand}>
+              {onTitleClick ? (
+                <button
+                  type="button"
+                  className={styles.brandButton}
+                  onClick={onTitleClick}
+                  aria-label="Go home"
+                >
+                  <h1 className={styles.title}>{title}</h1>
+                </button>
+              ) : (
                 <h1 className={styles.title}>{title}</h1>
-              </button>
-            ) : (
-              <h1 className={styles.title}>{title}</h1>
+              )}
+            </div>
+            {navigation && (
+              <nav className={styles.navigation} aria-label="Main navigation">
+                {navigation}
+              </nav>
             )}
+            {actions && <div className={styles.actions}>{actions}</div>}
           </div>
-          {navigation && (
-            <nav className={styles.navigation} aria-label="Main navigation">
-              {navigation}
-            </nav>
-          )}
-          {actions && <div className={styles.actions}>{actions}</div>}
-        </div>
-      </header>
+        </header>
+      )}
       {banner}
       <div className={styles.contentWrapper}>
         {navRail}

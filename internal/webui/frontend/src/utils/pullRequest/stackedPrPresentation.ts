@@ -129,11 +129,16 @@ export function requirementLines(
         return { id: "review", label: "Changes requested", state: "failing" };
       case "review_required":
         return { id: "review", label: "Review required", state: "pending" };
+      // GitHub's reviewDecision was null: the repo may require no review, or
+      // GitHub simply did not say (internal/prreadiness/types.go). Neutral,
+      // never "met" — the backend verdict and its no_review_required
+      // warning stay on the readiness badge untouched.
       case "not_reported":
         return {
           id: "review",
-          label: "No review required",
-          state: "met",
+          label: "No review decision reported",
+          state: "unknown",
+          detail: "GitHub did not say",
         };
       default:
         return {

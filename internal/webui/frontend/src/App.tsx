@@ -76,6 +76,10 @@ import {
 import { UserMenu } from "@/components/UserMenu/UserMenu";
 import { SearchTermProvider } from "@/contexts/SearchTermContext";
 import {
+  RouteChromeProvider,
+  type RouteChromeControls,
+} from "@/contexts/RouteChromeContext";
+import {
   WorkspaceViewProvider,
   type WorkspaceViewData,
   type WorkspaceViewActions,
@@ -1473,6 +1477,40 @@ function App() {
     </div>
   );
 
+  // A routed view (the /prs stacked workspace) may claim the chrome: App
+  // then drops the global header and NavRail and hands it these live
+  // controls instead. Claims are counted so a remount cannot race a release.
+  const [routeChromeClaims, setRouteChromeClaims] = useState(0);
+  const routeOwnsChrome = routeChromeClaims > 0;
+  const claimRouteChrome = useCallback(() => {
+    setRouteChromeClaims((n) => n + 1);
+    return () => setRouteChromeClaims((n) => Math.max(0, n - 1));
+  }, []);
+  const routeChromeWorkspaces = workspace?.workspaces;
+  const routeChrome = useMemo(() => {
+    const controls: RouteChromeControls = {
+      theme,
+      onToggleTheme: toggleTheme,
+      workspaces: (routeChromeWorkspaces ?? []).map((ws) => ({
+        id: ws.id,
+        name: ws.name,
+      })),
+      activeWorkspaceId: workspaceId,
+      onWorkspaceSwitch: handleWorkspaceSwitcherSelect,
+      onBackToWorkspace: () => navigateToView("home"),
+      accountMenu: <UserMenu />,
+    };
+    return { controls, claim: claimRouteChrome };
+  }, [
+    theme,
+    toggleTheme,
+    routeChromeWorkspaces,
+    workspaceId,
+    handleWorkspaceSwitcherSelect,
+    navigateToView,
+    claimRouteChrome,
+  ]);
+
   const sidebarContent = (
     <WorkspaceTree
       onWorkspaceSwitch={handleWorkspaceSwitch}
@@ -1492,7 +1530,7 @@ function App() {
 
   // Views that bring their own left tree suppress the workspace sidebar, so
   // the page owns its chrome instead of showing two trees side by side.
-  const viewOwnsChrome =
+  const viewOwnsSidebar =
     activeView === "files" ||
     activeView === "skills" ||
     activeView === "settings" ||
@@ -1517,27 +1555,30 @@ function App() {
     >
       <SearchTermProvider value={activeSearchTerm}>
         <AppLayout
+          chrome={routeOwnsChrome ? "route" : "shell"}
           banner={<ClaimHoldBanner />}
           title={headerTitle}
           onTitleClick={() => navigateToView("home")}
           actions={headerActions}
           navRail={
-            <NavRail
-              activeView={activeView}
-              onChange={handleNavChange}
-              sessionCount={sessionCount}
-              operatorQueueCount={operatorQueue.length}
-              badges={{ terminal: hasTerminalUnread }}
-              workspaces={(workspace?.workspaces ?? []).map((ws) => ({
-                id: ws.id,
-                name: ws.name,
-              }))}
-              activeWorkspaceId={workspaceId}
-              onWorkspaceSwitch={handleWorkspaceSwitcherSelect}
-              onAddWorkspace={() => setShowCreateWorkspace(true)}
-            />
+            routeOwnsChrome ? undefined : (
+              <NavRail
+                activeView={activeView}
+                onChange={handleNavChange}
+                sessionCount={sessionCount}
+                operatorQueueCount={operatorQueue.length}
+                badges={{ terminal: hasTerminalUnread }}
+                workspaces={(workspace?.workspaces ?? []).map((ws) => ({
+                  id: ws.id,
+                  name: ws.name,
+                }))}
+                activeWorkspaceId={workspaceId}
+                onWorkspaceSwitch={handleWorkspaceSwitcherSelect}
+                onAddWorkspace={() => setShowCreateWorkspace(true)}
+              />
+            )
           }
-          sidebar={viewOwnsChrome ? null : sidebarContent}
+          sidebar={viewOwnsSidebar || routeOwnsChrome ? null : sidebarContent}
         >
           <div
             className={
@@ -1559,9 +1600,11 @@ function App() {
                 data={workspaceViewData}
                 actions={workspaceViewActions}
               >
-                <Suspense fallback={<LoadingSkeleton.Column />}>
-                  <Outlet />
-                </Suspense>
+                <RouteChromeProvider value={routeChrome}>
+                  <Suspense fallback={<LoadingSkeleton.Column />}>
+                    <Outlet />
+                  </Suspense>
+                </RouteChromeProvider>
               </WorkspaceViewProvider>
               {activeView !== "agents" && (
                 <div

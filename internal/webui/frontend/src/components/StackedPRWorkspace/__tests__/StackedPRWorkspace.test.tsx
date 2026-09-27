@@ -10,6 +10,10 @@ import { MemoryRouter } from "react-router-dom";
 
 import type { GitPullRequest } from "@/api/workspace/pullRequests";
 import type { DeliveryGroupView } from "@/api/workspace/deliveryGroups";
+import {
+  RouteChromeProvider,
+  type RouteChromeControls,
+} from "@/contexts/RouteChromeContext";
 import { StackedPRWorkspace } from "../StackedPRWorkspace";
 
 vi.mock("@/hooks/workspace/useWorkspaceContext", () => ({
@@ -279,6 +283,80 @@ describe("StackedPRWorkspace", () => {
     expect(
       screen.getByText(/membership is incomplete or unverified/i),
     ).toBeInTheDocument();
+  });
+
+  it("does not hijack Enter/Space on buttons or modifier chords", () => {
+    const { onOpenReview } = renderWorkspace();
+    // A row is auto-selected, so a bare Enter on the page would open review.
+    const guide = screen.getByRole("button", { name: /How groups work/ });
+    guide.focus();
+    fireEvent.keyDown(guide, { key: "Enter" });
+    fireEvent.keyDown(guide, { key: " " });
+    expect(onOpenReview).not.toHaveBeenCalled();
+
+    const pathView = screen.getByRole("button", { name: "Path view" });
+    fireEvent.keyDown(document.body, { key: "v", metaKey: true });
+    fireEvent.keyDown(document.body, { key: "v", ctrlKey: true });
+    expect(pathView).toHaveAttribute("aria-pressed", "true");
+    fireEvent.keyDown(document.body, { key: "v" });
+    expect(pathView).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.keyDown(document.body, { key: "Enter" });
+    expect(onOpenReview).toHaveBeenCalledTimes(1);
+  });
+
+  it("claims route chrome and wires live Loom shell controls", () => {
+    const release = vi.fn();
+    const claim = vi.fn(() => release);
+    const controls: RouteChromeControls = {
+      theme: "dark",
+      onToggleTheme: vi.fn(),
+      workspaces: [
+        { id: "STACKED-PRS", name: "Stacked PRs" },
+        { id: "other", name: "Other" },
+      ],
+      activeWorkspaceId: "STACKED-PRS",
+      onWorkspaceSwitch: vi.fn(),
+      onBackToWorkspace: vi.fn(),
+      accountMenu: null,
+    };
+    const { unmount } = render(
+      <MemoryRouter>
+        <RouteChromeProvider value={{ controls, claim }}>
+          <StackedPRWorkspace
+            issues={[]}
+            pullRequests={[pr(3)]}
+            deliveryGroups={[]}
+            warnings={[]}
+            loading={false}
+            error={null}
+            onOpenReview={vi.fn()}
+          />
+        </RouteChromeProvider>
+      </MemoryRouter>,
+    );
+    expect(claim).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Switch to light theme" }),
+    );
+    expect(controls.onToggleTheme).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Switch workspace" }),
+      { target: { value: "other" } },
+    );
+    expect(controls.onWorkspaceSwitch).toHaveBeenCalledWith("other");
+
+    for (const back of screen.getAllByRole("button", {
+      name: "Back to workspace",
+    })) {
+      fireEvent.click(back);
+    }
+    expect(controls.onBackToWorkspace).toHaveBeenCalledTimes(2);
+
+    unmount();
+    expect(release).toHaveBeenCalledTimes(1);
   });
 
   it("toggles history mode", () => {

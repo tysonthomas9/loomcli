@@ -204,3 +204,22 @@
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
+
+/* Route-owned chrome: the routed view draws its own header and navigation,
+   so there is no fixed global header to clear and no NavRail dock to
+   reserve space for. */
+.routeChrome {
+  padding-top: 0;
+}
+
+@media (width <= 768px) {
+  .routeChrome .contentWrapper {
+    margin-bottom: 0;
+  }
+}
+
+@media (width <= 640px) {
+  .routeChrome .main {
+    padding: 0;
+  }
+}
