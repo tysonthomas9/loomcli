@@ -44,11 +44,12 @@ func newProfileGateAgent() *AgentProcess {
 }
 
 // driftedProfile provisions a profile whose manifest pins one harness version
-// while the (stubbed) binary reports another — the exact condition a `claude`
-// auto-update creates for every profiled agent at once.
+// while the (stubbed) binary reports a different MAJOR one. The boot policy
+// still refuses that (checkProfileManifest); drift within a major boots with a
+// recorded warning, so it cannot stand in for a broken profile here.
 func driftedProfile(t *testing.T, projectDir, worktree string) {
 	t.Helper()
-	stubHarnessVersion(t, map[string]string{"claude": "2.1.237 (Claude Code)"})
+	stubHarnessVersion(t, map[string]string{"claude": "3.0.0 (Claude Code)"})
 	writeProfile(t, projectDir, worktree, "2.1.236 (Claude Code)", map[string]string{
 		"settings.json": `{"model":"opus"}`,
 	})
@@ -85,7 +86,7 @@ func TestPreFlightSetup_DriftedProfileRefusesBeforeClaim(t *testing.T) {
 		t.Fatal("ProfileError = nil, want the drift message")
 	}
 	if !strings.Contains(ap.ProfileError.Message, "2.1.236 (Claude Code)") ||
-		!strings.Contains(ap.ProfileError.Message, "2.1.237 (Claude Code)") {
+		!strings.Contains(ap.ProfileError.Message, "3.0.0 (Claude Code)") {
 		t.Fatalf("ProfileError.Message = %q, want both versions named", ap.ProfileError.Message)
 	}
 	if !strings.Contains(ap.ProfileError.Message, filepath.Join(".loom", AgentProfilesDirName, "observer", "claude")) {
@@ -121,7 +122,7 @@ func TestProfileRefusalSurvivesNoWorkOverwrite(t *testing.T) {
 	if agents[0].LastErrorClass != agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome).String() {
 		t.Fatalf("LastErrorClass = %q, want the NoWork overwrite to have happened", agents[0].LastErrorClass)
 	}
-	if !strings.Contains(agents[0].ProfileError, "2.1.237 (Claude Code)") {
+	if !strings.Contains(agents[0].ProfileError, "3.0.0 (Claude Code)") {
 		t.Fatalf("ProfileError = %q, want the drift text to have survived", agents[0].ProfileError)
 	}
 	if agents[0].StopReason != StopReasonProfileInvalid {
@@ -190,7 +191,7 @@ func TestGateProfileVerified_WritesRefusalToAgentLog(t *testing.T) {
 	if !strings.Contains(body, "PROFILE VERIFICATION FAILED") {
 		t.Fatalf("agent log = %q, want the refusal banner", body)
 	}
-	if !strings.Contains(body, "2.1.237 (Claude Code)") {
+	if !strings.Contains(body, "3.0.0 (Claude Code)") {
 		t.Fatalf("agent log = %q, want the drift detail", body)
 	}
 }

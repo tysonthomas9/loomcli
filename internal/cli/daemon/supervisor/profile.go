@@ -11,8 +11,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -164,6 +166,10 @@ func ProfileEnvVar(harness string) string {
 // legacy env: silently running the agent against the operator's full ~/.claude
 // is the exact leak per-agent profiles close. Per-agent boot degradation
 // contains the failure to the one agent whose profile is broken.
+//
+// "Unverifiable" is checkProfileManifest's judgment, not agentprofile.Verify's:
+// a harness version that drifted within its major boots with a recorded warning
+// rather than refusing. See checkProfileManifest for why.
 func ProfileHarnessEnv(projectDir, agent, harness string) (string, []string, error) {
 	root := agentprofile.Dir(projectDir, agent)
 	if root == "" {
@@ -179,7 +185,7 @@ func ProfileHarnessEnv(projectDir, agent, harness string) (string, []string, err
 	if !dirExists(dir) {
 		return "", nil, nil
 	}
-	if err := verifyProfileManifest(dir, agentprofile.HarnessBinary[harness]); err != nil {
+	if err := checkProfileManifest(dir, agentprofile.HarnessBinary[harness]); err != nil {
 		return "", nil, err
 	}
 	env := []string{fmt.Sprintf("%s=%s", envVar, dir)}
@@ -434,6 +440,58 @@ func verifyProfileManifest(dir, binary string) error {
 	return agentprofile.Verify(dir, harnessVersion(binary))
 }
 
+// CheckProfileManifest applies the spawn path's BOOT policy to a profile root
+// for a caller outside the daemon. `loom lead` is the one agent the supervisor
+// does not spawn, so it must reuse this rather than grow a second, weaker —
+// or, since this change, a second, stricter — policy alongside it.
+func CheckProfileManifest(dir, binary string) error {
+	return checkProfileManifest(dir, binary)
+}
+
+// checkProfileManifest applies the spawn path's boot policy to a verification
+// result. It is deliberately NOT agentprofile.Verify's job: Verify reports what
+// is true, and `loom doctor` wants every drift reported strictly. This decides
+// what a BOOT does about it.
+//
+// Version drift within a major is a warning, not a refusal. The manifest pins
+// the version a profile's CONTENT was provisioned against; whether the new
+// harness actually works is harness-wrapper's corpus replay, which this check
+// knows nothing about. Refusing here stopped the whole fleet on an ordinary
+// patch bump four times in six days (2.1.235 -> .237 -> .238 -> .241 -> .243)
+// and again on 2026-08-28 (.250 -> .251).
+//
+// A major jump still refuses, and so does an unparseable version on either
+// side: those are the cases where "probably fine" is not a defensible guess.
+// Every other sentinel — fingerprint mismatch above all — is untouched.
+func checkProfileManifest(dir, binary string) error {
+	err := verifyProfileManifest(dir, binary)
+	if err == nil {
+		// A profile that verifies clean is not drifted any more, whatever it
+		// was when the daemon started: `loom doctor --fix` re-blesses without
+		// restarting anything.
+		clearProfileDrift(dir)
+		return nil
+	}
+	if !errors.Is(err, agentprofile.ErrVersionDrift) {
+		return err
+	}
+	m, lerr := agentprofile.LoadManifest(dir)
+	if lerr != nil {
+		return err // report the drift we already have, not a second fault
+	}
+	got := harnessVersion(binary)
+	if !agentprofile.SameMajorVersion(m.HarnessVersion, got) {
+		return fmt.Errorf("%w (major version change - refusing to boot)", err)
+	}
+	if recordProfileDrift(dir, binary, m.HarnessVersion, got) {
+		slog.Warn("profile harness version drift: proceeding UNVERIFIED",
+			"profile", dir, "manifest_version", m.HarnessVersion, "binary", binary, "observed_version", got,
+			"hint", "harness-wrapper has not been verified against this version; run `loom doctor` to see it "+
+				"and `loom doctor --fix` to re-bless once verified")
+	}
+	return nil
+}
+
 // harnessVersionTTL bounds how long a probed --version string is reused. It is
 // deliberately coarse: the point is that one spawn cycle — every agent the
 // supervisor brings up in a burst — costs a single probe per binary rather
@@ -485,4 +543,92 @@ func ResetHarnessVersionCache() {
 // probeHarnessVersion is a seam for tests; production runs the real binary.
 var probeHarnessVersion = func(binary string) string {
 	return agentprofile.ProbeVersion(binary, backends.VersionProbeTimeout)
+}
+
+// ─── profile drift record ───────────────────────────────────────────────────
+
+// ProfileDrift is one observed manifest-vs-binary version mismatch that was
+// allowed to proceed. The supervisor records it so `loom daemon status` and
+// the state file can show "running unverified" without an operator having to
+// read the daemon log.
+type ProfileDrift struct {
+	Dir      string    `json:"dir"`
+	Binary   string    `json:"binary"`
+	Manifest string    `json:"manifest_version"` // version the manifest pins
+	Observed string    `json:"observed_version"` // version the binary reports
+	FirstAt  time.Time `json:"first_at"`
+	Count    int       `json:"count"` // spawns that proceeded under this drift
+}
+
+// Package-level, guarded by a mutex, matching the harnessVersionMu /
+// harnessVersionCache idiom in spawn.go: the drift is a property of the host's
+// harness binaries against the workspace's profiles, not of any one Supervisor
+// instance, and the same check runs from `loom lead`, which has no Supervisor
+// at all.
+var (
+	profileDriftMu sync.Mutex
+	profileDrifts  = map[string]ProfileDrift{} // keyed by profile dir
+)
+
+// recordProfileDrift records the drift and reports whether this is the first
+// observation of this (dir, manifest->observed) triple, so the WARN is logged
+// once per drift rather than once per spawn. Twelve agents in a restart storm
+// must produce one warning line, not one per boot.
+//
+// A drift whose versions changed is a NEW observation: the operator needs to
+// see the second upgrade too, and its count starts over so the number always
+// describes the drift the line names.
+func recordProfileDrift(dir, binary, manifest, observed string) (first bool) {
+	profileDriftMu.Lock()
+	defer profileDriftMu.Unlock()
+
+	if d, ok := profileDrifts[dir]; ok && d.Manifest == manifest && d.Observed == observed {
+		d.Count++
+		profileDrifts[dir] = d
+		return false
+	}
+	profileDrifts[dir] = ProfileDrift{
+		Dir:      dir,
+		Binary:   binary,
+		Manifest: manifest,
+		Observed: observed,
+		FirstAt:  time.Now(),
+		Count:    1,
+	}
+	return true
+}
+
+// clearProfileDrift drops dir's recorded drift. Called whenever a verification
+// for dir SUCCEEDS: after `loom doctor --fix` re-blesses the pin, the recorded
+// drift describes a condition that no longer exists, and a status line that
+// outlives its condition is worse than no line at all.
+func clearProfileDrift(dir string) {
+	profileDriftMu.Lock()
+	delete(profileDrifts, dir)
+	profileDriftMu.Unlock()
+}
+
+// ProfileDrifts returns a snapshot of the recorded drifts, newest first.
+func ProfileDrifts() []ProfileDrift {
+	profileDriftMu.Lock()
+	out := make([]ProfileDrift, 0, len(profileDrifts))
+	for _, d := range profileDrifts {
+		out = append(out, d)
+	}
+	profileDriftMu.Unlock()
+
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].FirstAt.Equal(out[j].FirstAt) {
+			return out[i].FirstAt.After(out[j].FirstAt)
+		}
+		return out[i].Dir < out[j].Dir // stable for drifts recorded in the same instant
+	})
+	return out
+}
+
+// ResetProfileDrifts drops the record. For testing only.
+func ResetProfileDrifts() {
+	profileDriftMu.Lock()
+	profileDrifts = map[string]ProfileDrift{}
+	profileDriftMu.Unlock()
 }

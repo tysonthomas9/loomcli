@@ -111,6 +111,11 @@ func writeStateFile(path string, startedAt time.Time, agents []supervisor.Superv
 		WrittenAt:        time.Now(),
 		Degradations:     degradations,
 		QuarantinedTasks: quarantined,
+		// Read from the supervisor package's own record rather than threaded
+		// through the signature: the drift is a property of this host's
+		// harness binaries, not of any one Supervisor, and it is recorded from
+		// `loom lead` too, which has no Supervisor at all.
+		ProfileDrifts: supervisor.ProfileDrifts(),
 	}
 	if len(hold) > 0 {
 		state.ClaimHold = hold[0]
