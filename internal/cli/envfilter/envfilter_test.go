@@ -3,6 +3,8 @@ package envfilter
 import (
 	"slices"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/secrets/names"
 )
 
 func TestFilterEnv_AllowsExactMatches(t *testing.T) {
@@ -81,6 +83,26 @@ func TestFilterEnv_AllowsBackendConfigDirOverrides(t *testing.T) {
 		if got[i] != input[i] {
 			t.Errorf("got[%d] = %q, want %q", i, got[i], input[i])
 		}
+	}
+}
+
+func TestFilterEnv_AllowsAllProviderCredentials(t *testing.T) {
+	for _, n := range names.ProviderCredentialNames {
+		got := FilterEnv([]string{n + "=x"})
+		if len(got) != 1 || got[0] != n+"=x" {
+			t.Errorf("provider credential %s not allowed by FilterEnv: got %v", n, got)
+		}
+	}
+	for _, n := range []string{"CODEX_API_KEY", "GH_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS"} {
+		if got := FilterEnv([]string{n + "=x"}); len(got) != 1 {
+			t.Errorf("Drift-1 regression: %s dropped by FilterEnv", n)
+		}
+	}
+	if got := FilterEnv([]string{"GITHUB_TOKEN_FILE=/x"}); len(got) != 1 {
+		t.Errorf("GITHUB_TOKEN_FILE should remain allowed: %v", got)
+	}
+	if got := FilterEnv([]string{"RANDOM_SECRET=x"}); len(got) != 0 {
+		t.Errorf("RANDOM_SECRET should be dropped: %v", got)
 	}
 }
 
