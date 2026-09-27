@@ -1016,3 +1016,25 @@ func TestClaudeTurnBackoff(t *testing.T) {
 		t.Errorf("large-attempt backoff = %s, want cap %s", got, claudeTurnMaxBackoff)
 	}
 }
+
+func TestCollectClaudeStreamUsage_PTYEchoPrefix(t *testing.T) {
+	t.Parallel()
+	c := usage.NewCollector("claude", "t")
+
+	line := "\x04\b\b\x04\b\b" + `{"type":"message_delta","message":{"id":"msg-pty"},"usage":{"input_tokens":1000,"output_tokens":300,"cache_read_input_tokens":200,"cache_creation_input_tokens":50}}`
+	collectClaudeStreamUsage(line, c)
+
+	su := c.Finalize("", "", time.Now(), time.Now(), 0)
+	if su.InputTokens != 1000 {
+		t.Errorf("InputTokens = %d, want 1000", su.InputTokens)
+	}
+	if su.OutputTokens != 300 {
+		t.Errorf("OutputTokens = %d, want 300", su.OutputTokens)
+	}
+	if su.CacheReadTokens != 200 {
+		t.Errorf("CacheReadTokens = %d, want 200", su.CacheReadTokens)
+	}
+	if su.CacheWriteTokens != 50 {
+		t.Errorf("CacheWriteTokens = %d, want 50", su.CacheWriteTokens)
+	}
+}

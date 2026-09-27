@@ -102,6 +102,7 @@ func initialSessionMetadata(sid string, opts CreateOptions) SessionMetadata {
 		SessionRecord: SessionRecord{
 			SchemaVersion: CurrentSchemaVersion,
 			SessionID:     sid,
+			TaskID:        opts.TaskID,
 			EpicID:        opts.EpicID,
 			AgentName:     opts.AgentName,
 			Backend:       opts.Backend,

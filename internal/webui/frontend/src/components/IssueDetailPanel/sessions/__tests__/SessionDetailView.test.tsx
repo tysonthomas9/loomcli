@@ -2,13 +2,13 @@
  * @vitest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { SessionRecord, TranscriptEntry } from "@/types/agent";
 
-import { SessionDetailView } from "../SessionDetailView";
+import { SessionDetailView, formatDuration } from "../SessionDetailView";
 
 vi.mock("@/hooks/terminal", async () => {
   const actual =
@@ -651,6 +651,81 @@ describe("SessionDetailView", () => {
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       fireEvent.click(screen.getByTestId("session-inner-tab-diff"));
       expect(screen.getByText("No diff available")).toBeInTheDocument();
+    });
+  });
+
+  // ─── formatDuration ────────────────────────────────────────────────
+  describe("formatDuration", () => {
+    it("returns em-dash for undefined and 0", () => {
+      expect(formatDuration(undefined)).toBe("—");
+      expect(formatDuration(0)).toBe("—");
+    });
+
+    it("renders sub-minute values with one decimal", () => {
+      expect(formatDuration(30.25)).toBe("30.3s");
+      expect(formatDuration(59.6)).toBe("59.6s");
+    });
+
+    it("renders whole-minute values as m s", () => {
+      expect(formatDuration(60.0)).toBe("1m 0s");
+    });
+
+    it("promotes near-60s values to minutes instead of rendering 60.0s", () => {
+      expect(formatDuration(59.96)).toBe("1m 0s");
+    });
+
+    it("rounds seconds before splitting into minutes (no 60s remainder)", () => {
+      expect(formatDuration(1019.6)).toBe("17m 0s");
+    });
+  });
+
+  // ─── Live duration for active sessions ─────────────────────────────
+  describe("active session live duration", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function renderActiveSession() {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-20T10:01:00Z"));
+      const session = createSession({
+        is_active: true,
+        status: "running",
+        duration_s: 0,
+        ended_at: undefined,
+        started_at: "2026-01-20T10:00:00Z",
+      });
+      render(<SessionDetailView taskId="task-1" session={session} />);
+    }
+
+    it("shows elapsed time since started_at in the Duration stat", () => {
+      renderActiveSession();
+      // 60s elapsed → "1m 0s"
+      expect(screen.getByText("1m 0s")).toBeInTheDocument();
+    });
+
+    it("ticks the elapsed duration once per second", () => {
+      renderActiveSession();
+      expect(screen.getByText("1m 0s")).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+      expect(screen.queryByText("1m 0s")).not.toBeInTheDocument();
+      expect(screen.getByText("1m 5s")).toBeInTheDocument();
+    });
+
+    it("shows em-dash for Exit while the session is active", () => {
+      renderActiveSession();
+      expect(screen.queryByText("0 (success)")).not.toBeInTheDocument();
+      // Duration shows elapsed, Exit shows the only standalone em-dash
+      expect(screen.getByText("—")).toBeInTheDocument();
+    });
+
+    it("completed session still shows recorded duration and exit code", () => {
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+      expect(screen.getByText("5m 0s")).toBeInTheDocument();
+      expect(screen.getByText("0 (success)")).toBeInTheDocument();
+      expect(screen.queryByText("—")).not.toBeInTheDocument();
     });
   });
 

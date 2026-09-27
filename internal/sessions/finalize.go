@@ -23,8 +23,11 @@ func (s *Session) Finalize(opts FinalizeOptions) error {
 
 	now := time.Now().UTC()
 
-	// Set task and outcome fields.
-	s.Meta.TaskID = opts.TaskID
+	// Set task and outcome fields. Keep the creation-stamped task ID when the
+	// finalizer couldn't resolve one (e.g. lock file already released).
+	if opts.TaskID != "" {
+		s.Meta.TaskID = opts.TaskID
+	}
 	s.Meta.ExitCode = opts.ExitCode
 	if opts.ExitCode == 0 {
 		s.Meta.Status = StatusCompleted
