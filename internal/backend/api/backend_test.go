@@ -955,6 +955,68 @@ func TestCreate_HappyPath(t *testing.T) {
 	}
 }
 
+// createBodyCapturingServer returns a backend whose server decodes the create
+// request body into the map at *body before replying with a minimal issue.
+func createBodyCapturingServer(t *testing.T, body *map[string]any) (*APIBackend, *httptest.Server) {
+	t.Helper()
+	now := time.Now().UTC().Truncate(time.Second)
+	return newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		respondOK(w, gen.IssueResponse{
+			Id:        "new-1",
+			Title:     "t",
+			Status:    gen.IssueResponseStatus("open"),
+			IssueType: gen.IssueResponseIssueType("bug"),
+			Priority:  4,
+			CreatedAt: now,
+			UpdatedAt: now,
+			Labels:    []string{},
+		})
+	})
+}
+
+// TestCreate_SerialisesSourceRepo pins the wire body: CreateParams.SourceRepo
+// must reach the server as "source_repo". It was silently dropped for as long
+// as the generated request type had no field for it.
+func TestCreate_SerialisesSourceRepo(t *testing.T) {
+	var body map[string]any
+	ab, ts := createBodyCapturingServer(t, &body)
+	defer ts.Close()
+
+	if _, err := ab.Create(context.Background(), backend.CreateParams{
+		Title:      "t",
+		IssueType:  "bug",
+		Priority:   4,
+		SourceRepo: "loomcli",
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if got := body["source_repo"]; got != "loomcli" {
+		t.Errorf("source_repo = %v, want loomcli (body: %v)", got, body)
+	}
+}
+
+// TestCreate_OmitsEmptySourceRepo keeps the key off the wire when no repo was
+// requested, so callers that pass none behave exactly as before.
+func TestCreate_OmitsEmptySourceRepo(t *testing.T) {
+	var body map[string]any
+	ab, ts := createBodyCapturingServer(t, &body)
+	defer ts.Close()
+
+	if _, err := ab.Create(context.Background(), backend.CreateParams{
+		Title:     "t",
+		IssueType: "bug",
+		Priority:  4,
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, ok := body["source_repo"]; ok {
+		t.Errorf("source_repo should be absent, got %v", body["source_repo"])
+	}
+}
+
 func TestCreate_ValidationError(t *testing.T) {
 	ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		respondErr(w, 400, "title is required")
