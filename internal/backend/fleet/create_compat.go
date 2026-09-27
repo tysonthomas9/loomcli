@@ -19,6 +19,7 @@ import (
 const (
 	unsupportedCreateExternalRefMessage        = `unknown field "external_ref"`
 	unsupportedCreateAcceptanceCriteriaMessage = `unknown field "acceptance_criteria"`
+	unsupportedCreateEstimatedMinutesMessage   = `unknown field "estimated_minutes"`
 )
 
 // createCompatField describes one such field: how to read it off CreateParams,
@@ -29,12 +30,15 @@ type createCompatField struct {
 	name string
 	// unsupportedMessage is the exact strict-decode rejection for this field.
 	unsupportedMessage string
-	get                func(backend.CreateParams) string
-	clear              func(*backend.CreateParams)
-	setUpdate          func(*backend.UpdateParams, string)
+	// isSet reports whether the caller set the field. Only a set field can
+	// explain a rejection; see rejectedCreateCompatField.
+	isSet func(backend.CreateParams) bool
+	clear func(*backend.CreateParams)
+	// setUpdate copies the caller's original value onto the follow-up PATCH.
+	setUpdate func(*backend.UpdateParams, backend.CreateParams)
 	// echo writes the value onto the created issue when the PATCH succeeded, for
 	// fields backend.IssueData actually carries. nil when it carries none.
-	echo func(*backend.IssueData, string)
+	echo func(*backend.IssueData, backend.CreateParams)
 	// patchFailure is this field's own wording for a failed follow-up PATCH.
 	// Used only when it is the single stripped field; see createPatchError.
 	patchFailure func(id string) string
@@ -44,10 +48,13 @@ var createCompatFields = []createCompatField{
 	{
 		name:               "external_ref",
 		unsupportedMessage: unsupportedCreateExternalRefMessage,
-		get:                func(p backend.CreateParams) string { return p.ExternalRef },
+		isSet:              func(p backend.CreateParams) bool { return p.ExternalRef != "" },
 		clear:              func(p *backend.CreateParams) { p.ExternalRef = "" },
-		setUpdate:          func(u *backend.UpdateParams, v string) { u.ExternalRef = &v },
-		echo:               func(d *backend.IssueData, v string) { d.ExternalRef = v },
+		setUpdate: func(u *backend.UpdateParams, p backend.CreateParams) {
+			v := p.ExternalRef
+			u.ExternalRef = &v
+		},
+		echo: func(d *backend.IssueData, p backend.CreateParams) { d.ExternalRef = p.ExternalRef },
 		patchFailure: func(id string) string {
 			return fmt.Sprintf("issue %s was created, but setting external_ref failed", id)
 		},
@@ -55,9 +62,12 @@ var createCompatFields = []createCompatField{
 	{
 		name:               "acceptance_criteria",
 		unsupportedMessage: unsupportedCreateAcceptanceCriteriaMessage,
-		get:                func(p backend.CreateParams) string { return p.AcceptanceCriteria },
+		isSet:              func(p backend.CreateParams) bool { return p.AcceptanceCriteria != "" },
 		clear:              func(p *backend.CreateParams) { p.AcceptanceCriteria = "" },
-		setUpdate:          func(u *backend.UpdateParams, v string) { u.AcceptanceCriteria = &v },
+		setUpdate: func(u *backend.UpdateParams, p backend.CreateParams) {
+			v := p.AcceptanceCriteria
+			u.AcceptanceCriteria = &v
+		},
 		// backend.IssueData is the slim projection and carries no acceptance
 		// criteria field, so there is nothing to echo back — the value is
 		// persisted and comes back on the next Get.
@@ -68,6 +78,30 @@ var createCompatFields = []createCompatField{
 		patchFailure: func(id string) string {
 			return fmt.Sprintf(
 				"issue %s was created, but this fleet-db does not accept acceptance_criteria (needs fleet-db PR #244)",
+				id,
+			)
+		},
+	},
+	{
+		name:               "estimated_minutes",
+		unsupportedMessage: unsupportedCreateEstimatedMinutesMessage,
+		// Guarded on != nil, not on a non-zero value: 0 is a caller-chosen
+		// estimate and must retry like any other (PUPPET-607).
+		isSet: func(p backend.CreateParams) bool { return p.EstimatedMinutes != nil },
+		clear: func(p *backend.CreateParams) { p.EstimatedMinutes = nil },
+		setUpdate: func(u *backend.UpdateParams, p backend.CreateParams) {
+			v := *p.EstimatedMinutes
+			u.EstimatedMinutes = &v
+		},
+		// backend.IssueData is the slim projection and carries no estimated
+		// minutes field, so there is nothing to echo back — the value is
+		// persisted and comes back on the next Get.
+		echo: nil,
+		// As with acceptance_criteria, a fleet-db that rejects the field on
+		// create rejects it on PATCH too.
+		patchFailure: func(id string) string {
+			return fmt.Sprintf(
+				"issue %s was created, but this fleet-db does not accept estimated_minutes (needs fleet-db PR #303)",
 				id,
 			)
 		},
@@ -88,7 +122,7 @@ func rejectedCreateCompatField(
 		return createCompatField{}, false
 	}
 	for _, field := range createCompatFields {
-		if backendErr.Message == field.unsupportedMessage && field.get(params) != "" {
+		if backendErr.Message == field.unsupportedMessage && field.isSet(params) {
 			return field, true
 		}
 	}
@@ -147,7 +181,7 @@ func (b *FleetBackend) applyStrippedCreateFields(
 	}
 	var update backend.UpdateParams
 	for _, field := range stripped {
-		field.setUpdate(&update, field.get(params))
+		field.setUpdate(&update, params)
 	}
 	if err := b.Update(ctx, result.ID, update); err != nil {
 		// The issue itself was created; return it alongside the classified
@@ -156,7 +190,7 @@ func (b *FleetBackend) applyStrippedCreateFields(
 	}
 	for _, field := range stripped {
 		if field.echo != nil {
-			field.echo(result, field.get(params))
+			field.echo(result, params)
 		}
 	}
 	return result, nil
@@ -181,68 +215,4 @@ func createPatchError(id string, stripped []createCompatField, err error) error 
 		message = fmt.Sprintf("issue %s was created, but setting %s failed", id, strings.Join(names, ", "))
 	}
 	return backend.NewBackendError(kind, "Create", message, err)
-}
-
-const unsupportedCreateEstimatedMinutesMessage = `unknown field "estimated_minutes"`
-
-// isCreateEstimatedMinutesUnsupported reports whether err is the strict-decode
-// rejection a fleet-db whose CreateIssueRequest predates estimated_minutes
-// returns. Such a server 400s the whole body, so the issue is not created at all
-// — the retry below re-creates it without the field.
-func isCreateEstimatedMinutesUnsupported(err error) bool {
-	var backendErr *backend.BackendError
-	return errors.As(err, &backendErr) &&
-		backendErr.Kind == backend.KindValidation &&
-		backendErr.Message == unsupportedCreateEstimatedMinutesMessage
-}
-
-// createWithoutEstimatedMinutes retries the create with the field stripped,
-// then attempts to apply it by PATCH. As with acceptance_criteria, the PATCH is
-// expected to fail on exactly the servers that need this retry — a fleet-db
-// that rejects estimated_minutes on create rejects it on PATCH too — so its
-// failure is reported as a descriptive error carrying the created issue rather
-// than being swallowed.
-func (b *FleetBackend) createWithoutEstimatedMinutes(
-	ctx context.Context,
-	params backend.CreateParams,
-) (*backend.IssueData, error) {
-	retryParams := params
-	retryParams.EstimatedMinutes = nil
-	retryKey, err := retryParams.FleetCreateIdempotencyKey(time.Now())
-	if err != nil {
-		return nil, backend.ErrInternal("Create", "derive compatibility idempotency key", err)
-	}
-	retryParams.IdempotencyKey = retryKey
-	result, err := b.createIssueOnce(ctx, retryParams)
-	if err != nil {
-		return nil, err
-	}
-
-	estimated := *params.EstimatedMinutes
-	if err := b.Update(ctx, result.ID, backend.UpdateParams{EstimatedMinutes: &estimated}); err != nil {
-		// The issue itself was created; return it alongside the classified
-		// error so callers that inspect the partial result can still see the ID.
-		return result, createEstimatedMinutesPatchError(result.ID, err)
-	}
-	// backend.IssueData is the slim projection and carries no estimated
-	// minutes field, so there is nothing to echo back here — the value is
-	// persisted and comes back on the next Get.
-	return result, nil
-}
-
-func createEstimatedMinutesPatchError(id string, err error) error {
-	kind := backend.KindInternal
-	var backendErr *backend.BackendError
-	if errors.As(err, &backendErr) {
-		kind = backendErr.Kind
-	}
-	return backend.NewBackendError(
-		kind,
-		"Create",
-		fmt.Sprintf(
-			"issue %s was created, but this fleet-db does not accept estimated_minutes (needs fleet-db PR #303)",
-			id,
-		),
-		err,
-	)
 }

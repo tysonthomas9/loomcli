@@ -198,3 +198,72 @@ func bothCompatFieldsCreateParams() backend.CreateParams {
 		AcceptanceCriteria: "AC-1",
 	}
 }
+
+// estimated_minutes joined the create body after the retry table existed, and
+// it must strip cumulatively like the others. A fleet-db that predates both
+// acceptance_criteria (PR #244) and estimated_minutes (PR #303) rejects the
+// first key it meets; the retry that drops estimated_minutes must keep the
+// already-stripped acceptance_criteria out, and both values come back in the
+// single follow-up PATCH.
+func TestCreateStripsEstimatedMinutesCumulatively(t *testing.T) {
+	var postBodies []map[string]any
+	var patchBody map[string]any
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/issues"):
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode create body: %v", err)
+			}
+			postBodies = append(postBodies, body)
+			if _, present := body["acceptance_criteria"]; present {
+				respondErr(w, http.StatusBadRequest, unsupportedCreateAcceptanceCriteriaMessage)
+				return
+			}
+			if _, present := body["estimated_minutes"]; present {
+				respondErr(w, http.StatusBadRequest, unsupportedCreateEstimatedMinutesMessage)
+				return
+			}
+			respondOK(w, types.Issue{ID: "issue-11", Title: "AC and estimate"})
+		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/issues/issue-11"):
+			if err := json.NewDecoder(r.Body).Decode(&patchBody); err != nil {
+				t.Errorf("decode patch body: %v", err)
+			}
+			respondOK(w, map[string]any{})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	defer ts.Close()
+
+	estimate := 0
+	params := backend.CreateParams{
+		Title:              "AC and estimate",
+		AcceptanceCriteria: "AC-1",
+		EstimatedMinutes:   &estimate,
+		IdempotencyKey:     "original-key",
+	}
+	issue, err := fb.Create(context.Background(), params)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if issue == nil || issue.ID != "issue-11" {
+		t.Fatalf("issue = %#v, want issue-11", issue)
+	}
+	if len(postBodies) != 3 {
+		t.Fatalf("POST bodies = %d, want 3 (original + two strips)", len(postBodies))
+	}
+	if _, present := postBodies[2]["acceptance_criteria"]; present {
+		t.Errorf("third POST re-sent the already-stripped acceptance_criteria: %v", postBodies[2])
+	}
+	if _, present := postBodies[2]["estimated_minutes"]; present {
+		t.Errorf("third POST still carried estimated_minutes: %v", postBodies[2])
+	}
+	if patchBody["acceptance_criteria"] != "AC-1" {
+		t.Errorf("PATCH acceptance_criteria = %v, want AC-1", patchBody["acceptance_criteria"])
+	}
+	if got, ok := patchBody["estimated_minutes"].(float64); !ok || got != 0 {
+		t.Errorf("PATCH estimated_minutes = %v, want 0", patchBody["estimated_minutes"])
+	}
+}

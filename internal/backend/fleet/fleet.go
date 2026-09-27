@@ -559,11 +559,6 @@ func (b *FleetBackend) SearchIssues(ctx context.Context, query string, limit int
 
 func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
 	result, err := b.createWithCompatRetries(ctx, params)
-	// Guarded on != nil, not on a non-zero value: 0 is a caller-chosen
-	// estimate and must retry like any other (PUPPET-607).
-	if err != nil && params.EstimatedMinutes != nil && isCreateEstimatedMinutesUnsupported(err) {
-		result, err = b.createWithoutEstimatedMinutes(ctx, params)
-	}
 	if err != nil {
 		return result, err
 	}
