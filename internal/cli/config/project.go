@@ -99,9 +99,19 @@ type RoleConfig struct {
 //
 //	repos: ["backend", "frontend"]         # explicit repo names this agent handles
 //	repo_groups: ["infra", "data"]         # bind to groups defined in RepoConfig
-//	cross_repo: true                       # agent can pick up tasks spanning repos
+//	cross_repo: true                       # opt out of the hard filter (see below)
 //
 // An agent with neither repos nor repo_groups can work on any repo.
+//
+// A binding is a HARD FILTER, not a ranking hint: the task router rejects an
+// issue outside the binding outright (and rejects an issue with no source repo
+// at all, matching the fetch-layer filter), so a bound agent is never offered
+// another repo's work. `cross_repo: true` opts out, restoring the older
+// score-only behavior where a mismatch merely ranks last.
+//
+// A binding that cannot be resolved is a claim-time failure, never a silent
+// widening: the supervisor refuses the claim rather than falling through to a
+// fleet-wide one. See docs/arch/repo-affinity.md.
 type AgentEntry struct {
 	Worktree         string                   `yaml:"worktree"`
 	Role             string                   `yaml:"role"`

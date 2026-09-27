@@ -867,7 +867,7 @@ All array fields marshal as `[]` (never `null`).
 | `name` | string | Agent name |
 | `repos` | []string | Assigned repository names |
 | `repo_groups` | []string | Assigned repo group names |
-| `cross_repo` | bool | Whether agent works across repos |
+| `cross_repo` | bool | `false` (default): the repo binding is a hard filter — the router rejects work outside it. `true`: affinity is advisory, a mismatch only ranks lower. See [repo affinity](arch/repo-affinity.md). |
 
 ### Validation Rules
 
