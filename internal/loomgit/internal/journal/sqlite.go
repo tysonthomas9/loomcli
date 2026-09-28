@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"path/filepath"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 )
@@ -27,11 +27,11 @@ func OpenSQLite(path string) (*SQLite, error) {
 	}
 	u := url.URL{Scheme: "file", Path: abs}
 	q := u.Query()
-	q.Set("_busy_timeout", "5000")
-	q.Set("_journal_mode", "WAL")
-	q.Set("_foreign_keys", "on")
+	q.Add("_pragma", "busy_timeout(5000)")
+	q.Add("_pragma", "journal_mode(WAL)")
+	q.Add("_pragma", "foreign_keys(1)")
 	u.RawQuery = q.Encode()
-	db, err := sql.Open("sqlite3", u.String())
+	db, err := sql.Open("sqlite", u.String())
 	if err != nil {
 		return nil, err
 	}

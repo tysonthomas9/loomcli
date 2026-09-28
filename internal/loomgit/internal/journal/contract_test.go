@@ -120,7 +120,7 @@ func TestStoreContract(t *testing.T) {
 
 func TestSQLiteSurvivesProcessExitAndFencesProcesses(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "journal.db")
-	cmd := exec.Command(os.Args[0], "-test.run=TestJournalChildProcess")
+	cmd := exec.Command(os.Args[0], "-test.run=TestJournalChildProcess") //nolint:norawexec // Child process proves journal durability across process exit.
 	cmd.Env = append(os.Environ(), "LOOMGIT_JOURNAL_CHILD=begin", "LOOMGIT_JOURNAL_PATH="+path)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("child begin: %v: %s", err, out)
@@ -140,7 +140,7 @@ func TestSQLiteSurvivesProcessExitAndFencesProcesses(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			c := exec.Command(os.Args[0], "-test.run=TestJournalChildProcess")
+			c := exec.Command(os.Args[0], "-test.run=TestJournalChildProcess") //nolint:norawexec // Separate processes race on one journal fence.
 			c.Env = append(os.Environ(), "LOOMGIT_JOURNAL_CHILD=advance", "LOOMGIT_JOURNAL_PATH="+path)
 			out, err := c.CombinedOutput()
 			if err != nil {
