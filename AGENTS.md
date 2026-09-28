@@ -169,6 +169,16 @@ loom data claim <id>           # Claim work
 loom data close <id> --reason "done"  # Complete work
 ```
 
+## Local Quality Gate
+
+Run `make gate-clean` for a sanitized local gate. It uses a temporary `HOME`
+under `/tmp` for tests that read user settings, while keeping the standard
+shared Go and lint caches and clearing desktop state and credentials.
+Never set a private `GOCACHE` or `GOMODCACHE`, and never run `go clean -cache`.
+Put scratch work under `/tmp`. A temporary `HOME` must keep `GOCACHE`,
+`GOMODCACHE`, and `GOLANGCI_LINT_CACHE` on their normal shared paths and be
+removed with an exit trap.
+
 ## Landing the Plane (Session Completion)
 
 **When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.

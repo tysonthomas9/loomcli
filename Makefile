@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli test-skills-release-compat fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status compose-smoke compose-smoke-down ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-ci test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli test-skills-release-compat fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status compose-smoke compose-smoke-down ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-ci test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-clean gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -750,6 +750,34 @@ check:
 
 # Backward-compatible alias for 'make check'
 gate: check
+
+# Run the gate with isolated app settings and the user's shared build caches.
+gate-clean:
+	@set -eu; \
+	tmp_root=$$(cd /tmp && pwd -P); \
+	gate_home=$$(mktemp -d "$$tmp_root/loom-gate-home.XXXXXX"); \
+	trap 'rm -rf "$$gate_home"' EXIT; \
+	go_cache=$$(env -u GOCACHE go env GOCACHE); \
+	mod_cache=$$(env -u GOMODCACHE go env GOMODCACHE); \
+	lint_cache=$$(env -u GOLANGCI_LINT_CACHE golangci-lint cache status | sed -n 's/^Dir: //p'); \
+	test -n "$$go_cache" && test -n "$$mod_cache" && test -n "$$lint_cache"; \
+	env -u GITHUB_TOKEN -u GH_TOKEN -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
+		-u LOOM_API_KEY -u LOOM_FLEET_API_KEY -u LOOM_FLEET_DB_API_KEY \
+		-u LOOM_SECRET_API_KEY -u LOOM_SECRET_ANTHROPIC_API_KEY \
+		-u LOOM_WEBUI_API_KEY -u LOOM_DRIVER_API_TOKEN -u LOOM_RUN_TOKEN \
+		-u LOOM_TASK_RUN_TOKEN -u LOOM_NOTIFY_TOKEN -u GOCACHE -u GOMODCACHE \
+		-u GOLANGCI_LINT_CACHE -u LOOM_WORKSPACE -u LOOM_WORKSPACE_RUNTIME_DIR \
+		-u LOOM_AGENT_NAME -u LOOM_AGENT_ROLE -u LOOM_AGENT_TERMINAL_ID \
+		-u LOOM_SESSION_ID -u LOOM_CONFIG_DIR -u LOOM_DESKTOP_DATA_DIR \
+		-u LOOM_FRONTEND_DIR -u LOOM_WEBUI_URL -u LOOM_LOCAL_RUNTIME \
+		-u GIT_CONFIG_COUNT -u GIT_CONFIG_PARAMETERS \
+		HOME="$$gate_home" TMPDIR="$$tmp_root" \
+		GOCACHE="$$go_cache" GOMODCACHE="$$mod_cache" \
+		GOLANGCI_LINT_CACHE="$$lint_cache" \
+		GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+		GIT_AUTHOR_NAME='Loom Gate' GIT_AUTHOR_EMAIL='loom-gate@example.invalid' \
+		GIT_COMMITTER_NAME='Loom Gate' GIT_COMMITTER_EMAIL='loom-gate@example.invalid' \
+		$(MAKE) gate
 
 # Extended quality gate — gate + self-contained e2e tests
 gate-e2e: gate
