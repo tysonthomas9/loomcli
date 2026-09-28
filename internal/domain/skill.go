@@ -46,9 +46,9 @@ const MaxSkillNameLength = 64
 const (
 	// MaxRoleNameLength mirrors fleet-db's role-name path-segment limit.
 	MaxRoleNameLength = 100
-	// MaxSkillDescriptionBytes is the Agent Skills description limit.
-	MaxSkillDescriptionBytes = 1024
-	// MaxSkillContentBytes bounds the SKILL.md body.
+	// MaxSkillDescriptionCharacters is the Agent Skills description limit.
+	MaxSkillDescriptionCharacters = 1024
+	// MaxSkillContentBytes bounds the complete SKILL.md object.
 	MaxSkillContentBytes = 100_000
 	// MaxSkillFilePathLength bounds one bundled file destination.
 	MaxSkillFilePathLength = 256
@@ -681,11 +681,13 @@ func ValidateSkillDescription(description string) error {
 	if strings.TrimSpace(description) == "" {
 		return fmt.Errorf("skill description is required: %w", ErrInvalid)
 	}
-	if len(description) > MaxSkillDescriptionBytes {
-		return fmt.Errorf("skill description must be at most %d bytes: %w", MaxSkillDescriptionBytes, ErrInvalid)
+	if utf8.RuneCountInString(description) > MaxSkillDescriptionCharacters {
+		return fmt.Errorf("skill description must be at most %d characters: %w", MaxSkillDescriptionCharacters, ErrInvalid)
 	}
-	if strings.ContainsAny(description, "<>") {
-		return fmt.Errorf("skill description must not contain angle brackets: %w", ErrInvalid)
+	for _, r := range description {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("skill description must not contain control characters: %w", ErrInvalid)
+		}
 	}
 	return nil
 }

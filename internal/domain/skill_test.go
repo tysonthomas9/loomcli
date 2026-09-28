@@ -514,3 +514,34 @@ func TestNormalizeSkillRevision(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateSkillDescriptionMatchesFleetContract(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		description string
+		wantErr     bool
+	}{
+		{name: "component name in angle brackets", description: "Use <ViewTransition> for animated navigation"},
+		{name: "1024 multibyte characters", description: strings.Repeat("界", MaxSkillDescriptionCharacters)},
+		{name: "1025 multibyte characters", description: strings.Repeat("界", MaxSkillDescriptionCharacters+1), wantErr: true},
+		{name: "newline", description: "first line\nsecond line", wantErr: true},
+		{name: "unicode control", description: "before\u0085after", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateSkillDescription(tt.description)
+			if tt.wantErr {
+				if !errors.Is(err, ErrInvalid) {
+					t.Fatalf("ValidateSkillDescription error = %v, want ErrInvalid", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ValidateSkillDescription: %v", err)
+			}
+		})
+	}
+}
