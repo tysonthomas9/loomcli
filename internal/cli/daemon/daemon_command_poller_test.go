@@ -97,6 +97,8 @@ type commandPollerTestStore struct {
 	commands store.AgentCommandStore
 }
 
+var _ store.Store = commandPollerTestStore{}
+
 func (s commandPollerTestStore) Workspaces() store.WorkspaceStore { return nil }
 func (s commandPollerTestStore) Repos() store.RepoStore           { return nil }
 func (s commandPollerTestStore) Agents() store.AgentStore         { return nil }
@@ -158,6 +160,7 @@ func (s commandPollerTestStore) ConnectorCalls() store.ConnectorAuditStore  { re
 func (s commandPollerTestStore) Workers() store.WorkerStore                 { return nil }
 func (s commandPollerTestStore) Roles() store.RoleStore                     { return nil }
 func (s commandPollerTestStore) Skills() store.SkillStore                   { return nil }
+func (s commandPollerTestStore) WorkspaceFiles() store.WorkspaceFileStore   { return nil }
 func (s commandPollerTestStore) SkillMaterializationLeases() store.SkillMaterializationLeaseStore {
 	return nil
 }
