@@ -83,6 +83,8 @@ const issueJournalReplayEnv = "LOOM_ISSUE_BRIDGE_REPLAY"
 // keeps failing is retried at most every 2^shift sweeps.
 const issueJournalMaxBackoffShift = 6
 
+const maxIssueJournalPagesPerSweep = 500
+
 // defaultIssueJournalActionAllowlist is the default set of journal actions the
 // bridge re-emits. v1 ships issue.create only; close/reopen sit behind the
 // allowlist for a later roster expansion so a single binding cannot
@@ -139,6 +141,7 @@ type IssueJournalBridge struct {
 	// failures counts consecutive reader failures per workspace, driving the
 	// exponential skip backoff; reset on the first clean poll.
 	failures map[string]int
+	stalls   map[string]int
 	// skipRemaining counts how many upcoming sweeps a workspace is still paused
 	// for by the failure backoff; decremented each pass, replenished on a fresh
 	// failure (clock-free window — no wall clock needed in serve or tests).
@@ -225,18 +228,28 @@ func (b *IssueJournalBridge) bootstrap(ctx context.Context, ws string, out *Issu
 // stream position, emitting nothing. The last batch's nextCursor is the tail.
 func (b *IssueJournalBridge) journalTail(ctx context.Context, ws string) (string, error) {
 	cursor := ""
-	for {
+	for pages := 0; ; pages++ {
+		if ctx.Err() != nil {
+			return cursor, ctx.Err()
+		}
+		if pages >= maxIssueJournalPagesPerSweep {
+			b.logger().Info("issue journal bridge: fast-forward page cap reached, resuming next sweep",
+				"workspace", ws, "pages", pages, "cursor", cursor)
+			return cursor, nil
+		}
 		_, next, hasMore, err := b.Reader.ListIssueEvents(ctx, ws, cursor, b.batchLimit())
 		if err != nil {
 			return "", fmt.Errorf("fast-forward issue journal in workspace %q: %w", ws, err)
 		}
-		cursor = next
 		if !hasMore {
+			return next, nil
+		}
+		if next == cursor {
+			b.logger().Warn("issue journal bridge: fast-forward cursor did not advance, stopping sweep",
+				"workspace", ws, "cursor", cursor)
 			return cursor, nil
 		}
-		if ctx.Err() != nil {
-			return cursor, ctx.Err()
-		}
+		cursor = next
 	}
 }
 
@@ -246,17 +259,34 @@ func (b *IssueJournalBridge) journalTail(ctx context.Context, ws string) (string
 // failure resumes exactly there on the next pass without re-emitting handled
 // entries or skipping unhandled ones.
 func (b *IssueJournalBridge) drainFrom(ctx context.Context, ws, cursor string, out *IssueJournalSweepResult) error {
-	for {
-		events, _, hasMore, err := b.Reader.ListIssueEvents(ctx, ws, cursor, b.batchLimit())
+	for pages := 0; ; pages++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if pages >= maxIssueJournalPagesPerSweep {
+			b.saveCursor(ws, cursor)
+			b.logger().Info("issue journal bridge: page cap reached, resuming next sweep",
+				"workspace", ws, "pages", pages, "cursor", cursor)
+			return nil
+		}
+		started := cursor
+		events, serverCursor, hasMore, err := b.Reader.ListIssueEvents(ctx, ws, cursor, b.batchLimit())
 		if err != nil {
 			b.recordFailure(ws)
 			return fmt.Errorf("poll issue journal in workspace %q: %w", ws, err)
 		}
 		b.recordSuccess(ws)
 		next, perr := b.emitBatch(ctx, ws, events, out)
-		if next != "" {
+		switch {
+		case next != "":
 			cursor = next
 			b.saveCursor(ws, cursor)
+		case perr == nil && serverCursor != "" && serverCursor != cursor:
+			cursor = serverCursor
+			b.saveCursor(ws, cursor)
+		}
+		if cursor != started {
+			b.clearStall(ws)
 		}
 		if perr != nil {
 			return perr
@@ -264,8 +294,11 @@ func (b *IssueJournalBridge) drainFrom(ctx context.Context, ws, cursor string, o
 		if !hasMore {
 			return nil
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if cursor == started {
+			b.logger().Warn("issue journal bridge: journal cursor did not advance, stopping sweep",
+				"workspace", ws, "cursor", cursor, "events", len(events))
+			b.recordStall(ws)
+			return nil
 		}
 	}
 }
@@ -446,6 +479,29 @@ func (b *IssueJournalBridge) recordFailure(ws string) {
 		b.skipRemaining = make(map[string]int)
 	}
 	b.skipRemaining[ws] = (1 << shift) - 1
+}
+
+func (b *IssueJournalBridge) recordStall(ws string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.stalls == nil {
+		b.stalls = make(map[string]int)
+	}
+	b.stalls[ws]++
+	shift := b.stalls[ws]
+	if shift > issueJournalMaxBackoffShift {
+		shift = issueJournalMaxBackoffShift
+	}
+	if b.skipRemaining == nil {
+		b.skipRemaining = make(map[string]int)
+	}
+	b.skipRemaining[ws] = (1 << shift) - 1
+}
+
+func (b *IssueJournalBridge) clearStall(ws string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.stalls, ws)
 }
 
 // recordSuccess clears the workspace's failure backoff after a clean poll.
