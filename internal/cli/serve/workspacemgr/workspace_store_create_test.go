@@ -267,6 +267,17 @@ func TestStoreBackedAddReposAttachesLocalRepoToEmptyWorkspace(t *testing.T) {
 	if local.Repos["api"] != filepath.Join(wsPath, "api") {
 		t.Fatalf("local repo path = %q", local.Repos["api"])
 	}
+	attached, err := loomworkspace.Records(context.Background(), "MY-WS")
+	if err != nil || len(attached) != 1 {
+		t.Fatalf("attached records=%v err=%v", attached, err)
+	}
+	wantBranch := "loom/ws/MY-WS/interactive/lead"
+	if attached[0].Repo != "api" || attached[0].Trunk != "main" || attached[0].WorkspaceBranch != wantBranch || attached[0].BaseSHA != strings.TrimSpace(gitOutput(t, src, "rev-parse", "main")) {
+		t.Fatalf("attached record=%+v", attached[0])
+	}
+	if got := strings.TrimSpace(gitOutput(t, filepath.Join(wsPath, "api"), "branch", "--show-current")); got != wantBranch {
+		t.Fatalf("attached branch=%q", got)
+	}
 }
 
 func TestStoreBackedAddReposClonesRemoteRepoToEmptyWorkspace(t *testing.T) {
@@ -316,6 +327,13 @@ func TestStoreBackedAddReposClonesRemoteRepoToEmptyWorkspace(t *testing.T) {
 	local := sc.Workspaces["MY-WS"]
 	if local.Repos["hello-world"] != filepath.Join(wsPath, "hello-world") {
 		t.Fatalf("local repo path = %q", local.Repos["hello-world"])
+	}
+	attached, err := loomworkspace.Records(context.Background(), "MY-WS")
+	if err != nil || len(attached) != 1 || attached[0].Repo != "hello-world" || attached[0].Trunk != "main" || attached[0].WorkspaceBranch != "loom/ws/MY-WS/interactive/lead" {
+		t.Fatalf("attached clone record=%v err=%v", attached, err)
+	}
+	if got := strings.TrimSpace(gitOutput(t, filepath.Join(wsPath, "hello-world"), "branch", "--show-current")); got != attached[0].WorkspaceBranch {
+		t.Fatalf("attached clone branch=%q", got)
 	}
 }
 

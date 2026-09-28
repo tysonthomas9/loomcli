@@ -13,6 +13,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	loomworkspace "github.com/tysonthomas9/loomcli/internal/loomgit/workspace"
 	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -205,8 +207,40 @@ func addReposToStoreBackedWorkspace(ctx context.Context, s storepkg.Store, req s
 		return service.WorkspaceCreateResult{}, err
 	}
 	repos = append(repos, clonedRepos...)
+	branch, err := loomgit.InteractiveBranch(key, "lead")
+	if err != nil {
+		cleanupAttachedWorktrees(created)
+		cleanupClonedRepos(clonedRepos)
+		return service.WorkspaceCreateResult{}, err
+	}
+	localRecords := make([]loomgit.WorkspaceRepo, 0, len(repos))
+	for _, repo := range prepared {
+		localRecords = append(localRecords, loomgit.WorkspaceRepo{Workspace: key, Repo: repo.name, Trunk: trunk, WorkspaceBranch: branch, BaseSHA: repo.baseSHA})
+	}
+	for _, repo := range clonedRepos {
+		base, err := localworkspace.PrepareWorkspaceBase(repo.Path, key, "origin", trunk)
+		if err == nil {
+			_, err = cli.RunGitCommand(repo.Path, "checkout", "-b", branch, base)
+		}
+		if err != nil {
+			cleanupAttachedWorktrees(created)
+			cleanupClonedRepos(clonedRepos)
+			return service.WorkspaceCreateResult{}, fmt.Errorf("open cloned repo %q: %w", repo.Name, err)
+		}
+		localRecords = append(localRecords, loomgit.WorkspaceRepo{Workspace: key, Repo: repo.Name, Trunk: trunk, WorkspaceBranch: branch, BaseSHA: base})
+	}
+	var session *loomworkspace.Session
+	if len(localRecords) > 0 {
+		session, err = loomworkspace.BeginAttach(ctx, key, localRecords)
+		if err != nil {
+			cleanupAttachedWorktrees(created)
+			cleanupClonedRepos(clonedRepos)
+			return service.WorkspaceCreateResult{}, err
+		}
+		defer func() { _ = session.Close() }()
+	}
 
-	if err := persistAddReposRecords(ctx, s, key, wsDir, trunk, repos, created, clonedRepos); err != nil {
+	if err := persistAddReposRecords(ctx, s, key, wsDir, trunk, repos, created, clonedRepos, session); err != nil {
 		return service.WorkspaceCreateResult{}, err
 	}
 	return service.WorkspaceCreateResult{WorkspaceID: key, WorkspacePath: wsDir}, nil
@@ -313,9 +347,25 @@ func materializeAddReposClones(ctx context.Context, cloneURLs []string, wsDir st
 // repo and saves the local-state file. On any failure it rolls back the
 // store records, attached worktrees, and clone directories so the caller
 // is left with the pre-call state.
-func persistAddReposRecords(ctx context.Context, s storepkg.Store, key, wsDir, branch string, repos []config.RepoConfig, created []createdWorktree, clonedRepos []config.RepoConfig) error {
+func persistAddReposRecords(ctx context.Context, s storepkg.Store, key, wsDir, branch string, repos []config.RepoConfig, created []createdWorktree, clonedRepos []config.RepoConfig, session *loomworkspace.Session) error {
 	var storeRepos []string
+	stateSaved := false
 	rollback := func() {
+		if session != nil {
+			if err := session.Rollback(context.Background()); err != nil {
+				slog.Warn("failed to abort repo attachment journal", "workspace", key, "err", err)
+			}
+		}
+		if stateSaved {
+			if err := bootstrap.MutateWorkspaceLocalState(key, func(local *bootstrap.WorkspaceLocalState) error {
+				for _, repo := range repos {
+					delete(local.Repos, repo.Name)
+				}
+				return nil
+			}); err != nil {
+				slog.Warn("failed to rollback local repo state", "workspace", key, "err", err)
+			}
+		}
 		for _, name := range storeRepos {
 			if err := s.Repos().Delete(context.Background(), key, name); err != nil && !errors.Is(err, domain.ErrNotFound) {
 				slog.Warn("failed to rollback store repo create", "workspace", key, "repo", name, "err", err)
@@ -332,9 +382,16 @@ func persistAddReposRecords(ctx context.Context, s storepkg.Store, key, wsDir, b
 		}
 		storeRepos = append(storeRepos, r.Name)
 	}
+	stateSaved = true
 	if err := saveLocalWorkspaceState(key, wsDir, repos, true); err != nil {
 		rollback()
 		return err
+	}
+	if session != nil {
+		if err := session.Commit(ctx); err != nil {
+			rollback()
+			return fmt.Errorf("record attached workspace repos: %w", err)
+		}
 	}
 	return nil
 }

@@ -178,6 +178,33 @@ func AdoptClones(ctx context.Context, workspace, trunk string, sources []Source)
 	return s, nil
 }
 
+// BeginAttach journals new repo records for an existing workspace. The caller
+// owns its newly created checkouts until Commit succeeds and aborts on failure.
+func BeginAttach(ctx context.Context, workspace string, repos []loomgit.WorkspaceRepo) (*Session, error) {
+	if len(repos) == 0 {
+		return nil, errors.New("attach requires at least one repo")
+	}
+	if err := os.MkdirAll(filepath.Join(config.GetConfigDir(), "loomgit"), 0o700); err != nil {
+		return nil, err
+	}
+	st, err := journal.OpenSQLite(filepath.Join(config.GetConfigDir(), "loomgit", "store.db"))
+	if err != nil {
+		return nil, err
+	}
+	// Repo names are unique within a workspace, so the first repo identifies
+	// this attachment even when the request is retried after an abort.
+	requestID := "workspace-add:" + workspace + ":" + repos[0].Repo
+	entry, created, err := st.Begin(ctx, requestID, "attach_workspace_repos")
+	if err != nil || !created {
+		_ = st.Close()
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("workspace repo %q has an existing attachment journal entry", repos[0].Repo)
+	}
+	return &Session{store: st, entry: entry, repos: repos}, nil
+}
+
 func beginSession(ctx context.Context, workspace string, repos []loomgit.WorkspaceRepo) (*Session, error) {
 	if err := os.MkdirAll(filepath.Join(config.GetConfigDir(), "loomgit"), 0o700); err != nil {
 		return nil, err
