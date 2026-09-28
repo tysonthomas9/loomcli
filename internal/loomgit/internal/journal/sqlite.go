@@ -17,6 +17,8 @@ type SQLite struct{ db *sql.DB }
 
 // OpenSQLite opens a host-local durable store. A separate SQLite connection
 // is safe in each process; all fences are checked by row updates.
+//
+//nolint:funlen // Schema bootstrap is one atomic set of related table definitions.
 func OpenSQLite(path string) (*SQLite, error) {
 	if path == "" {
 		return nil, errors.New("journal path is required")
@@ -59,6 +61,11 @@ func OpenSQLite(path string) (*SQLite, error) {
 		derived_from_change TEXT NOT NULL DEFAULT '', derived_from_number INTEGER NOT NULL DEFAULT 0,
 		ready INTEGER NOT NULL DEFAULT 0,
 		PRIMARY KEY(workspace, change_id, number)
+	);
+	CREATE TABLE IF NOT EXISTS workspace_repos (
+		workspace TEXT NOT NULL, repo TEXT NOT NULL, trunk TEXT NOT NULL,
+		workspace_branch TEXT NOT NULL, base_sha TEXT NOT NULL,
+		PRIMARY KEY(workspace, repo)
 	);
 	CREATE INDEX IF NOT EXISTS event_outbox_pending ON event_outbox(delivered, id);`); err != nil {
 		_ = db.Close()

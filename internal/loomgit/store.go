@@ -51,6 +51,21 @@ type Revision struct {
 	Ready                        bool
 }
 
+// WorkspaceRepo records the trunk independently of the lead's working branch.
+type WorkspaceRepo struct {
+	Workspace, Repo, Trunk, WorkspaceBranch string
+	BaseSHA                                 string
+}
+
+// WorkspaceStore commits all repo records with the workspace creation journal
+// entry. Git checkouts are performed after Begin and before CommitWorkspace.
+type WorkspaceStore interface {
+	Begin(context.Context, string, string) (JournalEntry, bool, error)
+	CommitWorkspace(context.Context, JournalEntry, []WorkspaceRepo) error
+	AbortWorkspace(context.Context, JournalEntry) error
+	WorkspaceRepos(context.Context, string) ([]WorkspaceRepo, error)
+}
+
 // RevisionStore reserves monotonically numbered revisions and finishes them
 // after their immutable refs have been installed.
 type RevisionStore interface {

@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 )
 
 // Repo is the local filesystem view of a workspace repository.
@@ -147,6 +148,33 @@ func CloneRepoTo(ctx context.Context, cloneURL, targetPath string) error {
 // EnsureGitWorktree creates a git worktree at targetPath from repoPath.
 func EnsureGitWorktree(repoPath, targetPath, branchName string) error {
 	return EnsureGitWorktreeFromBranch(repoPath, targetPath, branchName, "", "")
+}
+
+// PrepareWorkspaceBase checks Loom's branch namespace and resolves the trunk
+// to a commit before a workspace creates any checkout or record.
+func PrepareWorkspaceBase(repoPath, workspace, remote, trunk string) (string, error) {
+	if err := loomgit.CheckWorkspaceNamespace(repoPath, workspace); err != nil {
+		return "", err
+	}
+	branch, err := loomgit.InteractiveBranch(workspace, "lead")
+	if err != nil {
+		return "", err
+	}
+	if _, err := runGit(context.Background(), repoPath, "show-ref", "--verify", "refs/heads/"+branch); err == nil {
+		return "", loomgit.NewError(loomgit.RefNamespaceConflict, "branch already exists: "+branch, nil)
+	}
+	base, err := resolveFreshBaseRef(repoPath, remote, trunk)
+	if err != nil {
+		return "", loomgit.NewError(loomgit.BaseRefUnresolvable, fmt.Sprintf("resolve trunk %q", trunk), err)
+	}
+	if base == "" {
+		return "", loomgit.NewError(loomgit.BaseRefUnresolvable, "trunk is required", nil)
+	}
+	out, err := runGit(context.Background(), repoPath, "rev-parse", "--verify", base+"^{commit}")
+	if err != nil {
+		return "", loomgit.NewError(loomgit.BaseRefUnresolvable, fmt.Sprintf("resolve trunk %q", trunk), err)
+	}
+	return strings.TrimSpace(out), nil
 }
 
 // EnsureDetachedGitWorktreeFromBranch creates a detached git worktree at

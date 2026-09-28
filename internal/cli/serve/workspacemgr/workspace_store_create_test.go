@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	loomworkspace "github.com/tysonthomas9/loomcli/internal/loomgit/workspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
@@ -31,7 +32,7 @@ func TestStoreBackedCreateEmptyWorkspaceCreatesStoreAndLocalState(t *testing.T) 
 		Name:   "my-ws",
 		Type:   "empty",
 		Repos:  []string{src},
-		Branch: "feature-work",
+		Branch: "main",
 		Path:   wsPath,
 	})
 	if err != nil {
@@ -186,7 +187,7 @@ func TestAddWorktreesRecoversCorruptBranchRef(t *testing.T) {
 	}
 }
 
-func TestAddWorktreesSkipsUnrecoverableCheckoutWithWarning(t *testing.T) {
+func TestAddWorktreesRejectsUnrecoverableCheckout(t *testing.T) {
 	src := initTestGitRepo(t, t.TempDir(), "app")
 	wsDir := filepath.Join(t.TempDir(), "workspace")
 	blockedPath := filepath.Join(wsDir, "app")
@@ -199,18 +200,18 @@ func TestAddWorktreesSkipsUnrecoverableCheckoutWithWarning(t *testing.T) {
 
 	ctx := service.WithCreateWarnings(context.Background())
 	created, repos, err := addWorktrees(ctx, []resolvedRepo{{path: src, name: "app"}}, wsDir, "local-coder")
-	if err != nil {
-		t.Fatalf("addWorktrees returned fatal error: %v", err)
+	if err == nil {
+		t.Fatal("addWorktrees succeeded despite failed checkout")
 	}
 	if len(created) != 0 {
 		t.Fatalf("created = %v, want no created worktrees", created)
 	}
-	if len(repos) != 1 || repos[0].Path != blockedPath {
-		t.Fatalf("repos = %#v, want intended skipped checkout path", repos)
+	if len(repos) != 0 {
+		t.Fatalf("repos = %#v, want no registered repo", repos)
 	}
 	warnings := service.GetCreateWarnings(ctx)
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "Skipped checkout") {
-		t.Fatalf("warnings = %v, want skipped checkout warning", warnings)
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
 	}
 }
 
@@ -235,7 +236,7 @@ func TestStoreBackedAddReposAttachesLocalRepoToEmptyWorkspace(t *testing.T) {
 	result, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		Repos:       []string{src},
-		Branch:      "feature-work",
+		Branch:      "main",
 	})
 	if err != nil {
 		t.Fatalf("add repo: %v", err)
@@ -251,8 +252,8 @@ func TestStoreBackedAddReposAttachesLocalRepoToEmptyWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list repos: %v", err)
 	}
-	if len(repos) != 1 || repos[0].Name != "api" || repos[0].DefaultBranch != "feature-work" {
-		t.Fatalf("repos = %#v, want api on feature-work", repos)
+	if len(repos) != 1 || repos[0].Name != "api" || repos[0].DefaultBranch != "main" {
+		t.Fatalf("repos = %#v, want api on main", repos)
 	}
 
 	sc, err := bootstrap.LoadStateCache()
@@ -452,6 +453,12 @@ func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) 
 	}
 	if _, err := os.Stat(filepath.Join(wsPath, "app", ".git")); err != nil {
 		t.Fatalf("clone checkout not created: %v", err)
+	}
+	if got := strings.TrimSpace(gitOutput(t, filepath.Join(wsPath, "app"), "branch", "--show-current")); got != "loom/ws/CLONE-WS/interactive/lead" {
+		t.Fatalf("clone branch=%q", got)
+	}
+	if records, err := loomworkspace.Records(context.Background(), "CLONE-WS"); err != nil || len(records) != 1 || records[0].Trunk != "main" || records[0].WorkspaceBranch != "loom/ws/CLONE-WS/interactive/lead" {
+		t.Fatalf("clone records=%v err=%v", records, err)
 	}
 	sc, err := bootstrap.LoadStateCache()
 	if err != nil {
@@ -670,7 +677,7 @@ func initTestGitRepo(t *testing.T, parent, name string) string {
 	if err := os.MkdirAll(path, 0755); err != nil {
 		t.Fatalf("mkdir repo: %v", err)
 	}
-	runGit(t, path, "init")
+	runGit(t, path, "init", "-b", "main")
 	runGit(t, path, "config", "user.email", "test@example.com")
 	runGit(t, path, "config", "user.name", "Test User")
 	if err := os.WriteFile(filepath.Join(path, "README.md"), []byte("test\n"), 0644); err != nil {

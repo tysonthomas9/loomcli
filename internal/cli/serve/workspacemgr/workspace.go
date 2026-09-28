@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
@@ -165,6 +164,46 @@ type createdWorktree struct {
 	branch       string
 }
 
+type preparedWorkspaceRepo struct {
+	resolvedRepo
+	baseSHA string
+}
+
+// prepareWorkspaceRepos completes every fallible source check before creating
+// any workspace checkout. A failed repo cannot leave earlier repos attached.
+func prepareWorkspaceRepos(resolved []resolvedRepo, workspace, trunk string) ([]preparedWorkspaceRepo, error) {
+	prepared := make([]preparedWorkspaceRepo, 0, len(resolved))
+	for _, repo := range resolved {
+		base, err := localworkspace.PrepareWorkspaceBase(repo.path, workspace, "origin", trunk)
+		if err != nil {
+			return nil, fmt.Errorf("prepare repo %q: %w", repo.name, err)
+		}
+		prepared = append(prepared, preparedWorkspaceRepo{resolvedRepo: repo, baseSHA: base})
+	}
+	return prepared, nil
+}
+
+func addPreparedWorkspaceWorktrees(ctx context.Context, prepared []preparedWorkspaceRepo, wsDir, workspace, trunk string) ([]createdWorktree, []config.RepoConfig, error) {
+	branch, err := loomgit.InteractiveBranch(workspace, "lead")
+	if err != nil {
+		return nil, nil, err
+	}
+	var created []createdWorktree
+	var repos []config.RepoConfig
+	for _, repo := range prepared {
+		if err := ctx.Err(); err != nil {
+			return created, nil, err
+		}
+		path := filepath.Join(wsDir, repo.name)
+		if _, err := cli.RunGitCommand(repo.path, "worktree", "add", path, "-b", branch, repo.baseSHA); err != nil {
+			return created, nil, fmt.Errorf("checkout repo %q: %w", repo.name, err)
+		}
+		created = append(created, createdWorktree{origRepoPath: repo.path, worktreePath: path, branch: branch})
+		repos = append(repos, worktreeRepoConfig(repo.resolvedRepo, path, trunk))
+	}
+	return created, repos, nil
+}
+
 // addWorktrees creates git worktrees for each resolved repo in the workspace directory.
 func addWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch string) ([]createdWorktree, []config.RepoConfig, error) {
 	var created []createdWorktree
@@ -181,9 +220,7 @@ func addWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch st
 			if errors.Is(err, gitbranch.ErrRepositoryNotUsable) {
 				return created, nil, workspaceerrors.New(workspaceerrors.GitFailed, fmt.Sprintf("source repo is not usable for %s", repo.name), err)
 			}
-			warnSkippedWorktree(ctx, repo.name, worktreePath, err)
-			repos = append(repos, repoConfig)
-			continue
+			return created, nil, fmt.Errorf("checkout repo %q: %w", repo.name, err)
 		}
 		created = append(created, worktree)
 		repos = append(repos, repoConfig)
@@ -240,12 +277,6 @@ func addWorkspaceWorktree(repoPath, worktreePath, branch, baseRef string) error 
 	}
 	_, err := cli.RunGitCommand(repoPath, args...)
 	return err
-}
-
-func warnSkippedWorktree(ctx context.Context, repoName, worktreePath string, err error) {
-	msg := fmt.Sprintf("Skipped checkout for repo %q at %s: %v", repoName, worktreePath, err)
-	slog.Warn("workspace bootstrap skipped checkout", "repo", repoName, "path", worktreePath, "err", err)
-	service.AddCreateWarning(ctx, msg)
 }
 
 // cleanupWorktrees removes created worktrees and, only when Loom created it,
