@@ -60,8 +60,10 @@ type Result struct {
 func SecretPath(path string) bool {
 	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
 		name := strings.ToLower(part)
+		sshKey := strings.TrimSuffix(name, ".pub")
 		if strings.HasPrefix(name, ".env") || strings.HasSuffix(name, ".pem") ||
-			strings.HasSuffix(name, ".key") || strings.HasPrefix(name, "id_") ||
+			strings.HasSuffix(name, ".key") ||
+			sshKey == "id_rsa" || sshKey == "id_dsa" || sshKey == "id_ecdsa" || sshKey == "id_ed25519" ||
 			name == ".npmrc" || name == ".netrc" || name == "credentials.json" {
 			return true
 		}
@@ -108,22 +110,24 @@ func fileSize(path string) (int64, error) {
 	return size, err
 }
 
-func stagePath(ctx context.Context, runner *gitexec.Runner, repo string, env map[string]string, path string, total int64, ignored bool) Entry {
+func classifyPath(repo, path string, total int64, tracked, changed, ignored bool) (Entry, bool) {
 	entry := Entry{Path: path, Class: Captured}
 	info, statErr := os.Lstat(filepath.Join(repo, filepath.FromSlash(path)))
 	if statErr == nil {
 		entry.Size = info.Size()
 	}
-	var err error
 	switch {
-	case ignored:
+	case !tracked && ignored:
 		entry.Class = Listed
-		_, err = runner.RunWithEnv(ctx, env, "rm", "--cached", "-q", "--ignore-unmatch", "--", path)
-	case SecretPath(path):
+	case !tracked && SecretPath(path):
 		entry.Class = SecretSuspect
-		_, err = runner.RunWithEnv(ctx, env, "rm", "--cached", "-q", "--ignore-unmatch", "--", path)
+	case !changed:
+		// HEAD already contains this blob. It needs no staging or size budget.
+		return entry, false
 	case statErr != nil && !errors.Is(statErr, os.ErrNotExist):
 		entry.Class, entry.Reason = Incomplete, statErr.Error()
+	case errors.Is(statErr, os.ErrNotExist) && !tracked:
+		entry.Class, entry.Reason = Incomplete, "new file disappeared"
 	case statErr == nil && !info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0:
 		entry.Class, entry.Reason = Incomplete, "unsupported file type"
 	case statErr == nil && info.Mode().IsRegular() && info.Mode().Perm()&0444 == 0:
@@ -133,12 +137,31 @@ func stagePath(ctx context.Context, runner *gitexec.Runner, repo string, env map
 	case total+entry.Size > MaxCaptureBytes:
 		entry.Class, entry.Reason = Incomplete, "capture cap exceeded"
 	default:
-		_, err = runner.RunWithEnv(ctx, env, "add", "-A", "--", path)
+		return entry, true
 	}
+	return entry, false
+}
+
+func stagePaths(ctx context.Context, runner *gitexec.Runner, env map[string]string, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	file, err := os.CreateTemp("", "loom-capture-pathspec-*")
 	if err != nil {
-		entry.Class, entry.Reason = Incomplete, err.Error()
+		return err
 	}
-	return entry
+	defer os.Remove(file.Name())
+	for _, path := range paths {
+		if _, err := file.WriteString(path + "\x00"); err != nil {
+			_ = file.Close()
+			return err
+		}
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	_, err = runner.RunWithEnv(ctx, env, "add", "-A", "--pathspec-from-file="+file.Name(), "--pathspec-file-nul")
+	return err
 }
 
 func saveManifest(ctx context.Context, runner *gitexec.Runner, repo string, manifest Manifest) (string, error) {
@@ -176,7 +199,11 @@ func recordIgnored(manifest *Manifest, repo string, paths []string, seen map[str
 }
 
 func scanWorkingTree(ctx context.Context, runner *gitexec.Runner, repo string, env map[string]string, manifest *Manifest) error {
-	tracked, err := runner.Run(ctx, "ls-files", "--cached", "-z")
+	tracked, err := runner.Run(ctx, "ls-tree", "-r", "--name-only", "-z", "HEAD")
+	if err != nil {
+		return err
+	}
+	changed, err := runner.Run(ctx, "diff", "--name-only", "-z", "HEAD")
 	if err != nil {
 		return err
 	}
@@ -188,23 +215,33 @@ func scanWorkingTree(ctx context.Context, runner *gitexec.Runner, repo string, e
 	if err != nil {
 		return err
 	}
-	ignoredTracked, err := runner.Run(ctx, "ls-files", "--cached", "--ignored", "--exclude-standard", "-z")
+	ignoredIndex, err := runner.Run(ctx, "ls-files", "--cached", "--ignored", "--exclude-standard", "-z")
 	if err != nil {
 		return err
 	}
 	ignoredSet := make(map[string]bool)
-	for _, path := range lines(ignoredTracked) {
+	for _, path := range lines(ignoredIndex) {
 		ignoredSet[path] = true
 	}
+	trackedSet := make(map[string]bool)
+	for _, path := range lines(tracked) {
+		trackedSet[path] = true
+	}
+	changedSet := make(map[string]bool)
+	for _, path := range lines(changed) {
+		changedSet[path] = true
+	}
 	seen := make(map[string]bool)
+	var toStage []string
 	var total int64
-	for _, path := range append(lines(tracked), lines(untracked)...) {
+	for _, path := range append(append(lines(tracked), lines(changed)...), lines(untracked)...) {
 		if seen[path] {
 			continue
 		}
 		seen[path] = true
-		entry := stagePath(ctx, runner, repo, env, path, total, ignoredSet[path])
-		if entry.Class == Captured {
+		entry, stage := classifyPath(repo, path, total, trackedSet[path], changedSet[path] || !trackedSet[path], ignoredSet[path])
+		if stage {
+			toStage = append(toStage, path)
 			total += entry.Size
 		}
 		if entry.Class == Incomplete || entry.Class == SecretSuspect {
@@ -213,6 +250,9 @@ func scanWorkingTree(ctx context.Context, runner *gitexec.Runner, repo string, e
 		manifest.Entries = append(manifest.Entries, entry)
 	}
 	recordIgnored(manifest, repo, lines(ignored), seen)
+	if err := stagePaths(ctx, runner, env, toStage); err != nil {
+		return err
+	}
 	sort.Slice(manifest.Entries, func(i, j int) bool { return manifest.Entries[i].Path < manifest.Entries[j].Path })
 	manifest.Retained = !manifest.Complete
 	return nil
@@ -272,7 +312,18 @@ func Capture(ctx context.Context, runner *gitexec.Runner, repo string, p Params)
 		return result, err
 	}
 	if result.CaptureSHA != "" {
-		if err = runner.UpdateRef(ctx, ref, result.CaptureSHA, strings.Repeat("0", len(head))); err != nil {
+		expected := strings.Repeat("0", len(head))
+		exists, probeErr := gitexec.RefExists(repo, ref)
+		if probeErr != nil {
+			return result, probeErr
+		}
+		if exists {
+			expected, err = git(ctx, runner, "rev-parse", "--verify", ref)
+			if err != nil {
+				return result, err
+			}
+		}
+		if err = runner.UpdateRef(ctx, ref, result.CaptureSHA, expected); err != nil {
 			return result, err
 		}
 	}

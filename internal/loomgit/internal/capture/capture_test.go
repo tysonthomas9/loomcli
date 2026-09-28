@@ -2,11 +2,13 @@ package capture
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 )
@@ -14,7 +16,7 @@ import (
 func fixture(t *testing.T) (string, *gitexec.Runner) {
 	t.Helper()
 	dir := t.TempDir()
-	cmd := exec.Command("git", "init", "-q", dir)
+	cmd := exec.Command("git", "init", "-q", dir) //nolint:norawexec // Test fixture creates a real temporary repository.
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %s: %v", out, err)
 	}
@@ -67,6 +69,19 @@ func classes(entries []Entry) map[string]Entry {
 		m[entry.Path] = entry
 	}
 	return m
+}
+
+func TestSecretPathMatchesOnlySSHKeyNames(t *testing.T) {
+	for _, path := range []string{"id_rsa", "nested/id_dsa.pub", "id_ecdsa", "id_ed25519.pub"} {
+		if !SecretPath(path) {
+			t.Errorf("SSH key not detected: %s", path)
+		}
+	}
+	for _, path := range []string{"src/id_utils.go", "id_custom", "id_rsa.backup"} {
+		if SecretPath(path) {
+			t.Errorf("ordinary path classified as a secret: %s", path)
+		}
+	}
 }
 
 func TestCapturePreservesIndexAndCapturesLargeTrackedEdit(t *testing.T) {
@@ -156,32 +171,78 @@ func TestIgnoredOnlyCaptureIsComplete(t *testing.T) {
 	}
 }
 
-func TestTrackedSecretIsRemovedFromCaptureTree(t *testing.T) {
+func TestTrackedSecretRemainsInCaptureTree(t *testing.T) {
 	dir, r := fixture(t)
 	write(t, dir, "credentials.json", "private")
 	must(t, r, "add", "credentials.json")
 	must(t, r, "commit", "-qm", "legacy secret")
+	write(t, dir, "base.txt", "edited")
 	result := capture(t, dir, r)
-	if result.CaptureSHA == "" || result.Manifest.Complete || classes(result.Manifest.Entries)["credentials.json"].Class != SecretSuspect {
+	if result.CaptureSHA == "" || !result.Manifest.Complete || classes(result.Manifest.Entries)["credentials.json"].Class != Captured {
 		t.Fatalf("tracked secret result: %+v", result)
 	}
-	if got := must(t, r, "ls-tree", "-r", "--name-only", result.CaptureSHA); strings.Contains(got, "credentials.json") {
-		t.Fatalf("secret still in capture tree: %s", got)
+	if got := must(t, r, "ls-tree", "-r", "--name-only", result.CaptureSHA); !strings.Contains(got, "credentials.json") {
+		t.Fatalf("tracked path missing from capture tree: %s", got)
 	}
 }
 
-func TestPreviouslyTrackedIgnoredFileIsExcluded(t *testing.T) {
+func TestPreviouslyTrackedIgnoredFileIsPreserved(t *testing.T) {
 	dir, r := fixture(t)
 	write(t, dir, "generated.out", "generated")
 	must(t, r, "add", "generated.out")
 	must(t, r, "commit", "-qm", "tracked output")
 	write(t, dir, ".gitignore", "generated.out\n")
 	result := capture(t, dir, r)
-	if !result.Manifest.Complete || classes(result.Manifest.Entries)["generated.out"].Class != Listed {
+	if !result.Manifest.Complete || classes(result.Manifest.Entries)["generated.out"].Class != Captured {
 		t.Fatalf("ignored tracked file: %+v", result.Manifest)
 	}
-	if got := must(t, r, "ls-tree", "-r", "--name-only", result.CaptureSHA); strings.Contains(got, "generated.out") {
-		t.Fatalf("ignored path in capture: %s", got)
+	if got := must(t, r, "ls-tree", "-r", "--name-only", result.CaptureSHA); !strings.Contains(got, "generated.out") {
+		t.Fatalf("tracked path missing from capture: %s", got)
+	}
+}
+
+func TestOneLineEditDoesNotDeleteTrackedPatterns(t *testing.T) {
+	dir, r := fixture(t)
+	write(t, dir, ".npmrc", "registry=https://example.test")
+	write(t, dir, "src/id_utils.go", "package src")
+	must(t, r, "add", ".npmrc", "src/id_utils.go")
+	must(t, r, "commit", "-qm", "tracked patterns")
+	write(t, dir, "base.txt", "changed")
+	result := capture(t, dir, r)
+	if !result.Manifest.Complete {
+		t.Fatalf("capture incomplete: %+v", result.Manifest)
+	}
+	if got := must(t, r, "diff", "--name-status", "HEAD", result.CaptureSHA); got != "M\tbase.txt" {
+		t.Fatalf("capture diff = %q", got)
+	}
+}
+
+func TestRepeatedCaptureAdvancesRef(t *testing.T) {
+	dir, r := fixture(t)
+	write(t, dir, "base.txt", "first")
+	first := capture(t, dir, r)
+	write(t, dir, "base.txt", "second")
+	second := capture(t, dir, r)
+	if first.CaptureSHA == second.CaptureSHA || must(t, r, "rev-parse", first.CaptureRef) != second.CaptureSHA {
+		t.Fatalf("capture ref did not advance: %s -> %s", first.CaptureSHA, second.CaptureSHA)
+	}
+}
+
+func TestCaptureThreeThousandTrackedFilesUnderTenSeconds(t *testing.T) {
+	dir, r := fixture(t)
+	for i := range 3000 {
+		write(t, dir, filepath.Join("src", fmt.Sprintf("file-%04d.txt", i)), "original")
+	}
+	must(t, r, "add", "src")
+	must(t, r, "commit", "-qm", "many files")
+	write(t, dir, "src/file-0000.txt", "changed")
+	start := time.Now()
+	result := capture(t, dir, r)
+	if elapsed := time.Since(start); elapsed >= 10*time.Second {
+		t.Fatalf("capture took %s", elapsed)
+	}
+	if !result.Manifest.Complete || result.CaptureSHA == "" {
+		t.Fatalf("capture result: %+v", result)
 	}
 }
 
