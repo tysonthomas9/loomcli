@@ -107,6 +107,42 @@ func New(dir string, opts Options) (*Runner, error) {
 
 func (r *Runner) Identity() Identity { return r.identity }
 
+// CheckRefFormat validates a complete ref or a branch through the Git process boundary.
+func CheckRefFormat(ref string, branch bool) error {
+	args := []string{"check-ref-format"}
+	if branch {
+		args = append(args, "--branch")
+	}
+	args = append(args, ref)
+	return runRefProbe("", args...)
+}
+
+// RefExists reports whether an exact ref exists in repo, including packed refs.
+func RefExists(repo, ref string) (bool, error) {
+	err := runRefProbe(repo, "show-ref", "--verify", "--quiet", ref)
+	if err == nil {
+		return true, nil
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
+}
+
+func runRefProbe(dir string, args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // Fixed Git verbs and argv; no shell.
+	cmd.Dir = dir
+	cmd.Env = cleanEnv(os.Environ())
+	_, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return ErrTimeout
+	}
+	return err
+}
+
 type configEntry struct{ key, value string }
 
 func readConfig(scope, path string) ([]configEntry, error) {
