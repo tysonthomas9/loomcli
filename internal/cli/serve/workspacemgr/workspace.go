@@ -2,7 +2,6 @@ package workspacemgr
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
@@ -204,30 +202,6 @@ func addPreparedWorkspaceWorktrees(ctx context.Context, prepared []preparedWorks
 	return created, repos, nil
 }
 
-// addWorktrees creates git worktrees for each resolved repo in the workspace directory.
-func addWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch string) ([]createdWorktree, []config.RepoConfig, error) {
-	var created []createdWorktree
-	var repos []config.RepoConfig
-
-	for _, repo := range resolved {
-		if ctx.Err() != nil {
-			return created, nil, ctx.Err()
-		}
-		worktreePath := filepath.Join(wsDir, repo.name)
-		repoConfig := worktreeRepoConfig(repo, worktreePath, branch)
-		worktree, err := createWorkspaceWorktree(repo, worktreePath, branch)
-		if err != nil {
-			if errors.Is(err, gitbranch.ErrRepositoryNotUsable) {
-				return created, nil, workspaceerrors.New(workspaceerrors.GitFailed, fmt.Sprintf("source repo is not usable for %s", repo.name), err)
-			}
-			return created, nil, fmt.Errorf("checkout repo %q: %w", repo.name, err)
-		}
-		created = append(created, worktree)
-		repos = append(repos, repoConfig)
-	}
-	return created, repos, nil
-}
-
 func worktreeRepoConfig(repo resolvedRepo, worktreePath, branch string) config.RepoConfig {
 	return config.RepoConfig{
 		Name:          repo.name,
@@ -236,54 +210,6 @@ func worktreeRepoConfig(repo resolvedRepo, worktreePath, branch string) config.R
 		DefaultBranch: branch,
 		SourceRepoID:  repo.name,
 	}
-}
-
-func createWorkspaceWorktree(repo resolvedRepo, worktreePath, branch string) (createdWorktree, error) {
-	info, err := gitbranch.Inspect(repo.path, branch)
-	if err != nil {
-		return createdWorktree{}, err
-	}
-	baseRef := ""
-	if info.State == gitbranch.StateBroken {
-		recoveryBase := workspaceWorktreeRecoveryBase(repo.path, branch)
-		recovery, err := gitbranch.Recover(repo.path, branch, recoveryBase, info)
-		if err != nil {
-			return createdWorktree{}, err
-		}
-		baseRef = recovery.BaseSHA
-	}
-	if err := addWorkspaceWorktree(repo.path, worktreePath, branch, baseRef); err != nil {
-		return createdWorktree{}, err
-	}
-	return createdWorktree{origRepoPath: repo.path, worktreePath: worktreePath, branch: branch}, nil
-}
-
-func workspaceWorktreeRecoveryBase(repoPath, targetBranch string) string {
-	out, err := cli.RunGitCommand(repoPath, "branch", "--show-current")
-	if err != nil {
-		return ""
-	}
-	base := strings.TrimSpace(out)
-	if base == "" || base == targetBranch {
-		return ""
-	}
-	return base
-}
-
-func addWorkspaceWorktree(repoPath, worktreePath, branch, baseRef string) error {
-	args := []string{"worktree", "add", worktreePath, "-b", branch}
-	if baseRef != "" {
-		args = append(args, baseRef)
-	}
-	_, err := cli.RunGitCommand(repoPath, args...)
-	return err
-}
-
-// cleanupWorktrees removes created worktrees and, only when Loom created it,
-// the workspace directory on failure.
-func cleanupWorktrees(plan workspaceDirPlan, created []createdWorktree) {
-	cleanupAttachedWorktrees(created)
-	cleanupWorkspaceRoot(plan)
 }
 
 func cleanupAttachedWorktrees(created []createdWorktree) {

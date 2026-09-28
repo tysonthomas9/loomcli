@@ -315,20 +315,6 @@ func dedupAddReposAgainstExisting(ctx context.Context, s storepkg.Store, key str
 	return seen, nil
 }
 
-// materializeAddReposWorktrees attaches a worktree for each resolved repo,
-// rolling back partially-attached worktrees on failure.
-func materializeAddReposWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch string) ([]createdWorktree, []config.RepoConfig, error) {
-	if len(resolved) == 0 {
-		return nil, nil, nil
-	}
-	created, repos, err := addWorktrees(ctx, resolved, wsDir, branch)
-	if err != nil {
-		cleanupAttachedWorktrees(created)
-		return nil, nil, err
-	}
-	return created, repos, nil
-}
-
 // materializeAddReposClones clones any --clone-url repos under the workspace
 // directory, rolling back previously-attached worktrees on failure.
 func materializeAddReposClones(ctx context.Context, cloneURLs []string, wsDir string, seen map[string]bool, created []createdWorktree) ([]config.RepoConfig, error) {

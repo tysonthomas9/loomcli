@@ -151,7 +151,7 @@ func TestP18PreV2WorkspaceIsRejectedBeforeAddRepos(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := BuildStoreBackedAddRepos(st)(context.Background(), service.WorkspaceAddReposRequest{WorkspaceID: "OLD", Repos: []string{src}})
-	if !errors.Is(err, &loomgit.Error{Kind: loomgit.Code("workspace_unsupported")}) || !strings.Contains(err.Error(), "created before v2, recreate it") {
+	if !errors.Is(err, &loomgit.Error{Kind: loomgit.WorkspaceUnsupported}) || !strings.Contains(err.Error(), "created before v2, recreate it") {
 		t.Fatalf("error=%v", err)
 	}
 	if rows, err := st.Repos().List(context.Background(), "OLD"); err != nil || len(rows) != 0 {

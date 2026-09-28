@@ -88,7 +88,7 @@ func CheckSupported(ctx context.Context, workspace string) error {
 	path := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
-			return loomgit.NewError(loomgit.Code("workspace_unsupported"), "created before v2, recreate it", nil)
+			return loomgit.NewError(loomgit.WorkspaceUnsupported, "created before v2, recreate it", nil)
 		}
 		return err
 	}
@@ -99,7 +99,7 @@ func CheckSupported(ctx context.Context, workspace string) error {
 	defer func() { _ = st.Close() }()
 	entry, err := st.Get(ctx, "workspace-create:"+workspace)
 	if err != nil || entry.Phase != "done" {
-		return loomgit.NewError(loomgit.Code("workspace_unsupported"), "created before v2, recreate it", nil)
+		return loomgit.NewError(loomgit.WorkspaceUnsupported, "created before v2, recreate it", nil)
 	}
 	return nil
 }
