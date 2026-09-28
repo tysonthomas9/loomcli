@@ -816,6 +816,8 @@ func TestRecoverWorktree_NoLock(t *testing.T) {
 		},
 	})
 	mock.Install()
+	// An unexpected GitCleanExclude uses RunWithOutput, not CommandMock.Run.
+	NewOutputCommandMock(t, nil).Install()
 
 	err := RecoverWorktree(tmpDir, "test-agent", -1, false)
 	if err != nil {
@@ -857,6 +859,8 @@ func TestRecoverWorktree_StaleLock(t *testing.T) {
 		},
 	})
 	mock.Install()
+	// An unexpected GitCleanExclude uses RunWithOutput, not CommandMock.Run.
+	NewOutputCommandMock(t, nil).Install()
 
 	err := RecoverWorktree(tmpDir, "test-agent", -1, false)
 	if err != nil {
