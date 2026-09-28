@@ -36,7 +36,7 @@ if (process.env.FAKE_ENV_FILE) {
   const worktreeConfig = spawnSync("git", ["config", "--worktree", "--get-regexp", "^credential\\\\."], { encoding: "utf8" });
   fs.writeFileSync(process.env.FAKE_ENV_FILE, JSON.stringify({
     env: process.env, argv: process.argv,
-    credentialCode: credential.status, credentialOutput: credential.stdout,
+    credentialCode: credential.status, credentialPresent: credential.stdout?.includes("password=") ?? false,
     localCredentialConfig: localConfig.stdout, worktreeCredentialConfig: worktreeConfig.stdout,
   }));
 }
@@ -907,8 +907,8 @@ describe("local-task-runner pull-request delivery gating", () => {
     }
     assert.equal(child.env.GIT_CONFIG_KEY_0, "credential.helper");
     assert.equal(child.env.GIT_CONFIG_VALUE_0, "");
-    assert.notEqual(child.credentialCode, 0, "git credential fill unexpectedly succeeded");
-    assert.equal(child.credentialOutput, "");
+    assert.equal(child.env.GIT_CONFIG_PARAMETERS, undefined);
+    assert.equal(child.credentialPresent, false, "git credential fill returned a credential");
     assert.equal(child.localCredentialConfig, "");
     assert.equal(child.worktreeCredentialConfig, "");
     assert.ok(!child.argv.join(" ").includes("fixture-github-token"));

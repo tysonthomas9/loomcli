@@ -594,6 +594,9 @@ function agentEnv() {
   for (const name of ["GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN_FILE", "LOOM_PR_GIT_PASSWORD"]) {
     delete env[name];
   }
+  // The desktop may pass per-command Git config that installs a credential
+  // helper; it takes precedence over the safe helper reset below.
+  delete env.GIT_CONFIG_PARAMETERS;
   // A task copy must not use the user's global credential helper by accident.
   env.GIT_CONFIG_GLOBAL = os.devNull;
   env.GIT_CONFIG_NOSYSTEM = "1";
