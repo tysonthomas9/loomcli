@@ -282,7 +282,8 @@ func TestEnsureDetachedGitWorktreeAtPRHeadRejectsFastForwardedTip(t *testing.T) 
 	headB := gitOutput(t, seed, "rev-parse", "HEAD")
 	git(t, seed, "push", "origin", "HEAD:refs/pull/7/head")
 
-	gotTip, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, target, "origin", 7, " "+strings.ToUpper(headA)+" ")
+	staleTarget := filepath.Join(root, "pr-worktrees", "repo", "pr-7", "stale")
+	gotTip, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, staleTarget, "origin", 7, " "+strings.ToUpper(headA)+" ")
 	var changed *PRHeadChangedError
 	if !errors.As(err, &changed) {
 		t.Fatalf("stale ensure error = %v, want PRHeadChangedError", err)
@@ -298,6 +299,9 @@ func TestEnsureDetachedGitWorktreeAtPRHeadRejectsFastForwardedTip(t *testing.T) 
 	}
 	if _, err := os.Stat(sentinel); err != nil {
 		t.Fatalf("stale outcome scrubbed existing worktree: %v", err)
+	}
+	if _, err := os.Lstat(staleTarget); !os.IsNotExist(err) {
+		t.Fatalf("stale outcome created a new review worktree: %v", err)
 	}
 
 	next := filepath.Join(root, "pr-worktrees", "repo", "pr-7", "second")
