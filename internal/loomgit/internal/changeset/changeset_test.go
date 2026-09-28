@@ -19,7 +19,7 @@ import (
 func fixture(t *testing.T) (string, *gitexec.Runner, *journal.SQLite) {
 	t.Helper()
 	dir := t.TempDir()
-	if out, err := exec.Command("git", "init", "-q", dir).CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "init", "-q", dir).CombinedOutput(); err != nil { //nolint:norawexec // Test fixture creates a real temporary repository.
 		t.Fatalf("git init: %v: %s", err, out)
 	}
 	config := filepath.Join(t.TempDir(), "config")
