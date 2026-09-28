@@ -9,13 +9,17 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 )
 
 // inventory records filesystem content that a Git tree cannot represent.
-func inventory(repo string) ([]Entry, []string, error) {
+func inventory(repo string, ignored []string) ([]Entry, []string, error) {
 	var entries []Entry
 	var nested []string
+	ignoredSet := make(map[string]bool, len(ignored))
+	for _, path := range ignored {
+		ignoredSet[strings.TrimSuffix(path, "/")] = true
+	}
 	err := filepath.WalkDir(repo, func(full string, item fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -28,8 +32,8 @@ func inventory(repo string) ([]Entry, []string, error) {
 			return err
 		}
 		path = filepath.ToSlash(path)
-		if path == ".git" {
-			return filepath.SkipDir
+		if path == ".git" || ignoredSet[path] {
+			return skipInventoryEntry(item)
 		}
 		info, err := os.Lstat(full)
 		if err != nil {
@@ -53,14 +57,30 @@ func inventory(repo string) ([]Entry, []string, error) {
 		} else if !info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
 			entries = append(entries, Entry{Path: path, Class: Incomplete, Size: info.Size(), Reason: "unsupported file type"})
 		}
-		if count, err := countXattrs(full); err != nil {
-			entries = append(entries, Entry{Path: path, Class: Incomplete, Size: info.Size(), Reason: "extended attribute scan: " + err.Error()})
-		} else if count > 0 {
-			entries = append(entries, Entry{Path: path, Class: Incomplete, Size: info.Size(), Reason: "extended attributes cannot be captured"})
+		if xattr, ok := inventoryXattr(full, path, info.Size()); ok {
+			entries = append(entries, xattr)
 		}
 		return nil
 	})
 	return entries, nested, err
+}
+
+func skipInventoryEntry(item fs.DirEntry) error {
+	if item.IsDir() {
+		return filepath.SkipDir
+	}
+	return nil
+}
+
+func inventoryXattr(full, path string, size int64) (Entry, bool) {
+	count, err := countXattrs(full)
+	if err != nil {
+		return Entry{Path: path, Class: Incomplete, Size: size, Reason: "extended attribute scan: " + err.Error()}, true
+	}
+	if count > 0 {
+		return Entry{Path: path, Class: Incomplete, Size: size, Reason: "extended attributes cannot be captured"}, true
+	}
+	return Entry{}, false
 }
 
 func nestedRoot(path string, roots []string) string {
@@ -72,7 +92,7 @@ func nestedRoot(path string, roots []string) string {
 	return ""
 }
 
-func verifyAfterWrite(ctx context.Context, runner *gitexec.Runner, repo string, env map[string]string, manifest *Manifest) error {
+func verifyAfterWrite(ctx context.Context, runner loomgit.RepoStore, repo string, env map[string]string, manifest *Manifest) error {
 	changed, err := runner.RunWithEnv(ctx, env, "diff", "--name-only", "-z")
 	if err != nil {
 		return err
@@ -81,7 +101,7 @@ func verifyAfterWrite(ctx context.Context, runner *gitexec.Runner, repo string, 
 	if err != nil {
 		return err
 	}
-	extras, _, err := inventory(repo)
+	extras, _, err := inventory(repo, paths[3])
 	if err != nil {
 		return err
 	}
@@ -125,7 +145,7 @@ func verifyExtras(manifest *Manifest, known map[string]Entry, extras []Entry) {
 	}
 }
 
-func finishCapture(ctx context.Context, runner *gitexec.Runner, repo string, env map[string]string, before map[string]bool, manifest *Manifest) error {
+func finishCapture(ctx context.Context, runner loomgit.RepoStore, repo string, env map[string]string, before map[string]bool, manifest *Manifest) error {
 	if err := syncNewObjects(ctx, runner, repo, before); err != nil {
 		return err
 	}
@@ -152,7 +172,7 @@ func markChanged(manifest *Manifest, known map[string]Entry, path, reason string
 	manifest.Complete = false
 }
 
-func objectDirectory(ctx context.Context, runner *gitexec.Runner, repo string) (string, error) {
+func objectDirectory(ctx context.Context, runner loomgit.RepoStore, repo string) (string, error) {
 	path, err := git(ctx, runner, "rev-parse", "--git-path", "objects")
 	if err != nil {
 		return "", err
@@ -163,7 +183,7 @@ func objectDirectory(ctx context.Context, runner *gitexec.Runner, repo string) (
 	return path, nil
 }
 
-func looseObjects(ctx context.Context, runner *gitexec.Runner, repo string) (map[string]bool, error) {
+func looseObjects(ctx context.Context, runner loomgit.RepoStore, repo string) (map[string]bool, error) {
 	dir, err := objectDirectory(ctx, runner, repo)
 	if err != nil {
 		return nil, err
@@ -191,7 +211,7 @@ var syncObjectFile = func(path string) error {
 	return file.Sync()
 }
 
-func syncNewObjects(ctx context.Context, runner *gitexec.Runner, repo string, before map[string]bool) error {
+func syncNewObjects(ctx context.Context, runner loomgit.RepoStore, repo string, before map[string]bool) error {
 	after, err := looseObjects(ctx, runner, repo)
 	if err != nil {
 		return err

@@ -225,7 +225,7 @@ func scanWorkingTree(ctx context.Context, runner loomgit.RepoStore, repo string,
 	trackedSet := pathSet(tracked)
 	changedSet := pathSet(changed)
 	seen := make(map[string]bool)
-	extras, nested, err := inventory(repo)
+	extras, nested, err := inventory(repo, ignored)
 	if err != nil {
 		return err
 	}

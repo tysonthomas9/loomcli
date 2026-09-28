@@ -1,0 +1,8 @@
+name: ignored nested repositories and attributes do not make captures incomplete
+task: P1.3b
+git: [min, latest]
+fixture: loomcli
+when:
+  - go_check: ignored_capture_inventory
+then:
+  - go_check: no_error

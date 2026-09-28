@@ -26,9 +26,16 @@ func countXattrs(path string) (int, error) {
 		return 0, err
 	}
 	for _, name := range splitXattrNames(names) {
-		if name != "com.apple.provenance" {
+		if !ambientXattr(name) {
 			return 1, nil
 		}
 	}
 	return 0, nil
+}
+
+func ambientXattr(name string) bool {
+	// Host provenance and container SELinux labels are recreated by the platform.
+	// security.capability, POSIX ACLs, and com.apple.quarantine can change
+	// execution or access decisions, so they remain uncapturable.
+	return name == "com.apple.provenance" || name == "security.selinux"
 }

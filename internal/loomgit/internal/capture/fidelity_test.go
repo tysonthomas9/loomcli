@@ -12,7 +12,31 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"golang.org/x/sys/unix"
+
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 )
+
+func TestCaptureWithHostGitDefaults(t *testing.T) {
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init", "-q", dir) //nolint:norawexec // Creates an isolated repository for the production-default runner.
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %s: %v", out, err)
+	}
+	runner, err := gitexec.New(dir, gitexec.Options{})
+	if err != nil {
+		t.Skipf("host Git identity unavailable: %v", err)
+	}
+	write(t, dir, "base.txt", "base")
+	must(t, runner, "add", "base.txt")
+	must(t, runner, "commit", "-qm", "base")
+	write(t, dir, "base.txt", "edited")
+	result := capture(t, dir, runner)
+	if !result.Manifest.Complete || result.CaptureSHA == "" {
+		t.Fatalf("default capture: %+v", result)
+	}
+}
 
 func TestNestedRepositoryIsNamedAndNeverBecomesGitlink(t *testing.T) {
 	dir, runner := fixture(t)
@@ -32,6 +56,51 @@ func TestNestedRepositoryIsNamedAndNeverBecomesGitlink(t *testing.T) {
 	}
 	if result.CaptureSHA != "" {
 		t.Fatalf("nested repository became a capture commit: %s", result.CaptureSHA)
+	}
+}
+
+func TestIgnoredNestedRepositoryDoesNotMakeCaptureIncomplete(t *testing.T) {
+	dir, runner := fixture(t)
+	write(t, dir, ".gitignore", "node_modules/\n")
+	nested := filepath.Join(dir, "node_modules", "vendored")
+	if err := os.MkdirAll(nested, 0700); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "init", "-q", nested) //nolint:norawexec // Creates an ignored nested repository fixture.
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init nested: %s: %v", out, err)
+	}
+	write(t, dir, "node_modules/vendored/source.go", "package vendored")
+	result := capture(t, dir, runner)
+	if !result.Manifest.Complete || result.CaptureSHA == "" {
+		t.Fatalf("ignored nested repository affected capture: %+v", result.Manifest)
+	}
+	if _, ok := classes(result.Manifest.Entries)["node_modules/vendored/"]; ok {
+		t.Fatalf("ignored nested repository was inventoried: %+v", result.Manifest)
+	}
+}
+
+func TestIgnoredExtendedAttributeDoesNotMakeCaptureIncomplete(t *testing.T) {
+	dir, runner := fixture(t)
+	write(t, dir, ".gitignore", "node_modules/\n")
+	write(t, dir, "node_modules/ignored.txt", "content")
+	full := filepath.Join(dir, "node_modules", "ignored.txt")
+	switch runtime.GOOS {
+	case "darwin":
+		cmd := exec.Command("xattr", "-w", "com.example.capture", "value", full) //nolint:norawexec // Marks an ignored fixture file with an xattr.
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("set xattr: %s: %v", out, err)
+		}
+	case "linux":
+		if err := unix.Lsetxattr(full, "user.capture-test", []byte("value"), 0); err != nil {
+			t.Skipf("user xattrs unavailable: %v", err)
+		}
+	default:
+		t.Skip("xattr fixture unavailable")
+	}
+	result := capture(t, dir, runner)
+	if !result.Manifest.Complete || result.CaptureSHA == "" {
+		t.Fatalf("ignored xattr affected capture: %+v", result.Manifest)
 	}
 }
 
