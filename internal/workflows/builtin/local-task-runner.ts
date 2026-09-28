@@ -75,6 +75,16 @@ export async function run(ctx = {}) {
     );
   }
 
+  // Until P3.3 restores host publishing, reject PR mode before starting a
+  // backend CLI or creating an isolated worktree.
+  const stacked = booleanValue(process.env.LOOM_TASK_RUN_STACKED) || booleanValue(inputValue(request, "stackedPullRequests"));
+  const openPR = booleanValue(inputValue(request, "openPullRequest"));
+  if (stacked || openPR) {
+    return failed("host_publish_required", "Pull requests return with the host publisher in P3.3; PR-mode runs are unavailable until then", {
+      taskRunId, taskId, backend, request, logs,
+    });
+  }
+
   const worktree = stringValue(process.env.LOOM_WORKTREE_PATH);
   if (!worktree || !dirExists(worktree)) {
     return failed(
@@ -109,7 +119,6 @@ export async function run(ctx = {}) {
   // double-wrap), commits there, and pushes the canonical output branch. The
   // post-drain reconcile opens/links the PR with the right base — the runner
   // does not open an independent loom/<taskid> PR.
-  const stacked = booleanValue(process.env.LOOM_TASK_RUN_STACKED);
   const stackBranch = stringValue(process.env.LOOM_TASK_RUN_OUTPUT_BRANCH);
   const stackBaseRef = stringValue(process.env.LOOM_TASK_RUN_BASE_REF);
   const stackId = stringValue(process.env.LOOM_TASK_RUN_STACK_ID);
@@ -133,7 +142,6 @@ export async function run(ctx = {}) {
   const args = backendArgs(backend, execWorktree, prompt);
   const usesStdinPrompt = backendUsesStdinPrompt(backend);
 
-  const openPR = booleanValue(inputValue(request, "openPullRequest"));
   let exitCode;
   let stdout = "";
   let stderr = "";
@@ -597,9 +605,7 @@ function agentEnv() {
   // The desktop may pass per-command Git config that installs a credential
   // helper; it takes precedence over the safe helper reset below.
   delete env.GIT_CONFIG_PARAMETERS;
-  // A task copy must not use the user's global credential helper by accident.
-  env.GIT_CONFIG_GLOBAL = os.devNull;
-  env.GIT_CONFIG_NOSYSTEM = "1";
+  // Reset inherited credential helpers while retaining the user's Git identity.
   env.GIT_CONFIG_COUNT = "1";
   env.GIT_CONFIG_KEY_0 = "credential.helper";
   env.GIT_CONFIG_VALUE_0 = "";

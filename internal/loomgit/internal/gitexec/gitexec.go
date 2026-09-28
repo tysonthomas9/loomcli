@@ -356,6 +356,10 @@ func (r *Runner) RunWithCredential(ctx context.Context, source *cred.Source, rep
 	if err := askpass.Chmod(0700); err != nil {
 		return nil, err
 	}
+	// Linux refuses to execute a script while it is still open for writing.
+	if err := askpass.Close(); err != nil {
+		return nil, err
+	}
 	env := map[string]string{"GIT_ASKPASS": askpass.Name(), "LOOM_HOST_GIT_PASSWORD": token}
 	out, err := r.runWithEnv(ctx, nil, env, args...)
 	var commandErr *CommandError

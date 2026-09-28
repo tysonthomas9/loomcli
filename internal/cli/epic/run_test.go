@@ -37,6 +37,32 @@ func TestRunnerNeedsLocalPreflight(t *testing.T) {
 	}
 }
 
+func TestValidateEpicRunFlagsRejectsPRModeBeforeQueue(t *testing.T) {
+	oldParent, oldConcurrency, oldInterval := runParent, runMaxConcurrency, runIntervalSeconds
+	oldOpenPR, oldStackedPRs := runOpenPR, runStackedPRs
+	t.Cleanup(func() {
+		runParent, runMaxConcurrency, runIntervalSeconds = oldParent, oldConcurrency, oldInterval
+		runOpenPR, runStackedPRs = oldOpenPR, oldStackedPRs
+	})
+	runParent, runMaxConcurrency, runIntervalSeconds = "EPIC-1", 1, 1
+	for _, tc := range []struct {
+		name    string
+		openPR  bool
+		stacked bool
+	}{
+		{name: "open pull request", openPR: true},
+		{name: "stacked pull requests", stacked: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runOpenPR, runStackedPRs = tc.openPR, tc.stacked
+			err := validateEpicRunFlags()
+			if err == nil || !strings.Contains(err.Error(), "host_publish_required") || !strings.Contains(err.Error(), "host publisher in P3.3") {
+				t.Fatalf("validateEpicRunFlags() = %v, want P3.3 host publisher error", err)
+			}
+		})
+	}
+}
+
 // daemonGetterStub satisfies the surface PreflightLocalTaskRunner needs so the
 // gated branch can be exercised without a full store.
 type daemonGetterStub struct{ backend string }

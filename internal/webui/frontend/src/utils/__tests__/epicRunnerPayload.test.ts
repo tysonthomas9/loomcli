@@ -44,18 +44,14 @@ function makeRepo(
 }
 
 describe("epicRunnerRuntimePayload", () => {
-  it('maps "Locally" runtime to local-task-runner PR delivery with a selected repo', () => {
-    const payload = epicRunnerRuntimePayload({
-      localSettings: makeLocalSettings("local"),
-      repos: [makeRepo()],
-      currentRepo: "acme",
-    });
-    expect(payload).toEqual({
-      runner: "local-task-runner",
-      repoUrl: "https://github.com/acme/widgets.git",
-      baseBranch: "main",
-      openPullRequest: true,
-    });
+  it("shows the host publisher requirement before a local PR-mode run is queued", () => {
+    expect(() =>
+      epicRunnerRuntimePayload({
+        localSettings: makeLocalSettings("local"),
+        repos: [makeRepo()],
+        currentRepo: "acme",
+      }),
+    ).toThrow(/host_publish_required.*host publisher in P3\.3/);
   });
 
   it("maps a null/undefined runtime to the explicit local-task-runner", () => {
@@ -67,30 +63,24 @@ describe("epicRunnerRuntimePayload", () => {
     expect(payload).toEqual({ runner: "local-task-runner" });
   });
 
-  it("never returns an empty payload for the local path", () => {
+  it("never returns an empty payload for the local path without a repo", () => {
     const payload = epicRunnerRuntimePayload({
       localSettings: makeLocalSettings("local"),
-      repos: [makeRepo()],
-      currentRepo: "acme",
+      repos: [],
+      currentRepo: null,
     });
     expect(payload.runner).toBe("local-task-runner");
-    expect(payload.openPullRequest).toBe(true);
     expect(Object.keys(payload)).not.toHaveLength(0);
   });
 
-  it('maps "daytona" runtime to the daytona runner with a normalized repo URL', () => {
-    const payload = epicRunnerRuntimePayload({
-      localSettings: makeLocalSettings("daytona"),
-      repos: [makeRepo()],
-      currentRepo: "acme",
-    });
-    expect(payload).toEqual({
-      runner: "daytona-task-runner",
-      repoUrl: "https://github.com/acme/widgets.git",
-      baseBranch: "main",
-      openPullRequest: true,
-      stackedPullRequests: true,
-    });
+  it("shows the host publisher requirement before a Daytona PR-mode run is queued", () => {
+    expect(() =>
+      epicRunnerRuntimePayload({
+        localSettings: makeLocalSettings("daytona"),
+        repos: [makeRepo()],
+        currentRepo: "acme",
+      }),
+    ).toThrow(/host_publish_required.*host publisher in P3\.3/);
   });
 
   it("throws on the daytona path when no repo URL can be resolved", () => {

@@ -218,6 +218,9 @@ func validateEpicRunFlags() error {
 	if strings.TrimSpace(runParent) == "" {
 		return errors.New("--parent is required")
 	}
+	if runOpenPR || runStackedPRs {
+		return errors.New("host_publish_required: Pull requests return with the host publisher in P3.3; PR-mode runs are unavailable until then")
+	}
 	if runMaxConcurrency < 1 {
 		return fmt.Errorf("--max-concurrency must be >= 1, got %d", runMaxConcurrency)
 	}

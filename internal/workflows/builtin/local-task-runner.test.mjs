@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -32,12 +33,18 @@ if (process.env.FAKE_ENV_FILE) {
     input: "protocol=https\\nhost=github.com\\n\\n",
     encoding: "utf8",
   });
+  const userName = spawnSync("git", ["config", "user.name"], { encoding: "utf8" });
   const localConfig = spawnSync("git", ["config", "--local", "--get-regexp", "^credential\\\\."], { encoding: "utf8" });
   const worktreeConfig = spawnSync("git", ["config", "--worktree", "--get-regexp", "^credential\\\\."], { encoding: "utf8" });
+  const push = process.env.FAKE_PUSH_URL
+    ? spawnSync("git", ["push", process.env.FAKE_PUSH_URL, "HEAD:refs/heads/probe"], { encoding: "utf8" })
+    : null;
   fs.writeFileSync(process.env.FAKE_ENV_FILE, JSON.stringify({
     env: process.env, argv: process.argv,
     credentialCode: credential.status, credentialPresent: credential.stdout?.includes("password=") ?? false,
+    userName: userName.stdout?.trim(),
     localCredentialConfig: localConfig.stdout, worktreeCredentialConfig: worktreeConfig.stdout,
+    pushExitCode: push?.status,
   }));
 }
 // Write into the CLI's cwd (the worktree the runner executes in — the isolated
@@ -113,11 +120,13 @@ const ENV_KEYS = [
   "FAKE_STDIN_FILE",
   "FAKE_USAGE_TOKENS",
   "FAKE_ENV_FILE",
+  "FAKE_PUSH_URL",
   "FLEET_DB_URL",
   "LOOM_FLEET_DB_URL",
   "GITHUB_TOKEN",
   "GH_TOKEN",
   "LOOM_PR_GIT_PASSWORD",
+  "GIT_CONFIG_GLOBAL",
   "LOOM_TASK_RUN_STACKED",
   "LOOM_TASK_RUN_STACK_ID",
   "LOOM_TASK_RUN_OUTPUT_BRANCH",
@@ -892,6 +901,10 @@ describe("local-task-runner isolated worktree", () => {
 describe("local-task-runner pull-request delivery gating", () => {
   it("starts the backend without Loom-supplied GitHub credentials or helper", async () => {
     const capture = path.join(tmpRoot, "agent-env.json");
+    const gitConfig = path.join(tmpRoot, "agent-gitconfig");
+    fs.writeFileSync(gitConfig, "[user]\n  name = Fixture Agent\n  email = fixture@example.test\n");
+    process.env.GIT_CONFIG_GLOBAL = gitConfig;
+    execFileSync("git", ["config", "--local", "--unset", "user.name"], { cwd: worktree });
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
     process.env.LOOM_WORKTREE_PATH = worktree;
     process.env.LOOM_CODEX_BIN = fakeBin;
@@ -909,9 +922,36 @@ describe("local-task-runner pull-request delivery gating", () => {
     assert.equal(child.env.GIT_CONFIG_VALUE_0, "");
     assert.equal(child.env.GIT_CONFIG_PARAMETERS, undefined);
     assert.equal(child.credentialPresent, false, "git credential fill returned a credential");
+    assert.equal(child.userName, "Fixture Agent");
     assert.equal(child.localCredentialConfig, "");
     assert.equal(child.worktreeCredentialConfig, "");
     assert.ok(!child.argv.join(" ").includes("fixture-github-token"));
+  });
+
+  it("cannot push from a task copy to a remote requiring credentials", async () => {
+    const requests = [];
+    const server = http.createServer((request, response) => {
+      requests.push({ authorization: Boolean(request.headers.authorization) });
+      response.writeHead(401, { "WWW-Authenticate": 'Basic realm="test"' });
+      response.end();
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const capture = path.join(tmpRoot, "agent-push.json");
+      process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+      process.env.LOOM_WORKTREE_PATH = worktree;
+      process.env.LOOM_CODEX_BIN = fakeBin;
+      process.env.FAKE_ENV_FILE = capture;
+      process.env.FAKE_PUSH_URL = `http://127.0.0.1:${server.address().port}/repo.git`;
+      const out = await run();
+      assert.equal(out.status, "completed");
+      const child = JSON.parse(fs.readFileSync(capture, "utf8"));
+      assert.notEqual(child.pushExitCode, 0);
+      assert.ok(requests.length > 0, "push never reached the test remote");
+      assert.ok(requests.every((request) => !request.authorization), "push sent an Authorization header");
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 
   // A sanitized bin dir that exposes the fake backend + real git but no gh.
@@ -949,12 +989,14 @@ describe("local-task-runner pull-request delivery gating", () => {
   it("openPullRequest stays with the host publisher", async () => {
     const binDir = sanitizedBinDir();
     const ghMarker = path.join(tmpRoot, "gh-called");
+    const backendMarker = path.join(tmpRoot, "pr-backend-called");
     fs.writeFileSync(path.join(binDir, "gh"), `#!/bin/sh\nprintf called > '${ghMarker}'\nprintf fixture-token\n`, { mode: 0o700 });
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
     process.env.LOOM_WORKTREE_PATH = worktree;
     process.env.LOOM_CODEX_BIN = fakeBin;
     process.env.FAKE_EXIT_CODE = "0";
     process.env.FAKE_WRITE_FILE = "pr-change.txt";
+    process.env.FAKE_ENV_FILE = backendMarker;
     // Ensure no env credential and no gh on PATH (so `gh auth token` ENOENTs).
     delete process.env.GITHUB_TOKEN;
     delete process.env.GH_TOKEN;
@@ -970,15 +1012,14 @@ describe("local-task-runner pull-request delivery gating", () => {
     const out = await run();
     assert.equal(out.status, "failed");
     assert.equal(out.errorClass, "host_publish_required");
+    assert.match(out.errorMessage, /host publisher in P3\.3/);
     assert.equal(out.exitCode, 1);
-    assert.ok(out.patch?.includes("pr-change.txt"), "host receives the isolated agent's patch");
-    assert.equal(out.patch_base_ref, out.base_ref);
+    assert.equal(out.patch, undefined);
+    assert.ok(!fs.existsSync(backendMarker), "runner started the backend before rejecting PR mode");
     assert.ok(!fs.existsSync(ghMarker), "runner called gh auth token");
   });
 
-  it("openPullRequest=true but the agent produced no changes skips the PR (delivery=pull_request_skipped_no_changes)", async () => {
-    // No FAKE_WRITE_FILE => the fake CLI changes nothing, so filesChanged === 0
-    // and PR delivery is short-circuited BEFORE any credential/network work.
+  it("rejects PR mode even when the agent would produce no changes", async () => {
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
     process.env.LOOM_WORKTREE_PATH = worktree;
     process.env.LOOM_CODEX_BIN = fakeBin;
@@ -994,10 +1035,9 @@ describe("local-task-runner pull-request delivery gating", () => {
     });
 
     const out = await run();
-    assert.equal(out.status, "completed");
-    assert.equal(out.runtimeMetadata.delivery, "pull_request_skipped_no_changes");
-    // No changes => no top-level patch content, no PR url.
-    assert.equal(out.runtimeMetadata.github_pr_url, undefined);
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "host_publish_required");
+    assert.match(out.errorMessage, /host publisher in P3\.3/);
   });
 
   it("stacked mode stays with the host publisher", async () => {
@@ -1026,13 +1066,11 @@ describe("local-task-runner pull-request delivery gating", () => {
     const out = await run();
     assert.equal(out.status, "failed");
     assert.equal(out.errorClass, "host_publish_required");
+    assert.match(out.errorMessage, /host publisher in P3\.3/);
     assert.equal(out.exitCode, 1);
   });
 
-  it("stacked mode with no changes records an empty unit (no branch pushed)", async () => {
-    // No FAKE_WRITE_FILE => filesChanged === 0 => the empty unit is recorded and
-    // no push/credential work happens. The host finalize barrier maps this to
-    // NodeState=empty (decision (a): the dependent slides past it).
+  it("rejects stacked PR mode before an empty unit runs", async () => {
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
     process.env.LOOM_WORKTREE_PATH = worktree;
     process.env.LOOM_CODEX_BIN = fakeBin;
@@ -1051,11 +1089,10 @@ describe("local-task-runner pull-request delivery gating", () => {
     });
 
     const out = await run();
-    assert.equal(out.status, "completed");
-    assert.equal(out.runtimeMetadata.delivery, "pull_request_skipped_no_changes");
-    // Stacked mode runs in place => no top-level patch (patch-back skipped).
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "host_publish_required");
+    assert.match(out.errorMessage, /host publisher in P3\.3/);
     assert.equal(out.patch, undefined);
-    assert.equal(out.runtimeMetadata.github_branch, undefined);
   });
   // The actual canonical-branch push (commit in place → push loom/stack/<stack>/<task>,
   // no PR) is Stage 3's LIVE verify bar (2-task local epic → 2 branches on origin,

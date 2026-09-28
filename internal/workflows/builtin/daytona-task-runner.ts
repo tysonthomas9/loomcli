@@ -54,6 +54,10 @@ export async function run(ctx = {}) {
   const taskId = stringValue(request.task_id || request.taskId || process.env.LOOM_TASK_ID);
   const logs = [];
 
+  if (booleanValue(inputValue(request, "openPullRequest")) || booleanValue(inputValue(request, "stackedPullRequests"))) {
+    return failed("host_publish_required", "Pull requests return with the host publisher in P3.3; PR-mode runs are unavailable until then", taskRunId, request, logs);
+  }
+
   const mode = taskMode(request);
   if (DEMO_MODES.has(mode) && !demoModesEnabled(request)) {
     return failed(
@@ -104,7 +108,7 @@ export async function run(ctx = {}) {
     const task = taskContext.task;
     const delivery = deliveryPlan(request, task, taskRunId);
     if (delivery.openPullRequest) {
-      return failed("host_publish_required", "pull request delivery requires host-side publishing", taskRunId, request, logs);
+      return failed("host_publish_required", "Pull requests return with the host publisher in P3.3; PR-mode runs are unavailable until then", taskRunId, request, logs);
     }
 
     const sdk = imports.daytona;
