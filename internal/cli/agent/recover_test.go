@@ -15,6 +15,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	cligit "github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
@@ -576,9 +577,8 @@ func initRecoveryRepo(t *testing.T, path string) {
 	if err := os.MkdirAll(path, 0755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("git", "init", "-q", path) //nolint:norawexec
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v: %s", err, out)
+	if _, err := cligit.RunGitCommand(path, "init", "-q"); err != nil {
+		t.Fatalf("git init: %v", err)
 	}
 }
 
