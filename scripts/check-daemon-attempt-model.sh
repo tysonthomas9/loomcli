@@ -4,7 +4,10 @@
 # Runs TLC on every configuration and compares the result with the expected
 # outcome: "pass" configs must explore their finite state space with no
 # violation; "fail" configs are deliberate mutations that must produce a
-# counterexample for the named invariant.
+# counterexample for the named invariant, or, for a temporal property, a
+# liveness counterexample from a config whose only PROPERTIES entry is that
+# property. Stage-d configs (d_*) use module DaemonAttemptD, which extends
+# DaemonAttempt.
 #
 # Usage: scripts/check-daemon-attempt-model.sh [config-name ...]
 #
@@ -28,7 +31,8 @@ MIN_FREE_MB="${LOOM_TLA_MIN_FREE_MB:-2048}"
 CAP_MB="${LOOM_TLA_CAP_MB:-1024}"
 WORKERS="${LOOM_TLA_WORKERS:-auto}"
 
-# name|expect|invariant (invariant is the one a "fail" run must violate)
+# name|expect|invariant[|module] (invariant or temporal property a "fail" run
+# must violate; module defaults to DaemonAttempt)
 CASES=(
   "a_pass|pass|"
   "a_pass_faults|pass|"
@@ -52,6 +56,18 @@ CASES=(
   "c_fail_stale_finalize|fail|NoSupersededFinalize"
   "c_stranded_session|fail|NoStrandedSession"
   "c_vacuity|fail|NeverFinalized"
+  "d_pass_finalize_liveness|pass||DaemonAttemptD"
+  "d_pass_safety|pass||DaemonAttemptD"
+  "d_pass_no_crash_no_reaper|pass||DaemonAttemptD"
+  "d_fail_no_reaper|fail|SessionTerminates|DaemonAttemptD"
+  "d_fail_ownership_bound_finalize|fail|SessionTerminates|DaemonAttemptD"
+  "d_fail_stale_completed|fail|NoStaleCompleted|DaemonAttemptD"
+  "d_fail_no_cas|fail|TerminalOnceD|DaemonAttemptD"
+  "d_fail_ipc_only_renewal|fail|LiveOwnerKeepsSessionLease|DaemonAttemptD"
+  "d_fail_unbound_session_lease|fail|NoSupersededWrite|DaemonAttemptD"
+  "d_fail_ipc_bypass|fail|NoWriteAfterSessionLeaseLoss|DaemonAttemptD"
+  "d_vacuity_reap|fail|NeverReaped|DaemonAttemptD"
+  "d_vacuity_completed|fail|NeverCompleted|DaemonAttemptD"
 )
 
 command -v java >/dev/null || { echo "java not found (TLC needs Java 11+)" >&2; exit 2; }
@@ -83,9 +99,10 @@ want() {
 }
 
 failures=0
-printf '%-24s %-6s %-8s %s\n' CONFIG EXPECT RESULT DETAIL
+printf '%-32s %-6s %-8s %s\n' CONFIG EXPECT RESULT DETAIL
 for entry in "${CASES[@]}"; do
-  IFS='|' read -r name expect inv <<<"$entry"
+  IFS='|' read -r name expect inv module <<<"$entry"
+  module="${module:-DaemonAttempt}"
   want "$name" || continue
   avail="$(free_mb "$SCRATCH")"
   if (( avail < MIN_FREE_MB )); then
@@ -97,7 +114,7 @@ for entry in "${CASES[@]}"; do
   # -cleanup makes TLC clear its own states directory; nothing else is removed.
   (cd "$MODEL_DIR" && exec java -XX:+UseParallelGC -cp "$JAR" tlc2.TLC \
       -deadlock -cleanup -checkpoint 0 -workers "$WORKERS" \
-      -metadir "$meta" -config "$name.cfg" DaemonAttempt.tla) >"$log" 2>&1 &
+      -metadir "$meta" -config "$name.cfg" "$module.tla") >"$log" 2>&1 &
   pid=$!
   capped=0
   while kill -0 "$pid" 2>/dev/null; do
@@ -124,11 +141,15 @@ for entry in "${CASES[@]}"; do
     result=ok; detail="no violation; $states"
   elif [[ "$expect" == fail ]] && (( code == 12 )) && grep -q "Invariant $inv is violated" "$log"; then
     result=ok; detail="counterexample for $inv; $states"
+  elif [[ "$expect" == fail ]] && (( code == 13 )) \
+       && grep -q 'Temporal properties were violated' "$log" \
+       && [[ "$(grep -E '^PROPERT(Y|IES)' "$MODEL_DIR/$name.cfg")" =~ ^PROPERT(Y|IES)\ +$inv\ *$ ]]; then
+    result=ok; detail="liveness counterexample for $inv; $states"
   else
     result=UNEXPECTED; detail="exit $code; see $log"
   fi
   [[ "$result" == ok ]] || failures=$((failures + 1))
-  printf '%-24s %-6s %-8s %s\n' "$name" "$expect" "$result" "$detail"
+  printf '%-32s %-6s %-8s %s\n' "$name" "$expect" "$result" "$detail"
 done
 
 echo "TLC ${TLA_VERSION} ($JAR); logs and counterexamples under $SCRATCH"
