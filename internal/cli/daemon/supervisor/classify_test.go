@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
 )
@@ -119,7 +121,27 @@ func TestAgentExitCapturesAfterDrainRemovedYieldFile(t *testing.T) {
 }
 
 func TestAgentExitCaptureFailureRetainsWork(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		exitCode    int
+		yieldReason string
+	}{
+		{name: "failed exit", exitCode: 1},
+		{name: "clean exit", exitCode: 0},
+		{name: "yield", exitCode: 0, yieldReason: "shutdown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testAgentExitCaptureFailureRetainsWork(t, tc.exitCode, tc.yieldReason)
+		})
+	}
+}
+
+func testAgentExitCaptureFailureRetainsWork(t *testing.T, exitCode int, yieldReason string) {
 	dir := t.TempDir()
+	mock := clitest.NewMockIssueBackend()
+	mock.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-3", Status: "in_progress"}}
+	cli.SetDefaultIssueBackend(mock)
+	t.Cleanup(cli.ResetDefaultIssueBackend)
 	writeLockFile(t, dir, &cli.LockInfo{AgentName: "agent", TaskID: "task-3"})
 	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("keep"), 0600); err != nil {
 		t.Fatal(err)
@@ -128,8 +150,8 @@ func TestAgentExitCaptureFailureRetainsWork(t *testing.T) {
 	s.captureWorktree = func(context.Context, string, string, string, string, string) (agentcapture.Result, error) {
 		return agentcapture.Result{}, errors.New("capture failed")
 	}
-	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "agent"}, WorktreePath: dir}
-	s.handleAgentCheckpoint(ap, 1)
+	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "agent"}, WorktreePath: dir, YieldReason: yieldReason}
+	s.handleAgentCheckpoint(ap, exitCode)
 	if !ap.CaptureRetained {
 		t.Fatal("capture failure must mark worktree retained")
 	}
@@ -137,7 +159,24 @@ func TestAgentExitCaptureFailureRetainsWork(t *testing.T) {
 	if err != nil || cp == nil || !cp.Retained {
 		t.Fatalf("retained checkpoint: %+v, %v", cp, err)
 	}
-	s.postMortemRecovery(ap, 1)
+	s.postMortemRecovery(ap, exitCode)
+	if _, err := os.Stat(filepath.Join(dir, cli.LockFileName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("agent lock remains after capture failure: %v", err)
+	}
+	var released, reopened bool
+	for _, call := range mock.Calls {
+		switch call.Method {
+		case "ReleaseIssueLock":
+			released = true
+		case "Update":
+			if params, ok := call.Args[1].(backend.UpdateParams); ok && params.Status != nil && *params.Status == "open" {
+				reopened = true
+			}
+		}
+	}
+	if !released || !reopened {
+		t.Fatalf("ownership not released after capture failure: released=%v reopened=%v calls=%+v", released, reopened, mock.Calls)
+	}
 	if data, err := os.ReadFile(filepath.Join(dir, "new.txt")); err != nil || string(data) != "keep" {
 		t.Fatalf("worktree changed: %q, %v", data, err)
 	}

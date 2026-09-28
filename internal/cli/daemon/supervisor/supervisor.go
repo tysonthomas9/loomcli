@@ -829,11 +829,12 @@ func (s *Supervisor) postMortemRecovery(ap *AgentProcess, exitCode int) {
 	ap.Mu.Unlock()
 	if retained {
 		slog.Warn("retaining agent worktree after capture failure", "worktree", ap.Entry.Worktree)
-		return
-	}
-	if yielded || IsYieldRequested(ap.WorktreePath) {
+	} else if yielded || IsYieldRequested(ap.WorktreePath) {
 		slog.Info("skipping post-mortem recovery for yield exit", "worktree", ap.Entry.Worktree)
 		return
+	}
+	if retained && exitCode == 0 {
+		exitCode = -1 // A failed capture must requeue even after a clean agent exit.
 	}
 	if err := s.recoverAgent(ap, exitCode, isIncompleteRun(ap)); err != nil {
 		slog.Warn("post-mortem recovery failed", "worktree", ap.Entry.Worktree, "err", err)

@@ -3,8 +3,6 @@ package agentcapture
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/capture"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
@@ -17,11 +15,7 @@ type Result struct {
 }
 
 func Capture(ctx context.Context, repo, workspace, attempt, taskID, taskTitle string) (Result, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return Result{}, err
-	}
-	runner, err := gitexec.New(repo, gitexec.Options{GlobalConfig: filepath.Join(home, ".gitconfig")})
+	runner, err := gitexec.New(repo, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
 	if err != nil {
 		return Result{}, err
 	}
@@ -31,5 +25,9 @@ func Capture(ctx context.Context, repo, workspace, attempt, taskID, taskTitle st
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Ref: result.CaptureRef, SHA: result.CaptureSHA, Complete: result.Manifest.Complete}, nil
+	ref := ""
+	if result.CaptureSHA != "" {
+		ref = result.CaptureRef
+	}
+	return Result{Ref: ref, SHA: result.CaptureSHA, Complete: result.Manifest.Complete}, nil
 }
