@@ -77,8 +77,17 @@ var subprocessEnvSensitiveFragments = []string{
 // local task runner is allowed to inherit so the backend CLI authenticates
 // exactly as local tooling does (§4.3). This widening is STRICTLY scoped to the
 // local-task-runner entrypoint — Daytona/remote runners keep the strict filter
-// in scopedSubprocessBaseEnv (which treats every one of these as sensitive) so
-// a credential never leaks into a remote sandbox.
+// in scopedSubprocessBaseEnv (which drops every one of these) so a credential
+// never leaks into a remote sandbox.
+//
+// This map is NOT kept in step by hand. It is the `provider_credentials` role of
+// the vendored contract testdata/sensitive-env-names.json (mirrored byte-for-byte
+// from meta-harness's contract/sensitive-env-names.json), and
+// sensitive_env_contract_test.go asserts set equality against it — as does
+// internal/workflows/builtin/daytona-task-runner.test.mjs for the leak probe that
+// must enumerate the same names. To change the list, edit the artifact in
+// meta-harness, re-run scripts/sync-sensitive-env-names.sh --to <this repo> there,
+// and land both PRs. See contract/README.md in that repo.
 var trustedLocalProviderCredentials = map[string]struct{}{
 	"ANTHROPIC_API_KEY": {},
 	// claude-code's long-lived OAuth token (`claude setup-token`); the headless
