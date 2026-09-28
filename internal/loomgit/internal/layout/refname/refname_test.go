@@ -98,7 +98,7 @@ func TestTaskCopiesAreWorkspaceScoped(t *testing.T) {
 
 func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", args...) //nolint:norawexec // Test fixture runs real Git to verify ref names.
 	cmd.Dir = dir
 	cmd.Env = append(cmd.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
 	if out, err := cmd.CombinedOutput(); err != nil {

@@ -20,8 +20,13 @@ func TestRefLiteralsOnlyInLayout(t *testing.T) {
 		t.Fatal("locate test source")
 	}
 	root := filepath.Clean(filepath.Join(filepath.Dir(source), "..", ".."))
+	rootFS, err := os.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rootFS.Close()
 	legacyCount := 0
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -38,7 +43,7 @@ func TestRefLiteralsOnlyInLayout(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		body, err := os.ReadFile(path)
+		body, err := rootFS.ReadFile(rel)
 		if err != nil {
 			return err
 		}

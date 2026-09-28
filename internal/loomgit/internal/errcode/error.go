@@ -35,6 +35,7 @@ const (
 	HashMismatch          Code = "hash_mismatch"
 	CaptureFailed         Code = "capture_failed"
 	SecretPathRefused     Code = "secret_path_refused" //nolint:gosec // Stable error code, not a credential.
+	WorkspaceUnsupported  Code = "workspace_unsupported"
 )
 
 var All = []Code{
@@ -43,7 +44,7 @@ var All = []Code{
 	StaleSubject, StackLocked, StackNotLinear, RefNamespaceConflict, ProviderStackLimit,
 	Diverged, DependencyAbandoned, MergeNotAuthorized, MergeBlocked, ModeMismatch,
 	IntegrityMissing, AttentionRequired, ApplyPending, SwapHeld, RestackConflict,
-	RevisionSuperseded, HashMismatch, CaptureFailed, SecretPathRefused,
+	RevisionSuperseded, HashMismatch, CaptureFailed, SecretPathRefused, WorkspaceUnsupported,
 }
 
 // Error carries a stable code, a useful message, and an optional cause.

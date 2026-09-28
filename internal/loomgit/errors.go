@@ -36,6 +36,7 @@ const (
 	HashMismatch          = errcode.HashMismatch
 	CaptureFailed         = errcode.CaptureFailed
 	SecretPathRefused     = errcode.SecretPathRefused
+	WorkspaceUnsupported  = errcode.WorkspaceUnsupported
 )
 
 var ErrorCodes = errcode.All
