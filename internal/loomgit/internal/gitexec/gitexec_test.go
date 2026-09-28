@@ -28,7 +28,7 @@ func fixture(t *testing.T) (*Runner, string, string) {
 
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...) //nolint:gosec,norawexec // Test fixture setup uses real Git.
+	cmd := exec.Command("git", args...) //nolint:norawexec,gosec // Test fixture setup uses real Git.
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -274,11 +274,11 @@ func TestGlobalSigningConfigSurvivesIsolation(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(gpgHome) })
 	t.Setenv("GNUPGHOME", gpgHome)
-	keygen := exec.Command("gpg", "--batch", "--pinentry-mode", "loopback", "--passphrase", "", "--quick-generate-key", "Example Author <author@example.test>", "default", "default", "never") //nolint:gosec,norawexec // Test generates a disposable key.
+	keygen := exec.Command("gpg", "--batch", "--pinentry-mode", "loopback", "--passphrase", "", "--quick-generate-key", "Example Author <author@example.test>", "default", "default", "never") //nolint:norawexec,gosec // Test generates a disposable key.
 	if out, err := keygen.CombinedOutput(); err != nil {
 		t.Fatalf("gpg keygen: %s: %v", out, err)
 	}
-	list := exec.Command("gpg", "--batch", "--with-colons", "--list-secret-keys") //nolint:gosec,norawexec // Test reads its disposable key.
+	list := exec.Command("gpg", "--batch", "--with-colons", "--list-secret-keys") //nolint:norawexec,gosec // Test reads its disposable key.
 	out, err := list.Output()
 	if err != nil {
 		t.Fatal(err)
