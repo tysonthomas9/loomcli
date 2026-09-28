@@ -38,7 +38,7 @@ func FreezeSource(ctx context.Context, runner loomgit.RepoStore, p FreezeParams)
 
 // RewriteSource creates the source chain without publishing a revision ref.
 // The caller can verify and record it before installing refs.
-func RewriteSource(ctx context.Context, runner *gitexec.Runner, p FreezeParams) (string, error) {
+func RewriteSource(ctx context.Context, runner loomgit.RepoStore, p FreezeParams) (string, error) {
 	if _, err := refname.RevisionHead(p.Workspace, p.ChangeID, p.Revision); err != nil {
 		return "", err
 	}
