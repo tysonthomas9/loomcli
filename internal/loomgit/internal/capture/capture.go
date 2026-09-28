@@ -221,19 +221,18 @@ func scanWorkingTree(ctx context.Context, runner loomgit.RepoStore, repo string,
 		return err
 	}
 	tracked, changed, untracked, ignored, ignoredIndex := paths[0], paths[1], paths[2], paths[3], paths[4]
-	ignoredSet := make(map[string]bool)
-	for _, path := range ignoredIndex {
-		ignoredSet[path] = true
-	}
-	trackedSet := make(map[string]bool)
-	for _, path := range tracked {
-		trackedSet[path] = true
-	}
-	changedSet := make(map[string]bool)
-	for _, path := range changed {
-		changedSet[path] = true
-	}
+	ignoredSet := pathSet(ignoredIndex)
+	trackedSet := pathSet(tracked)
+	changedSet := pathSet(changed)
 	seen := make(map[string]bool)
+	extras, nested, err := inventory(repo)
+	if err != nil {
+		return err
+	}
+	extraByPath := make(map[string]Entry, len(extras))
+	for _, entry := range extras {
+		extraByPath[entry.Path] = entry
+	}
 	var toStage []string
 	var total int64
 	for _, path := range append(append(tracked, changed...), untracked...) {
@@ -246,6 +245,7 @@ func scanWorkingTree(ctx context.Context, runner loomgit.RepoStore, repo string,
 			continue
 		}
 		entry, stage := classifyPath(repo, path, total, trackedSet[path], ignoredSet[path])
+		entry, stage = specialEntry(entry, stage, nested, extraByPath)
 		if stage {
 			toStage = append(toStage, path)
 			total += entry.Size
@@ -256,12 +256,48 @@ func scanWorkingTree(ctx context.Context, runner loomgit.RepoStore, repo string,
 		manifest.Entries = append(manifest.Entries, entry)
 	}
 	recordIgnored(manifest, repo, ignored, seen)
+	for _, path := range ignored {
+		seen[path] = true
+	}
+	recordExtras(manifest, extras, seen)
 	if err := stagePaths(ctx, runner, env, toStage); err != nil {
 		return err
 	}
 	sort.Slice(manifest.Entries, func(i, j int) bool { return manifest.Entries[i].Path < manifest.Entries[j].Path })
 	manifest.Retained = !manifest.Complete
 	return nil
+}
+
+func recordExtras(manifest *Manifest, extras []Entry, seen map[string]bool) {
+	for _, entry := range extras {
+		if seen[entry.Path] {
+			continue
+		}
+		manifest.Entries = append(manifest.Entries, entry)
+		if entry.Class == Incomplete {
+			manifest.Complete = false
+		}
+	}
+}
+
+func pathSet(paths []string) map[string]bool {
+	set := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		set[path] = true
+	}
+	return set
+}
+
+func specialEntry(entry Entry, stage bool, nested []string, extras map[string]Entry) (Entry, bool) {
+	if root := nestedRoot(entry.Path, nested); root != "" {
+		entry.Class, entry.Reason = Incomplete, "nested git repository: "+root
+		return entry, false
+	}
+	if extra, ok := extras[entry.Path]; ok && extra.Class == Incomplete {
+		entry.Class, entry.Reason = Incomplete, extra.Reason
+		return entry, false
+	}
+	return entry, stage
 }
 
 func advanceCaptureRef(ctx context.Context, runner loomgit.RepoStore, repo, ref, next, head string) error {
@@ -317,6 +353,10 @@ func Capture(ctx context.Context, runner loomgit.RepoStore, repo string, p Param
 	if _, err = runner.RunWithEnv(ctx, env, "read-tree", head); err != nil {
 		return result, err
 	}
+	beforeObjects, err := looseObjects(ctx, runner, repo)
+	if err != nil {
+		return result, err
+	}
 	if err = scanWorkingTree(ctx, runner, repo, env, &result.Manifest); err != nil {
 		return result, err
 	}
@@ -326,6 +366,9 @@ func Capture(ctx context.Context, runner loomgit.RepoStore, repo string, p Param
 	}
 	result.CaptureSHA, err = captureCommit(ctx, runner, head, p, tree)
 	if err != nil {
+		return result, err
+	}
+	if err = finishCapture(ctx, runner, repo, env, beforeObjects, &result.Manifest); err != nil {
 		return result, err
 	}
 	result.ManifestPath, err = saveManifest(ctx, runner, repo, result.Manifest)
