@@ -288,10 +288,13 @@ func prepareReviewerCheckout(w http.ResponseWriter, spec reviewerCheckoutSpec) (
 			"pull request head changed while preparing the reviewer; refresh and retry", true)
 		return "", false
 	}
-	// Isolated PR-checkout namespace (.loom/pr-worktrees/<repo>/pr-N), distinct
-	// from the agent-worktree tree so PR review checkouts never collide with a
-	// working agent's branch worktree.
-	target, err := localworkspace.PRReviewWorktreePath(spec.wsPath, spec.repoName, spec.params.number)
+	// Every request gets a new checkout. The previous review and its scratch
+	// files remain available for the later Abandon operation.
+	reviewID, err := randomHex(16)
+	if err != nil {
+		return fail("review id failed", err, "failed to prepare the PR review worktree")
+	}
+	target, err := localworkspace.PRReviewWorktreePath(spec.wsPath, spec.repoName, spec.params.number, reviewID)
 	if err != nil {
 		return fail("worktree path failed", err, "failed to resolve the PR review worktree path")
 	}

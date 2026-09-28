@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
+	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
 // Repo is the local filesystem view of a workspace repository.
@@ -68,9 +68,9 @@ func TaskRunWorktreePath(workspacePath, repoName, taskRunID string) (string, err
 	return target, nil
 }
 
-// PRReviewWorktreePath returns the canonical isolated worktree path for a PR
-// review checkout.
-func PRReviewWorktreePath(workspacePath, repoName string, prNumber int) (string, error) {
+// PRReviewWorktreePath returns a fresh review checkout path under the PR's
+// directory. reviewID must be unique for each review attempt.
+func PRReviewWorktreePath(workspacePath, repoName string, prNumber int, reviewID string) (string, error) {
 	if strings.TrimSpace(workspacePath) == "" {
 		return "", fmt.Errorf("workspace path is empty")
 	}
@@ -80,11 +80,14 @@ func PRReviewWorktreePath(workspacePath, repoName string, prNumber int) (string,
 	if prNumber <= 0 {
 		return "", fmt.Errorf("pr number must be positive")
 	}
+	if strings.TrimSpace(reviewID) == "" || safePathSegment(reviewID) != reviewID {
+		return "", fmt.Errorf("invalid review id")
+	}
 	root, err := filepath.Abs(workspacePath)
 	if err != nil {
 		return "", err
 	}
-	target, err := filepath.Abs(filepath.Join(root, ".loom", "pr-worktrees", safePathSegment(repoName), fmt.Sprintf("pr-%d", prNumber)))
+	target, err := filepath.Abs(filepath.Join(root, ".loom", "pr-worktrees", safePathSegment(repoName), fmt.Sprintf("pr-%d", prNumber), reviewID))
 	if err != nil {
 		return "", err
 	}
@@ -169,11 +172,6 @@ func EnsureDetachedGitWorktreeFromBranch(repoPath, targetPath, remoteName, defau
 	return err
 }
 
-// prWorktreeLocks serializes EnsureDetachedGitWorktreeAtPRHead per target path
-// within a process, so a second concurrent call for the same PR can't tear down
-// (worktree remove --force) a checkout the first call is actively serving.
-var prWorktreeLocks sync.Map
-
 // PRHeadChangedError reports that the fetched PR tip no longer matches the
 // expected head. The target worktree is left untouched when this is returned.
 type PRHeadChangedError struct {
@@ -204,8 +202,9 @@ func validatePRWorktreeInputs(repoPath, targetPath, remoteName string, prNumber 
 	return remoteName, nil
 }
 
-// EnsureDetachedGitWorktreeAtPRHead creates or updates a detached git worktree
-// at targetPath when the fetched PR tip matches the expected head.
+// EnsureDetachedGitWorktreeAtPRHead creates a detached git worktree at a new
+// targetPath when the fetched PR tip matches the expected head. A file lock
+// serializes fetch and checkout across serve and daemon processes.
 func EnsureDetachedGitWorktreeAtPRHead(
 	ctx context.Context,
 	repoPath, targetPath, remoteName string,
@@ -217,10 +216,12 @@ func EnsureDetachedGitWorktreeAtPRHead(
 		return "", err
 	}
 
-	lockAny, _ := prWorktreeLocks.LoadOrStore(targetPath, &sync.Mutex{})
-	lock := lockAny.(*sync.Mutex)
-	lock.Lock()
-	defer lock.Unlock()
+	lock, err := lockPRReviewWorktree(targetPath)
+	if err != nil {
+		return "", err
+	}
+	defer lock.Close()
+	defer func() { _ = lockfile.FlockUnlock(lock) }()
 
 	checkoutRef := fmt.Sprintf("refs/loom/pr/%d/head", prNumber)
 	fetchRef := fmt.Sprintf("+refs/pull/%d/head:%s", prNumber, checkoutRef)
@@ -240,63 +241,36 @@ func EnsureDetachedGitWorktreeAtPRHead(
 		return tipSHA, &PRHeadChangedError{ExpectedSHA: expectedSHA, TipSHA: tipSHA}
 	}
 
-	return syncPRWorktree(ctx, repoPath, targetPath, checkoutRef, tipSHA)
+	if _, err := os.Lstat(targetPath); err == nil {
+		return "", fmt.Errorf("PR review worktree path already exists: %s", targetPath)
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("inspect PR review worktree path: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return "", fmt.Errorf("create PR review worktree parent: %w", err)
+	}
+	if _, err := runGit(ctx, repoPath, "worktree", "add", "--detach", targetPath, tipSHA); err != nil {
+		// The target was absent before add, so only this attempt can own it.
+		_ = os.RemoveAll(targetPath)
+		return "", fmt.Errorf("add PR review worktree at %s: %w", targetPath, err)
+	}
+	return tipSHA, nil
 }
 
-// syncPRWorktree materializes checkout at targetPath: create when absent,
-// cache-hit when already there and pristine, else scrub back to the exact
-// sha (reset+clean), recreating the worktree when even that fails.
-func syncPRWorktree(ctx context.Context, repoPath, targetPath, checkout, expectHEAD string) (string, error) {
-	addWorktree := func() error {
-		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-			return fmt.Errorf("creating PR worktree parent: %w", err)
-		}
-		out, err := runGit(ctx, repoPath, "worktree", "add", "--detach", targetPath, checkout)
-		if err == nil {
-			return nil
-		}
-		if !branchAlreadyExists(out, err) {
-			return fmt.Errorf("add PR worktree at %s: %w", targetPath, err)
-		}
-		_, _ = runGit(ctx, repoPath, "worktree", "remove", "--force", targetPath)
-		if _, err := runGit(ctx, repoPath, "worktree", "add", "--detach", targetPath, checkout); err != nil {
-			return fmt.Errorf("add PR worktree at %s after removing stale registration: %w", targetPath, err)
-		}
-		return nil
+func lockPRReviewWorktree(targetPath string) (*os.File, error) {
+	lockPath := filepath.Dir(targetPath) + ".lock"
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		return nil, fmt.Errorf("create PR review lock parent: %w", err)
 	}
-
-	if _, err := os.Stat(filepath.Join(targetPath, ".git")); err != nil {
-		if !os.IsNotExist(err) {
-			return "", fmt.Errorf("stat PR worktree git dir: %w", err)
-		}
-		if err := addWorktree(); err != nil {
-			return "", err
-		}
-		return expectHEAD, nil
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // G304: opens a lock, not file content; path belongs to this review checkout.
+	if err != nil {
+		return nil, fmt.Errorf("open PR review lock: %w", err)
 	}
-
-	// Cache hit only when the worktree is at the target sha AND pristine — a
-	// review checkout must faithfully match the PR head, so drift left by a
-	// prior session (untracked/modified files, interrupted clean) is scrubbed
-	// via the reset+clean path rather than handed back dirty.
-	head, _ := runGit(ctx, targetPath, "rev-parse", "HEAD")
-	if strings.TrimSpace(head) == expectHEAD {
-		if status, err := runGit(ctx, targetPath, "status", "--porcelain"); err == nil && strings.TrimSpace(status) == "" {
-			return expectHEAD, nil
-		}
+	if err := lockfile.FlockExclusiveBlocking(lock); err != nil {
+		_ = lock.Close()
+		return nil, fmt.Errorf("lock PR review: %w", err)
 	}
-
-	if _, err := runGit(ctx, targetPath, "reset", "--hard", checkout); err != nil {
-		_, _ = runGit(ctx, repoPath, "worktree", "remove", "--force", targetPath)
-		if err := addWorktree(); err != nil {
-			return "", fmt.Errorf("recreate PR worktree at %s after reset failure: %w", targetPath, err)
-		}
-		return expectHEAD, nil
-	}
-	if _, err := runGit(ctx, targetPath, "clean", "-fdx"); err != nil {
-		return "", fmt.Errorf("clean PR worktree at %s: %w", targetPath, err)
-	}
-	return expectHEAD, nil
+	return lock, nil
 }
 
 // EnsureGitWorktreeFromBranch creates a git worktree at targetPath. When
