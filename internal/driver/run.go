@@ -667,8 +667,8 @@ func ApplyPatchBack(ctx context.Context, opts PatchBackOptions) (*PatchBackResul
 	return result, nil
 }
 
-// CommitWorktree commits the ALREADY-STAGED changes in worktreePath with a fixed loom
-// identity. The daemon TS leaf calls this after ApplyPatchBack{Index:true} (which staged
+// CommitWorktree commits the ALREADY-STAGED changes in worktreePath using the
+// user's Git identity. The daemon TS leaf calls this after ApplyPatchBack{Index:true} (which staged
 // exactly the agent's patched files) so the change lands on the worktree HEAD and the
 // session finalize's `git diff beforeRef..HEAD` captures it — the Go leaf gets the same
 // effect from the agent committing in place. It intentionally does NOT `git add -A`, so
@@ -677,10 +677,29 @@ func CommitWorktree(ctx context.Context, worktreePath, message string) error {
 	if strings.TrimSpace(worktreePath) == "" {
 		return fmt.Errorf("worktree path required: %w", domain.ErrInvalid)
 	}
-	if _, err := gitOutput(ctx, worktreePath, nil, "-c", "user.name=loom", "-c", "user.email=loom@local", "commit", "-m", message); err != nil {
+	if _, err := gitCommitWithUserIdentity(ctx, worktreePath, message); err != nil {
 		return fmt.Errorf("git commit: %w", err)
 	}
 	return nil
+}
+
+func gitCommitWithUserIdentity(ctx context.Context, dir, message string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "commit", "-m", message) //nolint:gosec // Fixed Git command; message is an argv value.
+	cmd.Dir = dir
+	for _, item := range os.Environ() {
+		key, _, _ := strings.Cut(item, "=")
+		switch key {
+		case "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL":
+		default:
+			cmd.Env = append(cmd.Env, item)
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return stdout.String(), fmt.Errorf("%s: %w", strings.TrimSpace(stderr.String()), err)
+	}
+	return stdout.String(), nil
 }
 
 func gitOutput(ctx context.Context, dir string, stdin []byte, args ...string) (string, error) {

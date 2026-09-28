@@ -42,10 +42,10 @@ func TestRunWorkspaceSync_MultipleWorkspaces(t *testing.T) {
 	// OutputCommandMock for pull phase of both workspaces
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "origin/main", "-m", "Pull from main"}, Err: nil},
 		{Args: []string{"push", "origin", "dev-branch"}, Err: nil},
 		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "origin/main", "-m", "Pull from main"}, Err: nil},
 		{Args: []string{"push", "origin", "dev-branch"}, Err: nil},
 	})
 	outputMock.Install()
@@ -98,7 +98,7 @@ func TestRunWorkspaceSync_SpecificWorkspaceFlag(t *testing.T) {
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "origin/main", "-m", "Pull from main"}, Err: nil},
 		{Args: []string{"push", "origin", "feature-a"}, Err: nil},
 	})
 	outputMock.Install()
@@ -189,7 +189,7 @@ func TestRunFullSync_DispatchesToWorkspaceMode(t *testing.T) {
 	// Workspace pull: fetch, merge, push
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "origin/main", "-m", "Pull from main"}, Err: nil},
 		{Args: []string{"push", "origin", "api-branch"}, Err: nil},
 	})
 	outputMock.Install()

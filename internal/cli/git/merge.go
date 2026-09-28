@@ -83,7 +83,7 @@ func mergeSource(repoPath, sourceBranch, targetBranch string) (conflicts []strin
 
 // mergeSourceDeps is the deps-aware variant of mergeSource.
 func mergeSourceDeps(deps *cli.Deps, repoPath, sourceBranch, targetBranch string) (conflicts []string, err error) {
-	mergeMsg := fmt.Sprintf("Merge %s into %s\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", sourceBranch, targetBranch)
+	mergeMsg := fmt.Sprintf("Merge %s into %s", sourceBranch, targetBranch)
 	if err := gitMerge(deps, repoPath, sourceBranch, mergeMsg); err != nil {
 		conflicts, conflictErr := getConflictedFilesDeps(deps, repoPath)
 		if conflictErr != nil || len(conflicts) == 0 {

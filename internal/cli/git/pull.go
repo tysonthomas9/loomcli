@@ -253,7 +253,7 @@ func pullRepoWorktree(deps *cli.Deps, repoPath, currentBranch, sourceBranch, rem
 	}
 
 	// Attempt merge
-	mergeMsg := fmt.Sprintf("Pull from %s\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", sourceBranch)
+	mergeMsg := fmt.Sprintf("Pull from %s", sourceBranch)
 	if err := gitMergeRemote(deps, repoPath, remote, sourceBranch, mergeMsg); err != nil {
 		// Check for conflicts
 		conflicts, conflictErr := getConflictedFilesDeps(deps, repoPath)

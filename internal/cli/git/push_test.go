@@ -135,7 +135,7 @@ func TestPushWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "-m", "Merge feat-a into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feat-a"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feat-a into main", "--", "feat-a"}, Err: nil},
 		{Args: []string{"push", "origin", "main"}, Err: nil},
 		{Args: []string{"checkout", "feat-a"}, Err: nil}, // branch restore defer
 		// repo-b: fetch, stash, checkout, pull, merge, push, restore
@@ -143,7 +143,7 @@ func TestPushWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "-m", "Merge feat-b into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feat-b"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feat-b into main", "--", "feat-b"}, Err: nil},
 		{Args: []string{"push", "origin", "main"}, Err: nil},
 		{Args: []string{"checkout", "feat-b"}, Err: nil}, // branch restore defer
 	}
@@ -200,7 +200,7 @@ func TestPushWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "develop"}, Err: nil},
 		{Args: []string{"pull", "origin", "develop"}, Err: nil},
-		{Args: []string{"merge", "-m", "Merge feat-a into develop\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feat-a"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feat-a into develop", "--", "feat-a"}, Err: nil},
 		{Args: []string{"push", "origin", "develop"}, Err: nil},
 		{Args: []string{"checkout", "feat-a"}, Err: nil}, // branch restore defer
 		// repo-b pushes into "staging"
@@ -208,7 +208,7 @@ func TestPushWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "staging"}, Err: nil},
 		{Args: []string{"pull", "origin", "staging"}, Err: nil},
-		{Args: []string{"merge", "-m", "Merge feat-b into staging\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feat-b"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feat-b into staging", "--", "feat-b"}, Err: nil},
 		{Args: []string{"push", "origin", "staging"}, Err: nil},
 		{Args: []string{"checkout", "feat-b"}, Err: nil}, // branch restore defer
 	}
@@ -257,7 +257,7 @@ func TestPushWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "release"}, Err: nil},
 		{Args: []string{"pull", "origin", "release"}, Err: nil},
-		{Args: []string{"merge", "-m", "Merge feat-a into release\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feat-a"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feat-a into release", "--", "feat-a"}, Err: nil},
 		{Args: []string{"push", "origin", "release"}, Err: nil},
 		{Args: []string{"checkout", "feat-a"}, Err: nil}, // branch restore defer
 	}
@@ -300,7 +300,7 @@ func TestPushWorkspaceWorktrees_CustomRemote(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "upstream", "main"}, Err: nil},
-		{Args: []string{"merge", "-m", "Merge feat-a into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feat-a"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feat-a into main", "--", "feat-a"}, Err: nil},
 		{Args: []string{"push", "upstream", "main"}, Err: nil},
 		{Args: []string{"checkout", "feat-a"}, Err: nil}, // branch restore defer
 	}
@@ -350,7 +350,7 @@ func TestPushWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "-m", "Merge feat-b into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feat-b"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feat-b into main", "--", "feat-b"}, Err: nil},
 		{Args: []string{"push", "origin", "main"}, Err: nil},
 		{Args: []string{"checkout", "feat-b"}, Err: nil}, // branch restore defer
 	}
@@ -385,7 +385,7 @@ func TestPushBranchInRepo_DirtyWorkingTree_StashesAndPops(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "-m", "Merge feature into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feature into main", "--", "feature"}, Err: nil},
 		{Args: []string{"push", "origin", "main"}, Err: nil},
 		{Args: []string{"checkout", "feature"}, Err: nil}, // branch restore defer (runs first, LIFO)
 		{Args: []string{"stash", "pop"}, Err: nil},        // stash pop (runs second, LIFO)
@@ -458,7 +458,7 @@ func TestPushBranchInRepo_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "-m", "Merge feature into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feature into main", "--", "feature"}, Err: nil},
 		{Args: []string{"push", "origin", "main"}, Err: nil},
 		{Args: []string{"checkout", "feature"}, Err: nil},             // branch restore defer (runs first, LIFO)
 		{Args: []string{"stash", "pop"}, Err: errors.New("conflict")}, // stash pop (runs second, LIFO)
@@ -499,7 +499,7 @@ func TestPushBranchInRepo_CleanWorkingTree_NoStash(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil}, // git stash runs but is no-op
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "-m", "Merge feature into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feature into main", "--", "feature"}, Err: nil},
 		{Args: []string{"push", "origin", "main"}, Err: nil},
 		{Args: []string{"checkout", "feature"}, Err: nil}, // branch restore defer
 	}

@@ -181,7 +181,7 @@ func PullRepoWorktreeResult(repoPath, currentBranch, sourceBranch, remote string
 		return nil, fmt.Errorf("fetching: %v", err)
 	}
 
-	mergeMsg := fmt.Sprintf("Pull from %s\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", sourceBranch)
+	mergeMsg := fmt.Sprintf("Pull from %s", sourceBranch)
 	if err := GitMergeRemote(repoPath, remote, sourceBranch, mergeMsg); err != nil {
 		conflicts, conflictErr := GetConflictedFiles(repoPath)
 		if conflictErr != nil || len(conflicts) == 0 {
