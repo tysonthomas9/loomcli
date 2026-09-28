@@ -1,0 +1,110 @@
+name: Formal model (daemon attempt)
+
+# Model-checks test/formal/daemon-attempt with TLC via
+# scripts/check-daemon-attempt-model.sh (pinned tla2tools v1.7.4, SHA-256
+# checked by the script).
+#
+# What this proves: the model is internally consistent. Every "pass" config
+# explores its finite state space with no violation, and every "fail" config
+# (mutation or vacuity probe) produces a counterexample for its named
+# invariant. It does NOT test Loom or FleetDB code; runtime conformance is
+# covered by the Go and contract tests, not by this workflow.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'test/formal/**'
+      - 'scripts/check-daemon-attempt-model.sh'
+      - '.github/workflows/formal-daemon-attempt.yml'
+  schedule:
+    # 03:30 UTC daily. GitHub runs schedules only from the default branch.
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: formal-daemon-attempt-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  LOOM_TLA_CACHE: ${{ github.workspace }}/.tla-cache
+
+jobs:
+  pr-gate:
+    name: TLC expected failures + a_pass_faults
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java (Temurin 21)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache tla2tools.jar
+        uses: actions/cache@v4
+        with:
+          path: .tla-cache
+          key: tla2tools-v1.7.4-936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88
+
+      - name: Model-check (every fail config by named invariant, plus a_pass_faults)
+        env:
+          LOOM_TLA_SCRATCH: ${{ runner.temp }}/loom-tla-daemon-attempt
+        run: scripts/check-daemon-attempt-model.sh --pr
+
+      - name: Upload TLC logs and counterexamples
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tlc-daemon-attempt-pr
+          path: ${{ runner.temp }}/loom-tla-daemon-attempt/*.log
+          retention-days: 14
+
+  nightly-full:
+    name: TLC full suite
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java (Temurin 21)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache tla2tools.jar
+        uses: actions/cache@v4
+        with:
+          path: .tla-cache
+          key: tla2tools-v1.7.4-936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88
+
+      - name: Free space before the run
+        run: df -h "$RUNNER_TEMP"
+
+      # The script's disk guard applies: it refuses to start a config below
+      # LOOM_TLA_MIN_FREE_MB free and stops any run whose scratch exceeds
+      # LOOM_TLA_CAP_MB. A capped run fails the job. The largest pass configs
+      # peaked near 1 GB of scratch locally, so the cap is raised above the
+      # script default to avoid false CAPPED results.
+      - name: Model-check (all configs)
+        env:
+          LOOM_TLA_SCRATCH: ${{ runner.temp }}/loom-tla-daemon-attempt
+          LOOM_TLA_MIN_FREE_MB: '4096'
+          LOOM_TLA_CAP_MB: '3072'
+        run: scripts/check-daemon-attempt-model.sh
+
+      - name: Upload TLC logs and counterexamples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tlc-daemon-attempt-full
+          path: ${{ runner.temp }}/loom-tla-daemon-attempt/*.log
+          retention-days: 14
