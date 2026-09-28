@@ -91,10 +91,14 @@ jobs:
 
       # The script's disk guard applies: it refuses to start a config below
       # LOOM_TLA_MIN_FREE_MB free and stops any run whose scratch exceeds
-      # LOOM_TLA_CAP_MB (defaults 2048 / 1024). A capped run fails the job.
+      # LOOM_TLA_CAP_MB. A capped run fails the job. The largest pass configs
+      # peaked near 1 GB of scratch locally, so the cap is raised above the
+      # script default to avoid false CAPPED results.
       - name: Model-check (all configs)
         env:
           LOOM_TLA_SCRATCH: ${{ runner.temp }}/loom-tla-daemon-attempt
+          LOOM_TLA_MIN_FREE_MB: '4096'
+          LOOM_TLA_CAP_MB: '3072'
         run: scripts/check-daemon-attempt-model.sh
 
       - name: Upload TLC logs and counterexamples
