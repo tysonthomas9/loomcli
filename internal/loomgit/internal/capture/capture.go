@@ -110,7 +110,7 @@ func fileSize(path string) (int64, error) {
 	return size, err
 }
 
-func classifyPath(repo, path string, total int64, tracked, changed, ignored bool) (Entry, bool) {
+func classifyPath(repo, path string, total int64, tracked, ignored bool) (Entry, bool) {
 	entry := Entry{Path: path, Class: Captured}
 	info, statErr := os.Lstat(filepath.Join(repo, filepath.FromSlash(path)))
 	if statErr == nil {
@@ -121,9 +121,6 @@ func classifyPath(repo, path string, total int64, tracked, changed, ignored bool
 		entry.Class = Listed
 	case !tracked && SecretPath(path):
 		entry.Class = SecretSuspect
-	case !changed:
-		// HEAD already contains this blob. It needs no staging or size budget.
-		return entry, false
 	case statErr != nil && !errors.Is(statErr, os.ErrNotExist):
 		entry.Class, entry.Reason = Incomplete, statErr.Error()
 	case errors.Is(statErr, os.ErrNotExist) && !tracked:
@@ -243,7 +240,11 @@ func scanWorkingTree(ctx context.Context, runner *gitexec.Runner, repo string, e
 			continue
 		}
 		seen[path] = true
-		entry, stage := classifyPath(repo, path, total, trackedSet[path], changedSet[path] || !trackedSet[path], ignoredSet[path])
+		if trackedSet[path] && !changedSet[path] {
+			// HEAD already contains this blob; the manifest records only work to capture.
+			continue
+		}
+		entry, stage := classifyPath(repo, path, total, trackedSet[path], ignoredSet[path])
 		if stage {
 			toStage = append(toStage, path)
 			total += entry.Size

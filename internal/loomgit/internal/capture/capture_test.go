@@ -178,8 +178,11 @@ func TestTrackedSecretRemainsInCaptureTree(t *testing.T) {
 	must(t, r, "commit", "-qm", "legacy secret")
 	write(t, dir, "base.txt", "edited")
 	result := capture(t, dir, r)
-	if result.CaptureSHA == "" || !result.Manifest.Complete || classes(result.Manifest.Entries)["credentials.json"].Class != Captured {
+	if result.CaptureSHA == "" || !result.Manifest.Complete {
 		t.Fatalf("tracked secret result: %+v", result)
+	}
+	if _, listed := classes(result.Manifest.Entries)["credentials.json"]; listed {
+		t.Fatal("unchanged tracked secret listed in manifest")
 	}
 	if got := must(t, r, "ls-tree", "-r", "--name-only", result.CaptureSHA); !strings.Contains(got, "credentials.json") {
 		t.Fatalf("tracked path missing from capture tree: %s", got)
@@ -193,8 +196,11 @@ func TestPreviouslyTrackedIgnoredFileIsPreserved(t *testing.T) {
 	must(t, r, "commit", "-qm", "tracked output")
 	write(t, dir, ".gitignore", "generated.out\n")
 	result := capture(t, dir, r)
-	if !result.Manifest.Complete || classes(result.Manifest.Entries)["generated.out"].Class != Captured {
+	if !result.Manifest.Complete {
 		t.Fatalf("ignored tracked file: %+v", result.Manifest)
+	}
+	if _, listed := classes(result.Manifest.Entries)["generated.out"]; listed {
+		t.Fatal("unchanged tracked ignored file listed in manifest")
 	}
 	if got := must(t, r, "ls-tree", "-r", "--name-only", result.CaptureSHA); !strings.Contains(got, "generated.out") {
 		t.Fatalf("tracked path missing from capture: %s", got)
@@ -272,6 +278,9 @@ func TestCaptureThreeThousandTrackedFilesUnderTenSeconds(t *testing.T) {
 	if !result.Manifest.Complete || result.CaptureSHA == "" {
 		t.Fatalf("capture result: %+v", result)
 	}
+	if got := result.Manifest.Entries; len(got) != 1 || got[0].Path != "src/file-0000.txt" || got[0].Class != Captured {
+		t.Fatalf("manifest should contain only changed file, got %d entries: %+v", len(got), got)
+	}
 }
 
 func TestCaptureRecordsSizeAndPermissionFailures(t *testing.T) {
@@ -302,6 +311,9 @@ func TestCaptureCleanTreeMakesNoCommit(t *testing.T) {
 	result := capture(t, dir, r)
 	if result.CaptureSHA != "" || !result.Manifest.Complete {
 		t.Fatalf("clean result: %+v", result)
+	}
+	if len(result.Manifest.Entries) != 0 {
+		t.Fatalf("clean tree listed %d unchanged files: %+v", len(result.Manifest.Entries), result.Manifest.Entries)
 	}
 }
 
