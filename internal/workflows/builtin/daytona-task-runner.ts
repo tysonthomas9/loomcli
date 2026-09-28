@@ -103,20 +103,8 @@ export async function run(ctx = {}) {
 
     const task = taskContext.task;
     const delivery = deliveryPlan(request, task, taskRunId);
-    let githubToken = "";
-    try {
-      githubToken = await readRuntimeCredential(taskContext.client, "github");
-    } catch (error) {
-      if (delivery.openPullRequest) {
-        return failed("github_credentials_missing", errorMessage(error), taskRunId, request, logs);
-      }
-      logs.push("warning: GitHub credential lookup failed; cloning without GitHub credential: " + errorMessage(error));
-    }
-    if (delivery.openPullRequest && !githubToken) {
-      return failed("github_credentials_missing", "saved GitHub credential is required for pull request mode", taskRunId, request, logs);
-    }
-    if (githubToken) {
-      secrets.push(githubToken);
+    if (delivery.openPullRequest) {
+      return failed("host_publish_required", "pull request delivery requires host-side publishing", taskRunId, request, logs);
     }
 
     const sdk = imports.daytona;
@@ -158,7 +146,7 @@ export async function run(ctx = {}) {
       name: "daytona-setup",
     });
 
-    const clone = await setup.shell(cloneCommand(repoUrl, repoDir, delivery.baseBranch, githubToken), {
+    const clone = await setup.shell(cloneCommand(repoUrl, repoDir, delivery.baseBranch), {
       timeout: numberValue(process.env.DAYTONA_CLONE_TIMEOUT_SECONDS, 180),
     });
     logs.push(commandLog(delivery.baseBranch ? "git clone " + delivery.baseBranch : "git clone", clone));
@@ -217,31 +205,8 @@ export async function run(ctx = {}) {
       diff: redact(diff.stdout || "", secrets),
       diffStat: redact(diffStat.stdout || "", secrets),
     }, logs);
-    const published = delivery.openPullRequest
-      ? await publishPullRequest(setup, {
-          task,
-          taskId,
-          taskRunId,
-          repoUrl,
-          repoDir,
-          baseBranch: delivery.baseBranch,
-          branch: delivery.branch,
-          githubToken,
-          secrets,
-          logs,
-        })
-      : null;
-    const prArtifact = published
-      ? await uploadPullRequestArtifact(taskContext.client, {
-          taskRunId,
-          taskId,
-          repoUrl,
-          baseBranch: delivery.baseBranch,
-          branch: delivery.branch,
-          pullRequest: published.pullRequest,
-          commitSha: published.commitSha,
-        }, logs)
-      : null;
+    const published = null;
+    const prArtifact = null;
     const transcriptEntries = redactTranscriptEntries(transcriptCollector.entries, secrets);
     const transcriptJSONL = serializeTranscriptJSONL(transcriptEntries);
     const usage = flueUsageToTaskUsage(response && response.usage, { costUnit: "usd" });
@@ -579,8 +544,6 @@ async function readRuntimeCredential(client, provider) {
 function readRuntimeCredentialFile(provider) {
   const fileEnv = provider === "daytona"
     ? process.env.DAYTONA_CREDENTIAL_FILE
-    : provider === "github"
-      ? process.env.GITHUB_TOKEN_FILE
       : "";
   const filePath = stringValue(fileEnv);
   if (!filePath) {
@@ -789,176 +752,23 @@ async function uploadPullRequestArtifact(client, input, logs) {
   return artifact;
 }
 
-async function publishPullRequest(setup, input) {
-  const status = await setup.shell("git -C " + shellQuote(input.repoDir) + " status --short", { timeout: 30 });
-  input.logs.push(commandLog("git status before publish", status));
-  if (status.exitCode !== 0) {
-    throw new Error("git status failed before publishing PR: " + textTail(status.stdout + status.stderr));
+export function cloneCommand(repoUrl, repoDir, branch) {
+  if (/^https?:\/\//i.test(repoUrl)) {
+    const parsed = new URL(repoUrl);
+    if (parsed.username || parsed.password) {
+      throw new Error("repository URL must not contain credentials");
+    }
   }
-  if (!status.stdout.trim()) {
-    throw new Error("slack-pr-chain mode expected repository changes, but the Codex run left the worktree clean");
-  }
-
-  const authorName = stringValue(process.env.DAYTONA_GIT_AUTHOR_NAME) || "Loom Daytona Runner";
-  const authorEmail = stringValue(process.env.DAYTONA_GIT_AUTHOR_EMAIL) || "loom-daytona@example.test";
-  const config = await setup.shell(
-    "git -C " + shellQuote(input.repoDir) + " config user.name " + shellQuote(authorName) +
-      " && git -C " + shellQuote(input.repoDir) + " config user.email " + shellQuote(authorEmail),
-    { timeout: 30 },
-  );
-  input.logs.push(commandLog("git config author", config));
-  if (config.exitCode !== 0) {
-    throw new Error("git author configuration failed: " + textTail(config.stdout + config.stderr));
-  }
-
-  const add = await setup.shell("git -C " + shellQuote(input.repoDir) + " add -A", { timeout: 30 });
-  input.logs.push(commandLog("git add", add));
-  if (add.exitCode !== 0) {
-    throw new Error("git add failed: " + textTail(add.stdout + add.stderr));
-  }
-
-  const commitMessage = input.taskId + ": " + taskTitle(input.task);
-  const commit = await setup.shell(
-    "git -C " + shellQuote(input.repoDir) + " commit -m " + shellQuote(commitMessage),
-    { timeout: numberValue(process.env.DAYTONA_COMMIT_TIMEOUT_SECONDS, 60) },
-  );
-  input.logs.push(commandLog("git commit", commit));
-  if (commit.exitCode !== 0) {
-    throw new Error("git commit failed: " + textTail(commit.stdout + commit.stderr));
-  }
-
-  const sha = await setup.shell("git -C " + shellQuote(input.repoDir) + " rev-parse HEAD", { timeout: 30 });
-  if (sha.exitCode !== 0 || !sha.stdout.trim()) {
-    throw new Error("git rev-parse failed after commit: " + textTail(sha.stdout + sha.stderr));
-  }
-  const commitSha = sha.stdout.trim();
-
-  const push = await setup.shell(
-    gitWithGitHubAuth(input.githubToken) + " -C " + shellQuote(input.repoDir) +
-      " push --force-with-lease origin HEAD:refs/heads/" + shellQuote(input.branch),
-    { timeout: numberValue(process.env.DAYTONA_PUSH_TIMEOUT_SECONDS, 180) },
-  );
-  input.logs.push(commandLog("git push " + input.branch, push));
-  if (push.exitCode !== 0) {
-    throw new Error("git push failed: " + textTail(push.stdout + push.stderr));
-  }
-
-  const repo = parseGitHubRepo(input.repoUrl);
-  if (!repo) {
-    throw new Error("DAYTONA_REPO_URL is not a github.com repository URL: " + input.repoUrl);
-  }
-  const pullRequest = await createOrFindPullRequest({
-    token: input.githubToken,
-    owner: repo.owner,
-    repo: repo.repo,
-    title: commitMessage,
-    body: pullRequestBody(input, commitSha),
-    head: input.branch,
-    base: input.baseBranch,
-    draft: booleanValue(defaultValue(process.env.DAYTONA_PR_DRAFT, "1")),
-  });
-  input.logs.push("opened GitHub PR " + pullRequest.html_url);
-  return { commitSha, pullRequest };
-}
-
-async function createOrFindPullRequest(input) {
-  const created = await githubFetch(input.token, "POST", "/repos/" + input.owner + "/" + input.repo + "/pulls", {
-    title: input.title,
-    head: input.head,
-    base: input.base,
-    body: input.body,
-    draft: input.draft,
-  });
-  if (created.ok) {
-    return created.json;
-  }
-  if (created.status !== 422) {
-    throw new Error("GitHub PR create failed (" + created.status + "): " + textTail(created.text));
-  }
-  const head = input.owner + ":" + input.head;
-  const query = new URLSearchParams({ state: "open", head, base: input.base });
-  const existing = await githubFetch(input.token, "GET", "/repos/" + input.owner + "/" + input.repo + "/pulls?" + query.toString());
-  if (!existing.ok) {
-    throw new Error("GitHub PR lookup failed after create conflict (" + existing.status + "): " + textTail(existing.text));
-  }
-  const match = Array.isArray(existing.json) ? existing.json[0] : null;
-  if (!match) {
-    throw new Error("GitHub PR create returned 422 and no open PR matched head " + head + " base " + input.base);
-  }
-  return match;
-}
-
-async function githubFetch(token, method, path, body) {
-  const response = await fetch("https://api.github.com" + path, {
-    method,
-    headers: {
-      "Accept": "application/vnd.github+json",
-      "Authorization": "Bearer " + token,
-      "Content-Type": "application/json",
-      "X-GitHub-Api-Version": "2022-11-28",
-      "User-Agent": "loom-daytona-task-runner",
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await response.text();
-  let json = null;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    json = null;
-  }
-  return { ok: response.ok, status: response.status, text, json };
-}
-
-function pullRequestBody(input, commitSha) {
-  return [
-    "Created by the Loom Daytona task runner.",
-    "",
-    "- Task: `" + input.taskId + "`",
-    "- Task run: `" + input.taskRunId + "`",
-    "- Base branch: `" + input.baseBranch + "`",
-    "- Head branch: `" + input.branch + "`",
-    "- Commit: `" + commitSha + "`",
-    "",
-    "The Loom task run stores the transcript, patch artifact, and PR metadata artifact.",
-  ].join("\n");
-}
-
-function taskTitle(task) {
-  return stringValue(task && task.title) || "Loom task";
-}
-
-function parseGitHubRepo(repoUrl) {
-  const text = stringValue(repoUrl).replace(/\.git$/, "");
-  let match = text.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)$/);
-  if (!match) {
-    match = text.match(/^git@github\.com:([^/]+)\/([^/]+)$/);
-  }
-  if (!match) {
-    return null;
-  }
-  return { owner: match[1], repo: match[2] };
-}
-
-export function cloneCommand(repoUrl, repoDir, branch, githubToken) {
   // Full clone (NOT --depth 1): a stacked task bases on its predecessor's branch,
   // and the PR diff + the post-drain reconcile's merge-base checks need the real
   // base SHA and history, which a shallow tip does not provide.
   const parts = [
     "rm -rf " + shellQuote(repoDir),
-    gitWithGitHubAuth(githubToken) + " clone" +
+    "git clone" +
       (branch ? " --branch " + shellQuote(branch) : "") +
       " " + shellQuote(repoUrl) + " " + shellQuote(repoDir),
   ];
   return parts.join(" && ");
-}
-
-function gitWithGitHubAuth(token) {
-  if (!token) {
-    return "git";
-  }
-  const encoded = Buffer.from("x-access-token:" + token, "utf8").toString("base64");
-  return "git -c " + shellQuote("http.https://github.com/.extraheader=AUTHORIZATION: basic " + encoded);
 }
 
 function buildPrompt(request, task, repoDir) {

@@ -41,7 +41,7 @@ func TestTaskRunnerEnvAPIBaseURL(t *testing.T) {
 	}
 }
 
-func TestLocalTaskRunnerSettingsDoNotOverrideInheritedGitHubToken(t *testing.T) {
+func TestLocalTaskRunnerSettingsNeverExportGitHubToken(t *testing.T) {
 	settingsDir := t.TempDir()
 	credential, err := runtimesettings.SealRuntimeCredential(settingsDir, runtimesettings.RuntimeCredentialProviderGitHub, "settings-token", time.Now())
 	if err != nil {
@@ -58,22 +58,18 @@ func TestLocalTaskRunnerSettingsDoNotOverrideInheritedGitHubToken(t *testing.T) 
 	req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
 	executor := HostBridgeTaskExecutor{WorktreePath: "/wt", LocalSettingsDir: settingsDir}
 
-	env := executor.taskRunnerEnv(req, "{}", []string{"PATH=/bin", "GITHUB_TOKEN=host-token"})
-	if envContains(env, "GITHUB_TOKEN=settings-token") {
-		t.Fatalf("settings GitHub token overrode inherited GITHUB_TOKEN: %v", env)
-	}
+	env := executor.taskRunnerEnv(req, "{}")
 	if !envContains(env, "LOOM_OPENCODE_MODEL=opencode/model") {
 		t.Fatalf("non-secret local task runner setting was not exported: %v", env)
 	}
 
-	env = executor.taskRunnerEnv(req, "{}", []string{"PATH=/bin", "GH_TOKEN=host-token"})
-	if envContains(env, "GITHUB_TOKEN=settings-token") {
-		t.Fatalf("settings GitHub token overrode inherited GH_TOKEN: %v", env)
-	}
-
-	env = executor.taskRunnerEnv(req, "{}", []string{"PATH=/bin"})
-	if !envContains(env, "GITHUB_TOKEN=settings-token") {
-		t.Fatalf("settings GitHub token was not exported when inherited env had no GitHub token: %v", env)
+	for _, inherited := range [][]string{{"GH_TOKEN=host-token"}, {"PATH=/bin"}} {
+		env = append(taskRunnerBaseEnvForRequest(req, inherited), executor.taskRunnerEnv(req, "{}")...)
+		for _, entry := range env {
+			if strings.HasPrefix(entry, "GITHUB_TOKEN=") || strings.HasPrefix(entry, "GH_TOKEN=") || strings.HasPrefix(entry, "LOOM_PR_GIT_PASSWORD=") {
+				t.Fatalf("task runner received GitHub credential: %s", entry)
+			}
+		}
 	}
 }
 

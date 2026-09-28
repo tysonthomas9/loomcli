@@ -10,6 +10,35 @@ import (
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
+func TestBuildCommandOmitsGitHubCredentials(t *testing.T) {
+	for name, value := range map[string]string{
+		"GITHUB_TOKEN": "github-fixture", "GH_TOKEN": "gh-fixture",
+		"GITHUB_TOKEN_FILE": "/tmp/github-fixture", "LOOM_PR_GIT_PASSWORD": "password-fixture",
+	} {
+		t.Setenv(name, value)
+	}
+	s := &Supervisor{ConfigSnapshot: func() *cfgpkg.DaemonConfig {
+		return &cfgpkg.DaemonConfig{Daemon: cfgpkg.DaemonSettings{}}
+	}, ProjectDir: t.TempDir()}
+	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "worker", Role: "task"}, WorktreePath: t.TempDir()}
+	cmd, err := s.buildCommand(ap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range cmd.Env {
+		for _, name := range []string{"GITHUB_TOKEN=", "GH_TOKEN=", "GITHUB_TOKEN_FILE=", "LOOM_PR_GIT_PASSWORD="} {
+			if strings.HasPrefix(entry, name) {
+				t.Fatalf("agent env contains %s", name)
+			}
+		}
+	}
+	for _, arg := range cmd.Args {
+		if strings.Contains(arg, "fixture") {
+			t.Fatalf("agent argv contains credential: %q", arg)
+		}
+	}
+}
+
 func TestAppendRoleEnv_MaxBudgetUSD(t *testing.T) {
 	t.Parallel()
 

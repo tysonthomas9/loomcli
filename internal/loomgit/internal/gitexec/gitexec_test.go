@@ -9,7 +9,63 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/cred"
 )
+
+func TestRunWithCredentialRefusesForeignURLBeforeConsumingToken(t *testing.T) {
+	r, _, _ := fixture(t)
+	source := cred.New("https://github.com/owner/repo.git", "secret")
+	_, err := r.RunWithCredential(context.Background(), source, "https://github.com/owner/other.git", "fetch", "https://github.com/owner/other.git")
+	if !errors.Is(err, cred.ErrRefused) {
+		t.Fatalf("foreign URL error = %v, want refusal", err)
+	}
+	_, err = r.RunWithCredential(context.Background(), source, "https://github.com/owner/repo.git", "fetch", "https://github.com/owner/other.git")
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("command with mismatched URL = %v, want forbidden", err)
+	}
+	if _, err := source.Take("https://github.com/owner/repo.git"); err != nil {
+		t.Fatalf("foreign attempts consumed token: %v", err)
+	}
+}
+
+func TestRunWithCredentialUsesHostAskpassWithoutTokenInArgv(t *testing.T) {
+	r, dir, _ := fixture(t)
+	bin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(bin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CAPTURE_ARGS\"\n\"$GIT_ASKPASS\" 'Username for repo:' > \"$CAPTURE_USER\"\n\"$GIT_ASKPASS\" 'Password for repo:' > \"$CAPTURE_PASSWORD\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	argsFile := filepath.Join(dir, "args")
+	userFile := filepath.Join(dir, "user")
+	passwordFile := filepath.Join(dir, "password")
+	t.Setenv("CAPTURE_ARGS", argsFile)
+	t.Setenv("CAPTURE_USER", userFile)
+	t.Setenv("CAPTURE_PASSWORD", passwordFile)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	url := "https://github.com/owner/repo.git"
+	if _, err := r.RunWithCredential(context.Background(), cred.New(url, "fixture-secret"), url, "fetch", url); err != nil {
+		t.Fatal(err)
+	}
+	args, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(args), "fixture-secret") {
+		t.Fatalf("token appeared in git argv: %s", args)
+	}
+	user, err := os.ReadFile(userFile)
+	if err != nil || string(user) != "x-access-token" {
+		t.Fatalf("askpass username = %q, %v", user, err)
+	}
+	password, err := os.ReadFile(passwordFile)
+	if err != nil || string(password) != "fixture-secret" {
+		t.Fatalf("askpass password = %q, %v", password, err)
+	}
+}
 
 func fixture(t *testing.T) (*Runner, string, string) {
 	t.Helper()

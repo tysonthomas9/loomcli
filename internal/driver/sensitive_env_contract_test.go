@@ -139,8 +139,8 @@ func TestSensitiveEnvContractNamesAreDroppedByStrictFilter(t *testing.T) {
 	}
 }
 
-// The local-runner widening is the one place provider credentials are admitted, and it
-// must admit exactly the contract's provider_credentials — no more.
+// The local runner admits backend credentials from the shared contract, while
+// GitHub credentials stay with the host publisher.
 func TestLocalTaskRunnerBaseEnvAdmitsExactlyTheContractCredentials(t *testing.T) {
 	c := loadSensitiveEnvContract(t)
 
@@ -158,14 +158,20 @@ func TestLocalTaskRunnerBaseEnvAdmitsExactlyTheContractCredentials(t *testing.T)
 	}
 
 	for _, name := range c.ProviderCredentials {
+		if name == "GITHUB_TOKEN" || name == "GH_TOKEN" {
+			if _, leaked := got[name]; leaked {
+				t.Errorf("localTaskRunnerBaseEnv forwarded GitHub credential %q", name)
+			}
+			continue
+		}
 		if _, ok := got[name]; !ok {
 			t.Errorf("localTaskRunnerBaseEnv dropped %q, which %s declares as a "+
 				"provider credential the local runner must inherit. To fix: %s",
 				name, sensitiveEnvContractPath, syncHint)
 		}
 	}
-	if len(got) != len(c.ProviderCredentials) {
-		t.Errorf("localTaskRunnerBaseEnv admitted %d names for %d contract credentials: %v",
-			len(got), len(c.ProviderCredentials), got)
+	if len(got) != len(c.ProviderCredentials)-2 {
+		t.Errorf("localTaskRunnerBaseEnv admitted %d names for %d permitted credentials: %v",
+			len(got), len(c.ProviderCredentials)-2, got)
 	}
 }

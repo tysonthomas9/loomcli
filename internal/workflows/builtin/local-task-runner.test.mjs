@@ -24,7 +24,22 @@ import {
 const FAKE_CLI = `#!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 const exit = Number(process.env.FAKE_EXIT_CODE || "0");
+if (process.env.FAKE_ENV_FILE) {
+  const credential = spawnSync("git", ["credential", "fill"], {
+    cwd: process.cwd(),
+    input: "protocol=https\\nhost=github.com\\n\\n",
+    encoding: "utf8",
+  });
+  const localConfig = spawnSync("git", ["config", "--local", "--get-regexp", "^credential\\\\."], { encoding: "utf8" });
+  const worktreeConfig = spawnSync("git", ["config", "--worktree", "--get-regexp", "^credential\\\\."], { encoding: "utf8" });
+  fs.writeFileSync(process.env.FAKE_ENV_FILE, JSON.stringify({
+    env: process.env, argv: process.argv,
+    credentialCode: credential.status, credentialOutput: credential.stdout,
+    localCredentialConfig: localConfig.stdout, worktreeCredentialConfig: worktreeConfig.stdout,
+  }));
+}
 // Write into the CLI's cwd (the worktree the runner executes in — the isolated
 // worktree when one is set up, the host worktree in the fallback path). A bare
 // FAKE_WRITE_FILE name is resolved against cwd; an absolute path is honored.
@@ -97,10 +112,12 @@ const ENV_KEYS = [
   "FAKE_STREAM_ERROR",
   "FAKE_STDIN_FILE",
   "FAKE_USAGE_TOKENS",
+  "FAKE_ENV_FILE",
   "FLEET_DB_URL",
   "LOOM_FLEET_DB_URL",
   "GITHUB_TOKEN",
   "GH_TOKEN",
+  "LOOM_PR_GIT_PASSWORD",
   "LOOM_TASK_RUN_STACKED",
   "LOOM_TASK_RUN_STACK_ID",
   "LOOM_TASK_RUN_OUTPUT_BRANCH",
@@ -873,10 +890,32 @@ describe("local-task-runner isolated worktree", () => {
 });
 
 describe("local-task-runner pull-request delivery gating", () => {
-  // A sanitized bin dir that exposes the fake backend + real git but NOT gh, so
-  // resolveGitHubToken's `gh auth token` fallback cannot succeed even on a host
-  // where gh is logged in. Combined with cleared GITHUB_TOKEN/GH_TOKEN, this
-  // forces the no-credential path deterministically.
+  it("starts the backend without Loom-supplied GitHub credentials or helper", async () => {
+    const capture = path.join(tmpRoot, "agent-env.json");
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_ENV_FILE = capture;
+    process.env.GITHUB_TOKEN = "fixture-github-token";
+    process.env.GH_TOKEN = "fixture-gh-token";
+    process.env.LOOM_PR_GIT_PASSWORD = "fixture-password";
+    const out = await run();
+    assert.equal(out.status, "completed");
+    const child = JSON.parse(fs.readFileSync(capture, "utf8"));
+    for (const name of ["GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN_FILE", "LOOM_PR_GIT_PASSWORD"]) {
+      assert.equal(child.env[name], undefined, `${name} reached agent env`);
+    }
+    assert.equal(child.env.GIT_CONFIG_KEY_0, "credential.helper");
+    assert.equal(child.env.GIT_CONFIG_VALUE_0, "");
+    assert.notEqual(child.credentialCode, 0, "git credential fill unexpectedly succeeded");
+    assert.equal(child.credentialOutput, "");
+    assert.equal(child.localCredentialConfig, "");
+    assert.equal(child.worktreeCredentialConfig, "");
+    assert.ok(!child.argv.join(" ").includes("fixture-github-token"));
+  });
+
+  // A sanitized bin dir that exposes the fake backend + real git but no gh.
+  // The runner must not ask gh for a token even when PR delivery is requested.
   function sanitizedBinDir() {
     const dir = fs.mkdtempSync(path.join(tmpRoot, "sanitized-bin-"));
     // node is needed to run the fake CLI shebang interpreter; symlink the real
@@ -907,8 +946,10 @@ describe("local-task-runner pull-request delivery gating", () => {
     assert.equal(out.runtimeMetadata.github_pr_url, undefined);
   });
 
-  it("openPullRequest with no credential and gh unavailable fails closed (github_credentials_missing)", async () => {
-    const binDirNoGh = sanitizedBinDir();
+  it("openPullRequest stays with the host publisher", async () => {
+    const binDir = sanitizedBinDir();
+    const ghMarker = path.join(tmpRoot, "gh-called");
+    fs.writeFileSync(path.join(binDir, "gh"), `#!/bin/sh\nprintf called > '${ghMarker}'\nprintf fixture-token\n`, { mode: 0o700 });
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
     process.env.LOOM_WORKTREE_PATH = worktree;
     process.env.LOOM_CODEX_BIN = fakeBin;
@@ -917,7 +958,7 @@ describe("local-task-runner pull-request delivery gating", () => {
     // Ensure no env credential and no gh on PATH (so `gh auth token` ENOENTs).
     delete process.env.GITHUB_TOKEN;
     delete process.env.GH_TOKEN;
-    process.env.PATH = binDirNoGh;
+    process.env.PATH = binDir;
     process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
       task_run_id: "tr-pr",
       task_id: "T-PR",
@@ -928,8 +969,9 @@ describe("local-task-runner pull-request delivery gating", () => {
 
     const out = await run();
     assert.equal(out.status, "failed");
-    assert.equal(out.errorClass, "github_credentials_missing");
+    assert.equal(out.errorClass, "host_publish_required");
     assert.equal(out.exitCode, 1);
+    assert.ok(!fs.existsSync(ghMarker), "runner called gh auth token");
   });
 
   it("openPullRequest=true but the agent produced no changes skips the PR (delivery=pull_request_skipped_no_changes)", async () => {
@@ -956,7 +998,7 @@ describe("local-task-runner pull-request delivery gating", () => {
     assert.equal(out.runtimeMetadata.github_pr_url, undefined);
   });
 
-  it("stacked mode with no credential and changes fails closed (github_credentials_missing)", async () => {
+  it("stacked mode stays with the host publisher", async () => {
     const binDirNoGh = sanitizedBinDir();
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
     process.env.LOOM_WORKTREE_PATH = worktree;
@@ -981,7 +1023,7 @@ describe("local-task-runner pull-request delivery gating", () => {
 
     const out = await run();
     assert.equal(out.status, "failed");
-    assert.equal(out.errorClass, "github_credentials_missing");
+    assert.equal(out.errorClass, "host_publish_required");
     assert.equal(out.exitCode, 1);
   });
 

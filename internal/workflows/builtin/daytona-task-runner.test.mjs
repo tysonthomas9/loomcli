@@ -217,9 +217,11 @@ describe("daytona-task-runner stack lineage parity (Stage 5)", () => {
   });
 
   it("cloneCommand does a full clone (no --depth 1) so base SHAs are real", () => {
-    const cmd = mod.cloneCommand("https://github.com/o/r.git", "/work/repo", "loom/stack/epic-E/T-A", "");
+    const cmd = mod.cloneCommand("https://github.com/o/r.git", "/work/repo", "loom/stack/epic-E/T-A", "fixture-token");
     assert.ok(!cmd.includes("--depth"), "stacked clone must not be shallow: " + cmd);
     assert.ok(cmd.includes("clone"), "still a clone");
     assert.ok(cmd.includes("--branch"), "clones the predecessor base branch");
+    assert.ok(!cmd.includes("fixture-token") && !cmd.includes("AUTHORIZATION"), "clone command contains no credential");
+    assert.throws(() => mod.cloneCommand("https://user:fixture-token@github.com/o/r.git", "/work/repo", ""), /credentials/);
   });
 });

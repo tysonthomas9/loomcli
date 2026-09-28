@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/cred"
 )
 
 var (
@@ -320,6 +322,49 @@ func (r *Runner) Run(ctx context.Context, args ...string) ([]byte, error) {
 	return r.runWithEnv(ctx, nil, nil, args...)
 }
 
+// RunWithCredential permits one host fetch or push against the scoped URL.
+// The token reaches Git through askpass, never argv or repository config.
+func (r *Runner) RunWithCredential(ctx context.Context, source *cred.Source, repoURL string, args ...string) ([]byte, error) {
+	if source == nil || len(args) < 2 || (args[0] != "fetch" && args[0] != "push") || forbidden(args) {
+		return nil, ErrForbidden
+	}
+	found := false
+	for _, arg := range args[1:] {
+		if arg == repoURL {
+			found = true
+		} else if strings.HasPrefix(arg, "https://") || strings.HasPrefix(arg, "http://") {
+			return nil, ErrForbidden
+		}
+	}
+	if !found {
+		return nil, ErrForbidden
+	}
+	token, err := source.Take(repoURL)
+	if err != nil {
+		return nil, err
+	}
+	askpass, err := os.CreateTemp("", "loom-git-askpass-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(askpass.Name())
+	defer askpass.Close()
+	const script = "#!/bin/sh\ncase \"$1\" in *Username*) printf '%s' x-access-token;; *Password*) printf '%s' \"$LOOM_HOST_GIT_PASSWORD\";; esac\n"
+	if _, err := askpass.WriteString(script); err != nil {
+		return nil, err
+	}
+	if err := askpass.Chmod(0700); err != nil {
+		return nil, err
+	}
+	env := map[string]string{"GIT_ASKPASS": askpass.Name(), "LOOM_HOST_GIT_PASSWORD": token}
+	out, err := r.runWithEnv(ctx, nil, env, args...)
+	var commandErr *CommandError
+	if errors.As(err, &commandErr) {
+		commandErr.Stderr = strings.ReplaceAll(commandErr.Stderr, token, "***")
+	}
+	return out, err
+}
+
 func (r *Runner) run(ctx context.Context, input io.Reader, args ...string) ([]byte, error) {
 	return r.runWithEnv(ctx, input, nil, args...)
 }
@@ -349,6 +394,7 @@ func (r *Runner) runWithEnv(ctx context.Context, input io.Reader, env map[string
 		"author.name="+r.identity.Name, "author.email="+r.identity.Email,
 		"committer.name="+r.identity.Name, "committer.email="+r.identity.Email)
 	argv := make([]string, 0, len(config)*2+len(args))
+	//nolint:gosec // Only allowlisted Git config values enter this fixed Git invocation.
 	for _, item := range config {
 		argv = append(argv, "-c", item)
 	}

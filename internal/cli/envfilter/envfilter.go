@@ -39,15 +39,13 @@ var envAllowlistExact = map[string]bool{
 	"CLAUDE_CODE_OAUTH_TOKEN": true,
 	//
 	// NOT AN INCONSISTENCY, do not "fix" it: several names above
-	// (CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, CODEX_HOME, GITHUB_TOKEN…) also
+	// (CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, CODEX_HOME…) also
 	// appear in the sensitive-env-name contract that
 	// internal/driver/testdata/sensitive-env-names.json freezes. That contract is a
 	// DENYLIST for a remote sandbox GUEST — names a Daytona probe must count as
 	// leaks. This map is an ALLOWLIST for interactive/lead agents running on the
-	// host, which must authenticate and therefore need exactly those names. Wiring
+	// host, whose model backends need those credentials. Wiring
 	// the two together would invert this file's meaning.
-	// Git hosting tokens (needed by container agents for git push)
-	"GITHUB_TOKEN": true, "GITHUB_TOKEN_FILE": true,
 	// E2E test stubs. Exact matches keep arbitrary STUB_* values out.
 	"STUB_CODEX_EPIC_RUNNER": true, "STUB_CODEX_INVOCATIONS": true,
 	// Editor
@@ -58,6 +56,7 @@ var envAllowlistExact = map[string]bool{
 // passed to subprocesses, even if they match the allowlist. Defense-in-depth
 // against git-redirection and code-execution attacks.
 var envBlocklistExact = map[string]bool{
+	"GITHUB_TOKEN": true, "GH_TOKEN": true, "GITHUB_TOKEN_FILE": true, "LOOM_PR_GIT_PASSWORD": true,
 	// Git redirection — can make git operate on wrong repo/worktree
 	"GIT_DIR":                          true,
 	"GIT_WORK_TREE":                    true,
