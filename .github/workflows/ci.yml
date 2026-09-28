@@ -37,6 +37,9 @@ jobs:
           git config --global user.name "CI Bot"
           git config --global user.email "ci@loomcli.test"
 
+      - name: Install Git LFS for gitexec tests
+        run: sudo apt-get update && sudo apt-get install -y git-lfs gnupg
+
       - name: Decoupling smoke (no frontend dist)
         run: |
           rm -rf internal/webui/frontend/dist
@@ -81,6 +84,9 @@ jobs:
         run: |
           git config --global user.name "CI Bot"
           git config --global user.email "ci@loomcli.test"
+
+      - name: Install Git LFS for gitexec tests
+        run: sudo apt-get update && sudo apt-get install -y git-lfs gnupg
 
       - name: Run tests with coverage
         run: go test -race -coverprofile=coverage.out -tags=integration -timeout 15m ./...
