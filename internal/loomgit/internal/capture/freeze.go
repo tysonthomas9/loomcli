@@ -26,6 +26,22 @@ func FreezeSource(ctx context.Context, runner *gitexec.Runner, p FreezeParams) (
 	if err != nil {
 		return "", err
 	}
+	parent, err := RewriteSource(ctx, runner, p)
+	if err != nil {
+		return "", err
+	}
+	if err := runner.UpdateRef(ctx, ref, parent, strings.Repeat("0", len(parent))); err != nil {
+		return "", err
+	}
+	return parent, nil
+}
+
+// RewriteSource creates the source chain without publishing a revision ref.
+// The caller can verify and record it before installing refs.
+func RewriteSource(ctx context.Context, runner *gitexec.Runner, p FreezeParams) (string, error) {
+	if _, err := refname.RevisionHead(p.Workspace, p.ChangeID, p.Revision); err != nil {
+		return "", err
+	}
 	commits, err := runner.Run(ctx, "rev-list", "--reverse", p.BaseSHA+".."+p.HeadSHA)
 	if err != nil {
 		return "", err
@@ -63,9 +79,6 @@ func FreezeSource(ctx context.Context, runner *gitexec.Runner, p FreezeParams) (
 			return "", err
 		}
 		parent = strings.TrimSpace(string(out))
-	}
-	if err := runner.UpdateRef(ctx, ref, parent, strings.Repeat("0", len(parent))); err != nil {
-		return "", err
 	}
 	return parent, nil
 }

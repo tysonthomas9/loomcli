@@ -51,6 +51,15 @@ func OpenSQLite(path string) (*SQLite, error) {
 		id INTEGER PRIMARY KEY AUTOINCREMENT, entry_id TEXT NOT NULL REFERENCES journal_entries(id),
 		kind TEXT NOT NULL, payload BLOB, delivered INTEGER NOT NULL DEFAULT 0
 	);
+	CREATE TABLE IF NOT EXISTS change_revisions (
+		workspace TEXT NOT NULL, change_id TEXT NOT NULL, number INTEGER NOT NULL,
+		request_id TEXT NOT NULL UNIQUE, kind TEXT NOT NULL, operation TEXT NOT NULL,
+		outcome TEXT NOT NULL, base_sha TEXT NOT NULL, head_sha TEXT NOT NULL DEFAULT '',
+		tree_hash TEXT NOT NULL, source_head_sha TEXT NOT NULL,
+		derived_from_change TEXT NOT NULL DEFAULT '', derived_from_number INTEGER NOT NULL DEFAULT 0,
+		ready INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY(workspace, change_id, number)
+	);
 	CREATE INDEX IF NOT EXISTS event_outbox_pending ON event_outbox(delivered, id);`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("open journal: %w", err)
