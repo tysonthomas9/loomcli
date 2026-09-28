@@ -2,8 +2,11 @@ package loomgit
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+var ErrLeaseHeld = errors.New("lease held by another owner")
 
 // Lease fences writes to one ownership scope across serve and daemon.
 type Lease struct {
@@ -71,4 +74,13 @@ type Store interface {
 	PendingEvents(context.Context) ([]OutboxEvent, error)
 	MarkDelivered(context.Context, int64) error
 	Close() error
+}
+
+// RepoStore is the Git object and ref boundary for one source repository.
+// A provider-backed implementation can replace the local implementation.
+type RepoStore interface {
+	Path() string
+	Run(context.Context, ...string) ([]byte, error)
+	RunWithEnv(context.Context, map[string]string, ...string) ([]byte, error)
+	UpdateRef(context.Context, string, string, string) error
 }

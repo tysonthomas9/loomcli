@@ -10,7 +10,7 @@ import (
 
 var ErrStale = loomgit.NewError(loomgit.Stale, "journal entry changed", nil)
 var ErrNotFound = errors.New("journal entry not found")
-var ErrLeaseHeld = errors.New("lease held by another owner")
+var ErrLeaseHeld = loomgit.ErrLeaseHeld
 var ErrNeedsReplay = errors.New("unfinished request needs journal replay")
 
 // Execute returns a completed request's stored result without running effect.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
 )
 
@@ -21,7 +21,7 @@ type FreezeParams struct {
 
 // FreezeSource rewrites the attempt's linear commit chain once with durable
 // identity trailers. The original capture ref and commits remain untouched.
-func FreezeSource(ctx context.Context, runner *gitexec.Runner, p FreezeParams) (string, error) {
+func FreezeSource(ctx context.Context, runner loomgit.RepoStore, p FreezeParams) (string, error) {
 	ref, err := refname.RevisionHead(p.Workspace, p.ChangeID, p.Revision)
 	if err != nil {
 		return "", err
