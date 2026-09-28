@@ -28,13 +28,70 @@ func fixture(t *testing.T) (*Runner, string, string) {
 
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...) //nolint:gosec // Test fixture setup uses real Git.
+	cmd := exec.Command("git", args...) //nolint:gosec,norawexec // Test fixture setup uses real Git.
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %s: %v", args, out, err)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func TestDefaultOptionsReadAllowlistedGlobalConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
+	previousGlobal, hadGlobal := os.LookupEnv("GIT_CONFIG_GLOBAL")
+	if err := os.Unsetenv("GIT_CONFIG_GLOBAL"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if hadGlobal {
+			_ = os.Setenv("GIT_CONFIG_GLOBAL", previousGlobal)
+		} else {
+			_ = os.Unsetenv("GIT_CONFIG_GLOBAL")
+		}
+	})
+	config := `[user]
+name = Home Author
+email = home@example.test
+signingkey = ABC123
+[filter "lfs"]
+clean = git-lfs clean -- %f
+[lfs]
+fetchinclude = assets/*
+[commit]
+gpgsign = true
+[gpg]
+format = openpgp
+[credential]
+helper = !false
+[alias]
+evil = !false
+`
+	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte(config), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init", "-q")
+	r, err := New(dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Identity() != (Identity{Name: "Home Author", Email: "home@example.test"}) {
+		t.Fatalf("identity: %+v", r.Identity())
+	}
+	joined := strings.Join(r.config, "\n")
+	for _, want := range []string{"filter.lfs.clean=git-lfs clean -- %f", "lfs.fetchinclude=assets/*", "commit.gpgsign=true", "gpg.format=openpgp", "user.signingkey=ABC123"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("allowed global config %q missing from %q", want, joined)
+		}
+	}
+	for _, forbidden := range []string{"credential.helper", "alias.evil"} {
+		if strings.Contains(joined, forbidden) {
+			t.Errorf("unsafe config %q survived", forbidden)
+		}
+	}
 }
 
 func mustRun(t *testing.T, r *Runner, args ...string) string {
@@ -211,16 +268,17 @@ func TestGlobalSigningConfigSurvivesIsolation(t *testing.T) {
 		t.Skip("gpg is not installed")
 	}
 	r, dir, config := fixture(t)
-	gpgHome := filepath.Join(dir, "gnupg")
-	if err := os.Mkdir(gpgHome, 0700); err != nil {
+	gpgHome, err := os.MkdirTemp("/tmp", "gpg")
+	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = os.RemoveAll(gpgHome) })
 	t.Setenv("GNUPGHOME", gpgHome)
-	keygen := exec.Command("gpg", "--batch", "--pinentry-mode", "loopback", "--passphrase", "", "--quick-generate-key", "Example Author <author@example.test>", "default", "default", "never") //nolint:gosec // Test generates a disposable key.
+	keygen := exec.Command("gpg", "--batch", "--pinentry-mode", "loopback", "--passphrase", "", "--quick-generate-key", "Example Author <author@example.test>", "default", "default", "never") //nolint:gosec,norawexec // Test generates a disposable key.
 	if out, err := keygen.CombinedOutput(); err != nil {
 		t.Fatalf("gpg keygen: %s: %v", out, err)
 	}
-	list := exec.Command("gpg", "--batch", "--with-colons", "--list-secret-keys") //nolint:gosec // Test reads its disposable key.
+	list := exec.Command("gpg", "--batch", "--with-colons", "--list-secret-keys") //nolint:gosec,norawexec // Test reads its disposable key.
 	out, err := list.Output()
 	if err != nil {
 		t.Fatal(err)

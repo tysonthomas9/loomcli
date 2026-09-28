@@ -117,7 +117,7 @@ func readConfig(scope, path string) ([]configEntry, error) {
 		args = append(args, scope)
 	}
 	cmd := exec.Command("git", args...) //nolint:gosec // Fixed git binary and config-read arguments.
-	cmd.Env = cleanEnv(os.Environ())
+	cmd.Env = configReadEnv(scope, path)
 	out, err := cmd.Output()
 	if err != nil {
 		// Git exits 128 when a config file does not exist; normal hosts need no system file.
@@ -141,6 +141,31 @@ func readConfig(scope, path string) ([]configEntry, error) {
 		result = append(result, configEntry{key, value})
 	}
 	return result, nil
+}
+
+// configReadEnv lets Git locate the user's real config before we copy only
+// allowlisted values into the isolated environment used for all other commands.
+func configReadEnv(scope, path string) []string {
+	env := cleanEnv(os.Environ())
+	if path != "" {
+		return env
+	}
+	blocked := "GIT_CONFIG_GLOBAL="
+	if scope == "--system" {
+		blocked = "GIT_CONFIG_NOSYSTEM="
+	}
+	filtered := env[:0]
+	for _, item := range env {
+		if !strings.HasPrefix(item, blocked) {
+			filtered = append(filtered, item)
+		}
+	}
+	if scope == "--global" {
+		if path, ok := os.LookupEnv("GIT_CONFIG_GLOBAL"); ok {
+			filtered = append(filtered, "GIT_CONFIG_GLOBAL="+path)
+		}
+	}
+	return filtered
 }
 
 func allowedConfig(key string) bool {
