@@ -51,6 +51,9 @@ func (s *state) goCheck(name string) error {
 	case "revision_diff":
 		// Real Git fixtures cover committed and Snapshot work, the patch budget, interdiff, and missing base.
 		return s.packageTests("./internal/loomgit/gitread", "Test(SnapshotDiffInterdiffBudgetAndMissingBase|DerivedRevisionOffersRangeDiff)")
+	case "trial_merge":
+		// Proves clean, conflict, dropped-commit, and old-version behavior under the lab Git.
+		return s.packageTests("./internal/loomgit/internal/replay", "Test(TrialMergeCleanAndConflictLeaveCheckoutUnchanged|TrialMergeMultiCommitAndDrop|TrialMergeStopsAtFirstConflictingCommit|TrialMergeUsesFirstParentOfMergeCommit|TrialMergePreservesAuthorMessageAndTrailers|VersionRequirement)")
 	case "process_lock":
 		// Proves two processes contend on one repository lock and stale leases recover.
 		return s.packageTests("./internal/loomgit/internal/pool", "Test(ConcurrentProcesses|StaleLeaseAfterProcessExit)")

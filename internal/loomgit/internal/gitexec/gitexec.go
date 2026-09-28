@@ -54,6 +54,7 @@ type Runner struct {
 
 type CommandError struct {
 	Args   []string
+	Stdout string
 	Stderr string
 	Err    error
 }
@@ -430,7 +431,7 @@ func (r *Runner) runWithEnv(ctx context.Context, input io.Reader, env map[string
 		for i, arg := range args {
 			safeArgs[i] = redact(arg)
 		}
-		return nil, &CommandError{Args: safeArgs, Stderr: redact(stderr.buf.String()), Err: err}
+		return nil, &CommandError{Args: safeArgs, Stdout: redact(out.buf.String()), Stderr: redact(stderr.buf.String()), Err: err}
 	}
 	return out.buf.Bytes(), nil
 }
