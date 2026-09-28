@@ -4,9 +4,24 @@
 # Runs TLC on every configuration and compares the result with the expected
 # outcome: "pass" configs must explore their finite state space with no
 # violation; "fail" configs are deliberate mutations that must produce a
-# counterexample for the named invariant.
+# counterexample for the named invariant, or, for a temporal property, a
+# liveness counterexample from a config whose only PROPERTIES entry is that
+# property. Stage-d configs (d_*) use module DaemonAttemptD, which extends
+# DaemonAttempt.
 #
-# Usage: scripts/check-daemon-attempt-model.sh [config-name ...]
+# Usage: scripts/check-daemon-attempt-model.sh [--pr | config-name ...]
+#
+#   (no args)  every configuration (the nightly CI job)
+#   --pr       every "fail" configuration (mutations and vacuity probes) plus
+#              a_pass_faults (the pull-request CI job)
+#
+# Before any run, every *.cfg in the model directory must have a CASES entry
+# and every entry must have a .cfg, so a new configuration cannot silently
+# escape the gate. Unknown config names are rejected.
+#
+# Scope: this checks the model's internal consistency (each safe config holds,
+# each mutation is caught by its named invariant). It says nothing about
+# whether Loom or FleetDB code conforms to the model.
 #
 # Env:
 #   LOOM_TLA_CACHE        jar cache dir (default ~/.cache/loom-tla)
@@ -28,7 +43,8 @@ MIN_FREE_MB="${LOOM_TLA_MIN_FREE_MB:-2048}"
 CAP_MB="${LOOM_TLA_CAP_MB:-1024}"
 WORKERS="${LOOM_TLA_WORKERS:-auto}"
 
-# name|expect|invariant (invariant is the one a "fail" run must violate)
+# name|expect|invariant[|module] (invariant or temporal property a "fail" run
+# must violate; module defaults to DaemonAttempt)
 CASES=(
   "a_pass|pass|"
   "a_pass_faults|pass|"
@@ -52,6 +68,18 @@ CASES=(
   "c_fail_stale_finalize|fail|NoSupersededFinalize"
   "c_stranded_session|fail|NoStrandedSession"
   "c_vacuity|fail|NeverFinalized"
+  "d_pass_finalize_liveness|pass||DaemonAttemptD"
+  "d_pass_safety|pass||DaemonAttemptD"
+  "d_pass_no_crash_no_reaper|pass||DaemonAttemptD"
+  "d_fail_no_reaper|fail|SessionTerminates|DaemonAttemptD"
+  "d_fail_ownership_bound_finalize|fail|SessionTerminates|DaemonAttemptD"
+  "d_fail_stale_completed|fail|NoStaleCompleted|DaemonAttemptD"
+  "d_fail_no_cas|fail|TerminalOnceD|DaemonAttemptD"
+  "d_fail_ipc_only_renewal|fail|LiveOwnerKeepsSessionLease|DaemonAttemptD"
+  "d_fail_unbound_session_lease|fail|NoSupersededWrite|DaemonAttemptD"
+  "d_fail_ipc_bypass|fail|NoWriteAfterSessionLeaseLoss|DaemonAttemptD"
+  "d_vacuity_reap|fail|NeverReaped|DaemonAttemptD"
+  "d_vacuity_completed|fail|NeverCompleted|DaemonAttemptD"
 )
 
 command -v java >/dev/null || { echo "java not found (TLC needs Java 11+)" >&2; exit 2; }
@@ -75,18 +103,46 @@ used_mb() { du -sm "$1" 2>/dev/null | awk '{print $1}'; }
 
 mkdir -p "$SCRATCH"
 
-selected=("$@")
-want() {
+# Preflight: CASES and the .cfg files on disk must match one-to-one.
+known=()
+for entry in "${CASES[@]}"; do known+=("${entry%%|*}"); done
+is_known() { local k; for k in "${known[@]}"; do [[ "$k" == "$1" ]] && return 0; done; return 1; }
+drift=0
+for k in "${known[@]}"; do
+  [[ -f "$MODEL_DIR/$k.cfg" ]] || { echo "CASES entry $k has no $k.cfg" >&2; drift=1; }
+done
+for f in "$MODEL_DIR"/*.cfg; do
+  k="$(basename "$f" .cfg)"
+  is_known "$k" || { echo "$k.cfg has no CASES entry in $0" >&2; drift=1; }
+done
+(( drift == 0 )) || exit 2
+
+pr_mode=0
+selected=()
+for a in "$@"; do
+  if [[ "$a" == --pr ]]; then pr_mode=1
+  elif is_known "$a"; then selected+=("$a")
+  else echo "unknown config: $a" >&2; exit 2
+  fi
+done
+if (( pr_mode )) && (( ${#selected[@]} > 0 )); then
+  echo "--pr cannot be combined with config names" >&2; exit 2
+fi
+want() { # name expect
+  if (( pr_mode )); then [[ "$2" == fail || "$1" == a_pass_faults ]]; return; fi
   [[ ${#selected[@]} -eq 0 ]] && return 0
   local s; for s in "${selected[@]}"; do [[ "$s" == "$1" ]] && return 0; done
   return 1
 }
 
 failures=0
-printf '%-24s %-6s %-8s %s\n' CONFIG EXPECT RESULT DETAIL
+ran=0
+printf '%-32s %-6s %-8s %s\n' CONFIG EXPECT RESULT DETAIL
 for entry in "${CASES[@]}"; do
-  IFS='|' read -r name expect inv <<<"$entry"
-  want "$name" || continue
+  IFS='|' read -r name expect inv module <<<"$entry"
+  module="${module:-DaemonAttempt}"
+  want "$name" "$expect" || continue
+  ran=$((ran + 1))
   avail="$(free_mb "$SCRATCH")"
   if (( avail < MIN_FREE_MB )); then
     echo "refusing to run $name: ${avail} MB free under $SCRATCH (< ${MIN_FREE_MB} MB)" >&2
@@ -97,7 +153,7 @@ for entry in "${CASES[@]}"; do
   # -cleanup makes TLC clear its own states directory; nothing else is removed.
   (cd "$MODEL_DIR" && exec java -XX:+UseParallelGC -cp "$JAR" tlc2.TLC \
       -deadlock -cleanup -checkpoint 0 -workers "$WORKERS" \
-      -metadir "$meta" -config "$name.cfg" DaemonAttempt.tla) >"$log" 2>&1 &
+      -metadir "$meta" -config "$name.cfg" "$module.tla") >"$log" 2>&1 &
   pid=$!
   capped=0
   while kill -0 "$pid" 2>/dev/null; do
@@ -124,14 +180,22 @@ for entry in "${CASES[@]}"; do
     result=ok; detail="no violation; $states"
   elif [[ "$expect" == fail ]] && (( code == 12 )) && grep -q "Invariant $inv is violated" "$log"; then
     result=ok; detail="counterexample for $inv; $states"
+  elif [[ "$expect" == fail ]] && (( code == 13 )) \
+       && grep -q 'Temporal properties were violated' "$log" \
+       && [[ "$(grep -E '^PROPERT(Y|IES)' "$MODEL_DIR/$name.cfg")" =~ ^PROPERT(Y|IES)\ +$inv\ *$ ]]; then
+    result=ok; detail="liveness counterexample for $inv; $states"
   else
     result=UNEXPECTED; detail="exit $code; see $log"
   fi
   [[ "$result" == ok ]] || failures=$((failures + 1))
-  printf '%-24s %-6s %-8s %s\n' "$name" "$expect" "$result" "$detail"
+  printf '%-32s %-6s %-8s %s\n' "$name" "$expect" "$result" "$detail"
 done
 
 echo "TLC ${TLA_VERSION} ($JAR); logs and counterexamples under $SCRATCH"
+if (( ran == 0 )); then
+  echo "no configuration was run" >&2
+  exit 1
+fi
 if (( failures > 0 )); then
   echo "$failures configuration(s) did not match the expected outcome" >&2
   exit 1
