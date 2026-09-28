@@ -17,7 +17,7 @@ import (
 
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", args...) //nolint:norawexec // Test fixture uses real Git for worktree operations.
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -164,7 +164,7 @@ func TestConcurrentProcesses(t *testing.T) {
 	repo, db := fixture(t)
 	cmds := make([]*exec.Cmd, 2)
 	for i := range cmds {
-		cmds[i] = exec.Command(os.Args[0], "-test.run=^TestProcessHelper$")
+		cmds[i] = exec.Command(os.Args[0], "-test.run=^TestProcessHelper$") //nolint:norawexec // Child processes verify repository lock serialization.
 		cmds[i].Env = append(os.Environ(), "POOL_HELPER=1", "POOL_DB="+db, "POOL_REPO="+repo, "POOL_DEST="+filepath.Join(filepath.Dir(repo), "process-"+string(rune('a'+i))))
 	}
 	var wg sync.WaitGroup
@@ -191,7 +191,7 @@ func TestConcurrentProcesses(t *testing.T) {
 
 func TestStaleLeaseAfterProcessExit(t *testing.T) {
 	repo, db := fixture(t)
-	cmd := exec.Command(os.Args[0], "-test.run=^TestProcessHelper$")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestProcessHelper$") //nolint:norawexec // Child process verifies stale lease recovery.
 	cmd.Env = append(os.Environ(), "POOL_HELPER=claim", "POOL_DB="+db, "POOL_REPO="+repo)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("lease holder: %v: %s", err, out)
