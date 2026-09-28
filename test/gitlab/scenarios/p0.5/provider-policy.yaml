@@ -1,0 +1,8 @@
+name: bare provider remote rejects secret paths and files over 100 MiB
+task: P0.5
+git: [min, latest]
+fixture: empty
+when:
+  - go_check: provider_policy
+then:
+  - go_check: no_error

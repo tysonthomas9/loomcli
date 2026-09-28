@@ -1,0 +1,8 @@
+name: two processes contend for one repository lock
+task: P0.4
+git: [min, latest]
+fixture: empty
+when:
+  - go_check: process_lock
+then:
+  - go_check: no_error

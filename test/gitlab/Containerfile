@@ -1,0 +1,29 @@
+FROM golang:1.25.6-trixie AS gitbuild
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl gcc make libssl-dev zlib1g-dev libcurl4-openssl-dev \
+    libexpat1-dev xz-utils && rm -rf /var/lib/apt/lists/*
+
+ARG GIT_MIN=2.40.4
+ARG GIT_LATEST=2.56.0
+RUN set -eu; for spec in "min:$GIT_MIN" "latest:$GIT_LATEST"; do \
+      name="${spec%%:*}"; version="${spec#*:}"; \
+      curl -fsSL "https://www.kernel.org/pub/software/scm/git/git-${version}.tar.xz" -o /tmp/git.tar.xz; \
+      mkdir /tmp/git-src; tar -xJf /tmp/git.tar.xz -C /tmp/git-src --strip-components=1; \
+      make -C /tmp/git-src -j2 prefix="/opt/git-${name}" NO_RUST=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease all; \
+      make -C /tmp/git-src prefix="/opt/git-${name}" NO_RUST=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease install; \
+      rm -rf /tmp/git-src /tmp/git.tar.xz; \
+    done
+
+FROM golang:1.25.6-trixie
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates git-lfs gnupg libcurl4 libexpat1 zlib1g && \
+    rm -rf /var/lib/apt/lists/* && useradd -m labother
+COPY --from=gitbuild /opt/git-min /opt/git-min
+COPY --from=gitbuild /opt/git-latest /opt/git-latest
+WORKDIR /src
+COPY go.mod go.sum /src/
+RUN go mod download
+COPY test/gitlab/container-run.sh /usr/local/bin/loomgit-lab-run
+RUN chmod +x /usr/local/bin/loomgit-lab-run
+CMD ["loomgit-lab-run"]

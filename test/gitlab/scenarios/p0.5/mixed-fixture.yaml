@@ -1,0 +1,8 @@
+name: realistic fixture includes special paths, nested Git, submodule, LFS and large file
+task: P0.5
+git: [min, latest]
+fixture: mixed
+when:
+  - go_check: fixture_inventory
+then:
+  - go_check: no_error

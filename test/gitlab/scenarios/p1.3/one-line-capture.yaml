@@ -1,0 +1,17 @@
+name: one-line Loom edit keeps tracked dotfiles and rejects new secrets
+task: P1.3
+git: [min, latest]
+fixture: loomcli
+given:
+  - edit: {path: cmd/loom/main.go, append: "// git lab one-line edit\n"}
+  - write: {path: .env, content: "TOKEN=x\n"}
+  - write: {path: id_rsa, content: "fixture private key\n"}
+when:
+  - capture: {attempt: A1}
+then:
+  - diff_vs_head: {changed: [cmd/loom/main.go]}
+  - tree_has: [.npmrc, src/id_utils.go]
+  - tree_lacks: [.env, id_rsa]
+  - manifest: {".env": secret_suspect, id_rsa: secret_suspect}
+  - capture_complete: false
+  - took_under: 10s

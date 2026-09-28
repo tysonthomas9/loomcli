@@ -1,0 +1,13 @@
+name: a second capture advances the same attempt ref
+task: P1.3
+git: [min, latest]
+fixture: empty
+given:
+  - write: {path: work.txt, content: "first\n"}
+when:
+  - capture: {attempt: A1}
+  - write: {path: work.txt, content: "second\n"}
+  - capture: {attempt: A1}
+then:
+  - go_check: repeat_capture
+  - diff_vs_head: {changed: [work.txt]}
