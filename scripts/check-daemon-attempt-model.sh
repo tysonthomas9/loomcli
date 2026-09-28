@@ -6,7 +6,19 @@
 # violation; "fail" configs are deliberate mutations that must produce a
 # counterexample for the named invariant.
 #
-# Usage: scripts/check-daemon-attempt-model.sh [config-name ...]
+# Usage: scripts/check-daemon-attempt-model.sh [--pr | config-name ...]
+#
+#   (no args)  every configuration (the nightly CI job)
+#   --pr       every "fail" configuration (mutations and vacuity probes) plus
+#              a_pass_faults (the pull-request CI job)
+#
+# Before any run, every *.cfg in the model directory must have a CASES entry
+# and every entry must have a .cfg, so a new configuration cannot silently
+# escape the gate. Unknown config names are rejected.
+#
+# Scope: this checks the model's internal consistency (each safe config holds,
+# each mutation is caught by its named invariant). It says nothing about
+# whether Loom or FleetDB code conforms to the model.
 #
 # Env:
 #   LOOM_TLA_CACHE        jar cache dir (default ~/.cache/loom-tla)
@@ -75,18 +87,45 @@ used_mb() { du -sm "$1" 2>/dev/null | awk '{print $1}'; }
 
 mkdir -p "$SCRATCH"
 
-selected=("$@")
-want() {
+# Preflight: CASES and the .cfg files on disk must match one-to-one.
+known=()
+for entry in "${CASES[@]}"; do known+=("${entry%%|*}"); done
+is_known() { local k; for k in "${known[@]}"; do [[ "$k" == "$1" ]] && return 0; done; return 1; }
+drift=0
+for k in "${known[@]}"; do
+  [[ -f "$MODEL_DIR/$k.cfg" ]] || { echo "CASES entry $k has no $k.cfg" >&2; drift=1; }
+done
+for f in "$MODEL_DIR"/*.cfg; do
+  k="$(basename "$f" .cfg)"
+  is_known "$k" || { echo "$k.cfg has no CASES entry in $0" >&2; drift=1; }
+done
+(( drift == 0 )) || exit 2
+
+pr_mode=0
+selected=()
+for a in "$@"; do
+  if [[ "$a" == --pr ]]; then pr_mode=1
+  elif is_known "$a"; then selected+=("$a")
+  else echo "unknown config: $a" >&2; exit 2
+  fi
+done
+if (( pr_mode )) && (( ${#selected[@]} > 0 )); then
+  echo "--pr cannot be combined with config names" >&2; exit 2
+fi
+want() { # name expect
+  if (( pr_mode )); then [[ "$2" == fail || "$1" == a_pass_faults ]]; return; fi
   [[ ${#selected[@]} -eq 0 ]] && return 0
   local s; for s in "${selected[@]}"; do [[ "$s" == "$1" ]] && return 0; done
   return 1
 }
 
 failures=0
+ran=0
 printf '%-24s %-6s %-8s %s\n' CONFIG EXPECT RESULT DETAIL
 for entry in "${CASES[@]}"; do
   IFS='|' read -r name expect inv <<<"$entry"
-  want "$name" || continue
+  want "$name" "$expect" || continue
+  ran=$((ran + 1))
   avail="$(free_mb "$SCRATCH")"
   if (( avail < MIN_FREE_MB )); then
     echo "refusing to run $name: ${avail} MB free under $SCRATCH (< ${MIN_FREE_MB} MB)" >&2
@@ -132,6 +171,10 @@ for entry in "${CASES[@]}"; do
 done
 
 echo "TLC ${TLA_VERSION} ($JAR); logs and counterexamples under $SCRATCH"
+if (( ran == 0 )); then
+  echo "no configuration was run" >&2
+  exit 1
+fi
 if (( failures > 0 )); then
   echo "$failures configuration(s) did not match the expected outcome" >&2
   exit 1
