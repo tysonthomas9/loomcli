@@ -199,7 +199,13 @@ export async function run(ctx = {}) {
 
   // Fail closed when PR delivery was requested but could not be completed.
   if (prFailure) {
-    return failed(prFailure.class, prFailure.message, { taskRunId, taskId, backend, request, logs, headBefore });
+    const failure = failed(prFailure.class, prFailure.message, { taskRunId, taskId, backend, request, logs, headBefore });
+    if (isolated && patchInfo) {
+      failure.patch = patchInfo.patch;
+      failure.base_ref = baseRef;
+      failure.patch_base_ref = baseRef;
+    }
+    return failure;
   }
 
   let transcriptEntries = STREAM_JSON_BACKENDS.has(backend)

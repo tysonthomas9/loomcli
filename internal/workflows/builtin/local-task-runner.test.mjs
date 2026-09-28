@@ -971,6 +971,8 @@ describe("local-task-runner pull-request delivery gating", () => {
     assert.equal(out.status, "failed");
     assert.equal(out.errorClass, "host_publish_required");
     assert.equal(out.exitCode, 1);
+    assert.ok(out.patch?.includes("pr-change.txt"), "host receives the isolated agent's patch");
+    assert.equal(out.patch_base_ref, out.base_ref);
     assert.ok(!fs.existsSync(ghMarker), "runner called gh auth token");
   });
 
