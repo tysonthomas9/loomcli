@@ -156,6 +156,10 @@ func TestCleanExitStillCapturesAndClearsCheckpoint(t *testing.T) {
 	if ap.CaptureRetained {
 		t.Fatal("clean capture unexpectedly retained")
 	}
+	manifests, err := filepath.Glob(filepath.Join(dir, ".git", "loom", "capture", "agent-*.json"))
+	if err != nil || len(manifests) != 1 {
+		t.Fatalf("clean exit did not run capture: %v, %v", manifests, err)
+	}
 	cp, err := config.LoadCheckpoint(lockDir)
 	if err != nil || cp != nil {
 		t.Fatalf("clean checkpoint: %+v, %v", cp, err)
