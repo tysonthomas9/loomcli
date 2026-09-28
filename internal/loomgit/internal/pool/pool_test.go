@@ -83,6 +83,15 @@ func TestCreateRemoveAndFailedAdd(t *testing.T) {
 	if strings.Contains(git(t, repo, "worktree", "list", "--porcelain"), "worktree "+bad.Path()) {
 		t.Fatal("failed add left registration")
 	}
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	lease, err := openPool(t, db).leases.ClaimLease(probeCtx, "repo:"+r.common, "failed-add-probe", time.Second)
+	if err != nil {
+		t.Fatalf("failed add left repository lease held: %v", err)
+	}
+	if err := r.pool.leases.ReleaseLease(ctx, lease); err != nil {
+		t.Fatal(err)
+	}
 	copy := r.LinkedWorktree(filepath.Join(filepath.Dir(repo), "good"))
 	if err := copy.Create(ctx, "HEAD"); err != nil {
 		t.Fatalf("lock not released after failed add: %v", err)
@@ -155,8 +164,69 @@ func TestProcessHelper(t *testing.T) {
 		}
 		return
 	}
+	if mode == "contend" {
+		trace, name := os.Getenv("POOL_TRACE"), os.Getenv("POOL_NAME")
+		mark := func(event string) error {
+			f, err := os.OpenFile(trace, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+			if err != nil {
+				return err
+			}
+			_, writeErr := f.WriteString(name + " " + event + "\n")
+			return errors.Join(writeErr, f.Close())
+		}
+		if err := r.locked(context.Background(), func(context.Context) error {
+			if err := mark("start"); err != nil {
+				return err
+			}
+			time.Sleep(750 * time.Millisecond)
+			return mark("end")
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
 	if err := r.LinkedWorktree(dest).Create(context.Background(), "HEAD"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRepositoryLeaseSerializesProcesses(t *testing.T) {
+	repo, db := fixture(t)
+	trace := filepath.Join(filepath.Dir(repo), "lease-trace")
+	child := func(name string) *exec.Cmd {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestProcessHelper$") //nolint:norawexec // Child processes verify the repository lease.
+		cmd.Env = append(os.Environ(), "POOL_HELPER=contend", "POOL_DB="+db, "POOL_REPO="+repo, "POOL_TRACE="+trace, "POOL_NAME="+name)
+		return cmd
+	}
+	first := child("first")
+	if err := first.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = first.Process.Kill(); _ = first.Wait() }()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		data, err := os.ReadFile(trace)
+		if err == nil && strings.Contains(string(data), "first start\n") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("first child did not acquire lease: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	second := child("second")
+	if out, err := second.CombinedOutput(); err != nil {
+		t.Fatalf("second child: %v: %s", err, out)
+	}
+	if err := first.Wait(); err != nil {
+		t.Fatalf("first child: %v", err)
+	}
+	data, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); got != "first start\nfirst end\nsecond start\nsecond end\n" {
+		t.Fatalf("repository leases overlapped or were not released: %q", got)
 	}
 }
 
