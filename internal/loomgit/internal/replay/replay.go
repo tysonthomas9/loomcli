@@ -90,54 +90,64 @@ func (e *Engine) TrialMerge(ctx context.Context, base, head, target string) (Res
 	}
 	result := Result{HeadSHA: target}
 	for _, commit := range strings.Fields(commits) {
-		parent, err := git(ctx, e.repo, "rev-parse", commit+"^1")
-		if err != nil {
-			return result, fmt.Errorf("revision commit %s has no first parent: %w", commit, err)
+		if err := e.replayCommit(ctx, commit, &result); err != nil {
+			return result, err
 		}
-		// Name-only NUL output begins with the tree OID, then conflicted paths.
-		out, mergeErr := e.repo.Run(ctx, "merge-tree", "--write-tree", "--merge-base="+parent, "--name-only", "--no-messages", "-z", result.HeadSHA, commit)
-		if mergeErr != nil {
-			var commandErr *gitexec.CommandError
-			var exitErr *exec.ExitError
-			if !errors.As(mergeErr, &commandErr) || !errors.As(mergeErr, &exitErr) || exitErr.ExitCode() != 1 {
-				return result, fmt.Errorf("replay commit %s: %w", commit, mergeErr)
-			}
-			result.ConflictCommit = commit
-			result.ConflictingPaths = conflictPaths(commandErr.Stdout)
-			if len(result.ConflictingPaths) == 0 {
-				return result, fmt.Errorf("merge-tree conflicted without paths at %s: %w", commit, mergeErr)
-			}
+		if result.ConflictCommit != "" {
 			return result, nil
 		}
-		tree := strings.SplitN(string(out), "\x00", 2)[0]
-		if !shaPattern.MatchString(tree) {
-			return result, fmt.Errorf("merge-tree returned invalid tree for %s", commit)
-		}
-		priorTree, err := git(ctx, e.repo, "rev-parse", result.HeadSHA+"^{tree}")
-		if err != nil {
-			return result, err
-		}
-		if tree == priorTree {
-			result.DroppedCommits = append(result.DroppedCommits, commit)
-			continue
-		}
-		metaOut, err := e.repo.Run(ctx, "show", "-s", "--format=%an%x00%ae%x00%aI%x00%B%x00", commit)
-		if err != nil {
-			return result, err
-		}
-		parts := strings.SplitN(string(metaOut), "\x00", 4)
-		if len(parts) != 4 {
-			return result, fmt.Errorf("invalid author metadata for %s", commit)
-		}
-		message := strings.TrimSuffix(parts[3], "\x00\n")
-		commitOut, err := e.repo.RunWithEnv(ctx, map[string]string{"GIT_AUTHOR_NAME": parts[0], "GIT_AUTHOR_EMAIL": parts[1], "GIT_AUTHOR_DATE": parts[2]}, "commit-tree", tree, "-p", result.HeadSHA, "-m", message)
-		if err != nil {
-			return result, fmt.Errorf("commit replay %s: %w", commit, err)
-		}
-		result.HeadSHA = strings.TrimSpace(string(commitOut))
 	}
 	result.TreeSHA, err = git(ctx, e.repo, "rev-parse", result.HeadSHA+"^{tree}")
 	return result, err
+}
+
+func (e *Engine) replayCommit(ctx context.Context, commit string, result *Result) error {
+	parent, err := git(ctx, e.repo, "rev-parse", commit+"^1")
+	if err != nil {
+		return fmt.Errorf("revision commit %s has no first parent: %w", commit, err)
+	}
+	// Name-only NUL output begins with the tree OID, then conflicted paths.
+	out, mergeErr := e.repo.Run(ctx, "merge-tree", "--write-tree", "--merge-base="+parent, "--name-only", "--no-messages", "-z", result.HeadSHA, commit)
+	if mergeErr != nil {
+		var commandErr *gitexec.CommandError
+		var exitErr *exec.ExitError
+		if !errors.As(mergeErr, &commandErr) || !errors.As(mergeErr, &exitErr) || exitErr.ExitCode() != 1 {
+			return fmt.Errorf("replay commit %s: %w", commit, mergeErr)
+		}
+		result.ConflictCommit = commit
+		result.ConflictingPaths = conflictPaths(commandErr.Stdout)
+		if len(result.ConflictingPaths) == 0 {
+			return fmt.Errorf("merge-tree conflicted without paths at %s: %w", commit, mergeErr)
+		}
+		return nil
+	}
+	tree := strings.SplitN(string(out), "\x00", 2)[0]
+	if !shaPattern.MatchString(tree) {
+		return fmt.Errorf("merge-tree returned invalid tree for %s", commit)
+	}
+	priorTree, err := git(ctx, e.repo, "rev-parse", result.HeadSHA+"^{tree}")
+	if err != nil {
+		return err
+	}
+	if tree == priorTree {
+		result.DroppedCommits = append(result.DroppedCommits, commit)
+		return nil
+	}
+	metaOut, err := e.repo.Run(ctx, "show", "-s", "--format=%an%x00%ae%x00%aI%x00%B%x00", commit)
+	if err != nil {
+		return err
+	}
+	parts := strings.SplitN(string(metaOut), "\x00", 4)
+	if len(parts) != 4 {
+		return fmt.Errorf("invalid author metadata for %s", commit)
+	}
+	message := strings.TrimSuffix(parts[3], "\x00\n")
+	commitOut, err := e.repo.RunWithEnv(ctx, map[string]string{"GIT_AUTHOR_NAME": parts[0], "GIT_AUTHOR_EMAIL": parts[1], "GIT_AUTHOR_DATE": parts[2]}, "commit-tree", tree, "-p", result.HeadSHA, "-m", message)
+	if err != nil {
+		return fmt.Errorf("commit replay %s: %w", commit, err)
+	}
+	result.HeadSHA = strings.TrimSpace(string(commitOut))
+	return nil
 }
 
 func conflictPaths(output string) []string {
