@@ -398,7 +398,7 @@ func TestPRReviewCrossProcessLock(t *testing.T) {
 	var children []*exec.Cmd
 	for _, id := range []string{"serve", "daemon"} {
 		target := filepath.Join(parent, id)
-		cmd := exec.Command(os.Args[0], "-test.run=^TestPRReviewCrossProcessLock$")
+		cmd := exec.Command(os.Args[0], "-test.run=^TestPRReviewCrossProcessLock$") //nolint:norawexec // Child test process verifies the cross-process review lock.
 		cmd.Env = append(os.Environ(), "LOOM_PR_REVIEW_LOCK_CHILD=1", "LOOM_PR_REVIEW_REPO="+repo, "LOOM_PR_REVIEW_TARGET="+target, "LOOM_PR_REVIEW_HEAD="+head)
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
