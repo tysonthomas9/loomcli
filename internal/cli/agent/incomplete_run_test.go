@@ -73,10 +73,8 @@ func TestRecoverWorktree_IncompleteRun_RequeuesTaskAndKeepsUntrackedFiles(t *tes
 	tmpDir := t.TempDir()
 	writeAgentLock(t, tmpDir, deadPID, "test-agent", "task-123", "claude-abc")
 
-	// An empty stub list makes CommandMock fail the test on ANY command, so a
-	// `git clean` reaching the worktree is caught rather than tolerated. Its
-	// Verify() cleanup also asserts nothing was expected-but-missed.
-	mock := NewCommandMock(t, nil)
+	// Only the read-only status inspection is permitted during recovery.
+	mock := NewCommandMock(t, []CommandStub{{Dir: tmpDir, Name: "git", Args: []string{"status", "--porcelain", "--untracked-files=all"}}})
 	mock.Install()
 
 	tracker := claimStateBackend("in_progress", "test-agent")
@@ -96,16 +94,15 @@ func TestRecoverWorktree_IncompleteRun_RequeuesTaskAndKeepsUntrackedFiles(t *tes
 	}
 }
 
-// The mirror: a genuinely complete run still trusts the agent's status and
-// still cleans, so the divergence is confined to the incomplete case.
-func TestRecoverWorktree_CompleteRun_TrustsStatusAndStillCleans(t *testing.T) {
+// A complete run trusts the agent's status and preserves its files.
+func TestRecoverWorktree_CompleteRun_TrustsStatusAndKeepsFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	writeAgentLock(t, tmpDir, deadPID, "test-agent", "task-123", "claude-abc")
 
 	mock := NewCommandMock(t, []CommandStub{{
 		Dir:  tmpDir,
 		Name: "git",
-		Args: []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"},
+		Args: []string{"status", "--porcelain", "--untracked-files=all"},
 	}})
 	mock.Install()
 

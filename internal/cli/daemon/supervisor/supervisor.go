@@ -391,10 +391,11 @@ func (s *Supervisor) checkAgentStopSignals(ap *AgentProcess) bool {
 // remnant (a dead agent PID with a carried Claude session + task within TTL),
 // RESUME the interrupted task — preserve the lock, the in-progress worktree
 // files, and the fleet claim so the agent can `--resume` — instead of the
-// destructive recoverAgent path, which deletes the lock (discarding the session
-// id) and orphans the task. After repeated resume failures it escalates to a
-// CHECKPOINT retry of the same task (re-claim, but cold-start with the prior
-// attempt's diff injected) before finally cold-starting a fresh task. See
+// cold recoverAgent path, which clears the lock (discarding the session
+// id) and reopens the task while preserving worktree files. After repeated
+// resume failures it escalates to a CHECKPOINT retry of the same task
+// (re-claim, but cold-start with the prior attempt's diff injected) before
+// finally cold-starting a fresh task. See
 // detectRecovery.
 func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	// FIRST gate: a held workspace issues no Ready query, no ClaimIssue, runs
@@ -419,8 +420,8 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 		ap.Mu.Lock()
 		ap.ResumeFailures = 0 // cold-starting ⇒ let a future interruption recover again
 		ap.Mu.Unlock()
-		// Cold start: nothing here is being continued, so recovery takes its
-		// fully destructive form (incomplete=false).
+		// Cold start: nothing here is being continued, so recovery releases
+		// ownership and reports any leftover files (incomplete=false).
 		if err := s.recoverAgent(ap, 0, false); err != nil {
 			slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
 		}

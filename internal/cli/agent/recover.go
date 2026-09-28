@@ -35,22 +35,22 @@ This command will:
   2. If not running, clear the stale lock file
   3. Analyze the orphaned task using Claude to determine if it was completed
   4. Close completed tasks, or reset incomplete tasks to open status
-  5. Clean up untracked files left by the crashed agent (with confirmation)
+  5. Report untracked files left by the agent without removing them
 
 In workspace mode, recovery clears the shared workspace-level lock,
 searches git logs across all repos for task completion evidence, and
-cleans untracked files in all workspace repos.
+reports untracked files in all workspace repos.
 
 Use this when 'loom monitor' shows an agent in error state.
 
 Flags:
-  --force        Kill running agent and clean untracked files without prompting
+  --force        Kill a running agent without prompting
   --no-analyze   Skip Claude analysis, always reset task to open status
 
 Examples:
   loom recover falcon              # Recover with task analysis (default)
   loom recover ember --no-analyze  # Skip analysis, always reset to open
-  loom recover falcon --force      # Kill running agent and clean files without prompting
+  loom recover falcon --force      # Kill running agent without prompting
   loom recover myworkspace         # Recover workspace-level agent`,
 	Args: cobra.ExactArgs(1),
 	Run:  runRecover,
@@ -60,7 +60,7 @@ func init() {
 	recoverCmd.Flags().BoolVar(&recoverNoAnalyze, "no-analyze", false,
 		"Skip Claude analysis, always reset task to open status")
 	recoverCmd.Flags().BoolVar(&recoverForce, "force", false,
-		"Skip all confirmation prompts (kill process, clean files)")
+		"Kill a running agent without confirmation")
 	cli.RegisterCommand(recoverCmd)
 }
 
@@ -88,6 +88,7 @@ func runRecover(cmd *cobra.Command, args []string) {
 	if lockInfo == nil {
 		fmt.Println("No lock file found - checking for orphaned tasks...")
 		resetOrphanedAgentTasks(deps, worktreePath, worktreeName, "", !recoverNoAnalyze)
+		reportUntrackedFiles(worktreePath)
 		fmt.Println("Agent is ready for new work.")
 		return
 	}
@@ -105,7 +106,7 @@ func runRecover(cmd *cobra.Command, args []string) {
 	}
 
 	resetOrphanedAgentTasks(deps, worktreePath, lockInfo.AgentName, lockInfo.TaskID, !recoverNoAnalyze)
-	cleanUntrackedFiles(worktreePath, recoverForce)
+	reportUntrackedFiles(worktreePath)
 
 	fmt.Println("")
 	fmt.Println("=========================================")
@@ -173,16 +174,13 @@ func clearStaleLock(worktreePath string, pid int) {
 }
 
 // RecoverWorktree provides a non-interactive recovery path for daemon use:
-// force-release locks, kill processes, reset orphaned tasks, clean files.
+// force-release locks, kill processes, reset orphaned tasks, report leftovers.
 // On clean exit (code 0) trusts agent's task status; on non-zero resets tasks.
 //
 // incomplete marks the third case: the agent exited 0 but never released its
 // claim, so the turn ended before the task did (see ClaimStillHeld). Recovery
 // then behaves as it does for a crash where it matters — the task goes back on
-// the queue — but must NOT run the destructive cleanup, because the run's
-// uncommitted work is the thing the next attempt continues from. Callers that
-// have no exit to classify (pre-flight cold recovery) pass false: that path is
-// deliberately destructive.
+// the queue. All exit paths preserve the worktree's files, including cold recovery.
 func RecoverWorktree(worktreePath, agentName string, exitCode int, incomplete bool) error {
 	deps := &cli.Deps{}
 	*deps = *cli.GetDeps(nil)
@@ -247,17 +245,8 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int, incomplete bo
 	}
 	resetOrphanedAgentTasks(deps, worktreePath, agentName, lockTaskID, false)
 
-	// 6. Clean untracked files (force=true, no prompting).
-	//
-	// Skipped for an incomplete run. `git clean` here excludes only
-	// cli.ProtectedRuntimePaths, so everything the turn produced but had not
-	// committed yet — new files, scratch notes, generated fixtures — is exactly
-	// what it deletes. That is correct after a crash we are abandoning; it is
-	// destruction of live work when the agent simply ran out of turn and the
-	// next cycle is meant to continue from where it stopped.
-	if !incomplete {
-		cleanUntrackedFiles(worktreePath, true)
-	}
+	// 6. Report leftovers after ownership is released, even if Git is broken.
+	reportUntrackedFiles(worktreePath)
 
 	return nil
 }

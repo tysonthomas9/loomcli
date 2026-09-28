@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -459,76 +461,143 @@ func TestHandleOrphanedTask_NoAnalyze(t *testing.T) {
 	}
 }
 
-func TestCleanUntrackedFiles_NoFiles(t *testing.T) {
-	// Dry run returns empty — no clean should be called
+func TestReportUntrackedFiles_ListsWithoutCleaning(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{{
-		Dir:    "/test/worktree",
-		Name:   "git",
-		Args:   []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"},
-		Stdout: "",
-		Err:    nil,
+		Dir: "/test/worktree", Name: "git",
+		Args:   []string{"status", "--porcelain", "--untracked-files=all"},
+		Stdout: "?? notes.txt\n M tracked.go\n?? scratch/file.txt\n",
 	}})
 	mock.Install()
 
-	// No output command mock needed — GitClean should not be called
-	cleanUntrackedFiles("/test/worktree", false)
+	reportUntrackedFiles("/test/worktree")
+	for _, call := range mock.Calls() {
+		if len(call.Args) == 0 || call.Args[0] != "status" {
+			t.Fatalf("recovery invoked unexpected git command: %v", call.Args)
+		}
+	}
 }
 
-func TestCleanUntrackedFiles_WithForce(t *testing.T) {
-	// Dry run returns files, force=true -> clean is called without prompt
+func TestReportUntrackedFiles_StatusFailureDoesNotClean(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{{
-		Dir:    "/test/worktree",
-		Name:   "git",
-		Args:   []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"},
-		Stdout: "Would remove test.txt\nWould remove screenshots/\n",
-		Err:    nil,
+		Dir: "/test/worktree", Name: "git",
+		Args: []string{"status", "--porcelain", "--untracked-files=all"},
+		Err:  errors.New("broken repo"),
 	}})
 	mock.Install()
 
-	outputMock := NewOutputCommandMock(t, []OutputCommandStub{{
-		Dir:  "/test/worktree",
-		Args: []string{"clean", "-fd", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"},
-		Err:  nil,
-	}})
-	outputMock.Install()
-
-	cleanUntrackedFiles("/test/worktree", true)
+	reportUntrackedFiles("/test/worktree")
+	if len(mock.Calls()) != 1 {
+		t.Fatalf("git calls = %v, want only the failed status call", mock.Calls())
+	}
 }
 
-func TestCleanUntrackedFiles_DryRunFails(t *testing.T) {
-	// Dry run fails -- prints warning, no clean called
-	mock := NewCommandMock(t, []CommandStub{{
-		Dir:    "/test/worktree",
-		Name:   "git",
-		Args:   []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"},
-		Stdout: "",
-		Stderr: "error: not a git repo\n",
-		Err:    errors.New("exit status 128"),
-	}})
-	mock.Install()
+func TestRecoverWorktree_ColdWorkspacePreservesUntrackedFile(t *testing.T) {
+	resetDefaultIssueBackend()
+	t.Cleanup(resetDefaultIssueBackend)
+	wsDir := t.TempDir()
+	repoDir := filepath.Join(wsDir, "api")
+	initRecoveryRepo(t, repoDir)
+	notes := filepath.Join(repoDir, "notes.txt")
+	if err := os.WriteFile(notes, []byte("keep this work"), 0600); err != nil {
+		t.Fatal(err)
+	}
 
-	cleanUntrackedFiles("/test/worktree", true)
+	cfg := &LoomConfig{DefaultWorkspace: "testws", Workspaces: map[string]WorkspaceConfig{
+		"testws": {Path: wsDir, Repos: []RepoConfig{{Name: "api", Path: repoDir}}},
+	}}
+	old := cli.TestingResetDefaultResolver()
+	cli.TestingSetDefaultResolver(&cli.Resolver{Mode: cli.ModeWorkspace, Config: cfg, Workspace: "testws"})
+	t.Cleanup(func() { cli.TestingSetDefaultResolver(old) })
+	setDefaultIssueBackend(NewMockIssueBackend())
+
+	if err := RecoverWorktree(repoDir, "", -1, false); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(notes); err != nil || string(got) != "keep this work" {
+		t.Fatalf("cold recovery changed notes.txt: content=%q, err=%v", got, err)
+	}
 }
 
-func TestCleanUntrackedFiles_CleanFails(t *testing.T) {
-	// Dry run succeeds but actual clean fails -- prints warning
-	mock := NewCommandMock(t, []CommandStub{{
-		Dir:    "/test/worktree",
-		Name:   "git",
-		Args:   []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"},
-		Stdout: "Would remove test.txt\n",
-		Err:    nil,
-	}})
-	mock.Install()
+func TestRecoverWorktree_PostExitReportsLeftovers(t *testing.T) {
+	resetDefaultIssueBackend()
+	t.Cleanup(resetDefaultIssueBackend)
+	repoDir := filepath.Join(t.TempDir(), "repo")
+	initRecoveryRepo(t, repoDir)
+	notes := filepath.Join(repoDir, "notes.txt")
+	if err := os.WriteFile(notes, []byte("keep this work"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	setDefaultIssueBackend(NewMockIssueBackend())
 
-	outputMock := NewOutputCommandMock(t, []OutputCommandStub{{
-		Dir:  "/test/worktree",
-		Args: []string{"clean", "-fd", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"},
-		Err:  errors.New("Permission denied"),
-	}})
-	outputMock.Install()
+	output := captureRecoveryOutput(t, func() {
+		if err := RecoverWorktree(repoDir, "", 0, false); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(output, "notes.txt") {
+		t.Fatalf("recovery log did not list notes.txt: %q", output)
+	}
+	if _, err := os.Stat(notes); err != nil {
+		t.Fatalf("post-exit recovery removed notes.txt: %v", err)
+	}
+}
 
-	cleanUntrackedFiles("/test/worktree", true)
+func TestRecoverWorktree_BrokenGitStillReleasesOwnership(t *testing.T) {
+	resetDefaultIssueBackend()
+	t.Cleanup(resetDefaultIssueBackend)
+	dir := t.TempDir() // Deliberately not a Git repository.
+	notes := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(notes, []byte("keep this work"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	writeAgentLock(t, dir, deadPID, "test-agent", "task-123", "")
+	tracker := claimStateBackend("in_progress", "test-agent")
+	setDefaultIssueBackend(tracker)
+
+	if err := RecoverWorktree(dir, "test-agent", -1, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, LockFileName)); !os.IsNotExist(err) {
+		t.Fatalf("stale lock remains: %v", err)
+	}
+	if status := updateStatusFor(t, tracker, "task-123"); status == nil || *status != "open" {
+		t.Fatalf("task was not reopened: status=%v", status)
+	}
+	if !tracker.Called("ReleaseIssueLock") {
+		t.Fatal("fleet-db issue lock was not released")
+	}
+	if _, err := os.Stat(notes); err != nil {
+		t.Fatalf("broken Git caused notes.txt to be removed: %v", err)
+	}
+}
+
+func initRecoveryRepo(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "init", "-q", path) //nolint:norawexec
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+}
+
+func captureRecoveryOutput(t *testing.T, run func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = old; _ = r.Close(); _ = w.Close() }()
+	run()
+	_ = w.Close()
+	output, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(output)
 }
 
 func TestKillProcess_Success(t *testing.T) {
@@ -736,12 +805,12 @@ func TestRecoverWorktree_NoLock(t *testing.T) {
 	setDefaultIssueBackend(tracker)
 
 	// No lock file in tmpDir, so CheckLock returns (nil, false, nil).
-	// RecoverWorktree should call resetOrphanedAgentTasks (List) and cleanUntrackedFiles (git clean -fdn).
+	// RecoverWorktree checks for leftovers after resetting orphaned tasks.
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Dir:    tmpDir,
 			Name:   "git",
-			Args:   []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"},
+			Args:   []string{"status", "--porcelain", "--untracked-files=all"},
 			Stdout: "",
 			Err:    nil,
 		},
@@ -752,6 +821,7 @@ func TestRecoverWorktree_NoLock(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}
+	assertOnlyRecoveryStatusCalls(t, mock)
 }
 
 func TestRecoverWorktree_StaleLock(t *testing.T) {
@@ -776,12 +846,12 @@ func TestRecoverWorktree_StaleLock(t *testing.T) {
 	// 2. forceReleaseLock -> removes lock file
 	// 3. resetTask: GetIssue (check status), then UpdateIssue
 	// 4. resetOrphanedAgentTasks (List for test-agent, skipping task-123)
-	// 5. cleanUntrackedFiles (git clean -fdn)
+	// 5. report untracked leftovers
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Dir:    tmpDir,
 			Name:   "git",
-			Args:   []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"},
+			Args:   []string{"status", "--porcelain", "--untracked-files=all"},
 			Stdout: "",
 			Err:    nil,
 		},
@@ -792,10 +862,20 @@ func TestRecoverWorktree_StaleLock(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}
+	assertOnlyRecoveryStatusCalls(t, mock)
 
 	// Verify lock file was removed
 	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
 		t.Error("lock file should have been removed by forceReleaseLock")
+	}
+}
+
+func assertOnlyRecoveryStatusCalls(t *testing.T, mock *CommandMock) {
+	t.Helper()
+	for _, call := range mock.Calls() {
+		if call.Name != "git" || !slices.Equal(call.Args, []string{"status", "--porcelain", "--untracked-files=all"}) {
+			t.Fatalf("unexpected recovery command (possible cleanup): %s %v", call.Name, call.Args)
+		}
 	}
 }
 
@@ -826,12 +906,12 @@ func TestRecoverWorktree_EmptyAgentName(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// No lock file. Empty agent name means resetOrphanedAgentTasks returns immediately.
-	// Only cleanUntrackedFiles runs (git clean -fdn returning empty).
+	// Only leftover reporting runs (git status returning empty).
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Dir:    tmpDir,
 			Name:   "git",
-			Args:   []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"},
+			Args:   []string{"status", "--porcelain", "--untracked-files=all"},
 			Stdout: "",
 			Err:    nil,
 		},
@@ -1094,142 +1174,39 @@ func TestAnalyzeTaskCompletion_WorkspaceMode_PartialResults(t *testing.T) {
 	}
 }
 
-func TestCleanUntrackedFiles_WorkspaceMode(t *testing.T) {
-	// In workspace mode, cleanUntrackedFiles should iterate over all repos.
-	// Uses defaultResolver (global) and DiscoverWorktrees (global deps), so not parallel-safe.
-	tmpDir := t.TempDir()
-	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-
-	repo1Path := filepath.Join(tmpDir, "repo1")
-	repo2Path := filepath.Join(tmpDir, "repo2")
-	createGitRepo(t, repo1Path)
-	createGitRepo(t, repo2Path)
-
+func TestReportUntrackedFiles_WorkspaceMode(t *testing.T) {
+	wsDir := t.TempDir()
+	wsDir, _ = filepath.EvalSymlinks(wsDir)
+	repo1 := filepath.Join(wsDir, "repo1")
+	repo2 := filepath.Join(wsDir, "repo2")
+	createGitRepo(t, repo1)
+	createGitRepo(t, repo2)
 	cfg := &LoomConfig{
 		DefaultWorkspace: "testws",
 		Workspaces: map[string]WorkspaceConfig{
-			"testws": {
-				Path: tmpDir,
-				Repos: []RepoConfig{
-					{Name: "repo1", Path: repo1Path},
-					{Name: "repo2", Path: repo2Path},
-				},
-			},
+			"testws": {Path: wsDir, Repos: []RepoConfig{
+				{Name: "repo1", Path: repo1}, {Name: "repo2", Path: repo2},
+			}},
 		},
 	}
 	old := cli.TestingResetDefaultResolver()
 	cli.TestingSetDefaultResolver(&cli.Resolver{Mode: cli.ModeWorkspace, Config: cfg, Workspace: "testws"})
-	defer func() { cli.TestingSetDefaultResolver(old) }()
+	defer cli.TestingSetDefaultResolver(old)
 
-	// DiscoverWorktrees calls GetCurrentBranch for each repo, then
-	// GitCleanDryRun (via RunGitCommand/execCommand) for each.
 	mock := NewCommandMock(t, []CommandStub{
-		// DiscoverWorktrees: GetCurrentBranch
-		{Dir: repo1Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
-		{Dir: repo2Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
-		// GitCleanDryRunExclude for each repo
-		{Dir: repo1Path, Name: "git", Args: []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"}, Stdout: "Would remove file1.txt\n"},
-		{Dir: repo2Path, Name: "git", Args: []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"}, Stdout: "Would remove file2.txt\n"},
+		{Dir: repo1, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
+		{Dir: repo2, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
+		{Dir: repo1, Name: "git", Args: []string{"status", "--porcelain", "--untracked-files=all"}, Stdout: "?? notes.txt\n"},
+		{Dir: repo2, Name: "git", Args: []string{"status", "--porcelain", "--untracked-files=all"}, Stdout: "?? other.txt\n"},
 	})
 	mock.Install()
 
-	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
-		{Dir: repo1Path, Args: []string{"clean", "-fd", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"}},
-		{Dir: repo2Path, Args: []string{"clean", "-fd", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"}},
-	})
-	outputMock.Install()
-
-	cleanUntrackedFiles("/some/path", true)
-}
-
-func TestCleanUntrackedFiles_WorkspaceMode_NoUntrackedInAnyRepo(t *testing.T) {
-	// No untracked files in any workspace repo -- GitClean should not be called.
-	// Uses defaultResolver (global) and DiscoverWorktrees (global deps), so not parallel-safe.
-	tmpDir := t.TempDir()
-	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-
-	repo1Path := filepath.Join(tmpDir, "repo1")
-	repo2Path := filepath.Join(tmpDir, "repo2")
-	createGitRepo(t, repo1Path)
-	createGitRepo(t, repo2Path)
-
-	cfg := &LoomConfig{
-		DefaultWorkspace: "testws",
-		Workspaces: map[string]WorkspaceConfig{
-			"testws": {
-				Path: tmpDir,
-				Repos: []RepoConfig{
-					{Name: "repo1", Path: repo1Path},
-					{Name: "repo2", Path: repo2Path},
-				},
-			},
-		},
+	reportUntrackedFiles(repo1)
+	for _, call := range mock.Calls() {
+		if len(call.Args) != 0 && call.Args[0] == "clean" {
+			t.Fatalf("recovery invoked git clean: %v", call.Args)
+		}
 	}
-	old := cli.TestingResetDefaultResolver()
-	cli.TestingSetDefaultResolver(&cli.Resolver{Mode: cli.ModeWorkspace, Config: cfg, Workspace: "testws"})
-	defer func() { cli.TestingSetDefaultResolver(old) }()
-
-	mock := NewCommandMock(t, []CommandStub{
-		// DiscoverWorktrees: GetCurrentBranch
-		{Dir: repo1Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
-		{Dir: repo2Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
-		// GitCleanDryRunExclude returns empty for both
-		{Dir: repo1Path, Name: "git", Args: []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"}, Stdout: ""},
-		{Dir: repo2Path, Name: "git", Args: []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"}, Stdout: ""},
-	})
-	mock.Install()
-
-	// No OutputCommandMock needed -- GitClean should not be called
-	cleanUntrackedFiles("/some/path", true)
-}
-
-func TestCleanUntrackedFiles_WorkspaceMode_PartialUntracked(t *testing.T) {
-	// Only one repo has untracked files. Both repos go through the dry-run
-	// check, but both have GitClean called when any repo has untracked files.
-	// However, the code below tests that the workspace iterates all repos.
-	// Uses defaultResolver (global) and DiscoverWorktrees (global deps), so not parallel-safe.
-	tmpDir := t.TempDir()
-	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
-
-	repo1Path := filepath.Join(tmpDir, "repo1")
-	repo2Path := filepath.Join(tmpDir, "repo2")
-	createGitRepo(t, repo1Path)
-	createGitRepo(t, repo2Path)
-
-	cfg := &LoomConfig{
-		DefaultWorkspace: "testws",
-		Workspaces: map[string]WorkspaceConfig{
-			"testws": {
-				Path: tmpDir,
-				Repos: []RepoConfig{
-					{Name: "repo1", Path: repo1Path},
-					{Name: "repo2", Path: repo2Path},
-				},
-			},
-		},
-	}
-	old := cli.TestingResetDefaultResolver()
-	cli.TestingSetDefaultResolver(&cli.Resolver{Mode: cli.ModeWorkspace, Config: cfg, Workspace: "testws"})
-	defer func() { cli.TestingSetDefaultResolver(old) }()
-
-	// Both repos have untracked files so that GitClean is definitively called for both
-	mock := NewCommandMock(t, []CommandStub{
-		// DiscoverWorktrees: GetCurrentBranch
-		{Dir: repo1Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
-		{Dir: repo2Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
-		// GitCleanDryRunExclude: repo1 has files, repo2 also has files
-		{Dir: repo1Path, Name: "git", Args: []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"}, Stdout: "Would remove leftover.txt\n"},
-		{Dir: repo2Path, Name: "git", Args: []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"}, Stdout: "Would remove other.txt\n"},
-	})
-	mock.Install()
-
-	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
-		{Dir: repo1Path, Args: []string{"clean", "-fd", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"}},
-		{Dir: repo2Path, Args: []string{"clean", "-fd", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"}},
-	})
-	outputMock.Install()
-
-	cleanUntrackedFiles("/some/path", true)
 }
 
 func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
@@ -1270,10 +1247,10 @@ func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
 	setDefaultIssueBackend(tracker)
 
 	mock := NewCommandMock(t, []CommandStub{
-		// cleanUntrackedFiles: DiscoverWorktrees calls GetCurrentBranch
+		// reportUntrackedFiles: DiscoverWorktrees calls GetCurrentBranch
 		{Dir: repoDir, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
-		// cleanUntrackedFiles: GitCleanDryRunExclude
-		{Dir: repoDir, Name: "git", Args: []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"}, Stdout: ""},
+		// reportUntrackedFiles: git status
+		{Dir: repoDir, Name: "git", Args: []string{"status", "--porcelain", "--untracked-files=all"}, Stdout: ""},
 	})
 	mock.Install()
 
