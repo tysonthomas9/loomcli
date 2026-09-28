@@ -30,6 +30,9 @@ func (s *Supervisor) RequestYield(ap *AgentProcess, reason string) error {
 	if err := WriteYieldFile(ap.WorktreePath, req); err != nil {
 		return fmt.Errorf("request yield for %s: %w", ap.Entry.Worktree, err)
 	}
+	ap.Mu.Lock()
+	ap.YieldReason = reason
+	ap.Mu.Unlock()
 	slog.Info("yield requested", "worktree", ap.Entry.Worktree, "reason", reason)
 	return nil
 }

@@ -30,6 +30,8 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.AssignedTaskID = ""
 	ap.ResumeTaskID = ""          // per-cycle; re-detected in preFlightSetup (ResumeFailures persists)
 	ap.RecoveryMode = recoverCold // per-cycle; re-classified in preFlightSetup
+	ap.YieldReason = ""
+	ap.CaptureRetained = false
 	ap.LastActivity = time.Time{}
 	// A child that died while parked on an interactive prompt never sends its
 	// "end", so the in-flight count must not survive into the next cycle: a

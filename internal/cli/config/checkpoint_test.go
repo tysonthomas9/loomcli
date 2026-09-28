@@ -3,9 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -17,7 +15,7 @@ func TestSaveAndLoadCheckpoint(t *testing.T) {
 		AgentName:  "falcon",
 		TaskID:     "loom-123",
 		EpicID:     "loom-epic1",
-		GitDiff:    "diff --git a/main.go\n+added line",
+		CaptureRef: "diff --git a/main.go\n+added line",
 		ExitCode:   1,
 		ErrorClass: "RateLimited",
 		Timestamp:  time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC),
@@ -44,8 +42,8 @@ func TestSaveAndLoadCheckpoint(t *testing.T) {
 	if loaded.EpicID != cp.EpicID {
 		t.Errorf("EpicID: got %q, want %q", loaded.EpicID, cp.EpicID)
 	}
-	if loaded.GitDiff != cp.GitDiff {
-		t.Errorf("GitDiff: got %q, want %q", loaded.GitDiff, cp.GitDiff)
+	if loaded.CaptureRef != cp.CaptureRef {
+		t.Errorf("CaptureRef: got %q, want %q", loaded.CaptureRef, cp.CaptureRef)
 	}
 	if loaded.ExitCode != cp.ExitCode {
 		t.Errorf("ExitCode: got %d, want %d", loaded.ExitCode, cp.ExitCode)
@@ -137,133 +135,6 @@ func TestSaveCheckpointAtomicity(t *testing.T) {
 	}
 }
 
-func TestTruncateDiff(t *testing.T) {
-	// Short diff — no truncation
-	short := "abc"
-	if got := TruncateDiff(short, 100); got != short {
-		t.Errorf("Short diff truncated: got %q, want %q", got, short)
-	}
-
-	// Large diff — should be truncated
-	large := strings.Repeat("x", 8000)
-	result := TruncateDiff(large, 4096)
-	if len(result) > 4096 {
-		t.Errorf("Truncated diff too long: %d bytes", len(result))
-	}
-	if !strings.Contains(result, "truncated") {
-		t.Error("Truncated diff should contain truncation notice")
-	}
-	if !strings.Contains(result, "8000") {
-		t.Error("Truncation notice should include original size")
-	}
-}
-
-func TestCaptureGitDiffCleanWorktree(t *testing.T) {
-	clearGitEnvVars(t)
-	// Create a temp git repo with no changes
-	tmpDir := t.TempDir()
-	run := func(args ...string) {
-		cmd := exec.Command("git", args...) //nolint:norawexec
-		cmd.Dir = tmpDir
-		cmd.Env = gitSafeEnv(
-			"GIT_AUTHOR_NAME=test",
-			"GIT_AUTHOR_EMAIL=test@test.com",
-			"GIT_COMMITTER_NAME=test",
-			"GIT_COMMITTER_EMAIL=test@test.com",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v failed: %v\n%s", args, err, out)
-		}
-	}
-
-	run("init")
-	run("commit", "--allow-empty", "-m", "initial")
-
-	diff := captureSingleRepoDiff(tmpDir, maxDiffBytes)
-	if diff != "" {
-		t.Errorf("Expected empty diff for clean worktree, got %q", diff)
-	}
-}
-
-func TestCaptureGitDiff(t *testing.T) {
-	clearGitEnvVars(t)
-	tmpDir := t.TempDir()
-	run := func(args ...string) {
-		cmd := exec.Command("git", args...) //nolint:norawexec
-		cmd.Dir = tmpDir
-		cmd.Env = gitSafeEnv(
-			"GIT_AUTHOR_NAME=test",
-			"GIT_AUTHOR_EMAIL=test@test.com",
-			"GIT_COMMITTER_NAME=test",
-			"GIT_COMMITTER_EMAIL=test@test.com",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v failed: %v\n%s", args, err, out)
-		}
-	}
-
-	run("init")
-	// Create and commit a file
-	if err := os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte("package main\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	run("add", "main.go")
-	run("commit", "-m", "initial")
-
-	// Make an uncommitted change
-	if err := os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte("package main\n\nfunc hello() {}\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	diff := captureSingleRepoDiff(tmpDir, maxDiffBytes)
-	if diff == "" {
-		t.Error("Expected non-empty diff for dirty worktree")
-	}
-	if !strings.Contains(diff, "hello") {
-		t.Errorf("Diff should contain 'hello', got %q", diff)
-	}
-}
-
-func TestCaptureGitDiffTruncation(t *testing.T) {
-	clearGitEnvVars(t)
-	tmpDir := t.TempDir()
-	run := func(args ...string) {
-		cmd := exec.Command("git", args...) //nolint:norawexec
-		cmd.Dir = tmpDir
-		cmd.Env = gitSafeEnv(
-			"GIT_AUTHOR_NAME=test",
-			"GIT_AUTHOR_EMAIL=test@test.com",
-			"GIT_COMMITTER_NAME=test",
-			"GIT_COMMITTER_EMAIL=test@test.com",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v failed: %v\n%s", args, err, out)
-		}
-	}
-
-	run("init")
-	// Create and commit a file
-	if err := os.WriteFile(filepath.Join(tmpDir, "big.txt"), []byte("original\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	run("add", "big.txt")
-	run("commit", "-m", "initial")
-
-	// Make a large change (> 4KB)
-	bigContent := strings.Repeat("line of content here\n", 500) // ~10KB
-	if err := os.WriteFile(filepath.Join(tmpDir, "big.txt"), []byte(bigContent), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	diff := captureSingleRepoDiff(tmpDir, 4096)
-	if len(diff) > 4096 {
-		t.Errorf("Diff should be truncated to 4096 bytes, got %d", len(diff))
-	}
-	if !strings.Contains(diff, "truncated") {
-		t.Error("Truncated diff should contain truncation notice")
-	}
-}
-
 func TestSaveAndLoadCheckpoint_WithYieldReason(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -271,7 +142,7 @@ func TestSaveAndLoadCheckpoint_WithYieldReason(t *testing.T) {
 		AgentName:   "falcon",
 		TaskID:      "loom-yield-1",
 		EpicID:      "loom-epic1",
-		GitDiff:     "+yielded change",
+		CaptureRef:  "+yielded change",
 		ExitCode:    0,
 		ErrorClass:  "Yielded",
 		YieldReason: "config_removed",
@@ -305,44 +176,7 @@ func TestSaveAndLoadCheckpoint_WithYieldReason(t *testing.T) {
 	if loaded.TaskID != cp.TaskID {
 		t.Errorf("TaskID: got %q, want %q", loaded.TaskID, cp.TaskID)
 	}
-	if loaded.GitDiff != cp.GitDiff {
-		t.Errorf("GitDiff: got %q, want %q", loaded.GitDiff, cp.GitDiff)
-	}
-}
-
-func TestLoadCheckpoint_BackwardsCompatible(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Write a checkpoint JSON manually WITHOUT the yield_reason field,
-	// simulating a checkpoint from an older version of the code.
-	oldJSON := `{
-  "agent_name": "hawk",
-  "task_id": "loom-old-1",
-  "git_diff": "+old change",
-  "exit_code": 1,
-  "error_class": "RateLimited",
-  "timestamp": "2026-03-01T12:00:00Z"
-}`
-	cpPath := filepath.Join(tmpDir, CheckpointFileName)
-	if err := os.WriteFile(cpPath, []byte(oldJSON), 0600); err != nil {
-		t.Fatalf("failed to write old checkpoint: %v", err)
-	}
-
-	loaded, err := LoadCheckpoint(tmpDir)
-	if err != nil {
-		t.Fatalf("LoadCheckpoint failed: %v", err)
-	}
-	if loaded == nil {
-		t.Fatal("LoadCheckpoint returned nil")
-	}
-
-	if loaded.YieldReason != "" {
-		t.Errorf("YieldReason: got %q, want empty string for old checkpoint", loaded.YieldReason)
-	}
-	if loaded.ErrorClass != "RateLimited" {
-		t.Errorf("ErrorClass: got %q, want %q", loaded.ErrorClass, "RateLimited")
-	}
-	if loaded.ExitCode != 1 {
-		t.Errorf("ExitCode: got %d, want 1", loaded.ExitCode)
+	if loaded.CaptureRef != cp.CaptureRef {
+		t.Errorf("CaptureRef: got %q, want %q", loaded.CaptureRef, cp.CaptureRef)
 	}
 }

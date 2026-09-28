@@ -47,11 +47,13 @@ type AgentProcess struct {
 	InputWaitPending       int               // interactive harness prompts currently awaiting an answer; a count (not a flag) so overlapping prompts nest — see input_wait.go
 	InputWaitSince         time.Time         // when InputWaitPending last rose from zero; anchors the bound that stops a suspension from outliving its cause
 
-	RestartCount   int       // consecutive restart attempts
-	LastStart      time.Time // when subprocess was last spawned
-	LastExit       time.Time // when subprocess last exited
-	LastExitCode   int       // exit code from last run
-	AssignedEpicID string    // epic this agent is currently assigned to (empty = non-epic mode)
+	RestartCount    int       // consecutive restart attempts
+	LastStart       time.Time // when subprocess was last spawned
+	LastExit        time.Time // when subprocess last exited
+	LastExitCode    int       // exit code from last run
+	AssignedEpicID  string    // epic this agent is currently assigned to (empty = non-epic mode)
+	YieldReason     string    // persisted yield intent, even after the drain removes its file
+	CaptureRetained bool      // capture failed or was incomplete; recovery must preserve the worktree
 
 	SoftKnobWarning string // last soft-enforcement warning logged by gateSafetyKnobsEnforceable; deduplicates a per-poll-cycle line down to one per change
 

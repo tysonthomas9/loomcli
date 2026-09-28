@@ -1,343 +1,163 @@
 package supervisor
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
 )
 
-// writeLockFile is a test helper that writes a lock file with the given info.
 func writeLockFile(t *testing.T, dir string, info *cli.LockInfo) {
 	t.Helper()
-	data, err := json.MarshalIndent(info, "", "  ")
+	data, err := json.Marshal(info)
 	if err != nil {
-		t.Fatalf("failed to marshal lock info: %v", err)
+		t.Fatal(err)
 	}
-	lockPath := filepath.Join(dir, cli.LockFileName)
-	if err := os.WriteFile(lockPath, data, 0600); err != nil {
-		t.Fatalf("failed to write lock file: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, cli.LockFileName), data, 0600); err != nil {
+		t.Fatal(err)
 	}
 }
 
-// writeYieldFile is a test helper that writes a yield file with the given reason.
-func writeYieldFile(t *testing.T, dir string, reason string) {
+func writeYieldFile(t *testing.T, dir, reason string) {
 	t.Helper()
-	req := &YieldRequest{
-		Reason:      reason,
-		RequestedAt: time.Now(),
-		RequestedBy: "test",
-	}
-	if err := WriteYieldFile(dir, req); err != nil {
-		t.Fatalf("failed to write yield file: %v", err)
+	if err := WriteYieldFile(dir, &YieldRequest{Reason: reason, RequestedAt: time.Now()}); err != nil {
+		t.Fatal(err)
 	}
 }
 
-// newTestSupervisor returns a minimal Supervisor for checkpoint tests.
 func newTestSupervisor() *Supervisor {
-	cfg := &config.DaemonConfig{}
-	return &Supervisor{
-		ConfigSnapshot: func() *config.DaemonConfig { return cfg },
-	}
+	return &Supervisor{ConfigSnapshot: func() *config.DaemonConfig { return &config.DaemonConfig{} }}
 }
 
-// ---------------------------------------------------------------------------
-// handleAgentCheckpoint tests
-// ---------------------------------------------------------------------------
-
-func TestHandleAgentCheckpoint_YieldExit(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Write a lock file with a task ID
-	writeLockFile(t, tmpDir, &cli.LockInfo{
-		PID:       os.Getpid(),
-		Command:   "task",
-		AgentName: "falcon",
-		TaskID:    "loom-yield-100",
-		TaskTitle: "Add yield support",
-		StartedAt: time.Now(),
-	})
-
-	// Write a yield file
-	writeYieldFile(t, tmpDir, "config_removed")
-
-	s := newTestSupervisor()
-	ap := &AgentProcess{
-		Entry:        config.AgentEntry{Worktree: "falcon"},
-		WorktreePath: tmpDir,
-	}
-
-	// Call handleAgentCheckpoint with exit code 0 (yield path)
-	s.handleAgentCheckpoint(ap, 0)
-
-	// Verify checkpoint was saved with yield metadata
-	lockDir := cli.ResolveLockDir(tmpDir)
-	cp, err := config.LoadCheckpoint(lockDir)
+func gitForCaptureTest(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...) //nolint:gosec,norawexec // Real temporary Git repository verifies capture objects.
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("LoadCheckpoint failed: %v", err)
+		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
-	if cp == nil {
-		t.Fatal("Expected checkpoint to be saved for yield exit, got nil")
-	}
-
-	if cp.ErrorClass != "Yielded" {
-		t.Errorf("ErrorClass: got %q, want %q", cp.ErrorClass, "Yielded")
-	}
-	if cp.YieldReason != "config_removed" {
-		t.Errorf("YieldReason: got %q, want %q", cp.YieldReason, "config_removed")
-	}
-	if cp.TaskID != "loom-yield-100" {
-		t.Errorf("TaskID: got %q, want %q", cp.TaskID, "loom-yield-100")
-	}
-	if cp.AgentName != "falcon" {
-		t.Errorf("AgentName: got %q, want %q", cp.AgentName, "falcon")
-	}
-	if cp.ExitCode != 0 {
-		t.Errorf("ExitCode: got %d, want 0", cp.ExitCode)
-	}
+	return strings.TrimSpace(string(out))
 }
 
-func TestHandleAgentCheckpoint_NormalSuccess(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Write a lock file with a task ID
-	writeLockFile(t, tmpDir, &cli.LockInfo{
-		PID:       os.Getpid(),
-		Command:   "task",
-		AgentName: "falcon",
-		TaskID:    "loom-done-200",
-		TaskTitle: "Completed task",
-		StartedAt: time.Now(),
-	})
-
-	// Pre-create a checkpoint to verify it gets cleared
-	lockDir := cli.ResolveLockDir(tmpDir)
-	oldCp := &config.Checkpoint{
-		AgentName: "falcon",
-		TaskID:    "loom-done-200",
-		ExitCode:  1,
-		Timestamp: time.Now(),
+func captureRepo(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[user]\nname = Test\nemail = test@example.com\n"), 0600); err != nil {
+		t.Fatal(err)
 	}
-	if err := config.SaveCheckpoint(lockDir, oldCp); err != nil {
-		t.Fatalf("SaveCheckpoint (setup) failed: %v", err)
+	dir := t.TempDir()
+	gitForCaptureTest(t, dir, "init")
+	if err := os.WriteFile(filepath.Join(dir, "main.txt"), []byte("initial\n"), 0600); err != nil {
+		t.Fatal(err)
 	}
-
-	// No yield file present
-
-	s := newTestSupervisor()
-	ap := &AgentProcess{
-		Entry:        config.AgentEntry{Worktree: "falcon"},
-		WorktreePath: tmpDir,
-	}
-
-	// Call handleAgentCheckpoint with exit code 0 (normal success)
-	s.handleAgentCheckpoint(ap, 0)
-
-	// Verify checkpoint was cleared
-	cp, err := config.LoadCheckpoint(lockDir)
-	if err != nil {
-		t.Fatalf("LoadCheckpoint failed: %v", err)
-	}
-	if cp != nil {
-		t.Errorf("Expected checkpoint to be cleared on normal success, got %+v", cp)
-	}
+	gitForCaptureTest(t, dir, "add", "main.txt")
+	gitForCaptureTest(t, dir, "commit", "-m", "initial")
+	return dir
 }
 
-func TestHandleAgentCheckpoint_CrashWithYieldFile(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Write a lock file with a task ID
-	writeLockFile(t, tmpDir, &cli.LockInfo{
-		PID:       os.Getpid(),
-		Command:   "task",
-		AgentName: "hawk",
-		TaskID:    "loom-crash-300",
-		TaskTitle: "Crashed task",
-		StartedAt: time.Now(),
-	})
-
-	// Write a yield file (should be ignored for non-zero exits)
-	writeYieldFile(t, tmpDir, "manual_stop")
-
-	s := newTestSupervisor()
-	ap := &AgentProcess{
-		Entry:        config.AgentEntry{Worktree: "hawk"},
-		WorktreePath: tmpDir,
+func TestAgentExitCapturesLargeTrackedAndUntrackedWork(t *testing.T) {
+	dir := captureRepo(t)
+	tracked := strings.Repeat("tracked edit\n", 2000)
+	if err := os.WriteFile(filepath.Join(dir, "main.txt"), []byte(tracked), 0600); err != nil {
+		t.Fatal(err)
 	}
-
-	// Call handleAgentCheckpoint with exit code 1 (crash path)
+	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("untracked work\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	writeLockFile(t, dir, &cli.LockInfo{AgentName: "agent", TaskID: "task-1", TaskTitle: "Work"})
+	s := newTestSupervisor()
+	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "agent"}, WorktreePath: dir}
 	s.handleAgentCheckpoint(ap, 1)
-
-	// Verify crash checkpoint is saved (not yield checkpoint)
-	lockDir := cli.ResolveLockDir(tmpDir)
-	cp, err := config.LoadCheckpoint(lockDir)
-	if err != nil {
-		t.Fatalf("LoadCheckpoint failed: %v", err)
+	cp, err := config.LoadCheckpoint(cli.ResolveLockDir(dir))
+	if err != nil || cp == nil {
+		t.Fatalf("checkpoint: %v, %+v", err, cp)
 	}
-	if cp == nil {
-		t.Fatal("Expected crash checkpoint to be saved, got nil")
+	if cp.CaptureRef == "" || cp.Retained {
+		t.Fatalf("capture checkpoint: %+v", cp)
 	}
-
-	if cp.ExitCode != 1 {
-		t.Errorf("ExitCode: got %d, want 1", cp.ExitCode)
+	if got := gitForCaptureTest(t, dir, "show", cp.CaptureRef+":main.txt"); got != strings.TrimSpace(tracked) {
+		t.Fatal("tracked edit was not captured in full")
 	}
-	if cp.ErrorClass == "Yielded" {
-		t.Error("ErrorClass should NOT be 'Yielded' for a crash exit with yield file")
+	if got := gitForCaptureTest(t, dir, "show", cp.CaptureRef+":new.txt"); got != "untracked work" {
+		t.Fatalf("untracked content: %q", got)
 	}
-	if cp.YieldReason != "" {
-		t.Errorf("YieldReason should be empty for crash checkpoint, got %q", cp.YieldReason)
-	}
-	if cp.TaskID != "loom-crash-300" {
-		t.Errorf("TaskID: got %q, want %q", cp.TaskID, "loom-crash-300")
+	if got := gitForCaptureTest(t, dir, "status", "--porcelain"); !strings.Contains(got, "main.txt") || !strings.Contains(got, "new.txt") {
+		t.Fatalf("worktree changed after capture: %q", got)
 	}
 }
 
-// ---------------------------------------------------------------------------
-// saveYieldCheckpoint tests
-// ---------------------------------------------------------------------------
-
-func TestSaveYieldCheckpoint_NoLock(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Write a yield file but no lock file
-	writeYieldFile(t, tmpDir, "config_removed")
-
+func TestAgentExitCapturesAfterDrainRemovedYieldFile(t *testing.T) {
+	dir := captureRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("yield work\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	writeLockFile(t, dir, &cli.LockInfo{AgentName: "agent", TaskID: "task-2"})
 	s := newTestSupervisor()
-	ap := &AgentProcess{
-		Entry:        config.AgentEntry{Worktree: "falcon"},
-		WorktreePath: tmpDir,
+	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "agent"}, WorktreePath: dir, YieldReason: "shutdown"}
+	s.handleAgentCheckpoint(ap, 0)
+	cp, err := config.LoadCheckpoint(cli.ResolveLockDir(dir))
+	if err != nil || cp == nil || cp.CaptureRef == "" || cp.YieldReason != "shutdown" {
+		t.Fatalf("yield checkpoint: %+v, %v", cp, err)
 	}
-
-	// Call saveYieldCheckpoint directly
-	s.saveYieldCheckpoint(ap)
-
-	// Verify no checkpoint was saved (lock file required)
-	lockDir := cli.ResolveLockDir(tmpDir)
-	cp, err := config.LoadCheckpoint(lockDir)
-	if err != nil {
-		t.Fatalf("LoadCheckpoint failed: %v", err)
+	if got := gitForCaptureTest(t, dir, "show", cp.CaptureRef+":new.txt"); got != "yield work" {
+		t.Fatalf("captured yield work: %q", got)
 	}
-	if cp != nil {
-		t.Errorf("Expected no checkpoint when lock file is missing, got %+v", cp)
+	if _, err := os.Stat(filepath.Join(dir, "new.txt")); err != nil {
+		t.Fatalf("yield work was removed: %v", err)
 	}
 }
 
-func TestSaveYieldCheckpoint_NoTaskID(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Write a lock file WITHOUT a task ID
-	writeLockFile(t, tmpDir, &cli.LockInfo{
-		PID:       os.Getpid(),
-		Command:   "task",
-		AgentName: "falcon",
-		StartedAt: time.Now(),
-	})
-
-	// Write a yield file
-	writeYieldFile(t, tmpDir, "manual_stop")
-
+func TestAgentExitCaptureFailureRetainsWork(t *testing.T) {
+	dir := t.TempDir()
+	writeLockFile(t, dir, &cli.LockInfo{AgentName: "agent", TaskID: "task-3"})
+	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	s := newTestSupervisor()
-	ap := &AgentProcess{
-		Entry:        config.AgentEntry{Worktree: "falcon"},
-		WorktreePath: tmpDir,
+	s.captureWorktree = func(context.Context, string, string, string, string, string) (agentcapture.Result, error) {
+		return agentcapture.Result{}, errors.New("capture failed")
 	}
-
-	// Call saveYieldCheckpoint directly
-	s.saveYieldCheckpoint(ap)
-
-	// Verify no checkpoint was saved (task ID required)
-	lockDir := cli.ResolveLockDir(tmpDir)
-	cp, err := config.LoadCheckpoint(lockDir)
-	if err != nil {
-		t.Fatalf("LoadCheckpoint failed: %v", err)
+	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "agent"}, WorktreePath: dir}
+	s.handleAgentCheckpoint(ap, 1)
+	if !ap.CaptureRetained {
+		t.Fatal("capture failure must mark worktree retained")
 	}
-	if cp != nil {
-		t.Errorf("Expected no checkpoint when lock has no task ID, got %+v", cp)
+	cp, err := config.LoadCheckpoint(cli.ResolveLockDir(dir))
+	if err != nil || cp == nil || !cp.Retained {
+		t.Fatalf("retained checkpoint: %+v, %v", cp, err)
+	}
+	s.postMortemRecovery(ap, 1)
+	if data, err := os.ReadFile(filepath.Join(dir, "new.txt")); err != nil || string(data) != "keep" {
+		t.Fatalf("worktree changed: %q, %v", data, err)
 	}
 }
 
-func TestSaveYieldCheckpoint_CapturesEpicID(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Write a lock file with a task ID
-	writeLockFile(t, tmpDir, &cli.LockInfo{
-		PID:       os.Getpid(),
-		Command:   "task",
-		AgentName: "falcon",
-		TaskID:    "loom-epic-task-1",
-		TaskTitle: "Epic task",
-		StartedAt: time.Now(),
-	})
-
-	// Write a yield file
-	writeYieldFile(t, tmpDir, "higher_priority")
-
+func TestCleanExitStillCapturesAndClearsCheckpoint(t *testing.T) {
+	dir := captureRepo(t)
+	writeLockFile(t, dir, &cli.LockInfo{AgentName: "agent", TaskID: "task-4"})
+	lockDir := cli.ResolveLockDir(dir)
+	if err := config.SaveCheckpoint(lockDir, &config.Checkpoint{TaskID: "old", CaptureRef: "refs/loom/old"}); err != nil {
+		t.Fatal(err)
+	}
 	s := newTestSupervisor()
-	ap := &AgentProcess{
-		Entry:          config.AgentEntry{Worktree: "falcon"},
-		WorktreePath:   tmpDir,
-		AssignedEpicID: "loom-epic-42",
+	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "agent"}, WorktreePath: dir}
+	s.handleAgentCheckpoint(ap, 0)
+	if ap.CaptureRetained {
+		t.Fatal("clean capture unexpectedly retained")
 	}
-
-	s.saveYieldCheckpoint(ap)
-
-	lockDir := cli.ResolveLockDir(tmpDir)
 	cp, err := config.LoadCheckpoint(lockDir)
-	if err != nil {
-		t.Fatalf("LoadCheckpoint failed: %v", err)
-	}
-	if cp == nil {
-		t.Fatal("Expected checkpoint to be saved, got nil")
-	}
-
-	if cp.EpicID != "loom-epic-42" {
-		t.Errorf("EpicID: got %q, want %q", cp.EpicID, "loom-epic-42")
-	}
-	if cp.YieldReason != "higher_priority" {
-		t.Errorf("YieldReason: got %q, want %q", cp.YieldReason, "higher_priority")
-	}
-}
-
-func TestSaveYieldCheckpoint_NoYieldFile_DefaultsToUnknown(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Write a lock file with a task ID
-	writeLockFile(t, tmpDir, &cli.LockInfo{
-		PID:       os.Getpid(),
-		Command:   "task",
-		AgentName: "falcon",
-		TaskID:    "loom-noyield-1",
-		TaskTitle: "No yield file task",
-		StartedAt: time.Now(),
-	})
-
-	// No yield file -- saveYieldCheckpoint should still save with reason "unknown"
-
-	s := newTestSupervisor()
-	ap := &AgentProcess{
-		Entry:        config.AgentEntry{Worktree: "falcon"},
-		WorktreePath: tmpDir,
-	}
-
-	s.saveYieldCheckpoint(ap)
-
-	lockDir := cli.ResolveLockDir(tmpDir)
-	cp, err := config.LoadCheckpoint(lockDir)
-	if err != nil {
-		t.Fatalf("LoadCheckpoint failed: %v", err)
-	}
-	if cp == nil {
-		t.Fatal("Expected checkpoint to be saved, got nil")
-	}
-
-	if cp.YieldReason != "unknown" {
-		t.Errorf("YieldReason: got %q, want %q (default when yield file missing)", cp.YieldReason, "unknown")
-	}
-	if cp.ErrorClass != "Yielded" {
-		t.Errorf("ErrorClass: got %q, want %q", cp.ErrorClass, "Yielded")
+	if err != nil || cp != nil {
+		t.Fatalf("clean checkpoint: %+v, %v", cp, err)
 	}
 }

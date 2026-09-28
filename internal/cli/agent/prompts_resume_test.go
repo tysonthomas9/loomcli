@@ -17,7 +17,7 @@ func TestInjectCheckpointIfNotResuming(t *testing.T) {
 	wt := t.TempDir()
 	t.Setenv("LOOM_WORKTREE_PATH", wt)
 	if err := config.SaveCheckpoint(cli.ResolveLockDir(wt), &config.Checkpoint{
-		AgentName: "a", TaskID: "t", GitDiff: "diff --git a/x b/x", ExitCode: 1,
+		AgentName: "a", TaskID: "t", CaptureRef: "diff --git a/x b/x", ExitCode: 1,
 	}); err != nil {
 		t.Fatalf("SaveCheckpoint: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestFleetPromptsInjectCheckpointFallback(t *testing.T) {
 	wt := t.TempDir()
 	t.Setenv("LOOM_WORKTREE_PATH", wt)
 	if err := config.SaveCheckpoint(cli.ResolveLockDir(wt), &config.Checkpoint{
-		AgentName: "a", TaskID: "t", GitDiff: "diff --git a/x b/x", ExitCode: 1,
+		AgentName: "a", TaskID: "t", CaptureRef: "diff --git a/x b/x", ExitCode: 1,
 	}); err != nil {
 		t.Fatalf("SaveCheckpoint: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestFleetPromptsSkipCheckpointWhenResuming(t *testing.T) {
 	wt := t.TempDir()
 	t.Setenv("LOOM_WORKTREE_PATH", wt)
 	if err := config.SaveCheckpoint(cli.ResolveLockDir(wt), &config.Checkpoint{
-		AgentName: "a", TaskID: "t", GitDiff: "diff --git a/x b/x", ExitCode: 1,
+		AgentName: "a", TaskID: "t", CaptureRef: "diff --git a/x b/x", ExitCode: 1,
 	}); err != nil {
 		t.Fatalf("SaveCheckpoint: %v", err)
 	}

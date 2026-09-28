@@ -20,7 +20,7 @@ Do stuff here.
 		TaskID:     "loom-123",
 		ExitCode:   1,
 		ErrorClass: "RateLimited",
-		GitDiff:    "+added line",
+		CaptureRef: "refs/loom/test/capture-1",
 		Timestamp:  time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC),
 	}
 
@@ -45,7 +45,7 @@ Do stuff here.
 	if !strings.Contains(result, "RateLimited") {
 		t.Error("Result should contain error class")
 	}
-	if !strings.Contains(result, "+added line") {
+	if !strings.Contains(result, "refs/loom/test/capture-1") {
 		t.Error("Result should contain git diff")
 	}
 }
@@ -59,7 +59,7 @@ func TestInjectCheckpointContextNoDiff(t *testing.T) {
 	}
 
 	result := injectCheckpointContext(prompt, cp)
-	if !strings.Contains(result, "no uncommitted changes") {
+	if !strings.Contains(result, "no captured file changes") {
 		t.Error("Result should mention no uncommitted changes when diff is empty")
 	}
 }
@@ -68,10 +68,10 @@ func TestInjectCheckpointContextNoStep1(t *testing.T) {
 	// Fallback: append to end when "### Step 1:" is not found
 	prompt := `Some prompt without steps`
 	cp := &config.Checkpoint{
-		TaskID:    "loom-789",
-		ExitCode:  1,
-		GitDiff:   "some diff",
-		Timestamp: time.Now(),
+		TaskID:     "loom-789",
+		ExitCode:   1,
+		CaptureRef: "refs/loom/test/capture-2",
+		Timestamp:  time.Now(),
 	}
 
 	result := injectCheckpointContext(prompt, cp)
@@ -96,7 +96,7 @@ Do stuff here.
 		ExitCode:    0,
 		ErrorClass:  "Yielded",
 		YieldReason: "manual_stop",
-		GitDiff:     "+yield change",
+		CaptureRef:  "refs/loom/test/capture-3",
 		Timestamp:   time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC),
 	}
 
@@ -109,7 +109,7 @@ Do stuff here.
 	if !strings.Contains(result, "manual_stop") {
 		t.Error("Yield checkpoint should contain the yield reason 'manual_stop'")
 	}
-	if !strings.Contains(result, "Continue from where it left off") {
+	if !strings.Contains(result, "continue from where it left off") {
 		t.Error("Yield checkpoint should contain 'Continue from where it left off'")
 	}
 
@@ -118,7 +118,7 @@ Do stuff here.
 		t.Error("Yield checkpoint should NOT contain 'exited with code'")
 	}
 	if strings.Contains(result, "start fresh") {
-		t.Error("Yield checkpoint should NOT contain 'start fresh'")
+		t.Error("Yield checkpoint should not direct a fresh start")
 	}
 
 	// Should be injected before Step 1
@@ -145,7 +145,7 @@ Do stuff here.
 		TaskID:     "loom-crash-1",
 		ExitCode:   1,
 		ErrorClass: "RateLimited",
-		GitDiff:    "+crash change",
+		CaptureRef: "refs/loom/test/capture-4",
 		Timestamp:  time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC),
 	}
 
@@ -155,15 +155,15 @@ Do stuff here.
 	if !strings.Contains(result, "exited with code") {
 		t.Error("Crash checkpoint should contain 'exited with code'")
 	}
-	if !strings.Contains(result, "start fresh") {
-		t.Error("Crash checkpoint should contain 'start fresh'")
+	if !strings.Contains(result, "Review the captured work") {
+		t.Error("Crash checkpoint should direct review of captured work")
 	}
 
 	// Should NOT contain yield messaging
 	if strings.Contains(result, "preempted") {
 		t.Error("Crash checkpoint should NOT contain 'preempted'")
 	}
-	if strings.Contains(result, "Continue from where it left off") {
+	if strings.Contains(result, "continue from where it left off") {
 		t.Error("Crash checkpoint should NOT contain yield-specific 'Continue from where it left off'")
 	}
 }
