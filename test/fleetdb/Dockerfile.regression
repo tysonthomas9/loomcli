@@ -12,7 +12,7 @@
 # Build:  docker build -f test/fleetdb/Dockerfile.regression -t loomcli-fleetdb-regression .
 # Context: the loomcli repo root.
 
-ARG GO_VERSION=1.25.6
+ARG GO_VERSION=1.26.0
 ARG CODEX_CLI_VERSION=latest
 
 # ── Stage 1: build loom ──

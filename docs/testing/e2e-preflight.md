@@ -43,7 +43,7 @@ until curl -sf http://127.0.0.1:18095/healthz; do sleep 0.1; done; echo " ready"
 ## Loom env (cloud mode)
 
 ```bash
-export PATH=/home/admin/sdk/go1.25.6/bin:$PATH
+export PATH=/home/admin/sdk/go1.26.0/bin:$PATH
 export LOOM_FLEET_DB_URL=http://127.0.0.1:18095
 export LOOM_FLEET_DB_ACTOR=tester
 export LOOM_CONFIG_DIR=/tmp/loom-e2e

@@ -30,7 +30,7 @@
 # instructs) still produces the hardened image. Select the other explicitly:
 # `docker build --target runtime-terminal …`.
 
-ARG GO_VERSION=1.25.6
+ARG GO_VERSION=1.26.0
 
 # ─── Stage 1: Build ──────────────────────────────────────────────────────────
 FROM golang:${GO_VERSION}-bookworm AS builder
