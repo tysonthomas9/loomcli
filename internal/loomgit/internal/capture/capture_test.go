@@ -170,6 +170,21 @@ func TestTrackedSecretIsRemovedFromCaptureTree(t *testing.T) {
 	}
 }
 
+func TestPreviouslyTrackedIgnoredFileIsExcluded(t *testing.T) {
+	dir, r := fixture(t)
+	write(t, dir, "generated.out", "generated")
+	must(t, r, "add", "generated.out")
+	must(t, r, "commit", "-qm", "tracked output")
+	write(t, dir, ".gitignore", "generated.out\n")
+	result := capture(t, dir, r)
+	if !result.Manifest.Complete || classes(result.Manifest.Entries)["generated.out"].Class != Listed {
+		t.Fatalf("ignored tracked file: %+v", result.Manifest)
+	}
+	if got := must(t, r, "ls-tree", "-r", "--name-only", result.CaptureSHA); strings.Contains(got, "generated.out") {
+		t.Fatalf("ignored path in capture: %s", got)
+	}
+}
+
 func TestCaptureRecordsSizeAndPermissionFailures(t *testing.T) {
 	dir, r := fixture(t)
 	full := filepath.Join(dir, "large.bin")

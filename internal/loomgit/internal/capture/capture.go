@@ -108,7 +108,7 @@ func fileSize(path string) (int64, error) {
 	return size, err
 }
 
-func stagePath(ctx context.Context, runner *gitexec.Runner, repo string, env map[string]string, path string, total int64) Entry {
+func stagePath(ctx context.Context, runner *gitexec.Runner, repo string, env map[string]string, path string, total int64, ignored bool) Entry {
 	entry := Entry{Path: path, Class: Captured}
 	info, statErr := os.Lstat(filepath.Join(repo, filepath.FromSlash(path)))
 	if statErr == nil {
@@ -116,6 +116,9 @@ func stagePath(ctx context.Context, runner *gitexec.Runner, repo string, env map
 	}
 	var err error
 	switch {
+	case ignored:
+		entry.Class = Listed
+		_, err = runner.RunWithEnv(ctx, env, "rm", "--cached", "-q", "--ignore-unmatch", "--", path)
 	case SecretPath(path):
 		entry.Class = SecretSuspect
 		_, err = runner.RunWithEnv(ctx, env, "rm", "--cached", "-q", "--ignore-unmatch", "--", path)
@@ -185,6 +188,14 @@ func scanWorkingTree(ctx context.Context, runner *gitexec.Runner, repo string, e
 	if err != nil {
 		return err
 	}
+	ignoredTracked, err := runner.Run(ctx, "ls-files", "--cached", "--ignored", "--exclude-standard", "-z")
+	if err != nil {
+		return err
+	}
+	ignoredSet := make(map[string]bool)
+	for _, path := range lines(ignoredTracked) {
+		ignoredSet[path] = true
+	}
 	seen := make(map[string]bool)
 	var total int64
 	for _, path := range append(lines(tracked), lines(untracked)...) {
@@ -192,7 +203,7 @@ func scanWorkingTree(ctx context.Context, runner *gitexec.Runner, repo string, e
 			continue
 		}
 		seen[path] = true
-		entry := stagePath(ctx, runner, repo, env, path, total)
+		entry := stagePath(ctx, runner, repo, env, path, total, ignoredSet[path])
 		if entry.Class == Captured {
 			total += entry.Size
 		}
