@@ -40,7 +40,7 @@ func newTestSupervisor() *Supervisor {
 
 func gitForCaptureTest(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...) //nolint:gosec,norawexec // Real temporary Git repository verifies capture objects.
+	cmd := exec.Command("git", args...) //nolint:norawexec,gosec // Real temporary Git repository verifies capture objects.
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
