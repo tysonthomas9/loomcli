@@ -198,43 +198,47 @@ func recordIgnored(manifest *Manifest, repo string, paths []string, seen map[str
 	}
 }
 
+func collectWorkingPaths(ctx context.Context, runner *gitexec.Runner) ([][]string, error) {
+	commands := [][]string{
+		{"ls-tree", "-r", "--name-only", "-z", "HEAD"},
+		{"diff", "--name-only", "-z", "HEAD"},
+		{"ls-files", "--others", "--exclude-standard", "-z"},
+		{"ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"},
+		{"ls-files", "--cached", "--ignored", "--exclude-standard", "-z"},
+	}
+	paths := make([][]string, len(commands))
+	for i, args := range commands {
+		out, err := runner.Run(ctx, args...)
+		if err != nil {
+			return nil, err
+		}
+		paths[i] = lines(out)
+	}
+	return paths, nil
+}
+
 func scanWorkingTree(ctx context.Context, runner *gitexec.Runner, repo string, env map[string]string, manifest *Manifest) error {
-	tracked, err := runner.Run(ctx, "ls-tree", "-r", "--name-only", "-z", "HEAD")
+	paths, err := collectWorkingPaths(ctx, runner)
 	if err != nil {
 		return err
 	}
-	changed, err := runner.Run(ctx, "diff", "--name-only", "-z", "HEAD")
-	if err != nil {
-		return err
-	}
-	untracked, err := runner.Run(ctx, "ls-files", "--others", "--exclude-standard", "-z")
-	if err != nil {
-		return err
-	}
-	ignored, err := runner.Run(ctx, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z")
-	if err != nil {
-		return err
-	}
-	ignoredIndex, err := runner.Run(ctx, "ls-files", "--cached", "--ignored", "--exclude-standard", "-z")
-	if err != nil {
-		return err
-	}
+	tracked, changed, untracked, ignored, ignoredIndex := paths[0], paths[1], paths[2], paths[3], paths[4]
 	ignoredSet := make(map[string]bool)
-	for _, path := range lines(ignoredIndex) {
+	for _, path := range ignoredIndex {
 		ignoredSet[path] = true
 	}
 	trackedSet := make(map[string]bool)
-	for _, path := range lines(tracked) {
+	for _, path := range tracked {
 		trackedSet[path] = true
 	}
 	changedSet := make(map[string]bool)
-	for _, path := range lines(changed) {
+	for _, path := range changed {
 		changedSet[path] = true
 	}
 	seen := make(map[string]bool)
 	var toStage []string
 	var total int64
-	for _, path := range append(append(lines(tracked), lines(changed)...), lines(untracked)...) {
+	for _, path := range append(append(tracked, changed...), untracked...) {
 		if seen[path] {
 			continue
 		}
@@ -249,13 +253,28 @@ func scanWorkingTree(ctx context.Context, runner *gitexec.Runner, repo string, e
 		}
 		manifest.Entries = append(manifest.Entries, entry)
 	}
-	recordIgnored(manifest, repo, lines(ignored), seen)
+	recordIgnored(manifest, repo, ignored, seen)
 	if err := stagePaths(ctx, runner, env, toStage); err != nil {
 		return err
 	}
 	sort.Slice(manifest.Entries, func(i, j int) bool { return manifest.Entries[i].Path < manifest.Entries[j].Path })
 	manifest.Retained = !manifest.Complete
 	return nil
+}
+
+func advanceCaptureRef(ctx context.Context, runner *gitexec.Runner, repo, ref, next, head string) error {
+	expected := strings.Repeat("0", len(head))
+	exists, err := gitexec.RefExists(repo, ref)
+	if err != nil {
+		return err
+	}
+	if exists {
+		expected, err = git(ctx, runner, "rev-parse", "--verify", ref)
+		if err != nil {
+			return err
+		}
+	}
+	return runner.UpdateRef(ctx, ref, next, expected)
 }
 
 func captureCommit(ctx context.Context, runner *gitexec.Runner, head string, p Params, tree []byte) (string, error) {
@@ -312,18 +331,7 @@ func Capture(ctx context.Context, runner *gitexec.Runner, repo string, p Params)
 		return result, err
 	}
 	if result.CaptureSHA != "" {
-		expected := strings.Repeat("0", len(head))
-		exists, probeErr := gitexec.RefExists(repo, ref)
-		if probeErr != nil {
-			return result, probeErr
-		}
-		if exists {
-			expected, err = git(ctx, runner, "rev-parse", "--verify", ref)
-			if err != nil {
-				return result, err
-			}
-		}
-		if err = runner.UpdateRef(ctx, ref, result.CaptureSHA, expected); err != nil {
+		if err = advanceCaptureRef(ctx, runner, repo, ref, result.CaptureSHA, head); err != nil {
 			return result, err
 		}
 	}
