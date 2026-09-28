@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
@@ -41,8 +42,9 @@ func dispatchHookEvent(event *HookEvent, runtimeDir, sessionID string) error { /
 	}
 
 	// When a Task subagent completes, Claude Code has written its transcript
-	// at <parent_dir>/subagents/agent-<subagentID>.jsonl. Mirror that into
-	// sessions/<sid>/subagents/ so the UI can render nested subagent work.
+	// at <parent_transcript_without_.jsonl>/subagents/agent-<subagentID>.jsonl.
+	// Mirror that into sessions/<sid>/subagents/ so the UI can render nested
+	// subagent work.
 	if event.Type == HookSubagentEnd && event.SubagentID != "" && event.SessionRef != "" {
 		subPath := deriveSubagentPath(event.SessionRef, event.SubagentID)
 		if err := store.SyncSubagentTranscript(sessionID, event.SubagentID, subPath); err != nil {
@@ -60,14 +62,18 @@ func dispatchHookEvent(event *HookEvent, runtimeDir, sessionID string) error { /
 }
 
 // deriveSubagentPath returns the on-disk path to a spawned subagent's JSONL
-// transcript. Claude Code writes them to
+// transcript. Claude Code writes them into a per-session sidecar directory
+// named after the parent transcript FILE, not next to it:
 //
-//	<parent_transcript_dir>/subagents/agent-<subagentID>.jsonl
+//	<projects>/<encoded-cwd>/<session-uuid>/subagents/agent-<subagentID>.jsonl
+//
+// Measured against claude 2.1.261: every `subagents` directory on the host sat
+// at that depth, none alongside the parent transcript.
 func deriveSubagentPath(parentTranscriptPath, subagentID string) string {
 	if parentTranscriptPath == "" || subagentID == "" {
 		return ""
 	}
-	return filepath.Join(filepath.Dir(parentTranscriptPath), "subagents", "agent-"+subagentID+".jsonl")
+	return filepath.Join(strings.TrimSuffix(parentTranscriptPath, ".jsonl"), "subagents", "agent-"+subagentID+".jsonl")
 }
 
 // captureTokenUsage reads the Claude transcript, sums token usage, and
