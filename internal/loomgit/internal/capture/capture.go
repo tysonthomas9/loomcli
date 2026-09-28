@@ -201,7 +201,7 @@ func recordIgnored(manifest *Manifest, repo string, paths []string, seen map[str
 func collectWorkingPaths(ctx context.Context, runner *gitexec.Runner) ([][]string, error) {
 	commands := [][]string{
 		{"ls-tree", "-r", "--name-only", "-z", "HEAD"},
-		{"diff", "--name-only", "-z", "HEAD"},
+		{"diff", "--no-renames", "--name-only", "-z", "HEAD"},
 		{"ls-files", "--others", "--exclude-standard", "-z"},
 		{"ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"},
 		{"ls-files", "--cached", "--ignored", "--exclude-standard", "-z"},

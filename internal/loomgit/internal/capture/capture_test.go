@@ -228,6 +228,34 @@ func TestRepeatedCaptureAdvancesRef(t *testing.T) {
 	}
 }
 
+func TestCaptureStagedRenameRemovesOldPath(t *testing.T) {
+	dir, r := fixture(t)
+	must(t, r, "mv", "base.txt", "renamed.txt")
+	result := capture(t, dir, r)
+	if !result.Manifest.Complete {
+		t.Fatalf("capture incomplete: %+v", result.Manifest)
+	}
+	if got := must(t, r, "diff", "--no-renames", "--name-status", "HEAD", result.CaptureSHA); got != "D\tbase.txt\nA\trenamed.txt" {
+		t.Fatalf("capture diff = %q", got)
+	}
+}
+
+func TestCaptureStagedRenameWithEditRemovesOldPath(t *testing.T) {
+	dir, r := fixture(t)
+	must(t, r, "mv", "base.txt", "renamed.txt")
+	write(t, dir, "renamed.txt", "edited after rename")
+	result := capture(t, dir, r)
+	if !result.Manifest.Complete {
+		t.Fatalf("capture incomplete: %+v", result.Manifest)
+	}
+	if got := must(t, r, "diff", "--no-renames", "--name-status", "HEAD", result.CaptureSHA); got != "D\tbase.txt\nA\trenamed.txt" {
+		t.Fatalf("capture diff = %q", got)
+	}
+	if got := must(t, r, "show", result.CaptureSHA+":renamed.txt"); got != "edited after rename" {
+		t.Fatalf("renamed file content = %q", got)
+	}
+}
+
 func TestCaptureThreeThousandTrackedFilesUnderTenSeconds(t *testing.T) {
 	dir, r := fixture(t)
 	for i := range 3000 {
