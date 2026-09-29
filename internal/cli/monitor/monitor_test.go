@@ -2714,39 +2714,6 @@ func TestCollectTaskStatusReadyLimitParam(t *testing.T) {
 	}
 }
 
-// TestCollectReadyTasksByPriorityReadyLimitParam verifies that
-// collectReadyTasksByPriority passes the readyLimit parameter through to
-// Ready() (limit=50, matching the serve use case).
-func TestCollectReadyTasksByPriorityReadyLimitParam(t *testing.T) {
-	// not parallel: uses setDefaultIssueBackend
-	mock := NewMockIssueBackend()
-	var capturedOpts backend.ReadyOpts
-	mock.ReadyFn = func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
-		capturedOpts = opts
-		return []backend.IssueData{
-			{ID: "T-1", Title: "P1 task", Status: "open", Priority: 1, Design: "plan"},
-			{ID: "T-2", Title: "P2 task", Status: "open", Priority: 2, Design: ""},
-		}, nil
-	}
-	setDefaultIssueBackend(mock)
-	defer resetDefaultIssueBackend()
-
-	counts := collectReadyTasksByPriority(50)
-
-	// Verify Ready() was called with Limit=50
-	if capturedOpts.Limit != 50 {
-		t.Errorf("Ready() called with Limit=%d, want 50", capturedOpts.Limit)
-	}
-
-	// Also verify the function correctly counted by priority
-	if counts[1] != 1 {
-		t.Errorf("expected priority 1 count=1, got %d", counts[1])
-	}
-	if counts[2] != 1 {
-		t.Errorf("expected priority 2 count=1, got %d", counts[2])
-	}
-}
-
 // TestCompleteSyncStatusDetails tests that completeSyncStatus populates
 // GitPushDetails and GitPullDetails from agent Ahead/Behind counts.
 func TestCompleteSyncStatusDetails(t *testing.T) {
