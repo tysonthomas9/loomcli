@@ -21,6 +21,10 @@ if [[ "$actual_vercel_ref" != "$VERCEL_SKILLS_REF" ]]; then
   exit 2
 fi
 
+loom_sha="$(git -C "$ROOT" rev-parse HEAD)"
+fleet_db_sha="$(git -C "$FLEET_DB_REPO" rev-parse HEAD)"
+echo "Compatibility revisions: loomcli=$loom_sha fleetdb=$fleet_db_sha vercel_skills=$actual_vercel_ref"
+
 tmp="$(mktemp -d -t loom-vercel-skills-compat.XXXXXX)"
 cleanup() {
   rm -rf "$tmp"
@@ -29,9 +33,9 @@ trap cleanup EXIT
 
 loom_bin="$tmp/loom"
 fleet_db_bin="$tmp/fleet-db"
-echo "Building loomcli $(git -C "$ROOT" rev-parse --short HEAD)"
+echo "Building loomcli $loom_sha"
 (cd "$ROOT" && go build -o "$loom_bin" ./cmd/loom)
-echo "Building fleet-db $(git -C "$FLEET_DB_REPO" rev-parse --short HEAD)"
+echo "Building fleet-db $fleet_db_sha"
 (cd "$FLEET_DB_REPO" && go build -o "$fleet_db_bin" ./cmd/fleet-db)
 
 export HOME="$tmp/home"
