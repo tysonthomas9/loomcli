@@ -2,6 +2,7 @@ package stackpublish
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -73,4 +74,49 @@ func TestPRStatuses_GraphQLParse(t *testing.T) {
 	require.Len(t, got, 2, "only PRs under the prefix are returned")
 	assert.Equal(t, PRStatus{Number: 1, Checks: "passing", Review: "approved", Mergeable: "mergeable"}, got["loom/stack/epic-E/T1"])
 	assert.Equal(t, PRStatus{Number: 2, Checks: "failing", Review: "changes_requested", Mergeable: "conflicting"}, got["loom/stack/epic-E/T2"])
+}
+
+func TestCreatePRMetadataPayload(t *testing.T) {
+	var payload map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/repos/o/r/pulls", r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"number":5,"node_id":"PR_node","state":"open","title":"custom","body":"body","html_url":"https://github.com/o/r/pull/5","draft":true,"head":{"ref":"h"},"base":{"ref":"b"}}`)
+	}))
+	defer srv.Close()
+
+	f := NewGitHubForge("tok", srv.Client(), srv.URL)
+	pr, err := f.CreatePR(context.Background(), "o", "r", "h", "b", PullRequestOptions{
+		Title: "custom", Body: "body", Draft: true,
+		MaintainerCanModify: false, MaintainerCanModifySet: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 5, pr.Number)
+	assert.Equal(t, "PR_node", pr.NodeID)
+	assert.True(t, pr.Draft)
+	assert.Equal(t, "custom", payload["title"])
+	assert.Equal(t, "h", payload["head"])
+	assert.Equal(t, "b", payload["base"])
+	assert.Equal(t, "body", payload["body"])
+	assert.Equal(t, true, payload["draft"])
+	assert.Equal(t, false, payload["maintainer_can_modify"])
+}
+
+func TestSetPRDraftUsesGraphQLMutation(t *testing.T) {
+	var payload map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/graphql", r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":{"convertPullRequestToDraft":{"pullRequest":{"id":"PR_node","isDraft":true}}}}`)
+	}))
+	defer srv.Close()
+
+	f := NewGitHubForge("tok", srv.Client(), srv.URL)
+	err := f.SetPRDraft(context.Background(), "o", "r", PR{Number: 5, NodeID: "PR_node"}, true)
+	require.NoError(t, err)
+	assert.Contains(t, payload["query"], "convertPullRequestToDraft")
+	assert.Equal(t, map[string]any{"id": "PR_node"}, payload["variables"])
 }
