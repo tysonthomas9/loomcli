@@ -17,6 +17,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/mirror"
 )
 
 func git(t *testing.T, dir string, args ...string) string {
@@ -145,7 +146,7 @@ func TestValidPushRecordsSHAWithoutTaskProviderToken(t *testing.T) {
 }
 
 func TestForeignRefsAndDeletionNeverReachProvider(t *testing.T) {
-	for _, ref := range []string{"refs/heads/main", "refs/tags/v1", "refs/loom/ws/w/attempt/other/capture"} {
+	for _, ref := range []string{"refs/heads/main", "refs/tags/v1", "refs/loom/ws/w/attempt/other/capture", "refs/loom/ws/w/attempt/a/base", "refs/loom/ws/w/attempt/a/nested/capture"} {
 		t.Run(ref, func(t *testing.T) {
 			f := setup(t)
 			f.commit(t, "readme", []byte("changed"))
@@ -190,7 +191,7 @@ func TestExpandedTreeBytesAreCappedPerPush(t *testing.T) {
 		entries = append(entries, 0)
 	}
 	var total int64
-	if err := validateTreeEntries(entries, nil, &total); err == nil || !strings.Contains(err.Error(), "2 GiB") {
+	if err := validateTreeEntries(entries, nil, &total, make(map[string]bool)); err == nil || !strings.Contains(err.Error(), "2 GiB") {
 		t.Fatalf("expanded push cap: %d %v", total, err)
 	}
 }
@@ -255,11 +256,14 @@ func TestRetryRecordsExactSHAAfterRecordFailure(t *testing.T) {
 	f.server = httptest.NewServer(&Proxy{Store: store, Remote: f.provider})
 	f.url = f.server.URL + "/repo.git"
 	ref, _ := refname.AttemptCapture("w", "a")
-	if out, err := f.push(t, ref); err == nil || !strings.Contains(out, "record unavailable") {
+	if out, err := f.push(t, ref); err == nil || !strings.Contains(out, "contact the host operator") || strings.Contains(out, "record unavailable") {
 		t.Fatalf("record failure: %v: %s", err, out)
 	}
 	if got := git(t, f.provider, "rev-parse", ref); got != sha {
 		t.Fatalf("provider ref %s, want %s", got, sha)
+	}
+	if got := git(t, f.host, "rev-parse", ref); got != sha {
+		t.Fatalf("host ref %s, want %s after record failure", got, sha)
 	}
 	if out, err := f.push(t, ref); err != nil {
 		t.Fatalf("retry: %v: %s", err, out)
@@ -267,6 +271,53 @@ func TestRetryRecordsExactSHAAfterRecordFailure(t *testing.T) {
 	row, found, err := f.store.MirrorState(context.Background(), f.host, ref)
 	if err != nil || !found || row.SHA != sha {
 		t.Fatalf("retry record: %+v %v %v", row, found, err)
+	}
+}
+
+func TestSecretInIntermediateCommitIsRefused(t *testing.T) {
+	f := setup(t)
+	f.commit(t, "nested/id_rsa", []byte("private key"))
+	git(t, f.repo, "rm", "-q", "nested/id_rsa")
+	git(t, f.repo, "commit", "-qm", "drop key")
+	ref, _ := refname.AttemptCapture("w", "a")
+	if out, err := f.push(t, ref); err == nil || !strings.Contains(out, "secret_path_refused") {
+		t.Fatalf("secret history was accepted: %v: %s", err, out)
+	}
+	if out := git(t, f.provider, "for-each-ref", "--format=%(refname)", ref); out != "" {
+		t.Fatalf("secret history reached provider: %s", out)
+	}
+}
+
+func TestLargeBlobInIntermediateCommitIsRefused(t *testing.T) {
+	f := setup(t)
+	f.commit(t, "large.bin", make([]byte, 150<<20))
+	git(t, f.repo, "rm", "-q", "large.bin")
+	git(t, f.repo, "commit", "-qm", "drop blob")
+	ref, _ := refname.AttemptCapture("w", "a")
+	if out, err := f.push(t, ref); err == nil || !strings.Contains(out, "100 MiB") {
+		t.Fatalf("large blob history was accepted: %v: %s", err, out)
+	}
+	if out := git(t, f.provider, "for-each-ref", "--format=%(refname)", ref); out != "" {
+		t.Fatalf("large blob reached provider: %s", out)
+	}
+}
+
+func TestMirrorKeepsProxyAcceptedRef(t *testing.T) {
+	f := setup(t)
+	sha := f.commit(t, "readme", []byte("changed"))
+	ref, _ := refname.AttemptCapture("w", "a")
+	if out, err := f.push(t, ref); err != nil {
+		t.Fatalf("push: %v: %s", err, out)
+	}
+	if got := git(t, f.host, "rev-parse", ref); got != sha {
+		t.Fatalf("host ref %s, want %s", got, sha)
+	}
+	git(t, f.host, "remote", "add", "origin", f.provider)
+	if err := mirror.SyncRepo(context.Background(), f.store, f.host, f.base); err != nil {
+		t.Fatal(err)
+	}
+	if got := git(t, f.provider, "rev-parse", ref); got != sha {
+		t.Fatalf("mirror lost provider ref: got %s, want %s", got, sha)
 	}
 }
 

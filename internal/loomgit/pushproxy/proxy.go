@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -39,6 +40,31 @@ type Proxy struct {
 
 type update struct{ old, new, ref string }
 
+type clientError string
+
+func (e clientError) Error() string { return string(e) }
+
+func clientReason(err error) string {
+	if errors.Is(err, errPushTooLarge) {
+		return errPushTooLarge.Error()
+	}
+	var safe clientError
+	if errors.As(err, &safe) {
+		return safe.Error()
+	}
+	var coded *errcode.Error
+	if errors.As(err, &coded) && (coded.Kind == errcode.Stale || coded.Kind == errcode.SecretPathRefused) {
+		return coded.Error()
+	}
+	slog.Error("push proxy request failed", "error", err)
+	return "push failed; contact the host operator"
+}
+
+func internalHTTPError(w http.ResponseWriter, err error) {
+	slog.Error("push proxy request failed", "error", err)
+	http.Error(w, "push proxy unavailable", http.StatusInternalServerError)
+}
+
 func runner(dir string) (*gitexec.Runner, error) {
 	return gitexec.New(dir, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
 }
@@ -54,7 +80,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	claims, err := Verify(r.Context(), p.Store, strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
+		http.Error(w, clientReason(err), http.StatusUnauthorized)
 		return
 	}
 	if r.Method != http.MethodPost && r.Method != http.MethodGet {
@@ -68,7 +94,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	dir, err := os.MkdirTemp("/tmp", "loom-push-quarantine-*")
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		internalHTTPError(w, err)
 		return
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
@@ -77,13 +103,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, err = git.Run(r.Context(), "init", "--bare")
 	}
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		internalHTTPError(w, err)
 		return
 	}
 	if r.Method == http.MethodGet {
 		advert, err := git.Run(r.Context(), "receive-pack", "--stateless-rpc", "--advertise-refs", dir)
 		if err != nil {
-			http.Error(w, err.Error(), 500)
+			internalHTTPError(w, err)
 			return
 		}
 		w.Header().Set("Content-Type", "application/x-git-receive-pack-advertisement")
@@ -126,32 +152,32 @@ func (p *Proxy) receive(w http.ResponseWriter, r *http.Request, claims Claims, g
 		if errors.Is(err, errPushTooLarge) {
 			status = http.StatusRequestEntityTooLarge
 		}
-		http.Error(w, err.Error(), status)
+		http.Error(w, clientReason(err), status)
 		return
 	}
 	defer os.Remove(body.Name())
 	defer body.Close()
 	updates, sideband, packAt, err := readUpdates(body, claims)
 	if err != nil {
-		http.Error(w, err.Error(), 400)
+		http.Error(w, "invalid push request", 400)
 		return
 	}
 	// index-pack writes only inside the disposable quarantine repository.
 	if _, err := body.Seek(packAt, io.SeekStart); err != nil {
-		http.Error(w, err.Error(), 500)
+		internalHTTPError(w, err)
 		return
 	}
 	if _, err := git.RunInput(r.Context(), body, "index-pack", "--stdin", "--fix-thin"); err != nil {
-		writeReport(w, updates, sideband, err.Error())
+		writeReport(w, updates, sideband, clientReason(err))
 		return
 	}
 	if _, err := body.Seek(0, io.SeekStart); err != nil {
-		http.Error(w, err.Error(), 500)
+		internalHTTPError(w, err)
 		return
 	}
 	report, err := git.RunInput(r.Context(), body, "receive-pack", "--stateless-rpc", dir)
 	if err != nil {
-		writeReport(w, updates, sideband, err.Error())
+		writeReport(w, updates, sideband, clientReason(err))
 		return
 	}
 	for _, change := range updates {
@@ -163,7 +189,7 @@ func (p *Proxy) receive(w http.ResponseWriter, r *http.Request, claims Claims, g
 	}
 	accepted, err := p.validateAndForward(r.Context(), claims, git, updates)
 	if err != nil {
-		writeReport(w, updates, sideband, err.Error(), accepted...)
+		writeReport(w, updates, sideband, clientReason(err), accepted...)
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-git-receive-pack-result")
@@ -188,9 +214,16 @@ func (p *Proxy) validateAndForward(ctx context.Context, claims Claims, git *gite
 		return nil, err
 	}
 	var total int64
+	seenBlobs := make(map[string]bool)
 	for _, change := range updates {
-		if err := validateTree(ctx, git, change.new, basePaths, &total); err != nil {
+		commits, err := git.Run(ctx, "rev-list", change.new, "^"+strings.TrimSpace(string(baseSHA)))
+		if err != nil {
 			return nil, err
+		}
+		for _, commit := range strings.Fields(string(commits)) {
+			if err := validateTree(ctx, git, commit, basePaths, &total, seenBlobs); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if err := current(ctx, p.Store, claims, nowUTC()); err != nil {
@@ -205,7 +238,7 @@ func (p *Proxy) validateAndForward(ctx context.Context, claims Claims, git *gite
 		if err := current(ctx, p.Store, claims, nowUTC()); err != nil {
 			return accepted, err
 		}
-		if err := p.forwardOne(ctx, push, claims.Repo, change); err != nil {
+		if err := p.forwardOne(ctx, push, host, git.Path(), change); err != nil {
 			return accepted, err
 		}
 		accepted = append(accepted, change.ref)
@@ -213,8 +246,8 @@ func (p *Proxy) validateAndForward(ctx context.Context, claims Claims, git *gite
 	return accepted, nil
 }
 
-func (p *Proxy) forwardOne(ctx context.Context, push mirror.RefPusher, repo string, change update) error {
-	prior, found, err := p.Store.MirrorState(ctx, repo, change.ref)
+func (p *Proxy) forwardOne(ctx context.Context, push mirror.RefPusher, host *gitexec.Runner, quarantine string, change update) error {
+	prior, found, err := p.Store.MirrorState(ctx, host.Path(), change.ref)
 	if err != nil {
 		return err
 	}
@@ -223,22 +256,56 @@ func (p *Proxy) forwardOne(ctx context.Context, push mirror.RefPusher, repo stri
 		return err
 	}
 	if actual != change.new && actual != "" && (!found || prior.SHA != actual || prior.Remote != p.Remote || prior.State != "mirrored") {
-		return errors.New("remote ref moved")
+		return clientError("remote ref moved")
 	}
 	if actual != change.new {
 		if err := push.Push(ctx, p.Remote, change.ref, change.new, actual); err != nil {
-			return fmt.Errorf("provider rejected: %s", providerReason(err))
+			return clientError("provider rejected: " + providerReason(err))
 		}
 	}
-	return p.Store.PutMirrorRecord(ctx, journal.MirrorRecord{Repo: repo, Ref: change.ref, Remote: p.Remote, SHA: change.new, State: "mirrored"})
+	if err := retainOnHost(ctx, host, quarantine, change, prior, found); err != nil {
+		return err
+	}
+	return p.Store.PutMirrorRecord(ctx, journal.MirrorRecord{Repo: host.Path(), Ref: change.ref, Remote: p.Remote, SHA: change.new, State: "mirrored"})
+}
+
+func retainOnHost(ctx context.Context, host *gitexec.Runner, quarantine string, change update, prior journal.MirrorRecord, found bool) error {
+	if _, err := host.Run(ctx, "fetch", "--no-tags", quarantine, change.ref); err != nil {
+		return err
+	}
+	fetched, err := host.Run(ctx, "rev-parse", "--verify", "FETCH_HEAD")
+	if err != nil || strings.TrimSpace(string(fetched)) != change.new {
+		return errors.New("host fetch did not preserve accepted SHA")
+	}
+	old := strings.Repeat("0", len(change.new))
+	if exists, err := gitexec.RefExists(host.Path(), change.ref); err != nil {
+		return err
+	} else if exists {
+		current, err := host.Run(ctx, "rev-parse", "--verify", change.ref)
+		if err != nil {
+			return err
+		}
+		old = strings.TrimSpace(string(current))
+		if old != change.new && (!found || old != prior.SHA) {
+			return clientError("host ref moved")
+		}
+	}
+	if err := host.UpdateRef(ctx, change.ref, change.new, old); err != nil {
+		return err
+	}
+	return nil
 }
 
 func providerReason(err error) string {
 	var command *gitexec.CommandError
 	if errors.As(err, &command) && command.Stderr != "" {
-		return strings.TrimSpace(command.Stderr)
+		for _, line := range strings.Split(command.Stderr, "\n") {
+			if reason, ok := strings.CutPrefix(strings.TrimSpace(line), "remote: "); ok && reason != "" {
+				return reason
+			}
+		}
 	}
-	return err.Error()
+	return "push refused"
 }
 
 func nowUTC() time.Time { return time.Now().UTC() }
@@ -295,8 +362,8 @@ func readUpdates(body *os.File, claims Claims) ([]update, bool, int64, error) {
 
 func parseUpdate(line []byte, prefix string) (update, error) {
 	fields := strings.Fields(strings.TrimSpace(string(line)))
-	if len(fields) != 3 || !validSHA(fields[0]) || !validSHA(fields[1]) || !strings.HasPrefix(fields[2], prefix) ||
-		len(fields[2]) <= len(prefix) || gitexec.CheckRefFormat(fields[2], false) != nil || zeroSHA(fields[1]) {
+	if len(fields) != 3 || !validSHA(fields[0]) || !validSHA(fields[1]) || fields[2] != prefix+"capture" ||
+		gitexec.CheckRefFormat(fields[2], false) != nil || zeroSHA(fields[1]) {
 		return update{}, errors.New("ref update refused")
 	}
 	return update{old: fields[0], new: fields[1], ref: fields[2]}, nil
@@ -330,15 +397,15 @@ func treePaths(ctx context.Context, git *gitexec.Runner, sha string) (map[string
 	return paths, nil
 }
 
-func validateTree(ctx context.Context, git *gitexec.Runner, sha string, basePaths map[string]string, total *int64) error {
+func validateTree(ctx context.Context, git *gitexec.Runner, sha string, basePaths map[string]string, total *int64, seenBlobs map[string]bool) error {
 	out, err := git.Run(ctx, "ls-tree", "-r", "-l", "-z", sha)
 	if err != nil {
 		return err
 	}
-	return validateTreeEntries(out, basePaths, total)
+	return validateTreeEntries(out, basePaths, total, seenBlobs)
 }
 
-func validateTreeEntries(out []byte, basePaths map[string]string, total *int64) error {
+func validateTreeEntries(out []byte, basePaths map[string]string, total *int64, seenBlobs map[string]bool) error {
 	for _, entry := range bytes.Split(bytes.TrimSuffix(out, []byte{0}), []byte{0}) {
 		if len(entry) == 0 {
 			continue
@@ -357,18 +424,19 @@ func validateTreeEntries(out []byte, basePaths map[string]string, total *int64) 
 			return errcode.New(errcode.SecretPathRefused, name, nil)
 		}
 		if fields[1] == "blob" {
-			if basePaths[name] == fields[2] {
+			if basePaths[name] == fields[2] || seenBlobs[fields[2]] {
 				continue
 			}
+			seenBlobs[fields[2]] = true
 			size, err := strconv.ParseInt(fields[3], 10, 64)
 			if err != nil {
 				return err
 			}
 			if size > capture.MaxFileBytes {
-				return fmt.Errorf("file exceeds 100 MiB: %s", name)
+				return clientError("file exceeds 100 MiB: " + name)
 			}
 			if size > maxPushBytes-*total {
-				return errors.New("push exceeds 2 GiB")
+				return clientError("push exceeds 2 GiB")
 			}
 			*total += size
 		}
