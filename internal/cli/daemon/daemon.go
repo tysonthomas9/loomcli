@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/notify"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/taskcontent"
 )
 
 // Daemon coordinates multiple supervised agents.
@@ -54,6 +55,9 @@ type Daemon struct {
 	mutBuf *MutationBuffer
 
 	issueBackend backend.IssueBackend // pluggable issue data access
+	// contentGate refuses to dispatch a bodyless task to a worker role. Shared
+	// with the supervisor so the refusal memo is process-wide, not per-path.
+	contentGate *taskcontent.Gate
 
 	// store is the fleet-db backed source of agent assignments and daemon
 	// profile data.
@@ -96,6 +100,7 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 		projectDir:   projectDir,
 		notifyBus:    notify.NopPublisher{},
 		issueBackend: issueBackend,
+		contentGate:  taskcontent.NewGate(),
 		store:        st,
 		inputs:       newInputRegistry(),
 	}
@@ -110,6 +115,7 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 		Agents:         make([]*supervisor.AgentProcess, 0, len(config.Agents)),
 		ControlStore:   st,
 		IssueBackend:   issueBackend,
+		ContentGate:    d.contentGate,
 	}
 
 	wireSupervisorCallbacks(sup, issueBackend)

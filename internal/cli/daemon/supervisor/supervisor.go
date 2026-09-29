@@ -21,6 +21,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/taskcontent"
 
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -112,6 +113,13 @@ type Supervisor struct {
 	// IssueBackendReady checks if an epic has ready tasks. Injected by daemon.
 	IssueBackendReady func(epicID string) (bool, error)
 	IssueBackend      backend.IssueBackend
+
+	// ContentGate enforces the dispatch-time content invariant: a task with no
+	// description, no acceptance criteria and no design is never handed to a
+	// worker role (see internal/taskcontent). It is nil-safe — a nil gate
+	// allows every claim, which is what the composite literals in tests that
+	// do not set it get.
+	ContentGate *taskcontent.Gate
 
 	// quarantine is the supervisor-scoped, task-ID-keyed ledger of repeated
 	// no-progress kills (see quarantine.go). Lazily initialized via qrec so

@@ -177,6 +177,17 @@ type releaseCall struct {
 	actor string
 }
 
+// Get feeds the dispatch content gate (internal/taskcontent). These fixtures
+// are about claim/conflict/blocked handling, not content, so every row reads
+// back as described and the gate allows it. Without this the embedded nil
+// IssueBackend panics as soon as the gate reads the row.
+func (f *fakeReadyIssueBackend) Get(_ context.Context, id string) (*backend.IssueDetailData, error) {
+	return &backend.IssueDetailData{
+		IssueData:   backend.IssueData{ID: id},
+		Description: "fixture task with a body",
+	}, nil
+}
+
 func (f *fakeReadyIssueBackend) Ready(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
 	f.readyCalls = append(f.readyCalls, opts)
 	return append([]backend.IssueData(nil), f.ready...), nil
