@@ -31,8 +31,15 @@ type LabelSet struct {
 	// arrived by another route, so the recorded ref must not be merged.
 	Superseded string `yaml:"superseded"`
 	// PRPending marks a ticket whose pull request has not landed yet. The
-	// sweep only ever CLEARS it, and only when the pr-pending test passes.
+	// sweep CLEARS it when the pr-pending test passes and APPLIES it when the
+	// same test fails on work the union carries and the trunk does not — one
+	// predicate, both directions, so the two passes cannot disagree.
 	PRPending string `yaml:"pr_pending"`
+	// Abandoned marks work that was deliberately dropped: the union-merge
+	// completion contract (designBody) tells the integrator to stamp it when a
+	// conflict is unresolvable. The apply pass reads it so it never asserts
+	// that abandoned work is waiting to land.
+	Abandoned string `yaml:"abandoned"`
 	// Debt marks a derived, claimable debt ticket.
 	Debt string `yaml:"debt"`
 	// DebtOfPrefix + originID is the per-original dedupe label.
@@ -50,6 +57,7 @@ var defaultLabels = LabelSet{
 	Unreachable:  "union-unreachable",
 	Superseded:   "union-superseded",
 	PRPending:    "pr-pending",
+	Abandoned:    "union-abandoned",
 	Debt:         "union-debt",
 	DebtOfPrefix: "union-debt-of:",
 	Route:        "approved",
@@ -69,6 +77,9 @@ func (l LabelSet) withDefaults() LabelSet {
 	}
 	if l.PRPending == "" {
 		l.PRPending = defaultLabels.PRPending
+	}
+	if l.Abandoned == "" {
+		l.Abandoned = defaultLabels.Abandoned
 	}
 	if l.Debt == "" {
 		l.Debt = defaultLabels.Debt
