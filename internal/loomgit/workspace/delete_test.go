@@ -15,8 +15,7 @@ import (
 
 func gitDeleteTest(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	//nolint:norawexec // A real scratch repository is the contract under test.
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...) //nolint:norawexec // A real scratch repository is the contract under test.
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, out)
