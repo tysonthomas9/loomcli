@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 )
@@ -120,9 +121,17 @@ func TestDeleteWorkspaceRequiresExactPreviewAndRemovesCapturedWorktree(t *testin
 }
 
 func TestDeletePreviewIgnoresDeadAgentLock(t *testing.T) {
+	if os.Getenv("LOOM_DELETE_LOCK_CHILD") == "1" {
+		if err := cli.AcquireLock(os.Getenv("LOOM_DELETE_LOCK_COPY"), "test", "test-agent"); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
 	ws, _, copy := deleteFixture(t)
-	if err := os.WriteFile(filepath.Join(copy, ".agent.lock"), []byte(`{"pid":99999999}`), 0600); err != nil {
-		t.Fatal(err)
+	child := exec.Command(os.Args[0], "-test.run=^TestDeletePreviewIgnoresDeadAgentLock$") //nolint:norawexec // Real child process acquires the agent lock, then exits.
+	child.Env = append(os.Environ(), "LOOM_DELETE_LOCK_CHILD=1", "LOOM_DELETE_LOCK_COPY="+copy)
+	if out, err := child.CombinedOutput(); err != nil {
+		t.Fatalf("lock owner exited: %v: %s", err, out)
 	}
 	preview, err := DryRun(context.Background(), ws)
 	if err != nil {
@@ -132,6 +141,36 @@ func TestDeletePreviewIgnoresDeadAgentLock(t *testing.T) {
 		if item.Kind == "running_agent" {
 			t.Fatalf("dead PID reported as running: %+v", item)
 		}
+	}
+}
+
+func TestDeleteWorkspaceRefusesLiveAgentLock(t *testing.T) {
+	ws, _, copy := deleteFixture(t)
+	if err := cli.AcquireLock(copy, "test", "test-agent"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cli.ReleaseLock(copy) })
+	preview, err := DryRun(context.Background(), ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var running bool
+	for _, item := range preview.Items {
+		running = running || item.Kind == "running_agent"
+	}
+	if !running {
+		t.Fatalf("live agent missing from preview: %+v", preview.Items)
+	}
+	deleted := false
+	err = DeleteWorkspace(context.Background(), ws, preview.Fingerprint, func(context.Context, string) error {
+		deleted = true
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "running agents") || deleted {
+		t.Fatalf("live agent deletion: err=%v rowsDeleted=%v", err, deleted)
+	}
+	if _, err := os.Stat(copy); err != nil {
+		t.Fatalf("live agent worktree removed: %v", err)
 	}
 }
 
