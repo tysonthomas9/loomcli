@@ -78,15 +78,13 @@ var workspaceListCmd = &cobra.Command{
 var workspaceRemoveCmd = &cobra.Command{
 	Use:   "remove <name>",
 	Short: "Remove a workspace and its worktrees",
-	Long: `Remove a workspace and optionally clean up its git worktrees.
-
-By default, removes the workspace directory and runs git worktree remove
-for each repo. Use --keep-worktrees to only remove from config.
+	Long: `Preview and remove a workspace after confirming its exact work list.
+The --force compatibility flag does not bypass confirmation or safety checks.
 
 Examples:
   loom workspace remove myws
-  loom workspace remove myws --force
-  loom workspace remove myws --keep-worktrees`,
+  loom workspace remove myws --confirm-fingerprint <printed-fingerprint>
+  loom workspace remove myws --force --confirm-fingerprint <printed-fingerprint>`,
 	Args: cobra.ExactArgs(1),
 	Run:  runWorkspaceRemove,
 }
@@ -100,7 +98,7 @@ func init() {
 
 	workspaceListCmd.Flags().BoolVar(&wsListJSON, "json", false, "Output as JSON")
 
-	workspaceRemoveCmd.Flags().BoolVar(&wsRemoveForce, "force", false, "Remove even if worktrees are dirty")
+	workspaceRemoveCmd.Flags().BoolVar(&wsRemoveForce, "force", false, "Compatibility flag; still requires --confirm-fingerprint and safety checks")
 	workspaceRemoveCmd.Flags().BoolVar(&wsRemoveKeepWorktrees, "keep-worktrees", false, "Remove from config but don't delete git worktrees")
 	workspaceRemoveCmd.Flags().StringVar(&wsRemoveFingerprint, "confirm-fingerprint", "", "Confirm the exact work list printed by a previous remove attempt")
 
@@ -249,10 +247,19 @@ func runFleetWorkspaceList() error {
 	})
 }
 
+var withWorkspaceRemoveStore = cmdstore.WithStore
+
 func runWorkspaceRemove(cmd *cobra.Command, args []string) {
+	if err := removeWorkspace(cmd, args); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func removeWorkspace(cmd *cobra.Command, args []string) error {
 	_ = cmd
 	wsName := args[0]
-	if err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+	return withWorkspaceRemoveStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		ws, err := h.Store.Workspaces().Get(ctx, wsName)
 		if err != nil {
 			if byName, byNameErr := h.Store.Workspaces().GetByName(ctx, wsName); byNameErr == nil {
@@ -282,10 +289,7 @@ func runWorkspaceRemove(cmd *cobra.Command, args []string) {
 		}
 		fmt.Printf("Workspace %q removed.\n", ws.Key)
 		return nil
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
+	})
 }
 
 func workspaceLocalConfig(ctx context.Context, h *bootstrap.StoreHandle, key string) (config.WorkspaceConfig, error) {
