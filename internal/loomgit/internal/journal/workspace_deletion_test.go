@@ -19,6 +19,14 @@ func TestFinishWorkspaceDeletionLeavesTombstoneAndClearsCreationRecords(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	entry, err = st.Advance(ctx, entry, "checkouts_added", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err = st.Advance(ctx, entry, "rows_written", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := st.CommitWorkspace(ctx, entry, []loomgit.WorkspaceRepo{{Workspace: "TEST", Repo: "repo", Trunk: "main", WorkspaceBranch: "lead", BaseSHA: "abc"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +38,7 @@ func TestFinishWorkspaceDeletionLeavesTombstoneAndClearsCreationRecords(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.db.ExecContext(ctx, `CREATE TABLE workspace_settings (workspace TEXT PRIMARY KEY); INSERT INTO workspace_settings(workspace) VALUES ('TEST')`); err != nil {
+	if _, err := st.db.ExecContext(ctx, `INSERT INTO workspace_settings(workspace) VALUES ('TEST')`); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.FinishWorkspaceDeletion(ctx, "TEST"); err != nil {
