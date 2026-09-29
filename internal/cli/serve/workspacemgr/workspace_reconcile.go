@@ -19,16 +19,19 @@ func Reconcile(ctx context.Context, s storepkg.Store) error {
 	if err != nil {
 		return err
 	}
+	var failures []error
 	for _, recovery := range recoveries {
 		if err := reconcileCreation(ctx, s, recovery.Workspace(), recovery); err != nil {
-			_ = recovery.Close()
-			return fmt.Errorf("reconcile workspace %s: %w", recovery.Workspace(), err)
+			failure := fmt.Errorf("reconcile workspace %s: %w", recovery.Workspace(), err)
+			slog.Warn("workspace recovery failed", "workspace", recovery.Workspace(), "err", err)
+			failures = append(failures, failure)
 		}
 		if err := recovery.Close(); err != nil {
-			return err
+			slog.Warn("workspace recovery close failed", "workspace", recovery.Workspace(), "err", err)
+			failures = append(failures, fmt.Errorf("close workspace recovery %s: %w", recovery.Workspace(), err))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 func reconcileCreation(ctx context.Context, s storepkg.Store, key string, recovery *loomworkspace.Recovery) error {

@@ -160,6 +160,45 @@ func TestP19DeletedWorkspaceDiscardsInterruptedAttachment(t *testing.T) {
 	}
 }
 
+func TestP19ReconcileContinuesAfterMultipleFailedAttachments(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(root, "config"))
+	src := initTestGitRepo(t, root, "app")
+	for _, key := range []string{"BAD1", "BAD2"} {
+		wsDir := filepath.Join(root, key)
+		if err := os.MkdirAll(wsDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		branch := "loom/ws/" + key + "/interactive/lead"
+		checkout := filepath.Join(wsDir, "app")
+		runGit(t, src, "worktree", "add", checkout, "-b", branch, "HEAD")
+		base := strings.TrimSpace(gitOutput(t, checkout, "rev-parse", "HEAD"))
+		session, err := loomworkspace.BeginAttach(context.Background(), key, wsDir, []loomgit.WorkspaceRepo{{Workspace: key, Repo: "app", Trunk: "main", WorkspaceBranch: branch, BaseSHA: base}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := session.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	good, err := loomworkspace.EnsureRequest(context.Background(), "GOOD", "good", "good-request", "main", filepath.Join(root, "GOOD"), []loomworkspace.Source{{Name: "app", Path: src}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := good.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st := memstore.New()
+	err = Reconcile(context.Background(), st)
+	if err == nil || !strings.Contains(err.Error(), "BAD1") || !strings.Contains(err.Error(), "BAD2") {
+		t.Fatalf("aggregate failures = %v", err)
+	}
+	ws, err := st.Workspaces().Get(context.Background(), "GOOD")
+	if err != nil || ws.State != domain.WorkspaceStateReady {
+		t.Fatalf("later workspace was not recovered: %+v, %v", ws, err)
+	}
+}
+
 func TestP19InterruptedCloneKeepsJournalAndRequestsAttention(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(root, "config"))
