@@ -12,7 +12,10 @@ tmp/
 internal/workflows/builtin-dist/
 
 # Frontend dependencies
-internal/webui/frontend/node_modules/
+# No trailing slash: developers often symlink node_modules into a git worktree,
+# and a directory-only pattern does not match a symlink, so one slipped into a
+# commit once. The slashless form matches both.
+internal/webui/frontend/node_modules
 internal/webui/frontend/dist/
 internal/webui/frontend/playwright-report/
 internal/webui/frontend/test-results/
@@ -57,5 +60,5 @@ services/auth/dist/
 # Local worktrees
 worktrees/
 .agent.yield
-node_modules/
+node_modules
 *.agent.lock.flock
