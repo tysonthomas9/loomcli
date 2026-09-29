@@ -22,6 +22,19 @@ type ResetIgnoredFile struct {
 	Size int64  `json:"size"`
 }
 
+// ListResetIgnored reads the paths and sizes a reset would remove.
+func ListResetIgnored(ctx context.Context, path string) ([]ResetIgnoredFile, error) {
+	entries, err := agentcapture.ListIgnored(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	ignored := make([]ResetIgnoredFile, 0, len(entries))
+	for _, entry := range entries {
+		ignored = append(ignored, ResetIgnoredFile{Path: entry.Path, Size: entry.Size})
+	}
+	return ignored, nil
+}
+
 func ignoredResetEntries(result agentcapture.Result) []ResetIgnoredFile {
 	var ignored []ResetIgnoredFile
 	for _, entry := range result.Entries {

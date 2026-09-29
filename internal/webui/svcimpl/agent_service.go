@@ -8,7 +8,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
-	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	webuilog "github.com/tysonthomas9/loomcli/internal/webui/log"
@@ -321,15 +320,7 @@ func (s *agentServiceImpl) GitResetPreview(ctx context.Context, wsID, agentName 
 	if err != nil {
 		return nil, err
 	}
-	entries, err := agentcapture.ListIgnored(ctx, wt.Path)
-	if err != nil {
-		return nil, err
-	}
-	ignored := make([]ops.GitResetIgnoredFile, 0, len(entries))
-	for _, entry := range entries {
-		ignored = append(ignored, ops.GitResetIgnoredFile{Path: entry.Path, Size: entry.Size})
-	}
-	return ignored, nil
+	return s.gitOps.ListResetIgnored(ctx, wt.Path)
 }
 
 func (s *agentServiceImpl) GitStatus(_ context.Context, wsID, agentName string) (*ops.GitStatusResult, error) {

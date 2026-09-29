@@ -342,3 +342,7 @@ func (m *mockGitOps) DiffFilePatch(_ context.Context, worktreePath, from, to, pa
 	}
 	return &ops.DiffFilePatchResult{}, nil
 }
+
+func (m *mockGitOps) ListResetIgnored(context.Context, string) ([]ops.GitResetIgnoredFile, error) {
+	return []ops.GitResetIgnoredFile{}, nil
+}

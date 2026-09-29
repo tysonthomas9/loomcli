@@ -35,6 +35,9 @@ type GitOps interface {
 	// The push argument is retained for compatibility; true is rejected.
 	Reset(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error)
 
+	// ListResetIgnored lists ignored paths and sizes that reset would remove.
+	ListResetIgnored(ctx context.Context, worktreePath string) ([]GitResetIgnoredFile, error)
+
 	// Status returns comprehensive git status for a worktree.
 	Status(worktreePath, targetBranch string) (*GitStatusResult, error)
 

@@ -1440,3 +1440,7 @@ func TestGitPushAll_DefaultRemote(t *testing.T) {
 		t.Errorf("pushed = %d, want 1", resp.Pushed)
 	}
 }
+
+func (m *mockGitOps) ListResetIgnored(context.Context, string) ([]ops.GitResetIgnoredFile, error) {
+	return []ops.GitResetIgnoredFile{}, nil
+}

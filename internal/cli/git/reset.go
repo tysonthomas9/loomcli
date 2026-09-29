@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
 )
 
 var (
@@ -243,7 +242,7 @@ func resetWorktree(worktreeName, targetBranch string, askConfirm bool) bool {
 }
 
 func printResetIgnored(path string) error {
-	entries, err := agentcapture.ListIgnored(context.Background(), path)
+	entries, err := ListResetIgnored(context.Background(), path)
 	if err != nil {
 		return err
 	}

@@ -720,6 +720,18 @@ func (g *GitOpsImpl) Reset(worktreePath, worktreeName, targetBranch string, forc
 	}, nil
 }
 
+func (g *GitOpsImpl) ListResetIgnored(ctx context.Context, worktreePath string) ([]ops.GitResetIgnoredFile, error) {
+	entries, err := git.ListResetIgnored(ctx, worktreePath)
+	if err != nil {
+		return nil, err
+	}
+	ignored := make([]ops.GitResetIgnoredFile, 0, len(entries))
+	for _, entry := range entries {
+		ignored = append(ignored, ops.GitResetIgnoredFile{Path: entry.Path, Size: entry.Size})
+	}
+	return ignored, nil
+}
+
 func (g *GitOpsImpl) Status(worktreePath, targetBranch string) (*ops.GitStatusResult, error) {
 	result, err := git.GetGitStatusSummary(worktreePath, targetBranch)
 	if err != nil {
