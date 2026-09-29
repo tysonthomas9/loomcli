@@ -125,10 +125,16 @@ func TestResetRealRepoDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(root)
+	shallow := filepath.Join(root, "shallow")
+	resetGit(t, root, "clone", "--depth", "1", "file://"+source, shallow)
+	if got := resetGit(t, shallow, "rev-parse", "--is-shallow-repository"); got != "true" {
+		t.Fatalf("fixture is not shallow: %s", got)
+	}
 	repo := filepath.Join(root, "repo")
-	resetGit(t, root, "clone", "--local", source, repo)
+	resetGit(t, root, "clone", "--local", shallow, repo)
 	origin := filepath.Join(root, "origin.git")
 	resetGit(t, root, "init", "--bare", origin)
+	resetGit(t, origin, "config", "receive.shallowUpdate", "true")
 	resetGit(t, repo, "remote", "set-url", "origin", origin)
 	resetGit(t, repo, "push", "origin", "HEAD:refs/heads/main")
 	resetGit(t, repo, "checkout", "-b", "loom/ws/W/interactive/L")
