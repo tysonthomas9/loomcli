@@ -28,12 +28,31 @@ stage_daytona_sdk() {
 }
 
 # stage_builtin_node_modules <STAGE>
+# stage_meta_harness <STAGE>
+# Symlink a BUILT meta-harness clone into STAGE/node_modules so the local task
+# runner's `import("meta-harness/oneshot")` (etc.) resolves — matching the bundle
+# build's meta-harness link. Best-effort: only the local-task-runner meta-harness
+# path uses it, and its tests skip when the clone is absent, so a missing clone is
+# not fatal (unlike @flue/runtime, which every builtin statically imports).
+stage_meta_harness() {
+  local stage="$1" root=""
+  for candidate in "${LOOM_META_HARNESS_ROOT:-}" "${META_HARNESS_ROOT:-}" "$ROOT/../meta-harness"; do
+    [ -n "$candidate" ] && [ -f "$candidate/package.json" ] && [ -d "$candidate/dist" ] && { root="$candidate"; break; }
+  done
+  if [ -n "$root" ]; then
+    ln -s "$(cd "$root" && pwd)" "$stage/node_modules/meta-harness"
+  else
+    echo "note: built meta-harness not found; meta-harness resolution tests will skip" >&2
+  fi
+}
+
 # Create STAGE/node_modules and symlink the three bare specifiers the builtin
-# workflow .ts files import.
+# workflow .ts files import (plus meta-harness, best-effort, for the local runner).
 stage_builtin_node_modules() {
   local stage="$1"
   mkdir -p "$stage/node_modules/@loom" "$stage/node_modules/@flue" "$stage/node_modules/@daytona"
   ln -s "$ROOT/sdk" "$stage/node_modules/@loom/sdk"
   ln -s "$FLUE_REPO/packages/runtime" "$stage/node_modules/@flue/runtime"
   stage_daytona_sdk "$stage"
+  stage_meta_harness "$stage"
 }

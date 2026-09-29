@@ -134,34 +134,72 @@ export async function run(ctx = {}) {
   const usesStdinPrompt = backendUsesStdinPrompt(backend);
 
   const openPR = booleanValue(inputValue(request, "openPullRequest"));
+  // Route through meta-harness when the backend is gated in AND the modules are
+  // actually staged in this bundle; otherwise degrade to the headless execFile
+  // path (staging is best-effort at build time — a missing optional dependency
+  // must never fail the run).
+  let mhModules = null;
+  if (useMetaHarness(backend)) {
+    mhModules = await loadMetaHarnessModules();
+    if (!mhModules) {
+      logs.push(`meta-harness modules not staged in this bundle; ${backend} falls back to the headless CLI path`);
+    }
+  }
+  const viaMetaHarness = mhModules !== null;
   let exitCode;
   let stdout = "";
   let stderr = "";
+  // Canonical transcript entries from the meta-harness Readers (null on the
+  // headless execBackend path, where entries are parsed from stdout below).
+  let metaHarnessEntries = null;
+  // Token usage read back from the harness's on-disk session on the meta-harness
+  // path (the stream-json path computes it during parsing instead).
+  let metaHarnessUsage = null;
   let patchInfo;
   let prInfo = null;
   let stackInfo = null;
   let prFailure = null;
   try {
-    let result;
-    try {
-      result = await execBackend(binary, args, {
-        cwd: execWorktree,
-        input: usesStdinPrompt ? prompt : undefined,
-        live: true,
-      });
-    } catch (error) {
-      return failed("local_agent_failed", `failed to spawn ${backend} CLI: ${errorMessage(error)}`, {
-        taskRunId,
-        taskId,
-        backend,
-        request,
-        logs,
-        headBefore,
-      });
+    if (viaMetaHarness) {
+      try {
+        const mh = await runViaMetaHarness(backend, binary, prompt, execWorktree, logs, mhModules);
+        exitCode = mh.exitCode;
+        stdout = mh.reply;
+        stderr = "";
+        metaHarnessEntries = mh.transcriptEntries;
+        metaHarnessUsage = mh.usage;
+      } catch (error) {
+        return failed("local_agent_failed", `meta-harness ${backend} run failed: ${errorMessage(error)}`, {
+          taskRunId,
+          taskId,
+          backend,
+          request,
+          logs,
+          headBefore,
+        });
+      }
+    } else {
+      let result;
+      try {
+        result = await execBackend(binary, args, {
+          cwd: execWorktree,
+          input: usesStdinPrompt ? prompt : undefined,
+          live: true,
+        });
+      } catch (error) {
+        return failed("local_agent_failed", `failed to spawn ${backend} CLI: ${errorMessage(error)}`, {
+          taskRunId,
+          taskId,
+          backend,
+          request,
+          logs,
+          headBefore,
+        });
+      }
+      exitCode = result.code;
+      stdout = result.stdout;
+      stderr = result.stderr;
     }
-    exitCode = result.code;
-    stdout = result.stdout;
-    stderr = result.stderr;
 
     logs.push(`${backend} CLI exit=${exitCode}`);
     if (stdout.trim()) {
@@ -234,12 +272,31 @@ export async function run(ctx = {}) {
     return failed(prFailure.class, prFailure.message, { taskRunId, taskId, backend, request, logs, headBefore });
   }
 
-  let transcriptEntries = STREAM_JSON_BACKENDS.has(backend)
-    ? parseStreamJSONTranscript(backend, stdout)
-    : minimalTranscript(backend, taskId || taskRunId, prompt, stdout);
-  // Fall back to the prompt + stdout tail if a stream-json backend yielded no
-  // parseable content (non-JSON output / early exit), so evidence isn't lost.
-  if (STREAM_JSON_BACKENDS.has(backend) && !transcriptEntries.some((e) => e.role !== "system")) {
+  let transcriptEntries;
+  if (metaHarnessEntries !== null) {
+    // meta-harness path: canonical entries came from the transcript Reader. Fall
+    // back to prompt + reply if the read produced nothing (empty/failed read), so
+    // the reply isn't lost.
+    transcriptEntries = metaHarnessEntries.some((e) => e.role !== "system")
+      ? metaHarnessEntries
+      : minimalTranscript(backend, taskId || taskRunId, prompt, stdout);
+    // Terminal result entry carrying the session's token usage (read back from
+    // the harness's on-disk session), mirroring the stream-json parsers — this is
+    // what taskUsageFromEntries recovers into the top-level usage fields below.
+    // Appended AFTER the fallback choice so usage survives an empty Reader read.
+    if (metaHarnessUsage) {
+      transcriptEntries = transcriptEntries.concat([
+        resultEntry(exitCode === 0 ? "completed" : "failed", metaHarnessUsage, new Date().toISOString()),
+      ]);
+    }
+  } else if (STREAM_JSON_BACKENDS.has(backend)) {
+    transcriptEntries = parseStreamJSONTranscript(backend, stdout);
+    // Fall back to the prompt + stdout tail if a stream-json backend yielded no
+    // parseable content (non-JSON output / early exit), so evidence isn't lost.
+    if (!transcriptEntries.some((e) => e.role !== "system")) {
+      transcriptEntries = minimalTranscript(backend, taskId || taskRunId, prompt, stdout);
+    }
+  } else {
     transcriptEntries = minimalTranscript(backend, taskId || taskRunId, prompt, stdout);
   }
   // Tool outputs now persist (the `output` field) and the agent inherits host
@@ -268,7 +325,7 @@ export async function run(ctx = {}) {
 
   const metadata = stringMetadata({
     task_runner: "local-task-runner",
-    runtime_strategy: "local-cli-" + backend,
+    runtime_strategy: (viaMetaHarness ? "meta-harness-" : "local-cli-") + backend,
     runner: request.runner || request.runner_ref || "local-task-runner",
     runner_kind: request.runner_kind || request.runnerKind || process.env.LOOM_TASK_RUNNER_KIND,
     runner_entrypoint: request.runner_entrypoint || request.runnerEntrypoint || process.env.LOOM_TASK_RUNNER_ENTRYPOINT,
@@ -554,6 +611,153 @@ async function execBackend(binary, args, options) {
   });
 }
 
+// META_HARNESS_CAPABLE lists the backends with a full meta-harness turns adapter
+// AND transcript Reader (run + canonical transcript). Only these can route through
+// meta-harness; the rest stay on the headless execBackend + stream-json path.
+const META_HARNESS_CAPABLE = new Set(["claude", "codex"]);
+
+// metaHarnessBackends resolves the routed set from LOOM_META_HARNESS_BACKENDS
+// (comma list, "all", or "none"/"off" to disable), intersected with
+// META_HARNESS_CAPABLE. Default ON for every capable backend: token usage is
+// read back from the harness's on-disk session (meta-harness Reader.readUsage,
+// v0.1.4), closing the zero-usage regression that kept this opt-in. Cost
+// (estimated_cost_usd) is still unavailable on this path — the interactive
+// session records no cost, and cost is never estimated from a price table.
+function metaHarnessBackends() {
+  const raw = stringValue(process.env.LOOM_META_HARNESS_BACKENDS).toLowerCase();
+  if (raw === "" || raw === "all") return new Set(META_HARNESS_CAPABLE);
+  if (raw === "none" || raw === "off") return new Set();
+  return new Set(
+    raw
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter((backend) => META_HARNESS_CAPABLE.has(backend)),
+  );
+}
+
+export function useMetaHarness(backend) {
+  return metaHarnessBackends().has(backend);
+}
+
+// metaHarnessArgs are the interactive-PTY launch flags meta-harness forwards to the
+// harness (mirrors orche packages/agent/src/harness/headless.ts: claude needs
+// --dangerously-skip-permissions, codex needs none). These are NOT backendArgs()
+// (those are the headless -p/--output-format stream-json flags). Effort and model
+// flow through OneShotConfig.effort/model, not here.
+export function metaHarnessArgs(backend) {
+  return backend === "claude" ? ["--dangerously-skip-permissions"] : [];
+}
+
+// metaHarnessEnv converts process.env to the KEY=VALUE[] shape OneShotConfig.env
+// wants, adding IS_SANDBOX=1 so claude-code accepts --dangerously-skip-permissions
+// under root (meta-harness's cleanEnv strips the leaked CLAUDECODE/CLAUDE_CODE_*).
+export function metaHarnessEnv() {
+  const env = Object.entries(process.env).map(([key, value]) => `${key}=${value ?? ""}`);
+  env.push("IS_SANDBOX=1");
+  return env;
+}
+
+// metaHarnessHarness maps a loom backend to a meta-harness adapter name.
+export function metaHarnessHarness(backend) {
+  return backend === "claude" ? "claude-code" : "codex";
+}
+
+// loadMetaHarnessModules resolves the dynamic imports the meta-harness path needs,
+// or null when meta-harness isn't staged in this bundle. Staging is best-effort at
+// build time (a bundle built without the sibling clone simply lacks the modules),
+// and the backends route through meta-harness BY DEFAULT — so an unresolvable
+// import must degrade to the headless execFile path, never fail the run. The
+// imports are dynamic (a static string literal esbuild still inlines into the
+// bundle) so this file also loads under `node --test` without meta-harness.
+export async function loadMetaHarnessModules() {
+  try {
+    const [oneshot, asyncMod, transcript] = await Promise.all([
+      import("meta-harness/oneshot"),
+      import("meta-harness/async"),
+      import("meta-harness/transcript"),
+    ]);
+    return { oneshot, asyncMod, transcript };
+  } catch {
+    return null;
+  }
+}
+
+// runViaMetaHarness drives one backend turn through meta-harness (real PTY, clean
+// reply extraction, folder-trust auto-accept, canonical transcript) instead of the
+// headless execBackend path, and reads the canonical transcript + token usage back
+// from the harness's on-disk session. Returns { exitCode, reply, transcriptEntries,
+// usage } shaped like the execBackend result so run()'s downstream (patch, PR,
+// redaction, result) is shared.
+async function runViaMetaHarness(backend, binary, prompt, execWorktree, logs, modules) {
+  const { runOneShotDetailed } = modules.oneshot;
+  const { Context } = modules.asyncMod;
+  const { ClaudeCodeReader, CodexReader, toPublicJSON } = modules.transcript;
+
+  const timeoutMs = numberValue(process.env.LOOM_LOCAL_TASK_TIMEOUT_MS, 30 * 60 * 1000);
+  const { ctx, cancel } = Context.withDeadline(Context.background(), timeoutMs);
+  let outcome;
+  try {
+    outcome = await runOneShotDetailed(ctx, {
+      harness: metaHarnessHarness(backend),
+      binaryPath: binary,
+      prompt,
+      args: metaHarnessArgs(backend),
+      workingDir: execWorktree,
+      env: metaHarnessEnv(),
+      effort: resolveAgentEffort() || undefined,
+      model: resolveModel(backend) || undefined,
+    });
+  } finally {
+    cancel();
+  }
+
+  // Read the canonical transcript + token usage back for EVERY outcome that
+  // established a session (the id is absent only on startup_error). Best-effort:
+  // a Reader failure must not erase a successful reply — keep the reply and note
+  // the read error.
+  let transcriptEntries = [];
+  let usage = null;
+  if (outcome.harnessSessionID) {
+    const reader = backend === "claude" ? new ClaudeCodeReader() : new CodexReader();
+    try {
+      transcriptEntries = reader.read(outcome.harnessSessionID, execWorktree).map(toPublicJSON);
+    } catch (error) {
+      logs.push("meta-harness transcript read failed (reply preserved): " + errorMessage(error));
+    }
+    // The session's own token accounting (Reader.readUsage; the canonical Event
+    // DTO carries no token fields by contract). Mapped to the same keys the
+    // stream-json parsers feed resultEntry, so taskUsageFromEntries surfaces it
+    // identically: cache_read/cache_write from the claude cache_* fields, codex
+    // input_tokens INCLUDES its cached subset (codex's own semantics). No cost:
+    // neither on-disk format reports one, and cost is never estimated here.
+    try {
+      const u = reader.readUsage(outcome.harnessSessionID, execWorktree);
+      if (u) {
+        usage = normalizeUsage({
+          input_tokens: u.inputTokens,
+          output_tokens: u.outputTokens,
+          cache_read_tokens: u.cacheReadInputTokens,
+          cache_write_tokens: u.cacheCreationInputTokens,
+          reasoning_tokens: u.reasoningOutputTokens,
+        });
+      }
+    } catch (error) {
+      logs.push("meta-harness usage read failed (run preserved): " + errorMessage(error));
+    }
+  }
+
+  const exitCode = outcome.status === "completed" ? 0 : outcome.status === "deadline" ? 124 : 1;
+  if (outcome.status !== "completed") {
+    logs.push(`meta-harness ${backend} ${outcome.status}` + (outcome.reason ? ": " + outcome.reason : ""));
+  }
+  return {
+    exitCode,
+    reply: outcome.status === "completed" ? outcome.reply : outcome.reason || "",
+    transcriptEntries,
+    usage,
+  };
+}
+
 // setupIsolatedWorktree creates a linked git worktree checked out at the host
 // worktree's HEAD, so the backend CLI edits an isolated copy and the host
 // worktree stays clean for the driver host-bridge to patch-back the result.
@@ -807,7 +1011,7 @@ export function redactSecretsInText(text) {
 // output/text — now persisted via the `output` field — before the transcript is
 // written: first the exact values of known secret env vars, then entropy/pattern
 // detection for secrets that are NOT in that env allowlist.
-function redactTranscriptSecrets(entries, env = process.env) {
+export function redactTranscriptSecrets(entries, env = process.env) {
   const names = [
     "GITHUB_TOKEN", "GH_TOKEN", "LOOM_PR_GIT_PASSWORD",
     "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY",
@@ -1208,7 +1412,7 @@ function sessionMetaEntry(backend, label) {
 
 // ensureSessionMetaLead prepends a session_meta entry unless the transcript already
 // leads with one. Its timestamp mirrors the first real entry so it sorts to the head.
-function ensureSessionMetaLead(entries, backend, label) {
+export function ensureSessionMetaLead(entries, backend, label) {
   if (entries[0]?.type === "session_meta") return entries;
   const meta = sessionMetaEntry(backend, label);
   const firstTs = entries.find((e) => e && e.timestamp)?.timestamp;
