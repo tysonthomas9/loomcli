@@ -1,7 +1,7 @@
 # A real TaskRun produces the revision; the deterministic Codex CLI fixture only
 # supplies the agent's file edit. The verdict is recorded through the mounted UI.
 suite: loomgit-review
-classification: { area: git, feature: revision-review, surface: mixed, purpose: journey }
+classification: { area: reviews, feature: revision-review, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 setup: >-
   d="$AFT_WORK_DIR/review-repo";
