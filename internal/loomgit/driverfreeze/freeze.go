@@ -65,11 +65,12 @@ func FreezeAt(ctx context.Context, journalPath string, in Request) (loomgit.Revi
 		return loomgit.Revision{}, err
 	}
 	defer func() { _ = store.Close() }()
-	repo, err := pool.New(store).Admit(ctx, in.Worktree)
+	gitOptions := gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}}
+	repo, err := pool.New(store, gitOptions).Admit(ctx, in.Worktree)
 	if err != nil {
 		return loomgit.Revision{}, err
 	}
-	runner, err := gitexec.New(in.Worktree, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
+	runner, err := gitexec.New(in.Worktree, gitOptions)
 	if err != nil {
 		return loomgit.Revision{}, err
 	}
