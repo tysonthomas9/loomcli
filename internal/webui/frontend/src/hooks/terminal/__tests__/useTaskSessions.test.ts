@@ -284,4 +284,122 @@ describe("useTaskSessions", () => {
       expect(result.current.sessions).toEqual([]);
     });
   });
+
+  // Rapidly switching run rows must never show task A's sessions under task B.
+  // The hook instance survives a taskId change (IssueDetailPanel renders with no
+  // `key`), so refs are reused across the switch and need generation fencing.
+  describe("task switch fencing", () => {
+    function deferred(): {
+      promise: Promise<SessionRecord[]>;
+      resolve: (value: SessionRecord[]) => void;
+    } {
+      let resolve!: (value: SessionRecord[]) => void;
+      const promise = new Promise<SessionRecord[]>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    }
+
+    it("fetches the new task even while the previous fetch is still in flight", async () => {
+      const first = deferred();
+      mockGetSessions.mockReturnValueOnce(first.promise);
+
+      const { rerender } = renderHook(
+        ({ taskId }: { taskId: string | null }) => useTaskSessions(taskId),
+        { initialProps: { taskId: "task-1" } },
+      );
+      await flushPromises();
+      expect(mockGetSessions).toHaveBeenCalledWith("test-ws-id", "task-1");
+
+      const second = deferred();
+      mockGetSessions.mockReturnValueOnce(second.promise);
+      rerender({ taskId: "task-2" });
+      await flushPromises();
+
+      // A shared in-flight guard swallows this call, leaving task-2 unfetched
+      // until the next poll tick (up to 10s).
+      expect(mockGetSessions).toHaveBeenCalledWith("test-ws-id", "task-2");
+    });
+
+    it("discards a late response belonging to the previous task", async () => {
+      const first = deferred();
+      mockGetSessions.mockReturnValueOnce(first.promise);
+
+      const { result, rerender } = renderHook(
+        ({ taskId }: { taskId: string | null }) => useTaskSessions(taskId),
+        { initialProps: { taskId: "task-1" } },
+      );
+      await flushPromises();
+
+      const second = deferred();
+      mockGetSessions.mockReturnValueOnce(second.promise);
+      rerender({ taskId: "task-2" });
+      await flushPromises();
+
+      // task-1's response lands after the switch — it must be dropped.
+      await act(async () => {
+        first.resolve([
+          createMockSession({ session_id: "a1", task_id: "task-1" }),
+        ]);
+        await Promise.resolve();
+      });
+      expect(result.current.sessions).toEqual([]);
+
+      await act(async () => {
+        second.resolve([
+          createMockSession({ session_id: "b1", task_id: "task-2" }),
+        ]);
+        await Promise.resolve();
+      });
+      expect(result.current.sessions.map((s) => s.session_id)).toEqual(["b1"]);
+    });
+
+    it("clears the previous task's sessions immediately on switch", async () => {
+      mockGetSessions.mockResolvedValueOnce([
+        createMockSession({ session_id: "a1", task_id: "task-1" }),
+      ]);
+
+      const { result, rerender } = renderHook(
+        ({ taskId }: { taskId: string | null }) => useTaskSessions(taskId),
+        { initialProps: { taskId: "task-1" } },
+      );
+      await flushPromises();
+      expect(result.current.sessions).toHaveLength(1);
+
+      const second = deferred();
+      mockGetSessions.mockReturnValueOnce(second.promise);
+      rerender({ taskId: "task-2" });
+      await flushPromises();
+
+      // Stale rows must not linger under the newly selected task while it loads.
+      expect(result.current.sessions).toEqual([]);
+    });
+
+    it("discards a late error belonging to the previous task", async () => {
+      let rejectFirst!: (err: Error) => void;
+      mockGetSessions.mockReturnValueOnce(
+        new Promise<SessionRecord[]>((_, reject) => {
+          rejectFirst = reject;
+        }),
+      );
+
+      const { result, rerender } = renderHook(
+        ({ taskId }: { taskId: string | null }) => useTaskSessions(taskId),
+        { initialProps: { taskId: "task-1" } },
+      );
+      await flushPromises();
+
+      const second = deferred();
+      mockGetSessions.mockReturnValueOnce(second.promise);
+      rerender({ taskId: "task-2" });
+      await flushPromises();
+
+      await act(async () => {
+        rejectFirst(new Error("task-1 blew up"));
+        await Promise.resolve();
+      });
+
+      expect(result.current.error).toBeNull();
+    });
+  });
 });
