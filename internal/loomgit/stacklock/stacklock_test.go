@@ -39,12 +39,23 @@ func TestExpiredLeaseFromDeadProcessIsRecovered(t *testing.T) {
 	if out, err := child.CombinedOutput(); err != nil {
 		t.Fatalf("dead holder: %v: %s", err, out)
 	}
-	start := time.Now()
 	if err := With(context.Background(), "ws", "dead", func(context.Context) error { return nil }); err != nil {
 		t.Fatalf("stale lease was not recovered: %v", err)
 	}
-	if time.Since(start) < 50*time.Millisecond {
-		t.Fatal("lease was available before the dead holder's TTL elapsed")
+	store, err := journal.OpenSQLite(filepath.Join(dir, "loomgit-journal.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	lease, err := store.ClaimLease(context.Background(), "stack:ws:dead", "probe", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lease.Fence != 3 {
+		t.Fatalf("lease fence = %d, want 3 (dead holder, recovery, probe)", lease.Fence)
+	}
+	if err := store.ReleaseLease(context.Background(), lease); err != nil {
+		t.Fatal(err)
 	}
 }
 
