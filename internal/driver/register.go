@@ -254,11 +254,6 @@ func resolvedRunnerRef(parent *domain.DriverRun, version *domain.DriverVersion, 
 	return strings.Join([]string{driverID, versionID, spec.Kind, spec.Entrypoint}, "#")
 }
 
-func inferNodeModuleRunnerName(path string) string {
-	name := strings.TrimSuffix(filepath.Base(strings.TrimSpace(path)), filepath.Ext(path))
-	return strings.TrimSpace(name)
-}
-
 func RegisterFlueDriver(ctx context.Context, s store.Store, opts RegisterFlueOptions) (*RegisterFlueResult, error) {
 	if s == nil {
 		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
@@ -834,11 +829,6 @@ func digestBundleTree(bundleRoot string, manifest []byte) (string, error) {
 		_, _ = h.Write([]byte("\n"))
 	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
-}
-
-func digestBytes(data []byte) string {
-	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 func digestShort(digest string) string {

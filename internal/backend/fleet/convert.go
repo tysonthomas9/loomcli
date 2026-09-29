@@ -225,17 +225,6 @@ func issueWithCountsToData(iwc *types.IssueWithCounts) backend.IssueData {
 	return d
 }
 
-// issuesWithCountsToData converts a slice of *types.IssueWithCounts.
-func issuesWithCountsToData(issues []*types.IssueWithCounts) []backend.IssueData {
-	result := make([]backend.IssueData, 0, len(issues))
-	for _, iwc := range issues {
-		if iwc != nil {
-			result = append(result, issueWithCountsToData(iwc))
-		}
-	}
-	return result
-}
-
 // detailsToDetailData converts types.IssueDetails to backend.IssueDetailData.
 func detailsToDetailData(details *types.IssueDetails) backend.IssueDetailData {
 	d := backend.IssueDetailData{

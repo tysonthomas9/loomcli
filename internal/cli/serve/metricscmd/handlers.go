@@ -271,10 +271,6 @@ func HandleStatsWithDataSource(dataSource *MonitorDataSource) http.HandlerFunc {
 	}
 }
 
-func monitorDataForRequest(r *http.Request, collectDataFn func() *monitor.MonitorData, backendFn IssueBackendFn) *monitor.MonitorData {
-	return NewMonitorDataSource(collectDataFn, backendFn).Resolve(r)
-}
-
 // HandleSync returns an HTTP handler for the sync endpoint.
 func HandleSync(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -376,10 +372,6 @@ func groupAgentsByWorkspace(agents []monitor.AgentStatus) map[string][]monitor.A
 		groups[ws] = append(groups[ws], agent)
 	}
 	return groups
-}
-
-func storeAgentsForMonitor(ctx context.Context, st store.Store, workspaceHint string) []monitor.AgentStatus {
-	return collectMonitorStoreData(ctx, st, workspaceHint).Agents
 }
 
 func latestAgentSessionsForMonitor(ctx context.Context, st store.Store, wsKey string) map[string]*domain.AgentSession {
