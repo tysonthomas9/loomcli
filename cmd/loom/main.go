@@ -25,6 +25,7 @@ import (
 	_ "github.com/tysonthomas9/loomcli/internal/cli/hooks"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/local"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/monitor"
+	_ "github.com/tysonthomas9/loomcli/internal/cli/preflight"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/repo"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/role"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/serve"

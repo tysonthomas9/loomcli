@@ -41,6 +41,8 @@ type TaskWorker struct {
 	// WorktreeResolver resolves per-task-run local worktrees for bundled local
 	// task runners. Nil uses the machine-local workspace cache.
 	WorktreeResolver TaskWorktreeResolver
+	// PreflightChecker is passed to the default host-bridge executor.
+	PreflightChecker func(ctx context.Context, workspaceKey, workerProfileID string) (backend string, err error)
 	// Now is a clock seam for tests; nil uses time.Now.
 	Now func() time.Time
 }
@@ -92,6 +94,7 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 			LocalSettingsDir: w.LocalSettingsDir,
 			WorktreeResolver: firstNonNilTaskWorktreeResolver(w.WorktreeResolver, LocalTaskWorktreeResolver{Store: w.Store, Lineage: DefaultStackLineageLookup()}),
 			StackStore:       DefaultStackStore(),
+			PreflightChecker: w.PreflightChecker,
 		}
 	}
 	outcome, err := ClaimAndExecuteTaskRunWithResult(ctx, w.Store, TaskRunWorkerOptions{

@@ -192,12 +192,23 @@ func (c *CodexBackend) Meta() BackendMeta {
 
 // HealthCheck reports the installation and readiness status of the Codex backend.
 func (c *CodexBackend) HealthCheck() HealthStatus {
+	return c.healthCheck(true)
+}
+
+// HealthCheckForAdmission reports readiness without collecting the CLI version.
+func (c *CodexBackend) HealthCheckForAdmission(context.Context) HealthStatus {
+	return c.healthCheck(false)
+}
+
+func (c *CodexBackend) healthCheck(includeVersion bool) HealthStatus {
 	var hs HealthStatus
 	var issues []string
 
 	if _, err := exec.LookPath("codex"); err == nil {
 		hs.Installed = true
-		hs.Version = detectBinaryVersion("codex")
+		if includeVersion {
+			hs.Version = detectBinaryVersion("codex")
+		}
 	} else {
 		issues = append(issues, "codex binary not found on PATH")
 	}

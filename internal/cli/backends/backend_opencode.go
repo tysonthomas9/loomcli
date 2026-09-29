@@ -127,11 +127,22 @@ func (o *OpenCodeBackend) Meta() BackendMeta {
 
 // HealthCheck reports the installation and readiness status of the OpenCode backend.
 func (o *OpenCodeBackend) HealthCheck() HealthStatus {
+	return o.healthCheck(true)
+}
+
+// HealthCheckForAdmission reports readiness without collecting the CLI version.
+func (o *OpenCodeBackend) HealthCheckForAdmission(context.Context) HealthStatus {
+	return o.healthCheck(false)
+}
+
+func (o *OpenCodeBackend) healthCheck(includeVersion bool) HealthStatus {
 	var hs HealthStatus
 
 	if _, err := exec.LookPath("opencode"); err == nil {
 		hs.Installed = true
-		hs.Version = detectBinaryVersion("opencode")
+		if includeVersion {
+			hs.Version = detectBinaryVersion("opencode")
+		}
 	} else {
 		hs.Message = "opencode binary not found on PATH"
 		return hs

@@ -2,6 +2,7 @@
 package driver
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,6 +12,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+type staticTaskWorktreeResolver struct {
+	path string
+}
+
+func (r staticTaskWorktreeResolver) ResolveTaskWorktree(context.Context, TaskExecRequest, string) (TaskWorktree, error) {
+	return TaskWorktree{Path: r.path}, nil
+}
 
 func TestTaskWorkerRunOnceClaimsQueuedTaskRunAndClosesTask(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
@@ -109,9 +118,10 @@ func TestTaskWorkerRunOnceMapsFlueSessionUnderParent(t *testing.T) {
 		t.Fatalf("Create queued task run: %v", err)
 	}
 	executor := HostBridgeTaskExecutor{
-		Store:        st,
-		WorktreePath: t.TempDir(),
-		Command:      hostBridgeHelperCommand(t, "flue-transcript", "unused-base", "unused-patch"),
+		Store:            st,
+		WorktreePath:     t.TempDir(),
+		Command:          hostBridgeHelperCommand(t, "flue-transcript", "unused-base", "unused-patch"),
+		PreflightChecker: permissiveLocalPreflight,
 	}
 
 	outcome, err := (&TaskWorker{
@@ -138,6 +148,52 @@ func TestTaskWorkerRunOnceMapsFlueSessionUnderParent(t *testing.T) {
 	}
 	if session.Metadata["runtime"] != "flue" || session.Metadata["task_run_id"] != "task-run-worker-flue" || session.Metadata["transcript_ref"] == "" {
 		t.Fatalf("session metadata = %+v, want flue transcript metadata", session.Metadata)
+	}
+}
+
+func TestTaskWorkerPassesPreflightCheckerToDefaultExecutor(t *testing.T) {
+	ctx, st, run := setupRunningDriverRun(t)
+	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey:     "TEST",
+		TaskRunID:        "task-run-worker-preflight",
+		DriverRunID:      run.RunID,
+		TaskID:           "TEST-15",
+		Runner:           "local-task-runner",
+		RunnerKind:       RunnerKindFlueWorkflow,
+		RunnerEntrypoint: "local-task-runner",
+		Status:           domain.TaskRunQueued,
+		RuntimeMetadata: map[string]string{
+			"runner_trust_level": string(domain.DriverTrustTrusted),
+		},
+	}); err != nil {
+		t.Fatalf("Create queued task run: %v", err)
+	}
+	checkerCalls := 0
+	outcome, err := (&TaskWorker{
+		Store:             st,
+		WorkspaceKey:      "TEST",
+		WorkDir:           t.TempDir(),
+		NodeID:            "task-worker-node-1",
+		RunnerID:          "task-worker-runner-1",
+		HeartbeatInterval: -1,
+		MaxAttempts:       1,
+		WorktreeResolver:  staticTaskWorktreeResolver{path: t.TempDir()},
+		PreflightChecker: func(_ context.Context, workspaceKey, workerProfileID string) (string, error) {
+			checkerCalls++
+			if workspaceKey != "TEST" || workerProfileID != "" {
+				t.Fatalf("checker target = %q/%q, want TEST/empty", workspaceKey, workerProfileID)
+			}
+			return "", &classifiedPreflightTestError{class: "local_backend_unhealthy"}
+		},
+	}).RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if checkerCalls != 1 {
+		t.Fatalf("checker calls = %d, want 1", checkerCalls)
+	}
+	if outcome.Run.Status != domain.TaskRunFailed || outcome.Run.ErrorClass != "local_backend_unhealthy" {
+		t.Fatalf("outcome = %+v, want failed canonical preflight class", outcome.Run)
 	}
 }
 

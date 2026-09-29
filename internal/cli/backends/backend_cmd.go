@@ -124,23 +124,19 @@ var backendHealthCmd = &cobra.Command{
 	Use:   "health",
 	Short: "Check health status of all backends",
 	Args:  cobra.NoArgs,
-	Run:   runBackendHealth,
+	RunE:  runBackendHealth,
 }
 
 type backendHealthEntry struct {
-	Name      string `json:"name"`
-	Healthy   bool   `json:"healthy"`
-	Installed bool   `json:"installed"`
-	Version   string `json:"version"`
-	APIKeySet bool   `json:"api_key_set"`
-	Message   string `json:"message"`
+	Name string `json:"name"`
+	HealthStatus
 }
 
-func runBackendHealth(cmd *cobra.Command, args []string) {
+func runBackendHealth(cmd *cobra.Command, _ []string) error {
 	names := cli.ListBackends()
 	if len(names) == 0 {
 		fmt.Println("No backends registered.")
-		return
+		return nil
 	}
 
 	entries := make([]backendHealthEntry, 0, len(names))
@@ -162,28 +158,20 @@ func runBackendHealth(cmd *cobra.Command, args []string) {
 	}
 
 	if anyUnhealthy {
-		os.Exit(1)
+		return backendCommandExitError(cmd, 1, fmt.Errorf("one or more backends are unhealthy"))
 	}
+	return nil
 }
 
 // buildHealthEntry populates a backendHealthEntry from the registered backend.
 func buildHealthEntry(name string) backendHealthEntry {
 	e := backendHealthEntry{Name: name}
-	b, ok := cli.GetBackendByName(name)
-	if !ok {
-		return e
-	}
-	hc, ok := b.(HealthCheckableBackend)
+	hs, ok := CheckBackendHealth(name)
 	if !ok {
 		e.Message = "no health check available"
 		return e
 	}
-	hs := hc.HealthCheck()
-	e.Healthy = hs.Healthy
-	e.Installed = hs.Installed
-	e.Version = hs.Version
-	e.APIKeySet = hs.APIKeySet
-	e.Message = hs.Message
+	e.HealthStatus = hs
 	return e
 }
 
@@ -207,7 +195,7 @@ var backendInfoCmd = &cobra.Command{
 	Use:   "info <name>",
 	Short: "Show detailed info for a specific backend",
 	Args:  cobra.ExactArgs(1),
-	Run:   runBackendInfo,
+	RunE:  runBackendInfo,
 }
 
 type backendInfoOutput struct {
@@ -227,12 +215,11 @@ type capabilitiesOutput struct {
 	Metadata  bool `json:"metadata"`
 }
 
-func runBackendInfo(cmd *cobra.Command, args []string) {
+func runBackendInfo(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	b, ok := cli.GetBackendByName(name)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "unknown backend %q; available: %s\n", name, cli.ValidBackendNames())
-		os.Exit(1)
+		return backendCommandExitError(cmd, 1, fmt.Errorf("unknown backend %q; available: %s", name, cli.ValidBackendNames()))
 	}
 
 	caps := InspectCapabilities(b)
@@ -242,10 +229,11 @@ func runBackendInfo(cmd *cobra.Command, args []string) {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(out)
-		return
+		return nil
 	}
 
 	printInfoHumanReadable(name, out, caps)
+	return nil
 }
 
 // buildInfoOutput assembles the JSON-serialisable backend info structure.
@@ -359,6 +347,16 @@ func printField(label, value string) {
 		return
 	}
 	fmt.Printf("%-17s %s\n", label+":", value)
+}
+
+func backendCommandExitError(cmd *cobra.Command, code int, err error) error {
+	if cmd != nil {
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.Root().SilenceErrors = true
+		cmd.Root().SilenceUsage = true
+	}
+	return cli.NewCommandExitError(code, err)
 }
 
 func init() {

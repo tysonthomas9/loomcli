@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/localbackend"
 )
 
 // DaytonaTaskRunnerEntrypoint is the bundled Daytona task runner entrypoint. It
@@ -59,7 +61,7 @@ func RunBundledTaskRunner(ctx context.Context, opts BundledRunnerOptions) (json.
 	}
 	entrypoint := strings.TrimSpace(opts.Entrypoint)
 	if entrypoint == "" {
-		entrypoint = LocalTaskRunnerEntrypoint
+		entrypoint = localbackend.LocalTaskRunnerEntrypoint
 	}
 	requestJSON := opts.RequestJSON
 	if strings.TrimSpace(requestJSON) == "" {

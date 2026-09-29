@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agentinbox"
+	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -86,7 +87,7 @@ func isControlledLeadAgent(agent *domain.Agent) bool {
 	if agent == nil {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(agent.RoleName), "lead") && leadcontrol.IsControlledLeadBackend(agent.Backend)
+	return strings.EqualFold(strings.TrimSpace(agent.RoleName), "lead") && backendnames.IsControlledLeadBackend(agent.Backend)
 }
 
 // NewAgentMessageDeliveryResult converts a lead-control delivery into the

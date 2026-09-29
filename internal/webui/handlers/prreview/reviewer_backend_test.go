@@ -3,6 +3,7 @@ package prreview
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -47,6 +48,25 @@ type backendTestEnv struct {
 	store  store.Store
 	module *Module
 	term   *fakeTerminalService
+}
+
+type failingDaemonTargetStore struct {
+	store.Store
+	err error
+}
+
+func (s failingDaemonTargetStore) Daemon() store.DaemonProfileStore {
+	return failingDaemonProfileStore{err: s.err}
+}
+
+type failingDaemonProfileStore struct{ err error }
+
+func (s failingDaemonProfileStore) Get(context.Context, string) (*domain.DaemonProfile, error) {
+	return nil, s.err
+}
+
+func (s failingDaemonProfileStore) Upsert(context.Context, *domain.DaemonProfile) (*domain.DaemonProfile, error) {
+	return nil, errors.New("unexpected daemon profile upsert")
 }
 
 func newBackendTestEnv(t *testing.T, workspaceBackend string) *backendTestEnv {
@@ -141,14 +161,45 @@ func TestEnsureReviewerAgentUsesWorkspaceBackend(t *testing.T) {
 }
 
 func TestEnsureReviewerAgentDefaultsToCodex(t *testing.T) {
-	for _, workspaceBackend := range []string{"", "not-a-real-backend"} {
-		env := newBackendTestEnv(t, workspaceBackend)
-		if err := env.module.ensureReviewerAgent(context.Background(), prReviewTestWorkspace, "review-hello-pr-7", "hello"); err != nil {
-			t.Fatalf("ensureReviewerAgent(%q): %v", workspaceBackend, err)
-		}
-		if got := env.agentBackend(t, "review-hello-pr-7"); got != "codex" {
-			t.Fatalf("workspace backend %q: agent backend = %q, want codex", workspaceBackend, got)
-		}
+	env := newBackendTestEnv(t, "")
+	if err := env.module.ensureReviewerAgent(context.Background(), prReviewTestWorkspace, "review-hello-pr-7", "hello"); err != nil {
+		t.Fatalf("ensureReviewerAgent: %v", err)
+	}
+	if got := env.agentBackend(t, "review-hello-pr-7"); got != "codex" {
+		t.Fatalf("agent backend = %q, want codex", got)
+	}
+}
+
+func TestEnsureReviewerAgentRejectsUnsupportedWorkspaceBackend(t *testing.T) {
+	env := newBackendTestEnv(t, "not-a-real-backend")
+	err := env.module.ensureReviewerAgent(context.Background(), prReviewTestWorkspace, "review-hello-pr-7", "hello")
+	if err == nil || !strings.Contains(err.Error(), `reviewer backend "not-a-real-backend"`) ||
+		!strings.Contains(err.Error(), "supported backends: codex, claude, gemini, opencode, cursor") {
+		t.Fatalf("ensureReviewerAgent error = %v, want backend and supported set", err)
+	}
+	if !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("ensureReviewerAgent error = %v, want domain.ErrInvalid", err)
+	}
+	if _, getErr := env.store.Agents().Get(context.Background(), prReviewTestWorkspace, "review-hello-pr-7"); !errors.Is(getErr, domain.ErrNotFound) {
+		t.Fatalf("reviewer agent lookup error = %v, want ErrNotFound", getErr)
+	}
+}
+
+func TestEnsureReviewerAgentFailsClosedOnBackendResolutionError(t *testing.T) {
+	env := newBackendTestEnv(t, "")
+	storeFailure := errors.New("fleet unavailable")
+	failingStore := failingDaemonTargetStore{Store: env.store, err: storeFailure}
+	env.module.store = failingStore
+
+	err := env.module.ensureReviewerAgent(context.Background(), prReviewTestWorkspace, "review-hello-pr-7", "hello")
+	if !errors.Is(err, storeFailure) {
+		t.Fatalf("ensureReviewerAgent() error = %v, want backend resolution failure", err)
+	}
+	if _, getErr := env.store.Agents().Get(context.Background(), prReviewTestWorkspace, "review-hello-pr-7"); !errors.Is(getErr, domain.ErrNotFound) {
+		t.Fatalf("reviewer agent lookup error = %v, want ErrNotFound", getErr)
+	}
+	if _, getErr := env.store.Roles().Get(context.Background(), prReviewTestWorkspace, reviewerRoleName); !errors.Is(getErr, domain.ErrNotFound) {
+		t.Fatalf("reviewer role lookup error = %v, want ErrNotFound", getErr)
 	}
 }
 

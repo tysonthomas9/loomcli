@@ -36,6 +36,7 @@ import (
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
+	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
@@ -590,6 +591,7 @@ func (m *Module) execTask(ctx context.Context, ws string, id driverIdentity, bod
 		LocalSettingsDir: m.localSettingsDir,
 		WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{Store: m.store, Lineage: driverpkg.DefaultStackLineageLookup()},
 		StackStore:       driverpkg.DefaultStackStore(),
+		PreflightChecker: runtimepreflight.NewLocalTaskRunnerChecker(m.store),
 	}
 	if params.EnqueueOnly {
 		outcome, err := driverpkg.EnqueueTaskRunWithResult(ctx, m.store, opts, executor)

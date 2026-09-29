@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 )
 
 var (
@@ -157,6 +158,7 @@ func runDriverExecTask(_ *cobra.Command, _ []string) error {
 			WorktreePath:     currentWorkingDir(),
 			WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{Store: h.Store, Lineage: driverpkg.DefaultStackLineageLookup()},
 			StackStore:       driverpkg.DefaultStackStore(),
+			PreflightChecker: runtimepreflight.NewLocalTaskRunnerChecker(h.Store),
 		})
 		if err != nil {
 			return fmt.Errorf("exec task: %w", err)
@@ -217,6 +219,7 @@ func runDriverWorkTaskRun(_ *cobra.Command, _ []string) error {
 			WorktreePath:     currentWorkingDir(),
 			WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{Store: h.Store, Lineage: driverpkg.DefaultStackLineageLookup()},
 			StackStore:       driverpkg.DefaultStackStore(),
+			PreflightChecker: runtimepreflight.NewLocalTaskRunnerChecker(h.Store),
 		})
 		if err != nil {
 			return fmt.Errorf("work task run: %w", err)

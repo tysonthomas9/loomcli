@@ -16,7 +16,9 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/localbackend"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
+	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -26,13 +28,13 @@ import (
 // the legacy set so unflipped deployments are byte-identical.
 func TestTaskRunnerEnvAPIBaseURL(t *testing.T) {
 	req := hostBridgeTaskExecRequest()
-	legacy := HostBridgeTaskExecutor{WorktreePath: "/wt"}.taskRunnerEnv(req, "{}")
+	legacy := mustTaskRunnerEnv(t, HostBridgeTaskExecutor{WorktreePath: "/wt"}, req, "{}")
 	for _, entry := range legacy {
 		if strings.HasPrefix(entry, "LOOM_TASK_RUN_API_URL=") {
 			t.Fatalf("legacy env unexpectedly exports the serve API URL: %q", entry)
 		}
 	}
-	withURL := HostBridgeTaskExecutor{WorktreePath: "/wt", APIBaseURL: " http://127.0.0.1:8080 "}.taskRunnerEnv(req, "{}")
+	withURL := mustTaskRunnerEnv(t, HostBridgeTaskExecutor{WorktreePath: "/wt", APIBaseURL: " http://127.0.0.1:8080 "}, req, "{}")
 	if len(withURL) != len(legacy)+1 || withURL[len(withURL)-1] != "LOOM_TASK_RUN_API_URL=http://127.0.0.1:8080" {
 		t.Fatalf("env with APIBaseURL = %v, want legacy env plus trimmed LOOM_TASK_RUN_API_URL appended", withURL)
 	}
@@ -55,10 +57,10 @@ func TestLocalTaskRunnerSettingsDoNotOverrideInheritedGitHubToken(t *testing.T) 
 	}
 
 	req := hostBridgeTaskExecRequest()
-	req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
-	executor := HostBridgeTaskExecutor{WorktreePath: "/wt", LocalSettingsDir: settingsDir}
+	req.RunnerEntrypoint = localbackend.LocalTaskRunnerEntrypoint
+	executor := HostBridgeTaskExecutor{WorktreePath: "/wt", LocalSettingsDir: settingsDir, checkedBackend: "codex"}
 
-	env := executor.taskRunnerEnv(req, "{}", []string{"PATH=/bin", "GITHUB_TOKEN=host-token"})
+	env := mustTaskRunnerEnv(t, executor, req, "{}", []string{"PATH=/bin", "GITHUB_TOKEN=host-token"})
 	if envContains(env, "GITHUB_TOKEN=settings-token") {
 		t.Fatalf("settings GitHub token overrode inherited GITHUB_TOKEN: %v", env)
 	}
@@ -66,14 +68,225 @@ func TestLocalTaskRunnerSettingsDoNotOverrideInheritedGitHubToken(t *testing.T) 
 		t.Fatalf("non-secret local task runner setting was not exported: %v", env)
 	}
 
-	env = executor.taskRunnerEnv(req, "{}", []string{"PATH=/bin", "GH_TOKEN=host-token"})
+	env = mustTaskRunnerEnv(t, executor, req, "{}", []string{"PATH=/bin", "GH_TOKEN=host-token"})
 	if envContains(env, "GITHUB_TOKEN=settings-token") {
 		t.Fatalf("settings GitHub token overrode inherited GH_TOKEN: %v", env)
 	}
 
-	env = executor.taskRunnerEnv(req, "{}", []string{"PATH=/bin"})
+	env = mustTaskRunnerEnv(t, executor, req, "{}", []string{"PATH=/bin"})
 	if !envContains(env, "GITHUB_TOKEN=settings-token") {
 		t.Fatalf("settings GitHub token was not exported when inherited env had no GitHub token: %v", env)
+	}
+}
+
+func TestHostBridgeTaskExecutorGatesConfiguredLocalRunnerAndBindsCheckedBackend(t *testing.T) {
+	req := hostBridgeTaskExecRequest()
+	req.RunnerEntrypoint = localbackend.LocalTaskRunnerEntrypoint
+	req.WorkerProfileID = "worker-a"
+	req.RunnerTrustLevel = domain.DriverTrustTrusted
+	checkerCalls := 0
+	executor := HostBridgeTaskExecutor{
+		WorktreePath: t.TempDir(),
+		Command:      hostBridgeHelperCommand(t, "backend-env", "unused", "unused"),
+		PreflightChecker: func(_ context.Context, workspaceKey, workerProfileID string) (string, error) {
+			checkerCalls++
+			if workspaceKey != "WS" || workerProfileID != "worker-a" {
+				t.Fatalf("checker target = %q/%q, want WS/worker-a", workspaceKey, workerProfileID)
+			}
+			return "gemini", nil
+		},
+	}
+
+	result, err := executor.ExecuteTask(context.Background(), req)
+	if err != nil {
+		t.Fatalf("ExecuteTask: %v", err)
+	}
+	if checkerCalls != 1 {
+		t.Fatalf("checker calls = %d, want 1", checkerCalls)
+	}
+	if result.RuntimeMetadata["checked_backend"] != "gemini" {
+		t.Fatalf("runtime metadata = %+v, want checked backend gemini", result.RuntimeMetadata)
+	}
+}
+
+func TestHostBridgeTaskExecutorRechecksPersistedAgentBackendAfterQueue(t *testing.T) {
+	ctx, st, run := setupRunningDriverRun(t)
+	const workerProfileID = "worker-race"
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "TEST",
+		Name:         workerProfileID,
+		RoleName:     "task",
+		Backend:      "claude",
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := st.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{
+		WorkspaceKey: "TEST",
+		ProfileID:    workerProfileID,
+		Role:         "task",
+	}); err != nil {
+		t.Fatalf("create worker profile: %v", err)
+	}
+
+	var probedBackends []string
+	restore := runtimepreflight.SetHealthCheckerForTest(func(name string) (runtimepreflight.HealthStatus, bool) {
+		probedBackends = append(probedBackends, name)
+		return runtimepreflight.HealthStatus{Healthy: true, Installed: true, APIKeySet: true, Message: "ready"}, true
+	})
+	t.Cleanup(restore)
+	executor := HostBridgeTaskExecutor{
+		Store:            st,
+		WorktreePath:     t.TempDir(),
+		Command:          hostBridgeHelperCommand(t, "backend-env", "unused", "unused"),
+		PreflightChecker: runtimepreflight.NewLocalTaskRunnerChecker(st),
+	}
+	queued, err := EnqueueTaskRunWithResult(ctx, st, TaskRunRequestOptions{
+		WorkspaceKey:    "TEST",
+		DriverRunID:     run.RunID,
+		TaskRunID:       "task-run-agent-backend-race",
+		TaskID:          "TEST-1",
+		WorkerProfileID: workerProfileID,
+		Runner:          "local-task-runner",
+		ParentNodeID:    run.NodeID,
+		ParentLeaseID:   run.LeaseID,
+		ParentFence:     run.FencingToken,
+	}, executor)
+	if err != nil {
+		t.Fatalf("enqueue task run: %v", err)
+	}
+	if len(probedBackends) != 0 {
+		t.Fatalf("backend probe ran before launch: %v", probedBackends)
+	}
+
+	updatedBackend := "gemini"
+	if _, err := st.Agents().Update(ctx, "TEST", workerProfileID, store.AgentUpdate{Backend: &updatedBackend}); err != nil {
+		t.Fatalf("update agent backend: %v", err)
+	}
+	outcome, err := ClaimAndExecuteTaskRunWithResult(ctx, st, TaskRunWorkerOptions{
+		WorkspaceKey:      "TEST",
+		TaskRunID:         queued.Run.TaskRunID,
+		NodeID:            "node-1",
+		RunnerID:          "runner-agent-backend-race",
+		WorkerProfileIDs:  []string{workerProfileID},
+		HeartbeatInterval: -1,
+	}, executor)
+	if err != nil {
+		t.Fatalf("claim and execute task run: %v", err)
+	}
+	if !slices.Equal(probedBackends, []string{updatedBackend}) {
+		t.Fatalf("probed backends = %v, want only updated backend %q", probedBackends, updatedBackend)
+	}
+	if got := outcome.Run.RuntimeMetadata["checked_backend"]; got != updatedBackend {
+		t.Fatalf("bound %s = %q, want %q", TaskRunnerBackendEnv, got, updatedBackend)
+	}
+
+	updatedBackend = "opencode"
+	if _, err := st.Agents().Update(ctx, "TEST", workerProfileID, store.AgentUpdate{Backend: &updatedBackend}); err != nil {
+		t.Fatalf("update agent backend again: %v", err)
+	}
+	queued, err = EnqueueTaskRunWithResult(ctx, st, TaskRunRequestOptions{
+		WorkspaceKey:    "TEST",
+		DriverRunID:     run.RunID,
+		TaskRunID:       "task-run-agent-backend-race-second",
+		TaskID:          "TEST-2",
+		WorkerProfileID: workerProfileID,
+		Runner:          "local-task-runner",
+		ParentNodeID:    run.NodeID,
+		ParentLeaseID:   run.LeaseID,
+		ParentFence:     run.FencingToken,
+	}, executor)
+	if err != nil {
+		t.Fatalf("enqueue second task run: %v", err)
+	}
+	outcome, err = ClaimAndExecuteTaskRunWithResult(ctx, st, TaskRunWorkerOptions{
+		WorkspaceKey:      "TEST",
+		TaskRunID:         queued.Run.TaskRunID,
+		NodeID:            "node-1",
+		RunnerID:          "runner-agent-backend-race-second",
+		WorkerProfileIDs:  []string{workerProfileID},
+		HeartbeatInterval: -1,
+	}, executor)
+	if err != nil {
+		t.Fatalf("claim and execute second task run: %v", err)
+	}
+	if !slices.Equal(probedBackends, []string{"gemini", "opencode"}) {
+		t.Fatalf("probed backends = %v, want updated backend at each launch", probedBackends)
+	}
+	if got := outcome.Run.RuntimeMetadata["checked_backend"]; got != updatedBackend {
+		t.Fatalf("second run bound %s = %q, want %q", TaskRunnerBackendEnv, got, updatedBackend)
+	}
+}
+
+func TestHostBridgeTaskExecutorLocalRunnerPreflightFailures(t *testing.T) {
+	req := hostBridgeTaskExecRequest()
+	req.RunnerEntrypoint = localbackend.LocalTaskRunnerEntrypoint
+	req.RunnerKind = RunnerKindFlueWorkflow
+
+	t.Run("nil checker fails closed", func(t *testing.T) {
+		_, err := (HostBridgeTaskExecutor{}).bridgeRunner(context.Background(), req)
+		var classified interface{ PreflightClass() string }
+		if !errors.As(err, &classified) || classified.PreflightClass() != localBackendResolutionFailed {
+			t.Fatalf("bridgeRunner error = %v, want %s", err, localBackendResolutionFailed)
+		}
+		completion := normalizeTaskExecCompletion(TaskExecResult{}, err)
+		if completion.ErrorClass != localBackendResolutionFailed {
+			t.Fatalf("completion class = %q, want %s", completion.ErrorClass, localBackendResolutionFailed)
+		}
+	})
+
+	t.Run("built-in branch propagates checker error", func(t *testing.T) {
+		wantErr := errors.New("backend unavailable")
+		executor := HostBridgeTaskExecutor{PreflightChecker: func(context.Context, string, string) (string, error) {
+			return "", wantErr
+		}}
+		_, err := executor.bridgeRunner(context.Background(), req)
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("bridgeRunner error = %v, want checker error", err)
+		}
+	})
+
+	t.Run("checker returning empty backend fails closed", func(t *testing.T) {
+		executor := HostBridgeTaskExecutor{PreflightChecker: func(context.Context, string, string) (string, error) {
+			return "   ", nil
+		}}
+		_, err := executor.bridgeRunner(context.Background(), req)
+		var classified interface{ PreflightClass() string }
+		if !errors.As(err, &classified) || classified.PreflightClass() != localBackendResolutionFailed {
+			t.Fatalf("bridgeRunner error = %v, want %s", err, localBackendResolutionFailed)
+		}
+	})
+
+	t.Run("empty checked backend cannot be bound directly", func(t *testing.T) {
+		_, err := (HostBridgeTaskExecutor{checkedBackend: "   "}).taskRunnerEnv(req, "{}")
+		var classified interface{ PreflightClass() string }
+		if !errors.As(err, &classified) || classified.PreflightClass() != localBackendResolutionFailed {
+			t.Fatalf("taskRunnerEnv error = %v, want %s", err, localBackendResolutionFailed)
+		}
+	})
+}
+
+func TestHostBridgeTaskExecutorRemoteRunnerBypassesLocalPreflight(t *testing.T) {
+	req := hostBridgeTaskExecRequest()
+	req.RunnerEntrypoint = DaytonaTaskRunnerEntrypoint
+	req.RunnerTrustLevel = domain.DriverTrustTrusted
+	checkerCalled := false
+	executor := HostBridgeTaskExecutor{
+		WorktreePath: t.TempDir(),
+		Command:      hostBridgeHelperCommand(t, "backend-env", "unused", "unused"),
+		PreflightChecker: func(context.Context, string, string) (string, error) {
+			checkerCalled = true
+			return "", errors.New("must not be called")
+		},
+	}
+	result, err := executor.ExecuteTask(context.Background(), req)
+	if err != nil {
+		t.Fatalf("ExecuteTask: %v", err)
+	}
+	if checkerCalled {
+		t.Fatal("remote runner invoked local backend preflight")
+	}
+	if result.RuntimeMetadata["checked_backend"] != "" {
+		t.Fatalf("remote runner received local backend env: %+v", result.RuntimeMetadata)
 	}
 }
 
@@ -292,9 +505,10 @@ func TestHostBridgeTaskExecutorRegistersFinalizedRunnerArtifacts(t *testing.T) {
 func TestHostBridgeTaskExecutorMapsFlueSessionAndTranscript(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	executor := HostBridgeTaskExecutor{
-		Store:        st,
-		WorktreePath: t.TempDir(),
-		Command:      hostBridgeHelperCommand(t, "flue-transcript", "unused-base", "unused-patch"),
+		Store:            st,
+		WorktreePath:     t.TempDir(),
+		Command:          hostBridgeHelperCommand(t, "flue-transcript", "unused-base", "unused-patch"),
+		PreflightChecker: permissiveLocalPreflight,
 	}
 
 	outcome, err := RequestTaskRunWithResult(ctx, st, TaskRunRequestOptions{
@@ -626,9 +840,10 @@ setInterval(() => {}, 1000);
 	req.RunnerVersionID = "driver-version-1"
 	req.RunnerTrustLevel = domain.DriverTrustTrusted
 	executor := HostBridgeTaskExecutor{
-		Store:        st,
-		WorktreePath: worktree,
-		Command:      []string{"node", genericTaskRunnerInvokerPath(t)},
+		Store:            st,
+		WorktreePath:     worktree,
+		Command:          []string{"node", genericTaskRunnerInvokerPath(t)},
+		PreflightChecker: permissiveLocalPreflight,
 	}
 	result, err := executor.ExecuteTask(ctx, req)
 	if err != nil {
@@ -650,8 +865,9 @@ setInterval(() => {}, 1000);
 	directReq.TaskID = "TASK-2"
 	directReq.LeaseToken = "scoped-task-token-2"
 	directResult, err := (HostBridgeTaskExecutor{
-		Store:        st,
-		WorktreePath: worktree,
+		Store:            st,
+		WorktreePath:     worktree,
+		PreflightChecker: permissiveLocalPreflight,
 	}).ExecuteTask(ctx, directReq)
 	if err != nil {
 		t.Fatalf("direct ExecuteTask: %v", err)
@@ -722,7 +938,7 @@ func TestTaskRunnerEnvIncludesFlueBundleForRunnerVersion(t *testing.T) {
 	req.RunnerKind = RunnerKindFlueWorkflow
 	req.RunnerVersionID = "driver-version-1"
 	req.RunnerTrustLevel = domain.DriverTrustTrusted
-	env := HostBridgeTaskExecutor{Store: st, WorktreePath: worktree}.taskRunnerEnv(req, "{}")
+	env := mustTaskRunnerEnv(t, HostBridgeTaskExecutor{Store: st, WorktreePath: worktree}, req, "{}")
 	if !envContains(env, "LOOM_TASK_RUNNER_BUNDLE_ROOT="+bundleRoot) {
 		t.Fatalf("env missing bundle root: %v", env)
 	}
@@ -833,6 +1049,17 @@ func TestHostBridgeTaskExecutorHelperProcess(t *testing.T) {
 		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
 			t.Fatalf("encode result: %v", err)
 		}
+	case "backend-env":
+		result := map[string]any{
+			"status":    "completed",
+			"exit_code": 0,
+			"runtime_metadata": map[string]string{
+				"checked_backend": os.Getenv(TaskRunnerBackendEnv),
+			},
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+			t.Fatalf("encode result: %v", err)
+		}
 	case "flue-transcript":
 		result := map[string]any{
 			"status":    "completed",
@@ -919,6 +1146,25 @@ func hostBridgeHelperCommand(t *testing.T, mode, base, patch string) []string {
 	}
 	t.Setenv("LOOM_HOST_BRIDGE_HELPER", "1")
 	return []string{exe, "-test.run=TestHostBridgeTaskExecutorHelperProcess", "--", mode, base, patch}
+}
+
+func mustTaskRunnerEnv(
+	t *testing.T,
+	executor HostBridgeTaskExecutor,
+	req TaskExecRequest,
+	requestJSON string,
+	inherited ...[]string,
+) []string {
+	t.Helper()
+	env, err := executor.taskRunnerEnv(req, requestJSON, inherited...)
+	if err != nil {
+		t.Fatalf("taskRunnerEnv: %v", err)
+	}
+	return env
+}
+
+func permissiveLocalPreflight(context.Context, string, string) (string, error) {
+	return "codex", nil
 }
 
 func genericTaskRunnerInvokerPath(t *testing.T) string {

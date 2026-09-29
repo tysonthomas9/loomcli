@@ -14,3 +14,7 @@ internal/cli 19
 # wiring and the domain skill path policy to svcimpl's file index.
 internal/webui/app 19
 internal/webui/svcimpl 19
+# serve is the daemon's composition root: the launch-time preflight gate is
+# wired here by injecting runtimepreflight's checker into the driver executor
+# (the driver must stay CLI- and preflight-free, so the import lands in serve).
+internal/cli/serve 19

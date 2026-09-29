@@ -19,6 +19,10 @@ var (
 // format: "text" (default) or "json"
 // output: "stderr" (default) or a file path
 func InitLogger(format, output string) error {
+	return initLogger(format, output, slog.LevelInfo)
+}
+
+func initLogger(format, output string, level slog.Level) error {
 	// Determine writer
 	var w *os.File
 	switch output {
@@ -33,7 +37,7 @@ func InitLogger(format, output string) error {
 	}
 
 	opts := &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+		Level: level,
 	}
 
 	var handler slog.Handler
@@ -52,6 +56,8 @@ func InitLogger(format, output string) error {
 	slog.SetDefault(slog.New(handler))
 
 	// Bridge existing log.Printf calls through slog
+	// Legacy log.Printf messages are informational. Keep that bridge level
+	// stable so a warn-level handler suppresses them with other INFO output.
 	slog.SetLogLoggerLevel(slog.LevelInfo)
 
 	return nil
