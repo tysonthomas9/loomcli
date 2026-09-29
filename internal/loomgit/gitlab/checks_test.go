@@ -48,6 +48,9 @@ func (s *state) goCheck(name string) error {
 	case "revision_round_trip":
 		// Proves revision hashes and imported trees survive source and derived operations.
 		return s.packageTests("./internal/loomgit/internal/changeset", "Test(FreezeSourceStoresRewrittenChainAndReplay|ImportMatchingTreeAndSecondSourceRevision|DerivedOperationsAndNextAttemptKeepOldRevision)")
+	case "revision_diff":
+		// Real Git fixtures cover committed and Snapshot work, the patch budget, interdiff, and missing base.
+		return s.packageTests("./internal/loomgit/gitread", "Test(SnapshotDiffInterdiffBudgetAndMissingBase|DerivedRevisionOffersRangeDiff)")
 	case "process_lock":
 		// Proves two processes contend on one repository lock and stale leases recover.
 		return s.packageTests("./internal/loomgit/internal/pool", "Test(ConcurrentProcesses|StaleLeaseAfterProcessExit)")

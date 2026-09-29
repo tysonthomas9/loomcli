@@ -93,6 +93,21 @@ func runGit(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
+func TestReadOnlyRunnerNeedsNoIdentityAndRejectsWrites(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init", "-q")
+	r, err := New(dir, Options{GlobalConfig: os.DevNull, SystemConfig: os.DevNull, ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Run(context.Background(), "rev-parse", "--git-dir"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Run(context.Background(), "commit", "--allow-empty", "-m", "write"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("write allowed: %v", err)
+	}
+}
+
 func TestDefaultOptionsReadAllowlistedGlobalConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
