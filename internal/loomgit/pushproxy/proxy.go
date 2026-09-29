@@ -258,18 +258,21 @@ func (p *Proxy) forwardOne(ctx context.Context, push mirror.RefPusher, host *git
 	if actual != change.new && actual != "" && (!found || prior.SHA != actual || prior.Remote != p.Remote || prior.State != "mirrored") {
 		return clientError("remote ref moved")
 	}
+	if err := fetchOnHost(ctx, host, quarantine, change); err != nil {
+		return err
+	}
 	if actual != change.new {
 		if err := push.Push(ctx, p.Remote, change.ref, change.new, actual); err != nil {
 			return clientError("provider rejected: " + providerReason(err))
 		}
 	}
-	if err := retainOnHost(ctx, host, quarantine, change, prior, found); err != nil {
+	if err := retainOnHost(ctx, host, change, prior, found); err != nil {
 		return err
 	}
 	return p.Store.PutMirrorRecord(ctx, journal.MirrorRecord{Repo: host.Path(), Ref: change.ref, Remote: p.Remote, SHA: change.new, State: "mirrored"})
 }
 
-func retainOnHost(ctx context.Context, host *gitexec.Runner, quarantine string, change update, prior journal.MirrorRecord, found bool) error {
+func fetchOnHost(ctx context.Context, host *gitexec.Runner, quarantine string, change update) error {
 	if _, err := host.Run(ctx, "fetch", "--no-tags", quarantine, change.ref); err != nil {
 		return err
 	}
@@ -277,6 +280,10 @@ func retainOnHost(ctx context.Context, host *gitexec.Runner, quarantine string, 
 	if err != nil || strings.TrimSpace(string(fetched)) != change.new {
 		return errors.New("host fetch did not preserve accepted SHA")
 	}
+	return nil
+}
+
+func retainOnHost(ctx context.Context, host *gitexec.Runner, change update, prior journal.MirrorRecord, found bool) error {
 	old := strings.Repeat("0", len(change.new))
 	if exists, err := gitexec.RefExists(host.Path(), change.ref); err != nil {
 		return err

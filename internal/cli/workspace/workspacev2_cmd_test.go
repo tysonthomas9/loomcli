@@ -2,6 +2,9 @@ package workspace
 
 import (
 	"context"
+	"database/sql"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -9,7 +12,31 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	_ "modernc.org/sqlite"
 )
+
+func TestLoomGitMirrorStatusReadsWorkspaceStore(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	dir := filepath.Join(configDir, "loomgit")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(dir, "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec(`CREATE TABLE mirror_refs (repo TEXT NOT NULL, ref TEXT NOT NULL, remote TEXT NOT NULL, sha TEXT NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL, PRIMARY KEY(repo, ref));
+		INSERT INTO mirror_refs VALUES ('repo', 'refs/loom/ws/WS/attempt/a/capture', 'origin', 'sha', 'pending', '');
+		INSERT INTO mirror_refs VALUES ('repo', 'refs/loom/ws/OTHER/attempt/a/capture', 'origin', 'sha', 'mirrored', '');`); err != nil {
+		t.Fatal(err)
+	}
+	status := loomGitMirrorStatus(context.Background(), "WS")
+	if status.Pending != 1 || status.Mirrored != 0 || len(status.NotMirrored) != 0 {
+		t.Fatalf("workspace mirror status = %+v, want one pending ref", status)
+	}
+}
 
 func TestValidDesignFormat(t *testing.T) {
 	tests := []struct {

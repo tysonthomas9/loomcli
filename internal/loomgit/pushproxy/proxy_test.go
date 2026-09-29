@@ -399,3 +399,20 @@ func TestProviderRejectionRecordsNoAcceptedSHA(t *testing.T) {
 		t.Fatalf("provider changed: %s", out)
 	}
 }
+
+func TestProviderReceivesOnlyCommitsAlreadyFetchedByHost(t *testing.T) {
+	f := setup(t)
+	sha := f.commit(t, "readme", []byte("changed"))
+	hook := filepath.Join(f.provider, "hooks", "pre-receive")
+	script := fmt.Sprintf("#!/bin/sh\nread old new ref\nunset GIT_DIR GIT_WORK_TREE\ngit -C %q cat-file -e \"$new^{commit}\" || exit 1\n", f.host)
+	if err := os.WriteFile(hook, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ref, _ := refname.AttemptCapture("w", "a")
+	if out, err := f.push(t, ref); err != nil {
+		t.Fatalf("provider could not find commit in host before push: %v: %s", err, out)
+	}
+	if got := git(t, f.provider, "rev-parse", ref); got != sha {
+		t.Fatalf("provider SHA = %s, want %s", got, sha)
+	}
+}
