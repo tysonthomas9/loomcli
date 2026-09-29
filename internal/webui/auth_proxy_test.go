@@ -3,6 +3,7 @@ package webui
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -107,6 +108,43 @@ func TestNewAuthProxy_InvalidURL(t *testing.T) {
 func TestNewAuthProxy_ValidURL(t *testing.T) {
 	if NewAuthProxy("https://auth.example.com", nil) == nil {
 		t.Error("expected non-nil for valid URL")
+	}
+}
+
+func TestNewAuthProxy_RewritePreservesTLSCookiePolicy(t *testing.T) {
+	var upstreamHost string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/auth/session" {
+			t.Errorf("upstream path = %q", r.URL.Path)
+		}
+		if r.Host != upstreamHost {
+			t.Errorf("upstream host = %q", r.Host)
+		}
+		if got := r.Header.Get("X-Forwarded-Proto"); got != "https" {
+			t.Errorf("upstream X-Forwarded-Proto = %q, want https", got)
+		}
+		if got := r.Header.Get("X-Forwarded-For"); got != "203.0.113.7, 10.0.0.5" {
+			t.Errorf("upstream X-Forwarded-For = %q, want client and peer", got)
+		}
+		if got := r.Header.Get("X-Forwarded-Host"); got != "" {
+			t.Errorf("upstream X-Forwarded-Host = %q, want absent", got)
+		}
+		w.Header().Set("Set-Cookie", "session=abc; Domain=example.com")
+	}))
+	defer upstream.Close()
+	upstreamHost = strings.TrimPrefix(upstream.URL, "http://")
+
+	req := httptest.NewRequest(http.MethodGet, "http://localhost/api/auth/session", nil)
+	req.RemoteAddr = "10.0.0.5:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.7")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec := httptest.NewRecorder()
+	NewAuthProxy(upstream.URL, nil).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("proxy status = %d", rec.Code)
+	}
+	if cookie := rec.Header().Get("Set-Cookie"); !strings.Contains(cookie, "Secure") || strings.Contains(cookie, "Domain=") {
+		t.Errorf("rewritten cookie = %q", cookie)
 	}
 }
 
