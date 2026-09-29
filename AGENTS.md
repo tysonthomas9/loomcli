@@ -174,6 +174,10 @@ loom data close <id> --reason "done"  # Complete work
 Run `make gate-clean` for a sanitized local gate. It uses a temporary `HOME`
 under `/tmp` for tests that read user settings, while keeping the standard
 shared Go and lint caches and clearing desktop state and credentials.
+Full gates and Git lab runs take the machine-wide lock through
+`scripts/with-heavy-lock.sh`; `make gate-clean` already uses it. Wrap a lab
+command with the script from this checkout (or its absolute path from another
+checkout). Focused `go test` runs do not need the lock.
 Never set a private `GOCACHE` or `GOMODCACHE`, and never run `go clean -cache`.
 Put scratch work under `/tmp`. A temporary `HOME` must keep `GOCACHE`,
 `GOMODCACHE`, and `GOLANGCI_LINT_CACHE` on their normal shared paths and be

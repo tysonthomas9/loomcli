@@ -762,7 +762,8 @@ gate-clean:
 	mod_cache=$$(env -u GOMODCACHE go env GOMODCACHE); \
 	lint_cache=$$(env -u GOLANGCI_LINT_CACHE golangci-lint cache status | sed -n 's/^Dir: //p'); \
 	test -n "$$go_cache" && test -n "$$mod_cache" && test -n "$$lint_cache"; \
-	env -u GITHUB_TOKEN -u GH_TOKEN -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
+	./scripts/with-heavy-lock.sh env -u GITHUB_TOKEN -u GH_TOKEN \
+		-u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
 		-u LOOM_API_KEY -u LOOM_FLEET_API_KEY -u LOOM_FLEET_DB_API_KEY \
 		-u LOOM_SECRET_API_KEY -u LOOM_SECRET_ANTHROPIC_API_KEY \
 		-u LOOM_WEBUI_API_KEY -u LOOM_DRIVER_API_TOKEN -u LOOM_RUN_TOKEN \
