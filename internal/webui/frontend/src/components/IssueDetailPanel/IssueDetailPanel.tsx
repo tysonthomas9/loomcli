@@ -85,6 +85,7 @@ import { ResizeDivider } from "./actions";
 import { ErrorToast } from "../ErrorToast";
 import { useSplitRatio, useToast } from "@/hooks/ui";
 import { CollapsibleSection } from "./CollapsibleSection";
+import { RevisionsSection } from "./sections/RevisionsSection";
 import { SessionsTab } from "./sessions";
 import styles from "./IssueDetailPanel.module.css";
 import { formatDate, isIssueDetails } from "./utils";
@@ -1577,6 +1578,7 @@ function DefaultContent({
             </div>
 
             {/* Full-width sections below the columns */}
+            {issue.issue_type === "task" && <RevisionsSection workspaceId={workspaceId} taskId={issue.id} />}
 
             <LabelEditor
               labels={issue.labels ?? []}

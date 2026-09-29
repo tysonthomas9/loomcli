@@ -48,4 +48,6 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/diff/file", HandleDiffFile(m.diffSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/changes/{change}/revisions/{r}/diff", HandleRevisionDiff(false))
 	mux.HandleFunc("GET /api/workspaces/{ws}/changes/{change}/revisions/{r}/interdiff", HandleRevisionDiff(true))
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/revisions", handleTaskRevisions)
+	mux.HandleFunc("POST /api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict", handleVerdict)
 }

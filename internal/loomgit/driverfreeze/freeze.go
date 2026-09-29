@@ -25,6 +25,7 @@ type Request struct {
 	CommitHeadSHA                  string
 	Patch                          []byte
 	Outcome                        string
+	AuthorKind, AuthorID           string
 }
 
 type CaptureRequest struct {
@@ -184,6 +185,11 @@ func recordRevision(ctx context.Context, store *journal.SQLite, runner *gitexec.
 			return loomgit.Revision{}, fmt.Errorf("attempt %q was already recorded with different content", in.Attempt)
 		}
 		if stored.Ready {
+			if in.AuthorKind != "" && in.AuthorID != "" {
+				if err := store.SetRevisionAuthor(ctx, stored, in.AuthorKind, in.AuthorID); err != nil {
+					return loomgit.Revision{}, err
+				}
+			}
 			return stored, nil
 		}
 		captureSHA = stored.SourceHeadSHA
@@ -196,11 +202,20 @@ func recordRevision(ctx context.Context, store *journal.SQLite, runner *gitexec.
 			return loomgit.Revision{}, err
 		}
 	}
-	return changeset.FreezeSource(ctx, store, runner, changeset.SourceInput{
+	revision, err := changeset.FreezeSource(ctx, store, runner, changeset.SourceInput{
 		Workspace: in.Workspace, Change: change, RequestID: requestID,
 		Attempt: in.Attempt, TaskID: in.Task, BaseSHA: in.Base,
 		CaptureSHA: captureSHA, Outcome: in.Outcome, Complete: true,
 	})
+	if err != nil {
+		return revision, err
+	}
+	if in.AuthorKind != "" && in.AuthorID != "" {
+		if err := store.SetRevisionAuthor(ctx, revision, in.AuthorKind, in.AuthorID); err != nil {
+			return revision, err
+		}
+	}
+	return revision, nil
 }
 
 func captureHead(ctx context.Context, runner *gitexec.Runner, in Request, tree string) (string, error) {

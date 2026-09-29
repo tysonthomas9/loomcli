@@ -1112,6 +1112,48 @@ func (e ListBlockedParamsType) Valid() bool {
 	}
 }
 
+// Defines values for SubmitRevisionVerdictJSONBodyActorKind.
+const (
+	SubmitRevisionVerdictJSONBodyActorKindAgent SubmitRevisionVerdictJSONBodyActorKind = "agent"
+	SubmitRevisionVerdictJSONBodyActorKindHuman SubmitRevisionVerdictJSONBodyActorKind = "human"
+	SubmitRevisionVerdictJSONBodyActorKindLead  SubmitRevisionVerdictJSONBodyActorKind = "lead"
+)
+
+// Valid indicates whether the value is a known member of the SubmitRevisionVerdictJSONBodyActorKind enum.
+func (e SubmitRevisionVerdictJSONBodyActorKind) Valid() bool {
+	switch e {
+	case SubmitRevisionVerdictJSONBodyActorKindAgent:
+		return true
+	case SubmitRevisionVerdictJSONBodyActorKindHuman:
+		return true
+	case SubmitRevisionVerdictJSONBodyActorKindLead:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SubmitRevisionVerdictJSONBodyVerdict.
+const (
+	Approve  SubmitRevisionVerdictJSONBodyVerdict = "approve"
+	Override SubmitRevisionVerdictJSONBodyVerdict = "override"
+	Reject   SubmitRevisionVerdictJSONBodyVerdict = "reject"
+)
+
+// Valid indicates whether the value is a known member of the SubmitRevisionVerdictJSONBodyVerdict enum.
+func (e SubmitRevisionVerdictJSONBodyVerdict) Valid() bool {
+	switch e {
+	case Approve:
+		return true
+	case Override:
+		return true
+	case Reject:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeleteScopedFileParamsScope.
 const (
 	DeleteScopedFileParamsScopeAgent     DeleteScopedFileParamsScope = "agent"
@@ -1366,19 +1408,19 @@ func (e StatScopedFileParamsScope) Valid() bool {
 
 // Defines values for GetScopedFileTreeParamsScope.
 const (
-	GetScopedFileTreeParamsScopeAgent     GetScopedFileTreeParamsScope = "agent"
-	GetScopedFileTreeParamsScopeRepo      GetScopedFileTreeParamsScope = "repo"
-	GetScopedFileTreeParamsScopeWorkspace GetScopedFileTreeParamsScope = "workspace"
+	Agent     GetScopedFileTreeParamsScope = "agent"
+	Repo      GetScopedFileTreeParamsScope = "repo"
+	Workspace GetScopedFileTreeParamsScope = "workspace"
 )
 
 // Valid indicates whether the value is a known member of the GetScopedFileTreeParamsScope enum.
 func (e GetScopedFileTreeParamsScope) Valid() bool {
 	switch e {
-	case GetScopedFileTreeParamsScopeAgent:
+	case Agent:
 		return true
-	case GetScopedFileTreeParamsScopeRepo:
+	case Repo:
 		return true
-	case GetScopedFileTreeParamsScopeWorkspace:
+	case Workspace:
 		return true
 	default:
 		return false
@@ -2655,6 +2697,16 @@ type PullRequestReviewResult struct {
 	State    *string `json:"state,omitempty"`
 }
 
+// ReviewRevision defines model for ReviewRevision.
+type ReviewRevision struct {
+	ChangeId   string  `json:"change_id"`
+	HeadSha    string  `json:"head_sha"`
+	Incomplete bool    `json:"incomplete"`
+	Number     int     `json:"number"`
+	Outcome    string  `json:"outcome"`
+	Verdict    *string `json:"verdict,omitempty"`
+}
+
 // ReviewerConversation defines model for ReviewerConversation.
 type ReviewerConversation struct {
 	// Detail Human-readable context for failed/unsupported states.
@@ -3291,6 +3343,23 @@ type ListBlockedParams struct {
 // ListBlockedParamsType defines parameters for ListBlocked.
 type ListBlockedParamsType string
 
+// SubmitRevisionVerdictJSONBody defines parameters for SubmitRevisionVerdict.
+type SubmitRevisionVerdictJSONBody struct {
+	Actor struct {
+		Id   string                                 `json:"id"`
+		Kind SubmitRevisionVerdictJSONBodyActorKind `json:"kind"`
+	} `json:"actor"`
+	HeadSha string                               `json:"head_sha"`
+	Reason  *string                              `json:"reason,omitempty"`
+	Verdict SubmitRevisionVerdictJSONBodyVerdict `json:"verdict"`
+}
+
+// SubmitRevisionVerdictJSONBodyActorKind defines parameters for SubmitRevisionVerdict.
+type SubmitRevisionVerdictJSONBodyActorKind string
+
+// SubmitRevisionVerdictJSONBodyVerdict defines parameters for SubmitRevisionVerdict.
+type SubmitRevisionVerdictJSONBodyVerdict string
+
 // SubscribeEventsParams defines parameters for SubscribeEvents.
 type SubscribeEventsParams struct {
 	// Token One-time SSE auth token (for EventSource clients)
@@ -3675,6 +3744,9 @@ type UpdateGitTargetJSONRequestBody UpdateGitTargetJSONBody
 
 // StopAgentJSONRequestBody defines body for StopAgent for application/json ContentType.
 type StopAgentJSONRequestBody StopAgentJSONBody
+
+// SubmitRevisionVerdictJSONRequestBody defines body for SubmitRevisionVerdict for application/json ContentType.
+type SubmitRevisionVerdictJSONRequestBody SubmitRevisionVerdictJSONBody
 
 // PatchWorkspaceBackendJSONRequestBody defines body for PatchWorkspaceBackend for application/json ContentType.
 type PatchWorkspaceBackendJSONRequestBody = WorkspaceBackendPatchRequest

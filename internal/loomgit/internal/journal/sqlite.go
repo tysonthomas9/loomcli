@@ -83,6 +83,10 @@ func OpenSQLite(path string) (*SQLite, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("open revision completeness: %w", err)
 	}
+	if err := createReviewSchema(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open review journal: %w", err)
+	}
 	if err := initWorkspaceCreationSchema(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("open workspace creation journal: %w", err)
@@ -90,6 +94,32 @@ func OpenSQLite(path string) (*SQLite, error) {
 	return &SQLite{db: db}, nil
 }
 func (s *SQLite) Close() error { return s.db.Close() }
+
+// LeadMayApprovePublish defaults on for workspaces without an explicit setting.
+func (s *SQLite) LeadMayApprovePublish(ctx context.Context, workspace string) (bool, error) {
+	if workspace == "" {
+		return false, errors.New("workspace is required")
+	}
+	var enabled int
+	err := s.db.QueryRowContext(ctx, `SELECT lead_may_approve_publish FROM workspace_settings WHERE workspace = ?`, workspace).Scan(&enabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	return enabled != 0, err
+}
+
+func (s *SQLite) SetLeadMayApprovePublish(ctx context.Context, workspace string, enabled bool) error {
+	if workspace == "" {
+		return errors.New("workspace is required")
+	}
+	value := 0
+	if enabled {
+		value = 1
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO workspace_settings(workspace, lead_may_approve_publish) VALUES (?, ?)
+		ON CONFLICT(workspace) DO UPDATE SET lead_may_approve_publish = excluded.lead_may_approve_publish`, workspace, value)
+	return err
+}
 
 // AutoCommit defaults on for workspaces without an explicit setting.
 func (s *SQLite) AutoCommit(ctx context.Context, workspace string) (bool, error) {

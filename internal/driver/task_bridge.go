@@ -875,6 +875,7 @@ func (e HostBridgeTaskExecutor) finalizeAndFreezePatch(ctx context.Context, req 
 		Workspace: req.WorkspaceKey, Task: req.TaskID, Repo: repoName, Attempt: taskCopyAttemptID(req.TaskRunID, req.SchedulerAttempt),
 		Worktree: e.WorktreePath, Base: baseRef, Patch: patch, Outcome: outcome,
 		CommitHeadSHA: firstNonEmpty(runner.CommitHeadSHA, runner.CommitHeadSHACamel),
+		AuthorKind:    "agent", AuthorID: firstNonEmpty(req.WorkerProfileID, req.Runner),
 	})
 	if err != nil {
 		result.Status = domain.TaskRunFailed

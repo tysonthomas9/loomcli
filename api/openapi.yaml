@@ -3211,6 +3211,82 @@ paths:
               schema:
                 type: object
 
+  /api/workspaces/{ws}/issues/{id}/revisions:
+    get:
+      operationId: listTaskRevisions
+      tags: [git]
+      summary: List reviewable revisions for a task
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Revisions with current verdicts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ReviewRevision"
+  /api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict:
+    post:
+      operationId: submitRevisionVerdict
+      tags: [git]
+      summary: Record a verdict for an exact revision head
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: change
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: r
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [head_sha, verdict, actor]
+              properties:
+                head_sha:
+                  type: string
+                verdict:
+                  type: string
+                  enum: [approve, reject, override]
+                reason:
+                  type: string
+                actor:
+                  type: object
+                  required: [kind, id]
+                  properties:
+                    kind:
+                      type: string
+                      enum: [human, agent, lead]
+                    id:
+                      type: string
+      responses:
+        "200":
+          description: Recorded SHA-bound verdict
+          content:
+            application/json:
+              schema:
+                type: object
+
   /api/workspaces/{ws}/files/stat:
     get:
       operationId: statScopedFile
@@ -5967,6 +6043,22 @@ components:
           type: string
 
     # ── Session Schemas ─────────────────────────────────────────────────
+    ReviewRevision:
+      type: object
+      required: [change_id, number, head_sha, outcome, incomplete]
+      properties:
+        change_id:
+          type: string
+        number:
+          type: integer
+        head_sha:
+          type: string
+        outcome:
+          type: string
+        incomplete:
+          type: boolean
+        verdict:
+          type: string
     SessionResponse:
       type: object
       description: Session audit record from dto.SessionResponse
