@@ -726,7 +726,10 @@ check:
 # wrappers, not nested ones: each arms its own deadline and its own process
 # group. The banner goes to stderr, which the redirections below already fold
 # into the log that is `cat`ed when a side fails.
-	@go_log=$$(mktemp); fe_log=$$(mktemp); \
+	@set -eu; go_log=; fe_log=; \
+	trap 'rm -f "$$go_log" "$$fe_log"' EXIT; \
+	go_log=$$(mktemp /tmp/loom-gate.XXXXXX); \
+	fe_log=$$(mktemp /tmp/loom-gate.XXXXXX); \
 	cap=$$(./scripts/gate-timeout-seconds.sh); \
 	./scripts/with-timeout.sh "$$cap" "check-go" $(MAKE) check-go >"$$go_log" 2>&1 & go_pid=$$!; \
 	./scripts/with-timeout.sh "$$cap" "check-frontend" $(MAKE) check-frontend >"$$fe_log" 2>&1 & fe_pid=$$!; \
@@ -740,12 +743,10 @@ check:
 		if [ $$fe_rc -ne 0 ]; then \
 			echo ""; echo "━━━ Frontend output (FAILED) ━━━"; cat "$$fe_log"; \
 		fi; \
-		rm -f "$$go_log" "$$fe_log"; \
 		exit 1; \
 	fi; \
 	echo "=== Go quality gates PASSED ==="; \
-	echo "=== Frontend quality gates PASSED ==="; \
-	rm -f "$$go_log" "$$fe_log"
+	echo "=== Frontend quality gates PASSED ==="
 	@echo "=== All quality gates PASSED ==="
 
 # Backward-compatible alias for 'make check'
