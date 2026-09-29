@@ -231,6 +231,19 @@ func TestComputeBackoff(t *testing.T) {
 		}
 	})
 
+	t.Run("LockConflict uses the fixed no_work_backoff too", func(t *testing.T) {
+		// Contention is the same idle condition as an empty board; the
+		// exponential bucket would collapse to a tight poll because the
+		// uncounted path zeroes RestartCount.
+		ap := &AgentProcess{
+			RestartCount: 5, // should be irrelevant
+			LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome)},
+		}
+		if backoff, want := s.computeBackoff(ap), 30*time.Second; backoff != want {
+			t.Errorf("computeBackoff() = %v, want %v", backoff, want)
+		}
+	})
+
 	t.Run("NoWork uses fixed no_work_backoff", func(t *testing.T) {
 		ap := &AgentProcess{
 			RestartCount: 5, // should be irrelevant

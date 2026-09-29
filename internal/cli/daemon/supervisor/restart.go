@@ -107,15 +107,23 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 }
 
 // applyUncountedRestart handles the RetryUncounted dispositions — a claim
-// hold, no work, and rate limiting — each of which restarts without eroding
-// the retry budget for its own reason. Caller holds ap.Mu.
+// hold, no work, lock contention and rate limiting — each of which restarts
+// without eroding the retry budget for its own reason. It dispatches on the
+// OUTCOME rather than treating "not NoWork" as a rate limit: a lock conflict
+// reaching the rate-limit arm would be counted again (via applyCountedRestart
+// when rate_limit_no_count is unset), which is exactly the bug this path
+// exists to avoid. The final applyCountedRestart fallthrough is deliberate —
+// an unrecognized future uncounted outcome should still be bounded.
+// Caller holds ap.Mu.
 func (s *Supervisor) applyUncountedRestart(ap *AgentProcess, outcome agenterr.Outcome,
 	d agentpolicy.Disposition, maxRetries int) bool {
 	if outcome.Is(agenterr.ClaimsHeldOutcome) {
 		s.applyClaimsHeldRestart(ap)
 		return true
 	}
-	if outcome.Is(agenterr.NoWorkOutcome) {
+	// Both idle classes: no claimable task, and every candidate already
+	// claimed by a live sibling. Neither is a backend-health signal.
+	if outcome.Is(agenterr.NoWorkOutcome) || outcome.Is(agenterr.LockConflictOutcome) {
 		s.applyNoWorkRestart(ap)
 		return true
 	}
@@ -264,12 +272,12 @@ func (s *Supervisor) maxRetriesBlockBackoff() time.Duration {
 	return defaultMaxRetriesBlockInterval
 }
 
-// applyNoWorkRestart handles a NoWork exit — the agent found nothing claimable
-// and went home — and, if the agent has failed over to a fallback backend,
+// applyNoWorkRestart handles an IDLE exit — the agent found nothing claimable,
+// or every candidate was already claimed by a live sibling (LockConflict) — and, if the agent has failed over to a fallback backend,
 // periodically returns to the primary to test recovery. Caller holds ap.Mu.
 //
-// NoWork never CHARGES the restart budget: task availability is not a
-// backend-health signal, so an idle cycle is not a failure and RestartCount is
+// Neither idle class CHARGES the restart budget: task availability and claim
+// races are not backend-health signals, so an idle cycle is not a failure and RestartCount is
 // not incremented. It does not REFUND it either, which is the rule this
 // function used to get wrong. An idle cycle is no evidence that a failing
 // agent recovered — it is not even evidence that the agent ran, since the
@@ -290,6 +298,10 @@ func (s *Supervisor) maxRetriesBlockBackoff() time.Duration {
 // RateRetryCount still resets: it is the rate-limit schedule's own counter and
 // drives backend failover (FailoverAfter), both of which are backend-health
 // state that a completed idle cycle legitimately clears.
+//
+// BlockCount is not reset either, for the same reason: only a clean run is
+// progress, so an agent that already blocked for a genuine fault cannot
+// launder its escalation budget by idling.
 func (s *Supervisor) applyNoWorkRestart(ap *AgentProcess) {
 	ap.RateRetryCount = 0
 	ap.NoWorkCount++

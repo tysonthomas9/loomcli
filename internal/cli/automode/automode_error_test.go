@@ -360,3 +360,32 @@ func TestTrackResumeFailures_OnlyCountsAttemptedResume(t *testing.T) {
 		t.Fatalf("resumeFailures = %d, want 1", ctx.resumeFailures)
 	}
 }
+
+// TestHandleAutoTaskError_LockConflict pins the other uncounted outcome:
+// losing a claim race must not drive the rate-limit breaker (and so must not
+// count toward maxConsecutiveRateLimits, which exits the process), and must
+// not end the loop — auto-mode re-polls and claims something else.
+func TestHandleAutoTaskError_LockConflict(t *testing.T) {
+	t.Parallel()
+	ctx := newTestAutoLoopCtx()
+	shutdown := make(chan struct{})
+
+	ae := &agenterr.AgentError{
+		Class:   agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome),
+		Message: "task-1 locked by worker-2",
+		Backend: "claude",
+	}
+	cont := handleAutoTaskError(ctx, ae, fmt.Errorf("exit code 1"), shutdown)
+	if !cont {
+		t.Error("handleAutoTaskError should return true for a lock conflict (continue)")
+	}
+	if ctx.state.ShouldExit {
+		t.Errorf("ShouldExit = true (%q), want false: contention is not a fault", ctx.state.ExitReason)
+	}
+	if ctx.state.ConsecutiveRateLimits != 0 {
+		t.Errorf("ConsecutiveRateLimits = %d, want 0 (a claim race is not a rate limit)", ctx.state.ConsecutiveRateLimits)
+	}
+	if ctx.state.ConsecutiveErrors != 0 {
+		t.Errorf("ConsecutiveErrors = %d, want 0 (uncounted)", ctx.state.ConsecutiveErrors)
+	}
+}
