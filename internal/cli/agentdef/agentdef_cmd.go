@@ -126,6 +126,7 @@ func init() {
 	agentUpdateCmd.Flags().StringVar(&agentUpdateParent, "parent", "", "Epic ID to scope this agent to (pass an empty string to clear the scope)")
 	agentUpdateCmd.Flags().StringVar(&agentUpdateRole, "role", "", "Role name to switch this agent to")
 	agentUpdateCmd.Flags().StringVar(&agentUpdateMode, "mode", "", "Agent mode: ephemeral or service (empty clears it)")
+	agentUpdateCmd.Flags().StringVar(&agentUpdateFilter, "task-filter", "", "Task filter for task-driven agents: needs_design, has_design, or any (empty clears it back to the role's filter)")
 
 	agentdefCmd.AddCommand(agentAddCmd, agentListCmd, agentShowCmd, agentRemoveCmd, agentStartCmd, agentStopCmd, agentUpdateCmd)
 	cli.RegisterCommand(agentdefCmd)
@@ -172,6 +173,10 @@ func agentCreateFromFlags(workspace, name string, mode domain.AgentMode) (store.
 	if err != nil {
 		return store.AgentCreate{}, err
 	}
+	taskFilter, err := cli.ValidateTaskFilter(strings.TrimSpace(agentAddTaskFilter))
+	if err != nil {
+		return store.AgentCreate{}, err
+	}
 	return store.AgentCreate{
 		WorkspaceKey:   workspace,
 		Name:           name,
@@ -183,7 +188,7 @@ func agentCreateFromFlags(workspace, name string, mode domain.AgentMode) (store.
 		CrossRepo:      agentAddCrossRepo,
 		Parent:         agentAddParent,
 		Mode:           mode,
-		TaskFilter:     agentAddTaskFilter,
+		TaskFilter:     taskFilter,
 		MaxConcurrency: agentAddMaxConc,
 		BudgetPolicy:   agentAddBudget,
 		DesiredState:   desiredState,

@@ -263,6 +263,32 @@ func TestClaimTask_SkipsLongLivedRoleWithoutTaskFilter(t *testing.T) {
 	}
 }
 
+// The agent-level task_filter must open the claim gate by itself: an agentdef
+// created with --task-filter and a bare custom role is a legal configuration,
+// and for a while it silently behaved as long-lived because the gate only
+// consulted the role.
+func TestClaimTask_AgentTaskFilterAloneOpensTheGate(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{
+		{ID: "task-9", IssueType: "task", Status: "open", Priority: 1, Title: "Undesigned"},
+	}
+	s := &Supervisor{IssueBackend: mock}
+	ap := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "designer", Role: "reviewer", TaskFilter: "any"},
+		RoleConfig: cfgpkg.RoleConfig{},
+	}
+
+	if !s.claimTask(ap, "") {
+		t.Fatal("claimTask returned false")
+	}
+	if ap.AssignedTaskID != "task-9" {
+		t.Fatalf("AssignedTaskID = %q, want task-9 (entry filter \"any\" must reach the ready query)", ap.AssignedTaskID)
+	}
+	if len(mock.Calls) == 0 {
+		t.Fatal("backend never queried — the gate treated the agent as long-lived")
+	}
+}
+
 func TestClaimTask_CancelsReadyOnShutdown(t *testing.T) {
 	mock := clitest.NewMockIssueBackend()
 	readyStarted := make(chan struct{})

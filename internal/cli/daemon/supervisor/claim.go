@@ -292,7 +292,7 @@ func (s *Supervisor) operationContext(timeout time.Duration) (context.Context, c
 }
 
 func shouldClaimTaskForRole(ap *AgentProcess) bool {
-	return BuiltInRoles[ap.Entry.Role] || ap.RoleConfig.TaskFilter != ""
+	return BuiltInRoles[ap.Entry.Role] || ap.RoleConfig.TaskFilter != "" || ap.Entry.TaskFilter != ""
 }
 
 func (s *Supervisor) setPreflightError(ap *AgentProcess, class agenterr.Outcome, message string) {
