@@ -52,6 +52,11 @@ func gitSafeEnv(extra ...string) []string {
 }
 
 // captureSingleRepoDiff runs git diff HEAD and truncates for checkpoint tests.
+//
+// LOCAL STAND-IN, not the production path. The real checkpoint capture lives in
+// internal/cli/daemon/supervisor/diffcapture.go and covers untracked files and
+// multiple source trees; this helper exists only to exercise TruncateDiff, so
+// the name overlap is not coverage of the real thing.
 func captureSingleRepoDiff(repoPath string, maxBytes int) string {
 	cmd := exec.Command("git", "diff", "HEAD") //nolint:gosec //nolint:norawexec
 	cmd.Dir = repoPath
