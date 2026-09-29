@@ -22,6 +22,7 @@ import (
 type Request struct {
 	Workspace, Task, Repo, Attempt string
 	Worktree, Base                 string
+	CommitHeadSHA                  string
 	Patch                          []byte
 	Outcome                        string
 }
@@ -42,7 +43,7 @@ func ChangeForTask(ctx context.Context, workspace, task, repo string) (string, e
 	if err != nil {
 		return "", err
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	return changeForTask(ctx, store, workspace, task, repo)
 }
 
@@ -63,7 +64,7 @@ func FreezeAt(ctx context.Context, journalPath string, in Request) (loomgit.Revi
 	if err != nil {
 		return loomgit.Revision{}, err
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	repo, err := pool.New(store).Admit(ctx, in.Worktree)
 	if err != nil {
 		return loomgit.Revision{}, err
@@ -74,64 +75,100 @@ func FreezeAt(ctx context.Context, journalPath string, in Request) (loomgit.Revi
 	}
 	var revision loomgit.Revision
 	err = repo.WithLock(ctx, func(ctx context.Context) error {
-		base, err := runner.Run(ctx, "rev-parse", "--verify", in.Base+"^{commit}")
+		tree, err := stagePatch(ctx, runner, in)
 		if err != nil {
 			return err
 		}
-		if strings.TrimSpace(string(base)) != in.Base {
-			return fmt.Errorf("base must be an exact commit SHA")
-		}
-		index, err := os.CreateTemp("", "loom-driver-index-*")
-		if err != nil {
-			return err
-		}
-		indexPath := index.Name()
-		_ = index.Close()
-		defer os.Remove(indexPath)
-		env := map[string]string{"GIT_INDEX_FILE": indexPath}
-		if _, err = runner.RunWithEnv(ctx, env, "read-tree", in.Base); err != nil {
-			return err
-		}
-		if _, err = runner.RunWithInput(ctx, in.Patch, env, "apply", "--cached", "--binary"); err != nil {
-			return err
-		}
-		tree, err := runner.RunWithEnv(ctx, env, "write-tree")
-		if err != nil {
-			return err
-		}
-		change, err := changeForTask(ctx, store, in.Workspace, in.Task, in.Repo)
-		if err != nil {
-			return err
-		}
-		requestID := "driver:" + in.Attempt
-		stored, err := store.RevisionByRequest(ctx, requestID)
-		captureSHA := ""
-		if err == nil {
-			if stored.Workspace != in.Workspace || stored.Change != change || stored.BaseSHA != in.Base ||
-				stored.TreeHash != strings.TrimSpace(string(tree)) || stored.Outcome != in.Outcome {
-				return fmt.Errorf("attempt %q was already recorded with different content", in.Attempt)
-			}
-			if stored.Ready {
-				revision = stored
-				return nil
-			}
-			captureSHA = stored.SourceHeadSHA
-		} else if !errors.Is(err, journal.ErrNotFound) {
-			return err
-		}
-		if captureSHA == "" {
-			commit, err := runner.Run(ctx, "commit-tree", strings.TrimSpace(string(tree)), "-p", in.Base, "-m", "Loom driver attempt "+in.Attempt)
-			if err != nil {
-				return err
-			}
-			captureSHA = strings.TrimSpace(string(commit))
-		}
-		revision, err = changeset.FreezeSource(ctx, store, runner, changeset.SourceInput{
-			Workspace: in.Workspace, Change: change, RequestID: requestID,
-			Attempt: in.Attempt, TaskID: in.Task, BaseSHA: in.Base,
-			CaptureSHA: captureSHA, Outcome: in.Outcome, Complete: true,
-		})
+		revision, err = recordRevision(ctx, store, runner, in, tree)
 		return err
 	})
 	return revision, err
+}
+
+func stagePatch(ctx context.Context, runner *gitexec.Runner, in Request) (string, error) {
+	base, err := runner.Run(ctx, "rev-parse", "--verify", in.Base+"^{commit}")
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(string(base)) != in.Base {
+		return "", fmt.Errorf("base must be an exact commit SHA")
+	}
+	index, err := os.CreateTemp("", "loom-driver-index-*")
+	if err != nil {
+		return "", err
+	}
+	indexPath := index.Name()
+	_ = index.Close()
+	defer func() { _ = os.Remove(indexPath) }()
+	env := map[string]string{"GIT_INDEX_FILE": indexPath}
+	if _, err = runner.RunWithEnv(ctx, env, "read-tree", in.Base); err != nil {
+		return "", err
+	}
+	if _, err = runner.RunWithInput(ctx, in.Patch, env, "apply", "--cached", "--binary"); err != nil {
+		return "", err
+	}
+	tree, err := runner.RunWithEnv(ctx, env, "write-tree")
+	return strings.TrimSpace(string(tree)), err
+}
+
+func recordRevision(ctx context.Context, store *journal.SQLite, runner *gitexec.Runner, in Request, tree string) (loomgit.Revision, error) {
+	change, err := changeForTask(ctx, store, in.Workspace, in.Task, in.Repo)
+	if err != nil {
+		return loomgit.Revision{}, err
+	}
+	requestID := "driver:" + in.Attempt
+	stored, err := store.RevisionByRequest(ctx, requestID)
+	captureSHA := ""
+	if err == nil {
+		if stored.Workspace != in.Workspace || stored.Change != change || stored.BaseSHA != in.Base ||
+			stored.TreeHash != tree || stored.Outcome != in.Outcome {
+			return loomgit.Revision{}, fmt.Errorf("attempt %q was already recorded with different content", in.Attempt)
+		}
+		if stored.Ready {
+			return stored, nil
+		}
+		captureSHA = stored.SourceHeadSHA
+	} else if !errors.Is(err, journal.ErrNotFound) {
+		return loomgit.Revision{}, err
+	}
+	if captureSHA == "" {
+		captureSHA, err = captureHead(ctx, runner, in, tree)
+		if err != nil {
+			return loomgit.Revision{}, err
+		}
+	}
+	return changeset.FreezeSource(ctx, store, runner, changeset.SourceInput{
+		Workspace: in.Workspace, Change: change, RequestID: requestID,
+		Attempt: in.Attempt, TaskID: in.Task, BaseSHA: in.Base,
+		CaptureSHA: captureSHA, Outcome: in.Outcome, Complete: true,
+	})
+}
+
+func captureHead(ctx context.Context, runner *gitexec.Runner, in Request, tree string) (string, error) {
+	parent := in.Base
+	if in.CommitHeadSHA != "" {
+		resolved, err := runner.Run(ctx, "rev-parse", "--verify", in.CommitHeadSHA+"^{commit}")
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(string(resolved)) != in.CommitHeadSHA {
+			return "", fmt.Errorf("runner commit head is not an exact commit SHA")
+		}
+		if _, err = runner.Run(ctx, "merge-base", "--is-ancestor", in.Base, in.CommitHeadSHA); err != nil {
+			return "", fmt.Errorf("runner commit head is not based on recorded base: %w", err)
+		}
+		parent = in.CommitHeadSHA
+	}
+	parentTree, err := runner.Run(ctx, "rev-parse", parent+"^{tree}")
+	if err != nil {
+		return "", err
+	}
+	if in.CommitHeadSHA != "" && strings.TrimSpace(string(parentTree)) == tree {
+		return parent, nil
+	}
+	commit, err := runner.Run(ctx, "commit-tree", tree, "-p", parent, "-m", "Loom driver attempt "+in.Attempt)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(commit)), nil
 }

@@ -135,6 +135,8 @@ type bridgeTaskRunnerResult struct {
 	PatchPathCamel          string               `json:"patchPath"`
 	PatchBaseRef            string               `json:"patch_base_ref"`
 	PatchBaseRefCamel       string               `json:"patchBaseRef"`
+	CommitHeadSHA           string               `json:"commit_head_sha"`
+	CommitHeadSHACamel      string               `json:"commitHeadSha"`
 	BaseRef                 string               `json:"base_ref"`
 	BaseRefCamel            string               `json:"baseRef"`
 	PatchArtifactID         string               `json:"patch_artifact_id"`
@@ -361,6 +363,7 @@ func normalizeCommand(command []string) ([]string, error) {
 	return out, nil
 }
 
+//nolint:gosec // Node executes the generated local runner launcher.
 func (e HostBridgeTaskExecutor) runBuiltInFlueWorkflow(ctx context.Context, req TaskExecRequest) (bridgeTaskRunnerResult, error) {
 	input, err := json.Marshal(req)
 	if err != nil {
@@ -372,7 +375,7 @@ func (e HostBridgeTaskExecutor) runBuiltInFlueWorkflow(ctx context.Context, req 
 	}
 	defer cleanup()
 
-	cmd := exec.CommandContext(ctx, "node", launcherPath) //nolint:gosec // fixed local runtime for bundled Flue workflow runners.
+	cmd := exec.CommandContext(ctx, "node", launcherPath)
 	if worktree := strings.TrimSpace(e.WorktreePath); worktree != "" {
 		cmd.Dir = worktree
 	}
@@ -427,12 +430,13 @@ func writeFlueTaskRunnerLauncher() (string, func(), error) {
 	return launcher.Name(), cleanup, nil
 }
 
+//nolint:gosec // Configured argv runs directly without shell expansion.
 func (e HostBridgeTaskExecutor) runCommand(ctx context.Context, req TaskExecRequest, command []string) (bridgeTaskRunnerResult, error) {
 	input, err := json.Marshal(req)
 	if err != nil {
 		return bridgeTaskRunnerResult{}, fmt.Errorf("encode task runner request: %w", err)
 	}
-	cmd := exec.CommandContext(ctx, command[0], command[1:]...) //nolint:gosec // configured argv vector; no shell expansion.
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	if worktree := strings.TrimSpace(e.WorktreePath); worktree != "" {
 		cmd.Dir = worktree
 	}
@@ -865,6 +869,7 @@ func (e HostBridgeTaskExecutor) finalizeAndFreezePatch(ctx context.Context, req 
 	revision, err := driverfreeze.Freeze(ctx, driverfreeze.Request{
 		Workspace: req.WorkspaceKey, Task: req.TaskID, Repo: repoName, Attempt: req.TaskRunID,
 		Worktree: e.WorktreePath, Base: baseRef, Patch: patch, Outcome: outcome,
+		CommitHeadSHA: firstNonEmpty(runner.CommitHeadSHA, runner.CommitHeadSHACamel),
 	})
 	if err != nil {
 		result.Status = domain.TaskRunFailed

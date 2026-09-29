@@ -124,7 +124,8 @@ func TestFreezeCommittedAndUncommittedWork(t *testing.T) {
 	}
 	beforeHead, beforeStatus := git("rev-parse", "HEAD"), git("status", "--porcelain")
 	patch := git("diff", "--binary", base) + "\n"
-	rev, err := driverfreeze.FreezeAt(context.Background(), filepath.Join(t.TempDir(), "journal.db"), driverfreeze.Request{
+	journalPath := filepath.Join(t.TempDir(), "journal.db")
+	rev, err := driverfreeze.FreezeAt(context.Background(), journalPath, driverfreeze.Request{
 		Workspace: "WS", Task: "TASK", Repo: "repo", Attempt: "mixed", Worktree: dir,
 		Base: base, Patch: []byte(patch), Outcome: "completed",
 	})
@@ -139,5 +140,24 @@ func TestFreezeCommittedAndUncommittedWork(t *testing.T) {
 	}
 	if got := git("diff-tree", "--no-commit-id", "--name-only", "-r", rev.HeadSHA); !strings.Contains(got, "committed") || !strings.Contains(got, "edited") {
 		t.Fatalf("revision lost work: %s", got)
+	}
+	explicit, err := driverfreeze.FreezeAt(context.Background(), journalPath, driverfreeze.Request{
+		Workspace: "WS", Task: "TASK", Repo: "repo", Attempt: "mixed-explicit", Worktree: dir,
+		Base: base, CommitHeadSHA: beforeHead, Patch: []byte(patch), Outcome: "completed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explicit.Number != 2 || explicit.Change != rev.Change {
+		t.Fatalf("explicit revision = %+v", explicit)
+	}
+	if got := git("rev-list", "--count", base+".."+explicit.HeadSHA); got != "2" {
+		t.Fatalf("explicit commit chain has %s commits", got)
+	}
+	if messages := git("log", "--format=%B", base+".."+explicit.HeadSHA); !strings.Contains(messages, "agent commit") || strings.Count(messages, "Loom-Revision: 2") != 2 {
+		t.Fatalf("explicit commit metadata lost: %s", messages)
+	}
+	if got := git("status", "--porcelain"); got != beforeStatus {
+		t.Fatalf("worktree changed: %s", got)
 	}
 }
