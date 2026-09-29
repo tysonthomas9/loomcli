@@ -3,6 +3,7 @@ package uniondebt
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -23,6 +24,10 @@ const ledgerLimit = 200
 // issueClient is the slice of backend.IssueBackend the sweep uses.
 type issueClient interface {
 	List(ctx context.Context, opts backend.ListOpts) ([]backend.IssueData, error)
+	// Get fetches the full projection. It is needed for Design: a collection
+	// response may omit a large design body (internal/backend/types.go), and
+	// the recorded tip lives in that body.
+	Get(ctx context.Context, id string) (*backend.IssueDetailData, error)
 	Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error)
 	AddLabel(ctx context.Context, id string, label string) error
 	RemoveLabel(ctx context.Context, id string, label string) error
@@ -31,7 +36,7 @@ type issueClient interface {
 
 // prober is the git layer, stubbed in tests.
 type prober interface {
-	Probe(clone, unionBranch, taskID string) (ProbeResult, error)
+	Probe(clone, unionBranch, taskID, recordedTip string) (ProbeResult, error)
 }
 
 // Action is what the sweep did about one ledger item.
@@ -44,6 +49,9 @@ const (
 	ActionRetired Action = "retired"
 	// ActionUnreachable means the marker was swapped for union-unreachable.
 	ActionUnreachable Action = "unreachable"
+	// ActionSuperseded means the marker was swapped for union-superseded: the
+	// recorded branch is not the branch to merge any more.
+	ActionSuperseded Action = "superseded"
 	// ActionSkipped means a debt ticket already exists, or --limit was hit.
 	ActionSkipped Action = "skipped"
 	// ActionError means the item could not be classified or acted on.
@@ -52,19 +60,20 @@ const (
 
 // Item is one ledger entry's outcome, and is the JSON output shape.
 type Item struct {
-	OriginID   string `json:"origin_id"`
-	Repo       string `json:"repo"`
-	Clone      string `json:"clone,omitempty"`
-	Union      string `json:"union_branch,omitempty"`
-	Ref        string `json:"ref,omitempty"`
-	TipSHA     string `json:"tip_sha,omitempty"`
-	Class      Class  `json:"class,omitempty"`
-	Action     Action `json:"action"`
-	DerivedID  string `json:"derived_id,omitempty"`
-	Detail     string `json:"detail,omitempty"`
-	ProbedAt   string `json:"probed_at"`
-	DryRun     bool   `json:"dry_run,omitempty"`
-	ErrMessage string `json:"error,omitempty"`
+	OriginID    string `json:"origin_id"`
+	Repo        string `json:"repo"`
+	Clone       string `json:"clone,omitempty"`
+	Union       string `json:"union_branch,omitempty"`
+	Ref         string `json:"ref,omitempty"`
+	TipSHA      string `json:"tip_sha,omitempty"`
+	RecordedTip string `json:"recorded_tip,omitempty"`
+	Class       Class  `json:"class,omitempty"`
+	Action      Action `json:"action"`
+	DerivedID   string `json:"derived_id,omitempty"`
+	Detail      string `json:"detail,omitempty"`
+	ProbedAt    string `json:"probed_at"`
+	DryRun      bool   `json:"dry_run,omitempty"`
+	ErrMessage  string `json:"error,omitempty"`
 }
 
 // Report is the whole sweep's outcome.
@@ -193,14 +202,31 @@ func (s *Sweeper) handle(ctx context.Context, iss backend.IssueData, filed *int)
 	}
 	item.Clone, item.Union = li.Clone, li.Branch
 
-	res, err := s.probe.Probe(li.Clone, li.Branch, iss.ID)
+	// The derived ticket is looked up BEFORE the probe, not inside file(): the
+	// probe needs the tip recorded in its design body to tell a rebuilt branch
+	// from ordinary conflict work.
+	debtOf := s.labels().DebtOfPrefix + iss.ID
+	existing, err := s.existingDebt(ctx, debtOf)
+	if err != nil {
+		item.Action = ActionError
+		item.ErrMessage = err.Error()
+		return item
+	}
+	item.RecordedTip = s.recordedTip(ctx, existing)
+
+	res, err := s.probe.Probe(li.Clone, li.Branch, iss.ID, item.RecordedTip)
 	if err != nil {
 		item.Action = ActionError
 		item.ErrMessage = err.Error()
 		return item
 	}
 	item.Class, item.Ref, item.TipSHA = res.Class, res.Ref, res.TipSHA
+	return s.act(ctx, iss, res, li, item, debtOf, existing, filed)
+}
 
+// act performs the write one probe class calls for. It is split out of handle
+// so each half stays readable: handle gathers facts, act decides.
+func (s *Sweeper) act(ctx context.Context, iss backend.IssueData, res ProbeResult, li LocalIntegration, item Item, debtOf, existing string, filed *int) Item {
 	switch res.Class {
 	case ClassNoUnion:
 		// Never create the union branch and never touch the ticket — the
@@ -221,8 +247,15 @@ func (s *Sweeper) handle(ctx context.Context, iss backend.IssueData, filed *int)
 		s.apply(ctx, &item, func() error { return s.retire(ctx, iss.ID, s.labels().Unreachable, item) })
 		return item
 
+	case ClassSuperseded:
+		item.Action = ActionSuperseded
+		item.Detail = res.Detail
+		item.DerivedID = existing
+		s.apply(ctx, &item, func() error { return s.supersede(ctx, iss.ID, existing, item) })
+		return item
+
 	case ClassClean, ClassConflict:
-		return s.file(ctx, iss, res, li, item, filed)
+		return s.file(ctx, iss, res, li, item, debtOf, existing, filed)
 
 	default:
 		item.Action = ActionError
@@ -265,20 +298,77 @@ func (s *Sweeper) retire(ctx context.Context, id, replacement string, item Item)
 	return nil
 }
 
+// supersede retires the marker in favor of the superseded label and, when a
+// derived debt ticket exists, tells that ticket its instructions are stale.
+//
+// It files nothing and closes nothing. The sweeper has no status write today
+// and gains none here: closing is the integrator's act, per the abandon path in
+// prompts/integrator.md, and a status write would widen this command's blast
+// radius well past labels and comments.
+func (s *Sweeper) supersede(ctx context.Context, id, derivedID string, item Item) error {
+	if err := s.retire(ctx, id, s.labels().Superseded, item); err != nil {
+		return err
+	}
+	if derivedID == "" {
+		return nil
+	}
+	if _, err := s.issues.AddComment(ctx, backend.CommentAddParams{
+		IssueID: derivedID,
+		Text:    staleDebtComment(id, item, s.labels()),
+	}); err != nil {
+		return fmt.Errorf("comment on %s: %w", derivedID, err)
+	}
+	return nil
+}
+
+// recordedTip recovers the tip SHA the derived debt ticket was filed against.
+//
+// Every failure — no debt ticket, an unreadable one, a design body with no
+// parsable tip line — yields "", which switches the ref-moved signal off. That
+// is deliberate: a guessed tip could produce a false "superseded" and retire
+// real debt.
+func (s *Sweeper) recordedTip(ctx context.Context, derivedID string) string {
+	if derivedID == "" {
+		return ""
+	}
+	detail, err := s.issues.Get(ctx, derivedID)
+	if err != nil || detail == nil {
+		return ""
+	}
+	return parseRecordedTip(detail.Design)
+}
+
+// tipSHALine labels the recorded tip in a derived ticket's design body. The
+// writer and the parser share this one constant so they cannot drift apart.
+const tipSHALine = "Tip SHA:"
+
+// recordedTipPattern is what a value after tipSHALine must look like to be
+// believed: an abbreviated or full hex object name and nothing else.
+var recordedTipPattern = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
+
+// parseRecordedTip pulls the tip SHA back out of a design body written by
+// designBody, or returns "" when there is nothing trustworthy to read.
+func parseRecordedTip(design string) string {
+	for _, line := range strings.Split(design, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, tipSHALine) {
+			continue
+		}
+		sha := strings.TrimSpace(strings.TrimPrefix(trimmed, tipSHALine))
+		if recordedTipPattern.MatchString(sha) {
+			return sha
+		}
+	}
+	return ""
+}
+
 // file creates the derived, claimable debt ticket for one real debt item and
 // records it on the original. The original KEEPS its marker: it is retired by
 // the integrator once the merge actually lands, which is what makes the ledger
 // drain reflect union content rather than sweeper activity.
-func (s *Sweeper) file(ctx context.Context, iss backend.IssueData, res ProbeResult, li LocalIntegration, item Item, filed *int) Item {
+func (s *Sweeper) file(ctx context.Context, iss backend.IssueData, res ProbeResult, li LocalIntegration, item Item, debtOf, existing string, filed *int) Item {
 	lbl := s.labels()
-	debtOf := lbl.DebtOfPrefix + iss.ID
 
-	existing, err := s.existingDebt(ctx, debtOf)
-	if err != nil {
-		item.Action = ActionError
-		item.ErrMessage = err.Error()
-		return item
-	}
 	if existing != "" {
 		item.Action = ActionSkipped
 		item.DerivedID = existing
@@ -391,6 +481,26 @@ func filedComment(item Item, li LocalIntegration, lbl LabelSet) string {
 	return b.String()
 }
 
+// staleDebtComment tells an existing debt ticket that the branch its design
+// names is not the branch to merge any more. It says close, never merge: the
+// recorded ref holds work that was rebuilt or has already arrived by another
+// route.
+func staleDebtComment(originID string, item Item, lbl LabelSet) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "union-debt sweep: this debt ticket is STALE — do not merge it.\n\n")
+	fmt.Fprintf(&b, "Original: %s\n", originID)
+	if item.RecordedTip != "" {
+		fmt.Fprintf(&b, "Filed at: %s\n", item.RecordedTip)
+	}
+	fmt.Fprintf(&b, "Ref now:  %s (%s)\n", item.Ref, item.TipSHA)
+	if item.Detail != "" {
+		fmt.Fprintf(&b, "Reason:   %s\n", item.Detail)
+	}
+	fmt.Fprintf(&b, "\nMerging the ref this ticket names would re-apply abandoned code. Close this\n")
+	fmt.Fprintf(&b, "ticket rather than merging it; %s now carries `%s`.\n", originID, lbl.Superseded)
+	return b.String()
+}
+
 func writeProbeFacts(b *strings.Builder, item Item) {
 	fmt.Fprintf(b, "Repo:     %s\n", item.Repo)
 	fmt.Fprintf(b, "Clone:    %s\n", item.Clone)
@@ -398,6 +508,9 @@ func writeProbeFacts(b *strings.Builder, item Item) {
 	if item.Ref != "" {
 		fmt.Fprintf(b, "Ref:      %s\n", item.Ref)
 		fmt.Fprintf(b, "Tip SHA:  %s\n", item.TipSHA)
+	}
+	if item.RecordedTip != "" {
+		fmt.Fprintf(b, "Filed at: %s (the tip the debt was recorded against)\n", item.RecordedTip)
 	}
 	fmt.Fprintf(b, "Class:    %s\n", item.Class)
 	fmt.Fprintf(b, "Probed:   %s (no fetch — refs as they stood in the clone)\n", item.ProbedAt)
@@ -419,7 +532,7 @@ func designBody(iss backend.IssueData, res ProbeResult, li LocalIntegration, pro
 	fmt.Fprintf(&b, "    Clone:     %s\n", li.Clone)
 	fmt.Fprintf(&b, "    Union:     %s\n", li.Branch)
 	fmt.Fprintf(&b, "    Ref:       %s\n", res.Ref)
-	fmt.Fprintf(&b, "    Tip SHA:   %s\n", res.TipSHA)
+	fmt.Fprintf(&b, "    %s   %s\n", tipSHALine, res.TipSHA)
 	fmt.Fprintf(&b, "    Probe:     %s\n\n", res.Class)
 	if res.Class == ClassClean {
 		fmt.Fprintf(&b, "`git merge-tree` reported no conflict at probe time. That is a hint, not a\n")

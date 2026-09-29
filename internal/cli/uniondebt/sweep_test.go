@@ -20,19 +20,28 @@ type listCall struct {
 
 type fakeBackend struct {
 	// issues keyed by status, as the backend's List filters see them.
-	byStatus  map[string][]backend.IssueData
-	listed    []listCall
-	created   []backend.CreateParams
-	added     []string // "<id>:<label>"
-	removed   []string // "<id>:<label>"
-	comments  map[string][]string
+	byStatus map[string][]backend.IssueData
+	listed   []listCall
+	created  []backend.CreateParams
+	added    []string // "<id>:<label>"
+	removed  []string // "<id>:<label>"
+	comments map[string][]string
+	// designs holds the detail-only Design body per issue ID, so a test can
+	// exercise the recorded-tip lookup the slim list projection cannot serve.
+	designs   map[string]string
+	getCalls  []string
+	getErr    error
 	createErr error
 	listErr   error
 	nextID    int
 }
 
 func newFakeBackend() *fakeBackend {
-	return &fakeBackend{byStatus: map[string][]backend.IssueData{}, comments: map[string][]string{}}
+	return &fakeBackend{
+		byStatus: map[string][]backend.IssueData{},
+		comments: map[string][]string{},
+		designs:  map[string]string{},
+	}
 }
 
 func (f *fakeBackend) add(iss backend.IssueData) {
@@ -69,6 +78,22 @@ func hasAll(have, want []string) bool {
 	return true
 }
 
+func (f *fakeBackend) Get(_ context.Context, id string) (*backend.IssueDetailData, error) {
+	f.getCalls = append(f.getCalls, id)
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	for _, issues := range f.byStatus {
+		for _, iss := range issues {
+			if iss.ID == id {
+				iss.Design = f.designs[id]
+				return &backend.IssueDetailData{IssueData: iss}, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("no such issue %q", id)
+}
+
 func (f *fakeBackend) Create(_ context.Context, p backend.CreateParams) (*backend.IssueData, error) {
 	if f.createErr != nil {
 		return nil, f.createErr
@@ -101,10 +126,16 @@ type stubProber struct {
 	results map[string]ProbeResult
 	errs    map[string]error
 	calls   []string
+	// tips records the recordedTip the sweep passed, per task ID.
+	tips map[string]string
 }
 
-func (s *stubProber) Probe(_, _, taskID string) (ProbeResult, error) {
+func (s *stubProber) Probe(_, _, taskID, recordedTip string) (ProbeResult, error) {
 	s.calls = append(s.calls, taskID)
+	if s.tips == nil {
+		s.tips = map[string]string{}
+	}
+	s.tips[taskID] = recordedTip
 	if err := s.errs[taskID]; err != nil {
 		return ProbeResult{}, err
 	}
@@ -596,6 +627,188 @@ func TestSweep_UnreachableUsesContractLabel(t *testing.T) {
 		t.Errorf("added = %v, want [%s]", f.added, want)
 	}
 	if want := "PUPPET-11:merge-pending"; len(f.removed) != 1 || f.removed[0] != want {
+		t.Errorf("removed = %v, want [%s]", f.removed, want)
+	}
+}
+
+// --- superseded ---
+
+// debtTicket is an existing derived debt ticket for origin, carrying the design
+// body the sweep reads the recorded tip out of.
+func debtTicket(f *fakeBackend, id, origin, design string) {
+	f.add(backend.IssueData{
+		ID: id, Status: "open", SourceRepo: "loomcli",
+		Labels: []string{defaultLabels.Route, defaultLabels.Debt, defaultLabels.DebtOfPrefix + origin},
+	})
+	f.designs[id] = design
+}
+
+func TestSweep_SupersededRetiresMarkerAndWarnsDebtTicket(t *testing.T) {
+	f := newFakeBackend()
+	f.add(closedIssue("PUPPET-540", "loomcli", 2))
+	debtTicket(f, "PUPPET-560", "PUPPET-540", "    "+tipSHALine+"   f0e9458b6\n")
+	p := &stubProber{results: map[string]ProbeResult{
+		"PUPPET-540": {
+			Class:  ClassSuperseded,
+			Ref:    "origin/loom/PUPPET-415",
+			TipSHA: "9d70c75d4",
+			Detail: "the recorded tip f0e9458b6 is not an ancestor of origin/loom/PUPPET-415",
+		},
+	}}
+
+	item := onlyItem(t, run(t, f, p, Options{}))
+	if item.Action != ActionSuperseded || item.Class != ClassSuperseded {
+		t.Fatalf("item = %+v, want the superseded action and class", item)
+	}
+	if item.RecordedTip != "f0e9458b6" {
+		t.Errorf("RecordedTip = %q, want the sha from the debt ticket design", item.RecordedTip)
+	}
+	if got := p.tips["PUPPET-540"]; got != "f0e9458b6" {
+		t.Errorf("probe got recordedTip %q, want it passed through", got)
+	}
+
+	// The marker is swapped, exactly the shape the no-branch path uses.
+	if want := "PUPPET-540:" + defaultLabels.Superseded; len(f.added) != 1 || f.added[0] != want {
+		t.Errorf("added = %v, want [%s]", f.added, want)
+	}
+	if want := "PUPPET-540:" + defaultLabels.Marker; len(f.removed) != 1 || f.removed[0] != want {
+		t.Errorf("removed = %v, want [%s]", f.removed, want)
+	}
+
+	// Both tickets are told why.
+	orig := f.comments["PUPPET-540"]
+	if len(orig) != 1 {
+		t.Fatalf("comments on the original = %v, want exactly one", orig)
+	}
+	for _, want := range []string{"f0e9458b6", "9d70c75d4", "origin/loom/PUPPET-415", "not an ancestor"} {
+		if !strings.Contains(orig[0], want) {
+			t.Errorf("original comment missing %q:\n%s", want, orig[0])
+		}
+	}
+	derived := f.comments["PUPPET-560"]
+	if len(derived) != 1 {
+		t.Fatalf("comments on the debt ticket = %v, want exactly one", derived)
+	}
+	for _, want := range []string{"PUPPET-540", "f0e9458b6", "origin/loom/PUPPET-415", "Close this"} {
+		if !strings.Contains(derived[0], want) {
+			t.Errorf("debt-ticket comment missing %q:\n%s", want, derived[0])
+		}
+	}
+
+	// Files nothing, closes nothing.
+	if len(f.created) != 0 {
+		t.Errorf("created %+v; a superseded item files no new work", f.created)
+	}
+	if item.DerivedID != "PUPPET-560" {
+		t.Errorf("DerivedID = %q, want the existing debt ticket", item.DerivedID)
+	}
+}
+
+func TestSweep_SupersededWithNoDebtTicketStillRetires(t *testing.T) {
+	f := newFakeBackend()
+	f.add(closedIssue("PUPPET-541", "loomcli", 2))
+	p := &stubProber{results: map[string]ProbeResult{
+		"PUPPET-541": {Class: ClassSuperseded, Ref: "loom/PUPPET-541", TipSHA: "aaa", Detail: "rebuilt"},
+	}}
+
+	item := onlyItem(t, run(t, f, p, Options{}))
+	if item.Action != ActionSuperseded {
+		t.Fatalf("Action = %s, want superseded", item.Action)
+	}
+	if got := p.tips["PUPPET-541"]; got != "" {
+		t.Errorf("recordedTip = %q, want empty with no debt ticket to read it from", got)
+	}
+	if want := "PUPPET-541:" + defaultLabels.Superseded; len(f.added) != 1 || f.added[0] != want {
+		t.Errorf("added = %v, want [%s]", f.added, want)
+	}
+	if want := "PUPPET-541:" + defaultLabels.Marker; len(f.removed) != 1 || f.removed[0] != want {
+		t.Errorf("removed = %v, want [%s]", f.removed, want)
+	}
+	if len(f.comments) != 1 || len(f.comments["PUPPET-541"]) != 1 {
+		t.Errorf("comments = %v, want one on the original only", f.comments)
+	}
+}
+
+func TestSweep_SupersededDryRunWritesNothing(t *testing.T) {
+	f := newFakeBackend()
+	f.add(closedIssue("PUPPET-540", "loomcli", 2))
+	debtTicket(f, "PUPPET-560", "PUPPET-540", "    "+tipSHALine+"   f0e9458b6\n")
+	p := &stubProber{results: map[string]ProbeResult{
+		"PUPPET-540": {Class: ClassSuperseded, Ref: "origin/loom/PUPPET-415", TipSHA: "9d70c75d4", Detail: "rebuilt"},
+	}}
+
+	item := onlyItem(t, run(t, f, p, Options{DryRun: true}))
+	if item.Action != ActionSuperseded || !item.DryRun {
+		t.Fatalf("item = %+v, want a dry-run superseded item", item)
+	}
+	if len(f.added) != 0 || len(f.removed) != 0 || len(f.comments) != 0 || len(f.created) != 0 {
+		t.Errorf("dry run wrote: added=%v removed=%v comments=%v created=%v",
+			f.added, f.removed, f.comments, f.created)
+	}
+}
+
+// TestSweep_UnparsableDesignYieldsNoRecordedTip: a guessed tip could retire real
+// debt, so anything that is not a plain hex object name is refused.
+func TestSweep_UnparsableDesignYieldsNoRecordedTip(t *testing.T) {
+	for name, design := range map[string]string{
+		"no tip line": "Original: PUPPET-540\n\nnothing recorded here\n",
+		"not a sha":   "    " + tipSHALine + "   see the branch\n",
+		"empty value": "    " + tipSHALine + "   \n",
+		"too short":   "    " + tipSHALine + "   f0e94\n",
+		"not hex":     "    " + tipSHALine + "   zzzzzzzz\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeBackend()
+			f.add(closedIssue("PUPPET-540", "loomcli", 2))
+			debtTicket(f, "PUPPET-560", "PUPPET-540", design)
+			p := &stubProber{results: map[string]ProbeResult{
+				"PUPPET-540": {Class: ClassConflict, Ref: "origin/loom/PUPPET-540", TipSHA: "abc"},
+			}}
+
+			run(t, f, p, Options{})
+			if got := p.tips["PUPPET-540"]; got != "" {
+				t.Errorf("recordedTip = %q, want empty for %s", got, name)
+			}
+		})
+	}
+}
+
+// TestDesignBody_RecordedTipRoundTrip pins the writer and the parser together:
+// they share tipSHALine, and this is what stops them drifting apart.
+func TestDesignBody_RecordedTipRoundTrip(t *testing.T) {
+	const sha = "f0e9458b6c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f"
+	iss := closedIssue("PUPPET-540", "loomcli", 2)
+	res := ProbeResult{Class: ClassConflict, Ref: "origin/loom/PUPPET-540", TipSHA: sha, Conflict: "CONFLICT: x"}
+	li := LocalIntegration{Branch: "local/union", Clone: "/clones/loomcli"}
+
+	body := designBody(iss, res, li, "2026-09-08T00:00:00Z", defaultLabels)
+	if got := parseRecordedTip(body); got != sha {
+		t.Fatalf("parseRecordedTip(designBody(...)) = %q, want %q\n%s", got, sha, body)
+	}
+}
+
+// TestSweep_SupersededUsesContractLabel: the replacement is configuration, like
+// every other label the sweep writes.
+func TestSweep_SupersededUsesContractLabel(t *testing.T) {
+	c, err := LoadContract(writeContract(t, withLabels("  labels:\n    marker: merge-pending\n    superseded: merge-superseded\n")))
+	if err != nil {
+		t.Fatalf("LoadContract: %v", err)
+	}
+	f := newFakeBackend()
+	iss := closedIssue("PUPPET-540", "loomcli", 2)
+	iss.Labels = []string{"merge-pending"}
+	f.add(iss)
+	p := &stubProber{results: map[string]ProbeResult{
+		"PUPPET-540": {Class: ClassSuperseded, Ref: "loom/PUPPET-540", TipSHA: "aaa", Detail: "rebuilt"},
+	}}
+
+	if item := onlyItem(t, run(t, f, p, Options{Contract: c})); item.Action != ActionSuperseded {
+		t.Fatalf("item = %+v, want superseded", item)
+	}
+	if want := "PUPPET-540:merge-superseded"; len(f.added) != 1 || f.added[0] != want {
+		t.Errorf("added = %v, want [%s]", f.added, want)
+	}
+	if want := "PUPPET-540:merge-pending"; len(f.removed) != 1 || f.removed[0] != want {
 		t.Errorf("removed = %v, want [%s]", f.removed, want)
 	}
 }

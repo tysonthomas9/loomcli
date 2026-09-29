@@ -26,6 +26,9 @@ type LabelSet struct {
 	Marker string `yaml:"marker"`
 	// Unreachable replaces the marker when no branch exists to merge.
 	Unreachable string `yaml:"unreachable"`
+	// Superseded replaces the marker when the branch was rebuilt or its work
+	// arrived by another route, so the recorded ref must not be merged.
+	Superseded string `yaml:"superseded"`
 	// Debt marks a derived, claimable debt ticket.
 	Debt string `yaml:"debt"`
 	// DebtOfPrefix + originID is the per-original dedupe label.
@@ -41,19 +44,23 @@ type LabelSet struct {
 var defaultLabels = LabelSet{
 	Marker:       "union-pending",
 	Unreachable:  "union-unreachable",
+	Superseded:   "union-superseded",
 	Debt:         "union-debt",
 	DebtOfPrefix: "union-debt-of:",
 	Route:        "approved",
 }
 
 // withDefaults fills every empty field from defaultLabels, so a contract may
-// override one label without restating the other four.
+// override one label without restating the others.
 func (l LabelSet) withDefaults() LabelSet {
 	if l.Marker == "" {
 		l.Marker = defaultLabels.Marker
 	}
 	if l.Unreachable == "" {
 		l.Unreachable = defaultLabels.Unreachable
+	}
+	if l.Superseded == "" {
+		l.Superseded = defaultLabels.Superseded
 	}
 	if l.Debt == "" {
 		l.Debt = defaultLabels.Debt
