@@ -118,6 +118,42 @@ func TestFreezeSourceStoresRewrittenChainAndReplay(t *testing.T) {
 	}
 }
 
+func TestIncompleteCaptureOnlyFreezesAsCancelled(t *testing.T) {
+	dir, runner, store := fixture(t)
+	base := must(t, runner, "rev-parse", "HEAD")
+	write(t, dir, "edit", "partial work")
+	result, err := capture.Capture(context.Background(), runner, dir, capture.Params{
+		Workspace: "W", Attempt: "A", TaskID: "task", TaskTitle: "change"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := SourceInput{Workspace: "W", Change: "C", RequestID: "cancel", Attempt: "A",
+		TaskID: "task", BaseSHA: base, CaptureSHA: result.CaptureSHA, Complete: false}
+	in.Outcome = "failed"
+	if _, err := FreezeSource(context.Background(), store, runner, in); err == nil {
+		t.Fatal("non-cancelled incomplete capture was accepted")
+	}
+	in.Outcome = "cancelled"
+	rev, err := FreezeSource(context.Background(), store, runner, in)
+	if err != nil || !rev.Ready || !rev.Incomplete || rev.Outcome != "cancelled" {
+		t.Fatalf("cancelled incomplete revision = %+v, %v", rev, err)
+	}
+	stored, err := store.GetRevision(context.Background(), "W", "C", rev.Number)
+	if err != nil || !stored.Incomplete {
+		t.Fatalf("incomplete flag not persisted: %+v, %v", stored, err)
+	}
+	if got := must(t, runner, "show", rev.HeadSHA+":edit"); got != "partial work" {
+		t.Fatalf("captured edit = %q", got)
+	}
+	derived, err := RecordDerived(context.Background(), store, runner, DerivedInput{
+		Workspace: "W", Change: "C", RequestID: "derived-cancel", FromNumber: rev.Number,
+		Operation: "apply", BaseSHA: base, HeadSHA: rev.HeadSHA, Outcome: "cancelled",
+	})
+	if err != nil || !derived.Incomplete {
+		t.Fatalf("derived revision lost incomplete flag: %+v, %v", derived, err)
+	}
+}
+
 func TestImportRejectsMismatchedTreeBeforeRefsAndKeepsSource(t *testing.T) {
 	dir, runner, store := fixture(t)
 	base := must(t, runner, "rev-parse", "HEAD")

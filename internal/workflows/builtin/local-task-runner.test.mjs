@@ -62,6 +62,9 @@ if (process.env.FAKE_TRAP_TERM) {
 if (process.env.FAKE_SLEEP_MS) {
   await new Promise((resolve) => setTimeout(resolve, Number(process.env.FAKE_SLEEP_MS)));
 }
+if (process.env.FAKE_OUTPUT_BYTES) {
+  process.stdout.write("x".repeat(Number(process.env.FAKE_OUTPUT_BYTES)));
+}
 if (process.env.FAKE_STREAM_ERROR) {
   process.stdout.write(JSON.stringify({ type: "error", error: { message: process.env.FAKE_STREAM_ERROR } }) + "\\n");
   process.exit(exit);
@@ -125,6 +128,8 @@ const ENV_KEYS = [
   "FAKE_SLEEP_MS",
   "FAKE_TRAP_TERM",
   "LOOM_LOCAL_TASK_TIMEOUT_MS",
+  "LOOM_LOCAL_TASK_MAX_BUFFER_BYTES",
+  "FAKE_OUTPUT_BYTES",
   "FAKE_STREAM_ERROR",
   "FAKE_STDIN_FILE",
   "FAKE_USAGE_TOKENS",
@@ -877,6 +882,36 @@ describe("local-task-runner isolated worktree", () => {
     assert.equal(out.errorClass, "timeout");
     assert.match(out.patch, /graceful-timeout-edit\.txt/);
   });
+
+  it("classifies the output limit separately from timeout", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_LOCAL_TASK_MAX_BUFFER_BYTES = "1024";
+    process.env.FAKE_OUTPUT_BYTES = "4096";
+    process.env.FAKE_WRITE_FILE = "output-limit-edit.txt";
+    const out = await run();
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "output_limit");
+    assert.match(out.patch, /output-limit-edit\.txt/);
+  });
+
+  for (const mode of ["--binary", "--numstat"]) {
+    it(`retains the edit when only git diff ${mode} fails`, async () => {
+      process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+      process.env.LOOM_CODEX_BIN = fakeBin;
+      process.env.LOOM_WORKTREE_PATH = worktree;
+      process.env.FAKE_WRITE_FILE = `failed-${mode.slice(2)}.txt`;
+      const git = execFileSync("which", ["git"]).toString().trim();
+      const wrapper = path.join(binDir, "git");
+      fs.writeFileSync(wrapper, `#!/bin/sh\ncase " $* " in *" diff ${mode} "*) exit 1;; esac\nexec "${git}" "$@"\n`, { mode: 0o755 });
+      process.env.PATH = binDir + path.delimiter + process.env.PATH;
+      const out = await run();
+      assert.equal(out.errorClass, "capture_failed");
+      assert.equal(Object.hasOwn(out, "patch"), false);
+      assert.ok(fs.existsSync(path.join(out.runtimeMetadata.retained_path, `failed-${mode.slice(2)}.txt`)));
+    });
+  }
 
   it("retains the sibling when Git capture fails", async () => {
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";

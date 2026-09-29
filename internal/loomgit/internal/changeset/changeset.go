@@ -96,10 +96,10 @@ func installRevision(ctx context.Context, store loomgit.RevisionStore, runner *g
 	return r, nil
 }
 
-// FreezeSource records a complete task-copy capture as a source revision.
+// FreezeSource records a task-copy capture as a source revision.
 // The original capture ref remains at the unrewritten capture commit.
 func FreezeSource(ctx context.Context, store loomgit.RevisionStore, runner *gitexec.Runner, in SourceInput) (loomgit.Revision, error) {
-	if !in.Complete {
+	if !in.Complete && in.Outcome != "cancelled" {
 		return loomgit.Revision{}, loomgit.NewError(loomgit.CaptureIncomplete, "capture is incomplete", nil)
 	}
 	if err := validateNames(in.Workspace, in.Change); err != nil {
@@ -114,7 +114,7 @@ func FreezeSource(ctx context.Context, store loomgit.RevisionStore, runner *gite
 	}
 	r, err := store.ReserveRevision(ctx, loomgit.Revision{Workspace: in.Workspace, Change: in.Change,
 		RequestID: in.RequestID, Kind: "source", Operation: "snapshot", Outcome: in.Outcome,
-		BaseSHA: in.BaseSHA, TreeHash: hash, SourceHeadSHA: in.CaptureSHA})
+		BaseSHA: in.BaseSHA, TreeHash: hash, SourceHeadSHA: in.CaptureSHA, Incomplete: !in.Complete})
 	if err != nil || r.Ready {
 		return r, err
 	}
@@ -199,7 +199,7 @@ func RecordDerived(ctx context.Context, store loomgit.RevisionStore, runner *git
 	r, err := store.ReserveRevision(ctx, loomgit.Revision{Workspace: in.Workspace, Change: in.Change,
 		RequestID: in.RequestID, Kind: "derived", Operation: in.Operation, Outcome: in.Outcome,
 		BaseSHA: in.BaseSHA, TreeHash: hash, SourceHeadSHA: in.HeadSHA,
-		DerivedFromChange: from.Change, DerivedFromNumber: from.Number})
+		DerivedFromChange: from.Change, DerivedFromNumber: from.Number, Incomplete: from.Incomplete})
 	if err != nil || r.Ready {
 		return r, err
 	}

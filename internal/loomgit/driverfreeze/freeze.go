@@ -27,6 +27,64 @@ type Request struct {
 	Outcome                        string
 }
 
+type CaptureRequest struct {
+	Workspace, Task, Repo, Attempt string
+	Worktree, Base, CaptureSHA     string
+	Outcome                        string
+	Complete                       bool
+}
+
+// FreezeCapture records a host capture after cancellation, including a
+// partial capture. The caller retains the task copy for recovery.
+func FreezeCapture(ctx context.Context, in CaptureRequest) (loomgit.Revision, error) {
+	return FreezeCaptureAt(ctx, filepath.Join(config.GetConfigDir(), "loomgit", "store.db"), in)
+}
+
+func FreezeCaptureAt(ctx context.Context, journalPath string, in CaptureRequest) (loomgit.Revision, error) {
+	if in.Workspace == "" || in.Task == "" || in.Repo == "" || in.Attempt == "" || in.Worktree == "" || in.Base == "" || in.Outcome != "cancelled" {
+		return loomgit.Revision{}, fmt.Errorf("cancelled capture requires workspace, task, repo, attempt, worktree and base")
+	}
+	if err := os.MkdirAll(filepath.Dir(journalPath), 0o700); err != nil {
+		return loomgit.Revision{}, err
+	}
+	store, err := journal.OpenSQLite(journalPath)
+	if err != nil {
+		return loomgit.Revision{}, err
+	}
+	defer func() { _ = store.Close() }()
+	options := gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}}
+	repo, err := pool.New(store, options).Admit(ctx, in.Worktree)
+	if err != nil {
+		return loomgit.Revision{}, err
+	}
+	runner, err := gitexec.New(in.Worktree, options)
+	if err != nil {
+		return loomgit.Revision{}, err
+	}
+	var revision loomgit.Revision
+	err = repo.WithLock(ctx, func(ctx context.Context) error {
+		captureSHA := in.CaptureSHA
+		if captureSHA == "" {
+			head, err := runner.Run(ctx, "rev-parse", "HEAD")
+			if err != nil {
+				return err
+			}
+			captureSHA = strings.TrimSpace(string(head))
+		}
+		change, err := changeForTask(ctx, store, in.Workspace, in.Task, in.Repo)
+		if err != nil {
+			return err
+		}
+		revision, err = changeset.FreezeSource(ctx, store, runner, changeset.SourceInput{
+			Workspace: in.Workspace, Change: change, RequestID: "driver:" + in.Attempt,
+			Attempt: in.Attempt, TaskID: in.Task, BaseSHA: in.Base, CaptureSHA: captureSHA,
+			Outcome: in.Outcome, Complete: in.Complete,
+		})
+		return err
+	})
+	return revision, err
+}
+
 // Freeze uses production journal and Git defaults. The patch is staged in a
 // private index rooted at Base; neither the worktree nor its index is changed.
 func Freeze(ctx context.Context, in Request) (loomgit.Revision, error) {

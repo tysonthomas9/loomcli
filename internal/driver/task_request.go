@@ -656,6 +656,8 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 	req := taskExecRequest(claimed, opts, refs)
 	execResult, execErr := executor.ExecuteTask(ctx, req)
 	completion := normalizeTaskExecCompletion(execResult, execErr)
+	ctx, finishCancel := taskRunCompletionContext(ctx, completion.Status)
+	defer finishCancel()
 	metadata := taskExecRuntimeMetadata(execResult, refs)
 	if isLocalTaskRunner(req) {
 		metadata["attempt_id"] = taskCopyAttemptID(req.TaskRunID, req.SchedulerAttempt)

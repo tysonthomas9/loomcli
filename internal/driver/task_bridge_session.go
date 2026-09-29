@@ -242,6 +242,11 @@ func (e HostBridgeTaskExecutor) finishFlueTaskSession(ctx context.Context, req T
 	if session.cancel != nil {
 		session.cancel()
 	}
+	if ctx.Err() != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+	}
 	status := flueTaskSessionStatus(result, execErr)
 	metadata := mergeStringMaps(session.Metadata, result.RuntimeMetadata)
 	if runner != nil {

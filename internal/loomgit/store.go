@@ -49,6 +49,7 @@ type Revision struct {
 	DerivedFromChange            string
 	DerivedFromNumber            int
 	Ready                        bool
+	Incomplete                   bool
 }
 
 // WorkspaceRepo records the trunk independently of the lead's working branch.
