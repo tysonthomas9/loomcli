@@ -397,6 +397,12 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 
 func initGitRepo(t *testing.T, dir string) {
 	t.Helper()
+	// Git's author/committer environment overrides repository config. Keep
+	// fixture commits independent of the shell that runs the tests.
+	t.Setenv("GIT_AUTHOR_NAME", "Test User")
+	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "Test User")
+	t.Setenv("GIT_COMMITTER_EMAIL", "test@example.com")
 	mustGit(t, dir, "init", "-b", "main")
 	mustGit(t, dir, "config", "user.email", "test@example.com")
 	mustGit(t, dir, "config", "user.name", "Test User")

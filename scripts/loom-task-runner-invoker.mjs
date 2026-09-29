@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { fork } from "node:child_process";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -252,7 +253,10 @@ async function main() {
 }
 
 // Only auto-run when invoked as a script; importing for tests must not execute.
-if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
   main().catch((error) => {
     console.log(JSON.stringify(failure("task_runner_invoker_failed", error)));
   });

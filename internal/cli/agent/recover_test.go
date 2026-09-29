@@ -580,23 +580,29 @@ func TestKillProcess_NonExistentPid(t *testing.T) {
 
 func TestKillProcess_AlreadyDead(t *testing.T) {
 	t.Parallel()
-	// Start and immediately kill a process to get a dead PID
-	cmd := exec.Command("sleep", "60") //nolint:norawexec
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("failed to start sleep process: %v", err)
+	// A reaped PID can already identify a different process group on a busy
+	// host. Only assert the already-dead behavior after confirming ESRCH.
+	for attempt := 0; attempt < 5; attempt++ {
+		cmd := exec.Command("sleep", "60") //nolint:norawexec
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("failed to start sleep process: %v", err)
+		}
+		pid := cmd.Process.Pid
+		if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
+			_ = cmd.Wait()
+			t.Fatalf("kill test process group: %v", err)
+		}
+		_ = cmd.Wait()
+		if err := syscall.Kill(-pid, 0); err != syscall.ESRCH {
+			continue
+		}
+		if err := killProcess(pid); err != nil {
+			t.Errorf("killProcess should succeed for already-dead process, got: %v", err)
+		}
+		return
 	}
-	pid := cmd.Process.Pid
-
-	// Kill the process group directly
-	_ = syscall.Kill(-pid, syscall.SIGKILL)
-	_ = cmd.Wait()
-
-	// Now killProcess should handle the already-dead case gracefully
-	err := killProcess(pid)
-	if err != nil {
-		t.Errorf("killProcess should succeed for already-dead process, got: %v", err)
-	}
+	t.Fatal("could not obtain an absent process group for the already-dead test")
 }
 
 func TestKillProcess_WithChildProcesses(t *testing.T) {

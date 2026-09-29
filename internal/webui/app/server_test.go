@@ -376,7 +376,12 @@ func TestStartServer_WriteTimeout_NonStreamingEndpoint(t *testing.T) {
 	}()
 
 	serverAddr := fmt.Sprintf("http://127.0.0.1:%d", port)
-	client := &http.Client{Timeout: 5 * time.Second}
+	// This test checks one completed response, not connection reuse. Avoid
+	// leaving a keep-alive connection active while asserting shutdown.
+	client := &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: &http.Transport{DisableKeepAlives: true},
+	}
 
 	// Wait for the server to be ready
 	var ready bool
@@ -422,6 +427,10 @@ func TestStartServer_WriteTimeout_NonStreamingEndpoint(t *testing.T) {
 		t.Errorf("expected non-empty status from /api/health, got empty")
 	}
 
+	// Release the response connection before asking the server to drain.
+	if err := resp.Body.Close(); err != nil {
+		t.Fatalf("close health response: %v", err)
+	}
 	// Shut down
 	cancel()
 
