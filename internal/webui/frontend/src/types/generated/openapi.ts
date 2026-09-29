@@ -394,6 +394,33 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/issues/{id}/release": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Release a claimed issue back to open
+     * @description Releases the claim on an issue, clearing the assignee and returning the
+     *     issue to open. The counterpart to the claim endpoint.
+     *
+     *     The X-Actor header scopes the release to the worker that holds the
+     *     lock: releasing a lock held by a different actor returns 409 Conflict
+     *     rather than un-claiming the worker still running on it. Without the
+     *     header the release is performed as a plain status transition under the
+     *     server-side actor.
+     */
+    post: operations["releaseIssue"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/issues/{id}/move": {
     parameters: {
       query?: never;
@@ -4600,6 +4627,68 @@ export interface operations {
         };
       };
       /** @description Issue already claimed by another agent or blocked by an open dependency */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  releaseIssue: {
+    parameters: {
+      query?: never;
+      header?: {
+        /**
+         * @description Identity of the worker performing the operation. Issue locks are
+         *     arbitrated per actor, so without this header every worker behind one
+         *     server collapses onto the server's own configured actor. Bounded at
+         *     128 characters; control characters are rejected with 400.
+         */
+        "X-Actor"?: components["parameters"]["ActorHeader"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Issue identifier */
+        id: components["parameters"]["IssueId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Issue released */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+          };
+        };
+      };
+      /** @description Missing issue ID, or a malformed X-Actor header */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Issue not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Lock is held by a different actor */
       409: {
         headers: {
           [name: string]: unknown;

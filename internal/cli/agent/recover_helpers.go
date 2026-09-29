@@ -16,8 +16,12 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 )
 
-// handleOrphanedTask decides whether to close or reopen an orphaned task
-func handleOrphanedTask(deps *cli.Deps, worktreePath, taskID string, analyze bool) {
+// handleOrphanedTask decides whether to close or reopen an orphaned task.
+//
+// actor is the recovering agent's identity — the same name it claimed under,
+// since fleet-db arbitrates issue locks by actor. It may be empty for callers
+// that do not know it, which keeps the legacy unscoped behavior.
+func handleOrphanedTask(deps *cli.Deps, worktreePath, taskID, actor string, analyze bool) {
 	fmt.Printf("\nHandling orphaned task: %s\n", taskID)
 
 	if analyze {
@@ -29,11 +33,11 @@ func handleOrphanedTask(deps *cli.Deps, worktreePath, taskID string, analyze boo
 			closeTask(deps, taskID, reason)
 		} else {
 			fmt.Printf("Task appears INCOMPLETE: %s\n", reason)
-			resetTask(deps, taskID)
+			resetTask(deps, taskID, actor)
 		}
 	} else {
 		fmt.Println("Skipping analysis (--no-analyze)")
-		resetTask(deps, taskID)
+		resetTask(deps, taskID, actor)
 	}
 }
 
@@ -151,7 +155,13 @@ func closeTask(deps *cli.Deps, taskID, reason string) {
 // processed and should not be reset; a blocked task was quarantined by the
 // daemon (or blocked by a human) and must not be flipped back to open by a
 // crash-recovery pass.
-func resetTask(deps *cli.Deps, taskID string) {
+//
+// actor is the recovering agent's identity. When it is set and the backend can
+// scope a release, the release only succeeds if this actor holds the lock — a
+// conflict means a live sibling owns it, and the task is left claimed instead
+// of being taken away from a worker that is still running. The unscoped status
+// transition below cannot make that distinction: it frees whatever lock exists.
+func resetTask(deps *cli.Deps, taskID, actor string) {
 	ib := deps.IssueBackend
 	ctx := cmdstore.RootContext()
 
@@ -161,6 +171,31 @@ func resetTask(deps *cli.Deps, taskID string) {
 		if detail.Status == "review" || detail.Status == "closed" || detail.Status == "blocked" {
 			fmt.Printf("✓ Task %s already %s, skipping reset\n", taskID, detail.Status)
 			return
+		}
+	}
+
+	if actor != "" {
+		if releaser, ok := ib.(backend.ActorReleaser); ok {
+			switch relErr := releaser.ReleaseIssueAsActor(ctx, taskID, actor); {
+			case relErr == nil:
+				fmt.Printf("✓ Task %s reset to open\n", taskID)
+				return
+			case backend.IsKind(relErr, backend.KindConflict):
+				fmt.Printf("✓ Task %s is claimed by another worker, leaving it claimed\n", taskID)
+				return
+			case backend.IsKind(relErr, backend.KindNotImplemented), backend.IsKind(relErr, backend.KindNotFound):
+				// The backend (or a server older than the release route) cannot
+				// scope a release. Degrade to the status transition below: that
+				// is what this did before the actor-scoped path existed.
+				fmt.Printf("Note: actor-scoped release unavailable (%v); resetting %s via status update\n", relErr, taskID)
+			default:
+				// Transient (timeout, unavailable, ...). Do NOT fall back: the
+				// unscoped transition would free the lock whoever holds it, and
+				// we could not establish that this agent does. Leaving the task
+				// claimed is recoverable — re-running recovery retries it.
+				fmt.Printf("Warning: actor-scoped release failed (%v); leaving task %s claimed, re-run recovery to retry\n", relErr, taskID)
+				return
+			}
 		}
 	}
 
@@ -352,7 +387,7 @@ func resetOrphanedAgentTasks(deps *cli.Deps, worktreePath, agentName, alreadyHan
 
 	fmt.Printf("\nFound %d additional orphaned task(s) for agent %s:\n", len(orphaned), agentName)
 	for _, t := range orphaned {
-		handleOrphanedTask(deps, worktreePath, t.ID, analyze)
+		handleOrphanedTask(deps, worktreePath, t.ID, agentName, analyze)
 	}
 }
 
