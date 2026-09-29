@@ -29,35 +29,14 @@ type CommitRequest struct {
 // Commit writes only named working-tree paths through a private index. The
 // caller's index is never read or changed.
 func Commit(ctx context.Context, repo string, settings WorkspaceSettingsStore, req CommitRequest) (string, error) {
-	if repo == "" || settings == nil || req.Workspace == "" || len(req.Paths) == 0 ||
-		strings.TrimSpace(req.Message) == "" || strings.TrimSpace(req.ChangeID) == "" || strings.TrimSpace(req.Agent) == "" {
-		return "", errors.New("repo, workspace, paths, message, change ID and agent are required")
-	}
-	if strings.ContainsAny(req.ChangeID+req.Agent, "\r\n") {
-		return "", errors.New("commit trailer values must be single-line")
-	}
-	enabled, err := settings.AutoCommit(ctx, req.Workspace)
-	if err != nil {
+	if err := validateCommitRequest(ctx, repo, settings, req); err != nil {
 		return "", err
-	}
-	if !enabled && !req.UserRequested {
-		return "", errors.New("auto-commit is disabled for this workspace")
 	}
 	r, err := gitexec.New(repo, gitexec.Options{})
 	if err != nil {
 		return "", err
 	}
-	gitPath, err := r.Run(ctx, "rev-parse", "--git-path", "MERGE_HEAD")
-	if err != nil {
-		return "", err
-	}
-	mergePath := strings.TrimSpace(string(gitPath))
-	if !filepath.IsAbs(mergePath) {
-		mergePath = filepath.Join(repo, mergePath)
-	}
-	if _, err := os.Stat(mergePath); err == nil {
-		return "", errors.New("commit refused during merge")
-	} else if !errors.Is(err, os.ErrNotExist) {
+	if err := refuseMerge(ctx, r, repo); err != nil {
 		return "", err
 	}
 	for _, path := range req.Paths {
@@ -117,6 +96,41 @@ func Commit(ctx context.Context, repo string, settings WorkspaceSettingsStore, r
 	return sha, nil
 }
 
+func validateCommitRequest(ctx context.Context, repo string, settings WorkspaceSettingsStore, req CommitRequest) error {
+	if repo == "" || settings == nil || req.Workspace == "" || len(req.Paths) == 0 ||
+		strings.TrimSpace(req.Message) == "" || strings.TrimSpace(req.ChangeID) == "" || strings.TrimSpace(req.Agent) == "" {
+		return errors.New("repo, workspace, paths, message, change ID and agent are required")
+	}
+	if strings.ContainsAny(req.ChangeID+req.Agent, "\r\n") {
+		return errors.New("commit trailer values must be single-line")
+	}
+	enabled, err := settings.AutoCommit(ctx, req.Workspace)
+	if err != nil {
+		return err
+	}
+	if !enabled && !req.UserRequested {
+		return errors.New("auto-commit is disabled for this workspace")
+	}
+	return nil
+}
+
+func refuseMerge(ctx context.Context, r *gitexec.Runner, repo string) error {
+	gitPath, err := r.Run(ctx, "rev-parse", "--git-path", "MERGE_HEAD")
+	if err != nil {
+		return err
+	}
+	mergePath := strings.TrimSpace(string(gitPath))
+	if !filepath.IsAbs(mergePath) {
+		mergePath = filepath.Join(repo, mergePath)
+	}
+	if _, err := os.Stat(mergePath); err == nil {
+		return errors.New("commit refused during merge")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
 func checkCommitPath(repo, path string) error {
 	if path == "" || filepath.IsAbs(path) || filepath.Clean(path) != path || path == "." || path == ".." || strings.HasPrefix(path, ".."+string(filepath.Separator)) || strings.ContainsRune(path, 0) {
 		return fmt.Errorf("invalid commit path %q", path)
@@ -129,7 +143,7 @@ func checkCommitPath(repo, path string) error {
 	parts := strings.Split(filepath.Clean(path), string(filepath.Separator))
 	for i, part := range parts {
 		if part == ".git" {
-			return fmt.Errorf("Git metadata path refused: %q", path)
+			return fmt.Errorf("git metadata path refused: %q", path)
 		}
 		if i == len(parts)-1 {
 			break

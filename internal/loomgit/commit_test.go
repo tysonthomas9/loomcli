@@ -2,6 +2,7 @@ package loomgit_test
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -126,14 +127,28 @@ func TestCommitRefusesMergeAndSubmodulePath(t *testing.T) {
 
 func TestProductionGoHasNoClaudeCoauthorTrailer(t *testing.T) {
 	root := filepath.Join("..", "..")
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	rootFS, err := os.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rootFS.Close() }()
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
-		body, err := os.ReadFile(path)
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		file, err := rootFS.Open(rel)
+		if err != nil {
+			return err
+		}
+		body, err := io.ReadAll(file)
+		_ = file.Close()
 		if err != nil {
 			return err
 		}
