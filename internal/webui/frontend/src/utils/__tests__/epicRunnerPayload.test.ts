@@ -44,14 +44,14 @@ function makeRepo(
 }
 
 describe("epicRunnerRuntimePayload", () => {
-  it("shows the host publisher requirement before a local PR-mode run is queued", () => {
-    expect(() =>
+  it("uses local delivery for a GitHub-backed repo", () => {
+    expect(
       epicRunnerRuntimePayload({
         localSettings: makeLocalSettings("local"),
         repos: [makeRepo()],
         currentRepo: "acme",
       }),
-    ).toThrow(/host_publish_required.*host publisher in P3\.3/);
+    ).toEqual({ runner: "local-task-runner" });
   });
 
   it("maps a null/undefined runtime to the explicit local-task-runner", () => {
@@ -73,14 +73,18 @@ describe("epicRunnerRuntimePayload", () => {
     expect(Object.keys(payload)).not.toHaveLength(0);
   });
 
-  it("shows the host publisher requirement before a Daytona PR-mode run is queued", () => {
-    expect(() =>
+  it("uses Daytona without requesting PR delivery", () => {
+    expect(
       epicRunnerRuntimePayload({
         localSettings: makeLocalSettings("daytona"),
         repos: [makeRepo()],
         currentRepo: "acme",
       }),
-    ).toThrow(/host_publish_required.*host publisher in P3\.3/);
+    ).toEqual({
+      runner: "daytona-task-runner",
+      repoUrl: "https://github.com/acme/widgets.git",
+      baseBranch: "main",
+    });
   });
 
   it("throws on the daytona path when no repo URL can be resolved", () => {

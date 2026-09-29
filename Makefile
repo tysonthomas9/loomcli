@@ -48,8 +48,8 @@ test:
 	@TEST_COVER=1 ./scripts/test.sh
 
 git-lab-test:
-	@if [ -x /Users/tyson/intent/workspaces/phases-build/wt/px.1/scripts/with-heavy-lock.sh ]; then \
-		/Users/tyson/intent/workspaces/phases-build/wt/px.1/scripts/with-heavy-lock.sh ./test/gitlab/run.sh; \
+	@if [ -x scripts/with-heavy-lock.sh ]; then \
+		scripts/with-heavy-lock.sh ./test/gitlab/run.sh; \
 	else \
 		./test/gitlab/run.sh; \
 	fi

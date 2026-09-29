@@ -38,26 +38,12 @@ export function epicRunnerRuntimePayload({
   currentRepo: string | null;
 }): EpicRunnerRuntimePayload {
   const repo = runnerRepoUrl(repos, currentRepo);
-  if (repo.repoUrl) {
-    throw new Error(
-      "host_publish_required: Pull requests return with the host publisher in P3.3; PR-mode runs are unavailable until then",
-    );
-  }
   if (localSettings?.agent_runtime.default !== "daytona") {
     // Local ("Locally") runtime: pin the runner explicitly so the request never
-    // falls through to an unspecified server-side default. The local task runner
-    // execFile's the user-selected backend CLI over the prepared worktree. When
-    // a workspace repo is selected, opt in to PR delivery; the runner fails
-    // closed if the desktop GitHub credential is not configured.
+    // falls through to an unspecified server-side default. Until P3.3 adds
+    // host publishing, UI epic runs use local delivery even for GitHub repos.
     return {
       runner: "local-task-runner",
-      ...(repo.repoUrl
-        ? {
-            repoUrl: repo.repoUrl,
-            baseBranch: repo.baseBranch,
-            openPullRequest: true,
-          }
-        : {}),
     };
   }
   if (!repo.repoUrl) {
@@ -69,8 +55,6 @@ export function epicRunnerRuntimePayload({
     runner: "daytona-task-runner",
     repoUrl: repo.repoUrl,
     baseBranch: repo.baseBranch,
-    openPullRequest: true,
-    stackedPullRequests: true,
   };
 }
 
