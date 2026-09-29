@@ -10,9 +10,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	_ "modernc.org/sqlite"
+
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	_ "modernc.org/sqlite"
 )
 
 func TestLoomGitMirrorStatusReadsWorkspaceStore(t *testing.T) {
