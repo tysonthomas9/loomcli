@@ -383,7 +383,7 @@ func (c *Client) doBytes(ctx context.Context, method, path string) ([]byte, erro
 		if readErr != nil {
 			return nil, fmt.Errorf("fleetdb: %s %s: HTTP %d (read body: %w)", method, path, resp.StatusCode, readErr)
 		}
-		return nil, classifyHTTPError(method, path, resp.StatusCode, respBody)
+		return nil, classifyHTTPError(method, path, resp.StatusCode, respBody, resp.Header)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody+1))
 	if err != nil {
@@ -424,7 +424,7 @@ func (c *Client) doRequestResponseWithClient(httpClient *http.Client, req *http.
 		if readErr != nil {
 			return resp.StatusCode, resp.Header, fmt.Errorf("fleetdb: %s %s: HTTP %d (read body: %w)", method, path, resp.StatusCode, readErr)
 		}
-		return resp.StatusCode, resp.Header, classifyHTTPError(method, path, resp.StatusCode, respBody)
+		return resp.StatusCode, resp.Header, classifyHTTPError(method, path, resp.StatusCode, respBody, resp.Header)
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
 		return resp.StatusCode, resp.Header, nil
@@ -442,7 +442,7 @@ func (c *Client) doRequestResponseWithClient(httpClient *http.Client, req *http.
 // domain sentinel + descriptive wrap.
 //
 //nolint:cyclop,funlen // One status/code classification table; each arm is one sentinel.
-func classifyHTTPError(method, path string, status int, body []byte) error {
+func classifyHTTPError(method, path string, status int, body []byte, header http.Header) error {
 	msg := extractErrorMessage(body)
 	code := extractErrorCode(body)
 	prefix := fmt.Sprintf("fleetdb: %s %s: HTTP %d", method, path, status)
@@ -496,6 +496,15 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 		// fleet-db heartbeat: lease exists, token is ours, but it is no
 		// longer live (expired or released) — re-acquire is safe.
 		return fmt.Errorf("%s: %w", prefix, domain.ErrGone)
+	case http.StatusTooManyRequests:
+		// Carved out of the 4xx catch-all below, which used to hand every
+		// throttle to callers as domain.ErrConflict — a lost race. The
+		// Retry-After hint travels verbatim; the transport detail stays in
+		// the message so logs still name the request.
+		return &domain.RateLimitError{
+			RetryAfter: strings.TrimSpace(header.Get("Retry-After")),
+			Detail:     prefix,
+		}
 	case http.StatusPreconditionFailed:
 		// A failed If-Match on a conditional write. Distinct from every 409
 		// above because this one a caller fixes by re-reading and merging.
