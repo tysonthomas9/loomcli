@@ -11,6 +11,7 @@ import (
 
 var pullAll bool
 var pullWorkspace string
+var pullNoPush bool
 
 var pullCmd = &cobra.Command{
 	Use:               "pull [worktree] [branch]",
@@ -23,6 +24,10 @@ Merges the source branch (e.g., main) INTO the worktree branch, updating
 the worktree with the latest changes. If conflicts occur, Claude
 is launched to resolve them.
 
+After a clean merge the worktree branch is pushed to its remote, so the
+remote copy of the branch stays current. Pass --no-push to merge without
+publishing anything.
+
 Arguments:
   worktree    Worktree name (e.g., falcon)
   branch      Source branch to pull from (default: main or per-repo default)
@@ -30,12 +35,14 @@ Arguments:
 Flags:
   -a, --all          Pull into all worktrees
   -W, --workspace    Workspace to operate on
+      --no-push      Do not push the merge result back to the remote
 
 Examples:
   loom pull falcon                        # Pull main (or per-repo default) into falcon
   loom pull falcon main                   # Pull main into falcon explicitly
   loom pull --all                         # Pull into all worktrees from their defaults
   loom pull --all main                    # Pull main into all worktrees
+  loom pull --all --no-push               # Merge in latest without publishing
   loom pull -W myworkspace falcon         # Pull in specific workspace`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if pullAll {
@@ -55,6 +62,7 @@ Examples:
 func init() {
 	pullCmd.Flags().BoolVarP(&pullAll, "all", "a", false, "Pull into all worktrees")
 	pullCmd.Flags().StringVarP(&pullWorkspace, "workspace", "W", "", "Workspace to operate on")
+	pullCmd.Flags().BoolVar(&pullNoPush, "no-push", false, "Do not push the merge result back to the remote")
 	cli.RegisterCommand(pullCmd)
 }
 
@@ -62,6 +70,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 	deps := cli.GetDeps(cmd)
 	all, _ := cmd.Flags().GetBool("all")
 	ws, _ := cmd.Flags().GetString("workspace")
+	noPush, _ := cmd.Flags().GetBool("no-push")
 
 	if all && ws != "" {
 		fmt.Fprintln(os.Stderr, "Error: --all and --workspace are mutually exclusive")
@@ -75,7 +84,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 		if len(args) == 1 {
 			sourceBranch = args[0]
 		}
-		pullAllWorkspaces(deps, sourceBranch)
+		pullAllWorkspaces(deps, sourceBranch, !noPush)
 		return nil
 	}
 
@@ -98,11 +107,11 @@ func runPull(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	pullWorkspaceRepo(deps, resolver, worktreeName, sourceBranch)
+	pullWorkspaceRepo(deps, resolver, worktreeName, sourceBranch, !noPush)
 	return nil
 }
 
-func pullAllWorkspaces(deps *cli.Deps, sourceBranch string) {
+func pullAllWorkspaces(deps *cli.Deps, sourceBranch string, pushAfterPull bool) {
 	resolver, err := cli.NewResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
@@ -138,7 +147,7 @@ func pullAllWorkspaces(deps *cli.Deps, sourceBranch string) {
 			continue
 		}
 
-		pullWorkspaceWorktrees(deps, worktrees, sourceBranch)
+		pullWorkspaceWorktrees(deps, worktrees, sourceBranch, pushAfterPull)
 		fmt.Println("")
 	}
 
@@ -147,7 +156,7 @@ func pullAllWorkspaces(deps *cli.Deps, sourceBranch string) {
 	fmt.Println("=========================================")
 }
 
-func pullWorkspaceRepo(deps *cli.Deps, resolver *cli.Resolver, worktreeName, sourceBranch string) {
+func pullWorkspaceRepo(deps *cli.Deps, resolver *cli.Resolver, worktreeName, sourceBranch string, pushAfterPull bool) {
 	// Resolve the specific worktree path
 	worktreePath, err := resolver.ResolveWorktreePath(worktreeName)
 	if err != nil {
@@ -190,14 +199,14 @@ func pullWorkspaceRepo(deps *cli.Deps, resolver *cli.Resolver, worktreeName, sou
 	fmt.Println("=========================================")
 	fmt.Println("")
 
-	err = pullRepoWorktree(deps, matched.Path, matched.Branch, source, remote)
+	err = pullRepoWorktree(deps, matched.Path, matched.Branch, source, remote, pushAfterPull)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func pullWorkspaceWorktrees(deps *cli.Deps, worktrees []cli.WorktreeInfo, sourceBranch string) {
+func pullWorkspaceWorktrees(deps *cli.Deps, worktrees []cli.WorktreeInfo, sourceBranch string, pushAfterPull bool) {
 	type result struct {
 		repo    string
 		success bool
@@ -220,7 +229,7 @@ func pullWorkspaceWorktrees(deps *cli.Deps, worktrees []cli.WorktreeInfo, source
 
 		remote := wt.Repo.Remote
 
-		err := pullRepoWorktree(deps, wt.Path, wt.Branch, source, remote)
+		err := pullRepoWorktree(deps, wt.Path, wt.Branch, source, remote, pushAfterPull)
 		if err != nil {
 			results = append(results, result{repo: wt.Name, success: false, err: err.Error()})
 		} else {
@@ -240,7 +249,15 @@ func pullWorkspaceWorktrees(deps *cli.Deps, worktrees []cli.WorktreeInfo, source
 	}
 }
 
-func pullRepoWorktree(deps *cli.Deps, repoPath, currentBranch, sourceBranch, remote string) error {
+// pullRepoWorktree merges sourceBranch into currentBranch and, when
+// pushAfterPull is true, publishes the merge result by pushing currentBranch to
+// the remote.
+//
+// With pushAfterPull=false the function performs NO remote-writing operation:
+// it fetches and merges only. That is what `loom sync --pull-only` needs — the
+// flag promises that nothing is published, and this push is the one that used
+// to break that promise by publishing every worktree's current branch.
+func pullRepoWorktree(deps *cli.Deps, repoPath, currentBranch, sourceBranch, remote string, pushAfterPull bool) error {
 	r := resolveRemote(remote)
 
 	fmt.Println("=========================================")
@@ -278,6 +295,10 @@ func pullRepoWorktree(deps *cli.Deps, repoPath, currentBranch, sourceBranch, rem
 	}
 
 	fmt.Println("✓ Pull completed successfully (no conflicts)")
+
+	if !pushAfterPull {
+		return nil
+	}
 
 	// Push
 	if err := gitPushRemote(deps, repoPath, remote, currentBranch); err != nil {

@@ -5,7 +5,12 @@ import (
 	"testing"
 )
 
-func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
+// TestSyncSingleWorkspace_PushAndPull_StillPushesAfterPull pins the plain
+// `loom sync` path: with neither --push-only nor --pull-only, phase 2 must
+// still push the worktree branch after the merge, so remote agent branches stay
+// current. It guards against over-correcting PUPPET-42 by deleting that push
+// outright instead of making it conditional.
+func TestSyncSingleWorkspace_PushAndPull_StillPushesAfterPull(t *testing.T) {
 	// not parallel: uses SetupTestEnv, mock.Install(), defaultDeps.Agent mutation
 	tmpDir := t.TempDir()
 	wsDir := tmpDir + "/ws"
@@ -67,6 +72,9 @@ func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
 		t.Fatalf("failed to set workspace: %v", err)
 	}
 
+	// outputMock.Install() verifies on cleanup that every stub was consumed, so
+	// the phase-2 push stub above is load-bearing: a push that stopped
+	// happening fails this test.
 	syncSingleWorkspace(defaultDeps, resolver, false, false)
 }
 
@@ -128,7 +136,12 @@ func TestSyncSingleWorkspace_PushOnly(t *testing.T) {
 	syncSingleWorkspace(defaultDeps, resolver, true, false)
 }
 
-func TestSyncSingleWorkspace_PullOnly(t *testing.T) {
+// TestSyncSingleWorkspace_PullOnly_DoesNotPush is the PUPPET-42 regression
+// test. --pull-only must issue no remote-writing command at all: phase 1 is
+// skipped and phase 2's post-merge push is suppressed. This test previously
+// stubbed {"push", "origin", "api-branch"} — it encoded the bug, where
+// --pull-only published every worktree's current branch.
+func TestSyncSingleWorkspace_PullOnly_DoesNotPush(t *testing.T) {
 	// not parallel: uses SetupTestEnv, mock.Install(), defaultDeps.Agent mutation
 	tmpDir := t.TempDir()
 	wsDir := tmpDir + "/ws"
@@ -146,10 +159,11 @@ func TestSyncSingleWorkspace_PullOnly(t *testing.T) {
 	})
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
-		// Pull phase only
+		// Pull phase only — fetch and merge, and deliberately no push stub.
+		// OutputCommandMock t.Fatal's on any call past its stubs, so a
+		// reintroduced push fails here.
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
-		{Args: []string{"push", "origin", "api-branch"}, Err: nil},
 	})
 
 	cmdMock := NewCommandMock(t, []CommandStub{
