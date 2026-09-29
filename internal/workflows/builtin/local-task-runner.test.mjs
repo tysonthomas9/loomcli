@@ -56,6 +56,9 @@ if (process.env.FAKE_WRITE_FILE) {
     : path.join(process.cwd(), process.env.FAKE_WRITE_FILE);
   fs.writeFileSync(target, "hello from fake backend\\n");
 }
+if (process.env.FAKE_TRAP_TERM) {
+  process.on("SIGTERM", () => process.exit(0));
+}
 if (process.env.FAKE_SLEEP_MS) {
   await new Promise((resolve) => setTimeout(resolve, Number(process.env.FAKE_SLEEP_MS)));
 }
@@ -120,6 +123,7 @@ const ENV_KEYS = [
   "FAKE_EXIT_CODE",
   "FAKE_WRITE_FILE",
   "FAKE_SLEEP_MS",
+  "FAKE_TRAP_TERM",
   "LOOM_LOCAL_TASK_TIMEOUT_MS",
   "FAKE_STREAM_ERROR",
   "FAKE_STDIN_FILE",
@@ -857,6 +861,21 @@ describe("local-task-runner isolated worktree", () => {
     assert.equal(out.base_ref, base);
     assert.equal(out.patch_base_ref, base);
     assert.match(out.patch, /timeout-edit\.txt/);
+  });
+
+  it("keeps timeout when the CLI exits zero after SIGTERM", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.FAKE_WRITE_FILE = "graceful-timeout-edit.txt";
+    process.env.FAKE_SLEEP_MS = "3000";
+    process.env.FAKE_TRAP_TERM = "1";
+    process.env.LOOM_LOCAL_TASK_TIMEOUT_MS = "500";
+
+    const out = await run();
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "timeout");
+    assert.match(out.patch, /graceful-timeout-edit\.txt/);
   });
 
   it("retains the sibling when Git capture fails", async () => {

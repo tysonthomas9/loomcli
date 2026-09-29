@@ -528,8 +528,11 @@ async function execBackend(binary, args, options) {
           reject(error);
           return;
         }
-        const code = error && typeof error.code === "number" ? error.code : error && error.killed ? 124 : 0;
-        resolve({ code, timedOut: error?.killed === true, stdout: String(stdout || ""), stderr: String(stderr || "") });
+        // A CLI may handle the timeout signal and exit 0. The timer still ended
+        // the run, so the signal takes precedence over its exit code.
+        const timedOut = error?.killed === true || child.killed === true;
+        const code = timedOut ? 124 : error && typeof error.code === "number" ? error.code : 0;
+        resolve({ code, timedOut, stdout: String(stdout || ""), stderr: String(stderr || "") });
       },
     );
     if (options.live === true && booleanValue(process.env.LOOM_TASK_RUNNER_STREAM_STDERR)) {
