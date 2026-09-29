@@ -4,9 +4,7 @@
 import type { ReactNode } from "react";
 import { useState, useCallback, useEffect } from "react";
 
-import { ApiError } from "@/types";
-import { gitPush, gitPushAll } from "@/hooks/api";
-import { ConfirmDialog, ErrorDisplay, LoadingSkeleton } from "@/components";
+import { ErrorDisplay, LoadingSkeleton } from "@/components";
 import { useStore } from "zustand";
 
 import {
@@ -123,19 +121,8 @@ export function AgentsSidebar({
     null,
   );
 
-  // Push All state
-  const [isPushing, setIsPushing] = useState(false);
-  const [pushError, setPushError] = useState<string | null>(null);
-  const [showPushConfirm, setShowPushConfirm] = useState(false);
-
-  // Push details list (expandable per-agent push)
+  // Publication details list. Publication itself is explicit CLI/PR work.
   const [isPushListExpanded, setIsPushListExpanded] = useState(false);
-  const [pushingAgents, setPushingAgents] = useState<Record<string, boolean>>(
-    {},
-  );
-  const [agentPushErrors, setAgentPushErrors] = useState<
-    Record<string, string>
-  >({});
 
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
@@ -177,38 +164,12 @@ export function AgentsSidebar({
     return () => mql.removeEventListener("change", onChange);
   }, []);
 
-  // Auto-collapse push list and clear stale state when no agents need push
+  // Auto-collapse publication details when no agents are ahead.
   useEffect(() => {
     if (sync.git_needs_push === 0) {
       setIsPushListExpanded(false);
-      setAgentPushErrors({});
-      setPushingAgents({});
     }
   }, [sync.git_needs_push]);
-
-  const anyAgentPushing = Object.values(pushingAgents).some(Boolean);
-
-  const handleAgentPush = useCallback(
-    async (agentName: string) => {
-      setPushingAgents((prev) => ({ ...prev, [agentName]: true }));
-      setAgentPushErrors((prev) => {
-        const next = { ...prev };
-        delete next[agentName];
-        return next;
-      });
-      try {
-        await gitPush(workspaceId, agentName);
-      } catch (err) {
-        setAgentPushErrors((prev) => ({
-          ...prev,
-          [agentName]: err instanceof ApiError ? err.statusText : "Push failed",
-        }));
-      } finally {
-        setPushingAgents((prev) => ({ ...prev, [agentName]: false }));
-      }
-    },
-    [workspaceId],
-  );
 
   const handleToggle = useCallback(() => {
     if (!collapsible) return;
@@ -226,30 +187,6 @@ export function AgentsSidebar({
   const handleDrawerClose = useCallback(() => {
     setSelectedCategory(null);
   }, []);
-
-  const handlePushAll = useCallback(async () => {
-    setIsPushing(true);
-    setPushError(null);
-    try {
-      const data = await gitPushAll(workspaceId);
-      if (data.failed > 0) {
-        const failedNames = data.results
-          .filter((r) => !r.success)
-          .map((r) => r.name)
-          .join(", ");
-        setPushError(`Failed: ${failedNames}`);
-      }
-    } catch (err) {
-      setPushError(err instanceof ApiError ? err.statusText : "Network error");
-    } finally {
-      setIsPushing(false);
-    }
-  }, []);
-
-  const handlePushConfirm = useCallback(() => {
-    setShowPushConfirm(false);
-    handlePushAll();
-  }, [handlePushAll]);
 
   // Get tasks and title for the selected category
   const getDrawerData = useCallback((): {
@@ -275,20 +212,6 @@ export function AgentsSidebar({
   }, [selectedCategory, taskLists]);
 
   const drawerData = getDrawerData();
-
-  const pushDetails = sync.git_push_details;
-  const pushConfirmMessage =
-    pushDetails && pushDetails.length > 0 ? (
-      <ul style={{ margin: 0, paddingLeft: "1.2em" }}>
-        {pushDetails.map((d) => (
-          <li key={d.name}>
-            {d.name}: {d.count} commit{d.count !== 1 ? "s" : ""}
-          </li>
-        ))}
-      </ul>
-    ) : (
-      `Push ${sync.git_needs_push} branch${sync.git_needs_push !== 1 ? "es" : ""} to remote?`
-    );
 
   const collapsed = collapsible ? isCollapsed : false;
 
@@ -429,7 +352,7 @@ export function AgentsSidebar({
                             <span className={styles.syncBannerToggle}>
                               {isPushListExpanded ? "v" : ">"}
                             </span>
-                            {sync.git_needs_push} need push
+                            {sync.git_needs_push} need publication
                           </button>
                         ) : (
                           <span
@@ -439,17 +362,9 @@ export function AgentsSidebar({
                               "ahead",
                             )}
                           >
-                            {sync.git_needs_push} need push
+                            {sync.git_needs_push} need publication
                           </span>
                         )}
-                        <button
-                          type="button"
-                          className={styles.pushButton}
-                          onClick={() => setShowPushConfirm(true)}
-                          disabled={isPushing || anyAgentPushing}
-                        >
-                          {isPushing ? "Pushing..." : "Push All"}
-                        </button>
                       </div>
                       {isPushListExpanded &&
                         sync.git_push_details &&
@@ -467,30 +382,10 @@ export function AgentsSidebar({
                                   {detail.count} commit
                                   {detail.count !== 1 ? "s" : ""}
                                 </span>
-                                <button
-                                  type="button"
-                                  className={styles.pushDetailButton}
-                                  onClick={() => handleAgentPush(detail.name)}
-                                  disabled={
-                                    pushingAgents[detail.name] || isPushing
-                                  }
-                                >
-                                  {pushingAgents[detail.name]
-                                    ? "Pushing..."
-                                    : "Push"}
-                                </button>
-                                {agentPushErrors[detail.name] && (
-                                  <span className={styles.pushDetailError}>
-                                    {agentPushErrors[detail.name]}
-                                  </span>
-                                )}
                               </div>
                             ))}
                           </div>
                         )}
-                      {pushError && (
-                        <div className={styles.pushError}>{pushError}</div>
-                      )}
                     </>
                   )}
                   <div className={styles.queueGrid}>
@@ -635,17 +530,6 @@ export function AgentsSidebar({
           {activeCount}
         </div>
       )}
-
-      {/* Push All Confirmation Dialog */}
-      <ConfirmDialog
-        isOpen={showPushConfirm}
-        title="Push all branches?"
-        confirmLabel="Push"
-        variant="danger"
-        message={pushConfirmMessage}
-        onConfirm={handlePushConfirm}
-        onCancel={() => setShowPushConfirm(false)}
-      />
 
       {/* Task Drawer */}
       <TaskDrawer

@@ -28,10 +28,7 @@ func NewModule(agentSvc service.AgentService, diffSvc service.DiffService) *Modu
 // Register implements [Module] by registering 13 git and diff routes.
 func (m *Module) Register(mux *http.ServeMux) {
 	// Git operations (agent-scoped)
-	mux.HandleFunc("POST /api/workspaces/{ws}/git/push-all", HandleGitPushAll(m.agentSvc))
-	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/push", HandleGitPush(m.agentSvc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/pull", HandleGitPull(m.agentSvc))
-	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/sync", HandleGitSync(m.agentSvc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/pr", HandleGitPR(m.agentSvc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/reset", HandleGitReset(m.agentSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/git/status", HandleGitStatus(m.agentSvc))

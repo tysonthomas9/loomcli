@@ -9,65 +9,48 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
-var syncPushOnly bool
-var syncPullOnly bool
 var syncWorkspaceFlag string
 
 var syncCmd = &cobra.Command{
 	Use:     "sync",
-	Short:   "Push completed work then pull latest into all worktrees",
+	Short:   "Pull latest into all worktrees",
 	GroupID: "git",
-	Long: `Sync performs a full push + pull cycle for all worktrees.
+	Long: `Sync pulls the protected default branch into all worktrees.
 
 This command:
-1. Finds all worktrees with completed work (ready to push)
-2. Pushes each to main (or per-repo default)
-3. Pulls main into all worktrees
+1. Finds all worktrees in the workspace
+2. Pulls the protected default branch into each worktree
 
 This is the recommended way to keep worktrees in sync with the main branch.
 
 Flags:
-  --push-only        Only push (skip pulling)
-  --pull-only        Only pull (skip pushing)
   -W, --workspace    Workspace to operate on
 
 Examples:
-  loom sync                      # Full sync: push all ready + pull all
-  loom sync --push-only          # Only push completed work
-  loom sync --pull-only          # Only pull latest (same as pull --all)
+  loom sync                      # Pull latest into all worktrees
   loom sync -W myworkspace       # Sync specific workspace`,
 	Args: cobra.NoArgs,
 	RunE: runFullSync,
 }
 
 func init() {
-	syncCmd.Flags().BoolVar(&syncPushOnly, "push-only", false, "Only push (skip pulling)")
-	syncCmd.Flags().BoolVar(&syncPullOnly, "pull-only", false, "Only pull (skip pushing)")
 	syncCmd.Flags().StringVarP(&syncWorkspaceFlag, "workspace", "W", "", "Workspace to operate on")
 	cli.RegisterCommand(syncCmd)
 }
 
 func runFullSync(cmd *cobra.Command, args []string) error {
 	deps := cli.GetDeps(cmd)
-	pushOnly, _ := cmd.Flags().GetBool("push-only")
-	pullOnly, _ := cmd.Flags().GetBool("pull-only")
 	ws, _ := cmd.Flags().GetString("workspace")
-
-	if pushOnly && pullOnly {
-		fmt.Fprintln(os.Stderr, "Error: --push-only and --pull-only are mutually exclusive")
-		os.Exit(1)
-	}
-
-	return runWorkspaceSync(deps, pushOnly, pullOnly, ws)
+	return runWorkspaceSync(deps, ws)
 }
 
 // runWorkspaceSync returns a non-nil error when any workspace failed to sync.
 // The failures are printed as they happen — a multi-workspace sync should not
 // abandon the remaining workspaces because one of them is broken — but they
-// must still reach the exit code. Swallowing them printed "Full sync complete!"
+// must still reach the exit code. Swallowing them printed "Sync complete!"
 // and exited 0 over a workspace whose repos were never discovered, which is
 // indistinguishable from success to anything scripting this command.
-func runWorkspaceSync(deps *cli.Deps, pushOnly, pullOnly bool, ws string) error {
+func runWorkspaceSync(deps *cli.Deps, ws string) error {
 	resolver, err := cli.NewResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
@@ -81,7 +64,7 @@ func runWorkspaceSync(deps *cli.Deps, pushOnly, pullOnly bool, ws string) error 
 			fmt.Fprintf(os.Stderr, "Error: workspace %q not found. Available: %v\n", ws, available)
 			os.Exit(1)
 		}
-		return syncSingleWorkspace(deps, resolver, pushOnly, pullOnly)
+		return syncSingleWorkspace(deps, resolver)
 	}
 
 	// Sync all workspaces
@@ -104,7 +87,7 @@ func runWorkspaceSync(deps *cli.Deps, pushOnly, pullOnly bool, ws string) error 
 			failed = append(failed, wsName)
 			continue
 		}
-		if err := syncSingleWorkspace(deps, resolver, pushOnly, pullOnly); err != nil {
+		if err := syncSingleWorkspace(deps, resolver); err != nil {
 			failed = append(failed, wsName)
 		}
 		fmt.Println("")
@@ -116,16 +99,15 @@ func runWorkspaceSync(deps *cli.Deps, pushOnly, pullOnly bool, ws string) error 
 		fmt.Println("=========================================")
 		return fmt.Errorf("sync failed for %d workspace(s): %v", len(failed), failed)
 	}
-	fmt.Println("Full sync complete!")
+	fmt.Println("Sync complete!")
 	fmt.Println("=========================================")
 	return nil
 }
 
-// syncSingleWorkspace returns an error only for failures that mean the sync did
-// not happen. A push phase that completed with per-repo errors is reported but
-// not fatal — that is the pre-existing contract of pushWorkspaceWorktrees, and
-// changing it belongs to a different change than this one.
-func syncSingleWorkspace(deps *cli.Deps, resolver *cli.Resolver, pushOnly, pullOnly bool) error {
+// syncSingleWorkspace returns an error only for failures that mean the pull did
+// not happen. Individual worktree conflicts remain the responsibility of the
+// existing pull workflow.
+func syncSingleWorkspace(deps *cli.Deps, resolver *cli.Resolver) error {
 	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error discovering repos: %v\n", err)
@@ -137,20 +119,8 @@ func syncSingleWorkspace(deps *cli.Deps, resolver *cli.Resolver, pushOnly, pullO
 		return nil
 	}
 
-	// Phase 1: Push (unless pull-only)
-	if !pullOnly {
-		fmt.Println("")
-		fmt.Println("--- Phase 1: Push ---")
-		if err := pushWorkspaceWorktrees(deps, worktrees, "", ""); err != nil {
-			fmt.Fprintf(os.Stderr, "Push phase completed with errors: %v\n", err)
-		}
-	}
-
-	// Phase 2: Pull (unless push-only)
-	if !pushOnly {
-		fmt.Println("")
-		fmt.Println("--- Phase 2: Pull ---")
-		pullWorkspaceWorktrees(deps, worktrees, "")
-	}
+	fmt.Println("")
+	fmt.Println("--- Pull ---")
+	pullWorkspaceWorktrees(deps, worktrees, "")
 	return nil
 }

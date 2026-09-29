@@ -423,19 +423,6 @@ func agentRepoAllowed(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentInfo, r
 	return false
 }
 
-func (g *GitOpsImpl) Push(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error) {
-	result, err := git.PushBranchInRepoResult(worktreePath, sourceBranch, targetBranch, remote)
-	if err != nil {
-		return nil, err
-	}
-	return &ops.GitPushResult{
-		Success:         result.Success,
-		Message:         result.Message,
-		AlreadyUpToDate: result.AlreadyUpToDate,
-		ConflictedFiles: result.ConflictedFiles,
-	}, nil
-}
-
 func (g *GitOpsImpl) Pull(worktreePath, currentBranch, sourceBranch, remote string) (*ops.GitPullResult, error) {
 	result, err := git.PullRepoWorktreeResult(worktreePath, currentBranch, sourceBranch, remote)
 	if err != nil {

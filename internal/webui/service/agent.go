@@ -24,17 +24,8 @@ type AgentService interface {
 	// GetDiffStat returns diff statistics for an agent's worktree.
 	GetDiffStat(ctx context.Context, wsID, agentName string) (*AgentDiffStatResult, error)
 
-	// GitPush merges the agent's branch into the target branch.
-	GitPush(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error)
-
-	// GitPushAll pushes all agent worktrees to their target branches.
-	GitPushAll(ctx context.Context, wsID string) (*GitPushAllResult, error)
-
 	// GitPull merges the source branch into the agent's worktree branch.
 	GitPull(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error)
-
-	// GitSync performs a full push+pull cycle against the default branch.
-	GitSync(ctx context.Context, wsID, agentName string) (*GitSyncResult, error)
 
 	// CreatePR creates a GitHub PR from the agent's worktree branch.
 	CreatePR(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error)
@@ -132,27 +123,6 @@ type AgentDiffStatResult struct {
 	Branch  string
 	Added   int
 	Removed int
-}
-
-// GitSyncResult contains the combined push+pull results.
-type GitSyncResult struct {
-	PushResult *ops.GitPushResult `json:"push_result"`
-	PullResult *ops.GitPullResult `json:"pull_result"`
-}
-
-// GitPushAllResult contains aggregate results from pushing all worktrees.
-type GitPushAllResult struct {
-	Results []GitPushAllWorktreeResult `json:"results"`
-	Pushed  int                        `json:"pushed"`
-	Failed  int                        `json:"failed"`
-}
-
-// GitPushAllWorktreeResult contains the push result for a single worktree.
-type GitPushAllWorktreeResult struct {
-	Name    string `json:"name"`
-	Success bool   `json:"success"`
-	Message string `json:"message,omitempty"`
-	Error   string `json:"error,omitempty"`
 }
 
 // Terminal mode constants for AgentTerminalInfoResult.Mode.

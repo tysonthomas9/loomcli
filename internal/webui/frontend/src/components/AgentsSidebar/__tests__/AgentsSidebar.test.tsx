@@ -98,17 +98,6 @@ vi.mock("@/hooks", () => ({
   LAYER_ISSUE_PANEL: 10,
 }));
 
-const mockGitPushAll = vi.fn();
-const mockGitPush = vi.fn();
-vi.mock(import("@/api/workspace"), async (importOriginal) => {
-  const actual = await importOriginal();
-  return {
-    ...actual,
-    gitPush: (...args: unknown[]) => mockGitPush(...args),
-    gitPushAll: (...args: unknown[]) => mockGitPushAll(...args),
-  };
-});
-
 vi.mock(import("@/api/common"), async (importOriginal) => {
   const actual = await importOriginal();
   return {
@@ -140,8 +129,6 @@ describe("AgentsSidebar", () => {
     localStorage.setItem("loom:last-workspace-id", TEST_WS_ID);
     mockContextOverride = {};
     mockSelectedRepos = [];
-    mockGitPush.mockReset();
-    mockGitPush.mockResolvedValue({ success: true });
   });
 
   describe("viewSwitcher slot", () => {
@@ -215,24 +202,31 @@ describe("AgentsSidebar", () => {
     });
   });
 
-  describe("sync banner in Work Queue", () => {
-    it('renders "need push" banner when git_needs_push > 0', () => {
+  describe("publication banner in Work Queue", () => {
+    it("reports unpublished branches without direct mutation controls", () => {
       mockContextOverride = {
         sync: {
           db_synced: true,
           db_last_sync: "",
           git_needs_push: 2,
           git_needs_pull: 0,
+          git_push_details: [
+            { name: "nova", count: 3 },
+            { name: "falcon", count: 1 },
+          ],
         },
       };
 
       render(<AgentsSidebar />);
 
-      expect(screen.getByText(/2 need push/)).toBeInTheDocument();
-      expect(screen.queryByText(/unpushed/)).not.toBeInTheDocument();
+      expect(screen.getByText(/2 need publication/)).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /push all/i }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText(/2 need publication/)).toHaveAttribute("title");
     });
 
-    it("does not render banner when git_needs_push is 0", () => {
+    it("does not render the banner when no branches are ahead", () => {
       mockContextOverride = {
         sync: {
           db_synced: true,
@@ -243,189 +237,7 @@ describe("AgentsSidebar", () => {
       };
 
       render(<AgentsSidebar />);
-
-      expect(screen.queryByText(/need push/)).not.toBeInTheDocument();
-    });
-
-    it('"Push All" button is present in banner', () => {
-      mockContextOverride = {
-        sync: {
-          db_synced: true,
-          db_last_sync: "",
-          git_needs_push: 3,
-          git_needs_pull: 0,
-        },
-      };
-
-      render(<AgentsSidebar />);
-
-      expect(
-        screen.getByRole("button", { name: /push all/i }),
-      ).toBeInTheDocument();
-    });
-
-    it("shows tooltip with worktree details on banner text", () => {
-      mockContextOverride = {
-        sync: {
-          db_synced: true,
-          db_last_sync: "",
-          git_needs_push: 2,
-          git_needs_pull: 0,
-          git_push_details: [
-            { name: "nova", count: 3 },
-            { name: "falcon", count: 1 },
-          ],
-        },
-      };
-
-      render(<AgentsSidebar />);
-
-      const pushElement = screen.getByText(/2 need push/);
-      expect(pushElement).toHaveAttribute("title");
-      const title = pushElement.getAttribute("title")!;
-      expect(title).toContain("nova");
-      expect(title).toContain("3 commit");
-      expect(title).toContain("falcon");
-      expect(title).toContain("1 commit");
-      expect(title).toContain("ahead");
-    });
-
-    it("Push All button opens confirmation dialog instead of pushing immediately", () => {
-      mockContextOverride = {
-        sync: {
-          db_synced: true,
-          db_last_sync: "",
-          git_needs_push: 1,
-          git_needs_pull: 0,
-        },
-      };
-
-      render(<AgentsSidebar />);
-
-      const pushButton = screen.getByRole("button", { name: /push all/i });
-      fireEvent.click(pushButton);
-
-      // Dialog should appear, push should NOT be called yet
-      expect(screen.getByText("Push all branches?")).toBeInTheDocument();
-      expect(mockGitPushAll).not.toHaveBeenCalled();
-    });
-
-    it("confirmation dialog lists branches with commit counts", () => {
-      mockContextOverride = {
-        sync: {
-          db_synced: true,
-          db_last_sync: "",
-          git_needs_push: 2,
-          git_needs_pull: 0,
-          git_push_details: [
-            { name: "nova", count: 3 },
-            { name: "falcon", count: 1 },
-          ],
-        },
-      };
-
-      render(<AgentsSidebar />);
-
-      fireEvent.click(screen.getByRole("button", { name: /push all/i }));
-
-      expect(screen.getByText(/nova: 3 commits/)).toBeInTheDocument();
-      expect(screen.getByText(/falcon: 1 commit$/)).toBeInTheDocument();
-    });
-
-    it("confirming the dialog triggers the push", async () => {
-      mockContextOverride = {
-        sync: {
-          db_synced: true,
-          db_last_sync: "",
-          git_needs_push: 1,
-          git_needs_pull: 0,
-        },
-      };
-
-      mockGitPushAll.mockResolvedValueOnce({
-        results: [],
-        pushed: 1,
-        failed: 0,
-      });
-
-      render(<AgentsSidebar />);
-
-      fireEvent.click(screen.getByRole("button", { name: /push all/i }));
-      await act(async () => {
-        fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
-      });
-
-      expect(mockGitPushAll).toHaveBeenCalled();
-
-      mockGitPushAll.mockReset();
-    });
-
-    it("canceling the dialog does not trigger push", () => {
-      mockContextOverride = {
-        sync: {
-          db_synced: true,
-          db_last_sync: "",
-          git_needs_push: 1,
-          git_needs_pull: 0,
-        },
-      };
-
-      render(<AgentsSidebar />);
-
-      fireEvent.click(screen.getByRole("button", { name: /push all/i }));
-      fireEvent.click(screen.getByTestId("confirm-dialog-cancel"));
-
-      expect(mockGitPushAll).not.toHaveBeenCalled();
-      // Dialog should be closed
-      expect(screen.queryByText("Push all branches?")).not.toBeInTheDocument();
-    });
-
-    it("dialog closes after confirming", async () => {
-      mockContextOverride = {
-        sync: {
-          db_synced: true,
-          db_last_sync: "",
-          git_needs_push: 1,
-          git_needs_pull: 0,
-        },
-      };
-
-      mockGitPushAll.mockResolvedValueOnce({
-        results: [],
-        pushed: 1,
-        failed: 0,
-      });
-
-      render(<AgentsSidebar />);
-
-      fireEvent.click(screen.getByRole("button", { name: /push all/i }));
-      expect(screen.getByText("Push all branches?")).toBeInTheDocument();
-
-      await act(async () => {
-        fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
-      });
-      expect(screen.queryByText("Push all branches?")).not.toBeInTheDocument();
-
-      mockGitPushAll.mockReset();
-    });
-
-    it("fallback message when no push details available", () => {
-      mockContextOverride = {
-        sync: {
-          db_synced: true,
-          db_last_sync: "",
-          git_needs_push: 3,
-          git_needs_pull: 0,
-        },
-      };
-
-      render(<AgentsSidebar />);
-
-      fireEvent.click(screen.getByRole("button", { name: /push all/i }));
-
-      expect(
-        screen.getByText("Push 3 branches to remote?"),
-      ).toBeInTheDocument();
+      expect(screen.queryByText(/need publication/)).not.toBeInTheDocument();
     });
   });
 
@@ -1154,175 +966,32 @@ describe("AgentsSidebar", () => {
   // Push details expandable list
   // ---------------------------------------------------------------------------
 
-  describe("push details expandable list", () => {
-    const pushDetailsSyncOverride = {
-      sync: {
-        db_synced: true,
-        db_last_sync: "",
-        git_needs_push: 2,
-        git_needs_pull: 0,
-        git_push_details: [
-          { name: "nova", count: 3 },
-          { name: "falcon", count: 1 },
-        ],
-      },
-    };
-
-    it('clicking "N need push" text expands the agent push list when git_push_details is available', () => {
-      mockContextOverride = pushDetailsSyncOverride;
-
-      render(<AgentsSidebar />);
-
-      const pushButton = screen.getByRole("button", { name: /push details/i });
-      fireEvent.click(pushButton);
-
-      // Agent names from push details should be visible in the expanded list
-      expect(screen.getByText("nova")).toBeInTheDocument();
-      expect(screen.getByText("falcon")).toBeInTheDocument();
-    });
-
-    it("expanded list shows each agent name and commit count from git_push_details", () => {
-      mockContextOverride = pushDetailsSyncOverride;
-
-      render(<AgentsSidebar />);
-
-      // Expand the list
-      fireEvent.click(screen.getByRole("button", { name: /push details/i }));
-
-      // Check agent names
-      expect(screen.getByText("nova")).toBeInTheDocument();
-      expect(screen.getByText("falcon")).toBeInTheDocument();
-
-      // Check commit counts
-      expect(screen.getByText("3 commits")).toBeInTheDocument();
-      expect(screen.getByText("1 commit")).toBeInTheDocument();
-    });
-
-    it("each agent row has a Push button", () => {
-      mockContextOverride = pushDetailsSyncOverride;
-
-      render(<AgentsSidebar />);
-
-      // Expand the list
-      fireEvent.click(screen.getByRole("button", { name: /push details/i }));
-
-      // Should have individual Push buttons (plus the Push All button)
-      const pushButtons = screen.getAllByRole("button", { name: /^Push$/i });
-      expect(pushButtons).toHaveLength(2);
-    });
-
-    it('clicking "N need push" again collapses the list', () => {
-      mockContextOverride = pushDetailsSyncOverride;
-
-      render(<AgentsSidebar />);
-
-      const pushToggle = screen.getByRole("button", { name: /push details/i });
-
-      // Expand
-      fireEvent.click(pushToggle);
-      expect(screen.getByText("nova")).toBeInTheDocument();
-
-      // Collapse
-      fireEvent.click(pushToggle);
-      expect(screen.queryByText("nova")).not.toBeInTheDocument();
-      expect(screen.queryByText("falcon")).not.toBeInTheDocument();
-    });
-
-    it("list is NOT rendered when git_push_details is empty/undefined (text is static, not a button)", () => {
+  describe("publication details expandable list", () => {
+    it("shows branch details but no direct push controls", () => {
       mockContextOverride = {
         sync: {
           db_synced: true,
           db_last_sync: "",
           git_needs_push: 2,
           git_needs_pull: 0,
+          git_push_details: [
+            { name: "nova", count: 3 },
+            { name: "falcon", count: 1 },
+          ],
         },
       };
 
-      const { container } = render(<AgentsSidebar />);
-
-      // The "need push" text should be present but not as a button
-      expect(screen.getByText(/2 need push/)).toBeInTheDocument();
-
-      // It should be a static span with syncBannerTextStatic class
-      const staticElement = container.querySelector(
-        '[class*="syncBannerTextStatic"]',
-      );
-      expect(staticElement).toBeInTheDocument();
-
-      // Should NOT be a button
-      const pushButtons = screen.queryAllByRole("button", {
-        name: /need push/i,
-      });
-      expect(pushButtons).toHaveLength(0);
-    });
-
-    it("individual Push button calls gitPush with correct agent name", async () => {
-      mockContextOverride = pushDetailsSyncOverride;
-
       render(<AgentsSidebar />);
-
-      // Expand the list
       fireEvent.click(screen.getByRole("button", { name: /push details/i }));
 
-      // Click the first individual Push button (for "nova")
-      const pushButtons = screen.getAllByRole("button", { name: /^Push$/i });
-      await act(async () => {
-        fireEvent.click(pushButtons[0]!);
-      });
-
-      expect(mockGitPush).toHaveBeenCalledWith(TEST_WS_ID, "nova");
-    });
-
-    it('Push button shows "Pushing..." while in progress', async () => {
-      mockContextOverride = pushDetailsSyncOverride;
-
-      // Create a promise that we control (never resolves during the test)
-      let resolvePush!: (value: { success: boolean }) => void;
-      mockGitPush.mockImplementation(
-        () =>
-          new Promise<{ success: boolean }>((resolve) => {
-            resolvePush = resolve;
-          }),
-      );
-
-      render(<AgentsSidebar />);
-
-      // Expand the list
-      fireEvent.click(screen.getByRole("button", { name: /push details/i }));
-
-      // Click the first individual Push button
-      const pushButtons = screen.getAllByRole("button", { name: /^Push$/i });
-      await act(async () => {
-        fireEvent.click(pushButtons[0]!);
-      });
-
-      // The button should now show "Pushing..."
-      expect(screen.getByText("Pushing...")).toBeInTheDocument();
-
-      // Resolve to clean up
-      await act(async () => {
-        resolvePush({ success: true });
-      });
-    });
-
-    it("banner text is a <button> element with aria-expanded attribute when details are available", () => {
-      mockContextOverride = pushDetailsSyncOverride;
-
-      render(<AgentsSidebar />);
-
-      const pushToggle = screen.getByRole("button", { name: /push details/i });
-      expect(pushToggle.tagName).toBe("BUTTON");
-      expect(pushToggle).toHaveAttribute("aria-expanded", "false");
-
-      // After clicking, aria-expanded should be true
-      fireEvent.click(pushToggle);
-      expect(pushToggle).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByText("nova")).toBeInTheDocument();
+      expect(screen.getByText("falcon")).toBeInTheDocument();
+      expect(screen.getByText("3 commits")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /^push$/i }),
+      ).not.toBeInTheDocument();
     });
   });
-
-  // ---------------------------------------------------------------------------
-  // Responsive layout breakpoint (auto-collapse at <1024px)
-  // ---------------------------------------------------------------------------
 
   describe("responsive layout breakpoint", () => {
     let originalMatchMedia: typeof window.matchMedia;

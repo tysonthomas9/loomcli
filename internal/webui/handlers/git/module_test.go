@@ -20,10 +20,7 @@ func TestGitModule_RegisterRoutes(t *testing.T) {
 		path   string
 	}{
 		// Git operations
-		{"POST", "/api/workspaces/test-ws/git/push-all"},
-		{"POST", "/api/workspaces/test-ws/agents/agent1/git/push"},
 		{"POST", "/api/workspaces/test-ws/agents/agent1/git/pull"},
-		{"POST", "/api/workspaces/test-ws/agents/agent1/git/sync"},
 		{"POST", "/api/workspaces/test-ws/agents/agent1/git/pr"},
 		{"POST", "/api/workspaces/test-ws/agents/agent1/git/reset"},
 		{"GET", "/api/workspaces/test-ws/agents/agent1/git/status"},
@@ -48,21 +45,6 @@ func TestGitModule_RegisterRoutes(t *testing.T) {
 		if rec.Code == http.StatusMethodNotAllowed {
 			t.Errorf("%s %s: got 405, wrong method registered", rt.method, rt.path)
 		}
-	}
-}
-
-func TestGitModule_WrongMethod_Returns405(t *testing.T) {
-	mod := NewGitModule(&mockAgentService{}, &stubDiffService{})
-
-	mux := http.NewServeMux()
-	mod.Register(mux)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/workspaces/test-ws/git/push-all", nil)
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Errorf("GET .../git/push-all: expected 405, got %d", rec.Code)
 	}
 }
 

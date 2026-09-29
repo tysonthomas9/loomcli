@@ -1,7 +1,7 @@
 /**
  * EmbeddedTerminal component.
  * Wraps TerminalInstance with a header bar showing backend info,
- * connection state, worktree breadcrumb, and optional git actions.
+ * connection state and worktree breadcrumb.
  * Designed to be rendered inside terminal-type tabs in IssueDetailPanel.
  *
  * Selection, copy, and paste stay inside the selected terminal renderer;
@@ -9,8 +9,6 @@
  */
 
 import { forwardRef, useState, useCallback } from "react";
-
-import { useGitActions } from "@/hooks/workspace";
 
 import {
   TerminalInstance,
@@ -59,8 +57,6 @@ export const EmbeddedTerminal = forwardRef<
     [onExternalStateChange],
   );
 
-  const gitActions = useGitActions({ agentName });
-
   return (
     <div className={styles.container} data-testid="embedded-terminal">
       <TerminalHeader
@@ -68,7 +64,6 @@ export const EmbeddedTerminal = forwardRef<
         worktreePath={worktreePath}
         agentName={agentName}
         connectionState={connectionState}
-        gitActions={agentName !== null ? gitActions : undefined}
         onMaximize={onMaximize}
         isMaximized={isMaximized}
       />

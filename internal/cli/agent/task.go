@@ -35,8 +35,8 @@ The implementation agent will:
   1. Pick the highest priority ready task (skipping tasks needing revision)
   2. Follow the --design plan if present, otherwise create a local plan
   3. Implement, test, and review the code
-  4. Commit and push changes
-  5. Close the task and exit after completing ONE task (unless --auto is enabled)
+  4. Commit and publish changes for review
+  5. Move the task to review and exit after completing ONE task (unless --auto is enabled)
 
 Arguments:
   worktree    Worktree/workspace name (e.g., falcon) or path

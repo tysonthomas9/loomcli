@@ -11,7 +11,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { ConnectionState } from "@/components/TerminalView/instances";
-import type { UseGitActionsReturn } from "@/hooks/workspace";
 
 import { TerminalHeader } from "../TerminalHeader";
 
@@ -22,26 +21,6 @@ const hoisted = vi.hoisted(() => {
     | ((state: "disconnected" | "connecting" | "connected") => void)
     | undefined;
 
-  const mockGitActions: UseGitActionsReturn = {
-    push: vi.fn(),
-    pull: vi.fn(),
-    sync: vi.fn(),
-    createPR: vi.fn(),
-    reset: vi.fn(),
-    updateTarget: vi.fn(),
-    pushState: { isLoading: false, error: null },
-    pullState: { isLoading: false, error: null },
-    syncState: { isLoading: false, error: null },
-    prState: { isLoading: false, error: null },
-    resetState: { isLoading: false, error: null },
-    targetState: { isLoading: false, error: null },
-    anyLoading: false,
-  };
-
-  const mockUseGitActions = vi.fn(() => mockGitActions);
-  const mockShowToast = vi.fn();
-  const mockUseToast = vi.fn(() => ({ showToast: mockShowToast }));
-
   return {
     get capturedOnConnectionStateChange() {
       return _capturedOnConnectionStateChange;
@@ -49,10 +28,6 @@ const hoisted = vi.hoisted(() => {
     set capturedOnConnectionStateChange(v) {
       _capturedOnConnectionStateChange = v;
     },
-    mockGitActions,
-    mockUseGitActions,
-    mockShowToast,
-    mockUseToast,
   };
 });
 
@@ -85,20 +60,6 @@ vi.mock("@/components/TerminalView/instances/TerminalInstance", () => ({
   ),
 }));
 
-vi.mock("@/hooks/workspace", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/hooks/workspace")>(
-      "@/hooks/workspace",
-    );
-  return { ...actual, useGitActions: hoisted.mockUseGitActions };
-});
-
-vi.mock("@/hooks/ui", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/hooks/ui")>("@/hooks/ui");
-  return { ...actual, useToast: hoisted.mockUseToast };
-});
-
 // ── Lazy import after mocks are set up ────────────────────────────────────────
 
 // EmbeddedTerminal must be imported after vi.mock declarations so the mocks
@@ -107,17 +68,10 @@ const { EmbeddedTerminal } = await import("../EmbeddedTerminal");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function defaultGitActions(
-  overrides: Partial<UseGitActionsReturn> = {},
-): UseGitActionsReturn {
-  return { ...hoisted.mockGitActions, ...overrides };
-}
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
   hoisted.capturedOnConnectionStateChange = undefined;
-  hoisted.mockUseGitActions.mockReturnValue(defaultGitActions());
 });
 
 describe("EmbeddedTerminal", () => {
@@ -287,106 +241,6 @@ describe("TerminalHeader", () => {
       expect(
         screen.queryByTestId("worktree-breadcrumb"),
       ).not.toBeInTheDocument();
-    });
-  });
-
-  describe("git action buttons", () => {
-    it("renders git action buttons when agentName is non-null and gitActions provided", () => {
-      render(
-        <TerminalHeader
-          backend="claude"
-          agentName="agent-1"
-          connectionState="connected"
-          gitActions={defaultGitActions()}
-        />,
-      );
-
-      expect(screen.getByTestId("git-actions")).toBeInTheDocument();
-      expect(screen.getByTestId("action-review-changes")).toBeInTheDocument();
-      expect(screen.getByTestId("action-merge")).toBeInTheDocument();
-    });
-
-    it("does NOT render git action buttons when agentName is null", () => {
-      render(
-        <TerminalHeader
-          backend="claude"
-          agentName={null}
-          connectionState="connected"
-        />,
-      );
-
-      expect(screen.queryByTestId("git-actions")).not.toBeInTheDocument();
-    });
-
-    it("does NOT render git action buttons when gitActions is undefined", () => {
-      render(
-        <TerminalHeader
-          backend="claude"
-          agentName="agent-1"
-          connectionState="connected"
-          gitActions={undefined}
-        />,
-      );
-
-      expect(screen.queryByTestId("git-actions")).not.toBeInTheDocument();
-    });
-
-    it("disables buttons when gitActions.anyLoading is true", () => {
-      render(
-        <TerminalHeader
-          backend="claude"
-          agentName="agent-1"
-          connectionState="connected"
-          gitActions={defaultGitActions({ anyLoading: true })}
-        />,
-      );
-
-      expect(screen.getByTestId("action-review-changes")).toBeDisabled();
-      expect(screen.getByTestId("action-merge")).toBeDisabled();
-    });
-
-    it("enables buttons when gitActions.anyLoading is false", () => {
-      render(
-        <TerminalHeader
-          backend="claude"
-          agentName="agent-1"
-          connectionState="connected"
-          gitActions={defaultGitActions({ anyLoading: false })}
-        />,
-      );
-
-      expect(screen.getByTestId("action-review-changes")).toBeEnabled();
-      expect(screen.getByTestId("action-merge")).toBeEnabled();
-    });
-
-    it("calls gitActions.sync when Review Changes is clicked", () => {
-      const syncFn = vi.fn();
-      render(
-        <TerminalHeader
-          backend="claude"
-          agentName="agent-1"
-          connectionState="connected"
-          gitActions={defaultGitActions({ sync: syncFn })}
-        />,
-      );
-
-      fireEvent.click(screen.getByTestId("action-review-changes"));
-      expect(syncFn).toHaveBeenCalledTimes(1);
-    });
-
-    it("calls gitActions.push when Merge is clicked", () => {
-      const pushFn = vi.fn();
-      render(
-        <TerminalHeader
-          backend="claude"
-          agentName="agent-1"
-          connectionState="connected"
-          gitActions={defaultGitActions({ push: pushFn })}
-        />,
-      );
-
-      fireEvent.click(screen.getByTestId("action-merge"));
-      expect(pushFn).toHaveBeenCalledTimes(1);
     });
   });
 
