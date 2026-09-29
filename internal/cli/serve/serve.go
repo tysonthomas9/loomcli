@@ -235,6 +235,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	startTriggerDeliverySweeper(ctx, storeHandle.Store)
 	startAwaitTimeoutSweeper(ctx, storeHandle.Store)
 	startIssueJournalBridge(ctx, storeHandle.Store)
+	startLoomGitMirror(ctx)
 
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForURL(storeHandle.URL(), fleetState.clientCfg.Actor)
 	monitorDefaultWorkspace := resolveMonitorCollectorWorkspace(storeHandle.Store, fleetState.clientCfg.Workspace)

@@ -24,6 +24,10 @@ func TestRunWithCredentialRefusesForeignURLBeforeConsumingToken(t *testing.T) {
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("command with mismatched URL = %v, want forbidden", err)
 	}
+	_, err = r.RunWithCredential(context.Background(), source, "https://github.com/owner/repo.git", "ls-remote", "https://github.com/owner/other.git")
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("remote read with mismatched URL = %v, want forbidden", err)
+	}
 	if _, err := source.Take("https://github.com/owner/repo.git"); err != nil {
 		t.Fatalf("foreign attempts consumed token: %v", err)
 	}

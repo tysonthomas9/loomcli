@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/kv"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/mirror"
 )
 
 var (
@@ -50,14 +51,21 @@ func init() {
 
 // StatusData is the top-level JSON output for loom status.
 type StatusData struct {
-	Daemon       DaemonInfo       `json:"daemon"`
-	Backend      BackendInfo      `json:"backend"`
-	IssueBackend string           `json:"issue_backend"`
-	Worktrees    WorktreesSummary `json:"worktrees"`
-	Tasks        TaskSummary      `json:"tasks"`
-	Git          GitSummary       `json:"git"`
-	Redis        RedisInfo        `json:"redis"`
-	Issues       []StatusIssue    `json:"issues,omitempty"`
+	Daemon        DaemonInfo       `json:"daemon"`
+	Backend       BackendInfo      `json:"backend"`
+	IssueBackend  string           `json:"issue_backend"`
+	Worktrees     WorktreesSummary `json:"worktrees"`
+	Tasks         TaskSummary      `json:"tasks"`
+	Git           GitSummary       `json:"git"`
+	LoomGitMirror MirrorSummary    `json:"loom_git_mirror"`
+	Redis         RedisInfo        `json:"redis"`
+	Issues        []StatusIssue    `json:"issues,omitempty"`
+}
+
+type MirrorSummary struct {
+	Mirrored    int      `json:"mirrored"`
+	Pending     int      `json:"pending"`
+	NotMirrored []string `json:"not_mirrored,omitempty"`
 }
 
 // DaemonInfo holds daemon health information.
@@ -145,6 +153,20 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	// Build status data from collected information.
 	data := buildStatusData(daemonInfo, monData)
+	if rows, err := mirror.Status(cmd.Context()); err == nil {
+		for _, row := range rows {
+			switch row.State {
+			case "mirrored":
+				data.LoomGitMirror.Mirrored++
+			case "pending":
+				data.LoomGitMirror.Pending++
+			default:
+				data.LoomGitMirror.NotMirrored = append(data.LoomGitMirror.NotMirrored, row.Ref+": "+row.Reason)
+			}
+		}
+	} else {
+		data.LoomGitMirror.NotMirrored = append(data.LoomGitMirror.NotMirrored, "status unavailable: "+err.Error())
+	}
 
 	if statusJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -314,6 +336,10 @@ func renderStatusHuman(data StatusData) {
 	fmt.Printf("Tasks:      %d open, %d in-progress, %d review, %d closed\n",
 		data.Tasks.Open, data.Tasks.InProgress, data.Tasks.Review, data.Tasks.Closed)
 	renderStatusGit(data.Git)
+	fmt.Printf("Loom Git:   %d mirrored, %d pending, %d not mirrored\n", data.LoomGitMirror.Mirrored, data.LoomGitMirror.Pending, len(data.LoomGitMirror.NotMirrored))
+	for _, reason := range data.LoomGitMirror.NotMirrored {
+		fmt.Printf("  %s\n", reason)
+	}
 	renderStatusRedis(data.Redis)
 	renderStatusIssues(data.Issues)
 }
