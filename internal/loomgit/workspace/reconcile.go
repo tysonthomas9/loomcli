@@ -35,6 +35,22 @@ func (r *Recovery) Phase() string   { return r.entry.Phase }
 func (r *Recovery) IsAttach() bool  { return r.entry.Operation == "attach_workspace_repos" }
 func (r *Recovery) Unplanned() bool { return r.unplanned }
 
+// DiscardMissingAttachment clears an attachment journal after its workspace was
+// deleted. A surviving checkout needs manual recovery and keeps journal ownership.
+func (r *Recovery) DiscardMissingAttachment(ctx context.Context) error {
+	if !r.IsAttach() {
+		return errors.New("not an attachment recovery")
+	}
+	for _, repo := range r.Plan.Repos {
+		if _, err := os.Lstat(repo.Path); err == nil {
+			return fmt.Errorf("deleted workspace has an attached checkout requiring recovery: %s", repo.Path)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return r.store.AbortWorkspace(ctx, r.entry)
+}
+
 func OpenCreations(ctx context.Context) ([]*Recovery, error) {
 	path := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {

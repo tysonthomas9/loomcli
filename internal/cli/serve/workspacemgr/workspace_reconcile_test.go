@@ -130,6 +130,36 @@ func TestP19InterruptedRepoAttachmentIsAdopted(t *testing.T) {
 	}
 }
 
+func TestP19DeletedWorkspaceDiscardsInterruptedAttachment(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(root, "config"))
+	src := initTestGitRepo(t, root, "app")
+	wsDir := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	branch := "loom/ws/WS1/interactive/lead"
+	checkout := filepath.Join(wsDir, "app")
+	runGit(t, src, "worktree", "add", checkout, "-b", branch, "HEAD")
+	base := strings.TrimSpace(gitOutput(t, checkout, "rev-parse", "HEAD"))
+	session, err := loomworkspace.BeginAttach(context.Background(), "WS1", wsDir, []loomgit.WorkspaceRepo{{Workspace: "WS1", Repo: "app", Trunk: "main", WorkspaceBranch: branch, BaseSHA: base}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, src, "worktree", "remove", checkout)
+	st := memstore.New()
+	if err := Reconcile(context.Background(), st); err != nil {
+		t.Fatalf("deleted workspace should not block serve: %v", err)
+	}
+	open, err := loomworkspace.OpenCreations(context.Background())
+	if err != nil || len(open) != 0 {
+		t.Fatalf("orphan attachment journals = %d, err = %v", len(open), err)
+	}
+}
+
 func TestP19InterruptedCloneKeepsJournalAndRequestsAttention(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(root, "config"))

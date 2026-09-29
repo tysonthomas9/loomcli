@@ -33,6 +33,17 @@ func Reconcile(ctx context.Context, s storepkg.Store) error {
 
 func reconcileCreation(ctx context.Context, s storepkg.Store, key string, recovery *loomworkspace.Recovery) error {
 	plan := recovery.Plan
+	if recovery.IsAttach() {
+		if _, err := s.Workspaces().Get(ctx, key); errors.Is(err, domain.ErrNotFound) {
+			if err := recovery.DiscardMissingAttachment(ctx); err != nil {
+				return err
+			}
+			slog.Warn("discarded interrupted repo attachment for deleted workspace", "workspace", key)
+			return nil
+		} else if err != nil {
+			return err
+		}
+	}
 	if recovery.Unplanned() {
 		return markCreationAttention(ctx, s, key, plan, errors.New("journal has no recovery plan; inspect its worktrees"))
 	}
