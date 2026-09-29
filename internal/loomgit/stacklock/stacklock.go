@@ -49,10 +49,11 @@ func With(ctx context.Context, workspace, stack string, action func(context.Cont
 		return fmt.Errorf("open stack journal: %w", err)
 	}
 	defer func() { _ = store.Close() }()
-	return withStore(ctx, store, "stack:"+workspace+":"+stack, waitLimit(ctx), leaseTTL, action)
+	return withStore(ctx, store, "stack:"+workspace+":"+stack, WaitLimit(ctx), leaseTTL, action)
 }
 
-func waitLimit(ctx context.Context) time.Duration {
+// WaitLimit reports the bounded lock wait selected for this caller.
+func WaitLimit(ctx context.Context) time.Duration {
 	if ctx.Value(epicWaitKey{}) == true {
 		return epicWaitTimeout
 	}

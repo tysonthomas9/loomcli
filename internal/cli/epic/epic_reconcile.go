@@ -44,7 +44,7 @@ func reconcileEpicStack(ctx context.Context, ws string, proj *EpicStackProjectio
 	}
 	opts := stackpublish.Options{Resolver: stack.HeadlessResolver()}
 
-	report, err := rec.PublishFromOrigin(stacklock.ForEpicReconcile(ctx), ws, proj.StackID, proj.RepoURL, token, opts)
+	report, err := publishEpicFromOrigin(rec, stacklock.ForEpicReconcile(ctx), ws, proj.StackID, proj.RepoURL, token, opts)
 	if err != nil {
 		return err
 	}
@@ -59,6 +59,8 @@ func reconcileEpicStack(ctx context.Context, ws string, proj *EpicStackProjectio
 	}
 	return nil
 }
+
+var publishEpicFromOrigin = (*stackpublish.Reconciler).PublishFromOrigin
 
 // resolveGitHubToken mirrors `loom stack`'s token resolution: env first, then a
 // local `gh auth token`. Returns "" when none is available.

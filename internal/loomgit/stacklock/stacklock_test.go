@@ -96,10 +96,10 @@ func TestHeldLeaseTimesOutWithStackLocked(t *testing.T) {
 }
 
 func TestEpicReconcileWaitsLongerThanManualEntry(t *testing.T) {
-	if got := waitLimit(context.Background()); got != waitTimeout {
+	if got := WaitLimit(context.Background()); got != waitTimeout {
 		t.Fatalf("manual wait = %v", got)
 	}
-	if got := waitLimit(ForEpicReconcile(context.Background())); got != epicWaitTimeout || got <= waitTimeout {
+	if got := WaitLimit(ForEpicReconcile(context.Background())); got != epicWaitTimeout || got <= waitTimeout {
 		t.Fatalf("epic wait = %v", got)
 	}
 }
