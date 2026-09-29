@@ -47,6 +47,8 @@ func (e *ErrUnsavedWork) Error() string {
 	return "unsaved_work: workspace deletion requires confirmation of the current work list"
 }
 
+func (e *ErrUnsavedWork) UnsavedWork() bool { return true }
+
 func deleteRunner(path string) (*gitexec.Runner, error) {
 	return gitexec.New(path, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
 }

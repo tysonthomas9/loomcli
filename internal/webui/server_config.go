@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	loomworkspace "github.com/tysonthomas9/loomcli/internal/loomgit/workspace"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
@@ -80,7 +79,7 @@ type ServerConfig struct {
 	FileOps                    ops.FileOps                      // File operations interface (optional; nil disables file endpoints)
 	WorkspaceDeleteFn          func(name string) error          // Workspace deletion function; nil = deletion unavailable
 	WorkspaceDeleteConfirmedFn func(name, fingerprint string) error
-	WorkspaceDeletePreviewFn   func(name string) (loomworkspace.DeletePreview, error)
+	WorkspaceDeletePreviewFn   func(name string) (service.WorkspaceDeletePreview, error)
 	SetDefaultWorkspaceFn      func(name string) error     // Deprecated compatibility hook; default workspace selection is disabled.
 	ClearDefaultWorkspaceFn    func() error                // Deprecated compatibility hook; default workspace selection is disabled.
 	WorkspaceCreateFn          service.WorkspaceCreateFn   // Workspace creation function; nil = creation unavailable

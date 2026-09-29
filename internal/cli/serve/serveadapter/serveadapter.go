@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	loomworkspace "github.com/tysonthomas9/loomcli/internal/loomgit/workspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // BuildWorkspaceIDResolverFn returns a closure satisfying
@@ -83,17 +84,28 @@ func WorkspaceConfig(ctx context.Context, s store.Store, key string) (config.Wor
 	return config.WorkspaceConfig{ID: key, Path: local.Path, Repos: repos}, nil
 }
 
-func BuildWorkspaceDeletePreviewFn(s store.Store) func(string) (loomworkspace.DeletePreview, error) {
+func BuildWorkspaceDeletePreviewFn(s store.Store) func(string) (service.WorkspaceDeletePreview, error) {
 	if s == nil {
 		return nil
 	}
-	return func(key string) (loomworkspace.DeletePreview, error) {
+	return func(key string) (service.WorkspaceDeletePreview, error) {
 		ctx := context.Background()
 		ws, err := WorkspaceConfig(ctx, s, key)
 		if err != nil {
-			return loomworkspace.DeletePreview{}, err
+			return service.WorkspaceDeletePreview{}, err
 		}
-		return loomworkspace.DryRun(ctx, ws)
+		preview, err := loomworkspace.DryRun(ctx, ws)
+		if err != nil {
+			return service.WorkspaceDeletePreview{}, err
+		}
+		items := make([]service.WorkspaceDeleteItem, 0, len(preview.Items))
+		for _, item := range preview.Items {
+			items = append(items, service.WorkspaceDeleteItem{
+				Repo: item.Repo, Path: item.Path, Kind: item.Kind,
+				Detail: item.Detail, Size: item.Size,
+			})
+		}
+		return service.WorkspaceDeletePreview{Items: items, Fingerprint: preview.Fingerprint}, nil
 	}
 }
 

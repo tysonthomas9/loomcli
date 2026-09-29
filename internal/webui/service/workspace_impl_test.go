@@ -8,7 +8,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	loomworkspace "github.com/tysonthomas9/loomcli/internal/loomgit/workspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
@@ -97,9 +96,9 @@ func TestDeleteWorkspace_PreviewAndConfirmedDeleteUseSameKey(t *testing.T) {
 	var previewKey, deletedKey, passedFingerprint string
 	svc := NewWorkspaceService(WorkspaceServiceConfig{
 		Store: st,
-		DeletePreviewFn: func(key string) (loomworkspace.DeletePreview, error) {
+		DeletePreviewFn: func(key string) (WorkspaceDeletePreview, error) {
 			previewKey = key
-			return loomworkspace.DeletePreview{Fingerprint: "exact"}, nil
+			return WorkspaceDeletePreview{Fingerprint: "exact"}, nil
 		},
 		DeleteConfirmedFn: func(key, fingerprint string) error {
 			deletedKey = key
@@ -108,7 +107,7 @@ func TestDeleteWorkspace_PreviewAndConfirmedDeleteUseSameKey(t *testing.T) {
 		},
 	})
 	previewer, ok := svc.(interface {
-		PreviewWorkspaceDeletion(context.Context, string) (loomworkspace.DeletePreview, error)
+		PreviewWorkspaceDeletion(context.Context, string) (WorkspaceDeletePreview, error)
 	})
 	if !ok {
 		t.Fatal("service has no deletion preview")
