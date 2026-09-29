@@ -48,6 +48,13 @@ func TestVerdictsBindExactHeadAndSupersedeOnlyOnNewSource(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
 	r1 := revision(t, s, "1", "source")
+	codeIs(t, func() error {
+		_, err := Submit(ctx, s, "W", "C", r1.Number, strings.Repeat("f", 40), "approve", "", Actor{"human", "user"})
+		return err
+	}(), loomgit.StaleSubject)
+	if _, err := s.LatestVerdict(ctx, r1); !errors.Is(err, journal.ErrNotFound) {
+		t.Fatalf("stale head recorded a verdict: %v", err)
+	}
 	v, err := Submit(ctx, s, "W", "C", r1.Number, r1.HeadSHA, "approve", "", Actor{"human", "user"})
 	if err != nil || v.HeadSHA != r1.HeadSHA {
 		t.Fatalf("verdict=%+v err=%v", v, err)
@@ -72,6 +79,18 @@ func TestVerdictsBindExactHeadAndSupersedeOnlyOnNewSource(t *testing.T) {
 	codeIs(t, RequireVerdict(ctx, s, "W", "C", derived.Number, derived.HeadSHA, "apply", "lead"), loomgit.ReviewRequired)
 	r2 := revision(t, s, "3", "source")
 	codeIs(t, RequireVerdict(ctx, s, "W", "C", r1.Number, r1.HeadSHA, "apply", "lead"), loomgit.RevisionSuperseded)
+	before, err := s.LatestVerdict(ctx, r1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RecordVerdict(ctx, loomgit.Verdict{Workspace: "W", Change: "C", Number: r1.Number,
+		HeadSHA: r1.HeadSHA, Kind: "approve", ActorKind: "human", ActorID: "user"}); err == nil {
+		t.Fatal("SQL guard recorded a verdict on superseded revision")
+	}
+	after, err := s.LatestVerdict(ctx, r1)
+	if err != nil || after.ID != before.ID {
+		t.Fatalf("superseded revision verdict changed: before=%+v after=%+v err=%v", before, after, err)
+	}
 	codeIs(t, func() error {
 		_, err := Submit(ctx, s, "W", "C", r1.Number, r1.HeadSHA, "approve", "", Actor{"human", "user"})
 		return err

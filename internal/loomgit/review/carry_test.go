@@ -80,6 +80,11 @@ func TestCarryForwardCleanPatchIDsAndEmptyDroppedCommit(t *testing.T) {
 	if err := RequireVerdict(ctx, s, "W", "C", derived.Number, derived.HeadSHA, "publish", ""); err != nil {
 		t.Fatal(err)
 	}
+	conflicted := recorded(t, s, "conflicted", "derived", trunk, derivedHead, source.Number)
+	if _, ok, err := CarryForward(ctx, s, runner, source, conflicted, replay.Result{ConflictCommit: dropped, DroppedCommits: []string{dropped}}); err != nil || ok {
+		t.Fatalf("patch-equivalent conflict carried: ok=%v err=%v", ok, err)
+	}
+	codeIs(t, RequireVerdict(ctx, s, "W", "C", conflicted.Number, conflicted.HeadSHA, "publish", ""), loomgit.ReviewRequired)
 	git(t, runner, "checkout", "-q", "-b", "different", trunk)
 	differentHead := commit(t, runner, dir, "b", "different")
 	different := recorded(t, s, "different", "derived", trunk, differentHead, source.Number)

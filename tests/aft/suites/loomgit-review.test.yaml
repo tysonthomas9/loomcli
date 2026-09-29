@@ -58,7 +58,15 @@ tests:
           done;
           echo "TaskRun did not record a revision"; exit 1
         intent: "Wait until the TaskRun records a reviewable revision through the product path"
-      - open: /ws/E2E-WS-REVIEW/issues/${var:reviewTaskId}
+      - open: /ws/E2E-WS-REVIEW/kanban
+        intent: "Load the new workspace before following a task deep link"
+      - wait:
+          fn: "!!document.querySelector('[data-testid=board-toolbar]')"
+        intent: "Wait until the workspace board has finished mounting"
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-REVIEW/issues/$(cat "$AFT_WORK_DIR/reviewTaskId")"
+        intent: "Open the recorded task through the same browser session using its runtime ID"
       - wait: { text: Revisions }
       - expect: { visible: { testid: revisions-section } }
       - click: { role: button, name: Approve, exact: true }

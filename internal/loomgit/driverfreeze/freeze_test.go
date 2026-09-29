@@ -47,7 +47,7 @@ func TestFreezeFlatDiffAndNextAttempt(t *testing.T) {
 		patch := git("diff", "--binary", base)
 		git("restore", "--worktree", ".")
 		outcome := []string{"completed", "timeout"}[number]
-		in := driverfreeze.Request{Workspace: "WS", Task: "TASK", Repo: "repo", Attempt: []string{"attempt-1", "attempt-2"}[number], Worktree: dir, Base: base, Patch: []byte(patch + "\n"), Outcome: outcome}
+		in := driverfreeze.Request{Workspace: "WS", Task: "TASK", Repo: "repo", Attempt: []string{"attempt-1", "attempt-2"}[number], Worktree: dir, Base: base, Patch: []byte(patch + "\n"), Outcome: outcome, AuthorKind: "agent", AuthorID: "worker"}
 		rev, err := driverfreeze.FreezeAt(ctx, journalPath, in)
 		if err != nil {
 			t.Fatal(err)
@@ -84,9 +84,13 @@ func TestFreezeFlatDiffAndNextAttempt(t *testing.T) {
 			t.Fatal(err)
 		}
 		stored, err := store.GetRevision(ctx, "WS", rev.Change, rev.Number)
+		authorKind, authorID, authorErr := store.RevisionAuthor(ctx, rev)
 		_ = store.Close()
 		if err != nil || stored.Outcome != outcome {
 			t.Fatalf("stored revision = %+v, %v", stored, err)
+		}
+		if authorErr != nil || authorKind != "agent" || authorID != "worker" {
+			t.Fatalf("revision author = %q/%q, %v", authorKind, authorID, authorErr)
 		}
 	}
 }
