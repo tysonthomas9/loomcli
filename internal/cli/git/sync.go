@@ -119,7 +119,10 @@ func runWorkspaceSyncWithConfirmation(deps *cli.Deps, pushOnly, pullOnly bool, w
 			skipped = append(skipped, wsName)
 		}
 	}
+	return printSyncSummary(failed, skipped)
+}
 
+func printSyncSummary(failed, skipped []string) error {
 	fmt.Println("=========================================")
 	if len(failed) > 0 {
 		fmt.Fprintf(os.Stderr, "Sync failed for %d workspace(s): %v\n", len(failed), failed)
