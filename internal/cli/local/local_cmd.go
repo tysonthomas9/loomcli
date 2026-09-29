@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
@@ -132,9 +133,15 @@ func runService(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	logFile, err := os.OpenFile(serveLogPath(cfg.dataDir), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		return fmt.Errorf("open serve log: %w", err)
+	// Size-capped, rotating serve log. lumberjack opens the file lazily on the
+	// first write (and creates the logs dir if needed), so there is no open
+	// error to check here; ensureRuntimeDirs already created the directory.
+	logFile := &lumberjack.Logger{
+		Filename:   serveLogPath(cfg.dataDir),
+		MaxSize:    100, // MB
+		MaxBackups: 3,
+		MaxAge:     14, // days
+		Compress:   true,
 	}
 	defer func() { _ = logFile.Close() }()
 
@@ -233,7 +240,7 @@ func newRuntimeInfo(cfg *localServiceConfig) *runtimeInfo {
 
 // startServeProcess spawns `loom serve` as a child, records its PID in
 // runtime.json, and returns the running *exec.Cmd. Caller owns Wait().
-func startServeProcess(ctx context.Context, cfg *localServiceConfig, logFile *os.File, info *runtimeInfo) (*exec.Cmd, error) {
+func startServeProcess(ctx context.Context, cfg *localServiceConfig, logFile io.Writer, info *runtimeInfo) (*exec.Cmd, error) {
 	// exe is this process's resolved binary path; args are fixed subcommand +
 	// CLI-validated bindFlag / port. The guard refuses to re-exec a *.test
 	// binary (fork-bomb protection; see reexec_guard.go).
