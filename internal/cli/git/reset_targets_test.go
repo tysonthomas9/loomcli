@@ -41,12 +41,12 @@ func TestResetTargetsHonorPerRepoAndExplicitBranches(t *testing.T) {
 
 func TestResetSummaryReportsPartialAndAllFailures(t *testing.T) {
 	for _, failed := range [][]string{{"first"}, {"first", "second"}} {
-		err := printResetSummary(failed, "main", false)
+		err := printResetSummary(failed, nil, "main", false)
 		if err == nil || !strings.Contains(err.Error(), failed[len(failed)-1]) || !strings.Contains(err.Error(), "failed to reset") {
 			t.Fatalf("failed=%v error=%v", failed, err)
 		}
 	}
-	if err := printResetSummary(nil, "main", false); err != nil {
+	if err := printResetSummary(nil, nil, "main", false); err != nil {
 		t.Fatalf("success summary: %v", err)
 	}
 }
