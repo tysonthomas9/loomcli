@@ -53,8 +53,7 @@ tests:
       - run: >-
           task="$(cat "$AFT_WORK_DIR/reviewTaskId")";
           for i in $(seq 1 45); do
-            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/issues/$task/revisions"
-            | grep -q '"head_sha"' && exit 0;
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/issues/$task/revisions" | grep -q '"head_sha"' && exit 0;
             sleep 2;
           done;
           echo "TaskRun did not record a revision"; exit 1
