@@ -14,3 +14,8 @@ internal/cli 19
 # wiring and the domain skill path policy to svcimpl's file index.
 internal/webui/app 19
 internal/webui/svcimpl 19
+# serve is where a process-wide Prometheus registration has to happen: the
+# spawn/session collector is read at scrape time by the /metrics handler serve
+# owns, so serve imports internal/metrics/agentmetrics directly. That is one
+# import past the threshold, and the only one the collector costs.
+internal/cli/serve 19
