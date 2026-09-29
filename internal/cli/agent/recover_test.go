@@ -167,6 +167,19 @@ func TestResetTask_SkipsBlocked(t *testing.T) {
 	}
 }
 
+func TestResetTask_SkipsDeferred(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
+
+	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-789", Status: "deferred"}}
+
+	resetTask(deps, "task-789")
+
+	if tracker.Called("Update") {
+		t.Error("UpdateIssue should not be called for a deferred task (a human hold is released only by an explicit deferred -> open)")
+	}
+}
+
 func TestResetTask_GetIssueFails(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)

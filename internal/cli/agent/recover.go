@@ -227,7 +227,8 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int, incomplete bo
 				// in_progress with nobody working it. Put it back on the queue
 				// so another agent (or this one on its next cycle) can carry it
 				// forward. resetTask still no-ops on review/closed/blocked, so
-				// a status the agent DID set is never stomped.
+				// a status the agent DID set is never stomped, and on deferred,
+				// so a human hold is never released by recovery.
 				fmt.Printf("[recover] Agent %s exited cleanly (code 0) without releasing its claim, returning task %s to the queue\n",
 					agentName, lockInfo.TaskID)
 				resetTask(deps, lockInfo.TaskID)

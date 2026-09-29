@@ -328,7 +328,12 @@ func (s *Supervisor) advanceReviewCycle(ctx context.Context, taskID string, cycl
 	// deliberate gesture; in loom a planning stage lands there as its ordinary
 	// completion, so honoring it would stall every loop at round one. Use
 	// `blocked` to stop a loop for a human.
-	if issue.Status == "closed" || issue.Status == "blocked" {
+	//
+	// `deferred` is the human hold: a human parked the task, possibly while
+	// this run was in flight, and only an explicit deferred -> open releases
+	// it. Stopping here (no label writes, no reopen) leaves the hold intact and
+	// the run clean.
+	if issue.Status == "closed" || issue.Status == "blocked" || issue.Status == "deferred" {
 		slog.InfoContext(ctx, "review cycle stopped: task is not available to advance",
 			"task", taskID, "status", issue.Status)
 		return nil
@@ -652,8 +657,22 @@ func (s *Supervisor) writeTaskDesign(ctx context.Context, taskID, reply string) 
 // of notes — the reason for the block that is happening NOW supersedes an older
 // one, and appending would need a read-modify-write that could lose a concurrent
 // edit anyway.
+//
+// A task that is `deferred` when the hook runs is left alone and the action
+// succeeds: `deferred` is the human hold, and a human can move a task there
+// while its run is in flight. Only an explicit deferred -> open (the CLI or the
+// board, not a hook) releases it. Skipping rather than failing matters: a failed
+// hook demotes the run, burns the agent's block budget, and hands the task to
+// crash recovery. If the status read fails the write proceeds as before.
 func (s *Supervisor) setTaskStatus(ctx context.Context, taskID string, action domain.AgentHookAction) error {
 	status := action.Value
+	if status != "deferred" {
+		if issue, err := s.IssueBackend.Get(ctx, taskID); err == nil && issue != nil && issue.Status == "deferred" {
+			slog.InfoContext(ctx, "set_status skipped: task is deferred (human hold)",
+				"task", taskID, "status", status)
+			return nil
+		}
+	}
 	params := backend.UpdateParams{Status: &status}
 	// Validate guarantees a reason is present only on a set_status to blocked,
 	// so the field's presence IS the condition. Re-testing the status here would
