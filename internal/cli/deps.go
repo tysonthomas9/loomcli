@@ -410,14 +410,15 @@ func (b *fleetDBIssueBackend) ReleaseClaim(ctx context.Context, id, actor string
 	})
 }
 
+// ClaimIssueAsActor is declared unconditionally on this wrapper, so a caller
+// type-asserting backend.ActorClaimer always succeeds here regardless of what
+// the inner backend can do. That makes the wrapper the one place a lost
+// capability could hide, so the inner dispatch goes through backend.ClaimAs:
+// an inner backend that cannot scope the claim refuses instead of quietly
+// claiming under this process's configured actor.
 func (b *fleetDBIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
 	return b.withBackend(ctx, "ClaimIssue", func(ib backend.IssueBackend) error {
-		if actorBackend, ok := ib.(interface {
-			ClaimIssueAsActor(context.Context, string, time.Duration, string) error
-		}); ok {
-			return actorBackend.ClaimIssueAsActor(ctx, id, lockTTL, actor)
-		}
-		return ib.ClaimIssue(ctx, id, lockTTL)
+		return backend.ClaimAs(ctx, ib, id, lockTTL, actor)
 	})
 }
 

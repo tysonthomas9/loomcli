@@ -378,12 +378,14 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Atomically claim an issue for the server-side actor
-     * @description Claims an issue for the LOOM_AGENT_NAME configured on the server. Returns 409
-     *     Conflict if the issue is already claimed by another agent. The claim
-     *     operation is atomic — only one of N concurrent callers will succeed.
-     *     Blocked issues with open ready-work dependencies cannot be claimed.
-     *     Sets assignee and transitions status to in_progress in a single step.
+     * Atomically claim an issue
+     * @description Claims an issue for the actor named in the X-Actor header, or for the
+     *     LOOM_AGENT_NAME configured on the server when that header is absent.
+     *     Returns 409 Conflict if the issue is already claimed by another agent.
+     *     The claim operation is atomic — only one of N concurrent callers will
+     *     succeed. Blocked issues with open ready-work dependencies cannot be
+     *     claimed. Sets assignee and transitions status to in_progress in a
+     *     single step.
      */
     post: operations["claimIssue"];
     delete?: never;
@@ -3649,6 +3651,13 @@ export interface components {
     WorkspaceId: string;
     /** @description Issue identifier */
     IssueId: string;
+    /**
+     * @description Identity of the worker performing the operation. Issue locks are
+     *     arbitrated per actor, so without this header every worker behind one
+     *     server collapses onto the server's own configured actor. Bounded at
+     *     128 characters; control characters are rejected with 400.
+     */
+    ActorHeader: string;
     /** @description Agent worktree name */
     AgentName: string;
   };
@@ -4541,7 +4550,15 @@ export interface operations {
   claimIssue: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /**
+         * @description Identity of the worker performing the operation. Issue locks are
+         *     arbitrated per actor, so without this header every worker behind one
+         *     server collapses onto the server's own configured actor. Bounded at
+         *     128 characters; control characters are rejected with 400.
+         */
+        "X-Actor"?: components["parameters"]["ActorHeader"];
+      };
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];

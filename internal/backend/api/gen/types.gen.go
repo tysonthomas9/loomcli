@@ -3120,6 +3120,9 @@ type WorkspaceSummary struct {
 	RepoCount int     `json:"repo_count"`
 }
 
+// ActorHeader defines model for ActorHeader.
+type ActorHeader = string
+
 // AgentName defines model for AgentName.
 type AgentName = string
 
@@ -3503,6 +3506,15 @@ type GetGraphParams struct {
 
 // GetGraphParamsStatus defines parameters for GetGraph.
 type GetGraphParamsStatus string
+
+// ClaimIssueParams defines parameters for ClaimIssue.
+type ClaimIssueParams struct {
+	// XActor Identity of the worker performing the operation. Issue locks are
+	// arbitrated per actor, so without this header every worker behind one
+	// server collapses onto the server's own configured actor. Bounded at
+	// 128 characters; control characters are rejected with 400.
+	XActor *ActorHeader `json:"X-Actor,omitempty"`
+}
 
 // GetIssueEventsParams defines parameters for GetIssueEvents.
 type GetIssueEventsParams struct {
