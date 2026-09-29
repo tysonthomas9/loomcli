@@ -235,6 +235,6 @@
   left: 0;
   margin-top: var(--space-1, 4px);
   font-size: var(--font-xs);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   white-space: nowrap;
 }

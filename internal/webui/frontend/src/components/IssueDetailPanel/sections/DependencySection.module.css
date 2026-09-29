@@ -59,7 +59,7 @@
   padding: 8px 12px;
   margin-bottom: 8px;
   font-size: var(--font-xs);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   background-color: var(--color-danger-bg);
   border-radius: var(--radius-sm);
 }
@@ -281,7 +281,7 @@
 }
 
 .removeButton:hover:not(:disabled) {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   background-color: var(--color-danger-bg);
 }
 
