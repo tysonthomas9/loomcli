@@ -12,6 +12,7 @@ if [[ ${LOOM_HEAVY_LOCK_HELD+x} ]]; then
     exit
 fi
 
+caller_umask=$(umask)
 umask 077
 lock_dir="$HOME/.cache/loom/heavy.lock"
 mkdir -p "${lock_dir%/*}"
@@ -114,4 +115,5 @@ printf '%s\n%s\n%s\n%s\n' "$$" "$started" "$token" "$command" > "$metadata"
 mv "$metadata" "$owner_file"
 echo "Running heavy command under lock: $command" >&2
 export LOOM_HEAVY_LOCK_HELD="$$"
+umask "$caller_umask"
 "$@"
