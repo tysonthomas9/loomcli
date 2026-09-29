@@ -1243,7 +1243,16 @@ paths:
         Not expressible as a standard REST operation in OpenAPI.
         The frontend's `useSSE` hook consumes this stream directly.
 
-        **Event format**: Each SSE `data:` line contains a JSON `MutationPayload`:
+        **Replay contract**: `mutation` events carry durable journal IDs when
+        replayable. `checkpoint` events carry a durable ID with `{}` data and
+        advance replay past records excluded by `source_repos`; they do not
+        represent a domain mutation or synchronization completion. Clients
+        must retain these IDs for reconnect. The ID-less `connected` event is
+        emitted only after successful replay. A failed later page may emit a
+        successfully read prefix before closing; resume from its last ID.
+        Transport open alone does not mean synchronization has completed.
+
+        **Event format**: Each `mutation` SSE `data:` line contains a JSON `MutationPayload`:
         ```json
         {
           "type": "update",
