@@ -2,20 +2,20 @@ package git
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
 )
 
 var (
 	resetAll   bool
 	resetForce bool
-	resetPush  bool
 )
 
 var resetCmd = &cobra.Command{
@@ -25,12 +25,12 @@ var resetCmd = &cobra.Command{
 	ValidArgsFunction: cli.WorktreeThenBranchCompletion,
 	Long: `Hard reset worktree(s) to a specific branch.
 
-WARNING: This discards ALL local changes!
+WARNING: This discards local changes after a complete capture.
 
 This command will:
-  1. Discard all local changes (git reset --hard, git clean -fd)
-  2. Reset to the target branch (origin/branch)
-  3. Force push only if --push is specified (local-only by default)
+  1. Check branch protection and the running agent
+  2. Capture local changes in a workspace WIP ref
+  3. Reset to the target branch (origin/branch)
 
 In workspace mode, --all resets all repos in the workspace. Each repo
 resets to its own configured integration branch (DefaultBranch) unless
@@ -42,21 +42,16 @@ Arguments:
 
 Flags:
   -a, --all      Reset all worktrees
-  -p, --push     Force-push to remote after resetting locally
-  -f, --force    Skip confirmation prompt, override lock protection,
-                 and allow force-push to protected branches (main/master)
+  -f, --force    Stop a running agent after confirmation
 
 Safety:
-  By default, only local state is reset. The remote branch is NOT updated.
-  Use --push to force-push the reset to origin.
-  Force-pushing to main/master requires both --push and --force.
+  Protected branches cannot be reset. The remote branch is never updated.
 
 Examples:
-  loom reset falcon                        # Reset falcon locally (no push)
-  loom reset falcon main                   # Reset falcon to main (local only)
-  loom reset falcon --push                 # Reset falcon and force-push to origin
+  loom reset falcon                        # Capture and reset falcon locally
+  loom reset falcon main                   # Reset falcon to main locally
   loom reset --all                         # Reset all worktrees locally
-  loom reset --all --push                  # Reset all worktrees and force-push`,
+`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if resetAll {
 			if len(args) > 1 {
@@ -74,13 +69,11 @@ Examples:
 
 func init() {
 	resetCmd.Flags().BoolVarP(&resetAll, "all", "a", false, "Reset all worktrees")
-	resetCmd.Flags().BoolVarP(&resetPush, "push", "p", false, "Force-push to remote after resetting locally")
-	resetCmd.Flags().BoolVarP(&resetForce, "force", "f", false, "Skip confirmation and allow force-push to protected branches (main/master)")
+	resetCmd.Flags().BoolVarP(&resetForce, "force", "f", false, "Stop running agent after confirmation")
 	cli.RegisterCommand(resetCmd)
 }
 
-func runReset(cmd *cobra.Command, args []string) {
-	deps := cli.GetDeps(cmd)
+func runReset(_ *cobra.Command, args []string) {
 	defaultBranch := cli.GetDefaultBranch()
 
 	if resetAll {
@@ -90,7 +83,7 @@ func runReset(cmd *cobra.Command, args []string) {
 		if explicitBranch {
 			targetBranch = args[0]
 		}
-		if err := resetAllWorktrees(deps, targetBranch, explicitBranch); err != nil {
+		if err := resetAllWorktrees(targetBranch, explicitBranch); err != nil {
 			os.Exit(1)
 		}
 	} else {
@@ -100,7 +93,7 @@ func runReset(cmd *cobra.Command, args []string) {
 		if len(args) > 1 {
 			targetBranch = args[1]
 		}
-		if !resetWorktree(deps, worktreeName, targetBranch, !resetForce) {
+		if !resetWorktree(worktreeName, targetBranch, true) {
 			os.Exit(1)
 		}
 	}
@@ -112,7 +105,7 @@ type resetTarget struct {
 	branch string
 }
 
-func resetAllWorktrees(deps *cli.Deps, targetBranch string, explicitTarget bool) error {
+func resetAllWorktrees(targetBranch string, explicitTarget bool) error {
 	worktrees, err := cli.DiscoverWorktrees()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error discovering worktrees: %v\n", err)
@@ -126,15 +119,19 @@ func resetAllWorktrees(deps *cli.Deps, targetBranch string, explicitTarget bool)
 	targets, perRepoBranches := buildResetTargets(worktrees, targetBranch, explicitTarget)
 	printResetPlan(targets, targetBranch, perRepoBranches)
 
-	if !resetForce {
-		if !ConfirmAction("Are you sure?") {
-			fmt.Println("Aborted.")
-			return nil
+	for _, target := range targets {
+		fmt.Printf("%s:\n", target.wt.Name)
+		if err := printResetIgnored(target.wt.Path); err != nil {
+			return err
 		}
-		fmt.Println("")
 	}
+	if !ConfirmAction("Are you sure?") {
+		fmt.Println("Aborted.")
+		return nil
+	}
+	fmt.Println("")
 
-	failed := executeResetAll(deps, targets)
+	failed := executeResetAll(targets)
 	return printResetSummary(failed, targetBranch, perRepoBranches)
 }
 
@@ -164,7 +161,7 @@ func printResetPlan(targets []resetTarget, targetBranch string, perRepoBranches 
 	}
 	fmt.Println("=========================================")
 	fmt.Println("")
-	fmt.Println("⚠ WARNING: This will discard ALL local changes in ALL worktrees!")
+	fmt.Println("⚠ WARNING: This will discard local changes in ALL worktrees after capture!")
 	fmt.Println("")
 	for _, t := range targets {
 		fmt.Printf("  - %s (%s) -> %s\n", t.wt.Name, t.wt.Branch, t.branch)
@@ -172,10 +169,10 @@ func printResetPlan(targets []resetTarget, targetBranch string, perRepoBranches 
 	fmt.Println("")
 }
 
-func executeResetAll(deps *cli.Deps, targets []resetTarget) []string {
+func executeResetAll(targets []resetTarget) []string {
 	var failed []string
 	for _, t := range targets {
-		if !resetWorktree(deps, t.wt.Name, t.branch, false) {
+		if !resetWorktree(t.wt.Name, t.branch, false) {
 			failed = append(failed, t.wt.Name)
 		}
 		fmt.Println("")
@@ -199,14 +196,19 @@ func printResetSummary(failed []string, targetBranch string, perRepoBranches boo
 	return nil
 }
 
-func resetWorktree(deps *cli.Deps, worktreeName, targetBranch string, askConfirm bool) bool {
+func resetWorktree(worktreeName, targetBranch string, askConfirm bool) bool {
 	worktreePath, err := cli.ResolveWorktreePath(worktreeName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return false
 	}
-
-	if !checkResetLock(worktreePath, worktreeName) {
+	branch, err := cli.GetCurrentBranch(worktreePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting branch: %v\n", err)
+		return false
+	}
+	if isProtectedBranch(branch) || branch == targetBranch {
+		fmt.Fprintf(os.Stderr, "Error: protected branch %s\n", branch)
 		return false
 	}
 
@@ -216,7 +218,11 @@ func resetWorktree(deps *cli.Deps, worktreeName, targetBranch string, askConfirm
 
 	if askConfirm {
 		fmt.Println("")
-		fmt.Printf("⚠ WARNING: This will discard ALL local changes in '%s'!\n", worktreeName)
+		fmt.Printf("⚠ WARNING: This will discard local changes in '%s' after capture!\n", worktreeName)
+		if err := printResetIgnored(worktreePath); err != nil {
+			fmt.Fprintf(os.Stderr, "Error listing ignored files: %v\n", err)
+			return false
+		}
 		if !ConfirmAction("Are you sure?") {
 			fmt.Println("Aborted.")
 			return true
@@ -224,100 +230,36 @@ func resetWorktree(deps *cli.Deps, worktreeName, targetBranch string, askConfirm
 		fmt.Println("")
 	}
 
-	currentBranch, err := getCurrentBranchViaDeps(deps, worktreePath)
+	result, err := ResetWorktreeResult(worktreePath, worktreeName, targetBranch, resetForce, false)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting current branch: %v\n", err)
-		return false
-	}
-
-	if err := executeReset(deps, worktreePath, targetBranch); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return false
 	}
-
-	return resetFinalizePush(deps, worktreePath, worktreeName, targetBranch, currentBranch)
-}
-
-// checkResetLock checks for an active agent lock and returns false if the reset should be blocked.
-func checkResetLock(worktreePath, worktreeName string) bool {
-	lockInfo, running, checkErr := cli.CheckLock(worktreePath)
-	if checkErr != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not check agent lock: %v\n", checkErr)
-		return true
+	fmt.Printf("✓ %s\n", result.Message)
+	if result.CaptureRef != "" {
+		fmt.Printf("  Capture: %s\n", result.CaptureRef)
 	}
-	if !running {
-		return true
-	}
-
-	duration := time.Since(lockInfo.StartedAt).Round(time.Second)
-	taskInfo := ""
-	if lockInfo.TaskID != "" {
-		taskInfo = fmt.Sprintf(" on task %s", lockInfo.TaskID)
-	}
-
-	if !resetForce {
-		fmt.Fprintf(os.Stderr, "Error: Agent '%s' (PID %d) is actively working%s in worktree '%s' (running %s)\n",
-			lockInfo.AgentName, lockInfo.PID, taskInfo, worktreeName, duration)
-		fmt.Fprintf(os.Stderr, "Use --force to reset anyway (will destroy uncommitted work)\n")
-		return false
-	}
-
-	fmt.Fprintf(os.Stderr, "Warning: Agent '%s' (PID %d) is actively working%s in worktree '%s' (running %s)\n",
-		lockInfo.AgentName, lockInfo.PID, taskInfo, worktreeName, duration)
-	fmt.Fprintf(os.Stderr, "Proceeding with --force...\n")
 	return true
 }
 
-// executeReset performs the fetch, discard, and reset-to-target steps.
-func executeReset(deps *cli.Deps, worktreePath, targetBranch string) error {
-	if err := gitFetch(deps, worktreePath); err != nil {
-		return fmt.Errorf("fetching: %v", err)
+func printResetIgnored(path string) error {
+	entries, err := agentcapture.ListIgnored(context.Background(), path)
+	if err != nil {
+		return err
 	}
-
-	fmt.Println("Discarding local changes...")
-	if err := gitReset(deps, worktreePath, "HEAD"); err != nil {
-		return fmt.Errorf("resetting: %v", err)
+	if len(entries) == 0 {
+		return nil
 	}
-	if err := gitClean(deps, worktreePath); err != nil {
-		return fmt.Errorf("cleaning: %v", err)
-	}
-
-	if err := gitReset(deps, worktreePath, "origin/"+targetBranch); err != nil {
-		return fmt.Errorf("resetting to %s: %v", targetBranch, err)
+	fmt.Println("Ignored paths that will be removed:")
+	for _, entry := range entries {
+		fmt.Printf("  %s (%d bytes)\n", entry.Path, entry.Size)
 	}
 	return nil
 }
 
-// resetFinalizePush handles the optional force-push after a reset.
-func resetFinalizePush(deps *cli.Deps, worktreePath, worktreeName, targetBranch, currentBranch string) bool {
-	if !resetPush {
-		fmt.Printf("✓ Reset complete: %s is now at origin/%s\n", worktreeName, targetBranch)
-		fmt.Printf("  Remote branch not updated. Use --push to force-push to origin.\n")
-		return true
-	}
-
-	if isProtectedBranch(currentBranch) && !resetForce {
-		fmt.Fprintf(os.Stderr, "Error: refusing to force-push to protected branch '%s'.\n", currentBranch)
-		fmt.Fprintf(os.Stderr, "Use --force to override this protection.\n")
-		return false
-	}
-	if isProtectedBranch(currentBranch) && resetForce {
-		fmt.Fprintf(os.Stderr, "Warning: force-pushing to protected branch '%s'!\n", currentBranch)
-	}
-
-	if err := gitPushForce(deps, worktreePath, currentBranch); err != nil {
-		fmt.Fprintf(os.Stderr, "Error force pushing: %v\n", err)
-		return false
-	}
-
-	fmt.Printf("✓ Reset complete: %s is now at origin/%s\n", worktreeName, targetBranch)
-	fmt.Printf("  Branch: %s (force pushed)\n", currentBranch)
-	return true
-}
-
-// isProtectedBranch returns true if the branch is main or master.
+// isProtectedBranch recognizes the conventional trunks used by Loom.
 func isProtectedBranch(branch string) bool {
-	return branch == "main" || branch == "master"
+	return branch == "main" || branch == "master" || branch == "v5"
 }
 
 func ConfirmAction(prompt string) bool {

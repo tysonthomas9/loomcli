@@ -45,6 +45,7 @@ type AgentService interface {
 
 	// GitReset hard-resets the agent's worktree to a branch.
 	GitReset(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error)
+	GitResetPreview(ctx context.Context, wsID, agentName string) ([]ops.GitResetIgnoredFile, error)
 
 	// GitStatus returns detailed git status for the agent's worktree.
 	GitStatus(ctx context.Context, wsID, agentName string) (*ops.GitStatusResult, error)

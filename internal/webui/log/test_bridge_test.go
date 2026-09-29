@@ -110,3 +110,7 @@ func (m *mockAgentService) RequestAgentLifecycle(_ context.Context, _, _ string,
 	return nil, nil
 }
 func (m *mockAgentService) DeleteAgent(_ context.Context, _, _ string) error { return nil }
+
+func (m *mockAgentService) GitResetPreview(context.Context, string, string) ([]ops.GitResetIgnoredFile, error) {
+	return []ops.GitResetIgnoredFile{}, nil
+}

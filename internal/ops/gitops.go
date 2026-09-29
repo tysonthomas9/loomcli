@@ -32,7 +32,7 @@ type GitOps interface {
 	ListWorkspacePullRequests(workspaceID, state string, limit int) (*GitPullRequestList, error)
 
 	// Reset hard-resets a worktree to a target branch.
-	// If push is true, force-pushes the branch to origin after resetting.
+	// The push argument is retained for compatibility; true is rejected.
 	Reset(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error)
 
 	// Status returns comprehensive git status for a worktree.
@@ -133,10 +133,17 @@ type GitPRResult struct {
 
 // GitResetResult contains the result of a reset operation.
 type GitResetResult struct {
-	Success        bool   `json:"success"`
-	Message        string `json:"message"`
-	PreviousBranch string `json:"previous_branch,omitempty"`
-	Pushed         bool   `json:"pushed"`
+	Success        bool                  `json:"success"`
+	Message        string                `json:"message"`
+	PreviousBranch string                `json:"previous_branch,omitempty"`
+	Pushed         bool                  `json:"pushed"`
+	CaptureRef     string                `json:"capture_ref,omitempty"`
+	Ignored        []GitResetIgnoredFile `json:"ignored,omitempty"`
+}
+
+type GitResetIgnoredFile struct {
+	Path string `json:"path"`
+	Size int64  `json:"size"`
 }
 
 // GitResetLockedError indicates a worktree is locked by an active agent.

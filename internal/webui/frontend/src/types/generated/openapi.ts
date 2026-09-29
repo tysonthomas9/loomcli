@@ -1403,6 +1403,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/agents/{name}/git/reset-preview": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List ignored paths that Reset will remove */
+    get: operations["gitResetPreview"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/agents/{name}/git/reset": {
     parameters: {
       query?: never;
@@ -6535,7 +6552,7 @@ export interface operations {
       };
     };
   };
-  gitReset: {
+  gitResetPreview: {
     parameters: {
       query?: never;
       header?: never;
@@ -6549,13 +6566,63 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
+      /** @description Ignored paths and sizes */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            ignored: {
+              path: string;
+              /** Format: int64 */
+              size: number;
+            }[];
+          };
+        };
+      };
+    };
+  };
+  gitReset: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent worktree name */
+        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": {
+          branch?: string;
+          force?: boolean;
+        };
+      };
+    };
+    responses: {
       /** @description Reset complete */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["MessageResponse"];
+          "application/json": {
+            success?: boolean;
+            message?: string;
+            previous_branch?: string;
+            /** @description Always false; Reset never pushes */
+            pushed?: boolean;
+            capture_ref?: string;
+            ignored?: {
+              path?: string;
+              /** Format: int64 */
+              size?: number;
+            }[];
+          };
         };
       };
     };

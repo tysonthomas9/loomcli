@@ -353,3 +353,7 @@ func (s *stubAgentService) RequestAgentLifecycle(ctx context.Context, wsKey, nam
 func (s *stubAgentService) DeleteAgent(context.Context, string, string) error {
 	return service.ErrNotImplemented("not implemented")
 }
+
+func (s *stubAgentService) GitResetPreview(context.Context, string, string) ([]ops.GitResetIgnoredFile, error) {
+	return []ops.GitResetIgnoredFile{}, nil
+}

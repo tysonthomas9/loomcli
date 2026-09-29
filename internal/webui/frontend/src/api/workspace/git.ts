@@ -50,6 +50,12 @@ export interface GitResetResult {
   message: string;
   previous_branch?: string;
   pushed: boolean;
+  capture_ref?: string;
+  ignored?: Array<{ path: string; size: number }>;
+}
+
+export interface GitResetPreview {
+  ignored: Array<{ path: string; size: number }>;
 }
 
 export interface GitResetLockedResponse {
@@ -149,17 +155,26 @@ export async function gitCreatePR(
   );
 }
 
+/** GET /api/workspaces/{ws}/agents/{name}/git/reset-preview */
+export async function gitResetPreview(
+  workspaceId: string,
+  agentName: string,
+): Promise<GitResetPreview> {
+  return get<GitResetPreview>(
+    agentGitUrl(workspaceId, agentName, "reset-preview"),
+  );
+}
+
 /** POST /api/workspaces/{ws}/agents/{name}/git/reset */
 export async function gitReset(
   workspaceId: string,
   agentName: string,
   branch?: string,
   force?: boolean,
-  push?: boolean,
 ): Promise<GitResetResult> {
   return post<GitResetResult>(
     agentGitUrl(workspaceId, agentName, "reset"),
-    { branch, force, push },
+    { branch, force },
     {
       timeout: GIT_ACTION_TIMEOUT,
     },

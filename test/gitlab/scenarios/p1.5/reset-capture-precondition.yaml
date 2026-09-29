@@ -1,0 +1,18 @@
+name: reset capture retains the edit and reports ignored files
+task: P1.5
+git: [min, latest]
+fixture: empty
+given:
+  - write: {path: README.md, content: "base\n"}
+  - write: {path: .gitignore, content: ".env\n"}
+  - git: [add, README.md, .gitignore]
+  - commit: seed reset candidate
+  - edit: {path: README.md, append: "reset candidate\n"}
+  - write: {path: .env, content: "ignored\n"}
+when:
+  - capture: {attempt: reset-1}
+then:
+  - diff_vs_head: {changed: [README.md]}
+  - manifest: {README.md: captured, .env: listed}
+  - capture_complete: true
+  - tree_lacks: [.env]

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -198,6 +199,18 @@ func HandleGitPR(svc service.AgentService) http.HandlerFunc {
 
 // --- Reset ---
 
+// HandleGitResetPreview lists ignored paths before the reset confirmation.
+func HandleGitResetPreview(svc service.AgentService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ignored, err := svc.GitResetPreview(r.Context(), middleware.WorkspaceFromContext(r.Context()), r.PathValue("name"))
+		if err != nil {
+			writeAgentGitError(w, err, http.StatusBadGateway)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, map[string]any{"ignored": ignored})
+	}
+}
+
 type gitResetRequest struct {
 	Branch string `json:"branch"`
 	Force  bool   `json:"force"`
@@ -230,6 +243,10 @@ func HandleGitReset(svc service.AgentService) http.HandlerFunc {
 		}
 
 		branch := req.Branch
+		if req.Push {
+			handler.RespondError(w, http.StatusBadRequest, "reset cannot push")
+			return
+		}
 		if branch != "" && (!validGitRef.MatchString(branch) || strings.Contains(branch, "..")) {
 			handler.RespondError(w, http.StatusBadRequest, "invalid branch name")
 			return
@@ -248,6 +265,11 @@ func HandleGitReset(svc service.AgentService) http.HandlerFunc {
 						TaskID:   lockedErr.TaskID,
 					},
 				})
+				return
+			}
+			var gitErr *loomgit.Error
+			if errors.As(err, &gitErr) {
+				handler.WriteJSON(w, http.StatusConflict, map[string]string{"error": gitErr.Error(), "code": gitErr.Code()})
 				return
 			}
 			writeAgentGitError(w, err, http.StatusBadGateway)

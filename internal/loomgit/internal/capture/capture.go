@@ -46,6 +46,7 @@ type Params struct {
 	Attempt   string
 	TaskID    string
 	TaskTitle string
+	Ref       string // Optional working-area WIP ref; task copies use AttemptCapture.
 }
 
 type Result struct {
@@ -196,6 +197,21 @@ func recordIgnored(manifest *Manifest, repo string, paths []string, seen map[str
 	}
 }
 
+// ListIgnored returns the same ignored-path entries that Capture records,
+// without creating a commit or ref. Callers can show these before confirmation.
+func ListIgnored(ctx context.Context, runner loomgit.RepoStore, repo string) ([]Entry, error) {
+	out, err := runner.Run(ctx, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z")
+	if err != nil {
+		return nil, err
+	}
+	manifest := Manifest{Complete: true}
+	recordIgnored(&manifest, repo, lines(out), map[string]bool{})
+	if !manifest.Complete {
+		return manifest.Entries, fmt.Errorf("cannot list all ignored paths")
+	}
+	return manifest.Entries, nil
+}
+
 func collectWorkingPaths(ctx context.Context, runner loomgit.RepoStore) ([][]string, error) {
 	commands := [][]string{
 		{"ls-tree", "-r", "--name-only", "-z", "HEAD"},
@@ -333,6 +349,10 @@ func captureCommit(ctx context.Context, runner loomgit.RepoStore, head string, p
 func Capture(ctx context.Context, runner loomgit.RepoStore, repo string, p Params) (Result, error) {
 	var result Result
 	ref, err := refname.AttemptCapture(p.Workspace, p.Attempt)
+	if p.Ref != "" {
+		ref = p.Ref
+		err = gitexec.CheckRefFormat(ref, false)
+	}
 	if err != nil {
 		return result, err
 	}

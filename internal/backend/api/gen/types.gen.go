@@ -3231,6 +3231,12 @@ type GitPushJSONBody struct {
 	Target *string `json:"target,omitempty"`
 }
 
+// GitResetJSONBody defines parameters for GitReset.
+type GitResetJSONBody struct {
+	Branch *string `json:"branch,omitempty"`
+	Force  *bool   `json:"force,omitempty"`
+}
+
 // UpdateGitTargetJSONBody defines parameters for UpdateGitTarget.
 type UpdateGitTargetJSONBody struct {
 	Target *string `json:"target,omitempty"`
@@ -3642,6 +3648,9 @@ type GitPullJSONRequestBody GitPullJSONBody
 
 // GitPushJSONRequestBody defines body for GitPush for application/json ContentType.
 type GitPushJSONRequestBody GitPushJSONBody
+
+// GitResetJSONRequestBody defines body for GitReset for application/json ContentType.
+type GitResetJSONRequestBody GitResetJSONBody
 
 // UpdateGitTargetJSONRequestBody defines body for UpdateGitTarget for application/json ContentType.
 type UpdateGitTargetJSONRequestBody UpdateGitTargetJSONBody

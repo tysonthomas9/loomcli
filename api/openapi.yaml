@@ -2601,6 +2601,32 @@ paths:
               schema:
                 type: object
 
+  /api/workspaces/{ws}/agents/{name}/git/reset-preview:
+    get:
+      operationId: gitResetPreview
+      tags: [git]
+      summary: List ignored paths that Reset will remove
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Ignored paths and sizes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ignored]
+                properties:
+                  ignored:
+                    type: array
+                    items:
+                      type: object
+                      required: [path, size]
+                      properties:
+                        path: {type: string}
+                        size: {type: integer, format: int64}
+
   /api/workspaces/{ws}/agents/{name}/git/reset:
     post:
       operationId: gitReset
@@ -2609,13 +2635,34 @@ paths:
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                branch: {type: string}
+                force: {type: boolean}
       responses:
         "200":
           description: Reset complete
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                type: object
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  previous_branch: {type: string}
+                  pushed: {type: boolean, description: Always false; Reset never pushes}
+                  capture_ref: {type: string}
+                  ignored:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        path: {type: string}
+                        size: {type: integer, format: int64}
 
   /api/workspaces/{ws}/agents/{name}/git/target:
     patch:

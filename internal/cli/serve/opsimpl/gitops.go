@@ -706,11 +706,17 @@ func (g *GitOpsImpl) Reset(worktreePath, worktreeName, targetBranch string, forc
 		}
 		return nil, err
 	}
+	ignored := make([]ops.GitResetIgnoredFile, 0, len(result.Ignored))
+	for _, entry := range result.Ignored {
+		ignored = append(ignored, ops.GitResetIgnoredFile{Path: entry.Path, Size: entry.Size})
+	}
 	return &ops.GitResetResult{
 		Success:        result.Success,
 		Message:        result.Message,
 		PreviousBranch: result.PreviousBranch,
 		Pushed:         result.Pushed,
+		CaptureRef:     result.CaptureRef,
+		Ignored:        ignored,
 	}, nil
 }
 
