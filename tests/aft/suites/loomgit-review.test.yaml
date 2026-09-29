@@ -5,7 +5,7 @@ classification: { area: git, feature: revision-review, surface: mixed, purpose: 
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 setup: >-
   d="$AFT_WORK_DIR/review-repo";
-  mkdir -p "$d"; git -C "$d" init -q;
+  mkdir -p "$d"; git -C "$d" init -q -b main;
   git -C "$d" -c user.email=e2e@x -c user.name=e2e commit --allow-empty -m init -q;
   curl -sf -X POST "$AFT_BASE_URL/api/workspaces"
   -H "Content-Type: application/json"
