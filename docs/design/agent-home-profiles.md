@@ -14,8 +14,9 @@ before, which is why the feature can be rolled out — and rolled back — one
 agent at a time by renaming a directory.
 
 Path resolution lives in `internal/agentprofile`, deliberately stdlib-only, so
-the halves that *inject* the paths (the supervisor at spawn, `loom lead` at
-startup) and the halves that *discover* them from outside the process
+the halves that *inject* the paths (the supervisor at spawn, `loom lead` and
+`loom agent` at startup) and the halves that *discover* them from outside the
+process
 (transcript mirroring, `loom doctor`) cannot drift apart. A duplicated
 `filepath.Join` on each side is precisely how the writer ends up in one
 directory and every reader in another, and that drift is silent.
@@ -70,7 +71,8 @@ is an operator-typed command, because it is the moment the claim above is made.
 ## Verify or refuse
 
 The supervisor verifies a profile root *before* it exports the variable
-(`AppendProfileEnv` in `internal/cli/daemon/supervisor/spawn.go`). Verification
+(`AppendProfileEnv` in `internal/harnessprofile`, reached from
+`internal/cli/daemon/supervisor/spawn.go`). Verification
 failure is a **boot failure for that one agent**, never a fallback to the
 legacy roots — silently running an agent against the operator's full `~/.claude`
 is the exact leak per-agent profiles exist to close. Degrading per agent keeps
@@ -169,9 +171,12 @@ The split is not cosmetic — it is why `--fix` is safe to run:
 Editing a profile file by hand is therefore never the repair. It breaks the
 fingerprint, and the next spawn refuses.
 
-## `loom lead` and the same profile root
+## `loom lead`, `loom agent`, and the same profile root
 
-`loom lead` is the one agent the supervisor does **not** spawn. The workspace
+`loom lead` and the standalone `loom agent` are the two entry points the
+supervisor does **not** spawn. What follows is written for `lead`, where the
+hole was first measured; `loom agent` closes the identical hole with the
+identical code (see the end of this section). The workspace
 launcher (`scripts/lead-isolated.sh`) exports `CLAUDE_CONFIG_DIR` itself, and
 `lead` inherits it because the variable is on the envfilter allowlist — so
 `AppendProfileEnv`'s verification never ran on it. Measured 2026-08-20: the
@@ -227,14 +232,49 @@ its manual `export CLAUDE_CONFIG_DIR` is now redundant rather than load-bearing.
   the config root: `CODEX_HOME` says which *configuration* codex reads,
   `sqlite_home` says where this *session*'s state lives.
 
-The policy itself is not duplicated. `supervisor.ProfileHarnessEnv` resolves,
-verifies and formats one harness's assignment; the supervisor reaches it
-through `AppendProfileEnv` at spawn, and `lead` calls it per harness so it can
+### `loom agent`, the third entry point
+
+`loom agent <worktree> --prompt <path>` is the custom-prompt runner, and until
+2026-09-11 it resolved no profile root and exported no per-profile credential
+at all: a manual, one-off or cron invocation ran the harness on the
+**operator's** `~/.claude` and the operator's own OAuth pair. Because refresh
+tokens are one-time-use, the operator's next `/login` could invalidate whichever
+profile last shared that pair — the exact sharing per-agent profiles end.
+
+`runAgent` now calls `harnessprofile.Enforce` immediately after it resolves its
+target and **before** any of its three modes, since each of them can reach a
+backend. The agent name is `target.AgentName`, byte-identical to the worktree
+name the supervisor passes, and the workspace root is the same
+`cli.GetWorkspaceRuntimeDir()` lead uses, so all three callers resolve the
+identical tree.
+
+It runs on the daemon-spawned path too, deliberately. The supervisor's values
+arrive already set, so the inherit rule makes that a verify-and-keep no-op; and
+the tmux auto-mode child inherits the tmux **server's** environment rather than
+its caller's, so re-entering enforcement in that fresh process is the only thing
+that covers it. A gate skipped on a guessed "am I daemon-spawned?" heuristic is
+exactly the second, weaker copy this design forbids.
+
+### One implementation, in a package below all three
+
+The policy itself is not duplicated. It lives in `internal/harnessprofile`:
+`ProfileHarnessEnv` resolves, verifies and formats one harness's assignment;
+the supervisor reaches it through `AppendProfileEnv` at spawn, and `lead` and
+`agent` reach it through `Enforce`, which applies it per harness so each can
 skip the ones it inherited. The harness vocabulary — which harnesses exist,
 which variable each exports, which binary pins each version — lives in one set
 of tables next to it (`ProfileHarnesses`, `ProfileEnvVar`,
 `ProfileHarnessBinary`), so a new harness is one entry per table and no caller
 grows a second, weaker copy.
+
+It sits *below* the CLI command packages rather than inside the supervisor
+because of a hard import constraint: `internal/cli/daemon/supervisor` imports
+`internal/cli/agent`, so the standalone agent path can never import the
+supervisor, and interposing a helper package only lengthens the cycle. `lead`
+could call into the supervisor only because it is a sibling package. The
+supervisor keeps every `Profile*` name it exported before as an alias or a
+one-line delegation — same sentinel values, same version cache — so existing
+callers are unaffected.
 
 Binaries are resolved by **bare name on PATH**, exactly as the backends layer
 launches them, which is also what the provisioner pins its manifest version

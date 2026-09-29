@@ -1,4 +1,4 @@
-package supervisor
+package harnessprofile
 
 import (
 	"crypto/sha256"
@@ -42,7 +42,7 @@ func resetHarnessVersionCache() {
 // that wants a stale fingerprint mutates a file afterwards.
 func writeProfile(t *testing.T, projectDir, worktree, version string, files map[string]string) string {
 	t.Helper()
-	dir := filepath.Join(projectDir, ".loom", AgentProfilesDirName, worktree, "claude")
+	dir := filepath.Join(projectDir, ".loom", agentprofile.DirName, worktree, "claude")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func writeProfile(t *testing.T, projectDir, worktree, version string, files map[
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ProfileManifestName), raw, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, agentprofile.ManifestName), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return dir
@@ -98,7 +98,7 @@ func TestAppendProfileEnv_InjectsVerifiedProfileRoots(t *testing.T) {
 		"settings.json": `{"model":"opus"}`,
 		"CLAUDE.md":     "house rules\n",
 	})
-	codexDir := filepath.Join(projectDir, ".loom", AgentProfilesDirName, "worker", "codex")
+	codexDir := filepath.Join(projectDir, ".loom", agentprofile.DirName, "worker", "codex")
 	if err := os.MkdirAll(filepath.Join(codexDir, "sessions"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestAppendProfileEnv_InjectsVerifiedProfileRoots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(codexDir, ProfileManifestName), raw, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(codexDir, agentprofile.ManifestName), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -202,7 +202,7 @@ func TestAppendProfileEnv_UnknownVersionRefusesBoot(t *testing.T) {
 func TestAppendProfileEnv_MissingManifestRefusesBoot(t *testing.T) {
 	stubHarnessVersion(t, map[string]string{"claude": "2.1.234 (Claude Code)"})
 	projectDir := t.TempDir()
-	dir := filepath.Join(projectDir, ".loom", AgentProfilesDirName, "worker", "claude")
+	dir := filepath.Join(projectDir, ".loom", agentprofile.DirName, "worker", "claude")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -220,11 +220,11 @@ func TestAppendProfileEnv_MissingManifestRefusesBoot(t *testing.T) {
 func TestAppendProfileEnv_CorruptManifestRefusesBoot(t *testing.T) {
 	stubHarnessVersion(t, map[string]string{"claude": "2.1.234 (Claude Code)"})
 	projectDir := t.TempDir()
-	dir := filepath.Join(projectDir, ".loom", AgentProfilesDirName, "worker", "claude")
+	dir := filepath.Join(projectDir, ".loom", agentprofile.DirName, "worker", "claude")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ProfileManifestName), []byte("{not json"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, agentprofile.ManifestName), []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -292,7 +292,7 @@ func TestAppendProfileEnv_UnresolvableAgentNameLeavesEnvUntouched(t *testing.T) 
 // codex binary's version rather than claude's.
 func writeCodexProfile(t *testing.T, projectDir, agent, version string) string {
 	t.Helper()
-	dir := filepath.Join(projectDir, ".loom", AgentProfilesDirName, agent, "codex")
+	dir := filepath.Join(projectDir, ".loom", agentprofile.DirName, agent, "codex")
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func writeCodexProfile(t *testing.T, projectDir, agent, version string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ProfileManifestName), raw, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, agentprofile.ManifestName), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return dir

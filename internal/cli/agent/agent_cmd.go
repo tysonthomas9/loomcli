@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
+	"github.com/tysonthomas9/loomcli/internal/harnessprofile"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -119,6 +120,19 @@ func runAgent(cmd *cobra.Command, args []string) {
 
 	worktreePath := target.WorkDir
 	agentName := target.AgentName
+
+	// Before ANY of the three modes below, because each of them can reach a
+	// backend: a `loom agent` run must never authenticate on ambient auth. It
+	// runs on the daemon-spawned path too — the supervisor's values are
+	// inherited and left untouched there, while the tmux auto-mode child
+	// inherits the tmux SERVER's environment and would otherwise have nothing.
+	if err := enforceAgentProfile(cli.GetWorkspaceRuntimeDir(), agentName); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Repair: %s\n", harnessprofile.Repair(err, harnessprofile.FailedDir(err)))
+		cli.ExitWithFlush(1)
+		return
+	}
+
 	promptGen := makeCustomPromptGen(agentPromptFile)
 
 	if agentDaemonMode {

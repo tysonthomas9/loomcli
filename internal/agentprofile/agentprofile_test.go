@@ -13,9 +13,11 @@ func mkdirAll(t *testing.T, path string) {
 	}
 }
 
-// TestDir pins the layout the supervisor injects from. supervisor.AppendProfileEnv
-// resolves through Dir precisely so the two cannot disagree; if they ever did,
-// agents would write transcripts where no reader looks — silently.
+// TestDir pins the layout every injector resolves from.
+// harnessprofile.AppendProfileEnv (the shared policy the supervisor, `loom lead`
+// and `loom agent` all reach) resolves through Dir precisely so the two cannot
+// disagree; if they ever did, agents would write transcripts where no reader
+// looks — silently.
 func TestDir(t *testing.T) {
 	project := "/ws/PUPPET"
 	if got, want := Dir(project, "jack"), filepath.Join(project, ".loom", "agent-profiles", "jack"); got != want {
