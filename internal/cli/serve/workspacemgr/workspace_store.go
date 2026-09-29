@@ -227,7 +227,7 @@ func addReposToStoreBackedWorkspace(ctx context.Context, s storepkg.Store, req s
 	for _, repo := range clonedRepos {
 		base, err := localworkspace.PrepareWorkspaceBase(repo.Path, key, "origin", trunk)
 		if err == nil {
-			_, err = cli.RunGitCommand(repo.Path, "checkout", "-b", branch, base)
+			err = loomgit.CheckoutNewBranch(ctx, repo.Path, branch, base)
 		}
 		if err != nil {
 			cleanupAttachedWorktrees(created)
