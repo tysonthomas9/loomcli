@@ -34,6 +34,17 @@ reaches a real external/paid service, costs money / may mutate external state). 
 real/live path is blocked, report blocked/unverified — never fabricate state. See
 `docs/testing-terminology.md`.
 
+## No Code Comments
+
+Do not add comments to Go, TS, or TSX code: no `//` or `/* */` lines, trailing
+comments, doc comments, or lint/type suppressions (`//nolint`, `eslint-disable`,
+`@ts-expect-error`, `@ts-ignore`). Name things and structure code so it reads
+without them; fix a lint finding or change the linter config instead of
+suppressing it. Only `//go:` compiler directives (`//go:build`, `//go:embed`,
+`//go:generate`) are allowed. Existing comments may stay. `make check` (and so
+the pre-push hook and CI) fails on any added comment line
+(`scripts/check-no-new-comments.sh`).
+
 ## Generated Workflow Bundles
 
 Do not commit `internal/workflows/builtin-dist/` or other generated Flue bundle

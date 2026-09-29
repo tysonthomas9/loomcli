@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -545,6 +546,12 @@ func TestKillProcess_Success(t *testing.T) {
 	if !lockfile.IsProcessRunning(pid) {
 		t.Fatal("process should be running before kill")
 	}
+	if processGroupSignalGone(syscall.EPERM, pid) {
+		t.Error("EPERM for a group with a live member should not mean the group is gone")
+	}
+	if processGroupSignalGone(nil, pid) {
+		t.Error("a delivered signal should not mean the group is gone")
+	}
 
 	// Reap the child in a goroutine so it doesn't become a zombie
 	// (in production, killed processes aren't children of the recover command)
@@ -591,6 +598,18 @@ func TestKillProcess_AlreadyDead(t *testing.T) {
 	// Kill the process group directly
 	_ = syscall.Kill(-pid, syscall.SIGKILL)
 	_ = cmd.Wait()
+
+	if !processGroupSignalGone(syscall.ESRCH, pid) {
+		t.Error("ESRCH should mean the group is gone")
+	}
+	if processGroupSignalGone(syscall.EINVAL, pid) {
+		t.Error("EINVAL should not mean the group is gone")
+	}
+	if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
+		if !processGroupSignalGone(syscall.EPERM, pid) {
+			t.Error("EPERM for a group with no live member should mean the group is gone")
+		}
+	}
 
 	// Now killProcess should handle the already-dead case gracefully
 	err := killProcess(pid)

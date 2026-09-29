@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli test-skills-release-compat fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status compose-smoke compose-smoke-down ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-ci test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli test-skills-release-compat fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status compose-smoke compose-smoke-down ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-ci test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod check-no-new-comments test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -431,6 +431,10 @@ check-no-raw-exec:
 	@echo "Checking for raw exec.Command in unit tests..."
 	@./scripts/check-no-raw-exec.sh
 
+check-no-new-comments: ensure-frontend-deps
+	@./scripts/check-no-new-comments.sh go
+	@./scripts/check-no-new-comments.sh ts
+
 check-no-beads-prod:
 	@echo "Checking for new production beads/bd references..."
 	@./scripts/check-no-beads-prod.sh
@@ -653,32 +657,34 @@ frontend: build-frontend
 
 # Go-only quality gate (no Node, no frontend dist)
 check-go:
-	@echo "=== [1/13] Go: format check ==="
+	@echo "=== [1/14] Go: format check ==="
 	@bad=$$(gofmt -l . 2>/dev/null | grep -v third_party | grep -v worktrees | grep -v vendor | grep -v node_modules | head -20); \
 	if [ -n "$$bad" ]; then echo "gofmt violations:"; echo "$$bad"; exit 1; fi
-	@echo "=== [2/13] Go: vet ==="
+	@echo "=== [2/14] Go: vet ==="
 	@go vet ./...
-	@echo "=== [3/13] Go: build ==="
+	@echo "=== [3/14] Go: build ==="
 	@go build -buildvcs=false ./...
-	@echo "=== [4/13] Go: lint (golangci-lint + depguard + control-plane path guard) ==="
+	@echo "=== [4/14] Go: lint (golangci-lint + depguard + control-plane path guard) ==="
 	@golangci-lint run --timeout=5m --allow-parallel-runners
 	@./scripts/check-control-plane-paths.sh
-	@echo "=== [5/13] Go: LOC check ==="
+	@echo "=== [5/14] Go: LOC check ==="
 	@./scripts/check-loc.sh 1000 2500
-	@echo "=== [6/13] Go: package size check ==="
+	@echo "=== [6/14] Go: package size check ==="
 	@./scripts/check-package-size.sh 25
-	@echo "=== [7/13] Go: import fanout check ==="
+	@echo "=== [7/14] Go: import fanout check ==="
 	@./scripts/check-import-fanout.sh 18
-	@echo "=== [8/13] Go: exec.Command guard ==="
+	@echo "=== [8/14] Go: exec.Command guard ==="
 	@./scripts/check-no-raw-exec.sh
-	@echo "=== [9/13] Go: log.Printf guard ==="
+	@echo "=== [9/14] Go: log.Printf guard ==="
 	@./scripts/check-no-log-printf.sh
-	@echo "=== [10/13] Go: no new production beads/bd references ==="
+	@echo "=== [10/14] Go: no new code comments ==="
+	@./scripts/check-no-new-comments.sh go
+	@echo "=== [11/14] Go: no new production beads/bd references ==="
 	@./scripts/check-no-beads-prod.sh
-	@echo "=== [11/13] Go: generated API staleness ==="
+	@echo "=== [12/14] Go: generated API staleness ==="
 	@./scripts/check-go-api-staleness.sh
-	@echo "=== [12/13] Go: test with race detector ==="
-#   Steps 12 and 13 share one shell so they can share a PER-RUN profile path.
+	@echo "=== [13/14] Go: test with race detector ==="
+#   Steps 13 and 14 share one shell so they can share a PER-RUN profile path.
 #   A fixed /tmp path is unsafe two ways: two concurrent gates interleave writes
 #   into one file, and a gate killed mid-`go test` leaves a truncated file behind
 #   for the next run to read. Either produces a malformed record and the opaque
@@ -690,7 +696,7 @@ check-go:
 #   straight through when `make check` already armed a cap above us, and arms its
 #   own when `check-go` is the entry point (CI, or a direct invocation).
 #   `set -e` ordering is load-bearing: a non-zero exit here — 124 from the cap,
-#   or a killed tree — aborts before step 13, so check-coverage.sh never scores
+#   or a killed tree — aborts before step 14, so check-coverage.sh never scores
 #   the truncated profile a killed `go test` leaves behind. Do not add `|| true`.
 	@set -e; \
 	 profile="$$(mktemp "$${TMPDIR:-/tmp}/loom.coverage.XXXXXX")"; \
@@ -698,23 +704,25 @@ check-go:
 	 cap="$$(./scripts/gate-timeout-seconds.sh)"; \
 	 ./scripts/with-timeout.sh "$$cap" "check-go: go test -race ./..." \
 	   ./scripts/with-clean-loom-env.sh go test -p 1 -race -covermode=atomic -coverprofile="$$profile" -timeout 15m ./...; \
-	 echo "=== [13/13] Go: coverage threshold ==="; \
+	 echo "=== [14/14] Go: coverage threshold ==="; \
 	 COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh "$$profile"
 	@echo "=== Go quality gates PASSED ==="
 
 # Frontend-only quality gate (no Go toolchain, no dist prerequisite)
 check-frontend: ensure-frontend-deps
-	@echo "=== [1/6] Frontend: format check ==="
+	@echo "=== [1/7] Frontend: format check ==="
 	@cd $(FRONTEND_DIR) && npm run format:check
-	@echo "=== [2/6] Frontend: typecheck ==="
+	@echo "=== [2/7] Frontend: typecheck ==="
 	@cd $(FRONTEND_DIR) && npm run typecheck
-	@echo "=== [3/6] Frontend: eslint ==="
+	@echo "=== [3/7] Frontend: eslint ==="
 	@cd $(FRONTEND_DIR) && npm run lint
-	@echo "=== [4/6] Frontend: architectural checks ==="
+	@echo "=== [4/7] Frontend: architectural checks ==="
 	@cd $(FRONTEND_DIR) && npm run check:arch
-	@echo "=== [5/6] Frontend: generated code staleness ==="
+	@echo "=== [5/7] Frontend: no new code comments ==="
+	@cd $(FRONTEND_DIR) && npm run check:no-new-comments
+	@echo "=== [6/7] Frontend: generated code staleness ==="
 	@cd $(FRONTEND_DIR) && npm run check:generated
-	@echo "=== [6/6] Frontend: unit tests + coverage (60% threshold) ==="
+	@echo "=== [7/7] Frontend: unit tests + coverage (60% threshold) ==="
 	@cd $(FRONTEND_DIR) && npm run test:coverage
 	@echo "=== Frontend quality gates PASSED ==="
 
@@ -830,6 +838,7 @@ help:
 	@echo "  make test-frontend-coverage - Run frontend tests with coverage threshold"
 	@echo "  make test-forkwatch    - Run tests under a fork-bomb/process-leak watchdog (PKG=./path/...)"
 	@echo "  make check-no-raw-exec - Check for raw exec.Command in unit tests"
+	@echo "  make check-no-new-comments - Fail when the change adds Go/TS/TSX code comments"
 	@echo "  make check-control-plane-paths - Check local/cloud fleet-db runtime path invariants"
 	@echo "  make check-loc-stale   - Check for stale LOC allowlist entries"
 	@echo "  make lint              - Run Go linter (golangci-lint)"
