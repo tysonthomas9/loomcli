@@ -1210,6 +1210,70 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/agents/{name}/browsers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List an interactive agent's durable browsers
+     * @description Workspace operator route. Returns the FleetDB-backed durable browser
+     *     identities owned by the named interactive agent. Entries carry no
+     *     runtime or page data; `status` is reported exactly as stored and an
+     *     unrecognized value must never be treated as ready. In local desktop
+     *     mode (`/api/config` mode `open`) the caller authenticates with a
+     *     native-issued `X-Loom-Operator-Session` bearer; in remote mode with the
+     *     user's `Authorization: Bearer` token.
+     */
+    get: operations["listAgentBrowsers"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/agents/{name}/browsers/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get one durable browser owned by an interactive agent */
+    get: operations["getAgentBrowser"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/agents/{name}/browsers/{id}/select": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Mark one durable browser as the agent's selected browser
+     * @description Durably selects the browser; exactly one browser per owner agent is
+     *     selected afterwards. The request body is an empty JSON object.
+     */
+    post: operations["selectAgentBrowser"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/interactive-prompts": {
     parameters: {
       query?: never;
@@ -2320,6 +2384,49 @@ export interface components {
       retryable?: boolean;
       details?: Record<string, never>;
     };
+    /**
+     * @description Durable identity of one interactive-agent browser as stored in FleetDB.
+     *     Carries no runtime, CDP, or page data.
+     */
+    Browser: {
+      /** @description Immutable durable browser ID (UUID). */
+      id: string;
+      workspace_key: string;
+      owner_agent_id: string;
+      created_by: string;
+      name: string;
+      /** @description Always `running` in this slice. */
+      desired_state: string;
+      /**
+       * @description Observed status as stored (`starting`, `failed`, `ready`, or a
+       *     future value). Clients must render unknown values explicitly and
+       *     never as ready.
+       */
+      status: string;
+      request_id: string;
+      selected: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    BrowserList: {
+      browsers: components["schemas"]["Browser"][];
+    };
+    BrowserError: {
+      error: string;
+      code: components["schemas"]["BrowserErrorCode"];
+    };
+    /** @enum {string} */
+    BrowserErrorCode:
+      | "browser_operator_session_required"
+      | "browser_operator_session_expired"
+      | "browser_forbidden"
+      | "browser_agent_not_found"
+      | "browser_not_found"
+      | "browser_unavailable"
+      | "browser_operator_bridge_unavailable"
+      | "browser_invalid";
     MessageResponse: {
       /** @constant */
       success: true;
@@ -3643,7 +3750,68 @@ export interface components {
       data?: Record<string, never>;
     };
   };
-  responses: never;
+  responses: {
+    /**
+     * @description Malformed browser request.
+     *     Codes: `browser_invalid`.
+     */
+    BrowserInvalid: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["BrowserError"];
+      };
+    };
+    /**
+     * @description Missing, expired, or revoked browser principal. Browser clients must clear their inventory and must not treat this as a global sign-out.
+     *     Codes: `browser_operator_session_required`, `browser_operator_session_expired`.
+     */
+    BrowserUnauthorized: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["BrowserError"];
+      };
+    };
+    /**
+     * @description Authenticated but not permitted to act on this interactive agent.
+     *     Codes: `browser_forbidden`.
+     */
+    BrowserForbidden: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["BrowserError"];
+      };
+    };
+    /**
+     * @description Unknown interactive agent or browser.
+     *     Codes: `browser_agent_not_found`, `browser_not_found`.
+     */
+    BrowserNotFound: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["BrowserError"];
+      };
+    };
+    /**
+     * @description FleetDB, the delegation signer, or the local operator bridge is unavailable. Never answered with a synthesized browser.
+     *     Codes: `browser_unavailable`, `browser_operator_bridge_unavailable`.
+     */
+    BrowserUnavailable: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["BrowserError"];
+      };
+    };
+  };
   parameters: {
     /** @description Workspace identifier */
     WorkspaceId: string;
@@ -3651,6 +3819,8 @@ export interface components {
     IssueId: string;
     /** @description Agent worktree name */
     AgentName: string;
+    /** @description Immutable durable browser ID (UUID) */
+    BrowserId: string;
   };
   requestBodies: never;
   headers: never;
@@ -6123,6 +6293,103 @@ export interface operations {
         };
         content?: never;
       };
+    };
+  };
+  listAgentBrowsers: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent worktree name */
+        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Durable browsers owned by the agent */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BrowserList"];
+        };
+      };
+      401: components["responses"]["BrowserUnauthorized"];
+      403: components["responses"]["BrowserForbidden"];
+      404: components["responses"]["BrowserNotFound"];
+      503: components["responses"]["BrowserUnavailable"];
+    };
+  };
+  getAgentBrowser: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent worktree name */
+        name: components["parameters"]["AgentName"];
+        /** @description Immutable durable browser ID (UUID) */
+        id: components["parameters"]["BrowserId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Durable browser */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Browser"];
+        };
+      };
+      400: components["responses"]["BrowserInvalid"];
+      401: components["responses"]["BrowserUnauthorized"];
+      403: components["responses"]["BrowserForbidden"];
+      404: components["responses"]["BrowserNotFound"];
+      503: components["responses"]["BrowserUnavailable"];
+    };
+  };
+  selectAgentBrowser: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent worktree name */
+        name: components["parameters"]["AgentName"];
+        /** @description Immutable durable browser ID (UUID) */
+        id: components["parameters"]["BrowserId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": Record<string, never>;
+      };
+    };
+    responses: {
+      /** @description The selected browser */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Browser"];
+        };
+      };
+      400: components["responses"]["BrowserInvalid"];
+      401: components["responses"]["BrowserUnauthorized"];
+      403: components["responses"]["BrowserForbidden"];
+      404: components["responses"]["BrowserNotFound"];
+      503: components["responses"]["BrowserUnavailable"];
     };
   };
   listInteractivePrompts: {

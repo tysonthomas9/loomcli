@@ -51,6 +51,7 @@ type MultiPTYManager struct {
 
 	gracePeriod time.Duration
 	idleTimeout time.Duration
+	hooks       SpawnHooks
 
 	closed bool
 }
@@ -298,8 +299,21 @@ func (mm *MultiPTYManager) managerForWS(wsID string) (*PTYManager, error) {
 	if mm.idleTimeout != 0 {
 		m.SetIdleTimeout(mm.idleTimeout)
 	}
+	m.SetSpawnHooks(mm.hooks)
 	entry.mgr = m
 	return m, nil
+}
+
+// SetSpawnHooks installs hooks on every current and future per-workspace
+// manager.
+func (mm *MultiPTYManager) SetSpawnHooks(h SpawnHooks) {
+	mm.mu.Lock()
+	mm.hooks = h
+	managers := mm.snapshotManagersLocked()
+	mm.mu.Unlock()
+	for _, m := range managers {
+		m.SetSpawnHooks(h)
+	}
 }
 
 // existingManagerForWS returns the per-workspace PTYManager only if it has

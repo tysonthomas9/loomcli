@@ -63,9 +63,24 @@ const (
 const termEnv = "TERM=xterm-256color"
 const workspaceEnvPrefix = "LOOM_WORKSPACE="
 
+// inheritedSecretEnvPrefixes are per-agent secrets the server process may
+// itself have inherited (e.g. `loom serve` started from inside an agent
+// terminal). They must never flow into other PTYs; the spawn hook injects the
+// correct per-session value where one applies. The operator socket path
+// belongs to this runtime only: a nested `loom serve` in an agent terminal
+// must not bind (and later remove) the desktop's live socket.
+var inheritedSecretEnvPrefixes = []string{
+	"LOOM_AGENT_BROWSER_SESSION=",
+	"LOOM_AGENT_BROWSER_URL=",
+	"LOOM_BROWSER_SESSION_SOCKET=",
+}
+
 func terminalSpawnEnv(base []string) []string {
 	env := make([]string, 0, len(base)+1)
 	for _, entry := range base {
+		if hasAnyPrefix(entry, inheritedSecretEnvPrefixes) {
+			continue
+		}
 		switch {
 		case strings.HasPrefix(entry, "COLUMNS="),
 			strings.HasPrefix(entry, "LINES="),
@@ -76,6 +91,15 @@ func terminalSpawnEnv(base []string) []string {
 		}
 	}
 	return append(env, termEnv)
+}
+
+func hasAnyPrefix(s string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func terminalSessionEnv(base []string, key SessionKey) []string {
@@ -156,6 +180,10 @@ type PTYManager struct {
 	reaperStop chan struct{}
 	reaperWG   sync.WaitGroup
 
+	// hooks attach per-spawn, memory-only secrets (the agent browser session
+	// bearer) and learn when a session ends so they can revoke them.
+	hooks SpawnHooks
+
 	// closed is set by Shutdown under mu. Once true, AttachSession returns
 	// ErrPTYManagerClosed instead of spawning a new session. Prevents a
 	// concurrent AttachSession racing with MultiPTYManager.Deregister from
@@ -224,6 +252,32 @@ func (m *PTYManager) SetIdleTimeout(d time.Duration) {
 	m.mu.Lock()
 	m.idleTimeout = d
 	m.mu.Unlock()
+}
+
+// SpawnHooks let the server add per-spawn environment that must never be
+// persisted (tab metadata is served to clients) and observe session end.
+type SpawnHooks struct {
+	// ExtraEnv runs under the manager lock just before a session spawns. It
+	// must be fast and in-memory only. Returned entries override the launch
+	// spec's env for this spawn only.
+	ExtraEnv func(key SessionKey, launch *tabmeta.LaunchSpec) map[string]string
+	// Ended runs after a session is removed for any reason: child exit, kill,
+	// grace/idle reap, shutdown, or a failed spawn after ExtraEnv ran. extra
+	// is exactly what ExtraEnv returned for that session's spawn.
+	Ended func(key SessionKey, extra map[string]string)
+}
+
+// SetSpawnHooks installs hooks for sessions spawned from now on.
+func (m *PTYManager) SetSpawnHooks(h SpawnHooks) {
+	m.mu.Lock()
+	m.hooks = h
+	m.mu.Unlock()
+}
+
+func (m *PTYManager) sessionEnded(sess *ptySession, ended func(SessionKey, map[string]string)) {
+	if ended != nil && len(sess.spawnExtra) > 0 {
+		ended(sess.key, sess.spawnExtra)
+	}
 }
 
 // AttachSession returns an attachment to the session identified by key. If
@@ -359,6 +413,11 @@ func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, launch *tab
 	if launch != nil {
 		env = overlayTerminalEnv(env, launch.Env)
 	}
+	var extra map[string]string
+	if m.hooks.ExtraEnv != nil {
+		extra = m.hooks.ExtraEnv(key, launch)
+		env = overlayTerminalEnv(env, extra)
+	}
 	cmd.Env = env
 	cmd.Dir = m.cwd
 	if launch != nil && strings.TrimSpace(launch.Cwd) != "" {
@@ -367,10 +426,16 @@ func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, launch *tab
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: cols, Rows: rows})
 	if err != nil {
+		if len(extra) > 0 && m.hooks.Ended != nil {
+			// Revoke whatever ExtraEnv minted; no process holds it. Run it
+			// off the manager lock, which the caller holds.
+			go m.hooks.Ended(key, extra)
+		}
 		return nil, fmt.Errorf("pty.StartWithSize: %w", err)
 	}
 
 	sess := newPtySession(key, ptmx, cmd)
+	sess.spawnExtra = extra
 	go sess.drain(m)
 	return sess, nil
 }
@@ -405,11 +470,14 @@ func (m *PTYManager) killSession(key SessionKey, reason string) error {
 			m.ended[key] = reason
 		}
 	}
+	ended := m.hooks.Ended
 	m.mu.Unlock()
 	if !ok {
 		return nil
 	}
-	return sess.close(reason)
+	err := sess.close(reason)
+	m.sessionEnded(sess, ended)
+	return err
 }
 
 // SessionCount returns the number of live sessions, including detached ones
@@ -500,6 +568,7 @@ func (m *PTYManager) Shutdown() error {
 	for key := range sessions {
 		m.ended[key] = ExitReasonShutdown
 	}
+	ended := m.hooks.Ended
 	m.mu.Unlock()
 
 	var firstErr error
@@ -507,6 +576,7 @@ func (m *PTYManager) Shutdown() error {
 		if err := s.close(ExitReasonShutdown); err != nil && firstErr == nil {
 			firstErr = err
 		}
+		m.sessionEnded(s, ended)
 	}
 	return firstErr
 }

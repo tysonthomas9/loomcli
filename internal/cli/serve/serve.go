@@ -612,6 +612,7 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 		cfg.DriverAPIToken = driverAPIToken()
 		cfg.DriverAPIBaseURL = driverAPIBaseURL()
 		cfg.DriverRunTokenKey = driverRunTokenKey()
+		daemonwire.ApplyBrowserConfig(&cfg, storeHandle, cfg.Logger)
 	}
 	applyFleetConfig(&cfg, fs)
 	applyWorkspaceConfig(&cfg)

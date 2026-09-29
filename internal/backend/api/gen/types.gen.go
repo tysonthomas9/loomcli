@@ -8,10 +8,11 @@ import (
 )
 
 const (
-	BearerAuthScopes  = "BearerAuth.Scopes"
-	FleetApiKeyScopes = "FleetApiKey.Scopes"
-	FleetJWTScopes    = "FleetJWT.Scopes"
-	WorkerTokenScopes = "WorkerToken.Scopes"
+	BearerAuthScopes             = "BearerAuth.Scopes"
+	BrowserOperatorSessionScopes = "BrowserOperatorSession.Scopes"
+	FleetApiKeyScopes            = "FleetApiKey.Scopes"
+	FleetJWTScopes               = "FleetJWT.Scopes"
+	WorkerTokenScopes            = "WorkerToken.Scopes"
 )
 
 // Defines values for AgentStatusResponseAgentState.
@@ -155,6 +156,42 @@ func (e BlockedIssueStatus) Valid() bool {
 	case BlockedIssueStatusOpen:
 		return true
 	case BlockedIssueStatusReview:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BrowserErrorCode.
+const (
+	BrowserErrorCodeBrowserAgentNotFound             BrowserErrorCode = "browser_agent_not_found"
+	BrowserErrorCodeBrowserForbidden                 BrowserErrorCode = "browser_forbidden"
+	BrowserErrorCodeBrowserInvalid                   BrowserErrorCode = "browser_invalid"
+	BrowserErrorCodeBrowserNotFound                  BrowserErrorCode = "browser_not_found"
+	BrowserErrorCodeBrowserOperatorBridgeUnavailable BrowserErrorCode = "browser_operator_bridge_unavailable"
+	BrowserErrorCodeBrowserOperatorSessionExpired    BrowserErrorCode = "browser_operator_session_expired"
+	BrowserErrorCodeBrowserOperatorSessionRequired   BrowserErrorCode = "browser_operator_session_required"
+	BrowserErrorCodeBrowserUnavailable               BrowserErrorCode = "browser_unavailable"
+)
+
+// Valid indicates whether the value is a known member of the BrowserErrorCode enum.
+func (e BrowserErrorCode) Valid() bool {
+	switch e {
+	case BrowserErrorCodeBrowserAgentNotFound:
+		return true
+	case BrowserErrorCodeBrowserForbidden:
+		return true
+	case BrowserErrorCodeBrowserInvalid:
+		return true
+	case BrowserErrorCodeBrowserNotFound:
+		return true
+	case BrowserErrorCodeBrowserOperatorBridgeUnavailable:
+		return true
+	case BrowserErrorCodeBrowserOperatorSessionExpired:
+		return true
+	case BrowserErrorCodeBrowserOperatorSessionRequired:
+		return true
+	case BrowserErrorCodeBrowserUnavailable:
 		return true
 	default:
 		return false
@@ -1681,6 +1718,44 @@ type BlockerRef struct {
 	Title    string `json:"title"`
 }
 
+// Browser Durable identity of one interactive-agent browser as stored in FleetDB.
+// Carries no runtime, CDP, or page data.
+type Browser struct {
+	CreatedAt time.Time `json:"created_at"`
+	CreatedBy string    `json:"created_by"`
+
+	// DesiredState Always `running` in this slice.
+	DesiredState string `json:"desired_state"`
+
+	// Id Immutable durable browser ID (UUID).
+	Id           string `json:"id"`
+	Name         string `json:"name"`
+	OwnerAgentId string `json:"owner_agent_id"`
+	RequestId    string `json:"request_id"`
+	Selected     bool   `json:"selected"`
+
+	// Status Observed status as stored (`starting`, `failed`, `ready`, or a
+	// future value). Clients must render unknown values explicitly and
+	// never as ready.
+	Status       string    `json:"status"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	WorkspaceKey string    `json:"workspace_key"`
+}
+
+// BrowserError defines model for BrowserError.
+type BrowserError struct {
+	Code  BrowserErrorCode `json:"code"`
+	Error string           `json:"error"`
+}
+
+// BrowserErrorCode defines model for BrowserErrorCode.
+type BrowserErrorCode string
+
+// BrowserList defines model for BrowserList.
+type BrowserList struct {
+	Browsers []Browser `json:"browsers"`
+}
+
 // CloseRequest defines model for CloseRequest.
 type CloseRequest struct {
 	Force       *bool   `json:"force,omitempty"`
@@ -3123,11 +3198,29 @@ type WorkspaceSummary struct {
 // AgentName defines model for AgentName.
 type AgentName = string
 
+// BrowserId defines model for BrowserId.
+type BrowserId = string
+
 // IssueId defines model for IssueId.
 type IssueId = string
 
 // WorkspaceId defines model for WorkspaceId.
 type WorkspaceId = string
+
+// BrowserForbidden defines model for BrowserForbidden.
+type BrowserForbidden = BrowserError
+
+// BrowserInvalid defines model for BrowserInvalid.
+type BrowserInvalid = BrowserError
+
+// BrowserNotFound defines model for BrowserNotFound.
+type BrowserNotFound = BrowserError
+
+// BrowserUnauthorized defines model for BrowserUnauthorized.
+type BrowserUnauthorized = BrowserError
+
+// BrowserUnavailable defines model for BrowserUnavailable.
+type BrowserUnavailable = BrowserError
 
 // ReportClientErrorJSONBody defines parameters for ReportClientError.
 type ReportClientErrorJSONBody = map[string]interface{}
@@ -3213,6 +3306,9 @@ type CreateAgentJSONBody struct {
 	RoleName     string    `json:"role_name"`
 	WorkspaceKey *string   `json:"workspace_key,omitempty"`
 }
+
+// SelectAgentBrowserJSONBody defines parameters for SelectAgentBrowser.
+type SelectAgentBrowserJSONBody = map[string]interface{}
 
 // GetDiffFileParams defines parameters for GetDiffFile.
 type GetDiffFileParams struct {
@@ -3636,6 +3732,9 @@ type ReorderWorkspacesJSONRequestBody ReorderWorkspacesJSONBody
 
 // CreateAgentJSONRequestBody defines body for CreateAgent for application/json ContentType.
 type CreateAgentJSONRequestBody CreateAgentJSONBody
+
+// SelectAgentBrowserJSONRequestBody defines body for SelectAgentBrowser for application/json ContentType.
+type SelectAgentBrowserJSONRequestBody = SelectAgentBrowserJSONBody
 
 // GitPullJSONRequestBody defines body for GitPull for application/json ContentType.
 type GitPullJSONRequestBody GitPullJSONBody

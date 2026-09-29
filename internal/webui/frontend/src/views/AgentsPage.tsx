@@ -383,6 +383,7 @@ function AgentsPageInner(): JSX.Element {
             <div className={styles.realTabBody}>
               <AgentDetailMain
                 agentName={agentName}
+                isActive={isActive}
                 pendingTerminalInput={pendingTerminalInput}
                 onTerminalInputConsumed={() =>
                   setPendingTerminalInput(undefined)

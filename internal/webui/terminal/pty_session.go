@@ -89,6 +89,11 @@ type ptySession struct {
 	scrollback *ringBuffer
 	createdAt  int64 // unix nanos
 
+	// spawnExtra is the hook-supplied env this process was started with. It
+	// identifies the exact secrets to revoke when this session (not a later
+	// respawn under the same key) ends.
+	spawnExtra map[string]string
+
 	lastOutput atomic.Int64 // unix nanos, updated by drain
 
 	attachMu sync.Mutex
