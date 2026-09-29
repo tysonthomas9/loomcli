@@ -27,7 +27,7 @@ type Result struct {
 }
 
 func ListIgnored(ctx context.Context, repo string) ([]Entry, error) {
-	runner, err := gitexec.New(repo, gitexec.Options{})
+	runner, err := gitexec.New(repo, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func CaptureWorkingArea(ctx context.Context, repo, workspace, lead string) (Resu
 		return Result{}, err
 	}
 	if result.SHA == "" {
-		runner, err := gitexec.New(repo, gitexec.Options{})
+		runner, err := gitexec.New(repo, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
 		if err != nil {
 			return Result{}, err
 		}
