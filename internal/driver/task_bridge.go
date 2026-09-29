@@ -695,6 +695,12 @@ func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON s
 			"LOOM_TASK_RUN_STACK_ID="+e.stackBinding.StackID,
 			"LOOM_TASK_RUN_OUTPUT_BRANCH="+e.stackBinding.OutputBranch,
 			"LOOM_TASK_RUN_BASE_REF="+e.stackBinding.BaseRef,
+			// The head the branch was last published at. The runner leases its
+			// push against this so a re-run cannot overwrite a restack, a
+			// reviewer commit, or a concurrent attempt. Exported even when
+			// empty ("never published" => lease the ref as must-not-exist) so a
+			// stale inherited value can never be picked up.
+			"LOOM_TASK_RUN_OUTPUT_SHA="+e.stackBinding.OutputSHA,
 		)
 	}
 	env = append(env, e.taskRunnerBundleEnv(req)...)

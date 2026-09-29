@@ -49,6 +49,12 @@ type TaskLineage struct {
 	StackID      string `json:"stackId,omitempty"`
 	BaseRef      string `json:"baseRef,omitempty"`
 	OutputBranch string `json:"outputBranch,omitempty"`
+	// OutputSHA is the head this task's output branch was last published at. It
+	// is the lease the runner pushes against (`--force-with-lease=<ref>:<sha>`),
+	// so a re-run cannot silently discard a restack, a reviewer's commit, or a
+	// zombie attempt's push. Empty means "never published" — lease the ref as
+	// must-not-exist.
+	OutputSHA string `json:"outputSha,omitempty"`
 }
 
 // Empty reports whether the carrier holds no lineage at all.
@@ -219,6 +225,7 @@ func stackBindingForTask(ctx context.Context, store stackstore.Store, workspaceK
 		StackID:      string(st.ID),
 		BaseRef:      base,
 		OutputBranch: node.OutputBranch,
+		OutputSHA:    node.OutputSHA,
 	}, true, nil
 }
 

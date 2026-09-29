@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 
 import {
   backendArgs,
+  deliveryPushArgs,
   parseNumstat,
   parseRepoSlug,
   parseStreamJSONTranscript,
@@ -1017,4 +1018,121 @@ describe("local-task-runner pull-request delivery gating", () => {
   // no PR) is Stage 3's LIVE verify bar (2-task local epic → 2 branches on origin,
   // B based on A) — it needs a real GitHub origin, so it is exercised via the
   // aether-test-framework local-mode run, not a unit test.
+});
+
+// Delivery pushes must never blind-overwrite a branch. Both delivery paths write
+// refs that other writers touch (stackpublish's reconciler/restack, reviewers
+// pushing onto an open PR head, a zombie duplicate attempt), so every push is
+// leased against the head this run believes the remote is at.
+describe("delivery push leasing", () => {
+  it("leases against the expected remote head, never a bare --force", () => {
+    const sha = "a".repeat(40);
+    const args = deliveryPushArgs({
+      dir: "/w",
+      remoteUrl: "https://github.com/o/r.git",
+      branch: "loom/stack/epic-E/T2",
+      expectedSHA: sha,
+    });
+    assert.ok(!args.includes("--force"), "bare --force blind-overwrites the remote ref");
+    assert.ok(args.includes("--force-with-lease=refs/heads/loom/stack/epic-E/T2:" + sha));
+    assert.deepEqual(args.slice(0, 2), ["-C", "/w"]);
+    assert.ok(args.includes("push"));
+    assert.ok(args.includes("https://github.com/o/r.git"));
+    assert.ok(args.includes("HEAD:refs/heads/loom/stack/epic-E/T2"));
+  });
+
+  it("leases 'ref must not exist' when no expected head is known", () => {
+    const args = deliveryPushArgs({ dir: "/w", remoteUrl: "u", branch: "b", expectedSHA: "" });
+    assert.ok(!args.includes("--force"));
+    assert.ok(args.includes("--force-with-lease=refs/heads/b:"));
+  });
+
+  it("keeps the token out of argv (credential helper only)", () => {
+    const args = deliveryPushArgs({ dir: "/w", remoteUrl: "u", branch: "b", expectedSHA: "" });
+    assert.ok(args.some((a) => String(a).includes("LOOM_PR_GIT_PASSWORD")));
+    assert.ok(!args.some((a) => String(a).includes("x-access-token:")));
+  });
+
+  // Proves the generated argv actually behaves as intended against real git:
+  // a stale lease is REJECTED (the drift case that used to be silently clobbered)
+  // and a current lease succeeds.
+  it("real git rejects a stale lease and accepts a current one", () => {
+    const remote = path.join(tmpRoot, "remote.git");
+    execFileSync("git", ["init", "-q", "--bare", remote]);
+    const branch = "loom/stack/epic-E/T2";
+
+    const work = path.join(tmpRoot, "work");
+    execFileSync("git", ["clone", "-q", remote, work]);
+    execFileSync("git", ["config", "user.email", "t@example.test"], { cwd: work });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: work });
+
+    const commit = (msg) => {
+      fs.writeFileSync(path.join(work, "f.txt"), msg + "\n");
+      execFileSync("git", ["add", "-A"], { cwd: work });
+      execFileSync("git", ["commit", "-q", "-m", msg], { cwd: work });
+      return execFileSync("git", ["rev-parse", "HEAD"], { cwd: work }).toString().trim();
+    };
+    const push = (expectedSHA) =>
+      execFileSync("git", deliveryPushArgs({ dir: work, remoteUrl: remote, branch, expectedSHA }), {
+        stdio: "pipe",
+      });
+
+    // First publish: the ref must not exist yet.
+    const c1 = commit("c1");
+    push("");
+    assert.equal(
+      execFileSync("git", ["rev-parse", branch], { cwd: remote }).toString().trim(),
+      c1,
+    );
+
+    // Another writer advances the branch (restack / reviewer commit / zombie attempt).
+    const c2 = commit("c2");
+    push(c1);
+    assert.equal(
+      execFileSync("git", ["rev-parse", branch], { cwd: remote }).toString().trim(),
+      c2,
+    );
+
+    // This run still believes the branch is at c1 — the push MUST be rejected
+    // rather than discarding c2.
+    commit("c3");
+    assert.throws(() => push(c1), /stale info|rejected|non-fast-forward/i);
+    assert.equal(
+      execFileSync("git", ["rev-parse", branch], { cwd: remote }).toString().trim(),
+      c2,
+      "remote must still hold the other writer's commit",
+    );
+
+    // Re-leasing against the observed head succeeds.
+    push(c2);
+    assert.notEqual(
+      execFileSync("git", ["rev-parse", branch], { cwd: remote }).toString().trim(),
+      c2,
+    );
+  });
+
+  it("real git rejects a 'must not exist' lease when the branch already exists", () => {
+    const remote = path.join(tmpRoot, "remote2.git");
+    execFileSync("git", ["init", "-q", "--bare", remote]);
+    const branch = "loom/T-existing";
+    const work = path.join(tmpRoot, "work2");
+    execFileSync("git", ["clone", "-q", remote, work]);
+    execFileSync("git", ["config", "user.email", "t@example.test"], { cwd: work });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: work });
+    fs.writeFileSync(path.join(work, "f.txt"), "x\n");
+    execFileSync("git", ["add", "-A"], { cwd: work });
+    execFileSync("git", ["commit", "-q", "-m", "x"], { cwd: work });
+    execFileSync("git", ["push", "-q", remote, "HEAD:refs/heads/" + branch], { cwd: work });
+
+    fs.writeFileSync(path.join(work, "f.txt"), "y\n");
+    execFileSync("git", ["add", "-A"], { cwd: work });
+    execFileSync("git", ["commit", "-q", "-m", "y"], { cwd: work });
+    assert.throws(
+      () =>
+        execFileSync("git", deliveryPushArgs({ dir: work, remoteUrl: remote, branch, expectedSHA: "" }), {
+          stdio: "pipe",
+        }),
+      /stale info|rejected|non-fast-forward/i,
+    );
+  });
 });
