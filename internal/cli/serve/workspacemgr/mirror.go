@@ -1,4 +1,4 @@
-package serve
+package workspacemgr
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/mirror"
 )
 
-func startLoomGitMirror(ctx context.Context) {
+func StartLoomGitMirror(ctx context.Context) {
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
