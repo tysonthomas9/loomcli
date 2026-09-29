@@ -54,29 +54,10 @@ func Commit(ctx context.Context, repo string, settings WorkspaceSettingsStore, r
 		return "", err
 	}
 	parent := strings.TrimSpace(string(parentBytes))
-	tmp, err := os.CreateTemp("", "loom-commit-index-*")
+	tree, err := treeForPaths(ctx, r, parent, req.Paths)
 	if err != nil {
 		return "", err
 	}
-	index := tmp.Name()
-	_ = tmp.Close()
-	defer os.Remove(index)
-	env := map[string]string{"GIT_INDEX_FILE": index}
-	if _, err = r.RunWithEnv(ctx, env, "read-tree", parent); err != nil {
-		return "", err
-	}
-	args := []string{"add", "-A", "--"}
-	for _, path := range req.Paths {
-		args = append(args, ":(literal)"+path)
-	}
-	if _, err = r.RunWithEnv(ctx, env, args...); err != nil {
-		return "", err
-	}
-	treeBytes, err := r.RunWithEnv(ctx, env, "write-tree")
-	if err != nil {
-		return "", err
-	}
-	tree := strings.TrimSpace(string(treeBytes))
 	parentTree, err := r.Run(ctx, "rev-parse", parent+"^{tree}")
 	if err != nil {
 		return "", err
@@ -94,6 +75,32 @@ func Commit(ctx context.Context, repo string, settings WorkspaceSettingsStore, r
 		return "", err
 	}
 	return sha, nil
+}
+
+func treeForPaths(ctx context.Context, r *gitexec.Runner, parent string, paths []string) (string, error) {
+	tmp, err := os.CreateTemp("", "loom-commit-index-*")
+	if err != nil {
+		return "", err
+	}
+	index := tmp.Name()
+	_ = tmp.Close()
+	defer os.Remove(index)
+	env := map[string]string{"GIT_INDEX_FILE": index}
+	if _, err = r.RunWithEnv(ctx, env, "read-tree", parent); err != nil {
+		return "", err
+	}
+	args := []string{"add", "-A", "--"}
+	for _, path := range paths {
+		args = append(args, ":(literal)"+path)
+	}
+	if _, err = r.RunWithEnv(ctx, env, args...); err != nil {
+		return "", err
+	}
+	treeBytes, err := r.RunWithEnv(ctx, env, "write-tree")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(treeBytes)), nil
 }
 
 func validateCommitRequest(ctx context.Context, repo string, settings WorkspaceSettingsStore, req CommitRequest) error {
