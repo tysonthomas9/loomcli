@@ -6,6 +6,8 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -18,6 +20,61 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+func TestTaskRunnerCancelSignalsWholeProcessGroup(t *testing.T) {
+	markerDir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestTaskRunnerSignalHelper$") //nolint:norawexec // Exercise the process-group cancellation boundary with this test binary.
+	cmd.Env = append(os.Environ(), "LOOM_TEST_SIGNAL_ROLE=parent", "LOOM_TEST_SIGNAL_DIR="+markerDir)
+	configureTaskRunnerProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer terminateTaskRunnerGroup(cmd)
+	waitForSignalMarker(t, filepath.Join(markerDir, "child-ready"))
+	cancel()
+	_ = cmd.Wait()
+	waitForSignalMarker(t, filepath.Join(markerDir, "child-int"))
+}
+
+func TestTaskRunnerSignalHelper(t *testing.T) {
+	role := os.Getenv("LOOM_TEST_SIGNAL_ROLE")
+	if role == "" {
+		return
+	}
+	dir := os.Getenv("LOOM_TEST_SIGNAL_DIR")
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT)
+	defer signal.Stop(signals)
+	if role == "parent" {
+		child := exec.Command(os.Args[0], "-test.run=^TestTaskRunnerSignalHelper$") //nolint:norawexec // The child must inherit the parent's process group.
+		child.Env = append(os.Environ(), "LOOM_TEST_SIGNAL_ROLE=child")
+		if err := child.Start(); err != nil {
+			t.Fatal(err)
+		}
+	} else if err := os.WriteFile(filepath.Join(dir, "child-ready"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	<-signals
+	if role == "child" {
+		if err := os.WriteFile(filepath.Join(dir, "child-int"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func waitForSignalMarker(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("signal marker %s did not appear", path)
+}
 
 type cancelTestResolver struct{ copy TaskWorktree }
 
