@@ -204,6 +204,11 @@ func TestTrackedSecretPatternInBaseIsAllowed(t *testing.T) {
 	}
 	git(t, repo, "add", "-f", ".env.example")
 	git(t, repo, "commit", "-qm", "tracked example")
+	attemptBase, err := refname.AttemptBase("W", "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "update-ref", attemptBase, git(t, repo, "rev-parse", "HEAD"))
 	if err := os.WriteFile(filepath.Join(repo, "readme"), []byte("attempt edit\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -270,5 +275,78 @@ func TestUnavailableProviderDoesNotBlockLocalCaptureAndRetries(t *testing.T) {
 	}
 	if got := git(t, remote, "rev-parse", result.CaptureRef); got != result.CaptureSHA {
 		t.Fatal("retry did not mirror capture")
+	}
+}
+
+func TestCommittedSecretUnderCaptureIsNotMirrored(t *testing.T) {
+	ctx := context.Background()
+	repo, remote, base, store := fixture(t)
+	if err := os.WriteFile(filepath.Join(repo, "id_rsa"), []byte("private key"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "add", "id_rsa")
+	git(t, repo, "commit", "-qm", "agent commits key")
+	if err := os.WriteFile(filepath.Join(repo, "readme"), []byte("edit\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runner, err := gitexec.New(repo, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := capture.Capture(ctx, runner, repo, capture.Params{Workspace: "W", Attempt: "A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SyncRepo(ctx, store, repo, base); err == nil {
+		t.Fatal("secret capture was mirrored")
+	}
+	if out := git(t, remote, "for-each-ref", "--format=%(refname)", result.CaptureRef); out != "" {
+		t.Fatalf("secret capture reached provider: %s", out)
+	}
+	row, _, err := store.MirrorState(ctx, repo, result.CaptureRef)
+	if err != nil || row.State != "not_mirrored" || !strings.Contains(row.Reason, "id_rsa") {
+		t.Fatalf("capture state: %+v, %v", row, err)
+	}
+}
+
+func TestSecretInHistoryOfWIPRefIsNotMirrored(t *testing.T) {
+	ctx := context.Background()
+	repo, remote, base, store := fixture(t)
+	ref, err := refname.WIP("W", "lead", "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "id_rsa"), []byte("private key"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "add", "id_rsa")
+	git(t, repo, "commit", "-qm", "add key")
+	git(t, repo, "rm", "-q", "id_rsa")
+	git(t, repo, "commit", "-qm", "drop key")
+	git(t, repo, "update-ref", ref, git(t, repo, "rev-parse", "HEAD"))
+	if err := SyncRepo(ctx, store, repo, base); err == nil {
+		t.Fatal("secret history was mirrored")
+	}
+	if out := git(t, remote, "for-each-ref", "--format=%(refname)", ref); out != "" {
+		t.Fatalf("secret history reached provider: %s", out)
+	}
+}
+
+func TestSecondMirrorPassDoesNotPushAgain(t *testing.T) {
+	ctx := context.Background()
+	repo, remote, base, store := fixture(t)
+	ref, err := refname.WIP("W", "lead", "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "update-ref", ref, base)
+	if err := SyncRepo(ctx, store, repo, base); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(remote, "hooks", "pre-receive"), []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := SyncRepo(ctx, store, repo, base); err != nil {
+		t.Fatalf("second pass pushed again: %v", err)
 	}
 }

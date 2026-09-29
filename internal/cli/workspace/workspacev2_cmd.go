@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -256,12 +257,20 @@ func runWorkspaceStatus(_ *cobra.Command, args []string) error {
 			fmt.Printf("\t%s", ws.ErrorMessage)
 		}
 		fmt.Println()
-		fmt.Printf("Loom Git: %d mirrored, %d pending, %d not mirrored\n", mirrorStatus.Mirrored, mirrorStatus.Pending, len(mirrorStatus.NotMirrored))
-		for _, reason := range mirrorStatus.NotMirrored {
-			fmt.Printf("  %s\n", reason)
-		}
-		return nil
+		return writeLoomGitMirrorStatus(os.Stdout, mirrorStatus)
 	})
+}
+
+func writeLoomGitMirrorStatus(w io.Writer, summary loomGitMirrorSummary) error {
+	if _, err := fmt.Fprintf(w, "Loom Git: %d mirrored, %d pending, %d not mirrored\n", summary.Mirrored, summary.Pending, len(summary.NotMirrored)); err != nil {
+		return err
+	}
+	for _, reason := range summary.NotMirrored {
+		if _, err := fmt.Fprintf(w, "  %s\n", reason); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type loomGitMirrorSummary struct {
@@ -271,12 +280,21 @@ type loomGitMirrorSummary struct {
 }
 
 func loomGitMirrorStatus(ctx context.Context, workspace string) loomGitMirrorSummary {
-	var summary loomGitMirrorSummary
 	rows, err := mirror.StatusWorkspace(ctx, workspace)
 	if err != nil {
-		summary.NotMirrored = []string{"status unavailable: " + err.Error()}
-		return summary
+		return loomGitMirrorSummary{NotMirrored: []string{"status unavailable: " + err.Error()}}
 	}
+	var statuses []loomGitMirrorRow
+	for _, row := range rows {
+		statuses = append(statuses, loomGitMirrorRow{Ref: row.Ref, State: row.State, Reason: row.Reason})
+	}
+	return summarizeLoomGitMirror(statuses)
+}
+
+type loomGitMirrorRow struct{ Ref, State, Reason string }
+
+func summarizeLoomGitMirror(rows []loomGitMirrorRow) loomGitMirrorSummary {
+	var summary loomGitMirrorSummary
 	for _, row := range rows {
 		switch row.State {
 		case "mirrored":

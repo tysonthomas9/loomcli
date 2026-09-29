@@ -191,14 +191,8 @@ func recordFailure(ctx context.Context, store Store, row journal.MirrorRecord, r
 }
 
 func newSecretPath(ctx context.Context, runner *gitexec.Runner, ref, sha, base string) (string, error) {
-	if strings.HasSuffix(ref, "/capture") {
-		parent, err := runner.Run(ctx, "rev-parse", sha+"^")
-		if err != nil {
-			return "", err
-		}
-		base = strings.TrimSpace(string(parent))
-	} else if strings.HasSuffix(ref, "/head") {
-		baseRef := strings.TrimSuffix(ref, "/head") + "/base"
+	if strings.HasSuffix(ref, "/capture") || strings.HasSuffix(ref, "/head") {
+		baseRef := ref[:strings.LastIndex(ref, "/")+1] + "base"
 		if exists, err := gitexec.RefExists(runner.Path(), baseRef); err != nil {
 			return "", err
 		} else if exists {
@@ -214,13 +208,19 @@ func newSecretPath(ctx context.Context, runner *gitexec.Runner, ref, sha, base s
 	if err != nil {
 		return "", err
 	}
-	paths, err := treePaths(ctx, runner, sha)
+	commits, err := runner.Run(ctx, "rev-list", sha, "^"+base)
 	if err != nil {
 		return "", err
 	}
-	for path := range paths {
-		if capture.SecretPath(path) && !basePaths[path] {
-			return path, nil
+	for _, commit := range strings.Fields(string(commits)) {
+		paths, err := treePaths(ctx, runner, commit)
+		if err != nil {
+			return "", err
+		}
+		for path := range paths {
+			if capture.SecretPath(path) && !basePaths[path] {
+				return path, nil
+			}
 		}
 	}
 	return "", nil
