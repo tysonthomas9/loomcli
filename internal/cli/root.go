@@ -20,6 +20,13 @@ import (
 var (
 	Version = "dev"
 	Build   = "unknown"
+	// Ref, SourcePRs and BuildTime complete the build provenance (D-48). They
+	// stay in this package because deployers stamp
+	// -X .../internal/cli.<Name>=...; the logic that reads them lives in
+	// internal/cli/provenance.
+	Ref       = ""
+	SourcePRs = ""
+	BuildTime = ""
 )
 
 // serverFlag stores the --server flag value (remote loom server base URL).
@@ -92,7 +99,15 @@ EXAMPLES
   loom sync                     # Full sync: push all + pull all`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if v, _ := cmd.Flags().GetBool("version"); v {
-			fmt.Printf("loom version %s (%s)\n", Version, Build)
+			// Rendered through the hooks internal/cli/provenance installs, so
+			// this and `loom version` cannot report different provenance. The
+			// dependency points that way (provenance imports cli, like every
+			// other command package) because internal/cli sits at its
+			// import-fanout ceiling.
+			fmt.Println(VersionLine())
+			if warn := VersionSkewWarning(); warn != "" {
+				fmt.Fprintln(os.Stderr, warn)
+			}
 			return
 		}
 		_ = cmd.Help()
@@ -396,3 +411,19 @@ func parseGitBranches(output string) []string {
 
 	return unique
 }
+
+// Provenance hooks, installed by internal/cli/provenance at init. They exist
+// as function vars rather than a direct call because internal/cli is at its
+// import-fanout ceiling and, more importantly, because the dependency belongs
+// this way round: the provenance package imports cli (as every other command
+// package does), reads the ldflags-set vars above, and hands back rendered
+// strings.
+//
+// Defaults keep this package standalone — a build that never links provenance
+// still prints a truthful version line.
+var (
+	// VersionLine renders the human version line.
+	VersionLine = func() string { return fmt.Sprintf("loom version %s (%s)", Version, Build) }
+	// VersionSkewWarning renders the PATH-vs-deployed skew warning, or "".
+	VersionSkewWarning = func() string { return "" }
+)
