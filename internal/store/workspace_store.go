@@ -10,22 +10,24 @@ import (
 // (must satisfy fleet-db's `^[A-Z]([A-Z0-9-]{0,30}[A-Z0-9])?$` regex)
 // and Name. Other fields are optional and apply server-side defaults.
 type WorkspaceCreate struct {
-	Key           string
-	Name          string
-	Description   string
-	DefaultBranch string
-	DesignFormat  string
+	Key                     string
+	Name                    string
+	Description             string
+	DefaultBranch           string
+	DesignFormat            string
+	TaskDeliveryRequirement domain.TaskDeliveryRequirement
 }
 
 // WorkspaceUpdate is a partial-update payload. Only non-nil fields are
 // applied. Pointer types distinguish "unset" from "set to zero value".
 type WorkspaceUpdate struct {
-	Name          *string
-	Description   *string
-	DefaultBranch *string
-	DesignFormat  *string
-	State         *domain.WorkspaceState
-	ErrorMessage  *string
+	Name                    *string
+	Description             *string
+	DefaultBranch           *string
+	DesignFormat            *string
+	TaskDeliveryRequirement *domain.TaskDeliveryRequirement
+	State                   *domain.WorkspaceState
+	ErrorMessage            *string
 }
 
 // WorkspaceStore is the persistence interface for Workspace entities.

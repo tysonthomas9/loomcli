@@ -144,13 +144,17 @@ func TestWorkspaceStoreCreateSendsDesignFormat(t *testing.T) {
 		if body["design_format"] != "html" {
 			t.Fatalf("create body design_format = %v, want html (body=%+v)", body["design_format"], body)
 		}
+		if body["task_delivery_requirement"] != "pull_request" {
+			t.Fatalf("create body task_delivery_requirement = %v, want pull_request (body=%+v)", body["task_delivery_requirement"], body)
+		}
 		w.WriteHeader(http.StatusCreated)
 		writeJSON(t, w, domain.Workspace{
-			Key:          "LOCALMODE",
-			Name:         "Local Mode",
-			DesignFormat: "html",
-			CreatedAt:    now,
-			UpdatedAt:    now,
+			Key:                     "LOCALMODE",
+			Name:                    "Local Mode",
+			DesignFormat:            "html",
+			TaskDeliveryRequirement: domain.TaskDeliveryPullRequest,
+			CreatedAt:               now,
+			UpdatedAt:               now,
 		})
 	}))
 
@@ -159,15 +163,19 @@ func TestWorkspaceStoreCreateSendsDesignFormat(t *testing.T) {
 		t.Fatal(err)
 	}
 	ws, err := client.Workspaces().Create(t.Context(), store.WorkspaceCreate{
-		Key:          "LOCALMODE",
-		Name:         "Local Mode",
-		DesignFormat: "html",
+		Key:                     "LOCALMODE",
+		Name:                    "Local Mode",
+		DesignFormat:            "html",
+		TaskDeliveryRequirement: domain.TaskDeliveryPullRequest,
 	})
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	if ws.DesignFormat != "html" {
 		t.Fatalf("DesignFormat = %q, want html", ws.DesignFormat)
+	}
+	if ws.TaskDeliveryRequirement != domain.TaskDeliveryPullRequest {
+		t.Fatalf("TaskDeliveryRequirement = %q, want pull_request", ws.TaskDeliveryRequirement)
 	}
 }
 

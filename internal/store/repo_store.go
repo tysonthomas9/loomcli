@@ -9,22 +9,24 @@ import (
 // RepoCreate is the input for RepoStore.Create. WorkspaceKey + Name are
 // required; the workspace must already exist.
 type RepoCreate struct {
-	WorkspaceKey  string
-	Name          string
-	RemoteURL     string
-	Remote        string
-	DefaultBranch string
-	Groups        []string
-	SourceRepoID  string
+	WorkspaceKey            string
+	Name                    string
+	RemoteURL               string
+	Remote                  string
+	DefaultBranch           string
+	Groups                  []string
+	SourceRepoID            string
+	TaskDeliveryRequirement domain.TaskDeliveryRequirement
 }
 
 // RepoUpdate is the partial-update payload for repos.
 type RepoUpdate struct {
-	RemoteURL     *string
-	Remote        *string
-	DefaultBranch *string
-	Groups        *[]string
-	SourceRepoID  *string
+	RemoteURL               *string
+	Remote                  *string
+	DefaultBranch           *string
+	Groups                  *[]string
+	SourceRepoID            *string
+	TaskDeliveryRequirement *domain.TaskDeliveryRequirement
 }
 
 // RepoStore is the persistence interface for Repo entities. All methods
