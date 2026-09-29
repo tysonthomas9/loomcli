@@ -13,6 +13,7 @@
 set -uo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$repo_root/scripts/lib/sandbox.sh"
 cd "$repo_root"
 
 if [ -z "${LOOM_BIN:-}" ]; then
@@ -29,11 +30,12 @@ if [ ! -x "$LOOM_BIN" ]; then
     exit 2
 fi
 
-if ! tmp="$(mktemp -d -t loom-serve-fleetdb-missing.XXXXXX)"; then
+if ! loom_mktemp_dir loom-serve-fleetdb-missing; then
     echo "[repro] mktemp failed" >&2
     exit 2
 fi
-trap 'rm -rf "$tmp"' EXIT
+tmp="$LOOM_SANDBOX_DIR"
+trap 'rm -rf "$tmp"' EXIT INT TERM
 
 # Scrub PATH so the spawned `loom serve` cannot find fleet-db on disk, and
 # force FLEET_DB_BIN to a path that does not exist. The bundled-binary

@@ -10,6 +10,7 @@ set -Eeuo pipefail
 #   surface used by Flue's local sandbox tests.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/scripts/lib/sandbox.sh"
 FLEET_DB_REPO="${FLEET_DB_REPO:-$(cd "$ROOT/../fleet-db" 2>/dev/null && pwd || true)}"
 FLUE_REPO="${FLUE_REPO:-$(cd "$ROOT/../flue" 2>/dev/null && pwd || true)}"
 FLUE_LOOM_TS_DIR="$ROOT/scripts/real-flue-local-sandbox"
@@ -22,7 +23,7 @@ LOOM_PORT="${LOOM_PORT:-18196}"
 FLEET_URL="http://127.0.0.1:${FLEET_PORT}"
 LOOM_URL="http://127.0.0.1:${LOOM_PORT}"
 
-TMP_ROOT="$(mktemp -d -t loom-real-flue-local-sandbox.XXXXXX)"
+loom_mktemp_dir test-real-flue-local-sandbox-runner; TMP_ROOT="$LOOM_SANDBOX_DIR"
 BIN_DIR="$TMP_ROOT/bin"
 WORKDIR="$TMP_ROOT/work"
 LOOM_CONFIG_DIR="$TMP_ROOT/loom-config"
@@ -66,7 +67,7 @@ cleanup() {
     echo "kept real Flue local-sandbox E2E workspace at $TMP_ROOT"
   fi
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 run_flue() {
   if [[ -n "${LOOM_FLUE_BUILD_CMD_JSON:-}" ]]; then

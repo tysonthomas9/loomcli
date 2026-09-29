@@ -5,14 +5,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+. "$REPO_ROOT/scripts/lib/sandbox.sh"
 SKIP_FILE="$REPO_ROOT/.test-skip"
 
 # Isolate tests from the real ~/.loom so state-cache writes never clobber
 # the user's workspace path registry (LOOMDEV-14).
 if [[ -z "${LOOM_CONFIG_DIR:-}" ]]; then
-    LOOM_CONFIG_DIR="$(mktemp -d)"
+    loom_mktemp_dir test; LOOM_CONFIG_DIR="$LOOM_SANDBOX_DIR"
     export LOOM_CONFIG_DIR
-    trap 'rm -rf "$LOOM_CONFIG_DIR"' EXIT
+    trap 'rm -rf "$LOOM_CONFIG_DIR"' EXIT INT TERM
 fi
 
 # Build skip pattern from .test-skip file

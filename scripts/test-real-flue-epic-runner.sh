@@ -12,6 +12,7 @@
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/scripts/lib/sandbox.sh"
 FLEET_DB_REPO="${FLEET_DB_REPO:-$(cd "$ROOT/../fleet-db" 2>/dev/null && pwd || true)}"
 FLUE_REPO="${FLUE_REPO:-$(cd "$ROOT/../flue" 2>/dev/null && pwd || true)}"
 
@@ -81,7 +82,7 @@ run_flue() {
   flue "$@"
 }
 
-TMP_ROOT="$(mktemp -d -t loom-real-flue-e2e.XXXXXX)"
+loom_mktemp_dir test-real-flue-epic-runner; TMP_ROOT="$LOOM_SANDBOX_DIR"
 BIN_DIR="$TMP_ROOT/bin"
 WORKDIR="$TMP_ROOT/work"
 LOOM_CONFIG_DIR="$TMP_ROOT/loom-config"
@@ -110,7 +111,7 @@ cleanup() {
     echo "kept real Flue E2E workspace at $TMP_ROOT"
   fi
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 echo "==> building fleet-db and loom"
 (
