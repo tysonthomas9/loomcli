@@ -33,6 +33,25 @@ func CleanupFreshClone(path string) error {
 	if err := verifyFreshCloneState(ctx, runner, path); err != nil {
 		return err
 	}
+	if err := verifyFreshCloneRefs(ctx, runner, path); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return fmt.Errorf("partial clone retained at %s: %w", path, err)
+	}
+	return nil
+}
+
+func verifyFreshCloneRefs(ctx context.Context, runner *gitexec.Runner, path string) error {
+	refs, err := runner.Run(ctx, "for-each-ref", "--format=%(refname)", "refs")
+	if err != nil {
+		return fmt.Errorf("partial clone retained at %s: inspect refs: %w", path, err)
+	}
+	for _, ref := range strings.Fields(string(refs)) {
+		if !strings.HasPrefix(ref, "refs/heads/") && !strings.HasPrefix(ref, "refs/remotes/origin/") {
+			return fmt.Errorf("partial clone retained at %s: extra ref %s", path, ref)
+		}
+	}
 	defaultRef, err := runner.Run(ctx, "symbolic-ref", "refs/remotes/origin/HEAD")
 	if err != nil {
 		return fmt.Errorf("partial clone retained at %s: unknown default branch: %w", path, err)
@@ -51,14 +70,11 @@ func CleanupFreshClone(path string) error {
 			return fmt.Errorf("partial clone retained at %s: unpushed branch %s: %v", path, branch, err)
 		}
 	}
-	if err := os.RemoveAll(path); err != nil {
-		return fmt.Errorf("partial clone retained at %s: %w", path, err)
-	}
 	return nil
 }
 
 func verifyFreshCloneState(ctx context.Context, runner *gitexec.Runner, path string) error {
-	for _, args := range [][]string{{"status", "--porcelain", "--ignored"}, {"for-each-ref", "--format=%(refname)", "refs/stash"}} {
+	for _, args := range [][]string{{"status", "--porcelain", "--ignored"}} {
 		out, err := runner.Run(ctx, args...)
 		if err != nil || len(out) != 0 {
 			return fmt.Errorf("partial clone retained at %s: working files or stash present: %v", path, err)

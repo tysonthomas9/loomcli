@@ -66,6 +66,8 @@ func TestP120CleanupFreshClonePreservesNewWork(t *testing.T) {
 					t.Fatal(err)
 				}
 				gitDeleteTest(t, clone, "stash")
+			case "tag":
+				gitDeleteTest(t, clone, "tag", "user-save")
 			case "worktree":
 				gitDeleteTest(t, clone, "worktree", "add", "-b", "other", filepath.Join(filepath.Dir(clone), "other"))
 			case "detached-worktree":
