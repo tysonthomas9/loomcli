@@ -394,10 +394,21 @@ func completeLeadInboxRetry(
 		Outcome:    "retry",
 		ErrorClass: d.provider() + "_delivery_pending",
 		Error:      delivered.Reason,
+		ClaimedBy:  msg.ClaimedBy,
 	}); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("return lead inbox message %q to the queue: %w", msg.InboxMessageID, err)
 	}
 	return delivered, nil
+}
+
+// inboxClaimLost reports whether a completion was refused because this session
+// no longer holds the claim it is completing under: fleet-db answers 403 when
+// claimed_by does not match the live holder (an absent one included, or a
+// re-claim after our lease ran out) and 410 while the expired claim is still
+// the stored one. Neither is retryable under the same claim — the message goes
+// back to the queue and is claimed afresh.
+func inboxClaimLost(err error) bool {
+	return errors.Is(err, domain.ErrNotOwner) || errors.Is(err, domain.ErrGone)
 }
 
 // completeLeadInboxDelivered finalizes a delivered inbox message and, for
@@ -411,16 +422,26 @@ func completeLeadInboxDelivered(
 	msg *domain.AgentInboxMessage,
 	delivered *DeliveryResult,
 ) (*DeliveryResult, error) {
-	if _, err := st.AgentInboxMessages().Complete(ctx, workspace, msg.InboxMessageID, store.AgentInboxMessageComplete{
+	_, completeErr := st.AgentInboxMessages().Complete(ctx, workspace, msg.InboxMessageID, store.AgentInboxMessageComplete{
 		Outcome:           "delivered",
 		DeliveredThreadID: d.deliveredThreadID(),
-	}); err != nil {
-		return nil, err
+		ClaimedBy:         msg.ClaimedBy,
+	})
+	if completeErr != nil && !inboxClaimLost(completeErr) {
+		return nil, fmt.Errorf("complete lead inbox message %q: %w", msg.InboxMessageID, completeErr)
 	}
+	// The turn did land, so the assignment marker advances even when the
+	// completion was refused. Skipping it would re-deliver the same assignment
+	// on every drain tick for as long as the refusal lasts.
 	if epicID, version, ok := assignmentFromInboxMessage(msg); ok {
 		if err := MarkAssignmentDelivered(ctx, st, workspace, sessionID, epicID, version); err != nil {
 			return nil, err
 		}
+	}
+	if completeErr != nil {
+		return nil, fmt.Errorf(
+			"lead inbox message %q was delivered but the completion was refused (claim lost): %w",
+			msg.InboxMessageID, completeErr)
 	}
 	return delivered, nil
 }
@@ -445,7 +466,7 @@ func drainLeadMessageQueue(ctx context.Context, st store.Store, workspace, leadN
 		case <-ticker.C:
 			result, err := DeliverPendingLeadMessages(ctx, st, workspace, leadName)
 			if err != nil {
-				logger.Debug("lead message queue drain failed", "err", err)
+				logLeadDrainFailure(logger, leadName, err)
 				continue
 			}
 			if result != nil && result.State == DeliveryStateDelivered {
@@ -453,6 +474,14 @@ func drainLeadMessageQueue(ctx context.Context, st store.Store, workspace, leadN
 			}
 		}
 	}
+}
+
+// logLeadDrainFailure reports a failed drain tick. It is warn, not debug: a
+// drain that keeps failing re-delivers the same inbox message on every tick
+// (once every leadMessageDrainInterval) and the lead makes no progress, which
+// must not be invisible at the default log level.
+func logLeadDrainFailure(logger *slog.Logger, leadName string, err error) {
+	logger.Warn("lead message queue drain failed", "lead", leadName, "err", err)
 }
 
 func createLeadInboxMessage(ctx context.Context, st store.Store, workspace, leadName, sessionID, message string, opts LeadMessageDeliveryOptions) (*domain.AgentInboxMessage, error) {
