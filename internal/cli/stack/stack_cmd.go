@@ -1,6 +1,7 @@
 // Package stack implements the `loom stack` command group: register and inspect
-// stack lineage and publish it as stacked PRs. Lineage is loomcli-side (a local
-// stackstore); publishing uses the repo-scoped GitHub forge + reconciler.
+// stack lineage and publish it as stacked PRs. Lineage lives in FleetDB (the
+// canonical stackstore; LOOM_STACK_STORE=local selects the machine-local
+// fallback); publishing uses the repo-scoped GitHub forge + reconciler.
 package stack
 
 import (
@@ -41,8 +42,7 @@ func init() {
 // helpers --------------------------------------------------------------------
 
 // activeWorkspace returns the workspace key from LOOM_WORKSPACE (which the root
-// command mirrors --workspace into). Stack lineage is local, so this avoids
-// opening the fleet-db store for simple edits.
+// command mirrors --workspace into).
 func activeWorkspace() (string, error) {
 	ws := strings.TrimSpace(os.Getenv("LOOM_WORKSPACE"))
 	if ws == "" {
@@ -51,7 +51,25 @@ func activeWorkspace() (string, error) {
 	return ws, nil
 }
 
-func openStore() (*stackstore.LocalStore, error) { return stackstore.Default() }
+// openStore opens the canonical stack store: fleet-db's stack API through the
+// loom store handle, or LocalStore when LOOM_STACK_STORE=local. The returned
+// func releases the handle and must be called when the command is done.
+func openStore(ctx context.Context) (stackstore.Store, func(), error) {
+	if stackstore.LocalRequested() {
+		st, err := stackstore.Default()
+		return st, func() {}, err
+	}
+	h, err := cmdstore.OpenStore(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	st, err := stackstore.ForStore(h.Store)
+	if err != nil {
+		_ = h.Close()
+		return nil, nil, err
+	}
+	return st, func() { _ = h.Close() }, nil
+}
 
 var shaRe = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 
@@ -122,10 +140,11 @@ func initCmd() *cobra.Command {
 			if strings.TrimSpace(repo) == "" {
 				return errors.New("--repo is required")
 			}
-			st, err := openStore()
+			st, done, err := openStore(cmd.Context())
 			if err != nil {
 				return err
 			}
+			defer done()
 			stack := sl.Stack{
 				ID: sl.StackID(args[0]), WorkspaceKey: ws, RepoName: repo,
 				RootBase: base, DefaultCommitMode: sl.CommitMode(mode),
@@ -158,10 +177,11 @@ func listCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			st, err := openStore()
+			st, done, err := openStore(cmd.Context())
 			if err != nil {
 				return err
 			}
+			defer done()
 			stacks, err := st.ListStacks(cmd.Context(), ws)
 			if err != nil {
 				return err
@@ -190,10 +210,11 @@ func showCmd() *cobra.Command {
 		Short: "Show a stack and its ordered units",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, st, id, err := loadCtx(args[0])
+			ws, st, id, done, err := loadCtx(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}
+			defer done()
 			stack, err := st.GetStack(cmd.Context(), ws, id)
 			if err != nil {
 				return err
@@ -226,10 +247,11 @@ func statusCmd() *cobra.Command {
 		Short: "Show each unit's PR, state, and live health (checks/review/mergeable)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, st, id, err := loadCtx(args[0])
+			ws, st, id, done, err := loadCtx(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}
+			defer done()
 			stack, err := st.GetStack(cmd.Context(), ws, id)
 			if err != nil {
 				return err
@@ -290,10 +312,11 @@ func validateCmd() *cobra.Command {
 		Short: "Check the stack's lineage is linear and acyclic",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, st, id, err := loadCtx(args[0])
+			ws, st, id, done, err := loadCtx(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}
+			defer done()
 			nodes, err := st.ListNodes(cmd.Context(), ws, id)
 			if err != nil {
 				return err
@@ -325,10 +348,11 @@ func addCmd() *cobra.Command {
 		Short: "Register a task in a stack (appends to the tip; --after to chain, --root for a parallel chain)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, st, id, err := loadCtxFlag(stackID)
+			ws, st, id, done, err := loadCtxFlag(cmd.Context(), stackID)
 			if err != nil {
 				return err
 			}
+			defer done()
 			if root && after != "" {
 				return errors.New("--root and --after are mutually exclusive")
 			}
@@ -371,14 +395,19 @@ func moveCmd() *cobra.Command {
 		Short: "Reorder a unit to sit after another unit",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, st, id, err := loadCtxFlag(stackID)
+			ws, st, id, done, err := loadCtxFlag(cmd.Context(), stackID)
 			if err != nil {
 				return err
 			}
+			defer done()
 			if after == "" {
 				return errors.New("--after is required")
 			}
-			if err := st.MoveNode(cmd.Context(), ws, id, args[0], after); err != nil {
+			mover, ok := st.(stackstore.Mover)
+			if !ok {
+				return errors.New("stack store does not support moving units")
+			}
+			if err := mover.MoveNode(cmd.Context(), ws, id, args[0], after); err != nil {
 				return err
 			}
 			fmt.Printf("moved %s after %s\n", args[0], after)
@@ -398,10 +427,11 @@ func setBaseCmd() *cobra.Command {
 		Short: "Set a unit's predecessor (\"\" for root)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, st, id, err := loadCtxFlag(stackID)
+			ws, st, id, done, err := loadCtxFlag(cmd.Context(), stackID)
 			if err != nil {
 				return err
 			}
+			defer done()
 			if err := st.SetBase(cmd.Context(), ws, id, args[0], baseTask); err != nil {
 				return err
 			}
@@ -422,10 +452,11 @@ func removeCmd() *cobra.Command {
 		Short: "Remove a unit (children reparent onto its predecessor)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, st, id, err := loadCtxFlag(stackID)
+			ws, st, id, done, err := loadCtxFlag(cmd.Context(), stackID)
 			if err != nil {
 				return err
 			}
+			defer done()
 			if err := st.RemoveNode(cmd.Context(), ws, id, args[0]); err != nil {
 				return err
 			}
@@ -446,10 +477,11 @@ func restackCmd() *cobra.Command {
 		Short: "Rebase descendants of merged units onto the live base, resolving conflicts with an agent",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, st, id, err := loadCtx(args[0])
+			ws, st, id, done, err := loadCtx(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}
+			defer done()
 			stack, err := st.GetStack(cmd.Context(), ws, id)
 			if err != nil {
 				return err
@@ -489,10 +521,11 @@ func publishCmd() *cobra.Command {
 		Short: "Publish the stack as stacked pull requests",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, st, id, err := loadCtx(args[0])
+			ws, st, id, done, err := loadCtx(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}
+			defer done()
 			stack, err := st.GetStack(cmd.Context(), ws, id)
 			if err != nil {
 				return err
@@ -556,23 +589,23 @@ func publishCmd() *cobra.Command {
 
 // shared loaders -------------------------------------------------------------
 
-func loadCtx(stackID string) (string, *stackstore.LocalStore, sl.StackID, error) {
+func loadCtx(ctx context.Context, stackID string) (string, stackstore.Store, sl.StackID, func(), error) {
 	ws, err := activeWorkspace()
 	if err != nil {
-		return "", nil, "", err
+		return "", nil, "", nil, err
 	}
-	st, err := openStore()
+	st, done, err := openStore(ctx)
 	if err != nil {
-		return "", nil, "", err
+		return "", nil, "", nil, err
 	}
-	return ws, st, sl.StackID(stackID), nil
+	return ws, st, sl.StackID(stackID), done, nil
 }
 
-func loadCtxFlag(stackID string) (string, *stackstore.LocalStore, sl.StackID, error) {
+func loadCtxFlag(ctx context.Context, stackID string) (string, stackstore.Store, sl.StackID, func(), error) {
 	if strings.TrimSpace(stackID) == "" {
-		return "", nil, "", errors.New("--stack is required")
+		return "", nil, "", nil, errors.New("--stack is required")
 	}
-	return loadCtx(stackID)
+	return loadCtx(ctx, stackID)
 }
 
 func baseOrRoot(n sl.Node, root string) string {

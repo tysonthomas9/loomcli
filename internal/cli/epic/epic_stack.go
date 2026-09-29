@@ -291,9 +291,10 @@ func projectedLineage(ctx context.Context, sstore stackstore.Store, ws string, s
 
 // projectEpicStackForRun is the `loom epic run` wiring for stacked mode: it
 // builds the fleet-db issue backend, resolves the repo + root base the stack is
-// scoped to, and projects the epic DAG into the per-user stackstore — the same
-// store the worktree resolver reads via DefaultStackLineageLookup, so a stacked
-// task's worktree base comes from this projection.
+// scoped to, and projects the epic DAG into the canonical stackstore (FleetDB,
+// via stackstore.ForStore) — the same store the worktree resolver reads via
+// DefaultStackLineageLookup, so a stacked task's worktree base comes from this
+// projection.
 //
 // It is intentionally fail-open at the call site: the lineage path is inert
 // until populated, and a missing/partial projection only means the resolver
@@ -315,7 +316,7 @@ func projectEpicStackForRun(ctx context.Context, handle *bootstrap.StoreHandle, 
 	if err != nil {
 		return nil, fmt.Errorf("create fleet-db issue backend: %w", err)
 	}
-	sstore, err := stackstore.Default()
+	sstore, err := stackstore.ForStore(handle.Store)
 	if err != nil {
 		return nil, fmt.Errorf("open stack store: %w", err)
 	}

@@ -140,7 +140,7 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 
 	runID := fmt.Sprintf("run-%d", time.Now().UTC().UnixNano())
 
-	// Stacked mode: project the epic's blocks DAG into the per-user stackstore
+	// Stacked mode: project the epic's blocks DAG into the canonical stackstore
 	// before queueing so the workflow payload can carry the same lineage to
 	// sandboxed runners that cannot read the host stack store.
 	var stackProj *EpicStackProjection
@@ -184,7 +184,7 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 	// base = its predecessor's branch). Fail-open: the branches are on origin, so
 	// a reconcile error is a warning — re-runnable via `loom stack publish`.
 	if stackProj != nil {
-		if rerr := reconcileEpicStack(ctx, ws, stackProj); rerr != nil {
+		if rerr := reconcileEpicStack(ctx, handle.Store, ws, stackProj); rerr != nil {
 			fmt.Printf("[epic-run] WARN: stack reconcile skipped (branches are pushed; run `loom stack publish %s`): %v\n", stackProj.StackID, rerr)
 		}
 	}

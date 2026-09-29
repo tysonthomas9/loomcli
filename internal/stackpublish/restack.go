@@ -46,7 +46,27 @@ func slideSafe(ctx context.Context, repoPath, rootBase, predBranch, nodeBranch s
 // resolving conflicts via the resolver, so a squash/rebase merge doesn't leave
 // the descendant carrying its predecessor's commits. It is idempotent: chains
 // that are already safe (merge-commit, or already rebased) are skipped.
+//
+// Standalone Restack acquires the shared publish admission. When called from
+// Publish (nested auto-rebase), withAdmission reuses the outer session only for
+// the exact same (workspace, stackID) — mismatch fails closed before any
+// store/forge/git work. Same-key nesting keeps the outer leasingForge (no
+// second lease or wrapper).
 func (r *Reconciler) Restack(ctx context.Context, ws string, id sl.StackID, repoPath string, resolver ConflictResolver) (*RestackReport, error) {
+	var report *RestackReport
+	err := r.withAdmission(ctx, ws, id, func(ctx context.Context, sess *Session) error {
+		rec := *r
+		if _, ok := r.Forge.(*leasingForge); !ok {
+			rec.Forge = &leasingForge{inner: r.Forge, sess: sess}
+		}
+		var perr error
+		report, perr = rec.restackBody(ctx, ws, id, repoPath, resolver)
+		return perr
+	})
+	return report, err
+}
+
+func (r *Reconciler) restackBody(ctx context.Context, ws string, id sl.StackID, repoPath string, resolver ConflictResolver) (*RestackReport, error) {
 	stack, err := r.Store.GetStack(ctx, ws, id)
 	if err != nil {
 		return nil, err
@@ -141,6 +161,12 @@ func (r *Reconciler) restackChain(ctx context.Context, repoPath, rootBase string
 
 // rebaseOnto runs `git rebase --onto <onto> <upstream> <branch>`, driving the
 // resolver through any conflicts. Returns whether conflict resolution was needed.
+//
+// Git subprocesses are lease-/60s-bounded via runGit (boundLocal under a
+// Session so a rebase conflict is a settled local exit that reaches the
+// resolver without poisoning admission). The ConflictResolver call is
+// intentionally NOT wrapped in Session.Do — local agent thinking must not
+// inherit an artificial forge-call cap. Lease loss still cancels via ctx.
 func (r *Reconciler) rebaseOnto(ctx context.Context, repoPath, branch, onto, upstream string, resolver ConflictResolver) (bool, error) {
 	env := append(envWith(), "GIT_EDITOR=true", "GIT_SEQUENCE_EDITOR=true")
 	if _, err := runGit(ctx, repoPath, env, "rebase", "--onto", onto, upstream, branch); err == nil {

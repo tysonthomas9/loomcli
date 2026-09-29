@@ -101,6 +101,11 @@ type tracedStore struct {
 	connectorCalls       *tracedConnectorAuditStore
 }
 
+// Unwrap returns the decorated store, so callers such as stackstore.ForStore
+// can reach capabilities outside the store.Store contract (fleet-db's stack
+// API) through the tracing layer.
+func (t *tracedStore) Unwrap() store.Store { return t.inner }
+
 func (t *tracedStore) Workspaces() store.WorkspaceStore       { return t.workspaces }
 func (t *tracedStore) Repos() store.RepoStore                 { return t.repos }
 func (t *tracedStore) Agents() store.AgentStore               { return t.agents }

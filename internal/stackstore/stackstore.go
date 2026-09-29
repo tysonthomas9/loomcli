@@ -1,9 +1,10 @@
 // Package stackstore persists stack lineage for the stack-aware PR publisher.
 //
-// This iteration ships a loomcli-side LocalStore backed by ~/.loom/stacks.json,
-// using the same configlock + atomic-write discipline as the state cache. The
-// Store interface is the seam: a future FleetDBStore can implement it without
-// touching the reconciler or CLI. See
+// FleetDBStore (fleet-db's stack API) is the canonical store in a FleetDB
+// workspace; ForStore selects it. LocalStore, backed by ~/.loom/stacks.json with
+// the same configlock + atomic-write discipline as the state cache, remains
+// for explicit local/offline use (LOOM_STACK_STORE=local) and for callers
+// with no fleet-db store. See
 // docs/design/2026-06-18-stack-aware-pr-publisher.md.
 package stackstore
 
@@ -39,6 +40,12 @@ type Store interface {
 	UpdateNode(ctx context.Context, ws string, id sl.StackID, taskID string, fn func(*sl.Node) error) error
 }
 
+// Mover is implemented by stores that can splice a node to sit immediately
+// after another in its chain (`loom stack move`).
+type Mover interface {
+	MoveNode(ctx context.Context, ws string, id sl.StackID, taskID, afterTaskID string) error
+}
+
 // Sentinel errors.
 var (
 	ErrStackNotFound  = errors.New("stackstore: stack not found")
@@ -46,6 +53,20 @@ var (
 	ErrNodeNotFound   = errors.New("stackstore: node not found")
 	ErrNodeExists     = errors.New("stackstore: task already in stack")
 	ErrLoomDirMissing = errors.New("stackstore: cannot resolve loom directory")
+	// ErrNodeTerminal: the node is merged and its state/lineage cannot change.
+	ErrNodeTerminal = errors.New("stackstore: node is merged and cannot be changed")
+	// ErrConcurrentUpdate: the write kept losing the revision race to other
+	// writers. Nothing was written; the caller may retry.
+	ErrConcurrentUpdate = errors.New("stackstore: stack modified concurrently")
+	// ErrUnknownWriteOutcome: a write may have been accepted (for example
+	// fleet-db returned 503 stack_inconsistent after journaling) but a
+	// bounded re-read could not confirm the requested intent. Do not assume
+	// success or failure; re-read the stack and retry the mutation only if
+	// the intent is still unmet — never blind-retry after this error.
+	ErrUnknownWriteOutcome = errors.New("stackstore: write outcome unknown; re-read before retrying")
+	// ErrUnsupportedUpdate: UpdateNode's fn changed a field the store cannot
+	// write through UpdateNode. Nothing was written.
+	ErrUnsupportedUpdate = errors.New("stackstore: unsupported node update")
 )
 
 // on-disk shape ------------------------------------------------------------
@@ -69,7 +90,10 @@ type storedStack struct {
 // LocalStore implements Store against a single JSON file in a loom directory.
 type LocalStore struct{ dir string }
 
-var _ Store = (*LocalStore)(nil)
+var (
+	_ Store = (*LocalStore)(nil)
+	_ Mover = (*LocalStore)(nil)
+)
 
 // New returns a LocalStore rooted at dir (the directory holding stacks.json).
 func New(dir string) *LocalStore { return &LocalStore{dir: dir} }
@@ -232,6 +256,10 @@ func (s *LocalStore) EnsureStack(_ context.Context, in sl.Stack) error {
 		}
 		in.CreatedAt = now
 		in.UpdatedAt = now
+		if w.Stacks == nil {
+			// A workspace whose last stack was deleted reloads as {} → nil map.
+			w.Stacks = map[string]*storedStack{}
+		}
 		w.Stacks[string(in.ID)] = &storedStack{Stack: in, Nodes: map[string]*sl.Node{}}
 		return nil
 	})

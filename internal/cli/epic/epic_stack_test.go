@@ -254,22 +254,6 @@ func TestProjectEpicStack_MidChainReparent(t *testing.T) {
 	}
 }
 
-func TestSanitizeLockSegment(t *testing.T) {
-	cases := map[string]string{
-		"epic:EPIC-1":     "epic-EPIC-1",
-		"epic:E":          "epic-E",
-		"auto:loom/flaky": "auto-loom-flaky",
-		"":                "stack",
-		":::":             "stack",
-		"a_b-c":           "a_b-c",
-	}
-	for in, want := range cases {
-		if got := sanitizeLockSegment(in); got != want {
-			t.Errorf("sanitizeLockSegment(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func mustNodes(t *testing.T, ctx context.Context, s *stackstore.LocalStore, ws string, id sl.StackID) []sl.Node {
 	t.Helper()
 	nodes, err := s.ListNodes(ctx, ws, id)

@@ -182,3 +182,19 @@ func TestConcurrentAddNode(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 20, nodes[0].PRNumber, "lock must serialize read-modify-write")
 }
+
+// Deleting a workspace's last stack persists "WS": {} which reloads with a nil
+// Stacks map; the next EnsureStack must create it rather than panic.
+func TestEnsureStackAfterLastStackDeleted(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	seedStack(t, s)
+	require.NoError(t, s.DeleteStack(ctx, ws, "epic:E1"))
+
+	require.NoError(t, s.EnsureStack(ctx, sl.Stack{
+		ID: "epic:E2", WorkspaceKey: ws, RepoName: "loomcli", RootBase: "main",
+	}))
+	got, err := s.GetStack(ctx, ws, "epic:E2")
+	require.NoError(t, err)
+	assert.Equal(t, sl.StackID("epic:E2"), got.ID)
+}

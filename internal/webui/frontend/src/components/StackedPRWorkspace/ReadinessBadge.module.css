@@ -1,0 +1,64 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  white-space: nowrap;
+}
+
+.badge[data-key="ready"] {
+  color: var(--color-success, #1a7f4b);
+  background: color-mix(
+    in srgb,
+    var(--color-success, #1a7f4b) 12%,
+    transparent
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--color-success, #1a7f4b) 35%,
+    transparent
+  );
+}
+
+.badge[data-key="blocked"] {
+  color: var(--color-danger, #b42318);
+  background: color-mix(in srgb, var(--color-danger, #b42318) 10%, transparent);
+  border-color: color-mix(
+    in srgb,
+    var(--color-danger, #b42318) 30%,
+    transparent
+  );
+}
+
+.badge[data-key="stale"],
+.badge[data-key="unknown"],
+.badge[data-historical] {
+  color: var(--color-warning, #8a6d00);
+  background: color-mix(
+    in srgb,
+    var(--color-warning, #b8860b) 12%,
+    transparent
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--color-warning, #b8860b) 35%,
+    transparent
+  );
+}
+
+.badge[data-key="merged"],
+.badge[data-key="closed"] {
+  color: var(--color-text-tertiary);
+}
+
+.histMark {
+  opacity: 0.8;
+}

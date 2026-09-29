@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/atomicfile"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
@@ -136,40 +136,47 @@ func ResolveLockDir(path string) string {
 }
 
 // resolveWorkspaceName returns the workspace name for the given path, or empty string if not in a workspace.
+// Workspace and repo checkout paths are machine-local, so this reads only the
+// bootstrap state cache and never enumerates FleetDB workspaces (an unrelated
+// workspace failing to load must not affect agent lock acquisition).
 func resolveWorkspaceName(path string) string {
-	cfg, err := config.LoadConfig()
-	if err != nil || cfg == nil {
+	sc, err := bootstrap.LoadStateCache()
+	if err != nil || sc == nil {
 		return ""
 	}
 
 	cleanPath := filepath.Clean(path)
+	within := func(root string) bool {
+		return cleanPath == root || strings.HasPrefix(cleanPath, root+string(filepath.Separator))
+	}
 
-	for name, ws := range cfg.Workspaces {
+	// Most specific (longest) matching workspace or repo root wins so nested
+	// roots resolve to the inner workspace deterministically.
+	bestName := ""
+	bestLen := -1
+	consider := func(name, root string) {
+		if within(root) && len(root) > bestLen {
+			bestName = name
+			bestLen = len(root)
+		}
+	}
+	for name, ws := range sc.Workspaces {
 		if ws.Path == "" {
 			continue
 		}
 		wsPath := filepath.Clean(ws.Path)
-
-		if cleanPath == wsPath || strings.HasPrefix(cleanPath, wsPath+string(filepath.Separator)) {
-			return name
-		}
-
-		for _, repo := range ws.Repos {
-			if repo.Path == "" {
+		consider(name, wsPath)
+		for _, repoPath := range ws.Repos {
+			if repoPath == "" {
 				continue
 			}
-			repoPath := repo.Path
 			if !filepath.IsAbs(repoPath) {
 				repoPath = filepath.Join(wsPath, repoPath)
 			}
-			repoPath = filepath.Clean(repoPath)
-			if cleanPath == repoPath || strings.HasPrefix(cleanPath, repoPath+string(filepath.Separator)) {
-				return name
-			}
+			consider(name, filepath.Clean(repoPath))
 		}
 	}
-
-	return ""
+	return bestName
 }
 
 // acquireLockRetry handles the retry loop when the initial O_EXCL lock creation

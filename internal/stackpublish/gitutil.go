@@ -8,13 +8,70 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
+
+// callBoundDepthKey marks a context already under Session.Do / boundLocal so
+// nested git does not re-enter (PushBranches → runGit). Outer Do still tracks
+// forge/push uncertainty; boundLocal does not poison on settled local exits.
+type callBoundDepthKey struct{}
 
 // envWith returns the current process environment, for git subprocesses that
 // also need an extra credential variable appended.
 func envWith() []string { return os.Environ() }
 
+// runGit runs one git subprocess. Every invocation has a ≤60s deadline. While a
+// publish admission session is held (and not already inside Do/boundLocal):
+//   - git push uses Session.Do (conservative uncertain on any post-start error)
+//   - all other commands use boundLocal (renew + lease bound; settled local
+//     nonzero exits do not poison admission)
 func runGit(ctx context.Context, dir string, env []string, args ...string) (string, error) {
+	if ctx.Value(callBoundDepthKey{}) != nil {
+		return execGit(ctx, dir, env, args...)
+	}
+	if sess := SessionFrom(ctx); sess != nil {
+		var out string
+		run := func(cctx context.Context) error {
+			var e error
+			out, e = execGit(cctx, dir, env, args...)
+			return e
+		}
+		if gitInvocationIsPush(args) {
+			// Product pushes normally arrive via leasingForge.PushBranches → Do
+			// (depth key set). This path is the failsafe if push is invoked
+			// under a Session without an outer Do.
+			err := sess.Do(ctx, run)
+			return out, err
+		}
+		err := sess.boundLocal(ctx, run)
+		return out, err
+	}
+	cctx, cancel := context.WithTimeout(ctx, domain.MaxStackPublishCallBound)
+	defer cancel()
+	return execGit(cctx, dir, env, args...)
+}
+
+// gitInvocationIsPush reports whether args are a `git push` (after -c/-C and
+// similar option pairs). Used so remote-mutating push never skips Session.Do.
+func gitInvocationIsPush(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "-c" || a == "-C" || a == "--git-dir" || a == "--work-tree":
+			i++ // skip option value
+		case a == "push":
+			return true
+		case strings.HasPrefix(a, "-"):
+			// other flags; keep scanning for the verb
+		default:
+			return a == "push"
+		}
+	}
+	return false
+}
+
+func execGit(ctx context.Context, dir string, env []string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // fixed executable; args controlled by publisher
 	cmd.Dir = dir
 	if len(env) > 0 {
@@ -65,17 +122,34 @@ func fetchRef(ctx context.Context, dir, remote, ref string) error {
 
 // isAncestor reports whether `ancestor` is an ancestor of `descendant`. A clean
 // exit-1 means "no" (not an error); any other failure (e.g. an unresolvable ref)
-// is returned so callers can fail closed.
+// is returned so callers can fail closed. Bound like other local git subprocesses.
 func isAncestor(ctx context.Context, dir, ancestor, descendant string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", dir, "merge-base", "--is-ancestor", ancestor, descendant) //nolint:gosec // fixed executable; controlled args
-	err := cmd.Run()
-	if err == nil {
-		return true, nil
+	run := func(cctx context.Context) (bool, error) {
+		cmd := exec.CommandContext(cctx, "git", "-C", dir, "merge-base", "--is-ancestor", ancestor, descendant) //nolint:gosec // fixed executable; controlled args
+		err := cmd.Run()
+		if err == nil {
+			return true, nil
+		}
+		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+			return false, nil
+		}
+		return false, fmt.Errorf("git merge-base --is-ancestor %s %s: %w", ancestor, descendant, err)
 	}
-	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
-		return false, nil
+	if ctx.Value(callBoundDepthKey{}) != nil {
+		return run(ctx)
 	}
-	return false, fmt.Errorf("git merge-base --is-ancestor %s %s: %w", ancestor, descendant, err)
+	if sess := SessionFrom(ctx); sess != nil {
+		var ok bool
+		err := sess.boundLocal(ctx, func(cctx context.Context) error {
+			var e error
+			ok, e = run(cctx)
+			return e
+		})
+		return ok, err
+	}
+	cctx, cancel := context.WithTimeout(ctx, domain.MaxStackPublishCallBound)
+	defer cancel()
+	return run(cctx)
 }
 
 // headSHA returns the commit SHA a local ref points at.

@@ -1,0 +1,127 @@
+{
+  "data": {
+    "repository": {
+      "pr_785": {
+        "number": 785,
+        "id": "PR_kwDORAhY0M8AAAABE-bT1g",
+        "state": "OPEN",
+        "isDraft": false,
+        "merged": false,
+        "headRefName": "loom/stack/epic-STACKED-PRS-2/STACKED-PRS-27",
+        "headRefOid": "d4307ab52b67c001176511eba8e2ce0f9812af7b",
+        "baseRefName": "v5",
+        "baseRefOid": "1c6dabfc87281d12dcdb0fdb6884d0f5d042acb1",
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "BLOCKED",
+        "reviewDecision": "REVIEW_REQUIRED",
+        "isInMergeQueue": false,
+        "mergeQueueEntry": null,
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "d4307ab52b67c001176511eba8e2ce0f9812af7b",
+                "statusCheckRollup": {
+                  "state": "FAILURE",
+                  "contexts": {
+                    "totalCount": 9,
+                    "pageInfo": {
+                      "hasNextPage": false
+                    },
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "aft",
+                        "status": "COMPLETED",
+                        "conclusion": "FAILURE",
+                        "isRequired": false
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Go Quality Gate",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "isRequired": false
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Browser E2E Tests (mocked)",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "isRequired": false
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Frontend Quality Gate",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "isRequired": false
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Go Coverage",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "isRequired": false
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Frontend Coverage",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "isRequired": false
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Frontend (standalone)",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "isRequired": false
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Test (macOS, Go)",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "isRequired": false
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Builtin Bundle (flue pin)",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "isRequired": false
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "pr_99999": null
+    },
+    "rateLimit": {
+      "cost": 1,
+      "remaining": 4722,
+      "resetAt": "2026-09-25T00:11:19Z"
+    }
+  },
+  "errors": [
+    {
+      "type": "NOT_FOUND",
+      "path": [
+        "repository",
+        "pr_99999"
+      ],
+      "locations": [
+        {
+          "line": 12,
+          "column": 1
+        }
+      ],
+      "message": "Could not resolve to a PullRequest with the number of 99999."
+    }
+  ]
+}

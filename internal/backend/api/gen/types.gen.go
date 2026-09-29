@@ -206,6 +206,51 @@ func (e CreateIssueRequestStatus) Valid() bool {
 	}
 }
 
+// Defines values for DeliveryGroupMemberSource.
+const (
+	IdentityHeal          DeliveryGroupMemberSource = "identity_heal"
+	LineageAdopt          DeliveryGroupMemberSource = "lineage_adopt"
+	LoomTask              DeliveryGroupMemberSource = "loom_task"
+	Manual                DeliveryGroupMemberSource = "manual"
+	NativeStackSuggestion DeliveryGroupMemberSource = "native_stack_suggestion"
+)
+
+// Valid indicates whether the value is a known member of the DeliveryGroupMemberSource enum.
+func (e DeliveryGroupMemberSource) Valid() bool {
+	switch e {
+	case IdentityHeal:
+		return true
+	case LineageAdopt:
+		return true
+	case LoomTask:
+		return true
+	case Manual:
+		return true
+	case NativeStackSuggestion:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeliveryGroupViewState.
+const (
+	DeliveryGroupViewStateActive   DeliveryGroupViewState = "active"
+	DeliveryGroupViewStateArchived DeliveryGroupViewState = "archived"
+)
+
+// Valid indicates whether the value is a known member of the DeliveryGroupViewState enum.
+func (e DeliveryGroupViewState) Valid() bool {
+	switch e {
+	case DeliveryGroupViewStateActive:
+		return true
+	case DeliveryGroupViewStateArchived:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ErrorResponseSuccess.
 const (
 	False ErrorResponseSuccess = false
@@ -277,22 +322,22 @@ func (e FileCheckoutRepairRequestScope) Valid() bool {
 
 // Defines values for FileCheckoutRepairResponseMethod.
 const (
-	None      FileCheckoutRepairResponseMethod = "none"
-	Provision FileCheckoutRepairResponseMethod = "provision"
-	Recreate  FileCheckoutRepairResponseMethod = "recreate"
-	Repair    FileCheckoutRepairResponseMethod = "repair"
+	FileCheckoutRepairResponseMethodNone      FileCheckoutRepairResponseMethod = "none"
+	FileCheckoutRepairResponseMethodProvision FileCheckoutRepairResponseMethod = "provision"
+	FileCheckoutRepairResponseMethodRecreate  FileCheckoutRepairResponseMethod = "recreate"
+	FileCheckoutRepairResponseMethodRepair    FileCheckoutRepairResponseMethod = "repair"
 )
 
 // Valid indicates whether the value is a known member of the FileCheckoutRepairResponseMethod enum.
 func (e FileCheckoutRepairResponseMethod) Valid() bool {
 	switch e {
-	case None:
+	case FileCheckoutRepairResponseMethodNone:
 		return true
-	case Provision:
+	case FileCheckoutRepairResponseMethodProvision:
 		return true
-	case Recreate:
+	case FileCheckoutRepairResponseMethodRecreate:
 		return true
-	case Repair:
+	case FileCheckoutRepairResponseMethodRepair:
 		return true
 	default:
 		return false
@@ -338,6 +383,51 @@ func (e FilePartialReason) Valid() bool {
 	case FileSize:
 		return true
 	case ResultCount:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GitHubViewerIdentitySource.
+const (
+	GitHubViewerIdentitySourceConnector GitHubViewerIdentitySource = "connector"
+	GitHubViewerIdentitySourceGhCli     GitHubViewerIdentitySource = "gh_cli"
+	GitHubViewerIdentitySourceNone      GitHubViewerIdentitySource = "none"
+)
+
+// Valid indicates whether the value is a known member of the GitHubViewerIdentitySource enum.
+func (e GitHubViewerIdentitySource) Valid() bool {
+	switch e {
+	case GitHubViewerIdentitySourceConnector:
+		return true
+	case GitHubViewerIdentitySourceGhCli:
+		return true
+	case GitHubViewerIdentitySourceNone:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GitHubViewerIdentityStatus.
+const (
+	GitHubViewerIdentityStatusAvailable   GitHubViewerIdentityStatus = "available"
+	GitHubViewerIdentityStatusError       GitHubViewerIdentityStatus = "error"
+	GitHubViewerIdentityStatusRateLimited GitHubViewerIdentityStatus = "rate_limited"
+	GitHubViewerIdentityStatusUnavailable GitHubViewerIdentityStatus = "unavailable"
+)
+
+// Valid indicates whether the value is a known member of the GitHubViewerIdentityStatus enum.
+func (e GitHubViewerIdentityStatus) Valid() bool {
+	switch e {
+	case GitHubViewerIdentityStatusAvailable:
+		return true
+	case GitHubViewerIdentityStatusError:
+		return true
+	case GitHubViewerIdentityStatusRateLimited:
+		return true
+	case GitHubViewerIdentityStatusUnavailable:
 		return true
 	default:
 		return false
@@ -803,6 +893,168 @@ func (e PatchIssueRequestStatus) Valid() bool {
 	}
 }
 
+// Defines values for PullRequestReadinessErrorCode.
+const (
+	PullRequestReadinessErrorCodeChecksTruncated      PullRequestReadinessErrorCode = "checks_truncated"
+	PullRequestReadinessErrorCodeConnectorUnavailable PullRequestReadinessErrorCode = "connector_unavailable"
+	PullRequestReadinessErrorCodeForbidden            PullRequestReadinessErrorCode = "forbidden"
+	PullRequestReadinessErrorCodeNotFound             PullRequestReadinessErrorCode = "not_found"
+	PullRequestReadinessErrorCodeRateLimited          PullRequestReadinessErrorCode = "rate_limited"
+	PullRequestReadinessErrorCodeRepoUnregistered     PullRequestReadinessErrorCode = "repo_unregistered"
+	PullRequestReadinessErrorCodeTimeout              PullRequestReadinessErrorCode = "timeout"
+	PullRequestReadinessErrorCodeUnrecognizedValue    PullRequestReadinessErrorCode = "unrecognized_value"
+	PullRequestReadinessErrorCodeUpstreamError        PullRequestReadinessErrorCode = "upstream_error"
+)
+
+// Valid indicates whether the value is a known member of the PullRequestReadinessErrorCode enum.
+func (e PullRequestReadinessErrorCode) Valid() bool {
+	switch e {
+	case PullRequestReadinessErrorCodeChecksTruncated:
+		return true
+	case PullRequestReadinessErrorCodeConnectorUnavailable:
+		return true
+	case PullRequestReadinessErrorCodeForbidden:
+		return true
+	case PullRequestReadinessErrorCodeNotFound:
+		return true
+	case PullRequestReadinessErrorCodeRateLimited:
+		return true
+	case PullRequestReadinessErrorCodeRepoUnregistered:
+		return true
+	case PullRequestReadinessErrorCodeTimeout:
+		return true
+	case PullRequestReadinessErrorCodeUnrecognizedValue:
+		return true
+	case PullRequestReadinessErrorCodeUpstreamError:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PullRequestReadinessFactStatus.
+const (
+	PullRequestReadinessFactStatusComputing PullRequestReadinessFactStatus = "computing"
+	PullRequestReadinessFactStatusError     PullRequestReadinessFactStatus = "error"
+	PullRequestReadinessFactStatusKnown     PullRequestReadinessFactStatus = "known"
+	PullRequestReadinessFactStatusUnknown   PullRequestReadinessFactStatus = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the PullRequestReadinessFactStatus enum.
+func (e PullRequestReadinessFactStatus) Valid() bool {
+	switch e {
+	case PullRequestReadinessFactStatusComputing:
+		return true
+	case PullRequestReadinessFactStatusError:
+		return true
+	case PullRequestReadinessFactStatusKnown:
+		return true
+	case PullRequestReadinessFactStatusUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PullRequestReadinessPreviewMemberPosition.
+const (
+	PullRequestReadinessPreviewMemberPositionAfterStop PullRequestReadinessPreviewMemberPosition = "after_stop"
+	PullRequestReadinessPreviewMemberPositionInPrefix  PullRequestReadinessPreviewMemberPosition = "in_prefix"
+	PullRequestReadinessPreviewMemberPositionMerged    PullRequestReadinessPreviewMemberPosition = "merged"
+	PullRequestReadinessPreviewMemberPositionStop      PullRequestReadinessPreviewMemberPosition = "stop"
+)
+
+// Valid indicates whether the value is a known member of the PullRequestReadinessPreviewMemberPosition enum.
+func (e PullRequestReadinessPreviewMemberPosition) Valid() bool {
+	switch e {
+	case PullRequestReadinessPreviewMemberPositionAfterStop:
+		return true
+	case PullRequestReadinessPreviewMemberPositionInPrefix:
+		return true
+	case PullRequestReadinessPreviewMemberPositionMerged:
+		return true
+	case PullRequestReadinessPreviewMemberPositionStop:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PullRequestReadinessVerdict.
+const (
+	PullRequestReadinessVerdictBlocked PullRequestReadinessVerdict = "blocked"
+	PullRequestReadinessVerdictClosed  PullRequestReadinessVerdict = "closed"
+	PullRequestReadinessVerdictMerged  PullRequestReadinessVerdict = "merged"
+	PullRequestReadinessVerdictQueued  PullRequestReadinessVerdict = "queued"
+	PullRequestReadinessVerdictReady   PullRequestReadinessVerdict = "ready"
+	PullRequestReadinessVerdictUnknown PullRequestReadinessVerdict = "unknown"
+	PullRequestReadinessVerdictWaiting PullRequestReadinessVerdict = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the PullRequestReadinessVerdict enum.
+func (e PullRequestReadinessVerdict) Valid() bool {
+	switch e {
+	case PullRequestReadinessVerdictBlocked:
+		return true
+	case PullRequestReadinessVerdictClosed:
+		return true
+	case PullRequestReadinessVerdictMerged:
+		return true
+	case PullRequestReadinessVerdictQueued:
+		return true
+	case PullRequestReadinessVerdictReady:
+		return true
+	case PullRequestReadinessVerdictUnknown:
+		return true
+	case PullRequestReadinessVerdictWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PullRequestReadinessViewFreshness.
+const (
+	PullRequestReadinessViewFreshnessAging   PullRequestReadinessViewFreshness = "aging"
+	PullRequestReadinessViewFreshnessFresh   PullRequestReadinessViewFreshness = "fresh"
+	PullRequestReadinessViewFreshnessStale   PullRequestReadinessViewFreshness = "stale"
+	PullRequestReadinessViewFreshnessUnknown PullRequestReadinessViewFreshness = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the PullRequestReadinessViewFreshness enum.
+func (e PullRequestReadinessViewFreshness) Valid() bool {
+	switch e {
+	case PullRequestReadinessViewFreshnessAging:
+		return true
+	case PullRequestReadinessViewFreshnessFresh:
+		return true
+	case PullRequestReadinessViewFreshnessStale:
+		return true
+	case PullRequestReadinessViewFreshnessUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PullRequestReadinessViewInvalidated.
+const (
+	BaseChanged PullRequestReadinessViewInvalidated = "base_changed"
+	HeadMoved   PullRequestReadinessViewInvalidated = "head_moved"
+)
+
+// Valid indicates whether the value is a known member of the PullRequestReadinessViewInvalidated enum.
+func (e PullRequestReadinessViewInvalidated) Valid() bool {
+	switch e {
+	case BaseChanged:
+		return true
+	case HeadMoved:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PullRequestReviewRequestEvent.
 const (
 	PullRequestReviewRequestEventApprove        PullRequestReviewRequestEvent = "approve"
@@ -862,16 +1114,16 @@ func (e SessionHistoryRecordLauncher) Valid() bool {
 
 // Defines values for SessionHistoryRecordStatus.
 const (
-	Active    SessionHistoryRecordStatus = "active"
-	Completed SessionHistoryRecordStatus = "completed"
+	SessionHistoryRecordStatusActive    SessionHistoryRecordStatus = "active"
+	SessionHistoryRecordStatusCompleted SessionHistoryRecordStatus = "completed"
 )
 
 // Valid indicates whether the value is a known member of the SessionHistoryRecordStatus enum.
 func (e SessionHistoryRecordStatus) Valid() bool {
 	switch e {
-	case Active:
+	case SessionHistoryRecordStatusActive:
 		return true
-	case Completed:
+	case SessionHistoryRecordStatusCompleted:
 		return true
 	default:
 		return false
@@ -1106,6 +1358,27 @@ func (e ListBlockedParamsType) Valid() bool {
 	case ListBlockedParamsTypeFeature:
 		return true
 	case ListBlockedParamsTypeTask:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListDeliveryGroupsParamsState.
+const (
+	ListDeliveryGroupsParamsStateActive   ListDeliveryGroupsParamsState = "active"
+	ListDeliveryGroupsParamsStateAll      ListDeliveryGroupsParamsState = "all"
+	ListDeliveryGroupsParamsStateArchived ListDeliveryGroupsParamsState = "archived"
+)
+
+// Valid indicates whether the value is a known member of the ListDeliveryGroupsParamsState enum.
+func (e ListDeliveryGroupsParamsState) Valid() bool {
+	switch e {
+	case ListDeliveryGroupsParamsStateActive:
+		return true
+	case ListDeliveryGroupsParamsStateAll:
+		return true
+	case ListDeliveryGroupsParamsStateArchived:
 		return true
 	default:
 		return false
@@ -1463,6 +1736,33 @@ func (e GetGraphParamsStatus) Valid() bool {
 	}
 }
 
+// Defines values for ListPullRequestsParamsState.
+const (
+	ListPullRequestsParamsStateAll    ListPullRequestsParamsState = "all"
+	ListPullRequestsParamsStateClosed ListPullRequestsParamsState = "closed"
+	ListPullRequestsParamsStateMerged ListPullRequestsParamsState = "merged"
+	ListPullRequestsParamsStateOpen   ListPullRequestsParamsState = "open"
+	ListPullRequestsParamsStateReview ListPullRequestsParamsState = "review"
+)
+
+// Valid indicates whether the value is a known member of the ListPullRequestsParamsState enum.
+func (e ListPullRequestsParamsState) Valid() bool {
+	switch e {
+	case ListPullRequestsParamsStateAll:
+		return true
+	case ListPullRequestsParamsStateClosed:
+		return true
+	case ListPullRequestsParamsStateMerged:
+		return true
+	case ListPullRequestsParamsStateOpen:
+		return true
+	case ListPullRequestsParamsStateReview:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListReadyParamsType.
 const (
 	ListReadyParamsTypeBug     ListReadyParamsType = "bug"
@@ -1732,8 +2032,11 @@ type CreateIssueRequest struct {
 	Owner              *string                     `json:"owner,omitempty"`
 	Parent             *string                     `json:"parent,omitempty"`
 	Priority           int                         `json:"priority"`
-	Status             *CreateIssueRequestStatus   `json:"status,omitempty"`
-	Title              string                      `json:"title"`
+
+	// SourceRepo Source repository for multi-repo workspaces
+	SourceRepo *string                   `json:"source_repo,omitempty"`
+	Status     *CreateIssueRequestStatus `json:"status,omitempty"`
+	Title      string                    `json:"title"`
 }
 
 // CreateIssueRequestIssueType defines model for CreateIssueRequest.IssueType.
@@ -1741,6 +2044,121 @@ type CreateIssueRequestIssueType string
 
 // CreateIssueRequestStatus defines model for CreateIssueRequest.Status.
 type CreateIssueRequestStatus string
+
+// DeliveryGroupCreateRequest defines model for DeliveryGroupCreateRequest.
+type DeliveryGroupCreateRequest struct {
+	EpicId  *string                     `json:"epic_id,omitempty"`
+	Id      string                      `json:"id"`
+	Members *[]DeliveryGroupMemberInput `json:"members,omitempty"`
+	Owner   *string                     `json:"owner,omitempty"`
+	Title   string                      `json:"title"`
+}
+
+// DeliveryGroupList defines model for DeliveryGroupList.
+type DeliveryGroupList struct {
+	Count          int                 `json:"count"`
+	DeliveryGroups []DeliveryGroupView `json:"delivery_groups"`
+	HasMore        bool                `json:"has_more"`
+	NextCursor     *string             `json:"next_cursor,omitempty"`
+	Warnings       *[]string           `json:"warnings,omitempty"`
+}
+
+// DeliveryGroupMember defines model for DeliveryGroupMember.
+type DeliveryGroupMember struct {
+	AddedAt        time.Time                 `json:"added_at"`
+	AddedBy        *string                   `json:"added_by,omitempty"`
+	GithubNodeId   *string                   `json:"github_node_id,omitempty"`
+	LineageStackId *string                   `json:"lineage_stack_id,omitempty"`
+	PrKey          string                    `json:"pr_key"`
+	PrNumber       int                       `json:"pr_number"`
+	RepoName       string                    `json:"repo_name"`
+	Source         DeliveryGroupMemberSource `json:"source"`
+	TaskId         *string                   `json:"task_id,omitempty"`
+}
+
+// DeliveryGroupMemberInput defines model for DeliveryGroupMemberInput.
+type DeliveryGroupMemberInput struct {
+	GithubNodeId   *string                    `json:"github_node_id,omitempty"`
+	LineageStackId *string                    `json:"lineage_stack_id,omitempty"`
+	PrKey          *string                    `json:"pr_key,omitempty"`
+	PrNumber       *int                       `json:"pr_number,omitempty"`
+	RepoName       *string                    `json:"repo_name,omitempty"`
+	Source         *DeliveryGroupMemberSource `json:"source,omitempty"`
+	TaskId         *string                    `json:"task_id,omitempty"`
+}
+
+// DeliveryGroupMemberSource defines model for DeliveryGroupMemberSource.
+type DeliveryGroupMemberSource string
+
+// DeliveryGroupMemberView defines model for DeliveryGroupMemberView.
+type DeliveryGroupMemberView struct {
+	AddedAt        time.Time `json:"added_at"`
+	AddedBy        *string   `json:"added_by,omitempty"`
+	GithubNodeId   *string   `json:"github_node_id,omitempty"`
+	LineageStackId *string   `json:"lineage_stack_id,omitempty"`
+	PrKey          string    `json:"pr_key"`
+	PrNumber       int       `json:"pr_number"`
+
+	// Readiness What a readiness surface renders for one PR. snapshot is the last-known observation (history once not fresh); current_verdict is the only verdict that may be shown as current and is never "ready" unless freshness is "fresh".
+	Readiness *PullRequestReadinessView `json:"readiness,omitempty"`
+	RepoName  string                    `json:"repo_name"`
+	Source    DeliveryGroupMemberSource `json:"source"`
+	TaskId    *string                   `json:"task_id,omitempty"`
+	Warnings  *[]string                 `json:"warnings,omitempty"`
+}
+
+// DeliveryGroupPreview defines model for DeliveryGroupPreview.
+type DeliveryGroupPreview struct {
+	FreshForS   int                             `json:"fresh_for_s"`
+	GroupId     string                          `json:"group_id"`
+	Preview     PullRequestReadinessPreview     `json:"preview"`
+	RepoErrors  []PullRequestReadinessRepoError `json:"repo_errors"`
+	Revision    int64                           `json:"revision"`
+	ServerNow   time.Time                       `json:"server_now"`
+	StaleAfterS int                             `json:"stale_after_s"`
+	Warnings    *[]string                       `json:"warnings,omitempty"`
+}
+
+// DeliveryGroupSetMembersRequest defines model for DeliveryGroupSetMembersRequest.
+type DeliveryGroupSetMembersRequest struct {
+	Members []DeliveryGroupMemberInput `json:"members"`
+}
+
+// DeliveryGroupUpdateRequest defines model for DeliveryGroupUpdateRequest.
+type DeliveryGroupUpdateRequest struct {
+	EpicId *string `json:"epic_id,omitempty"`
+	Owner  *string `json:"owner,omitempty"`
+	Title  *string `json:"title,omitempty"`
+}
+
+// DeliveryGroupView defines model for DeliveryGroupView.
+type DeliveryGroupView struct {
+	CreatedAt    time.Time                 `json:"created_at"`
+	CreatedBy    *string                   `json:"created_by,omitempty"`
+	EpicId       *string                   `json:"epic_id,omitempty"`
+	Id           string                    `json:"id"`
+	Inconsistent *bool                     `json:"inconsistent,omitempty"`
+	Integrity    *string                   `json:"integrity,omitempty"`
+	LastOpDigest *string                   `json:"last_op_digest,omitempty"`
+	LastOpId     string                    `json:"last_op_id"`
+	Members      []DeliveryGroupMemberView `json:"members"`
+	Owner        *string                   `json:"owner,omitempty"`
+	Revision     int64                     `json:"revision"`
+	State        DeliveryGroupViewState    `json:"state"`
+	Title        string                    `json:"title"`
+	UpdatedAt    time.Time                 `json:"updated_at"`
+	UpdatedBy    *string                   `json:"updated_by,omitempty"`
+	WorkspaceKey string                    `json:"workspace_key"`
+}
+
+// DeliveryGroupViewState defines model for DeliveryGroupView.State.
+type DeliveryGroupViewState string
+
+// DeliveryGroupWrite defines model for DeliveryGroupWrite.
+type DeliveryGroupWrite struct {
+	Group    DeliveryGroupView `json:"group"`
+	Replayed *bool             `json:"replayed,omitempty"`
+}
 
 // Dependency Full dependency relation from types.Dependency
 type Dependency struct {
@@ -1781,7 +2199,9 @@ type EditorOpenRequest struct {
 
 // ErrorResponse defines model for ErrorResponse.
 type ErrorResponse struct {
-	Code      *string                 `json:"code,omitempty"`
+	Code *string `json:"code,omitempty"`
+
+	// Details Structured facts for typed errors. Delivery-group 409 conflicts may include `pr_key`, `group_id`, and `revision`. Delivery-group 412 precondition failures include `expected_revision` and `stored_revision`.
 	Details   *map[string]interface{} `json:"details,omitempty"`
 	Error     string                  `json:"error"`
 	Retryable *bool                   `json:"retryable,omitempty"`
@@ -2024,6 +2444,78 @@ type FileWriteRequest struct {
 
 	// Repo Optional repo qualifier, valid only when scope=agent.
 	Repo *string `json:"repo,omitempty"`
+}
+
+// GitHubViewerIdentity Verified GitHub login for the same workspace credential that lists registered-repo PRs. Never derived from Better Auth/JWT display name.
+type GitHubViewerIdentity struct {
+	// ConnectorId e.g. github-webui when source=connector
+	ConnectorId *string `json:"connector_id,omitempty"`
+
+	// Login Present only when status=available. Exact GitHub login.
+	Login *string `json:"login,omitempty"`
+
+	// Message Operator-safe reason when not available (no token material).
+	Message    *string                    `json:"message,omitempty"`
+	ObservedAt *time.Time                 `json:"observed_at,omitempty"`
+	Source     GitHubViewerIdentitySource `json:"source"`
+	Status     GitHubViewerIdentityStatus `json:"status"`
+}
+
+// GitHubViewerIdentitySource defines model for GitHubViewerIdentity.Source.
+type GitHubViewerIdentitySource string
+
+// GitHubViewerIdentityStatus defines model for GitHubViewerIdentity.Status.
+type GitHubViewerIdentityStatus string
+
+// GitPullRequest defines model for GitPullRequest.
+type GitPullRequest struct {
+	Additions    *int    `json:"additions,omitempty"`
+	AuthorLogin  *string `json:"author_login,omitempty"`
+	BaseRefName  string  `json:"base_ref_name"`
+	ChangedFiles *int    `json:"changed_files,omitempty"`
+	CreatedAt    *string `json:"created_at,omitempty"`
+	Deletions    *int    `json:"deletions,omitempty"`
+	HeadRefName  string  `json:"head_ref_name"`
+	HeadSha      *string `json:"head_sha,omitempty"`
+	IsDraft      bool    `json:"is_draft"`
+
+	// NodeId GitHub global node ID. Survives repository rename or transfer and is used to reconcile pr_key.
+	NodeId *string `json:"node_id,omitempty"`
+	Number int     `json:"number"`
+
+	// PrKey Canonical identity "github:<owner>/<repo>#<number>", lowercased and taken from the PR's base repository as GitHub currently names it (never a fork head). Falls back to the registered remote.
+	PrKey *string `json:"pr_key,omitempty"`
+
+	// RepoName GitHub owner/repo of the base repository.
+	RepoName       string  `json:"repo_name"`
+	ReviewDecision *string `json:"review_decision,omitempty"`
+
+	// SourceRepo Workspace-registered repository name.
+	SourceRepo *string `json:"source_repo,omitempty"`
+
+	// State OPEN, CLOSED or MERGED.
+	State     string  `json:"state"`
+	Title     string  `json:"title"`
+	UpdatedAt *string `json:"updated_at,omitempty"`
+	Url       string  `json:"url"`
+}
+
+// GitPullRequestList defines model for GitPullRequestList.
+type GitPullRequestList struct {
+	DeliveryGroups *[]DeliveryGroupView `json:"delivery_groups,omitempty"`
+
+	// DeliveryGroupsCount Length of this delivery_groups page only
+	DeliveryGroupsCount      *int    `json:"delivery_groups_count,omitempty"`
+	DeliveryGroupsHasMore    *bool   `json:"delivery_groups_has_more,omitempty"`
+	DeliveryGroupsNextCursor *string `json:"delivery_groups_next_cursor,omitempty"`
+
+	// GithubViewer Verified GitHub login for the same workspace credential that lists registered-repo PRs. Never derived from Better Auth/JWT display name.
+	GithubViewer GitHubViewerIdentity `json:"github_viewer"`
+
+	// PullRequests Standalone discovered PRs not in an active delivery group
+	PullRequests           []GitPullRequest          `json:"pull_requests"`
+	StandaloneContinuation *StandalonePRContinuation `json:"standalone_continuation,omitempty"`
+	Warnings               *[]string                 `json:"warnings,omitempty"`
 }
 
 // HourlyBucket defines model for HourlyBucket.
@@ -2612,6 +3104,16 @@ type PatchIssueRequestDesignFormat string
 // PatchIssueRequestStatus defines model for PatchIssueRequest.Status.
 type PatchIssueRequestStatus string
 
+// PullRequestCheckSummary defines model for PullRequestCheckSummary.
+type PullRequestCheckSummary struct {
+	Failed       int       `json:"failed"`
+	FailingNames *[]string `json:"failing_names,omitempty"`
+	Passed       int       `json:"passed"`
+	Pending      int       `json:"pending"`
+	PendingNames *[]string `json:"pending_names,omitempty"`
+	Total        int       `json:"total"`
+}
+
 // PullRequestDetail defines model for PullRequestDetail.
 type PullRequestDetail struct {
 	BaseRefName string `json:"base_ref_name"`
@@ -2638,6 +3140,143 @@ type PullRequestDiffFile struct {
 	Path      string `json:"path"`
 	Status    string `json:"status"`
 }
+
+// PullRequestReadinessErrorCode defines model for PullRequestReadinessErrorCode.
+type PullRequestReadinessErrorCode string
+
+// PullRequestReadinessFact defines model for PullRequestReadinessFact.
+type PullRequestReadinessFact struct {
+	Error       *PullRequestReadinessErrorCode `json:"error,omitempty"`
+	RetryAfterS *int                           `json:"retry_after_s,omitempty"`
+	Status      PullRequestReadinessFactStatus `json:"status"`
+	Value       *string                        `json:"value,omitempty"`
+}
+
+// PullRequestReadinessFactStatus defines model for PullRequestReadinessFact.Status.
+type PullRequestReadinessFactStatus string
+
+// PullRequestReadinessFacts defines model for PullRequestReadinessFacts.
+type PullRequestReadinessFacts struct {
+	Conflicts           PullRequestReadinessFact `json:"conflicts"`
+	Lifecycle           PullRequestReadinessFact `json:"lifecycle"`
+	MergeState          PullRequestReadinessFact `json:"merge_state"`
+	OptionalCheckCounts PullRequestCheckSummary  `json:"optional_check_counts"`
+	OptionalChecks      PullRequestReadinessFact `json:"optional_checks"`
+	Queue               PullRequestReadinessFact `json:"queue"`
+	RequiredCheckCounts PullRequestCheckSummary  `json:"required_check_counts"`
+	RequiredChecks      PullRequestReadinessFact `json:"required_checks"`
+	Review              PullRequestReadinessFact `json:"review"`
+}
+
+// PullRequestReadinessList defines model for PullRequestReadinessList.
+type PullRequestReadinessList struct {
+	FreshForS    int                             `json:"fresh_for_s"`
+	PullRequests []PullRequestReadinessView      `json:"pull_requests"`
+	RepoErrors   []PullRequestReadinessRepoError `json:"repo_errors"`
+
+	// ServerNow Server clock; compute ages from this, not the client clock.
+	ServerNow   time.Time `json:"server_now"`
+	StaleAfterS int       `json:"stale_after_s"`
+}
+
+// PullRequestReadinessPreview defines model for PullRequestReadinessPreview.
+type PullRequestReadinessPreview struct {
+	ExpiresAt   *time.Time                          `json:"expires_at,omitempty"`
+	Fingerprint string                              `json:"fingerprint"`
+	Members     []PullRequestReadinessPreviewMember `json:"members"`
+
+	// ReadyCount Length of the ready prefix; the only source for ready counts.
+	ReadyCount int                              `json:"ready_count"`
+	StoppedBy  *PullRequestReadinessPreviewStop `json:"stopped_by,omitempty"`
+}
+
+// PullRequestReadinessPreviewMember defines model for PullRequestReadinessPreviewMember.
+type PullRequestReadinessPreviewMember struct {
+	Index    int                                       `json:"index"`
+	Position PullRequestReadinessPreviewMemberPosition `json:"position"`
+
+	// Readiness What a readiness surface renders for one PR. snapshot is the last-known observation (history once not fresh); current_verdict is the only verdict that may be shown as current and is never "ready" unless freshness is "fresh".
+	Readiness PullRequestReadinessView `json:"readiness"`
+	Reasons   []string                 `json:"reasons"`
+}
+
+// PullRequestReadinessPreviewMemberPosition defines model for PullRequestReadinessPreviewMember.Position.
+type PullRequestReadinessPreviewMemberPosition string
+
+// PullRequestReadinessPreviewResponse defines model for PullRequestReadinessPreviewResponse.
+type PullRequestReadinessPreviewResponse struct {
+	FreshForS   int                             `json:"fresh_for_s"`
+	Preview     PullRequestReadinessPreview     `json:"preview"`
+	RepoErrors  []PullRequestReadinessRepoError `json:"repo_errors"`
+	ServerNow   time.Time                       `json:"server_now"`
+	StaleAfterS int                             `json:"stale_after_s"`
+}
+
+// PullRequestReadinessPreviewStop defines model for PullRequestReadinessPreviewStop.
+type PullRequestReadinessPreviewStop struct {
+	PrKey   string                      `json:"pr_key"`
+	Reasons []string                    `json:"reasons"`
+	Verdict PullRequestReadinessVerdict `json:"verdict"`
+}
+
+// PullRequestReadinessReadError defines model for PullRequestReadinessReadError.
+type PullRequestReadinessReadError struct {
+	At          time.Time                     `json:"at"`
+	Code        PullRequestReadinessErrorCode `json:"code"`
+	RetryAfterS *int                          `json:"retry_after_s,omitempty"`
+}
+
+// PullRequestReadinessRepoError defines model for PullRequestReadinessRepoError.
+type PullRequestReadinessRepoError struct {
+	Code    PullRequestReadinessErrorCode `json:"code"`
+	Message *string                       `json:"message,omitempty"`
+	PrKeys  []string                      `json:"pr_keys"`
+
+	// Repo owner/repo of the failing repository.
+	Repo        string `json:"repo"`
+	RetryAfterS *int   `json:"retry_after_s,omitempty"`
+	Retryable   bool   `json:"retryable"`
+
+	// SourceRepo Workspace-registered repository name.
+	SourceRepo *string `json:"source_repo,omitempty"`
+}
+
+// PullRequestReadinessSnapshot Evidence for one PR pinned to the observed head/base and to the server time it arrived. The fingerprint covers identity, refs and every fact, not observed_at.
+type PullRequestReadinessSnapshot struct {
+	BaseRef     string                      `json:"base_ref"`
+	BaseSha     string                      `json:"base_sha"`
+	Facts       PullRequestReadinessFacts   `json:"facts"`
+	Fingerprint string                      `json:"fingerprint"`
+	HeadRef     string                      `json:"head_ref"`
+	HeadSha     string                      `json:"head_sha"`
+	ObservedAt  time.Time                   `json:"observed_at"`
+	PrKey       string                      `json:"pr_key"`
+	Reasons     []string                    `json:"reasons"`
+	Verdict     PullRequestReadinessVerdict `json:"verdict"`
+}
+
+// PullRequestReadinessVerdict defines model for PullRequestReadinessVerdict.
+type PullRequestReadinessVerdict string
+
+// PullRequestReadinessView What a readiness surface renders for one PR. snapshot is the last-known observation (history once not fresh); current_verdict is the only verdict that may be shown as current and is never "ready" unless freshness is "fresh".
+type PullRequestReadinessView struct {
+	AgeSeconds     int                                  `json:"age_seconds"`
+	CurrentReasons []string                             `json:"current_reasons"`
+	CurrentVerdict PullRequestReadinessVerdict          `json:"current_verdict"`
+	Freshness      PullRequestReadinessViewFreshness    `json:"freshness"`
+	Invalidated    *PullRequestReadinessViewInvalidated `json:"invalidated,omitempty"`
+	LastError      *PullRequestReadinessReadError       `json:"last_error,omitempty"`
+	PrKey          string                               `json:"pr_key"`
+
+	// Snapshot Evidence for one PR pinned to the observed head/base and to the server time it arrived. The fingerprint covers identity, refs and every fact, not observed_at.
+	Snapshot *PullRequestReadinessSnapshot `json:"snapshot,omitempty"`
+}
+
+// PullRequestReadinessViewFreshness defines model for PullRequestReadinessView.Freshness.
+type PullRequestReadinessViewFreshness string
+
+// PullRequestReadinessViewInvalidated defines model for PullRequestReadinessView.Invalidated.
+type PullRequestReadinessViewInvalidated string
 
 // PullRequestReviewRequest defines model for PullRequestReviewRequest.
 type PullRequestReviewRequest struct {
@@ -2789,6 +3428,29 @@ type StaleDetectorStatus struct {
 	LastCheck         *time.Time `json:"last_check,omitempty"`
 	StaleWorkersFound int        `json:"stale_workers_found"`
 	TasksReconciled   int        `json:"tasks_reconciled"`
+}
+
+// StandalonePRContinuation defines model for StandalonePRContinuation.
+type StandalonePRContinuation struct {
+	// Complete False when connector discovery is truncated/partial/errored, or when active-group membership indexing is truncated, unavailable, or includes inconsistent rows; never infer confirmed standalone membership from missing rows or complete=true alone when membership was unverified.
+	Complete bool `json:"complete"`
+
+	// HasMore True when any repo has more GitHub pages beyond this response
+	HasMore bool                         `json:"has_more"`
+	Repos   []StandaloneRepoContinuation `json:"repos"`
+}
+
+// StandaloneRepoContinuation defines model for StandaloneRepoContinuation.
+type StandaloneRepoContinuation struct {
+	ContinuationHint *string `json:"continuation_hint,omitempty"`
+	Fetched          int     `json:"fetched"`
+	HasMore          bool    `json:"has_more"`
+	MaxPages         int     `json:"max_pages"`
+	NextPage         *int    `json:"next_page,omitempty"`
+	PageSize         int     `json:"page_size"`
+	PartialError     *string `json:"partial_error,omitempty"`
+	Repo             string  `json:"repo"`
+	SourceRepo       *string `json:"source_repo,omitempty"`
 }
 
 // Statistics defines model for Statistics.
@@ -3123,6 +3785,12 @@ type WorkspaceSummary struct {
 // AgentName defines model for AgentName.
 type AgentName = string
 
+// DeliveryGroupIdempotencyKey defines model for DeliveryGroupIdempotencyKey.
+type DeliveryGroupIdempotencyKey = string
+
+// DeliveryGroupIfMatch defines model for DeliveryGroupIfMatch.
+type DeliveryGroupIfMatch = string
+
 // IssueId defines model for IssueId.
 type IssueId = string
 
@@ -3266,6 +3934,50 @@ type ListBlockedParams struct {
 
 // ListBlockedParamsType defines parameters for ListBlocked.
 type ListBlockedParamsType string
+
+// ListDeliveryGroupsParams defines parameters for ListDeliveryGroups.
+type ListDeliveryGroupsParams struct {
+	State  *ListDeliveryGroupsParamsState `form:"state,omitempty" json:"state,omitempty"`
+	EpicId *string                        `form:"epic_id,omitempty" json:"epic_id,omitempty"`
+	Limit  *int                           `form:"limit,omitempty" json:"limit,omitempty"`
+	Cursor *string                        `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListDeliveryGroupsParamsState defines parameters for ListDeliveryGroups.
+type ListDeliveryGroupsParamsState string
+
+// CreateDeliveryGroupParams defines parameters for CreateDeliveryGroup.
+type CreateDeliveryGroupParams struct {
+	// XIdempotencyKey Stable client intent key for create/update/archive/set-members
+	XIdempotencyKey DeliveryGroupIdempotencyKey `json:"X-Idempotency-Key"`
+}
+
+// UpdateDeliveryGroupParams defines parameters for UpdateDeliveryGroup.
+type UpdateDeliveryGroupParams struct {
+	// IfMatch Expected group revision as a strong ETag (`"3"`) or bare revision
+	IfMatch DeliveryGroupIfMatch `json:"If-Match"`
+
+	// XIdempotencyKey Stable client intent key for create/update/archive/set-members
+	XIdempotencyKey DeliveryGroupIdempotencyKey `json:"X-Idempotency-Key"`
+}
+
+// ArchiveDeliveryGroupParams defines parameters for ArchiveDeliveryGroup.
+type ArchiveDeliveryGroupParams struct {
+	// IfMatch Expected group revision as a strong ETag (`"3"`) or bare revision
+	IfMatch DeliveryGroupIfMatch `json:"If-Match"`
+
+	// XIdempotencyKey Stable client intent key for create/update/archive/set-members
+	XIdempotencyKey DeliveryGroupIdempotencyKey `json:"X-Idempotency-Key"`
+}
+
+// SetDeliveryGroupMembersParams defines parameters for SetDeliveryGroupMembers.
+type SetDeliveryGroupMembersParams struct {
+	// IfMatch Expected group revision as a strong ETag (`"3"`) or bare revision
+	IfMatch DeliveryGroupIfMatch `json:"If-Match"`
+
+	// XIdempotencyKey Stable client intent key for create/update/archive/set-members
+	XIdempotencyKey DeliveryGroupIdempotencyKey `json:"X-Idempotency-Key"`
+}
 
 // SubscribeEventsParams defines parameters for SubscribeEvents.
 type SubscribeEventsParams struct {
@@ -3529,6 +4241,35 @@ type RunOnboardingFirstTaskJSONBody struct {
 	Title       string  `json:"title"`
 }
 
+// ListPullRequestsParams defines parameters for ListPullRequests.
+type ListPullRequestsParams struct {
+	State *ListPullRequestsParamsState `form:"state,omitempty" json:"state,omitempty"`
+
+	// StandaloneRepo owner/repo to continue standalone discovery for
+	StandaloneRepo *string `form:"standalone_repo,omitempty" json:"standalone_repo,omitempty"`
+
+	// StandalonePage 1-based GitHub list page to start a bounded continuation window
+	StandalonePage       *int    `form:"standalone_page,omitempty" json:"standalone_page,omitempty"`
+	DeliveryGroupsLimit  *int    `form:"delivery_groups_limit,omitempty" json:"delivery_groups_limit,omitempty"`
+	DeliveryGroupsCursor *string `form:"delivery_groups_cursor,omitempty" json:"delivery_groups_cursor,omitempty"`
+}
+
+// ListPullRequestsParamsState defines parameters for ListPullRequests.
+type ListPullRequestsParamsState string
+
+// GetPullRequestReadinessParams defines parameters for GetPullRequestReadiness.
+type GetPullRequestReadinessParams struct {
+	// Pr PR key ("github:owner/repo#N"), repeated; at most 100.
+	Pr    []string `form:"pr" json:"pr"`
+	Force *bool    `form:"force,omitempty" json:"force,omitempty"`
+}
+
+// GetPullRequestReadinessPreviewParams defines parameters for GetPullRequestReadinessPreview.
+type GetPullRequestReadinessPreviewParams struct {
+	// Pr Ordered, distinct PR keys; at most 50.
+	Pr []string `form:"pr" json:"pr"`
+}
+
 // ListReadyParams defines parameters for ListReady.
 type ListReadyParams struct {
 	Assignee *string `form:"assignee,omitempty" json:"assignee,omitempty"`
@@ -3654,6 +4395,15 @@ type PatchWorkspaceBackendJSONRequestBody = WorkspaceBackendPatchRequest
 
 // PatchWorkspaceDesignFormatJSONRequestBody defines body for PatchWorkspaceDesignFormat for application/json ContentType.
 type PatchWorkspaceDesignFormatJSONRequestBody = WorkspaceDesignFormatPatchRequest
+
+// CreateDeliveryGroupJSONRequestBody defines body for CreateDeliveryGroup for application/json ContentType.
+type CreateDeliveryGroupJSONRequestBody = DeliveryGroupCreateRequest
+
+// UpdateDeliveryGroupJSONRequestBody defines body for UpdateDeliveryGroup for application/json ContentType.
+type UpdateDeliveryGroupJSONRequestBody = DeliveryGroupUpdateRequest
+
+// SetDeliveryGroupMembersJSONRequestBody defines body for SetDeliveryGroupMembers for application/json ContentType.
+type SetDeliveryGroupMembersJSONRequestBody = DeliveryGroupSetMembersRequest
 
 // WriteScopedFileJSONRequestBody defines body for WriteScopedFile for application/json ContentType.
 type WriteScopedFileJSONRequestBody = FileWriteRequest

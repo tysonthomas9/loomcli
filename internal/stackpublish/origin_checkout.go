@@ -18,19 +18,44 @@ import (
 // the process working directory. The checkout is torn down before returning.
 // token authenticates clone/fetch/push for a private GitHub https origin and is
 // ignored for ssh/file origins.
+//
+// Non-dry-run: clone/fetch runs under the same outer publish admission as Publish
+// (nested Publish reuses it). Remote push never runs outside the lease.
+//
+// Dry-run: provision is an explicit read-only preflight — clone/fetch only, no
+// push, and no lease yet because DryRun Publish skips admission. Each git
+// subprocess is still capped at MaxStackPublishCallBound (60s).
 func (r *Reconciler) PublishFromOrigin(ctx context.Context, ws string, id sl.StackID, repoURL, token string, opts Options) (*Report, error) {
-	repoPath, cleanup, err := provisionOriginCheckout(ctx, repoURL, token, id)
-	if err != nil {
-		return nil, err
+	if opts.DryRun {
+		repoPath, cleanup, err := provisionOriginCheckout(ctx, repoURL, token, id)
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+		return r.Publish(ctx, ws, id, repoPath, opts)
 	}
-	defer cleanup()
-	return r.Publish(ctx, ws, id, repoPath, opts)
+	var report *Report
+	err := r.withAdmission(ctx, ws, id, func(ctx context.Context, _ *Session) error {
+		repoPath, cleanup, err := provisionOriginCheckout(ctx, repoURL, token, id)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		var perr error
+		report, perr = r.Publish(ctx, ws, id, repoPath, opts)
+		return perr
+	})
+	return report, err
 }
 
 // provisionOriginCheckout clones repoURL into a fresh temp dir and fetches the
 // stack's branches (loom/stack/<stack>/*) from origin into local refs/heads so
 // the reconciler can run emptiness checks and re-push them. Returns the checkout
 // path and a cleanup func that removes the temp dir.
+//
+// When called under a Session, runGit renews and bounds each subprocess by the
+// verified lease window (boundLocal for non-push; Session.Do for push). Outside
+// a session (DryRun preflight), each subprocess still has a ≤60s deadline.
 func provisionOriginCheckout(ctx context.Context, repoURL, token string, id sl.StackID) (string, func(), error) {
 	noop := func() {}
 	repoURL = strings.TrimSpace(repoURL)

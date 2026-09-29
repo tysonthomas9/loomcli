@@ -33,6 +33,11 @@ export type { EditableDescriptionProps } from "./EditableDescription";
 
 export { EpicRollup } from "./EpicRollup";
 export type { EpicRollupProps } from "./EpicRollup";
+export {
+  EpicDeliveryLineage,
+  EpicDeliveryLineageView,
+} from "./EpicDeliveryLineage";
+export type { EpicDeliveryLineageViewProps } from "./EpicDeliveryLineage";
 
 export { MarkdownRenderer } from "./MarkdownRenderer";
 export type { MarkdownRendererProps } from "./MarkdownRenderer";

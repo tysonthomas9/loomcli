@@ -9,7 +9,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
-	"github.com/tysonthomas9/loomcli/internal/sessions/redact"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
@@ -154,9 +154,9 @@ func (m *Module) readReviewerSnapshot(ctx context.Context, session reviewerStrea
 		snap = m.readHarnessReviewerSnapshot(session, sess, provider)
 	}
 	for i := range snap.messages {
-		snap.messages[i].Text = redact.String(snap.messages[i].Text)
-		snap.messages[i].ToolInput = redact.String(snap.messages[i].ToolInput)
-		snap.messages[i].ToolResult = redact.String(snap.messages[i].ToolResult)
+		snap.messages[i].Text = sessions.RedactString(snap.messages[i].Text)
+		snap.messages[i].ToolInput = sessions.RedactString(snap.messages[i].ToolInput)
+		snap.messages[i].ToolResult = sessions.RedactString(snap.messages[i].ToolResult)
 	}
 	return snap, nil
 }
