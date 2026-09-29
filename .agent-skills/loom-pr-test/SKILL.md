@@ -259,6 +259,10 @@ Parallel or named stack:
 LOCAL_MODE_COMPOSE_PROJECT=<project-name> make local-mode-down
 ```
 
+Always use this target with the same project name after a private stack test.
+It removes that project's private images after Compose stops its containers;
+the shared `loomcli-local-mode` project is protected.
+
 If the stack used compose override files, pass the same override list during teardown:
 
 ```bash

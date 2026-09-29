@@ -178,6 +178,14 @@ Full gates and Git lab runs take the machine-wide lock through
 `scripts/with-heavy-lock.sh`; `make gate-clean` already uses it. Wrap a lab
 command with the script from this checkout (or its absolute path from another
 checkout). Focused `go test` runs do not need the lock.
+The heavy-run wrapper checks for 40 GiB free after taking the lock and after
+the command. Below that level it removes only Go build-cache entries unused
+for over 24 hours (over 6 hours below 20 GiB), unused images from stopped
+private Loom stacks and old Git labs, then trims the default Podman machine.
+It logs removals and measured space to `~/.cache/loom/cleanup.log`; it leaves
+running containers, volumes, `loomcli-local-mode`, and other machines alone.
+Always tear down a private local-mode stack with its exact project name and
+`make local-mode-down`; that also removes the project's private images.
 Never set a private `GOCACHE` or `GOMODCACHE`, and never run `go clean -cache`.
 Put scratch work under `/tmp`. A temporary `HOME` must keep `GOCACHE`,
 `GOMODCACHE`, and `GOLANGCI_LINT_CACHE` on their normal shared paths and be

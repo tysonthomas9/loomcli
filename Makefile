@@ -5,6 +5,9 @@
 # Default target
 all: build
 
+# Share compiled packages between worktrees with identical source trees.
+export GOFLAGS := $(strip $(GOFLAGS) -trimpath)
+
 LOCAL_MODE_COMPOSE_PROJECT ?= loomcli-local-mode
 LOCAL_MODE_COMPOSE ?=
 LOCAL_MODE_COMPOSE_FILES ?=
@@ -301,7 +304,11 @@ local-mode-daytona-up: local-mode-frontend-dist
 local-mode-down:
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
-	$$compose $(LOCAL_MODE_COMPOSE_ARGS) down -v --remove-orphans
+	$$compose $(LOCAL_MODE_COMPOSE_ARGS) down -v --remove-orphans; \
+	case "$$compose" in podman*) image_tool=podman;; docker*) image_tool=docker;; *) exit 0;; esac; \
+	./scripts/remove-local-mode-images.sh "$$image_tool" "$(LOCAL_MODE_COMPOSE_PROJECT)" \
+	  "$(LOCAL_MODE_FLEETDB_IMAGE)" "$(LOCAL_MODE_LOOM_IMAGE)" \
+	  "$(LOCAL_MODE_LOOM_CODEX_IMAGE)" "$(LOCAL_MODE_LOOM_CLAUDE_IMAGE)"
 
 local-mode-logs:
 	@set -e; \

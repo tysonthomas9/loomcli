@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -446,9 +445,9 @@ func TestFlueRuntimeRootHonorsLoomPrefixedEnv(t *testing.T) {
 
 func workflowTestRepoRoot(t *testing.T) string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	return filepath.Clean(filepath.Join(dir, "..", ".."))
 }

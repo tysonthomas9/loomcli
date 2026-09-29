@@ -116,4 +116,8 @@ mv "$metadata" "$owner_file"
 echo "Running heavy command under lock: $command" >&2
 export LOOM_HEAVY_LOCK_HELD="$$"
 umask "$caller_umask"
-"$@"
+"$(dirname "$0")/loom-disk-budget.sh"
+run_rc=0
+"$@" || run_rc=$?
+"$(dirname "$0")/loom-disk-budget.sh"
+exit "$run_rc"
