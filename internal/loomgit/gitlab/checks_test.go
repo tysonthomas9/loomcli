@@ -69,6 +69,9 @@ func (s *state) goCheck(name string) error {
 	case "second_repo_rollback":
 		// Proves failure adding the second repository rolls back the first checkout.
 		return s.packageTests("./internal/cli/serve/workspacemgr", "TestP18SecondWorktreeAddFailureRollsBackFirst")
+	case "workspace_creation_crash_adoption":
+		// Proves interrupted creation and attachment are adopted or kept for repair.
+		return s.packageTests("./internal/cli/serve/workspacemgr", "TestP19.*")
 	case "explicit_commit":
 		return s.checkExplicitCommit()
 	case "fixture_inventory":
