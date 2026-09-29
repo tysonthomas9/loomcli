@@ -3,6 +3,7 @@ package tsruntime
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -102,7 +103,7 @@ func (i agentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, sh
 	entrypoint := taskRunnerEntrypoint()
 	taskRunID := strings.TrimSpace(os.Getenv("LOOM_TASK_RUN_ID"))
 	if taskRunID == "" {
-		taskRunID = "tr-" + agentName
+		taskRunID = fallbackTaskRunID(agentName)
 	}
 	input := map[string]any{}
 	if entrypoint == driver.DaytonaTaskRunnerEntrypoint {
@@ -159,6 +160,10 @@ func (i agentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, sh
 		applyLeafPatchBack(ctx, workDir, baseRef, patch, os.Getenv("LOOM_WORKSPACE"), os.Getenv("LOOM_ASSIGNED_TASK_ID"), repoName, agentName)
 	}
 	return nil
+}
+
+func fallbackTaskRunID(agentName string) string {
+	return "tr-" + agentName + "-" + rand.Text()
 }
 
 // applyTaskRunnerResult decodes the bundled task-runner's result, feeds usage into

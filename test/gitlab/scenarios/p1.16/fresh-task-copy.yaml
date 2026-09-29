@@ -1,0 +1,8 @@
+name: every task attempt keeps its own copy and immutable recorded base
+task: P1.16
+git: [min, latest]
+fixture: loomcli
+when:
+  - go_check: fresh_task_copy
+then:
+  - go_check: no_error

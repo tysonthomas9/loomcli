@@ -81,19 +81,40 @@ func taskExecHasNamedRunner(req TaskExecRequest) bool {
 
 func localWorktreeResolutionFailure(err error) TaskExecResult {
 	message := "local task runner worktree is not provisioned"
+	errorClass := ErrorClassLocalWorktreeUnprovisioned
 	if err != nil {
 		message += ": " + err.Error()
+		var coded interface{ Code() string }
+		if errors.As(err, &coded) && coded.Code() == "task_copy_create_failed" {
+			errorClass = coded.Code()
+		}
 	}
 	return TaskExecResult{
 		Status:       domain.TaskRunFailed,
 		ExitCode:     1,
-		ErrorClass:   ErrorClassLocalWorktreeUnprovisioned,
+		ErrorClass:   errorClass,
 		ErrorMessage: message,
 		RuntimeMetadata: map[string]string{
-			ErrorCodeOutputKey: ErrorClassLocalWorktreeUnprovisioned,
+			ErrorCodeOutputKey: errorClass,
 			RetryableOutputKey: "false",
 		},
 	}
+}
+
+func withTaskWorktreeMetadata(result TaskExecResult, wt TaskWorktree) TaskExecResult {
+	if wt.Path == "" {
+		return result
+	}
+	result.RuntimeMetadata = mergeStringMaps(result.RuntimeMetadata, map[string]string{
+		"worktree_path":    wt.Path,
+		"task_copy_path":   wt.Path,
+		"attempt_id":       wt.AttemptID,
+		"attempt_base_sha": wt.BaseSHA,
+		"repo_name":        wt.RepoName,
+		"source_repo_id":   wt.SourceRepoID,
+		"worktree_source":  "local_workspace_state",
+	})
+	return result
 }
 
 func (e *HostBridgeTaskExecutor) resolveLocalTaskWorktree(ctx context.Context, req TaskExecRequest) (TaskWorktree, TaskExecResult, bool) {
@@ -112,6 +133,7 @@ func (e *HostBridgeTaskExecutor) resolveLocalTaskWorktree(ctx context.Context, r
 			e.driverBundleBaseDir = e.WorktreePath
 		}
 		e.WorktreePath = resolved.Path
+		e.taskCopyBaseSHA = resolved.BaseSHA
 	}
 	return resolved, TaskExecResult{}, false
 }

@@ -83,6 +83,7 @@ type HostBridgeTaskExecutor struct {
 	// which the per-run git worktree does NOT contain — so taskRunnerBundleEnv must
 	// resolve the bundle against this base, not the reassigned worktree.
 	driverBundleBaseDir string
+	taskCopyBaseSHA     string
 }
 
 type bridgeTaskRunnerResult struct {
@@ -221,6 +222,9 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	if failed {
 		return worktreeFailure, nil
 	}
+	if resolvedWorktree.Path != "" {
+		defer func() { result = withTaskWorktreeMetadata(result, resolvedWorktree) }()
+	}
 	// Stacked task? Compute the binding (canonical output branch + base ref) once.
 	// Local runs resolve the repo from the host worktree; daytona/named runs (no
 	// host worktree) resolve it from the task's repo selectors. When set, the
@@ -284,14 +288,7 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 		return result, nil
 	}
 	result = runnerResult.taskExecResult()
-	if resolvedWorktree.Path != "" {
-		result.RuntimeMetadata = mergeStringMaps(result.RuntimeMetadata, map[string]string{
-			"worktree_path":   resolvedWorktree.Path,
-			"repo_name":       resolvedWorktree.RepoName,
-			"source_repo_id":  resolvedWorktree.SourceRepoID,
-			"worktree_source": "local_workspace_state",
-		})
-	}
+	result = withTaskWorktreeMetadata(result, resolvedWorktree)
 	if artifacts := runner.finalizedArtifacts(); len(artifacts) > 0 {
 		result, err = e.registerRunnerArtifacts(ctx, req, artifacts, result)
 		if err != nil {
@@ -712,6 +709,9 @@ func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON s
 	}
 	env = append(env, e.taskRunnerBundleEnv(req)...)
 	if isLocalTaskRunner(req) {
+		if e.taskCopyBaseSHA != "" {
+			env = append(env, "LOOM_TASK_COPY_FRESH=1", "LOOM_TASK_COPY_BASE_SHA="+e.taskCopyBaseSHA)
+		}
 		env = append(env, TaskRunnerBackendEnv+"="+e.resolveTaskRunnerBackend(req))
 		env = append(env, e.localTaskRunnerSettingsEnv()...)
 	}
@@ -867,7 +867,7 @@ func (e HostBridgeTaskExecutor) finalizeAndFreezePatch(ctx context.Context, req 
 		repoName = filepath.Base(e.WorktreePath)
 	}
 	revision, err := driverfreeze.Freeze(ctx, driverfreeze.Request{
-		Workspace: req.WorkspaceKey, Task: req.TaskID, Repo: repoName, Attempt: req.TaskRunID,
+		Workspace: req.WorkspaceKey, Task: req.TaskID, Repo: repoName, Attempt: taskCopyAttemptID(req.TaskRunID, req.SchedulerAttempt),
 		Worktree: e.WorktreePath, Base: baseRef, Patch: patch, Outcome: outcome,
 		CommitHeadSHA: firstNonEmpty(runner.CommitHeadSHA, runner.CommitHeadSHACamel),
 	})
@@ -892,6 +892,9 @@ func (e HostBridgeTaskExecutor) createPatchArtifact(ctx context.Context, req Tas
 	artifactID := firstNonEmpty(runner.PatchArtifactID, runner.PatchArtifactIDCamel)
 	if artifactID == "" {
 		artifactID = "patch-" + req.TaskRunID
+		if req.SchedulerAttempt > 0 {
+			artifactID = "patch-" + taskCopyAttemptID(req.TaskRunID, req.SchedulerAttempt)
+		}
 	}
 	summary := firstNonEmpty(runner.PatchSummary, runner.PatchSummaryCamel, "task patch")
 	mimeType := firstNonEmpty(runner.PatchMIMEType, runner.PatchMIMETypeCamel, "text/x-diff")

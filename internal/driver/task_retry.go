@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
@@ -47,6 +48,18 @@ func taskRunAttempt(run *domain.TaskRun) int {
 		return 0
 	}
 	return attempt
+}
+
+func taskCopyAttemptID(taskRunID string, schedulerAttempt int) string {
+	name := taskRunID
+	for _, r := range taskRunID {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.') {
+			name = "hex-" + hex.EncodeToString([]byte(taskRunID))
+			break
+		}
+	}
+	return fmt.Sprintf("%s-a%d", name, schedulerAttempt+1)
 }
 
 func requeueClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, execResult TaskExecResult, completion taskExecCompletion, metadata map[string]string, retry taskRunRetryDecisionResult) (*domain.TaskRun, error) {

@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/taskcopy"
 	"github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -25,6 +26,8 @@ type TaskWorktree struct {
 	Path         string
 	RepoName     string
 	SourceRepoID string
+	AttemptID    string
+	BaseSHA      string
 }
 
 type TaskWorktreeResolver interface {
@@ -338,18 +341,29 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 	if err != nil {
 		return TaskWorktree{}, err
 	}
-	target, err := localworkspace.TaskRunWorktreePath(local.Path, selected.Name, taskRunID)
+	attemptID := taskCopyAttemptID(taskRunID, req.SchedulerAttempt)
+	target, err := localworkspace.TaskCopyPath(local.Path, selected.Name, attemptID)
 	if err != nil {
 		return TaskWorktree{}, err
 	}
 	baseBranch := r.baseBranchForTask(ctx, workspaceKey, selected, req)
-	if err := localworkspace.EnsureDetachedGitWorktreeFromBranch(repoPath, target, repoRemote(selected), baseBranch); err != nil {
-		return TaskWorktree{}, fmt.Errorf("ensure task run worktree for repo %q: %w", selected.Name, err)
+	base := ""
+	if req.PreviousAttemptID == "" {
+		base, err = localworkspace.ResolveTaskBase(repoPath, repoRemote(selected), baseBranch)
+		if err != nil {
+			return TaskWorktree{}, fmt.Errorf("resolve task copy base for repo %q: %w", selected.Name, err)
+		}
+	}
+	baseSHA, err := taskcopy.Create(ctx, repoPath, target, workspaceKey, attemptID, req.PreviousAttemptID, base)
+	if err != nil {
+		return TaskWorktree{}, fmt.Errorf("create task copy for repo %q: %w", selected.Name, err)
 	}
 	return TaskWorktree{
 		Path:         target,
 		RepoName:     selected.Name,
 		SourceRepoID: firstNonEmpty(selected.SourceRepoID, selected.Name),
+		AttemptID:    attemptID,
+		BaseSHA:      baseSHA,
 	}, nil
 }
 
