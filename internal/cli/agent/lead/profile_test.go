@@ -572,3 +572,96 @@ func TestLeadProfileRepair_TokenFailureNamesTheTokenScript(t *testing.T) {
 		t.Errorf("a refused profile must export nothing, got %q", got)
 	}
 }
+
+// hollowLeadCredentials is the shape observed on disk on 2026-09-11:
+// structurally valid, correct scopes, no token bytes.
+const hollowLeadCredentials = `{"claudeAiOauth":{"accessToken":"","refreshToken":"",` +
+	`"scopes":["user:inference"],"subscriptionType":"max"}}`
+
+func writeLeadCredentials(t *testing.T, dir, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, agentprofile.CredentialsName), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A lead refused for a hollow credential must be told to remove the file, not
+// to re-provision or re-mint: nothing loom provisions is wrong, the harness's
+// own file is, and removing it hands authentication back to the token loom
+// already injects.
+func TestLeadProfileRepair_HollowCredentials(t *testing.T) {
+	clearProfileEnv(t)
+	clearLeadToken(t)
+	stubClaudeOnPath(t)
+	runtimeDir := t.TempDir()
+	dir := writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	if err := os.WriteFile(filepath.Join(dir, "oauth-token"), []byte("sk-ant-oat01-lead"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeLeadCredentials(t, dir, hollowLeadCredentials)
+
+	failed, err := applyLeadProfile(runtimeDir, "lead", "claude")
+	if !errors.Is(err, supervisor.ErrProfileCredentialsHollow) {
+		t.Fatalf("a hollow credential must refuse, got %v", err)
+	}
+	want := "rm " + filepath.Join(dir, agentprofile.CredentialsName)
+	if got := leadProfileRepair(err, failed); got != want {
+		t.Errorf("repair = %q, want %q", got, want)
+	}
+	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "" {
+		t.Errorf("a refused profile must export nothing, got %q", got)
+	}
+}
+
+// The inherited-config-root path is the one the workspace launcher takes, and
+// it reaches ProfileSecretEnv directly rather than through ProfileHarnessEnv —
+// so it needs its own proof that the same gate applies.
+func TestApplyLeadProfile_InheritedRootWithHollowCredentialsRefuses(t *testing.T) {
+	clearProfileEnv(t)
+	clearLeadToken(t)
+	stubClaudeOnPath(t)
+	runtimeDir := t.TempDir()
+	inherited := writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	if err := os.WriteFile(filepath.Join(inherited, "oauth-token"), []byte("sk-ant-oat01-lead"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeLeadCredentials(t, inherited, hollowLeadCredentials)
+	t.Setenv("CLAUDE_CONFIG_DIR", inherited)
+
+	failed, err := applyLeadProfile(runtimeDir, "lead", "claude")
+	if !errors.Is(err, supervisor.ErrProfileCredentialsHollow) {
+		t.Fatalf("an inherited root with a hollow credential must refuse, got %v", err)
+	}
+	if failed != inherited {
+		t.Errorf("failure names %q, want the inherited root %q", failed, inherited)
+	}
+	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "" {
+		t.Errorf("a refused profile must export nothing, got %q", got)
+	}
+}
+
+// A populated credential shadows nothing, so it must change nothing.
+func TestApplyLeadProfile_PopulatedCredentialsStillInject(t *testing.T) {
+	clearProfileEnv(t)
+	clearLeadToken(t)
+	stubClaudeOnPath(t)
+	runtimeDir := t.TempDir()
+	dir := writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	if err := os.WriteFile(filepath.Join(dir, "oauth-token"), []byte("sk-ant-oat01-lead"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeLeadCredentials(t, dir, `{"claudeAiOauth":{"accessToken":"sk-ant-oat01-harness"}}`)
+
+	if _, err := applyLeadProfile(runtimeDir, "lead", "claude"); err != nil {
+		t.Fatalf("a populated credential must not refuse, got %v", err)
+	}
+	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "sk-ant-oat01-lead" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want the profile's own token", got)
+	}
+}
