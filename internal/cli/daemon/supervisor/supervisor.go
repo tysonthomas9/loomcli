@@ -175,6 +175,7 @@ func (s *Supervisor) NewAgent(entry config.AgentEntry, idx int) (*AgentProcess, 
 		Entry:        entry,
 		RoleConfig:   roleConfig,
 		WorktreePath: target.WorkDir,
+		WorktreeRepo: target.Repo,
 		RepoConfig:   s.FindRepoConfig(repoName),
 	}
 	return ap, nil

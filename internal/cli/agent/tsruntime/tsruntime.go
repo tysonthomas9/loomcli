@@ -93,7 +93,7 @@ func (i agentInvoker) InvokeInteractive(workDir, prompt, agentName string) error
 
 //nolint:funlen // TS leaf invocation has to assemble one driver request with env, input, transcript, and patch-back handling.
 func (i agentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
-	serverPath, err := taskRunnerBundleServerPath()
+	serverPath, err := resolveTaskRunnerBundle()
 	if err != nil {
 		return fmt.Errorf("ts-runtime: materialize bundle: %w", err)
 	}
@@ -127,7 +127,7 @@ func (i agentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, sh
 	ctx, cancel := contextFromShutdown(shutdown)
 	defer cancel()
 
-	raw, err := driver.RunBundledTaskRunner(ctx, driver.BundledRunnerOptions{
+	raw, err := runTaskRunner(ctx, driver.BundledRunnerOptions{
 		ServerPath:   serverPath,
 		Entrypoint:   entrypoint,
 		Worktree:     workDir,
@@ -152,10 +152,11 @@ func (i agentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, sh
 	// files_changed=0 and serve surfaces no diff. (Daytona delivers via its own PR/sandbox path —
 	// it returns no top-level patch, so this is a no-op for the Daytona entrypoint.)
 	if entrypoint == driver.LocalTaskRunnerEntrypoint {
-		if err := validateLeafPatchIdentity(patch, os.Getenv("LOOM_ASSIGNED_TASK_ID"), os.Getenv("LOOM_AGENT_REPO")); err != nil {
+		repoName := leafPatchRepoName(workDir)
+		if err := validateLeafPatchIdentity(patch, os.Getenv("LOOM_ASSIGNED_TASK_ID"), repoName); err != nil {
 			return err
 		}
-		applyLeafPatchBack(ctx, workDir, baseRef, patch, os.Getenv("LOOM_WORKSPACE"), os.Getenv("LOOM_ASSIGNED_TASK_ID"), os.Getenv("LOOM_AGENT_REPO"), agentName)
+		applyLeafPatchBack(ctx, workDir, baseRef, patch, os.Getenv("LOOM_WORKSPACE"), os.Getenv("LOOM_ASSIGNED_TASK_ID"), repoName, agentName)
 	}
 	return nil
 }
@@ -228,9 +229,19 @@ func validateLeafPatchIdentity(patch, taskID, repoName string) error {
 		return errors.New("ts-leaf patch requires LOOM_ASSIGNED_TASK_ID before applying it")
 	}
 	if strings.TrimSpace(repoName) == "" {
-		return errors.New("ts-leaf patch requires LOOM_AGENT_REPO before applying it")
+		return errors.New("ts-leaf patch requires LOOM_WORKTREE_REPO before applying it")
 	}
 	return nil
+}
+
+func leafPatchRepoName(workDir string) string {
+	if repo := strings.TrimSpace(os.Getenv("LOOM_WORKTREE_REPO")); repo != "" {
+		return repo
+	}
+	if strings.TrimSpace(os.Getenv("LOOM_WORKSPACE")) == "" {
+		return filepath.Base(workDir)
+	}
+	return ""
 }
 
 func applyLeafPatchBack(ctx context.Context, workDir, baseRef, patch, workspace, taskID, repoName, agent string) {
@@ -272,9 +283,11 @@ func applyLeafPatchBack(ctx context.Context, workDir, baseRef, patch, workspace,
 }
 
 var (
-	taskRunnerBundleOnce sync.Once
-	taskRunnerServerPath string
-	taskRunnerBundleErr  error
+	taskRunnerBundleOnce    sync.Once
+	taskRunnerServerPath    string
+	taskRunnerBundleErr     error
+	resolveTaskRunnerBundle = taskRunnerBundleServerPath
+	runTaskRunner           = driver.RunBundledTaskRunner
 )
 
 // taskRunnerBundleServerPath builds the bundled task-runner once per process

@@ -306,7 +306,7 @@ func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string, par
 		return err
 	}
 
-	ap := s.newRuntimeAgentProcess(entry, roleConfig, target.WorkDir, taskID, parentSessionID)
+	ap := s.newRuntimeAgentProcess(entry, roleConfig, target.WorkDir, target.Repo, taskID, parentSessionID)
 
 	// Authoritative duplicate check + slice append + WaitGroup increment under
 	// a single write lock so Wg.Add can't race with Stop()'s Wg.Wait.
@@ -329,11 +329,12 @@ func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string, par
 	return nil
 }
 
-func (s *Supervisor) newRuntimeAgentProcess(entry config.AgentEntry, roleConfig config.RoleConfig, workDir, taskID, parentSessionID string) *AgentProcess {
+func (s *Supervisor) newRuntimeAgentProcess(entry config.AgentEntry, roleConfig config.RoleConfig, workDir, repoName, taskID, parentSessionID string) *AgentProcess {
 	return &AgentProcess{
 		Entry:           entry,
 		RoleConfig:      roleConfig,
 		WorktreePath:    workDir,
+		WorktreeRepo:    repoName,
 		RepoConfig:      s.FindRepoConfig(entry.Repo),
 		RequestedTaskID: taskID,
 		ParentSessionID: parentSessionID,

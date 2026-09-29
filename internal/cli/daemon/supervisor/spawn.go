@@ -53,6 +53,7 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	)
 
 	cmd.Env = appendRoleEnv(cmd.Env, ap)
+	cmd.Env = append(cmd.Env, "LOOM_WORKTREE_REPO="+ap.WorktreeRepo)
 	cmd.Env = appendRoutingEnv(cmd.Env, ap)
 	// Both ends of a human answer wait need the same clock: the child's ask
 	// deadline runs slightly inside this bound so an unanswered prompt ends in
