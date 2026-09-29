@@ -5,20 +5,20 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 )
 
 func TestProductionSSEFramingUsesWriter(t *testing.T) {
-	_, testFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve writer seam test path")
+	testDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
 	}
-	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(testFile), "../../../.."))
-	writerPath := filepath.Join(filepath.Dir(testFile), "writer.go")
+	repoRoot := filepath.Clean(filepath.Join(testDir, "../../../.."))
+	writerPath := filepath.Join(testDir, "writer.go")
 	fset := token.NewFileSet()
 
 	for _, packageRoot := range []string{"internal", "cmd"} {
