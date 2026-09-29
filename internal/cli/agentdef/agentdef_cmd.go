@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backendcheck"
+	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
@@ -171,6 +172,12 @@ func agentCreateFromFlags(workspace, name string, mode domain.AgentMode) (store.
 		agentAddRemoveLabels, agentAddSetStatus, agentAddClose, agentAddCycle)
 	if err != nil {
 		return store.AgentCreate{}, err
+	}
+	// Plan workers need host-owned design submit under read_only backends that
+	// strip Bash / sandbox FS writes. Seed the write_design → set_status review
+	// pipeline unless the operator passed explicit --on-complete-* flags.
+	if hooks == nil && agentAddRole == "plan" {
+		hooks = backends.DefaultPlanHostHooks()
 	}
 	return store.AgentCreate{
 		WorkspaceKey:   workspace,

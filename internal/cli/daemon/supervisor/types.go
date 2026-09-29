@@ -155,6 +155,9 @@ type SupervisedAgentStatus struct {
 	CurrentBackend         string     // effective backend (includes failover state)
 	StopReason             StopReason // why the agent stopped (empty while running)
 	LastErrorClass         string     // string representation of last error class (e.g. "RateLimited")
+	LastErrorMessage       string     // operator-facing last error text (capability admit / spawn failure)
+	EnforcementLevel       string     // effective read_only enforcement (hard_tools/os_sandbox/prompt_only)
+	EnforcementDetail      string     // identical wording as daemon soft-enforcement log line
 	NoWorkCount            int        // consecutive NoWork exits
 	BlockCount             int        // block cycles since the last successful run
 	BackoffUntil           time.Time  // when backoff sleep ends (zero if not in backoff)

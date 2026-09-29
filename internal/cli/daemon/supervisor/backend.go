@@ -4,6 +4,8 @@ import (
 	"errors"
 	"log"
 	"log/slog"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
@@ -125,6 +127,60 @@ func (s *Supervisor) gateSafetyKnobsEnforceable(ap *AgentProcess) error {
 	ap.Mu.Unlock()
 	log.Printf("[daemon] Agent %s: %v — skipping spawn", worktree, err)
 	return err
+}
+
+// gatePlannerCapsEnforceable refuses to spawn a plan worker when required
+// planner capabilities (assignment read + design/status submit) cannot be
+// satisfied under the effective backend enforcement — typically missing
+// host write_design/set_status hooks on a hard read-only backend. Soft
+// enforcement warnings reuse SoftKnobWarning so CLI/UI see the same text.
+func (s *Supervisor) gatePlannerCapsEnforceable(ap *AgentProcess) error {
+	backendName := s.GetEffectiveBackend(ap)
+	hooks := s.currentCompletionHooks(ap)
+	serverURL := strings.TrimSpace(os.Getenv("LOOM_SERVER_URL"))
+
+	// Supervised plan workers always receive an assigned task before spawn
+	// (claim / resume / requested), so treat host assignment as available for
+	// admission. The gate's job is "can this config submit a design", not
+	// "is a task claimed on this poll cycle".
+	isPlanner := backends.IsPlannerWorker(ap.Entry.Role, ap.RoleConfig.TaskFilter)
+	result := backends.ResolvePlannerCaps(backends.PlannerCapInput{
+		Backend:           backendName,
+		ReadOnly:          ap.RoleConfig.ReadOnly,
+		RoleName:          ap.Entry.Role,
+		TaskFilter:        ap.RoleConfig.TaskFilter,
+		Hooks:             hooks,
+		AssignedTaskIDSet: isPlanner,
+		ServerURL:         serverURL,
+	})
+
+	// Surface soft enforcement identically to the safety-knob gate.
+	if result.Enforcement == backends.EnforcementPromptOnly && result.EnforcementDetail != "" {
+		ap.Mu.Lock()
+		repeat := ap.SoftKnobWarning == result.EnforcementDetail
+		ap.SoftKnobWarning = result.EnforcementDetail
+		worktree := ap.Entry.Worktree
+		ap.Mu.Unlock()
+		if !repeat {
+			log.Printf("[daemon] Agent %s: SOFT ENFORCEMENT ONLY — %s", worktree, result.EnforcementDetail)
+		}
+	}
+
+	if result.AdmitError == nil {
+		return nil
+	}
+
+	ap.Mu.Lock()
+	ap.LastError = &agenterr.AgentError{
+		Class:     agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome),
+		Message:   result.AdmitError.Error(),
+		Backend:   backendName,
+		Timestamp: time.Now(),
+	}
+	worktree := ap.Entry.Worktree
+	ap.Mu.Unlock()
+	log.Printf("[daemon] Agent %s: %v — skipping spawn", worktree, result.AdmitError)
+	return result.AdmitError
 }
 
 // GetEffectiveBackend returns the backend name for the agent's current failover position.
