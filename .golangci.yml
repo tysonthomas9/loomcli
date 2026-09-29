@@ -223,8 +223,11 @@ linters:
         # Disable rules that are too noisy
         - name: exported
           disabled: true
+        # Every package under internal/ carries a doc comment; this keeps it
+        # that way. See docs/arch/README.md for where a package doc comment
+        # ends and a narrative architecture page begins.
         - name: package-comments
-          disabled: true
+          disabled: false
         # Allow meaningful package names
         - name: var-naming
           arguments:

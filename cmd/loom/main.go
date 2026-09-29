@@ -1,3 +1,10 @@
+// Command loom is the loom CLI: a single binary that is also the server, the
+// daemon, and the agent runner, selected by subcommand.
+//
+// This file is wiring only. The command tree is assembled by blank imports:
+// each internal/cli sub-package registers its own commands from init() via
+// cli.RegisterCommand, so adding a command means adding a package and its
+// import here — never editing a central switch.
 package main
 
 import (
