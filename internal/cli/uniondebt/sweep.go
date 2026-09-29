@@ -52,8 +52,16 @@ const (
 	// ActionSuperseded means the marker was swapped for union-superseded: the
 	// recorded branch is not the branch to merge any more.
 	ActionSuperseded Action = "superseded"
-	// ActionSkipped means a debt ticket already exists, or --limit was hit.
+	// ActionSkipped means a debt ticket already exists, --limit was hit, or
+	// the pr-pending test did not pass and the marker stays.
 	ActionSkipped Action = "skipped"
+	// ActionCleared means the pr-pending marker was removed: a PR exists, it
+	// is MERGEABLE, and its base chain reaches the repo's trunk.
+	ActionCleared Action = "cleared"
+	// ActionDrift means the pr-pending test FAILED on a ticket that carries no
+	// marker. It is reported and nothing is written: deriving a marker is a
+	// different question (PUPPET-653), and this sweep only ever clears.
+	ActionDrift Action = "drift"
 	// ActionError means the item could not be classified or acted on.
 	ActionError Action = "error"
 )
@@ -68,12 +76,18 @@ type Item struct {
 	TipSHA      string `json:"tip_sha,omitempty"`
 	RecordedTip string `json:"recorded_tip,omitempty"`
 	Class       Class  `json:"class,omitempty"`
-	Action      Action `json:"action"`
-	DerivedID   string `json:"derived_id,omitempty"`
-	Detail      string `json:"detail,omitempty"`
-	ProbedAt    string `json:"probed_at"`
-	DryRun      bool   `json:"dry_run,omitempty"`
-	ErrMessage  string `json:"error,omitempty"`
+	// PR, Mergeable and Chain describe the pr-pending test: the ticket's pull
+	// request, the value GitHub reported for it, and the base chain walked.
+	PR         int    `json:"pr,omitempty"`
+	Mergeable  string `json:"mergeable,omitempty"`
+	Chain      string `json:"chain,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+	Action     Action `json:"action"`
+	DerivedID  string `json:"derived_id,omitempty"`
+	Detail     string `json:"detail,omitempty"`
+	ProbedAt   string `json:"probed_at"`
+	DryRun     bool   `json:"dry_run,omitempty"`
+	ErrMessage string `json:"error,omitempty"`
 }
 
 // Report is the whole sweep's outcome.
@@ -92,6 +106,13 @@ type Options struct {
 	// Limit caps derived tickets filed per run, so a mis-parse cannot flood
 	// the board. Zero or negative means unlimited.
 	Limit int
+	// PRDrift additionally scans every open PR for inverse drift — a ticket
+	// that fails the pr-pending test while carrying no marker. It is
+	// read-only, and it is OFF by default here because it costs a full PR
+	// listing per repo and reaches GitHub even when the ledger is empty. The
+	// `sweep` command turns it on; library callers (and every unit test) opt
+	// in explicitly, which is what keeps the package's tests network-free.
+	PRDrift bool
 	// Now supplies the probe timestamp; nil uses time.Now.
 	Now func() time.Time
 }
@@ -102,7 +123,11 @@ type Options struct {
 type Sweeper struct {
 	issues issueClient
 	probe  prober
-	opts   Options
+	// pr answers the pr-pending clear test. It is created lazily, on the
+	// first item that needs it, so a sweep whose pr-pending ledger is empty
+	// never shells out to `gh` at all.
+	pr   prChecker
+	opts Options
 }
 
 // NewSweeper wires a Sweeper. Pass nil for p to use the real git prober.
@@ -132,18 +157,33 @@ func (s *Sweeper) Run(ctx context.Context) (*Report, error) {
 	filed := 0
 	for _, iss := range ledger {
 		item := s.handle(ctx, iss, &filed)
-		if item.Action == ActionError {
-			rep.Errors++
-		}
-		rep.Items = append(rep.Items, item)
+		rep.add(item)
+	}
+	if err := s.sweepPRPending(ctx, rep); err != nil {
+		return nil, err
 	}
 	return rep, nil
+}
+
+// add records one outcome, keeping the error count in step with the items.
+func (r *Report) add(item Item) {
+	if item.Action == ActionError {
+		r.Errors++
+	}
+	r.Items = append(r.Items, item)
 }
 
 // ledger enumerates every issue still carrying the marker, one status at a
 // time, deduplicated by ID and ordered for stable output.
 func (s *Sweeper) ledger(ctx context.Context) ([]backend.IssueData, error) {
-	marker := s.labels().Marker
+	return s.issuesLabeled(ctx, s.labels().Marker)
+}
+
+// issuesLabeled enumerates every issue carrying one label, one status at a
+// time, deduplicated by ID, filtered to the requested repos and ordered for
+// stable output. Both ledgers — the union marker and the pr-pending marker —
+// are read through it, so they cannot drift in how they page the board.
+func (s *Sweeper) issuesLabeled(ctx context.Context, marker string) ([]backend.IssueData, error) {
 	seen := map[string]backend.IssueData{}
 	for _, status := range ledgerStatuses {
 		found, err := s.issues.List(ctx, backend.ListOpts{

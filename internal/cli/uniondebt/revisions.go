@@ -59,3 +59,14 @@ func highestRevisionRef(git gitRunner, clone, taskID string) (string, error) {
 	}
 	return best, nil
 }
+
+// atoiSafe parses a revision number, returning -1 for anything that is not a
+// plain integer. -1 loses to every real revision, so an unparsable number can
+// never outrank one — the same rule highestRevisionRef applies by skipping.
+func atoiSafe(s string) int {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return -1
+	}
+	return n
+}

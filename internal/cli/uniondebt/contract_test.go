@@ -143,6 +143,7 @@ func TestLabels_PartialBlockFallsBackPerField(t *testing.T) {
 		{"marker", "    marker: merge-pending\n", func(l LabelSet) LabelSet { l.Marker = "merge-pending"; return l }},
 		{"unreachable", "    unreachable: merge-unreachable\n", func(l LabelSet) LabelSet { l.Unreachable = "merge-unreachable"; return l }},
 		{"superseded", "    superseded: merge-superseded\n", func(l LabelSet) LabelSet { l.Superseded = "merge-superseded"; return l }},
+		{"pr_pending", "    pr_pending: awaiting-merge\n", func(l LabelSet) LabelSet { l.PRPending = "awaiting-merge"; return l }},
 		{"debt", "    debt: merge-debt\n", func(l LabelSet) LabelSet { l.Debt = "merge-debt"; return l }},
 		{"debt_of_prefix", "    debt_of_prefix: \"merge-debt-for/\"\n", func(l LabelSet) LabelSet { l.DebtOfPrefix = "merge-debt-for/"; return l }},
 		{"route", "    route: integrate\n", func(l LabelSet) LabelSet { l.Route = "integrate"; return l }},
@@ -170,5 +171,52 @@ func TestLabels_ExplicitSupersededOverridesDefault(t *testing.T) {
 	}
 	if got := c.Labels().Superseded; got != "merge-superseded" {
 		t.Errorf("Superseded = %q, want the configured merge-superseded", got)
+	}
+}
+
+// TestTrunk is the pr-pending test's only source for "where must this chain
+// end". loomcli's trunk is v5, not main, and the difference decides whether a
+// marker is cleared on work that can land or on work that cannot.
+func TestTrunk(t *testing.T) {
+	c, err := LoadContract(writeContract(t, contractFixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trunk, ok := c.Trunk("loomcli"); !ok || trunk != "v5" {
+		t.Errorf("Trunk(loomcli) = %q,%v, want v5,true", trunk, ok)
+	}
+	// meta-harness names no trunk of its own and inherits the default.
+	if trunk, ok := c.Trunk("meta-harness"); !ok || trunk != "main" {
+		t.Errorf("Trunk(meta-harness) = %q,%v, want the inherited main,true", trunk, ok)
+	}
+	// A repo with a trunk but no local_integration still answers: the two
+	// questions are independent.
+	if trunk, ok := c.Trunk("local-stack"); !ok || trunk != "main" {
+		t.Errorf("Trunk(local-stack) = %q,%v, want main,true", trunk, ok)
+	}
+	if _, ok := c.Trunk("nope"); ok {
+		t.Error("an unknown repo has no trunk; the caller must not guess one")
+	}
+	var nilContract *Contract
+	if _, ok := nilContract.Trunk("loomcli"); ok {
+		t.Error("a nil contract has no trunk")
+	}
+}
+
+// TestRepos lists only what the sweep can reach: a repo with no
+// local_integration has no clone to run `gh` in.
+func TestRepos(t *testing.T) {
+	c, err := LoadContract(writeContract(t, contractFixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := c.Repos()
+	want := []string{"loomcli", "meta-harness"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("Repos() = %v, want %v", got, want)
+	}
+	var nilContract *Contract
+	if len(nilContract.Repos()) != 0 {
+		t.Error("a nil contract reaches no repos")
 	}
 }

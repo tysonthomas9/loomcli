@@ -18,6 +18,7 @@ var (
 	sweepRepos    []string
 	sweepDryRun   bool
 	sweepLimit    int
+	sweepPRDrift  bool
 	sweepOutput   string
 )
 
@@ -46,6 +47,13 @@ union branch locally, and act on what it finds:
                      comment, and warn any debt ticket already filed
   not in union       file a NEW open, approved ticket the integrator claims
 
+It also runs the pr-pending clear test over every ticket carrying that marker.
+The marker is cleared ONLY when a pull request exists for the ticket's branch,
+GitHub reports it MERGEABLE, and its base chain reaches the repo's trunk
+through open, mergeable PRs. GitHub computes mergeability lazily, so UNKNOWN is
+re-polled with bounded backoff and is never read as mergeable; CONFLICTING, a
+missing PR and a chain that stops short all keep the marker.
+
 The sweep never merges, never claims and never reopens: the closed original is
 touched only through its labels and comments. It also never runs git fetch —
 it reads the refs the clone already has and records the probe time and tip SHA
@@ -58,6 +66,7 @@ func init() {
 	sweepCmd.Flags().StringSliceVar(&sweepRepos, "repo", nil, "Restrict the sweep to these source repos (repeatable)")
 	sweepCmd.Flags().BoolVar(&sweepDryRun, "dry-run", false, "Classify and print without writing anything")
 	sweepCmd.Flags().IntVar(&sweepLimit, "limit", 10, "Maximum debt tickets to file per run (0 = unlimited)")
+	sweepCmd.Flags().BoolVar(&sweepPRDrift, "pr-drift", true, "Also report tickets that fail the pr-pending test while carrying no marker (read-only)")
 	sweepCmd.Flags().StringVarP(&sweepOutput, "output", "o", "text", "Output format: text or json")
 	unionDebtCmd.AddCommand(sweepCmd)
 	cli.RegisterCommand(unionDebtCmd)
@@ -86,6 +95,7 @@ func runSweep(cmd *cobra.Command, _ []string) error {
 		Repos:    sweepRepos,
 		DryRun:   sweepDryRun,
 		Limit:    sweepLimit,
+		PRDrift:  sweepPRDrift,
 	})
 	report, err := sweeper.Run(cmdstore.RootContext())
 	if err != nil {
@@ -154,6 +164,9 @@ func printReport(w io.Writer, rep *Report, lbl LabelSet) error {
 	}
 	for _, it := range rep.Items {
 		line := fmt.Sprintf("%-14s %-14s %-12s %s", it.OriginID, it.Repo, it.Class, it.Action)
+		if it.PR != 0 {
+			line += fmt.Sprintf(" #%d", it.PR)
+		}
 		if it.DerivedID != "" {
 			line += " -> " + it.DerivedID
 		}
