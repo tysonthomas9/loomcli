@@ -72,6 +72,13 @@ type SessionRecord struct {
 	// Retry context
 	AttemptNum int    `json:"attempt_num"`
 	ErrorClass string `json:"error_class,omitempty"`
+
+	// Frozen task-delivery policy and accepted receipt. These fields make the
+	// host's closure decision inspectable after the run.
+	TaskDeliveryPlanID       string `json:"task_delivery_plan_id,omitempty"`
+	TaskDeliveryRequirement  string `json:"task_delivery_requirement,omitempty"`
+	TaskDeliveryPolicySource string `json:"task_delivery_policy_source,omitempty"`
+	TaskDeliveryReceipt      string `json:"task_delivery_receipt,omitempty"`
 }
 
 // SessionMetadata is the mutable state in sessions/<id>/metadata.json.

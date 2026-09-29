@@ -40,6 +40,7 @@ type promptTemplateData struct {
 	ConflictList      string
 	PushRef           string
 	DesignFormat      string
+	DeliveryStep      string
 }
 
 // resolveDesignFormat returns the design output format for planner prompts.
@@ -264,6 +265,26 @@ func buildInspectReviewStep(caps backendCapabilities) string {
 	return ""
 }
 
+func buildModelOwnedDeliveryStep() string {
+	return `- Publish through Loom stacked PR delivery (MANDATORY):
+  - Determine the stack id: use epic:<epic-id> for child tasks; use task:<task-id> for standalone tasks.
+  - Determine the repo name and base branch from the task source_repo, the parent epic, or the workspace repo table.
+  - Ensure the stack exists: loom stack init <stack-id>.
+  - Ensure this task is registered with loom stack add <task-id>.
+  - Materialize the committed HEAD: git branch -f <output-branch> HEAD.
+  - Run loom stack publish <stack-id> --repo-path <repo-path> --dry-run --json, then publish without --dry-run.
+  - Do not use direct integration or direct branch pushes as the completion path.
+- Run loom data close <id> --reason "Completed with tests and code review"
+- Signal completion: loom complete`
+}
+
+func buildHostOwnedDeliveryStep(requirement domain.TaskDeliveryRequirement) string {
+	return fmt.Sprintf(`- Delivery requirement: %s.
+- Stop after creating a clean commit in the assigned worktree.
+- Do NOT push, open or publish a pull request, close or reopen the task, change its status, or run loom complete.
+- The Loom host owns publication, verifies durable delivery evidence, and closes the task only after that verification succeeds.`, requirement)
+}
+
 // GeneratePlanningPrompt creates the prompt for the planning agent.
 // If workspace is non-nil, workspace context is injected into the prompt.
 // If parentID is non-empty, the prompt scopes task discovery to that epic.
@@ -321,6 +342,7 @@ func GenerateTaskPrompt(agentName string, workspace *config.WorkspaceConfig, par
 		TestStep:          buildTestStep(caps),
 		ReviewStep:        buildReviewStep(caps),
 		InspectReviewStep: buildInspectReviewStep(caps),
+		DeliveryStep:      buildModelOwnedDeliveryStep(),
 	})
 
 	// Inject the prior-attempt checkpoint as a FALLBACK — skipped when a session
@@ -354,6 +376,24 @@ func GenerateFleetTaskPrompt(agentName, taskID string, workspace *config.Workspa
 		TestStep:          buildTestStep(caps),
 		ReviewStep:        buildReviewStep(caps),
 		InspectReviewStep: buildInspectReviewStep(caps),
+		DeliveryStep:      buildModelOwnedDeliveryStep(),
+	})
+	return injectCheckpointIfNotResuming(prompt)
+}
+
+// GenerateFleetTaskPromptForHostDelivery transfers delivery and closure
+// authority from the model to the daemon host for a frozen run plan.
+func GenerateFleetTaskPromptForHostDelivery(agentName, taskID string, workspace *config.WorkspaceConfig, backendName string, requirement domain.TaskDeliveryRequirement) string {
+	caps := capabilitiesFor(backendName)
+	prompt := renderPrompt("fleet_task", promptTemplateData{
+		AgentName:         agentName,
+		WorkspaceBlock:    buildWorkspaceContextBlock(workspace),
+		SafetyBlock:       buildSafetyGuardrailsBlock(),
+		TaskID:            taskID,
+		TestStep:          buildTestStep(caps),
+		ReviewStep:        buildReviewStep(caps),
+		InspectReviewStep: buildInspectReviewStep(caps),
+		DeliveryStep:      buildHostOwnedDeliveryStep(requirement),
 	})
 	return injectCheckpointIfNotResuming(prompt)
 }
