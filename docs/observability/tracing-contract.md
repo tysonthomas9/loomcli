@@ -139,6 +139,15 @@ disconnect reason goes on the `disconnect.reason` attribute (bounded enum:
 - **Frontend → loom serve**: `client.ts` generates a fresh `traceparent`
   per request (random 16-byte trace id, random 8-byte span id, sampled
   flag from a feature flag).
+- **In-process (daemon-internal)**: a span opened inside the daemon MUST have
+  the context `startSpan` returns threaded to every operation performed under
+  it. Discarding it (`_, span := startSpan(…)`) and re-deriving from the root
+  flattens the trace: the operations record as SIBLINGS of the span that
+  caused them, which is unattributable as soon as two agents act at once.
+  Best-effort helpers that must survive daemon shutdown keep their
+  non-cancellable semantics with `context.WithoutCancel(ctx)` — which strips
+  cancellation and deadlines while preserving the span — rather than reverting
+  to `context.Background()`.
 
 ## 6. PII / redaction policy
 
