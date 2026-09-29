@@ -27,7 +27,7 @@ func TestNewPTYManager_EmptyCwdPanics(t *testing.T) {
 			t.Errorf("panic message = %q, want contains 'cwd is required'", msg)
 		}
 	}()
-	_ = NewPTYManager("", 0, "")
+	_ = NewPTYManager("", 0, "", nil)
 }
 
 // TestNewPTYManager_CwdIsRespected verifies the constructor threads the cwd
@@ -35,7 +35,7 @@ func TestNewPTYManager_EmptyCwdPanics(t *testing.T) {
 // assigned to cmd.Dir at spawn time).
 func TestNewPTYManager_CwdIsRespected(t *testing.T) {
 	dir := t.TempDir()
-	m := NewPTYManager("cat", 0, dir)
+	m := NewPTYManager("cat", 0, dir, nil)
 	t.Cleanup(func() { _ = m.Shutdown() })
 	if m.cwd != dir {
 		t.Errorf("m.cwd = %q, want %q", m.cwd, dir)
@@ -99,7 +99,7 @@ func TestTerminalSessionEnv_UnscopedStripsWorkspace(t *testing.T) {
 // cat echoes stdin to stdout so tests can deterministically drive the PTY.
 func newTestManager(t *testing.T) *PTYManager {
 	t.Helper()
-	m := NewPTYManager("cat", 0, t.TempDir())
+	m := NewPTYManager("cat", 0, t.TempDir(), nil)
 	m.SetGracePeriod(200 * time.Millisecond)
 	m.SetIdleTimeout(200 * time.Millisecond)
 	t.Cleanup(func() { _ = m.Shutdown() })
@@ -511,7 +511,7 @@ func TestChildExitRemovesSession(t *testing.T) {
 // TestShutdown_RejectsFutureAttach — MultiPTYManager.Deregister relies on
 // this contract to prevent orphan sessions after the entry is dropped.
 func TestShutdown_RejectsFutureAttach(t *testing.T) {
-	m := NewPTYManager("cat", 0, t.TempDir())
+	m := NewPTYManager("cat", 0, t.TempDir(), nil)
 	if err := m.Shutdown(); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
@@ -527,7 +527,7 @@ func TestShutdown_RejectsFutureAttach(t *testing.T) {
 // TestShutdown_Idempotent — called from both Deregister and Close paths;
 // a naive implementation would panic on the second close(reaperStop).
 func TestShutdown_Idempotent(t *testing.T) {
-	m := NewPTYManager("cat", 0, t.TempDir())
+	m := NewPTYManager("cat", 0, t.TempDir(), nil)
 	if err := m.Shutdown(); err != nil {
 		t.Fatalf("first Shutdown: %v", err)
 	}

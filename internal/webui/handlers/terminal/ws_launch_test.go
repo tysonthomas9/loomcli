@@ -71,7 +71,7 @@ func TestEnsureWorkspacePTYRegisteredUsesLocalState(t *testing.T) {
 		t.Fatalf("MutateStateCache: %v", err)
 	}
 
-	mm := webuterminal.NewMultiPTYManager("cat", 0)
+	mm := webuterminal.NewMultiPTYManager("cat", 0, nil)
 	t.Cleanup(func() { _ = mm.Close() })
 	p := &terminalWSParams{manager: mm}
 

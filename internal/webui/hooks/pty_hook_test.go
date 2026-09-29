@@ -14,7 +14,7 @@ import (
 
 func newPTYHookFixture(t *testing.T) (*PTYHook, *terminal.MultiPTYManager) {
 	t.Helper()
-	multi := terminal.NewMultiPTYManager("bash", 0)
+	multi := terminal.NewMultiPTYManager("bash", 0, nil)
 	t.Cleanup(func() { _ = multi.Close() })
 	return NewPTYHook(multi, slog.Default()), multi
 }
@@ -51,7 +51,7 @@ func TestPTYHook_NilMulti_Panics(t *testing.T) {
 }
 
 func TestPTYHook_DefaultLogger(t *testing.T) {
-	multi := terminal.NewMultiPTYManager("bash", 0)
+	multi := terminal.NewMultiPTYManager("bash", 0, nil)
 	t.Cleanup(func() { _ = multi.Close() })
 	hook := NewPTYHook(multi, nil)
 	if hook.logger == nil {
@@ -130,7 +130,7 @@ func TestPTYHook_OnRegister_DoesNotProvide(t *testing.T) {
 }
 
 func TestPTYHook_OnRegister_MultiPTYManagerClosed(t *testing.T) {
-	multi := terminal.NewMultiPTYManager("bash", 0)
+	multi := terminal.NewMultiPTYManager("bash", 0, nil)
 	_ = multi.Close()
 	hook := NewPTYHook(multi, slog.Default())
 	ctx := regCtx("ws-1", t.TempDir())
@@ -179,7 +179,7 @@ func TestPTYHook_OnRollback_SameAsDeregister(t *testing.T) {
 }
 
 func TestPTYHook_IntegrationWithRegistry(t *testing.T) {
-	multi := terminal.NewMultiPTYManager("bash", 0)
+	multi := terminal.NewMultiPTYManager("bash", 0, nil)
 	t.Cleanup(func() { _ = multi.Close() })
 
 	registry := coordinator.NewWorkspaceRegistry(slog.Default())
@@ -208,7 +208,7 @@ func TestPTYHook_IntegrationWithRegistry(t *testing.T) {
 }
 
 func TestPTYHook_IntegrationWithRegistry_InvalidPath(t *testing.T) {
-	multi := terminal.NewMultiPTYManager("bash", 0)
+	multi := terminal.NewMultiPTYManager("bash", 0, nil)
 	t.Cleanup(func() { _ = multi.Close() })
 
 	registry := coordinator.NewWorkspaceRegistry(slog.Default())

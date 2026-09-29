@@ -554,7 +554,7 @@ func TestHandleTerminalWS_AuthNoToken(t *testing.T) {
 	// However, looking at the code: nil manager check -> session check -> auth check.
 	// With nil manager, we get 503 before auth is checked.
 	// We need to provide a real manager or restructure. Let's try with a real manager.
-	manager := terminal.NewPTYManager("", 0, t.TempDir())
+	manager := terminal.NewPTYManager("", 0, t.TempDir(), nil)
 	defer manager.Shutdown()
 
 	handler := hterminal.HandleTerminalWS(manager, ta, nil, "", nil, nil, nil, time.Time{})
@@ -588,7 +588,7 @@ func TestHandleTerminalWS_AuthInvalidToken(t *testing.T) {
 	ta := newTestTerminalAuth()
 	defer ta.Stop()
 
-	manager := terminal.NewPTYManager("", 0, t.TempDir())
+	manager := terminal.NewPTYManager("", 0, t.TempDir(), nil)
 	defer manager.Shutdown()
 
 	handler := hterminal.HandleTerminalWS(manager, ta, nil, "", nil, nil, nil, time.Time{})
@@ -610,7 +610,7 @@ func TestHandleTerminalWS_AuthValidToken(t *testing.T) {
 	ta := newTestTerminalAuth()
 	defer ta.Stop()
 
-	manager := terminal.NewPTYManager("", 0, t.TempDir())
+	manager := terminal.NewPTYManager("", 0, t.TempDir(), nil)
 	defer manager.Shutdown()
 
 	handler := hterminal.HandleTerminalWS(manager, ta, nil, "", nil, nil, nil, time.Time{})
@@ -648,7 +648,7 @@ func TestHandleTerminalWS_AuthValidToken(t *testing.T) {
 // TestHandleTerminalWS_AuthNilPassesThrough tests that when auth is nil
 // (not configured), the handler does not require a token.
 func TestHandleTerminalWS_AuthNilPassesThrough(t *testing.T) {
-	manager := terminal.NewPTYManager("", 0, t.TempDir())
+	manager := terminal.NewPTYManager("", 0, t.TempDir(), nil)
 	defer manager.Shutdown()
 
 	// auth=nil means no token auth required
@@ -671,7 +671,7 @@ func TestHandleTerminalWS_AuthReusedTokenFails(t *testing.T) {
 	ta := newTestTerminalAuth()
 	defer ta.Stop()
 
-	manager := terminal.NewPTYManager("", 0, t.TempDir())
+	manager := terminal.NewPTYManager("", 0, t.TempDir(), nil)
 	defer manager.Shutdown()
 
 	handler := hterminal.HandleTerminalWS(manager, ta, nil, "", nil, nil, nil, time.Time{})

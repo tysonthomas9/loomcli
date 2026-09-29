@@ -141,6 +141,7 @@ type PTYManager struct {
 	mu       sync.Mutex
 	sessions map[SessionKey]*ptySession
 	ended    map[SessionKey]string
+	observer PTYLifecycleObserver
 
 	shell string   // absolute path to the login shell (e.g. /bin/bash)
 	argv  []string // default args when a session's argv is nil
@@ -170,8 +171,9 @@ type PTYManager struct {
 // initial working directory for every PTY the manager spawns and is required:
 // an empty cwd is a programmer error and panics. There is no silent fallback
 // to $HOME or any other default — callers must supply a real directory
-// (typically a workspace.Path).
-func NewPTYManager(command string, maxSessions int, cwd string) *PTYManager {
+// (typically a workspace.Path). observer may be nil; a non-nil observer is
+// called after each authoritative process-liveness transition.
+func NewPTYManager(command string, maxSessions int, cwd string, observer PTYLifecycleObserver) *PTYManager {
 	if cwd == "" {
 		panic("terminal.NewPTYManager: cwd is required (pass workspace.Path or a concrete directory; no silent HOME fallback)")
 	}
@@ -196,6 +198,7 @@ func NewPTYManager(command string, maxSessions int, cwd string) *PTYManager {
 	m := &PTYManager{
 		sessions:    make(map[SessionKey]*ptySession),
 		ended:       make(map[SessionKey]string),
+		observer:    observer,
 		shell:       shell,
 		argv:        argv,
 		env:         env,
@@ -252,6 +255,7 @@ func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *ta
 	// closing.
 	const maxAttachRetries = 3
 	for attempt := 0; attempt < maxAttachRetries; attempt++ {
+		spawned := false
 		m.mu.Lock()
 		if m.closed {
 			m.mu.Unlock()
@@ -271,8 +275,12 @@ func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *ta
 			m.sessions[key] = newSess
 			delete(m.ended, key)
 			sess = newSess
+			spawned = true
 		}
 		m.mu.Unlock()
+		if spawned {
+			m.sessionStarted(key, sess)
+		}
 
 		if existed {
 			_ = pty.Setsize(sess.pty, &pty.Winsize{Cols: cols, Rows: rows})
@@ -322,6 +330,7 @@ func (m *PTYManager) EnsureSession(key SessionKey, cols, rows uint16, argv []str
 		}
 		m.sessions[key] = newSess
 		m.mu.Unlock()
+		m.sessionStarted(key, newSess)
 		return true, nil
 	}
 	m.mu.Unlock()
@@ -370,9 +379,19 @@ func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, launch *tab
 		return nil, fmt.Errorf("pty.StartWithSize: %w", err)
 	}
 
-	sess := newPtySession(key, ptmx, cmd)
+	return newPtySession(key, ptmx, cmd), nil
+}
+
+// sessionStarted publishes the new session only after it is visible in the
+// manager map, then starts the drain that detects its eventual natural exit.
+func (m *PTYManager) sessionStarted(key SessionKey, sess *ptySession) {
+	m.observeLifecycle(PTYLifecycleEvent{
+		Key:      key,
+		Action:   PTYLifecycleStarted,
+		PTYAlive: true,
+		Kind:     PTYKind,
+	})
 	go sess.drain(m)
-	return sess, nil
 }
 
 // Detach releases the connID attached to key and arms the grace timer if
@@ -409,7 +428,19 @@ func (m *PTYManager) killSession(key SessionKey, reason string) error {
 	if !ok {
 		return nil
 	}
-	return sess.close(reason)
+	err := sess.close(reason)
+	action := PTYLifecycleKilled
+	if reason == ExitReasonExited {
+		action = PTYLifecycleExited
+	}
+	m.observeLifecycle(PTYLifecycleEvent{
+		Key:        key,
+		Action:     action,
+		PTYAlive:   false,
+		ExitReason: reason,
+		Kind:       PTYKind,
+	})
+	return err
 }
 
 // SessionCount returns the number of live sessions, including detached ones
@@ -503,10 +534,17 @@ func (m *PTYManager) Shutdown() error {
 	m.mu.Unlock()
 
 	var firstErr error
-	for _, s := range sessions {
+	for key, s := range sessions {
 		if err := s.close(ExitReasonShutdown); err != nil && firstErr == nil {
 			firstErr = err
 		}
+		m.observeLifecycle(PTYLifecycleEvent{
+			Key:        key,
+			Action:     PTYLifecycleKilled,
+			PTYAlive:   false,
+			ExitReason: ExitReasonShutdown,
+			Kind:       PTYKind,
+		})
 	}
 	return firstErr
 }
@@ -563,4 +601,10 @@ func (m *PTYManager) reapIdle() {
 // process exits on its own (PTY EOF). Cleans up manager-side state.
 func (m *PTYManager) onSessionExited(key SessionKey) {
 	_ = m.killSession(key, ExitReasonExited)
+}
+
+func (m *PTYManager) observeLifecycle(event PTYLifecycleEvent) {
+	if m.observer != nil {
+		m.observer.OnPTYLifecycle(event)
+	}
 }

@@ -48,6 +48,7 @@ type MultiPTYManager struct {
 	// without holding mu.
 	cmd      string
 	maxPerWS int
+	observer PTYLifecycleObserver
 
 	gracePeriod time.Duration
 	idleTimeout time.Duration
@@ -58,12 +59,13 @@ type MultiPTYManager struct {
 // NewMultiPTYManager constructs a MultiPTYManager. cmd is the default shell
 // command passed to every per-workspace PTYManager (see NewPTYManager).
 // maxPerWS is the per-workspace concurrent-session cap; values <= 0 use the
-// PTYManager default.
-func NewMultiPTYManager(cmd string, maxPerWS int) *MultiPTYManager {
+// PTYManager default. observer is forwarded to every lazily created manager.
+func NewMultiPTYManager(cmd string, maxPerWS int, observer PTYLifecycleObserver) *MultiPTYManager {
 	return &MultiPTYManager{
 		entries:  make(map[string]*wsEntry),
 		cmd:      cmd,
 		maxPerWS: maxPerWS,
+		observer: observer,
 	}
 }
 
@@ -291,7 +293,7 @@ func (mm *MultiPTYManager) managerForWS(wsID string) (*PTYManager, error) {
 	// entry.mgr. While we hold mm.mu, no other goroutine can observe this
 	// manager, so its own lock is uncontended — there is no cross-lock
 	// ordering concern here even though SetGracePeriod acquires PTYManager.mu.
-	m := NewPTYManager(mm.cmd, mm.maxPerWS, entry.path)
+	m := NewPTYManager(mm.cmd, mm.maxPerWS, entry.path, mm.observer)
 	if mm.gracePeriod != 0 {
 		m.SetGracePeriod(mm.gracePeriod)
 	}
