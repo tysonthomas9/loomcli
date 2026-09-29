@@ -19,14 +19,14 @@ describe("normalizePrUrl", () => {
 });
 
 describe("prKeyFromRef", () => {
-  it("builds an owner/repo#number key from a canonical URL", () => {
+  it("builds a canonical github:owner/repo#number key from a canonical URL", () => {
     expect(prKeyFromRef("https://github.com/Org/Repo/pull/42")).toBe(
-      "org/repo#42",
+      "github:org/repo#42",
     );
   });
 
   it("is robust to URL variants that break string matching", () => {
-    const expected = "org/repo#42";
+    const expected = "github:org/repo#42";
     expect(prKeyFromRef("http://github.com/org/repo/pull/42")).toBe(expected);
     expect(prKeyFromRef("https://www.github.com/org/repo/pull/42")).toBe(
       expected,
@@ -46,6 +46,8 @@ describe("prKeyFromRef", () => {
     expect(prKeyFromRef("JIRA-1")).toBeNull();
     expect(prKeyFromRef("https://github.com/org/repo")).toBeNull();
     expect(prKeyFromRef("https://github.com/org/repo/issues/42")).toBeNull();
+    // Keys are GitHub-only, matching Go's prref.FromURL.
+    expect(prKeyFromRef("https://gitlab.com/org/repo/pull/42")).toBeNull();
     expect(prKeyFromRef(null)).toBeNull();
     expect(prKeyFromRef(undefined)).toBeNull();
   });

@@ -21,7 +21,13 @@ import type { GitPullRequest } from "@/api/workspace";
 import type { Issue } from "@/types";
 import { useWorkspaceViewData } from "@/contexts/WorkspaceViewContext";
 import { usePullRequests } from "@/hooks/workspace";
-import { getReviewType, isPRUrl, prKeyFromRef } from "@/utils/issue";
+import {
+  formatPrKey,
+  getReviewType,
+  isPRUrl,
+  prKeyFromRef,
+  pullRequestKey,
+} from "@/utils/issue";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
 import { PRReviewWorkspace } from "./PRReviewWorkspace";
@@ -138,12 +144,17 @@ export function parseReviewPrParam(
   return { owner: match[1], repo: match[2], number };
 }
 
+function prKeyField(key: string | null): { pr_key?: string } {
+  return key ? { pr_key: key } : {};
+}
+
 /** Minimal GitHub PR row so the review workspace can mount before the list loads. */
 export function stubPullRequestFromSubject(
   subject: PullRequestSubject,
 ): GitPullRequest {
   return {
     number: subject.number,
+    ...prKeyField(formatPrKey(subject.owner, subject.repo, subject.number)),
     title: `${subject.owner}/${subject.repo}#${subject.number}`,
     url: `https://github.com/${subject.owner}/${subject.repo}/pull/${subject.number}`,
     state: "OPEN",
@@ -165,7 +176,7 @@ export function buildPullRequestRows(
 ): PullRequestRow[] {
   const prByKey = new Map<string, GitPullRequest>();
   for (const pr of pullRequests) {
-    const key = prKeyFromRef(pr.url);
+    const key = pullRequestKey(pr);
     if (key && !prByKey.has(key)) prByKey.set(key, pr);
   }
 
@@ -182,7 +193,7 @@ export function buildPullRequestRows(
 
   const emittedKeys = new Set(linkedKeys);
   for (const pr of pullRequests) {
-    const key = prKeyFromRef(pr.url);
+    const key = pullRequestKey(pr);
     if (key && emittedKeys.has(key)) continue;
     if (key) emittedKeys.add(key);
     rows.push({ pr });
@@ -456,12 +467,13 @@ export function PRsPage(): JSX.Element {
 
   const reviewPrLinkedIssue = useMemo(() => {
     if (!reviewPrSubject) return undefined;
-    const key =
-      `${reviewPrSubject.owner}/${reviewPrSubject.repo}#${reviewPrSubject.number}`.toLowerCase();
-    return issues.find((issue) => {
-      const issueKey = prKeyFromRef(issue.external_ref);
-      return issueKey != null && issueKey.toLowerCase() === key;
-    });
+    const key = formatPrKey(
+      reviewPrSubject.owner,
+      reviewPrSubject.repo,
+      reviewPrSubject.number,
+    );
+    if (!key) return undefined;
+    return issues.find((issue) => prKeyFromRef(issue.external_ref) === key);
   }, [issues, reviewPrSubject]);
 
   if (reviewIssue) {

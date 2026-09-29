@@ -8,9 +8,10 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/prref"
 )
 
-const prListJSONFields = "number,title,url,state,isDraft,headRefName,baseRefName,author,createdAt,updatedAt,reviewDecision,additions,deletions,changedFiles"
+const prListJSONFields = "id,number,headRefOid,title,url,state,isDraft,headRefName,baseRefName,author,createdAt,updatedAt,reviewDecision,additions,deletions,changedFiles"
 const defaultPRListLimit = 500
 
 type ghPRAuthor struct {
@@ -18,7 +19,9 @@ type ghPRAuthor struct {
 }
 
 type ghPRItem struct {
+	ID             string     `json:"id"`
 	Number         int        `json:"number"`
+	HeadRefOid     string     `json:"headRefOid"`
 	Title          string     `json:"title"`
 	URL            string     `json:"url"`
 	State          string     `json:"state"`
@@ -67,24 +70,37 @@ func ListPullRequests(repoPath, state string, limit int) ([]ops.GitPullRequest, 
 
 	out := make([]ops.GitPullRequest, 0, len(items))
 	for _, item := range items {
-		out = append(out, ops.GitPullRequest{
-			Number:         item.Number,
-			Title:          item.Title,
-			URL:            item.URL,
-			State:          strings.ToUpper(item.State),
-			IsDraft:        item.IsDraft,
-			HeadRefName:    item.HeadRefName,
-			BaseRefName:    item.BaseRefName,
-			AuthorLogin:    item.Author.Login,
-			CreatedAt:      item.CreatedAt,
-			UpdatedAt:      item.UpdatedAt,
-			ReviewDecision: item.ReviewDecision,
-			Additions:      item.Additions,
-			Deletions:      item.Deletions,
-			ChangedFiles:   item.ChangedFiles,
-		})
+		out = append(out, item.toPullRequest())
 	}
 	return out, nil
+}
+
+// toPullRequest maps one gh JSON row onto the shared DTO.
+func (item ghPRItem) toPullRequest() ops.GitPullRequest {
+	// gh returns the base repository's PR URL, so it carries the identity.
+	var prKey string
+	if ref, ok := prref.FromURL(item.URL); ok {
+		prKey = ref.Key()
+	}
+	return ops.GitPullRequest{
+		Number:         item.Number,
+		PRKey:          prKey,
+		NodeID:         item.ID,
+		HeadSHA:        item.HeadRefOid,
+		Title:          item.Title,
+		URL:            item.URL,
+		State:          strings.ToUpper(item.State),
+		IsDraft:        item.IsDraft,
+		HeadRefName:    item.HeadRefName,
+		BaseRefName:    item.BaseRefName,
+		AuthorLogin:    item.Author.Login,
+		CreatedAt:      item.CreatedAt,
+		UpdatedAt:      item.UpdatedAt,
+		ReviewDecision: item.ReviewDecision,
+		Additions:      item.Additions,
+		Deletions:      item.Deletions,
+		ChangedFiles:   item.ChangedFiles,
+	}
 }
 
 func normalizePRListLimit(limit int) int {

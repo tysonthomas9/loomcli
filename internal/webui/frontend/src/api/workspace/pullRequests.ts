@@ -1,27 +1,16 @@
 /**
- * Workspace pull request list from GitHub via gh CLI.
+ * Workspace pull request list from GitHub (connector, or gh CLI fallback).
  */
 
 import { get, wsUrl } from "@/api/common";
+import type { components } from "@/types/generated/openapi";
 
-export interface GitPullRequest {
-  number: number;
-  title: string;
-  url: string;
-  state: string;
-  is_draft: boolean;
-  head_ref_name: string;
-  base_ref_name: string;
-  author_login?: string;
-  created_at?: string;
-  updated_at?: string;
-  review_decision?: string;
-  repo_name: string;
-  source_repo?: string;
-  additions?: number;
-  deletions?: number;
-  changed_files?: number;
-}
+/**
+ * One listed PR. `pr_key` is the canonical identity
+ * ("github:owner/repo#number", base repo); `node_id` is GitHub's global node
+ * ID for reconciling a renamed or transferred repository.
+ */
+export type GitPullRequest = components["schemas"]["GitPullRequest"];
 
 export type PullRequestListState = "all" | "open" | "merged" | "review";
 

@@ -2658,6 +2658,52 @@ paths:
                 type: object
 
   # ── Pull Requests ───────────────────────────────────────────────────────
+  /api/workspaces/{ws}/pull-requests:
+    get:
+      operationId: listPullRequests
+      tags: [pull-requests]
+      summary: List pull requests across the workspace's registered repositories
+      description: >-
+        Lists GitHub pull requests for every registered repository, including
+        PRs created outside Loom. Served by the GitHub connector when a token
+        is configured and by the gh CLI otherwise. Per-repo failures are
+        reported in warnings rather than failing the whole list.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [all, open, closed, merged, review]
+            default: all
+      responses:
+        "200":
+          description: Pull request list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/GitPullRequestList"
+        "502":
+          description: gh CLI listing failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: No pull request source available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}:
     get:
       operationId: getPullRequestDetail
@@ -4809,6 +4855,81 @@ components:
           type: string
 
     # ── Pull Request Schemas ────────────────────────────────────────────
+    GitPullRequest:
+      type: object
+      required:
+        - number
+        - title
+        - url
+        - state
+        - is_draft
+        - head_ref_name
+        - base_ref_name
+        - repo_name
+      properties:
+        number:
+          type: integer
+        pr_key:
+          type: string
+          description: >-
+            Canonical identity "github:<owner>/<repo>#<number>", lowercased and
+            taken from the PR's base repository as GitHub currently names it
+            (never a fork head). Falls back to the registered remote.
+          example: "github:octo/hello#42"
+        node_id:
+          type: string
+          description: >-
+            GitHub global node ID. Survives repository rename or transfer and
+            is used to reconcile pr_key.
+        head_sha:
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+        state:
+          type: string
+          description: OPEN, CLOSED or MERGED.
+        is_draft:
+          type: boolean
+        head_ref_name:
+          type: string
+        base_ref_name:
+          type: string
+        author_login:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+        review_decision:
+          type: string
+        repo_name:
+          type: string
+          description: GitHub owner/repo of the base repository.
+        source_repo:
+          type: string
+          description: Workspace-registered repository name.
+        additions:
+          type: integer
+        deletions:
+          type: integer
+        changed_files:
+          type: integer
+
+    GitPullRequestList:
+      type: object
+      required: [pull_requests]
+      properties:
+        pull_requests:
+          type: array
+          items:
+            $ref: "#/components/schemas/GitPullRequest"
+        warnings:
+          type: array
+          items:
+            type: string
+
     PullRequestDetail:
       type: object
       required:

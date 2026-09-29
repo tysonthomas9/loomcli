@@ -109,6 +109,13 @@ describe("stubPullRequestFromSubject", () => {
       repo_name: "tysonthomas9/loomcli",
     });
   });
+
+  it("sets the canonical lowercased pr_key", () => {
+    expect(
+      stubPullRequestFromSubject({ owner: "Octo", repo: "Hello", number: 5 })
+        .pr_key,
+    ).toBe("github:octo/hello#5");
+  });
 });
 
 describe("buildPullRequestRows (loom-first queue)", () => {
@@ -203,5 +210,91 @@ describe("buildPullRequestRows (loom-first queue)", () => {
   it("sorts rows by most recent update", () => {
     const rows = buildPullRequestRows([], [ghPr(1), ghPr(3), ghPr(2)]);
     expect(rows.map((r) => r.pr?.number)).toEqual([3, 2, 1]);
+  });
+
+  describe("pr_key identity join", () => {
+    it("joins a linked issue to a PR with server pr_key and differently cased URL", () => {
+      const issue = makeIssue({
+        id: "task-5",
+        external_ref: "https://github.com/org/repo/pull/5",
+      });
+      const pr = ghPr(5, {
+        pr_key: "github:org/repo#5",
+        url: "https://github.com/Org/Repo/pull/5",
+        node_id: "PR_kwDO5",
+        head_sha: "abc5",
+      });
+      const rows = buildPullRequestRows([issue], [pr]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.issue?.id).toBe("task-5");
+      expect(rows[0]?.pr?.node_id).toBe("PR_kwDO5");
+      expect(rows[0]?.pr?.head_sha).toBe("abc5");
+    });
+
+    it("joins on pr_key even when the PR URL does not parse", () => {
+      const issue = makeIssue({
+        id: "task-6",
+        external_ref: "https://github.com/Org/Repo/pull/6",
+      });
+      const pr = ghPr(6, {
+        pr_key: "github:org/repo#6",
+        url: "https://git.example.com/mirror/6",
+      });
+      const rows = buildPullRequestRows([issue], [pr]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.issue?.id).toBe("task-6");
+      expect(rows[0]?.pr?.number).toBe(6);
+    });
+
+    it("keeps an unlinked external PR as a standalone row", () => {
+      const issue = makeIssue({
+        id: "task-7",
+        external_ref: "https://github.com/org/repo/pull/7",
+      });
+      const linked = ghPr(7, { pr_key: "github:org/repo#7" });
+      const external = ghPr(8, {
+        pr_key: "github:org/repo#8",
+        node_id: "PR_kwDO8",
+        author_login: "contributor",
+      });
+      const rows = buildPullRequestRows([issue], [linked, external]);
+      expect(rows).toHaveLength(2);
+      const standalone = rows.filter((r) => !r.issue);
+      expect(standalone).toHaveLength(1);
+      expect(standalone[0]?.pr?.number).toBe(8);
+      expect(standalone[0]?.pr?.node_id).toBe("PR_kwDO8");
+    });
+
+    it("still joins by URL when the server sends no pr_key (legacy)", () => {
+      const issue = makeIssue({
+        id: "task-3",
+        external_ref: "https://github.com/ORG/REPO/pull/3/files",
+      });
+      const legacy = ghPr(3);
+      expect(legacy.pr_key).toBeUndefined();
+      const rows = buildPullRequestRows([issue], [legacy]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.issue?.id).toBe("task-3");
+      expect(rows[0]?.pr?.number).toBe(3);
+    });
+
+    it("does not emit duplicate rows for keyed and unkeyed copies of one PR", () => {
+      const issue = makeIssue({
+        id: "task-9",
+        external_ref: "https://github.com/org/repo/pull/9",
+      });
+      const keyed = ghPr(9, { pr_key: "github:org/repo#9" });
+      const unkeyed = ghPr(9, { url: "https://github.com/Org/Repo/pull/9/" });
+      const otherKeyed = ghPr(4, { pr_key: "GITHUB:Org/Repo#4" });
+      const otherUnkeyed = ghPr(4);
+      const rows = buildPullRequestRows(
+        [issue],
+        [keyed, unkeyed, otherKeyed, otherUnkeyed],
+      );
+      expect(rows).toHaveLength(2);
+      expect(rows.filter((r) => r.pr?.number === 9)).toHaveLength(1);
+      expect(rows.filter((r) => r.pr?.number === 4)).toHaveLength(1);
+      expect(rows.find((r) => r.pr?.number === 9)?.issue?.id).toBe("task-9");
+    });
   });
 });

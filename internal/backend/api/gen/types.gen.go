@@ -1463,6 +1463,33 @@ func (e GetGraphParamsStatus) Valid() bool {
 	}
 }
 
+// Defines values for ListPullRequestsParamsState.
+const (
+	All    ListPullRequestsParamsState = "all"
+	Closed ListPullRequestsParamsState = "closed"
+	Merged ListPullRequestsParamsState = "merged"
+	Open   ListPullRequestsParamsState = "open"
+	Review ListPullRequestsParamsState = "review"
+)
+
+// Valid indicates whether the value is a known member of the ListPullRequestsParamsState enum.
+func (e ListPullRequestsParamsState) Valid() bool {
+	switch e {
+	case All:
+		return true
+	case Closed:
+		return true
+	case Merged:
+		return true
+	case Open:
+		return true
+	case Review:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListReadyParamsType.
 const (
 	ListReadyParamsTypeBug     ListReadyParamsType = "bug"
@@ -2024,6 +2051,45 @@ type FileWriteRequest struct {
 
 	// Repo Optional repo qualifier, valid only when scope=agent.
 	Repo *string `json:"repo,omitempty"`
+}
+
+// GitPullRequest defines model for GitPullRequest.
+type GitPullRequest struct {
+	Additions    *int    `json:"additions,omitempty"`
+	AuthorLogin  *string `json:"author_login,omitempty"`
+	BaseRefName  string  `json:"base_ref_name"`
+	ChangedFiles *int    `json:"changed_files,omitempty"`
+	CreatedAt    *string `json:"created_at,omitempty"`
+	Deletions    *int    `json:"deletions,omitempty"`
+	HeadRefName  string  `json:"head_ref_name"`
+	HeadSha      *string `json:"head_sha,omitempty"`
+	IsDraft      bool    `json:"is_draft"`
+
+	// NodeId GitHub global node ID. Survives repository rename or transfer and is used to reconcile pr_key.
+	NodeId *string `json:"node_id,omitempty"`
+	Number int     `json:"number"`
+
+	// PrKey Canonical identity "github:<owner>/<repo>#<number>", lowercased and taken from the PR's base repository as GitHub currently names it (never a fork head). Falls back to the registered remote.
+	PrKey *string `json:"pr_key,omitempty"`
+
+	// RepoName GitHub owner/repo of the base repository.
+	RepoName       string  `json:"repo_name"`
+	ReviewDecision *string `json:"review_decision,omitempty"`
+
+	// SourceRepo Workspace-registered repository name.
+	SourceRepo *string `json:"source_repo,omitempty"`
+
+	// State OPEN, CLOSED or MERGED.
+	State     string  `json:"state"`
+	Title     string  `json:"title"`
+	UpdatedAt *string `json:"updated_at,omitempty"`
+	Url       string  `json:"url"`
+}
+
+// GitPullRequestList defines model for GitPullRequestList.
+type GitPullRequestList struct {
+	PullRequests []GitPullRequest `json:"pull_requests"`
+	Warnings     *[]string        `json:"warnings,omitempty"`
 }
 
 // HourlyBucket defines model for HourlyBucket.
@@ -3528,6 +3594,14 @@ type RunOnboardingFirstTaskJSONBody struct {
 	SourceRepo  *string `json:"source_repo,omitempty"`
 	Title       string  `json:"title"`
 }
+
+// ListPullRequestsParams defines parameters for ListPullRequests.
+type ListPullRequestsParams struct {
+	State *ListPullRequestsParamsState `form:"state,omitempty" json:"state,omitempty"`
+}
+
+// ListPullRequestsParamsState defines parameters for ListPullRequests.
+type ListPullRequestsParamsState string
 
 // ListReadyParams defines parameters for ListReady.
 type ListReadyParams struct {
