@@ -154,10 +154,12 @@ func syncConfirmedWorkspace(deps *cli.Deps, resolver *cli.Resolver, name string,
 		fmt.Printf("Skipped workspace %s.\n\n", name)
 		return true, nil
 	}
-	err = syncSingleWorkspace(deps, resolver, pushOnly, pullOnly)
+	err = runConfirmedSync(deps, resolver, pushOnly, pullOnly)
 	fmt.Println("")
 	return false, err
 }
+
+var runConfirmedSync = syncSingleWorkspace
 
 // syncSingleWorkspace returns an error only for failures that mean the sync did
 // not happen. A push phase that completed with per-repo errors is reported but

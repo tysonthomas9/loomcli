@@ -138,6 +138,22 @@ func TestSyncAndPRAskPerWorkspaceAndSkipDeclinedWork(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			var approved []string
+			if tc.name == "sync" {
+				old := runConfirmedSync
+				runConfirmedSync = func(_ *cli.Deps, resolver *cli.Resolver, _, _ bool) error {
+					approved = append(approved, resolver.WorkspaceName())
+					return nil
+				}
+				t.Cleanup(func() { runConfirmedSync = old })
+			} else {
+				oldCheck, oldRun := checkConfirmedGh, runConfirmedPR
+				checkConfirmedGh = func(*cli.Deps) error { return nil }
+				runConfirmedPR = func(_ *cli.Deps, worktrees []cli.WorktreeInfo, _, _ string) {
+					approved = append(approved, worktrees[0].Workspace)
+				}
+				t.Cleanup(func() { checkConfirmedGh, runConfirmedPR = oldCheck, oldRun })
+			}
 			if err := tc.run(confirmationForTest("", false)); err == nil || !strings.Contains(strings.ToLower(err.Error()), "first") || !strings.Contains(strings.ToLower(err.Error()), "second") {
 				t.Fatalf("non-interactive refusal = %v", err)
 			}
@@ -149,6 +165,15 @@ func TestSyncAndPRAskPerWorkspaceAndSkipDeclinedWork(t *testing.T) {
 			}
 			if strings.Count(output, tc.prompt) != 2 || strings.Count(output, "M README.md") != 2 || !strings.Contains(output, "Skipped workspace FIRST.") || !strings.Contains(output, "Skipped workspace SECOND.") {
 				t.Fatalf("per-workspace prompts missing: %s", output)
+			}
+			output, err = captureConfirmationOutput(t, func() error {
+				return tc.run(confirmationForTest("yes\nno\n", true))
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(approved) != 1 || !strings.EqualFold(approved[0], "first") || !strings.Contains(output, "Skipped workspace SECOND.") {
+				t.Fatalf("mixed answers ran %v: %s", approved, output)
 			}
 		})
 	}

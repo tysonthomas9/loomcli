@@ -67,7 +67,7 @@ func runPR(cmd *cobra.Command, args []string) error {
 	ws, _ := cmd.Flags().GetString("workspace")
 
 	if !all {
-		if err := checkGhInstalled(deps); err != nil {
+		if err := checkConfirmedGh(deps); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -189,10 +189,13 @@ func prConfirmedWorkspace(deps *cli.Deps, resolver *cli.Resolver, name, targetBr
 		}
 		*ghChecked = true
 	}
-	prWorkspaceWorktrees(deps, worktrees, "", targetBranch)
+	runConfirmedPR(deps, worktrees, "", targetBranch)
 	fmt.Println("")
 	return false, nil
 }
+
+var checkConfirmedGh = checkGhInstalled
+var runConfirmedPR = prWorkspaceWorktrees
 
 func prWorkspaceRepos(deps *cli.Deps, resolver *cli.Resolver, sourceBranch, targetBranch string) {
 	worktrees, err := resolver.DiscoverWorktrees()
