@@ -77,4 +77,10 @@ func (s *SQLite) GetRevision(ctx context.Context, workspace, change string, numb
 		WHERE workspace = ? AND change_id = ? AND number = ?`, workspace, change, number))
 }
 
+// RevisionByRequest lets a retried driver attempt reuse its recorded capture.
+func (s *SQLite) RevisionByRequest(ctx context.Context, requestID string) (loomgit.Revision, error) {
+	return scanRevision(s.db.QueryRowContext(ctx, `SELECT `+revisionColumns+` FROM change_revisions
+		WHERE request_id = ?`, requestID))
+}
+
 var _ loomgit.RevisionStore = (*SQLite)(nil)

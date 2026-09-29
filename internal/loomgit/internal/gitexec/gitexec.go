@@ -389,6 +389,17 @@ func (r *Runner) RunWithEnv(ctx context.Context, env map[string]string, args ...
 	return r.runWithEnv(ctx, nil, env, args...)
 }
 
+// RunWithInput applies a caller-supplied patch through Git's stdin without
+// exposing it in argv or changing the selected working tree.
+func (r *Runner) RunWithInput(ctx context.Context, input []byte, env map[string]string, args ...string) ([]byte, error) {
+	for key := range env {
+		if key != "GIT_INDEX_FILE" {
+			return nil, ErrForbidden
+		}
+	}
+	return r.runWithEnv(ctx, bytes.NewReader(input), env, args...)
+}
+
 func (r *Runner) runWithEnv(ctx context.Context, input io.Reader, env map[string]string, args ...string) ([]byte, error) {
 	if forbidden(args) {
 		return nil, ErrForbidden

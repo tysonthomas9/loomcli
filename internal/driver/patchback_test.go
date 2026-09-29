@@ -106,6 +106,7 @@ type patchBackRepo struct {
 
 func newPatchBackRepo(t *testing.T) patchBackRepo {
 	t.Helper()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	dir := t.TempDir()
 	repo := patchBackRepo{t: t, dir: dir}
 	repo.git("init", "--initial-branch=main")

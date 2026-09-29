@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 	"github.com/tysonthomas9/loomcli/internal/workflows"
@@ -150,7 +151,7 @@ func (i agentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, sh
 	// files_changed=0 and serve surfaces no diff. (Daytona delivers via its own PR/sandbox path —
 	// it returns no top-level patch, so this is a no-op for the Daytona entrypoint.)
 	if entrypoint == driver.LocalTaskRunnerEntrypoint {
-		applyLeafPatchBack(ctx, workDir, baseRef, patch, taskRunID)
+		applyLeafPatchBack(ctx, workDir, baseRef, patch, os.Getenv("LOOM_WORKSPACE"), os.Getenv("LOOM_ASSIGNED_TASK_ID"), agentName)
 	}
 	return nil
 }
@@ -215,7 +216,7 @@ func applyTaskRunnerResult(raw json.RawMessage, collector *usage.Collector) (pat
 // Best-effort + loud: the run already "completed", so a patch-back failure is a delivery
 // gap to surface on stderr, not a reason to fail the agent — and the resulting empty diff
 // will fail any downstream parity check rather than passing silently.
-func applyLeafPatchBack(ctx context.Context, workDir, baseRef, patch, taskID string) {
+func applyLeafPatchBack(ctx context.Context, workDir, baseRef, patch, workspace, taskID, agent string) {
 	if strings.TrimSpace(patch) == "" {
 		return // no change produced (or PR/stacked delivery) — nothing to patch back
 	}
@@ -241,7 +242,12 @@ func applyLeafPatchBack(ctx context.Context, workDir, baseRef, patch, taskID str
 		fmt.Fprintf(os.Stderr, "[ts-leaf] patch-back not applied (status=%s): %s\n", res.Status, res.ErrorMessage)
 		return
 	}
-	if err := driver.CommitWorktree(ctx, workDir, "loom: ts-leaf "+taskID); err != nil {
+	changeID, err := driverfreeze.ChangeForTask(ctx, workspace, taskID, filepath.Base(workDir))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ts-leaf] change lookup failed: %v\n", err)
+		return
+	}
+	if err := driver.CommitWorktree(ctx, workDir, "loom: ts-leaf "+taskID, changeID, agent); err != nil {
 		fmt.Fprintf(os.Stderr, "[ts-leaf] commit after patch-back failed: %v\n", err)
 		return
 	}

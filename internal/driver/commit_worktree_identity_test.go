@@ -32,11 +32,14 @@ func TestCommitWorktreeUsesGitUserIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	run("add", "x.txt")
-	if err := CommitWorktree(context.Background(), dir, "worktree commit"); err != nil {
+	if err := CommitWorktree(context.Background(), dir, "worktree commit", "real-change-1", "coder"); err != nil {
 		t.Fatal(err)
 	}
 	if got := run("show", "-s", "--format=%an <%ae>|%cn <%ce>", "HEAD"); got != "Worktree User <worktree@example.test>|Worktree User <worktree@example.test>" {
 		t.Fatal(got)
+	}
+	if message := run("show", "-s", "--format=%B", "HEAD"); !strings.Contains(message, "Loom-Change-Id: real-change-1") || !strings.Contains(message, "Loom-Agent: coder") {
+		t.Fatalf("commit trailers missing: %s", message)
 	}
 }
 
@@ -63,7 +66,7 @@ func TestCommitWorktreeFallsBackWithoutGitIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	run("add", "x.txt")
-	if err := CommitWorktree(context.Background(), dir, "fallback commit"); err != nil {
+	if err := CommitWorktree(context.Background(), dir, "fallback commit", "real-change-2", "coder"); err != nil {
 		t.Fatal(err)
 	}
 	if got := run("show", "-s", "--format=%an <%ae>|%cn <%ce>", "HEAD"); got != "Loom <loom@localhost>|Loom <loom@localhost>" {

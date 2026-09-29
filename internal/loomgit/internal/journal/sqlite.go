@@ -75,6 +75,10 @@ func OpenSQLite(path string) (*SQLite, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("open journal: %w", err)
 	}
+	if err := createDriverChanges(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open driver changes: %w", err)
+	}
 	return &SQLite{db: db}, nil
 }
 func (s *SQLite) Close() error { return s.db.Close() }

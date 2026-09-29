@@ -673,10 +673,11 @@ func ApplyPatchBack(ctx context.Context, opts PatchBackOptions) (*PatchBackResul
 // session finalize's `git diff beforeRef..HEAD` captures it — the Go leaf gets the same
 // effect from the agent committing in place. It intentionally does NOT `git add -A`, so
 // unrelated working-tree noise (the monitor's .agent.lock) is not folded into the commit.
-func CommitWorktree(ctx context.Context, worktreePath, message string) error {
-	if strings.TrimSpace(worktreePath) == "" {
-		return fmt.Errorf("worktree path required: %w", domain.ErrInvalid)
+func CommitWorktree(ctx context.Context, worktreePath, message, changeID, agent string) error {
+	if strings.TrimSpace(worktreePath) == "" || strings.TrimSpace(changeID) == "" || strings.TrimSpace(agent) == "" || strings.ContainsAny(changeID+agent, "\r\n") {
+		return fmt.Errorf("worktree path, change ID and agent required: %w", domain.ErrInvalid)
 	}
+	message = strings.TrimSpace(message) + "\n\nLoom-Change-Id: " + changeID + "\nLoom-Agent: " + agent
 	if _, err := gitCommitWithUserIdentity(ctx, worktreePath, message); err != nil {
 		return fmt.Errorf("git commit: %w", err)
 	}
