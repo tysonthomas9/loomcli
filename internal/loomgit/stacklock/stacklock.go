@@ -11,16 +11,25 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 )
 
 const (
-	leaseTTL    = 5 * time.Second
-	waitTimeout = 3 * time.Second
-	pollDelay   = 25 * time.Millisecond
+	leaseTTL        = 5 * time.Second
+	waitTimeout     = 3 * time.Second
+	epicWaitTimeout = time.Minute
+	pollDelay       = 25 * time.Millisecond
 )
+
+type epicWaitKey struct{}
+
+// ForEpicReconcile permits the background reconciler to wait for a manual
+// publish while still honoring cancellation and a finite deadline.
+func ForEpicReconcile(ctx context.Context) context.Context {
+	return context.WithValue(ctx, epicWaitKey{}, true)
+}
 
 // With holds a durable, renewable lease while action runs. Every process uses
 // the same host-local journal and the workspace/stack pair as its lease scope.
@@ -28,19 +37,26 @@ func With(ctx context.Context, workspace, stack string, action func(context.Cont
 	if workspace == "" || stack == "" {
 		return errors.New("workspace and stack are required")
 	}
-	dir := bootstrap.LoomDir()
+	dir := filepath.Join(config.GetConfigDir(), "loomgit")
 	if dir == "" {
 		return errors.New("loom directory is required for stack lock")
 	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("create stack journal directory: %w", err)
 	}
-	store, err := journal.OpenSQLite(filepath.Join(dir, "loomgit-journal.sqlite"))
+	store, err := journal.OpenSQLite(filepath.Join(dir, "store.db"))
 	if err != nil {
 		return fmt.Errorf("open stack journal: %w", err)
 	}
 	defer func() { _ = store.Close() }()
-	return withStore(ctx, store, "stack:"+workspace+":"+stack, waitTimeout, leaseTTL, action)
+	return withStore(ctx, store, "stack:"+workspace+":"+stack, waitLimit(ctx), leaseTTL, action)
+}
+
+func waitLimit(ctx context.Context) time.Duration {
+	if ctx.Value(epicWaitKey{}) == true {
+		return epicWaitTimeout
+	}
+	return waitTimeout
 }
 
 func withStore(ctx context.Context, store loomgit.Store, scope string, timeout, ttl time.Duration, action func(context.Context) error) error {

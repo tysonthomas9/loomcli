@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/stack"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/stacklock"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 )
@@ -43,7 +44,7 @@ func reconcileEpicStack(ctx context.Context, ws string, proj *EpicStackProjectio
 	}
 	opts := stackpublish.Options{Resolver: stack.HeadlessResolver()}
 
-	report, err := rec.PublishFromOrigin(ctx, ws, proj.StackID, proj.RepoURL, token, opts)
+	report, err := rec.PublishFromOrigin(stacklock.ForEpicReconcile(ctx), ws, proj.StackID, proj.RepoURL, token, opts)
 	if err != nil {
 		return err
 	}

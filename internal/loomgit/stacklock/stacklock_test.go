@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 )
@@ -42,7 +42,7 @@ func TestExpiredLeaseFromDeadProcessIsRecovered(t *testing.T) {
 	if err := With(context.Background(), "ws", "dead", func(context.Context) error { return nil }); err != nil {
 		t.Fatalf("stale lease was not recovered: %v", err)
 	}
-	store, err := journal.OpenSQLite(filepath.Join(dir, "loomgit-journal.sqlite"))
+	store, err := journal.OpenSQLite(filepath.Join(dir, "loomgit", "store.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,10 @@ func TestDeadHolderHelper(t *testing.T) {
 	if os.Getenv("LOOM_STACKLOCK_HELPER") != "1" {
 		return
 	}
-	store, err := journal.OpenSQLite(filepath.Join(bootstrap.LoomDir(), "loomgit-journal.sqlite"))
+	if err := os.MkdirAll(filepath.Join(config.GetConfigDir(), "loomgit"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := journal.OpenSQLite(filepath.Join(config.GetConfigDir(), "loomgit", "store.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,6 +92,15 @@ func TestHeldLeaseTimesOutWithStackLocked(t *testing.T) {
 	}
 	if time.Since(start) < 80*time.Millisecond {
 		t.Fatal("did not wait for timeout")
+	}
+}
+
+func TestEpicReconcileWaitsLongerThanManualEntry(t *testing.T) {
+	if got := waitLimit(context.Background()); got != waitTimeout {
+		t.Fatalf("manual wait = %v", got)
+	}
+	if got := waitLimit(ForEpicReconcile(context.Background())); got != epicWaitTimeout || got <= waitTimeout {
+		t.Fatalf("epic wait = %v", got)
 	}
 }
 
