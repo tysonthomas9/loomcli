@@ -348,11 +348,7 @@ func captureCommit(ctx context.Context, runner loomgit.RepoStore, head string, p
 // copy's repository lock while invoking it.
 func Capture(ctx context.Context, runner loomgit.RepoStore, repo string, p Params) (Result, error) {
 	var result Result
-	ref, err := refname.AttemptCapture(p.Workspace, p.Attempt)
-	if p.Ref != "" {
-		ref = p.Ref
-		err = gitexec.CheckRefFormat(ref, false)
-	}
+	ref, err := captureRef(p)
 	if err != nil {
 		return result, err
 	}
@@ -401,4 +397,11 @@ func Capture(ctx context.Context, runner loomgit.RepoStore, repo string, p Param
 		}
 	}
 	return result, nil
+}
+
+func captureRef(p Params) (string, error) {
+	if p.Ref != "" {
+		return p.Ref, gitexec.CheckRefFormat(p.Ref, false)
+	}
+	return refname.AttemptCapture(p.Workspace, p.Attempt)
 }
