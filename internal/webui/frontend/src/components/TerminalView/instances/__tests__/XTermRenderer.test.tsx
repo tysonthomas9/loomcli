@@ -24,7 +24,13 @@ const xtermMocks = vi.hoisted(() => {
     scrollToBottom = vi.fn();
     scrollToLine = vi.fn();
     buffer = {
-      active: { baseY: 0, viewportY: 0, cursorY: 0 },
+      active: {
+        baseY: 0,
+        viewportY: 0,
+        cursorY: 0,
+        cursorX: 0,
+        type: "normal" as string,
+      },
     };
     marker = {
       line: 0,
@@ -173,7 +179,13 @@ describe("XTermRenderer", () => {
     });
 
     if (!terminal) throw new Error("xterm was not created");
-    terminal.buffer.active = { baseY: 500, viewportY: 250, cursorY: 20 };
+    terminal.buffer.active = {
+      baseY: 500,
+      viewportY: 250,
+      cursorY: 20,
+      cursorX: 0,
+      type: "normal",
+    };
     terminal.marker.line = 250;
 
     expect(handle.fit()).toEqual({ cols: 80, rows: 24 });
@@ -181,6 +193,39 @@ describe("XTermRenderer", () => {
     expect(terminal.scrollToLine).toHaveBeenCalledWith(250);
     expect(terminal.scrollToBottom).not.toHaveBeenCalled();
     expect(terminal.marker.dispose).toHaveBeenCalledOnce();
+
+    view.unmount();
+  });
+
+  it("probes the live cursor position and buffer type", async () => {
+    const onReady = vi.fn();
+    const view = render(
+      <XTermRenderer
+        onReady={onReady}
+        onDispose={vi.fn()}
+        onData={vi.fn()}
+        onBinary={vi.fn()}
+        onResize={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(onReady).toHaveBeenCalledOnce());
+    const terminal = xtermMocks.MockTerminal.instances[0];
+    const handle = onReady.mock.calls[0]?.[0] as XTermRendererHandle;
+    if (!terminal) throw new Error("xterm was not created");
+
+    expect(handle.probeActivity()).toEqual({
+      cursorAtLineStart: true,
+      altScreen: false,
+    });
+
+    // A prompt leaves the cursor mid-line; a TUI takes the alternate buffer.
+    terminal.buffer.active.cursorX = 12;
+    terminal.buffer.active.type = "alternate";
+    expect(handle.probeActivity()).toEqual({
+      cursorAtLineStart: false,
+      altScreen: true,
+    });
 
     view.unmount();
   });
