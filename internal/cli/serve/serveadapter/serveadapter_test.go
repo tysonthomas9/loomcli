@@ -81,3 +81,21 @@ func TestWorkspaceDeleteFnDoesNotClearStateWhenStoreDeleteFails(t *testing.T) {
 		t.Fatal("local workspace state was removed despite store delete failure")
 	}
 }
+
+func TestWorkspaceDeleteRefusesMissingLocalPath(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := BuildWorkspaceDeletePreviewFn(st)("ALPHA"); err == nil {
+		t.Fatal("preview should refuse missing local path")
+	}
+	if err := BuildWorkspaceDeleteConfirmedFn(st)("ALPHA", "fingerprint"); err == nil {
+		t.Fatal("delete should refuse missing local path")
+	}
+	if _, err := st.Workspaces().Get(ctx, "ALPHA"); err != nil {
+		t.Fatalf("workspace row deleted without a local path: %v", err)
+	}
+}

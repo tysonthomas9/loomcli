@@ -62,6 +62,9 @@ func WorkspaceConfig(ctx context.Context, s store.Store, key string) (config.Wor
 	if sc != nil {
 		local = sc.Workspaces[key]
 	}
+	if !filepath.IsAbs(local.Path) {
+		return config.WorkspaceConfig{}, fmt.Errorf("workspace %q has no absolute local path", key)
+	}
 	repoRows, err := s.Repos().List(ctx, key)
 	if err != nil {
 		return config.WorkspaceConfig{}, err
