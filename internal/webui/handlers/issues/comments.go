@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/backend/advisoryactor"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -98,9 +99,10 @@ func HandleAddComment(svc service.IssueService) http.HandlerFunc {
 			return
 		}
 
-		comment, err := svc.AddComment(r.Context(), service.AddCommentParams{
+		ctx := operatorActorContext(r, fallbackActor)
+		comment, err := svc.AddComment(ctx, service.AddCommentParams{
 			IssueID: issueID,
-			Actor:   operatorActor(r.Context(), fallbackActor),
+			Actor:   advisoryactor.From(ctx),
 			Author:  "web-ui",
 			Text:    req.Content(),
 		})
