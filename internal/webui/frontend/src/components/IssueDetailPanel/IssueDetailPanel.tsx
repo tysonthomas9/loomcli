@@ -1578,7 +1578,9 @@ function DefaultContent({
             </div>
 
             {/* Full-width sections below the columns */}
-            {issue.issue_type === "task" && <RevisionsSection workspaceId={workspaceId} taskId={issue.id} />}
+            {issue.issue_type === "task" && (
+              <RevisionsSection workspaceId={workspaceId} taskId={issue.id} />
+            )}
 
             <LabelEditor
               labels={issue.labels ?? []}

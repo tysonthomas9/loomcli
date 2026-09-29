@@ -49,9 +49,9 @@ func recorded(t *testing.T, s *journal.SQLite, request, kind, base, head string,
 
 func TestCarryForwardCleanPatchIDsAndEmptyDroppedCommit(t *testing.T) {
 	dir := t.TempDir()
-	if out, err := exec.Command("git", "init", "-q", dir).CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "init", "-q", dir).CombinedOutput(); err != nil { //nolint:norawexec // Real temporary Git fixture.
 		t.Fatalf("git init: %v %s", err, out)
-	} //nolint:norawexec // Real temporary Git fixture.
+	}
 	configPath := filepath.Join(t.TempDir(), "config")
 	if err := os.WriteFile(configPath, []byte("[user]\nname = Test\nemail = test@example.com\n"), 0600); err != nil {
 		t.Fatal(err)
