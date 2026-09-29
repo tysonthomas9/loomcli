@@ -109,24 +109,29 @@ func BuildWorkspaceDeletePreviewFn(s store.Store) func(string) (service.Workspac
 	}
 }
 
-// BuildWorkspaceDeleteConfirmedFn is the shared UI/CLI deletion entry point.
+// BuildWorkspaceDeleteConfirmedFn binds the UI to the CLI's deletion entry point.
 func BuildWorkspaceDeleteConfirmedFn(s store.Store) func(string, string) error {
 	if s == nil {
 		return nil
 	}
 	return func(key, fingerprint string) error {
-		ctx := context.Background()
-		ws, err := WorkspaceConfig(ctx, s, key)
-		if err != nil {
+		return DeleteWorkspaceConfirmed(s, key, fingerprint)
+	}
+}
+
+// DeleteWorkspaceConfirmed is the one deletion path used by CLI and UI.
+func DeleteWorkspaceConfirmed(s store.Store, key, fingerprint string) error {
+	ctx := context.Background()
+	ws, err := WorkspaceConfig(ctx, s, key)
+	if err != nil {
+		return err
+	}
+	return loomworkspace.DeleteWorkspace(ctx, ws, fingerprint, func(ctx context.Context, key string) error {
+		if err := s.Workspaces().Delete(ctx, key); err != nil {
 			return err
 		}
-		return loomworkspace.DeleteWorkspace(ctx, ws, fingerprint, func(ctx context.Context, key string) error {
-			if err := s.Workspaces().Delete(ctx, key); err != nil {
-				return err
-			}
-			return deleteWorkspaceLocalState(key)
-		})
-	}
+		return deleteWorkspaceLocalState(key)
+	})
 }
 
 func deleteWorkspaceLocalState(key string) error {

@@ -22,11 +22,26 @@ func TestFinishWorkspaceDeletionLeavesTombstoneAndClearsCreationRecords(t *testi
 	if err := st.CommitWorkspace(ctx, entry, []loomgit.WorkspaceRepo{{Workspace: "TEST", Repo: "repo", Trunk: "main", WorkspaceBranch: "lead", BaseSHA: "abc"}}); err != nil {
 		t.Fatal(err)
 	}
+	attach, _, err := st.Begin(ctx, "workspace-add:TEST:repo", "attach_workspace_repos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _, err := st.Begin(ctx, "workspace-add:OTHER:repo", "attach_workspace_repos")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := st.db.ExecContext(ctx, `CREATE TABLE workspace_settings (workspace TEXT PRIMARY KEY); INSERT INTO workspace_settings(workspace) VALUES ('TEST')`); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.FinishWorkspaceDeletion(ctx, "TEST"); err != nil {
 		t.Fatal(err)
+	}
+	var attachCount, otherCount int
+	if err := st.db.QueryRowContext(ctx, `SELECT count(*) FROM journal_entries WHERE id=?`, attach.ID).Scan(&attachCount); err != nil || attachCount != 0 {
+		t.Fatalf("deleted workspace attachment remains: %d, %v", attachCount, err)
+	}
+	if err := st.db.QueryRowContext(ctx, `SELECT count(*) FROM journal_entries WHERE id=?`, other.ID).Scan(&otherCount); err != nil || otherCount != 1 {
+		t.Fatalf("other workspace attachment changed: %d, %v", otherCount, err)
 	}
 	repos, err := st.WorkspaceRepos(ctx, "TEST")
 	if err != nil || len(repos) != 0 {

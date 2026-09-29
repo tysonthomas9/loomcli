@@ -119,6 +119,22 @@ func TestDeleteWorkspaceRequiresExactPreviewAndRemovesCapturedWorktree(t *testin
 	}
 }
 
+func TestDeletePreviewIgnoresDeadAgentLock(t *testing.T) {
+	ws, _, copy := deleteFixture(t)
+	if err := os.WriteFile(filepath.Join(copy, ".agent.lock"), []byte(`{"pid":99999999}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := DryRun(context.Background(), ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range preview.Items {
+		if item.Kind == "running_agent" {
+			t.Fatalf("dead PID reported as running: %+v", item)
+		}
+	}
+}
+
 func TestDeleteWorkspaceKeepsIncompleteCaptureAndRowsButRemovesOtherCopies(t *testing.T) {
 	ws, source, first := deleteFixture(t)
 	second := filepath.Join(ws.Path, "repo2")

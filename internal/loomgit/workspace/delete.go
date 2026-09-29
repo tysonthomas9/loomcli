@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
@@ -184,10 +185,12 @@ func inspectRepoWorktrees(ctx context.Context, runner *gitexec.Runner, wsPath, r
 
 func inspectDeleteCopy(ctx context.Context, repo, path string) ([]DeleteItem, error) {
 	var items []DeleteItem
-	if _, err := os.Stat(filepath.Join(path, ".agent.lock")); err == nil {
-		items = append(items, DeleteItem{Repo: repo, Path: path, Kind: "running_agent"})
-	} else if !errors.Is(err, os.ErrNotExist) {
+	_, running, err := cli.CheckLock(path)
+	if err != nil {
 		return nil, err
+	}
+	if running {
+		items = append(items, DeleteItem{Repo: repo, Path: path, Kind: "running_agent"})
 	}
 	runner, err := deleteRunner(path)
 	if err != nil {

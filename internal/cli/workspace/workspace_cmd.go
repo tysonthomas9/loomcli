@@ -261,9 +261,6 @@ func runWorkspaceRemove(cmd *cobra.Command, args []string) {
 				return fmt.Errorf("workspace %q not found: %w", wsName, err)
 			}
 		}
-		if wsRemoveForce {
-			return fmt.Errorf("--force cannot confirm unseen work; use --confirm-fingerprint")
-		}
 		if wsRemoveKeepWorktrees {
 			return fmt.Errorf("--keep-worktrees cannot safely delete workspace records")
 		}
@@ -276,7 +273,7 @@ func runWorkspaceRemove(cmd *cobra.Command, args []string) {
 		}
 		fmt.Printf("Delete fingerprint: %s\n", preview.Fingerprint)
 		fingerprint := wsRemoveFingerprint
-		if err := serveadapter.BuildWorkspaceDeleteConfirmedFn(h.Store)(ws.Key, fingerprint); err != nil {
+		if err := serveadapter.DeleteWorkspaceConfirmed(h.Store, ws.Key, fingerprint); err != nil {
 			var unsaved *loomworkspace.ErrUnsavedWork
 			if errors.As(err, &unsaved) {
 				return fmt.Errorf("%w; rerun with --confirm-fingerprint %s after reviewing this exact list", err, preview.Fingerprint)

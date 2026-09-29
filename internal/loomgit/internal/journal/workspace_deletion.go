@@ -47,13 +47,15 @@ func (s *SQLite) FinishWorkspaceDeletion(ctx context.Context, workspace string) 
 			return err
 		}
 	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM event_outbox WHERE entry_id IN (SELECT id FROM journal_entries WHERE request_id=?)`, "workspace-create:"+workspace); err != nil {
+	attachPrefix := "workspace-add:" + workspace + ":"
+	entryPredicate := `request_id=? OR substr(request_id,1,length(?))=?`
+	if _, err = tx.ExecContext(ctx, `DELETE FROM event_outbox WHERE entry_id IN (SELECT id FROM journal_entries WHERE `+entryPredicate+`)`, "workspace-create:"+workspace, attachPrefix, attachPrefix); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM journal_results WHERE request_id=?`, "workspace-create:"+workspace); err != nil {
+	if _, err = tx.ExecContext(ctx, `DELETE FROM journal_results WHERE `+entryPredicate, "workspace-create:"+workspace, attachPrefix, attachPrefix); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM journal_entries WHERE request_id=?`, "workspace-create:"+workspace); err != nil {
+	if _, err = tx.ExecContext(ctx, `DELETE FROM journal_entries WHERE `+entryPredicate, "workspace-create:"+workspace, attachPrefix, attachPrefix); err != nil {
 		return err
 	}
 	return tx.Commit()
