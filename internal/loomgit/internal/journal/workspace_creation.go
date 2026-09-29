@@ -23,6 +23,7 @@ type WorkspaceCreation struct {
 
 type WorkspaceCreationRepo struct {
 	Name, Source, Path, Branch, BaseSHA string
+	Mode                                string // worktree or clone
 }
 
 func initWorkspaceCreationSchema(db *sql.DB) error {

@@ -284,7 +284,7 @@ func (s *workspaceServiceImpl) CreateWorkspace(ctx context.Context, req Workspac
 	}
 
 	timeout := workspaceCreateTimeoutClone
-	if req.Type == "empty" {
+	if req.Type == "empty" && len(req.CloneURLs) == 0 {
 		timeout = workspaceCreateTimeoutEmpty
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)

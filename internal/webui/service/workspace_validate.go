@@ -71,17 +71,17 @@ func validateWorkspaceCreateRequest(req *WorkspaceCreateRequest) *ServiceError {
 		if len(req.CloneURLs) == 0 {
 			return ErrValidation("at least one clone URL is required for clone workspace type")
 		}
-		for _, u := range req.CloneURLs {
-			if err := ValidateCloneURL(u); err != nil {
-				return ErrValidation(err.Error())
-			}
-		}
 	case "template":
 		return &ServiceError{Kind: KindUnavailable, Message: "template workspace type is not yet supported"}
 	case "":
 		return ErrValidation("type is required")
 	default:
 		return ErrValidation(fmt.Sprintf("invalid type %q; must be empty, clone, or template", req.Type))
+	}
+	for _, u := range req.CloneURLs {
+		if err := ValidateCloneURL(u); err != nil {
+			return ErrValidation(err.Error())
+		}
 	}
 
 	return nil
@@ -225,6 +225,9 @@ func classifyWorkspaceCreateError(err error) *ServiceError {
 		case workspaceerrors.AlreadyExists:
 			return ErrConflict(ce.Message)
 		case workspaceerrors.PathNotFound, workspaceerrors.NotGitRepo, workspaceerrors.GitFailed:
+			if strings.Contains(err.Error(), "partial clone retained at ") {
+				return ErrValidation(err.Error())
+			}
 			return ErrValidation(ce.Message)
 		case workspaceerrors.SecurityViolation:
 			return ErrForbidden(ce.Message)

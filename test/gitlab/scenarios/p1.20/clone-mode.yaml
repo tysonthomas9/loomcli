@@ -1,0 +1,8 @@
+name: mixed clone and local repos preserve work and mirror revisions
+task: P1.20
+git: [min, latest]
+fixture: empty
+when:
+  - go_check: clone_mode
+then:
+  - go_check: no_error

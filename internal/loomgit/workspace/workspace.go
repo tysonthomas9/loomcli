@@ -140,7 +140,7 @@ func EnsureRequest(ctx context.Context, workspace, name, requestID, trunk, wsDir
 	}
 	plan := journal.WorkspaceCreation{RequestID: requestID, Kind: "empty", Name: name, Path: wsDir, Trunk: trunk}
 	for _, src := range sources {
-		plan.Repos = append(plan.Repos, journal.WorkspaceCreationRepo{Name: src.Name, Source: src.Path, Path: filepath.Join(wsDir, src.Name), Branch: branch})
+		plan.Repos = append(plan.Repos, journal.WorkspaceCreationRepo{Name: src.Name, Source: src.Path, Path: filepath.Join(wsDir, src.Name), Branch: branch, Mode: "worktree"})
 	}
 	s, err := beginSession(ctx, workspace, nil, plan)
 	if err != nil {
@@ -224,6 +224,23 @@ func BeginCloneRequest(ctx context.Context, workspace, name, requestID, trunk, w
 	return beginSession(ctx, workspace, nil, plan)
 }
 
+// PlanClones records intended clone paths before a clone process can write them.
+func (s *Session) PlanClones(ctx context.Context, sources []Source) error {
+	plan, err := s.store.WorkspaceCreation(ctx, s.entry)
+	if err != nil {
+		return err
+	}
+	workspace := strings.TrimPrefix(s.entry.RequestID, "workspace-create:")
+	branch, err := loomgit.InteractiveBranch(workspace, "lead")
+	if err != nil {
+		return err
+	}
+	for _, src := range sources {
+		plan.Repos = append(plan.Repos, journal.WorkspaceCreationRepo{Name: src.Name, Source: src.Path, Path: src.Path, Branch: branch, Mode: "clone"})
+	}
+	return s.store.ReplaceWorkspaceCreation(ctx, s.entry, plan)
+}
+
 // AdoptClones installs the lead branch after clones are present. The updated
 // plan is durable before the first checkout changes a cloned repository.
 func (s *Session) AdoptClones(ctx context.Context, sources []Source) error {
@@ -245,12 +262,22 @@ func (s *Session) AdoptClones(ctx context.Context, sources []Source) error {
 		repos = append(repos, loomgit.WorkspaceRepo{Workspace: workspace, Repo: src.Name, Trunk: trunk, WorkspaceBranch: branch, BaseSHA: base})
 	}
 	for i, src := range sources {
-		plan.Repos = append(plan.Repos, journal.WorkspaceCreationRepo{Name: src.Name, Source: src.Path, Path: src.Path, Branch: branch, BaseSHA: repos[i].BaseSHA})
+		found := false
+		for j := range plan.Repos {
+			if plan.Repos[j].Name == src.Name && plan.Repos[j].Mode == "clone" {
+				plan.Repos[j].BaseSHA = repos[i].BaseSHA
+				found = true
+				break
+			}
+		}
+		if !found {
+			plan.Repos = append(plan.Repos, journal.WorkspaceCreationRepo{Name: src.Name, Source: src.Path, Path: src.Path, Branch: branch, BaseSHA: repos[i].BaseSHA, Mode: "clone"})
+		}
 	}
 	if err := s.store.ReplaceWorkspaceCreation(ctx, s.entry, plan); err != nil {
 		return err
 	}
-	s.repos = repos
+	s.repos = append(s.repos, repos...)
 	for i, src := range sources {
 		if _, err := cli.RunGitCommand(src.Path, "checkout", "-b", branch, repos[i].BaseSHA); err != nil {
 			return fmt.Errorf("open cloned repo %q: %w", src.Name, err)
@@ -258,6 +285,46 @@ func (s *Session) AdoptClones(ctx context.Context, sources []Source) error {
 	}
 	if err := s.checkoutsAdded(ctx); err != nil {
 		return err
+	}
+	return nil
+}
+
+// AddWorktrees extends the same creation journal with local repository checkouts.
+// The full plan is durable before the first worktree is created.
+func (s *Session) AddWorktrees(ctx context.Context, workspace, trunk, wsDir string, sources []Source) error {
+	if len(sources) == 0 {
+		return nil
+	}
+	plan, err := s.store.WorkspaceCreation(ctx, s.entry)
+	if err != nil {
+		return err
+	}
+	branch, err := loomgit.InteractiveBranch(workspace, "lead")
+	if err != nil {
+		return err
+	}
+	for _, src := range sources {
+		base, err := localworkspace.PrepareWorkspaceBase(src.Path, workspace, "origin", trunk)
+		if err != nil {
+			return fmt.Errorf("prepare repo %q: %w", src.Name, err)
+		}
+		s.repos = append(s.repos, loomgit.WorkspaceRepo{Workspace: workspace, Repo: src.Name, Trunk: trunk, WorkspaceBranch: branch, BaseSHA: base})
+		plan.Repos = append(plan.Repos, journal.WorkspaceCreationRepo{Name: src.Name, Source: src.Path, Path: filepath.Join(wsDir, src.Name), Branch: branch, BaseSHA: base, Mode: "worktree"})
+	}
+	if err := s.store.ReplaceWorkspaceCreation(ctx, s.entry, plan); err != nil {
+		return err
+	}
+	for i, src := range sources {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		path := filepath.Join(wsDir, src.Name)
+		base := s.repos[len(s.repos)-len(sources)+i].BaseSHA
+		if _, err := cli.RunGitCommand(src.Path, "worktree", "add", path, "-b", branch, base); err != nil {
+			_, _ = cli.RunGitCommand(src.Path, "branch", "-D", branch)
+			return fmt.Errorf("checkout repo %q: %w", src.Name, err)
+		}
+		s.created = append(s.created, checkout{source: src.Path, path: path, branch: branch})
 	}
 	return nil
 }
