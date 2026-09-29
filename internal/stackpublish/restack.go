@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/loomgit/stacklock"
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
 )
 
@@ -47,6 +48,16 @@ func slideSafe(ctx context.Context, repoPath, rootBase, predBranch, nodeBranch s
 // the descendant carrying its predecessor's commits. It is idempotent: chains
 // that are already safe (merge-commit, or already rebased) are skipped.
 func (r *Reconciler) Restack(ctx context.Context, ws string, id sl.StackID, repoPath string, resolver ConflictResolver) (*RestackReport, error) {
+	var report *RestackReport
+	err := stacklock.With(ctx, ws, string(id), func(lockedCtx context.Context) error {
+		var restackErr error
+		report, restackErr = r.restack(lockedCtx, ws, id, repoPath, resolver)
+		return restackErr
+	})
+	return report, err
+}
+
+func (r *Reconciler) restack(ctx context.Context, ws string, id sl.StackID, repoPath string, resolver ConflictResolver) (*RestackReport, error) {
 	stack, err := r.Store.GetStack(ctx, ws, id)
 	if err != nil {
 		return nil, err

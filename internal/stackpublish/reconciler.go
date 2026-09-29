@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/loomgit/stacklock"
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 )
@@ -153,6 +154,16 @@ func queuedConflicts(targets []int, queued map[int]bool) []int {
 //
 //nolint:cyclop,funlen,gocognit // Publish coordinates preflight, restack safety, forge mutation, and reporting in one transaction.
 func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repoPath string, opts Options) (*Report, error) {
+	var report *Report
+	err := stacklock.With(ctx, ws, string(id), func(lockedCtx context.Context) error {
+		var publishErr error
+		report, publishErr = r.publish(lockedCtx, ws, id, repoPath, opts)
+		return publishErr
+	})
+	return report, err
+}
+
+func (r *Reconciler) publish(ctx context.Context, ws string, id sl.StackID, repoPath string, opts Options) (*Report, error) {
 	stack, err := r.Store.GetStack(ctx, ws, id)
 	if err != nil {
 		return nil, err
@@ -229,7 +240,7 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 		// With a resolver, auto-rebase unsafe descendants first (resolving any
 		// conflicts via the agent); the guard below then passes.
 		if opts.Resolver != nil {
-			if _, err := r.Restack(ctx, ws, id, repoPath, opts.Resolver); err != nil {
+			if _, err := r.restack(ctx, ws, id, repoPath, opts.Resolver); err != nil {
 				return nil, fmt.Errorf("auto-rebase: %w", err)
 			}
 		}
