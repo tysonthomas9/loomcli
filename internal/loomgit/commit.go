@@ -89,7 +89,7 @@ func treeForPaths(ctx context.Context, r *gitexec.Runner, parent string, paths [
 	if _, err = r.RunWithEnv(ctx, env, "read-tree", parent); err != nil {
 		return "", err
 	}
-	args := []string{"add", "-A", "--"}
+	args := []string{"add", "--"}
 	for _, path := range paths {
 		args = append(args, ":(literal)"+path)
 	}

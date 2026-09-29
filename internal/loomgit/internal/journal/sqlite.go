@@ -69,7 +69,7 @@ func OpenSQLite(path string) (*SQLite, error) {
 	);
 	CREATE TABLE IF NOT EXISTS workspace_settings (
 		workspace TEXT PRIMARY KEY, auto_commit INTEGER NOT NULL DEFAULT 1,
-		lead_may_approve_publish INTEGER NOT NULL DEFAULT 0
+		lead_may_approve_publish INTEGER NOT NULL DEFAULT 1
 	);
 	CREATE INDEX IF NOT EXISTS event_outbox_pending ON event_outbox(delivered, id);`); err != nil {
 		_ = db.Close()

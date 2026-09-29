@@ -150,6 +150,18 @@ func TestPullWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 	}}
 
 	pullWorkspaceWorktrees(deps, worktrees, "main")
+	mergeCalls := 0
+	for _, call := range outputMock.calls {
+		if len(call.Args) > 0 && call.Args[0] == "merge" {
+			mergeCalls++
+			if strings.Join(call.Args, " ") != "merge origin/main -m Pull from main" {
+				t.Fatalf("pull merge message: %v", call.Args)
+			}
+		}
+	}
+	if mergeCalls != 2 {
+		t.Fatalf("pull merge calls = %d, want 2", mergeCalls)
+	}
 }
 
 func TestPullWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {

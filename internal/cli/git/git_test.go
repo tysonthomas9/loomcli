@@ -575,6 +575,18 @@ func TestGitMerge(t *testing.T) {
 	}
 }
 
+func TestMergeSourceUsesPlainMessage(t *testing.T) {
+	deps, _, _, _, _ := NewTestDeps(t)
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{{}})
+	outputMock.InstallOn(deps)
+	if _, err := mergeSourceDeps(deps, "/repo", "feature", "main"); err != nil {
+		t.Fatal(err)
+	}
+	if len(outputMock.calls) != 1 || !reflect.DeepEqual(outputMock.calls[0].Args, []string{"merge", "-m", "Merge feature into main", "--", "feature"}) {
+		t.Fatalf("merge command: %+v", outputMock.calls)
+	}
+}
+
 func TestGitMergeOrigin(t *testing.T) {
 	t.Parallel()
 

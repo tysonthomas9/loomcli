@@ -684,7 +684,18 @@ func CommitWorktree(ctx context.Context, worktreePath, message string) error {
 }
 
 func gitCommitWithUserIdentity(ctx context.Context, dir, message string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "commit", "-m", message) //nolint:gosec // Fixed Git command; message is an argv value.
+	name := exec.CommandContext(ctx, "git", "config", "--get", "user.name") //nolint:gosec // Reads identity from the selected repository.
+	name.Dir = dir
+	configuredName, nameErr := name.Output()
+	email := exec.CommandContext(ctx, "git", "config", "--get", "user.email") //nolint:gosec // Reads identity from the selected repository.
+	email.Dir = dir
+	configuredEmail, emailErr := email.Output()
+	args := []string{}
+	if nameErr != nil || emailErr != nil || strings.TrimSpace(string(configuredName)) == "" || strings.TrimSpace(string(configuredEmail)) == "" {
+		args = append(args, "-c", "user.name=Loom", "-c", "user.email=loom@localhost")
+	}
+	args = append(args, "commit", "-m", message)
+	cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // Fixed Git operation; message is one argv value.
 	cmd.Dir = dir
 	for _, item := range os.Environ() {
 		key, _, _ := strings.Cut(item, "=")

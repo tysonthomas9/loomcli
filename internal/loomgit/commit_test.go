@@ -125,6 +125,20 @@ func TestCommitRefusesMergeAndSubmodulePath(t *testing.T) {
 	}
 }
 
+func TestCommitNamedDeletion(t *testing.T) {
+	dir, store := fixture(t)
+	if err := os.Remove(filepath.Join(dir, "base.txt")); err != nil {
+		t.Fatal(err)
+	}
+	sha, err := loomgit.Commit(context.Background(), dir, store, request("base.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := git(t, dir, "diff-tree", "--no-commit-id", "--name-status", "-r", sha); got != "D\tbase.txt" {
+		t.Fatal(got)
+	}
+}
+
 func TestProductionGoHasNoClaudeCoauthorTrailer(t *testing.T) {
 	root := filepath.Join("..", "..")
 	rootFS, err := os.OpenRoot(root)
@@ -171,6 +185,10 @@ func TestCommitOnScratchClone(t *testing.T) {
 	cmd := exec.Command("git", "clone", "--local", "-q", root, dir) //nolint:norawexec // Real local clone is required acceptance evidence.
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("clone: %v: %s", err, out)
+	}
+	cmd = exec.Command("git", "-C", dir, "switch", "-c", "p25-scratch") //nolint:norawexec // Give the clone a branch even when the enclosing checkout is detached.
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("switch: %v: %s", err, out)
 	}
 	config := filepath.Join(t.TempDir(), "gitconfig")
 	if err := os.WriteFile(config, []byte("[user]\nname = Real User\nemail = user@example.test\n"), 0600); err != nil {
