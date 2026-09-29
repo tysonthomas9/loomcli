@@ -39,7 +39,7 @@ func (s *confirmationSession) confirm(prompt string) bool {
 }
 
 func confirmFrom(reader *bufio.Reader, out io.Writer, prompt string) bool {
-	fmt.Fprintf(out, "%s (y/N) ", prompt)
+	_, _ = fmt.Fprintf(out, "%s (y/N) ", prompt)
 	response, err := reader.ReadString('\n')
 	if err != nil {
 		return false

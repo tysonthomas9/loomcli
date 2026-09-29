@@ -109,30 +109,15 @@ func runWorkspaceSyncWithConfirmation(deps *cli.Deps, pushOnly, pullOnly bool, w
 	var failed []string
 	var skipped []string
 	for _, wsName := range wsNames {
-		fmt.Printf("=== Workspace: %s ===\n", wsName)
-		if err := resolver.SetWorkspace(wsName); err != nil {
-			fmt.Fprintf(os.Stderr, "Error setting workspace %s: %v\n", wsName, err)
-			failed = append(failed, wsName)
-			continue
-		}
-		worktrees, err := resolver.DiscoverWorktrees()
+		declined, err := syncConfirmedWorkspace(deps, resolver, wsName, pushOnly, pullOnly, confirmation)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error discovering repos in workspace %s: %v\n", wsName, err)
+			fmt.Fprintln(os.Stderr, err)
 			failed = append(failed, wsName)
 			continue
 		}
-		if err := printUnsavedWork(deps, worktrees, ""); err != nil {
-			return err
-		}
-		if !confirmation.confirm("Sync workspace " + wsName + "?") {
-			fmt.Printf("Skipped workspace %s.\n\n", wsName)
+		if declined {
 			skipped = append(skipped, wsName)
-			continue
 		}
-		if err := syncSingleWorkspace(deps, resolver, pushOnly, pullOnly); err != nil {
-			failed = append(failed, wsName)
-		}
-		fmt.Println("")
 	}
 
 	fmt.Println("=========================================")
@@ -148,6 +133,27 @@ func runWorkspaceSyncWithConfirmation(deps *cli.Deps, pushOnly, pullOnly bool, w
 	}
 	fmt.Println("=========================================")
 	return nil
+}
+
+func syncConfirmedWorkspace(deps *cli.Deps, resolver *cli.Resolver, name string, pushOnly, pullOnly bool, confirmation *confirmationSession) (bool, error) {
+	fmt.Printf("=== Workspace: %s ===\n", name)
+	if err := resolver.SetWorkspace(name); err != nil {
+		return false, fmt.Errorf("setting workspace %s: %w", name, err)
+	}
+	worktrees, err := resolver.DiscoverWorktrees()
+	if err != nil {
+		return false, fmt.Errorf("discovering repos in workspace %s: %w", name, err)
+	}
+	if err := printUnsavedWork(deps, worktrees, ""); err != nil {
+		return false, err
+	}
+	if !confirmation.confirm("Sync workspace " + name + "?") {
+		fmt.Printf("Skipped workspace %s.\n\n", name)
+		return true, nil
+	}
+	err = syncSingleWorkspace(deps, resolver, pushOnly, pullOnly)
+	fmt.Println("")
+	return false, err
 }
 
 // syncSingleWorkspace returns an error only for failures that mean the sync did
