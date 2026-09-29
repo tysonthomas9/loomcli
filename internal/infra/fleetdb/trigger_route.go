@@ -34,9 +34,14 @@ func (s *triggerRouteStore) DispatchTriggerRoute(ctx context.Context, ws, routeK
 // DispatchTriggerRouteV2 posts the trigger-routes endpoint and decodes the
 // BREAKING router-v2 fan-out wire: 201 {"deliveries":[...]} with NO top-level
 // driver_run_id. PrimaryRun stays nil — the wire no longer returns run bodies;
-// callers needing the run fetch it by Deliveries[0].RunID. SubjectAttrs is
-// deliberately not sent: fleet-db's strict decoder rejects unknown fields and
-// the server-side subject-key templating lane lands with a later chunk.
+// callers needing the run fetch it by Deliveries[0].RunID.
+//
+// SubjectAttrs rides as subject_attrs, the adapter-enriched lane the server
+// substitutes into {{attrs.<name>}} subject-key templates. It is omitted when
+// empty rather than sent as null: fleet-db decodes strictly, and an omitted
+// key keeps the request byte-identical to what a pre-attrs client sends, so
+// this stays compatible in both directions during a rolling upgrade (an older
+// server rejects the unknown field only if a caller actually populates attrs).
 func (s *triggerRouteStore) DispatchTriggerRouteV2(ctx context.Context, ws, routeKey string, in store.TriggerRouteDispatch) (*store.TriggerRouteDispatchResult, error) {
 	body := map[string]any{
 		"run_id":             in.RunID,
@@ -51,6 +56,9 @@ func (s *triggerRouteStore) DispatchTriggerRouteV2(ctx context.Context, ws, rout
 		"signature_status":   in.SignatureStatus,
 		"replay_of_event_id": in.ReplayOfEventID,
 		"payload":            in.Payload,
+	}
+	if len(in.SubjectAttrs) > 0 {
+		body["subject_attrs"] = in.SubjectAttrs
 	}
 	headers := map[string]string{}
 	if in.IdempotencyKey != "" {
