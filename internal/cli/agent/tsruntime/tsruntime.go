@@ -142,9 +142,18 @@ func (i agentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, sh
 	if err != nil {
 		return err
 	}
-	patch, baseRef, err := applyTaskRunnerResult(raw, collector)
+	result, err := applyTaskRunnerResult(raw, collector)
 	if err != nil {
 		return err
+	}
+	patch, baseRef := result.Patch, result.baseRef()
+	if result.Status != "completed" {
+		if entrypoint == driver.LocalTaskRunnerEntrypoint && strings.TrimSpace(patch) != "" {
+			if err := freezeFailedLeaf(ctx, workDir, taskRunID, result); err != nil {
+				return fmt.Errorf("ts-runtime: freeze failed run: %w", err)
+			}
+		}
+		return result.runError()
 	}
 	// Phase-U fix: the default local TS leaf runs the agent in an ISOLATED worktree and returns the
 	// change as a patch+base_ref, leaving the daemon's HOST worktree clean. The Go leaf commits in
@@ -166,26 +175,47 @@ func fallbackTaskRunID(agentName string) string {
 	return "tr-" + agentName + "-" + rand.Text()
 }
 
-// applyTaskRunnerResult decodes the bundled task-runner's result, feeds usage into
-// the daemon collector, mirrors the transcript onto the session, and maps a
-// non-completed run to an error. It also returns the runner's produced patch +
-// base_ref (empty for PR/stacked delivery) so the caller can patch it back onto the
-// host worktree (see applyLeafPatchBack).
-func applyTaskRunnerResult(raw json.RawMessage, collector *usage.Collector) (patch string, baseRef string, err error) {
-	var result struct {
-		Status            string            `json:"status"`
-		ErrorMessage      string            `json:"errorMessage"`
-		InputTokens       int64             `json:"input_tokens"`
-		OutputTokens      int64             `json:"output_tokens"`
-		CacheReadTokens   int64             `json:"cache_read_tokens"`
-		CacheWriteTokens  int64             `json:"cache_write_tokens"`
-		TranscriptEntries []json.RawMessage `json:"transcript_entries"`
-		Patch             string            `json:"patch"`
-		BaseRef           string            `json:"base_ref"`
-		PatchBaseRef      string            `json:"patch_base_ref"`
+// leafRunnerResult keeps failure patches available after decoding, so the caller
+// can freeze them before returning the runner's error.
+type leafRunnerResult struct {
+	Status            string            `json:"status"`
+	ErrorClass        string            `json:"errorClass"`
+	ErrorMessage      string            `json:"errorMessage"`
+	InputTokens       int64             `json:"input_tokens"`
+	OutputTokens      int64             `json:"output_tokens"`
+	CacheReadTokens   int64             `json:"cache_read_tokens"`
+	CacheWriteTokens  int64             `json:"cache_write_tokens"`
+	TranscriptEntries []json.RawMessage `json:"transcript_entries"`
+	Patch             string            `json:"patch"`
+	BaseRef           string            `json:"base_ref"`
+	PatchBaseRef      string            `json:"patch_base_ref"`
+	RuntimeMetadata   map[string]string `json:"runtimeMetadata"`
+}
+
+func (r leafRunnerResult) baseRef() string {
+	if strings.TrimSpace(r.BaseRef) != "" {
+		return r.BaseRef
 	}
+	return r.PatchBaseRef
+}
+
+func (r leafRunnerResult) runError() error {
+	msg := r.ErrorMessage
+	if msg == "" {
+		msg = r.Status
+	}
+	if path := r.RuntimeMetadata["retained_path"]; path != "" {
+		msg += " (retained at " + path + ")"
+	}
+	return fmt.Errorf("ts-runtime run did not complete: %s", msg)
+}
+
+// applyTaskRunnerResult decodes the result and records usage and transcript even
+// when the backend failed. The caller handles patch preservation before erroring.
+func applyTaskRunnerResult(raw json.RawMessage, collector *usage.Collector) (leafRunnerResult, error) {
+	var result leafRunnerResult
 	if jerr := json.Unmarshal(raw, &result); jerr != nil {
-		return "", "", fmt.Errorf("ts-runtime: decode runner result: %w", jerr)
+		return leafRunnerResult{}, fmt.Errorf("ts-runtime: decode runner result: %w", jerr)
 	}
 
 	// Feed the runner's usage into the daemon collector so the worker's own
@@ -206,18 +236,32 @@ func applyTaskRunnerResult(raw json.RawMessage, collector *usage.Collector) (pat
 	// transcript.Event, pinned by the Phase-U/U0 conformance test).
 	writeTaskRunnerNativeTranscript(result.TranscriptEntries)
 
-	if result.Status != "completed" {
-		msg := result.ErrorMessage
-		if msg == "" {
-			msg = result.Status
-		}
-		return "", "", fmt.Errorf("ts-runtime run did not complete: %s", msg)
+	return result, nil
+}
+
+func freezeFailedLeaf(ctx context.Context, workDir, attempt string, result leafRunnerResult) error {
+	base := result.baseRef()
+	if base == "" {
+		return errors.New("runner returned a patch without base_ref")
 	}
-	br := result.BaseRef
-	if strings.TrimSpace(br) == "" {
-		br = result.PatchBaseRef
+	task := strings.TrimSpace(os.Getenv("LOOM_ASSIGNED_TASK_ID"))
+	repo := leafPatchRepoName(workDir)
+	if err := validateLeafPatchIdentity(result.Patch, task, repo); err != nil {
+		return err
 	}
-	return result.Patch, br, nil
+	outcome := "failed"
+	if result.Status == "cancelled" {
+		outcome = "cancelled"
+	}
+	switch strings.ToLower(result.ErrorClass) {
+	case "timeout", "timed_out", "deadline_exceeded":
+		outcome = "timeout"
+	}
+	_, err := driverfreeze.Freeze(ctx, driverfreeze.Request{
+		Workspace: os.Getenv("LOOM_WORKSPACE"), Task: task, Repo: repo, Attempt: attempt,
+		Worktree: workDir, Base: base, Patch: []byte(result.Patch), Outcome: outcome,
+	})
+	return err
 }
 
 // applyLeafPatchBack lands the local TS runner's produced patch onto the daemon's host

@@ -56,6 +56,11 @@ func (s *state) goCheck(name string) error {
 		return s.packageTests("./internal/loomgit/driverfreeze", "TestFreeze(FlatDiffAndNextAttempt|CommittedAndUncommittedWork)")
 	case "fresh_task_copy":
 		return s.packageTests("./internal/driver", "Test(LocalTaskWorktreeResolverCreatesIsolatedTaskRunWorktree|BridgeRetryUsesDistinctFreezeRequestAndPatchArtifact)")
+	case "noncompleted_revision":
+		if err := s.packageTests("./internal/cli/agent/tsruntime", "TestFailedLeafFreezesReturnedPatchWithoutChangingHost"); err != nil {
+			return err
+		}
+		return s.packageTests("./internal/driver", "TestHostBridgeRetainsCaptureFailureWithoutFreezingEmptyPatch")
 	case "trial_merge":
 		// Proves clean, conflict, dropped-commit, and old-version behavior under the lab Git.
 		return s.packageTests("./internal/loomgit/internal/replay", "Test(TrialMergeCleanAndConflictLeaveCheckoutUnchanged|TrialMergeMultiCommitAndDrop|TrialMergeStopsAtFirstConflictingCommit|TrialMergeUsesFirstParentOfMergeCommit|TrialMergePreservesAuthorMessageAndTrailers|VersionRequirement)")

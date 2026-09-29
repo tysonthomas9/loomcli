@@ -1,0 +1,8 @@
+name: failed task runner work is retained as a revision
+task: P1.14
+git: [min, latest]
+fixture: loomcli
+when:
+  - go_check: noncompleted_revision
+then:
+  - go_check: no_error
