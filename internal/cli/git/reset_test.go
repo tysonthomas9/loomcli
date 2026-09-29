@@ -119,22 +119,25 @@ func TestResetCapturesBeforeDiscardAndNeverPushes(t *testing.T) {
 }
 
 func TestResetRealRepoDefaults(t *testing.T) {
-	source := resetGit(t, ".", "rev-parse", "--show-toplevel")
 	root, err := os.MkdirTemp("/tmp", "p15-real-repo-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(root)
-	shallow := filepath.Join(root, "shallow")
-	resetGit(t, root, "clone", "--depth", "1", "file://"+source, shallow)
-	if got := resetGit(t, shallow, "rev-parse", "--is-shallow-repository"); got != "true" {
-		t.Fatalf("fixture is not shallow: %s", got)
+	source := filepath.Join(root, "source")
+	if err := os.Mkdir(source, 0o700); err != nil {
+		t.Fatal(err)
 	}
+	resetGit(t, source, "init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(source, "README.md"), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resetGit(t, source, "add", "README.md")
+	resetGit(t, source, "commit", "-m", "base")
 	repo := filepath.Join(root, "repo")
-	resetGit(t, root, "clone", "--local", shallow, repo)
+	resetGit(t, root, "clone", "--local", source, repo)
 	origin := filepath.Join(root, "origin.git")
 	resetGit(t, root, "init", "--bare", origin)
-	resetGit(t, origin, "config", "receive.shallowUpdate", "true")
 	resetGit(t, repo, "remote", "set-url", "origin", origin)
 	resetGit(t, repo, "push", "origin", "HEAD:refs/heads/main")
 	resetGit(t, repo, "checkout", "-b", "loom/ws/W/interactive/L")
