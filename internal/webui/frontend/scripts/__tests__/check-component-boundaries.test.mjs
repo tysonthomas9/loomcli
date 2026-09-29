@@ -274,12 +274,14 @@ describe("scanFile — line numbers", () => {
 // ---------------------------------------------------------------------------
 
 describe("scanAll", () => {
+  // Unlike the synthetic scanFile cases, this walks and parses the entire
+  // component tree; concurrent Go race tests can delay it on a busy host.
   it("returns 0 violations with real codebase (all known are allowlisted)", () => {
     const result = scanAll(FRONTEND_ROOT);
     expect(result.violations).toHaveLength(0);
     expect(result.allowlistedCount).toBe(ALLOWLIST.length);
     expect(result.scannedCount).toBeGreaterThan(0);
-  });
+  }, 20_000);
 });
 
 // ---------------------------------------------------------------------------

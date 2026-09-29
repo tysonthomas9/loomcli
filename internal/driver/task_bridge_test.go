@@ -930,7 +930,13 @@ func genericTaskRunnerInvokerPath(t *testing.T) string {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("stat generic invoker: %v", err)
 	}
-	return path
+	// macOS /tmp and checkout paths may contain symlinked components. Node
+	// resolves the module path, so exercise invocation through a symlink.
+	linked := filepath.Join(t.TempDir(), "loom-task-runner-invoker.mjs")
+	if err := os.Symlink(path, linked); err != nil {
+		t.Fatalf("symlink generic invoker: %v", err)
+	}
+	return linked
 }
 
 func envContains(env []string, want string) bool {

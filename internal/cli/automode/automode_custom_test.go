@@ -1075,7 +1075,9 @@ func TestStartTmuxSession_CodexBackend_NoTermDumb(t *testing.T) {
 		t.Fatalf("startTmuxSession failed: %v", err)
 	}
 
-	paneCmd := waitForTmuxPaneStartCommand(t, sessionName, 5*time.Second)
+	// tmux is an external process; CI has observed its pane becoming visible
+	// just after five seconds while other gate processes contend for the host.
+	paneCmd := waitForTmuxPaneStartCommand(t, sessionName, 10*time.Second)
 
 	// Command should NOT contain "TERM=dumb" for codex
 	if strings.Contains(paneCmd, "TERM=dumb") {

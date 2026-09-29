@@ -221,6 +221,9 @@ export default defineConfig(({ mode }) => ({
     environment: "node",
     exclude: ["tests/e2e/**", "node_modules/**"],
     pool: "forks",
+    // The gate runs Go race tests alongside Vitest. Bound forked workers so
+    // synchronous tests do not exhaust their 5-second budget under host load.
+    maxWorkers: 4,
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],
