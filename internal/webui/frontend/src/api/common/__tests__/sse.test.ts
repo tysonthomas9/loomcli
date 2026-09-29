@@ -1,1514 +1,979 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../client";
-import { WorkspaceSSEClient, getSSEUrl, fetchSseToken } from "../sse";
+import { fetchSseToken, getSSEUrl, WorkspaceSSEClient } from "../sse";
 import type { MutationPayload, SseTokenResult } from "../sse";
 
-// Mock the get function from client.ts — default to 404 (open mode, no SSE token endpoint)
 const mockGet = vi.fn();
 vi.mock("../client", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("../client")>();
+  const actual = await importOriginal<typeof import("../client")>();
   return {
-    ...mod,
+    ...actual,
     get: (...args: unknown[]) => mockGet(...args),
   };
 });
 
-// Mock EventSource class with static constants matching the real EventSource API
-class MockEventSource {
-  // EventSource readyState constants
-  static readonly CONNECTING = 0;
-  static readonly OPEN = 1;
-  static readonly CLOSED = 2;
+type StreamPlan =
+  | { kind: "response"; status: number; contentType: string }
+  | { kind: "network-error"; error: Error };
 
-  static instances: MockEventSource[] = [];
-
+interface StreamRequest {
   url: string;
-  readyState: number = MockEventSource.CONNECTING;
-  onopen: (() => void) | null = null;
-  onerror: (() => void) | null = null;
+  headers: Headers;
+  signal: AbortSignal | null;
+  aborted: boolean;
+  push: (frame: string) => void;
+  close: () => void;
+  fail: (error?: Error) => void;
+}
 
-  private eventListeners: Map<string, ((e: MessageEvent) => void)[]> =
-    new Map();
+const encoder = new TextEncoder();
+let streamPlans: StreamPlan[] = [];
+let streamRequests: StreamRequest[] = [];
+let originalWindowFetch: typeof window.fetch;
+let originalDocumentHidden: PropertyDescriptor | undefined;
 
-  constructor(url: string) {
-    this.url = url;
-    MockEventSource.instances.push(this);
-  }
+function queueResponse(
+  status = 200,
+  contentType = "text/event-stream; charset=utf-8",
+): void {
+  streamPlans.push({ kind: "response", status, contentType });
+}
 
-  addEventListener(type: string, listener: (e: MessageEvent) => void): void {
-    if (!this.eventListeners.has(type)) {
-      this.eventListeners.set(type, []);
-    }
-    this.eventListeners.get(type)!.push(listener);
-  }
+function queueNetworkError(message = "network down"): void {
+  streamPlans.push({ kind: "network-error", error: new Error(message) });
+}
 
-  removeEventListener(type: string, listener: (e: MessageEvent) => void): void {
-    const listeners = this.eventListeners.get(type);
-    if (listeners) {
-      const index = listeners.indexOf(listener);
-      if (index > -1) {
-        listeners.splice(index, 1);
-      }
-    }
-  }
+const mockStreamFetch = vi.fn(
+  async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const plan = streamPlans.shift() ?? {
+      kind: "response",
+      status: 200,
+      contentType: "text/event-stream; charset=utf-8",
+    };
+    if (plan.kind === "network-error") throw plan.error;
 
-  close(): void {
-    this.readyState = MockEventSource.CLOSED;
-  }
+    let controller: ReadableStreamDefaultController<Uint8Array>;
+    let settled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(streamController) {
+        controller = streamController;
+      },
+    });
+    const signal = init?.signal ?? null;
+    const request: StreamRequest = {
+      url: String(input),
+      headers: new Headers(init?.headers),
+      signal,
+      aborted: signal?.aborted ?? false,
+      push(frame) {
+        if (!settled) controller.enqueue(encoder.encode(frame));
+      },
+      close() {
+        if (!settled) {
+          settled = true;
+          controller.close();
+        }
+      },
+      fail(error = new Error("stream failed")) {
+        if (!settled) {
+          settled = true;
+          controller.error(error);
+        }
+      },
+    };
+    signal?.addEventListener("abort", () => {
+      request.aborted = true;
+      request.fail(new DOMException("Aborted", "AbortError"));
+    });
+    streamRequests.push(request);
 
-  // Test helpers
-  simulateOpen(): void {
-    this.readyState = MockEventSource.OPEN;
-    this.onopen?.();
-  }
+    return new Response(body, {
+      status: plan.status,
+      headers: { "content-type": plan.contentType },
+    });
+  },
+);
 
-  simulateError(): void {
-    this.onerror?.();
-  }
+async function flush(): Promise<void> {
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+}
 
-  simulateMutation(data: MutationPayload, eventId?: string): void {
-    const listeners = this.eventListeners.get("mutation") ?? [];
-    // Compute eventId from timestamp if not provided (simulates server behavior)
-    const lastEventId = eventId ?? String(Date.parse(data.timestamp));
-    const event = {
-      data: JSON.stringify(data),
-      lastEventId,
-    } as MessageEvent;
-    for (const listener of listeners) {
-      listener(event);
-    }
-  }
+async function expectRequestCount(count: number): Promise<void> {
+  await flush();
+  expect(streamRequests).toHaveLength(count);
+}
 
-  simulateRawMutation(data: string, eventId = ""): void {
-    const listeners = this.eventListeners.get("mutation") ?? [];
-    const event = { data, lastEventId: eventId } as MessageEvent;
-    for (const listener of listeners) {
-      listener(event);
-    }
-  }
+function pushConnected(request = streamRequests.at(-1)): void {
+  request?.push('event: connected\ndata: {"clientId":1}\n\n');
+}
 
-  simulateConnectedEvent(): void {
-    const listeners = this.eventListeners.get("connected") ?? [];
-    const event = { data: "" } as MessageEvent;
-    for (const listener of listeners) {
-      listener(event);
-    }
-  }
-
-  static reset(): void {
-    MockEventSource.instances = [];
-  }
-
-  static get lastInstance(): MockEventSource | undefined {
-    return MockEventSource.instances.at(-1);
-  }
+function pushMutation(
+  mutation: MutationPayload,
+  id: string,
+  request = streamRequests.at(-1),
+): void {
+  request?.push(
+    `id: ${id}\nevent: mutation\ndata: ${JSON.stringify(mutation)}\n\n`,
+  );
 }
 
 describe("WorkspaceSSEClient", () => {
-  let originalEventSource: typeof EventSource;
-
   beforeEach(() => {
     vi.useFakeTimers();
-    originalEventSource = global.EventSource;
-    global.EventSource = MockEventSource as unknown as typeof EventSource;
-    MockEventSource.reset();
-    // Default: 404 (open mode — no SSE token endpoint)
-    mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
+    streamPlans = [];
+    streamRequests = [];
+    mockGet.mockReset();
+    mockGet.mockResolvedValue({ token: "test-token" });
+    mockStreamFetch.mockClear();
+    originalWindowFetch = window.fetch;
+    originalDocumentHidden = Object.getOwnPropertyDescriptor(
+      document,
+      "hidden",
+    );
+    window.fetch = mockStreamFetch as typeof window.fetch;
   });
 
   afterEach(() => {
+    window.fetch = originalWindowFetch;
+    if (originalDocumentHidden) {
+      Object.defineProperty(document, "hidden", originalDocumentHidden);
+    } else {
+      Reflect.deleteProperty(document, "hidden");
+    }
     vi.useRealTimers();
-    global.EventSource = originalEventSource;
     vi.restoreAllMocks();
   });
 
-  describe("Initialization", () => {
-    it("creates a client with initial disconnected state", () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      expect(client.getState()).toBe("disconnected");
-      expect(client.getReconnectAttempts()).toBe(0);
-    });
-
-    it("accepts callbacks in options", () => {
-      const onMutation = vi.fn();
-      const onError = vi.fn();
-      const onStateChange = vi.fn();
-      const onReconnect = vi.fn();
-
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        onMutation,
-        onError,
-        onStateChange,
-        onReconnect,
-      });
-
-      expect(client.getState()).toBe("disconnected");
-    });
-  });
-
-  describe("Connection lifecycle", () => {
-    it("connect() creates EventSource", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      await client.connect();
-
-      expect(MockEventSource.lastInstance).toBeDefined();
-      expect(MockEventSource.lastInstance?.url).toContain(
-        "/api/workspaces/test-ws-id/events",
-      );
-    });
-
-    it("connect() with since parameter adds query string", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      await client.connect(1706011200000);
-
-      expect(MockEventSource.lastInstance?.url).toContain(
-        "since=1706011200000",
-      );
-    });
-
-    it("state transitions from disconnected to connecting to connected", async () => {
-      const onStateChange = vi.fn();
-      const client = new WorkspaceSSEClient("test-ws-id", { onStateChange });
-
-      expect(client.getState()).toBe("disconnected");
-
-      await client.connect();
-
-      expect(client.getState()).toBe("connecting");
-      expect(onStateChange).toHaveBeenCalledWith("connecting");
-
-      MockEventSource.lastInstance?.simulateOpen();
-
-      expect(client.getState()).toBe("connected");
-      expect(onStateChange).toHaveBeenCalledWith("connected");
-    });
-
-    it("disconnect() closes EventSource and updates state", async () => {
-      const onStateChange = vi.fn();
-      const client = new WorkspaceSSEClient("test-ws-id", { onStateChange });
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      expect(client.getState()).toBe("connected");
-
-      const esInstance = MockEventSource.lastInstance;
-
-      client.disconnect();
-
-      expect(client.getState()).toBe("disconnected");
-      expect(esInstance?.readyState).toBe(MockEventSource.CLOSED);
-      expect(onStateChange).toHaveBeenCalledWith("disconnected");
-    });
-
-    it("connect() when already connected does nothing", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      expect(MockEventSource.instances.length).toBe(1);
-
-      await client.connect();
-
-      expect(MockEventSource.instances.length).toBe(1);
-    });
-
-    it("handles EventSource constructor throwing with reconnect", async () => {
-      const onReconnect = vi.fn();
-      const consoleErrorSpy = vi
-        .spyOn(console, "error")
-        .mockImplementation(() => {});
-
-      // Override EventSource to throw on construction
-      const ThrowingEventSource = function () {
-        throw new Error("SecurityError");
-      } as unknown as typeof EventSource;
-      ThrowingEventSource.CONNECTING = 0;
-      ThrowingEventSource.OPEN = 1;
-      ThrowingEventSource.CLOSED = 2;
-
-      global.EventSource = ThrowingEventSource;
-
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        onReconnect,
-        initialReconnectDelay: 100,
-      });
-      await client.connect();
-
-      // Should enter reconnecting state (EventSource constructor failure is transient)
-      expect(client.getState()).toBe("reconnecting");
-      expect(client.getReconnectAttempts()).toBe(1);
-      expect(onReconnect).toHaveBeenCalledWith(1);
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        "[SSE] Failed to create EventSource:",
-        expect.any(Error),
-      );
-
-      consoleErrorSpy.mockRestore();
-      // Restore MockEventSource for subsequent tests
-      global.EventSource = MockEventSource as unknown as typeof EventSource;
-    });
-
-    it("disconnect works after EventSource constructor failure", async () => {
-      const consoleErrorSpy = vi
-        .spyOn(console, "error")
-        .mockImplementation(() => {});
-
-      global.EventSource = class ThrowingEventSource {
-        static readonly CONNECTING = 0;
-        static readonly OPEN = 1;
-        static readonly CLOSED = 2;
-        constructor() {
-          throw new Error("EventSource not supported");
-        }
-      } as unknown as typeof EventSource;
-
-      const client = new WorkspaceSSEClient("test-ws-id");
-      await client.connect();
-
-      // In reconnecting state after constructor failure
-      expect(client.getState()).toBe("reconnecting");
-
-      // disconnect() should work without error
-      client.disconnect();
-      expect(client.getState()).toBe("disconnected");
-
-      consoleErrorSpy.mockRestore();
-    });
-
-    it("connect() when connecting does nothing", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      await client.connect();
-
-      expect(client.getState()).toBe("connecting");
-      expect(MockEventSource.instances.length).toBe(1);
-
-      await client.connect();
-
-      expect(MockEventSource.instances.length).toBe(1);
-    });
-  });
-
-  describe("Message parsing and callback invocation", () => {
-    it("onMutation called with parsed payload", async () => {
-      const onMutation = vi.fn();
-      const client = new WorkspaceSSEClient("test-ws-id", { onMutation });
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      const mutation: MutationPayload = {
-        type: "create",
-        issue_id: "issue-123",
-        title: "Test Issue",
-        timestamp: "2025-01-23T12:00:00Z",
-      };
-
-      MockEventSource.lastInstance?.simulateMutation(mutation);
-
-      expect(onMutation).toHaveBeenCalledWith(mutation);
-    });
-
-    it("onMutation receives generic non-issue agent payloads", async () => {
-      const onMutation = vi.fn();
-      const client = new WorkspaceSSEClient("test-ws-id", { onMutation });
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      const mutation: MutationPayload = {
-        type: "status",
-        entity_type: "agent",
-        entity_id: "agent-alpha",
-        action: "agent.status",
-        title: "agent-alpha",
-        timestamp: "2025-01-23T12:00:00Z",
-      };
-
-      MockEventSource.lastInstance?.simulateMutation(
-        mutation,
-        "agent-cursor-1",
-      );
-
-      expect(onMutation).toHaveBeenCalledWith(mutation);
-      expect(client.getLastEventId()).toBe("agent-cursor-1");
-    });
-
-    it("malformed JSON is ignored with warning", async () => {
-      const onMutation = vi.fn();
-      const consoleWarnSpy = vi
-        .spyOn(console, "warn")
-        .mockImplementation(() => {});
-      const client = new WorkspaceSSEClient("test-ws-id", { onMutation });
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      MockEventSource.lastInstance?.simulateRawMutation("not valid json");
-
-      expect(onMutation).not.toHaveBeenCalled();
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
-        "[SSE] Received malformed mutation event",
-      );
-
-      consoleWarnSpy.mockRestore();
-    });
-
-    it("onConnected callback fires on connected SSE event", async () => {
-      const onConnected = vi.fn();
-      const client = new WorkspaceSSEClient("test-ws-id", { onConnected });
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-      MockEventSource.lastInstance?.simulateConnectedEvent();
-
-      expect(onConnected).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe("Error handling and reconnect state tracking", () => {
-    it("error triggers reconnecting with unified manual reconnect", async () => {
-      const onStateChange = vi.fn();
-      const onReconnect = vi.fn();
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        onStateChange,
-        onReconnect,
-      });
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      const esInstance = MockEventSource.lastInstance;
-
-      // Simulate error — EventSource should be closed (manual reconnect)
-      esInstance?.simulateError();
-
-      expect(esInstance?.readyState).toBe(MockEventSource.CLOSED);
-      expect(client.getState()).toBe("reconnecting");
-      expect(client.getReconnectAttempts()).toBe(1);
-      expect(onStateChange).toHaveBeenCalledWith("reconnecting");
-      expect(onReconnect).toHaveBeenCalledWith(1);
-    });
-
-    it("reconnectAttempts increments on consecutive errors without successful open", async () => {
-      const onReconnect = vi.fn();
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        onReconnect,
-        initialReconnectDelay: 100,
-      });
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      // Consecutive errors without successful opens — attempts accumulate
-      MockEventSource.lastInstance?.simulateError();
-      expect(client.getReconnectAttempts()).toBe(1);
-
-      // Advance timer to trigger reconnect, then error again immediately
-      await vi.advanceTimersByTimeAsync(100);
-      MockEventSource.lastInstance?.simulateError();
-      expect(client.getReconnectAttempts()).toBe(2);
-
-      // Advance timer (200ms = 100 * 2^1)
-      await vi.advanceTimersByTimeAsync(200);
-      MockEventSource.lastInstance?.simulateError();
-      expect(client.getReconnectAttempts()).toBe(3);
-    });
-
-    it("reconnectAttempts resets to 0 on successful open", async () => {
-      const onReconnect = vi.fn();
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        onReconnect,
-        initialReconnectDelay: 100,
-      });
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      // Simulate error
-      MockEventSource.lastInstance?.simulateError();
-      expect(client.getReconnectAttempts()).toBe(1);
-
-      // Advance timer to trigger reconnect
-      await vi.advanceTimersByTimeAsync(100);
-
-      // Simulate successful reconnection
-      MockEventSource.lastInstance?.simulateOpen();
-
-      expect(client.getReconnectAttempts()).toBe(0);
-      expect(onReconnect).toHaveBeenCalledWith(0);
-    });
-
-    it("error after manual disconnect is ignored", async () => {
-      const onError = vi.fn();
-      const onReconnect = vi.fn();
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        onError,
-        onReconnect,
-      });
-
-      await client.connect();
-      const esInstance = MockEventSource.lastInstance;
-      MockEventSource.lastInstance?.simulateOpen();
-
-      // Clear mocks after open
-      onError.mockClear();
-      onReconnect.mockClear();
-
-      client.disconnect();
-
-      // Simulate error after disconnect
-      esInstance?.simulateError();
-
-      expect(onError).not.toHaveBeenCalled();
-      expect(onReconnect).not.toHaveBeenCalled();
-      expect(client.getReconnectAttempts()).toBe(0);
-    });
-
-    it("errors are processed again after disconnect then reconnect", async () => {
-      const onReconnect = vi.fn();
-      const client = new WorkspaceSSEClient("test-ws-id", { onReconnect });
-
-      // First connection
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      // Disconnect (sets manualDisconnect = true)
-      client.disconnect();
-
-      // Reconnect (should reset manualDisconnect = false)
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      onReconnect.mockClear();
-
-      // Error on the new connection should be processed, not suppressed
-      MockEventSource.lastInstance?.simulateError();
-
-      expect(client.getState()).toBe("reconnecting");
-      expect(client.getReconnectAttempts()).toBe(1);
-      expect(onReconnect).toHaveBeenCalledWith(1);
-    });
-
-    it("logs warning after 5 connection failures", async () => {
-      const consoleWarnSpy = vi
-        .spyOn(console, "warn")
-        .mockImplementation(() => {});
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        initialReconnectDelay: 10,
-        maxReconnectDelay: 1000,
-      });
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      // Consecutive errors without successful opens accumulate attempts
-      for (let i = 0; i < 5; i++) {
-        MockEventSource.lastInstance?.simulateError();
-        // Advance timer to trigger reconnect: delay = 10 * 2^i
-        const delay = Math.min(10 * Math.pow(2, i), 1000);
-        await vi.advanceTimersByTimeAsync(delay);
-        // connect() creates a new EventSource, but we immediately error again
-        // (no simulateOpen — the next iteration's simulateError hits the new instance)
-      }
-
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
-        "[SSE] Multiple connection failures, will continue retrying",
-      );
-
-      consoleWarnSpy.mockRestore();
-    });
-  });
-
-  describe("Last event ID tracking for reconnection catch-up", () => {
-    it("getLastEventId returns undefined initially", () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      expect(client.getLastEventId()).toBeUndefined();
-    });
-
-    it("getLastEventId returns the last event ID after receiving a mutation", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      const mutation: MutationPayload = {
-        type: "create",
-        issue_id: "issue-123",
-        title: "Test Issue",
-        timestamp: "2025-01-23T12:00:00Z",
-      };
-
-      MockEventSource.lastInstance?.simulateMutation(mutation);
-
-      const expectedTime = Date.parse("2025-01-23T12:00:00Z");
-      expect(client.getLastEventId()).toBe(String(expectedTime));
-    });
-
-    it("tracks last event ID from event.lastEventId", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      const mutation: MutationPayload = {
-        type: "create",
-        issue_id: "issue-123",
-        title: "Test Issue",
-        timestamp: "2025-01-23T12:00:00Z",
-      };
-
-      MockEventSource.lastInstance?.simulateMutation(mutation);
-
-      // Disconnect and reconnect - should use last event ID
-      client.disconnect();
-      await client.connect();
-
-      const expectedTime = Date.parse("2025-01-23T12:00:00Z");
-      expect(MockEventSource.lastInstance?.url).toContain(
-        `since=${expectedTime}`,
-      );
-    });
-
-    it("uses latest event ID when receiving multiple mutations", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      const mutation1: MutationPayload = {
-        type: "create",
-        issue_id: "issue-123",
-        title: "First Issue",
-        timestamp: "2025-01-23T12:00:00Z",
-      };
-
-      const mutation2: MutationPayload = {
-        type: "update",
-        issue_id: "issue-456",
-        title: "Second Issue",
-        timestamp: "2025-01-23T14:00:00Z",
-      };
-
-      MockEventSource.lastInstance?.simulateMutation(mutation1);
-      MockEventSource.lastInstance?.simulateMutation(mutation2);
-
-      client.disconnect();
-      await client.connect();
-
-      const expectedTime = Date.parse("2025-01-23T14:00:00Z");
-      expect(MockEventSource.lastInstance?.url).toContain(
-        `since=${expectedTime}`,
-      );
-    });
-
-    it("connect with explicit since overrides last event ID", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      const mutation: MutationPayload = {
-        type: "create",
-        issue_id: "issue-123",
-        title: "Test Issue",
-        timestamp: "2025-01-23T12:00:00Z",
-      };
-
-      MockEventSource.lastInstance?.simulateMutation(mutation);
-
-      client.disconnect();
-      await client.connect(1706100000000);
-
-      expect(MockEventSource.lastInstance?.url).toContain(
-        "since=1706100000000",
-      );
-    });
-
-    it("stores lastEventId of 0", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      const mutation: MutationPayload = {
-        type: "create",
-        issue_id: "issue-100",
-        title: "Test",
-        timestamp: "2025-01-23T12:00:00Z",
-      };
-
-      MockEventSource.lastInstance?.simulateMutation(mutation, "0");
-
-      expect(client.getLastEventId()).toBe("0");
-    });
-
-    it("stores negative lastEventId", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      const mutation: MutationPayload = {
-        type: "create",
-        issue_id: "issue-101",
-        title: "Test",
-        timestamp: "2025-01-23T12:00:00Z",
-      };
-
-      MockEventSource.lastInstance?.simulateMutation(mutation, "-1");
-
-      expect(client.getLastEventId()).toBe("-1");
-    });
-
-    it("stores opaque lastEventId", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      const mutation: MutationPayload = {
-        type: "create",
-        issue_id: "issue-102",
-        title: "Test",
-        timestamp: "2025-01-23T12:00:00Z",
-      };
-
-      MockEventSource.lastInstance?.simulateMutation(mutation, "abc");
-
-      expect(client.getLastEventId()).toBe("abc");
-    });
-
-    it("stores the last delivered event ID", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      const mutation1: MutationPayload = {
-        type: "create",
-        issue_id: "issue-103",
-        title: "First",
-        timestamp: "2025-01-23T12:00:00Z",
-      };
-
-      const mutation2: MutationPayload = {
-        type: "update",
-        issue_id: "issue-104",
-        title: "Second",
-        timestamp: "2025-01-23T11:00:00Z",
-      };
-
-      MockEventSource.lastInstance?.simulateMutation(mutation1, "2000");
-      MockEventSource.lastInstance?.simulateMutation(mutation2, "1000");
-
-      expect(client.getLastEventId()).toBe("1000");
-    });
-
-    it("handles empty lastEventId string", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      const mutation: MutationPayload = {
-        type: "create",
-        issue_id: "issue-105",
-        title: "Test",
-        timestamp: "2025-01-23T12:00:00Z",
-      };
-
-      MockEventSource.lastInstance?.simulateMutation(mutation, "");
-
-      expect(client.getLastEventId()).toBeUndefined();
-    });
-
-    it("invalid timestamp in mutation is ignored for tracking", async () => {
-      const onMutation = vi.fn();
-      const client = new WorkspaceSSEClient("test-ws-id", { onMutation });
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      const mutation = {
-        type: "create",
-        issue_id: "issue-123",
-        title: "Test Issue",
-        timestamp: "invalid-date",
-      };
-
-      MockEventSource.lastInstance?.simulateMutation(mutation, "");
-
-      // Callback should still be called
-      expect(onMutation).toHaveBeenCalled();
-
-      client.disconnect();
-      await client.connect();
-
-      // Should not have a since parameter since timestamp was invalid
-      expect(MockEventSource.lastInstance?.url).not.toContain("since=");
-    });
-  });
-
-  describe("retryNow", () => {
-    it("only works when in reconnecting state", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      expect(client.getState()).toBe("connected");
-
-      client.retryNow();
-
-      // Should not create a new EventSource
-      expect(MockEventSource.instances.length).toBe(1);
-    });
-
-    it("creates new connection immediately when in reconnecting state", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      // Trigger reconnecting state
-      MockEventSource.lastInstance?.simulateError();
-      expect(client.getState()).toBe("reconnecting");
-      expect(MockEventSource.instances.length).toBe(1);
-
-      client.retryNow();
-      // retryNow calls connect() which is async — wait for microtasks
-      await vi.waitFor(() => {
-        expect(MockEventSource.instances.length).toBe(2);
-      });
-      expect(client.getState()).toBe("connecting");
-    });
-
-    it("resets reconnect counter on manual retry", async () => {
-      const onReconnect = vi.fn();
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        onReconnect,
-        initialReconnectDelay: 100,
-      });
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      // Trigger error
-      MockEventSource.lastInstance?.simulateError();
-      expect(client.getReconnectAttempts()).toBe(1);
-
-      client.retryNow();
-
-      expect(client.getReconnectAttempts()).toBe(0);
-      expect(onReconnect).toHaveBeenCalledWith(0);
-    });
-
-    it("clears pending retry timer", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        initialReconnectDelay: 5000,
-      });
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      // Trigger error — starts a 5s retry timer
-      MockEventSource.lastInstance?.simulateError();
-      expect(client.getState()).toBe("reconnecting");
-
-      // retryNow should clear the timer and connect immediately
-      client.retryNow();
-      await vi.waitFor(() => {
-        expect(MockEventSource.instances.length).toBe(2);
-      });
-
-      // Advance past original timer — should NOT create a third connection
-      await vi.advanceTimersByTimeAsync(5000);
-      expect(MockEventSource.instances.length).toBe(2);
-    });
-  });
-
-  describe("Cleanup on destroy", () => {
-    it("destroy() closes EventSource and clears callbacks", async () => {
-      const onMutation = vi.fn();
-      const onStateChange = vi.fn();
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        onMutation,
-        onStateChange,
-      });
-
-      await client.connect();
-      const esInstance = MockEventSource.lastInstance;
-      MockEventSource.lastInstance?.simulateOpen();
-
-      client.destroy();
-
-      expect(esInstance?.readyState).toBe(MockEventSource.CLOSED);
-
-      // Callbacks should not be called after destroy
-      onStateChange.mockClear();
-      onMutation.mockClear();
-
-      // Try to trigger callbacks - they should not be called
-      esInstance?.simulateOpen();
-      esInstance?.simulateMutation({
-        type: "create",
-        issue_id: "issue-789",
-        title: "Should not trigger",
-        timestamp: "2025-01-23T12:00:00Z",
-      });
-
-      expect(onStateChange).not.toHaveBeenCalled();
-      expect(onMutation).not.toHaveBeenCalled();
-    });
-
-    it("connect() is a no-op after destroy", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      client.destroy();
-
-      // Try to connect again
-      await client.connect();
-
-      // Should not have created a new EventSource
-      expect(MockEventSource.instances.length).toBe(1);
-    });
-
-    it("retryNow() is a no-op after destroy", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      // Put in reconnecting state
-      MockEventSource.lastInstance?.simulateError();
-      expect(client.getState()).toBe("reconnecting");
-
-      client.destroy();
-
-      client.retryNow();
-      // Should not create a new EventSource
-      expect(MockEventSource.instances.length).toBe(1);
-    });
-
-    it("disconnect() is a no-op after destroy", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      client.destroy();
-
-      // Should not throw
-      client.disconnect();
-    });
-
-    it("getState() returns last known state after destroy", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-      expect(client.getState()).toBe("connected");
-
-      client.destroy();
-
-      // State is preserved (callbacks cleared, not state)
-      expect(client.getState()).toBe("connected");
-    });
-
-    it("destroy() clears pending retry timer", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        initialReconnectDelay: 5000,
-      });
-
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      // Trigger error — starts a retry timer
-      MockEventSource.lastInstance?.simulateError();
-
-      client.destroy();
-
-      // Advance past timer — should NOT create a new EventSource
-      await vi.advanceTimersByTimeAsync(5000);
-      expect(MockEventSource.instances.length).toBe(1);
-    });
-  });
-
-  describe("Injectable fetchToken", () => {
-    it("uses custom fetchToken instead of default", async () => {
-      const customFetchToken = vi
-        .fn()
-        .mockResolvedValue({ kind: "token", token: "custom-token-abc" });
-
-      // Clear mock call history so we can verify no default token fetch occurs
-      mockGet.mockClear();
-
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        fetchToken: customFetchToken,
-      });
-      await client.connect();
-
-      expect(customFetchToken).toHaveBeenCalledTimes(1);
-      // Default fetchSseToken should NOT have been called
-      expect(mockGet).not.toHaveBeenCalled();
-      expect(MockEventSource.lastInstance?.url).toContain(
-        "token=custom-token-abc",
-      );
-    });
-
-    it("custom fetchToken returning disabled works like open mode", async () => {
-      const customFetchToken = vi
-        .fn()
-        .mockResolvedValue({ kind: "disabled" } as SseTokenResult);
-
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        fetchToken: customFetchToken,
-      });
-      await client.connect();
-
-      expect(MockEventSource.lastInstance?.url).not.toContain("token=");
-    });
-
-    it("custom fetchToken that throws is handled gracefully", async () => {
-      const onError = vi.fn();
-      const customFetchToken = vi
-        .fn()
-        .mockRejectedValue(new Error("Token service down"));
-
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        fetchToken: customFetchToken,
-        onError,
-      });
-      await client.connect();
-
-      expect(onError).toHaveBeenCalledWith(
-        "SSE auth failed: Token service down",
-      );
-      expect(client.getState()).toBe("disconnected");
-      expect(MockEventSource.lastInstance).toBeUndefined();
-    });
-  });
-
-  describe("AbortController cancellation", () => {
-    it("disconnect during token fetch aborts cleanly", async () => {
-      // Make fetchToken take a while by using a deferred promise
-      let resolveToken: (value: SseTokenResult) => void;
-      const customFetchToken = vi.fn().mockReturnValue(
+  it("resolves connect after starting the loop without waiting for open", async () => {
+    let resolveToken!: (result: SseTokenResult) => void;
+    const fetchToken = vi.fn(
+      () =>
         new Promise<SseTokenResult>((resolve) => {
           resolveToken = resolve;
         }),
-      );
+    );
+    const client = new WorkspaceSSEClient("test-ws", { fetchToken });
 
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        fetchToken: customFetchToken,
-      });
-      const connectPromise = client.connect();
+    await expect(client.connect()).resolves.toBeUndefined();
 
-      // Disconnect while fetching token
-      client.disconnect();
+    expect(client.getState()).toBe("connecting");
+    expect(fetchToken).toHaveBeenCalledOnce();
+    expect(streamRequests).toHaveLength(0);
 
-      // Resolve the token call
-      resolveToken!({ kind: "token", token: "opaque-123" });
-      await connectPromise;
+    resolveToken({ kind: "token", token: "ready" });
+    await expectRequestCount(1);
+    expect(client.getState()).toBe("connected");
+    client.disconnect();
+  });
 
-      // Should not have created an EventSource
-      expect(MockEventSource.lastInstance).toBeUndefined();
-      expect(client.getState()).toBe("disconnected");
+  it("connects, opens the stream, and reports the connected frame", async () => {
+    const states = vi.fn();
+    const onConnected = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", {
+      onStateChange: states,
+      onConnected,
     });
 
-    it("destroy during token fetch aborts cleanly", async () => {
-      let resolveToken: (value: SseTokenResult) => void;
-      const customFetchToken = vi.fn().mockReturnValue(
+    await client.connect();
+    expect(client.getState()).toBe("connecting");
+    await expectRequestCount(1);
+    expect(client.getState()).toBe("connected");
+    expect(streamRequests[0].url).toContain("/api/workspaces/test-ws/events");
+
+    pushConnected();
+    await flush();
+
+    expect(onConnected).toHaveBeenCalledOnce();
+    expect(states.mock.calls.map(([state]) => state)).toEqual([
+      "connecting",
+      "connected",
+    ]);
+    client.disconnect();
+  });
+
+  it("delivers named mutation events and tracks opaque event ids", async () => {
+    const onMutation = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", { onMutation });
+    const mutation: MutationPayload = {
+      type: "status",
+      entity_type: "agent",
+      entity_id: "agent-alpha",
+      action: "agent.status",
+      timestamp: "2026-09-02T12:00:00Z",
+    };
+
+    await client.connect();
+    await expectRequestCount(1);
+    pushMutation(mutation, "opaque-cursor-1");
+    await flush();
+
+    expect(onMutation).toHaveBeenCalledWith(mutation);
+    expect(client.getLastEventId()).toBe("opaque-cursor-1");
+    client.disconnect();
+  });
+
+  it("keeps parsing messages when a mutation callback throws", async () => {
+    const callbackError = new Error("listener failed");
+    const onMutation = vi.fn(() => {
+      throw callbackError;
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const client = new WorkspaceSSEClient("test-ws", { onMutation });
+    const mutation: MutationPayload = {
+      type: "update",
+      issue_id: "issue-1",
+      timestamp: "2026-09-02T12:00:00Z",
+    };
+
+    await client.connect();
+    await expectRequestCount(1);
+    pushMutation(mutation, "cursor-1");
+    pushMutation(mutation, "cursor-2");
+    await flush();
+
+    expect(onMutation).toHaveBeenCalledTimes(2);
+    expect(client.getLastEventId()).toBe("cursor-2");
+    expect(client.getState()).toBe("connected");
+    expect(client.getReconnectAttempts()).toBe(0);
+    expect(error).toHaveBeenCalledWith(
+      "[SSE] onMutation callback threw:",
+      callbackError,
+    );
+    client.disconnect();
+  });
+
+  it("delivers at most one connected callback per open stream", async () => {
+    const onConnected = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", { onConnected });
+
+    await client.connect();
+    await expectRequestCount(1);
+    pushConnected(streamRequests[0]);
+    pushConnected(streamRequests[0]);
+    await flush();
+
+    expect(onConnected).toHaveBeenCalledOnce();
+
+    streamRequests[0].fail();
+    await flush();
+    await vi.advanceTimersByTimeAsync(1000);
+    await expectRequestCount(2);
+    pushConnected(streamRequests[1]);
+    await flush();
+
+    expect(onConnected).toHaveBeenCalledTimes(2);
+    client.disconnect();
+  });
+
+  it("ignores malformed mutation JSON without advancing the public cursor", async () => {
+    const onMutation = vi.fn();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const client = new WorkspaceSSEClient("test-ws", { onMutation });
+
+    await client.connect();
+    await expectRequestCount(1);
+    streamRequests[0].push("id: bad-id\nevent: mutation\ndata: {oops\n\n");
+    await flush();
+
+    expect(onMutation).not.toHaveBeenCalled();
+    expect(client.getLastEventId()).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      "[SSE] Received malformed mutation event",
+    );
+    client.disconnect();
+  });
+
+  it("recovers from a token 502 on the next backed-off attempt", async () => {
+    mockGet
+      .mockRejectedValueOnce(new ApiError(502, "Bad Gateway"))
+      .mockResolvedValueOnce({ token: "fresh-token" });
+    const onReconnect = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", { onReconnect });
+
+    await client.connect();
+    await flush();
+
+    expect(client.getState()).toBe("reconnecting");
+    expect(client.getReconnectAttempts()).toBe(1);
+    expect(streamRequests).toHaveLength(0);
+    expect(onReconnect).toHaveBeenCalledWith(1);
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(streamRequests).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    await expectRequestCount(1);
+
+    expect(streamRequests[0].url).toContain("token=fresh-token");
+    expect(client.getState()).toBe("connected");
+    expect(client.getReconnectAttempts()).toBe(0);
+    expect(onReconnect).toHaveBeenLastCalledWith(0);
+    client.disconnect();
+  });
+
+  it("opens a tokenless stream when the token endpoint returns 404", async () => {
+    mockGet.mockRejectedValueOnce(new ApiError(404, "Not Found"));
+    const onError = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", { onError });
+
+    await client.connect();
+    await expectRequestCount(1);
+
+    expect(new URL(streamRequests[0].url).searchParams.has("token")).toBe(
+      false,
+    );
+    expect(client.getState()).toBe("connected");
+    expect(onError).not.toHaveBeenCalled();
+    client.disconnect();
+  });
+
+  it("opens a tokenless stream when fetchToken resolves disabled", async () => {
+    const fetchToken = vi
+      .fn<() => Promise<SseTokenResult>>()
+      .mockResolvedValue({ kind: "disabled" });
+    const onError = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", { fetchToken, onError });
+
+    await client.connect();
+    await expectRequestCount(1);
+
+    expect(new URL(streamRequests[0].url).searchParams.has("token")).toBe(
+      false,
+    );
+    expect(client.getState()).toBe("connected");
+    expect(onError).not.toHaveBeenCalled();
+    client.disconnect();
+  });
+
+  it("opens a tokenless stream when fetchToken rejects with a 404", async () => {
+    const fetchToken = vi
+      .fn<() => Promise<SseTokenResult>>()
+      .mockRejectedValue(new ApiError(404, "Not Found"));
+    const onError = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", { fetchToken, onError });
+
+    await client.connect();
+    await expectRequestCount(1);
+
+    expect(new URL(streamRequests[0].url).searchParams.has("token")).toBe(
+      false,
+    );
+    expect(client.getState()).toBe("connected");
+    expect(onError).not.toHaveBeenCalled();
+    client.disconnect();
+  });
+
+  it("retries a failed open-mode stream with no token", async () => {
+    const fetchToken = vi
+      .fn<() => Promise<SseTokenResult>>()
+      .mockResolvedValue({ kind: "disabled" });
+    const client = new WorkspaceSSEClient("test-ws", {
+      fetchToken,
+      initialReconnectDelay: 100,
+    });
+
+    await client.connect();
+    await expectRequestCount(1);
+    expect(new URL(streamRequests[0].url).searchParams.has("token")).toBe(
+      false,
+    );
+    streamRequests[0].fail();
+    await flush();
+
+    expect(client.getState()).toBe("reconnecting");
+    await vi.advanceTimersByTimeAsync(99);
+    expect(streamRequests).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await expectRequestCount(2);
+    expect(new URL(streamRequests[1].url).searchParams.has("token")).toBe(
+      false,
+    );
+    expect(fetchToken).toHaveBeenCalledTimes(2);
+    client.disconnect();
+  });
+
+  it.each([401, 403])("treats token %s as fatal", async (status) => {
+    const fetchToken = vi
+      .fn<() => Promise<SseTokenResult>>()
+      .mockRejectedValue(new ApiError(status, "denied"));
+    const onError = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", {
+      fetchToken,
+      onError,
+    });
+
+    await client.connect();
+    await flush();
+
+    expect(client.getState()).toBe("disconnected");
+    expect(onError).toHaveBeenCalledWith(
+      `SSE auth failed: API Error: ${status} denied`,
+    );
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(streamRequests).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a non-2xx stream response", async () => {
+    queueResponse(502, "text/plain");
+    queueResponse();
+    const client = new WorkspaceSSEClient("test-ws");
+
+    await client.connect();
+    await flush();
+    expect(client.getState()).toBe("reconnecting");
+    expect(client.getReconnectAttempts()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await expectRequestCount(2);
+    expect(client.getState()).toBe("connected");
+    client.disconnect();
+  });
+
+  it("retries a 200 response whose content type is not SSE", async () => {
+    queueResponse(200, "text/plain");
+    queueResponse();
+    const client = new WorkspaceSSEClient("test-ws");
+
+    await client.connect();
+    await flush();
+    expect(client.getState()).toBe("reconnecting");
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await expectRequestCount(2);
+    expect(client.getState()).toBe("connected");
+    client.disconnect();
+  });
+
+  it("retries a network failure", async () => {
+    queueNetworkError();
+    queueResponse();
+    const client = new WorkspaceSSEClient("test-ws");
+
+    await client.connect();
+    await flush();
+    expect(client.getState()).toBe("reconnecting");
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await expectRequestCount(1);
+    expect(mockStreamFetch).toHaveBeenCalledTimes(2);
+    expect(client.getState()).toBe("connected");
+    client.disconnect();
+  });
+
+  it("retries an errored stream", async () => {
+    const client = new WorkspaceSSEClient("test-ws");
+    await client.connect();
+    await expectRequestCount(1);
+
+    streamRequests[0].fail();
+    await flush();
+    expect(client.getState()).toBe("reconnecting");
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await expectRequestCount(2);
+    client.disconnect();
+  });
+
+  it("lets fetch-event-source send Last-Event-ID and refreshes query auth", async () => {
+    mockGet
+      .mockResolvedValueOnce({ token: "token-one" })
+      .mockResolvedValueOnce({ token: "token-two" });
+    const client = new WorkspaceSSEClient("test-ws");
+    const mutation: MutationPayload = {
+      type: "update",
+      issue_id: "issue-1",
+      timestamp: "2026-09-02T12:00:00Z",
+    };
+
+    await client.connect("explicit-cursor");
+    await expectRequestCount(1);
+    expect(streamRequests[0].url).toContain("since=explicit-cursor");
+    expect(streamRequests[0].url).toContain("token=token-one");
+    pushMutation(mutation, "library-cursor", streamRequests[0]);
+    await flush();
+    streamRequests[0].close();
+    await flush();
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await expectRequestCount(2);
+    expect(streamRequests[1].headers.get("Last-Event-ID")).toBe(
+      "library-cursor",
+    );
+    expect(streamRequests[1].url).not.toContain("since=");
+    expect(streamRequests[1].url).toContain("token=token-two");
+    client.disconnect();
+  });
+
+  it("uses the newest id line as Last-Event-ID on the next attempt", async () => {
+    const client = new WorkspaceSSEClient("test-ws");
+
+    await client.connect("initial-cursor");
+    await expectRequestCount(1);
+    streamRequests[0].push("id: cursor-one\n\nid: cursor-two\n\n");
+    streamRequests[0].close();
+    await flush();
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await expectRequestCount(2);
+    expect(streamRequests[1].headers.get("Last-Event-ID")).toBe("cursor-two");
+    expect(streamRequests[1].url).not.toContain("since=");
+    client.disconnect();
+  });
+
+  it("clears Last-Event-ID when the server sends an empty id line", async () => {
+    const client = new WorkspaceSSEClient("test-ws");
+
+    await client.connect("initial-cursor");
+    await expectRequestCount(1);
+    streamRequests[0].push("id: cursor-one\n\nid:\n\n");
+    streamRequests[0].close();
+    await flush();
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await expectRequestCount(2);
+    expect(streamRequests[1].headers.has("Last-Event-ID")).toBe(false);
+    expect(streamRequests[1].url).not.toContain("since=");
+    client.disconnect();
+  });
+
+  it("overrides a server retry directive with the wrapper backoff", async () => {
+    const client = new WorkspaceSSEClient("test-ws", {
+      initialReconnectDelay: 1000,
+    });
+
+    await client.connect();
+    await expectRequestCount(1);
+    streamRequests[0].push("retry: 5000\n\n");
+    streamRequests[0].close();
+    await flush();
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(streamRequests).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await expectRequestCount(2);
+    client.disconnect();
+  });
+
+  it("resets exponential backoff after a successful open", async () => {
+    const onReconnect = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", {
+      onReconnect,
+      initialReconnectDelay: 100,
+      maxReconnectDelay: 1000,
+    });
+
+    await client.connect();
+    await expectRequestCount(1);
+    streamRequests[0].fail();
+    await flush();
+    await vi.advanceTimersByTimeAsync(100);
+    await expectRequestCount(2);
+
+    expect(client.getReconnectAttempts()).toBe(0);
+    streamRequests[1].fail();
+    await flush();
+    await vi.advanceTimersByTimeAsync(99);
+    expect(streamRequests).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    await expectRequestCount(3);
+    expect(onReconnect.mock.calls.map(([attempt]) => attempt)).toEqual([
+      1, 0, 1, 0,
+    ]);
+    client.disconnect();
+  });
+
+  it("continues retrying when onReconnect throws", async () => {
+    queueResponse(502, "text/plain");
+    queueResponse();
+    const callbackError = new Error("reconnect listener failed");
+    const onReconnect = vi.fn(() => {
+      throw callbackError;
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const client = new WorkspaceSSEClient("test-ws", {
+      onReconnect,
+      initialReconnectDelay: 25,
+    });
+
+    await client.connect();
+    await flush();
+    expect(client.getState()).toBe("reconnecting");
+
+    await vi.advanceTimersByTimeAsync(25);
+    await expectRequestCount(2);
+    expect(client.getState()).toBe("connected");
+    expect(error).toHaveBeenCalledWith(
+      "[SSE] onReconnect callback threw:",
+      callbackError,
+    );
+    client.disconnect();
+  });
+
+  it("retryNow inside onReconnect starts only one replacement attempt", async () => {
+    queueResponse(502, "text/plain");
+    queueResponse();
+    const fetchToken = vi
+      .fn<() => Promise<SseTokenResult>>()
+      .mockResolvedValue({ kind: "token", token: "fresh" });
+    const clientRef: { current?: WorkspaceSSEClient } = {};
+    const onReconnect = vi.fn((attempt: number) => {
+      if (attempt === 1) clientRef.current?.retryNow();
+    });
+    const client = new WorkspaceSSEClient("test-ws", {
+      fetchToken,
+      onReconnect,
+      initialReconnectDelay: 5000,
+    });
+    clientRef.current = client;
+
+    await client.connect();
+    await flush();
+
+    expect(fetchToken).toHaveBeenCalledTimes(2);
+    expect(streamRequests).toHaveLength(2);
+    expect(client.getState()).toBe("connected");
+    expect(onReconnect.mock.calls.map(([attempt]) => attempt)).toEqual([1, 0]);
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchToken).toHaveBeenCalledTimes(2);
+    expect(streamRequests).toHaveLength(2);
+    client.disconnect();
+  });
+
+  it("retryNow aborts the pending library retry and reconnects immediately", async () => {
+    queueResponse(502, "text/plain");
+    queueResponse();
+    const onReconnect = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", {
+      onReconnect,
+      initialReconnectDelay: 5000,
+    });
+
+    await client.connect();
+    await flush();
+    expect(client.getState()).toBe("reconnecting");
+
+    client.retryNow();
+    await expectRequestCount(2);
+    expect(client.getState()).toBe("connected");
+    expect(onReconnect).toHaveBeenCalledWith(0);
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(streamRequests).toHaveLength(2);
+    client.disconnect();
+  });
+
+  it("disconnect stops retries and aborts the active stream request", async () => {
+    const client = new WorkspaceSSEClient("test-ws");
+    await client.connect();
+    await expectRequestCount(1);
+
+    client.disconnect();
+
+    expect(client.getState()).toBe("disconnected");
+    expect(streamRequests[0].aborted).toBe(true);
+    expect(streamRequests[0].signal?.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(streamRequests).toHaveLength(1);
+  });
+
+  it("disconnect during token exchange prevents a stream request", async () => {
+    let resolveToken!: (result: SseTokenResult) => void;
+    const fetchToken = vi.fn(
+      () =>
         new Promise<SseTokenResult>((resolve) => {
           resolveToken = resolve;
         }),
-      );
+    );
+    const client = new WorkspaceSSEClient("test-ws", { fetchToken });
 
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        fetchToken: customFetchToken,
-      });
-      const connectPromise = client.connect();
+    await client.connect();
+    client.disconnect();
+    resolveToken({ kind: "token", token: "too-late" });
+    await flush();
 
-      // Destroy while fetching token
-      client.destroy();
-
-      // Resolve the token call
-      resolveToken!({ kind: "token", token: "opaque-123" });
-      await connectPromise;
-
-      // Should not have created an EventSource
-      expect(MockEventSource.lastInstance).toBeUndefined();
-    });
+    expect(streamRequests).toHaveLength(0);
+    expect(client.getState()).toBe("disconnected");
   });
 
-  describe("Unified reconnect (manual for all modes)", () => {
-    it("open mode uses manual reconnect (EventSource closed on error)", async () => {
-      // Open mode — no opaque token
-      mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
-
-      const client = new WorkspaceSSEClient("test-ws-id");
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      const esInstance = MockEventSource.lastInstance;
-      esInstance?.simulateError();
-
-      // EventSource should be closed — no browser auto-reconnect
-      expect(esInstance?.readyState).toBe(MockEventSource.CLOSED);
-      expect(client.getState()).toBe("reconnecting");
+  it("ignores stale callbacks after disconnect followed by connect", async () => {
+    let resolveStaleResponse!: (response: Response) => void;
+    let staleController!: ReadableStreamDefaultController<Uint8Array>;
+    const staleBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        staleController = controller;
+      },
     });
-
-    it("token mode uses same manual reconnect path", async () => {
-      mockGet.mockResolvedValue({ token: "opaque-token-123" });
-
-      const onReconnect = vi.fn();
-      const client = new WorkspaceSSEClient("test-ws-id", { onReconnect });
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      const esInstance = MockEventSource.lastInstance;
-      esInstance?.simulateError();
-
-      // EventSource should be closed
-      expect(esInstance?.readyState).toBe(MockEventSource.CLOSED);
-      expect(client.getState()).toBe("reconnecting");
-      expect(onReconnect).toHaveBeenCalledWith(1);
-    });
-
-    it("fresh token fetched on each reconnect", async () => {
-      let callCount = 0;
-      mockGet.mockImplementation(() => {
-        callCount++;
-        return Promise.resolve({ token: `opaque-token-${callCount}` });
-      });
-
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        initialReconnectDelay: 100,
-      });
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      expect(MockEventSource.lastInstance?.url).toContain(
-        "token=opaque-token-1",
-      );
-
-      // Trigger error → reconnecting
-      MockEventSource.lastInstance?.simulateError();
-      expect(client.getState()).toBe("reconnecting");
-
-      // Advance timer to trigger reconnect
-      await vi.advanceTimersByTimeAsync(100);
-
-      // New connection should use fresh token
-      expect(MockEventSource.instances.length).toBe(2);
-      expect(MockEventSource.lastInstance?.url).toContain(
-        "token=opaque-token-2",
-      );
-    });
-  });
-
-  describe("Configurable backoff", () => {
-    it("uses default delays (1000ms initial, 30000ms max)", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id");
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      // First error: 1000ms delay
-      MockEventSource.lastInstance?.simulateError();
-      expect(client.getState()).toBe("reconnecting");
-
-      // Before 1000ms: still reconnecting
-      await vi.advanceTimersByTimeAsync(999);
-      expect(MockEventSource.instances.length).toBe(1);
-
-      // At 1000ms: reconnect fires
-      await vi.advanceTimersByTimeAsync(1);
-      expect(MockEventSource.instances.length).toBe(2);
-    });
-
-    it("respects custom initialReconnectDelay and maxReconnectDelay", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        initialReconnectDelay: 500,
-        maxReconnectDelay: 2000,
-      });
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
-
-      // Consecutive errors without opens — backoff escalates:
-      // attempt 1: 500 * 2^0 = 500ms
-      // attempt 2: 500 * 2^1 = 1000ms
-      // attempt 3: 500 * 2^2 = 2000ms (capped)
-      // attempt 4: 500 * 2^3 = 4000ms → capped at 2000ms
-
-      // 1st error → attempt 1 → 500ms delay
-      MockEventSource.lastInstance?.simulateError();
-      expect(client.getReconnectAttempts()).toBe(1);
-      await vi.advanceTimersByTimeAsync(499);
-      expect(MockEventSource.instances.length).toBe(1);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(MockEventSource.instances.length).toBe(2);
-
-      // 2nd error → attempt 2 → 1000ms delay
-      MockEventSource.lastInstance?.simulateError();
-      expect(client.getReconnectAttempts()).toBe(2);
-      await vi.advanceTimersByTimeAsync(999);
-      expect(MockEventSource.instances.length).toBe(2);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(MockEventSource.instances.length).toBe(3);
-
-      // 3rd error → attempt 3 → 2000ms delay (capped)
-      MockEventSource.lastInstance?.simulateError();
-      expect(client.getReconnectAttempts()).toBe(3);
-      await vi.advanceTimersByTimeAsync(1999);
-      expect(MockEventSource.instances.length).toBe(3);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(MockEventSource.instances.length).toBe(4);
-
-      // 4th error → attempt 4 → 2000ms delay (still capped)
-      MockEventSource.lastInstance?.simulateError();
-      expect(client.getReconnectAttempts()).toBe(4);
-      await vi.advanceTimersByTimeAsync(1999);
-      expect(MockEventSource.instances.length).toBe(4);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(MockEventSource.instances.length).toBe(5);
-    });
-  });
-
-  describe("SSE token exchange", () => {
-    it("connect() with opaque token adds token to URL", async () => {
-      mockGet.mockResolvedValue({ token: "opaque-token-123" });
-
-      const client = new WorkspaceSSEClient("test-ws-id");
-      await client.connect();
-
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/events/token",
-      );
-      expect(MockEventSource.lastInstance?.url).toContain(
-        "token=opaque-token-123",
-      );
-    });
-
-    it("connect() in open mode (404) creates EventSource without token", async () => {
-      mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
-
-      const client = new WorkspaceSSEClient("test-ws-id");
-      await client.connect();
-
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/events/token",
-      );
-      expect(MockEventSource.lastInstance?.url).not.toContain("token=");
-    });
-
-    it("connect() in open mode disabled response creates EventSource without token", async () => {
-      mockGet.mockResolvedValue({ disabled: true });
-
-      const client = new WorkspaceSSEClient("test-ws-id");
-      await client.connect();
-
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/events/token",
-      );
-      expect(MockEventSource.lastInstance?.url).not.toContain("token=");
-    });
-
-    it("connect() with token error emits onError and sets disconnected", async () => {
-      mockGet.mockRejectedValue(new ApiError(500, "Internal Server Error"));
-
-      const onError = vi.fn();
-      const client = new WorkspaceSSEClient("test-ws-id", { onError });
-      await client.connect();
-
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/events/token",
-      );
-      expect(onError).toHaveBeenCalledWith(
-        expect.stringContaining("SSE auth failed"),
-      );
-      expect(client.getState()).toBe("disconnected");
-      expect(MockEventSource.lastInstance).toBeUndefined();
-    });
-
-    it("connect() bails out if disconnected during token fetch", async () => {
-      // Make fetchSseToken take a while by using a deferred promise
-      let resolveGet: (value: unknown) => void;
-      mockGet.mockReturnValue(
-        new Promise((resolve) => {
-          resolveGet = resolve;
+    mockStreamFetch.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveStaleResponse = resolve;
         }),
-      );
+    );
 
-      const client = new WorkspaceSSEClient("test-ws-id");
-      const connectPromise = client.connect();
-
-      // Disconnect while fetching token
-      client.disconnect();
-
-      // Resolve the get call
-      resolveGet!({ token: "opaque-123" });
-      await connectPromise;
-
-      // Should not have created an EventSource
-      expect(MockEventSource.lastInstance).toBeUndefined();
-      expect(client.getState()).toBe("disconnected");
+    const onMutation = vi.fn();
+    const onConnected = vi.fn();
+    const onError = vi.fn();
+    const onReconnect = vi.fn();
+    const onStateChange = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", {
+      onMutation,
+      onConnected,
+      onError,
+      onReconnect,
+      onStateChange,
     });
+    const mutation: MutationPayload = {
+      type: "update",
+      issue_id: "current",
+      timestamp: "2026-09-02T12:00:00Z",
+    };
 
-    it("retryNow() fetches fresh opaque token", async () => {
-      let callCount = 0;
-      mockGet.mockImplementation(() => {
-        callCount++;
-        return Promise.resolve({ token: `opaque-token-${callCount}` });
-      });
+    await client.connect();
+    await flush();
+    client.disconnect();
+    await client.connect();
+    await expectRequestCount(1);
+    pushConnected(streamRequests[0]);
+    pushMutation(mutation, "current-cursor", streamRequests[0]);
+    await flush();
 
-      const client = new WorkspaceSSEClient("test-ws-id");
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
+    const callbackCounts = {
+      connected: onConnected.mock.calls.length,
+      error: onError.mock.calls.length,
+      mutation: onMutation.mock.calls.length,
+      reconnect: onReconnect.mock.calls.length,
+      state: onStateChange.mock.calls.length,
+    };
 
-      expect(MockEventSource.lastInstance?.url).toContain(
-        "token=opaque-token-1",
-      );
+    resolveStaleResponse(
+      new Response(staleBody, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      }),
+    );
+    await flush();
+    staleController.enqueue(
+      encoder.encode(
+        'event: connected\ndata: {}\n\nid: stale-cursor\nevent: mutation\ndata: {"type":"update"}\n\n',
+      ),
+    );
+    staleController.close();
+    await flush();
 
-      // Trigger reconnecting state
-      MockEventSource.lastInstance?.simulateError();
-      expect(client.getState()).toBe("reconnecting");
-
-      // retryNow triggers a new connect with fresh token
-      client.retryNow();
-      await vi.waitFor(() => {
-        expect(MockEventSource.instances.length).toBe(2);
-      });
-      expect(MockEventSource.lastInstance?.url).toContain(
-        "token=opaque-token-2",
-      );
-    });
-
-    it("token fetch failure (kind: error) does NOT enter reconnect loop", async () => {
-      mockGet.mockRejectedValue(new ApiError(500, "Internal Server Error"));
-
-      const onError = vi.fn();
-      const onReconnect = vi.fn();
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        onError,
-        onReconnect,
-      });
-      await client.connect();
-
-      expect(client.getState()).toBe("disconnected");
-      expect(onReconnect).not.toHaveBeenCalled();
-    });
+    expect(onConnected).toHaveBeenCalledTimes(callbackCounts.connected);
+    expect(onError).toHaveBeenCalledTimes(callbackCounts.error);
+    expect(onMutation).toHaveBeenCalledTimes(callbackCounts.mutation);
+    expect(onReconnect).toHaveBeenCalledTimes(callbackCounts.reconnect);
+    expect(onStateChange).toHaveBeenCalledTimes(callbackCounts.state);
+    expect(client.getLastEventId()).toBe("current-cursor");
+    expect(client.getState()).toBe("connected");
+    client.disconnect();
   });
 
-  describe("Retry timer cleanup", () => {
-    it("disconnect clears pending retry timer", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        initialReconnectDelay: 5000,
-      });
+  it("rebinds sourceRepos by aborting then connecting with the new filter", async () => {
+    const client = new WorkspaceSSEClient("test-ws");
 
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
+    await client.connect(undefined, ["repo-a"]);
+    await expectRequestCount(1);
+    expect(streamRequests[0].url).toContain("source_repos=repo-a");
 
-      // Trigger error → starts retry timer
-      MockEventSource.lastInstance?.simulateError();
-      expect(client.getState()).toBe("reconnecting");
+    client.disconnect();
+    await client.connect(undefined, ["repo-b"]);
+    await expectRequestCount(2);
 
-      // Disconnect before timer fires
-      client.disconnect();
+    expect(streamRequests[0].aborted).toBe(true);
+    expect(streamRequests[1].url).toContain("source_repos=repo-b");
+    expect(streamRequests[1].url).not.toContain("repo-a");
+    client.disconnect();
+  });
 
-      // Advance past timer — no new EventSource should be created
-      await vi.advanceTimersByTimeAsync(5000);
-      expect(MockEventSource.instances.length).toBe(1);
+  it("retains sourceRepos when a later connect omits the filter", async () => {
+    const client = new WorkspaceSSEClient("test-ws");
+
+    await client.connect(undefined, ["repo-a"]);
+    await expectRequestCount(1);
+    client.disconnect();
+    await client.connect();
+    await expectRequestCount(2);
+
+    expect(streamRequests[1].url).toContain("source_repos=repo-a");
+    client.disconnect();
+  });
+
+  it("clears sourceRepos when a later connect passes an empty array", async () => {
+    const client = new WorkspaceSSEClient("test-ws");
+
+    await client.connect(undefined, ["repo-a"]);
+    await expectRequestCount(1);
+    client.disconnect();
+    await client.connect(undefined, []);
+    await expectRequestCount(2);
+
+    expect(streamRequests[1].url).not.toContain("source_repos");
+    client.disconnect();
+  });
+
+  it("uses exponential backoff values and caps at the configured maximum", async () => {
+    mockGet.mockRejectedValue(new ApiError(502, "Bad Gateway"));
+    const onReconnect = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", {
+      onReconnect,
+      initialReconnectDelay: 100,
+      maxReconnectDelay: 250,
     });
 
-    it("retryNow clears timer then connects immediately", async () => {
-      const client = new WorkspaceSSEClient("test-ws-id", {
-        initialReconnectDelay: 5000,
-      });
+    await client.connect();
+    await flush();
+    expect(mockGet).toHaveBeenCalledTimes(1);
 
-      await client.connect();
-      MockEventSource.lastInstance?.simulateOpen();
+    await vi.advanceTimersByTimeAsync(99);
+    expect(mockGet).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await flush();
+    expect(mockGet).toHaveBeenCalledTimes(2);
 
-      // Trigger error → starts retry timer
-      MockEventSource.lastInstance?.simulateError();
+    await vi.advanceTimersByTimeAsync(199);
+    expect(mockGet).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    await flush();
+    expect(mockGet).toHaveBeenCalledTimes(3);
 
-      // retryNow should clear timer and connect immediately
-      client.retryNow();
-      await vi.waitFor(() => {
-        expect(MockEventSource.instances.length).toBe(2);
-      });
+    await vi.advanceTimersByTimeAsync(249);
+    expect(mockGet).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1);
+    await flush();
+    expect(mockGet).toHaveBeenCalledTimes(4);
+    expect(onReconnect.mock.calls.map(([attempt]) => attempt)).toEqual([
+      1, 2, 3, 4,
+    ]);
+    client.disconnect();
+  });
 
-      expect(client.getReconnectAttempts()).toBe(0);
-
-      // Advance past original timer — should NOT create another connection
-      await vi.advanceTimersByTimeAsync(5000);
-      expect(MockEventSource.instances.length).toBe(2);
+  it("emits the five-attempt notice while continuing to retry", async () => {
+    mockGet.mockRejectedValue(new ApiError(502, "Bad Gateway"));
+    const onError = vi.fn();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const client = new WorkspaceSSEClient("test-ws", {
+      onError,
+      initialReconnectDelay: 1,
+      maxReconnectDelay: 1,
     });
+
+    await client.connect();
+    await flush();
+    for (let attempt = 2; attempt <= 5; attempt++) {
+      await vi.advanceTimersByTimeAsync(1);
+      await flush();
+    }
+
+    expect(client.getReconnectAttempts()).toBe(5);
+    expect(onError).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      "[SSE] Multiple connection failures, will continue retrying",
+    );
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(client.getState()).toBe("reconnecting");
+    expect(vi.getTimerCount()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await flush();
+    expect(client.getReconnectAttempts()).toBe(6);
+    expect(client.getState()).toBe("reconnecting");
+    expect(onError).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(1);
+    client.disconnect();
+  });
+
+  it("keeps the stream open when document.hidden changes", async () => {
+    const client = new WorkspaceSSEClient("test-ws");
+    await client.connect();
+    await expectRequestCount(1);
+
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      value: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await flush();
+
+    expect(streamRequests[0].aborted).toBe(false);
+    expect(streamRequests).toHaveLength(1);
+    client.disconnect();
+  });
+
+  it("destroy aborts and makes controls no-ops without changing the last state", async () => {
+    const client = new WorkspaceSSEClient("test-ws");
+    await client.connect();
+    await expectRequestCount(1);
+    expect(client.getState()).toBe("connected");
+
+    client.destroy();
+    client.disconnect();
+    client.retryNow();
+    await client.connect();
+
+    expect(streamRequests[0].aborted).toBe(true);
+    expect(streamRequests).toHaveLength(1);
+    expect(client.getState()).toBe("connected");
   });
 });
 
 describe("fetchSseToken", () => {
-  it("is exported and callable", () => {
-    expect(typeof fetchSseToken).toBe("function");
+  beforeEach(() => mockGet.mockReset());
+
+  it("returns token and disabled responses unchanged", async () => {
+    mockGet.mockResolvedValueOnce({ token: "opaque" });
+    await expect(fetchSseToken("ws")).resolves.toEqual({
+      kind: "token",
+      token: "opaque",
+    });
+
+    mockGet.mockResolvedValueOnce({ disabled: true });
+    await expect(fetchSseToken("ws")).resolves.toEqual({ kind: "disabled" });
   });
+
+  it("maps a 404 response to disabled", async () => {
+    mockGet.mockRejectedValueOnce(new ApiError(404, "Not Found"));
+
+    await expect(fetchSseToken("ws")).resolves.toEqual({ kind: "disabled" });
+  });
+
+  it.each([401, 403, 502])(
+    "returns the optional HTTP status for error result %s",
+    async (status) => {
+      mockGet.mockRejectedValue(new ApiError(status, "request failed"));
+
+      const result = await fetchSseToken("ws");
+      mockGet.mockReset();
+      expect(result).toEqual({
+        kind: "error",
+        message: `API Error: ${status} request failed`,
+        status,
+      });
+    },
+  );
 });
 
 describe("getSSEUrl", () => {
-  it("returns base URL without since parameter", () => {
-    const url = getSSEUrl("test-ws-id");
+  it("preserves since, source_repos, and query token contract", () => {
+    const url = getSSEUrl("test-ws", "cursor-1", ["repo-a", "repo-b"], "tok");
 
     expect(url).toBe(
-      `${window.location.origin}/api/workspaces/test-ws-id/events`,
+      `${window.location.origin}/api/workspaces/test-ws/events?since=cursor-1&source_repos=repo-a%2Crepo-b&token=tok`,
     );
   });
 
-  it("includes since parameter when provided", () => {
-    const url = getSSEUrl("test-ws-id", 1706011200000);
-
-    expect(url).toBe(
-      `${window.location.origin}/api/workspaces/test-ws-id/events?since=1706011200000`,
+  it("omits optional query parameters", () => {
+    expect(getSSEUrl("test-ws")).toBe(
+      `${window.location.origin}/api/workspaces/test-ws/events`,
     );
-  });
-
-  it("handles since value of 0", () => {
-    const url = getSSEUrl("test-ws-id", 0);
-
-    expect(url).toBe(
-      `${window.location.origin}/api/workspaces/test-ws-id/events?since=0`,
-    );
-  });
-
-  it("appends source_repos param when sourceRepos is provided", () => {
-    const url = getSSEUrl("test-ws-id", undefined, ["repo-a", "repo-b"]);
-
-    expect(url).toContain("source_repos=repo-a%2Crepo-b");
-  });
-
-  it("omits source_repos param when sourceRepos is empty", () => {
-    const url = getSSEUrl("test-ws-id", undefined, []);
-
-    expect(url).not.toContain("source_repos");
-  });
-
-  it("omits source_repos param when sourceRepos is undefined", () => {
-    const url = getSSEUrl("test-ws-id", undefined, undefined);
-
-    expect(url).not.toContain("source_repos");
-  });
-
-  it("includes both since and source_repos when both are provided", () => {
-    const url = getSSEUrl("test-ws-id", 1706011200000, ["repo-a"]);
-
-    expect(url).toContain("since=1706011200000");
-    expect(url).toContain("source_repos=repo-a");
-  });
-
-  it("includes opaqueToken in URL when provided", () => {
-    const url = getSSEUrl("test-ws-id", undefined, undefined, "opaque-abc");
-
-    expect(url).toContain("token=opaque-abc");
-  });
-
-  it("omits token when opaqueToken is undefined", () => {
-    const url = getSSEUrl("test-ws-id", undefined, undefined, undefined);
-
-    expect(url).not.toContain("token=");
-  });
-});
-
-describe("WorkspaceSSEClient sourceRepos support", () => {
-  let originalEventSource: typeof EventSource;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    originalEventSource = global.EventSource;
-    global.EventSource = MockEventSource as unknown as typeof EventSource;
-    MockEventSource.reset();
-    mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    global.EventSource = originalEventSource;
-    vi.restoreAllMocks();
-  });
-
-  it("connect() passes sourceRepos to URL", async () => {
-    const client = new WorkspaceSSEClient("test-ws-id");
-
-    await client.connect(undefined, ["repo-a", "repo-b"]);
-
-    expect(MockEventSource.lastInstance?.url).toContain(
-      "source_repos=repo-a%2Crepo-b",
-    );
-  });
-
-  it("connect() without sourceRepos omits source_repos from URL", async () => {
-    const client = new WorkspaceSSEClient("test-ws-id");
-
-    await client.connect();
-
-    expect(MockEventSource.lastInstance?.url).not.toContain("source_repos");
-  });
-
-  it("connect() with both since and sourceRepos includes both in URL", async () => {
-    const client = new WorkspaceSSEClient("test-ws-id");
-
-    await client.connect(1706011200000, ["repo-x"]);
-
-    expect(MockEventSource.lastInstance?.url).toContain("since=1706011200000");
-    expect(MockEventSource.lastInstance?.url).toContain("source_repos=repo-x");
-  });
-
-  it("retryNow() uses stored sourceRepos from last connect()", async () => {
-    const client = new WorkspaceSSEClient("test-ws-id");
-
-    await client.connect(undefined, ["repo-a", "repo-b"]);
-    MockEventSource.lastInstance?.simulateOpen();
-
-    // Trigger reconnecting state
-    MockEventSource.lastInstance?.simulateError();
-    expect(client.getState()).toBe("reconnecting");
-
-    client.retryNow();
-    await vi.waitFor(() => {
-      expect(MockEventSource.instances.length).toBe(2);
-    });
-
-    // New connection should use stored sourceRepos
-    expect(MockEventSource.lastInstance?.url).toContain(
-      "source_repos=repo-a%2Crepo-b",
-    );
-  });
-
-  it("retryNow() without sourceRepos omits source_repos from URL", async () => {
-    const client = new WorkspaceSSEClient("test-ws-id");
-
-    await client.connect();
-    MockEventSource.lastInstance?.simulateOpen();
-
-    // Trigger reconnecting state
-    MockEventSource.lastInstance?.simulateError();
-    expect(client.getState()).toBe("reconnecting");
-
-    client.retryNow();
-    await vi.waitFor(() => {
-      expect(MockEventSource.instances.length).toBe(2);
-    });
-
-    expect(MockEventSource.lastInstance?.url).not.toContain("source_repos");
+    expect(getSSEUrl("test-ws", 0)).toContain("since=0");
   });
 });

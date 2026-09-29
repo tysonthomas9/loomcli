@@ -12,12 +12,18 @@ import {
 } from "../useEventProvider";
 import type { MutationPayload } from "@/api/common";
 
-// Mock the get function from client.ts — default to 404 (open mode, no SSE token endpoint)
+const mockFetchEventSource = vi.hoisted(() => vi.fn());
+vi.mock("@microsoft/fetch-event-source", () => ({
+  EventStreamContentType: "text/event-stream",
+  fetchEventSource: mockFetchEventSource,
+}));
+
+// The stream library is mocked below, but keep the token seam valid if used.
 vi.mock("@/api/common/client", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/api/common/client")>();
   return {
     ...mod,
-    get: vi.fn().mockRejectedValue(new mod.ApiError(404, "Not Found")),
+    get: vi.fn().mockResolvedValue({ disabled: true }),
   };
 });
 
@@ -33,93 +39,84 @@ vi.mock("@/hooks/workspace", async () => {
   };
 });
 
-// Mock EventSource
-class MockEventSource {
+interface MockFetchEventSourceOptions {
+  signal?: AbortSignal;
+  onopen?: (response: Response) => Promise<void> | void;
+  onmessage?: (event: { id: string; event: string; data: string }) => void;
+  onerror?: (error: unknown) => number | void;
+}
+
+// Lightweight fetch-event-source double for hook behavior. The SSE client unit
+// tests exercise the real library parser against a pushable ReadableStream.
+class MockFetchEventSourceAttempt {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
   static readonly CLOSED = 2;
 
-  static instances: MockEventSource[] = [];
+  static instances: MockFetchEventSourceAttempt[] = [];
 
   url: string;
-  readyState: number = MockEventSource.CONNECTING;
-  onopen: (() => void) | null = null;
-  onerror: (() => void) | null = null;
+  readyState: number = MockFetchEventSourceAttempt.CONNECTING;
+  private options: MockFetchEventSourceOptions;
 
-  private eventListeners: Map<string, ((e: MessageEvent) => void)[]> =
-    new Map();
-
-  constructor(url: string) {
+  constructor(url: string, options: MockFetchEventSourceOptions) {
     this.url = url;
-    MockEventSource.instances.push(this);
-  }
-
-  addEventListener(type: string, listener: (e: MessageEvent) => void): void {
-    if (!this.eventListeners.has(type)) {
-      this.eventListeners.set(type, []);
-    }
-    this.eventListeners.get(type)!.push(listener);
-  }
-
-  removeEventListener(type: string, listener: (e: MessageEvent) => void): void {
-    const listeners = this.eventListeners.get(type);
-    if (listeners) {
-      const index = listeners.indexOf(listener);
-      if (index > -1) {
-        listeners.splice(index, 1);
-      }
-    }
-  }
-
-  close(): void {
-    this.readyState = MockEventSource.CLOSED;
+    this.options = options;
+    MockFetchEventSourceAttempt.instances.push(this);
+    options.signal?.addEventListener("abort", () => {
+      this.readyState = MockFetchEventSourceAttempt.CLOSED;
+    });
   }
 
   simulateOpen(): void {
-    this.readyState = MockEventSource.OPEN;
-    this.onopen?.();
+    this.readyState = MockFetchEventSourceAttempt.OPEN;
+    void this.options.onopen?.(
+      new Response(null, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      }),
+    );
   }
 
   simulateConnected(): void {
-    const listeners = this.eventListeners.get("connected") ?? [];
-    const event = {} as MessageEvent;
-    for (const listener of listeners) listener(event);
+    this.options.onmessage?.({ id: "", event: "connected", data: "" });
   }
 
-  simulateError(readyState: number = MockEventSource.CONNECTING): void {
+  simulateError(
+    readyState: number = MockFetchEventSourceAttempt.CONNECTING,
+  ): void {
     this.readyState = readyState;
-    this.onerror?.();
+    const retryDelay =
+      this.options.onerror?.(new Error("stream failed")) ?? 1000;
+    window.setTimeout(() => {
+      if (!this.options.signal?.aborted) {
+        new MockFetchEventSourceAttempt(this.url, this.options);
+      }
+    }, retryDelay);
   }
 
   simulateMutation(data: unknown, lastEventId?: string): void {
-    const listeners = this.eventListeners.get("mutation") ?? [];
     const parsed = data as { timestamp?: string };
     const eventId =
       lastEventId ??
       (parsed.timestamp ? String(Date.parse(parsed.timestamp)) : "");
-    const event = {
+    this.options.onmessage?.({
+      event: "mutation",
+      id: eventId,
       data: JSON.stringify(data),
-      lastEventId: eventId,
-    } as MessageEvent;
-    for (const listener of listeners) {
-      listener(event);
-    }
+    });
   }
 
   simulateRawMutation(data: string, lastEventId = ""): void {
-    const listeners = this.eventListeners.get("mutation") ?? [];
-    const event = { data, lastEventId } as MessageEvent;
-    for (const listener of listeners) {
-      listener(event);
-    }
+    this.options.onmessage?.({ event: "mutation", id: lastEventId, data });
   }
 
   static reset(): void {
-    MockEventSource.instances = [];
+    MockFetchEventSourceAttempt.instances = [];
   }
 
-  static get lastInstance(): MockEventSource | undefined {
-    return MockEventSource.instances.at(-1);
+  static get lastInstance(): MockFetchEventSourceAttempt | undefined {
+    return MockFetchEventSourceAttempt.instances.at(-1);
   }
 }
 
@@ -132,17 +129,24 @@ function wrapper({ children }: { children: React.ReactNode }) {
 }
 
 describe("useEventProvider", () => {
-  let originalEventSource: typeof EventSource;
-
   beforeEach(() => {
     mockWorkspaceId = "test-ws-id";
-    originalEventSource = global.EventSource;
-    global.EventSource = MockEventSource as unknown as typeof EventSource;
-    MockEventSource.reset();
+    MockFetchEventSourceAttempt.reset();
+    mockFetchEventSource.mockReset();
+    mockFetchEventSource.mockImplementation(
+      (input: RequestInfo, options: MockFetchEventSourceOptions) => {
+        const source = new MockFetchEventSourceAttempt(String(input), options);
+        return new Promise<void>((resolve) => {
+          options.signal?.addEventListener("abort", () => resolve());
+          if (source.readyState === MockFetchEventSourceAttempt.CLOSED)
+            resolve();
+        });
+      },
+    );
   });
 
   afterEach(() => {
-    global.EventSource = originalEventSource;
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -155,7 +159,7 @@ describe("useEventProvider", () => {
       );
       await flushConnect();
 
-      expect(MockEventSource.instances.length).toBe(1);
+      expect(MockFetchEventSourceAttempt.instances.length).toBe(1);
     });
 
     it("destroys client on unmount", async () => {
@@ -166,10 +170,10 @@ describe("useEventProvider", () => {
       );
       await flushConnect();
 
-      const esInstance = MockEventSource.lastInstance;
+      const esInstance = MockFetchEventSourceAttempt.lastInstance;
       unmount();
 
-      expect(esInstance?.readyState).toBe(MockEventSource.CLOSED);
+      expect(esInstance?.readyState).toBe(MockFetchEventSourceAttempt.CLOSED);
     });
 
     it("creates new client on workspaceId change", async () => {
@@ -181,10 +185,10 @@ describe("useEventProvider", () => {
       );
       await flushConnect();
 
-      expect(MockEventSource.instances.length).toBe(1);
-      expect(MockEventSource.instances[0].url).toContain("ws-a");
+      expect(MockFetchEventSourceAttempt.instances.length).toBe(1);
+      expect(MockFetchEventSourceAttempt.instances[0].url).toContain("ws-a");
 
-      const firstInstance = MockEventSource.lastInstance;
+      const firstInstance = MockFetchEventSourceAttempt.lastInstance;
 
       mockWorkspaceId = "ws-b";
       rerender(
@@ -194,9 +198,11 @@ describe("useEventProvider", () => {
       );
       await flushConnect();
 
-      expect(firstInstance?.readyState).toBe(MockEventSource.CLOSED);
-      expect(MockEventSource.instances.length).toBe(2);
-      expect(MockEventSource.instances[1].url).toContain("ws-b");
+      expect(firstInstance?.readyState).toBe(
+        MockFetchEventSourceAttempt.CLOSED,
+      );
+      expect(MockFetchEventSourceAttempt.instances.length).toBe(2);
+      expect(MockFetchEventSourceAttempt.instances[1].url).toContain("ws-b");
     });
   });
 
@@ -208,7 +214,7 @@ describe("useEventProvider", () => {
       expect(result.current.state).toBe("connecting");
 
       act(() => {
-        MockEventSource.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
       });
 
       expect(result.current.state).toBe("connected");
@@ -216,20 +222,43 @@ describe("useEventProvider", () => {
       expect(result.current.connectionEpoch).toBe(0);
     });
 
-    it("increments connectionEpoch after each completed handshake", async () => {
+    it("increments connectionEpoch after each completed retry handshake", async () => {
+      vi.useFakeTimers();
       const { result } = renderHook(() => useEventContext(), { wrapper });
       await flushConnect();
 
       act(() => {
-        MockEventSource.lastInstance?.simulateOpen();
-        MockEventSource.lastInstance?.simulateConnected();
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateConnected();
       });
       expect(result.current.connectionEpoch).toBe(1);
 
       act(() => {
-        MockEventSource.lastInstance?.simulateConnected();
+        MockFetchEventSourceAttempt.lastInstance?.simulateError();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      expect(MockFetchEventSourceAttempt.instances).toHaveLength(2);
+
+      act(() => {
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateConnected();
       });
       expect(result.current.connectionEpoch).toBe(2);
+    });
+
+    it("ignores duplicate connected frames on the same open stream", async () => {
+      const { result } = renderHook(() => useEventContext(), { wrapper });
+      await flushConnect();
+
+      act(() => {
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateConnected();
+        MockFetchEventSourceAttempt.lastInstance?.simulateConnected();
+      });
+
+      expect(result.current.connectionEpoch).toBe(1);
     });
 
     it("exposes reconnectAttempts", async () => {
@@ -237,13 +266,15 @@ describe("useEventProvider", () => {
       await flushConnect();
 
       act(() => {
-        MockEventSource.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
       });
 
       expect(result.current.reconnectAttempts).toBe(0);
 
       act(() => {
-        MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
+        MockFetchEventSourceAttempt.lastInstance?.simulateError(
+          MockFetchEventSourceAttempt.CONNECTING,
+        );
       });
 
       expect(result.current.reconnectAttempts).toBe(1);
@@ -254,14 +285,19 @@ describe("useEventProvider", () => {
       await flushConnect();
 
       act(() => {
-        MockEventSource.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
       });
 
       act(() => {
-        MockEventSource.lastInstance?.simulateError(MockEventSource.CLOSED);
+        for (let attempt = 0; attempt < 5; attempt++) {
+          MockFetchEventSourceAttempt.lastInstance?.simulateError(
+            MockFetchEventSourceAttempt.CLOSED,
+          );
+        }
       });
 
-      // Unified reconnect: transient errors enter reconnecting, no onError
+      // Unified reconnect: even repeated transient errors enter reconnecting,
+      // without surfacing an onError notice to the UI.
       expect(result.current.lastError).toBeNull();
       expect(result.current.state).toBe("reconnecting");
     });
@@ -290,7 +326,7 @@ describe("useEventProvider", () => {
       await flushConnect();
 
       act(() => {
-        MockEventSource.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
       });
 
       const mutation: MutationPayload = {
@@ -301,7 +337,7 @@ describe("useEventProvider", () => {
       };
 
       act(() => {
-        MockEventSource.lastInstance?.simulateMutation(mutation);
+        MockFetchEventSourceAttempt.lastInstance?.simulateMutation(mutation);
       });
 
       expect(cb1).toHaveBeenCalledWith(mutation);
@@ -326,12 +362,12 @@ describe("useEventProvider", () => {
       await flushConnect();
 
       act(() => {
-        MockEventSource.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
       });
 
       // Should receive
       act(() => {
-        MockEventSource.lastInstance?.simulateMutation({
+        MockFetchEventSourceAttempt.lastInstance?.simulateMutation({
           type: "create",
           issue_id: "test-1",
           timestamp: "2025-01-23T12:00:00Z",
@@ -340,7 +376,7 @@ describe("useEventProvider", () => {
 
       // Should NOT receive
       act(() => {
-        MockEventSource.lastInstance?.simulateMutation({
+        MockFetchEventSourceAttempt.lastInstance?.simulateMutation({
           type: "delete",
           issue_id: "test-2",
           timestamp: "2025-01-23T12:00:01Z",
@@ -349,7 +385,7 @@ describe("useEventProvider", () => {
 
       // Should receive
       act(() => {
-        MockEventSource.lastInstance?.simulateMutation({
+        MockFetchEventSourceAttempt.lastInstance?.simulateMutation({
           type: "update",
           issue_id: "test-3",
           timestamp: "2025-01-23T12:00:02Z",
@@ -381,11 +417,11 @@ describe("useEventProvider", () => {
       await flushConnect();
 
       act(() => {
-        MockEventSource.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
       });
 
       act(() => {
-        MockEventSource.lastInstance?.simulateMutation({
+        MockFetchEventSourceAttempt.lastInstance?.simulateMutation({
           type: "create",
           issue_id: "test-1",
           timestamp: "2025-01-23T12:00:00Z",
@@ -393,7 +429,7 @@ describe("useEventProvider", () => {
       });
 
       act(() => {
-        MockEventSource.lastInstance?.simulateMutation({
+        MockFetchEventSourceAttempt.lastInstance?.simulateMutation({
           type: "delete",
           issue_id: "test-2",
           timestamp: "2025-01-23T12:00:01Z",
@@ -422,11 +458,11 @@ describe("useEventProvider", () => {
       await flushConnect();
 
       act(() => {
-        MockEventSource.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
       });
 
       act(() => {
-        MockEventSource.lastInstance?.simulateMutation({
+        MockFetchEventSourceAttempt.lastInstance?.simulateMutation({
           type: "terminal_metadata",
           entity_type: "terminal",
           entity_id: "session-1",
@@ -436,7 +472,7 @@ describe("useEventProvider", () => {
       });
 
       act(() => {
-        MockEventSource.lastInstance?.simulateMutation({
+        MockFetchEventSourceAttempt.lastInstance?.simulateMutation({
           type: "terminal_session_change",
           entity_type: "terminal",
           entity_id: "session-1",
@@ -470,11 +506,11 @@ describe("useEventProvider", () => {
       await flushConnect();
 
       act(() => {
-        MockEventSource.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
       });
 
       act(() => {
-        MockEventSource.lastInstance?.simulateMutation({
+        MockFetchEventSourceAttempt.lastInstance?.simulateMutation({
           type: "status",
           entity_type: "agent",
           entity_id: "agent-alpha",
@@ -485,7 +521,7 @@ describe("useEventProvider", () => {
       });
 
       act(() => {
-        MockEventSource.lastInstance?.simulateMutation({
+        MockFetchEventSourceAttempt.lastInstance?.simulateMutation({
           type: "terminal_metadata",
           entity_type: "terminal",
           entity_id: "session-1",
@@ -495,7 +531,7 @@ describe("useEventProvider", () => {
       });
 
       act(() => {
-        MockEventSource.lastInstance?.simulateMutation({
+        MockFetchEventSourceAttempt.lastInstance?.simulateMutation({
           type: "update",
           entity_type: "issue",
           entity_id: "issue-1",
@@ -524,7 +560,7 @@ describe("useEventProvider", () => {
       await flushConnect();
 
       act(() => {
-        MockEventSource.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
       });
 
       let unsubscribe: () => void;
@@ -533,7 +569,7 @@ describe("useEventProvider", () => {
       });
 
       act(() => {
-        MockEventSource.lastInstance?.simulateMutation({
+        MockFetchEventSourceAttempt.lastInstance?.simulateMutation({
           type: "create",
           issue_id: "test-1",
           timestamp: "2025-01-23T12:00:00Z",
@@ -547,7 +583,7 @@ describe("useEventProvider", () => {
       });
 
       act(() => {
-        MockEventSource.lastInstance?.simulateMutation({
+        MockFetchEventSourceAttempt.lastInstance?.simulateMutation({
           type: "update",
           issue_id: "test-2",
           timestamp: "2025-01-23T12:00:01Z",
@@ -575,12 +611,12 @@ describe("useEventProvider", () => {
       await flushConnect();
 
       act(() => {
-        MockEventSource.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
       });
 
       // Send mutation — callback should fire
       act(() => {
-        MockEventSource.lastInstance?.simulateMutation({
+        MockFetchEventSourceAttempt.lastInstance?.simulateMutation({
           type: "create",
           issue_id: "test-1",
           timestamp: "2025-01-23T12:00:00Z",
@@ -598,7 +634,7 @@ describe("useEventProvider", () => {
 
       // Send another mutation — callback should NOT fire
       act(() => {
-        MockEventSource.lastInstance?.simulateMutation({
+        MockFetchEventSourceAttempt.lastInstance?.simulateMutation({
           type: "update",
           issue_id: "test-2",
           timestamp: "2025-01-23T12:00:01Z",
@@ -629,11 +665,13 @@ describe("useEventProvider", () => {
       await flushConnect();
 
       act(() => {
-        MockEventSource.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
       });
 
       act(() => {
-        MockEventSource.lastInstance?.simulateRawMutation("{not-json");
+        MockFetchEventSourceAttempt.lastInstance?.simulateRawMutation(
+          "{not-json",
+        );
       });
 
       expect(consoleWarnSpy).toHaveBeenCalledWith(
@@ -642,7 +680,7 @@ describe("useEventProvider", () => {
       expect(cb).not.toHaveBeenCalled();
 
       act(() => {
-        MockEventSource.lastInstance?.simulateMutation({
+        MockFetchEventSourceAttempt.lastInstance?.simulateMutation({
           type: "refresh",
           entity_type: "agent",
           entity_id: "agent-alpha",
@@ -690,11 +728,11 @@ describe("useEventProvider", () => {
       await flushConnect();
 
       act(() => {
-        MockEventSource.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
       });
 
       act(() => {
-        MockEventSource.lastInstance?.simulateMutation({
+        MockFetchEventSourceAttempt.lastInstance?.simulateMutation({
           type: "create",
           issue_id: "test-1",
           timestamp: "2025-01-23T12:00:00Z",
@@ -718,7 +756,7 @@ describe("useEventProvider", () => {
       );
       await flushConnect();
 
-      expect(MockEventSource.lastInstance?.url).toContain(
+      expect(MockFetchEventSourceAttempt.lastInstance?.url).toContain(
         "source_repos=repo-a%2Crepo-b",
       );
     });
@@ -731,8 +769,8 @@ describe("useEventProvider", () => {
       );
       await flushConnect();
 
-      expect(MockEventSource.instances.length).toBe(1);
-      const firstInstance = MockEventSource.lastInstance;
+      expect(MockFetchEventSourceAttempt.instances.length).toBe(1);
+      const firstInstance = MockFetchEventSourceAttempt.lastInstance;
 
       rerender(
         <EventProvider sourceRepos={["repo-b"]}>
@@ -741,9 +779,11 @@ describe("useEventProvider", () => {
       );
       await flushConnect();
 
-      expect(firstInstance?.readyState).toBe(MockEventSource.CLOSED);
-      expect(MockEventSource.instances.length).toBe(2);
-      expect(MockEventSource.lastInstance?.url).toContain(
+      expect(firstInstance?.readyState).toBe(
+        MockFetchEventSourceAttempt.CLOSED,
+      );
+      expect(MockFetchEventSourceAttempt.instances.length).toBe(2);
+      expect(MockFetchEventSourceAttempt.lastInstance?.url).toContain(
         "source_repos=repo-b",
       );
     });
@@ -779,16 +819,16 @@ describe("useEventProvider", () => {
       await flushConnect();
 
       act(() => {
-        MockEventSource.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
       });
 
-      const esInstance = MockEventSource.lastInstance;
+      const esInstance = MockFetchEventSourceAttempt.lastInstance;
 
       act(() => {
         window.dispatchEvent(new Event("auth-sign-out"));
       });
 
-      expect(esInstance?.readyState).toBe(MockEventSource.CLOSED);
+      expect(esInstance?.readyState).toBe(MockFetchEventSourceAttempt.CLOSED);
     });
   });
 
@@ -810,12 +850,12 @@ describe("useEventProvider", () => {
       await flushConnect();
 
       act(() => {
-        MockEventSource.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
       });
 
       // Send mutation with first callback
       act(() => {
-        MockEventSource.lastInstance?.simulateMutation({
+        MockFetchEventSourceAttempt.lastInstance?.simulateMutation({
           type: "create",
           issue_id: "test-1",
           timestamp: "2025-01-23T12:00:00Z",
@@ -833,7 +873,7 @@ describe("useEventProvider", () => {
 
       // Send another mutation — should use new callback via ref
       act(() => {
-        MockEventSource.lastInstance?.simulateMutation({
+        MockFetchEventSourceAttempt.lastInstance?.simulateMutation({
           type: "update",
           issue_id: "test-2",
           timestamp: "2025-01-23T12:00:01Z",
@@ -851,11 +891,13 @@ describe("useEventProvider", () => {
       await flushConnect();
 
       act(() => {
-        MockEventSource.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
       });
 
       act(() => {
-        MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
+        MockFetchEventSourceAttempt.lastInstance?.simulateError(
+          MockFetchEventSourceAttempt.CONNECTING,
+        );
       });
 
       expect(result.current.state).toBe("reconnecting");
@@ -865,7 +907,7 @@ describe("useEventProvider", () => {
       });
       await flushConnect();
 
-      expect(MockEventSource.instances.length).toBe(2);
+      expect(MockFetchEventSourceAttempt.instances.length).toBe(2);
     });
 
     it("disconnect delegates to client", async () => {
@@ -873,7 +915,7 @@ describe("useEventProvider", () => {
       await flushConnect();
 
       act(() => {
-        MockEventSource.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
       });
 
       expect(result.current.isConnected).toBe(true);
