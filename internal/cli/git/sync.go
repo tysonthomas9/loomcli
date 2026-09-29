@@ -12,6 +12,7 @@ import (
 var syncPushOnly bool
 var syncPullOnly bool
 var syncWorkspaceFlag string
+var syncYes bool
 
 var syncCmd = &cobra.Command{
 	Use:     "sync",
@@ -30,6 +31,7 @@ Flags:
   --push-only        Only push (skip pulling)
   --pull-only        Only pull (skip pushing)
   -W, --workspace    Workspace to operate on
+  -y, --yes          Confirm every workspace in non-interactive mode
 
 Examples:
   loom sync                      # Full sync: push all ready + pull all
@@ -44,6 +46,7 @@ func init() {
 	syncCmd.Flags().BoolVar(&syncPushOnly, "push-only", false, "Only push (skip pulling)")
 	syncCmd.Flags().BoolVar(&syncPullOnly, "pull-only", false, "Only pull (skip pushing)")
 	syncCmd.Flags().StringVarP(&syncWorkspaceFlag, "workspace", "W", "", "Workspace to operate on")
+	syncCmd.Flags().BoolVarP(&syncYes, "yes", "y", false, "Confirm every workspace without prompting")
 	cli.RegisterCommand(syncCmd)
 }
 
@@ -68,6 +71,10 @@ func runFullSync(cmd *cobra.Command, args []string) error {
 // and exited 0 over a workspace whose repos were never discovered, which is
 // indistinguishable from success to anything scripting this command.
 func runWorkspaceSync(deps *cli.Deps, pushOnly, pullOnly bool, ws string) error {
+	return runWorkspaceSyncWithConfirmation(deps, pushOnly, pullOnly, ws, newConfirmationSession(syncYes))
+}
+
+func runWorkspaceSyncWithConfirmation(deps *cli.Deps, pushOnly, pullOnly bool, ws string, confirmation *confirmationSession) error {
 	resolver, err := cli.NewResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
@@ -90,6 +97,9 @@ func runWorkspaceSync(deps *cli.Deps, pushOnly, pullOnly bool, ws string) error 
 		fmt.Println("No workspaces found.")
 		return nil
 	}
+	if err := confirmation.requireInteractive("loom sync", wsNames); err != nil {
+		return err
+	}
 
 	fmt.Println("=========================================")
 	fmt.Println("Full Sync: All Workspaces")
@@ -97,11 +107,26 @@ func runWorkspaceSync(deps *cli.Deps, pushOnly, pullOnly bool, ws string) error 
 	fmt.Println("")
 
 	var failed []string
+	var skipped []string
 	for _, wsName := range wsNames {
 		fmt.Printf("=== Workspace: %s ===\n", wsName)
 		if err := resolver.SetWorkspace(wsName); err != nil {
 			fmt.Fprintf(os.Stderr, "Error setting workspace %s: %v\n", wsName, err)
 			failed = append(failed, wsName)
+			continue
+		}
+		worktrees, err := resolver.DiscoverWorktrees()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error discovering repos in workspace %s: %v\n", wsName, err)
+			failed = append(failed, wsName)
+			continue
+		}
+		if err := printUnsavedWork(deps, worktrees, ""); err != nil {
+			return err
+		}
+		if !confirmation.confirm("Sync workspace " + wsName + "?") {
+			fmt.Printf("Skipped workspace %s.\n\n", wsName)
+			skipped = append(skipped, wsName)
 			continue
 		}
 		if err := syncSingleWorkspace(deps, resolver, pushOnly, pullOnly); err != nil {
@@ -116,7 +141,11 @@ func runWorkspaceSync(deps *cli.Deps, pushOnly, pullOnly bool, ws string) error 
 		fmt.Println("=========================================")
 		return fmt.Errorf("sync failed for %d workspace(s): %v", len(failed), failed)
 	}
-	fmt.Println("Full sync complete!")
+	if len(skipped) > 0 {
+		fmt.Printf("Skipped workspaces: %v\n", skipped)
+	} else {
+		fmt.Println("Full sync complete!")
+	}
 	fmt.Println("=========================================")
 	return nil
 }
