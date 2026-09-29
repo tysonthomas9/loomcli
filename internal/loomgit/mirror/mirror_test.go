@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	cligit "github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/capture"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
@@ -348,5 +349,46 @@ func TestSecondMirrorPassDoesNotPushAgain(t *testing.T) {
 	}
 	if err := SyncRepo(ctx, store, repo, base); err != nil {
 		t.Fatalf("second pass pushed again: %v", err)
+	}
+}
+
+func TestResetCompletesWithLocalCaptureBeforeMirrorRetry(t *testing.T) {
+	ctx := context.Background()
+	repo, remote, base, store := fixture(t)
+	git(t, repo, "push", "-u", "origin", "main")
+	git(t, repo, "checkout", "-b", "loom/ws/W/interactive/L")
+	if err := os.WriteFile(filepath.Join(repo, "readme"), []byte("edited before reset\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	hook := filepath.Join(remote, "hooks", "pre-receive")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho private ref rejected >&2\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	result, err := cligit.ResetWorktreeResult(repo, "L", "main", false, false)
+	if err != nil {
+		t.Fatalf("Reset must complete on the local capture: %v", err)
+	}
+	if !result.Success || result.CaptureRef == "" || git(t, repo, "show", "HEAD:readme") != "base" {
+		t.Fatalf("Reset did not complete locally: %+v", result)
+	}
+	captured := git(t, repo, "rev-parse", result.CaptureRef)
+	if got := git(t, repo, "show", result.CaptureRef+":readme"); got != "edited before reset" {
+		t.Fatalf("Reset lost captured work: %q", got)
+	}
+	if err := SyncRepo(ctx, store, repo, base); err == nil {
+		t.Fatal("provider rejection was ignored")
+	}
+	row, found, err := store.MirrorState(ctx, repo, result.CaptureRef)
+	if err != nil || !found || row.State != "not_mirrored" || !strings.Contains(row.Reason, "private ref rejected") {
+		t.Fatalf("rejected mirror state: %+v %v %v", row, found, err)
+	}
+	if err := os.Remove(hook); err != nil {
+		t.Fatal(err)
+	}
+	if err := SyncRepo(ctx, store, repo, base); err != nil {
+		t.Fatal(err)
+	}
+	if got := git(t, remote, "rev-parse", result.CaptureRef); got != captured {
+		t.Fatalf("retry mirrored %s, want %s", got, captured)
 	}
 }
