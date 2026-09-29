@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestCodexStubEpicRunnerPropagatesDesignLookupFailure(t *testing.T) {
+func TestCodexStubEpicRunnerReadsDirectivesFromPrompt(t *testing.T) {
 	tmp := t.TempDir()
 	binDir := filepath.Join(tmp, "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
@@ -17,11 +17,8 @@ func TestCodexStubEpicRunnerPropagatesDesignLookupFailure(t *testing.T) {
 	}
 
 	writeExecutable(t, filepath.Join(binDir, "loom"), `#!/bin/sh
-if [ "$1" = "data" ] && [ "$2" = "--output" ] && [ "$3" = "json" ] && [ "$4" = "show" ]; then
-  printf '{"design":"STUB_CODEX_WRITE=masked.txt"}\n'
-  exit 42
-fi
-exit 0
+echo "unexpected loom call: $*" >&2
+exit 42
 `)
 	writeExecutable(t, filepath.Join(binDir, "jq"), `#!/bin/sh
 if [ "$1" = "-nc" ]; then
@@ -36,7 +33,7 @@ exit 0
 
 	cmd := exec.Command(filepath.Join(repoRoot(t), "e2e", "stubs", "codex"), "exec", "--json") //nolint:norawexec,gosec // executes this repo's deterministic test stub.
 	cmd.Dir = tmp
-	cmd.Stdin = strings.NewReader("pre-assigned task: E2E-2\n")
+	cmd.Stdin = strings.NewReader("pre-assigned task: E2E-2\nSTUB_CODEX_WRITE=epic-runner-output/prompt-output.txt\n")
 	cmd.Env = append(os.Environ(),
 		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"STUB_CODEX_EPIC_RUNNER=1",
@@ -45,8 +42,15 @@ exit 0
 	)
 
 	out, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("codex stub exited successfully; masked failed design lookup. output:\n%s", out)
+	if err != nil {
+		t.Fatalf("codex stub failed: %v\n%s", err, out)
+	}
+	written, err := os.ReadFile(filepath.Join(tmp, "epic-runner-output", "prompt-output.txt"))
+	if err != nil {
+		t.Fatalf("read prompt output: %v", err)
+	}
+	if !strings.Contains(string(written), "task=E2E-2") {
+		t.Fatalf("prompt output = %q, want task id", written)
 	}
 }
 
