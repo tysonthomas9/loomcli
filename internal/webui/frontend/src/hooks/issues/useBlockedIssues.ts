@@ -1,18 +1,17 @@
 /**
- * useBlockedIssues - React hook for fetching and managing blocked issues.
- * Provides issues that have blocking dependencies (waiting on other issues to complete).
+ * useBlockedIssues - shared, event-invalidated blocked-issue projection.
+ * The endpoint remains authoritative; the SSE stream is only an invalidation
+ * hint and a five-minute hidden-paused poll repairs missed or early events.
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback, useMemo } from "react";
 
 import { getBlockedIssues, type BlockedFilter } from "@/api/issues";
+import { useInvalidatedQuery } from "@/hooks/common";
 import type { BlockedIssue } from "@/types";
 
 import { useWorkspaceContext } from "@/hooks/workspace";
 
-/**
- * Options for the useBlockedIssues hook.
- */
 export interface UseBlockedIssuesOptions {
   /** Optional: filter to descendants of this issue/epic */
   parentId?: string;
@@ -24,15 +23,10 @@ export interface UseBlockedIssuesOptions {
   assignee?: string;
   /** Optional: max results to return */
   limit?: number;
-  /** Optional: poll interval in ms (default: no polling) */
-  pollInterval?: number;
   /** Optional: whether to fetch (default: true) */
   enabled?: boolean;
 }
 
-/**
- * Return type for the useBlockedIssues hook.
- */
 export interface UseBlockedIssuesResult {
   /** Blocked issues data, null if not yet loaded */
   data: BlockedIssue[] | null;
@@ -45,7 +39,7 @@ export interface UseBlockedIssuesResult {
 }
 
 /**
- * React hook for fetching issues that have blocking dependencies.
+ * React hook for the workspace's issues with blocking dependencies.
  *
  * @param options - Configuration options for the hook
  * @returns Object with data, loading, error states and refetch function
@@ -53,9 +47,7 @@ export interface UseBlockedIssuesResult {
  * @example
  * ```tsx
  * function DependencyGraph() {
- *   const { data, loading, error, refetch } = useBlockedIssues({
- *     pollInterval: 30000, // Poll every 30 seconds
- *   })
+ *   const { data, loading, error, refetch } = useBlockedIssues()
  *
  *   if (loading && !data) return <Loading />
  *   if (error) return <Error message={error.message} />
@@ -79,120 +71,36 @@ export function useBlockedIssues(
     type,
     assignee,
     limit,
-    pollInterval,
     enabled = true,
   } = options ?? {};
 
-  const [data, setData] = useState<BlockedIssue[] | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<Error | null>(null);
+  const filter = useMemo<BlockedFilter>(() => {
+    const next: BlockedFilter = {};
+    if (parentId) next.parent_id = parentId;
+    if (priority !== undefined) next.priority = priority;
+    if (type) next.type = type;
+    if (assignee) next.assignee = assignee;
+    if (limit !== undefined) next.limit = limit;
+    return next;
+  }, [assignee, limit, parentId, priority, type]);
 
-  // Track if a fetch is in progress to prevent overlapping requests
-  const fetchInProgressRef = useRef<boolean>(false);
+  const key = useMemo(
+    () =>
+      `blocked:${workspaceId}:${JSON.stringify({ parentId, priority, type, assignee, limit })}`,
+    [assignee, limit, parentId, priority, type, workspaceId],
+  );
+  const fetcher = useCallback(
+    (signal: AbortSignal) => getBlockedIssues(workspaceId, filter, { signal }),
+    [filter, workspaceId],
+  );
 
-  // Track if the component is mounted for cleanup
-  const mountedRef = useRef<boolean>(true);
-
-  // Stable fetch function using useCallback
-  const fetchData = useCallback(async () => {
-    // Skip if already fetching (prevents stacking poll requests)
-    if (fetchInProgressRef.current) {
-      return;
-    }
-
-    fetchInProgressRef.current = true;
-    setLoading(true);
-
-    try {
-      const filter: BlockedFilter = {};
-      if (parentId) {
-        filter.parent_id = parentId;
-      }
-      if (priority !== undefined) {
-        filter.priority = priority;
-      }
-      if (type) {
-        filter.type = type;
-      }
-      if (assignee) {
-        filter.assignee = assignee;
-      }
-      if (limit !== undefined) {
-        filter.limit = limit;
-      }
-
-      const result = await getBlockedIssues(workspaceId, filter);
-
-      // Only update state if still mounted
-      if (mountedRef.current) {
-        setData(result);
-        setError(null);
-      }
-    } catch (err) {
-      // Only update state if still mounted
-      if (mountedRef.current) {
-        setError(err instanceof Error ? err : new Error(String(err)));
-        // Keep stale data on error
-      }
-    } finally {
-      if (mountedRef.current) {
-        setLoading(false);
-      }
-      fetchInProgressRef.current = false;
-    }
-  }, [workspaceId, parentId, priority, type, assignee, limit]);
-
-  // Refetch function exposed to consumers
-  const refetch = useCallback(async () => {
-    await fetchData();
-  }, [fetchData]);
-
-  // Initial fetch and polling setup
-  useEffect(() => {
-    mountedRef.current = true;
-
-    // Don't fetch if disabled
-    if (!enabled) {
-      return;
-    }
-
-    // Initial fetch
-    fetchData();
-
-    // Setup polling if interval is specified
-    let intervalId: ReturnType<typeof setInterval> | null = null;
-    if (pollInterval && pollInterval > 0) {
-      intervalId = setInterval(() => {
-        fetchData();
-      }, pollInterval);
-    }
-
-    // Cleanup
-    return () => {
-      mountedRef.current = false;
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
-    };
-
-    // fetchData excluded: it has fetchInProgressRef guard preventing overlapping requests,
-    // and including it causes interval stacking when parentId changes (fetchData recreated → effect reruns)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
+  return useInvalidatedQuery<BlockedIssue[]>(fetcher, {
+    key,
     enabled,
-    pollInterval,
-    workspaceId,
-    parentId,
-    priority,
-    type,
-    assignee,
-    limit,
-  ]);
-
-  return {
-    data,
-    loading,
-    error,
-    refetch,
-  };
+    entityTypes: ["issue", "dependency", "label"],
+    safetyPollMs: 5 * 60_000,
+    pauseWhenHidden: true,
+    refetchOnConnect: true,
+    resetOnKeyChange: false,
+  });
 }

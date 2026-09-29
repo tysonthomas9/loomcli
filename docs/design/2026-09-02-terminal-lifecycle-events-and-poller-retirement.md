@@ -25,8 +25,10 @@ objects.
   broadcast payloads and never frame events. See
   `docs/adr/0001-sse-framing-single-writer-seam.md`.
 - FleetDB mutations have durable cursors and can be replayed after
-  `Last-Event-ID`. A direct `Hub.Broadcast` gets a connection-local event ID,
-  but is not written to FleetDB and is not returned by the catch-up query.
+  `Last-Event-ID`, but the current catch-up path returns one page (at most 100
+  events) and swallows backend/catch-up failures. A direct `Hub.Broadcast` gets
+  a connection-local event ID, but is not written to FleetDB and is not
+  returned by the catch-up query.
 - The main terminal process is owned by `(workspace, session)` in
   `internal/webui/terminal/pty_manager.go`. `MultiPTYManager` selects a
   per-workspace manager. `AgentTmuxManager` only attaches browser PTYs to tmux
@@ -123,7 +125,9 @@ Every server-side mutation of state displayed by the UI must do one of:
 3. write to a dedicated resumable byte/item stream for append-only data.
 
 At the plan baseline, mutation sites without a complete notification contract
-include the following. Slice 1 closes the first item:
+include the following. Slice 1 closes the first item. Recovery/cache repair,
+raw Redis/Postgres writes, and boot reconciliation may also change a displayed
+projection without appending a mutation, so the contract is not universal:
 
 - PTY spawn/exit/kill in `internal/webui/terminal/pty_manager.go`;
 - pending-input open, answer, consume, and expiry in
@@ -144,41 +148,65 @@ their GET endpoint authoritative. Event fan-out work must be O(clients) with a
 small payload; expensive reads or aggregate computation happen once before
 broadcast, never once per client.
 
-### Shared frontend primitive
+### Shared frontend primitive (slice 2 complete)
 
-Add one hook after slice 1:
+`hooks/common/useInvalidatedQuery.ts` exposes:
 
 ```ts
-useInvalidatedQuery(fetch, {
-  key,
-  enabled,
-  entityTypes,
-  actions,
-  debounceMs,
-  safetyPollMs,       // default 0
-  pauseWhenHidden,    // default true
+useInvalidatedQuery(fetcher, {
+  key, enabled, entityTypes, actions, types, debounceMs, safetyPollMs,
+  pauseWhenHidden, refetchOnConnect, resetOnKeyChange,
 })
 ```
 
-Its interface guarantees:
+`fetcher` receives an `AbortSignal` and the result is
+`{data, loading, error, refetch}`. A provider-owned
+`InvalidatedQueryRegistry` gives equal keys one immutable cached snapshot, one
+debounce, one optional safety poll, one visibility listener, and one request;
+per-instance registrations keep committed fetchers and count enabled owners.
+Disabling the last enabled owner aborts and settles pending work, while a
+disabled registration can still issue a one-off `refetch`.
 
-- fetch on mount and on `key` change;
-- reset data/error policy on key change, selected explicitly by the caller;
-- one subscription on the shared workspace `EventSource`;
-- debounced invalidation with one trailing fetch when an event arrives during
-  an in-flight request;
-- a request generation/key guard so stale responses cannot overwrite newer
-  state;
-- optional safety polling measured in minutes, default off, suspended while
-  hidden, with an immediate fetch on becoming visible;
-- retained last-known data on transient failure and an explicit `refetch`.
+Events are forwarded unfiltered from `EventProvider` and match a non-empty
+`entity_type` first (entity and optional action must match; a caller that sets
+only `types` matches entity-typed events by coarse type); only entity-less
+events use the global `refresh` fallback. The registry records the
+provider's `connectionEpoch`, seeded before the mount fetch; every completed
+SSE handshake increments the epoch, and a changed epoch debounces one repair
+fetch. Hidden events/polls become dirty and visibility always performs one
+repair fetch. Blocked issues use `entityTypes: ["issue", "dependency", "label"]`,
+`safetyPollMs: 5 * 60_000`, and retain prior data on key changes.
 
-This deepens the repeated shape already present in
-`useIssueSessionMap` and `useWorkspaceSessionCount`: reuse
-`useEventSubscription`, debounce, visibility refresh, and the stale-response
-guard, but own them once. It does not own endpoint-specific selection or merge
-rules. Transcript/log append streams and aggregate snapshot streams use
-separate primitives.
+The primitive deepens the repeated shape in `useIssueSessionMap` and
+`useWorkspaceSessionCount`, but those hooks do not themselves provide the
+primitive's complete visibility or stale-response guarantees. It does not own
+endpoint-specific selection or merge rules. Transcript/log append streams and
+aggregate snapshot streams use separate primitives.
+
+Slice 2 follow-ups are replay pagination and catch-up failure surfacing in
+`fleet_batch_mutations.go` and `backend_subscriber.go`; aligning `/blocked`
+with the stream's source-repo scope; fixing `undefined ↔ array` source-repo
+rebinding in `useEventProvider.tsx`; and reconciling `BlockedIssue` blocker
+details with the wire type; documenting that the `parent_id` filter is
+direct-parent matching rather than descendant matching.
+
+Live verification of slice 2 (two browser passes on a local-mode stack) found
+three pre-existing transport defects that every later slice inherits and that
+gate the zero-poll cutover:
+
+- `internal/webui/subscription/backend_subscriber.go` re-creates a workspace
+  subscriber with cursor `0` after the idle deactivation in `multi.go`, so the
+  next SSE client triggers a replay of the whole FleetDB mutation stream to
+  every connected client.
+- That backlog overflows the new client's send buffer, and
+  `realtime/hub.go` `broadcastToClients` evicts it; the browser reconnects a
+  second later, so a cold load pays two handshakes (and, for invalidated
+  queries, a third repair fetch).
+- `internal/webui/frontend/src/api/common/sse.ts` `connect()` returns without
+  `scheduleReconnect()` when the token exchange fails (a 502 while the server
+  restarts); the tab never reconnects, `retryNow()` is inert, and the Monitor
+  banner does not reflect it because it follows the agent-status poll. Until
+  this is fixed, the safety poll is the only repair after a server restart.
 
 ### Data-source classes
 
@@ -204,7 +232,7 @@ countdowns.
 | Order | Poller | Current interval | Endpoint / source | Event-driven change | Difficulty |
 |---:|---|---|---|---|---|
 | 1 | `useWorkspaceSessionCount` | 30s -> 5m safety | `GET .../terminal/tabs`; Redis tab metadata + PTY manager | PTY lifecycle envelopes; 5m repair poll | S |
-| 2 | `useBlockedIssues` | caller: 30s | `GET .../blocked`; FleetDB issues/dependencies | invalidate on durable issue/dependency actions | S |
+| 2 | `useBlockedIssues` | 5m hidden-paused safety | `GET .../blocked`; FleetDB issues, dependencies, parent propagation, and labels | invalidate on delivered issue/dependency/label actions; retain repair poll until replay/scope gaps close | S |
 | 3 | `useTaskSessions` | 10s / 3s active | `GET .../tasks/{id}/sessions`; session index | complete `session.*` events at every record transition | M |
 | 4 | `usePendingInput` | 5s | `GET .../agents/{name}/input`; daemon registry | bridge open/answer/consume/expire as `agent.pending_input_changed` | M |
 | 5 | `agentStore` via `useStoreContext`; active-run refresh in `AgentsPage` | 30s / 5s active | `GET .../status`; daemon + issue projection | invalidate on complete agent/session/workspace/run mutations | M |
@@ -233,9 +261,10 @@ creation job loop is not a recovery probe and remains in the retirement list.
    other, and reconnect its WebSocket. The badge changes immediately for real
    spawn/kill/exit and does not increment on reattach; hide the document past a
    timer tick and confirm no safety request until visible.
-2. **Blocked projection + shared primitive:** add/remove a dependency and close
-   a blocker from a second browser tab. The blocked summary updates once per
-   burst with its data poll disabled.
+2. **Blocked projection + shared primitive (slice 2 complete):** add/remove a
+   dependency and close a blocker from a second browser tab. The blocked
+   summary updates once per delivered event burst, with one `/blocked` request
+   shared by equal-key consumers; the five-minute repair poll remains.
 3. **Task sessions:** start and finish a task run while its issue panel is open.
    The session row and active marker update with timer polling disabled,
    including a run started by another client.
@@ -313,6 +342,8 @@ hidden state, stale responses, and reconnect repair.
 7. **Should observability use workspace SSE?** Default to the existing global
    `/api/observability/events` stream because the metrics endpoint is global;
    keep workspace mutation traffic on the workspace stream.
-8. **When can safety polls reach zero?** Default gate: reconnect test proves an
-   authoritative snapshot or cursor replay, two-tab test proves no missed
-   mutation, and production metrics show no dropped-broadcast repair reliance.
+8. **When can safety polls reach zero?** Default gate: replay is paginated and
+   catch-up failures are surfaced or repaired, query and stream scopes align,
+   a reconnect test proves an authoritative snapshot or cursor replay, a
+   two-tab test proves no missed mutation, and production metrics show no
+   dropped-broadcast repair reliance.

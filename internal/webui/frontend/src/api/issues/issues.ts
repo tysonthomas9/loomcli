@@ -209,6 +209,7 @@ export interface BlockedFilter {
 export async function getBlockedIssues(
   workspaceId: string,
   options?: BlockedFilter,
+  requestOptions?: { signal?: AbortSignal },
 ): Promise<BlockedIssue[]> {
   const query = cleanQuery({
     parent_id: options?.parent_id,
@@ -221,6 +222,7 @@ export async function getBlockedIssues(
     "/api/workspaces/{ws}/blocked",
     {
       params: { path: { ws: workspaceId }, query },
+      ...(requestOptions?.signal ? { signal: requestOptions.signal } : {}),
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
