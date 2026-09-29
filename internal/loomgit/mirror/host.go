@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
 )
 
 func storePath() string { return filepath.Join(config.GetConfigDir(), "loomgit", "store.db") }
@@ -82,4 +84,20 @@ func Status(ctx context.Context) ([]journal.MirrorRecord, error) {
 		return nil, err
 	}
 	return store.MirrorRecords(ctx)
+}
+
+// StatusWorkspace returns mirror records for one workspace's private refs.
+func StatusWorkspace(ctx context.Context, workspace string) ([]journal.MirrorRecord, error) {
+	rows, err := Status(ctx)
+	if err != nil {
+		return nil, err
+	}
+	prefix := refname.WorkspaceRefPrefix + workspace + "/"
+	var selected []journal.MirrorRecord
+	for _, row := range rows {
+		if strings.HasPrefix(row.Ref, prefix) {
+			selected = append(selected, row)
+		}
+	}
+	return selected, nil
 }

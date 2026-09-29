@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/mirror"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -242,8 +243,9 @@ func runWorkspaceStatus(_ *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("get workspace: %w", err)
 		}
+		mirrorStatus := loomGitMirrorStatus(ctx, key)
 		if wsStatusJSON {
-			return cmdstore.WriteJSON(map[string]any{"key": ws.Key, "state": ws.State, "error": ws.ErrorMessage})
+			return cmdstore.WriteJSON(map[string]any{"key": ws.Key, "state": ws.State, "error": ws.ErrorMessage, "loom_git_mirror": mirrorStatus})
 		}
 		state := string(ws.State)
 		if state == "" {
@@ -254,8 +256,38 @@ func runWorkspaceStatus(_ *cobra.Command, args []string) error {
 			fmt.Printf("\t%s", ws.ErrorMessage)
 		}
 		fmt.Println()
+		fmt.Printf("Loom Git: %d mirrored, %d pending, %d not mirrored\n", mirrorStatus.Mirrored, mirrorStatus.Pending, len(mirrorStatus.NotMirrored))
+		for _, reason := range mirrorStatus.NotMirrored {
+			fmt.Printf("  %s\n", reason)
+		}
 		return nil
 	})
+}
+
+type loomGitMirrorSummary struct {
+	Mirrored    int      `json:"mirrored"`
+	Pending     int      `json:"pending"`
+	NotMirrored []string `json:"not_mirrored,omitempty"`
+}
+
+func loomGitMirrorStatus(ctx context.Context, workspace string) loomGitMirrorSummary {
+	var summary loomGitMirrorSummary
+	rows, err := mirror.StatusWorkspace(ctx, workspace)
+	if err != nil {
+		summary.NotMirrored = []string{"status unavailable: " + err.Error()}
+		return summary
+	}
+	for _, row := range rows {
+		switch row.State {
+		case "mirrored":
+			summary.Mirrored++
+		case "pending":
+			summary.Pending++
+		default:
+			summary.NotMirrored = append(summary.NotMirrored, row.Ref+": "+row.Reason)
+		}
+	}
+	return summary
 }
 
 // pickWorkspaceKey returns args[0] if provided, else the active workspace.
