@@ -723,7 +723,8 @@ func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 	cfg.WorkspaceIDResolverFn = serveadapter.BuildWorkspaceIDResolverFn(cfg.Store)
 	cfg.InitialWorkspaceID = serveadapter.ResolveInitialWorkspaceID(cfg.Store)
 	applyFleetInitialWorkspaceFallback(cfg, false)
-	cfg.WorkspaceDeleteFn = serveadapter.BuildWorkspaceDeleteFn(cfg.Store)
+	cfg.WorkspaceDeleteConfirmedFn = serveadapter.BuildWorkspaceDeleteConfirmedFn(cfg.Store)
+	cfg.WorkspaceDeletePreviewFn = serveadapter.BuildWorkspaceDeletePreviewFn(cfg.Store)
 	cfg.SetDefaultWorkspaceFn = nil
 	cfg.ClearDefaultWorkspaceFn = nil
 	cfg.WorkspaceCreateFn = workspacemgr.BuildStoreBackedCreateWorkspace(cfg.Store)

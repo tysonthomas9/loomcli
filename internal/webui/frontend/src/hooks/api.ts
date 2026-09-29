@@ -48,6 +48,7 @@ export type {
 export {
   renameWorkspace,
   deleteWorkspace,
+  previewWorkspaceDeletion,
   reorderWorkspaces,
   createWorkspace,
   addWorkspaceRepos,

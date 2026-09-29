@@ -372,6 +372,12 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	app.wrappedCreateFn = wrapWorkspaceCreateFn(config.WorkspaceCreateFn, app.registry)
 	app.wrappedDeleteFn = wrapWorkspaceDeleteFn(config.WorkspaceDeleteFn, app.registry, config.WorkspaceIDResolverFn)
+	if config.WorkspaceDeleteConfirmedFn != nil {
+		app.wrappedConfirmedDeleteFn = func(name, fingerprint string) error {
+			wrapped := wrapWorkspaceDeleteFn(func(key string) error { return config.WorkspaceDeleteConfirmedFn(key, fingerprint) }, app.registry, config.WorkspaceIDResolverFn)
+			return wrapped(name)
+		}
+	}
 
 	// Async job store for clone workspace creation (202 + polling).
 	app.jobStore = svcimpl.NewWorkspaceJobStore()
@@ -422,14 +428,16 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	// Initialize workspace service layer. FleetDB Store is the authoritative
 	// workspace source in both local and distributed modes.
 	app.workspaceSvc = service.NewWorkspaceService(service.WorkspaceServiceConfig{
-		Store:          config.Store,
-		MultiPool:      app.multiPool,
-		CreateFn:       app.wrappedCreateFn,
-		AddReposFn:     config.WorkspaceAddReposFn,
-		DeleteFn:       app.wrappedDeleteFn,
-		JobStore:       app.jobStore,
-		SetDefaultFn:   config.SetDefaultWorkspaceFn,
-		ClearDefaultFn: config.ClearDefaultWorkspaceFn,
+		Store:             config.Store,
+		MultiPool:         app.multiPool,
+		CreateFn:          app.wrappedCreateFn,
+		AddReposFn:        config.WorkspaceAddReposFn,
+		DeleteFn:          app.wrappedDeleteFn,
+		DeleteConfirmedFn: app.wrappedConfirmedDeleteFn,
+		DeletePreviewFn:   config.WorkspaceDeletePreviewFn,
+		JobStore:          app.jobStore,
+		SetDefaultFn:      config.SetDefaultWorkspaceFn,
+		ClearDefaultFn:    config.ClearDefaultWorkspaceFn,
 	})
 
 	// Generate and persist notify token for session change endpoint auth.

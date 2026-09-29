@@ -162,7 +162,7 @@ func (w *linkedWorktree) Remove(ctx context.Context, complete CaptureComplete) e
 		return err
 	}
 	return w.repo.locked(ctx, func(ctx context.Context) error {
-		_, err := w.repo.runner.Run(ctx, "worktree", "remove", abs)
+		_, err := w.repo.runner.Run(ctx, "worktree", "remove", "--force", abs)
 		return err
 	})
 }

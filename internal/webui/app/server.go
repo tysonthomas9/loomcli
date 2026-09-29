@@ -97,8 +97,9 @@ type Server struct {
 	jwksCleanup       func()                // nil if no JWKS cache
 
 	// Wrapped workspace lifecycle functions
-	wrappedCreateFn service.WorkspaceCreateFn
-	wrappedDeleteFn func(string) error
+	wrappedCreateFn          service.WorkspaceCreateFn
+	wrappedDeleteFn          func(string) error
+	wrappedConfirmedDeleteFn func(string, string) error
 
 	// Async workspace creation jobs
 	jobStore *svcimpl.WorkspaceJobStore

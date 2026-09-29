@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +15,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
+	loomworkspace "github.com/tysonthomas9/loomcli/internal/loomgit/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -28,6 +31,7 @@ var (
 
 	wsRemoveForce         bool
 	wsRemoveKeepWorktrees bool
+	wsRemoveFingerprint   string
 )
 
 var workspaceCmd = &cobra.Command{
@@ -98,6 +102,7 @@ func init() {
 
 	workspaceRemoveCmd.Flags().BoolVar(&wsRemoveForce, "force", false, "Remove even if worktrees are dirty")
 	workspaceRemoveCmd.Flags().BoolVar(&wsRemoveKeepWorktrees, "keep-worktrees", false, "Remove from config but don't delete git worktrees")
+	workspaceRemoveCmd.Flags().StringVar(&wsRemoveFingerprint, "confirm-fingerprint", "", "Confirm the exact work list printed by a previous remove attempt")
 
 	workspaceCmd.AddCommand(workspaceCreateCmd)
 	workspaceCmd.AddCommand(workspaceListCmd)
@@ -245,7 +250,7 @@ func runFleetWorkspaceList() error {
 }
 
 func runWorkspaceRemove(cmd *cobra.Command, args []string) {
-	deps := cli.GetDeps(cmd)
+	_ = cmd
 	wsName := args[0]
 	if err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		ws, err := h.Store.Workspaces().Get(ctx, wsName)
@@ -256,18 +261,26 @@ func runWorkspaceRemove(cmd *cobra.Command, args []string) {
 				return fmt.Errorf("workspace %q not found: %w", wsName, err)
 			}
 		}
-		local, err := workspaceLocalConfig(ctx, h, ws.Key)
+		if wsRemoveForce {
+			return fmt.Errorf("--force cannot confirm unseen work; use --confirm-fingerprint")
+		}
+		if wsRemoveKeepWorktrees {
+			return fmt.Errorf("--keep-worktrees cannot safely delete workspace records")
+		}
+		preview, err := serveadapter.BuildWorkspaceDeletePreviewFn(h.Store)(ws.Key)
 		if err != nil {
 			return err
 		}
-		if !wsRemoveKeepWorktrees {
-			checkRunningAgentsOrExit(local)
-			removeWorktrees(deps, local)
+		for _, item := range preview.Items {
+			fmt.Printf("%s %s %s %s (%d bytes)\n", item.Repo, item.Kind, item.Path, item.Detail, item.Size)
 		}
-		if err := h.Store.Workspaces().Delete(ctx, ws.Key); err != nil && !cmdstore.IsNotFound(err) {
-			return fmt.Errorf("delete workspace from fleet-db: %w", err)
-		}
-		if err := deleteWorkspaceLocalState(ws.Key); err != nil {
+		fmt.Printf("Delete fingerprint: %s\n", preview.Fingerprint)
+		fingerprint := wsRemoveFingerprint
+		if err := serveadapter.BuildWorkspaceDeleteConfirmedFn(h.Store)(ws.Key, fingerprint); err != nil {
+			var unsaved *loomworkspace.ErrUnsavedWork
+			if errors.As(err, &unsaved) {
+				return fmt.Errorf("%w; rerun with --confirm-fingerprint %s after reviewing this exact list", err, preview.Fingerprint)
+			}
 			return err
 		}
 		fmt.Printf("Workspace %q removed.\n", ws.Key)

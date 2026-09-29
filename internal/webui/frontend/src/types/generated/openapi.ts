@@ -176,6 +176,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/delete/preview": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List local work that workspace deletion would remove */
+    get: operations["previewWorkspaceDeletion"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/monitor/status": {
     parameters: {
       query?: never;
@@ -2982,6 +2999,17 @@ export interface components {
       depends_on_id: string;
       dep_type?: string;
     };
+    WorkspaceDeletePreview: {
+      fingerprint: string;
+      items: {
+        repo: string;
+        path: string;
+        kind: string;
+        detail?: string;
+        /** Format: int64 */
+        size?: number;
+      }[];
+    };
     WorkspaceResponse: {
       id: string;
       name: string;
@@ -3965,7 +3993,10 @@ export interface operations {
   deleteWorkspace: {
     parameters: {
       query?: never;
-      header?: never;
+      header: {
+        /** @description Fingerprint returned by the deletion preview */
+        "X-Loom-Delete-Fingerprint": string;
+      };
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
@@ -3989,6 +4020,29 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  previewWorkspaceDeletion: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Work list and confirmation fingerprint */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WorkspaceDeletePreview"];
+        };
       };
     };
   };

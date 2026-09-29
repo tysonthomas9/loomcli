@@ -133,6 +133,10 @@ func HandleClearDefaultWorkspace(svc service.WorkspaceService) http.HandlerFunc 
 func HandleWorkspaceDelete(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleWorkspaceDelete(svc)
 }
+
+func HandleWorkspaceDeletePreview(svc service.WorkspaceService) http.HandlerFunc {
+	return workspace.HandleWorkspaceDeletePreview(svc)
+}
 func HandleWorkspaceRename(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleWorkspaceRename(svc)
 }

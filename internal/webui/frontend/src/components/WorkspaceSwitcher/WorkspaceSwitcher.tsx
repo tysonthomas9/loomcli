@@ -13,12 +13,16 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 
 import type { WorkspaceSummary } from "@/api/workspace";
+import { deleteWorkspace, previewWorkspaceDeletion } from "@/hooks/api";
+import type { WorkspaceDeletePreview } from "@/api/workspace";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SearchInput } from "@/components/search";
 import {
   useRegisterEscapeLayer,
   useFocusTrap,
   useFocusReturn,
   LAYER_WORKSPACE_SWITCHER,
+  useToast,
 } from "@/hooks";
 
 import styles from "./WorkspaceSwitcher.module.css";
@@ -50,6 +54,11 @@ export function WorkspaceSwitcher({
 }: WorkspaceSwitcherProps) {
   const [search, setSearch] = useState("");
   const [highlightIndex, setHighlightIndex] = useState(0);
+  const [pendingDelete, setPendingDelete] = useState<{
+    workspace: WorkspaceSummary;
+    preview: WorkspaceDeletePreview;
+  } | null>(null);
+  const { showToast } = useToast();
   const dialogRef = useRef<HTMLDivElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
@@ -104,6 +113,39 @@ export function WorkspaceSwitcher({
     [onSelect, onClose],
   );
 
+  const handleStartDelete = useCallback(async () => {
+    const ws = filtered[highlightIndex];
+    if (!ws || ws.id === activeWorkspaceId) return;
+    try {
+      const preview = await previewWorkspaceDeletion(ws.id);
+      setPendingDelete({ workspace: ws, preview });
+      onClose();
+    } catch (error) {
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "Cannot preview workspace deletion",
+        { type: "error" },
+      );
+    }
+  }, [filtered, highlightIndex, activeWorkspaceId, onClose, showToast]);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!pendingDelete) return;
+    const { workspace, preview } = pendingDelete;
+    setPendingDelete(null);
+    try {
+      await deleteWorkspace(workspace.id, preview.fingerprint);
+      showToast(`Workspace ${workspace.name} removed`, { type: "success" });
+      window.location.reload();
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : "Workspace deletion failed",
+        { type: "error" },
+      );
+    }
+  }, [pendingDelete, showToast]);
+
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
       if (event.key === "ArrowDown") {
@@ -125,92 +167,133 @@ export function WorkspaceSwitcher({
     [filtered, highlightIndex, handleSelect],
   );
 
-  if (!isOpen) return null;
+  if (!isOpen && !pendingDelete) return null;
 
-  return createPortal(
-    <div
-      className={styles.overlay}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      onKeyDown={handleKeyDown}
-    >
-      <div
-        ref={dialogRef}
-        className={styles.dialog}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Switch workspace"
-      >
-        <div className={styles.searchWrapper}>
-          <SearchInput
-            value={search}
-            onChange={setSearch}
-            placeholder="Switch workspace..."
-            autoFocus
-            size="md"
-            aria-label="Search workspaces"
-          />
-        </div>
-        <div className={styles.results} ref={resultsRef}>
-          {filtered.length === 0 ? (
-            <div className={styles.emptyState}>No workspaces found</div>
-          ) : (
-            filtered.map((ws, index) => {
-              const isActive = ws.id === activeWorkspaceId;
-              const originalIndex = workspaces.indexOf(ws);
-              return (
-                <button
-                  key={ws.id}
-                  data-workspace-item
-                  className={[
-                    styles.item,
-                    index === highlightIndex ? styles.highlighted : "",
-                    isActive ? styles.active : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                  onClick={() => handleSelect(ws.id)}
-                  onMouseEnter={() => setHighlightIndex(index)}
-                >
-                  {isActive && (
-                    <span className={styles.activeIndicator}>&#10003;</span>
-                  )}
-                  <div className={styles.itemInfo}>
-                    <div className={styles.itemName}>{ws.name}</div>
-                    <div className={styles.itemPath}>{ws.path}</div>
-                  </div>
-                  <div className={styles.itemMeta}>
-                    <span className={styles.repoCount}>
-                      {ws.repo_count} repo{ws.repo_count !== 1 ? "s" : ""}
-                    </span>
-                    {originalIndex < 9 && (
-                      <span className={styles.shortcutHint}>
-                        {modSymbol}
-                        {shiftSymbol}
-                        {originalIndex + 1}
-                      </span>
-                    )}
-                  </div>
-                </button>
-              );
-            })
-          )}
-        </div>
-        {onAddWorkspace && (
-          <button
-            type="button"
-            className={styles.addButton}
-            onClick={() => {
-              onClose();
-              onAddWorkspace();
+  return (
+    <>
+      {isOpen &&
+        createPortal(
+          <div
+            className={styles.overlay}
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) onClose();
             }}
+            onKeyDown={handleKeyDown}
           >
-            + New Workspace
-          </button>
+            <div
+              ref={dialogRef}
+              className={styles.dialog}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Switch workspace"
+            >
+              <div className={styles.searchWrapper}>
+                <SearchInput
+                  value={search}
+                  onChange={setSearch}
+                  placeholder="Switch workspace..."
+                  autoFocus
+                  size="md"
+                  aria-label="Search workspaces"
+                />
+              </div>
+              <div className={styles.results} ref={resultsRef}>
+                {filtered.length === 0 ? (
+                  <div className={styles.emptyState}>No workspaces found</div>
+                ) : (
+                  filtered.map((ws, index) => {
+                    const isActive = ws.id === activeWorkspaceId;
+                    const originalIndex = workspaces.indexOf(ws);
+                    return (
+                      <button
+                        key={ws.id}
+                        data-workspace-item
+                        className={[
+                          styles.item,
+                          index === highlightIndex ? styles.highlighted : "",
+                          isActive ? styles.active : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                        onClick={() => handleSelect(ws.id)}
+                        onMouseEnter={() => setHighlightIndex(index)}
+                      >
+                        {isActive && (
+                          <span className={styles.activeIndicator}>
+                            &#10003;
+                          </span>
+                        )}
+                        <div className={styles.itemInfo}>
+                          <div className={styles.itemName}>{ws.name}</div>
+                          <div className={styles.itemPath}>{ws.path}</div>
+                        </div>
+                        <div className={styles.itemMeta}>
+                          <span className={styles.repoCount}>
+                            {ws.repo_count} repo{ws.repo_count !== 1 ? "s" : ""}
+                          </span>
+                          {originalIndex < 9 && (
+                            <span className={styles.shortcutHint}>
+                              {modSymbol}
+                              {shiftSymbol}
+                              {originalIndex + 1}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+              {onAddWorkspace && (
+                <button
+                  type="button"
+                  className={styles.addButton}
+                  onClick={() => {
+                    onClose();
+                    onAddWorkspace();
+                  }}
+                >
+                  + New Workspace
+                </button>
+              )}
+              {filtered[highlightIndex] &&
+                filtered[highlightIndex]?.id !== activeWorkspaceId && (
+                  <button
+                    type="button"
+                    className={styles.removeButton}
+                    onClick={handleStartDelete}
+                  >
+                    Remove {filtered[highlightIndex]?.name}
+                  </button>
+                )}
+            </div>
+          </div>,
+          document.body,
         )}
-      </div>
-    </div>,
-    document.body,
+      <ConfirmDialog
+        isOpen={pendingDelete !== null}
+        title="Remove workspace"
+        message={
+          <>
+            <p>
+              Remove &ldquo;{pendingDelete?.workspace.name}&rdquo; and its local
+              work?
+            </p>
+            <ul className={styles.deleteList}>
+              {pendingDelete?.preview.items?.map((item, index) => (
+                <li key={`${item.path}-${item.kind}-${index}`}>
+                  {item.repo}: {item.kind} {item.path} {item.detail ?? ""}
+                  {item.kind === "ignored" ? ` (${item.size ?? 0} bytes)` : ""}
+                </li>
+              ))}
+            </ul>
+          </>
+        }
+        confirmLabel="Remove"
+        variant="danger"
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
+    </>
   );
 }

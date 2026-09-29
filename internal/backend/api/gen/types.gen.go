@@ -3068,6 +3068,18 @@ type WorkspaceBackendPatchRequest struct {
 	Backend string `json:"backend"`
 }
 
+// WorkspaceDeletePreview defines model for WorkspaceDeletePreview.
+type WorkspaceDeletePreview struct {
+	Fingerprint string `json:"fingerprint"`
+	Items       []struct {
+		Detail *string `json:"detail,omitempty"`
+		Kind   string  `json:"kind"`
+		Path   string  `json:"path"`
+		Repo   string  `json:"repo"`
+		Size   *int64  `json:"size,omitempty"`
+	} `json:"items"`
+}
+
 // WorkspaceDesignFormatPatchRequest defines model for WorkspaceDesignFormatPatchRequest.
 type WorkspaceDesignFormatPatchRequest struct {
 	DesignFormat WorkspaceDesignFormatPatchRequestDesignFormat `json:"design_format"`
@@ -3188,6 +3200,12 @@ type SetDefaultWorkspaceJSONBody struct {
 // ReorderWorkspacesJSONBody defines parameters for ReorderWorkspaces.
 type ReorderWorkspacesJSONBody struct {
 	Order []string `json:"order"`
+}
+
+// DeleteWorkspaceParams defines parameters for DeleteWorkspace.
+type DeleteWorkspaceParams struct {
+	// XLoomDeleteFingerprint Fingerprint returned by the deletion preview
+	XLoomDeleteFingerprint string `json:"X-Loom-Delete-Fingerprint"`
 }
 
 // CreateAgentJSONBody defines parameters for CreateAgent.

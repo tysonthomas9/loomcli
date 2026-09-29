@@ -79,6 +79,13 @@ func WIP(workspace, lead, id string) (string, error) {
 	return hidden(workspace, []string{lead, id}, "wip", lead, id)
 }
 
+func WorkspacePrefix(workspace string) (string, error) {
+	if err := component(workspace); err != nil {
+		return "", err
+	}
+	return "refs/loom/ws/" + workspace + "/", nil
+}
+
 // TaskCopyPath is a workspace-scoped relative path keyed only by task-copy ID.
 func TaskCopyPath(workspace, taskCopy string) (string, error) {
 	name, err := hidden(workspace, []string{taskCopy}, "task-copy", taskCopy)

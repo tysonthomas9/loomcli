@@ -27,8 +27,12 @@ func TestWorkspaceDeleteFnDeletesStoreAndLocalState(t *testing.T) {
 		t.Fatalf("seed state cache: %v", err)
 	}
 
-	deleteFn := BuildWorkspaceDeleteFn(st)
-	if err := deleteFn("ALPHA"); err != nil {
+	deleteFn := BuildWorkspaceDeleteConfirmedFn(st)
+	preview, err := BuildWorkspaceDeletePreviewFn(st)("ALPHA")
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if err := deleteFn("ALPHA", preview.Fingerprint); err != nil {
 		t.Fatalf("delete workspace: %v", err)
 	}
 	if _, err := st.Workspaces().Get(ctx, "ALPHA"); !errors.Is(err, domain.ErrNotFound) {
@@ -58,8 +62,12 @@ func TestWorkspaceDeleteFnDoesNotClearStateWhenStoreDeleteFails(t *testing.T) {
 		t.Fatalf("seed state cache: %v", err)
 	}
 
-	deleteFn := BuildWorkspaceDeleteFn(st)
-	if err := deleteFn("MISSING"); !errors.Is(err, domain.ErrNotFound) {
+	deleteFn := BuildWorkspaceDeleteConfirmedFn(st)
+	preview, err := BuildWorkspaceDeletePreviewFn(st)("MISSING")
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if err := deleteFn("MISSING", preview.Fingerprint); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("delete err = %v, want ErrNotFound", err)
 	}
 	sc, err := bootstrap.LoadStateCache()

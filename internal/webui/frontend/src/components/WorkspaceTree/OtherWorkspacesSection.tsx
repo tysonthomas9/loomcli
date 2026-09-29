@@ -24,9 +24,11 @@ import {
 import {
   renameWorkspace,
   deleteWorkspace,
+  previewWorkspaceDeletion,
   reorderWorkspaces,
 } from "@/hooks/api";
 import type { WorkspaceSummary } from "@/api/workspace";
+import type { WorkspaceDeletePreview } from "@/api/workspace";
 import { useToast } from "@/hooks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
@@ -52,6 +54,8 @@ export function OtherWorkspacesSection({
   refetchWorkspaces,
 }: OtherWorkspacesSectionProps): JSX.Element | null {
   const { showToast } = useToast();
+  const [deletePreview, setDeletePreview] =
+    useState<WorkspaceDeletePreview | null>(null);
 
   // Filter to non-active workspaces (memoized for stable dep)
   const otherWorkspaces = useMemo(
@@ -245,30 +249,46 @@ export function OtherWorkspacesSection({
   );
 
   // Delete handlers
-  const handleStartRemove = useCallback(() => {
+  const handleStartRemove = useCallback(async () => {
     if (!contextMenu) return;
-    setPendingDeleteName(contextMenu.workspaceName);
-    setConfirmDeleteOpen(true);
-  }, [contextMenu]);
+    try {
+      const preview = await previewWorkspaceDeletion(
+        wsIdByName(contextMenu.workspaceName),
+      );
+      setDeletePreview(preview);
+      setPendingDeleteName(contextMenu.workspaceName);
+      setConfirmDeleteOpen(true);
+    } catch (err) {
+      showToast(
+        err instanceof Error
+          ? err.message
+          : "Cannot preview workspace deletion",
+        { type: "error" },
+      );
+    }
+  }, [contextMenu, wsIdByName, showToast]);
 
   const handleCancelDelete = useCallback(() => {
     setConfirmDeleteOpen(false);
     setPendingDeleteName(null);
+    setDeletePreview(null);
   }, []);
 
   const handleConfirmDelete = useCallback(() => {
-    if (!pendingDeleteName) return;
+    if (!pendingDeleteName || !deletePreview) return;
     if (deletionPendingRef.current) return;
     const nameToDelete = pendingDeleteName;
     const idToDelete = wsIdByName(pendingDeleteName);
+    const fingerprint = deletePreview.fingerprint;
     setConfirmDeleteOpen(false);
     setPendingDeleteName(null);
+    setDeletePreview(null);
     deletionPendingRef.current = true;
 
     deleteTimerRef.current = setTimeout(async () => {
       deleteTimerRef.current = null;
       try {
-        await deleteWorkspace(idToDelete);
+        await deleteWorkspace(idToDelete, fingerprint);
         refetchWorkspaces();
       } catch (err) {
         const message =
@@ -295,7 +315,13 @@ export function OtherWorkspacesSection({
         showToast("Deletion already in progress", { type: "info" });
       },
     });
-  }, [pendingDeleteName, refetchWorkspaces, showToast, wsIdByName]);
+  }, [
+    pendingDeleteName,
+    deletePreview,
+    refetchWorkspaces,
+    showToast,
+    wsIdByName,
+  ]);
 
   if (otherWorkspaces.length === 0) return null;
 
@@ -355,7 +381,19 @@ export function OtherWorkspacesSection({
       <ConfirmDialog
         isOpen={confirmDeleteOpen}
         title="Remove workspace"
-        message={`Are you sure you want to remove "${pendingDeleteName}"? Git worktrees will be kept on disk.`}
+        message={
+          <>
+            <p>Remove &ldquo;{pendingDeleteName}&rdquo; and its local work?</p>
+            <ul className={styles.deleteList}>
+              {deletePreview?.items?.map((item, index) => (
+                <li key={`${item.path}-${item.kind}-${index}`}>
+                  {item.repo}: {item.kind} {item.path} {item.detail ?? ""}
+                  {item.kind === "ignored" ? ` (${item.size ?? 0} bytes)` : ""}
+                </li>
+              ))}
+            </ul>
+          </>
+        }
         confirmLabel="Remove"
         variant="danger"
         onConfirm={handleConfirmDelete}
