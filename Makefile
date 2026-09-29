@@ -776,8 +776,8 @@ gate-clean:
 		GOCACHE="$$go_cache" GOMODCACHE="$$mod_cache" \
 		GOLANGCI_LINT_CACHE="$$lint_cache" \
 		GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
-		GIT_AUTHOR_NAME='Loom Gate' GIT_AUTHOR_EMAIL='loom-gate@example.invalid' \
-		GIT_COMMITTER_NAME='Loom Gate' GIT_COMMITTER_EMAIL='loom-gate@example.invalid' \
+		GIT_AUTHOR_NAME='Test User' GIT_AUTHOR_EMAIL='test@example.com' \
+		GIT_COMMITTER_NAME='Test User' GIT_COMMITTER_EMAIL='test@example.com' \
 		$(MAKE) gate
 
 # Extended quality gate — gate + self-contained e2e tests
