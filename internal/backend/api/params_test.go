@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/url"
 	"strings"
 	"testing"
@@ -343,6 +344,7 @@ func TestCreateParamsToCreateRequest_AllFields(t *testing.T) {
 		Dependencies:       []string{"loom-1", "loom-2"},
 		DueAt:              "2026-06-01",
 		DeferUntil:         "2026-05-01",
+		SourceRepo:         "loomcli",
 	}
 	req := createParamsToCreateRequest(params)
 	if req.Title != "Do the thing" {
@@ -402,6 +404,29 @@ func TestCreateParamsToCreateRequest_AllFields(t *testing.T) {
 	if req.DeferUntil == nil || *req.DeferUntil != "2026-05-01" {
 		t.Errorf("DeferUntil = %v", req.DeferUntil)
 	}
+	if req.SourceRepo == nil || *req.SourceRepo != "loomcli" {
+		t.Errorf("SourceRepo = %v", req.SourceRepo)
+	}
+
+	// Regression: source_repo must reach the POST /issues wire body alongside
+	// the generated contract fields.
+	raw, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := body["source_repo"]; got != "loomcli" {
+		t.Errorf("wire source_repo = %v, want loomcli", got)
+	}
+	if got := body["title"]; got != "Do the thing" {
+		t.Errorf("wire title = %v", got)
+	}
+	if got := body["parent"]; got != "epic-1" {
+		t.Errorf("wire parent = %v", got)
+	}
 }
 
 func TestCreateParamsToCreateRequest_MinimalFields(t *testing.T) {
@@ -428,6 +453,20 @@ func TestCreateParamsToCreateRequest_MinimalFields(t *testing.T) {
 	}
 	if req.EstimatedMinutes != nil {
 		t.Errorf("EstimatedMinutes should be nil")
+	}
+	if req.SourceRepo != nil {
+		t.Errorf("SourceRepo should be nil, got %v", req.SourceRepo)
+	}
+	raw, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := body["source_repo"]; ok {
+		t.Errorf("empty SourceRepo must be omitted from wire body: %s", raw)
 	}
 }
 

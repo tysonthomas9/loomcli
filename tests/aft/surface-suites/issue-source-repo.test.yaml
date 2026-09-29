@@ -1,0 +1,90 @@
+# Surface tier: source_repo has no mounted create control (the web UI create modal
+# never sends it), so these cases guard the CLI-over-server and API create wiring
+# directly. Promote when a UI surface lets an operator pick an issue's source repo.
+suite: issue-source-repo-surface
+classification: { area: issues, feature: issue-create, surface: api, purpose: contract }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+# The FleetDB create path rejects a source_repo that is not mapped to the workspace,
+# so resolve the primary workspace repo's source id (same rule as zz-task-runner).
+setup: |
+  curl -sf "$AFT_API_URL/api/workspaces/${AFT_WS:-E2E-WS}" > "$AFT_WORK_DIR/src-repo-ws.json"
+  python3 - "$AFT_WORK_DIR/src-repo-ws.json" > "$AFT_WORK_DIR/srcRepoId" <<'PY'
+  import json, sys
+  repos = (json.load(open(sys.argv[1])).get("data") or {}).get("repos") or []
+  assert repos, "workspace has no repos"
+  print(repos[0].get("source_repo_id") or repos[0]["name"], end="")
+  PY
+  test -s "$AFT_WORK_DIR/srcRepoId"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  # Surface-only because server-mode `loom data create` is a CLI-to-API contract
+  # with no browser scenario. Regression guard for LOOM-BUGS-33 / PR #782: the
+  # server-mode issue backend dropped --source-repo when building the create body.
+  # covers: loom data create --source-repo (LOOM_SERVER_URL); GET /api/workspaces/:ws/issues/:id source_repo
+  - name: server-mode loom data create keeps source_repo
+    intent: An agent creating an issue through the server-mode CLI keeps its source repo on readback
+    steps:
+      - run: |
+          set -e
+          src="$(cat "$AFT_WORK_DIR/srcRepoId")"
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" LOOM_SERVER_URL="$AFT_API_URL" \
+            "$AFT_LOOM_BIN" --workspace "${AFT_WS:-E2E-WS}" data create \
+            --title "source repo cli ${RUN_ID:-local}" --type task --priority 2 \
+            --source-repo "$src" --no-idempotency -o json \
+            > "$AFT_WORK_DIR/src-repo-cli-create.json" 2> "$AFT_WORK_DIR/src-repo-cli-create.err"
+          python3 - "$AFT_WORK_DIR/src-repo-cli-create.json" "$AFT_WORK_DIR/srcRepoCliIssueId" <<'PY'
+          import json, sys
+          issue = json.load(open(sys.argv[1]))
+          issue = issue.get("data", issue) if isinstance(issue, dict) else issue
+          issue_id = issue.get("id")
+          assert issue_id, issue
+          open(sys.argv[2], "w").write(issue_id)
+          PY
+          id="$(cat "$AFT_WORK_DIR/srcRepoCliIssueId")"
+          curl -sf "$AFT_API_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$id" > "$AFT_WORK_DIR/src-repo-cli-get.json"
+          python3 - "$AFT_WORK_DIR/src-repo-cli-get.json" "$src" <<'PY'
+          import json, sys
+          body = json.load(open(sys.argv[1]))
+          issue = body.get("data", body)
+          assert issue.get("source_repo") == sys.argv[2], ("source_repo", issue.get("source_repo"), sys.argv[2])
+          PY
+        intent: "An agent runs server-mode loom data create with --source-repo and an API readback shows the same source_repo"
+
+  # Surface-only because this is a standalone API create contract with no UI control;
+  # it pins the server side so a CLI-only regression is distinguishable from a server one.
+  # covers: POST /api/workspaces/:ws/issues source_repo; GET /api/workspaces/:ws/issues/:id source_repo
+  - name: api create keeps source_repo
+    intent: An API client creating an issue with source_repo reads the same source_repo back
+    steps:
+      - run: |
+          set -e
+          src="$(cat "$AFT_WORK_DIR/srcRepoId")"
+          python3 -c 'import json,sys; print(json.dumps({"title": sys.argv[1], "issue_type": "task", "priority": 2, "source_repo": sys.argv[2]}))' \
+            "source repo api ${RUN_ID:-local}" "$src" > "$AFT_WORK_DIR/src-repo-api-body.json"
+          code="$(curl -sS -o "$AFT_WORK_DIR/src-repo-api-create.json" -w "%{http_code}" \
+            -X POST "$AFT_API_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues" \
+            -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/src-repo-api-body.json")"
+          python3 - "$code" "$AFT_WORK_DIR/src-repo-api-create.json" "$src" "$AFT_WORK_DIR/srcRepoApiIssueId" <<'PY'
+          import json, sys
+          code, path, src, out = sys.argv[1:5]
+          body = json.load(open(path))
+          assert code == "201", (code, body)
+          issue = body.get("data") or {}
+          assert issue.get("id"), body
+          assert issue.get("source_repo") == src, ("source_repo", issue.get("source_repo"), src)
+          open(out, "w").write(issue["id"])
+          PY
+        intent: "An API client creates an issue with the workspace repo as its explicit source_repo"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/srcRepoApiIssueId")"
+          src="$(cat "$AFT_WORK_DIR/srcRepoId")"
+          curl -sf "$AFT_API_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$id" > "$AFT_WORK_DIR/src-repo-api-get.json"
+          python3 - "$AFT_WORK_DIR/src-repo-api-get.json" "$src" <<'PY'
+          import json, sys
+          body = json.load(open(sys.argv[1]))
+          issue = body.get("data", body)
+          assert issue.get("source_repo") == sys.argv[2], ("source_repo", issue.get("source_repo"), sys.argv[2])
+          PY
+        intent: "An API client reads the issue back and sees the same source_repo"
