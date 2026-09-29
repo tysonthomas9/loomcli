@@ -54,6 +54,11 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 	if req.Type != "empty" {
 		return service.WorkspaceCreateResult{}, fmt.Errorf("unsupported workspace type: %s", req.Type)
 	}
+	if plan, replay, err := loomworkspace.ReplayResult(ctx, service.WorkspaceKeyFromName(req.Name), req.RequestID); err != nil {
+		return service.WorkspaceCreateResult{}, err
+	} else if replay {
+		return service.WorkspaceCreateResult{WorkspaceID: service.WorkspaceKeyFromName(req.Name), WorkspacePath: plan.Path}, nil
+	}
 	if existing, err := s.Workspaces().GetByName(ctx, req.Name); err == nil && existing != nil {
 		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", req.Name), nil)
 	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
@@ -88,7 +93,7 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 	for _, repo := range resolved {
 		sources = append(sources, loomworkspace.Source{Name: repo.name, Path: repo.path})
 	}
-	session, err := loomworkspace.Ensure(ctx, key, trunk, wsDir, sources)
+	session, err := loomworkspace.EnsureRequest(ctx, key, req.Name, req.RequestID, trunk, wsDir, sources)
 	if err != nil {
 		cleanupWorkspaceRoot(wsPlan)
 		return service.WorkspaceCreateResult{}, err
@@ -157,9 +162,12 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 		rollbackLocal()
 		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace ready: %w", err)
 	}
+	if err := session.RowsWritten(ctx); err != nil {
+		_ = markCreationAttention(context.Background(), s, key, loomworkspace.Creation{Name: req.Name, Path: wsDir, Trunk: trunk}, err)
+		return service.WorkspaceCreateResult{}, fmt.Errorf("journal workspace rows: %w", err)
+	}
 	if err := session.Commit(ctx); err != nil {
-		rollbackStore()
-		rollbackLocal()
+		_ = markCreationAttention(context.Background(), s, key, loomworkspace.Creation{Name: req.Name, Path: wsDir, Trunk: trunk}, err)
 		return service.WorkspaceCreateResult{}, fmt.Errorf("record workspace repos: %w", err)
 	}
 
@@ -231,7 +239,7 @@ func addReposToStoreBackedWorkspace(ctx context.Context, s storepkg.Store, req s
 	}
 	var session *loomworkspace.Session
 	if len(localRecords) > 0 {
-		session, err = loomworkspace.BeginAttach(ctx, key, localRecords)
+		session, err = loomworkspace.BeginAttach(ctx, key, wsDir, localRecords)
 		if err != nil {
 			cleanupAttachedWorktrees(created)
 			cleanupClonedRepos(clonedRepos)
@@ -430,6 +438,11 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 	if len(cloneURLs) == 0 {
 		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.PathNotFound, "no clone URLs specified", nil)
 	}
+	if plan, replay, err := loomworkspace.ReplayResult(ctx, service.WorkspaceKeyFromName(req.Name), req.RequestID); err != nil {
+		return service.WorkspaceCreateResult{}, err
+	} else if replay {
+		return service.WorkspaceCreateResult{WorkspaceID: service.WorkspaceKeyFromName(req.Name), WorkspacePath: plan.Path}, nil
+	}
 	if existing, err := s.Workspaces().GetByName(ctx, req.Name); err == nil && existing != nil {
 		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", req.Name), nil)
 	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
@@ -451,6 +464,18 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return service.WorkspaceCreateResult{}, fmt.Errorf("check workspace key: %w", err)
 	}
+	session, err := loomworkspace.BeginCloneRequest(ctx, key, req.Name, req.RequestID, branch, wsDir)
+	if err != nil {
+		return service.WorkspaceCreateResult{}, err
+	}
+	committed := false
+	retainForRecovery := false
+	defer func() {
+		if !committed && !retainForRecovery {
+			_ = session.Rollback(context.Background())
+		}
+		_ = session.Close()
+	}()
 
 	if _, err := s.Workspaces().Create(ctx, storepkg.WorkspaceCreate{
 		Key:           key,
@@ -494,17 +519,12 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 	for _, repo := range repos {
 		sources = append(sources, loomworkspace.Source{Name: repo.Name, Path: repo.Path})
 	}
-	session, err := loomworkspace.AdoptClones(ctx, key, branch, sources)
-	if err != nil {
+	if err := session.AdoptClones(ctx, sources); err != nil {
 		cleanupCloneWorkspace(wsPlan, repos)
 		rollbackStore()
 		return service.WorkspaceCreateResult{}, err
 	}
-	defer func() { _ = session.Close() }()
 	rollbackClones := func() {
-		if err := session.Rollback(context.Background()); err != nil {
-			slog.Warn("failed to rollback clone workspace journal", "workspace", key, "err", err)
-		}
 		cleanupCloneWorkspace(wsPlan, repos)
 		rollbackStore()
 	}
@@ -534,10 +554,16 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 		rollbackClones()
 		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace ready: %w", err)
 	}
+	retainForRecovery = true
+	if err := session.RowsWritten(ctx); err != nil {
+		_ = markCreationAttention(context.Background(), s, key, loomworkspace.Creation{Name: req.Name, Path: wsDir, Trunk: branch}, err)
+		return service.WorkspaceCreateResult{}, fmt.Errorf("journal cloned workspace rows: %w", err)
+	}
 	if err := session.Commit(ctx); err != nil {
-		rollbackClones()
+		_ = markCreationAttention(context.Background(), s, key, loomworkspace.Creation{Name: req.Name, Path: wsDir, Trunk: branch}, err)
 		return service.WorkspaceCreateResult{}, fmt.Errorf("record cloned workspace repos: %w", err)
 	}
+	committed = true
 
 	return service.WorkspaceCreateResult{WorkspaceID: key, WorkspacePath: wsDir}, nil
 }

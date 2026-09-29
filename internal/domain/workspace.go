@@ -7,11 +7,12 @@ import "time"
 type WorkspaceState string
 
 const (
-	WorkspaceStateCreating     WorkspaceState = "creating"
-	WorkspaceStateCloning      WorkspaceState = "cloning"
-	WorkspaceStateInitializing WorkspaceState = "initializing"
-	WorkspaceStateReady        WorkspaceState = "ready"
-	WorkspaceStateError        WorkspaceState = "error"
+	WorkspaceStateCreating          WorkspaceState = "creating"
+	WorkspaceStateCloning           WorkspaceState = "cloning"
+	WorkspaceStateInitializing      WorkspaceState = "initializing"
+	WorkspaceStateReady             WorkspaceState = "ready"
+	WorkspaceStateError             WorkspaceState = "error"
+	WorkspaceStateAttentionRequired WorkspaceState = "attention_required"
 )
 
 // Workspace is the top-level container for a multi-repo project.

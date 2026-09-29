@@ -31,6 +31,17 @@ func TestWorkspaceRecordsCommitWithJournalEntry(t *testing.T) {
 				t.Fatalf("begin: created=%v err=%v", created, err)
 			}
 			record := loomgit.WorkspaceRepo{Workspace: "W1", Repo: "api", Trunk: "main", WorkspaceBranch: "loom/ws/W1/interactive/lead", BaseSHA: "abc"}
+			phaseStore := s.(interface {
+				Advance(context.Context, loomgit.JournalEntry, string, []byte, []loomgit.OutboxEvent) (loomgit.JournalEntry, error)
+			})
+			entry, err = phaseStore.Advance(ctx, entry, "checkouts_added", nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry, err = phaseStore.Advance(ctx, entry, "rows_written", nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if err := s.CommitWorkspace(ctx, entry, []loomgit.WorkspaceRepo{record, record}); err == nil {
 				t.Fatal("duplicate record commit succeeded")
 			}

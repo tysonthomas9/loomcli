@@ -205,6 +205,9 @@ func TestP18SecondWorktreeAddFailureRollsBackFirst(t *testing.T) {
 		t.Fatalf("retry after rollback: %v", err)
 	}
 	defer func() { _ = session.Close() }()
+	if err := session.RowsWritten(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	if err := session.Commit(context.Background()); err != nil {
 		t.Fatal(err)
 	}

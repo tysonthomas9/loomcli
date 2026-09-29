@@ -225,6 +225,9 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Fatalf("failed to open fleet-db store: %v", storeErr)
 	}
 	defer func() { _ = storeHandle.Close() }()
+	if err := workspacemgr.Reconcile(ctx, storeHandle.Store); err != nil {
+		log.Fatalf("reconcile workspace creations: %v", err)
+	}
 	startDriverExecutorIfEnabled(ctx, storeHandle.Store)
 	startStaleTaskSweeper(ctx, storeHandle.Store)
 	startOutboxDispatcher(ctx, storeHandle.Store)

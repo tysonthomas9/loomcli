@@ -8,6 +8,7 @@ import (
 
 // WorkspaceCreateRequest is the JSON body for POST /api/workspaces.
 type WorkspaceCreateRequest struct {
+	RequestID string   `json:"request_id,omitempty"` // stable identity for retried creation
 	Name      string   `json:"name"`
 	Type      string   `json:"type"`       // "empty", "clone", "template"
 	Repos     []string `json:"repos"`      // repo paths (for empty type)

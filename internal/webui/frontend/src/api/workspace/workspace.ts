@@ -83,6 +83,7 @@ export type WorkspaceLifecycleState =
   | "cloning"
   | "initializing"
   | "ready"
+  | "attention_required"
   | "error";
 
 export interface WorkspaceSummary {
@@ -235,6 +236,7 @@ export async function clearDefaultWorkspace(): Promise<WorkspaceData> {
 // ============= Workspace Creation =============
 
 export interface CreateWorkspaceRequest {
+  request_id?: string;
   name: string;
   type: "empty" | "clone" | "template";
   repos?: string[];

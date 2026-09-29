@@ -1,0 +1,8 @@
+name: killed workspace creation adopts its Git worktree
+task: P1.9
+git: [min, latest]
+fixture: empty
+when:
+  - go_check: workspace_creation_crash_adoption
+then:
+  - go_check: no_error
