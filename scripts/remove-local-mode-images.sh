@@ -9,7 +9,15 @@ shift 2
 for image in "$@"; do
     [[ $image == "$project"-*:latest ]] || continue
     "$engine" image inspect --format '{{.Id}}' "$image" >/dev/null 2>&1 || continue
-    if "$engine" ps -a --format '{{.Image}}' | grep -Fxq "$image"; then
+    used_images=$("$engine" ps -a --format '{{.Image}}') || exit 1
+    in_use=false
+    while IFS= read -r used_image; do
+        if [[ ${used_image##*/} == "$image" ]]; then
+            in_use=true
+            break
+        fi
+    done <<< "$used_images"
+    if [[ $in_use == true ]]; then
         echo "Keeping in-use image $image" >&2
         continue
     fi

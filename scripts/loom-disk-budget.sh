@@ -2,10 +2,27 @@
 # Called only by with-heavy-lock.sh while its machine-wide lock is held.
 set -euo pipefail
 
+lock_owner="$HOME/.cache/loom/heavy.lock/owner"
+if [[ ! ${LOOM_HEAVY_LOCK_HELD:-} =~ ^[0-9]+$ || $PPID != "$LOOM_HEAVY_LOCK_HELD" || ! -f $lock_owner ]]; then
+    echo "Disk cleanup requires the heavy-run lock" >&2
+    exit 1
+fi
+holder=
+IFS= read -r holder < "$lock_owner" || true
+if [[ $holder != "$LOOM_HEAVY_LOCK_HELD" ]]; then
+    echo "Disk cleanup requires the heavy-run lock" >&2
+    exit 1
+fi
+
 budget_kib=$((40 * 1024 * 1024))
 urgent_kib=$((20 * 1024 * 1024))
 log=${LOOM_DISK_CLEANUP_LOG:-$HOME/.cache/loom/cleanup.log}
 podman=${LOOM_DISK_PODMAN:-podman}
+podman_connection="podman-machine-default"
+
+podman_run() {
+    "$podman" --connection "$podman_connection" "$@"
+}
 
 free_kib() {
     if [[ -n ${LOOM_DISK_FREE_KIB_OVERRIDE:-} ]]; then
@@ -31,7 +48,7 @@ trim_go_cache() {
             size=$(du -sk "$file" | awk '{ print $1 * 1024 }') || continue
             rm -r -- "$file" || continue
         else
-            size=$(stat -f %z "$file" 2>/dev/null || stat -c %s "$file" 2>/dev/null) || continue
+            size=$(wc -c < "$file") || continue
             rm -f -- "$file" || continue
         fi
         if [[ ! -e $file ]]; then
@@ -44,8 +61,9 @@ trim_go_cache() {
 
 trim_images() {
     local ref short_ref id labels in_use newest_lab_kept=false
-    if ! command -v "$podman" >/dev/null 2>&1 || ! "$podman" info >/dev/null 2>&1; then
-        record "Podman: unavailable; image cleanup and fstrim skipped"
+    record "Podman: using connection $podman_connection"
+    if ! command -v "$podman" >/dev/null 2>&1 || ! podman_run info >/dev/null 2>&1; then
+        record "Podman: connection $podman_connection unavailable; image cleanup and fstrim skipped"
         return 1
     fi
     while IFS='|' read -r ref id; do
@@ -58,19 +76,19 @@ trim_images() {
         fi
         [[ ! $short_ref =~ ^loomcli-local-mode-(fleet-db|loom|loom-codex|loom-claude): ]] || continue
         [[ ${id#sha256:} =~ ^[a-f0-9]+$ ]] || continue
-        labels=$("$podman" image inspect --format '{{json .Labels}}' "$ref" 2>/dev/null) || continue
+        labels=$(podman_run image inspect --format '{{json .Labels}}' "$ref" 2>/dev/null) || continue
         [[ $labels != *loomcli-local-mode* ]] || continue
-        in_use=$("$podman" ps -a --no-trunc --format '{{.ImageID}}' 2>/dev/null) || return 1
+        in_use=$(podman_run ps -a --no-trunc --format '{{.ImageID}}' 2>/dev/null) || return 1
         if printf '%s\n' "$in_use" | grep -Fxq "${id#sha256:}" || printf '%s\n' "$in_use" | grep -Fxq "sha256:${id#sha256:}"; then
             record "Podman: kept in-use image $ref"
             continue
         fi
-        if "$podman" image rm "$ref" >/dev/null 2>&1; then
+        if podman_run image rm "$ref" >/dev/null 2>&1; then
             record "Podman: removed image $ref ($id)"
         else
             record "Podman: kept image $ref (in use or removal failed)"
         fi
-    done < <("$podman" image ls --sort created --no-trunc --format '{{.Repository}}:{{.Tag}}|{{.ID}}')
+    done < <(podman_run image ls --sort created --no-trunc --format '{{.Repository}}:{{.Tag}}|{{.ID}}')
     return 0
 }
 
