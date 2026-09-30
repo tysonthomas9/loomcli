@@ -127,6 +127,28 @@ func TestLocalTaskWorktreeResolverCreatesIsolatedTaskRunWorktree(t *testing.T) {
 	}
 }
 
+func TestEnsureRepoCheckout_MissingCheckoutDoesNotClone(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	if err := os.Mkdir(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, source, "init")
+	checkout := filepath.Join(root, "missing-checkout")
+	local := bootstrap.WorkspaceLocalState{
+		Path:  root,
+		Repos: map[string]string{"app": checkout},
+	}
+	_, err := (LocalTaskWorktreeResolver{}).ensureRepoCheckout(context.Background(), "TEST", local,
+		&domain.Repo{Name: "app", RemoteURL: source})
+	if err == nil || !strings.Contains(err.Error(), "missing-checkout") {
+		t.Fatalf("missing checkout error = %v", err)
+	}
+	if _, statErr := os.Stat(checkout); !os.IsNotExist(statErr) {
+		t.Fatalf("missing checkout was created: %v", statErr)
+	}
+}
+
 func gitCmd(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	_ = testGitOutput(t, dir, args...)

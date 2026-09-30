@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/taskcopy"
 	"github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
@@ -124,7 +125,8 @@ func (l StackLineageLookup) BaseRefForTask(ctx context.Context, workspaceKey, re
 	}
 	base, err := stacklineage.BaseBranchSliding(st, node, byTask)
 	if err != nil {
-		return "", false, err
+		return "", false, loomgit.NewError(loomgit.LineageUnresolved,
+			fmt.Sprintf("resolve lineage base for task %q", taskID), err)
 	}
 	return base, true, nil
 }
@@ -158,7 +160,8 @@ func findTaskStack(ctx context.Context, store stackstore.Store, workspaceKey, re
 	}
 	stacks, err := store.ListStacks(ctx, workspaceKey)
 	if err != nil {
-		return stacklineage.Stack{}, stacklineage.Node{}, nil, false, err
+		return stacklineage.Stack{}, stacklineage.Node{}, nil, false,
+			loomgit.NewError(loomgit.LineageUnresolved, "list task stacks", err)
 	}
 	var (
 		foundStack  stacklineage.Stack
@@ -172,7 +175,9 @@ func findTaskStack(ctx context.Context, store stackstore.Store, workspaceKey, re
 		}
 		nodes, err := store.ListNodes(ctx, workspaceKey, st.ID)
 		if err != nil {
-			return stacklineage.Stack{}, stacklineage.Node{}, nil, false, err
+			return stacklineage.Stack{}, stacklineage.Node{}, nil, false,
+				loomgit.NewError(loomgit.LineageUnresolved,
+					fmt.Sprintf("list nodes in stack %q", st.ID), err)
 		}
 		byTask := stacklineage.ByTask(nodes)
 		node, ok := byTask[taskID]
@@ -180,7 +185,9 @@ func findTaskStack(ctx context.Context, store stackstore.Store, workspaceKey, re
 			continue
 		}
 		if found {
-			return stacklineage.Stack{}, stacklineage.Node{}, nil, false, nil
+			return stacklineage.Stack{}, stacklineage.Node{}, nil, false,
+				loomgit.NewError(loomgit.LineageUnresolved,
+					fmt.Sprintf("task %q belongs to both stacks %q and %q", taskID, foundStack.ID, st.ID), nil)
 		}
 		foundStack, foundNode, foundByTask, found = st, node, byTask, true
 	}
@@ -404,26 +411,12 @@ func (r LocalTaskWorktreeResolver) selectRepo(ctx context.Context, workspaceKey 
 		return repos[0], nil
 	}
 	if len(selectors) > 0 {
-		return nil, fmt.Errorf("no workspace repo matches task repo selector %q", strings.Join(selectors, ", "))
+		return nil, loomgit.NewError(loomgit.RepoSelectionRequired,
+			fmt.Sprintf("no workspace repo matches task repo selector %q", strings.Join(selectors, ", ")), nil)
 	}
-
-	// No selector at all: the task carries no source_repo and no placement ref.
-	// repos was sorted by name above, so this picks the alphabetically first
-	// workspace repo, which is arbitrary — in a workspace holding both, a
-	// loomcli task is worked inside the fleet-db checkout and the diff lands
-	// against the wrong tree.
-	//
-	// Left as a fallback rather than promoted to an error on purpose: most
-	// issues currently arrive with no source_repo (the API-backend create path
-	// drops it), so failing here would stop dispatch outright the way an
-	// over-strict repo filter already has. Warn loudly enough to be auditable
-	// instead.
-	slog.WarnContext(ctx, "task has no repo selector; defaulting to the alphabetically first workspace repo",
-		"task", req.TaskID,
-		"workspace", workspaceKey,
-		"chosen_repo", repos[0].Name,
-		"candidates", strings.Join(repoNames(repos), ","))
-	return repos[0], nil
+	return nil, loomgit.NewError(loomgit.RepoSelectionRequired,
+		fmt.Sprintf("task %q in workspace %q needs a repo selector; candidates: %s",
+			req.TaskID, workspaceKey, strings.Join(repoNames(repos), ", ")), nil)
 }
 
 // repoNames renders a repo list for logging.
@@ -532,7 +525,7 @@ func repoBasename(value string) string {
 	return value
 }
 
-func (r LocalTaskWorktreeResolver) ensureRepoCheckout(ctx context.Context, workspaceKey string, local bootstrap.WorkspaceLocalState, repo *domain.Repo) (string, error) {
+func (r LocalTaskWorktreeResolver) ensureRepoCheckout(_ context.Context, _ string, local bootstrap.WorkspaceLocalState, repo *domain.Repo) (string, error) {
 	if repo == nil {
 		return "", fmt.Errorf("repo required: %w", domain.ErrInvalid)
 	}
@@ -552,16 +545,7 @@ func (r LocalTaskWorktreeResolver) ensureRepoCheckout(ctx context.Context, works
 	} else if !os.IsNotExist(err) {
 		return "", fmt.Errorf("stat repo %q path %s: %w", repo.Name, repoPath, err)
 	}
-	if strings.TrimSpace(repo.RemoteURL) == "" {
-		return "", fmt.Errorf("repo %q has no local checkout at %s and no remote URL to clone", repo.Name, repoPath)
-	}
-	if err := localworkspace.CloneRepoTo(ctx, repo.RemoteURL, repoPath); err != nil {
-		return "", err
-	}
-	if err := localworkspace.RememberRepoPath(workspaceKey, repo.Name, repoPath); err != nil {
-		return "", fmt.Errorf("remember repo path: %w", err)
-	}
-	return repoPath, nil
+	return "", fmt.Errorf("repo %q has no local checkout at %s", repo.Name, repoPath)
 }
 
 func isGitCheckout(path string) bool {
