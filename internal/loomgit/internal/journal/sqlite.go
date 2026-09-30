@@ -1,0 +1,209 @@
+package journal
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"net/url"
+	"path/filepath"
+
+	_ "modernc.org/sqlite"
+
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
+)
+
+type SQLite struct{ db *sql.DB }
+
+// OpenSQLite opens a host-local durable store. A separate SQLite connection
+// is safe in each process; all fences are checked by row updates.
+func OpenSQLite(path string) (*SQLite, error) {
+	if path == "" {
+		return nil, errors.New("journal path is required")
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	u := url.URL{Scheme: "file", Path: abs}
+	q := u.Query()
+	q.Add("_pragma", "busy_timeout(5000)")
+	q.Add("_pragma", "journal_mode(WAL)")
+	q.Add("_pragma", "foreign_keys(1)")
+	u.RawQuery = q.Encode()
+	db, err := sql.Open("sqlite", u.String())
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(4)
+	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS journal_entries (
+		id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE, operation TEXT NOT NULL,
+		phase TEXT NOT NULL, version INTEGER NOT NULL, fence INTEGER NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS journal_results (
+		request_id TEXT PRIMARY KEY, result BLOB NOT NULL,
+		FOREIGN KEY(request_id) REFERENCES journal_entries(request_id)
+	);
+	CREATE TABLE IF NOT EXISTS journal_leases (
+		scope TEXT PRIMARY KEY, owner TEXT NOT NULL, fence INTEGER NOT NULL, expires_at INTEGER NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS event_outbox (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, entry_id TEXT NOT NULL REFERENCES journal_entries(id),
+		kind TEXT NOT NULL, payload BLOB, delivered INTEGER NOT NULL DEFAULT 0
+	);
+	CREATE INDEX IF NOT EXISTS event_outbox_pending ON event_outbox(delivered, id);`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open journal: %w", err)
+	}
+	return &SQLite{db: db}, nil
+}
+func (s *SQLite) Close() error { return s.db.Close() }
+func scanEntry(row interface{ Scan(...any) error }) (loomgit.JournalEntry, error) {
+	var e loomgit.JournalEntry
+	err := row.Scan(&e.ID, &e.RequestID, &e.Operation, &e.Phase, &e.Version, &e.Fence, &e.Result)
+	if errors.Is(err, sql.ErrNoRows) {
+		return e, ErrNotFound
+	}
+	return e, err
+}
+
+const entryColumns = `j.id, j.request_id, j.operation, j.phase, j.version, j.fence, r.result`
+const entryFrom = ` FROM journal_entries j LEFT JOIN journal_results r ON r.request_id = j.request_id`
+
+func (s *SQLite) Begin(ctx context.Context, requestID, operation string) (loomgit.JournalEntry, bool, error) {
+	if requestID == "" || operation == "" {
+		return loomgit.JournalEntry{}, false, errors.New("request ID and operation are required")
+	}
+	r, err := s.db.ExecContext(ctx, `INSERT INTO journal_entries (id, request_id, operation, phase, version, fence) VALUES (?, ?, ?, 'started', 1, 1) ON CONFLICT(request_id) DO NOTHING`, requestID, requestID, operation)
+	if err != nil {
+		return loomgit.JournalEntry{}, false, err
+	}
+	n, err := r.RowsAffected()
+	if err != nil {
+		return loomgit.JournalEntry{}, false, err
+	}
+	e, err := scanEntry(s.db.QueryRowContext(ctx, `SELECT `+entryColumns+entryFrom+` WHERE j.request_id = ?`, requestID))
+	return e, n == 1, err
+}
+func (s *SQLite) Get(ctx context.Context, id string) (loomgit.JournalEntry, error) {
+	return scanEntry(s.db.QueryRowContext(ctx, `SELECT `+entryColumns+entryFrom+` WHERE j.id = ?`, id))
+}
+func (s *SQLite) OpenEntries(ctx context.Context) ([]loomgit.JournalEntry, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+entryColumns+entryFrom+` WHERE j.phase <> 'done' ORDER BY j.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []loomgit.JournalEntry
+	for rows.Next() {
+		e, err := scanEntry(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+func (s *SQLite) Advance(ctx context.Context, prior loomgit.JournalEntry, phase string, result []byte, events []loomgit.OutboxEvent) (loomgit.JournalEntry, error) {
+	if phase == "" {
+		return loomgit.JournalEntry{}, errors.New("phase is required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return loomgit.JournalEntry{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	r, err := tx.ExecContext(ctx, `UPDATE journal_entries SET phase = ?, version = version + 1 WHERE id = ? AND version = ? AND fence = ? AND phase <> 'done'`, phase, prior.ID, prior.Version, prior.Fence)
+	if err != nil {
+		return loomgit.JournalEntry{}, err
+	}
+	n, err := r.RowsAffected()
+	if err != nil {
+		return loomgit.JournalEntry{}, err
+	}
+	if n == 0 {
+		return loomgit.JournalEntry{}, ErrStale
+	}
+	if phase == "done" {
+		if result == nil {
+			result = []byte{}
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO journal_results(request_id, result) VALUES (?, ?)`, prior.RequestID, result); err != nil {
+			return loomgit.JournalEntry{}, err
+		}
+	}
+	for _, ev := range events {
+		if ev.Kind == "" {
+			return loomgit.JournalEntry{}, errors.New("event kind is required")
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO event_outbox(entry_id, kind, payload) VALUES (?, ?, ?)`, prior.ID, ev.Kind, ev.Payload); err != nil {
+			return loomgit.JournalEntry{}, err
+		}
+	}
+	e, err := scanEntry(tx.QueryRowContext(ctx, `SELECT `+entryColumns+entryFrom+` WHERE j.id = ?`, prior.ID))
+	if err != nil {
+		return e, err
+	}
+	if err = tx.Commit(); err != nil {
+		return loomgit.JournalEntry{}, err
+	}
+	return e, nil
+}
+func (s *SQLite) Takeover(ctx context.Context, prior loomgit.JournalEntry) (loomgit.JournalEntry, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return loomgit.JournalEntry{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	r, err := tx.ExecContext(ctx, `UPDATE journal_entries SET fence = fence + 1, version = version + 1 WHERE id = ? AND version = ? AND fence = ? AND phase <> 'done'`, prior.ID, prior.Version, prior.Fence)
+	if err != nil {
+		return loomgit.JournalEntry{}, err
+	}
+	n, err := r.RowsAffected()
+	if err != nil {
+		return loomgit.JournalEntry{}, err
+	}
+	if n == 0 {
+		return loomgit.JournalEntry{}, ErrStale
+	}
+	e, err := scanEntry(tx.QueryRowContext(ctx, `SELECT `+entryColumns+entryFrom+` WHERE j.id = ?`, prior.ID))
+	if err != nil {
+		return e, err
+	}
+	if err := tx.Commit(); err != nil {
+		return loomgit.JournalEntry{}, err
+	}
+	return e, nil
+}
+func (s *SQLite) PendingEvents(ctx context.Context) ([]loomgit.OutboxEvent, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, entry_id, kind, payload, delivered FROM event_outbox WHERE delivered = 0 ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []loomgit.OutboxEvent
+	for rows.Next() {
+		var e loomgit.OutboxEvent
+		if err := rows.Scan(&e.ID, &e.EntryID, &e.Kind, &e.Payload, &e.Delivered); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+func (s *SQLite) MarkDelivered(ctx context.Context, id int64) error {
+	r, err := s.db.ExecContext(ctx, `UPDATE event_outbox SET delivered = 1 WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, err := r.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+var _ loomgit.Store = (*SQLite)(nil)
