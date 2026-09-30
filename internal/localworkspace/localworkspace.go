@@ -69,6 +69,39 @@ func TaskRunWorktreePath(workspacePath, repoName, taskRunID string) (string, err
 	return target, nil
 }
 
+// TaskCopyPath names a distinct checkout for every attempt of a task run.
+func TaskCopyPath(workspacePath, repoName, attemptID string) (string, error) {
+	if strings.TrimSpace(workspacePath) == "" || strings.TrimSpace(repoName) == "" ||
+		strings.TrimSpace(attemptID) == "" || safePathSegment(attemptID) != attemptID {
+		return "", fmt.Errorf("invalid task copy path")
+	}
+	root, err := filepath.Abs(workspacePath)
+	if err != nil {
+		return "", err
+	}
+	target, err := filepath.Abs(filepath.Join(root, ".loom", "task-copies", safePathSegment(repoName), attemptID))
+	if err != nil {
+		return "", err
+	}
+	if !PathContains(root, target) || root == target {
+		return "", fmt.Errorf("task copy path escapes workspace: %s", target)
+	}
+	return target, nil
+}
+
+// ResolveTaskBase refreshes the selected branch and returns its exact commit.
+func ResolveTaskBase(repoPath, remote, branch string) (string, error) {
+	ref, err := resolveFreshBaseRef(repoPath, remote, branch)
+	if err != nil {
+		return "", err
+	}
+	if ref == "" {
+		ref = "HEAD"
+	}
+	sha, err := runGit(context.Background(), repoPath, "rev-parse", "--verify", ref+"^{commit}")
+	return strings.TrimSpace(sha), err
+}
+
 // PRReviewWorktreePath returns a fresh review checkout path under the PR's
 // directory. reviewID must be unique for each review attempt.
 func PRReviewWorktreePath(workspacePath, repoName string, prNumber int, reviewID string) (string, error) {

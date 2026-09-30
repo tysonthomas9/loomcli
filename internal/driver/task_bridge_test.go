@@ -17,6 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -38,6 +39,22 @@ func TestTaskRunnerEnvAPIBaseURL(t *testing.T) {
 	}
 	if !slices.Equal(withURL[:len(legacy)], legacy) {
 		t.Fatalf("APIBaseURL changed the legacy env prefix:\n%v\n%v", withURL[:len(legacy)], legacy)
+	}
+}
+
+func TestTaskCopyCreationFailureIsClassified(t *testing.T) {
+	result := localWorktreeResolutionFailure(loomgit.NewError(loomgit.TaskCopyCreateFailed, "checkout exists", nil))
+	if result.ErrorClass != string(loomgit.TaskCopyCreateFailed) || result.RuntimeMetadata[ErrorCodeOutputKey] != result.ErrorClass {
+		t.Fatalf("task copy failure = %+v", result)
+	}
+}
+
+func TestFreshTaskCopyBaseReachesLocalRunner(t *testing.T) {
+	req := hostBridgeTaskExecRequest()
+	req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
+	env := (HostBridgeTaskExecutor{taskCopyBaseSHA: "base-sha"}).taskRunnerEnv(req, "{}")
+	if !envContains(env, "LOOM_TASK_COPY_FRESH=1") || !envContains(env, "LOOM_TASK_COPY_BASE_SHA=base-sha") {
+		t.Fatalf("fresh copy runner env = %v", env)
 	}
 }
 
@@ -154,6 +171,35 @@ func TestHostBridgeTaskExecutorFreezesDespiteLocalEdit(t *testing.T) {
 	}
 	if artifact.DurableStatus != "finalized" || artifact.ContentHash == "" {
 		t.Fatalf("artifact = %+v, want finalized patch artifact despite conflict", artifact)
+	}
+}
+
+func TestBridgeRetryUsesDistinctFreezeRequestAndPatchArtifact(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	repo := newPatchBackRepo(t)
+	base := repo.commitFile("file.txt", "old\n", "base")
+	e := HostBridgeTaskExecutor{Store: st, WorktreePath: repo.dir}
+	request := hostBridgeTaskExecRequest()
+	var heads []string
+	for attempt, content := range []string{"first", "second"} {
+		request.SchedulerAttempt = attempt
+		patch := []byte("diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+" + content + "\n")
+		got, err := e.finalizeAndFreezePatch(ctx, request, bridgeTaskRunnerResult{PatchBaseRef: base}, patch,
+			TaskExecResult{Status: domain.TaskRunCompleted})
+		if err != nil || got.ErrorClass != "" || got.RuntimeMetadata["revision"] != string(rune('1'+attempt)) {
+			t.Fatalf("attempt %d freeze = %+v, %v", attempt+1, got, err)
+		}
+		heads = append(heads, got.RuntimeMetadata["revision_head_sha"])
+	}
+	if common := strings.TrimSpace(repo.git("merge-base", heads[0], heads[1])); common != base {
+		t.Fatalf("retry revision includes first attempt: common ancestor %s, want base %s", common, base)
+	}
+	if _, err := st.Artifacts().Get(ctx, request.WorkspaceKey, "patch-"+request.TaskRunID); err != nil {
+		t.Fatalf("first patch artifact lost: %v", err)
+	}
+	if _, err := st.Artifacts().Get(ctx, request.WorkspaceKey, "patch-"+taskCopyAttemptID(request.TaskRunID, 1)); err != nil {
+		t.Fatalf("retry patch artifact missing: %v", err)
 	}
 }
 

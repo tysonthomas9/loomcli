@@ -33,6 +33,14 @@ func TestTaskRunRetryBackoff(t *testing.T) {
 	}
 }
 
+func TestRetryCarriesPreviousAttemptID(t *testing.T) {
+	claimed := &domain.TaskRun{TaskRunID: "run-1", RuntimeMetadata: map[string]string{"scheduler_attempt": "1", "attempt_id": "run-1-a1"}}
+	req := taskExecRequest(claimed, executeClaimedTaskRunOptions{}, claimedTaskRunRefs{})
+	if req.SchedulerAttempt != 1 || req.PreviousAttemptID != "run-1-a1" || taskCopyAttemptID(req.TaskRunID, req.SchedulerAttempt) != "run-1-a2" {
+		t.Fatalf("retry request = %+v", req)
+	}
+}
+
 func TestRequeueClaimedTaskRunSetsNextEligibleAt(t *testing.T) {
 	ctx := t.Context()
 	s := memstore.New()

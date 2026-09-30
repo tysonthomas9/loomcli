@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -81,6 +84,46 @@ func TestLocalTaskWorktreeResolverCreatesIsolatedTaskRunWorktree(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(resolved.Path, "src", "app.js")); err != nil {
 		t.Fatalf("resolved worktree missing source file: %v", err)
+	}
+	if got := strings.TrimSpace(testGitOutput(t, repoPath, "rev-parse", "refs/loom/ws/TEST/attempt/"+resolved.AttemptID+"/base")); got != head {
+		t.Fatalf("attempt base ref = %s, want %s", got, head)
+	}
+	gitCmd(t, resolved.Path, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "--allow-empty", "-m", "attempt one")
+	firstHead := strings.TrimSpace(testGitOutput(t, resolved.Path, "rev-parse", "HEAD"))
+	gitCmd(t, repoPath, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "--allow-empty", "-m", "trunk advanced")
+	retry, err := (LocalTaskWorktreeResolver{Store: st}).ResolveTaskWorktree(ctx, TaskExecRequest{
+		WorkspaceKey: "TEST", TaskRunID: "task/run:1", TaskID: "TEST-1",
+		SchedulerAttempt: 1, PreviousAttemptID: resolved.AttemptID,
+	}, t.TempDir())
+	if err != nil {
+		t.Fatalf("retry ResolveTaskWorktree: %v", err)
+	}
+	if retry.Path == resolved.Path || retry.AttemptID == resolved.AttemptID || retry.BaseSHA != head {
+		t.Fatalf("retry copy = %+v, want distinct copy at original base %s", retry, head)
+	}
+	if got := strings.TrimSpace(testGitOutput(t, retry.Path, "rev-parse", "HEAD")); got != head {
+		t.Fatalf("retry HEAD = %s, want original base %s", got, head)
+	}
+	if got := strings.TrimSpace(testGitOutput(t, resolved.Path, "rev-parse", "HEAD")); got != firstHead {
+		t.Fatalf("first attempt changed: %s -> %s", firstHead, got)
+	}
+	if got := strings.TrimSpace(testGitOutput(t, repoPath, "rev-parse", "refs/loom/ws/TEST/attempt/"+retry.AttemptID+"/base")); got != head {
+		t.Fatalf("retry base ref = %s, want %s", got, head)
+	}
+	path, err := localworkspace.TaskCopyPath(workspacePath, "app", taskCopyAttemptID("task/run:1", 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err = (LocalTaskWorktreeResolver{Store: st}).ResolveTaskWorktree(ctx, TaskExecRequest{
+		WorkspaceKey: "TEST", TaskRunID: "task/run:1", TaskID: "TEST-1",
+		SchedulerAttempt: 2, PreviousAttemptID: retry.AttemptID,
+	}, t.TempDir())
+	var coded *loomgit.Error
+	if !errors.As(err, &coded) || coded.Code() != string(loomgit.TaskCopyCreateFailed) {
+		t.Fatalf("existing task copy error = %v, want task_copy_create_failed", err)
 	}
 }
 

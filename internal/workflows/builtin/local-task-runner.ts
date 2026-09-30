@@ -123,9 +123,11 @@ export async function run(ctx = {}) {
   const stackBaseRef = stringValue(process.env.LOOM_TASK_RUN_BASE_REF);
   const stackId = stringValue(process.env.LOOM_TASK_RUN_STACK_ID);
 
-  const isolated = stacked ? null : await setupIsolatedWorktree(worktree, taskRunId, logs);
+  const freshCopy = booleanValue(process.env.LOOM_TASK_COPY_FRESH);
+  const isolated = (stacked || freshCopy) ? null : await setupIsolatedWorktree(worktree, taskRunId, logs);
   const execWorktree = isolated ? isolated.path : worktree;
-  const baseRef = stacked ? stackBaseRef : (isolated ? isolated.base : "");
+  const baseRef = freshCopy ? stringValue(process.env.LOOM_TASK_COPY_BASE_SHA) :
+    (stacked ? stackBaseRef : (isolated ? isolated.base : ""));
   if (stacked) {
     logs.push("stacked mode: running in place at " + worktree + " (base " + (stackBaseRef || "?") + "), pushing " + (stackBranch || "?"));
   }

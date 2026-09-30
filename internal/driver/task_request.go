@@ -79,26 +79,28 @@ type TaskRunWorkerOptions struct {
 }
 
 type TaskExecRequest struct {
-	WorkspaceKey     string                  `json:"workspace_key"`
-	DriverRunID      string                  `json:"driver_run_id"`
-	DriverStepID     string                  `json:"driver_step_id,omitempty"`
-	TaskRunID        string                  `json:"task_run_id"`
-	TaskID           string                  `json:"task_id"`
-	WorkerProfileID  string                  `json:"worker_profile_id,omitempty"`
-	Runner           string                  `json:"runner,omitempty"`
-	RunnerRef        string                  `json:"runner_ref,omitempty"`
-	RunnerKind       string                  `json:"runner_kind,omitempty"`
-	RunnerEntrypoint string                  `json:"runner_entrypoint,omitempty"`
-	RunnerVersionID  string                  `json:"runner_driver_version_id,omitempty"`
-	RunnerTrustLevel domain.DriverTrustLevel `json:"runner_trust_level,omitempty"`
-	ProviderProfile  string                  `json:"provider_profile,omitempty"`
-	ParentSessionID  string                  `json:"parent_session_id,omitempty"`
-	NodeID           string                  `json:"node_id,omitempty"`
-	LeaseID          string                  `json:"lease_id,omitempty"`
-	LeaseToken       string                  `json:"lease_token,omitempty"`
-	FencingToken     int64                   `json:"fencing_token,omitempty"`
-	RunnerPlacement  domain.TaskRunPlacement `json:"runner_placement,omitempty"`
-	SandboxPlacement domain.TaskRunPlacement `json:"sandbox_placement,omitempty"`
+	WorkspaceKey      string                  `json:"workspace_key"`
+	DriverRunID       string                  `json:"driver_run_id"`
+	DriverStepID      string                  `json:"driver_step_id,omitempty"`
+	TaskRunID         string                  `json:"task_run_id"`
+	SchedulerAttempt  int                     `json:"scheduler_attempt,omitempty"`
+	PreviousAttemptID string                  `json:"previous_attempt_id,omitempty"`
+	TaskID            string                  `json:"task_id"`
+	WorkerProfileID   string                  `json:"worker_profile_id,omitempty"`
+	Runner            string                  `json:"runner,omitempty"`
+	RunnerRef         string                  `json:"runner_ref,omitempty"`
+	RunnerKind        string                  `json:"runner_kind,omitempty"`
+	RunnerEntrypoint  string                  `json:"runner_entrypoint,omitempty"`
+	RunnerVersionID   string                  `json:"runner_driver_version_id,omitempty"`
+	RunnerTrustLevel  domain.DriverTrustLevel `json:"runner_trust_level,omitempty"`
+	ProviderProfile   string                  `json:"provider_profile,omitempty"`
+	ParentSessionID   string                  `json:"parent_session_id,omitempty"`
+	NodeID            string                  `json:"node_id,omitempty"`
+	LeaseID           string                  `json:"lease_id,omitempty"`
+	LeaseToken        string                  `json:"lease_token,omitempty"`
+	FencingToken      int64                   `json:"fencing_token,omitempty"`
+	RunnerPlacement   domain.TaskRunPlacement `json:"runner_placement,omitempty"`
+	SandboxPlacement  domain.TaskRunPlacement `json:"sandbox_placement,omitempty"`
 	// Input is the task-run payload delivered verbatim to the runner via
 	// LOOM_TASK_RUN_REQUEST_JSON. Optional (omitempty) for back-compat.
 	Input json.RawMessage `json:"input,omitempty"`
@@ -651,9 +653,13 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 	stopHeartbeat := startClaimedTaskRunHeartbeat(ctx, s, claimed, opts, refs)
 	defer stopHeartbeat()
 
-	execResult, execErr := executor.ExecuteTask(ctx, taskExecRequest(claimed, opts, refs))
+	req := taskExecRequest(claimed, opts, refs)
+	execResult, execErr := executor.ExecuteTask(ctx, req)
 	completion := normalizeTaskExecCompletion(execResult, execErr)
 	metadata := taskExecRuntimeMetadata(execResult, refs)
+	if isLocalTaskRunner(req) {
+		metadata["attempt_id"] = taskCopyAttemptID(req.TaskRunID, req.SchedulerAttempt)
+	}
 	if opts.DeferCompletion && completion.Status == domain.TaskRunCompleted {
 		return deferClaimedTaskRunCompletion(ctx, s, claimed, opts, execResult, completion, metadata)
 	}
@@ -745,27 +751,29 @@ func startClaimedTaskRunHeartbeat(ctx context.Context, s store.Store, claimed *d
 
 func taskExecRequest(claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, refs claimedTaskRunRefs) TaskExecRequest {
 	return TaskExecRequest{
-		WorkspaceKey:     refs.WorkspaceKey,
-		DriverRunID:      refs.DriverRunID,
-		DriverStepID:     refs.DriverStepID,
-		TaskRunID:        claimed.TaskRunID,
-		TaskID:           refs.TaskID,
-		WorkerProfileID:  claimed.WorkerProfileID,
-		Runner:           refs.Runner,
-		RunnerRef:        refs.RunnerRef,
-		RunnerKind:       refs.RunnerKind,
-		RunnerEntrypoint: refs.RunnerEntrypoint,
-		RunnerVersionID:  refs.RunnerVersionID,
-		RunnerTrustLevel: refs.RunnerTrustLevel,
-		ProviderProfile:  refs.ProviderProfile,
-		ParentSessionID:  refs.ParentSessionID,
-		NodeID:           claimed.NodeID,
-		LeaseID:          claimed.LeaseID,
-		LeaseToken:       opts.LeaseToken,
-		FencingToken:     claimed.FencingToken,
-		RunnerPlacement:  claimed.RunnerPlacement,
-		SandboxPlacement: claimed.SandboxPlacement,
-		Input:            claimed.Input,
+		WorkspaceKey:      refs.WorkspaceKey,
+		DriverRunID:       refs.DriverRunID,
+		DriverStepID:      refs.DriverStepID,
+		TaskRunID:         claimed.TaskRunID,
+		SchedulerAttempt:  taskRunAttempt(claimed),
+		PreviousAttemptID: claimed.RuntimeMetadata["attempt_id"],
+		TaskID:            refs.TaskID,
+		WorkerProfileID:   claimed.WorkerProfileID,
+		Runner:            refs.Runner,
+		RunnerRef:         refs.RunnerRef,
+		RunnerKind:        refs.RunnerKind,
+		RunnerEntrypoint:  refs.RunnerEntrypoint,
+		RunnerVersionID:   refs.RunnerVersionID,
+		RunnerTrustLevel:  refs.RunnerTrustLevel,
+		ProviderProfile:   refs.ProviderProfile,
+		ParentSessionID:   refs.ParentSessionID,
+		NodeID:            claimed.NodeID,
+		LeaseID:           claimed.LeaseID,
+		LeaseToken:        opts.LeaseToken,
+		FencingToken:      claimed.FencingToken,
+		RunnerPlacement:   claimed.RunnerPlacement,
+		SandboxPlacement:  claimed.SandboxPlacement,
+		Input:             claimed.Input,
 	}
 }
 

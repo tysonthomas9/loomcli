@@ -131,6 +131,8 @@ const ENV_KEYS = [
   "LOOM_TASK_RUN_STACK_ID",
   "LOOM_TASK_RUN_OUTPUT_BRANCH",
   "LOOM_TASK_RUN_BASE_REF",
+  "LOOM_TASK_COPY_FRESH",
+  "LOOM_TASK_COPY_BASE_SHA",
   "LOOM_MAX_BUDGET_USD",
   "LOOM_AGENT_EFFORT",
   "LOOM_CLAUDE_EFFORT",
@@ -835,6 +837,23 @@ describe("local-task-runner success", () => {
 });
 
 describe("local-task-runner isolated worktree", () => {
+  it("runs in a fresh task copy and reports its recorded base", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_TASK_COPY_FRESH = "1";
+    process.env.LOOM_TASK_COPY_BASE_SHA = execFileSync("git", ["rev-parse", "HEAD"], { cwd: worktree }).toString().trim();
+    process.env.FAKE_WRITE_FILE = "task-copy-edit.txt";
+    const out = await run();
+    assert.equal(out.status, "completed");
+    assert.equal(out.base_ref, process.env.LOOM_TASK_COPY_BASE_SHA);
+    assert.equal(out.runtimeMetadata.exec_worktree_path, worktree);
+    assert.ok(fs.existsSync(path.join(worktree, "task-copy-edit.txt")));
+    assert.ok(out.patch.includes("task-copy-edit.txt"));
+    const worktrees = execFileSync("git", ["worktree", "list"], { cwd: worktree }).toString().trim().split("\n");
+    assert.equal(worktrees.length, 1);
+  });
+
   it("runs the CLI in an isolated worktree, leaving the host clean and returning base_ref=HEAD", async () => {
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
     process.env.LOOM_WORKTREE_PATH = worktree;
