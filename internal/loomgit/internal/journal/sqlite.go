@@ -83,6 +83,10 @@ func OpenSQLite(path string) (*SQLite, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("open driver changes: %w", err)
 	}
+	if err := createLocalLineageSchema(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open local lineage: %w", err)
+	}
 	if err := createRevisionCompleteness(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("open revision completeness: %w", err)
