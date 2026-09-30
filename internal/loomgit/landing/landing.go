@@ -53,6 +53,7 @@ func LocalDependents(ctx context.Context, workspace, change string) ([]Dependent
 type Options struct {
 	Dependents func(context.Context, string, string) ([]Dependent, error)
 	Restack    func(context.Context, journal.RestackOffer, Forge) (int, error)
+	Forge      Forge
 }
 
 type Forge interface {
@@ -72,7 +73,7 @@ func RunOnce(ctx context.Context) error {
 }
 
 func RunOnceWithOptions(ctx context.Context, options Options) error {
-	return RunAtWithOptions(ctx, filepath.Join(config.GetConfigDir(), "loomgit", "store.db"), nil, "", options)
+	return RunAtWithOptions(ctx, filepath.Join(config.GetConfigDir(), "loomgit", "store.db"), options.Forge, "", options)
 }
 
 func Status(ctx context.Context, workspace, change string) (journal.LandingStatus, error) {

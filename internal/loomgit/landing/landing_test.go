@@ -58,7 +58,10 @@ func newFixture(t *testing.T) *fixture {
 	initial := git(t, source, "rev-parse", "HEAD")
 	git(t, root, "clone", "-q", "--bare", source, remote)
 	git(t, source, "remote", "add", "origin", remote)
-	store, err := journal.OpenSQLite(filepath.Join(root, "store.db"))
+	if err := os.Mkdir(filepath.Join(root, "loomgit"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := journal.OpenSQLite(filepath.Join(root, "loomgit", "store.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -131,6 +131,34 @@ func TestProviderManualPushRecordsDivergenceAndFeedback(t *testing.T) {
 	}
 }
 
+func TestRunOnceObservesProviderPushFromConfiguredJournal(t *testing.T) {
+	fixture := newFixture(t)
+	providerBranch(t, fixture)
+	t.Setenv("LOOM_CONFIG_DIR", filepath.Dir(fixture.source))
+	newHead := fixture.commit(t, "human edit")
+	git(t, fixture.source, "push", "-q", "origin", "HEAD:refs/heads/loom/ws/W/change/B")
+	fixture.forge.pull = stackpublish.PR{Number: 42, Head: "loom/ws/W/change/B", HeadSHA: newHead, Base: "main", State: "open"}
+	ctx := context.Background()
+	if err := RunOnceWithOptions(ctx, Options{Forge: fixture.forge}); err != nil {
+		t.Fatal(err)
+	}
+	status, err := Status(ctx, "W", "B")
+	if err != nil || status.State != "diverged" {
+		t.Fatalf("configured status = %+v, %v", status, err)
+	}
+	before, err := fixture.store.PendingEvents(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunOnceWithOptions(ctx, Options{Forge: fixture.forge}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := fixture.store.PendingEvents(ctx)
+	if err != nil || len(after) != len(before) {
+		t.Fatalf("repeat run created events: %d -> %d, %v", len(before), len(after), err)
+	}
+}
+
 func TestProviderRestackChangedPatchRequiresNewVerdict(t *testing.T) {
 	fixture := newFixture(t)
 	old := providerBranch(t, fixture)
