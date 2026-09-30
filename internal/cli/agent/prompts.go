@@ -540,18 +540,20 @@ func buildCheckpointBlock(cp *config.Checkpoint) string {
 		sb.WriteString(fmt.Sprintf(" at %s.\n\n", cp.Timestamp.Format(time.RFC3339)))
 	}
 
-	if cp.GitDiff != "" {
-		sb.WriteString("The previous attempt made these uncommitted changes:\n```diff\n")
-		sb.WriteString(cp.GitDiff)
-		sb.WriteString("\n```\n\n")
+	if cp.CaptureRef != "" {
+		sb.WriteString("The previous attempt's work was captured at Git ref `")
+		sb.WriteString(cp.CaptureRef)
+		sb.WriteString("`. Review that ref and the retained worktree before continuing.\n\n")
+	} else if cp.Retained {
+		sb.WriteString("Capture needs attention. The worktree was retained; inspect it before continuing.\n\n")
 	} else {
-		sb.WriteString("The previous attempt made no uncommitted changes.\n\n")
+		sb.WriteString("The previous attempt had no captured file changes.\n\n")
 	}
 
 	if cp.YieldReason != "" {
-		sb.WriteString("**Instructions**: The previous agent was interrupted, not crashed. Its changes are likely correct and in-progress. Continue from where it left off. Review the diff to understand what was done, then pick up the next step.\n")
+		sb.WriteString("**Instructions**: The previous agent was interrupted. Review the captured work and continue from where it left off.\n")
 	} else {
-		sb.WriteString("**Instructions**: Review the previous changes. If they look correct and complete, continue from where they left off. If they look wrong or incomplete, start fresh. Do NOT blindly re-apply the diff — use it as context to understand what was attempted.\n")
+		sb.WriteString("**Instructions**: Review the captured work before deciding how to continue. Do not discard the retained worktree.\n")
 	}
 
 	return sb.String()

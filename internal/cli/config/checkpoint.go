@@ -11,16 +11,13 @@ import (
 // CheckpointFileName is the name of the checkpoint file in each lock directory.
 const CheckpointFileName = ".agent.checkpoint.json"
 
-// maxDiffBytes is the maximum size of the git diff stored in a checkpoint.
-const maxDiffBytes = 4096
-
-// Checkpoint captures the state of an agent's progress when it exits non-zero.
-// This allows the next agent session to continue from where the previous one left off.
+// Checkpoint points the next agent session to the durable capture of its work.
 type Checkpoint struct {
 	AgentName   string    `json:"agent_name"`
 	TaskID      string    `json:"task_id"`
 	EpicID      string    `json:"epic_id,omitempty"`
-	GitDiff     string    `json:"git_diff"`
+	CaptureRef  string    `json:"capture_ref,omitempty"`
+	Retained    bool      `json:"retained,omitempty"`
 	ExitCode    int       `json:"exit_code"`
 	ErrorClass  string    `json:"error_class,omitempty"`
 	YieldReason string    `json:"yield_reason,omitempty"` // non-empty when agent was preempted via yield
@@ -80,15 +77,3 @@ func ClearCheckpoint(lockDir string) error {
 	}
 	return nil
 }
-
-// TruncateDiff truncates a diff string to maxBytes, appending a notice if truncated.
-func TruncateDiff(diff string, maxBytes int) string {
-	if len(diff) <= maxBytes {
-		return diff
-	}
-	notice := fmt.Sprintf("\n... (truncated, full diff was %d bytes)", len(diff))
-	return diff[:maxBytes-len(notice)] + notice
-}
-
-// MaxDiffBytes is the maximum size of the git diff stored in a checkpoint.
-const MaxDiffBytes = maxDiffBytes

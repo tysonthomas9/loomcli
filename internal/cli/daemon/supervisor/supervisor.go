@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/store"
 
@@ -32,6 +33,7 @@ type EventEmitter = events.Emitter
 // restart logic, and graceful drain. It is created by the daemon and owns
 // the agent process list and supervision goroutines.
 type Supervisor struct {
+	captureWorktree func(context.Context, string, string, string, string, string) (agentcapture.Result, error)
 	// ConfigSnapshot returns the current daemon config. This callback avoids a
 	// circular dependency between supervisor and daemon (daemon swaps config
 	// under a lock; supervisor reads it via this function).
@@ -617,6 +619,10 @@ func (s *Supervisor) agentSessionMetadataLocked(ap *AgentProcess, backend string
 		metadata["attempt_kind"] = "ephemeral_task_attempt"
 		metadata["cleanup_state"] = "retained"
 	}
+	if ap.CaptureRetained {
+		metadata["cleanup_state"] = "retained"
+		metadata["capture_state"] = "attention_required"
+	}
 	if ap.Entry.Repo != "" {
 		metadata["repo"] = ap.Entry.Repo
 	}
@@ -806,8 +812,8 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	// exist, and before finalize/checkpoint/recovery decide the run's fate: a
 	// failed hook write demotes exitCode so the owned task is reopened.
 	exitCode = s.runCompletionHooks(ap, exitCode)
-	s.finalizeAgentSession(ap, exitCode)
 	s.handleAgentCheckpoint(ap, exitCode)
+	s.finalizeAgentSession(ap, exitCode)
 	s.postMortemRecovery(ap, exitCode)
 	// Sweep AFTER recovery reset the task to open, so the quarantine write
 	// transitions open→blocked.
@@ -818,9 +824,17 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 
 // postMortemRecovery runs recovery after agent exit, skipping for yield exits.
 func (s *Supervisor) postMortemRecovery(ap *AgentProcess, exitCode int) {
-	if IsYieldRequested(ap.WorktreePath) {
+	ap.Mu.Lock()
+	retained, yielded := ap.CaptureRetained, ap.YieldReason != ""
+	ap.Mu.Unlock()
+	if retained {
+		slog.Warn("retaining agent worktree after capture failure", "worktree", ap.Entry.Worktree)
+	} else if yielded || IsYieldRequested(ap.WorktreePath) {
 		slog.Info("skipping post-mortem recovery for yield exit", "worktree", ap.Entry.Worktree)
 		return
+	}
+	if retained && exitCode == 0 {
+		exitCode = -1 // A failed capture must requeue even after a clean agent exit.
 	}
 	if err := s.recoverAgent(ap, exitCode, isIncompleteRun(ap)); err != nil {
 		slog.Warn("post-mortem recovery failed", "worktree", ap.Entry.Worktree, "err", err)

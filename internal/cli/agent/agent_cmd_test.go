@@ -474,7 +474,7 @@ func TestMakeCustomPromptGen_OptInBlocks(t *testing.T) {
 	backends.ClearResumeSessionID()
 
 	if err := config.SaveCheckpoint(cli.ResolveLockDir(wt), &config.Checkpoint{
-		AgentName: "falcon", TaskID: "loomcli-487", GitDiff: "+prior work", ExitCode: 1,
+		AgentName: "falcon", TaskID: "loomcli-487", CaptureRef: "+prior work", ExitCode: 1,
 	}); err != nil {
 		t.Fatalf("SaveCheckpoint: %v", err)
 	}
@@ -613,7 +613,7 @@ func TestMakeCustomPromptGen_NothingIsForced(t *testing.T) {
 	setAgentParentID(t, "EPIC-9")
 	backends.ClearResumeSessionID()
 	if err := config.SaveCheckpoint(cli.ResolveLockDir(wt), &config.Checkpoint{
-		AgentName: "falcon", TaskID: "loomcli-487", GitDiff: "+prior work", ExitCode: 1,
+		AgentName: "falcon", TaskID: "loomcli-487", CaptureRef: "+prior work", ExitCode: 1,
 	}); err != nil {
 		t.Fatalf("SaveCheckpoint: %v", err)
 	}

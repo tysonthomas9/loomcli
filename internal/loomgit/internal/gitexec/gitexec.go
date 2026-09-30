@@ -33,10 +33,11 @@ type Identity struct {
 }
 
 type Options struct {
-	GlobalConfig string // Empty reads Git's normal global config files.
-	SystemConfig string // Empty reads Git's normal system config file.
-	Timeout      time.Duration
-	OutputCap    int
+	GlobalConfig     string   // Empty reads Git's normal global config files.
+	SystemConfig     string   // Empty reads Git's normal system config file.
+	FallbackIdentity Identity // Used only when the user has no complete Git identity.
+	Timeout          time.Duration
+	OutputCap        int
 }
 
 type Runner struct {
@@ -98,6 +99,9 @@ func New(dir string, opts Options) (*Runner, error) {
 		case "user.email":
 			r.identity.Email = entry.value
 		}
+	}
+	if r.identity.Name == "" || r.identity.Email == "" {
+		r.identity = opts.FallbackIdentity
 	}
 	if r.identity.Name == "" || r.identity.Email == "" {
 		return nil, errors.New("git user.name and user.email are required")

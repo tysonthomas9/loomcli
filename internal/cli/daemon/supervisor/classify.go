@@ -1,8 +1,13 @@
 package supervisor
 
 import (
+	"context"
+	"fmt"
 	"log"
+	"log/slog"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
@@ -10,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
 )
 
 // classifyAgentExit reads the lock file (before recovery clears it) and classifies
@@ -216,119 +222,88 @@ func (s *Supervisor) markSpawnFailure(ap *AgentProcess, spawnErr error) {
 		ap.Entry.Worktree, spawnErr)
 }
 
-// handleAgentCheckpoint saves a checkpoint on non-zero exit (before recovery clears the
-// worktree) or clears the checkpoint on successful exit. For yield exits (exit 0 with
-// yield file present), a yield checkpoint is saved instead of clearing. An incomplete
-// exit-0 run is treated the same way: the work is unfinished, so the checkpoint is the
-// only thing that carries it into the next cycle.
+// handleAgentCheckpoint captures on every exit, including clean and yielded exits.
+// Capture runs before session finalization and ownership release.
 func (s *Supervisor) handleAgentCheckpoint(ap *AgentProcess, exitCode int) {
-	if exitCode == 0 {
-		// Check if this was a yield exit — save checkpoint instead of clearing
-		if IsYieldRequested(ap.WorktreePath) {
-			s.saveYieldCheckpoint(ap)
-			return
-		}
-		// Exit 0 with the claim still held is a preemption in all but name: the
-		// task is unfinished, so clearing here would throw away the one record
-		// of what the turn achieved. Save it under the IncompleteRun class (the
-		// exit code stays 0 — it was not a crash) so a cold-started next cycle
-		// re-derives the WIP through injectCheckpointIfNotResuming.
-		if isIncompleteRun(ap) {
-			s.saveAgentCheckpoint(ap, exitCode)
-			return
-		}
-		lockDir := cli.ResolveLockDir(ap.WorktreePath)
-		if err := config.ClearCheckpoint(lockDir); err != nil {
-			log.Printf("[daemon] Agent %s: failed to clear checkpoint: %v", ap.Entry.Worktree, err)
-		}
-		return
-	}
-	s.saveAgentCheckpoint(ap, exitCode)
-}
-
-// saveAgentCheckpoint captures the current worktree diff and agent state into a
-// checkpoint file. Called when an agent exits non-zero before recovery clears the worktree.
-func (s *Supervisor) saveAgentCheckpoint(ap *AgentProcess, exitCode int) {
 	lockInfo, _, _ := cli.CheckLock(ap.WorktreePath)
 	taskID := s.taskIDForLifecycle(ap, lockInfo)
-	if taskID == "" {
-		return
+	taskTitle := ""
+	if lockInfo != nil {
+		taskTitle = lockInfo.TaskTitle
 	}
-
-	diff := captureGitDiff(ap.WorktreePath, config.MaxDiffBytes)
 	errClass := ""
 	ap.Mu.Lock()
 	if ap.LastError != nil {
 		errClass = ap.LastError.Class.String()
 	}
 	epicID := ap.AssignedEpicID
+	yieldReason := ap.YieldReason
 	ap.Mu.Unlock()
-
+	if yieldReason == "" {
+		if req, err := ReadYieldFile(ap.WorktreePath); err == nil && req != nil {
+			yieldReason = req.Reason
+		}
+	}
 	agentName := ap.Entry.Worktree
 	if lockInfo != nil && lockInfo.AgentName != "" {
 		agentName = lockInfo.AgentName
 	}
-
-	cp := &config.Checkpoint{
-		AgentName:  agentName,
-		TaskID:     taskID,
-		EpicID:     epicID,
-		GitDiff:    diff,
-		ExitCode:   exitCode,
-		ErrorClass: errClass,
-		Timestamp:  time.Now(),
-	}
+	result, retained := s.captureExitWorktree(ap, agentName, taskID, taskTitle)
 	lockDir := cli.ResolveLockDir(ap.WorktreePath)
-	if err := config.SaveCheckpoint(lockDir, cp); err != nil {
-		log.Printf("[daemon] Agent %s: failed to save checkpoint: %v", ap.Entry.Worktree, err)
-	} else {
-		log.Printf("[daemon] Agent %s: saved checkpoint for task %s", ap.Entry.Worktree, taskID)
+	if exitCode == 0 && yieldReason == "" && !isIncompleteRun(ap) && !retained {
+		if err := config.ClearCheckpoint(lockDir); err != nil {
+			log.Printf("[daemon] Agent %s: failed to clear checkpoint: %v", ap.Entry.Worktree, err)
+		}
+		return
 	}
-}
-
-// saveYieldCheckpoint captures the worktree state when an agent is preempted
-// via yield. Unlike saveAgentCheckpoint (crash path), this sets ErrorClass to
-// "Yielded" and records the yield reason from the yield file.
-func (s *Supervisor) saveYieldCheckpoint(ap *AgentProcess) {
-	lockInfo, _, _ := cli.CheckLock(ap.WorktreePath)
-	taskID := s.taskIDForLifecycle(ap, lockInfo)
 	if taskID == "" {
 		return
 	}
-
-	diff := captureGitDiff(ap.WorktreePath, config.MaxDiffBytes)
-
-	yieldReason := "unknown"
-	if req, err := ReadYieldFile(ap.WorktreePath); err == nil && req != nil && req.Reason != "" {
-		yieldReason = req.Reason
+	if yieldReason != "" {
+		errClass = "Yielded"
 	}
+	s.saveCaptureCheckpoint(ap, lockDir, &config.Checkpoint{
+		AgentName: agentName, TaskID: taskID, EpicID: epicID,
+		CaptureRef: result.Ref, Retained: retained,
+		ExitCode: exitCode, ErrorClass: errClass, YieldReason: yieldReason,
+		Timestamp: time.Now(),
+	})
+}
 
-	ap.Mu.Lock()
-	epicID := ap.AssignedEpicID
-	ap.Mu.Unlock()
-
-	agentName := ap.Entry.Worktree
-	if lockInfo != nil && lockInfo.AgentName != "" {
-		agentName = lockInfo.AgentName
-	}
-
-	cp := &config.Checkpoint{
-		AgentName:   agentName,
-		TaskID:      taskID,
-		EpicID:      epicID,
-		GitDiff:     diff,
-		ExitCode:    0,
-		ErrorClass:  "Yielded",
-		YieldReason: yieldReason,
-		Timestamp:   time.Now(),
-	}
-	lockDir := cli.ResolveLockDir(ap.WorktreePath)
+func (s *Supervisor) saveCaptureCheckpoint(ap *AgentProcess, lockDir string, cp *config.Checkpoint) {
 	if err := config.SaveCheckpoint(lockDir, cp); err != nil {
-		log.Printf("[daemon] Agent %s: failed to save yield checkpoint: %v", ap.Entry.Worktree, err)
+		slog.Error("agent checkpoint needs attention; worktree retained", "worktree", cp.AgentName, "err", err)
+		ap.Mu.Lock()
+		ap.CaptureRetained = true
+		ap.Mu.Unlock()
 	} else {
-		log.Printf("[daemon] Agent %s: saved yield checkpoint for task %s (reason: %s)",
-			ap.Entry.Worktree, taskID, yieldReason)
+		log.Printf("[daemon] Agent %s: saved capture checkpoint for task %s", ap.Entry.Worktree, cp.TaskID)
 	}
+}
+
+func (s *Supervisor) captureExitWorktree(ap *AgentProcess, agentName, taskID, taskTitle string) (agentcapture.Result, bool) {
+	workspace := s.WorkspaceID
+	if workspace == "" {
+		workspace = agentName
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	captureFn := s.captureWorktree
+	if captureFn == nil {
+		captureFn = agentcapture.Capture
+	}
+	result, captureErr := captureFn(ctx, ap.WorktreePath, workspace, uuid.NewString(), taskID, taskTitle)
+	retained := captureErr != nil || !result.Complete
+	if retained {
+		ap.Mu.Lock()
+		ap.CaptureRetained = true
+		ap.Mu.Unlock()
+		if captureErr == nil {
+			captureErr = fmt.Errorf("capture manifest is incomplete")
+		}
+		slog.Error("agent capture needs attention; worktree retained", "worktree", agentName, "task_id", taskID, "err", captureErr)
+	}
+	return result, retained
 }
 
 func (s *Supervisor) taskIDForLifecycle(ap *AgentProcess, lockInfo *cli.LockInfo) string {
