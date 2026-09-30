@@ -3,66 +3,20 @@ package epic
 import (
 	"context"
 	"fmt"
-	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/stack"
-	"github.com/tysonthomas9/loomcli/internal/githubtoken"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/stacklock"
-	"github.com/tysonthomas9/loomcli/internal/stackpublish"
-	"github.com/tysonthomas9/loomcli/internal/stackstore"
 )
 
-// reconcileEpicStack runs the Stage-4 post-drain reconcile: once the epic has
-// drained (every task pushed its canonical branch), it provisions an ephemeral
-// checkout of the repo origin under a per-stack lock, fetches the stack's
-// branches, and runs the publisher to open/link one PR per task with each PR's
-// base set to its predecessor's branch.
-//
-// It is fail-open at the call site: the task branches are already on origin, so
-// a reconcile failure is a warning, not an epic failure — it is fully
-// re-runnable via `loom stack publish <stack>`. It never uses os.Getwd(); the
-// checkout is provisioned by PublishFromOrigin in a temp dir.
-func reconcileEpicStack(ctx context.Context, ws string, proj *EpicStackProjection) error {
-	if proj == nil {
-		return nil
-	}
-	if strings.TrimSpace(proj.RepoURL) == "" {
-		return fmt.Errorf("stack %s has no repo origin url to reconcile from", proj.StackID)
-	}
-	token := resolveGitHubToken(ctx)
-	if token == "" {
-		return fmt.Errorf("no GitHub token (set GITHUB_TOKEN/GH_TOKEN or run `gh auth login`)")
-	}
-	sstore, err := stackstore.Default()
-	if err != nil {
-		return fmt.Errorf("open stack store: %w", err)
-	}
-	rec := &stackpublish.Reconciler{
-		Store: sstore,
-		Forge: stackpublish.NewConfiguredGitHubForge(token),
-	}
-	opts := stackpublish.Options{Resolver: stack.HeadlessResolver()}
+type StackPublisher func(context.Context, string, string, string, []string) ([]publish.Result, error)
 
-	report, err := publishEpicFromOrigin(rec, stacklock.ForEpicReconcile(ctx), ws, proj.StackID, proj.RepoURL, token, opts)
+func ReconcileEpicStack(ctx context.Context, workspace, lead string, publisher StackPublisher) error {
+	results, err := publisher(stacklock.ForEpicReconcile(ctx), workspace, publish.LeadStackID(lead), lead, nil)
 	if err != nil {
 		return err
 	}
-
-	if report != nil {
-		fmt.Printf("[epic-run] reconciled stack %s: created=%d reparented=%d skipped=%d closed=%d merged=%d empty=%d\n",
-			proj.StackID, len(report.Created), len(report.Reparented), len(report.Skipped),
-			len(report.Closed), len(report.Merged), len(report.Empty))
-		for task, url := range report.PRURLs {
-			fmt.Printf("[epic-run]   %s  %s\n", task, url)
-		}
+	for _, result := range results {
+		fmt.Printf("[epic-run] published %s  %s\n", result.Revision.Change, result.PRURL)
 	}
 	return nil
-}
-
-var publishEpicFromOrigin = (*stackpublish.Reconciler).PublishFromOrigin
-
-// resolveGitHubToken mirrors `loom stack`'s token resolution: env first, then a
-// local `gh auth token`. Returns "" when none is available.
-func resolveGitHubToken(ctx context.Context) string {
-	return githubtoken.GitHub(ctx)
 }

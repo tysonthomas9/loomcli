@@ -86,12 +86,12 @@ function request(mode) {
 
 describe("daytona-task-runner PR requests", () => {
   for (const flag of ["openPullRequest", "stackedPullRequests"]) {
-    it(`continues ${flag} to normal credential preflight`, async () => {
+    it(`rejects ${flag} until the host can publish`, async () => {
       const payload = request("normal");
       payload.input[flag] = true;
       const out = await mod.run({ payload });
       assert.equal(out.status, "failed");
-      assert.equal(out.errorClass, "codex_auth_failed");
+      assert.equal(out.errorClass, "host_publish_required");
     });
   }
 });

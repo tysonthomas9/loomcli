@@ -60,13 +60,6 @@ export async function run(ctx) {
       errorClass: "invalid_epic_runner_input",
     });
   }
-  if (booleanValue(input.openPullRequest) || booleanValue(input.stackedPullRequests)) {
-    return loom.failed({
-      summary: "Pull requests return with the host publisher in P3.3; PR-mode runs are unavailable until then",
-      errorClass: "host_publish_required",
-    });
-  }
-
   const started = await startEpicRun(loom, input, epicId);
   if (!started.ok) {
     return loom.failed({
@@ -339,8 +332,6 @@ function childTaskInputDefaults(input) {
     "repositoryUrl",
     "baseBranch",
     "targetBranch",
-    "openPullRequest",
-    "stackedPullRequests",
     "refreshCodexAuth",
   ]) {
     if (input && input[key] !== undefined && input[key] !== null && input[key] !== "") {
@@ -353,7 +344,7 @@ function childTaskInputDefaults(input) {
 export function childTaskInput(defaults, loom, task, stackLineage) {
   const out = {};
   for (const [key, value] of Object.entries(defaults || {})) {
-    if (value !== undefined && value !== null && value !== "") {
+    if (key !== "openPullRequest" && key !== "stackedPullRequests" && value !== undefined && value !== null && value !== "") {
       out[key] = value;
     }
   }

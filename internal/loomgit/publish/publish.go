@@ -191,7 +191,7 @@ func preflight(ctx context.Context, store Store, runner *gitexec.Runner, req Req
 		return journal.Publication{}, nil, err
 	}
 	remote := strings.TrimSpace(string(remoteOut))
-	slug, err := githubSlug(remote)
+	slug, err := GitHubSlug(remote)
 	if req.slug != "" {
 		slug = req.slug
 		err = nil
@@ -241,7 +241,7 @@ func recordedTrunk(ctx context.Context, store Store, req Request) (string, error
 	return "", errors.New("recorded repository trunk unavailable")
 }
 
-func githubSlug(remote string) (string, error) {
+func GitHubSlug(remote string) (string, error) {
 	var path string
 	if strings.HasPrefix(remote, "git@github.com:") {
 		path = strings.TrimPrefix(remote, "git@github.com:")

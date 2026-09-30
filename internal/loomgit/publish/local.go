@@ -2,11 +2,13 @@ package publish
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -35,6 +37,10 @@ type Result struct {
 
 var localPublishProvider = func() (Forge, string, string) { return nil, "", "" }
 var localFlagForTask = taskFeatureFlag
+
+func LeadStackID(lead string) string {
+	return fmt.Sprintf("lead-%x", sha256.Sum256([]byte(lead)))
+}
 
 func DeliveryModeLocal(ctx context.Context, workspace string) (string, error) {
 	store, err := openLocalStore()
@@ -74,6 +80,11 @@ func PublishLocal(ctx context.Context, workspace, lead, change string) (Result, 
 
 // PublishStackLocal publishes the requested applied layers in working-area order.
 func PublishStackLocal(ctx context.Context, workspace, stackID, lead string, changes []string) ([]Result, error) {
+	forge, token, slug := localPublishProvider()
+	return PublishStackWithProvider(ctx, workspace, stackID, lead, changes, forge, token, slug)
+}
+
+func PublishStackWithProvider(ctx context.Context, workspace, stackID, lead string, changes []string, forge Forge, token, slug string) ([]Result, error) {
 	if workspace == "" || stackID == "" || lead == "" {
 		return nil, errors.New("workspace, stack ID and lead are required")
 	}
@@ -86,7 +97,80 @@ func PublishStackLocal(ctx context.Context, workspace, stackID, lead string, cha
 	if err != nil {
 		return nil, err
 	}
-	return publishStackRecorded(ctx, store, cfg, workspace, stackID, lead, changes, nil, "", "")
+	return publishStackRecorded(ctx, store, cfg, workspace, stackID, lead, changes, forge, token, slug)
+}
+
+func PublishLeadChangeLocal(ctx context.Context, workspace, lead, change string) (Result, error) {
+	store, err := openLocalStore()
+	if err != nil {
+		return Result{}, err
+	}
+	defer func() { _ = store.Close() }()
+	repoName, err := repoNameForStack(ctx, store, workspace, lead, nil)
+	if err != nil {
+		return Result{}, err
+	}
+	area, err := workingArea(ctx, store, workspace, lead, repoName)
+	if err != nil {
+		return Result{}, err
+	}
+	changes, err := orderedStackChanges(ctx, store, area.Path, workspace, lead, nil)
+	if err != nil {
+		return Result{}, err
+	}
+	if !slices.Contains(changes, change) {
+		return Result{}, fmt.Errorf("change %q is not in the lead's applied stack", change)
+	}
+	requested, err := taskStackChanges(ctx, store, workspace, lead)
+	if err != nil {
+		return Result{}, err
+	}
+	stackID, err := recordedStackID(ctx, store, workspace, lead, changes)
+	if err != nil {
+		return Result{}, err
+	}
+	results, err := PublishStackLocal(ctx, workspace, stackID, lead, requested)
+	if err != nil {
+		return Result{}, err
+	}
+	for _, result := range results {
+		if result.Revision.Change == change {
+			return result, nil
+		}
+	}
+	return Result{}, errors.New("published stack omitted the requested change")
+}
+
+func recordedStackID(ctx context.Context, store *journal.SQLite, workspace, lead string, changes []string) (string, error) {
+	for _, change := range changes {
+		publication, found, err := store.Publication(ctx, workspace, change)
+		if err != nil {
+			return "", err
+		}
+		if found && publication.StackID != "" {
+			return publication.StackID, nil
+		}
+	}
+	return LeadStackID(lead), nil
+}
+
+func taskStackChanges(ctx context.Context, store *journal.SQLite, workspace, lead string) ([]string, error) {
+	applied, err := store.AppliedLog(ctx, workspace, lead)
+	if err != nil {
+		return nil, err
+	}
+	return requestedFromApplied(applied), nil
+}
+
+func requestedFromApplied(applied []loomgit.AppliedLayer) []string {
+	requested := make([]string, 0, len(applied))
+	for _, layer := range applied {
+		if layer.Revision > 0 && strings.HasPrefix(layer.Change, "own-") {
+			continue
+		}
+		requested = append(requested, layer.Change)
+	}
+	return requested
 }
 
 var featureFlagName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -143,6 +227,10 @@ func publishStackRecorded(ctx context.Context, store *journal.SQLite, cfg *confi
 	if err != nil {
 		return nil, err
 	}
+	prior, err := existingStackPRs(ctx, store, workspace, changes)
+	if err != nil {
+		return nil, err
+	}
 	_, configured, found := config.WorkspaceByID(cfg, workspace)
 	if !found {
 		return nil, loomgit.NewError(loomgit.WorkspaceUnsupported, "workspace is unavailable", nil)
@@ -151,17 +239,9 @@ func publishStackRecorded(ctx context.Context, store *journal.SQLite, cfg *confi
 		if repo.Name != repoName {
 			continue
 		}
-		if forge == nil {
-			forge, token, err = configuredStackForge(ctx, token)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if slug == "" {
-			slug, err = stackSlug(ctx, repo.ResolveAbsPath(configured.Path))
-			if err != nil {
-				return nil, err
-			}
+		forge, token, slug, err = configuredStackProvider(ctx, repo.ResolveAbsPath(configured.Path), forge, token, slug)
+		if err != nil {
+			return nil, err
 		}
 		backend, err := chooseStackBackend(ctx, store, workspace, stackID, slug, forge, LoomStackBackend{Store: store}, GitHubStackBackend{Store: store})
 		if err != nil {
@@ -174,22 +254,44 @@ func publishStackRecorded(ctx context.Context, store *journal.SQLite, cfg *confi
 		if err != nil {
 			return nil, err
 		}
-		return stackResults(ctx, store, workspace, changes, revisions, backend.Capabilities())
+		return stackResults(ctx, store, workspace, changes, revisions, backend.Capabilities(), prior)
 	}
 	return nil, loomgit.NewError(loomgit.RepoSelectionRequired, "stack repo is not in the workspace", nil)
 }
 
-func configuredStackForge(ctx context.Context, token string) (Forge, string, error) {
-	if token == "" {
-		token = githubtoken.GitHub(ctx)
+func configuredStackProvider(ctx context.Context, repoPath string, forge Forge, token, slug string) (Forge, string, string, error) {
+	if forge == nil {
+		if token == "" {
+			token = githubtoken.GitHub(ctx)
+		}
+		if token == "" {
+			return nil, "", "", errors.New("GitHub host credential unavailable")
+		}
+		forge = stackpublish.NewConfiguredGitHubForge(token)
 	}
-	if token == "" {
-		return nil, "", errors.New("GitHub host credential unavailable")
+	if slug == "" {
+		var err error
+		slug, err = stackSlug(ctx, repoPath)
+		if err != nil {
+			return nil, "", "", err
+		}
 	}
-	return stackpublish.NewConfiguredGitHubForge(token), token, nil
+	return forge, token, slug, nil
 }
 
-func stackResults(ctx context.Context, store *journal.SQLite, workspace string, changes []string, revisions []loomgit.Revision, capabilities StackCapabilities) ([]Result, error) {
+func existingStackPRs(ctx context.Context, store *journal.SQLite, workspace string, changes []string) (map[string]bool, error) {
+	prior := make(map[string]bool, len(changes))
+	for _, change := range changes {
+		publication, found, err := store.Publication(ctx, workspace, change)
+		if err != nil {
+			return nil, err
+		}
+		prior[change] = found && publication.PRNumber > 0
+	}
+	return prior, nil
+}
+
+func stackResults(ctx context.Context, store *journal.SQLite, workspace string, changes []string, revisions []loomgit.Revision, capabilities StackCapabilities, prior map[string]bool) ([]Result, error) {
 	results := make([]Result, 0, len(revisions))
 	backend, reason := "native", ""
 	if !capabilities.NativeStacks {
@@ -200,7 +302,7 @@ func stackResults(ctx context.Context, store *journal.SQLite, workspace string, 
 		if err != nil || !found {
 			return nil, errors.New("stack publication record unavailable")
 		}
-		results = append(results, Result{Revision: revision, PRURL: publication.PRURL, PRNumber: publication.PRNumber, Backend: backend, StatusReason: reason})
+		results = append(results, Result{Revision: revision, PRURL: publication.PRURL, PRNumber: publication.PRNumber, AlreadyExists: prior[changes[index]], Backend: backend, StatusReason: reason})
 	}
 	return results, nil
 }
@@ -215,14 +317,16 @@ func orderedStackChanges(ctx context.Context, store *journal.SQLite, areaPath, w
 		return nil, err
 	}
 	ordered := make([]string, 0, len(applied))
-	requested := make([]string, 0, len(changes))
 	for _, layer := range applied {
 		ordered = append(ordered, layer.Change)
-		if layer.Revision > 0 && len(layer.Change) >= 4 && layer.Change[:4] == "own-" {
-			continue
-		}
-		requested = append(requested, layer.Change)
 	}
+	if changes == nil {
+		return ordered, nil
+	}
+	if slices.Equal(changes, ordered) {
+		return ordered, nil
+	}
+	requested := requestedFromApplied(applied)
 	if len(requested) != len(changes) {
 		return nil, loomgit.NewError(loomgit.StackNotLinear, "requested tasks differ from working-area layers", nil)
 	}
@@ -243,7 +347,7 @@ func stackSlug(ctx context.Context, repoPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return githubSlug(strings.TrimSpace(string(remote)))
+	return GitHubSlug(strings.TrimSpace(string(remote)))
 }
 
 func repoNameForStack(ctx context.Context, store *journal.SQLite, workspace, lead string, changes []string) (string, error) {

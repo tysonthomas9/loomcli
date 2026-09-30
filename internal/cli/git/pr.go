@@ -114,10 +114,10 @@ func runPR(cmd *cobra.Command, args []string) error {
 		}
 	}
 	workspace := resolver.Config.Workspaces[resolver.WorkspaceName()]
-	result, err := publish.PublishLocal(cmd.Context(), workspace.ID, args[0], args[1])
+	result, err := CreatePRResult(cmd.Context(), workspace.ID, args[0], args[1])
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(cmd.OutOrStdout(), result.PRURL)
+	_, err = fmt.Fprintln(cmd.OutOrStdout(), result.URL)
 	return err
 }

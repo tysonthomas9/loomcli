@@ -68,6 +68,10 @@ func publishStack(ctx context.Context, store Store, request StackRequest) ([]loo
 	if err := pushStackHeads(ctx, store, runner, pusher, layers); err != nil {
 		return nil, err
 	}
+	return finishStackLayers(ctx, store, runner, pusher, forge, layers)
+}
+
+func finishStackLayers(ctx context.Context, store Store, runner *gitexec.Runner, pusher mirror.RefPusher, forge Forge, layers []stackLayer) ([]loomgit.Revision, error) {
 	result := make([]loomgit.Revision, 0, len(layers))
 	for _, layer := range layers {
 		publication := layer.publication

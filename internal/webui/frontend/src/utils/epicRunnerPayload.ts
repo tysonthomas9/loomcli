@@ -40,8 +40,7 @@ export function epicRunnerRuntimePayload({
   const repo = runnerRepoUrl(repos, currentRepo);
   if (localSettings?.agent_runtime.default !== "daytona") {
     // Local ("Locally") runtime: pin the runner explicitly so the request never
-    // falls through to an unspecified server-side default. Until P3.3 adds
-    // host publishing, UI epic runs use local delivery even for GitHub repos.
+    // falls through to an unspecified server-side default.
     return {
       runner: "local-task-runner",
     };
@@ -51,7 +50,6 @@ export function epicRunnerRuntimePayload({
       "Daytona runtime requires a GitHub repo URL or owner/repo repo selection",
     );
   }
-  // Until P3.3 moves publishing to the host, Daytona keeps its runner delivery.
   return {
     runner: "daytona-task-runner",
     repoUrl: repo.repoUrl,

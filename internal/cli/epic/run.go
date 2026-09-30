@@ -21,6 +21,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/githubtoken"
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
@@ -122,6 +125,25 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve workspace: %w", err)
 	}
+	if runOpenPR || runStackedPRs {
+		selected, _, err := resolveEpicStackRepo(ctx, handle, ws, runRepoURL, runBaseBranch)
+		if err != nil {
+			return err
+		}
+		if _, err := publish.GitHubSlug(selected.RemoteURL); err != nil {
+			return fmt.Errorf("epic PR delivery requires a GitHub origin: %w", err)
+		}
+		mode, err := publish.DeliveryModeLocal(ctx, ws)
+		if err != nil {
+			return err
+		}
+		if mode != "stack" {
+			return loomgit.NewError(loomgit.ModeMismatch, "epic PR delivery requires stack mode", nil)
+		}
+		if githubtoken.GitHub(ctx) == "" {
+			return errors.New("GitHub host credential unavailable")
+		}
+	}
 
 	// Fail-closed BEFORE queuing: the local task runner shells out to the
 	// resolved backend CLI, so if its binary/auth is missing the run would
@@ -140,22 +162,7 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 
 	runID := fmt.Sprintf("run-%d", time.Now().UTC().UnixNano())
 
-	// Stacked mode: project the epic's blocks DAG into the per-user stackstore
-	// before queueing so the workflow payload can carry the same lineage to
-	// sandboxed runners that cannot read the host stack store.
-	stackProj, err := prepareEpicRunStack(runStackedPRs, runDryRun, func() (*EpicStackProjection, error) {
-		return projectEpicStackForRun(ctx, handle, ws, runParent, runID, runRepoURL, runBaseBranch)
-	})
-	if err != nil {
-		return err
-	}
-	if stackProj != nil {
-		fmt.Printf("[epic-run] projected stack %s on %s@%s: %d task(s) — %d chained, %d root(s) (%d fan-in, %d fan-out breaks); %d new\n",
-			stackProj.StackID, stackProj.RepoName, stackProj.RootBase, stackProj.Stats.Tasks, stackProj.Stats.LinearLinks, stackProj.Stats.Roots,
-			stackProj.Stats.FanInBreaks, stackProj.Stats.FanOutBreaks, len(stackProj.Created))
-	}
-
-	payload, err := workflowPayload(stackProj)
+	payload, err := workflowPayload(nil)
 	if err != nil {
 		return err
 	}
@@ -179,27 +186,13 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// Stage 4 post-drain reconcile: the epic drained successfully, so every task
-	// pushed its canonical branch. Publish the stack as stacked PRs (each PR's
-	// base = its predecessor's branch). Fail-open: the branches are on origin, so
-	// a reconcile error is a warning — re-runnable via `loom stack publish`.
-	if stackProj != nil {
-		if rerr := reconcileEpicStack(ctx, ws, stackProj); rerr != nil {
-			fmt.Printf("[epic-run] WARN: stack reconcile skipped (branches are pushed; run `loom stack publish %s`): %v\n", stackProj.StackID, rerr)
+	// The host publisher sees only approved revisions in the applied log.
+	if (runOpenPR || runStackedPRs) && !runDryRun {
+		if rerr := ReconcileEpicStack(ctx, ws, resolveLeadName(runLead), publish.PublishStackLocal); rerr != nil {
+			fmt.Printf("[epic-run] stack awaits approved, applied revisions: %v\n", rerr)
 		}
 	}
 	return nil
-}
-
-func prepareEpicRunStack(stacked, dryRun bool, project func() (*EpicStackProjection, error)) (*EpicStackProjection, error) {
-	if !stacked || dryRun {
-		return nil, nil
-	}
-	projection, err := project()
-	if err != nil {
-		return nil, fmt.Errorf("project epic stack: %w", err)
-	}
-	return projection, nil
 }
 
 func queueEpicWorkflowRun(ctx context.Context, st store.Store, ws, workflowName, runID string, payload json.RawMessage) (*domain.DriverRun, error) {
@@ -228,9 +221,6 @@ func queueEpicWorkflowRun(ctx context.Context, st store.Store, ws, workflowName,
 func validateEpicRunFlags() error {
 	if strings.TrimSpace(runParent) == "" {
 		return errors.New("--parent is required")
-	}
-	if runOpenPR || runStackedPRs {
-		return errors.New("host_publish_required: Pull requests return with the host publisher in P3.3; PR-mode runs are unavailable until then")
 	}
 	if runMaxConcurrency < 1 {
 		return fmt.Errorf("--max-concurrency must be >= 1, got %d", runMaxConcurrency)
