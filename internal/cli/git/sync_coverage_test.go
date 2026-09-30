@@ -1,12 +1,21 @@
 package git
 
 import (
+	"context"
 	"os"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/loomgit/pull"
 )
 
 func TestSyncSingleWorkspace_RestacksWithoutPush(t *testing.T) {
 	stubPullLocal(t)
+	originalPull := pullLocal
+	pullCount := 0
+	pullLocal = func(ctx context.Context, path, remote, branch, requestID string) (pull.PullResult, error) {
+		pullCount++
+		return originalPull(ctx, path, remote, branch, requestID)
+	}
 	// not parallel: uses SetupTestEnv, mock.Install(), defaultDeps.Agent mutation
 	tmpDir := t.TempDir()
 	wsDir := tmpDir + "/ws"
@@ -52,6 +61,9 @@ func TestSyncSingleWorkspace_RestacksWithoutPush(t *testing.T) {
 
 	if err := syncSingleWorkspace(defaultDeps, resolver, false, false); err != nil {
 		t.Fatal(err)
+	}
+	if pullCount != 1 {
+		t.Fatalf("pull count = %d, want 1", pullCount)
 	}
 }
 
