@@ -2,9 +2,12 @@
 package driver
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -78,21 +81,70 @@ func seedSweeperFixture(t *testing.T, st *memstore.Store, ws string, driverRunSt
 
 type captureOrderStore struct {
 	store.Store
-	onRecover func(context.Context, string, string, store.StaleTaskRunRecovery)
+	onRecover     func(context.Context, string, string, store.StaleTaskRunRecovery)
+	releaseResult *store.StaleTaskRunRecoveryResult
 }
 
 func (st captureOrderStore) DriverRuns() store.DriverRunStore {
-	return captureOrderDriverRuns{DriverRunStore: st.Store.DriverRuns(), onRecover: st.onRecover}
+	return captureOrderDriverRuns{DriverRunStore: st.Store.DriverRuns(), onRecover: st.onRecover, releaseResult: st.releaseResult}
 }
 
 type captureOrderDriverRuns struct {
 	store.DriverRunStore
-	onRecover func(context.Context, string, string, store.StaleTaskRunRecovery)
+	onRecover     func(context.Context, string, string, store.StaleTaskRunRecovery)
+	releaseResult *store.StaleTaskRunRecoveryResult
 }
 
 func (runs captureOrderDriverRuns) RecoverStaleTaskRuns(ctx context.Context, workspace, runID string, recovery store.StaleTaskRunRecovery) (*store.StaleTaskRunRecoveryResult, error) {
-	runs.onRecover(ctx, workspace, runID, recovery)
-	return runs.DriverRunStore.RecoverStaleTaskRuns(ctx, workspace, runID, recovery)
+	if runs.onRecover != nil {
+		runs.onRecover(ctx, workspace, runID, recovery)
+	}
+	result, err := runs.DriverRunStore.RecoverStaleTaskRuns(ctx, workspace, runID, recovery)
+	if err != nil || runs.releaseResult == nil {
+		return result, err
+	}
+	result.Released = runs.releaseResult.Released
+	result.ReleasedTaskIDs = runs.releaseResult.ReleasedTaskIDs
+	return result, nil
+}
+
+func TestStaleTaskSweeperReportsOwnershipRelease(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		released    int
+		releasedIDs []string
+		wantWarning bool
+	}{
+		{name: "released task", released: 1, releasedIDs: []string{"WS-1"}},
+		{name: "already released or not reopened", wantWarning: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			st := memstore.New()
+			if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+				t.Fatal(err)
+			}
+			seedSweeperFixture(t, st, "WS", domain.DriverRunRunning, 10*time.Minute)
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			defer slog.SetDefault(previous)
+			response := &store.StaleTaskRunRecoveryResult{Released: test.released, ReleasedTaskIDs: test.releasedIDs}
+			sweeper := &StaleTaskSweeper{Store: captureOrderStore{Store: st, releaseResult: response}, WorkspaceKey: "WS", MaxAge: 5 * time.Minute}
+			if result, err := sweeper.RunOnce(ctx); err != nil || result.Recovered != 1 {
+				t.Fatalf("sweep = %+v, %v", result, err)
+			}
+			output := logs.String()
+			if !strings.Contains(output, "released="+fmt.Sprint(test.released)) ||
+				!strings.Contains(output, "released_task_ids="+fmt.Sprint(test.releasedIDs)) ||
+				strings.Contains(output, "level=WARN") != test.wantWarning {
+				t.Fatalf("release response not reported correctly: %s", output)
+			}
+			if test.wantWarning && !strings.Contains(output, "task_run_ids=[task-run-1]") {
+				t.Fatalf("warning does not name task run: %s", output)
+			}
+		})
+	}
 }
 
 func TestStaleTaskSweeperRunOnce(t *testing.T) {

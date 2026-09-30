@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"time"
 
@@ -123,6 +124,15 @@ func (s *StaleTaskSweeper) sweepWorkspace(ctx context.Context, ws string, staleB
 		})
 		if err != nil {
 			return fmt.Errorf("recover stale task runs for driver run %q: %w", id, err)
+		}
+		if result.Recovered > 0 {
+			slog.Info("stale task ownership recovery", "driver_run_id", id,
+				"task_run_ids", result.RecoveredTaskRunIDs, "released", result.Released,
+				"released_task_ids", result.ReleasedTaskIDs)
+			if result.Released == 0 {
+				slog.Warn("stale task run recovered without task ownership release",
+					"driver_run_id", id, "task_run_ids", result.RecoveredTaskRunIDs)
+			}
 		}
 		out.Recovered += result.Recovered
 		out.SkippedFresh += result.SkippedFresh
