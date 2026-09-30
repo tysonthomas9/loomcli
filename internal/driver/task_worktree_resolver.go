@@ -49,10 +49,6 @@ type TaskLineageLookup interface {
 	BaseRefForTask(ctx context.Context, workspaceKey, repoName, taskID string) (baseRef string, ok bool, err error)
 }
 
-type localPredecessorLookup interface {
-	PredecessorForTask(context.Context, string, string, string) (string, bool, error)
-}
-
 // TaskLineage is the per-task stack-lineage carrier. It rides inside the
 // existing TaskExecRequest.Input payload under the namespaced "lineage" key so
 // it travels verbatim to a runner, including a daytona sandbox that never reads
@@ -134,17 +130,6 @@ func (l StackLineageLookup) BaseRefForTask(ctx context.Context, workspaceKey, re
 			fmt.Sprintf("resolve lineage base for task %q", taskID), err)
 	}
 	return base, true, nil
-}
-
-func (l StackLineageLookup) PredecessorForTask(ctx context.Context, workspaceKey, repoName, taskID string) (string, bool, error) {
-	_, node, byTask, ok, err := findTaskStack(ctx, l.Store, workspaceKey, repoName, taskID)
-	if err != nil || !ok || node.BaseTaskID == "" {
-		return "", false, err
-	}
-	if _, exists := byTask[node.BaseTaskID]; !exists {
-		return "", false, loomgit.NewError(loomgit.LineageUnresolved, "predecessor missing from local stack", nil)
-	}
-	return node.BaseTaskID, true, nil
 }
 
 // DefaultStackLineageLookup returns a lineage lookup backed by the per-user loom
@@ -389,28 +374,9 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 			return TaskWorktree{}, fmt.Errorf("resolve delegated task base for repo %q: %w", selected.Name, err)
 		}
 		if !delegated {
-			if lookup, ok := r.Lineage.(localPredecessorLookup); ok {
-				predecessor, hasPredecessor, lookupErr := lookup.PredecessorForTask(ctx, workspaceKey, selected.Name, req.TaskID)
-				if lookupErr != nil {
-					return TaskWorktree{}, lookupErr
-				}
-				if hasPredecessor {
-					localBase, err = taskcopy.ResolveLineageBase(ctx, repoPath, workspaceKey, req.TaskID, predecessor, selected.Name)
-					if err != nil {
-						return TaskWorktree{}, err
-					}
-					base = localBase.Ref
-				}
-			}
-			if base == "" {
-				baseBranch, branchErr := r.baseBranchForTask(ctx, workspaceKey, selected, req)
-				if branchErr != nil {
-					return TaskWorktree{}, branchErr
-				}
-				base, err = localworkspace.ResolveTaskBase(repoPath, repoRemote(selected), baseBranch)
-				if err != nil {
-					return TaskWorktree{}, fmt.Errorf("resolve task copy base for repo %q: %w", selected.Name, err)
-				}
+			base, localBase, err = r.resolveTaskLineageBase(ctx, req, repoPath, selected)
+			if err != nil {
+				return TaskWorktree{}, err
 			}
 		}
 	}

@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/taskcopy"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -352,4 +355,43 @@ func flueTaskSessionMetadata(req TaskExecRequest, sessionID string) map[string]s
 		metadata["parent_session_id"] = req.ParentSessionID
 	}
 	return metadata
+}
+
+type localPredecessorLookup interface {
+	PredecessorForTask(context.Context, string, string, string) (string, bool, error)
+}
+
+func (l StackLineageLookup) PredecessorForTask(ctx context.Context, workspaceKey, repoName, taskID string) (string, bool, error) {
+	_, node, byTask, ok, err := findTaskStack(ctx, l.Store, workspaceKey, repoName, taskID)
+	if err != nil || !ok || node.BaseTaskID == "" {
+		return "", false, err
+	}
+	if _, exists := byTask[node.BaseTaskID]; !exists {
+		return "", false, loomgit.NewError(loomgit.LineageUnresolved, "predecessor missing from local stack", nil)
+	}
+	return node.BaseTaskID, true, nil
+}
+
+// resolveTaskLineageBase selects an immutable local predecessor head when one
+// exists. Roots and tasks without local lineage retain their branch selection.
+func (r LocalTaskWorktreeResolver) resolveTaskLineageBase(ctx context.Context, req TaskExecRequest, repoPath string, selected *domain.Repo) (string, taskcopy.LineageBase, error) {
+	if lookup, ok := r.Lineage.(localPredecessorLookup); ok {
+		predecessor, found, err := lookup.PredecessorForTask(ctx, req.WorkspaceKey, selected.Name, req.TaskID)
+		if err != nil {
+			return "", taskcopy.LineageBase{}, err
+		}
+		if found {
+			base, err := taskcopy.ResolveLineageBase(ctx, repoPath, req.WorkspaceKey, req.TaskID, predecessor, selected.Name)
+			return base.Ref, base, err
+		}
+	}
+	branch, err := r.baseBranchForTask(ctx, req.WorkspaceKey, selected, req)
+	if err != nil {
+		return "", taskcopy.LineageBase{}, err
+	}
+	sha, err := localworkspace.ResolveTaskBase(repoPath, repoRemote(selected), branch)
+	if err != nil {
+		return "", taskcopy.LineageBase{}, fmt.Errorf("resolve task copy base for repo %q: %w", selected.Name, err)
+	}
+	return sha, taskcopy.LineageBase{}, nil
 }
