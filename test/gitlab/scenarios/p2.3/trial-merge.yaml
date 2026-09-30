@@ -1,0 +1,8 @@
+name: trial merge replays without touching a checkout
+task: P2.3
+git: [min, latest]
+fixture: loomcli
+when:
+  - go_check: trial_merge
+then:
+  - go_check: no_error
