@@ -395,10 +395,12 @@ func TestPRReviewCrossProcessLock(t *testing.T) {
 			_ = lockfile.FlockUnlock(lock)
 		}
 	}()
+	childCtx, cancelChildren := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelChildren()
 	var children []*exec.Cmd
 	for _, id := range []string{"serve", "daemon"} {
 		target := filepath.Join(parent, id)
-		cmd := exec.Command(os.Args[0], "-test.run=^TestPRReviewCrossProcessLock$") //nolint:norawexec // Child test process verifies the cross-process review lock.
+		cmd := exec.CommandContext(childCtx, os.Args[0], "-test.run=^TestPRReviewCrossProcessLock$") //nolint:norawexec // Child test process verifies the cross-process review lock.
 		cmd.Env = append(os.Environ(), "LOOM_PR_REVIEW_LOCK_CHILD=1", "LOOM_PR_REVIEW_REPO="+repo, "LOOM_PR_REVIEW_TARGET="+target, "LOOM_PR_REVIEW_HEAD="+head)
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
@@ -416,26 +418,17 @@ func TestPRReviewCrossProcessLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	locked = false
-	// Both subprocesses must finish and each must receive its own checkout.
-	deadline := time.Now().Add(5 * time.Second)
-	for _, id := range []string{"serve", "daemon"} {
-		target := filepath.Join(parent, id)
-		for {
-			if _, err := os.Stat(filepath.Join(target, ".git")); err == nil {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("%s did not create a worktree", id)
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-		if got := gitOutput(t, target, "rev-parse", "HEAD"); got != head {
-			t.Fatalf("%s HEAD = %s, want %s", id, got, head)
-		}
-	}
+	// A .git file appears before git worktree add finishes. Wait for both
+	// creators to exit before inspecting their checkouts.
 	for _, child := range children {
 		if err := child.Wait(); err != nil {
 			t.Fatalf("review process failed: %v", err)
+		}
+	}
+	for _, id := range []string{"serve", "daemon"} {
+		target := filepath.Join(parent, id)
+		if got := gitOutput(t, target, "rev-parse", "HEAD"); got != head {
+			t.Fatalf("%s HEAD = %s, want %s", id, got, head)
 		}
 	}
 }
