@@ -50,6 +50,13 @@ internal/cli/automode/sessions/
 internal/cli/daemon/supervisor/sessions/
 notify.token
 
+# Scout-owned workspace files: they belong at the workspace root, but the
+# workspace runtime dir's "." fallback can land them in a repo checkout
+# (docs/design/2026-08-14-scout-proposal.md, "File placement and guards").
+/agents.md
+/agents.md.pending
+/history.md
+
 # Auth service
 services/auth/node_modules/
 services/auth/dist/

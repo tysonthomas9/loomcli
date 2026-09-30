@@ -155,6 +155,7 @@ func NewModule(cfg Config) *Module {
 		"release-task":                m.releaseTask,
 		"connector-dispatch":          m.connectorDispatch,
 		"emit-event":                  m.emitEvent,
+		"create-issue":                m.createIssue,
 	}
 	if m.worktreePath == "" {
 		if wd, err := os.Getwd(); err == nil {

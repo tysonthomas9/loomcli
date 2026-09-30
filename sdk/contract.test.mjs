@@ -110,6 +110,18 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
       artifactIds: ["art-1"],
     });
     await client.tasks.release({ taskId: "TASK-1", actor: "lead" });
+    await client.issues.create({
+      title: "Add retry to sync",
+      description: "It flakes.",
+      issueType: "task",
+      priority: 2,
+      labels: ["recommended"],
+      repo: "loomcli",
+      parent: "EPIC-1",
+      design: "one backoff loop",
+      status: "open",
+      idempotencyKey: "key-1",
+    });
     await client.connectors.dispatch({
       action: "github.pull_request.read",
       connectorId: "conn-1",

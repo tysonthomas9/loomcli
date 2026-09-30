@@ -23,10 +23,18 @@ const (
 	TaskRunnerCommandEnv     = "LOOM_DRIVER_TASK_RUNNER_CMD"
 
 	// LocalTaskRunnerEntrypoint is the bundled local task runner entrypoint.
-	// Only this runner gets the resolved backend env + the trusted-local
-	// provider-credential env allowlist (§4.3); Daytona/remote runners keep the
-	// strict driver filter.
+	// Only the trusted-local CLI runners (this one and the scout leaf below)
+	// get the resolved backend env + the trusted-local provider-credential env
+	// allowlist (§4.3); Daytona/remote runners keep the strict driver filter.
 	LocalTaskRunnerEntrypoint = "local-task-runner"
+
+	// ScoutTaskRunnerEntrypoint is the scout's bundled analysis leaf. It execs
+	// the workspace-default backend CLI on the host exactly like the local task
+	// runner, so it shares the trusted-local env treatment (backend resolution,
+	// provider credentials, local runner settings) — but NOT the per-run repo
+	// worktree resolution: scout runs stay anchored at the workspace work dir,
+	// never a repo checkout.
+	ScoutTaskRunnerEntrypoint = "scout-task-runner"
 
 	// TaskRunnerBackendEnv carries the resolved backend CLI to the local task
 	// runner (§4.5).
@@ -42,6 +50,19 @@ const (
 // so a leak cannot reach Daytona/remote runners.
 func isLocalTaskRunner(req TaskExecRequest) bool {
 	return strings.TrimSpace(req.RunnerEntrypoint) == LocalTaskRunnerEntrypoint
+}
+
+// isScoutTaskRunner reports whether the request targets the scout analysis
+// leaf.
+func isScoutTaskRunner(req TaskExecRequest) bool {
+	return strings.TrimSpace(req.RunnerEntrypoint) == ScoutTaskRunnerEntrypoint
+}
+
+// isTrustedLocalCLIRunner gates the trusted-local env widening (§4.3): the
+// bundled entrypoints that exec a backend CLI directly on the host. Strictly
+// entrypoint-scoped so the widened env can never reach Daytona/remote runners.
+func isTrustedLocalCLIRunner(req TaskExecRequest) bool {
+	return isLocalTaskRunner(req) || isScoutTaskRunner(req)
 }
 
 type HostBridgeTaskExecutor struct {
@@ -698,7 +719,7 @@ func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON s
 		)
 	}
 	env = append(env, e.taskRunnerBundleEnv(req)...)
-	if isLocalTaskRunner(req) {
+	if isTrustedLocalCLIRunner(req) {
 		env = append(env, TaskRunnerBackendEnv+"="+e.resolveTaskRunnerBackend(req))
 		existing := env
 		if len(inherited) > 0 && len(inherited[0]) > 0 {

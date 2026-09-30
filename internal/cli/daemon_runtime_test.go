@@ -33,6 +33,11 @@ func TestIsProtectedRuntimePath(t *testing.T) {
 		{"sessions/abc", true},
 		{"AGENTS.md", true},
 
+		// Scout-owned workspace files (lowercase, distinct from AGENTS.md)
+		{"agents.md", true},
+		{"agents.md.pending", true},
+		{"history.md", true},
+
 		// Not protected
 		{"leftover.txt", false},
 		{"other/file.go", false},
