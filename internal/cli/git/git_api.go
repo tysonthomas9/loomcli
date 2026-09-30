@@ -7,7 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
 )
 
@@ -179,38 +182,16 @@ func pushBranchInRepoDetachedResult(repoPath, sourceBranch, targetBranch, remote
 // PullRepoWorktreeResult pulls a source branch into the worktree and returns a structured result.
 // Unlike pullRepoWorktree, it does NOT launch an AI agent for conflicts.
 func PullRepoWorktreeResult(repoPath, currentBranch, sourceBranch, remote string) (*PullResult, error) {
-	r := resolveRemote(remote)
-
-	if err := GitFetchRemote(repoPath, remote); err != nil {
-		return nil, fmt.Errorf("fetching: %v", err)
-	}
-
-	mergeMsg := fmt.Sprintf("Pull from %s", sourceBranch)
-	if err := GitMergeRemote(repoPath, remote, sourceBranch, mergeMsg); err != nil {
-		conflicts, conflictErr := GetConflictedFiles(repoPath)
-		if conflictErr != nil || len(conflicts) == 0 {
-			// No conflict markers found — abort merge to restore clean state
-			_ = GitMergeAbort(repoPath)
-			return nil, fmt.Errorf("merge failed: %v", err)
+	_ = currentBranch
+	result, err := apply.PullLocal(context.Background(), repoPath, remote, sourceBranch, uuid.NewString())
+	if err != nil {
+		if len(result.Paths) > 0 {
+			return &PullResult{Message: err.Error(), ConflictedFiles: result.Paths}, nil
 		}
-		// Abort the merge to leave the worktree in a clean state.
-		// The API returns conflict info for the caller to handle.
-		_ = GitMergeAbort(repoPath)
-		return &PullResult{
-			Success:         false,
-			Message:         "merge conflicts detected",
-			ConflictedFiles: conflicts,
-		}, nil
+		return nil, err
 	}
-
-	if err := GitPushRemote(repoPath, remote, currentBranch); err != nil {
-		return nil, fmt.Errorf("pushing: %v", err)
-	}
-
-	return &PullResult{
-		Success: true,
-		Message: fmt.Sprintf("Pulled from %s and pushed to %s/%s", sourceBranch, r, currentBranch),
-	}, nil
+	return &PullResult{Success: true, Message: "Restacked working area onto recorded trunk",
+		AlreadyUpToDate: result.AlreadyUpToDate}, nil
 }
 
 // CreatePRResult publishes an approved change through the host publisher.

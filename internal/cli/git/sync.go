@@ -190,7 +190,9 @@ func syncSingleWorkspace(deps *cli.Deps, resolver *cli.Resolver, pushOnly, pullO
 	if !pushOnly {
 		fmt.Println("")
 		fmt.Println("--- Phase 2: Pull ---")
-		pullWorkspaceWorktrees(deps, worktrees, "")
+		if err := pullWorkspaceWorktrees(deps, worktrees, ""); err != nil {
+			return err
+		}
 	}
 	return nil
 }

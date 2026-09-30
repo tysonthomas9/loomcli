@@ -13,17 +13,75 @@ import (
 // Reconcile finishes an interrupted swap while holding the repository lock.
 func (s *Service) Reconcile(ctx context.Context, workspace, lead string) error {
 	return s.repo.WithLock(ctx, func(ctx context.Context) error {
+		areas, err := s.store.WorkingAreas(ctx, workspace, lead)
+		if err != nil {
+			return err
+		}
+		repo := ""
+		for _, area := range areas {
+			if area.Path == s.runner.Path() {
+				repo = area.Repo
+				break
+			}
+		}
 		layers, err := s.store.OpenApplied(ctx, workspace, lead)
 		if err != nil {
 			return err
 		}
 		for _, layer := range layers {
+			if layer.Change == "pull" {
+				belongs, err := s.pullPlanBelongsToRepo(ctx, workspace, lead, repo, layer.RequestID)
+				if err != nil {
+					return err
+				}
+				if !belongs {
+					continue
+				}
+			}
 			if err := s.reconcileLayer(ctx, layer); err != nil {
 				return err
 			}
 		}
-		return nil
+		return s.reconcilePullPlans(ctx, workspace, lead, repo)
 	})
+}
+
+func (s *Service) pullPlanBelongsToRepo(ctx context.Context, workspace, lead, repo, requestID string) (bool, error) {
+	plans, err := s.store.PendingPullPlans(ctx, workspace, lead)
+	if err != nil {
+		return false, err
+	}
+	for _, plan := range plans {
+		if plan.RequestID == requestID && plan.Repo == repo {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *Service) reconcilePullPlans(ctx context.Context, workspace, lead, repo string) error {
+	plans, err := s.store.PendingPullPlans(ctx, workspace, lead)
+	if err != nil {
+		return err
+	}
+	for _, plan := range plans {
+		if plan.Repo != repo {
+			continue
+		}
+		switch plan.Phase {
+		case "done":
+			if err := s.store.CompletePull(ctx, plan.RequestID, plan.Workspace, plan.Lead, plan.Repo, plan.BaseSHA, plan.Layers); err != nil {
+				return err
+			}
+		case "", "not_applied":
+			if err := s.store.DiscardPullPlan(ctx, plan.RequestID); err != nil {
+				return err
+			}
+		default:
+			return loomgit.NewError(loomgit.AttentionRequired, "unfinished pull swap requires recovery", nil)
+		}
+	}
+	return nil
 }
 
 func (s *Service) reconcileLayer(ctx context.Context, layer loomgit.AppliedLayer) error {
