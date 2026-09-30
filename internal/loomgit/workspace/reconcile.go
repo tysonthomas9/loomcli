@@ -83,6 +83,33 @@ func OpenCreations(ctx context.Context) ([]*Recovery, error) {
 	return recoveries, nil
 }
 
+// CheckOpenEntries refuses journal operations without a recovery handler. It
+// leaves their fences and files untouched for explicit repair.
+func CheckOpenEntries(ctx context.Context) error {
+	path := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	st, err := journal.OpenSQLite(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+	entries, err := st.OpenEntries(ctx)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.Operation != "ensure_workspace" && entry.Operation != "attach_workspace_repos" {
+			return loomgit.NewError(loomgit.AttentionRequired,
+				fmt.Sprintf("journal request %q has no recovery handler for %q", entry.RequestID, entry.Operation), nil)
+		}
+	}
+	return nil
+}
+
 func openRecovery(ctx context.Context, st *journal.SQLite, path string, entry loomgit.JournalEntry) (*Recovery, error) {
 	plan, err := st.WorkspaceCreation(ctx, entry)
 	unplanned := errors.Is(err, sql.ErrNoRows)

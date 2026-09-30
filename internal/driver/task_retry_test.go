@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -38,6 +39,24 @@ func TestRetryCarriesPreviousAttemptID(t *testing.T) {
 	req := taskExecRequest(claimed, executeClaimedTaskRunOptions{}, claimedTaskRunRefs{})
 	if req.SchedulerAttempt != 1 || req.PreviousAttemptID != "run-1-a1" || taskCopyAttemptID(req.TaskRunID, req.SchedulerAttempt) != "run-1-a2" {
 		t.Fatalf("retry request = %+v", req)
+	}
+}
+
+func TestResumeCarriesCaptureAttemptID(t *testing.T) {
+	claimed := &domain.TaskRun{TaskRunID: "run-2", RuntimeMetadata: map[string]string{"resume_from_attempt_id": "run-1-a1"}}
+	req := taskExecRequest(claimed, executeClaimedTaskRunOptions{}, claimedTaskRunRefs{})
+	if req.ResumeAttemptID != "run-1-a1" || req.PreviousAttemptID != "" {
+		t.Fatalf("resume request = %+v", req)
+	}
+}
+
+func TestQueuedResumeKeepsCaptureAttempt(t *testing.T) {
+	st := memstore.New()
+	run, err := createQueuedTaskRun(context.Background(), st, TaskRunRequestOptions{
+		WorkspaceKey: "WS", TaskID: "TASK-1", ResumeAttemptID: "old-attempt",
+	}, taskRunRequestRefs{TaskRunID: "new-run"})
+	if err != nil || run == nil || run.RuntimeMetadata["resume_from_attempt_id"] != "old-attempt" {
+		t.Fatalf("queued resume = %+v, %v", run, err)
 	}
 }
 

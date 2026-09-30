@@ -30,6 +30,7 @@ type TaskRunRequestOptions struct {
 	DriverStepID       string
 	TaskRunID          string
 	TaskID             string
+	ResumeAttemptID    string
 	WorkerProfileID    string
 	Runner             string
 	RunnerRef          string
@@ -85,6 +86,7 @@ type TaskExecRequest struct {
 	TaskRunID         string                  `json:"task_run_id"`
 	SchedulerAttempt  int                     `json:"scheduler_attempt,omitempty"`
 	PreviousAttemptID string                  `json:"previous_attempt_id,omitempty"`
+	ResumeAttemptID   string                  `json:"resume_from_attempt_id,omitempty"`
 	TaskID            string                  `json:"task_id"`
 	WorkerProfileID   string                  `json:"worker_profile_id,omitempty"`
 	Runner            string                  `json:"runner,omitempty"`
@@ -408,6 +410,7 @@ func normalizeTaskRunRequestOptions(opts TaskRunRequestOptions) TaskRunRequestOp
 	opts.DriverStepID = strings.TrimSpace(opts.DriverStepID)
 	opts.TaskRunID = strings.TrimSpace(opts.TaskRunID)
 	opts.TaskID = strings.TrimSpace(opts.TaskID)
+	opts.ResumeAttemptID = strings.TrimSpace(opts.ResumeAttemptID)
 	opts.WorkerProfileID = strings.TrimSpace(opts.WorkerProfileID)
 	opts.Runner = strings.TrimSpace(opts.Runner)
 	opts.RunnerRef = strings.TrimSpace(opts.RunnerRef)
@@ -515,6 +518,9 @@ func createQueuedTaskRun(ctx context.Context, s store.Store, opts TaskRunRequest
 	runtimeMetadata := map[string]string{
 		"driver_run_id": opts.DriverRunID,
 		"requested_by":  "driver",
+	}
+	if opts.ResumeAttemptID != "" {
+		runtimeMetadata["resume_from_attempt_id"] = opts.ResumeAttemptID
 	}
 	if opts.Runner != "" {
 		runtimeMetadata["runner"] = opts.Runner
@@ -752,7 +758,7 @@ func startClaimedTaskRunHeartbeat(ctx context.Context, s store.Store, claimed *d
 }
 
 func taskExecRequest(claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, refs claimedTaskRunRefs) TaskExecRequest {
-	return TaskExecRequest{
+	request := TaskExecRequest{
 		WorkspaceKey:      refs.WorkspaceKey,
 		DriverRunID:       refs.DriverRunID,
 		DriverStepID:      refs.DriverStepID,
@@ -777,6 +783,10 @@ func taskExecRequest(claimed *domain.TaskRun, opts executeClaimedTaskRunOptions,
 		SandboxPlacement:  claimed.SandboxPlacement,
 		Input:             claimed.Input,
 	}
+	if request.PreviousAttemptID == "" {
+		request.ResumeAttemptID = claimed.RuntimeMetadata["resume_from_attempt_id"]
+	}
+	return request
 }
 
 func normalizeTaskExecCompletion(execResult TaskExecResult, execErr error) taskExecCompletion {

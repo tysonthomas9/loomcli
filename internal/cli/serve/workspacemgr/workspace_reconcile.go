@@ -15,6 +15,9 @@ import (
 // Reconcile adopts every open workspace creation before serve accepts work.
 // A checkout mismatch remains journal-owned and is surfaced for repair.
 func Reconcile(ctx context.Context, s storepkg.Store) error {
+	if err := loomworkspace.CheckOpenEntries(ctx); err != nil {
+		return err
+	}
 	recoveries, err := loomworkspace.OpenCreations(ctx)
 	if err != nil {
 		return err

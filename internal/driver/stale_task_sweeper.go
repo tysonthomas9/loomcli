@@ -3,9 +3,13 @@ package driver
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -48,8 +52,8 @@ type StaleTaskSweepResult struct {
 	RecoveredTaskRunIDs []string
 }
 
-// RunOnce performs a single sweep: list running DriverRuns in each target
-// workspace and fail their TaskRuns whose heartbeat predates now-MaxAge.
+// RunOnce performs a single sweep of running TaskRuns in each target workspace.
+// A driver run may already be terminal when its task copy needs capture.
 func (s *StaleTaskSweeper) RunOnce(ctx context.Context) (*StaleTaskSweepResult, error) {
 	if s == nil || s.Store == nil {
 		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
@@ -69,25 +73,77 @@ func (s *StaleTaskSweeper) RunOnce(ctx context.Context) (*StaleTaskSweepResult, 
 }
 
 func (s *StaleTaskSweeper) sweepWorkspace(ctx context.Context, ws string, staleBefore time.Time, out *StaleTaskSweepResult) error {
-	runs, err := s.Store.DriverRuns().List(ctx, ws, store.DriverRunFilter{Status: domain.DriverRunRunning})
+	tasks, err := s.Store.TaskRuns().List(ctx, ws, store.TaskRunFilter{Status: domain.TaskRunRunning})
 	if err != nil {
-		return fmt.Errorf("list running driver runs in workspace %q: %w", ws, err)
+		return fmt.Errorf("list running task runs in workspace %q: %w", ws, err)
 	}
-	for _, run := range runs {
-		if run == nil {
+	runIDs := make(map[string][]*domain.TaskRun)
+	for _, task := range tasks {
+		if task == nil {
 			continue
 		}
-		result, err := s.Store.DriverRuns().RecoverStaleTaskRuns(ctx, ws, run.RunID, store.StaleTaskRunRecovery{
+		if task.DriverRunID == "" {
+			if task.RuntimeMetadata["task_copy_path"] != "" && task.LastHeartbeat.Before(staleBefore) {
+				return loomgit.NewError(loomgit.AttentionRequired, "stale task copy has no driver run", nil)
+			}
+			continue
+		}
+		runIDs[task.DriverRunID] = append(runIDs[task.DriverRunID], task)
+	}
+	ids := make([]string, 0, len(runIDs))
+	for id := range runIDs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		if err := captureStaleTaskCopies(ctx, runIDs[id], staleBefore); err != nil {
+			return err
+		}
+		result, err := s.Store.DriverRuns().RecoverStaleTaskRuns(ctx, ws, id, store.StaleTaskRunRecovery{
 			StaleBefore:  staleBefore,
 			ErrorClass:   staleTaskRunErrorClass,
 			ErrorMessage: staleTaskRunErrorMessage,
 		})
 		if err != nil {
-			return fmt.Errorf("recover stale task runs for driver run %q: %w", run.RunID, err)
+			return fmt.Errorf("recover stale task runs for driver run %q: %w", id, err)
 		}
 		out.Recovered += result.Recovered
 		out.SkippedFresh += result.SkippedFresh
 		out.RecoveredTaskRunIDs = append(out.RecoveredTaskRunIDs, result.RecoveredTaskRunIDs...)
+	}
+	return nil
+}
+
+func captureStaleTaskCopies(ctx context.Context, tasks []*domain.TaskRun, staleBefore time.Time) error {
+	for _, task := range tasks {
+		if task == nil || !task.LastHeartbeat.Before(staleBefore) || task.RuntimeMetadata["task_copy_path"] == "" {
+			continue
+		}
+		if err := captureStaleTaskCopy(ctx, task); err != nil {
+			return fmt.Errorf("task run %q: %w", task.TaskRunID, err)
+		}
+	}
+	return nil
+}
+
+func captureStaleTaskCopy(ctx context.Context, task *domain.TaskRun) error {
+	meta := task.RuntimeMetadata
+	path, attempt, base := meta["task_copy_path"], meta["attempt_id"], meta["attempt_base_sha"]
+	repo, source := meta["repo_name"], meta["source_repo_path"]
+	if path == "" || attempt == "" || base == "" || repo == "" || source == "" || task.TaskID == "" {
+		return loomgit.NewError(loomgit.AttentionRequired, "task copy has incomplete recovery metadata", nil)
+	}
+	captured, err := agentcapture.Capture(ctx, path, task.WorkspaceKey, attempt, task.TaskID, task.TaskID)
+	if err != nil {
+		return loomgit.NewError(loomgit.AttentionRequired, "capture stale task copy", err)
+	}
+	_, err = driverfreeze.FreezeCapture(ctx, driverfreeze.CaptureRequest{
+		Workspace: task.WorkspaceKey, Task: task.TaskID, Repo: repo, Attempt: attempt,
+		Worktree: path, Base: base, CaptureSHA: captured.SHA, SourceRepo: source,
+		Outcome: "failed", Complete: captured.Complete,
+	})
+	if err != nil {
+		return loomgit.NewError(loomgit.AttentionRequired, "freeze stale task copy", err)
 	}
 	return nil
 }

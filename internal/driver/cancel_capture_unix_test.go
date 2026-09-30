@@ -17,6 +17,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 
 	_ "modernc.org/sqlite"
 )
@@ -100,7 +101,13 @@ func TestCancelCapturesRetainedCopyAndKillsCLIChild(t *testing.T) {
 	req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
 	req.RunnerTrustLevel = domain.DriverTrustTrusted
 	copy := TaskWorktree{Path: repo.dir, RepoName: "repo", AttemptID: "attempt-1", BaseSHA: base}
-	e := HostBridgeTaskExecutor{Store: memstore.New(), WorktreePath: repo.dir,
+	st := memstore.New()
+	if _, err := st.TaskRuns().Create(context.Background(), store.TaskRunCreate{
+		WorkspaceKey: req.WorkspaceKey, TaskRunID: req.TaskRunID, TaskID: req.TaskID, Status: domain.TaskRunRunning,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e := HostBridgeTaskExecutor{Store: st, WorktreePath: repo.dir,
 		WorktreeResolver: cancelTestResolver{copy}, Command: []string{script}}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

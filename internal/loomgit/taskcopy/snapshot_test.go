@@ -78,6 +78,44 @@ func captureCopy(t *testing.T, source, copyPath, journal, base string, importSou
 	return revision.Change, revision.Number
 }
 
+func TestResumeStartsFreshCopyAtCaptureWithOriginalBase(t *testing.T) {
+	source, oldCopy, journal, base := fixture(t)
+	ctx := context.Background()
+	if _, err := taskcopy.CreateDetailedAt(ctx, journal, source, oldCopy, "W", "A", "", base); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(oldCopy, "untracked"), []byte("earlier work\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	captured, err := agentcapture.Capture(ctx, oldCopy, "W", "A", "T", "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := driverfreeze.FreezeCaptureAt(ctx, journal, driverfreeze.CaptureRequest{
+		Workspace: "W", Task: "T", Repo: "source", Attempt: "A", Worktree: oldCopy,
+		Base: base, CaptureSHA: captured.SHA, Outcome: "failed", Complete: captured.Complete, SourceRepo: source,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	newCopy := filepath.Join(filepath.Dir(oldCopy), "resumed")
+	resumed, err := taskcopy.ResumeDetailedAt(ctx, journal, source, newCopy, "W", "B", "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.BaseSHA != base || git(t, source, "rev-parse", "refs/loom/ws/W/attempt/B/base") != base {
+		t.Fatalf("resume base = %s, want original %s", resumed.BaseSHA, base)
+	}
+	if got := git(t, newCopy, "show", "HEAD:untracked"); got != "earlier work" {
+		t.Fatalf("resume omitted captured work: %q", got)
+	}
+	if got := git(t, newCopy, "merge-base", base, "HEAD"); got != base {
+		t.Fatalf("resume head left original base: %s", got)
+	}
+	if data, err := os.ReadFile(filepath.Join(oldCopy, "untracked")); err != nil || string(data) != "earlier work\n" {
+		t.Fatalf("old copy changed: %q, %v", data, err)
+	}
+}
+
 func TestP118SnapshotImportsCaptureAndRevision(t *testing.T) {
 	source, copyPath, journal, base := fixture(t)
 	change, revision := captureCopy(t, source, copyPath, journal, base, true)

@@ -228,6 +228,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	if err := workspacemgr.Reconcile(ctx, storeHandle.Store); err != nil {
 		log.Printf("warning: reconcile workspace creations: %v", err)
 	}
+	startLoomGitReconciler(ctx, storeHandle.Store)
 	startDriverExecutorIfEnabled(ctx, storeHandle.Store)
 	startStaleTaskSweeper(ctx, storeHandle.Store)
 	startOutboxDispatcher(ctx, storeHandle.Store)

@@ -358,7 +358,10 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 		return TaskWorktree{}, err
 	}
 	base := ""
-	if req.PreviousAttemptID != "" {
+	if req.ResumeAttemptID != "" && req.PreviousAttemptID != "" {
+		return TaskWorktree{}, fmt.Errorf("resume and retry cannot select the same task copy")
+	}
+	if req.PreviousAttemptID != "" || req.ResumeAttemptID != "" {
 		repoPath, _, _, err = r.delegatedBase(ctx, req, repoPath, selected.Name)
 		if err != nil {
 			return TaskWorktree{}, fmt.Errorf("resolve delegated retry source for repo %q: %w", selected.Name, err)
@@ -380,7 +383,12 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 			}
 		}
 	}
-	created, err := taskcopy.CreateDetailed(ctx, repoPath, target, workspaceKey, attemptID, req.PreviousAttemptID, base)
+	var created taskcopy.Result
+	if req.ResumeAttemptID != "" {
+		created, err = taskcopy.ResumeDetailed(ctx, repoPath, target, workspaceKey, attemptID, req.ResumeAttemptID)
+	} else {
+		created, err = taskcopy.CreateDetailed(ctx, repoPath, target, workspaceKey, attemptID, req.PreviousAttemptID, base)
+	}
 	if err != nil {
 		return TaskWorktree{}, fmt.Errorf("create task copy for repo %q: %w", selected.Name, err)
 	}

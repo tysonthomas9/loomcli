@@ -118,7 +118,7 @@ func TestFreezeSourceStoresRewrittenChainAndReplay(t *testing.T) {
 	}
 }
 
-func TestIncompleteCaptureOnlyFreezesAsCancelled(t *testing.T) {
+func TestIncompleteCaptureFreezesAsInterruptedOutcome(t *testing.T) {
 	dir, runner, store := fixture(t)
 	base := must(t, runner, "rev-parse", "HEAD")
 	write(t, dir, "edit", "partial work")
@@ -129,11 +129,18 @@ func TestIncompleteCaptureOnlyFreezesAsCancelled(t *testing.T) {
 	}
 	in := SourceInput{Workspace: "W", Change: "C", RequestID: "cancel", Attempt: "A",
 		TaskID: "task", BaseSHA: base, CaptureSHA: result.CaptureSHA, Complete: false}
-	in.Outcome = "failed"
+	in.Outcome = "completed"
 	if _, err := FreezeSource(context.Background(), store, runner, in); err == nil {
-		t.Fatal("non-cancelled incomplete capture was accepted")
+		t.Fatal("completed incomplete capture was accepted")
+	}
+	in.Outcome = "failed"
+	in.RequestID = "failed"
+	failed, err := FreezeSource(context.Background(), store, runner, in)
+	if err != nil || !failed.Ready || !failed.Incomplete || failed.Outcome != "failed" {
+		t.Fatalf("failed incomplete revision = %+v, %v", failed, err)
 	}
 	in.Outcome = "cancelled"
+	in.RequestID = "cancel"
 	rev, err := FreezeSource(context.Background(), store, runner, in)
 	if err != nil || !rev.Ready || !rev.Incomplete || rev.Outcome != "cancelled" {
 		t.Fatalf("cancelled incomplete revision = %+v, %v", rev, err)
