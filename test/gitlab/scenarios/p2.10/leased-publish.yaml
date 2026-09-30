@@ -1,0 +1,8 @@
+name: Approved working-area layer publishes to a bare provider with an exact lease
+task: P2.10
+git: [min, latest]
+fixture: empty
+when:
+  - go_check: leased_publish
+then:
+  - go_check: no_error

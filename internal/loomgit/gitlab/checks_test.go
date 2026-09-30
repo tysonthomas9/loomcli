@@ -121,6 +121,8 @@ func (s *state) goCheck(name string) error {
 		return s.checkProvider()
 	case "mirror_refs":
 		return s.packageTests("./internal/loomgit/mirror", "Test.*")
+	case "leased_publish":
+		return s.packageTests("./internal/loomgit/publish", "TestPublish.*")
 	case "fault_tools":
 		// Proves the lab has an ENOSPC tmpfs and a second Unix account.
 		return s.checkFaultTools()
