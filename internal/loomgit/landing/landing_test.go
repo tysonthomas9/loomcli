@@ -1,8 +1,10 @@
 package landing
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -162,6 +164,31 @@ func TestMergeRecordLandsWithoutTrailerAndOffersDependent(t *testing.T) {
 	}
 	if err := ReconcileWithOptions(ctx, fixture.store, fixture.forge, options); err != nil || restackCalls != 1 {
 		t.Fatalf("idempotent reconcile = %v, restacks = %d", err, restackCalls)
+	}
+}
+
+func TestLandingWithoutDependentAdapters(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.publish(t, "A")
+	merged := fixture.commit(t, "PR title only")
+	git(t, fixture.source, "push", "-q", "origin", "main")
+	fixture.forge.pull.Merged = true
+	fixture.forge.pull.MergeCommitSHA = merged
+
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	ctx := context.Background()
+	if err := Reconcile(ctx, fixture.store, fixture.forge); err != nil {
+		t.Fatal(err)
+	}
+	status, err := fixture.store.LandingStatus(ctx, "W", "A")
+	if err != nil || status.State != "landed" || status.Rule != "merge_commit" {
+		t.Fatalf("landing status = %+v, %v", status, err)
+	}
+	if !strings.Contains(logs.String(), "landing dependent work skipped: adapters not configured") {
+		t.Fatalf("missing adapter warning: %s", logs.String())
 	}
 }
 

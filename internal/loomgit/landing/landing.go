@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -92,6 +93,10 @@ func ReconcileWithOptions(ctx context.Context, store Store, forge Forge, options
 	publications, err := store.PublishedChanges(ctx)
 	if err != nil {
 		return err
+	}
+	if len(publications) > 0 && (options.Dependents == nil || options.Restack == nil) {
+		slog.Warn("landing dependent work skipped: adapters not configured",
+			"dependents_configured", options.Dependents != nil, "restack_configured", options.Restack != nil)
 	}
 	fetched, err := fetchPublications(ctx, store, publications, options.Dependents != nil)
 	if err != nil {
