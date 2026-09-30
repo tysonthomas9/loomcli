@@ -147,7 +147,7 @@ func publishStackRecorded(ctx context.Context, store *journal.SQLite, cfg *confi
 			if token == "" {
 				return nil, errors.New("GitHub host credential unavailable")
 			}
-			forge = stackpublish.NewGitHubForge(token, nil, "")
+			forge = stackpublish.NewConfiguredGitHubForge(token)
 		}
 		backend, err := chooseStackBackend(ctx, store, workspace, stackID, forge, LoomStackBackend{Store: store}, nil)
 		if err != nil {

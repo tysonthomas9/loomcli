@@ -39,7 +39,7 @@ func reconcileEpicStack(ctx context.Context, ws string, proj *EpicStackProjectio
 	}
 	rec := &stackpublish.Reconciler{
 		Store: sstore,
-		Forge: stackpublish.NewGitHubForge(token, nil, ""),
+		Forge: stackpublish.NewConfiguredGitHubForge(token),
 	}
 	opts := stackpublish.Options{Resolver: stack.HeadlessResolver()}
 

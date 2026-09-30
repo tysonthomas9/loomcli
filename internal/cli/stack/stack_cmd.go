@@ -231,7 +231,7 @@ func statusCmd() *cobra.Command {
 			if path != "" && token != "" {
 				rp = path
 			}
-			rec := &stackpublish.Reconciler{Store: st, Forge: stackpublish.NewGitHubForge(token, nil, "")}
+			rec := &stackpublish.Reconciler{Store: st, Forge: stackpublish.NewConfiguredGitHubForge(token)}
 			report, err := rec.StackStatus(cmd.Context(), ws, id, rp)
 			if err != nil {
 				return err
@@ -452,7 +452,7 @@ func restackCmd() *cobra.Command {
 			if token == "" {
 				return errors.New("no GitHub token (set GITHUB_TOKEN/GH_TOKEN or run `gh auth login`)")
 			}
-			rec := &stackpublish.Reconciler{Store: st, Forge: stackpublish.NewGitHubForge(token, nil, "")}
+			rec := &stackpublish.Reconciler{Store: st, Forge: stackpublish.NewConfiguredGitHubForge(token)}
 			report, err := rec.Restack(cmd.Context(), ws, id, path, newResolver(headless))
 			if err != nil {
 				return err
@@ -497,7 +497,7 @@ func publishCmd() *cobra.Command {
 			}
 			rec := &stackpublish.Reconciler{
 				Store: st,
-				Forge: stackpublish.NewGitHubForge(token, nil, ""),
+				Forge: stackpublish.NewConfiguredGitHubForge(token),
 			}
 			opts := stackpublish.Options{DryRun: dryRun}
 			// Seed PR titles/bodies from issue metadata when available; the

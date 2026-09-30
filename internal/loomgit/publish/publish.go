@@ -192,7 +192,7 @@ func preflight(ctx context.Context, store Store, runner *gitexec.Runner, req Req
 	}
 	remote := strings.TrimSpace(string(remoteOut))
 	slug, err := githubSlug(remote)
-	if req.forge != nil && req.slug != "" {
+	if req.slug != "" {
 		slug = req.slug
 		err = nil
 	}
@@ -218,7 +218,7 @@ func preflight(ctx context.Context, store Store, runner *gitexec.Runner, req Req
 	}
 	forge := req.forge
 	if forge == nil {
-		forge = stackpublish.NewGitHubForge(token, nil, "")
+		forge = stackpublish.NewConfiguredGitHubForge(token)
 	}
 	return journal.Publication{Workspace: req.Workspace, Change: req.Change, Repo: req.Repo,
 		Branch: branch, Trunk: trunk, Slug: slug, Head: head, FeatureFlag: req.FeatureFlag}, forge, nil
@@ -338,7 +338,7 @@ func Reconcile(ctx context.Context, store Store, forge Forge, token string) erro
 		return errors.New("GitHub host credential unavailable")
 	}
 	if forge == nil {
-		forge = stackpublish.NewGitHubForge(token, nil, "")
+		forge = stackpublish.NewConfiguredGitHubForge(token)
 	}
 	stackGroups := make(map[string][]journal.Publication)
 	for _, publication := range publications {
