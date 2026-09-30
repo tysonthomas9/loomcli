@@ -20,7 +20,7 @@ func (s *SQLite) CommitWorkspace(ctx context.Context, entry loomgit.JournalEntry
 			return fmt.Errorf("record workspace repo %q: %w", repo.Repo, err)
 		}
 	}
-	r, err := tx.ExecContext(ctx, `UPDATE journal_entries SET phase='done',version=version+1 WHERE id=? AND version=? AND fence=? AND phase='started'`, entry.ID, entry.Version, entry.Fence)
+	r, err := tx.ExecContext(ctx, `UPDATE journal_entries SET phase='done',version=version+1 WHERE id=? AND version=? AND fence=? AND (phase='rows_written' OR (operation='attach_workspace_repos' AND phase='started'))`, entry.ID, entry.Version, entry.Fence)
 	if err != nil {
 		return err
 	}
@@ -38,7 +38,7 @@ func (s *SQLite) CommitWorkspace(ctx context.Context, entry loomgit.JournalEntry
 }
 
 func (s *SQLite) AbortWorkspace(ctx context.Context, entry loomgit.JournalEntry) error {
-	r, err := s.db.ExecContext(ctx, `DELETE FROM journal_entries WHERE id=? AND version=? AND fence=? AND phase='started'`, entry.ID, entry.Version, entry.Fence)
+	r, err := s.db.ExecContext(ctx, `DELETE FROM journal_entries WHERE id=? AND version=? AND fence=? AND phase<>'done'`, entry.ID, entry.Version, entry.Fence)
 	if err != nil {
 		return err
 	}

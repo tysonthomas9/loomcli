@@ -186,15 +186,18 @@ export function SortableWorkspaceEntry({
           {ws.name}
         </a>
       )}
-      {ws.state === "error" && (
+      {(ws.state === "error" || ws.state === "attention_required") && (
         <span className={styles.errorDot} title={ws.error_message ?? "Error"} />
       )}
-      {ws.state && ws.state !== "ready" && ws.state !== "error" && (
-        <span
-          className={styles.stateSpinner}
-          title={`${formatStatusLabel(ws.state)}…`}
-        />
-      )}
+      {ws.state &&
+        ws.state !== "ready" &&
+        ws.state !== "error" &&
+        ws.state !== "attention_required" && (
+          <span
+            className={styles.stateSpinner}
+            title={`${formatStatusLabel(ws.state)}…`}
+          />
+        )}
       <span className={styles.workspaceEntryMeta}>
         <span className={styles.workspaceRepoCount}>{ws.repo_count}</span>
         {ws.active && (

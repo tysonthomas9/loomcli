@@ -352,7 +352,7 @@ func (s *workspaceServiceImpl) workspaceJobFromStore(ctx context.Context, key st
 	case domain.WorkspaceStateInitializing:
 		job.Status = JobStatusRunning
 		job.Progress = "initializing workspace..."
-	case domain.WorkspaceStateError:
+	case domain.WorkspaceStateError, domain.WorkspaceStateAttentionRequired:
 		job.Status = JobStatusFailed
 		job.Error = ws.ErrorMessage
 		if job.Error == "" {

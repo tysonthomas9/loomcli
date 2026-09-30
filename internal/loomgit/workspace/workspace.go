@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -44,9 +45,29 @@ func (s *Session) Commit(ctx context.Context) error {
 	return nil
 }
 
+// RowsWritten is called after FleetDB and local workspace state are durable.
+func (s *Session) RowsWritten(ctx context.Context) error {
+	entry, err := s.store.Advance(ctx, s.entry, "rows_written", nil, nil)
+	if err == nil {
+		s.entry = entry
+	}
+	return err
+}
+
+func (s *Session) checkoutsAdded(ctx context.Context) error {
+	entry, err := s.store.Advance(ctx, s.entry, "checkouts_added", nil, nil)
+	if err == nil {
+		s.entry = entry
+	}
+	return err
+}
+
 func (s *Session) Rollback(ctx context.Context) error {
 	if s.complete {
 		return errors.New("committed workspace cannot be rolled back")
+	}
+	if s.entry.Phase == "rows_written" {
+		return errors.New("workspace rows are durable; reconcile instead of removing checkouts")
 	}
 	var errs []error
 	for i := len(s.created) - 1; i >= 0; i-- {
@@ -104,24 +125,31 @@ func CheckSupported(ctx context.Context, workspace string) error {
 	return nil
 }
 
-// Ensure checks every source before creating a checkout. It then records a
-// started journal entry, creates each lead checkout, and returns a session for
-// the caller to commit after registering the workspace in FleetDB.
+// Ensure journals the intended source paths, checks every source, and creates
+// each lead checkout. The caller commits after FleetDB registration.
 func Ensure(ctx context.Context, workspace, trunk, wsDir string, sources []Source) (*Session, error) {
+	return EnsureRequest(ctx, workspace, workspace, "", trunk, wsDir, sources)
+}
+
+// EnsureRequest persists the intended paths and request identity before base
+// resolution, which may fetch and write source repository refs.
+func EnsureRequest(ctx context.Context, workspace, name, requestID, trunk, wsDir string, sources []Source) (*Session, error) {
 	branch, err := loomgit.InteractiveBranch(workspace, "lead")
 	if err != nil {
 		return nil, err
 	}
-	repos := make([]loomgit.WorkspaceRepo, 0, len(sources))
+	plan := journal.WorkspaceCreation{RequestID: requestID, Kind: "empty", Name: name, Path: wsDir, Trunk: trunk}
 	for _, src := range sources {
-		base, err := localworkspace.PrepareWorkspaceBase(src.Path, workspace, "origin", trunk)
-		if err != nil {
-			return nil, fmt.Errorf("prepare repo %q: %w", src.Name, err)
-		}
-		repos = append(repos, loomgit.WorkspaceRepo{Workspace: workspace, Repo: src.Name, Trunk: trunk, WorkspaceBranch: branch, BaseSHA: base})
+		plan.Repos = append(plan.Repos, journal.WorkspaceCreationRepo{Name: src.Name, Source: src.Path, Path: filepath.Join(wsDir, src.Name), Branch: branch})
 	}
-	s, err := beginSession(ctx, workspace, repos)
+	s, err := beginSession(ctx, workspace, nil, plan)
 	if err != nil {
+		return nil, err
+	}
+	repos, err := s.prepareSources(ctx, workspace, trunk, branch, sources, &plan)
+	if err != nil {
+		_ = s.Rollback(context.Background())
+		_ = s.Close()
 		return nil, err
 	}
 	if err := os.MkdirAll(wsDir, 0o755); err != nil {
@@ -146,41 +174,97 @@ func Ensure(ctx context.Context, workspace, trunk, wsDir string, sources []Sourc
 		}
 		s.created = append(s.created, checkout{source: src.Path, path: path, branch: branch})
 	}
+	if err := s.checkoutsAdded(ctx); err != nil {
+		_ = s.Rollback(context.Background())
+		_ = s.Close()
+		return nil, err
+	}
 	return s, nil
+}
+
+func (s *Session) prepareSources(ctx context.Context, workspace, trunk, branch string, sources []Source, plan *journal.WorkspaceCreation) ([]loomgit.WorkspaceRepo, error) {
+	repos := make([]loomgit.WorkspaceRepo, 0, len(sources))
+	for i, src := range sources {
+		base, err := localworkspace.PrepareWorkspaceBase(src.Path, workspace, "origin", trunk)
+		if err != nil {
+			return nil, fmt.Errorf("prepare repo %q: %w", src.Name, err)
+		}
+		repos = append(repos, loomgit.WorkspaceRepo{Workspace: workspace, Repo: src.Name, Trunk: trunk, WorkspaceBranch: branch, BaseSHA: base})
+		plan.Repos[i].BaseSHA = base
+	}
+	if err := s.store.ReplaceWorkspaceCreation(ctx, s.entry, *plan); err != nil {
+		return nil, err
+	}
+	s.repos = repos
+	return repos, nil
 }
 
 // AdoptClones opens the default lead's branch inside freshly cloned repos.
 // The caller owns clone directories and removes them if this returns an error.
 func AdoptClones(ctx context.Context, workspace, trunk string, sources []Source) (*Session, error) {
-	branch, err := loomgit.InteractiveBranch(workspace, "lead")
+	return AdoptClonesRequest(ctx, workspace, workspace, "", trunk, "", sources)
+}
+
+func AdoptClonesRequest(ctx context.Context, workspace, name, requestID, trunk, wsDir string, sources []Source) (*Session, error) {
+	s, err := BeginCloneRequest(ctx, workspace, name, requestID, trunk, wsDir)
 	if err != nil {
 		return nil, err
+	}
+	if err := s.AdoptClones(ctx, sources); err != nil {
+		_ = s.Rollback(context.Background())
+		_ = s.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+// BeginCloneRequest owns the clone directories before they are created.
+func BeginCloneRequest(ctx context.Context, workspace, name, requestID, trunk, wsDir string) (*Session, error) {
+	plan := journal.WorkspaceCreation{RequestID: requestID, Kind: "clone", Name: name, Path: wsDir, Trunk: trunk}
+	return beginSession(ctx, workspace, nil, plan)
+}
+
+// AdoptClones installs the lead branch after clones are present. The updated
+// plan is durable before the first checkout changes a cloned repository.
+func (s *Session) AdoptClones(ctx context.Context, sources []Source) error {
+	plan, err := s.store.WorkspaceCreation(ctx, s.entry)
+	if err != nil {
+		return err
+	}
+	workspace, trunk := strings.TrimPrefix(s.entry.RequestID, "workspace-create:"), plan.Trunk
+	branch, err := loomgit.InteractiveBranch(workspace, "lead")
+	if err != nil {
+		return err
 	}
 	repos := make([]loomgit.WorkspaceRepo, 0, len(sources))
 	for _, src := range sources {
 		base, err := localworkspace.PrepareWorkspaceBase(src.Path, workspace, "origin", trunk)
 		if err != nil {
-			return nil, fmt.Errorf("prepare cloned repo %q: %w", src.Name, err)
+			return fmt.Errorf("prepare cloned repo %q: %w", src.Name, err)
 		}
 		repos = append(repos, loomgit.WorkspaceRepo{Workspace: workspace, Repo: src.Name, Trunk: trunk, WorkspaceBranch: branch, BaseSHA: base})
 	}
-	s, err := beginSession(ctx, workspace, repos)
-	if err != nil {
-		return nil, err
+	for i, src := range sources {
+		plan.Repos = append(plan.Repos, journal.WorkspaceCreationRepo{Name: src.Name, Source: src.Path, Path: src.Path, Branch: branch, BaseSHA: repos[i].BaseSHA})
 	}
+	if err := s.store.ReplaceWorkspaceCreation(ctx, s.entry, plan); err != nil {
+		return err
+	}
+	s.repos = repos
 	for i, src := range sources {
 		if _, err := cli.RunGitCommand(src.Path, "checkout", "-b", branch, repos[i].BaseSHA); err != nil {
-			_ = s.Rollback(context.Background())
-			_ = s.Close()
-			return nil, fmt.Errorf("open cloned repo %q: %w", src.Name, err)
+			return fmt.Errorf("open cloned repo %q: %w", src.Name, err)
 		}
 	}
-	return s, nil
+	if err := s.checkoutsAdded(ctx); err != nil {
+		return err
+	}
+	return nil
 }
 
 // BeginAttach journals new repo records for an existing workspace. The caller
 // owns its newly created checkouts until Commit succeeds and aborts on failure.
-func BeginAttach(ctx context.Context, workspace string, repos []loomgit.WorkspaceRepo) (*Session, error) {
+func BeginAttach(ctx context.Context, workspace, wsDir string, repos []loomgit.WorkspaceRepo) (*Session, error) {
 	if len(repos) == 0 {
 		return nil, errors.New("attach requires at least one repo")
 	}
@@ -202,10 +286,20 @@ func BeginAttach(ctx context.Context, workspace string, repos []loomgit.Workspac
 		}
 		return nil, fmt.Errorf("workspace repo %q has an existing attachment journal entry", repos[0].Repo)
 	}
+	plan := journal.WorkspaceCreation{Name: workspace, Path: wsDir, Trunk: repos[0].Trunk}
+	for _, repo := range repos {
+		path := filepath.Join(wsDir, repo.Repo)
+		plan.Repos = append(plan.Repos, journal.WorkspaceCreationRepo{Name: repo.Repo, Source: path, Path: path, Branch: repo.WorkspaceBranch, BaseSHA: repo.BaseSHA})
+	}
+	if err := st.SaveWorkspaceCreation(ctx, entry, plan); err != nil {
+		_ = st.AbortWorkspace(context.Background(), entry)
+		_ = st.Close()
+		return nil, err
+	}
 	return &Session{store: st, entry: entry, repos: repos}, nil
 }
 
-func beginSession(ctx context.Context, workspace string, repos []loomgit.WorkspaceRepo) (*Session, error) {
+func beginSession(ctx context.Context, workspace string, repos []loomgit.WorkspaceRepo, plan journal.WorkspaceCreation) (*Session, error) {
 	if err := os.MkdirAll(filepath.Join(config.GetConfigDir(), "loomgit"), 0o700); err != nil {
 		return nil, err
 	}
@@ -220,6 +314,11 @@ func beginSession(ctx context.Context, workspace string, repos []loomgit.Workspa
 			return nil, err
 		}
 		return nil, fmt.Errorf("workspace %q has an existing creation journal entry", workspace)
+	}
+	if err := st.SaveWorkspaceCreation(ctx, entry, plan); err != nil {
+		_ = st.AbortWorkspace(context.Background(), entry)
+		_ = st.Close()
+		return nil, err
 	}
 	return &Session{store: st, entry: entry, repos: repos}, nil
 }

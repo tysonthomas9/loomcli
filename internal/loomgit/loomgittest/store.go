@@ -134,7 +134,7 @@ func (s *Store) CommitWorkspace(_ context.Context, prior loomgit.JournalEntry, r
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, ok := s.entries[prior.ID]
-	if !ok || e.Version != prior.Version || e.Fence != prior.Fence || e.Phase != "started" {
+	if !ok || e.Version != prior.Version || e.Fence != prior.Fence || (e.Phase != "rows_written" && !(e.Operation == "attach_workspace_repos" && e.Phase == "started")) {
 		return journal.ErrStale
 	}
 	seen := make(map[string]bool, len(repos))
@@ -163,7 +163,7 @@ func (s *Store) AbortWorkspace(_ context.Context, prior loomgit.JournalEntry) er
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, ok := s.entries[prior.ID]
-	if !ok || e.Version != prior.Version || e.Fence != prior.Fence || e.Phase != "started" {
+	if !ok || e.Version != prior.Version || e.Fence != prior.Fence || e.Phase == "done" {
 		return journal.ErrStale
 	}
 	delete(s.entries, prior.ID)
