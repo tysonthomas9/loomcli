@@ -94,6 +94,10 @@ func FreezeCaptureAt(ctx context.Context, journalPath string, in CaptureRequest)
 	if err == nil && in.SourceRepo != "" {
 		err = taskcopy.ImportSnapshot(ctx, journalPath, in.SourceRepo, in.Worktree, in.Workspace, in.Attempt, revision.Change, revision.Number)
 	}
+	if err == nil {
+		err = store.RecordRetainedCopy(ctx, journal.RetainedCopy{Workspace: in.Workspace, Change: revision.Change,
+			Attempt: in.Attempt, Path: in.Worktree, SourceRepo: in.SourceRepo, Complete: in.Complete})
+	}
 	return revision, err
 }
 
@@ -159,6 +163,10 @@ func FreezeAt(ctx context.Context, journalPath string, in Request) (loomgit.Revi
 	})
 	if err == nil && in.SourceRepo != "" {
 		err = taskcopy.ImportSnapshot(ctx, journalPath, in.SourceRepo, in.Worktree, in.Workspace, in.Attempt, revision.Change, revision.Number)
+	}
+	if err == nil {
+		err = store.RecordRetainedCopy(ctx, journal.RetainedCopy{Workspace: in.Workspace, Change: revision.Change,
+			Attempt: in.Attempt, Path: in.Worktree, SourceRepo: in.SourceRepo, Complete: true})
 	}
 	return revision, err
 }

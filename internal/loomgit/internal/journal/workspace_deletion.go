@@ -2,10 +2,63 @@ package journal
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
 )
+
+type WorkspaceTombstone struct {
+	Workspace, RefPrefix string
+	CreatedAt            time.Time
+}
+
+func (s *SQLite) WorkspaceTombstones(ctx context.Context) ([]WorkspaceTombstone, error) {
+	var exists int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_ref_tombstones'`).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace,ref_prefix,created_at FROM workspace_ref_tombstones ORDER BY workspace`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var result []WorkspaceTombstone
+	for rows.Next() {
+		var row WorkspaceTombstone
+		var created string
+		if err := rows.Scan(&row.Workspace, &row.RefPrefix, &created); err != nil {
+			return nil, err
+		}
+		row.CreatedAt, err = time.Parse("2006-01-02 15:04:05", created)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, row)
+	}
+	return result, rows.Err()
+}
+
+func (s *SQLite) DeleteWorkspaceTombstone(ctx context.Context, workspace string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM workspace_ref_tombstones WHERE workspace=?`, workspace)
+	return err
+}
+
+// EnsureDeletionSchema keeps deletion's retention record independent of the
+// core journal schema so it can be landed and migrated separately.
+func (s *SQLite) EnsureDeletionSchema(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS workspace_ref_tombstones (
+		workspace TEXT PRIMARY KEY, ref_prefix TEXT NOT NULL,
+		created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`)
+	return err
+}
 
 // FinishWorkspaceDeletion records the ref prefix for retention and removes
 // local creation records in one transaction after every worktree is gone.
