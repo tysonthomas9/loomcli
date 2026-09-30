@@ -61,6 +61,11 @@ func (s *state) goCheck(name string) error {
 			return err
 		}
 		return s.packageTests("./internal/driver", "TestHostBridgeRetainsCaptureFailureWithoutFreezingEmptyPatch")
+	case "cancelled_revision":
+		if err := s.packageTests("./internal/driver", "Test(CancelCapturesRetainedCopyAndKillsCLIChild|CancelMarksIncompleteCaptureAndRetainsCopy|CancelFreezesCommittedTaskCopyWork)"); err != nil {
+			return err
+		}
+		return s.packageTests("./internal/loomgit/internal/changeset", "TestIncompleteCaptureOnlyFreezesAsCancelled")
 	case "trial_merge":
 		// Proves clean, conflict, dropped-commit, and old-version behavior under the lab Git.
 		return s.packageTests("./internal/loomgit/internal/replay", "Test(TrialMergeCleanAndConflictLeaveCheckoutUnchanged|TrialMergeMultiCommitAndDrop|TrialMergeStopsAtFirstConflictingCommit|TrialMergeUsesFirstParentOfMergeCommit|TrialMergePreservesAuthorMessageAndTrailers|VersionRequirement)")

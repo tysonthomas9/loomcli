@@ -146,6 +146,7 @@ export async function run(ctx = {}) {
 
   let exitCode;
   let resultTimedOut = false;
+  let resultOutputLimit = false;
   let stdout = "";
   let stderr = "";
   let patchInfo;
@@ -174,6 +175,7 @@ export async function run(ctx = {}) {
     }
     exitCode = result.code;
     resultTimedOut = result.timedOut === true;
+    resultOutputLimit = result.outputLimit === true;
     stdout = result.stdout;
     stderr = result.stderr;
 
@@ -317,7 +319,7 @@ export async function run(ctx = {}) {
     return {
       status: "failed",
       exitCode: failureExitCode,
-      errorClass: exitCode === 124 && resultTimedOut ? "timeout" : "local_agent_failed",
+      errorClass: resultOutputLimit ? "output_limit" : exitCode === 124 && resultTimedOut ? "timeout" : "local_agent_failed",
       errorMessage: failureMessage,
       logs: logs.join("\n") + "\n",
       logsRef: "logs://" + taskRunId,
@@ -519,20 +521,21 @@ async function execBackend(binary, args, options) {
         // isolated task-run container. claude-code refuses `--dangerously-skip-permissions` under
         // root unless this sandbox signal is set; harmless for the other backends (codex/cursor/etc).
         env: { ...(options.env || process.env), IS_SANDBOX: "1" },
-        maxBuffer: 64 * 1024 * 1024,
+        maxBuffer: numberValue(process.env.LOOM_LOCAL_TASK_MAX_BUFFER_BYTES, 64 * 1024 * 1024),
         timeout: numberValue(process.env.LOOM_LOCAL_TASK_TIMEOUT_MS, 30 * 60 * 1000),
       },
       (error, stdout, stderr) => {
-        if (error && typeof error.code !== "number" && !error.killed) {
+        if (error && typeof error.code !== "number" && !error.killed && error.code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
           // Spawn failure (ENOENT, EACCES, ...) — no exit code available.
           reject(error);
           return;
         }
         // A CLI may handle the timeout signal and exit 0. The timer still ended
         // the run, so the signal takes precedence over its exit code.
-        const timedOut = error?.killed === true || child.killed === true;
-        const code = timedOut ? 124 : error && typeof error.code === "number" ? error.code : 0;
-        resolve({ code, timedOut, stdout: String(stdout || ""), stderr: String(stderr || "") });
+        const outputLimit = error?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
+        const timedOut = !outputLimit && (error?.killed === true || child.killed === true);
+        const code = outputLimit ? 125 : timedOut ? 124 : error && typeof error.code === "number" ? error.code : 0;
+        resolve({ code, timedOut, outputLimit, stdout: String(stdout || ""), stderr: String(stderr || "") });
       },
     );
     if (options.live === true && booleanValue(process.env.LOOM_TASK_RUNNER_STREAM_STDERR)) {

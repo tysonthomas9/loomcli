@@ -1,0 +1,8 @@
+name: cancelled task runner retains work as a revision
+task: P1.15
+git: [min, latest]
+fixture: loomcli
+when:
+  - go_check: cancelled_revision
+then:
+  - go_check: no_error

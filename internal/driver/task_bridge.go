@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
@@ -274,6 +273,9 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 		}
 	}()
 	runnerResult, err := runBridge()
+	if ctx.Err() != nil && resolvedWorktree.Path != "" {
+		return e.captureCancelledTask(req, resolvedWorktree)
+	}
 	if err != nil {
 		return TaskExecResult{}, err
 	}
@@ -384,14 +386,12 @@ func (e HostBridgeTaskExecutor) runBuiltInFlueWorkflow(ctx context.Context, req 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return cmd.Process.Signal(os.Interrupt)
+	configureTaskRunnerProcess(cmd)
+	runErr := cmd.Run()
+	if ctx.Err() != nil {
+		terminateTaskRunnerGroup(cmd)
 	}
-	cmd.WaitDelay = 5 * time.Second
-	if err := cmd.Run(); err != nil {
+	if err := runErr; err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			msg = err.Error()
@@ -445,7 +445,12 @@ func (e HostBridgeTaskExecutor) runCommand(ctx context.Context, req TaskExecRequ
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	configureTaskRunnerProcess(cmd)
+	runErr := cmd.Run()
+	if ctx.Err() != nil {
+		terminateTaskRunnerGroup(cmd)
+	}
+	if err := runErr; err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			msg = err.Error()

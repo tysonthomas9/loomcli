@@ -150,6 +150,45 @@ func TestRequestTaskRunCreatesExecutesAndFinishesChild(t *testing.T) {
 	}
 }
 
+type cancelAwareTaskRuns struct{ store.TaskRunStore }
+
+func (s cancelAwareTaskRuns) Finish(ctx context.Context, ws, id string, finish store.TaskRunFinish) (*domain.TaskRun, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.TaskRunStore.Finish(ctx, ws, id, finish)
+}
+
+type cancelAwareStore struct {
+	store.Store
+	tasks store.TaskRunStore
+}
+
+func (s cancelAwareStore) TaskRuns() store.TaskRunStore { return s.tasks }
+
+type cancellingTaskExecutor struct{ cancel context.CancelFunc }
+
+func (e cancellingTaskExecutor) ExecuteTask(context.Context, TaskExecRequest) (TaskExecResult, error) {
+	e.cancel()
+	return TaskExecResult{Status: domain.TaskRunCancelled, ExitCode: 130, ErrorClass: "driver_cancelled"}, nil
+}
+
+func TestCancelledTaskRunFinishesAfterContextCancellation(t *testing.T) {
+	ctx, raw, run := setupRunningDriverRun(t)
+	registerTaskWorkerNode(t, ctx, raw, "node-2", []string{"codex-default"}, nil)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	st := cancelAwareStore{Store: raw, tasks: cancelAwareTaskRuns{raw.TaskRuns()}}
+	outcome, err := RequestTaskRunWithResult(ctx, st, TaskRunRequestOptions{
+		WorkspaceKey: "TEST", DriverRunID: run.RunID, TaskRunID: "cancelled-task-run", TaskID: "TEST-1",
+		ProviderProfile: "codex-default", ParentNodeID: run.NodeID, ParentLeaseID: run.LeaseID,
+		ParentFence: run.FencingToken, NodeID: "node-2", RunnerID: "runner-2",
+	}, cancellingTaskExecutor{cancel})
+	if err != nil || outcome == nil || outcome.Run.Status != domain.TaskRunCancelled {
+		t.Fatalf("cancelled task finalization = %+v, %v", outcome, err)
+	}
+}
+
 func TestEnqueueTaskRunResolvesRunnerFromDriverVersionManifest(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	outcome, err := EnqueueTaskRunWithResult(ctx, st, TaskRunRequestOptions{
