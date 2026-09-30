@@ -239,90 +239,42 @@ func confirmKill(pid int) bool {
 	return git.ConfirmAction(fmt.Sprintf("Kill agent process (PID %d)?", pid))
 }
 
-// cleanTarget identifies a repo directory to check for untracked files.
-type cleanTarget struct {
-	name string
+// recoveryTarget identifies a repo directory to check for untracked files.
+type recoveryTarget struct {
 	path string
 }
 
-// cleanUntrackedFiles checks for and optionally removes untracked files.
-// In workspace mode, it iterates over all repos in the workspace.
-// Protected runtime paths (.loom/, sessions/, AGENTS.md)
-// are always excluded from cleanup to prevent destroying live daemon state.
-func cleanUntrackedFiles(worktreePath string, force bool) {
-	targets := resolveCleanTargets(worktreePath)
-	dirtyTargets := findDirtyTargets(targets)
-
-	if len(dirtyTargets) == 0 {
-		return
+// reportUntrackedFiles lists leftovers without changing any workspace files.
+func reportUntrackedFiles(worktreePath string) {
+	for _, target := range resolveRecoveryTargets(worktreePath) {
+		output, err := git.RunGitCommand(target.path, "status", "--porcelain", "--untracked-files=all")
+		if err != nil {
+			fmt.Printf("[recover] WARN: could not list untracked files in %s: %v\n", target.path, err)
+			continue
+		}
+		for _, line := range strings.Split(strings.TrimRight(output, "\n"), "\n") {
+			if !strings.HasPrefix(line, "?? ") {
+				continue
+			}
+			fmt.Printf("[recover] untracked file left in %s: %s\n", target.path, line[3:])
+		}
 	}
-	fmt.Println("")
-
-	if !force && !git.ConfirmAction("Remove these untracked files?") {
-		fmt.Println("Untracked files left in place.")
-		return
-	}
-
-	removeDirtyFiles(dirtyTargets)
 }
 
-// resolveCleanTargets returns the set of repo directories to scan for untracked files.
-func resolveCleanTargets(worktreePath string) []cleanTarget {
+// resolveRecoveryTargets returns the repo directories to scan for leftovers.
+func resolveRecoveryTargets(worktreePath string) []recoveryTarget {
 	resolver := cli.GetDefaultResolver()
 	if resolver.Mode == cli.ModeWorkspace {
 		worktrees, err := resolver.DiscoverWorktrees()
 		if err == nil && len(worktrees) > 0 {
-			targets := make([]cleanTarget, 0, len(worktrees))
+			targets := make([]recoveryTarget, 0, len(worktrees))
 			for _, wt := range worktrees {
-				targets = append(targets, cleanTarget{name: wt.Name, path: wt.Path})
+				targets = append(targets, recoveryTarget{path: wt.Path})
 			}
 			return targets
 		}
 	}
-	return []cleanTarget{{name: "", path: worktreePath}}
-}
-
-// findDirtyTargets checks each target for untracked files and prints them.
-func findDirtyTargets(targets []cleanTarget) []cleanTarget {
-	var dirty []cleanTarget
-	for _, t := range targets {
-		output, err := git.GitCleanDryRunExclude(t.path, cli.ProtectedRuntimePaths)
-		if err != nil {
-			fmt.Printf("Warning: could not check for untracked files in %s: %v\n", t.path, err)
-			continue
-		}
-		if output = strings.TrimSpace(output); output == "" {
-			continue
-		}
-		if len(dirty) == 0 {
-			fmt.Println("\nUntracked files found:")
-		}
-		if t.name != "" {
-			fmt.Printf("  [%s]\n", t.name)
-		}
-		fmt.Println(output)
-		dirty = append(dirty, t)
-	}
-	return dirty
-}
-
-// removeDirtyFiles runs git clean on each dirty target.
-func removeDirtyFiles(targets []cleanTarget) {
-	cleaned := 0
-	for _, t := range targets {
-		if err := git.GitCleanExclude(t.path, cli.ProtectedRuntimePaths); err != nil {
-			label := t.path
-			if t.name != "" {
-				label = t.name
-			}
-			fmt.Printf("Warning: failed to clean untracked files in %s: %v\n", label, err)
-			continue
-		}
-		cleaned++
-	}
-	if cleaned > 0 {
-		fmt.Println("✓ Untracked files removed")
-	}
+	return []recoveryTarget{{path: worktreePath}}
 }
 
 // resetOrphanedAgentTasks finds all in_progress tasks assigned to the given agent
