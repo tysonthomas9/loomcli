@@ -39,7 +39,8 @@ func NextEventID() int64 {
 
 // MutationPayload represents mutation data sent to clients.
 type MutationPayload struct {
-	Cursor      string `json:"cursor,omitempty"`      // Durable stream cursor for SSE Last-Event-ID when available
+	Cursor      string `json:"cursor,omitempty"` // Durable stream cursor for SSE Last-Event-ID when available
+	EventID     string `json:"event_id,omitempty"`
 	Type        string `json:"type"`                  // create, update, delete, comment, status, bonded, squashed, burned, refresh, terminal_metadata, terminal_session_change
 	EntityType  string `json:"entity_type,omitempty"` // Generic changed entity type (issue, dependency, terminal, ...)
 	EntityID    string `json:"entity_id,omitempty"`   // Generic changed entity identifier
@@ -266,18 +267,31 @@ func (h *Hub) UnregisterClient(client *Client) {
 // Broadcast sends a mutation to all connected clients.
 // If the broadcast channel is full, mutations are queued for retry.
 func (h *Hub) Broadcast(mutation *MutationPayload) {
+	h.TryBroadcast(mutation)
+}
+
+// TryBroadcast reports whether the hub accepted a mutation for delivery.
+func (h *Hub) TryBroadcast(mutation *MutationPayload) bool {
+	select {
+	case <-h.done:
+		return false
+	default:
+	}
 	select {
 	case h.broadcast <- mutation:
+		return true
 	default:
 		h.retryMu.Lock()
+		defer h.retryMu.Unlock()
 		if len(h.retryQueue) < 1024 {
 			h.retryQueue = append(h.retryQueue, mutation)
 			slog.Warn("SSE broadcast channel full, queued mutation", "queue_size", len(h.retryQueue))
+			return true
 		} else {
 			atomic.AddInt64(&h.droppedCount, 1)
 			slog.Warn("SSE retry queue full, dropped mutation", "total_dropped", atomic.LoadInt64(&h.droppedCount))
 		}
-		h.retryMu.Unlock()
+		return false
 	}
 }
 

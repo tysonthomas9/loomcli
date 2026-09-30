@@ -3,6 +3,7 @@ package journal
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -90,7 +91,12 @@ const verdictColumns = `id, workspace, change_id, number, head_sha, kind, actor_
 
 // RecordVerdict atomically rejects an incomplete or superseded source revision.
 func (s *SQLite) RecordVerdict(ctx context.Context, v loomgit.Verdict) (loomgit.Verdict, error) {
-	result, err := s.db.ExecContext(ctx, `INSERT INTO review_verdicts
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return v, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `INSERT INTO review_verdicts
 		(workspace,change_id,number,head_sha,kind,actor_kind,actor_id,reason,source_verdict_id)
 		SELECT ?,?,?,?,?,?,?,?,? WHERE EXISTS (
 			SELECT 1 FROM change_revisions r WHERE r.workspace=? AND r.change_id=? AND r.number=?
@@ -115,7 +121,29 @@ func (s *SQLite) RecordVerdict(ctx context.Context, v loomgit.Verdict) (loomgit.
 		return v, err
 	}
 	v.ID = id
+	if err := queueVerdictEvent(ctx, tx, v); err != nil {
+		return v, err
+	}
+	if err := tx.Commit(); err != nil {
+		return v, err
+	}
 	return v, nil
+}
+
+func queueVerdictEvent(ctx context.Context, tx *sql.Tx, v loomgit.Verdict) error {
+	payload, err := json.Marshal(struct {
+		Workspace string `json:"workspace"`
+		ChangeID  string `json:"change_id"`
+		Revision  int    `json:"revision"`
+		HeadSHA   string `json:"head_sha"`
+		Kind      string `json:"kind"`
+		ActorKind string `json:"actor_kind"`
+		ActorID   string `json:"actor_id"`
+	}{v.Workspace, v.Change, v.Number, v.HeadSHA, v.Kind, v.ActorKind, v.ActorID})
+	if err != nil {
+		return err
+	}
+	return queueEvent(ctx, tx, fmt.Sprintf("review-event:%d", v.ID), "git.review_recorded", payload)
 }
 
 func (s *SQLite) LatestVerdict(ctx context.Context, r loomgit.Revision) (loomgit.Verdict, error) {

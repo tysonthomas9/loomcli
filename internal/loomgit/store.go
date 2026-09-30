@@ -31,11 +31,12 @@ type JournalEntry struct {
 
 // OutboxEvent is committed in the same transaction as a phase change.
 type OutboxEvent struct {
-	ID        int64
-	EntryID   string
-	Kind      string
-	Payload   []byte
-	Delivered bool
+	ID           int64
+	EntryID      string
+	Kind         string
+	Payload      []byte
+	Delivered    bool
+	JSONLEmitted bool
 }
 
 // Revision is one immutable source or derived version of a change. Ready is

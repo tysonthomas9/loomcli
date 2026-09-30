@@ -127,6 +127,31 @@ func TestApplyFastForwardPreservesUnrelatedEditAndLogsLayer(t *testing.T) {
 	}
 }
 
+func TestApplyEventIsDurableOnlyAfterCompletion(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	before, err := f.store.PendingEvents(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := f.apply(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := f.store.PendingEvents(ctx)
+	if err != nil || len(events) != len(before)+1 || events[len(before)].Kind != "git.integrated" ||
+		!strings.Contains(string(events[len(before)].Payload), result.HeadSHA) {
+		t.Fatalf("completed apply events: %+v, %v", events, err)
+	}
+	if err := f.service.Reconcile(ctx, "W", "L"); err != nil {
+		t.Fatal(err)
+	}
+	again, err := f.store.PendingEvents(ctx)
+	if err != nil || len(again) != len(events) || again[len(before)].ID != events[len(before)].ID {
+		t.Fatalf("reconciled events: %+v, %v", again, err)
+	}
+}
+
 func TestApplyReplayRecordsDerivedAndCarriesApproval(t *testing.T) {
 	f := newFixture(t)
 	target := f.commit(t, "target", "target\n", "target")

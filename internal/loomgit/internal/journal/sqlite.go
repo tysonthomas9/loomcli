@@ -75,6 +75,10 @@ func OpenSQLite(path string) (*SQLite, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("open journal: %w", err)
 	}
+	if err := createOutboxDeliverySchema(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open outbox delivery: %w", err)
+	}
 	if err := createDriverChanges(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("open driver changes: %w", err)
@@ -276,15 +280,32 @@ func (s *SQLite) Takeover(ctx context.Context, prior loomgit.JournalEntry) (loom
 	return e, nil
 }
 func (s *SQLite) PendingEvents(ctx context.Context) ([]loomgit.OutboxEvent, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, entry_id, kind, payload, delivered FROM event_outbox WHERE delivered = 0 ORDER BY id`)
+	if err := s.expirePendingEvents(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT o.id,o.entry_id,o.kind,o.payload,o.delivered,d.jsonl_emitted
+		FROM event_outbox o JOIN event_outbox_delivery d ON d.event_id=o.id
+		WHERE o.delivered=0 AND d.expired=0 ORDER BY o.id`)
 	if err != nil {
 		return nil, err
 	}
+	return scanOutboxRows(rows)
+}
+func (s *SQLite) PendingJSONLEvents(ctx context.Context) ([]loomgit.OutboxEvent, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT o.id,o.entry_id,o.kind,o.payload,o.delivered,d.jsonl_emitted
+		FROM event_outbox o JOIN event_outbox_delivery d ON d.event_id=o.id
+		WHERE o.delivered=0 AND d.jsonl_emitted=0 ORDER BY o.id`)
+	if err != nil {
+		return nil, err
+	}
+	return scanOutboxRows(rows)
+}
+func scanOutboxRows(rows *sql.Rows) ([]loomgit.OutboxEvent, error) {
 	defer func() { _ = rows.Close() }()
 	var out []loomgit.OutboxEvent
 	for rows.Next() {
 		var e loomgit.OutboxEvent
-		if err := rows.Scan(&e.ID, &e.EntryID, &e.Kind, &e.Payload, &e.Delivered); err != nil {
+		if err := rows.Scan(&e.ID, &e.EntryID, &e.Kind, &e.Payload, &e.Delivered, &e.JSONLEmitted); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

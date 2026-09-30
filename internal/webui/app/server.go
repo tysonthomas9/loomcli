@@ -66,6 +66,7 @@ type Server struct {
 
 	// Real-time
 	hub               *appstores.Hub
+	stopLoomGitEvents func()
 	multiSub          *appstores.MultiWorkspaceSubscriber
 	getMutationsSince appstores.MutationsSinceFn
 
@@ -358,6 +359,9 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 	}
 
 	_ = app.registry.Close()
+	if app.stopLoomGitEvents != nil {
+		app.stopLoomGitEvents()
+	}
 
 	// Stop multi-workspace subscriber (no more handlers need it)
 	if app.multiSub != nil {

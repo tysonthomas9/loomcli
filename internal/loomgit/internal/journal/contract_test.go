@@ -2,6 +2,7 @@ package journal_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"os/exec"
@@ -259,5 +260,78 @@ func TestSQLiteResultAndOutboxSurviveReopen(t *testing.T) {
 	events, err := s.PendingEvents(ctx)
 	if err != nil || len(events) != 1 || events[0].Kind != "git.published" {
 		t.Fatalf("reopened outbox: %+v %v", events, err)
+	}
+}
+
+func TestAppliedEventSurvivesReopenWithoutEarlySuccess(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal.db")
+	store, err := journal.OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	layer := loomgit.AppliedLayer{RequestID: "apply-1", Workspace: "W", Lead: "L", Change: "C", Revision: 3,
+		OldTip: "old", NewTip: "new"}
+	if err := store.SaveApplied(ctx, layer); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AdvanceApplied(ctx, layer.RequestID, "prepared", "not_applied"); err != nil {
+		t.Fatal(err)
+	}
+	if events, err := store.PendingEvents(ctx); err != nil || len(events) != 0 {
+		t.Fatalf("failed apply events: %+v, %v", events, err)
+	}
+	if err := store.SaveApplied(ctx, layer); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AdvanceApplied(ctx, layer.RequestID, "prepared", "done"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = journal.OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	events, err := store.PendingEvents(ctx)
+	if err != nil || len(events) != 1 || events[0].Kind != "git.integrated" ||
+		!strings.Contains(string(events[0].Payload), `"workspace_sha":"new"`) {
+		t.Fatalf("durable apply event: %+v, %v", events, err)
+	}
+	if err := store.AdvanceApplied(ctx, layer.RequestID, "prepared", "done"); !errors.Is(err, journal.ErrStale) {
+		t.Fatalf("duplicate close: %v", err)
+	}
+}
+
+func TestAppliedCompletionRollsBackIfEventCannotBeQueued(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal.db")
+	store, err := journal.OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	ctx := context.Background()
+	layer := loomgit.AppliedLayer{RequestID: "apply-1", Workspace: "W", Lead: "L", Change: "C", Revision: 1,
+		OldTip: "old", NewTip: "new"}
+	if err := store.SaveApplied(ctx, layer); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec(`CREATE TRIGGER reject_integrated BEFORE INSERT ON event_outbox
+		WHEN NEW.kind='git.integrated' BEGIN SELECT RAISE(ABORT, 'event rejected'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AdvanceApplied(ctx, layer.RequestID, "prepared", "done"); err == nil {
+		t.Fatal("apply closed without its event")
+	}
+	open, err := store.OpenApplied(ctx, "W", "L")
+	if err != nil || len(open) != 1 || open[0].Phase != "prepared" {
+		t.Fatalf("completion was not rolled back: %+v, %v", open, err)
 	}
 }
