@@ -165,7 +165,7 @@ func TestPublishStackReportsUnchangedLayerDriftAndRetryConverges(t *testing.T) {
 	stack := StackRequest{Request: request, StackID: "feature-1", Changes: []string{"A", "B"},
 		pusher: &deletingPusher{RefPusher: mirror.NewPusher(runner), test: t, remote: fixture.remote, ref: "refs/heads/" + firstBranch}}
 	_, err = publishStack(context.Background(), fixture.store, stack)
-	codeIs(t, err, loomgit.StackDrift)
+	codeIs(t, err, loomgit.Diverged)
 	if !strings.Contains(err.Error(), "A") || !strings.Contains(err.Error(), first.HeadSHA) || !strings.Contains(err.Error(), "<absent>") {
 		t.Fatalf("drift error omits layer and SHA: %v", err)
 	}

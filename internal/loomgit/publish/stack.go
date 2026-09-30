@@ -119,7 +119,7 @@ func pushStackHeads(ctx context.Context, store Store, runner *gitexec.Runner, pu
 			if err := store.RecordPublicationDrift(ctx, layer.publication, actual); err != nil {
 				return err
 			}
-			return loomgit.NewError(loomgit.StackDrift, fmt.Sprintf("stack layer %s moved from %s to %s during publish", layer.publication.Change, layer.revision.HeadSHA, displaySHA(actual)), nil)
+			return loomgit.NewError(loomgit.Diverged, fmt.Sprintf("stack layer %s moved from %s to %s during publish", layer.publication.Change, layer.revision.HeadSHA, displaySHA(actual)), nil)
 		}
 	}
 	return nil
