@@ -190,7 +190,7 @@ func (s *Service) swapLocked(ctx context.Context, in Request, source loomgit.Rev
 	result := Result{HeadSHA: trial.HeadSHA, DroppedCommits: trial.DroppedCommits}
 	if old != source.BaseSHA {
 		result.Derived, err = changeset.RecordDerived(ctx, s.store, s.runner, changeset.DerivedInput{
-			Workspace: in.Workspace, Change: in.Change, RequestID: in.RequestID + ":derived",
+			Workspace: in.Workspace, Change: in.Change, RequestID: in.RequestID + ":derived:" + old,
 			FromNumber: source.Number, Operation: "apply", BaseSHA: old,
 			HeadSHA: trial.HeadSHA, Outcome: source.Outcome,
 		})

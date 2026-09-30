@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -137,6 +138,43 @@ func TestReconcileJournalBridgeApprovalFollowsAfterCrash(t *testing.T) {
 	}
 	if got := recoveryGit(t, area.Path, "rev-parse", "HEAD"); got != layers[0].NewTip {
 		t.Fatalf("working area did not follow recovered approval: %s", got)
+	}
+}
+
+func TestReconcileJournalApprovalAfterBaseMove(t *testing.T) {
+	ctx, journalStore, area, base, revision := bridgeApprovalFixture(t)
+	verdict, err := review.SubmitForLead(ctx, journalStore, "W", revision.Change, revision.Number, revision.HeadSHA,
+		"approve", "", review.Actor{Kind: "human", ID: "reviewer"}, "L")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldRequestID := fmt.Sprintf("approval:%d:derived", verdict.ID)
+	old, err := journalStore.ReserveRevision(ctx, loomgit.Revision{
+		Workspace: "W", Change: revision.Change, RequestID: oldRequestID, Kind: "derived", Operation: "apply",
+		Outcome: revision.Outcome, BaseSHA: base, TreeHash: revision.TreeHash, SourceHeadSHA: revision.HeadSHA,
+		DerivedFromChange: revision.Change, DerivedFromNumber: revision.Number,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.HeadSHA = revision.HeadSHA
+	if err := journalStore.FinishRevision(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(area.Path, "base-move"), []byte("moved\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recoveryGit(t, area.Path, "add", "base-move")
+	recoveryGit(t, area.Path, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "base move")
+	newBase := recoveryGit(t, area.Path, "rev-parse", "HEAD")
+	for range 2 {
+		if err := workspacemgr.ReconcileJournal(ctx, memstore.New()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	newRevision, err := journalStore.GetRevision(ctx, "W", revision.Change, old.Number+1)
+	if err != nil || newRevision.BaseSHA != newBase || newRevision.RequestID == oldRequestID {
+		t.Fatalf("base move revision: %+v, %v", newRevision, err)
 	}
 }
 
