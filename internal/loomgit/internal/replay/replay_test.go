@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/loomgit/gitversion"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 )
 
@@ -177,7 +178,7 @@ func TestTrialMergePreservesAuthorMessageAndTrailers(t *testing.T) {
 
 func TestVersionRequirement(t *testing.T) {
 	for input, want := range map[string]bool{"git version 2.39.9": false, "git version 2.40.4": true, "git version 2.56.0": true, "unknown": false} {
-		if got := supportedVersion(input); got != want {
+		if got := gitversion.Check(input) == nil; got != want {
 			t.Errorf("%q: %t", input, got)
 		}
 	}

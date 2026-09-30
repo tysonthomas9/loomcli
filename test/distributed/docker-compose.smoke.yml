@@ -55,8 +55,8 @@ services:
 
   loom-a:
     build:
-      context: .
-      dockerfile: Dockerfile.runtime
+      context: ../..
+      dockerfile: test/distributed/Dockerfile.runtime
     depends_on:
       - fleet-db
     environment:
@@ -98,8 +98,8 @@ services:
 
   loom-b:
     build:
-      context: .
-      dockerfile: Dockerfile.runtime
+      context: ../..
+      dockerfile: test/distributed/Dockerfile.runtime
     depends_on:
       - fleet-db
     environment:
@@ -141,8 +141,8 @@ services:
 
   supervisor-a:
     build:
-      context: .
-      dockerfile: Dockerfile.runtime
+      context: ../..
+      dockerfile: test/distributed/Dockerfile.runtime
     depends_on:
       - fleet-db
     networks: [distributed]
@@ -158,8 +158,8 @@ services:
 
   supervisor-b:
     build:
-      context: .
-      dockerfile: Dockerfile.runtime
+      context: ../..
+      dockerfile: test/distributed/Dockerfile.runtime
     depends_on:
       - fleet-db
     networks: [distributed]

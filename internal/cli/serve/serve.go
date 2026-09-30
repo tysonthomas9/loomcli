@@ -180,6 +180,9 @@ func registerServeAuthFlags() {
 
 //nolint:funlen // Serve startup wires process-wide dependencies in a fixed order.
 func runServe(cmd *cobra.Command, args []string) {
+	if err := workspacemgr.CheckGitVersion(); err != nil {
+		log.Fatal(err)
+	}
 	configureServeLocalRuntimeMode()
 
 	ctx, cancel := context.WithCancel(context.Background())

@@ -22,7 +22,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -o /out/loom ./cmd/loom
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
+COPY scripts/check-git-version.sh internal/loomgit/gitversion/minimum.txt /tmp/git-check/
 ARG INSTALL_CODEX=false
 ARG CODEX_CLI_VERSION=latest
 ARG INSTALL_CLAUDE=false
@@ -42,6 +43,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && if [ "$INSTALL_CLAUDE" = "true" ]; then \
         npm install -g "@anthropic-ai/claude-code@${CLAUDE_CLI_VERSION}"; \
     fi \
+    && sh /tmp/git-check/check-git-version.sh /tmp/git-check/minimum.txt \
     && rm -rf /var/lib/apt/lists/*
 ENV SHELL=/bin/bash
 

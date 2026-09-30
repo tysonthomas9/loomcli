@@ -70,8 +70,8 @@ func TestCheckGit(t *testing.T) {
 		}}
 
 		result := checkGit(deps)
-		if result.Status != StatusPass {
-			t.Errorf("expected pass, got %v: %s", result.Status, result.Summary)
+		if result.Status != StatusFail || !strings.Contains(result.Summary, "git_version_unsupported") {
+			t.Errorf("expected unsupported Git failure, got %v: %s", result.Status, result.Summary)
 		}
 	})
 
@@ -83,8 +83,8 @@ func TestCheckGit(t *testing.T) {
 		}}
 
 		result := checkGit(deps)
-		if result.Status != StatusWarn {
-			t.Errorf("expected warn, got %v: %s", result.Status, result.Summary)
+		if result.Status != StatusFail {
+			t.Errorf("expected fail, got %v: %s", result.Status, result.Summary)
 		}
 	})
 }

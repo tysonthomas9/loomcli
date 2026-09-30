@@ -37,6 +37,12 @@ The fixed step vocabulary is:
 | `took_under` | `took_under: 10s` | Bound the last capture duration. |
 | `go_check` | `go_check: journal_crash` | Run a named Go assertion for behavior too complex for YAML. |
 
+The Git lab builds Git 2.40.4 and 2.56.0 from source in `Containerfile`, then
+runs every scenario against both versions. The 2.40.4 leg covers the minimum
+supported line; the newer leg checks compatibility beyond it. These are
+deliberate test versions, separate from the runtime minimum in
+`internal/loomgit/gitversion/minimum.txt`.
+
 Named Go checks are in `internal/loomgit/gitlab/checks_test.go`. Each has a
 one-line comment describing its proof. Some checks invoke the existing real
 Git package regressions; the scenario runner names the exact tests and runs

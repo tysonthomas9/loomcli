@@ -126,6 +126,8 @@ rsync -a \
   "$FLUE_REPO/" "$CTX/flue-src/"
 
 cp "$STACK_DIR/worker-entrypoint.sh" "$CTX/worker-entrypoint.sh"
+cp "$LOOMCLI_REPO/scripts/check-git-version.sh" "$CTX/check-git-version.sh"
+cp "$LOOMCLI_REPO/internal/loomgit/gitversion/minimum.txt" "$CTX/minimum.txt"
 cp "$STACK_DIR/serve-entrypoint.sh" "$CTX/serve-entrypoint.sh"
 mkdir -p "$CTX/stub-upstream"
 cp "$STACK_DIR/stub-upstream/server.mjs" "$CTX/stub-upstream/server.mjs"

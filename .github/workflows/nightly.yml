@@ -24,6 +24,9 @@ jobs:
           git config --global user.name "CI Bot"
           git config --global user.email "ci@loomcli.test"
 
+      - name: Check Loom Git version
+        run: sh scripts/check-git-version.sh internal/loomgit/gitversion/minimum.txt
+
       - name: Build
         run: go build -v ./...
 
@@ -120,6 +123,9 @@ jobs:
         run: |
           git config --global user.name "CI Bot"
           git config --global user.email "ci@loomcli.test"
+
+      - name: Check Loom Git version
+        run: sh scripts/check-git-version.sh internal/loomgit/gitversion/minimum.txt
 
       - name: Build loom + fleet-db
         run: |

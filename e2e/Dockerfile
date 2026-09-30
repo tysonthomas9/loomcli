@@ -31,11 +31,13 @@ RUN --mount=type=cache,target=/app/internal/webui/frontend/node_modules \
 
 # ─── Stage 3: Runtime ───────────────────────────────────────────────────────
 FROM node:22-alpine AS runtime
+COPY scripts/check-git-version.sh internal/loomgit/gitversion/minimum.txt /tmp/git-check/
 
 # System packages
 RUN apk add --no-cache \
     tmux git jq curl ca-certificates bash coreutils make chromium \
-    nss freetype harfbuzz ttf-freefont
+    nss freetype harfbuzz ttf-freefont \
+    && sh /tmp/git-check/check-git-version.sh /tmp/git-check/minimum.txt
 
 # Playwright: use system chromium instead of downloading
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
