@@ -15,7 +15,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -104,9 +103,6 @@ func (m *mockBackend) InvokeNonInteractive(workDir, prompt, agentName string, sh
 	}
 	return m.nonInteractiveErr
 }
-
-// defaultResolver is a package-level Resolver for tests.
-var defaultResolver *cli.Resolver
 
 var defaultDeps = cli.TestingGetDefaultDeps()
 
@@ -387,21 +383,10 @@ func (m *OutputCommandMock) InstallOn(deps *cli.Deps) {
 
 // --- Workspace/git helpers ---
 
-func SetupTestEnv(t *testing.T, vars map[string]string) { testutil.SetupTestEnv(t, vars) }
 func SetupMockAgentInvokerOn(t *testing.T, deps *cli.Deps, returnErr error) *clitest.MockAgentInvoker {
 	t.Helper()
 	recorder := &clitest.MockAgentInvoker{InteractiveErr: returnErr}
 	deps.Agent = recorder
-	return recorder
-}
-
-func SetupMockClaudeInvoker(t *testing.T, returnErr error) *clitest.MockAgentInvoker {
-	t.Helper()
-	recorder := &clitest.MockAgentInvoker{InteractiveErr: returnErr}
-	dd := cli.TestingGetDefaultDeps()
-	orig := dd.Agent
-	dd.Agent = recorder
-	t.Cleanup(func() { dd.Agent = orig })
 	return recorder
 }
 

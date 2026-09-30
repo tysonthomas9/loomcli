@@ -53,14 +53,6 @@ func resolveDesignFormat(workspace *config.WorkspaceConfig) string {
 	return "markdown"
 }
 
-// BuiltinInteractivePrompt is a selectable built-in terminal-agent prompt.
-type BuiltinInteractivePrompt = domain.BuiltinInteractivePrompt
-
-// BuiltinInteractivePrompts returns the built-in interactive terminal prompts.
-func BuiltinInteractivePrompts() []BuiltinInteractivePrompt {
-	return domain.BuiltinInteractivePrompts()
-}
-
 // renderPrompt loads a template by name, checks for per-project override,
 // and renders it with the given data.
 func renderPrompt(name string, data promptTemplateData) string {
