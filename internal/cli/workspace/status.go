@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/kv"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/mirror"
 )
 
 var (
@@ -50,14 +51,15 @@ func init() {
 
 // StatusData is the top-level JSON output for loom status.
 type StatusData struct {
-	Daemon       DaemonInfo       `json:"daemon"`
-	Backend      BackendInfo      `json:"backend"`
-	IssueBackend string           `json:"issue_backend"`
-	Worktrees    WorktreesSummary `json:"worktrees"`
-	Tasks        TaskSummary      `json:"tasks"`
-	Git          GitSummary       `json:"git"`
-	Redis        RedisInfo        `json:"redis"`
-	Issues       []StatusIssue    `json:"issues,omitempty"`
+	LoomGit      mirror.InventorySnapshot `json:"loom_git"`
+	Daemon       DaemonInfo               `json:"daemon"`
+	Backend      BackendInfo              `json:"backend"`
+	IssueBackend string                   `json:"issue_backend"`
+	Worktrees    WorktreesSummary         `json:"worktrees"`
+	Tasks        TaskSummary              `json:"tasks"`
+	Git          GitSummary               `json:"git"`
+	Redis        RedisInfo                `json:"redis"`
+	Issues       []StatusIssue            `json:"issues,omitempty"`
 }
 
 // DaemonInfo holds daemon health information.
@@ -145,7 +147,19 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	// Build status data from collected information.
 	data := buildStatusData(daemonInfo, monData)
+	inventory, err := mirror.InventoryStatus(cmd.Context())
+	if err != nil {
+		return fmt.Errorf("read Loom Git status: %w", err)
+	}
+	data.LoomGit = inventory
 
+	if err := printStatus(data); err != nil {
+		return err
+	}
+	return nil
+}
+
+func printStatus(data StatusData) error {
 	if statusJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -314,6 +328,24 @@ func renderStatusHuman(data StatusData) {
 	fmt.Printf("Tasks:      %d open, %d in-progress, %d review, %d closed\n",
 		data.Tasks.Open, data.Tasks.InProgress, data.Tasks.Review, data.Tasks.Closed)
 	renderStatusGit(data.Git)
+	fmt.Printf("Loom Git:   %d objects, %d changed files", len(data.LoomGit.Entries), data.LoomGit.ChangedTotal)
+	if data.LoomGit.Truncated {
+		fmt.Print(" (list truncated)")
+	}
+	fmt.Println()
+	for _, entry := range data.LoomGit.Entries {
+		fmt.Printf("  %s %s/%s %s: %s", entry.Kind, entry.Workspace, entry.Repo, entry.ID, entry.State)
+		if entry.Drift != "" {
+			fmt.Printf("; %s (behind %d, ahead %d)", entry.Drift, entry.Behind, entry.Ahead)
+		}
+		if entry.BaseDrift != "" {
+			fmt.Printf("; base %s (behind %d, ahead %d)", entry.BaseDrift, entry.BaseBehind, entry.BaseAhead)
+		}
+		if entry.NextAction != "" {
+			fmt.Printf("; next: %s", entry.NextAction)
+		}
+		fmt.Println()
+	}
 	renderStatusRedis(data.Redis)
 	renderStatusIssues(data.Issues)
 }
