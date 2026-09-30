@@ -168,6 +168,11 @@ func TestLocalLineageStatusStaleAndAbandoned(t *testing.T) {
 	if first != f.taskAH {
 		t.Fatalf("dependent base = %s, want %s", first, f.taskAH)
 	}
+	dependents, err := taskcopy.DependentsOf(context.Background(), "TEST", f.change)
+	if err != nil || len(dependents) != 1 || dependents[0].Task != "task-b" ||
+		dependents[0].Repo != "app" || dependents[0].Revision != 1 || dependents[0].BaseSHA != first {
+		t.Fatalf("predecessor dependents = %+v, %v", dependents, err)
+	}
 	status, err := taskcopy.ReadLineageStatus(context.Background(), "TEST", "task-b", "app")
 	if err != nil || status.State != "current" || status.BasedOn.Revision != 1 {
 		t.Fatalf("initial status = %+v, %v", status, err)

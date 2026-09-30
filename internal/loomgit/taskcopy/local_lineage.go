@@ -30,6 +30,13 @@ type LineageStatus struct {
 	AvailableRef      string
 }
 
+type DependentLineage struct {
+	Task     string
+	Repo     string
+	Revision int
+	BaseSHA  string
+}
+
 func open() (*journal.SQLite, error) {
 	path := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -136,6 +143,26 @@ func AbandonChange(ctx context.Context, workspace, change string) error {
 	}
 	defer func() { _ = st.Close() }()
 	return st.AbandonChange(ctx, workspace, change)
+}
+
+// DependentsOf lists local task copies pinned to a predecessor change.
+func DependentsOf(ctx context.Context, workspace, change string) ([]DependentLineage, error) {
+	st, err := open()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = st.Close() }()
+	stored, err := st.DependentsOf(ctx, workspace, change)
+	if err != nil {
+		return nil, err
+	}
+	dependents := make([]DependentLineage, 0, len(stored))
+	for _, l := range stored {
+		dependents = append(dependents, DependentLineage{
+			Task: l.Task, Repo: l.Repo, Revision: l.PredecessorRevision, BaseSHA: l.BaseSHA,
+		})
+	}
+	return dependents, nil
 }
 
 func unresolved(message string, err error) error {

@@ -89,6 +89,26 @@ func (s *SQLite) LocalLineage(ctx context.Context, workspace, task, repo string)
 	return l, err
 }
 
+// DependentsOf returns the task copies pinned to a predecessor change.
+func (s *SQLite) DependentsOf(ctx context.Context, workspace, change string) ([]LocalLineage, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT task_id, repo, predecessor_revision, base_sha
+		FROM local_lineage WHERE workspace = ? AND predecessor_change = ?
+		ORDER BY task_id, repo`, workspace, change)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var dependents []LocalLineage
+	for rows.Next() {
+		l := LocalLineage{Workspace: workspace, PredecessorChange: change}
+		if err := rows.Scan(&l.Task, &l.Repo, &l.PredecessorRevision, &l.BaseSHA); err != nil {
+			return nil, err
+		}
+		dependents = append(dependents, l)
+	}
+	return dependents, rows.Err()
+}
+
 // AbandonChange records a deliberate abandonment without deleting revisions.
 func (s *SQLite) AbandonChange(ctx context.Context, workspace, change string) error {
 	if workspace == "" || change == "" {
