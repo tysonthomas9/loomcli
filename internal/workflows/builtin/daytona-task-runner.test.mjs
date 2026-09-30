@@ -292,4 +292,56 @@ describe("remote sandbox capture", () => {
     assert.ok(!git(task, "ls-tree", "-r", "--name-only", capture.captureSha).includes(".env"));
     assert.equal(fs.existsSync(tokenPath), false);
   });
+
+  it("reattaches a retained sandbox and retries with a fresh scoped token", async () => {
+    const priorFetch = globalThis.fetch;
+    const priorAPI = process.env.LOOM_TASK_RUN_API_URL;
+    process.env.LOOM_TASK_RUN_API_URL = "http://loom.test";
+    let tokenCount = 0;
+    let pushCount = 0;
+    let finalized = 0;
+    const uploaded = [];
+    const sandbox = {
+      fs: { uploadFile: async (content, file) => uploaded.push({ content: String(content), file }) },
+      process: { executeCommand: async (command) => {
+        assert.ok(command.includes("capture.git"));
+        pushCount++;
+        return { exitCode: 0, result: JSON.stringify({
+          captureSha: "a".repeat(40), treeHash: "b".repeat(40), complete: true,
+          pushError: pushCount === 1 ? "connection refused" : "",
+        }) };
+      } },
+    };
+    const provider = { get: async (sandboxId) => {
+      assert.equal(sandboxId, "retained-sandbox");
+      return sandbox;
+    } };
+    globalThis.fetch = async (url) => {
+      if (url.endsWith("/capture-token")) {
+        tokenCount++;
+        return { ok: true, json: async () => ({ token: `scoped-${tokenCount}`, attempt: "run-a1", ref: "refs/loom/ws/W/attempt/run-a1/capture" }) };
+      }
+      if (url.endsWith("/capture-pending")) {
+        return { ok: false, json: async () => ({ message: "proxy has no retained pack" }) };
+      }
+      if (url.endsWith("/capture-finalize")) {
+        finalized++;
+        return { ok: true, json: async () => ({ changeId: "change", revision: 1 }) };
+      }
+      throw new Error("unexpected capture operation: " + url);
+    };
+    try {
+      const input = { request: { workspace_key: "W", task_run_id: "run" }, repoUrl: "provider", repoDir: "/repo", baseSha: "c".repeat(40) };
+      await assert.rejects(mod.retryRetainedCapture(await provider.get("retained-sandbox"), input, []), /proxy has no retained pack/);
+      const recovered = await mod.retryRetainedCapture(await provider.get("retained-sandbox"), input, []);
+      assert.equal(recovered.changeId, "change");
+      assert.deepEqual(uploaded.map((item) => item.content), ["scoped-1", "scoped-2"]);
+      assert.equal(pushCount, 2);
+      assert.equal(finalized, 1);
+    } finally {
+      globalThis.fetch = priorFetch;
+      if (priorAPI === undefined) delete process.env.LOOM_TASK_RUN_API_URL;
+      else process.env.LOOM_TASK_RUN_API_URL = priorAPI;
+    }
+  });
 });

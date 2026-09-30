@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -148,7 +149,22 @@ func claim(ctx context.Context, store *journal.SQLite, workspace, attempt, owner
 	if err == nil && prior.Owner == owner && prior.ExpiresAt.After(time.Now()) {
 		return store.RenewLease(ctx, prior, leaseTTL)
 	}
+	if err == nil && prior.ExpiresAt.After(time.Now()) && sameRunNewFence(prior.Owner, owner) {
+		if err := store.ReleaseLease(ctx, prior); err != nil {
+			return loomgit.Lease{}, err
+		}
+	}
 	return store.ClaimLease(ctx, scope, owner, leaseTTL)
+}
+
+func sameRunNewFence(prior, next string) bool {
+	priorIndex, nextIndex := strings.LastIndex(prior, ":"), strings.LastIndex(next, ":")
+	if priorIndex < 1 || nextIndex < 1 || prior[:priorIndex] != next[:nextIndex] {
+		return false
+	}
+	oldNumber, oldErr := strconv.ParseInt(prior[priorIndex+1:], 10, 64)
+	newNumber, newErr := strconv.ParseInt(next[nextIndex+1:], 10, 64)
+	return oldErr == nil && newErr == nil && newNumber > oldNumber
 }
 
 // Prepare pins the base and mints a short-lived token for this attempt only.

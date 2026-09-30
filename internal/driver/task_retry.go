@@ -121,7 +121,17 @@ func taskRunRetryBackoff(attempt int) time.Duration {
 	return backoff
 }
 
-func taskRunRetryMetadata(_ *domain.TaskRun, retry taskRunRetryDecisionResult, completion taskExecCompletion, metadata map[string]string) map[string]string {
+func taskRunRetryMetadata(claimed *domain.TaskRun, retry taskRunRetryDecisionResult, completion taskExecCompletion, metadata map[string]string) map[string]string {
+	if claimed != nil {
+		if metadata == nil {
+			metadata = map[string]string{}
+		}
+		for _, key := range []string{"daytona_sandbox_id", "daytona_repo_dir", "remote_capture_status", "remote_capture_attempt", "remote_capture_base_sha", "remote_capture_repo_url"} {
+			if metadata[key] == "" && claimed.RuntimeMetadata[key] != "" {
+				metadata[key] = claimed.RuntimeMetadata[key]
+			}
+		}
+	}
 	return schedulerMetadata(metadata, "retrying", retry.Attempt, retry.MaxAttempts, completion)
 }
 

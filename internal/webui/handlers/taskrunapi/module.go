@@ -117,6 +117,8 @@ func NewModule(cfg Config) *Module {
 		"artifact-list":      m.artifactList,
 		"artifact-finalize":  m.artifactFinalize,
 		"capture-token":      m.captureToken,
+		"capture-register":   m.captureRegister,
+		"capture-state":      m.captureState,
 		"capture-pending":    m.capturePending,
 		"capture-finalize":   m.captureFinalize,
 	}

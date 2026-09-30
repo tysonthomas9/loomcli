@@ -122,6 +122,36 @@ export async function run(ctx = {}) {
     }
 
     const client = new Daytona(daytonaConfig);
+    if (numberValue(request.scheduler_attempt, 0) > 0) {
+      const state = (await captureOp("capture-state", request, {})).body;
+      if (state.status === "pending" && state.sandboxId) {
+        sandboxId = state.sandboxId;
+        captureContext = {
+          request, repoUrl: state.repoUrl, repoDir: state.repoDir,
+          baseSha: state.baseSha, attempt: state.attempt, taskRunId,
+        };
+        sandbox = await client.get(state.sandboxId);
+        if (sandbox.state && sandbox.state !== "started") {
+          await sandbox.start();
+        }
+        captureAttempted = true;
+        const capture = await retryRetainedCapture(sandbox, captureContext, secrets);
+        captureAccepted = capture.complete;
+        if (!capture.complete) {
+          return failed("capture_incomplete", "remote capture retained excluded or incomplete files", taskRunId, request, logs, sandboxId, secrets);
+        }
+        return {
+          status: "completed", exitCode: 0,
+          logs: redact("recovered remote capture " + capture.captureSha + "\n", secrets),
+          runtimeMetadata: stringMetadata({
+            task_runner: "daytona-task-runner", daytona_sandbox_id: sandboxId,
+            remote_capture_status: "frozen", remote_capture_sha: capture.captureSha,
+            remote_capture_tree_hash: capture.treeHash,
+            remote_capture_change_id: capture.changeId, remote_capture_revision: capture.revision,
+          }),
+        };
+      }
+    }
     sandbox = await client.create({
       labels: {
         loom: "epic-runner",
@@ -160,6 +190,10 @@ export async function run(ctx = {}) {
       return failed("daytona_repo_head_failed", textTail(head.stdout + head.stderr), taskRunId, request, logs, sandboxId, secrets);
     }
     captureContext = { request, repoUrl, repoDir, baseSha: head.stdout.trim(), taskRunId };
+    const registration = await captureOp("capture-register", request, {
+      repoUrl, repoDir, baseSha: captureContext.baseSha, sandboxId,
+    });
+    captureContext.attempt = stringValue(registration.body.attempt);
     if (delivery.openPullRequest) {
       const checkout = await setup.shell(
         "git -C " + shellQuote(repoDir) + " checkout -B " + shellQuote(delivery.branch),
@@ -265,9 +299,15 @@ export async function run(ctx = {}) {
       }
     }
     const result = failed("daytona_task_runner_failed", errorMessage(error), taskRunId, request, logs, sandboxId, secrets);
-    if (sandbox) {
-      result.runtimeMetadata.remote_capture_status = "retained";
+    if (sandboxId && captureContext) {
+      result.runtimeMetadata.remote_capture_status = captureContext ? "pending" : "retained";
       result.runtimeMetadata.remote_capture_reason = result.errorMessage;
+      if (captureContext) {
+        result.runtimeMetadata.remote_capture_attempt = stringValue(captureContext.attempt);
+        result.runtimeMetadata.remote_capture_base_sha = captureContext.baseSha;
+        result.runtimeMetadata.remote_capture_repo_url = captureContext.repoUrl;
+        result.runtimeMetadata.daytona_repo_dir = captureContext.repoDir;
+      }
     }
     return result;
   } finally {
@@ -315,6 +355,7 @@ async function captureRemoteWork(setup, sandbox, input, secrets) {
     throw new Error("host did not return a capture token and ref");
   }
   secrets.push(token);
+  input.attempt = stringValue(prepared.body.attempt);
   const tokenPath = "/tmp/loom-capture-token-" + Math.random().toString(16).slice(2);
   await sandbox.fs.uploadFile(Buffer.from(token, "utf8"), tokenPath);
   const args = {
@@ -347,6 +388,12 @@ async function captureRemoteWork(setup, sandbox, input, secrets) {
     outcome: input.outcome || (capture.complete ? "completed" : "failed"),
   });
   return { ...capture, ...finalized.body };
+}
+
+export async function retryRetainedCapture(sandbox, input, secrets) {
+  const api = new DaytonaSandboxApi(sandbox);
+  const setup = { shell: (command, options) => api.exec(command, { cwd: input.repoDir, timeout: options.timeout }) };
+  return captureRemoteWork(setup, sandbox, input, secrets);
 }
 
 const REMOTE_CAPTURE_SCRIPT = String.raw`

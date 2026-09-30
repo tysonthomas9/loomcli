@@ -42,6 +42,18 @@ func TestRetryCarriesPreviousAttemptID(t *testing.T) {
 	}
 }
 
+func TestRetryPreservesPendingRemoteCapture(t *testing.T) {
+	claimed := &domain.TaskRun{RuntimeMetadata: map[string]string{
+		"daytona_sandbox_id": "sandbox", "remote_capture_attempt": "run-a1",
+		"remote_capture_status": "pending", "remote_capture_base_sha": "base",
+	}}
+	metadata := taskRunRetryMetadata(claimed, taskRunRetryDecisionResult{Attempt: 2, MaxAttempts: 3},
+		taskExecCompletion{Status: domain.TaskRunFailed}, map[string]string{"phase": "capture_retry_failed"})
+	if metadata["daytona_sandbox_id"] != "sandbox" || metadata["remote_capture_attempt"] != "run-a1" || metadata["remote_capture_status"] != "pending" {
+		t.Fatalf("pending remote capture lost on retry: %+v", metadata)
+	}
+}
+
 func TestResumeCarriesCaptureAttemptID(t *testing.T) {
 	claimed := &domain.TaskRun{TaskRunID: "run-2", RuntimeMetadata: map[string]string{"resume_from_attempt_id": "run-1-a1"}}
 	req := taskExecRequest(claimed, executeClaimedTaskRunOptions{}, claimedTaskRunRefs{})

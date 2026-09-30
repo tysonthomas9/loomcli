@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/mirror"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/pushproxy"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/remotecapture"
 )
 
@@ -219,5 +220,71 @@ func TestPendingCaptureRecoversAfterMirrorRetry(t *testing.T) {
 	}
 	if len(pending) != 0 {
 		t.Fatalf("pending after recovery: %+v", pending)
+	}
+}
+
+func TestFreshTaskRunFenceTakesOverRetainedAttempt(t *testing.T) {
+	_, provider, _, journalPath, base := setup(t)
+	ctx := context.Background()
+	oldToken, ref, err := remotecapture.Prepare(ctx, journalPath, "W", "run-a1", provider, base, "run:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newToken, newRef, err := remotecapture.Prepare(ctx, journalPath, "W", "run-a1", provider, base, "run:2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref != newRef || oldToken == newToken {
+		t.Fatal("retry did not preserve the attempt and mint a fresh token")
+	}
+	store, err := journal.OpenSQLite(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	if _, err := pushproxy.Verify(ctx, store, oldToken); err == nil {
+		t.Fatal("old fence token remained valid")
+	}
+	if _, err := pushproxy.Verify(ctx, store, newToken); err != nil {
+		t.Fatalf("new token rejected: %v", err)
+	}
+}
+
+func TestCompletedRemoteCaptureFreezesExactProviderSHA(t *testing.T) {
+	source, provider, task, journalPath, base := setup(t)
+	ctx := context.Background()
+	for _, file := range []string{"first", "second"} {
+		if err := os.WriteFile(filepath.Join(task, file), []byte(file), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		git(t, task, "add", file)
+		git(t, task, "commit", "-qm", file)
+	}
+	if err := os.WriteFile(filepath.Join(task, "readme"), []byte("edited\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	capture, err := agentcapture.Capture(ctx, task, "W", "run-a3", "task", "task")
+	if err != nil || !capture.Complete {
+		t.Fatalf("complete capture = %+v, %v", capture, err)
+	}
+	_, ref, err := remotecapture.Prepare(ctx, journalPath, "W", "run-a3", provider, base, "run:3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	git(t, task, "push", "-q", provider, capture.SHA+":"+ref)
+	tree := git(t, task, "rev-parse", capture.SHA+"^{tree}")
+	revision, err := remotecapture.Finalize(ctx, journalPath, remotecapture.FinalizeInput{
+		Workspace: "W", Attempt: "run-a3", Task: "task", RepoURL: provider,
+		BaseSHA: base, CaptureSHA: capture.SHA, TreeHash: tree,
+		Outcome: "completed", Complete: true, Owner: "run:3",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revision.Incomplete || !revision.Ready || revision.BaseSHA != base || revision.TreeHash != tree {
+		t.Fatalf("completed revision = %+v", revision)
+	}
+	if got := git(t, source, "show", revision.HeadSHA+":readme"); got != "edited" {
+		t.Fatalf("completed revision lost edit: %q", got)
 	}
 }
