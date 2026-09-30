@@ -101,9 +101,6 @@ func seedAgentWorktrees(ctx context.Context, h *bootstrap.StoreHandle, content [
 	if err != nil {
 		return err
 	}
-	if err := localworkspace.RememberAgentWorktree(ws, agent.Name, localworkspace.FirstWorktreePath(created)); err != nil {
-		return fmt.Errorf("update local agent state: %w", err)
-	}
 
 	if seedWorktreeFile != "" {
 		worktree, cerr := seedCommitWorktree(created)
@@ -140,18 +137,7 @@ func ensureSeedWorktrees(wsData *ops.WorkspaceData, agent *domain.Agent) (map[st
 	if len(repos) == 0 {
 		return nil, fmt.Errorf("workspace %q has no repos for agent %q", wsData.ID, agent.Name)
 	}
-	created := make(map[string]string, len(repos))
-	for _, repo := range repos {
-		if repo.Path == "" {
-			return nil, fmt.Errorf("repo %q has no local path on this machine", repo.Name)
-		}
-		target := localworkspace.AgentWorktreePath(wsData.Path, repo.Name, agent.Name)
-		if werr := localworkspace.EnsureGitWorktree(repo.Path, target, agent.Name); werr != nil {
-			return nil, fmt.Errorf("create worktree for repo %q: %w", repo.Name, werr)
-		}
-		created[repo.Name] = target
-	}
-	return created, nil
+	return localworkspace.EnsureAgentTaskCopyWorktrees(agent.WorkspaceKey, agent.Name, wsData.Path, repos)
 }
 
 // seedCommitWorktree picks the worktree the --file commit lands in: the

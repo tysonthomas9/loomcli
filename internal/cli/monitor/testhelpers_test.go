@@ -2,10 +2,11 @@ package monitor
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"sort"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -81,11 +82,15 @@ func setupMonitorWorkspaceConfig(t *testing.T, workspaceDir string, agentNames .
 		t.Fatalf("create repo: %v", err)
 	}
 
-	agentNames = normalizeMonitorAgentNames(t, workspaceDir, agentNames)
+	agentNames = normalizeMonitorAgentNames(agentNames)
 	agents := make(map[string]bootstrap.AgentLocalState, len(agentNames))
 	for _, name := range agentNames {
+		copyID := monitorTestCopyID(name)
+		path := monitorAgentCheckoutPath(workspaceDir, name)
 		agents[name] = bootstrap.AgentLocalState{
-			Worktree: filepath.Join(workspaceDir, "worktrees", name),
+			Worktree:    path,
+			Worktrees:   map[string]string{repoName: path},
+			TaskCopyIDs: map[string]string{repoName: copyID},
 		}
 	}
 	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
@@ -106,24 +111,18 @@ func setupMonitorWorkspaceConfig(t *testing.T, workspaceDir string, agentNames .
 	cli.TestingResetDefaultResolver()
 }
 
-func normalizeMonitorAgentNames(t *testing.T, workspaceDir string, agentNames []string) []string {
-	t.Helper()
-	if len(agentNames) > 0 {
-		out := append([]string(nil), agentNames...)
-		sort.Strings(out)
-		return out
-	}
-	entries, err := os.ReadDir(filepath.Join(workspaceDir, "worktrees"))
-	if err != nil {
-		t.Fatalf("read worktrees dir: %v", err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			agentNames = append(agentNames, entry.Name())
-		}
-	}
-	sort.Strings(agentNames)
-	return agentNames
+func normalizeMonitorAgentNames(agentNames []string) []string {
+	out := append([]string(nil), agentNames...)
+	sort.Strings(out)
+	return out
+}
+
+func monitorTestCopyID(name string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(name)).String()
+}
+
+func monitorAgentCheckoutPath(workspaceDir, name string) string {
+	return filepath.Join(workspaceDir, ".loom", "task-copies", "repo", monitorTestCopyID(name))
 }
 
 // defaultResolver is the package-level Resolver for backward-compat tests.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -523,6 +524,25 @@ func TestWorkspaceOpsAgentStatusFlagsMissingWorktree(t *testing.T) {
 	}
 	if problems[0].Code != "agent_missing_worktree" || problems[0].Severity != "error" {
 		t.Errorf("problem = %+v, want code=agent_missing_worktree severity=error", problems[0])
+	}
+}
+
+func TestAgentWorktreePathIgnoresOldAgentNameCheckout(t *testing.T) {
+	root := t.TempDir()
+	oldPath := filepath.Join(root, "worktrees", "app", "alice")
+	if err := os.MkdirAll(filepath.Join(oldPath, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	state := bootstrap.WorkspaceLocalState{Path: root}
+	state.Agents = map[string]bootstrap.AgentLocalState{"alice": {Worktree: oldPath}}
+	agent := &domain.Agent{Name: "alice", Repos: []string{"app"}}
+	if got := agentWorktreePath(state, map[string]*domain.Repo{"app": {}}, agent); got != "" {
+		t.Fatalf("old agent-name path was selected: %q", got)
+	}
+	copyPath := filepath.Join(root, ".loom", "task-copies", "app", "T1")
+	state.Agents["alice"] = bootstrap.AgentLocalState{Worktrees: map[string]string{"app": copyPath}}
+	if got := agentWorktreePath(state, map[string]*domain.Repo{"app": {}}, agent); got != copyPath {
+		t.Fatalf("recorded task-copy path = %q, want %q", got, copyPath)
 	}
 }
 

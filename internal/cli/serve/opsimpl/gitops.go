@@ -17,6 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -99,8 +100,7 @@ func (g *GitOpsImpl) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentW
 	return &aw, nil
 }
 
-// ResolveAgentWorktreeForRepo resolves one explicit agent+repo checkout under
-// <ws>/worktrees/<repo>/<agent>.
+// ResolveAgentWorktreeForRepo resolves one recorded agent+repo checkout.
 func (g *GitOpsImpl) ResolveAgentWorktreeForRepo(workspaceID, name, repoName string) (*ops.AgentWorktree, error) {
 	repoName = strings.TrimSpace(repoName)
 	if repoName == "" {
@@ -142,7 +142,7 @@ func (g *GitOpsImpl) ResolveAgentWorktreeForRepo(workspaceID, name, repoName str
 	if !ok {
 		return nil, fmt.Errorf("%w: repo %q is not known in workspace %q", ops.ErrAgentRepoNotAllowed, repoName, workspaceID)
 	}
-	return resolveAgentWorktreeFromWSForRepo(&ops.WorkspaceData{Path: root}, name, repo)
+	return resolveAgentWorktreeFromWSForRepo(&ops.WorkspaceData{ID: workspaceID, Path: root}, name, repo)
 }
 
 // loadStoreWorkspace loads the workspace topology for store-backed agent
@@ -213,7 +213,10 @@ func resolveAgentWorktreeFromWS(ws *ops.WorkspaceData, workspaceID, name string)
 }
 
 func resolveAgentWorktreeFromWSForRepo(ws *ops.WorkspaceData, name string, repo ops.WorkspaceRepo) (*ops.AgentWorktree, error) {
-	wtPath := filepath.Join(ws.Path, "worktrees", repo.Name, name)
+	wtPath, ok := localworkspace.RememberedAgentWorktreeForRepo(ws.ID, name, repo.Name)
+	if !ok {
+		return nil, fmt.Errorf("%w: agent %q has no recorded checkout for repo %q", ops.ErrAgentWorktreeNotFound, name, repo.Name)
+	}
 	if _, err := os.Stat(filepath.Join(wtPath, ".git")); err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("%w: agent %q worktree for repo %q is not checked out on this machine at %s", ops.ErrAgentWorktreeNotFound, name, repo.Name, wtPath)

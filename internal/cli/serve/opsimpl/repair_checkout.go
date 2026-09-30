@@ -164,7 +164,14 @@ func repairAgentCheckoutTarget(ws *ops.WorkspaceData, wsRoot, target, repoName s
 	if err != nil {
 		return repairCheckoutSpec{}, err
 	}
-	path, err := validateRepairTargetPath(wsRoot, localworkspace.AgentWorktreePath(wsRoot, repo.Name, target))
+	recordedPath, branch, ok, err := localworkspace.RecordedAgentCheckout(ws.ID, target, repo.Name)
+	if err != nil {
+		return repairCheckoutSpec{}, err
+	}
+	if !ok {
+		return repairCheckoutSpec{}, fmt.Errorf("%w: agent %q has no recorded checkout for repo %q", ops.ErrCheckoutTargetNotAllowed, target, repo.Name)
+	}
+	path, err := validateRepairTargetPath(wsRoot, recordedPath)
 	if err != nil {
 		return repairCheckoutSpec{}, err
 	}
@@ -173,7 +180,7 @@ func repairAgentCheckoutTarget(ws *ops.WorkspaceData, wsRoot, target, repoName s
 		target:     target,
 		repo:       repo,
 		path:       path,
-		branch:     target,
+		branch:     branch,
 		baseBranch: repairDefaultBranch(repo),
 		label:      target,
 	}, nil
@@ -292,18 +299,11 @@ func findRepairSource(ws *ops.WorkspaceData, wsRoot string, repo ops.WorkspaceRe
 
 func repairSourceCandidates(ws *ops.WorkspaceData, wsRoot string, repo ops.WorkspaceRepo, targetPath string) []string {
 	candidates := []string{repairRepoCheckoutPath(wsRoot, repo)}
-	worktreesRoot := filepath.Join(wsRoot, "worktrees", repo.Name)
-	entries, err := os.ReadDir(worktreesRoot)
-	if err == nil {
-		for _, entry := range entries {
-			if entry.IsDir() {
-				candidates = append(candidates, filepath.Join(worktreesRoot, entry.Name()))
-			}
-		}
-	}
 	if ws != nil {
 		for _, agent := range ws.Agents {
-			candidates = append(candidates, localworkspace.AgentWorktreePath(wsRoot, repo.Name, agent.Name))
+			if path, ok := localworkspace.RememberedAgentWorktreeForRepo(ws.ID, agent.Name, repo.Name); ok {
+				candidates = append(candidates, path)
+			}
 		}
 	}
 	candidates = append(candidates, targetPath)

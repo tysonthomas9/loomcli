@@ -10,9 +10,82 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
+
+func TestAgentTaskCopiesAreUniqueAndRememberEveryRepo(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	root := t.TempDir()
+	repoA := filepath.Join(root, "a")
+	repoB := filepath.Join(root, "b")
+	for _, repo := range []string{repoA, repoB} {
+		initTaskCopyTestRepo(t, repo)
+	}
+	git(t, repoA, "branch", "alice")
+	repos := []Repo{{Name: "a", Path: repoA}, {Name: "b", Path: repoB}}
+	first, err := EnsureAgentTaskCopyWorktrees("W1", "alice", filepath.Join(root, "w1"), repos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := EnsureAgentTaskCopyWorktrees("W2", "alice", filepath.Join(root, "w2"), repos[:1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first["a"] == second["a"] || first["a"] == first["b"] {
+		t.Fatalf("task copies share paths: first=%v second=%v", first, second)
+	}
+	branchA, err := runGit(context.Background(), first["a"], "branch", "--show-current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	branchB, err := runGit(context.Background(), second["a"], "branch", "--show-current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	branchA = strings.TrimSpace(branchA)
+	branchB = strings.TrimSpace(branchB)
+	if branchA == "alice" || branchB == "alice" || branchA == branchB {
+		t.Fatalf("task copy branches collide: %q and %q", branchA, branchB)
+	}
+	writeFile(t, filepath.Join(first["a"], "only-w1.txt"), "unique\n")
+	git(t, first["a"], "add", "only-w1.txt")
+	git(t, first["a"], "commit", "-m", "unique")
+	if _, err := os.Stat(filepath.Join(second["a"], "only-w1.txt")); !os.IsNotExist(err) {
+		t.Fatalf("other workspace sees first workspace commit: %v", err)
+	}
+	again, err := EnsureAgentTaskCopyWorktrees("W1", "alice", filepath.Join(root, "w1"), repos)
+	if err != nil || again["a"] != first["a"] || again["b"] != first["b"] {
+		t.Fatalf("retry changed copies: %v, %v", again, err)
+	}
+	assertAgentTaskCopyRemembered(t, first)
+}
+
+func assertAgentTaskCopyRemembered(t *testing.T, paths map[string]string) {
+	t.Helper()
+	cache, err := bootstrap.LoadStateCache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := cache.Workspaces["W1"].Agents["alice"]
+	if state.Worktrees["a"] != paths["a"] || state.Worktrees["b"] != paths["b"] || state.Worktree != paths["a"] {
+		t.Fatalf("incomplete remembered paths: %+v", state)
+	}
+	if remembered, ok := RememberedAgentWorktreeForRepo("W1", "alice", "b"); !ok || remembered != paths["b"] {
+		t.Fatalf("repo b lookup = %q, %v; want %q", remembered, ok, paths["b"])
+	}
+}
+
+func initTaskCopyTestRepo(t *testing.T, repo string) {
+	t.Helper()
+	git(t, "", "init", repo)
+	git(t, repo, "config", "user.name", "Test User")
+	git(t, repo, "config", "user.email", "test@example.test")
+	writeFile(t, filepath.Join(repo, "base.txt"), "base\n")
+	git(t, repo, "add", "base.txt")
+	git(t, repo, "commit", "-m", "base")
+}
 
 func TestEnsureGitWorktreeFromBranchUsesFetchedDefaultBranch(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {

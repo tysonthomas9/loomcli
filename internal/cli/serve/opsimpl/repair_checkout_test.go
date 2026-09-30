@@ -20,6 +20,7 @@ type repairFixture struct {
 	wsRoot    string
 	repoPath  string
 	agentPath string
+	branch    string
 }
 
 func setupRepairFixture(t *testing.T, createAgentWorktree bool) repairFixture {
@@ -28,7 +29,8 @@ func setupRepairFixture(t *testing.T, createAgentWorktree bool) repairFixture {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	wsRoot := filepath.Join(t.TempDir(), "workspace")
 	repoPath := filepath.Join(wsRoot, "api")
-	agentPath := filepath.Join(wsRoot, "worktrees", "api", "nova")
+	agentPath := filepath.Join(wsRoot, ".loom", "task-copies", "api", "T1")
+	branch := "loom/ws/WS1/task-copy/T1"
 
 	if err := runGit(t, repoPath, "init", "-b", "main"); err != nil {
 		t.Fatalf("git init source: %v", err)
@@ -52,7 +54,7 @@ func setupRepairFixture(t *testing.T, createAgentWorktree bool) repairFixture {
 		if err := os.MkdirAll(filepath.Dir(agentPath), 0o755); err != nil {
 			t.Fatalf("mkdir worktrees: %v", err)
 		}
-		if err := runGit(t, repoPath, "worktree", "add", agentPath, "-b", "nova"); err != nil {
+		if err := runGit(t, repoPath, "worktree", "add", agentPath, "-b", branch); err != nil {
 			t.Fatalf("git worktree add agent: %v", err)
 		}
 	}
@@ -98,13 +100,16 @@ func setupRepairFixture(t *testing.T, createAgentWorktree bool) repairFixture {
 				"api":  repoPath,
 				"docs": filepath.Join(wsRoot, "docs"),
 			},
+			Agents: map[string]bootstrap.AgentLocalState{
+				"nova": {Worktrees: map[string]string{"api": agentPath}, TaskCopyIDs: map[string]string{"api": "T1"}},
+			},
 		}
 		return nil
 	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}
 
-	return repairFixture{g: NewGitOps().WithStore(st), wsRoot: wsRoot, repoPath: repoPath, agentPath: agentPath}
+	return repairFixture{g: NewGitOps().WithStore(st), wsRoot: wsRoot, repoPath: repoPath, agentPath: agentPath, branch: branch}
 }
 
 func TestRepairCheckout_DisallowedRepoRejected(t *testing.T) {
@@ -113,6 +118,26 @@ func TestRepairCheckout_DisallowedRepoRejected(t *testing.T) {
 	_, err := fx.g.RepairCheckout("WS1", "agent", "nova", "docs", false)
 	if !errors.Is(err, ops.ErrAgentRepoNotAllowed) {
 		t.Fatalf("err = %v, want ErrAgentRepoNotAllowed", err)
+	}
+}
+
+func TestRepairCheckoutIgnoresOldAgentCheckoutWithoutRecord(t *testing.T) {
+	fx := setupRepairFixture(t, false)
+	oldPath := filepath.Join(fx.wsRoot, "worktrees", "api", "nova")
+	if err := runGit(t, oldPath, "init", "-b", "nova"); err != nil {
+		t.Fatal(err)
+	}
+	if err := bootstrap.MutateWorkspaceLocalState("WS1", func(local *bootstrap.WorkspaceLocalState) error {
+		delete(local.Agents, "nova")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.g.RepairCheckout("WS1", "agent", "nova", "api", false); !errors.Is(err, ops.ErrCheckoutTargetNotAllowed) {
+		t.Fatalf("old checkout repair error = %v, want target not allowed", err)
+	}
+	if _, err := os.Stat(filepath.Join(oldPath, ".git")); err != nil {
+		t.Fatalf("old checkout changed: %v", err)
 	}
 }
 
@@ -208,8 +233,8 @@ func TestRepairCheckout_ForceRecreateRecoversBrokenBranchFromDefault(t *testing.
 		t.Fatalf("write untracked file: %v", err)
 	}
 	moveAdminOutsideWorktrees(t, fx.agentPath)
-	moveBranchReflogAside(t, fx.repoPath, "nova")
-	corruptLooseBranchRef(t, fx.repoPath, "nova")
+	moveBranchReflogAside(t, fx.repoPath, fx.branch)
+	corruptLooseBranchRef(t, fx.repoPath, fx.branch)
 
 	result, err := fx.g.RepairCheckout("WS1", "agent", "nova", "api", true)
 	if err != nil {
@@ -227,7 +252,7 @@ func TestRepairCheckout_ForceRecreateRecoversBrokenBranchFromDefault(t *testing.
 	if got, err := os.ReadFile(filepath.Join(fx.agentPath, "note.txt")); err != nil || string(got) != "untracked\n" {
 		t.Fatalf("untracked file after recreate = %q, %v", got, err)
 	}
-	assertBranchCommitExists(t, fx.repoPath, "nova")
+	assertBranchCommitExists(t, fx.repoPath, fx.branch)
 	assertPathExists(t, result.BackupPath)
 }
 
@@ -244,7 +269,7 @@ func TestRepairCheckout_ForceRecreateRecoversBrokenBranchFromReflog(t *testing.T
 	}
 	agentSHA := mustRunRepairGit(t, fx.agentPath, "rev-parse", "HEAD")
 	moveAdminOutsideWorktrees(t, fx.agentPath)
-	corruptLooseBranchRef(t, fx.repoPath, "nova")
+	corruptLooseBranchRef(t, fx.repoPath, fx.branch)
 
 	result, err := fx.g.RepairCheckout("WS1", "agent", "nova", "api", true)
 	if err != nil {
@@ -300,8 +325,8 @@ func TestRepairCheckout_ProvisionMissingAgentCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("branch after provision: %v", err)
 	}
-	if strings.TrimSpace(branch) != "nova" {
-		t.Fatalf("branch = %q, want nova", branch)
+	if strings.TrimSpace(branch) != fx.branch {
+		t.Fatalf("branch = %q, want %q", branch, fx.branch)
 	}
 	if !strings.Contains(result.Message, "missing") || !strings.Contains(result.Message, "default branch main") {
 		t.Fatalf("message = %q, want missing/default branch recovery disclosure", result.Message)

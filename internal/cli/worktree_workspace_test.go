@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
@@ -652,18 +653,22 @@ func TestResolver_WorkspaceRepoRelativePaths(t *testing.T) {
 }
 
 func TestResolver_ResolveWorktreePath_WorkspaceAgentWorktree(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 
 	repoPath := filepath.Join(tmpDir, "source-repo")
 	createGitRepo(t, repoPath)
 
-	agentPath := filepath.Join(tmpDir, "worktrees", "source-repo", "local-planner")
+	agentPath := filepath.Join(tmpDir, ".loom", "task-copies", "source-repo", "T1")
 	if err := os.MkdirAll(filepath.Dir(agentPath), 0755); err != nil {
 		t.Fatalf("mkdir agent parent: %v", err)
 	}
-	if _, err := RunGitCommand(repoPath, "worktree", "add", agentPath, "-b", "local-planner"); err != nil {
+	if _, err := RunGitCommand(repoPath, "worktree", "add", agentPath, "-b", "loom/ws/ws/task-copy/T1"); err != nil {
 		t.Fatalf("git worktree add agent: %v", err)
+	}
+	if err := localworkspace.RememberAgentWorktrees("ws", "local-planner", map[string]string{"source-repo": agentPath}); err != nil {
+		t.Fatal(err)
 	}
 
 	cfg := &LoomConfig{
@@ -685,6 +690,37 @@ func TestResolver_ResolveWorktreePath_WorkspaceAgentWorktree(t *testing.T) {
 	}
 	if path != agentPath {
 		t.Errorf("ResolveWorktreePath() = %q, want %q", path, agentPath)
+	}
+}
+
+func TestResolver_ResolveAgentByName_LegacyCheckoutNeedsRecreation(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	root := t.TempDir()
+	legacyPath := filepath.Join(root, "worktrees", "repo", "agent")
+	if err := os.MkdirAll(filepath.Join(legacyPath, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	resolver := &Resolver{Mode: ModeWorkspace, Workspace: "ws", Config: &LoomConfig{Workspaces: map[string]WorkspaceConfig{
+		"ws": {Path: root, Repos: []RepoConfig{{Name: "repo"}}},
+	}}}
+	_, err := resolver.ResolveAgentByName("agent")
+	if err == nil || !strings.Contains(err.Error(), legacyPath) || !strings.Contains(err.Error(), "loom agentdef add ... --auto") {
+		t.Fatalf("ResolveAgentByName() error = %v, want legacy path and recreation command", err)
+	}
+	_, err = resolver.ResolveWorktreePath("agent")
+	if err == nil || !strings.Contains(err.Error(), legacyPath) {
+		t.Fatalf("ResolveWorktreePath() error = %v, want legacy path", err)
+	}
+}
+
+func TestResolver_ResolveAgentByName_MissingCheckoutKeepsNotFound(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	resolver := &Resolver{Mode: ModeWorkspace, Workspace: "ws", Config: &LoomConfig{Workspaces: map[string]WorkspaceConfig{
+		"ws": {Path: t.TempDir(), Repos: []RepoConfig{{Name: "repo"}}},
+	}}}
+	_, err := resolver.ResolveAgentByName("agent")
+	if err == nil || err.Error() != `agent worktree "agent" not found` {
+		t.Fatalf("ResolveAgentByName() error = %v, want normal not-found error", err)
 	}
 }
 

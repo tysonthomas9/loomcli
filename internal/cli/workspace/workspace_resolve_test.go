@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 )
 
 func testResolver(cfg *LoomConfig, ws string) *cli.Resolver {
@@ -54,13 +55,17 @@ func TestResolveWorkspaceTarget_RepoName(t *testing.T) {
 }
 
 func TestResolveWorkspaceTarget_UnboundAgentKeepsRepoIdentity(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	root := t.TempDir()
 	repoPath := filepath.Join(root, "checkout")
 	createGitRepo(t, repoPath)
-	worktree := filepath.Join(root, "worktrees", "source-repo", "agent")
-	cmd := exec.Command("git", "-C", repoPath, "worktree", "add", "-b", "agent", worktree) //nolint:norawexec // Real Git worktree proves repo ownership.
+	worktree := filepath.Join(root, ".loom", "task-copies", "source-repo", "T1")
+	cmd := exec.Command("git", "-C", repoPath, "worktree", "add", "-b", "loom/ws/myws/task-copy/T1", worktree) //nolint:norawexec // Real Git worktree proves repo ownership.
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("add worktree: %v: %s", err, out)
+	}
+	if err := localworkspace.RememberAgentWorktrees("myws", "agent", map[string]string{"source-repo": worktree}); err != nil {
+		t.Fatal(err)
 	}
 	resolver := testResolver(&LoomConfig{Workspaces: map[string]WorkspaceConfig{
 		"myws": {Path: root, Repos: []RepoConfig{{Name: "source-repo", Path: repoPath}}},

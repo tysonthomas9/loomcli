@@ -114,7 +114,7 @@ func TestCollectAgentStatus_ActiveLockTaskIDPopulatesCurrentTask(t *testing.T) {
 	t.Cleanup(func() { defaultResolver = oldResolver })
 	ResetWorkspaceRuntimeDirCache()
 
-	wtDir := filepath.Join(tmpDir, "worktrees", "alpha")
+	wtDir := monitorAgentCheckoutPath(tmpDir, "alpha")
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestCollectAgentStatus_IgnoresIdleLockTaskIDForCurrentTask(t *testing.T) {
 	t.Cleanup(func() { defaultResolver = oldResolver })
 	ResetWorkspaceRuntimeDirCache()
 
-	wtDir := filepath.Join(tmpDir, "worktrees", "alpha")
+	wtDir := monitorAgentCheckoutPath(tmpDir, "alpha")
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}

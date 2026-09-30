@@ -537,7 +537,14 @@ func monitorBranchFromAgent(ws *ops.WorkspaceData, agent *domain.Agent) string {
 	if !ok || repo.Name == "" {
 		return "unknown"
 	}
-	worktreePath := filepath.Join(ws.Path, "worktrees", repo.Name, agent.Name)
+	cache, err := bootstrap.LoadStateCache()
+	if err != nil || cache == nil {
+		return "unknown"
+	}
+	worktreePath := cache.Workspaces[ws.ID].Agents[agent.Name].Worktrees[repo.Name]
+	if worktreePath == "" {
+		return "unknown"
+	}
 	if _, err := os.Stat(filepath.Join(worktreePath, ".git")); err != nil {
 		return "unknown"
 	}

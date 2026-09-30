@@ -48,7 +48,9 @@ type WorkspaceLocalState struct {
 // AgentLocalState holds an agent's local-machine attributes. Worktree
 // is the git worktree path the agent operates inside.
 type AgentLocalState struct {
-	Worktree string `json:"worktree,omitempty"`
+	Worktree    string            `json:"worktree,omitempty"`
+	Worktrees   map[string]string `json:"worktrees,omitempty"`
+	TaskCopyIDs map[string]string `json:"task_copy_ids,omitempty"`
 }
 
 // LoadStateCache reads ~/.loom/state.json. A missing file returns an

@@ -111,7 +111,15 @@ func TestFleetDBAgentRoutesUseStoreInsteadOfDaemonControl(t *testing.T) {
 	if got := list.Data[0]; got.WorkspaceKey != "PARITY" || got.Name != "worker-one" || got.RoleName != "builder" || got.State != "idle" {
 		t.Fatalf("unexpected listed agent: %+v", got)
 	}
-	if _, err := os.Stat(filepath.Join(wsRoot, "worktrees", "app", "worker-one", ".git")); err != nil {
+	cache, err := bootstrap.LoadStateCache()
+	if err != nil {
+		t.Fatalf("load local agent state: %v", err)
+	}
+	state := cache.Workspaces["PARITY"].Agents["worker-one"]
+	if state.TaskCopyIDs["app"] == "" || state.Worktrees["app"] != filepath.Join(wsRoot, ".loom", "task-copies", "app", state.TaskCopyIDs["app"]) {
+		t.Fatalf("agent task copy was not recorded: %+v", state)
+	}
+	if _, err := os.Stat(filepath.Join(state.Worktrees["app"], ".git")); err != nil {
 		t.Fatalf("agent worktree was not created: %v", err)
 	}
 
