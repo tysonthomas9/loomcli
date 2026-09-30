@@ -20,6 +20,22 @@ func (s *Service) AttributeCommit(ctx context.Context, sha, change string) (loom
 	return s.attribute(ctx, sha, change)
 }
 
+// ReconcileRequest recovers only the Pull swap identified by its journal request.
+func (s *Service) ReconcileRequest(ctx context.Context, workspace, lead, requestID string) error {
+	return s.repo.WithLock(ctx, func(ctx context.Context) error {
+		layers, err := s.store.OpenApplied(ctx, workspace, lead)
+		if err != nil {
+			return err
+		}
+		for _, layer := range layers {
+			if layer.RequestID == requestID && layer.Change == "pull" {
+				return s.reconcileLayer(ctx, layer)
+			}
+		}
+		return loomgit.NewError(loomgit.AttentionRequired, "pull swap has no open apply journal", nil)
+	})
+}
+
 // SwapPrepared installs one previously replayed leaf while the repository lock is held.
 func (s *Service) SwapPrepared(ctx context.Context, workspace, lead, requestID, old, next string) ([]string, error) {
 	branch, err := git(ctx, s.runner, "symbolic-ref", "HEAD")

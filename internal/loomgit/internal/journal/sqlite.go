@@ -103,6 +103,10 @@ func OpenSQLite(path string) (*SQLite, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("open applied journal: %w", err)
 	}
+	if err := createPullSchema(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open pull journal: %w", err)
+	}
 	if err := createWorkingAreaSchema(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("open working areas: %w", err)

@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/pool"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/reconcile"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 )
 
@@ -40,7 +41,12 @@ func fixtureWithSource(t *testing.T, extend func(*testing.T, *fixture)) *fixture
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := journal.OpenSQLite(filepath.Join(t.TempDir(), "journal.sqlite"))
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	if err := os.MkdirAll(filepath.Join(configDir, "loomgit"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := journal.OpenSQLite(filepath.Join(configDir, "loomgit", "store.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,11 +303,70 @@ func TestPullReconcileCompletesLayerLogAfterSwap(t *testing.T) {
 		t.Fatal("expected injected interruption")
 	}
 	fixture.service.beforeCompletePull = nil
-	if err := fixture.service.repo.WithLock(context.Background(), func(ctx context.Context) error { return fixture.service.reconcilePullPlans(ctx, "W", "L", "repo") }); err != nil {
+	if err := reconcile.RunOnce(context.Background(), reconcile.Handlers{Apply: reconcile.RecoverFunc(Recover)}); err != nil {
 		t.Fatal(err)
 	}
 	log, err := fixture.service.appliedLog(context.Background(), "W", "L", fixture.git(t, "rev-parse", "HEAD"))
 	if err != nil || len(log) != 1 || log[0].Change != "C1" {
 		t.Fatalf("recovered layer log = %+v, %v", log, err)
 	}
+}
+
+func TestPullRunOnceRecoversKilledProcess(t *testing.T) {
+	if os.Getenv("P29_PULL_CHILD") == "1" {
+		runInterruptedPullChild(t)
+		return
+	}
+	fixture := newFixture(t)
+	trunk := preparePull(t, fixture)
+	if _, err := fixture.apply(t); err != nil {
+		t.Fatal(err)
+	}
+	advanceTrunk(t, fixture, trunk, "trunk")
+	command := exec.Command(os.Args[0], "-test.run=^TestPullRunOnceRecoversKilledProcess$") //nolint:norawexec // Real subprocess proves recovery after abrupt exit.
+	command.Env = append(os.Environ(), "P29_PULL_CHILD=1", "P29_PULL_AREA="+fixture.dir)
+	output, err := command.CombinedOutput()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 77 {
+		t.Fatalf("child exit = %v, output = %s", err, output)
+	}
+	ctx := context.Background()
+	if err := reconcile.RunOnce(ctx, reconcile.Handlers{Apply: reconcile.RecoverFunc(Recover)}); err != nil {
+		t.Fatal(err)
+	}
+	plans, err := fixture.store.PendingPullPlans(ctx, "W", "L")
+	if err != nil || len(plans) != 0 {
+		t.Fatalf("pending plans = %+v, %v", plans, err)
+	}
+	log, err := fixture.service.appliedLog(ctx, "W", "L", fixture.git(t, "rev-parse", "HEAD"))
+	if err != nil || len(log) != 1 || log[0].Change != "C1" {
+		t.Fatalf("recovered layers = %+v, %v", log, err)
+	}
+}
+
+func runInterruptedPullChild(t *testing.T) {
+	ctx := context.Background()
+	path := os.Getenv("P29_PULL_AREA")
+	store, err := journal.OpenSQLite(filepath.Join(os.Getenv("LOOM_CONFIG_DIR"), "loomgit", "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	options := gitexec.Options{GlobalConfig: os.DevNull, SystemConfig: os.DevNull,
+		FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}}
+	repo, err := pool.New(store, options).Admit(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := gitexec.New(path, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := New(store, repo, runner)
+	service.beforeCompletePull = func() error { os.Exit(77); return nil }
+	if _, err := service.Pull(ctx, PullRequest{Workspace: "W", Lead: "L", Repo: "repo",
+		RequestID: "pull-killed"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Fatal("pull returned without interruption")
 }
