@@ -14,6 +14,48 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
 )
 
+type fakeAbandonment bool
+
+func (f fakeAbandonment) AbandonedForRetention(context.Context, string, string) (bool, error) {
+	return bool(f), nil
+}
+
+func TestSweepWithoutAbandonStateKeepsCopy(t *testing.T) {
+	ctx := context.Background()
+	store, err := journal.OpenSQLite(filepath.Join(t.TempDir(), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	row := journal.RetainedCopy{Workspace: "W", Change: "C", Attempt: "A", Path: "/missing/copy", SourceRepo: "/missing/source", Complete: true}
+	if err := store.RecordRetainedCopy(ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	revision, err := store.ReserveRevision(ctx, loomgit.Revision{Workspace: "W", Change: "C", RequestID: "driver:A",
+		Kind: "source", Outcome: "completed", BaseSHA: "base", TreeHash: "tree", SourceHeadSHA: "capture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision.HeadSHA = "capture"
+	if err := store.FinishRevision(ctx, revision); err != nil {
+		t.Fatal(err)
+	}
+	known, err := store.AbandonedForRetention(ctx, "W", "C")
+	if err != nil || known {
+		t.Fatalf("missing abandonment table: %t, %v", known, err)
+	}
+	sweep := Sweep{Store: store, Now: func() time.Time { return time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC) }}
+	results, err := sweep.Run(ctx, true)
+	if err != nil || len(results) != 1 || results[0].Reason != "change is not landed or abandoned" {
+		t.Fatalf("no abandon state: %+v, %v", results, err)
+	}
+	sweep.Abandoned = fakeAbandonment(true)
+	results, err = sweep.Run(ctx, true)
+	if err != nil || results[0].Reason != "retention starts when terminal state is observed" {
+		t.Fatalf("fake abandon state: %+v, %v", results, err)
+	}
+}
+
 func TestSweepLandedCopyUsesCaptureAndWorkspaceWindow(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

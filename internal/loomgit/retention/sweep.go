@@ -24,8 +24,13 @@ type Result struct {
 }
 
 type Sweep struct {
-	Store *journal.SQLite
-	Now   func() time.Time
+	Store     *journal.SQLite
+	Now       func() time.Time
+	Abandoned AbandonmentLookup
+}
+
+type AbandonmentLookup interface {
+	AbandonedForRetention(context.Context, string, string) (bool, error)
 }
 
 func RunAt(ctx context.Context, path string, apply bool) ([]Result, error) {
@@ -34,7 +39,7 @@ func RunAt(ctx context.Context, path string, apply bool) ([]Result, error) {
 		return nil, err
 	}
 	defer func() { _ = store.Close() }()
-	return (Sweep{Store: store}).Run(ctx, apply)
+	return (Sweep{Store: store, Abandoned: store}).Run(ctx, apply)
 }
 
 func (s Sweep) Run(ctx context.Context, apply bool) ([]Result, error) {
@@ -210,9 +215,22 @@ func (s Sweep) eligibility(ctx context.Context, row journal.RetainedCopy) (strin
 	if !row.Complete {
 		return "", "capture incomplete", nil
 	}
-	state, err := s.Store.RetentionState(ctx, row)
+	landed, err := s.Store.IsLanded(ctx, row.Workspace, row.Change)
 	if err != nil {
 		return "", "", err
+	}
+	state := ""
+	if landed {
+		state = "landed"
+	}
+	if state == "" && s.Abandoned != nil {
+		abandoned, err := s.Abandoned.AbandonedForRetention(ctx, row.Workspace, row.Change)
+		if err != nil {
+			return "", "", err
+		}
+		if abandoned {
+			state = "abandoned"
+		}
 	}
 	if state == "" {
 		return "", "change is not landed or abandoned", nil

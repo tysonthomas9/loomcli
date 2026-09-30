@@ -102,34 +102,23 @@ func (s *SQLite) MarkCaptureRefRemoved(ctx context.Context, row RetainedCopy) er
 	return err
 }
 
-func (s *SQLite) RetentionState(ctx context.Context, row RetainedCopy) (string, error) {
+func (s *SQLite) AbandonedForRetention(ctx context.Context, workspace, change string) (bool, error) {
 	var found int
-	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM landed_changes WHERE workspace=? AND change_id=?`,
-		row.Workspace, row.Change).Scan(&found)
-	if err == nil {
-		return "landed", nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return "", err
-	}
 	var schema int
-	err = s.db.QueryRowContext(ctx, `SELECT 1 FROM sqlite_master WHERE type='table' AND name='change_abandonments'`).Scan(&schema)
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM sqlite_master WHERE type='table' AND name='change_abandonments'`).Scan(&schema)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
+		return false, nil
 	}
 	if err != nil {
-		return "", err
+		return false, err
 	}
 	err = s.db.QueryRowContext(ctx, `SELECT 1 FROM change_abandonments
 		WHERE workspace=? AND change_id=? AND retention_eligible=1 AND claim_released=1`,
-		row.Workspace, row.Change).Scan(&found)
-	if err == nil {
-		return "abandoned", nil
-	}
+		workspace, change).Scan(&found)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
+		return false, nil
 	}
-	return "", err
+	return err == nil, err
 }
 
 func (s *SQLite) HasCompleteCapture(ctx context.Context, row RetainedCopy) (bool, error) {
