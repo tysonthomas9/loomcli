@@ -62,3 +62,30 @@ func TestApplyJournalUsesRecoveryOwner(t *testing.T) {
 		t.Fatalf("apply recovery called = %v, err = %v", called, err)
 	}
 }
+
+func TestLandingRunsAfterJournalRecoveryOnEveryPass(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", root)
+	path := filepath.Join(root, "loomgit", "store.db")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := journal.OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	var calls int
+	for range 2 {
+		err := RunOnce(context.Background(), Handlers{Landing: RecoverFunc(func(context.Context) error {
+			calls++
+			return nil
+		})})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("landing passes = %d", calls)
+	}
+}

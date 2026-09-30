@@ -144,6 +144,8 @@ func (s *state) goCheck(name string) error {
 		return s.packageTests("./internal/loomgit/mirror", "Test.*")
 	case "leased_publish":
 		return s.packageTests("./internal/loomgit/publish", "TestPublish.*")
+	case "landing_detection":
+		return s.packageTests("./internal/loomgit/landing", "Test(MergeRecordLandsWithoutTrailerAndOffersDependent|MergedWaitsForFetchedTrunk|RestackOfferSurvivesCallbackFailure|OpenOwnedPRNeverLandsFromCopiedTrailer|SecondaryNeedsOwnedPRAssociation|FetchFailureChangesNoStatus)")
 	case "fault_tools":
 		// Proves the lab has an ENOSPC tmpfs and a second Unix account.
 		return s.checkFaultTools()

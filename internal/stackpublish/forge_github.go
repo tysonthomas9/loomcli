@@ -39,13 +39,14 @@ func NewGitHubForge(token string, client *http.Client, baseURL string) *GitHubFo
 }
 
 type ghPull struct {
-	Number   int     `json:"number"`
-	State    string  `json:"state"`
-	Title    string  `json:"title"`
-	Body     string  `json:"body"`
-	HTMLURL  string  `json:"html_url"`
-	MergedAt *string `json:"merged_at"`
-	Head     struct {
+	Number         int     `json:"number"`
+	State          string  `json:"state"`
+	Title          string  `json:"title"`
+	Body           string  `json:"body"`
+	HTMLURL        string  `json:"html_url"`
+	MergedAt       *string `json:"merged_at"`
+	MergeCommitSHA string  `json:"merge_commit_sha"`
+	Head           struct {
 		Ref string `json:"ref"`
 	} `json:"head"`
 	Base struct {
@@ -56,9 +57,45 @@ type ghPull struct {
 func (p ghPull) toPR() PR {
 	return PR{
 		Number: p.Number, Head: p.Head.Ref, Base: p.Base.Ref,
-		State: p.State, Merged: p.MergedAt != nil && *p.MergedAt != "",
+		State: p.State, Merged: p.MergedAt != nil && *p.MergedAt != "", MergeCommitSHA: p.MergeCommitSHA,
 		Title: p.Title, Body: p.Body, URL: p.HTMLURL,
 	}
+}
+
+func (g *GitHubForge) PullByNumber(ctx context.Context, owner, repo string, number int) (PR, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, number)
+	status, data, _, err := g.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return PR{}, err
+	}
+	if status != http.StatusOK {
+		return PR{}, g.apiErr("GET", path, status, data)
+	}
+	var pull ghPull
+	if err := json.Unmarshal(data, &pull); err != nil {
+		return PR{}, fmt.Errorf("github pull decode: %w", err)
+	}
+	return pull.toPR(), nil
+}
+
+func (g *GitHubForge) PullsForCommit(ctx context.Context, owner, repo, sha string) ([]PR, error) {
+	path := fmt.Sprintf("/repos/%s/%s/commits/%s/pulls", owner, repo, sha)
+	status, data, _, err := g.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, g.apiErr("GET", path, status, data)
+	}
+	var pulls []ghPull
+	if err := json.Unmarshal(data, &pulls); err != nil {
+		return nil, fmt.Errorf("github associated pulls decode: %w", err)
+	}
+	out := make([]PR, 0, len(pulls))
+	for _, pull := range pulls {
+		out = append(out, pull.toPR())
+	}
+	return out, nil
 }
 
 var linkNextRe = regexp.MustCompile(`<([^>]+)>;\s*rel="next"`)

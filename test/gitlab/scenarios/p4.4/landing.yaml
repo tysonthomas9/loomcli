@@ -1,0 +1,8 @@
+name: Landing requires an owned merged PR and a fetched trunk
+task: P4.4
+git: [min, latest]
+fixture: empty
+when:
+  - go_check: landing_detection
+then:
+  - go_check: no_error
