@@ -132,6 +132,10 @@ func publishStackRecorded(ctx context.Context, store *journal.SQLite, cfg *confi
 	if err != nil {
 		return nil, err
 	}
+	changes, err = orderedStackChanges(ctx, store, area.Path, workspace, lead, changes)
+	if err != nil {
+		return nil, err
+	}
 	_, configured, found := config.WorkspaceByID(cfg, workspace)
 	if !found {
 		return nil, loomgit.NewError(loomgit.WorkspaceUnsupported, "workspace is unavailable", nil)
@@ -160,17 +164,50 @@ func publishStackRecorded(ctx context.Context, store *journal.SQLite, cfg *confi
 		if err != nil {
 			return nil, err
 		}
-		results := make([]Result, 0, len(revisions))
-		for index, revision := range revisions {
-			publication, found, err := store.Publication(ctx, workspace, changes[index])
-			if err != nil || !found {
-				return nil, errors.New("stack publication record unavailable")
-			}
-			results = append(results, Result{Revision: revision, PRURL: publication.PRURL, PRNumber: publication.PRNumber})
-		}
-		return results, nil
+		return stackPublicationResults(ctx, store, workspace, changes, revisions)
 	}
 	return nil, loomgit.NewError(loomgit.RepoSelectionRequired, "stack repo is not in the workspace", nil)
+}
+
+func stackPublicationResults(ctx context.Context, store *journal.SQLite, workspace string, changes []string, revisions []loomgit.Revision) ([]Result, error) {
+	results := make([]Result, 0, len(revisions))
+	for index, revision := range revisions {
+		publication, found, err := store.Publication(ctx, workspace, changes[index])
+		if err != nil || !found {
+			return nil, errors.New("stack publication record unavailable")
+		}
+		results = append(results, Result{Revision: revision, PRURL: publication.PRURL, PRNumber: publication.PRNumber})
+	}
+	return results, nil
+}
+
+func orderedStackChanges(ctx context.Context, store *journal.SQLite, areaPath, workspace, lead string, changes []string) ([]string, error) {
+	areaRunner, err := gitexec.New(areaPath, gitexec.Options{})
+	if err != nil {
+		return nil, err
+	}
+	applied, err := apply.New(store, nil, areaRunner).AppliedLog(ctx, workspace, lead)
+	if err != nil {
+		return nil, err
+	}
+	ordered := make([]string, 0, len(applied))
+	requested := make([]string, 0, len(changes))
+	for _, layer := range applied {
+		ordered = append(ordered, layer.Change)
+		if layer.Revision > 0 && len(layer.Change) >= 4 && layer.Change[:4] == "own-" {
+			continue
+		}
+		requested = append(requested, layer.Change)
+	}
+	if len(requested) != len(changes) {
+		return nil, loomgit.NewError(loomgit.StackNotLinear, "requested tasks differ from working-area layers", nil)
+	}
+	for index, change := range changes {
+		if requested[index] != change {
+			return nil, loomgit.NewError(loomgit.StackNotLinear, "requested tasks differ from working-area layer order", nil)
+		}
+	}
+	return ordered, nil
 }
 
 func repoNameForStack(ctx context.Context, store *journal.SQLite, workspace string, changes []string) (string, error) {

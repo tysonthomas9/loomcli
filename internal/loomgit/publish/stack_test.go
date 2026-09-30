@@ -112,6 +112,41 @@ func TestPublishStackPushesDerivedHeadsBeforeCreatingPRs(t *testing.T) {
 	}
 }
 
+func TestPublishStackUsesEveryWorkingAreaLayerInOrder(t *testing.T) {
+	fixture := newFixture(t)
+	changes := make([]string, 0, 12)
+	parent := fixture.base
+	for index := range 12 {
+		change := "T" + strconv.Itoa(index+1)
+		revision := stackRevision(t, fixture, change, 1, parent)
+		changes = append(changes, change)
+		parent = revision.HeadSHA
+	}
+	request := fixture.request()
+	forge := &fakeForge{}
+	request.forge = forge
+	ctx := context.Background()
+	for _, subset := range [][]string{changes[:11], append([]string{changes[1], changes[0]}, changes[2:]...)} {
+		_, err := publishStack(ctx, fixture.store, StackRequest{Request: request, StackID: "feature", Changes: subset})
+		codeIs(t, err, loomgit.StackNotLinear)
+	}
+	if forge.creates != 0 {
+		t.Fatalf("invalid stack created %d PRs", forge.creates)
+	}
+	got, err := publishStack(ctx, fixture.store, StackRequest{Request: request, StackID: "feature", Changes: changes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 12 || len(forge.prs) != 12 || got[11].HeadSHA != parent {
+		t.Fatalf("published %d revisions and %d PRs", len(got), len(forge.prs))
+	}
+	for index := 1; index < len(forge.prs); index++ {
+		if forge.prs[index].Base != forge.prs[index-1].Head {
+			t.Fatalf("PR %d base = %q, want %q", index+1, forge.prs[index].Base, forge.prs[index-1].Head)
+		}
+	}
+}
+
 func TestPublishStackStaleLeaseChangesNoBranchOrPRBase(t *testing.T) {
 	fixture := newFixture(t)
 	first := stackRevision(t, fixture, "A", 1, fixture.base)

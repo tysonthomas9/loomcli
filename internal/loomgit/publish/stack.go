@@ -51,6 +51,14 @@ func publishStack(ctx context.Context, store Store, request StackRequest) ([]loo
 	if err != nil {
 		return nil, err
 	}
+	if len(applied) != len(request.Changes) {
+		return nil, loomgit.NewError(loomgit.StackNotLinear, "stack must include every working-area layer", nil)
+	}
+	for index, layer := range applied {
+		if layer.Change != request.Changes[index] {
+			return nil, loomgit.NewError(loomgit.StackNotLinear, "stack order differs from working-area layer order", nil)
+		}
+	}
 	layers, forge, err := stackLayers(ctx, store, runner, area, request, applied)
 	if err != nil {
 		return nil, err
