@@ -3,6 +3,7 @@ package apply
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -28,6 +29,7 @@ type Store interface {
 	AdvanceApplied(context.Context, string, string, string) error
 	AppliedLog(context.Context, string, string) ([]loomgit.AppliedLayer, error)
 	WorkingAreas(context.Context, string, string) ([]journal.WorkingArea, error)
+	OpenApplied(context.Context, string, string) ([]loomgit.AppliedLayer, error)
 }
 
 type Request struct {
@@ -43,11 +45,12 @@ type Result struct {
 }
 
 type Service struct {
-	store           Store
-	repo            *pool.LocalRepo
-	runner          *gitexec.Runner
-	beforeIndexLock func()
-	onIndexLocked   func()
+	store            Store
+	repo             *pool.LocalRepo
+	runner           *gitexec.Runner
+	beforeIndexLock  func()
+	onIndexLocked    func()
+	beforeRecoverCAS func()
 }
 
 func New(store Store, repo *pool.LocalRepo, runner *gitexec.Runner) *Service {
@@ -157,20 +160,22 @@ func (s *Service) swap(ctx context.Context, in Request, source loomgit.Revision,
 		return Result{}, err
 	}
 	lockOwned := true
+	keepLock := false
 	defer func() {
 		_ = lock.Close()
-		if lockOwned {
+		if lockOwned && !keepLock {
 			_ = os.Remove(indexPath + ".lock")
 		}
 	}()
 	if s.onIndexLocked != nil {
 		s.onIndexLocked()
 	}
-	return s.swapLocked(ctx, in, source, old, trial, branch, indexPath, &lockOwned)
+	result, swapErr := s.swapLocked(ctx, in, source, old, trial, branch, indexPath, &lockOwned, &keepLock)
+	return result, swapErr
 }
 
 func (s *Service) swapLocked(ctx context.Context, in Request, source loomgit.Revision, old string,
-	trial replay.Result, branch, indexPath string, lockOwned *bool) (Result, error) {
+	trial replay.Result, branch, indexPath string, lockOwned, keepLock *bool) (Result, error) {
 	actual, err := git(ctx, s.runner, "rev-parse", "HEAD")
 	if err != nil || actual != old {
 		return Result{}, errors.Join(errHeadMoved, err)
@@ -196,7 +201,7 @@ func (s *Service) swapLocked(ctx context.Context, in Request, source loomgit.Rev
 	if err := s.recordLayer(ctx, in, source, old, trial, result.Derived); err != nil {
 		return Result{}, err
 	}
-	if err := s.install(ctx, branch, indexPath, old, trial.HeadSHA, in.RequestID, lockOwned); err != nil {
+	if err := s.install(ctx, branch, indexPath, old, trial.HeadSHA, in.RequestID, lockOwned, keepLock); err != nil {
 		return result, err
 	}
 	if result.Derived.Number != 0 && len(trial.DroppedCommits) == 0 {
@@ -288,47 +293,77 @@ func git(ctx context.Context, runner *gitexec.Runner, args ...string) (string, e
 	return strings.TrimSpace(string(out)), err
 }
 
-func (s *Service) install(ctx context.Context, branch, indexPath, old, next, requestID string, lockOwned *bool) error {
+func (s *Service) install(ctx context.Context, branch, indexPath, old, next, requestID string, lockOwned, keepLock *bool) error {
 	if old == next {
 		return s.store.AdvanceApplied(ctx, requestID, "prepared", "done")
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(indexPath), "loom-apply-index-*")
-	if err != nil {
+	tmpPath, ownerPath := recoveryPaths(indexPath, requestID)
+	if err := prepareIndex(indexPath, tmpPath, ownerPath); err != nil {
 		return err
 	}
-	tmpPath := tmp.Name()
-	_ = tmp.Close()
-	defer func() { _ = os.Remove(tmpPath) }()
-	data, err := os.ReadFile(indexPath) //nolint:gosec // Git resolves the active checkout index path.
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	defer func() {
+		if !*keepLock {
+			_ = os.Remove(tmpPath)
+			_ = os.Remove(ownerPath)
+		}
+	}()
+	if err := s.store.AdvanceApplied(ctx, requestID, "prepared", "installing"); err != nil {
 		return err
 	}
-	if err := os.WriteFile(tmpPath, data, 0600); err != nil { //nolint:gosec // The file was created by this operation.
-		return err
-	}
+	*keepLock = true
 	if _, err := s.runner.RunWithEnv(ctx, map[string]string{"GIT_INDEX_FILE": tmpPath}, "read-tree", "-m", "-u", old, next); err != nil {
 		return fmt.Errorf("install working files: %w", err)
 	}
-	if err := s.store.AdvanceApplied(ctx, requestID, "prepared", "files_updated"); err != nil {
+	if err := s.store.AdvanceApplied(ctx, requestID, "installing", "files_updated"); err != nil {
 		return err
 	}
 	if err := s.runner.UpdateRef(ctx, branch, next, old); err != nil {
-		_, undoErr := s.runner.RunWithEnv(ctx, map[string]string{"GIT_INDEX_FILE": tmpPath}, "read-tree", "-m", "-u", next, old)
-		return errors.Join(err, undoErr)
+		return err
 	}
 	if err := s.store.AdvanceApplied(ctx, requestID, "files_updated", "ref_updated"); err != nil {
 		return err
 	}
-	data, err = os.ReadFile(tmpPath) //nolint:gosec // The file was created by this operation.
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(indexPath+".lock", data, 0600); err != nil { //nolint:gosec // We own Git's exclusive index lock.
-		return err
-	}
-	if err := os.Rename(indexPath+".lock", indexPath); err != nil {
+	if err := commitIndex(indexPath+".lock", indexPath, tmpPath); err != nil {
 		return err
 	}
 	*lockOwned = false
-	return s.store.AdvanceApplied(ctx, requestID, "ref_updated", "done")
+	if err := s.store.AdvanceApplied(ctx, requestID, "ref_updated", "done"); err != nil {
+		return err
+	}
+	*keepLock = false
+	return nil
+}
+
+func prepareIndex(indexPath, tmpPath, ownerPath string) error {
+	tmp, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600) //nolint:gosec // Path is derived from Git's index path and the request hash.
+	if err != nil {
+		return err
+	}
+	_ = tmp.Close()
+	prepared := false
+	defer func() {
+		if !prepared {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if err := os.Link(indexPath+".lock", ownerPath); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(indexPath) //nolint:gosec // Git resolves the active checkout index path.
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		_ = os.Remove(ownerPath)
+		return err
+	}
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil { //nolint:gosec // The file was created by this operation.
+		_ = os.Remove(ownerPath)
+		return err
+	}
+	prepared = true
+	return nil
+}
+
+func recoveryPaths(indexPath, requestID string) (string, string) {
+	key := sha256.Sum256([]byte(requestID))
+	base := filepath.Join(filepath.Dir(indexPath), fmt.Sprintf("loom-apply-%x", key[:12]))
+	return base + ".index", base + ".owner"
 }
