@@ -24,22 +24,26 @@ func ReconcileJournal(ctx context.Context, s storepkg.Store) error {
 		Workspace: reconcile.RecoverFunc(func(ctx context.Context) error { return Reconcile(ctx, s) }),
 		Apply:     reconcile.RecoverFunc(func(ctx context.Context) error { return recoverPullThenApply(ctx, applyrecovery.Recover) }),
 		Landing: reconcile.RecoverFunc(func(ctx context.Context) error {
-			return landing.RunOnceWithOptions(ctx, landing.Options{
-				Dependents: func(ctx context.Context, workspace, change string) ([]landing.Dependent, error) {
-					lineages, err := taskcopy.DependentsOf(ctx, workspace, change)
-					if err != nil {
-						return nil, err
-					}
-					dependents := make([]landing.Dependent, 0, len(lineages))
-					for _, lineage := range lineages {
-						dependents = append(dependents, landing.Dependent{Task: lineage.Task, Repo: lineage.Repo})
-					}
-					return dependents, nil
-				},
-				Restack: pull.RestackOffer,
-			})
+			return landing.RunOnceWithOptions(ctx, landingOptions())
 		}),
 	})
+}
+
+func landingOptions() landing.Options {
+	return landing.Options{
+		Dependents: func(ctx context.Context, workspace, change string) ([]landing.Dependent, error) {
+			lineages, err := taskcopy.DependentsOf(ctx, workspace, change)
+			if err != nil {
+				return nil, err
+			}
+			dependents := make([]landing.Dependent, 0, len(lineages))
+			for _, lineage := range lineages {
+				dependents = append(dependents, landing.Dependent{Task: lineage.Task, Repo: lineage.Repo})
+			}
+			return dependents, nil
+		},
+		Restack: pull.RestackOffer,
+	}
 }
 
 // Reconcile adopts every open workspace creation before serve accepts work.

@@ -12,10 +12,26 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/taskcopy"
 	loomworkspace "github.com/tysonthomas9/loomcli/internal/loomgit/workspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
+
+func TestReconcileJournalLandingUsesRecordedDependents(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	ctx := context.Background()
+	if err := taskcopy.RecordLineageBase(ctx, "W", "B", "repo", taskcopy.LineageBase{
+		Change: "X", Revision: 1, SHA: "base-sha", Ref: "refs/loom/source",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	options := landingOptions()
+	dependents, err := options.Dependents(ctx, "W", "X")
+	if err != nil || len(dependents) != 1 || dependents[0].Task != "B" || dependents[0].Repo != "repo" || options.Restack == nil {
+		t.Fatalf("landing adapters = %+v, %v", dependents, err)
+	}
+}
 
 func TestP19CrashAfterWorktreeAddIsAdopted(t *testing.T) {
 	if os.Getenv("LOOM_P19_CHILD") == "1" {
