@@ -356,7 +356,10 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 	if err != nil {
 		return TaskWorktree{}, err
 	}
-	baseBranch := r.baseBranchForTask(ctx, workspaceKey, selected, req)
+	baseBranch, err := r.baseBranchForTask(ctx, workspaceKey, selected, req)
+	if err != nil {
+		return TaskWorktree{}, err
+	}
 	base := ""
 	if req.PreviousAttemptID == "" {
 		base, err = localworkspace.ResolveTaskBase(repoPath, repoRemote(selected), baseBranch)
@@ -559,37 +562,30 @@ func isGitCheckout(path string) bool {
 }
 
 // baseBranchForTask returns the git ref the task's worktree should be cut from.
-// With no lineage lookup wired (or no lineage for the task) it returns the repo
-// default branch — byte-identical to the pre-stacking behavior. With lineage, it
-// returns the predecessor's output branch (or the stack root base). A lookup that
-// cannot resolve a lineage base (e.g. the predecessor has not published its branch
-// yet) falls back to the default branch rather than failing the run; the Stage-2
-// finalize barrier is what guarantees the predecessor branch exists before a
-// dependent dispatches, and the Stage-2 sliding resolver handles empty ancestors.
-func (r LocalTaskWorktreeResolver) baseBranchForTask(ctx context.Context, workspaceKey string, selected *domain.Repo, req TaskExecRequest) string {
+// With no lineage lookup wired or no lineage for the task, use the repo default
+// branch. A failed lookup must stop the run instead of silently changing its base.
+func (r LocalTaskWorktreeResolver) baseBranchForTask(ctx context.Context, workspaceKey string, selected *domain.Repo, req TaskExecRequest) (string, error) {
 	fallback := repoDefaultBranch(selected)
 	if r.Lineage == nil {
-		return fallback
+		return fallback, nil
 	}
 	taskID := strings.TrimSpace(req.TaskID)
 	if taskID == "" {
-		return fallback
+		return fallback, nil
 	}
 	ref, ok, err := r.Lineage.BaseRefForTask(ctx, workspaceKey, selected.Name, taskID)
 	if err != nil {
-		// Lineage resolution is best-effort on the task-dispatch hot path: a
-		// corrupt/unreadable stack store or a corrupt lineage graph must not fail
-		// an otherwise-valid task run (pre-stacking, this path read no store at
-		// all). Log so corruption stays observable, then fall back to the default
-		// branch — byte-identical to pre-stacking behavior.
-		slog.WarnContext(ctx, "lineage base lookup failed; using repo default branch",
-			"task", taskID, "repo", selected.Name, "err", err)
-		return fallback
+		return "", loomgit.NewError(loomgit.LineageUnresolved,
+			fmt.Sprintf("resolve lineage base for task %q in repo %q", taskID, selected.Name), err)
 	}
-	if ok && strings.TrimSpace(ref) != "" {
-		return strings.TrimSpace(ref)
+	if ok {
+		if strings.TrimSpace(ref) == "" {
+			return "", loomgit.NewError(loomgit.LineageUnresolved,
+				fmt.Sprintf("task %q in repo %q has no lineage base", taskID, selected.Name), nil)
+		}
+		return strings.TrimSpace(ref), nil
 	}
-	return fallback
+	return fallback, nil
 }
 
 func repoRemote(repo *domain.Repo) string {

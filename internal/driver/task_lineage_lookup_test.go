@@ -310,19 +310,17 @@ func TestStackLineageLookup_GraphCorruptionSurfaced(t *testing.T) {
 	}
 }
 
-// errLineage is a TaskLineageLookup that always errors, modeling a corrupt/
-// unreadable stack store on the dispatch hot path.
-type errLineage struct{}
-
-func (errLineage) BaseRefForTask(context.Context, string, string, string) (string, bool, error) {
-	return "", false, errors.New("boom: unreadable stack store")
-}
-
-func TestResolveTaskWorktree_LineageErrorFallsBackNotFatal(t *testing.T) {
+func TestResolveTaskWorktree_UnreadableStacksFileStopsBeforeTaskCopy(t *testing.T) {
 	f := setupLineageFixture(t)
-	r := LocalTaskWorktreeResolver{Store: f.resolver.Store, Lineage: errLineage{}}
-	got := resolveHead(t, r, "task-b", "task/run:err")
-	if got != f.mainHead {
-		t.Fatalf("lineage-error worktree HEAD = %s, want default-branch main HEAD %s (must not fail)", got, f.mainHead)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "stacks.json"), []byte("invalid json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := LocalTaskWorktreeResolver{Store: f.resolver.Store, Lineage: StackLineageLookup{Store: stackstore.New(dir)}}
+	_, err := r.ResolveTaskWorktree(context.Background(), TaskExecRequest{
+		WorkspaceKey: "TEST", TaskRunID: "task/run:err", TaskID: "task-b",
+	}, t.TempDir())
+	if !errors.Is(err, loomgit.NewError(loomgit.LineageUnresolved, "", nil)) {
+		t.Fatalf("unreadable stacks file = %v, want lineage_unresolved", err)
 	}
 }
