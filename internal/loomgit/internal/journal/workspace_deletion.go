@@ -7,16 +7,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
 )
 
-// EnsureDeletionSchema keeps deletion's retention record independent of the
-// core journal schema so it can be landed and migrated separately.
-func (s *SQLite) EnsureDeletionSchema(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS workspace_ref_tombstones (
-		workspace TEXT PRIMARY KEY, ref_prefix TEXT NOT NULL,
-		created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-	)`)
-	return err
-}
-
 // FinishWorkspaceDeletion records the ref prefix for retention and removes
 // local creation records in one transaction after every worktree is gone.
 func (s *SQLite) FinishWorkspaceDeletion(ctx context.Context, workspace string) error {
@@ -24,7 +14,10 @@ func (s *SQLite) FinishWorkspaceDeletion(ctx context.Context, workspace string) 
 	if err != nil {
 		return err
 	}
-	if err := s.EnsureDeletionSchema(ctx); err != nil {
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS workspace_ref_tombstones (
+		workspace TEXT PRIMARY KEY, ref_prefix TEXT NOT NULL,
+		created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
 		return err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)

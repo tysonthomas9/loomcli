@@ -33,10 +33,15 @@ func ImportSnapshot(ctx context.Context, journalPath, source, copyPath, workspac
 	if repo.SameStore(copy) {
 		return nil
 	}
-	refs, err := snapshotRefs(workspace, change, revision)
+	base, err := refname.RevisionBase(workspace, change, strconv.Itoa(revision))
 	if err != nil {
 		return err
 	}
+	head, err := refname.RevisionHead(workspace, change, strconv.Itoa(revision))
+	if err != nil {
+		return err
+	}
+	refs := []string{base, head}
 	capture, err := refname.AttemptCapture(workspace, attempt)
 	if err != nil {
 		return err
@@ -71,16 +76,4 @@ func matchingTrees(ctx context.Context, repo, copy *pool.LocalRepo, refs []strin
 		}
 	}
 	return nil
-}
-
-func snapshotRefs(workspace, change string, revision int) ([]string, error) {
-	base, err := refname.RevisionBase(workspace, change, strconv.Itoa(revision))
-	if err != nil {
-		return nil, err
-	}
-	head, err := refname.RevisionHead(workspace, change, strconv.Itoa(revision))
-	if err != nil {
-		return nil, err
-	}
-	return []string{base, head}, nil
 }
