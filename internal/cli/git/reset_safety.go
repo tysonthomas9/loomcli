@@ -53,9 +53,9 @@ func prepareReset(worktreePath, targetBranch string, force bool) (resetPreparati
 	if isProtectedBranch(branch) || branch == targetBranch {
 		return resetPreparation{}, loomgit.NewError(loomgit.Protected, fmt.Sprintf("branch %q is protected", branch), nil)
 	}
-	workspace, lead, err := resetCaptureIdentity(branch)
-	if err != nil {
-		return resetPreparation{}, err
+	workspace, lead, ok := loomgit.InteractiveIdentity(branch)
+	if !ok {
+		return resetPreparation{}, loomgit.NewError(loomgit.WorkspaceUnsupported, "reset requires a v2 working area", nil)
 	}
 	lock, running, err := cli.CheckLock(worktreePath)
 	if err != nil {
@@ -83,13 +83,6 @@ func prepareReset(worktreePath, targetBranch string, force bool) (resetPreparati
 		return resetPreparation{}, loomgit.NewError(loomgit.CaptureIncomplete, strings.Join(missing, ", "), nil)
 	}
 	return resetPreparation{branch: branch, capture: result}, nil
-}
-
-func resetCaptureIdentity(branch string) (workspace, lead string, err error) {
-	if workspace, lead, ok := loomgit.InteractiveIdentity(branch); ok {
-		return workspace, lead, nil
-	}
-	return "", "", loomgit.NewError(loomgit.WorkspaceUnsupported, "reset requires a v2 working area", nil)
 }
 
 func stopResetAgent(path string, pid int) error {
