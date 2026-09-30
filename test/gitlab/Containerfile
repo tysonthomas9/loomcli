@@ -1,4 +1,4 @@
-FROM golang:1.25.6-trixie AS gitbuild
+FROM golang:1.27.1-trixie AS gitbuild
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl gcc make libssl-dev zlib1g-dev libcurl4-openssl-dev \
@@ -15,7 +15,7 @@ RUN set -eu; for spec in "min:$GIT_MIN" "latest:$GIT_LATEST"; do \
       rm -rf /tmp/git-src /tmp/git.tar.xz; \
     done
 
-FROM golang:1.25.6-trixie
+FROM golang:1.27.1-trixie
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates git-lfs gnupg libcurl4 libexpat1 zlib1g && \
     rm -rf /var/lib/apt/lists/* && useradd -m labother
