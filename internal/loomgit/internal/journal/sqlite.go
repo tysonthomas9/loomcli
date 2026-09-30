@@ -91,6 +91,10 @@ func OpenSQLite(path string) (*SQLite, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("open workspace creation journal: %w", err)
 	}
+	if err := createAppliedSchema(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open applied journal: %w", err)
+	}
 	return &SQLite{db: db}, nil
 }
 func (s *SQLite) Close() error { return s.db.Close() }
