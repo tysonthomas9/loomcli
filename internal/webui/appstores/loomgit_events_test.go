@@ -16,6 +16,9 @@ import (
 
 type noopJSONLStore struct{ outbox.Store }
 
+func (noopJSONLStore) PendingJSONLEvents(context.Context) ([]loomgit.OutboxEvent, error) {
+	return nil, nil
+}
 func (noopJSONLStore) MarkJSONLEmitted(context.Context, int64) error { return nil }
 
 func TestLoomGitEventGoesToJSONLAndSSEWithSameID(t *testing.T) {

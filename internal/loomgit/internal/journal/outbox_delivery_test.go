@@ -58,6 +58,9 @@ func TestPendingEventExpiresBeforeLateBroadcast(t *testing.T) {
 	if pending, err := store.PendingEvents(ctx); err != nil || len(pending) != 0 {
 		t.Fatalf("stale event replayed: %+v, %v", pending, err)
 	}
+	if pending, err := store.PendingJSONLEvents(ctx); err != nil || len(pending) != 1 {
+		t.Fatalf("expired event lost before JSONL emission: %+v, %v", pending, err)
+	}
 	var expired int
 	if err := store.db.QueryRowContext(ctx, `SELECT expired FROM event_outbox_delivery`).Scan(&expired); err != nil || expired != 1 {
 		t.Fatalf("event not marked expired: %d, %v", expired, err)

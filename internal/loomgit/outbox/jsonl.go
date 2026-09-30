@@ -10,6 +10,7 @@ import (
 
 type JSONLStore interface {
 	Store
+	PendingJSONLEvents(context.Context) ([]loomgit.OutboxEvent, error)
 	MarkJSONLEmitted(context.Context, int64) error
 }
 
@@ -30,7 +31,7 @@ func EmitJSONL(ctx context.Context, store JSONLStore, bus *events.Bus, event loo
 // EmitPending writes recovery events to JSONL without acknowledging outbox rows.
 // The UI dispatcher still owns SSE delivery and the final acknowledgement.
 func EmitPending(ctx context.Context, store JSONLStore, bus *events.Bus) error {
-	pending, err := store.PendingEvents(ctx)
+	pending, err := store.PendingJSONLEvents(ctx)
 	if err != nil {
 		return err
 	}
