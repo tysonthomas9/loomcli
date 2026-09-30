@@ -14,6 +14,20 @@ import (
 
 // ReleaseClaim tests (LOOM-1).
 
+func TestCurrentIssueLockHolder(t *testing.T) {
+	fb, server := newTestServer(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet || !strings.HasSuffix(request.URL.Path, "/issues/test-1/lock") {
+			t.Fatalf("unexpected lock request: %s %s", request.Method, request.URL.Path)
+		}
+		respondOK(writer, map[string]interface{}{"holder": "task-copy-42", "ttl_ms": 30000})
+	})
+	defer server.Close()
+	holder, err := fb.CurrentIssueLockHolder(context.Background(), "test-1")
+	if err != nil || holder != "task-copy-42" {
+		t.Fatalf("lock holder = %q, %v", holder, err)
+	}
+}
+
 // TestReleaseClaim_InProgressPostsToReleaseEndpoint asserts the wire shape for
 // a planner that exits while the issue is still in_progress: a GET to confirm
 // the supplied actor still owns the issue, followed by POST /issues/<id>/release

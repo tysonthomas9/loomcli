@@ -147,7 +147,11 @@ func AbandonChange(ctx context.Context, workspace, change string) error {
 
 // DependentsOf lists local task copies pinned to a predecessor change.
 func DependentsOf(ctx context.Context, workspace, change string) ([]DependentLineage, error) {
-	st, err := open()
+	return DependentsOfAt(ctx, filepath.Join(config.GetConfigDir(), "loomgit", "store.db"), workspace, change)
+}
+
+func DependentsOfAt(ctx context.Context, journalPath, workspace, change string) ([]DependentLineage, error) {
+	st, err := journal.OpenSQLite(journalPath)
 	if err != nil {
 		return nil, err
 	}

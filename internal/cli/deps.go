@@ -427,6 +427,22 @@ func (b *fleetDBIssueBackend) ReleaseIssueLock(ctx context.Context, id, actor st
 	})
 }
 
+func (b *fleetDBIssueBackend) CurrentIssueLockHolder(ctx context.Context, id string) (string, error) {
+	var holder string
+	err := b.withBackend(ctx, "CurrentIssueLockHolder", func(ib backend.IssueBackend) error {
+		reader, ok := ib.(interface {
+			CurrentIssueLockHolder(context.Context, string) (string, error)
+		})
+		if !ok {
+			return backend.ErrNotImplemented("CurrentIssueLockHolder", "backend does not expose issue locks")
+		}
+		var readErr error
+		holder, readErr = reader.CurrentIssueLockHolder(ctx, id)
+		return readErr
+	})
+	return holder, err
+}
+
 // ReleaseIssueAsActor is the actor-scoped release used by the supervisor to
 // free a lock acquired via ClaimIssueAsActor when the agent process exits.
 // Falls back to ReleaseIssueLock(id, actor) if the underlying backend does

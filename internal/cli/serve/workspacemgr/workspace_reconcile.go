@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/abandon"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/applyrecovery"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/landing"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
@@ -20,13 +22,23 @@ import (
 // ReconcileJournal classifies open journal work before dispatching it to the
 // workspace owner. Apply recovery is wired by its owner separately.
 func ReconcileJournal(ctx context.Context, s storepkg.Store) error {
-	return reconcile.RunOnce(ctx, reconcile.Handlers{
+	if err := reconcile.RunOnce(ctx, reconcile.Handlers{
 		Workspace: reconcile.RecoverFunc(func(ctx context.Context) error { return Reconcile(ctx, s) }),
 		Apply:     reconcile.RecoverFunc(func(ctx context.Context) error { return recoverPullThenApply(ctx, applyrecovery.Recover) }),
 		Landing: reconcile.RecoverFunc(func(ctx context.Context) error {
 			return landing.RunOnceWithOptions(ctx, landingOptions())
 		}),
-	})
+	}); err != nil {
+		return err
+	}
+	abandonment := abandon.New()
+	claims, ok := cli.GetDeps(nil).IssueBackend.(abandon.ClaimReleaser)
+	if !ok {
+		return errors.New("issue backend cannot read current claim holder")
+	}
+	abandonment.Claims = claims
+	abandonment.Sessions = s.AgentSessions()
+	return abandonment.Reconcile(ctx)
 }
 
 func landingOptions() landing.Options {

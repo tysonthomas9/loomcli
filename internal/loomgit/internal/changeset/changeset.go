@@ -99,7 +99,7 @@ func installRevision(ctx context.Context, store loomgit.RevisionStore, runner *g
 // FreezeSource records a task-copy capture as a source revision.
 // The original capture ref remains at the unrewritten capture commit.
 func FreezeSource(ctx context.Context, store loomgit.RevisionStore, runner *gitexec.Runner, in SourceInput) (loomgit.Revision, error) {
-	if !in.Complete && in.Outcome != "cancelled" && in.Outcome != "failed" {
+	if !in.Complete && in.Outcome != "cancelled" && in.Outcome != "failed" && in.Outcome != "abandoned" {
 		return loomgit.Revision{}, loomgit.NewError(loomgit.CaptureIncomplete, "capture is incomplete", nil)
 	}
 	if err := validateNames(in.Workspace, in.Change); err != nil {

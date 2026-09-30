@@ -223,6 +223,16 @@ func (t *tracedIssueBackend) ReleaseIssueLock(ctx context.Context, id, actor str
 	return err
 }
 
+func (t *tracedIssueBackend) CurrentIssueLockHolder(ctx context.Context, id string) (string, error) {
+	reader, ok := t.inner.(interface {
+		CurrentIssueLockHolder(context.Context, string) (string, error)
+	})
+	if !ok {
+		return "", backend.ErrNotImplemented("CurrentIssueLockHolder", "backend does not expose issue locks")
+	}
+	return reader.CurrentIssueLockHolder(ctx, id)
+}
+
 // ReleaseIssueAsActor preserves actor-scoped release through the traced
 // decorator when the underlying backend supports it.
 func (t *tracedIssueBackend) ReleaseIssueAsActor(ctx context.Context, id, actor string) error {
