@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
@@ -17,15 +18,15 @@ import (
 )
 
 type Store interface {
-	review.Store
+	apply.Store
 	RevisionByHead(context.Context, string, string, string) (loomgit.Revision, error)
 }
 
 type Request struct {
-	Workspace, Change string
-	Repo, WorkingArea string
-	BaseSHA           string
-	Branch            string // If supplied, must be the branch owned by this change.
+	Workspace, Lead, Change string
+	Repo, WorkingArea       string
+	BaseSHA                 string
+	Branch                  string // If supplied, must be the branch owned by this change.
 }
 
 // Publish selects the applied layer, checks its verdict, and pushes its immutable head.
@@ -38,8 +39,8 @@ func Publish(ctx context.Context, store Store, req Request) (loomgit.Revision, e
 	if req.Branch != "" && req.Branch != branch {
 		return loomgit.Revision{}, loomgit.NewError(loomgit.Protected, "branch is not owned by this change", nil)
 	}
-	if req.BaseSHA == "" || req.Repo == "" || req.WorkingArea == "" {
-		return loomgit.Revision{}, errors.New("repo, working area and base SHA are required")
+	if req.BaseSHA == "" || req.Repo == "" || req.WorkingArea == "" || req.Lead == "" {
+		return loomgit.Revision{}, errors.New("repo, working area, lead and base SHA are required")
 	}
 	runner, err := gitexec.New(req.Repo, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
 	if err != nil {
@@ -49,7 +50,7 @@ func Publish(ctx context.Context, store Store, req Request) (loomgit.Revision, e
 	if err != nil {
 		return loomgit.Revision{}, err
 	}
-	head, err := layerHead(ctx, area, req.BaseSHA, req.Change)
+	head, err := layerHead(ctx, apply.New(store, nil, nil), area, req.Workspace, req.Lead, req.BaseSHA, req.Change)
 	if err != nil {
 		return loomgit.Revision{}, err
 	}
@@ -77,30 +78,27 @@ func Publish(ctx context.Context, store Store, req Request) (loomgit.Revision, e
 	return revision, nil
 }
 
-func layerHead(ctx context.Context, area *gitexec.Runner, base, change string) (string, error) {
+func layerHead(ctx context.Context, applied *apply.Service, area *gitexec.Runner, workspace, lead, base, change string) (string, error) {
 	if len(base) != 40 && len(base) != 64 {
 		return "", errors.New("base must be a full Git SHA")
 	}
-	out, err := area.Run(ctx, "log", "--first-parent", "-z", "--format=%H%x00%B", base+"..HEAD")
+	layers, err := applied.AppliedLog(ctx, workspace, lead)
 	if err != nil {
 		return "", err
 	}
-	fields := strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")
-	for i := 0; i+1 < len(fields); i += 2 {
-		if hasChangeTrailer(fields[i+1], change) {
-			return fields[i], nil
+	for index := len(layers) - 1; index >= 0; index-- {
+		layer := layers[index]
+		if layer.Change == change {
+			if _, err := area.Run(ctx, "merge-base", "--is-ancestor", base, layer.NewTip); err != nil {
+				return "", loomgit.NewError(loomgit.StaleSubject, "applied layer is outside the requested base", err)
+			}
+			if _, err := area.Run(ctx, "merge-base", "--is-ancestor", layer.NewTip, "HEAD"); err != nil {
+				return "", loomgit.NewError(loomgit.StaleSubject, "applied layer is no longer in the working area", err)
+			}
+			return layer.NewTip, nil
 		}
 	}
 	return "", loomgit.NewError(loomgit.StaleSubject, "change is not a working-area layer", nil)
-}
-
-func hasChangeTrailer(message, change string) bool {
-	for _, line := range strings.Split(message, "\n") {
-		if strings.TrimSpace(line) == "Loom-Change-Id: "+change {
-			return true
-		}
-	}
-	return false
 }
 
 func push(ctx context.Context, runner *gitexec.Runner, pusher mirror.RefPusher, workspace, change, branch, head string) error {

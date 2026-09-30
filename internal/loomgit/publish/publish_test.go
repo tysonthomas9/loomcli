@@ -77,6 +77,12 @@ func (f fixture) revision(t *testing.T, number int, parent, body, kind string) l
 	if err := f.store.FinishRevision(ctx, r); err != nil {
 		t.Fatal(err)
 	}
+	if err := f.store.SaveApplied(ctx, loomgit.AppliedLayer{RequestID: "apply-" + strconv.Itoa(number), Workspace: "W", Lead: "L", Change: "C", Revision: r.Number, OldTip: parent, NewTip: head}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.AdvanceApplied(ctx, "apply-"+strconv.Itoa(number), "prepared", "done"); err != nil {
+		t.Fatal(err)
+	}
 	ref, err := refname.RevisionHead("W", "C", strconv.Itoa(r.Number))
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +100,7 @@ func (f fixture) approve(t *testing.T, r loomgit.Revision) {
 }
 
 func (f fixture) request() Request {
-	return Request{Workspace: "W", Change: "C", Repo: f.repo, WorkingArea: f.repo, BaseSHA: f.base}
+	return Request{Workspace: "W", Lead: "L", Change: "C", Repo: f.repo, WorkingArea: f.repo, BaseSHA: f.base}
 }
 
 func (f fixture) published(t *testing.T) string {
@@ -194,6 +200,21 @@ func TestPublishFindsLayerBelowAnotherChange(t *testing.T) {
 	got, err := Publish(context.Background(), f.store, f.request())
 	if err != nil || got.HeadSHA != r.HeadSHA || f.remoteHead(t) != r.HeadSHA {
 		t.Fatalf("stacked layer: revision=%+v err=%v", got, err)
+	}
+}
+
+func TestPublishSelectsAppliedLogInsteadOfCommitTrailer(t *testing.T) {
+	f := newFixture(t)
+	r := f.revision(t, 1, f.base, "one", "source")
+	f.approve(t, r)
+	if err := os.WriteFile(filepath.Join(f.repo, "other"), []byte("unlogged\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, f.repo, "add", "other")
+	git(t, f.repo, "commit", "-qm", "unlogged\n\nLoom-Change-Id: C")
+	got, err := Publish(context.Background(), f.store, f.request())
+	if err != nil || got.HeadSHA != r.HeadSHA || f.remoteHead(t) != r.HeadSHA {
+		t.Fatalf("selected unlogged trailer: revision=%+v err=%v", got, err)
 	}
 }
 
