@@ -7,6 +7,8 @@ import (
 )
 
 func TestRunWorkspaceSync_MultipleWorkspaces(t *testing.T) {
+	syncYes = true
+	t.Cleanup(func() { syncYes = false })
 	tmpDir := t.TempDir()
 	wsADir := tmpDir + "/ws-a"
 	repoA := wsADir + "/repo-a"
@@ -37,6 +39,8 @@ func TestRunWorkspaceSync_MultipleWorkspaces(t *testing.T) {
 	// FlexibleCommandMock for GetCurrentBranch calls (one per repo during discovery)
 	flexMock := NewFlexibleCommandMock(t)
 	flexMock.AddStub("git", []string{"branch", "--show-current"}, CommandResult{Stdout: "dev-branch\n"}).WithMinCalls(2)
+	flexMock.AddStub("git", []string{"status", "--short", "--untracked-files=all"}, CommandResult{}).WithMinCalls(2)
+	flexMock.AddStub("git", []string{"log", "--oneline", "@{upstream}..HEAD"}, CommandResult{}).WithMinCalls(2)
 	flexMock.Install()
 
 	// OutputCommandMock for pull phase of both workspaces
@@ -161,6 +165,8 @@ func TestRunWorkspaceSync_UnknownWorkspace(t *testing.T) {
 }
 
 func TestRunFullSync_DispatchesToWorkspaceMode(t *testing.T) {
+	syncYes = true
+	t.Cleanup(func() { syncYes = false })
 	tmpDir := t.TempDir()
 	wsDir := tmpDir + "/ws"
 	repo := wsDir + "/api"
@@ -182,6 +188,9 @@ func TestRunFullSync_DispatchesToWorkspaceMode(t *testing.T) {
 
 	// Workspace discovery: GetCurrentBranch for the repo
 	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
+		{Name: "git", Args: []string{"status", "--short", "--untracked-files=all"}},
+		{Name: "git", Args: []string{"log", "--oneline", "@{upstream}..HEAD"}},
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
 	})
 	cmdMock.Install()

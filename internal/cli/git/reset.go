@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -15,6 +14,7 @@ import (
 var (
 	resetAll   bool
 	resetForce bool
+	resetYes   bool
 )
 
 var resetCmd = &cobra.Command{
@@ -42,6 +42,7 @@ Arguments:
 Flags:
   -a, --all      Reset all worktrees
   -f, --force    Stop a running agent after confirmation
+  -y, --yes      Confirm every worktree in non-interactive mode
 
 Safety:
   Protected branches cannot be reset. The remote branch is never updated.
@@ -69,6 +70,7 @@ Examples:
 func init() {
 	resetCmd.Flags().BoolVarP(&resetAll, "all", "a", false, "Reset all worktrees")
 	resetCmd.Flags().BoolVarP(&resetForce, "force", "f", false, "Stop running agent after confirmation")
+	resetCmd.Flags().BoolVarP(&resetYes, "yes", "y", false, "Confirm every worktree without prompting")
 	cli.RegisterCommand(resetCmd)
 }
 
@@ -83,6 +85,7 @@ func runReset(_ *cobra.Command, args []string) {
 			targetBranch = args[0]
 		}
 		if err := resetAllWorktrees(targetBranch, explicitBranch); err != nil {
+			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 	} else {
@@ -105,6 +108,10 @@ type resetTarget struct {
 }
 
 func resetAllWorktrees(targetBranch string, explicitTarget bool) error {
+	return resetAllWorktreesWithConfirmation(targetBranch, explicitTarget, newConfirmationSession(resetYes))
+}
+
+func resetAllWorktreesWithConfirmation(targetBranch string, explicitTarget bool, confirmation *confirmationSession) error {
 	worktrees, err := cli.DiscoverWorktrees()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error discovering worktrees: %v\n", err)
@@ -114,24 +121,22 @@ func resetAllWorktrees(targetBranch string, explicitTarget bool) error {
 		fmt.Println("No worktrees found.")
 		return nil
 	}
+	names := make([]string, 0, len(worktrees))
+	for _, wt := range worktrees {
+		names = append(names, wt.Name)
+	}
+	if err := confirmation.requireInteractive("loom reset --all", names); err != nil {
+		return err
+	}
 
 	targets, perRepoBranches := buildResetTargets(worktrees, targetBranch, explicitTarget)
 	printResetPlan(targets, targetBranch, perRepoBranches)
 
-	for _, target := range targets {
-		fmt.Printf("%s:\n", target.wt.Name)
-		if err := printResetIgnored(target.wt.Path); err != nil {
-			return err
-		}
+	failed, skipped, err := executeResetAll(targets, confirmation)
+	if err != nil {
+		return err
 	}
-	if !ConfirmAction("Are you sure?") {
-		fmt.Println("Aborted.")
-		return nil
-	}
-	fmt.Println("")
-
-	failed := executeResetAll(targets)
-	return printResetSummary(failed, targetBranch, perRepoBranches)
+	return printResetSummary(failed, skipped, targetBranch, perRepoBranches)
 }
 
 // buildResetTargets resolves each worktree's target branch.
@@ -168,23 +173,40 @@ func printResetPlan(targets []resetTarget, targetBranch string, perRepoBranches 
 	fmt.Println("")
 }
 
-func executeResetAll(targets []resetTarget) []string {
+func executeResetAll(targets []resetTarget, confirmation *confirmationSession) ([]string, []string, error) {
 	var failed []string
+	var skipped []string
 	for _, t := range targets {
+		fmt.Printf("Workspace %s -> %s\n", t.wt.Name, t.branch)
+		if err := printUnsavedWork(cli.GetDeps(nil), []cli.WorktreeInfo{t.wt}, t.branch); err != nil {
+			return failed, skipped, err
+		}
+		if err := printResetIgnored(t.wt.Path); err != nil {
+			return failed, skipped, err
+		}
+		if !confirmation.confirm("Reset " + t.wt.Name + " after capture?") {
+			fmt.Printf("Skipped %s.\n\n", t.wt.Name)
+			skipped = append(skipped, t.wt.Name)
+			continue
+		}
 		if !resetWorktree(t.wt.Name, t.branch, false) {
 			failed = append(failed, t.wt.Name)
 		}
 		fmt.Println("")
 	}
-	return failed
+	return failed, skipped, nil
 }
 
-func printResetSummary(failed []string, targetBranch string, perRepoBranches bool) error {
+func printResetSummary(failed, skipped []string, targetBranch string, perRepoBranches bool) error {
 	fmt.Println("=========================================")
 	if len(failed) > 0 {
 		fmt.Fprintf(os.Stderr, "Failed to reset %d worktree(s): %v\n", len(failed), failed)
 		fmt.Println("=========================================")
 		return fmt.Errorf("failed to reset %d worktree(s): %v", len(failed), failed)
+	}
+	if len(skipped) > 0 {
+		fmt.Printf("Skipped %d worktree(s): %v\n", len(skipped), skipped)
+		return nil
 	}
 	if perRepoBranches {
 		fmt.Println("All worktrees reset to their integration branches!")
@@ -262,12 +284,5 @@ func isProtectedBranch(branch string) bool {
 }
 
 func ConfirmAction(prompt string) bool {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Printf("%s (y/N) ", prompt)
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		return false
-	}
-	response = strings.TrimSpace(strings.ToLower(response))
-	return response == "y" || response == "yes"
+	return confirmFrom(bufio.NewReader(os.Stdin), os.Stdout, prompt)
 }

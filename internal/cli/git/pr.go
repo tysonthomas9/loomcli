@@ -12,6 +12,7 @@ import (
 
 var prAll bool
 var prWorkspace string
+var prYes bool
 
 var prCmd = &cobra.Command{
 	Use:               "pr [worktree] [target]",
@@ -30,6 +31,7 @@ Arguments:
 Flags:
   -a, --all          Create PRs for all worktree branches
   -W, --workspace    Workspace to operate on
+  -y, --yes          Confirm every workspace in non-interactive mode
 
 Examples:
   loom pr falcon                        # Create PR from falcon to main
@@ -55,6 +57,7 @@ Examples:
 func init() {
 	prCmd.Flags().BoolVarP(&prAll, "all", "a", false, "Create PRs for all worktree branches")
 	prCmd.Flags().StringVarP(&prWorkspace, "workspace", "W", "", "Workspace to operate on")
+	prCmd.Flags().BoolVarP(&prYes, "yes", "y", false, "Confirm every workspace without prompting")
 	cli.RegisterCommand(prCmd)
 }
 
@@ -63,9 +66,11 @@ func runPR(cmd *cobra.Command, args []string) error {
 	all, _ := cmd.Flags().GetBool("all")
 	ws, _ := cmd.Flags().GetString("workspace")
 
-	if err := checkGhInstalled(deps); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	if !all {
+		if err := checkConfirmedGh(deps); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	}
 
 	return runPRWorkspaceMode(deps, args, all, ws)
@@ -82,8 +87,7 @@ func runPRWorkspaceMode(deps *cli.Deps, args []string, all bool, ws string) erro
 		if len(args) == 1 {
 			targetBranch = args[0]
 		}
-		prAllWorkspaces(deps, targetBranch)
-		return nil
+		return prAllWorkspaces(deps, targetBranch)
 	}
 
 	sourceBranch := args[0]
@@ -110,17 +114,24 @@ func runPRWorkspaceMode(deps *cli.Deps, args []string, all bool, ws string) erro
 	return nil
 }
 
-func prAllWorkspaces(deps *cli.Deps, targetBranch string) {
+func prAllWorkspaces(deps *cli.Deps, targetBranch string) error {
+	return prAllWorkspacesWithConfirmation(deps, targetBranch, newConfirmationSession(prYes))
+}
+
+func prAllWorkspacesWithConfirmation(deps *cli.Deps, targetBranch string, confirmation *confirmationSession) error {
 	resolver, err := cli.NewResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	wsNames := resolver.WorkspaceNames()
 	if len(wsNames) == 0 {
 		fmt.Println("No workspaces found.")
-		return
+		return nil
+	}
+	if err := confirmation.requireInteractive("loom pr --all", wsNames); err != nil {
+		return err
 	}
 
 	fmt.Println("=========================================")
@@ -128,32 +139,63 @@ func prAllWorkspaces(deps *cli.Deps, targetBranch string) {
 	fmt.Println("=========================================")
 	fmt.Println("")
 
+	var skipped []string
+	ghChecked := false
 	for _, wsName := range wsNames {
-		fmt.Printf("--- Workspace: %s ---\n", wsName)
-		if err := resolver.SetWorkspace(wsName); err != nil {
-			fmt.Fprintf(os.Stderr, "Error setting workspace %s: %v\n", wsName, err)
-			continue
-		}
-
-		worktrees, err := resolver.DiscoverWorktrees()
+		declined, err := prConfirmedWorkspace(deps, resolver, wsName, targetBranch, confirmation, &ghChecked)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error discovering repos in workspace %s: %v\n", wsName, err)
-			continue
+			return err
 		}
-
-		if len(worktrees) == 0 {
-			fmt.Printf("No repos found in workspace %s\n", wsName)
-			continue
+		if declined {
+			skipped = append(skipped, wsName)
 		}
-
-		prWorkspaceWorktrees(deps, worktrees, "", targetBranch)
-		fmt.Println("")
 	}
 
 	fmt.Println("=========================================")
-	fmt.Println("All workspace PRs created!")
+	if len(skipped) > 0 {
+		fmt.Printf("Skipped workspaces: %s\n", strings.Join(skipped, ", "))
+	} else {
+		fmt.Println("All workspace PRs created!")
+	}
 	fmt.Println("=========================================")
+	return nil
 }
+
+func prConfirmedWorkspace(deps *cli.Deps, resolver *cli.Resolver, name, targetBranch string, confirmation *confirmationSession, ghChecked *bool) (bool, error) {
+	fmt.Printf("--- Workspace: %s ---\n", name)
+	if err := resolver.SetWorkspace(name); err != nil {
+		fmt.Fprintf(os.Stderr, "Error setting workspace %s: %v\n", name, err)
+		return false, nil
+	}
+	worktrees, err := resolver.DiscoverWorktrees()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error discovering repos in workspace %s: %v\n", name, err)
+		return false, nil
+	}
+	if len(worktrees) == 0 {
+		fmt.Printf("No repos found in workspace %s\n", name)
+		return false, nil
+	}
+	if err := printUnsavedWork(deps, worktrees, ""); err != nil {
+		return false, err
+	}
+	if !confirmation.confirm("Create PRs for workspace " + name + "?") {
+		fmt.Printf("Skipped workspace %s.\n\n", name)
+		return true, nil
+	}
+	if !*ghChecked {
+		if err := checkGhInstalled(deps); err != nil {
+			return false, err
+		}
+		*ghChecked = true
+	}
+	runConfirmedPR(deps, worktrees, "", targetBranch)
+	fmt.Println("")
+	return false, nil
+}
+
+var checkConfirmedGh = checkGhInstalled
+var runConfirmedPR = prWorkspaceWorktrees
 
 func prWorkspaceRepos(deps *cli.Deps, resolver *cli.Resolver, sourceBranch, targetBranch string) {
 	worktrees, err := resolver.DiscoverWorktrees()
