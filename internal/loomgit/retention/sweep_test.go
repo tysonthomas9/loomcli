@@ -5,15 +5,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/pool"
 )
 
 type fakeAbandonment bool
@@ -106,7 +109,7 @@ func TestCloneRefsCapturedRejectsExtraLocalCommit(t *testing.T) {
 	}
 }
 
-func TestSweepKeepsFullyFrozenCloneWithoutCaptureLease(t *testing.T) {
+func TestSweepRemovesFullyFrozenCloneAfterCaptureLease(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	source, copyPath, journalPath := filepath.Join(root, "source"), filepath.Join(root, "A"), filepath.Join(root, "store.db")
@@ -205,22 +208,96 @@ func TestSweepKeepsFullyFrozenCloneWithoutCaptureLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	started := make(chan struct{})
+	release := make(chan struct{})
 	capturedAgain := make(chan error, 1)
 	go func() {
-		close(started)
-		_, captureErr := agentcapture.Capture(ctx, copyPath, "W", "A", "T", "task")
-		capturedAgain <- captureErr
+		capturedAgain <- agentcapture.WithTaskCopyLease(ctx, journalPath, source, copyPath, func(ctx context.Context) error {
+			recaptured, captureErr := agentcapture.Capture(ctx, copyPath, "W", "A", "T", "task")
+			if captureErr == nil && recaptured.SHA != captured.SHA {
+				captureErr = copyRunner.UpdateRef(ctx, captured.Ref, captured.SHA, recaptured.SHA)
+			}
+			close(started)
+			<-release
+			return captureErr
+		})
 	}()
 	<-started
 	results, err = sweep.Run(ctx, true)
+	if err != nil || results[0].Action != "keep" || results[0].Reason != "agent lock held" {
+		t.Fatalf("capture lease did not retain clone: %+v, %v", results, err)
+	}
+	if _, err := os.Stat(copyPath); err != nil {
+		t.Fatalf("clone removed while capture held lease: %v", err)
+	}
+	close(release)
 	if err := <-capturedAgain; err != nil {
 		t.Fatal(err)
 	}
-	if err != nil || len(results) != 1 || results[0].Action != "keep" || results[0].Reason != "eligible; deletion disabled until capture is lease-covered (P4.6b)" {
-		t.Fatalf("unprotected clone deletion: %+v, %v", results, err)
+	sourceRepo, err := pool.New(store).Admit(ctx, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaseStarted := make(chan struct{})
+	releaseSource := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(releaseSource) })
+	sourceDone := make(chan error, 1)
+	go func() {
+		sourceDone <- sourceRepo.WithLock(ctx, func(context.Context) error {
+			close(leaseStarted)
+			<-releaseSource
+			return nil
+		})
+	}()
+	<-leaseStarted
+	type sweepResult struct {
+		results []Result
+		err     error
+	}
+	sweepDone := make(chan sweepResult, 1)
+	go func() {
+		outcomes, sweepErr := sweep.Run(ctx, true)
+		sweepDone <- sweepResult{outcomes, sweepErr}
+	}()
+	deadline := time.After(3 * time.Second)
+	for {
+		lock, lockErr := cli.ReadLockFile(copyPath)
+		if lockErr == nil && lock.Command == "retention" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("sweep did not acquire the agent lock before waiting for the repo lease")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	captureDone := make(chan error, 1)
+	go func() {
+		_, captureErr := agentcapture.CaptureTaskCopy(ctx, source, copyPath, "W", "A", "T", "task")
+		captureDone <- captureErr
+	}()
+	select {
+	case captureErr := <-captureDone:
+		if captureErr == nil {
+			t.Fatal("capture entered the copy while sweep owned the agent lock")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("capture waited behind the sweep's repo lease without owning the agent lock")
 	}
 	if _, err := os.Stat(copyPath); err != nil {
-		t.Fatalf("clone was removed: %v", err)
+		t.Fatalf("sweep removed clone before source lease release: %v", err)
+	}
+	releaseOnce.Do(func() { close(releaseSource) })
+	if err := <-sourceDone; err != nil {
+		t.Fatal(err)
+	}
+	finished := <-sweepDone
+	results, err = finished.results, finished.err
+	if err != nil || len(results) != 1 || results[0].Action != "remove" {
+		t.Fatalf("eligible clone deletion: %+v, %v", results, err)
+	}
+	if _, err := os.Stat(copyPath); !os.IsNotExist(err) {
+		t.Fatalf("clone was retained: %v", err)
 	}
 }
 
@@ -384,7 +461,7 @@ func TestSweepLandedCopyUsesCaptureAndWorkspaceWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	results, err = sweep.Run(ctx, false)
-	if err != nil || results[0].Action != "keep" || results[0].Reason != "eligible; deletion disabled until capture is lease-covered (P4.6b)" {
+	if err != nil || results[0].Action != "remove" || results[0].Reason != "dry run" {
 		t.Fatalf("dry run: %+v, %v", results, err)
 	}
 	if _, err := os.Stat(copyPath); err != nil {
@@ -399,25 +476,21 @@ func TestSweepLandedCopyUsesCaptureAndWorkspaceWindow(t *testing.T) {
 	if err := <-captureDone; err != nil {
 		t.Fatal(err)
 	}
-	if err != nil || results[0].Action != "keep" || results[0].Reason != "eligible; deletion disabled until capture is lease-covered (P4.6b)" {
-		t.Fatalf("unprotected worktree deletion: %+v, %v", results, err)
+	if err != nil || results[0].Action != "remove" {
+		t.Fatalf("eligible worktree deletion: %+v, %v", results, err)
 	}
-	if _, err := os.Stat(copyPath); err != nil {
-		t.Fatalf("worktree removed: %v", err)
-	}
-	if err := store.MarkRetainedCopyRemoved(ctx, journal.RetainedCopy{Workspace: "W", Attempt: "attempt-1"}); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(copyPath); !os.IsNotExist(err) {
+		t.Fatalf("worktree retained: %v", err)
 	}
 	sweep.Now = func() time.Time { return start.Add(90 * 24 * time.Hour) }
 	for _, apply := range []bool{false, true} {
 		results, err = sweep.Run(ctx, apply)
-		if err != nil || len(results) != 2 || results[1].Action != "keep" ||
-			results[1].Reason != "eligible; capture-ref deletion disabled until capture is lease-covered (P4.6b)" {
+		if err != nil || len(results) != 2 || results[1].Action != "delete capture ref" {
 			t.Fatalf("retained capture ref (apply=%t): %+v, %v", apply, results, err)
 		}
 	}
-	if _, err := runner.Run(ctx, "show-ref", "--verify", ref); err != nil {
-		t.Fatalf("capture ref removed before copy: %v", err)
+	if _, err := runner.Run(ctx, "show-ref", "--verify", ref); err == nil {
+		t.Fatal("expired capture ref retained")
 	}
 }
 

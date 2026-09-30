@@ -12,6 +12,12 @@ import (
 
 const revisionColumns = `workspace, change_id, request_id, number, kind, operation, outcome, base_sha, head_sha, tree_hash, source_head_sha, derived_from_change, derived_from_number, ready, incomplete`
 
+func (s *SQLite) RevisionByHead(ctx context.Context, workspace, change, head string) (loomgit.Revision, error) {
+	return scanRevision(s.db.QueryRowContext(ctx, `SELECT `+revisionColumns+` FROM change_revisions
+		WHERE workspace = ? AND change_id = ? AND head_sha = ? AND ready = 1
+		ORDER BY number DESC LIMIT 1`, workspace, change, head))
+}
+
 func scanRevision(row interface{ Scan(...any) error }) (loomgit.Revision, error) {
 	var r loomgit.Revision
 	err := row.Scan(&r.Workspace, &r.Change, &r.RequestID, &r.Number, &r.Kind,

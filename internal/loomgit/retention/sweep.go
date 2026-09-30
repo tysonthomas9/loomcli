@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/pool"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/mirror"
 )
 
@@ -61,7 +63,7 @@ func (s Sweep) Run(ctx context.Context, apply bool) ([]Result, error) {
 			return results, err
 		}
 		if row.Removed && !row.CaptureRefRemoved {
-			captureResult, captureErr := s.captureRef(ctx, row, now().UTC())
+			captureResult, captureErr := s.captureRef(ctx, row, now().UTC(), apply)
 			results = append(results, captureResult)
 			if captureErr != nil {
 				return results, captureErr
@@ -114,7 +116,7 @@ func (s Sweep) tombstones(ctx context.Context, now time.Time, apply bool) ([]Res
 	return results, nil
 }
 
-func (s Sweep) captureRef(ctx context.Context, row journal.RetainedCopy, now time.Time) (Result, error) {
+func (s Sweep) captureRef(ctx context.Context, row journal.RetainedCopy, now time.Time, apply bool) (Result, error) {
 	result := Result{Workspace: row.Workspace, Change: row.Change, Attempt: row.Attempt,
 		Action: "keep", Reason: "capture ref retention window open"}
 	policy, err := s.Store.RetentionPolicy(ctx, row.Workspace)
@@ -138,7 +140,26 @@ func (s Sweep) captureRef(ctx context.Context, row journal.RetainedCopy, now tim
 		return result, nil
 	}
 	result.Path = ref
-	result.Reason = "eligible; capture-ref deletion disabled until capture is lease-covered (P4.6b)"
+	result.Action = "delete capture ref"
+	if !apply {
+		result.Reason = "dry run"
+		return result, nil
+	}
+	poolRepo, err := pool.New(s.Store).Admit(ctx, row.SourceRepo)
+	if err != nil {
+		result.Action, result.Reason = "keep", err.Error()
+		return result, nil
+	}
+	err = poolRepo.WithLock(ctx, func(ctx context.Context) error {
+		return poolRepo.UpdateRef(ctx, ref, strings.Repeat("0", len(expected)), expected)
+	})
+	if err != nil {
+		result.Action, result.Reason = "keep", err.Error()
+		return result, nil
+	}
+	if err := s.Store.MarkCaptureRefRemoved(ctx, row); err != nil {
+		return result, err
+	}
 	return result, nil
 }
 
@@ -175,12 +196,82 @@ func (s Sweep) inspect(ctx context.Context, row journal.RetainedCopy, now time.T
 		result.Reason = "retention window open"
 		return result, nil
 	}
-	if err := safeCopy(ctx, s.Store, row); err != nil {
+	_, running, err := cli.CheckLock(row.Path)
+	if err != nil {
+		return result, err
+	}
+	if running {
+		result.Reason = "agent lock held"
+		return result, nil
+	}
+	if err := safeCopy(ctx, s.Store, row, false); err != nil {
 		result.Reason = err.Error()
 		return result, nil
 	}
-	result.Reason = "eligible; deletion disabled until capture is lease-covered (P4.6b)"
+	return s.removeEligible(ctx, row, apply, result)
+}
+
+func (s Sweep) removeEligible(ctx context.Context, row journal.RetainedCopy, apply bool, result Result) (Result, error) {
+	result.Action = "remove"
+	if !apply {
+		result.Reason = "dry run"
+		return result, nil
+	}
+	if err := cli.AcquireLock(row.Path, "retention", "loom"); err != nil {
+		result.Action, result.Reason = "keep", err.Error()
+		return result, nil
+	}
+	defer func() { _ = cli.ReleaseLock(row.Path) }()
+	lock, err := cli.ReadLockFile(row.Path)
+	if err != nil {
+		return result, err
+	}
+	err = s.removeCopyUnderLeases(ctx, row, lock.RunID)
+	if err != nil {
+		result.Action, result.Reason = "keep", err.Error()
+		return result, nil
+	}
+	if err := s.Store.MarkRetainedCopyRemoved(ctx, row); err != nil {
+		return result, err
+	}
 	return result, nil
+}
+
+func (s Sweep) removeCopyUnderLeases(ctx context.Context, row journal.RetainedCopy, lockID string) error {
+	leasePool := pool.New(s.Store)
+	sourceRepo, err := leasePool.Admit(ctx, row.SourceRepo)
+	if err != nil {
+		return err
+	}
+	copyRepo, err := leasePool.Admit(ctx, row.Path)
+	if err != nil {
+		return err
+	}
+	remove := func(ctx context.Context) error {
+		lock, err := cli.ReadLockFile(row.Path)
+		if err != nil || lock.RunID != lockID || lock.PID != os.Getpid() {
+			return errors.New("retention agent lock changed")
+		}
+		if err := safeCopy(ctx, s.Store, row, true); err != nil {
+			return err
+		}
+		if sourceRepo.SameStore(copyRepo) {
+			options := gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}}
+			runner, err := gitexec.New(row.SourceRepo, options)
+			if err != nil {
+				return err
+			}
+			_, err = runner.Run(ctx, "worktree", "remove", "--force", row.Path)
+			return err
+		}
+		return os.RemoveAll(row.Path)
+	}
+	return sourceRepo.WithLock(ctx, func(ctx context.Context) error {
+		if sourceRepo.SameStore(copyRepo) {
+			return remove(ctx)
+		}
+		return copyRepo.WithLock(ctx, remove)
+	})
 }
 
 func (s Sweep) eligibility(ctx context.Context, row journal.RetainedCopy) (string, string, error) {
@@ -220,7 +311,7 @@ func (s Sweep) eligibility(ctx context.Context, row journal.RetainedCopy) (strin
 	return state, "", nil
 }
 
-func safeCopy(ctx context.Context, store *journal.SQLite, row journal.RetainedCopy) error {
+func safeCopy(ctx context.Context, store *journal.SQLite, row journal.RetainedCopy, ownAgentLock bool) error {
 	if err := recordedAgentCopy(row); err != nil {
 		return err
 	}
@@ -258,7 +349,7 @@ func safeCopy(ctx context.Context, store *journal.SQLite, row journal.RetainedCo
 	if err != nil {
 		return err
 	}
-	if err := checkCopyContent(ctx, copyRunner, expected); err != nil {
+	if err := checkCopyContentWithLock(ctx, copyRunner, expected, ownAgentLock); err != nil {
 		return err
 	}
 	return removeCopy(ctx, row, runner, copyRunner, expected)
@@ -287,6 +378,10 @@ func removeCopy(ctx context.Context, row journal.RetainedCopy,
 }
 
 func checkCopyContent(ctx context.Context, runner *gitexec.Runner, expected string) error {
+	return checkCopyContentWithLock(ctx, runner, expected, false)
+}
+
+func checkCopyContentWithLock(ctx context.Context, runner *gitexec.Runner, expected string, ownAgentLock bool) error {
 	head, err := runner.Run(ctx, "rev-parse", "HEAD")
 	if err != nil {
 		return err
@@ -297,6 +392,9 @@ func checkCopyContent(ctx context.Context, runner *gitexec.Runner, expected stri
 	status, err := runner.Run(ctx, "status", "--porcelain", "--untracked-files=all", "--ignored=matching")
 	if err != nil {
 		return err
+	}
+	if ownAgentLock {
+		status = []byte(strings.ReplaceAll(strings.ReplaceAll(string(status), "?? .agent.lock\n", ""), "!! .agent.lock\n", ""))
 	}
 	if len(status) != 0 {
 		return errors.New("copy contains work outside its complete capture")

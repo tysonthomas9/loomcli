@@ -58,15 +58,9 @@ type Request struct {
 // Publish selects the applied layer, checks its verdict, and pushes its immutable head.
 // Repo is the host's source repository; WorkingArea is the checked-out lead area.
 func Publish(ctx context.Context, store Store, req Request) (loomgit.Revision, error) {
-	branch, err := refname.ChangeBranch(req.Workspace, req.Change)
+	branch, err := publishBranch(req)
 	if err != nil {
 		return loomgit.Revision{}, err
-	}
-	if req.Branch != "" && req.Branch != branch {
-		return loomgit.Revision{}, loomgit.NewError(loomgit.Protected, "branch is not owned by this change", nil)
-	}
-	if req.BaseSHA == "" || req.Repo == "" || req.WorkingArea == "" || req.Lead == "" {
-		return loomgit.Revision{}, errors.New("repo, working area, lead and base SHA are required")
 	}
 	if err := requireNotStacked(ctx, store, req); err != nil {
 		return loomgit.Revision{}, err
@@ -110,6 +104,20 @@ func Publish(ctx context.Context, store Store, req Request) (loomgit.Revision, e
 		return loomgit.Revision{}, err
 	}
 	return revision, nil
+}
+
+func publishBranch(req Request) (string, error) {
+	branch, err := refname.ChangeBranch(req.Workspace, req.Change)
+	if err != nil {
+		return "", err
+	}
+	if req.Branch != "" && req.Branch != branch {
+		return "", loomgit.NewError(loomgit.Protected, "branch is not owned by this change", nil)
+	}
+	if req.BaseSHA == "" || req.Repo == "" || req.WorkingArea == "" || req.Lead == "" {
+		return "", errors.New("repo, working area, lead and base SHA are required")
+	}
+	return branch, nil
 }
 
 func requireNotStacked(ctx context.Context, store Store, req Request) error {

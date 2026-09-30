@@ -19,7 +19,6 @@
 
 export * from "@/api";
 export {
-  applyRevision,
   getTaskRevisions,
   submitRevisionVerdict,
 } from "@/api/git/revisions";

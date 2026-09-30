@@ -23,7 +23,7 @@ func (e HostBridgeTaskExecutor) captureCancelledTask(req TaskExecRequest, copy T
 		RuntimeMetadata: map[string]string{"retained_path": copy.Path, "patch_back_status": "retained"}}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	captured, err := agentcapture.Capture(ctx, copy.Path, req.WorkspaceKey, copy.AttemptID, req.TaskID, req.TaskID)
+	captured, err := agentcapture.CaptureTaskCopy(ctx, copy.SourcePath, copy.Path, req.WorkspaceKey, copy.AttemptID, req.TaskID, req.TaskID)
 	if err == nil {
 		revision, freezeErr := driverfreeze.FreezeCapture(ctx, driverfreeze.CaptureRequest{
 			Workspace: req.WorkspaceKey, Task: req.TaskID, Repo: copy.RepoName, Attempt: copy.AttemptID,

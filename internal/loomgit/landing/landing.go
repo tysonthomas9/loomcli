@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/githubtoken"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/taskcopy"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 )
 
@@ -30,6 +31,18 @@ type Store interface {
 
 type Dependent struct {
 	Task, Repo string
+}
+
+func LocalDependents(ctx context.Context, workspace, change string) ([]Dependent, error) {
+	lineages, err := taskcopy.DependentsOf(ctx, workspace, change)
+	if err != nil {
+		return nil, err
+	}
+	dependents := make([]Dependent, 0, len(lineages))
+	for _, lineage := range lineages {
+		dependents = append(dependents, Dependent{Task: lineage.Task, Repo: lineage.Repo})
+	}
+	return dependents, nil
 }
 
 type Options struct {
