@@ -338,32 +338,6 @@ func workspaceLocalConfig(ctx context.Context, h *bootstrap.StoreHandle, key str
 	return config.WorkspaceConfig{ID: key, Path: local.Path, Repos: repos}, nil
 }
 
-func deleteWorkspaceLocalState(key string) error {
-	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
-		delete(sc.Workspaces, key)
-		if sc.LastWorkspace == key {
-			sc.LastWorkspace = ""
-		}
-		return nil
-	}); err != nil {
-		return fmt.Errorf("update local workspace state: %w", err)
-	}
-	return nil
-}
-
-func checkRunningAgentsOrExit(ws config.WorkspaceConfig) {
-	if wsRemoveForce {
-		return
-	}
-	for _, repo := range ws.Repos {
-		lockPath := filepath.Join(repo.Path, ".agent.lock")
-		if _, err := os.Stat(lockPath); err == nil {
-			fmt.Fprintf(os.Stderr, "Error: repo %q has a running agent (lock file exists). Use --force to override.\n", repo.Name)
-			os.Exit(1)
-		}
-	}
-}
-
 func removeWorktrees(deps *cli.Deps, ws config.WorkspaceConfig) {
 	var errs []string
 	for _, repo := range ws.Repos {
