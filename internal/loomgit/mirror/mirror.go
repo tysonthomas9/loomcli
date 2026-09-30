@@ -31,6 +31,9 @@ type RefPusher interface {
 
 type gitPusher struct{ runner *gitexec.Runner }
 
+// NewPusher uses the host credential resolver for one source repository.
+func NewPusher(runner *gitexec.Runner) RefPusher { return gitPusher{runner} }
+
 func (p gitPusher) run(ctx context.Context, remote string, args ...string) ([]byte, error) {
 	if strings.HasPrefix(remote, "git@") {
 		return p.runner.Run(ctx, args...)

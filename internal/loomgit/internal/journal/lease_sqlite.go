@@ -60,3 +60,16 @@ func (s *SQLite) ReleaseLease(ctx context.Context, prior loomgit.Lease) error {
 	}
 	return nil
 }
+
+// CurrentLease reads a fence without extending or claiming its lease.
+func (s *SQLite) CurrentLease(ctx context.Context, scope string) (loomgit.Lease, error) {
+	var l loomgit.Lease
+	var expires int64
+	err := s.db.QueryRowContext(ctx, `SELECT scope,owner,fence,expires_at FROM journal_leases WHERE scope=?`, scope).
+		Scan(&l.Scope, &l.Owner, &l.Fence, &expires)
+	if err != nil {
+		return l, err
+	}
+	l.ExpiresAt = time.Unix(0, expires).UTC()
+	return l, nil
+}

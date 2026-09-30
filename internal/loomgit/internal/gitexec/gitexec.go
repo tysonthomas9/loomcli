@@ -291,7 +291,7 @@ func builtinVerb(verb string) bool {
 		"range-diff", "read-tree", "rebase", "reflog", "remote", "reset", "restore", "rev-list",
 		"rev-parse", "revert", "rm", "show", "show-ref", "status", "submodule",
 		"symbolic-ref", "tag", "update-index", "update-ref", "verify-commit",
-		"version", "worktree", "write-tree":
+		"version", "worktree", "write-tree", "receive-pack", "index-pack":
 		return true
 	default:
 		return false
@@ -323,6 +323,11 @@ func (w *cappedWriter) Write(p []byte) (int, error) {
 // Run returns stdout. On failure stderr and command arguments are redacted.
 func (r *Runner) Run(ctx context.Context, args ...string) ([]byte, error) {
 	return r.runWithEnv(ctx, nil, nil, args...)
+}
+
+// RunInput feeds a bounded caller-owned stream to an allowlisted Git builtin.
+func (r *Runner) RunInput(ctx context.Context, input io.Reader, args ...string) ([]byte, error) {
+	return r.run(ctx, input, args...)
 }
 
 // RunWithCredential permits one host fetch, push, or remote-ref read against the scoped URL.
