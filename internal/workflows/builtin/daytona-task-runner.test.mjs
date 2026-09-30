@@ -83,15 +83,14 @@ function request(mode) {
   return { task_run_id: "tr-d", task_id: "T-d", runner: "daytona-task-runner", input: { mode } };
 }
 
-describe("daytona-task-runner PR-mode gate", () => {
+describe("daytona-task-runner PR requests", () => {
   for (const flag of ["openPullRequest", "stackedPullRequests"]) {
-    it(`rejects ${flag} before loading credentials`, async () => {
+    it(`continues ${flag} to normal credential preflight`, async () => {
       const payload = request("normal");
       payload.input[flag] = true;
       const out = await mod.run({ payload });
       assert.equal(out.status, "failed");
-      assert.equal(out.errorClass, "host_publish_required");
-      assert.match(out.errorMessage, /host publisher in P3\.3/);
+      assert.equal(out.errorClass, "codex_auth_failed");
     });
   }
 });

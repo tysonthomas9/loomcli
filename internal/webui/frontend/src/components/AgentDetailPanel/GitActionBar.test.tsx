@@ -87,7 +87,7 @@ describe("GitActionBar", () => {
       expect(screen.getByText(/^Push/)).toBeInTheDocument();
       expect(screen.getByText(/^Pull/)).toBeInTheDocument();
       expect(screen.getByText("Sync")).toBeInTheDocument();
-      expect(screen.getByText("Create PR")).toBeInTheDocument();
+      expect(screen.getByText("Publish PR")).toBeInTheDocument();
       expect(screen.getByText("Reset")).toBeInTheDocument();
     });
 
@@ -212,7 +212,7 @@ describe("GitActionBar", () => {
       expect(screen.getByText("Sync")).not.toBeDisabled();
     });
 
-    it("disables Create PR button when ahead = 0", () => {
+    it("allows publishing a recorded change when ahead = 0", () => {
       render(
         <GitActionBar
           agentName="nova"
@@ -222,7 +222,7 @@ describe("GitActionBar", () => {
         />,
       );
 
-      expect(screen.getByText("Create PR")).toBeDisabled();
+      expect(screen.getByText("Publish PR")).toBeEnabled();
     });
 
     it("disables all buttons when agent is working", () => {
@@ -238,7 +238,7 @@ describe("GitActionBar", () => {
       expect(screen.getByText("Push (5)")).toBeDisabled();
       expect(screen.getByText("Pull (3)")).toBeDisabled();
       expect(screen.getByText("Sync")).toBeDisabled();
-      expect(screen.getByText("Create PR")).toBeDisabled();
+      expect(screen.getByText("Publish PR")).toBeDisabled();
       expect(screen.getByText("Reset")).toBeDisabled();
     });
 
@@ -255,7 +255,7 @@ describe("GitActionBar", () => {
       expect(screen.getByText("Push (1)")).toBeDisabled();
       expect(screen.getByText("Pull (1)")).toBeDisabled();
       expect(screen.getByText("Sync")).toBeDisabled();
-      expect(screen.getByText("Create PR")).toBeDisabled();
+      expect(screen.getByText("Publish PR")).toBeDisabled();
       expect(screen.getByText("Reset")).toBeDisabled();
     });
 
@@ -274,7 +274,7 @@ describe("GitActionBar", () => {
       expect(screen.getByText("Push (5)")).toBeDisabled();
       expect(screen.getByText("Pull (3)")).toBeDisabled();
       expect(screen.getByText("Sync")).toBeDisabled();
-      expect(screen.getByText("Create PR")).toBeDisabled();
+      expect(screen.getByText("Publish PR")).toBeDisabled();
       expect(screen.getByText("Reset")).toBeDisabled();
     });
 
@@ -370,7 +370,7 @@ describe("GitActionBar", () => {
       expect(screen.getByText("Push")).toBeDisabled();
       expect(screen.getByText("Pull")).toBeDisabled();
       expect(screen.getByText("Sync")).toBeDisabled();
-      expect(screen.getByText("Create PR")).toBeDisabled();
+      expect(screen.getByText("Publish PR")).toBeEnabled();
     });
   });
 
@@ -519,7 +519,7 @@ describe("GitActionBar", () => {
   });
 
   describe("inline PR form", () => {
-    it("shows PR form when Create PR button is clicked", () => {
+    it("shows PR form when Publish PR button is clicked", () => {
       render(
         <GitActionBar
           agentName="nova"
@@ -529,15 +529,15 @@ describe("GitActionBar", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Create PR"));
+      fireEvent.click(screen.getByText("Publish PR"));
 
-      expect(screen.getByText("Target branch")).toBeInTheDocument();
-      expect(screen.getByDisplayValue("main")).toBeInTheDocument();
-      expect(screen.getByText("Create")).toBeInTheDocument();
+      expect(screen.getByText("Approved change ID")).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("Change ID")).toHaveValue("");
+      expect(screen.getByText("Publish")).toBeInTheDocument();
       expect(screen.getByText("Cancel")).toBeInTheDocument();
     });
 
-    it("pre-fills target branch from gitStatus", () => {
+    it("does not substitute the target branch for a change ID", () => {
       render(
         <GitActionBar
           agentName="nova"
@@ -547,12 +547,12 @@ describe("GitActionBar", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Create PR"));
+      fireEvent.click(screen.getByText("Publish PR"));
 
-      expect(screen.getByDisplayValue("develop")).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("Change ID")).toHaveValue("");
     });
 
-    it("calls createPR with target branch when Create is clicked", async () => {
+    it("calls createPR with an explicit change ID", async () => {
       (actions.createPR as ReturnType<typeof vi.fn>).mockResolvedValue(
         undefined,
       );
@@ -566,13 +566,16 @@ describe("GitActionBar", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Create PR"));
-
-      await act(async () => {
-        fireEvent.click(screen.getByText("Create"));
+      fireEvent.click(screen.getByText("Publish PR"));
+      fireEvent.change(screen.getByPlaceholderText("Change ID"), {
+        target: { value: "C-1" },
       });
 
-      expect(actions.createPR).toHaveBeenCalledWith("main");
+      await act(async () => {
+        fireEvent.click(screen.getByText("Publish"));
+      });
+
+      expect(actions.createPR).toHaveBeenCalledWith("C-1");
     });
 
     it("closes PR form after submission", async () => {
@@ -589,14 +592,17 @@ describe("GitActionBar", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Create PR"));
-      expect(screen.getByText("Target branch")).toBeInTheDocument();
-
-      await act(async () => {
-        fireEvent.click(screen.getByText("Create"));
+      fireEvent.click(screen.getByText("Publish PR"));
+      expect(screen.getByText("Approved change ID")).toBeInTheDocument();
+      fireEvent.change(screen.getByPlaceholderText("Change ID"), {
+        target: { value: "C-1" },
       });
 
-      expect(screen.queryByText("Target branch")).not.toBeInTheDocument();
+      await act(async () => {
+        fireEvent.click(screen.getByText("Publish"));
+      });
+
+      expect(screen.queryByText("Approved change ID")).not.toBeInTheDocument();
     });
 
     it("closes PR form when Cancel is clicked", () => {
@@ -609,15 +615,15 @@ describe("GitActionBar", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Create PR"));
-      expect(screen.getByText("Target branch")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("Publish PR"));
+      expect(screen.getByText("Approved change ID")).toBeInTheDocument();
 
       fireEvent.click(screen.getByText("Cancel"));
 
-      expect(screen.queryByText("Target branch")).not.toBeInTheDocument();
+      expect(screen.queryByText("Approved change ID")).not.toBeInTheDocument();
     });
 
-    it("allows editing the target branch input", () => {
+    it("allows entering a change ID", () => {
       render(
         <GitActionBar
           agentName="nova"
@@ -627,12 +633,12 @@ describe("GitActionBar", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Create PR"));
+      fireEvent.click(screen.getByText("Publish PR"));
 
-      const input = screen.getByDisplayValue("main");
-      fireEvent.change(input, { target: { value: "develop" } });
+      const input = screen.getByPlaceholderText("Change ID");
+      fireEvent.change(input, { target: { value: "C-1" } });
 
-      expect(screen.getByDisplayValue("develop")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("C-1")).toBeInTheDocument();
     });
 
     it("submits PR form on Enter key", async () => {
@@ -649,14 +655,15 @@ describe("GitActionBar", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Create PR"));
-      const input = screen.getByDisplayValue("main");
+      fireEvent.click(screen.getByText("Publish PR"));
+      const input = screen.getByPlaceholderText("Change ID");
+      fireEvent.change(input, { target: { value: "C-1" } });
 
       await act(async () => {
         fireEvent.keyDown(input, { key: "Enter" });
       });
 
-      expect(actions.createPR).toHaveBeenCalledWith("main");
+      expect(actions.createPR).toHaveBeenCalledWith("C-1");
     });
 
     it("closes PR form on Escape key", () => {
@@ -669,16 +676,16 @@ describe("GitActionBar", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Create PR"));
-      expect(screen.getByText("Target branch")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("Publish PR"));
+      expect(screen.getByText("Approved change ID")).toBeInTheDocument();
 
-      const input = screen.getByDisplayValue("main");
+      const input = screen.getByPlaceholderText("Change ID");
       fireEvent.keyDown(input, { key: "Escape" });
 
-      expect(screen.queryByText("Target branch")).not.toBeInTheDocument();
+      expect(screen.queryByText("Approved change ID")).not.toBeInTheDocument();
     });
 
-    it("shows spinner on Create PR button when PR is loading", () => {
+    it("shows spinner on Publish PR button when PR is loading", () => {
       const loadingActions = makeActions({
         prState: { isLoading: true, error: null },
         anyLoading: true,
@@ -693,7 +700,7 @@ describe("GitActionBar", () => {
         />,
       );
 
-      const prButton = screen.getByText("Create PR").closest("button");
+      const prButton = screen.getByText("Publish PR").closest("button");
       const spinner = prButton?.querySelector('[class*="spinner"]');
       expect(spinner).toBeInTheDocument();
     });

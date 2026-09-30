@@ -439,26 +439,26 @@ func TestAgentService_GitSync(t *testing.T) {
 func TestAgentService_CreatePR(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("gh not installed returns ErrUnavailable", func(t *testing.T) {
+	t.Run("publisher error is returned", func(t *testing.T) {
 		gitOps := &mockGitOps{
-			checkGhInstalledFunc: func() error {
-				return errors.New("gh not found")
+			createPRFunc: func(_ context.Context, workspace, lead, change string) (*ops.GitPRResult, error) {
+				return nil, errors.New("review_required")
 			},
 		}
 		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
-		_, err := svc.CreatePR(ctx, "ws", "test-agent", "main")
-		requireServiceError(t, err, service.KindUnavailable)
+		_, err := svc.CreatePR(ctx, "ws", "lead", "C")
+		if err == nil || err.Error() != "review_required" {
+			t.Fatalf("error = %v", err)
+		}
 	})
 
 	t.Run("happy path", func(t *testing.T) {
-		wt := testWorktree()
 		gitOps := &mockGitOps{
-			checkGhInstalledFunc: func() error { return nil },
-			resolveFunc: func(name string) (*ops.AgentWorktree, error) {
-				return wt, nil
-			},
-			createPRFunc: func(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPRResult, error) {
+			createPRFunc: func(_ context.Context, workspace, lead, change string) (*ops.GitPRResult, error) {
+				if workspace != "ws" || lead != "lead" || change != "C" {
+					t.Fatalf("publish arguments = %q %q %q", workspace, lead, change)
+				}
 				return &ops.GitPRResult{
 					URL:     "https://github.com/test/repo/pull/42",
 					Created: true,
@@ -467,7 +467,7 @@ func TestAgentService_CreatePR(t *testing.T) {
 		}
 		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
-		result, err := svc.CreatePR(ctx, "ws", "test-agent", "main")
+		result, err := svc.CreatePR(ctx, "ws", "lead", "C")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

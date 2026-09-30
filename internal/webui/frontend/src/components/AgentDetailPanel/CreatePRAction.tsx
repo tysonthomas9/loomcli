@@ -1,5 +1,5 @@
 /**
- * CreatePRAction - Create PR button and inline target-branch form.
+ * CreatePRAction - Publish an approved change as a PR.
  */
 
 import { useState, useCallback } from "react";
@@ -11,8 +11,6 @@ import actionStyles from "./GitActionBar.module.css";
 import styles from "./CreatePRAction.module.css";
 
 interface CreatePRActionProps {
-  targetBranch: string;
-  ahead: number;
   agentStatus: ParsedLoomStatus;
   actions: UseGitActionsReturn;
 }
@@ -23,13 +21,11 @@ interface CreatePRActionResult {
 }
 
 export function useCreatePRAction({
-  targetBranch,
-  ahead,
   agentStatus,
   actions,
 }: CreatePRActionProps): CreatePRActionResult {
   const [showPRForm, setShowPRForm] = useState(false);
-  const [prTarget, setPrTarget] = useState("");
+  const [changeId, setChangeId] = useState("");
 
   const agentBusy =
     agentStatus.type === "working" || agentStatus.type === "planning";
@@ -41,47 +37,44 @@ export function useCreatePRAction({
       : undefined;
 
   const handlePRFormOpen = useCallback(() => {
-    setPrTarget(targetBranch);
     setShowPRForm(true);
-  }, [targetBranch]);
+  }, []);
 
   const handlePRSubmit = useCallback(async () => {
-    await actions.createPR(prTarget || undefined);
+    if (!changeId.trim()) return;
+    await actions.createPR(changeId.trim());
     setShowPRForm(false);
-    setPrTarget("");
-  }, [actions, prTarget]);
+    setChangeId("");
+  }, [actions, changeId]);
 
   const handlePRCancel = useCallback(() => {
     setShowPRForm(false);
-    setPrTarget("");
+    setChangeId("");
   }, []);
 
   const button = (
     <button
       type="button"
       className={styles.createPrBtn}
-      disabled={disabled || ahead === 0}
-      title={
-        disabledTitle ??
-        (ahead === 0 ? "No commits to create PR for" : undefined)
-      }
+      disabled={disabled}
+      title={disabledTitle}
       onClick={handlePRFormOpen}
     >
       {actions.prState.isLoading && <span className={actionStyles.spinner} />}
-      Create PR
+      Publish PR
     </button>
   );
 
   const form = showPRForm ? (
     <div className={styles.prForm}>
       <label className={actionStyles.inlineLabel}>
-        Target branch
+        Approved change ID
         <input
           type="text"
           className={actionStyles.inlineInput}
-          value={prTarget}
-          onChange={(e) => setPrTarget(e.target.value)}
-          placeholder="main"
+          value={changeId}
+          onChange={(e) => setChangeId(e.target.value)}
+          placeholder="Change ID"
           autoFocus
           onKeyDown={(e) => {
             if (e.key === "Enter") {
@@ -96,13 +89,13 @@ export function useCreatePRAction({
         <button
           type="button"
           className={actionStyles.actionBtn}
-          disabled={actions.prState.isLoading}
+          disabled={actions.prState.isLoading || !changeId.trim()}
           onClick={() => void handlePRSubmit()}
         >
           {actions.prState.isLoading && (
             <span className={actionStyles.spinner} />
           )}
-          Create
+          Publish
         </button>
         <button
           type="button"

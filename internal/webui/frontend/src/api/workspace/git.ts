@@ -144,11 +144,11 @@ export async function gitSync(
 export async function gitCreatePR(
   workspaceId: string,
   agentName: string,
-  target?: string,
+  changeId: string,
 ): Promise<GitPRResult> {
   return post<GitPRResult>(
     agentGitUrl(workspaceId, agentName, "pr"),
-    { target },
+    { change_id: changeId },
     {
       timeout: GIT_ACTION_TIMEOUT,
     },

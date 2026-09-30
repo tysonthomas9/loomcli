@@ -1,6 +1,6 @@
 /**
  * GitActionBar - Action buttons for git operations in the Git tab.
- * Provides Push, Pull, Sync, Create PR, and Reset actions with inline forms.
+ * Provides Push, Pull, Sync, Publish PR, and Reset actions with inline forms.
  */
 
 import { useState, useCallback } from "react";
@@ -24,7 +24,7 @@ export function GitActionBar({
   actions,
 }: GitActionBarProps): JSX.Element {
   const [showPRForm, setShowPRForm] = useState(false);
-  const [prTarget, setPrTarget] = useState("");
+  const [changeId, setChangeId] = useState("");
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   const ahead = gitStatus?.ahead ?? 0;
@@ -41,19 +41,19 @@ export function GitActionBar({
       : undefined;
 
   const handlePRFormOpen = useCallback(() => {
-    setPrTarget(targetBranch);
     setShowPRForm(true);
-  }, [targetBranch]);
+  }, []);
 
   const handlePRSubmit = useCallback(async () => {
-    await actions.createPR(prTarget || undefined);
+    if (!changeId.trim()) return;
+    await actions.createPR(changeId.trim());
     setShowPRForm(false);
-    setPrTarget("");
-  }, [actions, prTarget]);
+    setChangeId("");
+  }, [actions, changeId]);
 
   const handlePRCancel = useCallback(() => {
     setShowPRForm(false);
-    setPrTarget("");
+    setChangeId("");
   }, []);
 
   const handleResetConfirm = useCallback(async () => {
@@ -109,19 +109,16 @@ export function GitActionBar({
           Sync
         </button>
 
-        {/* Create PR */}
+        {/* Publish PR */}
         <button
           type="button"
           className={styles.actionBtn}
-          disabled={disabled || ahead === 0}
-          title={
-            disabledTitle ??
-            (ahead === 0 ? "No commits to create PR for" : undefined)
-          }
+          disabled={disabled}
+          title={disabledTitle}
           onClick={handlePRFormOpen}
         >
           {actions.prState.isLoading && <span className={styles.spinner} />}
-          Create PR
+          Publish PR
         </button>
 
         {/* Reset */}
@@ -142,13 +139,13 @@ export function GitActionBar({
       {showPRForm && (
         <div className={styles.inlineForm}>
           <label className={styles.inlineLabel}>
-            Target branch
+            Approved change ID
             <input
               type="text"
               className={styles.inlineInput}
-              value={prTarget}
-              onChange={(e) => setPrTarget(e.target.value)}
-              placeholder="main"
+              value={changeId}
+              onChange={(e) => setChangeId(e.target.value)}
+              placeholder="Change ID"
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
@@ -163,11 +160,11 @@ export function GitActionBar({
             <button
               type="button"
               className={styles.actionBtn}
-              disabled={actions.prState.isLoading}
+              disabled={actions.prState.isLoading || !changeId.trim()}
               onClick={() => void handlePRSubmit()}
             >
               {actions.prState.isLoading && <span className={styles.spinner} />}
-              Create
+              Publish
             </button>
             <button
               type="button"

@@ -233,7 +233,7 @@ type mockGitOps struct {
 	resolveFunc            func(name string) (*ops.AgentWorktree, error)
 	pushFunc               func(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error)
 	pullFunc               func(worktreePath, currentBranch, sourceBranch, remote string) (*ops.GitPullResult, error)
-	createPRFunc           func(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPRResult, error)
+	createPRFunc           func(context.Context, string, string, string) (*ops.GitPRResult, error)
 	resetFunc              func(worktreePath, worktreeName, targetBranch string, force, push bool) (*ops.GitResetResult, error)
 	statusFunc             func(worktreePath, targetBranch string) (*ops.GitStatusResult, error)
 	getCurrentBranchFunc   func(worktreePath string) (string, error)
@@ -269,9 +269,9 @@ func (m *mockGitOps) Pull(worktreePath, currentBranch, sourceBranch, remote stri
 	}
 	return &ops.GitPullResult{Success: true, Message: "pulled"}, nil
 }
-func (m *mockGitOps) CreatePR(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPRResult, error) {
+func (m *mockGitOps) CreatePR(ctx context.Context, workspace, lead, change string) (*ops.GitPRResult, error) {
 	if m.createPRFunc != nil {
-		return m.createPRFunc(worktreePath, sourceBranch, targetBranch, remote)
+		return m.createPRFunc(ctx, workspace, lead, change)
 	}
 	return &ops.GitPRResult{URL: "https://github.com/test/pr/1", Created: true}, nil
 }

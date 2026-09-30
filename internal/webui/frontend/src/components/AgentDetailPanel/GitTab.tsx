@@ -185,8 +185,6 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
   );
 
   const createPR = useCreatePRAction({
-    targetBranch,
-    ahead,
     agentStatus: parsedStatus,
     actions,
   });

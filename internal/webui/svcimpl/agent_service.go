@@ -237,25 +237,8 @@ func (s *agentServiceImpl) ListPullRequests(_ context.Context, wsID, state strin
 	return s.gitOps.ListWorkspacePullRequests(wsID, state, 500)
 }
 
-func (s *agentServiceImpl) CreatePR(_ context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {
-	if err := s.gitOps.CheckGhInstalled(); err != nil {
-		return nil, service.ErrUnavailable("gh CLI not installed: install from https://cli.github.com/ and run 'gh auth login'")
-	}
-
-	wt, err := s.resolveAgentWorktree(wsID, agentName)
-	if err != nil {
-		return nil, err
-	}
-
-	if target == "" {
-		target = wt.DefaultBranch
-	}
-
-	result, err := s.gitOps.CreatePR(wt.Path, wt.Branch, target, wt.Remote)
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
+func (s *agentServiceImpl) CreatePR(ctx context.Context, wsID, lead, change string) (*ops.GitPRResult, error) {
+	return s.gitOps.CreatePR(ctx, wsID, lead, change)
 }
 
 func (s *agentServiceImpl) GitReset(_ context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error) {

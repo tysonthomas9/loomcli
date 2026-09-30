@@ -24,8 +24,8 @@ type GitOps interface {
 	// Pull merges the source branch into the worktree's current branch.
 	Pull(worktreePath, currentBranch, sourceBranch, remote string) (*GitPullResult, error)
 
-	// CreatePR creates a GitHub PR from the source branch to the target branch.
-	CreatePR(worktreePath, sourceBranch, targetBranch, remote string) (*GitPRResult, error)
+	// CreatePR publishes an approved recorded change from a lead working area.
+	CreatePR(context.Context, string, string, string) (*GitPRResult, error)
 
 	// ListWorkspacePullRequests lists GitHub PRs across all repos in a workspace.
 	// Repos whose listing fails are skipped and reported via Warnings so one
@@ -135,7 +135,7 @@ type GitPullRequestList struct {
 	Warnings     []string         `json:"warnings,omitempty"`
 }
 
-// GitPRResult contains the result of a PR creation.
+// GitPRResult contains the result of publishing an approved change.
 type GitPRResult struct {
 	URL           string `json:"url,omitempty"`
 	Created       bool   `json:"created"`

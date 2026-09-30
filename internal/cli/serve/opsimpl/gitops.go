@@ -468,8 +468,8 @@ func (g *GitOpsImpl) Pull(worktreePath, currentBranch, sourceBranch, remote stri
 	}, nil
 }
 
-func (g *GitOpsImpl) CreatePR(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPRResult, error) {
-	result, err := git.CreatePRResult(worktreePath, sourceBranch, targetBranch, remote)
+func (g *GitOpsImpl) CreatePR(ctx context.Context, workspace, lead, change string) (*ops.GitPRResult, error) {
+	result, err := git.CreatePRResult(ctx, workspace, lead, change)
 	if err != nil {
 		return nil, err
 	}
