@@ -25,7 +25,7 @@ before(async () => {
 
   stub(flue, "index.js", "export const defineAgent = (fn) => ({ __agent: fn });\nexport const defineWorkflow = (def) => def;\n");
   fs.writeFileSync(path.join(flue, "package.json"), JSON.stringify({ name: "@flue/runtime", type: "module", main: "index.js" }));
-  stub(loom, "driver.js", "export const createLoomDriverClient = () => ({});\n");
+  stub(loom, "driver.js", "export const createLoomDriverClient = () => ({ failed: (value) => value });\n");
   fs.writeFileSync(path.join(loom, "package.json"), JSON.stringify({
     name: "@loom/sdk",
     type: "module",
@@ -35,6 +35,16 @@ before(async () => {
   const copy = path.join(stageRoot, "epic-runner.ts");
   fs.copyFileSync(SOURCE, copy);
   mod = await import(pathToFileURL(copy).href);
+});
+
+describe("epic-runner PR-mode gate", () => {
+  for (const flag of ["openPullRequest", "stackedPullRequests"]) {
+    it(`rejects ${flag} before starting the epic`, async () => {
+      const result = await mod.run({ payload: { epicId: "E-1", [flag]: true } });
+      assert.equal(result.errorClass, "host_publish_required");
+      assert.match(result.summary, /host publisher in P3\.3/);
+    });
+  }
 });
 
 after(() => {

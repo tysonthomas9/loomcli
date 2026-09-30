@@ -83,6 +83,19 @@ function request(mode) {
   return { task_run_id: "tr-d", task_id: "T-d", runner: "daytona-task-runner", input: { mode } };
 }
 
+describe("daytona-task-runner PR-mode gate", () => {
+  for (const flag of ["openPullRequest", "stackedPullRequests"]) {
+    it(`rejects ${flag} before loading credentials`, async () => {
+      const payload = request("normal");
+      payload.input[flag] = true;
+      const out = await mod.run({ payload });
+      assert.equal(out.status, "failed");
+      assert.equal(out.errorClass, "host_publish_required");
+      assert.match(out.errorMessage, /host publisher in P3\.3/);
+    });
+  }
+});
+
 describe("daytona-task-runner demo-mode gate (design §4.5)", () => {
   for (const mode of ["e2e-smoke", "slack-pr-chain"]) {
     it(`fails closed for ${mode} when LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES is unset`, async () => {
@@ -217,9 +230,11 @@ describe("daytona-task-runner stack lineage parity (Stage 5)", () => {
   });
 
   it("cloneCommand does a full clone (no --depth 1) so base SHAs are real", () => {
-    const cmd = mod.cloneCommand("https://github.com/o/r.git", "/work/repo", "loom/stack/epic-E/T-A", "");
+    const cmd = mod.cloneCommand("https://github.com/o/r.git", "/work/repo", "loom/stack/epic-E/T-A", "fixture-token");
     assert.ok(!cmd.includes("--depth"), "stacked clone must not be shallow: " + cmd);
     assert.ok(cmd.includes("clone"), "still a clone");
     assert.ok(cmd.includes("--branch"), "clones the predecessor base branch");
+    assert.ok(!cmd.includes("fixture-token") && !cmd.includes("AUTHORIZATION"), "clone command contains no credential");
+    assert.throws(() => mod.cloneCommand("https://user:fixture-token@github.com/o/r.git", "/work/repo", ""), /credentials/);
   });
 });

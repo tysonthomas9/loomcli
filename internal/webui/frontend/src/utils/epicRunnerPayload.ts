@@ -38,6 +38,11 @@ export function epicRunnerRuntimePayload({
   currentRepo: string | null;
 }): EpicRunnerRuntimePayload {
   const repo = runnerRepoUrl(repos, currentRepo);
+  if (repo.repoUrl) {
+    throw new Error(
+      "host_publish_required: Pull requests return with the host publisher in P3.3; PR-mode runs are unavailable until then",
+    );
+  }
   if (localSettings?.agent_runtime.default !== "daytona") {
     // Local ("Locally") runtime: pin the runner explicitly so the request never
     // falls through to an unspecified server-side default. The local task runner

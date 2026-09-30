@@ -75,6 +75,16 @@ export async function run(ctx = {}) {
     );
   }
 
+  // Until P3.3 restores host publishing, reject PR mode before starting a
+  // backend CLI or creating an isolated worktree.
+  const stacked = booleanValue(process.env.LOOM_TASK_RUN_STACKED) || booleanValue(inputValue(request, "stackedPullRequests"));
+  const openPR = booleanValue(inputValue(request, "openPullRequest"));
+  if (stacked || openPR) {
+    return failed("host_publish_required", "Pull requests return with the host publisher in P3.3; PR-mode runs are unavailable until then", {
+      taskRunId, taskId, backend, request, logs,
+    });
+  }
+
   const worktree = stringValue(process.env.LOOM_WORKTREE_PATH);
   if (!worktree || !dirExists(worktree)) {
     return failed(
@@ -109,7 +119,6 @@ export async function run(ctx = {}) {
   // double-wrap), commits there, and pushes the canonical output branch. The
   // post-drain reconcile opens/links the PR with the right base — the runner
   // does not open an independent loom/<taskid> PR.
-  const stacked = booleanValue(process.env.LOOM_TASK_RUN_STACKED);
   const stackBranch = stringValue(process.env.LOOM_TASK_RUN_OUTPUT_BRANCH);
   const stackBaseRef = stringValue(process.env.LOOM_TASK_RUN_BASE_REF);
   const stackId = stringValue(process.env.LOOM_TASK_RUN_STACK_ID);
@@ -133,7 +142,6 @@ export async function run(ctx = {}) {
   const args = backendArgs(backend, execWorktree, prompt);
   const usesStdinPrompt = backendUsesStdinPrompt(backend);
 
-  const openPR = booleanValue(inputValue(request, "openPullRequest"));
   let exitCode;
   let stdout = "";
   let stderr = "";
@@ -148,6 +156,7 @@ export async function run(ctx = {}) {
         cwd: execWorktree,
         input: usesStdinPrompt ? prompt : undefined,
         live: true,
+        env: agentEnv(),
       });
     } catch (error) {
       return failed("local_agent_failed", `failed to spawn ${backend} CLI: ${errorMessage(error)}`, {
@@ -179,23 +188,7 @@ export async function run(ctx = {}) {
       if (patchInfo.filesChanged === 0) {
         logs.push("stacked: the agent produced no changes; no branch pushed (empty unit)");
       } else {
-        const token = await resolveGitHubToken();
-        const slug = token ? await resolveRepoSlug(worktree, request) : null;
-        if (!token) {
-          prFailure = { class: "github_credentials_missing", message: "stackedPullRequests requires a GitHub credential (GITHUB_TOKEN/GH_TOKEN, or a local `gh auth login`)" };
-        } else if (!slug) {
-          prFailure = { class: "github_repo_unresolved", message: "stackedPullRequests requires a GitHub repo (githubRepo/repoUrl input or an origin remote)" };
-        } else if (!stackBranch) {
-          prFailure = { class: "stack_branch_missing", message: "stacked mode requires LOOM_TASK_RUN_OUTPUT_BRANCH (the canonical branch to push)" };
-        } else {
-          const title = stringValue((task && (task.title || task.name)) || ("Loom task " + (taskId || taskRunId)));
-          try {
-            stackInfo = await deliverStackBranch({ worktreePath: execWorktree, token, owner: slug.owner, repo: slug.repo, branch: stackBranch, title });
-            logs.push("pushed stack branch " + stackInfo.branch + " @ " + stackInfo.head.slice(0, 12));
-          } catch (error) {
-            prFailure = { class: "stack_push_failed", message: "failed to push stack branch: " + errorMessage(error) };
-          }
-        }
+        prFailure = { class: "host_publish_required", message: "stackedPullRequests requires host-side publishing" };
       }
     } else if (openPR && exitCode === 0) {
       if (!isolated) {
@@ -203,24 +196,7 @@ export async function run(ctx = {}) {
       } else if (patchInfo.filesChanged === 0) {
         logs.push("openPullRequest: the agent produced no changes; no PR opened");
       } else {
-        const token = await resolveGitHubToken();
-        const slug = token ? await resolveRepoSlug(worktree, request) : null;
-        if (!token) {
-          prFailure = { class: "github_credentials_missing", message: "openPullRequest requires a GitHub credential (GITHUB_TOKEN/GH_TOKEN, or a local `gh auth login`)" };
-        } else if (!slug) {
-          prFailure = { class: "github_repo_unresolved", message: "openPullRequest requires a GitHub repo (githubRepo/repoUrl input or an origin remote)" };
-        } else {
-          const base = stringValue(inputValue(request, "baseBranch")) || "main";
-          const branch = "loom/" + String(taskId || taskRunId).replace(/[^A-Za-z0-9_.-]/g, "-").toLowerCase();
-          const title = stringValue((task && (task.title || task.name)) || ("Loom task " + (taskId || taskRunId)));
-          const prBody = "Automated change by the Loom local-task-runner (" + backend + "). Task " + (taskId || taskRunId) + ".";
-          try {
-            prInfo = await deliverPullRequest({ isolatedPath: isolated.path, token, owner: slug.owner, repo: slug.repo, base, branch, title, body: prBody });
-            logs.push("opened pull request " + prInfo.url);
-          } catch (error) {
-            prFailure = { class: "github_pr_failed", message: "failed to open pull request: " + errorMessage(error) };
-          }
-        }
+        prFailure = { class: "host_publish_required", message: "openPullRequest requires host-side publishing" };
       }
     }
   } finally {
@@ -231,7 +207,13 @@ export async function run(ctx = {}) {
 
   // Fail closed when PR delivery was requested but could not be completed.
   if (prFailure) {
-    return failed(prFailure.class, prFailure.message, { taskRunId, taskId, backend, request, logs, headBefore });
+    const failure = failed(prFailure.class, prFailure.message, { taskRunId, taskId, backend, request, logs, headBefore });
+    if (isolated && patchInfo) {
+      failure.patch = patchInfo.patch;
+      failure.base_ref = baseRef;
+      failure.patch_base_ref = baseRef;
+    }
+    return failure;
   }
 
   let transcriptEntries = STREAM_JSON_BACKENDS.has(backend)
@@ -597,13 +579,8 @@ async function removeIsolatedWorktree(hostWorktree, isolatedPath, logs) {
 // ---------------------------------------------------------------------------
 // Opt-in GitHub pull-request delivery.
 //
-// By default the local task runner returns a patch and the driver host-bridge
-// applies it (patch-back). When the workflow opts in via openPullRequest AND a
-// GitHub credential is available (GITHUB_TOKEN/GH_TOKEN passed through by the
-// host bridge, or a local `gh auth login`), the runner instead commits the
-// isolated worktree's changes to a branch, pushes it, and opens a PR — and
-// returns NO top-level patch so the host-bridge skips patch-back. If PR mode is
-// requested but no credential/repo is resolvable, it fails closed.
+// The runner returns a patch for host-side delivery. Legacy PR flags fail
+// closed until the host publisher handles them.
 // ---------------------------------------------------------------------------
 
 function booleanValue(value) {
@@ -620,25 +597,22 @@ function inputValue(request, key) {
   return undefined;
 }
 
-// resolveGitHubToken prefers the host-bridge-passed env credential, then a
-// local `gh` login. Returns "" when neither is available.
-async function resolveGitHubToken() {
-  const envToken = stringValue(process.env.GITHUB_TOKEN) || stringValue(process.env.GH_TOKEN);
-  if (envToken) {
-    return envToken;
+function agentEnv() {
+  const env = { ...process.env };
+  for (const name of ["GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN_FILE", "LOOM_PR_GIT_PASSWORD"]) {
+    delete env[name];
   }
-  try {
-    const r = await execBackend("gh", ["auth", "token"], { cwd: os.tmpdir() });
-    if (r.code === 0) {
-      const t = stringValue(r.stdout);
-      if (t) {
-        return t;
-      }
-    }
-  } catch {
-    // gh not installed / not logged in — fall through.
-  }
-  return "";
+  // The desktop may pass per-command Git config that installs a credential
+  // helper; it takes precedence over the safe helper reset below.
+  delete env.GIT_CONFIG_PARAMETERS;
+  // Reset inherited credential helpers while retaining the user's Git identity.
+  env.GIT_CONFIG_COUNT = "1";
+  env.GIT_CONFIG_KEY_0 = "credential.helper";
+  env.GIT_CONFIG_VALUE_0 = "";
+  env.GIT_TERMINAL_PROMPT = "0";
+  env.GIT_ASKPASS = os.devNull;
+  env.SSH_ASKPASS = os.devNull;
+  return env;
 }
 
 export function parseRepoSlug(url) {
@@ -651,45 +625,6 @@ export function parseRepoSlug(url) {
     m = text.match(/^([^/\s]+)\/([^/\s]+?)(?:\.git)?$/);
   }
   return m ? { owner: m[1], repo: m[2] } : null;
-}
-
-// resolveRepoSlug resolves owner/repo from the request input, else the host
-// worktree's origin remote.
-async function resolveRepoSlug(worktree, request) {
-  const fromInput = parseRepoSlug(inputValue(request, "githubRepo") || inputValue(request, "repoUrl"));
-  if (fromInput) {
-    return fromInput;
-  }
-  try {
-    const r = await execBackend("git", ["-C", worktree, "remote", "get-url", "origin"], { cwd: worktree });
-    if (r.code === 0) {
-      return parseRepoSlug(r.stdout);
-    }
-  } catch {
-    // no origin remote.
-  }
-  return null;
-}
-
-async function githubFetch(token, method, apiPath, body) {
-  const res = await fetch("https://api.github.com" + apiPath, {
-    method,
-    headers: {
-      authorization: "Bearer " + token,
-      accept: "application/vnd.github+json",
-      "user-agent": "loom-local-task-runner",
-      "x-github-api-version": "2022-11-28",
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.text();
-  let json = null;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    json = null;
-  }
-  return { ok: res.ok, status: res.status, json, text };
 }
 
 // scrubToken removes a credential from text before it is surfaced in an error
@@ -831,98 +766,6 @@ function redactTranscriptSecrets(entries, env = process.env) {
     }
   }
   return entries;
-}
-
-// deliverPullRequest commits the isolated worktree's changes onto a branch,
-// pushes it (token supplied via env-backed credential helper, never in argv),
-// and opens (or finds) a PR. Returns { url, number, branch }.
-async function deliverPullRequest({ isolatedPath, token, owner, repo, base, branch, title, body }) {
-  const git = async (...args) => {
-    const r = await execBackend("git", ["-C", isolatedPath, ...args], { cwd: isolatedPath });
-    if (r.code !== 0) {
-      throw new Error("git " + args[0] + " failed: " + textTail(r.stderr || r.stdout, 400));
-    }
-    return r;
-  };
-  await git("checkout", "-b", branch);
-  await git("add", "-A");
-  await git("-c", "user.email=loom@example.test", "-c", "user.name=Loom", "commit", "-m", title);
-  // Push WITHOUT the token in argv: supply it through a credential helper that
-  // reads it from the subprocess ENV (LOOM_PR_GIT_PASSWORD), with a token-free
-  // remote URL. This keeps the credential out of `ps`/argv and out of git's URL
-  // logging. The empty `credential.helper=` first clears any inherited helper.
-  const pushRes = await execBackend(
-    "git",
-    [
-      "-C", isolatedPath,
-      "-c", "credential.helper=",
-      "-c", 'credential.helper=!f() { echo username=x-access-token; echo "password=$LOOM_PR_GIT_PASSWORD"; }; f',
-      "push", "--force",
-      "https://github.com/" + owner + "/" + repo + ".git",
-      "HEAD:refs/heads/" + branch,
-    ],
-    { cwd: isolatedPath, env: { ...process.env, LOOM_PR_GIT_PASSWORD: token, GIT_TERMINAL_PROMPT: "0" } },
-  );
-  if (pushRes.code !== 0) {
-    throw new Error("git push failed: " + scrubToken(textTail(pushRes.stderr || pushRes.stdout, 400), token));
-  }
-
-  const created = await githubFetch(token, "POST", "/repos/" + owner + "/" + repo + "/pulls", {
-    title,
-    head: branch,
-    base,
-    body,
-    draft: true,
-  });
-  if (created.ok && created.json) {
-    return { url: created.json.html_url, number: created.json.number, branch };
-  }
-  if (created.status === 422) {
-    const q = new URLSearchParams({ state: "open", head: owner + ":" + branch, base });
-    const existing = await githubFetch(token, "GET", "/repos/" + owner + "/" + repo + "/pulls?" + q.toString());
-    if (existing.ok && Array.isArray(existing.json) && existing.json.length > 0) {
-      return { url: existing.json[0].html_url, number: existing.json[0].number, branch };
-    }
-  }
-  throw new Error("PR create failed (" + created.status + "): " + textTail(created.text, 400));
-}
-
-// deliverStackBranch commits the in-place (per-task) worktree's changes and
-// pushes them to the canonical stack branch — WITHOUT opening a PR. The worktree
-// is already a detached checkout on the predecessor's branch (the host resolver
-// cut it there), so the commit lands directly on top of the predecessor and the
-// pushed branch's base == the predecessor branch by construction. The post-drain
-// reconcile opens/links the PR and sets bases. Returns { branch, head }.
-async function deliverStackBranch({ worktreePath, token, owner, repo, branch, title }) {
-  const git = async (...args) => {
-    const r = await execBackend("git", ["-C", worktreePath, ...args], { cwd: worktreePath });
-    if (r.code !== 0) {
-      throw new Error("git " + args[0] + " failed: " + textTail(r.stderr || r.stdout, 400));
-    }
-    return r;
-  };
-  await git("add", "-A");
-  await git("-c", "user.email=loom@example.test", "-c", "user.name=Loom", "commit", "-m", title);
-  const head = stringValue((await git("rev-parse", "HEAD")).stdout).trim();
-  // Push token via an env-backed credential helper (never in argv), token-free
-  // remote URL — same hardening as deliverPullRequest. Each task owns its
-  // canonical branch, so --force is safe (only this task pushes loom/stack/.../<task>).
-  const pushRes = await execBackend(
-    "git",
-    [
-      "-C", worktreePath,
-      "-c", "credential.helper=",
-      "-c", 'credential.helper=!f() { echo username=x-access-token; echo "password=$LOOM_PR_GIT_PASSWORD"; }; f',
-      "push", "--force",
-      "https://github.com/" + owner + "/" + repo + ".git",
-      "HEAD:refs/heads/" + branch,
-    ],
-    { cwd: worktreePath, env: { ...process.env, LOOM_PR_GIT_PASSWORD: token, GIT_TERMINAL_PROMPT: "0" } },
-  );
-  if (pushRes.code !== 0) {
-    throw new Error("git push failed: " + scrubToken(textTail(pushRes.stderr || pushRes.stdout, 400), token));
-  }
-  return { branch, head };
 }
 
 async function gitHead(worktree) {

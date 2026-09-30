@@ -369,7 +369,7 @@ func (e HostBridgeTaskExecutor) runBuiltInFlueWorkflow(ctx context.Context, req 
 	}
 	baseEnv := taskRunnerBaseEnvForRequest(req, os.Environ())
 	env := append([]string{}, baseEnv...)
-	env = append(env, e.taskRunnerEnv(req, string(input), baseEnv)...)
+	env = append(env, e.taskRunnerEnv(req, string(input))...)
 	cmd.Env = env
 	cmd.Stdin = bytes.NewReader(input)
 	var stdout, stderr bytes.Buffer
@@ -429,7 +429,7 @@ func (e HostBridgeTaskExecutor) runCommand(ctx context.Context, req TaskExecRequ
 	}
 	baseEnv := taskRunnerBaseEnvForRequest(req, os.Environ())
 	env := append([]string{}, baseEnv...)
-	env = append(env, e.taskRunnerEnv(req, string(input), baseEnv)...)
+	env = append(env, e.taskRunnerEnv(req, string(input))...)
 	cmd.Env = env
 	cmd.Stdin = bytes.NewReader(input)
 	var stdout, stderr bytes.Buffer
@@ -658,7 +658,7 @@ process.once('SIGTERM', () => {
 });
 `
 
-func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON string, inherited ...[]string) []string {
+func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON string) []string {
 	env := []string{
 		"LOOM_TASK_RUN_REQUEST_JSON=" + requestJSON,
 		"LOOM_WORKTREE_PATH=" + strings.TrimSpace(e.WorktreePath),
@@ -700,16 +700,12 @@ func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON s
 	env = append(env, e.taskRunnerBundleEnv(req)...)
 	if isLocalTaskRunner(req) {
 		env = append(env, TaskRunnerBackendEnv+"="+e.resolveTaskRunnerBackend(req))
-		existing := env
-		if len(inherited) > 0 && len(inherited[0]) > 0 {
-			existing = append(append([]string{}, inherited[0]...), env...)
-		}
-		env = append(env, e.localTaskRunnerSettingsEnv(existing)...)
+		env = append(env, e.localTaskRunnerSettingsEnv()...)
 	}
 	return env
 }
 
-func (e HostBridgeTaskExecutor) localTaskRunnerSettingsEnv(existing []string) []string {
+func (e HostBridgeTaskExecutor) localTaskRunnerSettingsEnv() []string {
 	dir := strings.TrimSpace(e.LocalSettingsDir)
 	if dir == "" {
 		return nil
@@ -718,32 +714,11 @@ func (e HostBridgeTaskExecutor) localTaskRunnerSettingsEnv(existing []string) []
 	if err != nil {
 		return nil
 	}
-	out := make([]string, 0, 2)
+	out := make([]string, 0, 1)
 	if model := strings.TrimSpace(settings.LocalTaskRunner.OpenCodeModel); model != "" {
 		out = append(out, "LOOM_OPENCODE_MODEL="+model)
 	}
-	if !envHasAny(existing, "GITHUB_TOKEN", "GH_TOKEN") {
-		token, err := runtimesettings.UnsealRuntimeCredential(dir, settings, runtimesettings.RuntimeCredentialProviderGitHub)
-		if err == nil && strings.TrimSpace(token) != "" {
-			out = append(out, "GITHUB_TOKEN="+strings.TrimSpace(token))
-		}
-	}
 	return out
-}
-
-func envHasAny(env []string, names ...string) bool {
-	for _, entry := range env {
-		name, value, ok := strings.Cut(entry, "=")
-		if !ok || strings.TrimSpace(value) == "" {
-			continue
-		}
-		for _, want := range names {
-			if name == want {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // resolveTaskRunnerBackend resolves the backend CLI for the local task runner,

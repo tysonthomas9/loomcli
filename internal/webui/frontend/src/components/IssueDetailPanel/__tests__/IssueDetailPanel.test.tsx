@@ -1948,7 +1948,7 @@ describe("IssueDetailPanel", () => {
       );
     });
 
-    it("starts app-triggered epic runs on Daytona when selected in settings", async () => {
+    it("shows the host publisher requirement before starting Daytona PR mode", async () => {
       const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
       const mockCreateWorkspaceAgent = createWorkspaceAgent as ReturnType<
         typeof vi.fn
@@ -2000,28 +2000,15 @@ describe("IssueDetailPanel", () => {
       fireEvent.click(screen.getByTestId("header-run-epic-button"));
 
       await waitFor(() => {
-        expect(mockCreateWorkspaceAgent).toHaveBeenCalledWith("DESKTOP-QA", {
-          name: "lead-desktop-qa-epic",
-          role_name: "lead",
-          auto: false,
-          cross_repo: false,
-          repos: ["slack-clone"],
-        });
-        expect(mockStartWorkflowRun).toHaveBeenCalledWith(
-          "DESKTOP-QA",
-          "epic-runner",
-          {
-            epicId: "DESKTOP-QA-EPIC",
-            leadName: "lead-desktop-qa-epic",
-            requestedBy: "ui",
-            runner: "daytona-task-runner",
-            repoUrl: "https://github.com/tyson/slack-clone-e2e.git",
-            baseBranch: "develop",
-            openPullRequest: true,
-            stackedPullRequests: true,
-          },
+        expect(mockShowToast).toHaveBeenCalledWith(
+          expect.stringMatching(
+            /host_publish_required.*host publisher in P3\.3/,
+          ),
+          { type: "error" },
         );
       });
+      expect(mockCreateWorkspaceAgent).not.toHaveBeenCalled();
+      expect(mockStartWorkflowRun).not.toHaveBeenCalled();
     });
 
     it("creates a fresh lead when the default epic lead name already exists", async () => {

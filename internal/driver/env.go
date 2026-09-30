@@ -73,9 +73,9 @@ var subprocessEnvSensitiveFragments = []string{
 	"API_KEY",
 }
 
-// trustedLocalProviderCredentials are the provider-credential env vars the
-// local task runner is allowed to inherit so the backend CLI authenticates
-// exactly as local tooling does (§4.3). This widening is STRICTLY scoped to the
+// trustedLocalProviderCredentials are the provider-credential names in the
+// shared contract. The local task runner inherits backend credentials only.
+// This widening is STRICTLY scoped to the
 // local-task-runner entrypoint — Daytona/remote runners keep the strict filter
 // in scopedSubprocessBaseEnv (which drops every one of these) so a credential
 // never leaks into a remote sandbox.
@@ -100,10 +100,8 @@ var trustedLocalProviderCredentials = map[string]struct{}{
 	"GOOGLE_API_KEY":                 {},
 	"GOOGLE_APPLICATION_CREDENTIALS": {},
 	"CURSOR_API_KEY":                 {},
-	// GitHub tokens enable the local runner's opt-in pull-request delivery.
-	// They remain in subprocessEnvSensitiveExact so the strict filter still
-	// denies them to Daytona/remote runners; localTaskRunnerBaseEnv adds them
-	// back ONLY for the local-task-runner entrypoint.
+	// Kept in the shared sensitive-name contract for sandbox leak probes.
+	// GitHub credentials are never forwarded to a task runner.
 	"GITHUB_TOKEN": {},
 	"GH_TOKEN":     {},
 }
@@ -124,7 +122,7 @@ func localTaskRunnerBaseEnv(env []string) []string {
 		if !ok {
 			continue
 		}
-		if _, allowed := trustedLocalProviderCredentials[strings.TrimSpace(name)]; allowed {
+		if _, allowed := trustedLocalProviderCredentials[strings.TrimSpace(name)]; allowed && name != "GITHUB_TOKEN" && name != "GH_TOKEN" {
 			out = append(out, entry)
 		}
 	}
