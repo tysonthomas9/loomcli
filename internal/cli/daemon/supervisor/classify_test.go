@@ -4,18 +4,151 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/olesho/harness-wrapper/pkg/discovery"
+
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
+	"github.com/tysonthomas9/loomcli/internal/store"
+	gitweb "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 )
+
+type releaseOrderLeaseStore struct {
+	store.AgentLeaseStore
+	onRelease func()
+}
+
+func (lease *releaseOrderLeaseStore) Release(ctx context.Context, workspace, leaseID, token string) (*domain.AgentLease, error) {
+	lease.onRelease()
+	return nil, nil
+}
+
+type releaseOrderIssueBackend struct {
+	*clitest.MockIssueBackend
+	onRelease func()
+}
+
+func (issue *releaseOrderIssueBackend) ReleaseIssueAsActor(context.Context, string, string) error {
+	issue.onRelease()
+	return nil
+}
+
+type apiTaskRevision struct {
+	Number  int    `json:"number"`
+	HeadSHA string `json:"head_sha"`
+	Verdict string `json:"verdict"`
+}
+
+func taskRevisionResponse(t *testing.T) []apiTaskRevision {
+	t.Helper()
+	mux := http.NewServeMux()
+	gitweb.NewModule(nil, nil).Register(mux)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest("GET", "/api/workspaces/WS/issues/task-1/revisions", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("revisions API: %d %s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Data []apiTaskRevision `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	return body.Data
+}
+
+func TestSpawnAndWaitFreezesCompletedRevision(t *testing.T) {
+	dir := captureRepo(t)
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	base := gitForCaptureTest(t, dir, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(dir, "main.txt"), []byte("completed work\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	writeLockFile(t, dir, &cli.LockInfo{PID: os.Getpid(), AgentName: "agent", TaskID: "task-1"})
+	previous := loomExecutablePath
+	loomExecutablePath = func() (string, error) { return exec.LookPath("true") }
+	t.Cleanup(func() { loomExecutablePath = previous })
+	s := newTestSupervisor()
+	s.WorkspaceID = "WS"
+	s.Shutdown = make(chan struct{})
+	s.Concurrency = NewConcurrencyTracker(nil)
+	s.Concurrency.Acquire("task")
+	s.EmitEvent = func(events.Event) {}
+	baseStore := memstore.New()
+	leaseReleases, claimReleases := 0, 0
+	assertRevision := func() {
+		revisions := taskRevisionResponse(t)
+		if len(revisions) != 1 || revisions[0].Number != 1 || revisions[0].HeadSHA == "" || revisions[0].Verdict != "" {
+			t.Fatalf("revision before release = %+v, want one unapproved revision", revisions)
+		}
+	}
+	s.ControlStore = &controlPlaneStoreOverrides{Store: baseStore, leases: &releaseOrderLeaseStore{
+		AgentLeaseStore: baseStore.AgentLeases(), onRelease: func() { leaseReleases++; assertRevision() },
+	}}
+	s.IssueBackend = &releaseOrderIssueBackend{MockIssueBackend: clitest.NewMockIssueBackend(), onRelease: func() { claimReleases++; assertRevision() }}
+	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "agent", Role: "task", Backend: "codex"},
+		WorktreePath: dir, BeforeRef: base, AgentSessionID: "session-1", AssignedTaskID: "task-1",
+		AgentLeaseID: "lease-1", AgentLeaseToken: "token-1"}
+	s.spawnAndWait(ap)
+	assertRevision()
+	if leaseReleases != 1 || claimReleases != 1 {
+		t.Fatalf("release calls = lease %d, claim %d; want one each", leaseReleases, claimReleases)
+	}
+	ap.BeforeRef = base
+	ap.AgentSessionID = "session-1"
+	ap.AssignedTaskID = "task-1"
+	writeLockFile(t, dir, &cli.LockInfo{PID: os.Getpid(), AgentName: "agent", TaskID: "task-1"})
+	s.Concurrency.Acquire("task")
+	s.spawnAndWait(ap)
+	assertRevision()
+	if ap.CaptureRetained {
+		t.Fatal("repeated exit unexpectedly retained the worktree")
+	}
+}
+
+func TestReconcilePendingAgentFreeze(t *testing.T) {
+	dir := captureRepo(t)
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	base := gitForCaptureTest(t, dir, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(dir, "main.txt"), []byte("recovered work\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	lockDir := cli.ResolveLockDir(dir)
+	cp := &config.Checkpoint{AgentName: "agent", TaskID: "task-1", FreezeBase: base,
+		FreezeID: "session-1", FreezeRepo: "repo", FreezeState: "completed"}
+	if err := config.SaveCheckpoint(lockDir, cp); err != nil {
+		t.Fatal(err)
+	}
+	stubCheckBackend(t, func(name string) (discovery.Info, error) {
+		return discovery.Info{Name: name, Installed: false}, nil
+	})
+	s := newBackendUnavailableSupervisor()
+	s.WorkspaceID = "WS"
+	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "agent", Backend: "codex"}, WorktreePath: dir}
+	if s.preFlightSetup(ap) {
+		t.Fatal("backend gate unexpectedly allowed a new run")
+	}
+	if s.preFlightSetup(ap) {
+		t.Fatal("backend gate unexpectedly allowed a second run")
+	}
+	revisions := taskRevisionResponse(t)
+	if len(revisions) != 1 || revisions[0].Number != 1 || revisions[0].HeadSHA == "" || revisions[0].Verdict != "" {
+		t.Fatalf("recovered revisions API = %+v, want one unapproved revision", revisions)
+	}
+}
 
 func writeLockFile(t *testing.T, dir string, info *cli.LockInfo) {
 	t.Helper()

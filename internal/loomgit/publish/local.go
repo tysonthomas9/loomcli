@@ -126,12 +126,8 @@ func openLocalStore() (*journal.SQLite, error) {
 }
 
 func publishStackRecorded(ctx context.Context, store *journal.SQLite, cfg *config.LoomConfig, workspace, stackID, lead string, changes []string, forge Forge, token, slug string) ([]Result, error) {
-	mode, err := store.DeliveryMode(ctx, workspace)
-	if err != nil {
+	if err := requireStackMode(ctx, store, workspace); err != nil {
 		return nil, err
-	}
-	if mode != "stack" {
-		return nil, loomgit.NewError(loomgit.ModeMismatch, "stack publication requires stack delivery mode", nil)
 	}
 	repoName, err := repoNameForStack(ctx, store, workspace, lead, changes)
 	if err != nil {
@@ -154,13 +150,10 @@ func publishStackRecorded(ctx context.Context, store *journal.SQLite, cfg *confi
 			continue
 		}
 		if forge == nil {
-			if token == "" {
-				token = githubtoken.GitHub(ctx)
+			forge, token, err = configuredStackForge(ctx, token)
+			if err != nil {
+				return nil, err
 			}
-			if token == "" {
-				return nil, errors.New("GitHub host credential unavailable")
-			}
-			forge = stackpublish.NewConfiguredGitHubForge(token)
 		}
 		if slug == "" {
 			slug, err = stackSlug(ctx, repo.ResolveAbsPath(configured.Path))
@@ -182,6 +175,16 @@ func publishStackRecorded(ctx context.Context, store *journal.SQLite, cfg *confi
 		return stackResults(ctx, store, workspace, changes, revisions, backend.Capabilities())
 	}
 	return nil, loomgit.NewError(loomgit.RepoSelectionRequired, "stack repo is not in the workspace", nil)
+}
+
+func configuredStackForge(ctx context.Context, token string) (Forge, string, error) {
+	if token == "" {
+		token = githubtoken.GitHub(ctx)
+	}
+	if token == "" {
+		return nil, "", errors.New("GitHub host credential unavailable")
+	}
+	return stackpublish.NewConfiguredGitHubForge(token), token, nil
 }
 
 func stackResults(ctx context.Context, store *journal.SQLite, workspace string, changes []string, revisions []loomgit.Revision, capabilities StackCapabilities) ([]Result, error) {

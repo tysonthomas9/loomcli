@@ -119,16 +119,25 @@ type backendRecorder interface {
 	DeliveryMode(context.Context, string) (string, error)
 }
 
+func requireStackMode(ctx context.Context, store interface {
+	DeliveryMode(context.Context, string) (string, error)
+}, workspace string) error {
+	mode, err := store.DeliveryMode(ctx, workspace)
+	if err != nil {
+		return err
+	}
+	if mode != "stack" {
+		return loomgit.NewError(loomgit.ModeMismatch, "stack publication requires stack delivery mode", nil)
+	}
+	return nil
+}
+
 func chooseStackBackend(ctx context.Context, recorder backendRecorder, workspace, stackID, slug string, forge Forge, loom, native StackBackend) (StackBackend, error) {
 	if recorder == nil || workspace == "" || stackID == "" || loom == nil {
 		return nil, errors.New("stack backend selection requires a recorder, workspace, stack and Loom backend")
 	}
-	mode, err := recorder.DeliveryMode(ctx, workspace)
-	if err != nil {
+	if err := requireStackMode(ctx, recorder, workspace); err != nil {
 		return nil, err
-	}
-	if mode != "stack" {
-		return nil, loomgit.NewError(loomgit.ModeMismatch, "stack backend selection requires stack delivery mode", nil)
 	}
 	if _, err := refname.ChangeBranch(workspace, stackID); err != nil {
 		return nil, err

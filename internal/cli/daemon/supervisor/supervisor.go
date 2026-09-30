@@ -401,6 +401,10 @@ func (s *Supervisor) checkAgentStopSignals(ap *AgentProcess) bool {
 // finally cold-starting a fresh task. See
 // detectRecovery.
 func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
+	if err := s.reconcilePendingFreeze(ap); err != nil {
+		slog.Error("pending agent revision needs attention", "worktree", ap.Entry.Worktree, "err", err)
+		return false
+	}
 	// FIRST gate: a held workspace issues no Ready query, no ClaimIssue, runs
 	// no recovery and creates no session.
 	if !s.gateClaimsHeld(ap) {

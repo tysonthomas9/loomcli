@@ -5,12 +5,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RevisionsSection } from "../RevisionsSection";
 
-const { getTaskRevisions, submitRevisionVerdict } = vi.hoisted(
-  () => ({
-    getTaskRevisions: vi.fn(),
-    submitRevisionVerdict: vi.fn(),
-  }),
-);
+const { getTaskRevisions, submitRevisionVerdict } = vi.hoisted(() => ({
+  getTaskRevisions: vi.fn(),
+  submitRevisionVerdict: vi.fn(),
+}));
 vi.mock("@/api/git/revisions", () => ({
   getTaskRevisions,
   submitRevisionVerdict,

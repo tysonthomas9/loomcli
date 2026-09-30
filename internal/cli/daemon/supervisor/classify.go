@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,8 +16,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
+	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
 )
 
 // classifyAgentExit reads the lock file (before recovery clears it) and classifies
@@ -248,8 +252,12 @@ func (s *Supervisor) handleAgentCheckpoint(ap *AgentProcess, exitCode int) {
 	if lockInfo != nil && lockInfo.AgentName != "" {
 		agentName = lockInfo.AgentName
 	}
-	result, retained := s.captureExitWorktree(ap, agentName, taskID, taskTitle)
 	lockDir := cli.ResolveLockDir(ap.WorktreePath)
+	result, retained, pendingFreeze := s.captureAndFreezeExit(ap, agentName, taskID, taskTitle, epicID, yieldReason, exitCode, lockDir)
+	s.finishAgentCheckpoint(ap, result, pendingFreeze, retained, agentName, taskID, epicID, errClass, yieldReason, exitCode, lockDir)
+}
+
+func (s *Supervisor) finishAgentCheckpoint(ap *AgentProcess, result agentcapture.Result, pendingFreeze *config.Checkpoint, retained bool, agentName, taskID, epicID, errClass, yieldReason string, exitCode int, lockDir string) {
 	if exitCode == 0 && yieldReason == "" && !isIncompleteRun(ap) && !retained {
 		if err := config.ClearCheckpoint(lockDir); err != nil {
 			log.Printf("[daemon] Agent %s: failed to clear checkpoint: %v", ap.Entry.Worktree, err)
@@ -262,12 +270,132 @@ func (s *Supervisor) handleAgentCheckpoint(ap *AgentProcess, exitCode int) {
 	if yieldReason != "" {
 		errClass = "Yielded"
 	}
-	s.saveCaptureCheckpoint(ap, lockDir, &config.Checkpoint{
-		AgentName: agentName, TaskID: taskID, EpicID: epicID,
-		CaptureRef: result.Ref, Retained: retained,
-		ExitCode: exitCode, ErrorClass: errClass, YieldReason: yieldReason,
-		Timestamp: time.Now(),
+	if pendingFreeze == nil {
+		pendingFreeze = &config.Checkpoint{AgentName: agentName, TaskID: taskID, EpicID: epicID, CaptureRef: result.Ref}
+	}
+	pendingFreeze.Retained = retained
+	pendingFreeze.ExitCode = exitCode
+	pendingFreeze.ErrorClass = errClass
+	pendingFreeze.YieldReason = yieldReason
+	pendingFreeze.Timestamp = time.Now()
+	s.saveCaptureCheckpoint(ap, lockDir, pendingFreeze)
+}
+
+func (s *Supervisor) captureAndFreezeExit(ap *AgentProcess, agentName, taskID, taskTitle, epicID, yieldReason string, exitCode int, lockDir string) (agentcapture.Result, bool, *config.Checkpoint) {
+	pendingFreeze, attempt := s.pendingExitFreeze(ap, agentName, taskID, epicID, yieldReason, exitCode, lockDir)
+	if pendingFreeze != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+		ready, err := driverfreeze.CaptureAlreadyFrozen(ctx, s.WorkspaceID, taskID, pendingFreeze.FreezeRepo, attempt)
+		cancel()
+		if err != nil {
+			slog.Error("agent revision lookup needs attention", "task_id", taskID, "err", err)
+			return agentcapture.Result{}, true, pendingFreeze
+		}
+		if ready {
+			return agentcapture.Result{}, false, nil
+		}
+	}
+	result, retained := s.captureExitWorktree(ap, agentName, taskID, taskTitle, attempt)
+	if pendingFreeze == nil || retained {
+		return result, retained, pendingFreeze
+	}
+	captureSHA := result.SHA
+	pendingFreeze.CaptureRef = result.Ref
+	if captureSHA == "" {
+		captureSHA = automode.CaptureHEADRef(ap.WorktreePath)
+		pendingFreeze.CaptureRef = captureSHA
+	}
+	s.saveCaptureCheckpoint(ap, lockDir, pendingFreeze)
+	if ap.CaptureRetained {
+		return result, true, pendingFreeze
+	}
+	if err := s.freezeCheckpoint(ap, pendingFreeze, captureSHA, result.Complete); err != nil {
+		ap.Mu.Lock()
+		ap.CaptureRetained = true
+		ap.Mu.Unlock()
+		slog.Error("agent revision freeze needs attention; worktree retained", "task_id", taskID, "err", err)
+		return result, true, pendingFreeze
+	}
+	return result, false, nil
+}
+
+func (s *Supervisor) pendingExitFreeze(ap *AgentProcess, agentName, taskID, epicID, yieldReason string, exitCode int, lockDir string) (*config.Checkpoint, string) {
+	ap.Mu.Lock()
+	base, attempt := ap.BeforeRef, ap.AgentSessionID
+	ap.Mu.Unlock()
+	if s.WorkspaceID == "" || taskID == "" || base == "" || attempt == "" {
+		return nil, attempt
+	}
+	state := "completed"
+	if exitCode != 0 || isIncompleteRun(ap) {
+		state = "failed"
+	} else if yieldReason != "" {
+		state = "cancelled"
+	}
+	cp := &config.Checkpoint{AgentName: agentName, TaskID: taskID, EpicID: epicID,
+		FreezeBase: base, FreezeID: attempt, FreezeRepo: s.freezeRepoName(ap),
+		FreezeState: state, Timestamp: time.Now()}
+	s.saveCaptureCheckpoint(ap, lockDir, cp)
+	return cp, attempt
+}
+
+func (s *Supervisor) freezeRepoName(ap *AgentProcess) string {
+	if ap.WorktreeRepo != "" {
+		return ap.WorktreeRepo
+	}
+	return filepath.Base(ap.WorktreePath)
+}
+
+func (s *Supervisor) freezeSourcePath(ap *AgentProcess) string {
+	if ap.RepoConfig != nil {
+		return ap.RepoConfig.ResolveAbsPath(s.ProjectDir)
+	}
+	return ap.WorktreePath
+}
+
+func (s *Supervisor) freezeCheckpoint(ap *AgentProcess, cp *config.Checkpoint, captureSHA string, complete bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	source := ""
+	if ap.RepoConfig != nil {
+		source = s.freezeSourcePath(ap)
+	}
+	_, err := driverfreeze.FreezeCapture(ctx, driverfreeze.CaptureRequest{
+		Workspace: s.WorkspaceID, Task: cp.TaskID, Repo: cp.FreezeRepo, Attempt: cp.FreezeID,
+		Worktree: ap.WorktreePath, Base: cp.FreezeBase, CaptureSHA: captureSHA,
+		SourceRepo: source, Outcome: cp.FreezeState, Complete: complete, SkipRetention: true,
 	})
+	return err
+}
+
+func (s *Supervisor) reconcilePendingFreeze(ap *AgentProcess) error {
+	lockDir := cli.ResolveLockDir(ap.WorktreePath)
+	cp, err := config.LoadCheckpoint(lockDir)
+	if err != nil || cp == nil || cp.FreezeID == "" {
+		return err
+	}
+	if cp.CaptureRef == "" {
+		result, retained := s.captureExitWorktree(ap, cp.AgentName, cp.TaskID, "", cp.FreezeID)
+		if retained {
+			return fmt.Errorf("pending revision capture is incomplete")
+		}
+		cp.CaptureRef = result.Ref
+		if cp.CaptureRef == "" {
+			cp.CaptureRef = automode.CaptureHEADRef(ap.WorktreePath)
+		}
+		if err := config.SaveCheckpoint(lockDir, cp); err != nil {
+			return err
+		}
+	}
+	sha, err := cli.RunGitCommand(ap.WorktreePath, "rev-parse", cp.CaptureRef)
+	if err != nil {
+		return err
+	}
+	if err := s.freezeCheckpoint(ap, cp, strings.TrimSpace(sha), true); err != nil {
+		return err
+	}
+	cp.FreezeID = ""
+	return config.SaveCheckpoint(lockDir, cp)
 }
 
 func (s *Supervisor) saveCaptureCheckpoint(ap *AgentProcess, lockDir string, cp *config.Checkpoint) {
@@ -281,7 +409,7 @@ func (s *Supervisor) saveCaptureCheckpoint(ap *AgentProcess, lockDir string, cp 
 	}
 }
 
-func (s *Supervisor) captureExitWorktree(ap *AgentProcess, agentName, taskID, taskTitle string) (agentcapture.Result, bool) {
+func (s *Supervisor) captureExitWorktree(ap *AgentProcess, agentName, taskID, taskTitle, attempt string) (agentcapture.Result, bool) {
 	workspace := s.WorkspaceID
 	if workspace == "" {
 		workspace = agentName
@@ -290,9 +418,15 @@ func (s *Supervisor) captureExitWorktree(ap *AgentProcess, agentName, taskID, ta
 	defer cancel()
 	captureFn := s.captureWorktree
 	if captureFn == nil {
-		captureFn = agentcapture.Capture
+		source := s.freezeSourcePath(ap)
+		captureFn = func(ctx context.Context, copyPath, workspace, attempt, taskID, taskTitle string) (agentcapture.Result, error) {
+			return agentcapture.CaptureTaskCopy(ctx, source, copyPath, workspace, attempt, taskID, taskTitle)
+		}
 	}
-	result, captureErr := captureFn(ctx, ap.WorktreePath, workspace, uuid.NewString(), taskID, taskTitle)
+	if attempt == "" {
+		attempt = uuid.NewString()
+	}
+	result, captureErr := captureFn(ctx, ap.WorktreePath, workspace, attempt, taskID, taskTitle)
 	retained := captureErr != nil || !result.Complete
 	if retained {
 		ap.Mu.Lock()

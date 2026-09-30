@@ -23,7 +23,7 @@ func TestRetentionCLIDefaultReportsEligibleCloneForRemoval(t *testing.T) {
 	root := t.TempDir()
 	source, copyPath, path := filepath.Join(root, "source"), filepath.Join(root, "A"), filepath.Join(root, "store.db")
 	git := func(dir string, args ...string) string {
-		command := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+		command := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...) //nolint:norawexec // Scratch repositories prove retention behavior with real Git.
 		command.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
 			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
 		output, err := command.CombinedOutput()
@@ -32,7 +32,7 @@ func TestRetentionCLIDefaultReportsEligibleCloneForRemoval(t *testing.T) {
 		}
 		return strings.TrimSpace(string(output))
 	}
-	git(root, "init", source)
+	git(root, "init", "-b", "main", source)
 	git(source, "commit", "--allow-empty", "-m", "base")
 	base := git(source, "rev-parse", "HEAD")
 	git(root, "clone", "--local", source, copyPath)
