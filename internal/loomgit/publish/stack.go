@@ -47,6 +47,13 @@ func publishStack(ctx context.Context, store Store, request StackRequest) ([]loo
 	if err != nil {
 		return nil, err
 	}
+	publications := make([]journal.Publication, 0, len(layers))
+	for _, layer := range layers {
+		publications = append(publications, layer.publication)
+	}
+	if err := store.BeginStackPublications(ctx, publications); err != nil {
+		return nil, err
+	}
 	pusher := mirror.NewPusher(runner)
 	if err := pushStackHeads(ctx, runner, pusher, layers); err != nil {
 		return nil, err
@@ -54,9 +61,6 @@ func publishStack(ctx context.Context, store Store, request StackRequest) ([]loo
 	result := make([]loomgit.Revision, 0, len(layers))
 	for _, layer := range layers {
 		publication := layer.publication
-		if err := store.BeginPublication(ctx, publication); err != nil {
-			return nil, err
-		}
 		if err := finishPublication(ctx, store, runner, pusher, forge, publication); err != nil {
 			return nil, err
 		}
@@ -137,6 +141,7 @@ func stackLayers(ctx context.Context, store Store, runner, area *gitexec.Runner,
 		}
 		stackForge = selected
 		prepared.publication.StackID = request.StackID
+		prepared.publication.Prior = prepared.prior
 		if len(layers) > 0 {
 			prepared.publication.Trunk = layers[len(layers)-1].publication.Branch
 		}

@@ -9,10 +9,10 @@ import (
 )
 
 type Publication struct {
-	Workspace, Change, Repo, Branch, Trunk, Slug, Head, StackID string
-	Phase                                                       string
-	PRNumber                                                    int
-	PRURL                                                       string
+	Workspace, Change, Repo, Branch, Trunk, Slug, Head, StackID, Prior string
+	Phase                                                              string
+	PRNumber                                                           int
+	PRURL                                                              string
 }
 
 func createPublicationSchema(db *sql.DB) error {
@@ -21,7 +21,7 @@ func createPublicationSchema(db *sql.DB) error {
 		branch TEXT NOT NULL, trunk TEXT NOT NULL, slug TEXT NOT NULL,
 		head_sha TEXT NOT NULL, phase TEXT NOT NULL,
 		pr_number INTEGER NOT NULL DEFAULT 0, pr_url TEXT NOT NULL DEFAULT '',
-		stack_id TEXT NOT NULL DEFAULT '',
+		stack_id TEXT NOT NULL DEFAULT '', prior_sha TEXT NOT NULL DEFAULT '',
 		PRIMARY KEY(workspace, change_id)
 	)`)
 	if err != nil {
@@ -32,6 +32,7 @@ func createPublicationSchema(db *sql.DB) error {
 		return err
 	}
 	defer func() { _ = rows.Close() }()
+	columns := map[string]bool{}
 	for rows.Next() {
 		var cid, notNull, pk int
 		var name, kind string
@@ -39,9 +40,7 @@ func createPublicationSchema(db *sql.DB) error {
 		if err := rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &pk); err != nil {
 			return err
 		}
-		if name == "stack_id" {
-			return nil
-		}
+		columns[name] = true
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -49,11 +48,16 @@ func createPublicationSchema(db *sql.DB) error {
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	_, err = db.Exec(`ALTER TABLE change_publications ADD COLUMN stack_id TEXT NOT NULL DEFAULT ''`)
-	if err != nil && strings.Contains(err.Error(), "duplicate column name") {
-		return nil
+	for _, column := range []string{"stack_id", "prior_sha"} {
+		if columns[column] {
+			continue
+		}
+		_, err = db.Exec(`ALTER TABLE change_publications ADD COLUMN ` + column + ` TEXT NOT NULL DEFAULT ''`)
+		if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
 	}
-	return err
+	return nil
 }
 
 func createStackBackendSchema(db *sql.DB) error {
@@ -89,9 +93,9 @@ func (s *SQLite) StackBackend(ctx context.Context, workspace, stackID string) (s
 
 func (s *SQLite) Publication(ctx context.Context, workspace, change string) (Publication, bool, error) {
 	var p Publication
-	err := s.db.QueryRowContext(ctx, `SELECT workspace,change_id,repo,branch,trunk,slug,head_sha,phase,pr_number,pr_url,stack_id
+	err := s.db.QueryRowContext(ctx, `SELECT workspace,change_id,repo,branch,trunk,slug,head_sha,phase,pr_number,pr_url,stack_id,prior_sha
 		FROM change_publications WHERE workspace=? AND change_id=?`, workspace, change).Scan(
-		&p.Workspace, &p.Change, &p.Repo, &p.Branch, &p.Trunk, &p.Slug, &p.Head, &p.Phase, &p.PRNumber, &p.PRURL, &p.StackID)
+		&p.Workspace, &p.Change, &p.Repo, &p.Branch, &p.Trunk, &p.Slug, &p.Head, &p.Phase, &p.PRNumber, &p.PRURL, &p.StackID, &p.Prior)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Publication{}, false, nil
 	}
@@ -99,14 +103,36 @@ func (s *SQLite) Publication(ctx context.Context, workspace, change string) (Pub
 }
 
 func (s *SQLite) BeginPublication(ctx context.Context, p Publication) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO change_publications
-		(workspace,change_id,repo,branch,trunk,slug,head_sha,stack_id,phase) VALUES (?,?,?,?,?,?,?,?,'started')
+	return beginPublication(ctx, s.db, p)
+}
+
+type publicationExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func beginPublication(ctx context.Context, database publicationExecer, p Publication) error {
+	_, err := database.ExecContext(ctx, `INSERT INTO change_publications
+		(workspace,change_id,repo,branch,trunk,slug,head_sha,stack_id,prior_sha,phase) VALUES (?,?,?,?,?,?,?,?,?,'started')
 		ON CONFLICT(workspace,change_id) DO UPDATE SET repo=excluded.repo,branch=excluded.branch,
-		trunk=excluded.trunk,slug=excluded.slug,head_sha=excluded.head_sha,stack_id=excluded.stack_id,phase='started'
+		trunk=excluded.trunk,slug=excluded.slug,head_sha=excluded.head_sha,stack_id=excluded.stack_id,prior_sha=excluded.prior_sha,phase='started'
 		WHERE change_publications.head_sha <> excluded.head_sha OR change_publications.trunk <> excluded.trunk
 		OR change_publications.stack_id <> excluded.stack_id`,
-		p.Workspace, p.Change, p.Repo, p.Branch, p.Trunk, p.Slug, p.Head, p.StackID)
+		p.Workspace, p.Change, p.Repo, p.Branch, p.Trunk, p.Slug, p.Head, p.StackID, p.Prior)
 	return err
+}
+
+func (s *SQLite) BeginStackPublications(ctx context.Context, publications []Publication) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, publication := range publications {
+		if err := beginPublication(ctx, tx, publication); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *SQLite) AdvancePublication(ctx context.Context, p Publication) error {
@@ -148,7 +174,7 @@ func (s *SQLite) AdvancePublication(ctx context.Context, p Publication) error {
 }
 
 func (s *SQLite) OpenPublications(ctx context.Context) ([]Publication, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT workspace,change_id,repo,branch,trunk,slug,head_sha,phase,pr_number,pr_url,stack_id
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace,change_id,repo,branch,trunk,slug,head_sha,phase,pr_number,pr_url,stack_id,prior_sha
 		FROM change_publications WHERE phase <> 'done' ORDER BY workspace,change_id`)
 	if err != nil {
 		return nil, err
@@ -158,7 +184,7 @@ func (s *SQLite) OpenPublications(ctx context.Context) ([]Publication, error) {
 	for rows.Next() {
 		var p Publication
 		if err := rows.Scan(&p.Workspace, &p.Change, &p.Repo, &p.Branch, &p.Trunk, &p.Slug,
-			&p.Head, &p.Phase, &p.PRNumber, &p.PRURL, &p.StackID); err != nil {
+			&p.Head, &p.Phase, &p.PRNumber, &p.PRURL, &p.StackID, &p.Prior); err != nil {
 			return nil, err
 		}
 		out = append(out, p)

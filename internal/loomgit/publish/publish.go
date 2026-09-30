@@ -26,6 +26,7 @@ type Store interface {
 	RevisionByHead(context.Context, string, string, string) (loomgit.Revision, error)
 	WorkspaceRepos(context.Context, string) ([]loomgit.WorkspaceRepo, error)
 	BeginPublication(context.Context, journal.Publication) error
+	BeginStackPublications(context.Context, []journal.Publication) error
 	AdvancePublication(context.Context, journal.Publication) error
 	OpenPublications(context.Context) ([]journal.Publication, error)
 	Publication(context.Context, string, string) (journal.Publication, bool, error)
@@ -267,6 +268,26 @@ func Reconcile(ctx context.Context, store Store, forge Forge, token string) erro
 	}
 	if forge == nil {
 		forge = stackpublish.NewGitHubForge(token, nil, "")
+	}
+	stackGroups := make(map[string][]journal.Publication)
+	for _, publication := range publications {
+		if publication.StackID != "" {
+			key := publication.Workspace + "\x00" + publication.StackID + "\x00" + publication.Repo
+			stackGroups[key] = append(stackGroups[key], publication)
+		}
+	}
+	for _, group := range stackGroups {
+		runner, err := gitexec.New(group[0].Repo, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
+		if err != nil {
+			return err
+		}
+		layers := make([]stackLayer, 0, len(group))
+		for _, publication := range group {
+			layers = append(layers, stackLayer{publication: publication, revision: loomgit.Revision{HeadSHA: publication.Head}, prior: publication.Prior})
+		}
+		if err := pushStackHeads(ctx, runner, mirror.NewPusher(runner), layers); err != nil {
+			return err
+		}
 	}
 	for _, publication := range publications {
 		runner, err := gitexec.New(publication.Repo, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})

@@ -11,6 +11,8 @@ import (
 
 var prWorkspace string
 var prStackWorkspace string
+var prStackResolver = cli.NewResolver
+var prStackPublish = publish.PublishStackLocal
 
 var prCmd = &cobra.Command{
 	Use:     "pr <lead> <change>",
@@ -40,7 +42,7 @@ var prStackCmd = &cobra.Command{
 }
 
 func runPRStack(cmd *cobra.Command, args []string) error {
-	resolver, err := cli.NewResolver()
+	resolver, err := prStackResolver()
 	if err != nil {
 		return err
 	}
@@ -50,7 +52,7 @@ func runPRStack(cmd *cobra.Command, args []string) error {
 		}
 	}
 	workspace := resolver.Config.Workspaces[resolver.WorkspaceName()]
-	results, err := publish.PublishStackLocal(cmd.Context(), workspace.ID, args[0], args[1], args[2:])
+	results, err := prStackPublish(cmd.Context(), workspace.ID, args[0], args[1], args[2:])
 	if err != nil {
 		return err
 	}

@@ -195,11 +195,56 @@ func TestPublishStackReconcileRetainsDependentBase(t *testing.T) {
 		t.Fatalf("interrupted stack publish = %v", err)
 	}
 	forge.createError = nil
-	if err := Reconcile(context.Background(), fixture.store, forge, "fixture-token"); err != nil {
+	reopened, err := journal.OpenSQLite(filepath.Join(filepath.Dir(fixture.repo), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reopened.Close() }()
+	if err := Reconcile(context.Background(), reopened, forge, "fixture-token"); err != nil {
 		t.Fatal(err)
 	}
 	if len(forge.prs) != 2 || forge.prs[1].Base != firstBranch {
 		t.Fatalf("reconciled PRs = %+v", forge.prs)
+	}
+}
+
+func TestPublishStackReconcilePushesAllIntentsAfterRestart(t *testing.T) {
+	fixture := newFixture(t)
+	first := stackRevision(t, fixture, "A", 1, fixture.base)
+	second := stackRevision(t, fixture, "B", 1, first.HeadSHA)
+	request := fixture.request()
+	request.forge = &fakeForge{}
+	ctx := context.Background()
+	runner, err := gitexec.New(fixture.repo, gitexec.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	layers, _, err := stackLayers(ctx, fixture.store, runner, runner,
+		StackRequest{Request: request, StackID: "feature-1", Changes: []string{"A", "B"}},
+		[]loomgit.AppliedLayer{{Change: "A", OldTip: fixture.base, NewTip: first.HeadSHA}, {Change: "B", OldTip: first.HeadSHA, NewTip: second.HeadSHA}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	publications := []journal.Publication{layers[0].publication, layers[1].publication}
+	if err := fixture.store.BeginStackPublications(ctx, publications); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := journal.OpenSQLite(filepath.Join(filepath.Dir(fixture.repo), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reopened.Close() }()
+	forge := &fakeForge{}
+	if err := Reconcile(ctx, reopened, forge, "fixture-token"); err != nil {
+		t.Fatal(err)
+	}
+	for _, layer := range layers {
+		if got := git(t, fixture.remote, "rev-parse", "refs/heads/"+layer.publication.Branch); got != layer.revision.HeadSHA {
+			t.Fatalf("%s remote head = %s", layer.publication.Change, got)
+		}
+	}
+	if len(forge.prs) != 2 || forge.prs[1].Base != forge.prs[0].Head {
+		t.Fatalf("recovered PRs = %+v", forge.prs)
 	}
 }
 
