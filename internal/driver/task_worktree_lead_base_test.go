@@ -190,6 +190,21 @@ func TestDelegatedTaskFromCurrentWorkspaceState(t *testing.T) {
 	if resolution.BaseSHA != leadTip || !strings.Contains(testGitOutput(t, resolution.Path, "ls-files", "-u"), "src/app.js") {
 		t.Fatalf("conflict resolution did not start at lead tip with conflicts: %+v", resolution)
 	}
+	baseInput, err := WithBaseRevision(nil, BaseRevision{Change: revision.Change, Number: revision.Number})
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseRun, err := createQueuedTaskRun(ctx, f.resolver.Store, TaskRunRequestOptions{
+		WorkspaceKey: "TEST", TaskRunID: "task/explicit-base", TaskID: "current", ParentSessionID: "lead-session", Input: baseInput,
+	}, taskRunRequestRefs{TaskRunID: "task/explicit-base"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.TaskRunID, request.Input = baseRun.TaskRunID, baseRun.Input
+	explicit, err := f.resolver.ResolveTaskWorktree(ctx, request, t.TempDir())
+	if err != nil || explicit.BaseSHA != revision.HeadSHA {
+		t.Fatalf("explicit revision base = %s, want %s: %v", explicit.BaseSHA, revision.HeadSHA, err)
+	}
 }
 
 func unresolvedLineageLookup(t *testing.T) TaskLineageLookup {

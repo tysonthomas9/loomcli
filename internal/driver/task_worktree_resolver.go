@@ -771,7 +771,7 @@ func createQueuedTaskRun(ctx context.Context, s store.Store, opts TaskRunRequest
 }
 
 func defaultTaskRunDelegation(opts TaskRunRequestOptions) (TaskRunRequestOptions, error) {
-	if opts.ParentSessionID == "" {
+	if opts.ParentSessionID == "" || opts.ResumeAttemptID != "" {
 		return opts, nil
 	}
 	_, hasBase, err := baseRevisionFromInput(opts.Input)

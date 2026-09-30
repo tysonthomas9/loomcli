@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -69,6 +70,38 @@ func TestQueuedResumeKeepsCaptureAttempt(t *testing.T) {
 	}, taskRunRequestRefs{TaskRunID: "new-run"})
 	if err != nil || run == nil || run.RuntimeMetadata["resume_from_attempt_id"] != "old-attempt" {
 		t.Fatalf("queued resume = %+v, %v", run, err)
+	}
+}
+
+func TestQueuedDelegationInputPrecedence(t *testing.T) {
+	base, err := WithBaseRevision(nil, BaseRevision{Change: "C1", Number: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name, parent, resume string
+		input                json.RawMessage
+	}{
+		{name: "not delegated"},
+		{name: "resume", parent: "lead-session", resume: "prior-attempt"},
+		{name: "explicit revision", parent: "lead-session", input: base},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			run, err := createQueuedTaskRun(t.Context(), memstore.New(), TaskRunRequestOptions{
+				WorkspaceKey: "WS", TaskID: "TASK-1", ParentSessionID: tc.parent,
+				ResumeAttemptID: tc.resume, Input: tc.input,
+			}, taskRunRequestRefs{TaskRunID: "run-1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(run.Input) != string(tc.input) {
+				t.Fatalf("queued input = %s, want unchanged %s", run.Input, tc.input)
+			}
+			if tc.resume != "" && run.RuntimeMetadata["resume_from_attempt_id"] != tc.resume {
+				t.Fatalf("resume attempt = %q, want %q", run.RuntimeMetadata["resume_from_attempt_id"], tc.resume)
+			}
+		})
 	}
 }
 
