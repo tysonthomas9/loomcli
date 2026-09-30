@@ -24,6 +24,8 @@ type GitHubForge struct {
 	client  *http.Client
 }
 
+func (*GitHubForge) SupportsNativeStacks() bool { return false }
+
 var _ Forge = (*GitHubForge)(nil)
 
 // NewGitHubForge builds a forge. A nil client uses a 30s-timeout default; an

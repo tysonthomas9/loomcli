@@ -28,11 +28,13 @@ type Store interface {
 	BeginPublication(context.Context, journal.Publication) error
 	AdvancePublication(context.Context, journal.Publication) error
 	OpenPublications(context.Context) ([]journal.Publication, error)
+	Publication(context.Context, string, string) (journal.Publication, bool, error)
 }
 
 type Forge interface {
 	ListStackPRs(context.Context, string, string, string) ([]stackpublish.PR, error)
 	CreatePR(context.Context, string, string, string, string, string, string) (stackpublish.PR, error)
+	UpdatePRBase(context.Context, string, string, int, string) error
 	UpdatePRBody(context.Context, string, string, int, string) error
 }
 
@@ -60,6 +62,9 @@ func Publish(ctx context.Context, store Store, req Request) (loomgit.Revision, e
 	}
 	if req.BaseSHA == "" || req.Repo == "" || req.WorkingArea == "" || req.Lead == "" {
 		return loomgit.Revision{}, errors.New("repo, working area, lead and base SHA are required")
+	}
+	if err := requireNotStacked(ctx, store, req); err != nil {
+		return loomgit.Revision{}, err
 	}
 	runner, err := gitexec.New(req.Repo, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
 	if err != nil {
@@ -97,6 +102,17 @@ func Publish(ctx context.Context, store Store, req Request) (loomgit.Revision, e
 		return loomgit.Revision{}, err
 	}
 	return revision, nil
+}
+
+func requireNotStacked(ctx context.Context, store Store, req Request) error {
+	prior, found, err := store.Publication(ctx, req.Workspace, req.Change)
+	if err != nil {
+		return err
+	}
+	if found && prior.StackID != "" {
+		return loomgit.NewError(loomgit.ModeMismatch, "change belongs to a published stack", nil)
+	}
+	return nil
 }
 
 func requireRevisionRef(ctx context.Context, runner *gitexec.Runner, req Request, revision loomgit.Revision, head string) error {
@@ -203,6 +219,11 @@ func finishPublication(ctx context.Context, store Store, runner *gitexec.Runner,
 	for _, pr := range prs {
 		if pr.Head != publication.Branch || pr.State != "open" {
 			continue
+		}
+		if publication.StackID != "" && pr.Base != publication.Trunk {
+			if err := forge.UpdatePRBase(ctx, parts[0], parts[1], pr.Number, publication.Trunk); err != nil {
+				return err
+			}
 		}
 		if !strings.Contains(pr.Body, body) {
 			if err := forge.UpdatePRBody(ctx, parts[0], parts[1], pr.Number, strings.TrimSpace(pr.Body)+"\n\n"+body); err != nil {

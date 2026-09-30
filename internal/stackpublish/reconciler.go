@@ -10,7 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 )
 
-// Reconciler publishes a stack's lineage as stacked PRs.
+// Reconciler publishes legacy stackstore lineage; P4.11 removes this path after epic delivery moves to Loom Git Publish.
 type Reconciler struct {
 	Store stackstore.Store
 	Forge Forge

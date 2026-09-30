@@ -29,6 +29,30 @@ type RefPusher interface {
 	Push(context.Context, string, string, string, string) error
 }
 
+type LeasedRef struct {
+	Ref, Head, Expected string
+}
+
+// PushAtomic replaces all refs together, using the exact expected value of each ref.
+func PushAtomic(ctx context.Context, runner *gitexec.Runner, remote string, refs []LeasedRef) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	args := []string{"push", "--atomic"}
+	for _, ref := range refs {
+		if !strings.HasPrefix(ref.Ref, "refs/heads/") || ref.Head == "" {
+			return errors.New("atomic push requires a branch ref and head")
+		}
+		args = append(args, "--force-with-lease="+ref.Ref+":"+ref.Expected)
+	}
+	args = append(args, remote)
+	for _, ref := range refs {
+		args = append(args, ref.Head+":"+ref.Ref)
+	}
+	_, err := (gitPusher{runner}).run(ctx, remote, args...)
+	return err
+}
+
 type gitPusher struct{ runner *gitexec.Runner }
 
 // NewPusher uses the host credential resolver for one source repository.
