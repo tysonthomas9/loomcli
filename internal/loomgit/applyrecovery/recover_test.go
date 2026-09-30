@@ -104,16 +104,19 @@ func TestReconcileEmitsClosedApplyEventAfterCrash(t *testing.T) {
 	if err := workspacemgr.ReconcileJournal(ctx, memstore.New()); err != nil {
 		t.Fatal(err)
 	}
+	if err := workspacemgr.ReconcileJournal(ctx, memstore.New()); err != nil {
+		t.Fatal(err)
+	}
 	files, err := os.ReadDir(filepath.Join(os.Getenv("LOOM_CONFIG_DIR"), "events"))
 	if err != nil || len(files) != 1 {
 		t.Fatalf("recovered event log: %+v, %v", files, err)
 	}
 	data, err := os.ReadFile(filepath.Join(os.Getenv("LOOM_CONFIG_DIR"), "events", files[0].Name()))
 	if err != nil || !strings.Contains(string(data), `"type":"git.integrated"`) ||
-		!strings.Contains(string(data), `"event_id":"loomgit:1"`) {
+		strings.Count(string(data), `"event_id":"loomgit:1"`) != 1 {
 		t.Fatalf("recovered event: %s, %v", data, err)
 	}
-	if pending, err := store.PendingEvents(ctx); err != nil || len(pending) != 1 {
+	if pending, err := store.PendingEvents(ctx); err != nil || len(pending) != 1 || !pending[0].JSONLEmitted {
 		t.Fatalf("event should await SSE acknowledgement: %+v, %v", pending, err)
 	}
 }

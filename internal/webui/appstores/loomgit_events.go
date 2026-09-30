@@ -18,11 +18,12 @@ import (
 )
 
 type loomGitEventSink struct {
-	bus *events.Bus
-	hub *realtime.Hub
+	bus   *events.Bus
+	hub   *realtime.Hub
+	store outbox.JSONLStore
 }
 
-func (sink loomGitEventSink) Emit(_ context.Context, event loomgit.OutboxEvent) error {
+func (sink loomGitEventSink) Emit(ctx context.Context, event loomgit.OutboxEvent) error {
 	var subject struct {
 		Workspace string `json:"workspace"`
 		ChangeID  string `json:"change_id"`
@@ -34,7 +35,7 @@ func (sink loomGitEventSink) Emit(_ context.Context, event loomgit.OutboxEvent) 
 		return fmt.Errorf("loom git event %d has no workspace", event.ID)
 	}
 	id := "loomgit:" + strconv.FormatInt(event.ID, 10)
-	if err := outbox.EmitJSONL(sink.bus, event); err != nil {
+	if err := outbox.EmitJSONL(ctx, sink.store, sink.bus, event); err != nil {
 		return err
 	}
 	if !sink.hub.TryBroadcast(&realtime.MutationPayload{EventID: id, Type: "update", EntityType: "change",
@@ -100,5 +101,6 @@ func dispatchLoomGitEvents(ctx context.Context, path string, sink loomGitEventSi
 		return err
 	}
 	defer func() { _ = store.Close() }()
+	sink.store = store
 	return outbox.Dispatch(ctx, store, sink)
 }

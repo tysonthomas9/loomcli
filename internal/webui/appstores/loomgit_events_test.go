@@ -14,6 +14,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
+type noopJSONLStore struct{ outbox.Store }
+
+func (noopJSONLStore) MarkJSONLEmitted(context.Context, int64) error { return nil }
+
 func TestLoomGitEventGoesToJSONLAndSSEWithSameID(t *testing.T) {
 	dir := t.TempDir()
 	bus := events.NewBus(dir)
@@ -25,7 +29,7 @@ func TestLoomGitEventGoesToJSONLAndSSEWithSameID(t *testing.T) {
 	hub.RegisterClient(client)
 	event := loomgit.OutboxEvent{ID: 42, Kind: "git.integrated",
 		Payload: []byte(`{"workspace":"W","change_id":"C","revision":3,"workspace_sha":"abc"}`)}
-	if err := (loomGitEventSink{bus: bus, hub: hub}).Emit(context.Background(), event); err != nil {
+	if err := (loomGitEventSink{bus: bus, hub: hub, store: noopJSONLStore{}}).Emit(context.Background(), event); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -109,7 +113,8 @@ func TestDispatchLoomGitEventsRetriesFullHub(t *testing.T) {
 		Payload: []byte(`{"workspace":"W","change_id":"C"}`)}}); err != nil {
 		t.Fatal(err)
 	}
-	bus := events.NewBus(t.TempDir())
+	busDir := t.TempDir()
+	bus := events.NewBus(busDir)
 	defer func() { _ = bus.Close() }()
 	hub := realtime.NewHub()
 	for range 1280 {
@@ -117,17 +122,18 @@ func TestDispatchLoomGitEventsRetriesFullHub(t *testing.T) {
 			t.Fatal("hub rejected mutation before capacity")
 		}
 	}
-	if err := outbox.Dispatch(ctx, store, loomGitEventSink{bus: bus, hub: hub}); err == nil {
+	if err := outbox.Dispatch(ctx, store, loomGitEventSink{bus: bus, hub: hub, store: store}); err == nil {
 		t.Fatal("dispatch accepted a full hub")
 	}
-	if pending, err := store.PendingEvents(ctx); err != nil || len(pending) != 1 {
+	if pending, err := store.PendingEvents(ctx); err != nil || len(pending) != 1 || !pending[0].JSONLEmitted {
 		t.Fatalf("event lost after full hub: %+v, %v", pending, err)
 	}
+	assertOneJSONLEvent(t, busDir)
 	go hub.Run()
 	defer hub.Stop()
 	deadline := time.Now().Add(time.Second)
 	for {
-		if err := outbox.Dispatch(ctx, store, loomGitEventSink{bus: bus, hub: hub}); err == nil {
+		if err := outbox.Dispatch(ctx, store, loomGitEventSink{bus: bus, hub: hub, store: store}); err == nil {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -137,5 +143,18 @@ func TestDispatchLoomGitEventsRetriesFullHub(t *testing.T) {
 	}
 	if pending, err := store.PendingEvents(ctx); err != nil || len(pending) != 0 {
 		t.Fatalf("event not delivered after retry: %+v, %v", pending, err)
+	}
+	assertOneJSONLEvent(t, busDir)
+}
+
+func assertOneJSONLEvent(t *testing.T, dir string) {
+	t.Helper()
+	files, err := os.ReadDir(dir)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("event logs: %+v, %v", files, err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, files[0].Name()))
+	if err != nil || strings.Count(string(data), `"event_id":"loomgit:1"`) != 1 {
+		t.Fatalf("event should be logged once: %s, %v", data, err)
 	}
 }
