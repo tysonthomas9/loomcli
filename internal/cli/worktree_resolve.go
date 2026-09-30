@@ -22,6 +22,15 @@ type Resolver struct {
 	Workspace string // active workspace name (workspace mode only)
 }
 
+type legacyAgentCheckoutError struct {
+	name string
+	path string
+}
+
+func (e legacyAgentCheckoutError) Error() string {
+	return fmt.Sprintf("agent worktree %q has an old checkout at %s; Loom will not use it. Remove and recreate the agent with `loom agentdef add ... --auto`", e.name, e.path)
+}
+
 // NewResolver creates a workspace resolver from configured workspaces.
 func NewResolver() (*Resolver, error) {
 	cfg, err := config.LoadConfigCached()
@@ -334,6 +343,12 @@ func (r *Resolver) ResolveAgentByName(name string) (WorktreeInfo, error) {
 			}
 		}
 	}
+	for _, repo := range ws.Repos {
+		legacyPath := filepath.Join(ws.Path, "worktrees", repo.Name, name)
+		if _, err := os.Stat(filepath.Join(legacyPath, ".git")); err == nil {
+			return WorktreeInfo{}, legacyAgentCheckoutError{name: name, path: legacyPath}
+		}
+	}
 
 	return WorktreeInfo{}, fmt.Errorf("agent worktree %q not found", name)
 }
@@ -344,6 +359,8 @@ func (r *Resolver) ResolveWorktreePath(name string) (string, error) {
 	if name != "" {
 		if wt, err := r.ResolveAgentByName(name); err == nil {
 			return wt.Path, nil
+		} else if _, legacy := err.(legacyAgentCheckoutError); legacy {
+			return "", err
 		}
 	}
 	return r.ResolveWorkspacePath(name)
