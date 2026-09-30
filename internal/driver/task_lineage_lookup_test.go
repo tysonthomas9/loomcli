@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/taskcopy"
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -22,11 +25,14 @@ import (
 // branch loom/stack/epic-E1/task-a (with a commit distinct from main), registers
 // workspace local state + a memstore repo, and a stackstore stack epic-E1 with
 // nodes task-a (root, published on that branch) and task-b (based on task-a).
-// It returns the resolver wired with the lineage lookup plus the two HEAD SHAs.
+// It freezes task A locally and returns the resolver plus its revision head.
 type lineageFixture struct {
 	resolver LocalTaskWorktreeResolver
 	mainHead string
-	taskAH   string // HEAD of loom/stack/epic-E1/task-a
+	taskAH   string // immutable head of task A revision 1
+	repoPath string
+	loomDir  string
+	change   string
 }
 
 func setupLineageFixture(t *testing.T) lineageFixture {
@@ -60,6 +66,7 @@ func setupLineageFixture(t *testing.T) lineageFixture {
 	gitCmd(t, repoPath, "commit", "-m", "task-a work")
 	taskAHead := strings.TrimSpace(testGitOutput(t, repoPath, "rev-parse", "HEAD"))
 	gitCmd(t, repoPath, "checkout", "main")
+	revision := addLocalRevision(t, repoPath, loomDir, taskAHead, 1)
 
 	if err := bootstrap.MutateWorkspaceLocalState("TEST", func(local *bootstrap.WorkspaceLocalState) error {
 		local.Path = workspacePath
@@ -108,8 +115,25 @@ func setupLineageFixture(t *testing.T) lineageFixture {
 	return lineageFixture{
 		resolver: LocalTaskWorktreeResolver{Store: st, Lineage: StackLineageLookup{Store: stacks}},
 		mainHead: mainHead,
-		taskAH:   taskAHead,
+		taskAH:   revision.HeadSHA,
+		repoPath: repoPath,
+		loomDir:  loomDir,
+		change:   revision.Change,
 	}
+}
+
+func addLocalRevision(t *testing.T, repoPath, loomDir, head string, wantNumber int) loomgit.Revision {
+	t.Helper()
+	base := strings.TrimSpace(testGitOutput(t, repoPath, "rev-parse", "main"))
+	patch := testGitOutput(t, repoPath, "diff", base, head)
+	rev, err := driverfreeze.FreezeAt(context.Background(), filepath.Join(loomDir, "loomgit", "store.db"), driverfreeze.Request{
+		Workspace: "TEST", Task: "task-a", Repo: "app", Attempt: fmt.Sprintf("attempt-%d", wantNumber),
+		Worktree: repoPath, Base: base, Patch: []byte(patch), Outcome: "completed",
+	})
+	if err != nil || rev.Number != wantNumber {
+		t.Fatalf("freeze revision: %+v, %v", rev, err)
+	}
+	return rev
 }
 
 func resolveHead(t *testing.T, r LocalTaskWorktreeResolver, taskID, taskRunID string) string {
@@ -129,12 +153,70 @@ func resolveHead(t *testing.T, r LocalTaskWorktreeResolver, taskID, taskRunID st
 	return strings.TrimSpace(testGitOutput(t, resolved.Path, "rev-parse", "HEAD"))
 }
 
-// A dependent task's worktree is cut from its predecessor's output branch, not main.
+// A dependent task's worktree is cut from its predecessor's local revision ref.
 func TestResolveTaskWorktree_DependentBasesOnPredecessorBranch(t *testing.T) {
 	f := setupLineageFixture(t)
 	got := resolveHead(t, f.resolver, "task-b", "task/run:b")
 	if got != f.taskAH {
 		t.Fatalf("task-b worktree HEAD = %s, want predecessor task-a branch HEAD %s (got main=%s?)", got, f.taskAH, f.mainHead)
+	}
+}
+
+func TestLocalLineageStatusStaleAndAbandoned(t *testing.T) {
+	f := setupLineageFixture(t)
+	first := resolveHead(t, f.resolver, "task-b", "task/run:b1")
+	if first != f.taskAH {
+		t.Fatalf("dependent base = %s, want %s", first, f.taskAH)
+	}
+	dependents, err := taskcopy.DependentsOf(context.Background(), "TEST", f.change)
+	if err != nil || len(dependents) != 1 || dependents[0].Task != "task-b" ||
+		dependents[0].Repo != "app" || dependents[0].Revision != 1 || dependents[0].BaseSHA != first {
+		t.Fatalf("predecessor dependents = %+v, %v", dependents, err)
+	}
+	status, err := taskcopy.ReadLineageStatus(context.Background(), "TEST", "task-b", "app")
+	if err != nil || status.State != "current" || status.BasedOn.Revision != 1 {
+		t.Fatalf("initial status = %+v, %v", status, err)
+	}
+	gitCmd(t, f.repoPath, "checkout", "loom/stack/epic-E1/task-a")
+	writeTestFile(t, filepath.Join(f.repoPath, "src", "a2.js"), "console.log('revision 2');\n")
+	gitCmd(t, f.repoPath, "add", "src/a2.js")
+	gitCmd(t, f.repoPath, "commit", "-m", "revision 2")
+	second := strings.TrimSpace(testGitOutput(t, f.repoPath, "rev-parse", "HEAD"))
+	addLocalRevision(t, f.repoPath, f.loomDir, second, 2)
+	status, err = taskcopy.ReadLineageStatus(context.Background(), "TEST", "task-b", "app")
+	if err != nil || status.State != "stale" || status.BasedOn.Revision != 1 ||
+		status.AvailableRevision != 2 || status.AvailableRef != "refs/loom/ws/TEST/change/"+f.change+"/2/head" {
+		t.Fatalf("stale status = %+v, %v", status, err)
+	}
+	if got := resolveHead(t, f.resolver, "task-b", "task/run:b2"); got != first {
+		t.Fatalf("dependent was rebuilt automatically: got %s, want %s", got, first)
+	}
+	if err := taskcopy.AbandonChange(context.Background(), "TEST", f.change); err != nil {
+		t.Fatal(err)
+	}
+	status, err = taskcopy.ReadLineageStatus(context.Background(), "TEST", "task-b", "app")
+	if err != nil || status.State != "dependency_abandoned" {
+		t.Fatalf("abandoned status = %+v, %v", status, err)
+	}
+	_, err = f.resolver.ResolveTaskWorktree(context.Background(), TaskExecRequest{
+		WorkspaceKey: "TEST", TaskRunID: "task/run:abandoned", TaskID: "task-b",
+		SandboxPlacement: domain.TaskRunPlacement{RepoRef: "frontend"},
+	}, t.TempDir())
+	if !errors.Is(err, loomgit.NewError(loomgit.DependencyAbandoned, "", nil)) {
+		t.Fatalf("abandoned predecessor delegation = %v, want dependency_abandoned", err)
+	}
+}
+
+func TestLocalLineageMissingRevisionRefFailsClosed(t *testing.T) {
+	f := setupLineageFixture(t)
+	ref := fmt.Sprintf("refs/loom/ws/TEST/change/%s/1/head", f.change)
+	gitCmd(t, f.repoPath, "update-ref", "-d", ref)
+	_, err := f.resolver.ResolveTaskWorktree(context.Background(), TaskExecRequest{
+		WorkspaceKey: "TEST", TaskRunID: "task/run:missing", TaskID: "task-b",
+		SandboxPlacement: domain.TaskRunPlacement{RepoRef: "frontend"},
+	}, t.TempDir())
+	if !errors.Is(err, loomgit.NewError(loomgit.LineageUnresolved, "", nil)) {
+		t.Fatalf("missing predecessor ref = %v, want lineage_unresolved", err)
 	}
 }
 

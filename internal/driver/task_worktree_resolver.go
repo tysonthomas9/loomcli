@@ -358,6 +358,7 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 		return TaskWorktree{}, err
 	}
 	base := ""
+	var localBase taskcopy.LineageBase
 	if req.ResumeAttemptID != "" && req.PreviousAttemptID != "" {
 		return TaskWorktree{}, fmt.Errorf("resume and retry cannot select the same task copy")
 	}
@@ -373,13 +374,9 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 			return TaskWorktree{}, fmt.Errorf("resolve delegated task base for repo %q: %w", selected.Name, err)
 		}
 		if !delegated {
-			baseBranch, err := r.baseBranchForTask(ctx, workspaceKey, selected, req)
+			base, localBase, err = r.resolveTaskLineageBase(ctx, req, repoPath, selected)
 			if err != nil {
 				return TaskWorktree{}, err
-			}
-			base, err = localworkspace.ResolveTaskBase(repoPath, repoRemote(selected), baseBranch)
-			if err != nil {
-				return TaskWorktree{}, fmt.Errorf("resolve task copy base for repo %q: %w", selected.Name, err)
 			}
 		}
 	}
@@ -391,6 +388,11 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 	}
 	if err != nil {
 		return TaskWorktree{}, fmt.Errorf("create task copy for repo %q: %w", selected.Name, err)
+	}
+	if localBase.Ref != "" {
+		if err := taskcopy.RecordLineageBase(ctx, workspaceKey, req.TaskID, selected.Name, localBase); err != nil {
+			return TaskWorktree{}, fmt.Errorf("record dependent lineage: %w", err)
+		}
 	}
 	return TaskWorktree{
 		Path:         target,
