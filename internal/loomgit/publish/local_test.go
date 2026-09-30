@@ -52,6 +52,20 @@ func TestPublishStackRecordedIncludesLeadOwnedLayer(t *testing.T) {
 	}
 }
 
+func TestPublishStackRecordedRejectsTrunkMode(t *testing.T) {
+	fixture := newFixture(t)
+	ctx := context.Background()
+	if err := fixture.store.SetDeliveryMode(ctx, "W", "trunk"); err != nil {
+		t.Fatal(err)
+	}
+	forge := &fakeForge{}
+	_, err := publishStackRecorded(ctx, fixture.store, nil, "W", "feature", "L", []string{"C"}, forge, "fixture-token", "owner/repo")
+	var coded *loomgit.Error
+	if !errors.As(err, &coded) || coded.Kind != loomgit.ModeMismatch || forge.creates != 0 {
+		t.Fatalf("trunk stack publish = %v; PRs = %d", err, forge.creates)
+	}
+}
+
 func TestPublishStackRecordedRequiresHumanVerdictForLeadLayerWhenPolicyOff(t *testing.T) {
 	fixture := newFixture(t)
 	ctx := context.Background()

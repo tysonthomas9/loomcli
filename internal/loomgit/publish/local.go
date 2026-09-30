@@ -126,6 +126,13 @@ func openLocalStore() (*journal.SQLite, error) {
 }
 
 func publishStackRecorded(ctx context.Context, store *journal.SQLite, cfg *config.LoomConfig, workspace, stackID, lead string, changes []string, forge Forge, token, slug string) ([]Result, error) {
+	mode, err := store.DeliveryMode(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	if mode != "stack" {
+		return nil, loomgit.NewError(loomgit.ModeMismatch, "stack publication requires stack delivery mode", nil)
+	}
 	repoName, err := repoNameForStack(ctx, store, workspace, lead, changes)
 	if err != nil {
 		return nil, err

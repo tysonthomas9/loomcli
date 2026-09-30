@@ -116,11 +116,19 @@ func (backend LoomStackBackend) MergeUpTo(context.Context, StackRequest, string)
 
 type backendRecorder interface {
 	RecordStackBackend(context.Context, string, string, string) error
+	DeliveryMode(context.Context, string) (string, error)
 }
 
 func chooseStackBackend(ctx context.Context, recorder backendRecorder, workspace, stackID, slug string, forge Forge, loom, native StackBackend) (StackBackend, error) {
 	if recorder == nil || workspace == "" || stackID == "" || loom == nil {
 		return nil, errors.New("stack backend selection requires a recorder, workspace, stack and Loom backend")
+	}
+	mode, err := recorder.DeliveryMode(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	if mode != "stack" {
+		return nil, loomgit.NewError(loomgit.ModeMismatch, "stack backend selection requires stack delivery mode", nil)
 	}
 	if _, err := refname.ChangeBranch(workspace, stackID); err != nil {
 		return nil, err

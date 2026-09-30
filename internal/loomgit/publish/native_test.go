@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -111,7 +110,7 @@ func TestRecordedNativeStackAdoptsAfterLostResponseAndRestart(t *testing.T) {
 	if err := fixture.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err := journal.OpenSQLite(filepath.Join(filepath.Dir(fixture.repo), "store.db"))
+	store, err := journal.OpenSQLite(fixture.storePath)
 	if err != nil {
 		t.Fatal(err)
 	}
