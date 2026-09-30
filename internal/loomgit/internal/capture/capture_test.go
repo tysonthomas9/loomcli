@@ -16,7 +16,7 @@ import (
 func fixture(t *testing.T) (string, *gitexec.Runner) {
 	t.Helper()
 	dir := t.TempDir()
-	cmd := exec.Command("git", "init", "-q", dir) //nolint:norawexec // Test fixture creates a real temporary repository.
+	cmd := exec.Command("git", "init", "-q", "-b", "main", dir) //nolint:norawexec // Test fixture creates a real temporary repository.
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %s: %v", out, err)
 	}
@@ -81,6 +81,66 @@ func TestSecretPathMatchesOnlySSHKeyNames(t *testing.T) {
 		if SecretPath(path) {
 			t.Errorf("ordinary path classified as a secret: %s", path)
 		}
+	}
+}
+
+func TestCaptureExcludesRuntimeFiles(t *testing.T) {
+	dir, runner := fixture(t)
+	for _, path := range []string{
+		".agent.checkpoint.json", ".agent.lock", ".agent.lock.flock",
+		".codex/hooks.json", "agent.lock", ".codex/config.toml", "work.txt",
+	} {
+		write(t, dir, path, path)
+	}
+	write(t, dir, ".claude/settings.json", `{"hooks":{"UserPromptSubmit":[{"hooks":[{"command":"loom skill materialize"}]}]}}`)
+	result := capture(t, dir, runner)
+	for _, path := range []string{
+		".agent.checkpoint.json", ".agent.lock", ".agent.lock.flock",
+		".codex/hooks.json", ".claude/settings.json",
+	} {
+		if _, ok := classes(result.Manifest.Entries)[path]; ok {
+			t.Errorf("runtime path %q entered manifest", path)
+		}
+		if _, err := runner.Run(context.Background(), "cat-file", "-e", result.CaptureSHA+":"+path); err == nil {
+			t.Errorf("runtime path %q entered capture", path)
+		}
+	}
+	for _, path := range []string{"agent.lock", ".codex/config.toml", "work.txt"} {
+		must(t, runner, "cat-file", "-e", result.CaptureSHA+":"+path)
+	}
+}
+
+func TestCapturePreservesUserClaudeSettings(t *testing.T) {
+	dir, runner := fixture(t)
+	write(t, dir, ".claude/settings.json", `{"model":"opus","hooks":{"UserPromptSubmit":[{"hooks":[{"command":"loom skill materialize"}]}]}}`)
+	result := capture(t, dir, runner)
+	must(t, runner, "cat-file", "-e", result.CaptureSHA+":.claude/settings.json")
+}
+
+func TestCapturePreservesTrackedClaudeSettings(t *testing.T) {
+	dir, runner := fixture(t)
+	path := ".claude/settings.json"
+	write(t, dir, path, `{"hooks":{"UserPromptSubmit":[{"hooks":[{"command":"loom skill materialize"}]}]}}`)
+	must(t, runner, "add", path)
+	must(t, runner, "commit", "-qm", "user settings")
+	write(t, dir, path, `{"hooks":{"UserPromptSubmit":[{"hooks":[{"command":"loom transcript save"}]}]}}`)
+	result := capture(t, dir, runner)
+	if got := must(t, runner, "show", result.CaptureSHA+":"+path); !strings.Contains(got, "loom transcript save") {
+		t.Fatalf("tracked settings omitted: %s", got)
+	}
+}
+
+func TestCaptureExcludesStagedNewLoomClaudeSettings(t *testing.T) {
+	dir, runner := fixture(t)
+	path := ".claude/settings.json"
+	write(t, dir, path, `{"hooks":{"UserPromptSubmit":[{"hooks":[{"command":"loom skill materialize"}]}]}}`)
+	must(t, runner, "add", path)
+	result := capture(t, dir, runner)
+	if result.CaptureSHA != "" {
+		t.Fatalf("staged new Loom settings created capture %s", result.CaptureSHA)
+	}
+	if got := must(t, runner, "ls-files", "--cached", path); got != path {
+		t.Fatalf("staged user index changed: %s", got)
 	}
 }
 
