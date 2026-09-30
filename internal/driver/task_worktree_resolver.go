@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -356,15 +357,27 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 	if err != nil {
 		return TaskWorktree{}, err
 	}
-	baseBranch, err := r.baseBranchForTask(ctx, workspaceKey, selected, req)
-	if err != nil {
-		return TaskWorktree{}, err
-	}
 	base := ""
-	if req.PreviousAttemptID == "" {
-		base, err = localworkspace.ResolveTaskBase(repoPath, repoRemote(selected), baseBranch)
+	if req.PreviousAttemptID != "" {
+		repoPath, _, _, err = r.delegatedBase(ctx, req, repoPath, selected.Name)
 		if err != nil {
-			return TaskWorktree{}, fmt.Errorf("resolve task copy base for repo %q: %w", selected.Name, err)
+			return TaskWorktree{}, fmt.Errorf("resolve delegated retry source for repo %q: %w", selected.Name, err)
+		}
+	} else {
+		var delegated bool
+		repoPath, base, delegated, err = r.delegatedBase(ctx, req, repoPath, selected.Name)
+		if err != nil {
+			return TaskWorktree{}, fmt.Errorf("resolve delegated task base for repo %q: %w", selected.Name, err)
+		}
+		if !delegated {
+			baseBranch, err := r.baseBranchForTask(ctx, workspaceKey, selected, req)
+			if err != nil {
+				return TaskWorktree{}, err
+			}
+			base, err = localworkspace.ResolveTaskBase(repoPath, repoRemote(selected), baseBranch)
+			if err != nil {
+				return TaskWorktree{}, fmt.Errorf("resolve task copy base for repo %q: %w", selected.Name, err)
+			}
 		}
 	}
 	created, err := taskcopy.CreateDetailed(ctx, repoPath, target, workspaceKey, attemptID, req.PreviousAttemptID, base)
@@ -600,4 +613,81 @@ func repoDefaultBranch(repo *domain.Repo) string {
 		return ""
 	}
 	return strings.TrimSpace(repo.DefaultBranch)
+}
+
+type BaseRevision struct {
+	Change string `json:"change"`
+	Number int    `json:"number"`
+}
+
+func WithBaseRevision(input json.RawMessage, revision BaseRevision) (json.RawMessage, error) {
+	if revision.Change == "" || revision.Number < 1 {
+		return nil, errors.New("base revision needs change and number")
+	}
+	obj := map[string]json.RawMessage{}
+	if len(input) > 0 {
+		if err := json.Unmarshal(input, &obj); err != nil {
+			return nil, err
+		}
+	}
+	data, err := json.Marshal(revision)
+	if err != nil {
+		return nil, err
+	}
+	obj["baseRevision"] = data
+	return json.Marshal(obj)
+}
+
+func baseRevisionFromInput(input json.RawMessage) (BaseRevision, bool, error) {
+	if len(input) == 0 {
+		return BaseRevision{}, false, nil
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(input, &obj); err != nil {
+		return BaseRevision{}, false, err
+	}
+	data, ok := obj["baseRevision"]
+	if !ok {
+		return BaseRevision{}, false, nil
+	}
+	var revision BaseRevision
+	if err := json.Unmarshal(data, &revision); err != nil {
+		return BaseRevision{}, false, err
+	}
+	if revision.Change == "" || revision.Number < 1 {
+		return BaseRevision{}, false, errors.New("invalid base revision")
+	}
+	return revision, true, nil
+}
+
+func (r LocalTaskWorktreeResolver) delegatedBase(ctx context.Context, req TaskExecRequest, repoPath, repoName string) (string, string, bool, error) {
+	revision, hasRevision, err := baseRevisionFromInput(req.Input)
+	if err != nil {
+		return "", "", false, err
+	}
+	if !hasRevision && req.ParentSessionID == "" {
+		return repoPath, "", false, nil
+	}
+	base := ""
+	if req.ParentSessionID != "" {
+		parent, err := r.Store.AgentSessions().Get(ctx, req.WorkspaceKey, req.ParentSessionID)
+		if err != nil {
+			return "", "", false, fmt.Errorf("resolve delegating lead: %w", err)
+		}
+		if parent.AgentID == "" || (parent.Kind != domain.AgentSessionKindOrchestration && parent.Kind != domain.AgentSessionKindTerminal) {
+			return "", "", false, errors.New("parent session is not a lead")
+		}
+		leadPath, tip, err := taskcopy.LeadSource(ctx, req.WorkspaceKey, parent.AgentID, repoName)
+		if err != nil {
+			return "", "", false, err
+		}
+		if !hasRevision {
+			repoPath, base = leadPath, tip
+		}
+	}
+	if hasRevision {
+		base, err = taskcopy.RevisionBase(ctx, req.WorkspaceKey, revision.Change, revision.Number)
+		return repoPath, base, true, err
+	}
+	return repoPath, base, true, nil
 }
