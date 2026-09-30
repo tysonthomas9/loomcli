@@ -219,6 +219,28 @@ func TestRestackLocalEntryUsesRegisteredWorkingArea(t *testing.T) {
 	}
 }
 
+func TestRestackOfferDerivesRevisionOnTrunk(t *testing.T) {
+	fixture := newFixture(t)
+	trunk := preparePull(t, fixture)
+	if _, err := fixture.apply(t); err != nil {
+		t.Fatal(err)
+	}
+	base := advanceTrunk(t, fixture, trunk, "landed predecessor")
+	offer := journal.RestackOffer{Workspace: "W", Change: "C1", Predecessor: "X", Repo: "repo", Revision: 1, TrunkSHA: base}
+	revision, err := RestackOffer(context.Background(), offer)
+	if err != nil || revision != 2 {
+		t.Fatalf("restack offer = %d, %v", revision, err)
+	}
+	derived, err := fixture.store.GetRevision(context.Background(), "W", "C1", revision)
+	if err != nil || derived.Operation != "restack" || derived.BaseSHA != base {
+		t.Fatalf("derived revision = %+v, %v", derived, err)
+	}
+	again, err := RestackOffer(context.Background(), offer)
+	if err != nil || again != revision {
+		t.Fatalf("repeated offer = %d, %v", again, err)
+	}
+}
+
 func TestRestackPreSwapFailuresLeaveNoRefsOrPlan(t *testing.T) {
 	for _, step := range []string{"revision", "plan", "swap", "held"} {
 		t.Run(step, func(t *testing.T) {
