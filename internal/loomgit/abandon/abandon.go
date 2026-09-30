@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
@@ -68,6 +69,17 @@ type Service struct {
 
 func New() *Service {
 	return &Service{JournalPath: filepath.Join(config.GetConfigDir(), "loomgit", "store.db")}
+}
+
+func ReconcileLocal(ctx context.Context, sessions store.AgentSessionStore) error {
+	abandonment := New()
+	claims, ok := cli.GetDeps(nil).IssueBackend.(ClaimReleaser)
+	if !ok {
+		return errors.New("issue backend cannot read current claim holder")
+	}
+	abandonment.Claims = claims
+	abandonment.Sessions = sessions
+	return abandonment.Reconcile(ctx)
 }
 
 func (service *Service) Run(ctx context.Context, req Request) (Result, error) {
