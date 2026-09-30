@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -18,6 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/githubtoken"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
@@ -56,17 +56,7 @@ func openStore() (*stackstore.LocalStore, error) { return stackstore.Default() }
 var shaRe = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 
 func resolveGitHubToken(ctx context.Context) string {
-	if t := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); t != "" {
-		return t
-	}
-	if t := strings.TrimSpace(os.Getenv("GH_TOKEN")); t != "" {
-		return t
-	}
-	out, err := exec.CommandContext(ctx, "gh", "auth", "token").Output()
-	if err == nil {
-		return strings.TrimSpace(string(out))
-	}
-	return ""
+	return githubtoken.GitHub(ctx)
 }
 
 // resolveRepoPath resolves the local checkout for a stack's repo and fails closed

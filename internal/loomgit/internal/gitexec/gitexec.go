@@ -325,10 +325,10 @@ func (r *Runner) Run(ctx context.Context, args ...string) ([]byte, error) {
 	return r.runWithEnv(ctx, nil, nil, args...)
 }
 
-// RunWithCredential permits one host fetch or push against the scoped URL.
+// RunWithCredential permits one host fetch, push, or remote-ref read against the scoped URL.
 // The token reaches Git through askpass, never argv or repository config.
 func (r *Runner) RunWithCredential(ctx context.Context, source *cred.Source, repoURL string, args ...string) ([]byte, error) {
-	if source == nil || len(args) < 2 || (args[0] != "fetch" && args[0] != "push") || forbidden(args) {
+	if source == nil || len(args) < 2 || (args[0] != "fetch" && args[0] != "push" && args[0] != "ls-remote") || forbidden(args) {
 		return nil, ErrForbidden
 	}
 	found := false

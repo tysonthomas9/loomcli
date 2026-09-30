@@ -10,6 +10,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 )
 
+const WorkspaceRefPrefix = "refs/loom/ws/"
+
 func component(id string) error {
 	if id == "" || id == "." || strings.Contains(id, "..") ||
 		strings.ContainsAny(id, "/\\ \t\n\r~^:?*[\x00") || strings.Contains(id, "@{") {

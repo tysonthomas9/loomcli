@@ -124,7 +124,7 @@ EOF
 create_workspace() {
   mkdir -p "$(dirname "$WORKSPACE_ROOT")"
   if [ ! -e "${WORKSPACE_REPO}/.git" ]; then
-    loom workspace create "$WORKSPACE" --repos "$SOURCE_REPO" --path "$WORKSPACE_ROOT" --branch localmode
+    loom workspace create "$WORKSPACE" --repos "$SOURCE_REPO" --path "$WORKSPACE_ROOT" --branch main
   else
     loom workspace list >/dev/null
   fi

@@ -3,11 +3,10 @@ package epic
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/stack"
+	"github.com/tysonthomas9/loomcli/internal/githubtoken"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/stacklock"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
@@ -65,14 +64,5 @@ var publishEpicFromOrigin = (*stackpublish.Reconciler).PublishFromOrigin
 // resolveGitHubToken mirrors `loom stack`'s token resolution: env first, then a
 // local `gh auth token`. Returns "" when none is available.
 func resolveGitHubToken(ctx context.Context) string {
-	if t := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); t != "" {
-		return t
-	}
-	if t := strings.TrimSpace(os.Getenv("GH_TOKEN")); t != "" {
-		return t
-	}
-	if out, err := exec.CommandContext(ctx, "gh", "auth", "token").Output(); err == nil {
-		return strings.TrimSpace(string(out))
-	}
-	return ""
+	return githubtoken.GitHub(ctx)
 }

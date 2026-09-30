@@ -1,0 +1,8 @@
+name: Loom refs mirror to a bare provider without publishing branches or tags
+task: P1.19
+git: [min, latest]
+fixture: empty
+when:
+  - go_check: mirror_refs
+then:
+  - go_check: no_error

@@ -92,6 +92,8 @@ func (s *state) goCheck(name string) error {
 	case "provider_policy":
 		// Proves the bare remote accepts ordinary pushes and rejects secrets and oversized blobs.
 		return s.checkProvider()
+	case "mirror_refs":
+		return s.packageTests("./internal/loomgit/mirror", "Test.*")
 	case "fault_tools":
 		// Proves the lab has an ENOSPC tmpfs and a second Unix account.
 		return s.checkFaultTools()

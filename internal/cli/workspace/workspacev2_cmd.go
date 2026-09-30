@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -11,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/mirror"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -242,8 +244,9 @@ func runWorkspaceStatus(_ *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("get workspace: %w", err)
 		}
+		mirrorStatus := loomGitMirrorStatus(ctx, key)
 		if wsStatusJSON {
-			return cmdstore.WriteJSON(map[string]any{"key": ws.Key, "state": ws.State, "error": ws.ErrorMessage})
+			return cmdstore.WriteJSON(map[string]any{"key": ws.Key, "state": ws.State, "error": ws.ErrorMessage, "loom_git_mirror": mirrorStatus})
 		}
 		state := string(ws.State)
 		if state == "" {
@@ -254,8 +257,55 @@ func runWorkspaceStatus(_ *cobra.Command, args []string) error {
 			fmt.Printf("\t%s", ws.ErrorMessage)
 		}
 		fmt.Println()
-		return nil
+		return writeLoomGitMirrorStatus(os.Stdout, mirrorStatus)
 	})
+}
+
+func writeLoomGitMirrorStatus(w io.Writer, summary loomGitMirrorSummary) error {
+	if _, err := fmt.Fprintf(w, "Loom Git: %d mirrored, %d pending, %d not mirrored\n", summary.Mirrored, summary.Pending, len(summary.NotMirrored)); err != nil {
+		return err
+	}
+	for _, reason := range summary.NotMirrored {
+		if _, err := fmt.Fprintf(w, "  %s\n", reason); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type loomGitMirrorSummary struct {
+	Mirrored    int      `json:"mirrored"`
+	Pending     int      `json:"pending"`
+	NotMirrored []string `json:"not_mirrored,omitempty"`
+}
+
+func loomGitMirrorStatus(ctx context.Context, workspace string) loomGitMirrorSummary {
+	rows, err := mirror.StatusWorkspace(ctx, workspace)
+	if err != nil {
+		return loomGitMirrorSummary{NotMirrored: []string{"status unavailable: " + err.Error()}}
+	}
+	var statuses []loomGitMirrorRow
+	for _, row := range rows {
+		statuses = append(statuses, loomGitMirrorRow{Ref: row.Ref, State: row.State, Reason: row.Reason})
+	}
+	return summarizeLoomGitMirror(statuses)
+}
+
+type loomGitMirrorRow struct{ Ref, State, Reason string }
+
+func summarizeLoomGitMirror(rows []loomGitMirrorRow) loomGitMirrorSummary {
+	var summary loomGitMirrorSummary
+	for _, row := range rows {
+		switch row.State {
+		case "mirrored":
+			summary.Mirrored++
+		case "pending":
+			summary.Pending++
+		default:
+			summary.NotMirrored = append(summary.NotMirrored, row.Ref+": "+row.Reason)
+		}
+	}
+	return summary
 }
 
 // pickWorkspaceKey returns args[0] if provided, else the active workspace.
