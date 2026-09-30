@@ -259,8 +259,8 @@ func TestRetryRecordsExactSHAAfterRecordFailure(t *testing.T) {
 	if out, err := f.push(t, ref); err == nil || !strings.Contains(out, "contact the host operator") || strings.Contains(out, "record unavailable") {
 		t.Fatalf("record failure: %v: %s", err, out)
 	}
-	if got := git(t, f.provider, "rev-parse", ref); got != sha {
-		t.Fatalf("provider ref %s, want %s", got, sha)
+	if got := git(t, f.provider, "for-each-ref", "--format=%(refname)"); got != "" {
+		t.Fatalf("provider advanced without a durable pending record: %s", got)
 	}
 	if got := git(t, f.host, "rev-parse", ref); got != sha {
 		t.Fatalf("host ref %s, want %s after record failure", got, sha)
@@ -392,11 +392,25 @@ func TestProviderRejectionRecordsNoAcceptedSHA(t *testing.T) {
 	if err == nil || !strings.Contains(out, "provider denied") {
 		t.Fatalf("provider rejection: %v: %s", err, out)
 	}
-	if _, found, err := f.store.MirrorState(context.Background(), f.host, ref); err != nil || found {
-		t.Fatalf("accepted record after rejection: %v %v", found, err)
+	row, found, err := f.store.MirrorState(context.Background(), f.host, ref)
+	if err != nil || !found || row.State != "not_mirrored" || !strings.Contains(row.Reason, "provider denied") {
+		t.Fatalf("retained rejection: %+v %v", row, err)
 	}
 	if out := git(t, f.provider, "for-each-ref", "--format=%(refname)"); out != "" {
 		t.Fatalf("provider changed: %s", out)
+	}
+	if got := git(t, f.host, "rev-parse", ref); got == "" {
+		t.Fatal("host discarded rejected capture")
+	}
+	if err := os.Remove(hook); err != nil {
+		t.Fatal(err)
+	}
+	git(t, f.host, "remote", "add", "origin", f.provider)
+	if err := mirror.SyncRepo(context.Background(), f.store, f.host, f.base); err != nil {
+		t.Fatal(err)
+	}
+	if got := git(t, f.provider, "rev-parse", ref); got != git(t, f.host, "rev-parse", ref) {
+		t.Fatalf("reconcile did not retry retained capture: %s", got)
 	}
 }
 

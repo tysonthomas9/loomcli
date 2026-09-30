@@ -251,25 +251,37 @@ func (p *Proxy) forwardOne(ctx context.Context, push mirror.RefPusher, host *git
 	if err != nil {
 		return err
 	}
-	actual, err := push.RemoteSHA(ctx, p.Remote, change.ref)
-	if err != nil {
-		return err
-	}
-	if actual != change.new && actual != "" && (!found || prior.SHA != actual || prior.Remote != p.Remote || prior.State != "mirrored") {
-		return clientError("remote ref moved")
-	}
 	if err := fetchOnHost(ctx, host, quarantine, change); err != nil {
 		return err
-	}
-	if actual != change.new {
-		if err := push.Push(ctx, p.Remote, change.ref, change.new, actual); err != nil {
-			return clientError("provider rejected: " + providerReason(err))
-		}
 	}
 	if err := retainOnHost(ctx, host, change, prior, found); err != nil {
 		return err
 	}
+	pending := journal.MirrorRecord{Repo: host.Path(), Ref: change.ref, Remote: p.Remote, SHA: prior.SHA, State: "pending"}
+	if err := p.Store.PutMirrorRecord(ctx, pending); err != nil {
+		return err
+	}
+	actual, err := push.RemoteSHA(ctx, p.Remote, change.ref)
+	if err != nil {
+		return p.recordFailure(ctx, pending, "provider unavailable: "+providerReason(err))
+	}
+	if actual != change.new && actual != "" && (!found || prior.SHA != actual || prior.Remote != p.Remote || prior.State != "mirrored") {
+		return p.recordFailure(ctx, pending, "remote ref moved")
+	}
+	if actual != change.new {
+		if err := push.Push(ctx, p.Remote, change.ref, change.new, actual); err != nil {
+			return p.recordFailure(ctx, pending, "provider rejected: "+providerReason(err))
+		}
+	}
 	return p.Store.PutMirrorRecord(ctx, journal.MirrorRecord{Repo: host.Path(), Ref: change.ref, Remote: p.Remote, SHA: change.new, State: "mirrored"})
+}
+
+func (p *Proxy) recordFailure(ctx context.Context, row journal.MirrorRecord, reason string) error {
+	row.State, row.Reason = "not_mirrored", reason
+	if err := p.Store.PutMirrorRecord(ctx, row); err != nil {
+		return err
+	}
+	return clientError(reason)
 }
 
 func fetchOnHost(ctx context.Context, host *gitexec.Runner, quarantine string, change update) error {

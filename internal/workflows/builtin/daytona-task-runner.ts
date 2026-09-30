@@ -69,6 +69,10 @@ export async function run(ctx = {}) {
   const secrets = [];
   let sandbox;
   let sandboxId = "";
+  let captureAccepted = false;
+  let captureAttempted = false;
+  let captureContext = null;
+  let captureSetup = null;
 
   try {
     const imports = await loadRuntimeImports();
@@ -141,6 +145,7 @@ export async function run(ctx = {}) {
       model: false,
       name: "daytona-setup",
     });
+    captureSetup = setup;
 
     const clone = await setup.shell(cloneCommand(repoUrl, repoDir, delivery.baseBranch), {
       timeout: numberValue(process.env.DAYTONA_CLONE_TIMEOUT_SECONDS, 180),
@@ -150,10 +155,22 @@ export async function run(ctx = {}) {
       return failed("daytona_repo_clone_failed", textTail(clone.stdout + clone.stderr), taskRunId, request, logs, sandboxId, secrets);
     }
 
-    const head = await setup.shell("git -C " + shellQuote(repoDir) + " rev-parse --short HEAD", { timeout: 30 });
+    const head = await setup.shell("git -C " + shellQuote(repoDir) + " rev-parse HEAD", { timeout: 30 });
     if (head.exitCode !== 0 || !head.stdout.trim()) {
       return failed("daytona_repo_head_failed", textTail(head.stdout + head.stderr), taskRunId, request, logs, sandboxId, secrets);
     }
+    captureContext = { request, repoUrl, repoDir, baseSha: head.stdout.trim(), taskRunId };
+    if (delivery.openPullRequest) {
+      const checkout = await setup.shell(
+        "git -C " + shellQuote(repoDir) + " checkout -B " + shellQuote(delivery.branch),
+        { timeout: 30 },
+      );
+      logs.push(commandLog("git checkout task branch", checkout));
+      if (checkout.exitCode !== 0) {
+        return failed("daytona_branch_checkout_failed", textTail(checkout.stdout + checkout.stderr), taskRunId, request, logs, sandboxId, secrets);
+      }
+    }
+
     const leakProbe = await setup.shell(sandboxLeakProbeCommand(), { timeout: 30 });
     const leakedEnvCount = numberValue(leakProbe.stdout.trim(), 0);
     if (leakedEnvCount !== 0) {
@@ -175,29 +192,25 @@ export async function run(ctx = {}) {
     const session = await harness.session(flueSession);
     const prompt = buildPrompt(request, task, repoDir);
     const response = await session.prompt(prompt);
-    const markUntracked = await setup.shell("git -C " + shellQuote(repoDir) + " add -N -- . || true", { timeout: 30 });
-    logs.push(commandLog("git add -N", markUntracked));
-    const diffStat = await setup.shell("git -C " + shellQuote(repoDir) + " diff --stat -- . || true", { timeout: 30 });
-    const diff = await setup.shell("git -C " + shellQuote(repoDir) + " diff --binary -- . || true", {
-      timeout: numberValue(process.env.DAYTONA_DIFF_TIMEOUT_SECONDS, 60),
-    });
-    const patchArtifact = await uploadPatchArtifact(taskContext.client, {
-      taskRunId,
-      taskId,
-      repoUrl,
-      repoDir,
-      head: head.stdout.trim(),
-      diff: redact(diff.stdout || "", secrets),
-      diffStat: redact(diffStat.stdout || "", secrets),
-    }, logs);
+    captureAttempted = true;
+    const capture = await captureRemoteWork(setup, sandbox, captureContext, secrets);
+    captureAccepted = capture.complete;
+    if (!capture.complete) {
+      const result = failed("capture_incomplete", "remote capture retained excluded or incomplete files", taskRunId, request, logs, sandboxId, secrets);
+      result.runtimeMetadata.remote_capture_status = "retained";
+      result.runtimeMetadata.remote_capture_reason = result.errorMessage;
+      return result;
+    }
+    const patchArtifact = null;
+    const published = null;
+    const prArtifact = null;
     const transcriptEntries = redactTranscriptEntries(transcriptCollector.entries, secrets);
     const transcriptJSONL = serializeTranscriptJSONL(transcriptEntries);
     const usage = flueUsageToTaskUsage(response && response.usage, { costUnit: "usd" });
 
     logs.push("codex/flue response:");
     logs.push(textTail(stringValue(response && response.text), 2000));
-    logs.push("remote git diffstat:");
-    logs.push(textTail(diffStat.stdout || "(no diff)", 2000));
+    logs.push("remote capture " + capture.captureSha);
 
     return {
       status: "completed",
@@ -232,15 +245,33 @@ export async function run(ctx = {}) {
         daytona_repo_url: repoUrl,
         daytona_repo_dir: repoDir,
         daytona_repo_head: head.stdout.trim(),
+        remote_capture_status: "frozen",
+        remote_capture_sha: capture.captureSha,
+        remote_capture_tree_hash: capture.treeHash,
+        remote_capture_change_id: capture.changeId,
+        remote_capture_revision: capture.revision,
         patch_artifact_id: patchArtifact && patchArtifact.id,
         daytona_sandbox_env_leak_count: "0",
         response_text: redact(textTail(stringValue(response && response.text), 1000), secrets),
       }),
     };
   } catch (error) {
-    return failed("daytona_task_runner_failed", errorMessage(error), taskRunId, request, logs, sandboxId, secrets);
+    if (captureContext && captureSetup && !captureAttempted) {
+      try {
+        captureAttempted = true;
+        await captureRemoteWork(captureSetup, sandbox, { ...captureContext, outcome: "failed" }, secrets);
+      } catch (captureError) {
+        logs.push("failed-run capture: " + errorMessage(captureError));
+      }
+    }
+    const result = failed("daytona_task_runner_failed", errorMessage(error), taskRunId, request, logs, sandboxId, secrets);
+    if (sandbox) {
+      result.runtimeMetadata.remote_capture_status = "retained";
+      result.runtimeMetadata.remote_capture_reason = result.errorMessage;
+    }
+    return result;
   } finally {
-    if (sandbox && process.env.KEEP_DAYTONA_SANDBOX !== "1") {
+    if (sandbox && captureAccepted && process.env.KEEP_DAYTONA_SANDBOX !== "1") {
       try {
         await sandbox.delete(60);
       } catch (error) {
@@ -249,6 +280,163 @@ export async function run(ctx = {}) {
     }
   }
 }
+
+async function captureOp(operation, request, params) {
+  const base = stringValue(process.env.LOOM_TASK_RUN_API_URL).replace(/\/$/, "");
+  const workspace = stringValue(request.workspace_key || request.workspaceKey || process.env.LOOM_DRIVER_WORKSPACE);
+  if (!base || !workspace) {
+    throw new Error("remote capture requires the serve task-run API and workspace identity");
+  }
+  const headers = {
+    "Content-Type": "application/json",
+    Authorization: "Bearer " + stringValue(process.env.LOOM_TASK_RUN_LEASE_TOKEN),
+    "X-Loom-Task-Run-Id": stringValue(request.task_run_id || request.taskRunId || process.env.LOOM_TASK_RUN_ID),
+    "X-Loom-Task-Run-Node-Id": stringValue(process.env.LOOM_TASK_RUN_NODE_ID),
+    "X-Loom-Task-Run-Lease-Id": stringValue(process.env.LOOM_TASK_RUN_LEASE_ID),
+    "X-Loom-Task-Run-Fencing-Token": stringValue(process.env.LOOM_TASK_RUN_FENCING_TOKEN),
+  };
+  const route = `/api/workspaces/${encodeURIComponent(workspace)}/task-run`;
+  const response = await fetch(base + route + "/" + operation, {
+    method: "POST", headers, body: JSON.stringify(params),
+  });
+  const body = await response.json();
+  if (!response.ok) {
+    throw new Error("remote capture " + operation + ": " + stringValue(body.message || body.error || response.status));
+  }
+  return { body, proxyURL: base + route + "/capture.git" };
+}
+
+async function captureRemoteWork(setup, sandbox, input, secrets) {
+  const prepared = await captureOp("capture-token", input.request, {
+    repoUrl: input.repoUrl, baseSha: input.baseSha,
+  });
+  const token = stringValue(prepared.body.token);
+  if (!token || !prepared.body.ref) {
+    throw new Error("host did not return a capture token and ref");
+  }
+  secrets.push(token);
+  const tokenPath = "/tmp/loom-capture-token-" + Math.random().toString(16).slice(2);
+  await sandbox.fs.uploadFile(Buffer.from(token, "utf8"), tokenPath);
+  const args = {
+    repo: input.repoDir, workspace: stringValue(input.request.workspace_key || input.request.workspaceKey || process.env.LOOM_DRIVER_WORKSPACE),
+    attempt: stringValue(prepared.body.attempt), ref: stringValue(prepared.body.ref),
+    proxyURL: prepared.proxyURL, tokenPath,
+  };
+  const command = "node -e " + shellQuote(REMOTE_CAPTURE_SCRIPT) + " -- " + shellQuote(JSON.stringify(args));
+  const result = await setup.shell(command, { timeout: numberValue(process.env.DAYTONA_CAPTURE_TIMEOUT_SECONDS, 180) });
+  if (result.exitCode !== 0) {
+    throw new Error("remote capture push failed: " + textTail(result.stderr || result.stdout, 1000));
+  }
+  let capture;
+  try {
+    capture = JSON.parse(result.stdout.trim());
+  } catch {
+    throw new Error("remote capture returned invalid manifest");
+  }
+  if (capture.pushError) {
+    await captureOp("capture-pending", input.request, {
+      repoUrl: input.repoUrl, baseSha: input.baseSha, captureSha: capture.captureSha,
+      treeHash: capture.treeHash, complete: capture.complete,
+      outcome: input.outcome || "failed", reason: capture.pushError,
+    });
+    throw new Error("provider capture push failed; sandbox retained: " + capture.pushError);
+  }
+  const finalized = await captureOp("capture-finalize", input.request, {
+    repoUrl: input.repoUrl, baseSha: input.baseSha, captureSha: capture.captureSha,
+    treeHash: capture.treeHash, complete: capture.complete,
+    outcome: input.outcome || (capture.complete ? "completed" : "failed"),
+  });
+  return { ...capture, ...finalized.body };
+}
+
+const REMOTE_CAPTURE_SCRIPT = String.raw`
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const cp = require("node:child_process");
+const input = JSON.parse(process.argv[1]);
+const repo = input.repo;
+const git = (args, env) => cp.execFileSync("git", args, {
+  cwd: repo, env: { ...process.env, ...env }, maxBuffer: 64 * 1024 * 1024,
+});
+const value = (args, env) => git(args, env).toString("utf8").trim();
+const paths = (args) => git(args).toString("utf8").split("\0").filter(Boolean);
+const secret = (name) => name.split("/").some((part) => {
+  const lower = part.toLowerCase();
+  return lower.startsWith(".env") || lower.endsWith(".pem") || lower.endsWith(".key") ||
+    ["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", ".npmrc", ".netrc", "credentials.json"].includes(lower.replace(/\.pub$/, ""));
+});
+const head = value(["rev-parse", "HEAD"]);
+const tracked = new Set(paths(["ls-tree", "-r", "--name-only", "-z", "HEAD"]));
+const changed = paths(["diff", "--no-renames", "--name-only", "-z", "HEAD"]);
+const untracked = paths(["ls-files", "--others", "--exclude-standard", "-z"]);
+const ignored = paths(["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"]);
+const ignoredIndex = new Set(paths(["ls-files", "--cached", "--ignored", "--exclude-standard", "-z"]));
+const entries = [];
+const stage = [];
+let total = 0;
+let complete = true;
+for (const name of [...new Set([...changed, ...untracked])].sort()) {
+  const existing = tracked.has(name);
+  let info;
+  try { info = fs.lstatSync(path.join(repo, name)); } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  let category = "captured";
+  let reason = "";
+  if (!existing && ignoredIndex.has(name)) category = "listed";
+  else if (!existing && secret(name)) category = "secret_suspect";
+  else if (!info && !existing) { category = "incomplete"; reason = "new file disappeared"; }
+  else if (info && !info.isFile() && !info.isSymbolicLink()) { category = "incomplete"; reason = "unsupported file type"; }
+  else if (info && info.isFile() && !(info.mode & 0o444)) { category = "incomplete"; reason = "unreadable file"; }
+  else if (info && info.size > 100 * 1024 * 1024) { category = "incomplete"; reason = "per-file cap exceeded"; }
+  else if (info && total + info.size > 2 * 1024 * 1024 * 1024) { category = "incomplete"; reason = "capture cap exceeded"; }
+  if (category === "captured") { stage.push(name); total += info ? info.size : 0; }
+  if (category === "secret_suspect" || category === "incomplete") complete = false;
+  entries.push({ path: name, class: category, size: info ? info.size : 0, ...(reason ? { reason } : {}) });
+}
+for (const name of ignored) entries.push({ path: name, class: "listed", size: 0 });
+entries.sort((left, right) => left.path.localeCompare(right.path));
+const manifest = { workspace: input.workspace, attempt: input.attempt, entries, complete, retained: !complete };
+const gitPath = value(["rev-parse", "--git-path", "loom/capture"]);
+const manifestDir = path.isAbsolute(gitPath) ? gitPath : path.join(repo, gitPath);
+fs.mkdirSync(manifestDir, { recursive: true, mode: 0o700 });
+fs.writeFileSync(path.join(manifestDir, input.workspace + "-" + input.attempt + ".json"), JSON.stringify(manifest));
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "loom-capture-"));
+try {
+  const index = path.join(scratch, "index");
+  const indexEnv = { GIT_INDEX_FILE: index };
+  git(["read-tree", "HEAD"], indexEnv);
+  if (stage.length) {
+    const pathspec = path.join(scratch, "paths");
+    fs.writeFileSync(pathspec, stage.join("\0") + "\0");
+    git(["add", "-A", "--pathspec-from-file=" + pathspec, "--pathspec-file-nul"], indexEnv);
+  }
+  const treeHash = value(["write-tree"], indexEnv);
+  const headTree = value(["rev-parse", "HEAD^{tree}"]);
+  const captureSha = treeHash === headTree ? head : value(["commit-tree", treeHash, "-p", head, "-m", "loom: remote uncommitted work"], {
+    GIT_AUTHOR_NAME: "Loom", GIT_AUTHOR_EMAIL: "loom@localhost",
+    GIT_COMMITTER_NAME: "Loom", GIT_COMMITTER_EMAIL: "loom@localhost",
+  });
+  git(["update-ref", input.ref, captureSha]);
+  const token = fs.readFileSync(input.tokenPath, "utf8").trim();
+  let pushError = "";
+  try {
+    git(["push", "--force", input.proxyURL, captureSha + ":" + input.ref], {
+      GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.extraHeader",
+      GIT_CONFIG_VALUE_0: "Authorization: Bearer " + token,
+    });
+  } catch (error) {
+    pushError = String(error.stderr || error.message || error).trim().slice(-1000);
+  }
+  process.stdout.write(JSON.stringify({ ...manifest, captureSha, treeHash, pushError }));
+} finally {
+  fs.rmSync(scratch, { recursive: true, force: true });
+  try { fs.unlinkSync(input.tokenPath); } catch {}
+}
+`;
+
+export function remoteCaptureScript() { return REMOTE_CAPTURE_SCRIPT; }
 
 async function loadRuntimeImports() {
   const runtimeImport = stringValue(process.env.FLUE_RUNTIME_IMPORT);

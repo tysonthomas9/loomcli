@@ -62,6 +62,11 @@ func taskCopyAttemptID(taskRunID string, schedulerAttempt int) string {
 	return fmt.Sprintf("%s-a%d", name, schedulerAttempt+1)
 }
 
+// TaskCopyAttemptID is the canonical attempt identity used by remote capture.
+func TaskCopyAttemptID(taskRunID string, schedulerAttempt int) string {
+	return taskCopyAttemptID(taskRunID, schedulerAttempt)
+}
+
 func requeueClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, execResult TaskExecResult, completion taskExecCompletion, metadata map[string]string, retry taskRunRetryDecisionResult) (*domain.TaskRun, error) {
 	metadata = taskRunRetryMetadata(claimed, retry, completion, metadata)
 	requeued, err := s.TaskRuns().Requeue(ctx, claimed.WorkspaceKey, claimed.TaskRunID, store.TaskRunRequeue{

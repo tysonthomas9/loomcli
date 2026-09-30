@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { after, before, describe, it } from "node:test";
 
@@ -235,5 +236,55 @@ describe("daytona-task-runner stack lineage parity (Stage 5)", () => {
     assert.ok(cmd.includes("--branch"), "clones the predecessor base branch");
     assert.ok(!cmd.includes("fixture-token") && !cmd.includes("AUTHORIZATION"), "clone command contains no credential");
     assert.throws(() => mod.cloneCommand("https://user:fixture-token@github.com/o/r.git", "/work/repo", ""), /credentials/);
+  });
+});
+
+describe("remote sandbox capture", () => {
+  it("keeps two commits and edits while excluding secrets and ignored files", () => {
+    const root = fs.mkdtempSync(path.join(stageRoot, "capture-"));
+    const source = path.join(root, "source");
+    const provider = path.join(root, "provider.git");
+    const task = path.join(root, "task");
+    fs.mkdirSync(source);
+    const env = {
+      ...process.env,
+      GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_AUTHOR_NAME: "Loom", GIT_AUTHOR_EMAIL: "loom@localhost",
+      GIT_COMMITTER_NAME: "Loom", GIT_COMMITTER_EMAIL: "loom@localhost",
+    };
+    const git = (cwd, ...args) => execFileSync("git", args, { cwd, env, encoding: "utf8" }).trim();
+    git(root, "init", "--bare", "-q", "-b", "main", provider);
+    git(source, "init", "-q", "-b", "main");
+    fs.writeFileSync(path.join(source, "readme"), "base\n");
+    fs.writeFileSync(path.join(source, ".gitignore"), "*.log\n");
+    git(source, "add", ".");
+    git(source, "commit", "-qm", "base");
+    const base = git(source, "rev-parse", "HEAD");
+    git(source, "remote", "add", "origin", provider);
+    git(source, "push", "-q", "origin", "main");
+    git(root, "clone", "-q", provider, task);
+    for (const name of ["one", "two"]) {
+      fs.writeFileSync(path.join(task, name), name);
+      git(task, "add", name);
+      git(task, "commit", "-qm", name);
+    }
+    fs.writeFileSync(path.join(task, "readme"), "edited\n");
+    fs.writeFileSync(path.join(task, ".env"), "SECRET=fixture\n");
+    fs.writeFileSync(path.join(task, "scratch.log"), "ignored\n");
+    const tokenPath = path.join(root, "scoped-token");
+    fs.writeFileSync(tokenPath, "fixture-scoped-token");
+    const ref = "refs/loom/ws/W/attempt/run-a1/capture";
+    const input = { repo: task, workspace: "W", attempt: "run-a1", ref, proxyURL: provider, tokenPath };
+    const output = execFileSync("node", ["-e", mod.remoteCaptureScript(), "--", JSON.stringify(input)], { env, encoding: "utf8" });
+    const capture = JSON.parse(output);
+    assert.equal(capture.complete, false);
+    assert.equal(capture.retained, true);
+    assert.ok(capture.entries.some((entry) => entry.path === ".env" && entry.class === "secret_suspect"));
+    assert.ok(capture.entries.some((entry) => entry.path === "scratch.log" && entry.class === "listed"));
+    assert.equal(git(provider, "rev-parse", ref), capture.captureSha);
+    assert.equal(git(task, "rev-list", "--count", `${base}..${capture.captureSha}`), "3");
+    assert.equal(git(task, "show", `${capture.captureSha}:readme`), "edited");
+    assert.ok(!git(task, "ls-tree", "-r", "--name-only", capture.captureSha).includes(".env"));
+    assert.equal(fs.existsSync(tokenPath), false);
   });
 });
