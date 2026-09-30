@@ -306,17 +306,7 @@ func removeCopy(ctx context.Context, store *journal.SQLite, row journal.Retained
 		if !apply {
 			return nil
 		}
-		repo, err := pool.New(store).Admit(ctx, row.SourceRepo)
-		if err != nil {
-			return err
-		}
-		return repo.WithLock(ctx, func(ctx context.Context) error {
-			if err := checkCopyContent(ctx, copyRunner, expected); err != nil {
-				return err
-			}
-			_, err := repo.Run(ctx, "worktree", "remove", row.Path)
-			return err
-		})
+		return removeWithLocks(ctx, store, row, runner, copyRunner, expected, true)
 	}
 	if err := cloneRefsCaptured(ctx, runner, copyRunner, expected); err != nil {
 		return err
@@ -327,10 +317,56 @@ func removeCopy(ctx context.Context, store *journal.SQLite, row journal.Retained
 	if !apply {
 		return nil
 	}
-	return removeCloneWithLease(ctx, row.Path, runner, copyRunner, expected)
+	return removeWithLocks(ctx, store, row, runner, copyRunner, expected, false)
 }
 
-func removeCloneWithLease(ctx context.Context, path string, sourceRunner, copyRunner *gitexec.Runner, expected string) error {
+func removeWithLocks(ctx context.Context, store *journal.SQLite, row journal.RetainedCopy,
+	sourceRunner, copyRunner *gitexec.Runner, expected string, linked bool) error {
+	return withCopyLease(row.Path, func() error {
+		repositories := pool.New(store)
+		sourceRepo, err := repositories.Admit(ctx, row.SourceRepo)
+		if err != nil {
+			return err
+		}
+		return sourceRepo.WithLock(ctx, func(ctx context.Context) error {
+			if linked {
+				return removeLockedCopy(ctx, row, sourceRunner, copyRunner, expected, sourceRepo, linked)
+			}
+			copyRepo, err := repositories.Admit(ctx, row.Path)
+			if err != nil {
+				return err
+			}
+			return copyRepo.WithLock(ctx, func(ctx context.Context) error {
+				return removeLockedCopy(ctx, row, sourceRunner, copyRunner, expected, sourceRepo, linked)
+			})
+		})
+	})
+}
+
+func removeLockedCopy(ctx context.Context, row journal.RetainedCopy, sourceRunner, copyRunner *gitexec.Runner,
+	expected string, sourceRepo *pool.LocalRepo, linked bool) error {
+	ref, err := refname.AttemptCapture(row.Workspace, row.Attempt)
+	if err != nil {
+		return err
+	}
+	sha, err := sourceRunner.Run(ctx, "show-ref", "--verify", "--hash", ref)
+	if err != nil || strings.TrimSpace(string(sha)) != expected {
+		return errors.New("source capture ref changed")
+	}
+	if err := checkCopyContentWithLease(ctx, copyRunner, expected); err != nil {
+		return err
+	}
+	if !linked {
+		if err := cloneRefsCaptured(ctx, sourceRunner, copyRunner, expected); err != nil {
+			return err
+		}
+		return os.RemoveAll(row.Path)
+	}
+	_, err = sourceRepo.Run(ctx, "worktree", "remove", "--force", row.Path)
+	return err
+}
+
+func withCopyLease(path string, action func() error) error {
 	root, err := os.OpenRoot(path)
 	if err != nil {
 		return err
@@ -351,13 +387,7 @@ func removeCloneWithLease(ctx context.Context, path string, sourceRunner, copyRu
 	if _, err := fmt.Fprintf(lock, "{\"pid\":%d}", os.Getpid()); err != nil {
 		return err
 	}
-	if err := checkCopyContentWithLease(ctx, copyRunner, expected); err != nil {
-		return err
-	}
-	if err := cloneRefsCaptured(ctx, sourceRunner, copyRunner, expected); err != nil {
-		return err
-	}
-	return os.RemoveAll(path)
+	return action()
 }
 
 func checkCopyContent(ctx context.Context, runner *gitexec.Runner, expected string) error {

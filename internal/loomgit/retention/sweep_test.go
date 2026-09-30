@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/pool"
 )
 
 type fakeAbandonment bool
@@ -202,6 +203,36 @@ func TestSweepRemovesFullyFrozenClone(t *testing.T) {
 		t.Fatalf("leased clone must remain: %+v, %v", results, err)
 	}
 	if err := os.Remove(leasePath); err != nil {
+		t.Fatal(err)
+	}
+	copyRepo, err := pool.New(store).Admit(ctx, copyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked := make(chan struct{})
+	release := make(chan struct{})
+	finished := make(chan error, 1)
+	go func() {
+		finished <- copyRepo.WithLock(ctx, func(context.Context) error {
+			close(locked)
+			<-release
+			return nil
+		})
+	}()
+	<-locked
+	blockedCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	err = removeWithLocks(blockedCtx, store, journal.RetainedCopy{
+		Workspace: "W", Attempt: "A", Path: copyPath, SourceRepo: source,
+	}, sourceRunner, copyRunner, captured.SHA, false)
+	cancel()
+	if err == nil {
+		t.Fatal("repo lease did not block clone removal")
+	}
+	if _, err := os.Stat(copyPath); err != nil {
+		t.Fatalf("repo-leased clone removed: %v", err)
+	}
+	close(release)
+	if err := <-finished; err != nil {
 		t.Fatal(err)
 	}
 	results, err = sweep.Run(ctx, true)
