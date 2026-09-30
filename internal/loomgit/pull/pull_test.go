@@ -31,7 +31,7 @@ func newFixture(t *testing.T) *fixture { return fixtureWithSource(t, nil) }
 func fixtureWithSource(t *testing.T, extend func(*testing.T, *fixture)) *fixture {
 	t.Helper()
 	dir := t.TempDir()
-	if out, err := exec.Command("git", "init", "-q", dir).CombinedOutput(); err != nil { //nolint:norawexec // Temporary real-Git fixture, no network.
+	if out, err := exec.Command("git", "init", "-q", "-b", "main", dir).CombinedOutput(); err != nil { //nolint:norawexec // Temporary real-Git fixture, no network.
 		t.Fatalf("git init: %s: %v", out, err)
 	}
 	options := gitexec.Options{GlobalConfig: os.DevNull, SystemConfig: os.DevNull,
