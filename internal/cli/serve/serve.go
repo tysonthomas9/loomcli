@@ -225,7 +225,7 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Fatalf("failed to open fleet-db store: %v", storeErr)
 	}
 	defer func() { _ = storeHandle.Close() }()
-	if err := workspacemgr.Reconcile(ctx, storeHandle.Store); err != nil {
+	if err := workspacemgr.ReconcileJournal(ctx, storeHandle.Store); err != nil {
 		log.Printf("warning: reconcile workspace creations: %v", err)
 	}
 	startLoomGitReconciler(ctx, storeHandle.Store)

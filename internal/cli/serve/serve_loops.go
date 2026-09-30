@@ -35,7 +35,7 @@ func startLoomGitReconciler(ctx context.Context, st store.Store) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := workspacemgr.Reconcile(ctx, st); err != nil && !errors.Is(err, context.Canceled) {
+				if err := workspacemgr.ReconcileJournal(ctx, st); err != nil && !errors.Is(err, context.Canceled) {
 					slog.Error("Loom Git reconcile failed", "err", err)
 				}
 			}

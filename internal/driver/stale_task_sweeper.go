@@ -13,6 +13,23 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
+func (e HostBridgeTaskExecutor) recordTaskCopy(ctx context.Context, req TaskExecRequest, worktree TaskWorktree) error {
+	if e.Store == nil || req.TaskRunID == "" {
+		return nil
+	}
+	metadata := withTaskWorktreeMetadata(TaskExecResult{}, worktree).RuntimeMetadata
+	metadata["retained_path"] = worktree.Path
+	metadata["patch_back_status"] = "retained"
+	_, err := e.Store.TaskRuns().Heartbeat(ctx, req.WorkspaceKey, req.TaskRunID, store.TaskRunHeartbeat{
+		NodeID: req.NodeID, LeaseID: req.LeaseID, LeaseToken: req.LeaseToken,
+		FencingToken: req.FencingToken, RuntimeMetadata: metadata,
+	})
+	if err != nil {
+		return fmt.Errorf("record task copy before execution: %w", err)
+	}
+	return nil
+}
+
 // defaultStaleTaskRunMaxAge is how old a running TaskRun's heartbeat may be
 // before the sweeper fails it, when no MaxAge is configured. Sized for the
 // longest legitimate task runs — a daytona sandbox provision + git clone +

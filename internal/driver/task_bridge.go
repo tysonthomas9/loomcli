@@ -223,16 +223,8 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	}
 	if resolvedWorktree.Path != "" {
 		defer func() { result = withTaskWorktreeMetadata(result, resolvedWorktree) }()
-		if e.Store != nil && req.TaskRunID != "" {
-			metadata := withTaskWorktreeMetadata(TaskExecResult{}, resolvedWorktree).RuntimeMetadata
-			metadata["retained_path"] = resolvedWorktree.Path
-			metadata["patch_back_status"] = "retained"
-			if _, heartbeatErr := e.Store.TaskRuns().Heartbeat(ctx, req.WorkspaceKey, req.TaskRunID, store.TaskRunHeartbeat{
-				NodeID: req.NodeID, LeaseID: req.LeaseID, LeaseToken: req.LeaseToken,
-				FencingToken: req.FencingToken, RuntimeMetadata: metadata,
-			}); heartbeatErr != nil {
-				return TaskExecResult{}, fmt.Errorf("record task copy before execution: %w", heartbeatErr)
-			}
+		if heartbeatErr := e.recordTaskCopy(ctx, req, resolvedWorktree); heartbeatErr != nil {
+			return TaskExecResult{}, heartbeatErr
 		}
 	}
 	// Stacked task? Compute the binding (canonical output branch + base ref) once.
