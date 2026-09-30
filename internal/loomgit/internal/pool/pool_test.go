@@ -6,8 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -278,4 +280,173 @@ func TestStaleLeaseAfterProcessExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = s.Close()
+}
+
+func TestP118CoWTaskCopyStartsAtCleanBase(t *testing.T) {
+	repo, db := fixture(t)
+	ctx := context.Background()
+	r, err := openPool(t, db).Admit(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "tracked"), []byte("base"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte(".env\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "add", "tracked", ".gitignore")
+	git(t, repo, "commit", "-qm", "tracked")
+	base := git(t, repo, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(repo, "tracked"), []byte("dirty"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "notes.txt"), []byte("untracked"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".env"), []byte("ignored secret"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	copy := r.TaskCopy(filepath.Join(filepath.Dir(repo), "cow-copy"))
+	if err := copy.Create(ctx, base); err != nil {
+		t.Fatal(err)
+	}
+	if copy.Kind() != "cow" {
+		if runtime.GOOS == "darwin" {
+			t.Fatalf("APFS task copy did not use CoW: %s (%s)", copy.Kind(), copy.Reason())
+		}
+		t.Skipf("volume does not support CoW: %s (%s)", copy.Kind(), copy.Reason())
+	}
+	if got := git(t, copy.Path(), "rev-parse", "HEAD"); got != base {
+		t.Fatalf("copy HEAD = %s", got)
+	}
+	if _, err := os.Stat(filepath.Join(copy.Path(), "notes.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("source untracked file copied: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(copy.Path(), "tracked")); err != nil || string(got) != "base" {
+		t.Fatalf("task tree differs from base: %q %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(copy.Path(), ".env")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ignored source file copied: %v", err)
+	}
+	git(t, copy.Path(), "fsck", "--no-reflogs")
+	if got := git(t, copy.Path(), "config", "remote.origin.url"); got != repo {
+		t.Fatalf("origin = %q", got)
+	}
+	if got := git(t, copy.Path(), "config", "remote.origin.pushurl"); got != "loom-no-push://task-copy" {
+		t.Fatalf("pushurl = %q", got)
+	}
+}
+
+func TestP118UnsupportedCoWFallsBackToWorktree(t *testing.T) {
+	repo, db := fixture(t)
+	r, err := openPool(t, db).Admit(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copy := &taskClone{repo: r, path: filepath.Join(filepath.Dir(repo), "fallback"), cloneGit: func(string, string) error { return errCoWUnsupported }}
+	if err := copy.Create(context.Background(), "HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	if copy.Kind() != "worktree" || copy.Reason() == "" {
+		t.Fatalf("fallback: %s %q", copy.Kind(), copy.Reason())
+	}
+	gitfile, err := os.ReadFile(filepath.Join(copy.Path(), ".git"))
+	if err != nil || !strings.HasPrefix(string(gitfile), "gitdir: ") {
+		t.Fatalf("fallback was not a linked worktree: %q %v", gitfile, err)
+	}
+}
+
+func TestP118RealCloneFailureDoesNotFallBack(t *testing.T) {
+	repo, db := fixture(t)
+	r, err := openPool(t, db).Admit(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copy := &taskClone{repo: r, path: filepath.Join(filepath.Dir(repo), "failed"), cloneGit: func(string, string) error { return syscall.ENOSPC }}
+	if err := copy.Create(context.Background(), "HEAD"); err == nil || !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("expected disk-full error: %v", err)
+	}
+	if _, err := os.Stat(copy.Path()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("partial copy kept: %v", err)
+	}
+	if strings.Contains(git(t, repo, "worktree", "list", "--porcelain"), "worktree "+copy.Path()) {
+		t.Fatal("real failure fell back")
+	}
+}
+
+func TestP118BareSourceUsesSharedClone(t *testing.T) {
+	repo, db := fixture(t)
+	root := filepath.Dir(repo)
+	bare := filepath.Join(root, "bare.git")
+	git(t, root, "clone", "-q", "--bare", repo, bare)
+	r, err := openPool(t, db).Admit(context.Background(), bare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copy := r.TaskCopy(filepath.Join(root, "shared"))
+	if err := copy.Create(context.Background(), "HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	if copy.Kind() != "shared" || copy.Reason() == "" {
+		t.Fatalf("shared fallback: %s %q", copy.Kind(), copy.Reason())
+	}
+	if got := git(t, copy.Path(), "rev-parse", "HEAD"); got != git(t, repo, "rev-parse", "HEAD") {
+		t.Fatalf("shared HEAD = %s", got)
+	}
+}
+
+func TestP118LinuxTmpfsFallsBackToWorktree(t *testing.T) {
+	if runtime.GOOS != "linux" || os.Getenv("LOOM_P118_EXPECT_WORKTREE") != "1" {
+		t.Skip("requires Linux tmpfs verification")
+	}
+	repo, db := fixture(t)
+	r, err := openPool(t, db).Admit(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copy := r.TaskCopy(filepath.Join(filepath.Dir(repo), "tmpfs-copy"))
+	if err := copy.Create(context.Background(), "HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	if copy.Kind() != "worktree" || copy.Reason() == "" {
+		t.Fatalf("tmpfs fallback = %s %q", copy.Kind(), copy.Reason())
+	}
+}
+
+func TestP118CoWCopyWaitsForRepoLock(t *testing.T) {
+	repo, db := fixture(t)
+	r, err := openPool(t, db).Admit(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	lockDone := make(chan error, 1)
+	go func() {
+		lockDone <- r.WithLock(context.Background(), func(context.Context) error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+	copy := r.TaskCopy(filepath.Join(filepath.Dir(repo), "waited"))
+	copyDone := make(chan error, 1)
+	go func() { copyDone <- copy.Create(context.Background(), "HEAD") }()
+	select {
+	case err := <-copyDone:
+		t.Fatalf("clone bypassed repo lock: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	if err := <-lockDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-copyDone; err != nil {
+		t.Fatal(err)
+	}
+	if copy.Kind() != "cow" {
+		t.Skipf("CoW unavailable: %s", copy.Kind())
+	}
+	git(t, copy.Path(), "fsck", "--no-reflogs")
 }

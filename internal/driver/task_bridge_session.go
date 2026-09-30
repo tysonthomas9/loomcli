@@ -113,6 +113,9 @@ func withTaskWorktreeMetadata(result TaskExecResult, wt TaskWorktree) TaskExecRe
 		"repo_name":        wt.RepoName,
 		"source_repo_id":   wt.SourceRepoID,
 		"worktree_source":  "local_workspace_state",
+		"task_copy_kind":   wt.Kind,
+		"task_copy_reason": wt.Reason,
+		"source_repo_path": wt.SourcePath,
 	})
 	return result
 }

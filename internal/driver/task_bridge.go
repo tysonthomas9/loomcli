@@ -874,6 +874,7 @@ func (e HostBridgeTaskExecutor) finalizeAndFreezePatch(ctx context.Context, req 
 	revision, err := driverfreeze.Freeze(ctx, driverfreeze.Request{
 		Workspace: req.WorkspaceKey, Task: req.TaskID, Repo: repoName, Attempt: taskCopyAttemptID(req.TaskRunID, req.SchedulerAttempt),
 		Worktree: e.WorktreePath, Base: baseRef, Patch: patch, Outcome: outcome,
+		SourceRepo:    result.RuntimeMetadata["source_repo_path"],
 		CommitHeadSHA: firstNonEmpty(runner.CommitHeadSHA, runner.CommitHeadSHACamel),
 		AuthorKind:    "agent", AuthorID: firstNonEmpty(req.WorkerProfileID, req.Runner),
 	})

@@ -23,24 +23,39 @@ func Create(ctx context.Context, source, target, workspace, attempt, previousAtt
 		source, target, workspace, attempt, previousAttempt, base)
 }
 
+type Result struct {
+	BaseSHA string
+	Kind    string
+	Reason  string
+}
+
+func CreateDetailed(ctx context.Context, source, target, workspace, attempt, previousAttempt, base string) (Result, error) {
+	return CreateDetailedAt(ctx, filepath.Join(config.GetConfigDir(), "loomgit", "store.db"), source, target, workspace, attempt, previousAttempt, base)
+}
+
 // CreateAt permits an isolated pool journal in tests.
 func CreateAt(ctx context.Context, journalPath, source, target, workspace, attempt, previousAttempt, base string) (string, error) {
+	result, err := CreateDetailedAt(ctx, journalPath, source, target, workspace, attempt, previousAttempt, base)
+	return result.BaseSHA, err
+}
+
+func CreateDetailedAt(ctx context.Context, journalPath, source, target, workspace, attempt, previousAttempt, base string) (Result, error) {
 	if err := os.MkdirAll(filepath.Dir(journalPath), 0o700); err != nil {
-		return "", err
+		return Result{}, err
 	}
 	store, err := journal.OpenSQLite(journalPath)
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
 	defer func() { _ = store.Close() }()
 	options := gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}}
 	repo, err := pool.New(store, options).Admit(ctx, source)
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
 	ref, err := refname.AttemptBase(workspace, attempt)
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
 	var sha string
 	err = repo.WithLock(ctx, func(ctx context.Context) error {
@@ -60,13 +75,14 @@ func CreateAt(ctx context.Context, journalPath, source, target, workspace, attem
 		return repo.UpdateRef(ctx, ref, sha, strings.Repeat("0", len(sha)))
 	})
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-		return "", loomgit.NewError(loomgit.TaskCopyCreateFailed, "create task copy parent", err)
+		return Result{}, loomgit.NewError(loomgit.TaskCopyCreateFailed, "create task copy parent", err)
 	}
-	if err := repo.LinkedWorktree(target).Create(ctx, sha); err != nil {
-		return "", loomgit.NewError(loomgit.TaskCopyCreateFailed, "create task copy", err)
+	copy := repo.TaskCopy(target)
+	if err := copy.Create(ctx, sha); err != nil {
+		return Result{}, loomgit.NewError(loomgit.TaskCopyCreateFailed, "create task copy", err)
 	}
-	return sha, nil
+	return Result{BaseSHA: sha, Kind: copy.Kind(), Reason: copy.Reason()}, nil
 }
