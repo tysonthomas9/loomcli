@@ -131,11 +131,11 @@ func TestPullWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 	outputStubs := []OutputCommandStub{
 		// repo-a: fetch, merge, push
 		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "origin/main", "-m", "Pull from main"}, Err: nil},
 		{Args: []string{"push", "origin", "feat-a"}, Err: nil},
 		// repo-b: fetch, merge, push
 		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "origin/main", "-m", "Pull from main"}, Err: nil},
 		{Args: []string{"push", "origin", "feat-b"}, Err: nil},
 	}
 
@@ -150,6 +150,18 @@ func TestPullWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 	}}
 
 	pullWorkspaceWorktrees(deps, worktrees, "main")
+	mergeCalls := 0
+	for _, call := range outputMock.calls {
+		if len(call.Args) > 0 && call.Args[0] == "merge" {
+			mergeCalls++
+			if strings.Join(call.Args, " ") != "merge origin/main -m Pull from main" {
+				t.Fatalf("pull merge message: %v", call.Args)
+			}
+		}
+	}
+	if mergeCalls != 2 {
+		t.Fatalf("pull merge calls = %d, want 2", mergeCalls)
+	}
 }
 
 func TestPullWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
@@ -174,11 +186,11 @@ func TestPullWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 	outputStubs := []OutputCommandStub{
 		// repo-a pulls from "develop"
 		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/develop", "-m", "Pull from develop\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "origin/develop", "-m", "Pull from develop"}, Err: nil},
 		{Args: []string{"push", "origin", "feat-a"}, Err: nil},
 		// repo-b pulls from "staging"
 		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/staging", "-m", "Pull from staging\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "origin/staging", "-m", "Pull from staging"}, Err: nil},
 		{Args: []string{"push", "origin", "feat-b"}, Err: nil},
 	}
 
@@ -202,7 +214,7 @@ func TestPullRepoWorktree_CustomRemote(t *testing.T) {
 
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "upstream"}, Err: nil},
-		{Args: []string{"merge", "upstream/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "upstream/main", "-m", "Pull from main"}, Err: nil},
 		{Args: []string{"push", "upstream", "feat-a"}, Err: nil},
 	}
 
@@ -228,7 +240,7 @@ func TestPullRepoWorktree_EmptyRemoteDefaultsToOrigin(t *testing.T) {
 
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "origin/main", "-m", "Pull from main"}, Err: nil},
 		{Args: []string{"push", "origin", "feat-a"}, Err: nil},
 	}
 
@@ -270,7 +282,7 @@ func TestPullWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 	// Only repo-b should be processed
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "origin/main", "-m", "Pull from main"}, Err: nil},
 		{Args: []string{"push", "origin", "feat-b"}, Err: nil},
 	}
 
@@ -303,7 +315,7 @@ func TestPullWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
 	// CLI source "release" overrides per-repo "develop"
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/release", "-m", "Pull from release\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "origin/release", "-m", "Pull from release"}, Err: nil},
 		{Args: []string{"push", "origin", "feat-a"}, Err: nil},
 	}
 

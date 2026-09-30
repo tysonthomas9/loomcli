@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/errcode"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
@@ -66,6 +67,8 @@ func (s *state) goCheck(name string) error {
 	case "second_repo_rollback":
 		// Proves failure adding the second repository rolls back the first checkout.
 		return s.packageTests("./internal/cli/serve/workspacemgr", "TestP18SecondWorktreeAddFailureRollsBackFirst")
+	case "explicit_commit":
+		return s.checkExplicitCommit()
 	case "fixture_inventory":
 		// Proves the mixed fixture includes nested Git, submodule, LFS, special paths and files.
 		return s.checkFixture()
@@ -90,6 +93,59 @@ func (s *state) goCheck(name string) error {
 	default:
 		return fmt.Errorf("unknown Go check %q", name)
 	}
+}
+
+func (s *state) checkExplicitCommit() error {
+	ctx := context.Background()
+	store, err := journal.OpenSQLite(filepath.Join(s.t.TempDir(), "settings.sqlite"))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = store.Close() }()
+	for _, name := range []string{"x.rs", "y.rs"} {
+		if err := os.WriteFile(filepath.Join(s.dir, name), []byte(name+"\n"), 0600); err != nil {
+			return err
+		}
+	}
+	if _, err := gitCommand(s.dir, "add", "y.rs"); err != nil {
+		return err
+	}
+	indexBefore, err := gitCommand(s.dir, "ls-files", "--stage")
+	if err != nil {
+		return err
+	}
+	sha, err := loomgit.Commit(ctx, s.dir, store, loomgit.CommitRequest{Workspace: "lab", Paths: []string{"x.rs"}, Message: "agent", ChangeID: "c1", Agent: "codex"})
+	if err != nil {
+		return err
+	}
+	indexAfter, err := gitCommand(s.dir, "ls-files", "--stage")
+	if err != nil || indexBefore != indexAfter {
+		return fmt.Errorf("user index changed: %v", err)
+	}
+	paths, err := gitCommand(s.dir, "diff-tree", "--no-commit-id", "--name-only", "-r", sha)
+	if err != nil || paths != "x.rs" {
+		return fmt.Errorf("commit paths=%q: %v", paths, err)
+	}
+	if _, err := loomgit.Commit(ctx, s.dir, store, loomgit.CommitRequest{Workspace: "lab", Message: "empty", ChangeID: "c2", Agent: "codex"}); err == nil {
+		return errors.New("empty path set accepted")
+	}
+	if _, err := loomgit.Commit(ctx, s.dir, store, loomgit.CommitRequest{Workspace: "lab", Paths: []string{"x.rs"}, Message: "unchanged", ChangeID: "c2", Agent: "codex"}); err == nil {
+		return errors.New("empty tree accepted")
+	}
+	mergePath, err := gitCommand(s.dir, "rev-parse", "--git-path", "MERGE_HEAD")
+	if err != nil {
+		return err
+	}
+	if !filepath.IsAbs(mergePath) {
+		mergePath = filepath.Join(s.dir, mergePath)
+	}
+	if err := os.WriteFile(mergePath, []byte(sha+"\n"), 0600); err != nil {
+		return err
+	}
+	if _, err := loomgit.Commit(ctx, s.dir, store, loomgit.CommitRequest{Workspace: "lab", Paths: []string{"x.rs"}, Message: "merge", ChangeID: "c2", Agent: "codex"}); err == nil {
+		return errors.New("merge in progress accepted")
+	}
+	return nil
 }
 
 func (s *state) packageTests(pkg, pattern string) error {

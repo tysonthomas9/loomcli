@@ -67,6 +67,10 @@ func OpenSQLite(path string) (*SQLite, error) {
 		workspace_branch TEXT NOT NULL, base_sha TEXT NOT NULL,
 		PRIMARY KEY(workspace, repo)
 	);
+	CREATE TABLE IF NOT EXISTS workspace_settings (
+		workspace TEXT PRIMARY KEY, auto_commit INTEGER NOT NULL DEFAULT 1,
+		lead_may_approve_publish INTEGER NOT NULL DEFAULT 1
+	);
 	CREATE INDEX IF NOT EXISTS event_outbox_pending ON event_outbox(delivered, id);`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("open journal: %w", err)
@@ -74,6 +78,32 @@ func OpenSQLite(path string) (*SQLite, error) {
 	return &SQLite{db: db}, nil
 }
 func (s *SQLite) Close() error { return s.db.Close() }
+
+// AutoCommit defaults on for workspaces without an explicit setting.
+func (s *SQLite) AutoCommit(ctx context.Context, workspace string) (bool, error) {
+	if workspace == "" {
+		return false, errors.New("workspace is required")
+	}
+	var enabled int
+	err := s.db.QueryRowContext(ctx, `SELECT auto_commit FROM workspace_settings WHERE workspace = ?`, workspace).Scan(&enabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	return enabled != 0, err
+}
+
+func (s *SQLite) SetAutoCommit(ctx context.Context, workspace string, enabled bool) error {
+	if workspace == "" {
+		return errors.New("workspace is required")
+	}
+	value := 0
+	if enabled {
+		value = 1
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO workspace_settings(workspace, auto_commit) VALUES (?, ?)
+		ON CONFLICT(workspace) DO UPDATE SET auto_commit = excluded.auto_commit`, workspace, value)
+	return err
+}
 func scanEntry(row interface{ Scan(...any) error }) (loomgit.JournalEntry, error) {
 	var e loomgit.JournalEntry
 	err := row.Scan(&e.ID, &e.RequestID, &e.Operation, &e.Phase, &e.Version, &e.Fence, &e.Result)

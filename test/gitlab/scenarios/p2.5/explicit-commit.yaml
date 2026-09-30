@@ -1,0 +1,8 @@
+name: named path commit keeps user index and refuses unsafe commits
+task: P2.5
+git: [min, latest]
+fixture: empty
+when:
+  - go_check: explicit_commit
+then:
+  - go_check: no_error
