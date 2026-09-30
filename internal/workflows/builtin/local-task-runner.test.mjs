@@ -47,8 +47,7 @@ if (process.env.FAKE_ENV_FILE) {
     pushExitCode: push?.status,
   }));
 }
-// Write into the CLI's cwd (the worktree the runner executes in — the isolated
-// worktree when one is set up, the host worktree in the fallback path). A bare
+// Write into the CLI's cwd (the isolated worktree or prepared task copy). A bare
 // FAKE_WRITE_FILE name is resolved against cwd; an absolute path is honored.
 if (process.env.FAKE_WRITE_FILE) {
   const target = path.isAbsolute(process.env.FAKE_WRITE_FILE)
@@ -990,7 +989,7 @@ describe("local-task-runner isolated worktree", () => {
     assert.ok(out.patch.includes("isolated-file.txt"), "patch should reference the file created in the isolated worktree");
   });
 
-  it("keeps in-place work when the directory is not a Git repo and capture fails", async () => {
+  it("does not start the CLI when the host directory has no Git HEAD", async () => {
     const nonGit = path.join(tmpRoot, "non-git");
     fs.mkdirSync(nonGit, { recursive: true });
 
@@ -1001,13 +1000,29 @@ describe("local-task-runner isolated worktree", () => {
     process.env.FAKE_WRITE_FILE = "in-place.txt";
 
     const out = await run();
-    assert.equal(out.status, "failed", "non-git work cannot be captured");
-    assert.equal(out.errorClass, "capture_failed");
-    // No git HEAD => in-place execution, empty base_ref (patch-back not possible).
-    assert.equal(Object.hasOwn(out, "patch"), false);
-    // The CLI ran in place, and the un-capturable edit remains for recovery.
-    assert.equal(out.runtimeMetadata.retained_path, nonGit);
-    assert.ok(fs.existsSync(path.join(nonGit, "in-place.txt")), "in-place run should write into the host directory");
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "task_copy_create_failed");
+    assert.ok(!fs.existsSync(path.join(nonGit, "in-place.txt")), "the CLI must not write into the host directory");
+  });
+
+  it("fails before starting the CLI when sibling worktree creation fails, preserving host edits", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_WRITE_FILE = "agent-started.txt";
+    const edited = path.join(worktree, "README.md");
+    fs.writeFileSync(edited, "user edit\n");
+    const git = execFileSync("which", ["git"]).toString().trim();
+    const wrapper = path.join(binDir, "git");
+    fs.writeFileSync(wrapper, `#!/bin/sh\ncase " $* " in *" worktree add --detach "*) echo 'injected add failure' >&2; exit 1;; esac\nexec "${git}" "$@"\n`, { mode: 0o755 });
+    process.env.PATH = binDir + path.delimiter + process.env.PATH;
+
+    const out = await run();
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "task_copy_create_failed");
+    assert.match(out.errorMessage, /injected add failure/);
+    assert.ok(!fs.existsSync(path.join(worktree, "agent-started.txt")), "the CLI must not run in place");
+    assert.equal(fs.readFileSync(edited, "utf8"), "user edit\n");
   });
 });
 
