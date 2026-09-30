@@ -306,7 +306,7 @@ func removeCopy(ctx context.Context, store *journal.SQLite, row journal.Retained
 		if !apply {
 			return nil
 		}
-		return removeWithLocks(ctx, store, row, runner, copyRunner, expected, true)
+		return removeWithLocks(ctx, store, row, runner, copyRunner, expected)
 	}
 	if err := cloneRefsCaptured(ctx, runner, copyRunner, expected); err != nil {
 		return err
@@ -317,34 +317,24 @@ func removeCopy(ctx context.Context, store *journal.SQLite, row journal.Retained
 	if !apply {
 		return nil
 	}
-	return removeWithLocks(ctx, store, row, runner, copyRunner, expected, false)
+	return errors.New("clone cleanup is disabled until capture writers share the copy lease")
 }
 
 func removeWithLocks(ctx context.Context, store *journal.SQLite, row journal.RetainedCopy,
-	sourceRunner, copyRunner *gitexec.Runner, expected string, linked bool) error {
+	sourceRunner, copyRunner *gitexec.Runner, expected string) error {
 	return withCopyLease(row.Path, func() error {
-		repositories := pool.New(store)
-		sourceRepo, err := repositories.Admit(ctx, row.SourceRepo)
+		sourceRepo, err := pool.New(store).Admit(ctx, row.SourceRepo)
 		if err != nil {
 			return err
 		}
 		return sourceRepo.WithLock(ctx, func(ctx context.Context) error {
-			if linked {
-				return removeLockedCopy(ctx, row, sourceRunner, copyRunner, expected, sourceRepo, linked)
-			}
-			copyRepo, err := repositories.Admit(ctx, row.Path)
-			if err != nil {
-				return err
-			}
-			return copyRepo.WithLock(ctx, func(ctx context.Context) error {
-				return removeLockedCopy(ctx, row, sourceRunner, copyRunner, expected, sourceRepo, linked)
-			})
+			return removeLockedCopy(ctx, row, sourceRunner, copyRunner, expected, sourceRepo)
 		})
 	})
 }
 
 func removeLockedCopy(ctx context.Context, row journal.RetainedCopy, sourceRunner, copyRunner *gitexec.Runner,
-	expected string, sourceRepo *pool.LocalRepo, linked bool) error {
+	expected string, sourceRepo *pool.LocalRepo) error {
 	ref, err := refname.AttemptCapture(row.Workspace, row.Attempt)
 	if err != nil {
 		return err
@@ -355,12 +345,6 @@ func removeLockedCopy(ctx context.Context, row journal.RetainedCopy, sourceRunne
 	}
 	if err := checkCopyContentWithLease(ctx, copyRunner, expected); err != nil {
 		return err
-	}
-	if !linked {
-		if err := cloneRefsCaptured(ctx, sourceRunner, copyRunner, expected); err != nil {
-			return err
-		}
-		return os.RemoveAll(row.Path)
 	}
 	_, err = sourceRepo.Run(ctx, "worktree", "remove", "--force", row.Path)
 	return err

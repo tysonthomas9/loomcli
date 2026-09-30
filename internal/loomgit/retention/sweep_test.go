@@ -14,7 +14,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
-	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/pool"
 )
 
 type fakeAbandonment bool
@@ -107,7 +106,7 @@ func TestCloneRefsCapturedRejectsExtraLocalCommit(t *testing.T) {
 	}
 }
 
-func TestSweepRemovesFullyFrozenClone(t *testing.T) {
+func TestSweepKeepsFullyFrozenCloneWithoutCaptureLease(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	source, copyPath, journalPath := filepath.Join(root, "source"), filepath.Join(root, "A"), filepath.Join(root, "store.db")
@@ -205,42 +204,23 @@ func TestSweepRemovesFullyFrozenClone(t *testing.T) {
 	if err := os.Remove(leasePath); err != nil {
 		t.Fatal(err)
 	}
-	copyRepo, err := pool.New(store).Admit(ctx, copyPath)
-	if err != nil {
+	started := make(chan struct{})
+	capturedAgain := make(chan error, 1)
+	go func() {
+		close(started)
+		_, captureErr := agentcapture.Capture(ctx, copyPath, "W", "A", "T", "task")
+		capturedAgain <- captureErr
+	}()
+	<-started
+	results, err = sweep.Run(ctx, true)
+	if err := <-capturedAgain; err != nil {
 		t.Fatal(err)
 	}
-	locked := make(chan struct{})
-	release := make(chan struct{})
-	finished := make(chan error, 1)
-	go func() {
-		finished <- copyRepo.WithLock(ctx, func(context.Context) error {
-			close(locked)
-			<-release
-			return nil
-		})
-	}()
-	<-locked
-	blockedCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
-	err = removeWithLocks(blockedCtx, store, journal.RetainedCopy{
-		Workspace: "W", Attempt: "A", Path: copyPath, SourceRepo: source,
-	}, sourceRunner, copyRunner, captured.SHA, false)
-	cancel()
-	if err == nil {
-		t.Fatal("repo lease did not block clone removal")
+	if err != nil || len(results) != 1 || results[0].Action != "keep" || !strings.Contains(results[0].Reason, "clone cleanup is disabled") {
+		t.Fatalf("unprotected clone deletion: %+v, %v", results, err)
 	}
 	if _, err := os.Stat(copyPath); err != nil {
-		t.Fatalf("repo-leased clone removed: %v", err)
-	}
-	close(release)
-	if err := <-finished; err != nil {
-		t.Fatal(err)
-	}
-	results, err = sweep.Run(ctx, true)
-	if err != nil || len(results) != 1 || results[0].Action != "remove" {
-		t.Fatalf("expired clone: %+v, %v", results, err)
-	}
-	if _, err := os.Stat(copyPath); !os.IsNotExist(err) {
-		t.Fatalf("clone remains: %v", err)
+		t.Fatalf("clone was removed: %v", err)
 	}
 }
 
