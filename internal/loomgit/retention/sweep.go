@@ -199,7 +199,11 @@ func (s Sweep) inspect(ctx context.Context, row journal.RetainedCopy, now time.T
 		result.Reason = "retention window open"
 		return result, nil
 	}
-	result.Reason = safeCopy(ctx, s.Store, row).Error()
+	if err := safeCopy(ctx, s.Store, row); err != nil {
+		result.Reason = err.Error()
+		return result, nil
+	}
+	result.Reason = "eligible; deletion disabled until capture is lease-covered (P4.6b)"
 	return result, nil
 }
 
@@ -295,7 +299,7 @@ func removeCopy(ctx context.Context, row journal.RetainedCopy,
 		return err
 	}
 	if strings.TrimSpace(string(common)) == strings.TrimSpace(string(sourceCommon)) {
-		return errors.New("worktree cleanup is disabled until capture writers share the copy lease")
+		return nil
 	}
 	if err := cloneRefsCaptured(ctx, runner, copyRunner, expected); err != nil {
 		return err
@@ -303,7 +307,7 @@ func removeCopy(ctx context.Context, row journal.RetainedCopy,
 	if filepath.Base(row.Path) != row.Attempt {
 		return errors.New("clone path does not match recorded attempt")
 	}
-	return errors.New("clone cleanup is disabled until capture writers share the copy lease")
+	return nil
 }
 
 func checkCopyContent(ctx context.Context, runner *gitexec.Runner, expected string) error {

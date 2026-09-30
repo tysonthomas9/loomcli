@@ -216,7 +216,7 @@ func TestSweepKeepsFullyFrozenCloneWithoutCaptureLease(t *testing.T) {
 	if err := <-capturedAgain; err != nil {
 		t.Fatal(err)
 	}
-	if err != nil || len(results) != 1 || results[0].Action != "keep" || !strings.Contains(results[0].Reason, "clone cleanup is disabled") {
+	if err != nil || len(results) != 1 || results[0].Action != "keep" || results[0].Reason != "eligible; deletion disabled until capture is lease-covered (P4.6b)" {
 		t.Fatalf("unprotected clone deletion: %+v, %v", results, err)
 	}
 	if _, err := os.Stat(copyPath); err != nil {
@@ -384,7 +384,7 @@ func TestSweepLandedCopyUsesCaptureAndWorkspaceWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	results, err = sweep.Run(ctx, false)
-	if err != nil || results[0].Action != "keep" || !strings.Contains(results[0].Reason, "worktree cleanup is disabled") {
+	if err != nil || results[0].Action != "keep" || results[0].Reason != "eligible; deletion disabled until capture is lease-covered (P4.6b)" {
 		t.Fatalf("dry run: %+v, %v", results, err)
 	}
 	if _, err := os.Stat(copyPath); err != nil {
@@ -399,7 +399,7 @@ func TestSweepLandedCopyUsesCaptureAndWorkspaceWindow(t *testing.T) {
 	if err := <-captureDone; err != nil {
 		t.Fatal(err)
 	}
-	if err != nil || results[0].Action != "keep" || !strings.Contains(results[0].Reason, "worktree cleanup is disabled") {
+	if err != nil || results[0].Action != "keep" || results[0].Reason != "eligible; deletion disabled until capture is lease-covered (P4.6b)" {
 		t.Fatalf("unprotected worktree deletion: %+v, %v", results, err)
 	}
 	if _, err := os.Stat(copyPath); err != nil {

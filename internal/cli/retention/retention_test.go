@@ -72,7 +72,7 @@ func TestRetentionCLIDefaultReportsEligibleCloneAsKeep(t *testing.T) {
 	if err := runRetention(ctx, path, false, &cmd); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "keep W "+revision.Change+" "+copyPath+": clone cleanup is disabled") {
+	if !strings.Contains(output.String(), "keep W "+revision.Change+" "+copyPath+": eligible; deletion disabled until capture is lease-covered (P4.6b)") {
 		t.Fatalf("default report promised deletion: %q", output.String())
 	}
 }
