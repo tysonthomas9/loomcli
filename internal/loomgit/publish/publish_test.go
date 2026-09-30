@@ -15,7 +15,51 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
+	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 )
+
+type fakeForge struct {
+	prs           []stackpublish.PR
+	creates       int
+	createError   error
+	adoptOnCreate *stackpublish.PR
+}
+
+func (f *fakeForge) ListStackPRs(_ context.Context, _, _, prefix string) ([]stackpublish.PR, error) {
+	var found []stackpublish.PR
+	for _, pr := range f.prs {
+		if strings.HasPrefix(pr.Head, prefix) {
+			found = append(found, pr)
+		}
+	}
+	return found, nil
+}
+
+func (f *fakeForge) CreatePR(_ context.Context, _, _, head, base, _, body string) (stackpublish.PR, error) {
+	f.creates++
+	if f.createError != nil {
+		return stackpublish.PR{}, f.createError
+	}
+	if f.adoptOnCreate != nil {
+		pr := *f.adoptOnCreate
+		f.prs = append(f.prs, pr)
+		return pr, nil
+	}
+	pr := stackpublish.PR{Number: len(f.prs) + 1, Head: head, Base: base, Body: body,
+		State: "open", URL: "https://github.com/owner/repo/pull/1"}
+	f.prs = append(f.prs, pr)
+	return pr, nil
+}
+
+func (f *fakeForge) UpdatePRBody(_ context.Context, _, _ string, number int, body string) error {
+	for index := range f.prs {
+		if f.prs[index].Number == number {
+			f.prs[index].Body = body
+			return nil
+		}
+	}
+	return errors.New("PR missing")
+}
 
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
@@ -55,6 +99,17 @@ func newFixture(t *testing.T) fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
+	entry, _, err := store.Begin(context.Background(), "workspace-W", "ensure_workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err = store.Advance(context.Background(), entry, "rows_written", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CommitWorkspace(context.Background(), entry, []loomgit.WorkspaceRepo{{Workspace: "W", Repo: "repo", Trunk: "develop"}}); err != nil {
+		t.Fatal(err)
+	}
 	return fixture{repo, remote, base, store}
 }
 
@@ -100,7 +155,8 @@ func (f fixture) approve(t *testing.T, r loomgit.Revision) {
 }
 
 func (f fixture) request() Request {
-	return Request{Workspace: "W", Lead: "L", Change: "C", Repo: f.repo, WorkingArea: f.repo, BaseSHA: f.base}
+	return Request{Workspace: "W", Lead: "L", Change: "C", Repo: f.repo, WorkingArea: f.repo,
+		BaseSHA: f.base, token: "fixture-token", slug: "owner/repo", forge: &fakeForge{}}
 }
 
 func (f fixture) published(t *testing.T) string {
@@ -139,6 +195,130 @@ func TestPublishCreatesAndLeasedReplacesLayer(t *testing.T) {
 	got, err = Publish(context.Background(), f.store, f.request())
 	if err != nil || got.Number != r3.Number || got.HeadSHA != r3.HeadSHA || f.remoteHead(t) != r3.HeadSHA || f.published(t) != r3.HeadSHA {
 		t.Fatalf("derived publish: revision=%+v err=%v, source=%s", got, err, r2.HeadSHA)
+	}
+}
+
+func TestPublishRequiresCredentialBeforePush(t *testing.T) {
+	f := newFixture(t)
+	r := f.revision(t, 1, f.base, "one", "source")
+	f.approve(t, r)
+	req := f.request()
+	req.credential = func(context.Context) string { return "" }
+	if _, err := Publish(context.Background(), f.store, req); err == nil || !strings.Contains(err.Error(), "credential unavailable") {
+		t.Fatalf("Publish error = %v", err)
+	}
+	if got := git(t, f.remote, "for-each-ref", "--format=%(refname)", "refs/heads"); got != "" {
+		t.Fatalf("pushed without credential: %s", got)
+	}
+}
+
+func TestPublishRequiresRepositorySlugBeforePush(t *testing.T) {
+	f := newFixture(t)
+	r := f.revision(t, 1, f.base, "one", "source")
+	f.approve(t, r)
+	req := f.request()
+	req.slug = ""
+	if _, err := Publish(context.Background(), f.store, req); err == nil || !strings.Contains(err.Error(), "not a GitHub repository") {
+		t.Fatalf("Publish error = %v", err)
+	}
+	if got := git(t, f.remote, "for-each-ref", "--format=%(refname)", "refs/heads"); got != "" {
+		t.Fatalf("pushed without repo slug: %s", got)
+	}
+}
+
+func TestPublishUsesRecordedTrunkAndChangeBody(t *testing.T) {
+	f := newFixture(t)
+	r := f.revision(t, 1, f.base, "one", "source")
+	f.approve(t, r)
+	forge := &fakeForge{}
+	req := f.request()
+	req.forge = forge
+	if _, err := Publish(context.Background(), f.store, req); err != nil {
+		t.Fatal(err)
+	}
+	if len(forge.prs) != 1 || forge.prs[0].Base != "develop" || !strings.Contains(forge.prs[0].Body, "Loom-Change-Id: C") {
+		t.Fatalf("PRs = %+v", forge.prs)
+	}
+	publication, found, err := f.store.Publication(context.Background(), "W", "C")
+	if err != nil || !found || publication.Phase != "done" || publication.PRNumber != 1 {
+		t.Fatalf("publication = %+v, found=%t, err=%v", publication, found, err)
+	}
+}
+
+func TestPublishRetryAfterPRFailureAdoptsPushedBranch(t *testing.T) {
+	f := newFixture(t)
+	r := f.revision(t, 1, f.base, "one", "source")
+	f.approve(t, r)
+	forge := &fakeForge{createError: errors.New("forge unavailable")}
+	req := f.request()
+	req.forge = forge
+	if _, err := Publish(context.Background(), f.store, req); err == nil {
+		t.Fatal("expected PR creation failure")
+	}
+	if f.remoteHead(t) != r.HeadSHA {
+		t.Fatal("push was not retained")
+	}
+	forge.createError = nil
+	if _, err := Publish(context.Background(), f.store, req); err != nil {
+		t.Fatal(err)
+	}
+	if forge.creates != 2 || len(forge.prs) != 1 {
+		t.Fatalf("creates=%d PRs=%+v", forge.creates, forge.prs)
+	}
+}
+
+func TestPublishRetryAdoptsPRAfterLostResponse(t *testing.T) {
+	f := newFixture(t)
+	r := f.revision(t, 1, f.base, "one", "source")
+	f.approve(t, r)
+	forge := &fakeForge{createError: errors.New("response lost")}
+	req := f.request()
+	req.forge = forge
+	if _, err := Publish(context.Background(), f.store, req); err == nil {
+		t.Fatal("expected lost response")
+	}
+	forge.createError = nil
+	forge.prs = []stackpublish.PR{{Number: 7, Head: "loom/ws/W/change/C", Base: "develop", State: "open", Body: "existing"}}
+	if _, err := Publish(context.Background(), f.store, req); err != nil {
+		t.Fatal(err)
+	}
+	if forge.creates != 1 || !strings.Contains(forge.prs[0].Body, "Loom-Change-Id: C") {
+		t.Fatalf("creates=%d PRs=%+v", forge.creates, forge.prs)
+	}
+}
+
+func TestPublishAdoptedCreateResponseGetsChangeBody(t *testing.T) {
+	f := newFixture(t)
+	r := f.revision(t, 1, f.base, "one", "source")
+	f.approve(t, r)
+	forge := &fakeForge{adoptOnCreate: &stackpublish.PR{Number: 9, Head: "loom/ws/W/change/C", Base: "develop", State: "open", Body: "older body"}}
+	req := f.request()
+	req.forge = forge
+	if _, err := Publish(context.Background(), f.store, req); err != nil {
+		t.Fatal(err)
+	}
+	if forge.creates != 1 || len(forge.prs) != 1 || !strings.Contains(forge.prs[0].Body, "Loom-Change-Id: C") {
+		t.Fatalf("creates=%d PRs=%+v", forge.creates, forge.prs)
+	}
+}
+
+func TestReconcileCompletesInterruptedPublish(t *testing.T) {
+	f := newFixture(t)
+	r := f.revision(t, 1, f.base, "one", "source")
+	f.approve(t, r)
+	forge := &fakeForge{createError: errors.New("forge unavailable")}
+	req := f.request()
+	req.forge = forge
+	if _, err := Publish(context.Background(), f.store, req); err == nil {
+		t.Fatal("expected PR creation failure")
+	}
+	forge.createError = nil
+	if err := Reconcile(context.Background(), f.store, forge, "fixture-token"); err != nil {
+		t.Fatal(err)
+	}
+	publication, found, err := f.store.Publication(context.Background(), "W", "C")
+	if err != nil || !found || publication.Phase != "done" || publication.Head != r.HeadSHA || forge.creates != 2 {
+		t.Fatalf("publication=%+v found=%t err=%v creates=%d", publication, found, err, forge.creates)
 	}
 }
 
