@@ -89,6 +89,17 @@ func (s *SQLite) LocalLineage(ctx context.Context, workspace, task, repo string)
 	return l, err
 }
 
+func (s *SQLite) DependencyForChange(ctx context.Context, workspace, change string) (string, error) {
+	var predecessor string
+	err := s.db.QueryRowContext(ctx, `SELECT l.predecessor_change FROM driver_changes d
+		JOIN local_lineage l ON l.workspace=d.workspace AND l.task_id=d.task_id AND l.repo=d.repo
+		WHERE d.workspace=? AND d.change_id=?`, workspace, change).Scan(&predecessor)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return predecessor, err
+}
+
 // DependentsOf returns the task copies pinned to a predecessor change.
 func (s *SQLite) DependentsOf(ctx context.Context, workspace, change string) ([]LocalLineage, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT task_id, repo, predecessor_revision, base_sha

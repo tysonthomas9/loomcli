@@ -106,7 +106,7 @@ func (s *SQLite) LandingStatus(ctx context.Context, workspace, change string) (L
 }
 
 func (s *SQLite) PublishedChanges(ctx context.Context) ([]Publication, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT workspace,change_id,repo,branch,trunk,slug,head_sha,phase,pr_number,pr_url
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace,change_id,repo,branch,trunk,slug,head_sha,feature_flag,phase,pr_number,pr_url
 		FROM change_publications WHERE phase='done' AND pr_number>0 ORDER BY workspace,change_id`)
 	if err != nil {
 		return nil, err
@@ -116,7 +116,7 @@ func (s *SQLite) PublishedChanges(ctx context.Context) ([]Publication, error) {
 	for rows.Next() {
 		var publication Publication
 		if err := rows.Scan(&publication.Workspace, &publication.Change, &publication.Repo,
-			&publication.Branch, &publication.Trunk, &publication.Slug, &publication.Head,
+			&publication.Branch, &publication.Trunk, &publication.Slug, &publication.Head, &publication.FeatureFlag,
 			&publication.Phase, &publication.PRNumber, &publication.PRURL); err != nil {
 			return nil, err
 		}

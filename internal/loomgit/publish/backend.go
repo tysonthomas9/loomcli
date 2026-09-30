@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/pull"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/stacklock"
@@ -22,6 +23,13 @@ type StackBackend interface {
 }
 
 type LoomStackBackend struct{ Store Store }
+
+func RestackOffer(ctx context.Context, offer journal.RestackOffer) (int, error) {
+	return pull.RestackOfferWithPublish(ctx, offer, func(ctx context.Context, workspace, lead, change string) error {
+		_, err := PublishLocal(ctx, workspace, lead, change)
+		return err
+	})
+}
 
 func (backend LoomStackBackend) Capabilities() StackCapabilities { return StackCapabilities{} }
 

@@ -69,7 +69,8 @@ func OpenSQLite(path string) (*SQLite, error) {
 	);
 	CREATE TABLE IF NOT EXISTS workspace_settings (
 		workspace TEXT PRIMARY KEY, auto_commit INTEGER NOT NULL DEFAULT 1,
-		lead_may_approve_publish INTEGER NOT NULL DEFAULT 1
+		lead_may_approve_publish INTEGER NOT NULL DEFAULT 1,
+		delivery_mode TEXT NOT NULL DEFAULT 'stack'
 	);
 	CREATE INDEX IF NOT EXISTS event_outbox_pending ON event_outbox(delivered, id);`); err != nil {
 		_ = db.Close()
@@ -122,6 +123,10 @@ func OpenSQLite(path string) (*SQLite, error) {
 	if err := createFeedbackSchema(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("open feedback journal: %w", err)
+	}
+	if err := ensureDeliveryMode(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open delivery mode: %w", err)
 	}
 	return &SQLite{db: db}, nil
 }
@@ -178,6 +183,87 @@ func (s *SQLite) SetAutoCommit(ctx context.Context, workspace string, enabled bo
 		ON CONFLICT(workspace) DO UPDATE SET auto_commit = excluded.auto_commit`, workspace, value)
 	return err
 }
+func ensureDeliveryMode(db *sql.DB) error {
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS delivery_holds (
+		workspace TEXT NOT NULL, change_id TEXT NOT NULL, status TEXT NOT NULL,
+		PRIMARY KEY(workspace,change_id))`); err != nil {
+		return err
+	}
+	rows, err := db.Query(`PRAGMA table_info(workspace_settings)`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var columnID, notNull, primaryKey int
+		var name, dataType string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&columnID, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return err
+		}
+		if name == "delivery_mode" {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE workspace_settings ADD COLUMN delivery_mode TEXT NOT NULL DEFAULT 'stack'`)
+	return err
+}
+
+func (s *SQLite) SetDeliveryHold(ctx context.Context, workspace, change, status string) error {
+	if workspace == "" || change == "" {
+		return errors.New("workspace and change are required")
+	}
+	if status == "" {
+		_, err := s.db.ExecContext(ctx, `DELETE FROM delivery_holds WHERE workspace=? AND change_id=?`, workspace, change)
+		return err
+	}
+	if status != "waiting_on_dependency" && status != "waiting_on_verdict" {
+		return fmt.Errorf("invalid delivery hold %q", status)
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO delivery_holds(workspace,change_id,status) VALUES (?,?,?)
+		ON CONFLICT(workspace,change_id) DO UPDATE SET status=excluded.status`, workspace, change, status)
+	return err
+}
+
+func (s *SQLite) DeliveryHold(ctx context.Context, workspace, change string) (string, error) {
+	var status string
+	err := s.db.QueryRowContext(ctx, `SELECT status FROM delivery_holds WHERE workspace=? AND change_id=?`, workspace, change).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return status, err
+}
+
+func (s *SQLite) DeliveryMode(ctx context.Context, workspace string) (string, error) {
+	if workspace == "" {
+		return "", errors.New("workspace is required")
+	}
+	var mode string
+	err := s.db.QueryRowContext(ctx, `SELECT delivery_mode FROM workspace_settings WHERE workspace=?`, workspace).Scan(&mode)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "stack", nil
+	}
+	return mode, err
+}
+
+func (s *SQLite) SetDeliveryMode(ctx context.Context, workspace, mode string) error {
+	if workspace == "" {
+		return errors.New("workspace is required")
+	}
+	if mode != "stack" && mode != "trunk" {
+		return fmt.Errorf("invalid delivery mode %q", mode)
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO workspace_settings(workspace,delivery_mode) VALUES (?,?)
+		ON CONFLICT(workspace) DO UPDATE SET delivery_mode=excluded.delivery_mode`, workspace, mode)
+	return err
+}
+
 func scanEntry(row interface{ Scan(...any) error }) (loomgit.JournalEntry, error) {
 	var e loomgit.JournalEntry
 	err := row.Scan(&e.ID, &e.RequestID, &e.Operation, &e.Phase, &e.Version, &e.Fence, &e.Result)

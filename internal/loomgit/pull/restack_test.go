@@ -291,6 +291,7 @@ func TestRestackOfferDerivesRevisionOnTrunk(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := advanceTrunk(t, fixture, trunk, "landed predecessor")
+	fixture.write(t, "unrelated", "dirty\n")
 	offer := journal.RestackOffer{Workspace: "W", Change: "C1", Predecessor: "X", Repo: "repo", Revision: 1, TrunkSHA: base}
 	revision, err := RestackOffer(context.Background(), offer)
 	if err != nil || revision != 2 {
@@ -300,9 +301,17 @@ func TestRestackOfferDerivesRevisionOnTrunk(t *testing.T) {
 	if err != nil || derived.Operation != "restack" || derived.BaseSHA != base {
 		t.Fatalf("derived revision = %+v, %v", derived, err)
 	}
+	if body, err := os.ReadFile(filepath.Join(fixture.dir, "unrelated")); err != nil || string(body) != "dirty\n" {
+		t.Fatalf("unrelated edit changed: %q, %v", body, err)
+	}
 	again, err := RestackOffer(context.Background(), offer)
 	if err != nil || again != revision {
 		t.Fatalf("repeated offer = %d, %v", again, err)
+	}
+	offer.Repo = "missing"
+	again, err = RestackOffer(context.Background(), offer)
+	if err != nil || again != revision {
+		t.Fatalf("stack retry looked up working area: %d, %v", again, err)
 	}
 }
 

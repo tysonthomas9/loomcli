@@ -10,7 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/applyrecovery"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/landing"
-	"github.com/tysonthomas9/loomcli/internal/loomgit/pull"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/reconcile"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/taskcopy"
 	loomworkspace "github.com/tysonthomas9/loomcli/internal/loomgit/workspace"
@@ -42,7 +42,7 @@ func landingOptions() landing.Options {
 			}
 			return dependents, nil
 		},
-		Restack: pull.RestackOffer,
+		Restack: publish.RestackOffer,
 	}
 }
 

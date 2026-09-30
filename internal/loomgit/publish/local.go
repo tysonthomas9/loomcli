@@ -6,11 +6,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/githubtoken"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/changeset"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/replay"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 )
 
@@ -21,16 +30,33 @@ type Result struct {
 	AlreadyExists bool
 }
 
+var localPublishProvider = func() (Forge, string, string) { return nil, "", "" }
+var localFlagForTask = taskFeatureFlag
+
+func DeliveryModeLocal(ctx context.Context, workspace string) (string, error) {
+	store, err := openLocalStore()
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = store.Close() }()
+	return store.DeliveryMode(ctx, workspace)
+}
+
+func SetDeliveryModeLocal(ctx context.Context, workspace, mode string) error {
+	store, err := openLocalStore()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = store.Close() }()
+	return store.SetDeliveryMode(ctx, workspace, mode)
+}
+
 // PublishLocal resolves a recorded change and its lead working area before publishing.
 func PublishLocal(ctx context.Context, workspace, lead, change string) (Result, error) {
 	if workspace == "" || lead == "" || change == "" {
 		return Result{}, errors.New("workspace, lead and change are required")
 	}
-	path := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
-	if _, err := os.Stat(path); err != nil {
-		return Result{}, loomgit.NewError(loomgit.WorkspaceUnsupported, "revision journal is unavailable", err)
-	}
-	store, err := journal.OpenSQLite(path)
+	store, err := openLocalStore()
 	if err != nil {
 		return Result{}, err
 	}
@@ -39,7 +65,8 @@ func PublishLocal(ctx context.Context, workspace, lead, change string) (Result, 
 	if err != nil {
 		return Result{}, err
 	}
-	return publishRecorded(ctx, store, cfg, workspace, lead, change, nil, "", "")
+	forge, token, slug := localPublishProvider()
+	return publishRecorded(ctx, store, cfg, workspace, lead, change, forge, token, slug, localFlagForTask)
 }
 
 // PublishStackLocal publishes the requested applied layers in working-area order.
@@ -47,11 +74,7 @@ func PublishStackLocal(ctx context.Context, workspace, stackID, lead string, cha
 	if workspace == "" || stackID == "" || lead == "" || len(changes) == 0 {
 		return nil, errors.New("workspace, stack ID, lead and changes are required")
 	}
-	path := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
-	if _, err := os.Stat(path); err != nil {
-		return nil, loomgit.NewError(loomgit.WorkspaceUnsupported, "revision journal is unavailable", err)
-	}
-	store, err := journal.OpenSQLite(path)
+	store, err := openLocalStore()
 	if err != nil {
 		return nil, err
 	}
@@ -61,6 +84,43 @@ func PublishStackLocal(ctx context.Context, workspace, stackID, lead string, cha
 		return nil, err
 	}
 	return publishStackRecorded(ctx, store, cfg, workspace, stackID, lead, changes, nil, "", "")
+}
+
+var featureFlagName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+func taskFeatureFlag(ctx context.Context, task string) (string, error) {
+	detail, err := cli.DefaultIssueBackend().Get(ctx, task)
+	if err != nil {
+		return "", fmt.Errorf("load task %s feature flag: %w", task, err)
+	}
+	if detail == nil {
+		return "", fmt.Errorf("task %s is unavailable", task)
+	}
+	return featureFlagFromLabels(detail.Labels)
+}
+
+func featureFlagFromLabels(labels []string) (string, error) {
+	var selected string
+	for _, label := range labels {
+		name, ok := strings.CutPrefix(label, "feature-flag:")
+		if !ok {
+			continue
+		}
+		if !featureFlagName.MatchString(name) || selected != "" {
+			return "", errors.New("task has an invalid or repeated feature flag label")
+		}
+		selected = name
+	}
+	return selected, nil
+}
+
+func openLocalStore() (*journal.SQLite, error) {
+	path := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
+	if _, err := os.Stat(path); err != nil {
+		return nil, loomgit.NewError(loomgit.WorkspaceUnsupported, "revision journal is unavailable", err)
+	}
+	store, err := journal.OpenSQLite(path)
+	return store, err
 }
 
 func publishStackRecorded(ctx context.Context, store *journal.SQLite, cfg *config.LoomConfig, workspace, stackID, lead string, changes []string, forge Forge, token, slug string) ([]Result, error) {
@@ -133,7 +193,8 @@ func repoNameForStack(ctx context.Context, store *journal.SQLite, workspace stri
 	return repoName, nil
 }
 
-func publishRecorded(ctx context.Context, store *journal.SQLite, cfg *config.LoomConfig, workspace, lead, change string, forge Forge, token, slug string) (Result, error) {
+func publishRecorded(ctx context.Context, store *journal.SQLite, cfg *config.LoomConfig, workspace, lead, change string,
+	forge Forge, token, slug string, flagForTask func(context.Context, string) (string, error)) (Result, error) {
 	repoName, err := store.RepoForChange(ctx, workspace, change)
 	if err != nil {
 		return Result{}, fmt.Errorf("find repo for change: %w", err)
@@ -150,29 +211,150 @@ func publishRecorded(ctx context.Context, store *journal.SQLite, cfg *config.Loo
 		if repo.Name != repoName {
 			continue
 		}
-		prior, priorExists, err := store.Publication(ctx, workspace, change)
-		if err != nil {
-			return Result{}, err
-		}
-		revision, err := Publish(ctx, store, Request{
-			Workspace: workspace, Lead: lead, Change: change,
+		request := Request{Workspace: workspace, Lead: lead, Change: change,
 			Repo: repo.ResolveAbsPath(configured.Path), WorkingArea: area.Path,
-			BaseSHA: area.BaseSHA, RepoName: repoName, forge: forge, token: token, slug: slug,
-		})
-		if err != nil {
-			return Result{}, err
-		}
-		publication, found, err := store.Publication(ctx, workspace, change)
-		if err != nil {
-			return Result{}, err
-		}
-		if !found || publication.Head != revision.HeadSHA || publication.Phase != "done" {
-			return Result{}, errors.New("published PR record unavailable")
-		}
-		return Result{Revision: revision, PRURL: publication.PRURL, PRNumber: publication.PRNumber,
-			AlreadyExists: priorExists && prior.Phase == "done" && prior.Head == revision.HeadSHA}, nil
+			BaseSHA: area.BaseSHA, RepoName: repoName, forge: forge, token: token, slug: slug}
+		return publishRepo(ctx, store, request, flagForTask)
 	}
 	return Result{}, loomgit.NewError(loomgit.RepoSelectionRequired, "change repo is not in the workspace", nil)
+}
+
+func publishRepo(ctx context.Context, store *journal.SQLite, request Request,
+	flagForTask func(context.Context, string) (string, error)) (Result, error) {
+	prior, priorExists, err := store.Publication(ctx, request.Workspace, request.Change)
+	if err != nil {
+		return Result{}, err
+	}
+	mode, err := store.DeliveryMode(ctx, request.Workspace)
+	if err != nil {
+		return Result{}, err
+	}
+	if mode == "trunk" {
+		if err := prepareTrunkRequest(ctx, store, &request, flagForTask); err != nil {
+			return Result{}, err
+		}
+	}
+	revision, err := Publish(ctx, store, request)
+	if err != nil {
+		if mode == "trunk" && errors.Is(err, loomgit.NewError(loomgit.ReviewRequired, "", nil)) {
+			if holdErr := store.SetDeliveryHold(ctx, request.Workspace, request.Change, "waiting_on_verdict"); holdErr != nil {
+				return Result{}, holdErr
+			}
+		}
+		return Result{}, err
+	}
+	if mode == "trunk" {
+		if err := store.SetDeliveryHold(ctx, request.Workspace, request.Change, ""); err != nil {
+			return Result{}, err
+		}
+	}
+	publication, found, err := store.Publication(ctx, request.Workspace, request.Change)
+	if err != nil {
+		return Result{}, err
+	}
+	if !found || publication.Head != revision.HeadSHA || publication.Phase != "done" {
+		return Result{}, errors.New("published PR record unavailable")
+	}
+	return Result{Revision: revision, PRURL: publication.PRURL, PRNumber: publication.PRNumber,
+		AlreadyExists: priorExists && prior.Phase == "done" && prior.Head == revision.HeadSHA}, nil
+}
+
+func prepareTrunkRequest(ctx context.Context, store *journal.SQLite, request *Request,
+	flagForTask func(context.Context, string) (string, error)) error {
+	predecessor, err := store.DependencyForChange(ctx, request.Workspace, request.Change)
+	if err != nil {
+		return err
+	}
+	if predecessor != "" {
+		landed, err := store.IsLanded(ctx, request.Workspace, predecessor)
+		if err != nil {
+			return err
+		}
+		if !landed {
+			if err := store.SetDeliveryHold(ctx, request.Workspace, request.Change, "waiting_on_dependency"); err != nil {
+				return err
+			}
+			return loomgit.NewError(loomgit.LineageUnresolved, "waiting_on_dependency: predecessor has not landed", nil)
+		}
+	}
+	if flagForTask != nil {
+		task, err := store.TaskForChange(ctx, request.Workspace, request.Change)
+		if err != nil {
+			return err
+		}
+		if task != "" {
+			request.FeatureFlag, err = flagForTask(ctx, task)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	request.RevisionHead, err = trunkRevision(ctx, store, *request)
+	return err
+}
+
+func trunkRevision(ctx context.Context, store *journal.SQLite, req Request) (string, error) {
+	runner, err := gitexec.New(req.Repo, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
+	if err != nil {
+		return "", err
+	}
+	area, err := gitexec.New(req.WorkingArea, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
+	if err != nil {
+		return "", err
+	}
+	initialHead, err := layerHead(ctx, apply.New(store, nil, area), area, req.Workspace, req.Lead, req.BaseSHA, req.Change)
+	if err != nil {
+		return "", err
+	}
+	source, err := store.RevisionByHead(ctx, req.Workspace, req.Change, initialHead)
+	if err != nil {
+		return "", err
+	}
+	trunk, err := recordedTrunk(ctx, store, req)
+	if err != nil {
+		return "", err
+	}
+	if _, err := runner.Run(ctx, "fetch", "origin", trunk); err != nil {
+		return "", fmt.Errorf("fetch trunk: %w", err)
+	}
+	out, err := runner.Run(ctx, "rev-parse", "--verify", "refs/remotes/origin/"+trunk+"^{commit}")
+	if err != nil {
+		return "", err
+	}
+	base := strings.TrimSpace(string(out))
+	if source.BaseSHA == base {
+		return source.HeadSHA, nil
+	}
+	return deriveTrunkRevision(ctx, store, runner, req, source, base)
+}
+
+func deriveTrunkRevision(ctx context.Context, store *journal.SQLite, runner *gitexec.Runner,
+	req Request, source loomgit.Revision, base string) (string, error) {
+	result, err := replay.New(runner).TrialMerge(ctx, source.BaseSHA, source.HeadSHA, base)
+	if err != nil {
+		return "", err
+	}
+	if result.ConflictCommit != "" {
+		return "", loomgit.NewError(loomgit.Conflict, strings.Join(result.ConflictingPaths, ", "), nil)
+	}
+	derived, err := changeset.RecordDerived(ctx, store, runner, changeset.DerivedInput{
+		Workspace: req.Workspace, Change: req.Change,
+		RequestID:  "trunk-delivery:" + req.Workspace + ":" + req.Change + ":" + strconv.Itoa(source.Number) + ":" + base,
+		FromNumber: source.Number, Operation: "restack", BaseSHA: base,
+		HeadSHA: result.HeadSHA, Outcome: source.Outcome,
+	})
+	if err != nil {
+		return "", err
+	}
+	if err := review.RequireVerdict(ctx, store, req.Workspace, req.Change, derived.Number, derived.HeadSHA, "publish", ""); err != nil {
+		if !errors.Is(err, loomgit.NewError(loomgit.ReviewRequired, "", nil)) {
+			return "", err
+		}
+		if _, _, err := review.CarryForward(ctx, store, runner, source, derived, result); err != nil {
+			return "", err
+		}
+	}
+	return derived.HeadSHA, nil
 }
 
 func workingArea(ctx context.Context, store *journal.SQLite, workspace, lead, repoName string) (*journal.WorkingArea, error) {

@@ -3,6 +3,8 @@ package git
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -61,5 +63,39 @@ func TestPrStackCommandCallsPublisherWithOrderedChanges(t *testing.T) {
 	}
 	if !called || output.String() != "https://example.test/1\n" {
 		t.Fatalf("publisher called = %v, output = %q", called, output.String())
+	}
+}
+
+func TestDeliveryModeCommandSetsWorkspaceMode(t *testing.T) {
+	root := t.TempDir()
+	setupWorkspaceConfigInDir(t, root, &config.LoomConfig{
+		DefaultWorkspace: "ws1",
+		Workspaces: map[string]config.WorkspaceConfig{
+			"ws1": {Path: root, Repos: []config.RepoConfig{{Name: "repo", Path: root}}},
+		},
+	})
+	journalDir := filepath.Join(root, "loomgit")
+	if err := os.MkdirAll(journalDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(journalDir, "store.db"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	deliveryModeCmd.SetOut(&output)
+	t.Cleanup(func() { deliveryModeCmd.SetOut(nil) })
+	deliveryModeCmd.SetContext(context.Background())
+	if err := deliveryModeCmd.RunE(deliveryModeCmd, []string{"trunk"}); err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != "trunk\n" {
+		t.Fatalf("set mode output = %q", output.String())
+	}
+	output.Reset()
+	if err := deliveryModeCmd.RunE(deliveryModeCmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != "trunk\n" {
+		t.Fatalf("read mode output = %q", output.String())
 	}
 }
