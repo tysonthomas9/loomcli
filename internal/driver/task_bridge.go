@@ -393,11 +393,11 @@ func writeFlueTaskRunnerLauncher() (string, func(), error) {
 	return launcher.Name(), cleanup, nil
 }
 
-//nolint:gosec // Configured argv runs directly without shell expansion.
 func (e HostBridgeTaskExecutor) runCommand(ctx context.Context, req TaskExecRequest, command []string) (bridgeTaskRunnerResult, error) {
 	return e.runTaskRunnerProcess(ctx, req, command, "task runner command", "task runner")
 }
 
+//nolint:gosec // Configured argv runs directly without shell expansion.
 func (e HostBridgeTaskExecutor) runTaskRunnerProcess(ctx context.Context, req TaskExecRequest, command []string, label, resultLabel string) (bridgeTaskRunnerResult, error) {
 	input, err := json.Marshal(req)
 	if err != nil {
