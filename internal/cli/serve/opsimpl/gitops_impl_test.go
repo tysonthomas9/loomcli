@@ -271,15 +271,16 @@ func TestResolveAgentWorktree_StoreBackedFleetDB(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	wtPath := filepath.Join(wsRoot, "worktrees", "api", "nova")
+	wtPath := filepath.Join(wsRoot, ".loom", "task-copies", "api", "T1")
 	if err := runGit(t, wtPath, "init", "-b", "feature/nova"); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
 	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
 		sc.LastWorkspace = "WS1"
 		sc.Workspaces["WS1"] = bootstrap.WorkspaceLocalState{
-			Path:  wsRoot,
-			Repos: map[string]string{"api": filepath.Join(wsRoot, "api")},
+			Path:   wsRoot,
+			Repos:  map[string]string{"api": filepath.Join(wsRoot, "api")},
+			Agents: map[string]bootstrap.AgentLocalState{"nova": {Worktrees: map[string]string{"api": wtPath}}},
 		}
 		return nil
 	}); err != nil {
@@ -335,13 +336,16 @@ func TestResolveAgentWorktreeForRepo_StoreBackedFleetDB(t *testing.T) {
 		t.Fatalf("create any: %v", err)
 	}
 
-	novaAPIPath := filepath.Join(wsRoot, "worktrees", "api", "nova")
+	novaAPIPath := filepath.Join(wsRoot, ".loom", "task-copies", "api", "T1")
 	if err := runGit(t, novaAPIPath, "init", "-b", "feature/nova"); err != nil {
 		t.Fatalf("git init nova api: %v", err)
 	}
 	anyDocsPath := filepath.Join(wsRoot, ".loom", "task-copies", "docs", "T1")
 	if err := runGit(t, anyDocsPath, "init", "-b", "feature/any-docs"); err != nil {
 		t.Fatalf("git init any docs: %v", err)
+	}
+	if err := runGit(t, filepath.Join(wsRoot, "worktrees", "api", "any"), "init", "-b", "any"); err != nil {
+		t.Fatalf("git init old agent checkout: %v", err)
 	}
 	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
 		sc.LastWorkspace = "WS1"
@@ -352,7 +356,8 @@ func TestResolveAgentWorktreeForRepo_StoreBackedFleetDB(t *testing.T) {
 				"docs": filepath.Join(wsRoot, "docs"),
 			},
 			Agents: map[string]bootstrap.AgentLocalState{
-				"any": {Worktree: anyDocsPath, Worktrees: map[string]string{"docs": anyDocsPath}},
+				"nova": {Worktrees: map[string]string{"api": novaAPIPath}},
+				"any":  {Worktree: anyDocsPath, Worktrees: map[string]string{"docs": anyDocsPath}},
 			},
 		}
 		return nil
@@ -419,7 +424,7 @@ func TestResolveAgentWorktree_BrokenGitMetadataReturnsUnknownBranch(t *testing.T
 		t.Fatalf("create agent: %v", err)
 	}
 
-	wtPath := filepath.Join(wsRoot, "worktrees", "api", "broken")
+	wtPath := filepath.Join(wsRoot, ".loom", "task-copies", "api", "T1")
 	if err := os.MkdirAll(wtPath, 0755); err != nil {
 		t.Fatalf("mkdir worktree: %v", err)
 	}
@@ -430,8 +435,9 @@ func TestResolveAgentWorktree_BrokenGitMetadataReturnsUnknownBranch(t *testing.T
 	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
 		sc.LastWorkspace = "WS1"
 		sc.Workspaces["WS1"] = bootstrap.WorkspaceLocalState{
-			Path:  wsRoot,
-			Repos: map[string]string{"api": filepath.Join(wsRoot, "api")},
+			Path:   wsRoot,
+			Repos:  map[string]string{"api": filepath.Join(wsRoot, "api")},
+			Agents: map[string]bootstrap.AgentLocalState{"broken": {Worktrees: map[string]string{"api": wtPath}}},
 		}
 		return nil
 	}); err != nil {

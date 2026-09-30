@@ -39,11 +39,6 @@ func RepoPath(local bootstrap.WorkspaceLocalState, repoName string) string {
 	return ""
 }
 
-// AgentWorktreePath returns the canonical local worktree path for an agent.
-func AgentWorktreePath(workspacePath, repoName, agentName string) string {
-	return filepath.Join(workspacePath, "worktrees", repoName, agentName)
-}
-
 // TaskRunWorktreePath returns the canonical isolated worktree path for a task
 // run. The path is deliberately separate from agent worktrees so concurrent
 // local-task-runner executions never share a mutable checkout.
@@ -593,6 +588,22 @@ func RememberAgentWorktree(wsKey, agentName, worktreePath string) error {
 	})
 }
 
+func RememberAgentWorktrees(wsKey, agentName string, paths map[string]string) error {
+	return bootstrap.MutateWorkspaceLocalState(wsKey, func(local *bootstrap.WorkspaceLocalState) error {
+		if local.Agents == nil {
+			local.Agents = make(map[string]bootstrap.AgentLocalState)
+		}
+		state := local.Agents[agentName]
+		state.Worktrees = make(map[string]string, len(paths))
+		for repo, path := range paths {
+			state.Worktrees[repo] = path
+		}
+		state.Worktree = FirstWorktreePath(paths)
+		local.Agents[agentName] = state
+		return nil
+	})
+}
+
 // EnsureAgentTaskCopyWorktrees creates a distinct checkout for each repo of a
 // worker agent and remembers all of its paths for subsequent launches.
 func EnsureAgentTaskCopyWorktrees(wsKey, agentName, workspacePath string, repos []Repo) (map[string]string, error) {
@@ -618,18 +629,7 @@ func EnsureAgentTaskCopyWorktrees(wsKey, agentName, workspacePath string, repos 
 		}
 		paths[repo.Name] = target
 	}
-	if err := bootstrap.MutateWorkspaceLocalState(wsKey, func(local *bootstrap.WorkspaceLocalState) error {
-		state := local.Agents[agentName]
-		if state.Worktrees == nil {
-			state.Worktrees = make(map[string]string)
-		}
-		for repo, path := range paths {
-			state.Worktrees[repo] = path
-		}
-		state.Worktree = FirstWorktreePath(state.Worktrees)
-		local.Agents[agentName] = state
-		return nil
-	}); err != nil {
+	if err := RememberAgentWorktrees(wsKey, agentName, paths); err != nil {
 		return nil, err
 	}
 	return paths, nil
@@ -693,6 +693,25 @@ func RememberedAgentWorktreeForRepo(wsKey, agentName, repoName string) (string, 
 		return "", false
 	}
 	return path, true
+}
+
+func RecordedAgentCheckout(wsKey, agentName, repoName string) (string, string, bool, error) {
+	cache, err := bootstrap.LoadStateCache()
+	if err != nil {
+		return "", "", false, err
+	}
+	state := cache.Workspaces[wsKey].Agents[agentName]
+	path := state.Worktrees[repoName]
+	if path == "" {
+		return "", "", false, nil
+	}
+	var branch string
+	if copyID := state.TaskCopyIDs[repoName]; copyID != "" {
+		branch, err = loomgit.TaskCopyBranch(wsKey, copyID)
+	} else {
+		branch, err = loomgit.InteractiveBranch(wsKey, agentName)
+	}
+	return path, branch, true, err
 }
 
 // RememberRepoPath stores a repo's local checkout path.

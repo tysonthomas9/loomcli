@@ -1,11 +1,27 @@
 package metricscmd
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/ops"
 )
+
+func TestMonitorBranchIgnoresUnrecordedAgentCheckout(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	root := t.TempDir()
+	oldPath := filepath.Join(root, "worktrees", "repo", "agent")
+	if err := os.MkdirAll(filepath.Join(oldPath, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	workspace := &ops.WorkspaceData{ID: "ws", Path: root, Repos: []ops.WorkspaceRepo{{Name: "repo"}}}
+	if branch := monitorBranchFromAgent(workspace, &domain.Agent{Name: "agent", Repos: []string{"repo"}}); branch != "unknown" {
+		t.Fatalf("branch = %q, want unknown without a recorded checkout", branch)
+	}
+}
 
 func TestMonitorLeadDeliveryState(t *testing.T) {
 	updatedAt := time.Date(2026, 5, 17, 8, 0, 0, 123, time.UTC)

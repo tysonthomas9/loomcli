@@ -289,7 +289,7 @@ func ensureInteractiveAgentWorktrees(ctx context.Context, agent domain.Agent, ws
 	for _, area := range areas {
 		paths[area.Repo] = area.Path
 	}
-	return localworkspace.RememberAgentWorktree(agent.WorkspaceKey, agent.Name, localworkspace.FirstWorktreePath(paths))
+	return localworkspace.RememberAgentWorktrees(agent.WorkspaceKey, agent.Name, paths)
 }
 
 func runAgentList(_ *cobra.Command, _ []string) error {

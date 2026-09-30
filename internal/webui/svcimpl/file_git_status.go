@@ -117,9 +117,9 @@ func workspaceFileCheckouts(wsID string, wsRoot string, ws *ops.WorkspaceData) [
 	}
 	for _, agent := range ws.Agents {
 		for _, repo := range agentCheckoutRepos(ws.Repos, agent) {
-			path := filepath.Join(wsRoot, "worktrees", repo.Name, agent.Name)
-			if remembered, ok := localworkspace.RememberedAgentWorktreeForRepo(wsID, agent.Name, repo.Name); ok {
-				path = remembered
+			path, ok := localworkspace.RememberedAgentWorktreeForRepo(wsID, agent.Name, repo.Name)
+			if !ok {
+				continue
 			}
 			checkout, ok := workspaceCheckoutWithinRoot(wsRoot, path)
 			if !ok {

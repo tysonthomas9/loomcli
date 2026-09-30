@@ -100,8 +100,7 @@ func (g *GitOpsImpl) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentW
 	return &aw, nil
 }
 
-// ResolveAgentWorktreeForRepo resolves one explicit agent+repo checkout under
-// <ws>/worktrees/<repo>/<agent>.
+// ResolveAgentWorktreeForRepo resolves one recorded agent+repo checkout.
 func (g *GitOpsImpl) ResolveAgentWorktreeForRepo(workspaceID, name, repoName string) (*ops.AgentWorktree, error) {
 	repoName = strings.TrimSpace(repoName)
 	if repoName == "" {
@@ -214,9 +213,9 @@ func resolveAgentWorktreeFromWS(ws *ops.WorkspaceData, workspaceID, name string)
 }
 
 func resolveAgentWorktreeFromWSForRepo(ws *ops.WorkspaceData, name string, repo ops.WorkspaceRepo) (*ops.AgentWorktree, error) {
-	wtPath := filepath.Join(ws.Path, "worktrees", repo.Name, name)
-	if remembered, ok := localworkspace.RememberedAgentWorktreeForRepo(ws.ID, name, repo.Name); ok {
-		wtPath = remembered
+	wtPath, ok := localworkspace.RememberedAgentWorktreeForRepo(ws.ID, name, repo.Name)
+	if !ok {
+		return nil, fmt.Errorf("%w: agent %q has no recorded checkout for repo %q", ops.ErrAgentWorktreeNotFound, name, repo.Name)
 	}
 	if _, err := os.Stat(filepath.Join(wtPath, ".git")); err != nil {
 		if os.IsNotExist(err) {

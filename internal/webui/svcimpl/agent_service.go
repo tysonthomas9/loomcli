@@ -405,7 +405,7 @@ func ensureInteractiveWebAgentWorktrees(ctx context.Context, agent domain.Agent,
 	if err != nil {
 		return service.ErrInternal("create lead working area", err)
 	}
-	if err := localworkspace.RememberAgentWorktree(agent.WorkspaceKey, agent.Name, localworkspace.FirstWorktreePath(paths)); err != nil {
+	if err := localworkspace.RememberAgentWorktrees(agent.WorkspaceKey, agent.Name, paths); err != nil {
 		return service.ErrInternal("update local agent state", err)
 	}
 	return nil

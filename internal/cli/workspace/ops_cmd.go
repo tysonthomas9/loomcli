@@ -620,12 +620,7 @@ func agentDesiredRunnable(agent *domain.Agent) bool {
 }
 
 func agentWorktreePath(localState bootstrap.WorkspaceLocalState, repoByName map[string]*domain.Repo, agent *domain.Agent) string {
-	if localState.Agents != nil && localState.Agents[agent.Name].Worktree != "" {
-		return localState.Agents[agent.Name].Worktree
-	}
-	if localState.Path == "" {
-		return ""
-	}
+	paths := localState.Agents[agent.Name].Worktrees
 	repoNames := agent.Repos
 	if agent.CrossRepo || len(repoNames) == 0 {
 		repoNames = make([]string, 0, len(repoByName))
@@ -634,13 +629,18 @@ func agentWorktreePath(localState bootstrap.WorkspaceLocalState, repoByName map[
 		}
 	}
 	for _, repoName := range repoNames {
-		candidate := localworkspace.AgentWorktreePath(localState.Path, repoName, agent.Name)
+		candidate := paths[repoName]
+		if candidate == "" {
+			continue
+		}
 		if _, err := os.Stat(filepath.Join(candidate, ".git")); err == nil {
 			return candidate
 		}
 	}
-	if len(repoNames) > 0 {
-		return localworkspace.AgentWorktreePath(localState.Path, repoNames[0], agent.Name)
+	for _, repoName := range repoNames {
+		if path := paths[repoName]; path != "" {
+			return path
+		}
 	}
 	return ""
 }

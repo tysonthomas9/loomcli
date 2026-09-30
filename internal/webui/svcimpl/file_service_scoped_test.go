@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -347,12 +348,13 @@ func setupScopedService(t *testing.T) (service.FileService, []scopedCase) {
 	t.Helper()
 	wsRoot := t.TempDir()
 	repoRoot := filepath.Join(wsRoot, "repo-a")
-	agentRoot := filepath.Join(wsRoot, "worktrees", "repo-a", "agent-a")
+	agentRoot := filepath.Join(wsRoot, ".loom", "task-copies", "repo-a", "T1")
 	for _, dir := range []string{repoRoot, agentRoot} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			t.Fatal(err)
 		}
 	}
+	recordScopedAgentCheckout(t, "repo-a", agentRoot)
 	svc := NewFileService(scopedMockFileOps{
 		wsRoot:    wsRoot,
 		repoRoot:  repoRoot,
@@ -362,6 +364,14 @@ func setupScopedService(t *testing.T) (service.FileService, []scopedCase) {
 		{name: "workspace", scope: service.ScopeWorkspace, root: wsRoot},
 		{name: "repo", scope: service.ScopeRepo, target: "repo-a", root: repoRoot},
 		{name: "agent", scope: service.ScopeAgent, target: "agent-a", root: agentRoot},
+	}
+}
+
+func recordScopedAgentCheckout(t *testing.T, repo, path string) {
+	t.Helper()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	if err := localworkspace.RememberAgentWorktrees("ws", "agent-a", map[string]string{repo: path}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -1696,11 +1706,32 @@ func TestFileServiceImpl_GitStatusScoped_WorkspaceFanoutPrefixes(t *testing.T) {
 	if got := status.Status["repo-a/tracked.txt"]; got != " M" {
 		t.Fatalf("status[repo-a/tracked.txt] = %q, want %q; full=%#v", got, " M", status)
 	}
-	if got := status.Status["worktrees/repo-a/agent-a/new.txt"]; got != "??" {
-		t.Fatalf("status[worktrees/repo-a/agent-a/new.txt] = %q, want %q; full=%#v", got, "??", status)
+	if got := status.Status[".loom/task-copies/repo-a/T1/new.txt"]; got != "??" {
+		t.Fatalf("status[task-copy new.txt] = %q, want %q; full=%#v", got, "??", status)
 	}
 	if _, ok := status.Status["tracked.txt"]; ok {
 		t.Fatalf("workspace status should prefix checkout paths, got %#v", status)
+	}
+}
+
+func TestWorkspaceFileCheckoutsIgnoresOldAgentPathWithoutRecord(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	wsRoot := t.TempDir()
+	oldPath := filepath.Join(wsRoot, "worktrees", "repo-a", "agent-a")
+	if err := os.MkdirAll(oldPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, oldPath)
+	ws := &ops.WorkspaceData{
+		ID:     "ws",
+		Path:   wsRoot,
+		Repos:  []ops.WorkspaceRepo{{Name: "repo-a", Path: filepath.Join(wsRoot, "repo-a")}},
+		Agents: []ops.WorkspaceAgentInfo{{Name: "agent-a", Repos: []string{"repo-a"}}},
+	}
+	for _, checkout := range workspaceFileCheckouts("ws", wsRoot, ws) {
+		if checkout.agent == "agent-a" {
+			t.Fatalf("old agent checkout was included: %+v", checkout)
+		}
 	}
 }
 
@@ -1808,11 +1839,18 @@ func TestFileServiceImpl_ListFileCheckouts_IncludesMissingAndChangeCounts(t *tes
 	wsRoot := t.TempDir()
 	repoARoot := filepath.Join(wsRoot, "repo-a")
 	repoBRoot := filepath.Join(wsRoot, "repo-b")
-	agentARoot := filepath.Join(wsRoot, "worktrees", "repo-a", "agent-a")
+	agentARoot := filepath.Join(wsRoot, ".loom", "task-copies", "repo-a", "T1")
 	for _, dir := range []string{repoARoot, agentARoot} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			t.Fatal(err)
 		}
+	}
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	if err := localworkspace.RememberAgentWorktrees("ws", "agent-a", map[string]string{
+		"repo-a": agentARoot,
+		"repo-b": filepath.Join(wsRoot, ".loom", "task-copies", "repo-b", "T2"),
+	}); err != nil {
+		t.Fatal(err)
 	}
 
 	initGitRepo(t, repoARoot)
@@ -1878,12 +1916,13 @@ func TestFileServiceImpl_CheckoutsAndWorkspaceGitStatusSkipBrokenCheckout(t *tes
 	ctx := context.Background()
 	wsRoot := t.TempDir()
 	repoRoot := filepath.Join(wsRoot, "repo-a")
-	agentRoot := filepath.Join(wsRoot, "worktrees", "repo-a", "agent-a")
+	agentRoot := filepath.Join(wsRoot, ".loom", "task-copies", "repo-a", "T1")
 	for _, dir := range []string{repoRoot, agentRoot} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			t.Fatal(err)
 		}
 	}
+	recordScopedAgentCheckout(t, "repo-a", agentRoot)
 
 	initGitRepo(t, repoRoot)
 	mustWrite(t, filepath.Join(repoRoot, "tracked.txt"), "one\n")
@@ -1939,7 +1978,7 @@ func TestFileServiceImpl_CheckoutsAndWorkspaceGitStatusSkipBrokenCheckout(t *tes
 		t.Fatalf("status[repo-a/tracked.txt] = %q, want %q; full=%#v", got, " M", status)
 	}
 	for path := range status.Status {
-		if strings.HasPrefix(path, "worktrees/repo-a/agent-a/") {
+		if strings.HasPrefix(path, ".loom/task-copies/repo-a/T1/") {
 			t.Fatalf("workspace status included broken checkout path %q; full=%#v", path, status)
 		}
 	}
