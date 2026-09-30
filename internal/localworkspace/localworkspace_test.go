@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
+	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
 func TestEnsureGitWorktreeFromBranchUsesFetchedDefaultBranch(t *testing.T) {
@@ -177,7 +179,7 @@ func TestEnsureDetachedGitWorktreeAtPRHead(t *testing.T) {
 	remote := filepath.Join(root, "remote.git")
 	seed := filepath.Join(root, "seed")
 	repo := filepath.Join(root, "repo")
-	target := filepath.Join(root, "pr-worktrees", "repo", "pr-7")
+	target := filepath.Join(root, "pr-worktrees", "repo", "pr-7", "first")
 
 	git(t, "", "init", "--bare", remote)
 	git(t, "", "init", seed)
@@ -216,53 +218,29 @@ func TestEnsureDetachedGitWorktreeAtPRHead(t *testing.T) {
 		t.Fatalf("target HEAD is attached to %q, want detached", strings.TrimSpace(out))
 	}
 
-	// Clean-tree cache hit: a re-ensure with no changes is a no-op at the same sha.
-	if gotSHA, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, target, "origin", 7, headSHA); err != nil {
-		t.Fatalf("EnsureDetachedGitWorktreeAtPRHead() clean cache hit error = %v", err)
-	} else if gotSHA != headSHA {
-		t.Fatalf("clean cache hit returned sha = %s, want %s", gotSHA, headSHA)
+	// A new review has its own checkout, leaving tracked edits and scratch files
+	// from the first review untouched.
+	sentinel := filepath.Join(target, "scratch.txt")
+	writeFile(t, sentinel, "review notes\n")
+	writeFile(t, filepath.Join(target, "pr.txt"), "edited by reviewer\n")
+	second := filepath.Join(root, "pr-worktrees", "repo", "pr-7", "second")
+	if _, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, second, "origin", 7, headSHA); err != nil {
+		t.Fatalf("create second review: %v", err)
 	}
-	if got := gitOutput(t, target, "rev-parse", "HEAD"); got != headSHA {
-		t.Fatalf("target HEAD after clean cache hit = %s, want %s", got, headSHA)
+	if got, err := os.ReadFile(sentinel); err != nil || string(got) != "review notes\n" {
+		t.Fatalf("first review scratch = %q, %v", got, err)
 	}
-
-	// Pristine guarantee: an untracked file at the right sha is scrubbed, not
-	// handed back — a review checkout must faithfully match the PR head.
-	sentinel := filepath.Join(target, "cache-hit-sentinel.txt")
-	writeFile(t, sentinel, "cruft\n")
-	if _, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, target, "origin", 7, headSHA); err != nil {
-		t.Fatalf("EnsureDetachedGitWorktreeAtPRHead() pristine scrub error = %v", err)
+	if got, err := os.ReadFile(filepath.Join(target, "pr.txt")); err != nil || string(got) != "edited by reviewer\n" {
+		t.Fatalf("first review edit = %q, %v", got, err)
 	}
-	if got := gitOutput(t, target, "rev-parse", "HEAD"); got != headSHA {
-		t.Fatalf("target HEAD after pristine scrub = %s, want %s", got, headSHA)
+	if got := gitOutput(t, second, "rev-parse", "HEAD"); got != headSHA {
+		t.Fatalf("second review HEAD = %s, want %s", got, headSHA)
 	}
-	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
-		t.Fatalf("untracked sentinel survived a re-ensure (err=%v), want it scrubbed", err)
+	if _, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, target, "origin", 7, headSHA); err == nil {
+		t.Fatal("reusing an existing review path succeeded")
 	}
-
-	git(t, target, "reset", "--hard", "HEAD~1")
-	if _, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, target, "origin", 7, headSHA); err != nil {
-		t.Fatalf("EnsureDetachedGitWorktreeAtPRHead() drift repair error = %v", err)
-	}
-	if got := gitOutput(t, target, "rev-parse", "HEAD"); got != headSHA {
-		t.Fatalf("target HEAD after drift repair = %s, want %s", got, headSHA)
-	}
-
-	writeFile(t, filepath.Join(seed, "pr.txt"), "pr v2\n")
-	git(t, seed, "add", "pr.txt")
-	git(t, seed, "commit", "-m", "advance pr head")
-	newHeadSHA := gitOutput(t, seed, "rev-parse", "HEAD")
-	git(t, seed, "push", "--force", "origin", "HEAD:refs/pull/7/head")
-
-	gotSHA, err = EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, target, "origin", 7, newHeadSHA)
-	if err != nil {
-		t.Fatalf("EnsureDetachedGitWorktreeAtPRHead() advance error = %v", err)
-	}
-	if gotSHA != newHeadSHA {
-		t.Fatalf("advance returned sha = %s, want %s", gotSHA, newHeadSHA)
-	}
-	if got := gitOutput(t, target, "rev-parse", "HEAD"); got != newHeadSHA {
-		t.Fatalf("target HEAD after advance = %s, want %s", got, newHeadSHA)
+	if got, err := os.ReadFile(sentinel); err != nil || string(got) != "review notes\n" {
+		t.Fatalf("reuse changed first review scratch = %q, %v", got, err)
 	}
 }
 
@@ -275,7 +253,7 @@ func TestEnsureDetachedGitWorktreeAtPRHeadRejectsFastForwardedTip(t *testing.T) 
 	remote := filepath.Join(root, "remote.git")
 	seed := filepath.Join(root, "seed")
 	repo := filepath.Join(root, "repo")
-	target := filepath.Join(root, "pr-worktrees", "repo", "pr-7")
+	target := filepath.Join(root, "pr-worktrees", "repo", "pr-7", "first")
 
 	git(t, "", "init", "--bare", remote)
 	git(t, "", "init", seed)
@@ -304,7 +282,8 @@ func TestEnsureDetachedGitWorktreeAtPRHeadRejectsFastForwardedTip(t *testing.T) 
 	headB := gitOutput(t, seed, "rev-parse", "HEAD")
 	git(t, seed, "push", "origin", "HEAD:refs/pull/7/head")
 
-	gotTip, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, target, "origin", 7, " "+strings.ToUpper(headA)+" ")
+	staleTarget := filepath.Join(root, "pr-worktrees", "repo", "pr-7", "stale")
+	gotTip, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, staleTarget, "origin", 7, " "+strings.ToUpper(headA)+" ")
 	var changed *PRHeadChangedError
 	if !errors.As(err, &changed) {
 		t.Fatalf("stale ensure error = %v, want PRHeadChangedError", err)
@@ -321,29 +300,146 @@ func TestEnsureDetachedGitWorktreeAtPRHeadRejectsFastForwardedTip(t *testing.T) 
 	if _, err := os.Stat(sentinel); err != nil {
 		t.Fatalf("stale outcome scrubbed existing worktree: %v", err)
 	}
+	if _, err := os.Lstat(staleTarget); !os.IsNotExist(err) {
+		t.Fatalf("stale outcome created a new review worktree: %v", err)
+	}
 
-	gotSHA, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, target, "origin", 7, "\n"+strings.ToUpper(headB)+"\t")
+	next := filepath.Join(root, "pr-worktrees", "repo", "pr-7", "second")
+	gotSHA, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, next, "origin", 7, "\n"+strings.ToUpper(headB)+"\t")
 	if err != nil {
 		t.Fatalf("ensure expected head B: %v", err)
 	}
 	if gotSHA != headB {
 		t.Fatalf("expected-B ensure returned %q, want %q", gotSHA, headB)
 	}
-	if got := gitOutput(t, target, "rev-parse", "HEAD"); got != headB {
-		t.Fatalf("target HEAD after expected-B ensure = %s, want %s", got, headB)
+	if got := gitOutput(t, next, "rev-parse", "HEAD"); got != headB {
+		t.Fatalf("new target HEAD after expected-B ensure = %s, want %s", got, headB)
 	}
-	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
-		t.Fatalf("expected-B ensure did not scrub sentinel (err=%v)", err)
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatalf("expected-B ensure changed old review scratch: %v", err)
+	}
+}
+
+func TestPRReviewWorktreeAddFailureLeavesNoDirectory(t *testing.T) {
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	seed := filepath.Join(root, "seed")
+	repo := filepath.Join(root, "repo")
+	target := filepath.Join(root, "pr-worktrees", "repo", "pr-7", "failed")
+	git(t, "", "init", "--bare", remote)
+	git(t, "", "init", seed)
+	git(t, seed, "config", "user.name", "Test User")
+	git(t, seed, "config", "user.email", "test@example.test")
+	writeFile(t, filepath.Join(seed, "file.txt"), "content\n")
+	git(t, seed, "add", "file.txt")
+	git(t, seed, "commit", "-m", "head")
+	head := gitOutput(t, seed, "rev-parse", "HEAD")
+	git(t, seed, "remote", "add", "origin", remote)
+	git(t, seed, "push", "origin", "HEAD:refs/pull/7/head")
+	git(t, "", "clone", remote, repo)
+	hooks := filepath.Join(root, "hooks")
+	if err := os.Mkdir(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hook := filepath.Join(hooks, "post-checkout")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "config", "core.hooksPath", hooks)
+	if _, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, target, "origin", 7, head); err == nil {
+		t.Fatal("worktree add unexpectedly succeeded")
+	}
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("partial worktree remains: %v", err)
+	}
+}
+
+func TestPRReviewCrossProcessLock(t *testing.T) {
+	if os.Getenv("LOOM_PR_REVIEW_LOCK_CHILD") == "1" {
+		_, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), os.Getenv("LOOM_PR_REVIEW_REPO"), os.Getenv("LOOM_PR_REVIEW_TARGET"), "origin", 7, os.Getenv("LOOM_PR_REVIEW_HEAD"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	seed := filepath.Join(root, "seed")
+	repo := filepath.Join(root, "repo")
+	parent := filepath.Join(root, "pr-worktrees", "repo", "pr-7")
+	git(t, "", "init", "--bare", remote)
+	git(t, "", "init", seed)
+	git(t, seed, "config", "user.name", "Test User")
+	git(t, seed, "config", "user.email", "test@example.test")
+	writeFile(t, filepath.Join(seed, "file.txt"), "content\n")
+	git(t, seed, "add", "file.txt")
+	git(t, seed, "commit", "-m", "head")
+	head := gitOutput(t, seed, "rev-parse", "HEAD")
+	git(t, seed, "remote", "add", "origin", remote)
+	git(t, seed, "push", "origin", "HEAD:refs/pull/7/head")
+	git(t, "", "clone", remote, repo)
+	if err := os.MkdirAll(filepath.Dir(parent), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(parent+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := lockfile.FlockExclusiveBlocking(lock); err != nil {
+		t.Fatal(err)
+	}
+	locked := true
+	defer func() {
+		if locked {
+			_ = lockfile.FlockUnlock(lock)
+		}
+	}()
+	childCtx, cancelChildren := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelChildren()
+	var children []*exec.Cmd
+	for _, id := range []string{"serve", "daemon"} {
+		target := filepath.Join(parent, id)
+		cmd := exec.CommandContext(childCtx, os.Args[0], "-test.run=^TestPRReviewCrossProcessLock$") //nolint:norawexec // Child test process verifies the cross-process review lock.
+		cmd.Env = append(os.Environ(), "LOOM_PR_REVIEW_LOCK_CHILD=1", "LOOM_PR_REVIEW_REPO="+repo, "LOOM_PR_REVIEW_TARGET="+target, "LOOM_PR_REVIEW_HEAD="+head)
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		children = append(children, cmd)
+		defer func() { _ = cmd.Process.Kill() }()
+	}
+	time.Sleep(150 * time.Millisecond)
+	for _, id := range []string{"serve", "daemon"} {
+		if _, err := os.Lstat(filepath.Join(parent, id)); !os.IsNotExist(err) {
+			t.Fatalf("%s created a worktree while PR lock was held: %v", id, err)
+		}
+	}
+	if err := lockfile.FlockUnlock(lock); err != nil {
+		t.Fatal(err)
+	}
+	locked = false
+	// A .git file appears before git worktree add finishes. Wait for both
+	// creators to exit before inspecting their checkouts.
+	for _, child := range children {
+		if err := child.Wait(); err != nil {
+			t.Fatalf("review process failed: %v", err)
+		}
+	}
+	for _, id := range []string{"serve", "daemon"} {
+		target := filepath.Join(parent, id)
+		if got := gitOutput(t, target, "rev-parse", "HEAD"); got != head {
+			t.Fatalf("%s HEAD = %s, want %s", id, got, head)
+		}
 	}
 }
 
 func TestPRHeadReviewWorktreePath(t *testing.T) {
 	root := t.TempDir()
-	got, err := PRReviewWorktreePath(root, "repo", 7)
+	got, err := PRReviewWorktreePath(root, "repo", 7, "review-1")
 	if err != nil {
 		t.Fatalf("PRReviewWorktreePath() error = %v", err)
 	}
-	want := filepath.Join(root, ".loom", "pr-worktrees", "repo", "pr-7")
+	want := filepath.Join(root, ".loom", "pr-worktrees", "repo", "pr-7", "review-1")
 	if got != want {
 		t.Fatalf("PRReviewWorktreePath() = %q, want %q", got, want)
 	}
@@ -351,16 +447,16 @@ func TestPRHeadReviewWorktreePath(t *testing.T) {
 		t.Fatalf("PRReviewWorktreePath() = %q, want under %q", got, root)
 	}
 
-	if _, err := PRReviewWorktreePath("", "repo", 7); err == nil {
+	if _, err := PRReviewWorktreePath("", "repo", 7, "review-1"); err == nil {
 		t.Fatal("PRReviewWorktreePath() with empty workspace path returned nil error")
 	}
-	if _, err := PRReviewWorktreePath(root, "", 7); err == nil {
+	if _, err := PRReviewWorktreePath(root, "", 7, "review-1"); err == nil {
 		t.Fatal("PRReviewWorktreePath() with empty repo name returned nil error")
 	}
-	if _, err := PRReviewWorktreePath(root, "repo", 0); err == nil {
+	if _, err := PRReviewWorktreePath(root, "repo", 0, "review-1"); err == nil {
 		t.Fatal("PRReviewWorktreePath() with zero PR number returned nil error")
 	}
-	if _, err := PRReviewWorktreePath(root, "repo", -1); err == nil {
+	if _, err := PRReviewWorktreePath(root, "repo", -1, "review-1"); err == nil {
 		t.Fatal("PRReviewWorktreePath() with negative PR number returned nil error")
 	}
 }

@@ -1658,9 +1658,9 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 	if role.Kind != domain.RoleKindInteractive || role.PromptFile != reviewerPromptFile || role.Prompt != "" {
 		t.Fatalf("reviewer role = kind:%q prompt_file:%q prompt:%q", role.Kind, role.PromptFile, role.Prompt)
 	}
-	worktreePath, err := localworkspace.PRReviewWorktreePath(workspacePath, "hello", 7)
-	if err != nil {
-		t.Fatalf("PRReviewWorktreePath: %v", err)
+	worktreePath, ok := localworkspace.RememberedAgentWorktree(prReviewTestWorkspace, agentName)
+	if !ok {
+		t.Fatal("reviewer worktree was not remembered")
 	}
 	if _, err := os.Stat(filepath.Join(worktreePath, ".git")); err != nil {
 		t.Fatalf("worktree .git missing: %v", err)
@@ -1682,12 +1682,21 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 		t.Fatalf("queued messages = %d, want 0 (prompt drives the review, no seed)", len(queued))
 	}
 
-	// A second ensure is idempotent: still 200, base still recorded.
+	// The next review gets a fresh path while the first review's scratch stays.
+	scratch := filepath.Join(worktreePath, "review-notes.txt")
+	writeTestFile(t, scratch, "keep me\n")
 	status, raw = h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/reviewer", `{}`)
 	if status != http.StatusOK {
 		t.Fatalf("second status = %d, want 200 (body %s)", status, raw)
 	}
-	if got := strings.TrimSpace(gitOutput(t, worktreePath, "config", "loom.reviewBase")); got != base {
+	secondPath, ok := localworkspace.RememberedAgentWorktree(prReviewTestWorkspace, agentName)
+	if !ok || secondPath == worktreePath {
+		t.Fatalf("second review path = %q, want a new worktree", secondPath)
+	}
+	if got, err := os.ReadFile(scratch); err != nil || string(got) != "keep me\n" {
+		t.Fatalf("first review scratch = %q, %v", got, err)
+	}
+	if got := strings.TrimSpace(gitOutput(t, secondPath, "config", "loom.reviewBase")); got != base {
 		t.Fatalf("loom.reviewBase after second ensure = %q, want %q", got, base)
 	}
 }
