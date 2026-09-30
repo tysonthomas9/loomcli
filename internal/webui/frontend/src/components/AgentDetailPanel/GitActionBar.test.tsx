@@ -87,7 +87,7 @@ describe("GitActionBar", () => {
       expect(screen.getByText(/^Push/)).toBeInTheDocument();
       expect(screen.getByText(/^Pull/)).toBeInTheDocument();
       expect(screen.getByText("Sync")).toBeInTheDocument();
-      expect(screen.getByText("Create PR")).toBeInTheDocument();
+      expect(screen.getByText("Publish PR")).toBeInTheDocument();
       expect(screen.getByText("Reset")).toBeInTheDocument();
     });
 
@@ -222,7 +222,7 @@ describe("GitActionBar", () => {
         />,
       );
 
-      expect(screen.getByText("Create PR")).toBeEnabled();
+      expect(screen.getByText("Publish PR")).toBeEnabled();
     });
 
     it("disables all buttons when agent is working", () => {
@@ -238,7 +238,7 @@ describe("GitActionBar", () => {
       expect(screen.getByText("Push (5)")).toBeDisabled();
       expect(screen.getByText("Pull (3)")).toBeDisabled();
       expect(screen.getByText("Sync")).toBeDisabled();
-      expect(screen.getByText("Create PR")).toBeDisabled();
+      expect(screen.getByText("Publish PR")).toBeDisabled();
       expect(screen.getByText("Reset")).toBeDisabled();
     });
 
@@ -255,7 +255,7 @@ describe("GitActionBar", () => {
       expect(screen.getByText("Push (1)")).toBeDisabled();
       expect(screen.getByText("Pull (1)")).toBeDisabled();
       expect(screen.getByText("Sync")).toBeDisabled();
-      expect(screen.getByText("Create PR")).toBeDisabled();
+      expect(screen.getByText("Publish PR")).toBeDisabled();
       expect(screen.getByText("Reset")).toBeDisabled();
     });
 
@@ -274,7 +274,7 @@ describe("GitActionBar", () => {
       expect(screen.getByText("Push (5)")).toBeDisabled();
       expect(screen.getByText("Pull (3)")).toBeDisabled();
       expect(screen.getByText("Sync")).toBeDisabled();
-      expect(screen.getByText("Create PR")).toBeDisabled();
+      expect(screen.getByText("Publish PR")).toBeDisabled();
       expect(screen.getByText("Reset")).toBeDisabled();
     });
 
@@ -370,7 +370,7 @@ describe("GitActionBar", () => {
       expect(screen.getByText("Push")).toBeDisabled();
       expect(screen.getByText("Pull")).toBeDisabled();
       expect(screen.getByText("Sync")).toBeDisabled();
-      expect(screen.getByText("Create PR")).toBeEnabled();
+      expect(screen.getByText("Publish PR")).toBeEnabled();
     });
   });
 
@@ -519,7 +519,7 @@ describe("GitActionBar", () => {
   });
 
   describe("inline PR form", () => {
-    it("shows PR form when Create PR button is clicked", () => {
+    it("shows PR form when Publish PR button is clicked", () => {
       render(
         <GitActionBar
           agentName="nova"
@@ -529,11 +529,11 @@ describe("GitActionBar", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Create PR"));
+      fireEvent.click(screen.getByText("Publish PR"));
 
       expect(screen.getByText("Approved change ID")).toBeInTheDocument();
       expect(screen.getByPlaceholderText("Change ID")).toHaveValue("");
-      expect(screen.getByText("Create")).toBeInTheDocument();
+      expect(screen.getByText("Publish")).toBeInTheDocument();
       expect(screen.getByText("Cancel")).toBeInTheDocument();
     });
 
@@ -547,7 +547,7 @@ describe("GitActionBar", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Create PR"));
+      fireEvent.click(screen.getByText("Publish PR"));
 
       expect(screen.getByPlaceholderText("Change ID")).toHaveValue("");
     });
@@ -566,13 +566,13 @@ describe("GitActionBar", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Create PR"));
+      fireEvent.click(screen.getByText("Publish PR"));
       fireEvent.change(screen.getByPlaceholderText("Change ID"), {
         target: { value: "C-1" },
       });
 
       await act(async () => {
-        fireEvent.click(screen.getByText("Create"));
+        fireEvent.click(screen.getByText("Publish"));
       });
 
       expect(actions.createPR).toHaveBeenCalledWith("C-1");
@@ -592,14 +592,14 @@ describe("GitActionBar", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Create PR"));
+      fireEvent.click(screen.getByText("Publish PR"));
       expect(screen.getByText("Approved change ID")).toBeInTheDocument();
       fireEvent.change(screen.getByPlaceholderText("Change ID"), {
         target: { value: "C-1" },
       });
 
       await act(async () => {
-        fireEvent.click(screen.getByText("Create"));
+        fireEvent.click(screen.getByText("Publish"));
       });
 
       expect(screen.queryByText("Approved change ID")).not.toBeInTheDocument();
@@ -615,7 +615,7 @@ describe("GitActionBar", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Create PR"));
+      fireEvent.click(screen.getByText("Publish PR"));
       expect(screen.getByText("Approved change ID")).toBeInTheDocument();
 
       fireEvent.click(screen.getByText("Cancel"));
@@ -633,7 +633,7 @@ describe("GitActionBar", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Create PR"));
+      fireEvent.click(screen.getByText("Publish PR"));
 
       const input = screen.getByPlaceholderText("Change ID");
       fireEvent.change(input, { target: { value: "C-1" } });
@@ -655,7 +655,7 @@ describe("GitActionBar", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Create PR"));
+      fireEvent.click(screen.getByText("Publish PR"));
       const input = screen.getByPlaceholderText("Change ID");
       fireEvent.change(input, { target: { value: "C-1" } });
 
@@ -676,7 +676,7 @@ describe("GitActionBar", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Create PR"));
+      fireEvent.click(screen.getByText("Publish PR"));
       expect(screen.getByText("Approved change ID")).toBeInTheDocument();
 
       const input = screen.getByPlaceholderText("Change ID");
@@ -685,7 +685,7 @@ describe("GitActionBar", () => {
       expect(screen.queryByText("Approved change ID")).not.toBeInTheDocument();
     });
 
-    it("shows spinner on Create PR button when PR is loading", () => {
+    it("shows spinner on Publish PR button when PR is loading", () => {
       const loadingActions = makeActions({
         prState: { isLoading: true, error: null },
         anyLoading: true,
@@ -700,7 +700,7 @@ describe("GitActionBar", () => {
         />,
       );
 
-      const prButton = screen.getByText("Create PR").closest("button");
+      const prButton = screen.getByText("Publish PR").closest("button");
       const spinner = prButton?.querySelector('[class*="spinner"]');
       expect(spinner).toBeInTheDocument();
     });

@@ -1,6 +1,6 @@
 /**
  * GitActionBar - Action buttons for git operations in the Git tab.
- * Provides Push, Pull, Sync, Create PR, and Reset actions with inline forms.
+ * Provides Push, Pull, Sync, Publish PR, and Reset actions with inline forms.
  */
 
 import { useState, useCallback } from "react";
@@ -109,7 +109,7 @@ export function GitActionBar({
           Sync
         </button>
 
-        {/* Create PR */}
+        {/* Publish PR */}
         <button
           type="button"
           className={styles.actionBtn}
@@ -118,7 +118,7 @@ export function GitActionBar({
           onClick={handlePRFormOpen}
         >
           {actions.prState.isLoading && <span className={styles.spinner} />}
-          Create PR
+          Publish PR
         </button>
 
         {/* Reset */}
@@ -164,7 +164,7 @@ export function GitActionBar({
               onClick={() => void handlePRSubmit()}
             >
               {actions.prState.isLoading && <span className={styles.spinner} />}
-              Create
+              Publish
             </button>
             <button
               type="button"

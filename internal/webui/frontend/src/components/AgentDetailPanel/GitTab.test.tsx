@@ -569,7 +569,7 @@ describe("GitTab", () => {
   });
 
   describe("create PR action", () => {
-    it("shows Create PR in the history header", async () => {
+    it("shows Publish PR in the history header", async () => {
       mockGitStatusReturn = {
         status: {
           branch: "feature-x",
@@ -588,7 +588,7 @@ describe("GitTab", () => {
 
       await renderGitTab(makeAgent());
 
-      expect(screen.getByText("Create PR")).toBeInTheDocument();
+      expect(screen.getByText("Publish PR")).toBeInTheDocument();
       expect(screen.queryByText(/^Push/)).not.toBeInTheDocument();
     });
   });

@@ -61,7 +61,7 @@ export function useCreatePRAction({
       onClick={handlePRFormOpen}
     >
       {actions.prState.isLoading && <span className={actionStyles.spinner} />}
-      Create PR
+      Publish PR
     </button>
   );
 
@@ -95,7 +95,7 @@ export function useCreatePRAction({
           {actions.prState.isLoading && (
             <span className={actionStyles.spinner} />
           )}
-          Create
+          Publish
         </button>
         <button
           type="button"
