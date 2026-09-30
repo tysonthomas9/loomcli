@@ -41,6 +41,10 @@ func (m *mockGitOps) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentW
 	return nil, errors.New("not found")
 }
 
+func (m *mockGitOps) ApplyRevision(context.Context, ops.ApplyRevisionRequest) (*ops.GitPushResult, error) {
+	return nil, nil
+}
+
 func (m *mockGitOps) Push(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error) {
 	if m.pushFunc != nil {
 		return m.pushFunc(worktreePath, sourceBranch, targetBranch, remote)

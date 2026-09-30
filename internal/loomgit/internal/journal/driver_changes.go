@@ -29,3 +29,12 @@ func (s *SQLite) DriverChange(ctx context.Context, workspace, task, repo, id str
 		WHERE workspace = ? AND task_id = ? AND repo = ?`, workspace, task, repo).Scan(&change)
 	return change, err
 }
+
+func (s *SQLite) RepoForChange(ctx context.Context, workspace, change string) (string, error) {
+	var repo string
+	err := s.db.QueryRowContext(ctx, `SELECT repo FROM driver_changes WHERE workspace = ? AND change_id = ?`, workspace, change).Scan(&repo)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return repo, err
+}

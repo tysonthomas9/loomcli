@@ -1,75 +1,81 @@
 package git
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
 )
 
-func TestPushCmd_ArgsValidation(t *testing.T) {
-	// Save and restore the global flag
-	origPushAll := pushAll
-	defer func() { pushAll = origPushAll }()
+func TestPushCmd_RoutesRevisionToApply(t *testing.T) {
+	previousApply, previousResolver := pushApply, pushResolver
+	previousWorkspace, previousLead, previousRequestID, previousAll := pushWorkspace, pushLead, pushRequestID, pushAll
+	t.Cleanup(func() {
+		pushApply, pushResolver = previousApply, previousResolver
+		pushWorkspace, pushLead, pushRequestID, pushAll = previousWorkspace, previousLead, previousRequestID, previousAll
+	})
+	pushWorkspace, pushLead, pushRequestID, pushAll = "", "lead", "request-1", false
+	pushResolver = func() (*cli.Resolver, error) {
+		return &cli.Resolver{Workspace: "workspace", Config: &config.LoomConfig{
+			Workspaces: map[string]config.WorkspaceConfig{"workspace": {ID: "workspace-1"}},
+		}}, nil
+	}
+	called := false
+	pushApply = func(_ context.Context, request apply.Request) (apply.Result, error) {
+		called = true
+		if request.Workspace != "workspace-1" || request.Change != "change-1" || request.Revision != 2 ||
+			request.Lead != "lead" || request.RequestID != "request-1" {
+			t.Fatalf("unexpected Apply request: %+v", request)
+		}
+		return apply.Result{}, nil
+	}
+	if err := runPush(pushCmd, []string{"change-1", "2"}); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("Push did not call Apply")
+	}
+}
 
+func TestPushCmd_ArgsValidation(t *testing.T) {
 	tests := []struct {
 		name      string
 		args      []string
-		allFlag   bool
 		wantError bool
 		errorMsg  string
 	}{
 		{
 			name:      "without --all, no args",
 			args:      []string{},
-			allFlag:   false,
 			wantError: true,
-			errorMsg:  "requires 1-2 arguments",
+			errorMsg:  "accepts 2 arg(s)",
 		},
 		{
-			name:      "without --all, one arg (success)",
+			name:      "one arg",
 			args:      []string{"feature/branch"},
-			allFlag:   false,
-			wantError: false,
+			wantError: true,
+			errorMsg:  "accepts 2 arg(s)",
 		},
 		{
-			name:      "without --all, two args (success)",
-			args:      []string{"feature/branch", "main"},
-			allFlag:   false,
+			name:      "change and revision",
+			args:      []string{"change-1", "2"},
 			wantError: false,
 		},
 		{
 			name:      "without --all, three args",
 			args:      []string{"feature/branch", "main", "extra"},
-			allFlag:   false,
 			wantError: true,
-			errorMsg:  "requires 1-2 arguments",
-		},
-		{
-			name:      "with --all, no args (success)",
-			args:      []string{},
-			allFlag:   true,
-			wantError: false,
-		},
-		{
-			name:      "with --all, one arg (success)",
-			args:      []string{"main"},
-			allFlag:   true,
-			wantError: false,
-		},
-		{
-			name:      "with --all, two args",
-			args:      []string{"main", "extra"},
-			allFlag:   true,
-			wantError: true,
-			errorMsg:  "--all flag accepts at most 1 argument",
+			errorMsg:  "accepts 2 arg(s)",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Set the flag state
-			pushAll = tc.allFlag
-
 			// Call the Args validation function directly
 			err := pushCmd.Args(pushCmd, tc.args)
 
@@ -527,31 +533,17 @@ func TestPushBranchInRepo_CleanWorkingTree_NoStash(t *testing.T) {
 	}
 }
 
-func TestPushCmd_MergeAlias(t *testing.T) {
-	t.Parallel()
-	// Test that "merge" is listed as an alias for the push command
-	aliases := pushCmd.Aliases
-	found := false
-	for _, a := range aliases {
-		if a == "merge" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected 'merge' to be an alias for push command, got aliases: %v", aliases)
+func TestPushCmd_RejectsLegacyBranchInput(t *testing.T) {
+	err := runPush(pushCmd, []string{"agent", "main"})
+	if err == nil || !strings.Contains(err.Error(), "branch Push is unavailable") {
+		t.Fatalf("legacy branch Push error = %v", err)
 	}
 }
 
-func TestPushCmd_MergeAliasIsFirst(t *testing.T) {
-	t.Parallel()
-	// Test that "merge" alias is the first (primary) alias
-	aliases := pushCmd.Aliases
-	if len(aliases) == 0 {
-		t.Fatal("push command has no aliases")
-	}
-	if aliases[0] != "merge" {
-		t.Errorf("expected first alias to be 'merge', got %q", aliases[0])
+func TestPushCmd_ConflictPrintsPathsAndFails(t *testing.T) {
+	err := applyError(apply.Result{Paths: []string{"src/conflict.go"}}, loomgit.NewError(loomgit.Conflict, "conflict", nil))
+	if err == nil || !strings.Contains(err.Error(), "src/conflict.go") {
+		t.Fatalf("conflict paths missing: %v", err)
 	}
 }
 

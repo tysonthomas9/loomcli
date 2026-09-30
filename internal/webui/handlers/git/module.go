@@ -29,6 +29,7 @@ func NewModule(agentSvc service.AgentService, diffSvc service.DiffService) *Modu
 func (m *Module) Register(mux *http.ServeMux) {
 	// Git operations (agent-scoped)
 	mux.HandleFunc("POST /api/workspaces/{ws}/git/push-all", HandleGitPushAll(m.agentSvc))
+	mux.HandleFunc("POST /api/workspaces/{ws}/git/apply", HandleGitApply(m.agentSvc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/push", HandleGitPush(m.agentSvc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/pull", HandleGitPull(m.agentSvc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/sync", HandleGitSync(m.agentSvc))

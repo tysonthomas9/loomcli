@@ -18,7 +18,11 @@
  */
 
 export * from "@/api";
-export { getTaskRevisions, submitRevisionVerdict } from "@/api/git/revisions";
+export {
+  applyRevision,
+  getTaskRevisions,
+  submitRevisionVerdict,
+} from "@/api/git/revisions";
 export type { ReviewRevision } from "@/api/git/revisions";
 
 // gitPushAll is not in the @/api barrel (by design — the api barrel only

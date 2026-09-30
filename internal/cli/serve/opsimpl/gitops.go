@@ -17,6 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
@@ -433,6 +434,21 @@ func (g *GitOpsImpl) Push(worktreePath, sourceBranch, targetBranch, remote strin
 		Message:         result.Message,
 		AlreadyUpToDate: result.AlreadyUpToDate,
 		ConflictedFiles: result.ConflictedFiles,
+	}, nil
+}
+
+func (g *GitOpsImpl) ApplyRevision(ctx context.Context, request ops.ApplyRevisionRequest) (*ops.GitPushResult, error) {
+	result, err := apply.ApplyLocal(ctx, apply.Request{Workspace: request.Workspace, Change: request.Change,
+		Revision: request.Revision, Lead: request.Lead, RequestID: request.RequestID})
+	if err != nil {
+		if len(result.Paths) > 0 {
+			return &ops.GitPushResult{ConflictedFiles: result.Paths, Message: err.Error()}, nil
+		}
+		return nil, err
+	}
+	return &ops.GitPushResult{
+		Success: true,
+		Message: "Applied revision to local working area",
 	}, nil
 }
 

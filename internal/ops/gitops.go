@@ -16,6 +16,7 @@ type GitOps interface {
 	// ResolveAgentWorktree resolves an agent name to its worktree info.
 	// workspaceID scopes discovery to a specific workspace (empty = default).
 	ResolveAgentWorktree(workspaceID, name string) (*AgentWorktree, error)
+	ApplyRevision(context.Context, ApplyRevisionRequest) (*GitPushResult, error)
 
 	// Push merges the source branch into the target branch (loom push semantics).
 	Push(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error)
@@ -69,6 +70,14 @@ type GitOps interface {
 
 	// DiffFilePatch returns the unified diff patch for a single file between two refs.
 	DiffFilePatch(ctx context.Context, worktreePath, from, to, path string) (*DiffFilePatchResult, error)
+}
+
+type ApplyRevisionRequest struct {
+	Workspace string `json:"workspace"`
+	Change    string `json:"change"`
+	Revision  int    `json:"revision"`
+	Lead      string `json:"lead"`
+	RequestID string `json:"request_id,omitempty"`
 }
 
 // AgentWorktree contains resolved worktree info for an agent.

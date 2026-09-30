@@ -3536,6 +3536,14 @@ type GetScopedFileTreeParamsScope string
 // FleetRegisterJSONBody defines parameters for FleetRegister.
 type FleetRegisterJSONBody = map[string]interface{}
 
+// GitApplyJSONBody defines parameters for GitApply.
+type GitApplyJSONBody struct {
+	Change    string  `json:"change"`
+	Lead      *string `json:"lead,omitempty"`
+	RequestId *string `json:"request_id,omitempty"`
+	Revision  int     `json:"revision"`
+}
+
 // ListIssuesParams defines parameters for ListIssues.
 type ListIssuesParams struct {
 	Status   *ListIssuesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
@@ -3771,6 +3779,9 @@ type SearchScopedFilesJSONRequestBody = FileSearchRequest
 
 // FleetRegisterJSONRequestBody defines body for FleetRegister for application/json ContentType.
 type FleetRegisterJSONRequestBody = FleetRegisterJSONBody
+
+// GitApplyJSONRequestBody defines body for GitApply for application/json ContentType.
+type GitApplyJSONRequestBody GitApplyJSONBody
 
 // CreateIssueJSONRequestBody defines body for CreateIssue for application/json ContentType.
 type CreateIssueJSONRequestBody = CreateIssueRequest

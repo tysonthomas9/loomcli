@@ -306,6 +306,10 @@ func (s *stubAgentService) GetLog(context.Context, string, string, int, int64) (
 func (s *stubAgentService) GetDiffStat(context.Context, string, string) (*service.AgentDiffStatResult, error) {
 	return nil, service.ErrNotImplemented("not implemented")
 }
+func (s *stubAgentService) GitApply(context.Context, ops.ApplyRevisionRequest) (*ops.GitPushResult, error) {
+	return nil, nil
+}
+
 func (s *stubAgentService) GitPush(context.Context, string, string, string) (*ops.GitPushResult, error) {
 	return nil, service.ErrNotImplemented("not implemented")
 }

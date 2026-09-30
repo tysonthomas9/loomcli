@@ -5,11 +5,15 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RevisionsSection } from "../RevisionsSection";
 
-const { getTaskRevisions, submitRevisionVerdict } = vi.hoisted(() => ({
-  getTaskRevisions: vi.fn(),
-  submitRevisionVerdict: vi.fn(),
-}));
+const { applyRevision, getTaskRevisions, submitRevisionVerdict } = vi.hoisted(
+  () => ({
+    applyRevision: vi.fn(),
+    getTaskRevisions: vi.fn(),
+    submitRevisionVerdict: vi.fn(),
+  }),
+);
 vi.mock("@/api/git/revisions", () => ({
+  applyRevision,
   getTaskRevisions,
   submitRevisionVerdict,
 }));
@@ -27,6 +31,7 @@ describe("RevisionsSection", () => {
     vi.clearAllMocks();
     getTaskRevisions.mockResolvedValue([revision]);
     submitRevisionVerdict.mockResolvedValue(undefined);
+    applyRevision.mockResolvedValue(undefined);
   });
 
   it("records approval for the displayed revision and exact head", async () => {
@@ -39,6 +44,14 @@ describe("RevisionsSection", () => {
         "approve",
         "",
       ),
+    );
+  });
+
+  it("applies the exact displayed revision", async () => {
+    render(<RevisionsSection workspaceId="W" taskId="T" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Apply" }));
+    await waitFor(() =>
+      expect(applyRevision).toHaveBeenCalledWith("W", revision),
     );
   });
 

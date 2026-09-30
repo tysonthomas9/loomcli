@@ -2,100 +2,75 @@ package git
 
 import (
 	"fmt"
-	"os"
+	"strconv"
+	"strings"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
 )
 
 var pushAll bool
 var pushWorkspace string
+var pushLead string
+var pushRequestID string
+var pushApply = apply.ApplyLocal
+var pushResolver = cli.NewResolver
 
 var pushCmd = &cobra.Command{
-	Use:               "push [worktree] [target]",
-	Short:             "Push worktree branch to target branch",
-	Aliases:           []string{"merge"},
-	GroupID:           "git",
-	ValidArgsFunction: cli.BranchCompletion,
-	Long: `Push completed work from worktree branches to target branch.
-
-Merges worktree branch INTO the target branch (e.g., main), pushing
-completed work. If conflicts occur, Claude is launched to resolve them.
-
-Arguments:
-  worktree    Source worktree to push from (e.g., falcon)
-  target      Target branch to push into (default: main or per-repo default)
-
-Flags:
-  -a, --all          Push all worktree branches to target
-  -W, --workspace    Workspace to operate on
-
-Examples:
-  loom push falcon                        # Push falcon to main (or per-repo default)
-  loom push falcon main                   # Push falcon to main explicitly
-  loom push --all                         # Push all worktrees to their default targets
-  loom push --all main                    # Push all worktrees to main
-  loom push -W myworkspace falcon         # Push in specific workspace`,
-	Args: func(cmd *cobra.Command, args []string) error {
-		if pushAll {
-			if len(args) > 1 {
-				return fmt.Errorf("--all flag accepts at most 1 argument (target branch)")
-			}
-			return nil
-		}
-		if len(args) < 1 || len(args) > 2 {
-			return fmt.Errorf("requires 1-2 arguments: <worktree> [target]")
-		}
-		return nil
-	},
-	RunE: runPush,
+	Use:     "push <change> <revision>",
+	Short:   "Apply an approved revision to the local working area",
+	GroupID: "git",
+	Args:    cobra.ExactArgs(2),
+	RunE:    runPush,
 }
 
 func init() {
-	pushCmd.Flags().BoolVarP(&pushAll, "all", "a", false, "Push all worktree branches to target")
+	pushCmd.Flags().BoolVarP(&pushAll, "all", "a", false, "Unavailable for revisions; apply one change at a time")
 	pushCmd.Flags().StringVarP(&pushWorkspace, "workspace", "W", "", "Workspace to operate on")
+	pushCmd.Flags().StringVar(&pushLead, "lead", "", "Lead working area (default: workspace lead)")
+	pushCmd.Flags().StringVar(&pushRequestID, "request-id", "", "Idempotency key for this apply")
 	cli.RegisterCommand(pushCmd)
 }
 
 func runPush(cmd *cobra.Command, args []string) error {
-	deps := cli.GetDeps(cmd)
-	all, _ := cmd.Flags().GetBool("all")
-	ws, _ := cmd.Flags().GetString("workspace")
-
-	if all && ws != "" {
-		fmt.Fprintln(os.Stderr, "Error: --all and --workspace are mutually exclusive")
-		os.Exit(1)
+	if pushAll {
+		return fmt.Errorf("--all is unavailable; provide change, revision and lead to Apply")
 	}
-
-	targetBranch := ""
-	sourceBranch := ""
-
-	if all {
-		if len(args) == 1 {
-			targetBranch = args[0]
-		}
-		return pushAllWorkspaces(deps, targetBranch)
+	revision, err := strconv.Atoi(args[1])
+	if err != nil || revision < 1 {
+		return fmt.Errorf("revision must be a positive number; branch Push is unavailable")
 	}
-
-	sourceBranch = args[0]
-	if len(args) == 2 {
-		targetBranch = args[1]
-	}
-
-	resolver, err := cli.NewResolver()
+	resolver, err := pushResolver()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
-		os.Exit(1)
+		return err
 	}
-
-	if ws != "" {
-		if err := resolver.SetWorkspace(ws); err != nil {
-			available := resolver.WorkspaceNames()
-			fmt.Fprintf(os.Stderr, "Error: workspace %q not found. Available: %v\n", ws, available)
-			os.Exit(1)
+	if pushWorkspace != "" {
+		if err := resolver.SetWorkspace(pushWorkspace); err != nil {
+			return err
 		}
 	}
+	workspace := resolver.Config.Workspaces[resolver.Workspace]
+	requestID := pushRequestID
+	if requestID == "" {
+		requestID = uuid.NewString()
+	}
+	result, err := pushApply(cmd.Context(), apply.Request{
+		Workspace: workspace.ID, Change: args[0], Revision: revision,
+		Lead: pushLead, RequestID: requestID,
+	})
+	if err != nil {
+		return applyError(result, err)
+	}
+	_, err = fmt.Fprintln(cmd.OutOrStdout(), "Applied revision to local working area")
+	return err
+}
 
-	return pushWorkspaceRepos(deps, resolver, sourceBranch, targetBranch)
+func applyError(result apply.Result, err error) error {
+	if len(result.Paths) > 0 {
+		return fmt.Errorf("%w\nConflicting files:\n  %s", err, strings.Join(result.Paths, "\n  "))
+	}
+	return err
 }

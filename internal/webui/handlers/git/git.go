@@ -32,6 +32,32 @@ func writeAgentGitError(w http.ResponseWriter, err error, fallbackStatus int) {
 
 // --- Push ---
 
+func HandleGitApply(svc service.AgentService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var request ops.ApplyRevisionRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&request); err != nil {
+			handler.RespondError(w, http.StatusBadRequest, "invalid Apply request")
+			return
+		}
+		request.Workspace = middleware.WorkspaceFromContext(r.Context())
+		result, err := svc.GitApply(r.Context(), request)
+		if err != nil {
+			var gitErr *loomgit.Error
+			if errors.As(err, &gitErr) && gitErr.Kind == loomgit.ReviewRequired {
+				handler.RespondError(w, http.StatusConflict, err.Error())
+				return
+			}
+			writeAgentGitError(w, err, http.StatusConflict)
+			return
+		}
+		if !result.Success {
+			handler.WriteJSON(w, http.StatusConflict, result)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, result)
+	}
+}
+
 type gitPushRequest struct {
 	Target string `json:"target"`
 }
@@ -80,7 +106,7 @@ func HandleGitPushAll(svc service.AgentService) http.HandlerFunc {
 
 		result, err := svc.GitPushAll(r.Context(), wsID)
 		if err != nil {
-			handler.RespondError(w, http.StatusInternalServerError, err.Error())
+			writeAgentGitError(w, err, http.StatusInternalServerError)
 			return
 		}
 

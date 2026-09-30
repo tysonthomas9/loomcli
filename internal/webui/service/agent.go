@@ -26,6 +26,7 @@ type AgentService interface {
 
 	// GitPush merges the agent's branch into the target branch.
 	GitPush(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error)
+	GitApply(ctx context.Context, request ops.ApplyRevisionRequest) (*ops.GitPushResult, error)
 
 	// GitPushAll pushes all agent worktrees to their target branches.
 	GitPushAll(ctx context.Context, wsID string) (*GitPushAllResult, error)

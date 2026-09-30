@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  applyRevision,
   getTaskRevisions,
   submitRevisionVerdict,
   type ReviewRevision,
@@ -19,6 +20,7 @@ export function RevisionsSection({
   const [busy, setBusy] = useState("");
   const [override, setOverride] = useState("");
   const [reason, setReason] = useState("");
+  const [applied, setApplied] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -63,6 +65,22 @@ export function RevisionsSection({
     }
   }
 
+  async function applySelected(revision: ReviewRevision) {
+    setBusy(`${revision.change_id}:${revision.number}`);
+    setError("");
+    setApplied("");
+    try {
+      await applyRevision(workspaceId, revision);
+      setApplied(
+        `Applied revision ${revision.number} to the local working area`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not apply revision");
+    } finally {
+      setBusy("");
+    }
+  }
+
   return (
     <section
       className={styles.section}
@@ -72,6 +90,7 @@ export function RevisionsSection({
       <h3>Revisions</h3>
       {loading && <p>Loading revisions…</p>}
       {error && <p role="alert">{error}</p>}
+      {applied && <p role="status">{applied}</p>}
       {!loading && revisions.length === 0 && <p>No revisions yet.</p>}
       {revisions.map((revision) => {
         const key = `${revision.change_id}:${revision.number}`;
@@ -88,6 +107,13 @@ export function RevisionsSection({
                 : (revision.verdict ?? "Awaiting review")}
             </div>
             <div className={styles.actions}>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => void applySelected(revision)}
+              >
+                Apply
+              </button>
               <button
                 type="button"
                 disabled={disabled}
