@@ -35,6 +35,27 @@ type OutboxEvent struct {
 	Delivered bool
 }
 
+// Revision is one immutable source or derived version of a change. Ready is
+// false only while a reserved revision is being installed or recovered.
+type Revision struct {
+	Workspace, Change, RequestID string
+	Number                       int
+	Kind, Operation, Outcome     string
+	BaseSHA, HeadSHA, TreeHash   string
+	SourceHeadSHA                string
+	DerivedFromChange            string
+	DerivedFromNumber            int
+	Ready                        bool
+}
+
+// RevisionStore reserves monotonically numbered revisions and finishes them
+// after their immutable refs have been installed.
+type RevisionStore interface {
+	ReserveRevision(context.Context, Revision) (Revision, error)
+	FinishRevision(context.Context, Revision) error
+	GetRevision(context.Context, string, string, int) (Revision, error)
+}
+
 // Store is the persistence port for journaled Git operations. Implementations
 // must use row compare-and-swap for Advance and Takeover; callers cannot rely
 // on a process mutex, file lock, or SQLite's single-writer behavior.
