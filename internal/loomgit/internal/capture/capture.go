@@ -73,6 +73,14 @@ func SecretPath(path string) bool {
 	return false
 }
 
+func runtimePath(path string) bool {
+	switch path {
+	case ".agent.checkpoint.json", ".agent.lock", ".agent.lock.flock", ".codex/hooks.json":
+		return true
+	}
+	return false
+}
+
 func lines(data []byte) []string {
 	if len(data) == 0 {
 		return nil
@@ -184,9 +192,11 @@ func saveManifest(ctx context.Context, runner loomgit.RepoStore, repo string, ma
 
 func recordIgnored(manifest *Manifest, repo string, paths []string, seen map[string]bool) {
 	for _, path := range paths {
-		if seen[path] {
+		if seen[path] || runtimePath(path) {
+			seen[path] = true
 			continue
 		}
+		seen[path] = true
 		size, err := fileSize(filepath.Join(repo, filepath.FromSlash(strings.TrimSuffix(path, "/"))))
 		entry := Entry{Path: path, Class: Listed, Size: size}
 		if err != nil {
@@ -252,6 +262,10 @@ func scanWorkingTree(ctx context.Context, runner loomgit.RepoStore, repo string,
 	var toStage []string
 	var total int64
 	for _, path := range append(append(tracked, changed...), untracked...) {
+		if runtimePath(path) {
+			seen[path] = true
+			continue
+		}
 		if seen[path] {
 			continue
 		}
@@ -272,9 +286,6 @@ func scanWorkingTree(ctx context.Context, runner loomgit.RepoStore, repo string,
 		manifest.Entries = append(manifest.Entries, entry)
 	}
 	recordIgnored(manifest, repo, ignored, seen)
-	for _, path := range ignored {
-		seen[path] = true
-	}
 	recordExtras(manifest, extras, seen)
 	if err := stagePaths(ctx, runner, env, toStage); err != nil {
 		return err
@@ -286,7 +297,7 @@ func scanWorkingTree(ctx context.Context, runner loomgit.RepoStore, repo string,
 
 func recordExtras(manifest *Manifest, extras []Entry, seen map[string]bool) {
 	for _, entry := range extras {
-		if seen[entry.Path] {
+		if seen[entry.Path] || runtimePath(entry.Path) {
 			continue
 		}
 		manifest.Entries = append(manifest.Entries, entry)

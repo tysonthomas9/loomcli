@@ -16,7 +16,7 @@ import (
 func fixture(t *testing.T) (string, *gitexec.Runner) {
 	t.Helper()
 	dir := t.TempDir()
-	cmd := exec.Command("git", "init", "-q", dir) //nolint:norawexec // Test fixture creates a real temporary repository.
+	cmd := exec.Command("git", "init", "-q", "-b", "main", dir) //nolint:norawexec // Test fixture creates a real temporary repository.
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %s: %v", out, err)
 	}
@@ -81,6 +81,32 @@ func TestSecretPathMatchesOnlySSHKeyNames(t *testing.T) {
 		if SecretPath(path) {
 			t.Errorf("ordinary path classified as a secret: %s", path)
 		}
+	}
+}
+
+func TestCaptureExcludesRuntimeFiles(t *testing.T) {
+	dir, runner := fixture(t)
+	for _, path := range []string{
+		".agent.checkpoint.json", ".agent.lock", ".agent.lock.flock",
+		".codex/hooks.json",
+		"agent.lock", ".codex/user.txt", "work.txt",
+	} {
+		write(t, dir, path, path)
+	}
+	result := capture(t, dir, runner)
+	for _, path := range []string{
+		".agent.checkpoint.json", ".agent.lock", ".agent.lock.flock",
+		".codex/hooks.json",
+	} {
+		if _, ok := classes(result.Manifest.Entries)[path]; ok {
+			t.Errorf("runtime path %q entered manifest", path)
+		}
+		if _, err := runner.Run(context.Background(), "cat-file", "-e", result.CaptureSHA+":"+path); err == nil {
+			t.Errorf("runtime path %q entered capture", path)
+		}
+	}
+	for _, path := range []string{"agent.lock", ".codex/user.txt", "work.txt"} {
+		must(t, runner, "cat-file", "-e", result.CaptureSHA+":"+path)
 	}
 }
 

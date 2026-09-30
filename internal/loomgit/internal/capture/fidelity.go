@@ -110,9 +110,15 @@ func verifyAfterWrite(ctx context.Context, runner loomgit.RepoStore, repo string
 		known[entry.Path] = entry
 	}
 	for _, path := range lines(changed) {
+		if runtimePath(path) {
+			continue
+		}
 		markChanged(manifest, known, path, "changed after capture write")
 	}
 	for _, path := range append(paths[2], paths[3]...) {
+		if runtimePath(path) {
+			continue
+		}
 		if _, ok := known[path]; !ok {
 			markChanged(manifest, known, path, "appeared after capture write")
 		}
@@ -124,6 +130,9 @@ func verifyAfterWrite(ctx context.Context, runner loomgit.RepoStore, repo string
 
 func verifyExtras(manifest *Manifest, known map[string]Entry, extras []Entry) {
 	for _, entry := range extras {
+		if runtimePath(entry.Path) {
+			continue
+		}
 		if old, ok := known[entry.Path]; !ok || old.Class != entry.Class || old.Reason != entry.Reason {
 			markChanged(manifest, known, entry.Path, "changed after capture write")
 		}
