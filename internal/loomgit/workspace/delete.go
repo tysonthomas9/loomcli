@@ -15,6 +15,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
@@ -288,7 +289,11 @@ func DeleteWorkspace(ctx context.Context, ws config.WorkspaceConfig, fingerprint
 }
 
 func deleteOneCopy(ctx context.Context, workspace string, copy deleteCopy) error {
-	result, err := agentcapture.CaptureWorkingArea(ctx, copy.path, workspace, "lead")
+	lead, err := captureLead(ctx, copy.path, workspace)
+	if err != nil {
+		return err
+	}
+	result, err := agentcapture.CaptureWorkingArea(ctx, copy.path, workspace, lead)
 	if err != nil {
 		return fmt.Errorf("capture %s: %w", copy.path, err)
 	}
@@ -312,6 +317,22 @@ func deleteOneCopy(ctx context.Context, workspace string, copy deleteCopy) error
 		return fmt.Errorf("remove %s: %w", copy.path, err)
 	}
 	return closeErr
+}
+
+func captureLead(ctx context.Context, path, workspace string) (string, error) {
+	r, err := gitexec.New(path, gitexec.Options{ReadOnly: true})
+	if err != nil {
+		return "", err
+	}
+	out, err := r.Run(ctx, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	branch := strings.TrimSpace(string(out))
+	if foundWorkspace, lead, ok := loomgit.InteractiveIdentity(branch); ok && foundWorkspace == workspace {
+		return lead, nil
+	}
+	return "lead", nil
 }
 
 func removeCapturedClone(ctx context.Context, workspace string, copy deleteCopy) error {

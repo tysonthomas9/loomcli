@@ -50,7 +50,7 @@ func Publish(ctx context.Context, store Store, req Request) (loomgit.Revision, e
 	if err != nil {
 		return loomgit.Revision{}, err
 	}
-	head, err := layerHead(ctx, apply.New(store, nil, nil), area, req.Workspace, req.Lead, req.BaseSHA, req.Change)
+	head, err := layerHead(ctx, apply.New(store, nil, area), area, req.Workspace, req.Lead, req.BaseSHA, req.Change)
 	if err != nil {
 		return loomgit.Revision{}, err
 	}

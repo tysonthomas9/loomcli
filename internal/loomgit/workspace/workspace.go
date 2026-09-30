@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 )
 
@@ -164,7 +165,7 @@ func EnsureRequest(ctx context.Context, workspace, name, requestID, trunk, wsDir
 			return nil, err
 		}
 		path := filepath.Join(wsDir, src.Name)
-		if _, err := cli.RunGitCommand(src.Path, "worktree", "add", path, "-b", branch, repos[i].BaseSHA); err != nil {
+		if err := addLeadWorktree(ctx, src.Path, path, branch, repos[i].BaseSHA); err != nil {
 			// This branch was absent before the add. Git can leave it behind if add
 			// fails after creating the ref.
 			_, _ = cli.RunGitCommand(src.Path, "branch", "-D", branch)
@@ -320,13 +321,22 @@ func (s *Session) AddWorktrees(ctx context.Context, workspace, trunk, wsDir stri
 		}
 		path := filepath.Join(wsDir, src.Name)
 		base := s.repos[len(s.repos)-len(sources)+i].BaseSHA
-		if _, err := cli.RunGitCommand(src.Path, "worktree", "add", path, "-b", branch, base); err != nil {
+		if err := addLeadWorktree(ctx, src.Path, path, branch, base); err != nil {
 			_, _ = cli.RunGitCommand(src.Path, "branch", "-D", branch)
 			return fmt.Errorf("checkout repo %q: %w", src.Name, err)
 		}
 		s.created = append(s.created, checkout{source: src.Path, path: path, branch: branch})
 	}
 	return nil
+}
+
+func addLeadWorktree(ctx context.Context, source, path, branch, base string) error {
+	r, err := gitexec.New(source, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
+	if err != nil {
+		return err
+	}
+	_, err = r.Run(ctx, "worktree", "add", path, "-b", branch, base)
+	return err
 }
 
 // BeginAttach journals new repo records for an existing workspace. The caller

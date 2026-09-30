@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	loomworkspace "github.com/tysonthomas9/loomcli/internal/loomgit/workspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -232,6 +233,11 @@ func warnIfBackendMissing(cmd *cobra.Command, agentName, agentBackend string) {
 }
 
 func ensureAgentDefinitionLocalWorktrees(ctx context.Context, st store.Store, agent domain.Agent) error {
+	role, err := st.Roles().Get(ctx, agent.WorkspaceKey, agent.RoleName)
+	if err != nil {
+		return fmt.Errorf("get agent role: %w", err)
+	}
+	interactive := domain.ResolveRoleKind(role, agent.RoleName) == domain.RoleKindInteractive
 	sc, err := bootstrap.LoadStateCache()
 	if err != nil {
 		return fmt.Errorf("load local workspace state: %w", err)
@@ -264,6 +270,9 @@ func ensureAgentDefinitionLocalWorktrees(ctx context.Context, st store.Store, ag
 	}
 
 	created := make(map[string]string, len(selected))
+	if interactive {
+		return ensureInteractiveAgentWorktrees(ctx, agent, local.Path, selected)
+	}
 	for _, repo := range selected {
 		target := localworkspace.AgentWorktreePath(local.Path, repo.Name, agent.Name)
 		if err := localworkspace.EnsureGitWorktree(repo.Path, target, agent.Name); err != nil {
@@ -272,6 +281,22 @@ func ensureAgentDefinitionLocalWorktrees(ctx context.Context, st store.Store, ag
 		created[repo.Name] = target
 	}
 	return localworkspace.RememberAgentWorktree(agent.WorkspaceKey, agent.Name, localworkspace.FirstWorktreePath(created))
+}
+
+func ensureInteractiveAgentWorktrees(ctx context.Context, agent domain.Agent, wsDir string, selected []localworkspace.Repo) error {
+	sources := make([]loomworkspace.WorkingAreaSource, 0, len(selected))
+	for _, repo := range selected {
+		sources = append(sources, loomworkspace.WorkingAreaSource{Name: repo.Name, Path: repo.Path})
+	}
+	areas, err := loomworkspace.EnsureWorkingArea(ctx, agent.WorkspaceKey, agent.Name, wsDir, sources)
+	if err != nil {
+		return err
+	}
+	paths := make(map[string]string, len(areas))
+	for _, area := range areas {
+		paths[area.Repo] = area.Path
+	}
+	return localworkspace.RememberAgentWorktree(agent.WorkspaceKey, agent.Name, localworkspace.FirstWorktreePath(paths))
 }
 
 func runAgentList(_ *cobra.Command, _ []string) error {

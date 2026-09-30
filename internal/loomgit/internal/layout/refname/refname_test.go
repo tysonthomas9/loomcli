@@ -11,6 +11,16 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 )
 
+func TestInteractiveIdentity(t *testing.T) {
+	workspace, lead, ok := InteractiveIdentity("loom/ws/W1/interactive/L1")
+	if !ok || workspace != "W1" || lead != "L1" {
+		t.Fatalf("identity = %q %q %v", workspace, lead, ok)
+	}
+	if _, _, ok := InteractiveIdentity("loom/ws/W1/change/L1"); ok {
+		t.Fatal("accepted non-interactive branch")
+	}
+}
+
 func TestBuilders(t *testing.T) {
 	builders := []struct {
 		name   string

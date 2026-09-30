@@ -50,6 +50,34 @@ func fixture(t *testing.T) (string, *journal.SQLite) {
 func request(paths ...string) loomgit.CommitRequest {
 	return loomgit.CommitRequest{Workspace: "ws", Paths: paths, Message: "agent change", ChangeID: "change-1", Agent: "codex"}
 }
+
+func TestCommitGroupsLeadOwnChangesAroundTaskLayer(t *testing.T) {
+	dir, settings := fixture(t)
+	git(t, dir, "checkout", "-b", "loom/ws/ws/interactive/L")
+	req := request("own.txt")
+	req.Agent, req.ChangeID = "L", ""
+	write(t, dir, "own.txt", "one")
+	first, err := loomgit.Commit(context.Background(), dir, settings, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstMessage := git(t, dir, "show", "-s", "--format=%B", first)
+	firstID := strings.TrimSpace(strings.Split(strings.Split(firstMessage, "Loom-Change-Id: ")[1], "\n")[0])
+	write(t, dir, "own.txt", "two")
+	second, err := loomgit.Commit(context.Background(), dir, settings, req)
+	if err != nil || !strings.Contains(git(t, dir, "show", "-s", "--format=%B", second), "Loom-Change-Id: "+firstID) {
+		t.Fatalf("second own change: %v", err)
+	}
+	git(t, dir, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "--allow-empty", "-m", "task\n\nLoom-Change-Id: C1")
+	write(t, dir, "own.txt", "three")
+	third, err := loomgit.Commit(context.Background(), dir, settings, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(git(t, dir, "show", "-s", "--format=%B", third), "Loom-Change-Id: "+firstID) {
+		t.Fatal("own change reused across task layer")
+	}
+}
 func TestCommitNamedPathsPreservesUserIndexAndIdentity(t *testing.T) {
 	dir, store := fixture(t)
 	write(t, dir, "x.rs", "agent\n")

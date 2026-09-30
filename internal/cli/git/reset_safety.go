@@ -86,9 +86,8 @@ func prepareReset(worktreePath, targetBranch string, force bool) (resetPreparati
 }
 
 func resetCaptureIdentity(branch string) (workspace, lead string, err error) {
-	parts := strings.Split(branch, "/")
-	if len(parts) == 5 && parts[0] == "loom" && parts[1] == "ws" && parts[3] == "interactive" {
-		return parts[2], parts[4], nil
+	if workspace, lead, ok := loomgit.InteractiveIdentity(branch); ok {
+		return workspace, lead, nil
 	}
 	return "", "", loomgit.NewError(loomgit.WorkspaceUnsupported, "reset requires a v2 working area", nil)
 }
