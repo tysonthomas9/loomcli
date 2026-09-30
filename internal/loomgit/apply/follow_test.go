@@ -45,6 +45,19 @@ func TestApprovalFollowsWorkingAreaAfterResume(t *testing.T) {
 	if err != nil || len(result.Applied) != 1 || fixture.git(t, "rev-parse", "HEAD") != fixture.source {
 		t.Fatalf("resume did not follow approval: %+v, %v", result, err)
 	}
+	events, err := fixture.store.PendingEvents(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundApplied := false
+	for _, event := range events {
+		if event.Kind == "git.integrated" && strings.Contains(string(event.Payload), `"workspace_sha":"`+fixture.source+`"`) {
+			foundApplied = true
+		}
+	}
+	if !foundApplied {
+		t.Fatalf("applied outbox event missing new leaf: %+v", events)
+	}
 	result, err = followWithStore(ctx, fixture.store, config, "W", "L")
 	if err != nil || len(result.Applied) != 0 {
 		t.Fatalf("approval followed twice: %+v, %v", result, err)
