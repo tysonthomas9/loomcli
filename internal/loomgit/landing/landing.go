@@ -93,7 +93,7 @@ func RunAtWithOptions(ctx context.Context, path string, forge Forge, token strin
 		if token == "" {
 			token = githubtoken.GitHub(ctx)
 		}
-		forge = stackpublish.NewGitHubForge(token, nil, "")
+		forge = stackpublish.NewConfiguredGitHubForge(token)
 	}
 	return ReconcileWithOptions(ctx, store, forge, options)
 }

@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/connector"
 )
 
 // DefaultGitHubBaseURL is the GitHub REST API root.
@@ -38,6 +41,10 @@ func NewGitHubForge(token string, client *http.Client, baseURL string) *GitHubFo
 		baseURL = DefaultGitHubBaseURL
 	}
 	return &GitHubForge{token: token, baseURL: strings.TrimRight(baseURL, "/"), client: client}
+}
+
+func NewConfiguredGitHubForge(token string) *GitHubForge {
+	return NewGitHubForge(token, nil, strings.TrimSpace(os.Getenv(connector.GitHubBaseURLEnvVar)))
 }
 
 type ghPull struct {
