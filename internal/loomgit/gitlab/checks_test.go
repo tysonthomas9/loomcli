@@ -71,6 +71,17 @@ func (s *state) goCheck(name string) error {
 		return s.packageTests("./internal/loomgit/internal/replay", "Test(TrialMergeCleanAndConflictLeaveCheckoutUnchanged|TrialMergeMultiCommitAndDrop|TrialMergeStopsAtFirstConflictingCommit|TrialMergeUsesFirstParentOfMergeCommit|TrialMergePreservesAuthorMessageAndTrailers|VersionRequirement)")
 	case "approved_apply":
 		return s.packageTests("./internal/loomgit/apply", "TestApply.*")
+	case "delegate_from_state":
+		for _, check := range []struct{ pkg, tests string }{
+			{"./internal/driver", "TestDelegatedTaskFromCurrentWorkspaceState"},
+			{"./internal/loomgit/apply", "TestApplyWIPBasedRevisionLeavesUserEditsUncommitted"},
+			{"./internal/loomgit/taskcopy", "TestConflictResolutionCopyCreatesNewRevisionForReview"},
+		} {
+			if err := s.packageTests(check.pkg, check.tests); err != nil {
+				return err
+			}
+		}
+		return nil
 	case "lead_working_areas":
 		if err := s.packageTests("./internal/loomgit/workspace", "TestEnsureWorkingAreaSeparatesLeadsAndKeepsTheirWork"); err != nil {
 			return err

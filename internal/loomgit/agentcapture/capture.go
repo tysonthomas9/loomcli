@@ -52,6 +52,15 @@ func Capture(ctx context.Context, repo, workspace, attempt, taskID, taskTitle st
 
 // CaptureWorkingArea saves a reset candidate under a unique workspace WIP ref.
 func CaptureWorkingArea(ctx context.Context, repo, workspace, lead string) (Result, error) {
+	return captureWorkingArea(ctx, repo, workspace, lead, "reset")
+}
+
+// CaptureDelegatedWorkingArea saves the user's current edits as a WIP base.
+func CaptureDelegatedWorkingArea(ctx context.Context, repo, workspace, lead string) (Result, error) {
+	return captureWorkingArea(ctx, repo, workspace, lead, "delegation")
+}
+
+func captureWorkingArea(ctx context.Context, repo, workspace, lead, purpose string) (Result, error) {
 	id := make([]byte, 16)
 	if _, err := rand.Read(id); err != nil {
 		return Result{}, err
@@ -60,7 +69,7 @@ func CaptureWorkingArea(ctx context.Context, repo, workspace, lead string) (Resu
 	if err != nil {
 		return Result{}, err
 	}
-	result, err := captureWithParams(ctx, repo, capture.Params{Workspace: workspace, Attempt: hex.EncodeToString(id), TaskTitle: "reset", Ref: ref})
+	result, err := captureWithParams(ctx, repo, capture.Params{Workspace: workspace, Attempt: hex.EncodeToString(id), TaskTitle: purpose, Ref: ref})
 	if err != nil {
 		return Result{}, err
 	}

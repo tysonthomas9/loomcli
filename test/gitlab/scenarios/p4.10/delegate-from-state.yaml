@@ -1,0 +1,8 @@
+name: delegated WIP state and conflict resolution become reviewable agent revisions
+task: P4.10
+git: [min, latest]
+fixture: loomcli
+when:
+  - go_check: delegate_from_state
+then:
+  - go_check: no_error
