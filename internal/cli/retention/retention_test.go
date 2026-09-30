@@ -18,7 +18,7 @@ import (
 	loomretention "github.com/tysonthomas9/loomcli/internal/loomgit/retention"
 )
 
-func TestRetentionCLIDefaultReportsEligibleCloneAsKeep(t *testing.T) {
+func TestRetentionCLIDefaultReportsEligibleCloneForRemoval(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	source, copyPath, path := filepath.Join(root, "source"), filepath.Join(root, "A"), filepath.Join(root, "store.db")
@@ -72,8 +72,18 @@ func TestRetentionCLIDefaultReportsEligibleCloneAsKeep(t *testing.T) {
 	if err := runRetention(ctx, path, false, &cmd); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "keep W "+revision.Change+" "+copyPath+": eligible; deletion disabled until capture is lease-covered (P4.6b)") {
-		t.Fatalf("default report promised deletion: %q", output.String())
+	if !strings.Contains(output.String(), "remove W "+revision.Change+" "+copyPath+": dry run") {
+		t.Fatalf("default report omitted eligible removal: %q", output.String())
+	}
+	output.Reset()
+	if err := runRetention(ctx, path, true, &cmd); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "remove W "+revision.Change+" "+copyPath) {
+		t.Fatalf("apply report omitted removal: %q", output.String())
+	}
+	if _, err := os.Stat(copyPath); !os.IsNotExist(err) {
+		t.Fatalf("apply retained eligible clone: %v", err)
 	}
 }
 

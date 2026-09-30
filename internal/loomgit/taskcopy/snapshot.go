@@ -16,6 +16,15 @@ import (
 // ImportSnapshot moves a clone's completed capture and revision refs to its
 // source repository. An atomic fetch makes the refs all-or-nothing.
 func ImportSnapshot(ctx context.Context, journalPath, source, copyPath, workspace, attempt, change string, revision int) error {
+	return importSnapshot(ctx, journalPath, source, copyPath, workspace, attempt, change, revision, false)
+}
+
+// ImportSnapshotUnderLease requires the caller to hold source then copy repo leases.
+func ImportSnapshotUnderLease(ctx context.Context, journalPath, source, copyPath, workspace, attempt, change string, revision int) error {
+	return importSnapshot(ctx, journalPath, source, copyPath, workspace, attempt, change, revision, true)
+}
+
+func importSnapshot(ctx context.Context, journalPath, source, copyPath, workspace, attempt, change string, revision int, leasesHeld bool) error {
 	store, err := journal.OpenSQLite(journalPath)
 	if err != nil {
 		return err
@@ -46,10 +55,10 @@ func ImportSnapshot(ctx context.Context, journalPath, source, copyPath, workspac
 	if err != nil {
 		return err
 	}
-	if _, err := copy.Run(ctx, "show-ref", "--verify", "--hash", capture); err == nil {
-		refs = append(refs, capture)
-	}
-	return repo.WithLock(ctx, func(ctx context.Context) error {
+	importRefs := func(ctx context.Context) error {
+		if _, err := copy.Run(ctx, "show-ref", "--verify", "--hash", capture); err == nil {
+			refs = append(refs, capture)
+		}
 		args := []string{"fetch", "--atomic", "--no-tags", "--no-write-fetch-head", copyPath}
 		for _, ref := range refs {
 			args = append(args, ref+":"+ref)
@@ -58,6 +67,12 @@ func ImportSnapshot(ctx context.Context, journalPath, source, copyPath, workspac
 			return fmt.Errorf("import task copy snapshot: %w", err)
 		}
 		return matchingTrees(ctx, repo, copy, refs)
+	}
+	if leasesHeld {
+		return importRefs(ctx)
+	}
+	return repo.WithLock(ctx, func(ctx context.Context) error {
+		return copy.WithLock(ctx, importRefs)
 	})
 }
 

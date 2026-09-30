@@ -100,7 +100,7 @@ func TestCancelCapturesRetainedCopyAndKillsCLIChild(t *testing.T) {
 	req := hostBridgeTaskExecRequest()
 	req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
 	req.RunnerTrustLevel = domain.DriverTrustTrusted
-	copy := TaskWorktree{Path: repo.dir, RepoName: "repo", AttemptID: "attempt-1", BaseSHA: base}
+	copy := TaskWorktree{Path: repo.dir, SourcePath: repo.dir, RepoName: "repo", AttemptID: "attempt-1", BaseSHA: base}
 	st := memstore.New()
 	if _, err := st.TaskRuns().Create(context.Background(), store.TaskRunCreate{
 		WorkspaceKey: req.WorkspaceKey, TaskRunID: req.TaskRunID, TaskID: req.TaskID, Status: domain.TaskRunRunning,
@@ -166,7 +166,7 @@ func TestCancelMarksIncompleteCaptureAndRetainsCopy(t *testing.T) {
 	config := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", config)
 	req := hostBridgeTaskExecRequest()
-	copy := TaskWorktree{Path: repo.dir, RepoName: "repo", AttemptID: "attempt-incomplete", BaseSHA: base}
+	copy := TaskWorktree{Path: repo.dir, SourcePath: repo.dir, RepoName: "repo", AttemptID: "attempt-incomplete", BaseSHA: base}
 	result, err := (HostBridgeTaskExecutor{}).captureCancelledTask(req, copy)
 	if err != nil || result.Status != domain.TaskRunCancelled || result.RuntimeMetadata["revision_incomplete"] != "true" {
 		t.Fatalf("incomplete cancel = %+v, %v", result, err)
@@ -196,7 +196,7 @@ func TestCancelFreezesCommittedTaskCopyWork(t *testing.T) {
 	config := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", config)
 	req := hostBridgeTaskExecRequest()
-	copy := TaskWorktree{Path: repo.dir, RepoName: "repo", AttemptID: "committed-at-cancel", BaseSHA: base}
+	copy := TaskWorktree{Path: repo.dir, SourcePath: repo.dir, RepoName: "repo", AttemptID: "committed-at-cancel", BaseSHA: base}
 	result, err := (HostBridgeTaskExecutor{}).captureCancelledTask(req, copy)
 	if err != nil || result.RuntimeMetadata["revision"] != "1" || result.RuntimeMetadata["revision_incomplete"] != "false" {
 		t.Fatalf("committed cancel = %+v, %v", result, err)

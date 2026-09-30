@@ -173,7 +173,7 @@ func captureStaleTaskCopy(ctx context.Context, task *domain.TaskRun) error {
 	if path == "" || attempt == "" || base == "" || repo == "" || source == "" || task.TaskID == "" {
 		return loomgit.NewError(loomgit.AttentionRequired, "task copy has incomplete recovery metadata", nil)
 	}
-	captured, err := agentcapture.Capture(ctx, path, task.WorkspaceKey, attempt, task.TaskID, task.TaskID)
+	captured, err := agentcapture.CaptureTaskCopy(ctx, source, path, task.WorkspaceKey, attempt, task.TaskID, task.TaskID)
 	if err != nil {
 		return loomgit.NewError(loomgit.AttentionRequired, "capture stale task copy", err)
 	}

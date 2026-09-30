@@ -293,7 +293,13 @@ func deleteOneCopy(ctx context.Context, workspace string, copy deleteCopy) error
 	if err != nil {
 		return err
 	}
-	result, err := agentcapture.CaptureWorkingArea(ctx, copy.path, workspace, lead)
+	journalPath := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
+	var result agentcapture.Result
+	err = agentcapture.WithTaskCopyLease(ctx, journalPath, copy.source, copy.path, func(ctx context.Context) error {
+		var captureErr error
+		result, captureErr = agentcapture.CaptureWorkingArea(ctx, copy.path, workspace, lead)
+		return captureErr
+	})
 	if err != nil {
 		return fmt.Errorf("capture %s: %w", copy.path, err)
 	}

@@ -13,10 +13,10 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/changeset"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
-	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/pool"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/taskcopy"
 )
 
@@ -58,16 +58,12 @@ func FreezeCaptureAt(ctx context.Context, journalPath string, in CaptureRequest)
 	}
 	defer func() { _ = store.Close() }()
 	options := gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}}
-	repo, err := pool.New(store, options).Admit(ctx, in.Worktree)
-	if err != nil {
-		return loomgit.Revision{}, err
-	}
 	runner, err := gitexec.New(in.Worktree, options)
 	if err != nil {
 		return loomgit.Revision{}, err
 	}
 	var revision loomgit.Revision
-	err = repo.WithLock(ctx, func(ctx context.Context) error {
+	err = agentcapture.WithTaskCopyLease(ctx, journalPath, sourceForFreeze(in.SourceRepo, in.Worktree), in.Worktree, func(ctx context.Context) error {
 		captureSHA := in.CaptureSHA
 		if captureSHA == "" {
 			head, err := runner.Run(ctx, "rev-parse", "HEAD")
@@ -89,15 +85,17 @@ func FreezeCaptureAt(ctx context.Context, journalPath string, in CaptureRequest)
 			Attempt: in.Attempt, TaskID: in.Task, BaseSHA: in.Base, CaptureSHA: captureSHA,
 			Outcome: in.Outcome, Complete: in.Complete,
 		})
-		return err
-	})
-	if err == nil && in.SourceRepo != "" {
-		err = taskcopy.ImportSnapshot(ctx, journalPath, in.SourceRepo, in.Worktree, in.Workspace, in.Attempt, revision.Change, revision.Number)
-	}
-	if err == nil {
-		err = store.RecordRetainedCopy(ctx, journal.RetainedCopy{Workspace: in.Workspace, Change: revision.Change,
+		if err != nil {
+			return err
+		}
+		if in.SourceRepo != "" {
+			if err := taskcopy.ImportSnapshotUnderLease(ctx, journalPath, in.SourceRepo, in.Worktree, in.Workspace, in.Attempt, revision.Change, revision.Number); err != nil {
+				return err
+			}
+		}
+		return store.RecordRetainedCopy(ctx, journal.RetainedCopy{Workspace: in.Workspace, Change: revision.Change,
 			Attempt: in.Attempt, Path: in.Worktree, SourceRepo: in.SourceRepo, Complete: in.Complete})
-	}
+	})
 	return revision, err
 }
 
@@ -130,6 +128,13 @@ func changeForTask(ctx context.Context, store *journal.SQLite, workspace, task, 
 	return store.DriverChange(ctx, workspace, task, repo, "driver-"+hex.EncodeToString(key[:16]))
 }
 
+func sourceForFreeze(source, worktree string) string {
+	if source != "" {
+		return source
+	}
+	return worktree
+}
+
 // FreezeAt permits isolated journals in tests while preserving the same Git path.
 func FreezeAt(ctx context.Context, journalPath string, in Request) (loomgit.Revision, error) {
 	if in.Workspace == "" || in.Task == "" || in.Repo == "" || in.Attempt == "" || in.Worktree == "" || in.Base == "" || len(in.Patch) == 0 {
@@ -144,30 +149,28 @@ func FreezeAt(ctx context.Context, journalPath string, in Request) (loomgit.Revi
 	}
 	defer func() { _ = store.Close() }()
 	gitOptions := gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}}
-	repo, err := pool.New(store, gitOptions).Admit(ctx, in.Worktree)
-	if err != nil {
-		return loomgit.Revision{}, err
-	}
 	runner, err := gitexec.New(in.Worktree, gitOptions)
 	if err != nil {
 		return loomgit.Revision{}, err
 	}
 	var revision loomgit.Revision
-	err = repo.WithLock(ctx, func(ctx context.Context) error {
+	err = agentcapture.WithTaskCopyLease(ctx, journalPath, sourceForFreeze(in.SourceRepo, in.Worktree), in.Worktree, func(ctx context.Context) error {
 		tree, err := stagePatch(ctx, runner, in)
 		if err != nil {
 			return err
 		}
 		revision, err = recordRevision(ctx, store, runner, in, tree)
-		return err
-	})
-	if err == nil && in.SourceRepo != "" {
-		err = taskcopy.ImportSnapshot(ctx, journalPath, in.SourceRepo, in.Worktree, in.Workspace, in.Attempt, revision.Change, revision.Number)
-	}
-	if err == nil {
-		err = store.RecordRetainedCopy(ctx, journal.RetainedCopy{Workspace: in.Workspace, Change: revision.Change,
+		if err != nil {
+			return err
+		}
+		if in.SourceRepo != "" {
+			if err := taskcopy.ImportSnapshotUnderLease(ctx, journalPath, in.SourceRepo, in.Worktree, in.Workspace, in.Attempt, revision.Change, revision.Number); err != nil {
+				return err
+			}
+		}
+		return store.RecordRetainedCopy(ctx, journal.RetainedCopy{Workspace: in.Workspace, Change: revision.Change,
 			Attempt: in.Attempt, Path: in.Worktree, SourceRepo: in.SourceRepo, Complete: true})
-	}
+	})
 	return revision, err
 }
 
