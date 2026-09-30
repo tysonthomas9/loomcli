@@ -81,6 +81,28 @@ func TestPublishStackRecordedRequiresHumanVerdictForLeadLayerWhenPolicyOff(t *te
 	}
 }
 
+func TestPublishStackRecordedOwnOnlyWorkingArea(t *testing.T) {
+	fixture := newFixture(t)
+	ctx := context.Background()
+	if err := fixture.store.SaveWorkingAreas(ctx, []journal.WorkingArea{{Workspace: "W", Lead: "L", Repo: "repo", Path: fixture.repo, BaseSHA: fixture.base}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixture.repo, "own"), []byte("lead"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, fixture.repo, "add", "own")
+	git(t, fixture.repo, "commit", "-qm", "lead work")
+	head := git(t, fixture.repo, "rev-parse", "HEAD")
+	cfg := &config.LoomConfig{Workspaces: map[string]config.WorkspaceConfig{
+		"workspace": {ID: "W", Path: fixture.repo, Repos: []config.RepoConfig{{Name: "repo", Path: fixture.repo}}},
+	}}
+	forge := &fakeForge{}
+	results, err := publishStackRecorded(ctx, fixture.store, cfg, "W", "feature", "L", nil, forge, "fixture-token", "owner/repo")
+	if err != nil || len(results) != 1 || results[0].Revision.HeadSHA != head || len(forge.prs) != 1 {
+		t.Fatalf("own-only publish = %+v, PRs = %+v, error = %v", results, forge.prs, err)
+	}
+}
+
 func TestPublishRecordedRequiresVerdictBeforePush(t *testing.T) {
 	fixture := newFixture(t)
 	revision := fixture.revision(t, 1, fixture.base, "change", "source")

@@ -41,6 +41,49 @@ func TestStackBackendRejectsTrunkMode(t *testing.T) {
 	codeIs(t, err, loomgit.ModeMismatch)
 }
 
+type limitedForge struct {
+	*fakeForge
+	limit int
+}
+
+func (forge limitedForge) StackLimit() int { return forge.limit }
+
+func TestPublishStackProviderLimitBeforePush(t *testing.T) {
+	fixture := newFixture(t)
+	first := stackRevision(t, fixture, "A", 1, fixture.base)
+	stackRevision(t, fixture, "B", 1, first.HeadSHA)
+	forge := limitedForge{fakeForge: &fakeForge{}, limit: 1}
+	request := fixture.request()
+	request.forge = forge
+	_, err := (LoomStackBackend{Store: fixture.store}).Publish(context.Background(), StackRequest{
+		Request: request, StackID: "feature", Changes: []string{"A", "B"}})
+	codeIs(t, err, loomgit.ProviderStackLimit)
+	if forge.creates != 0 || git(t, fixture.repo, "ls-remote", fixture.remote, "refs/heads/*") != "" {
+		t.Fatal("provider limit pushed a branch or opened a PR")
+	}
+}
+
+func TestPublishStackListsAllRevisionsNeedingApproval(t *testing.T) {
+	fixture := newFixture(t)
+	first := stackRevision(t, fixture, "A", 1, fixture.base)
+	second := stackRevision(t, fixture, "B", 1, first.HeadSHA)
+	ctx := context.Background()
+	for _, revision := range []loomgit.Revision{first, second} {
+		if _, err := review.Submit(ctx, fixture.store, "W", revision.Change, revision.Number, revision.HeadSHA,
+			"reject", "", review.Actor{Kind: "human", ID: "reviewer"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	request := fixture.request()
+	forge := &fakeForge{}
+	request.forge = forge
+	_, err := publishStack(ctx, fixture.store, StackRequest{Request: request, StackID: "feature", Changes: []string{"A", "B"}})
+	codeIs(t, err, loomgit.ReviewRequired)
+	if !strings.Contains(err.Error(), "A revision 1") || !strings.Contains(err.Error(), "B revision 1") || forge.creates != 0 {
+		t.Fatalf("missing review list: %v; PRs = %d", err, forge.creates)
+	}
+}
+
 func stackRevision(t *testing.T, fixture fixture, change string, number int, parent string) loomgit.Revision {
 	t.Helper()
 	git(t, fixture.repo, "reset", "-q", "--hard", parent)

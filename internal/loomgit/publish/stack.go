@@ -51,13 +51,8 @@ func publishStack(ctx context.Context, store Store, request StackRequest) ([]loo
 	if err != nil {
 		return nil, err
 	}
-	if len(applied) != len(request.Changes) {
-		return nil, loomgit.NewError(loomgit.StackNotLinear, "stack must include every working-area layer", nil)
-	}
-	for index, layer := range applied {
-		if layer.Change != request.Changes[index] {
-			return nil, loomgit.NewError(loomgit.StackNotLinear, "stack order differs from working-area layer order", nil)
-		}
+	if err := validateStackLayers(ctx, store, request, applied); err != nil {
+		return nil, err
 	}
 	layers, forge, err := stackLayers(ctx, store, runner, area, request, applied)
 	if err != nil {
@@ -86,6 +81,41 @@ func publishStack(ctx context.Context, store Store, request StackRequest) ([]loo
 		result = append(result, layer.revision)
 	}
 	return result, nil
+}
+
+func validateStackLayers(ctx context.Context, store Store, request StackRequest, applied []loomgit.AppliedLayer) error {
+	if len(applied) != len(request.Changes) {
+		return loomgit.NewError(loomgit.StackNotLinear, "stack must include every working-area layer", nil)
+	}
+	for index, layer := range applied {
+		if layer.Change != request.Changes[index] {
+			return loomgit.NewError(loomgit.StackNotLinear, "stack order differs from working-area layer order", nil)
+		}
+	}
+	return requireStackVerdicts(ctx, store, request.Workspace, applied)
+}
+
+func requireStackVerdicts(ctx context.Context, store Store, workspace string, applied []loomgit.AppliedLayer) error {
+	var needed []string
+	for _, layer := range applied {
+		revision, err := store.RevisionByHead(ctx, workspace, layer.Change, layer.NewTip)
+		if err != nil {
+			return err
+		}
+		err = review.RequireVerdict(ctx, store, workspace, layer.Change, revision.Number, layer.NewTip, "publish", "")
+		if err == nil {
+			continue
+		}
+		var coded *loomgit.Error
+		if !errors.As(err, &coded) || coded.Kind != loomgit.ReviewRequired {
+			return err
+		}
+		needed = append(needed, fmt.Sprintf("%s revision %d", layer.Change, revision.Number))
+	}
+	if len(needed) > 0 {
+		return loomgit.NewError(loomgit.ReviewRequired, "user approval required for "+strings.Join(needed, ", "), nil)
+	}
+	return nil
 }
 
 func pushStackHeads(ctx context.Context, store Store, runner *gitexec.Runner, pusher mirror.RefPusher, layers []stackLayer) error {

@@ -37,6 +37,11 @@ func (backend LoomStackBackend) Publish(ctx context.Context, request StackReques
 	if len(request.Changes) == 0 || request.StackID == "" {
 		return nil, errors.New("stack ID and changes are required")
 	}
+	if provider, ok := request.forge.(interface{ StackLimit() int }); ok {
+		if limit := provider.StackLimit(); limit > 0 && len(request.Changes) > limit {
+			return nil, loomgit.NewError(loomgit.ProviderStackLimit, "provider stack limit exceeded", nil)
+		}
+	}
 	var revisions []loomgit.Revision
 	err := stacklock.With(ctx, request.Workspace, request.StackID, func(lockedCtx context.Context) error {
 		var publishErr error
