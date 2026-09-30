@@ -1,0 +1,8 @@
+name: PR publication requires a verdict and task copies cannot push by default
+task: P2.12
+git: [min, latest]
+fixture: empty
+when:
+  - go_check: publish_only_pr
+then:
+  - go_check: no_error

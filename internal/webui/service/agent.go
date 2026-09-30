@@ -37,8 +37,8 @@ type AgentService interface {
 	// GitSync performs a full push+pull cycle against the default branch.
 	GitSync(ctx context.Context, wsID, agentName string) (*GitSyncResult, error)
 
-	// CreatePR creates a GitHub PR from the agent's worktree branch.
-	CreatePR(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error)
+	// CreatePR publishes an approved change from the lead's working area.
+	CreatePR(ctx context.Context, wsID, lead, change string) (*ops.GitPRResult, error)
 
 	// ListPullRequests returns GitHub PRs for all repos in the workspace,
 	// with per-repo failures reported as warnings rather than errors.

@@ -187,30 +187,34 @@ func HandleGitSync(svc service.AgentService) http.HandlerFunc {
 // --- PR ---
 
 type gitPRRequest struct {
+	Change string `json:"change_id"`
 	Target string `json:"target"`
 }
 
 // HandleGitPR handles POST /api/agents/{name}/git/pr
-// Creates a GitHub PR from the agent's worktree branch.
+// Publishes one approved change from the named lead's working area.
 func HandleGitPR(svc service.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
 
 		var req gitPRRequest
-		if r.Body != nil {
-			defer r.Body.Close()
-			_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req)
-		}
-
-		target := req.Target
-		if target != "" && (!validGitRef.MatchString(target) || strings.Contains(target, "..")) {
-			handler.RespondError(w, http.StatusBadRequest, "invalid target branch name")
+		if r.Body == nil {
+			handler.RespondError(w, http.StatusBadRequest, "change_id is required")
 			return
 		}
-
-		result, err := svc.CreatePR(r.Context(), wsID, agentName, target)
+		defer r.Body.Close()
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil || req.Change == "" || req.Target != "" {
+			handler.RespondError(w, http.StatusBadRequest, "an explicit change_id is required; target branches are recorded by Loom")
+			return
+		}
+		result, err := svc.CreatePR(r.Context(), wsID, agentName, req.Change)
 		if err != nil {
+			var gitErr *loomgit.Error
+			if errors.As(err, &gitErr) {
+				handler.RespondError(w, http.StatusConflict, err.Error())
+				return
+			}
 			writeAgentGitError(w, err, http.StatusBadGateway)
 			return
 		}

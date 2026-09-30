@@ -81,7 +81,7 @@ func (m *mockGitOps) Push(_, _, _, _ string) (*ops.GitPushResult, error) {
 func (m *mockGitOps) Pull(_, _, _, _ string) (*ops.GitPullResult, error) {
 	return &ops.GitPullResult{}, nil
 }
-func (m *mockGitOps) CreatePR(_, _, _, _ string) (*ops.GitPRResult, error) {
+func (m *mockGitOps) CreatePR(context.Context, string, string, string) (*ops.GitPRResult, error) {
 	return &ops.GitPRResult{}, nil
 }
 

@@ -75,15 +75,8 @@ export async function run(ctx = {}) {
     );
   }
 
-  // Until P3.3 restores host publishing, reject PR mode before starting a
-  // backend CLI or creating an isolated worktree.
   const stacked = booleanValue(process.env.LOOM_TASK_RUN_STACKED) || booleanValue(inputValue(request, "stackedPullRequests"));
   const openPR = booleanValue(inputValue(request, "openPullRequest"));
-  if (stacked || openPR) {
-    return failed("host_publish_required", "Pull requests return with the host publisher in P3.3; PR-mode runs are unavailable until then", {
-      taskRunId, taskId, backend, request, logs,
-    });
-  }
 
   const worktree = stringValue(process.env.LOOM_WORKTREE_PATH);
   if (!worktree || !dirExists(worktree)) {
@@ -113,13 +106,6 @@ export async function run(ctx = {}) {
   // host worktree in place would make patch-back re-apply changes that already
   // exist (conflict). A missing Git HEAD or failed sibling creation stops the
   // attempt before the backend CLI can touch the host worktree.
-  // Stacked mode (the host bridge sets LOOM_TASK_RUN_STACKED when the task
-  // belongs to a stack): the host worktree is ALREADY a per-task checkout cut
-  // from the predecessor's branch, so the agent runs IN PLACE (no isolated
-  // double-wrap), commits there, and pushes the canonical output branch. The
-  // post-drain reconcile opens/links the PR with the right base — the runner
-  // does not open an independent loom/<taskid> PR.
-  const stackBranch = stringValue(process.env.LOOM_TASK_RUN_OUTPUT_BRANCH);
   const stackBaseRef = stringValue(process.env.LOOM_TASK_RUN_BASE_REF);
   const stackId = stringValue(process.env.LOOM_TASK_RUN_STACK_ID);
 
@@ -136,7 +122,7 @@ export async function run(ctx = {}) {
   const baseRef = freshCopy ? stringValue(process.env.LOOM_TASK_COPY_BASE_SHA) :
     (stacked ? stackBaseRef : (isolated ? isolated.base : ""));
   if (stacked) {
-    logs.push("stacked mode: running in place at " + worktree + " (base " + (stackBaseRef || "?") + "), pushing " + (stackBranch || "?"));
+    logs.push("stacked mode: capturing revision at " + worktree + " (base " + (stackBaseRef || "?") + ")");
   }
 
   const task = await loadTask(request, logs);
@@ -157,9 +143,6 @@ export async function run(ctx = {}) {
   let stdout = "";
   let stderr = "";
   let patchInfo;
-  let prInfo = null;
-  let stackInfo = null;
-  let prFailure = null;
   let captureError = null;
   try {
     let result;
@@ -200,22 +183,8 @@ export async function run(ctx = {}) {
       captureError = error;
     }
 
-    // Stacked delivery: commit in place and push the canonical branch on the
-    // predecessor base. No PR is opened here — the post-drain reconcile does it.
-    if (!captureError && stacked && exitCode === 0) {
-      if (patchInfo.filesChanged === 0) {
-        logs.push("stacked: the agent produced no changes; no branch pushed (empty unit)");
-      } else {
-        prFailure = { class: "host_publish_required", message: "stackedPullRequests requires host-side publishing" };
-      }
-    } else if (!captureError && openPR && exitCode === 0) {
-      if (!isolated) {
-        prFailure = { class: "github_repo_unresolved", message: "openPullRequest requires a git worktree (no isolated worktree was created)" };
-      } else if (patchInfo.filesChanged === 0) {
-        logs.push("openPullRequest: the agent produced no changes; no PR opened");
-      } else {
-        prFailure = { class: "host_publish_required", message: "openPullRequest requires host-side publishing" };
-      }
+    if (!captureError && (stacked || openPR) && exitCode === 0 && patchInfo.filesChanged === 0) {
+      logs.push("PR requested: the agent produced no changes; no revision to publish");
     }
   } finally {
     if (isolated && !captureError) {
@@ -229,17 +198,6 @@ export async function run(ctx = {}) {
       taskRunId, taskId, backend, request, logs, headBefore,
     });
     failure.runtimeMetadata = { ...failure.runtimeMetadata, patch_back_status: "retained", retained_path: retainedPath };
-    return failure;
-  }
-
-  // Fail closed when PR delivery was requested but could not be completed.
-  if (prFailure) {
-    const failure = failed(prFailure.class, prFailure.message, { taskRunId, taskId, backend, request, logs, headBefore });
-    if (isolated && patchInfo) {
-      failure.patch = patchInfo.patch;
-      failure.base_ref = baseRef;
-      failure.patch_base_ref = baseRef;
-    }
     return failure;
   }
 
@@ -298,22 +256,9 @@ export async function run(ctx = {}) {
     metadata.stream_error = streamFailure;
   }
 
-  if (stackInfo) {
-    // Stacked: the pushed canonical branch IS the delivery; the reconcile opens
-    // the PR. github_branch + sha drive the host finalize barrier (published).
-    metadata.delivery = "stack_branch";
-    metadata.github_branch = stackInfo.branch;
-    metadata.github_head_sha = stackInfo.head;
-    if (stackId) {
-      metadata.stack_id = stackId;
-    }
-  } else if (prInfo) {
-    metadata.delivery = "pull_request";
-    metadata.github_pr_url = prInfo.url;
-    metadata.github_pr_number = String(prInfo.number);
-    metadata.github_branch = prInfo.branch;
-  } else if (openPR || stacked) {
-    metadata.delivery = "pull_request_skipped_no_changes";
+  if (openPR || stacked) {
+    metadata.delivery = patchInfo.filesChanged === 0 ? "revision_skipped_no_changes" : "revision_for_review";
+    if (stackId) metadata.stack_id = stackId;
   } else {
     metadata.delivery = "patch_back";
   }
@@ -350,12 +295,6 @@ export async function run(ctx = {}) {
     transcript_entries: transcriptEntries,
     runtimeMetadata: metadata,
   };
-  if (prInfo || stackInfo || stacked) {
-    // PR / stacked mode: the pull request or pushed branch IS the delivery (and
-    // stacked mode runs in place, so there is nothing to patch-back) — return no
-    // top-level patch so the driver host-bridge skips patch-back.
-    return completed;
-  }
   completed.patch = patchInfo.patch;
   // base_ref lets the driver host-bridge patch-back apply this patch to the
   // (clean) host worktree. Empty when running in place (no patch-back).
@@ -580,11 +519,24 @@ async function setupIsolatedWorktree(hostWorktree, taskRunId, logs) {
   // Some local CLIs, notably OpenCode, enforce project-directory permissions and
   // auto-reject writes to temp/external directories even when --dir points there.
   const isolatedPath = path.join(path.dirname(hostWorktree), ".loom-local-runner-" + safe + "-" + Date.now());
+  const enableConfig = await execBackend("git", ["-C", hostWorktree, "config", "extensions.worktreeConfig", "true"], {
+    cwd: hostWorktree,
+  });
+  if (enableConfig.code !== 0) {
+    throw new Error("git worktree config failed: " + textTail(enableConfig.stderr, 400));
+  }
   const add = await execBackend("git", ["-C", hostWorktree, "worktree", "add", "--detach", isolatedPath, "HEAD"], {
     cwd: hostWorktree,
   });
   if (add.code !== 0) {
     throw new Error("git worktree add failed: " + textTail(add.stderr, 400));
+  }
+  const protect = await execBackend("git", ["-C", isolatedPath, "config", "--worktree", "remote.origin.pushurl", "loom-no-push://task-copy"], {
+    cwd: isolatedPath,
+  });
+  if (protect.code !== 0) {
+    await removeIsolatedWorktree(hostWorktree, isolatedPath, logs);
+    throw new Error("git task copy push protection failed: " + textTail(protect.stderr, 400));
   }
   logs.push("isolated worktree at " + isolatedPath + " (base " + head + ")");
   return { path: isolatedPath, base: head };
@@ -604,10 +556,7 @@ async function removeIsolatedWorktree(hostWorktree, isolatedPath, logs) {
 }
 
 // ---------------------------------------------------------------------------
-// Opt-in GitHub pull-request delivery.
-//
-// The runner returns a patch for host-side delivery. Legacy PR flags fail
-// closed until the host publisher handles them.
+// Pull-request delivery returns a patch for host-side review and publication.
 // ---------------------------------------------------------------------------
 
 function booleanValue(value) {
@@ -1474,6 +1423,7 @@ function buildPrompt(request, task, worktree) {
     JSON.stringify(task || { task_id: request.task_id || request.taskId }, null, 2),
     "",
     "Work directly in the repository. Keep the change focused on this task.",
+    "Use Git only to inspect work. Do not commit, push, create worktrees, apply patches, clean, or reset --hard; Loom captures a revision for review.",
     "Do not update or close Loom issues yourself; the workflow driver records task completion.",
     "Do not print environment variables or credentials.",
     "Before finishing, run relevant validation commands if they are available.",

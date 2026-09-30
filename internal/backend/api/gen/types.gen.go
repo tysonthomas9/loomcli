@@ -3289,6 +3289,11 @@ type GetDiffFileParams struct {
 	Path string `form:"path" json:"path"`
 }
 
+// GitCreatePRJSONBody defines parameters for GitCreatePR.
+type GitCreatePRJSONBody struct {
+	ChangeId string `json:"change_id"`
+}
+
 // GitPullJSONBody defines parameters for GitPull.
 type GitPullJSONBody struct {
 	// Source Remote branch source
@@ -3737,6 +3742,9 @@ type ReorderWorkspacesJSONRequestBody ReorderWorkspacesJSONBody
 
 // CreateAgentJSONRequestBody defines body for CreateAgent for application/json ContentType.
 type CreateAgentJSONRequestBody CreateAgentJSONBody
+
+// GitCreatePRJSONRequestBody defines body for GitCreatePR for application/json ContentType.
+type GitCreatePRJSONRequestBody GitCreatePRJSONBody
 
 // GitPullJSONRequestBody defines body for GitPull for application/json ContentType.
 type GitPullJSONRequestBody GitPullJSONBody

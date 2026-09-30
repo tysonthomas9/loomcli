@@ -76,6 +76,11 @@ func (s *state) goCheck(name string) error {
 			return err
 		}
 		return s.packageTests("./internal/loomgit/apply", "TestAppliedLogInterleavesOwnAndTaskLayers")
+	case "publish_only_pr":
+		if err := s.packageTests("./internal/loomgit/publish", "TestPublishRecordedRequiresVerdictBeforePush"); err != nil {
+			return err
+		}
+		return s.packageTests("./internal/loomgit/internal/pool", "TestCreateRemoveAndFailedAdd")
 	case "review_patch_ids":
 		return s.packageTests("./internal/loomgit/review", "TestCarryForwardCleanPatchIDsAndEmptyDroppedCommit")
 	case "process_lock":

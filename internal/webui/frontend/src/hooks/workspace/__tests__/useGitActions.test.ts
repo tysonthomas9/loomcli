@@ -300,13 +300,13 @@ describe("useGitActions", () => {
       );
 
       await act(async () => {
-        await result.current.createPR("main");
+        await result.current.createPR("C-1");
       });
 
       expect(mockGitCreatePR).toHaveBeenCalledWith(
         "test-ws-id",
         "nova",
-        "main",
+        "C-1",
       );
       expect(mockShowToast).toHaveBeenCalledWith(
         "PR created: https://github.com/repo/pull/42",
@@ -327,7 +327,7 @@ describe("useGitActions", () => {
       );
 
       await act(async () => {
-        await result.current.createPR();
+        await result.current.createPR("C-1");
       });
 
       expect(mockShowToast).toHaveBeenCalledWith("PR created", {
@@ -349,7 +349,7 @@ describe("useGitActions", () => {
       );
 
       await act(async () => {
-        await result.current.createPR();
+        await result.current.createPR("C-1");
       });
 
       expect(mockShowToast).toHaveBeenCalledWith(
@@ -371,7 +371,7 @@ describe("useGitActions", () => {
       );
 
       await act(async () => {
-        await result.current.createPR();
+        await result.current.createPR("C-1");
       });
 
       expect(mockShowToast).toHaveBeenCalledWith("PR already exists", {
@@ -392,7 +392,7 @@ describe("useGitActions", () => {
       );
 
       await act(async () => {
-        await result.current.createPR();
+        await result.current.createPR("C-1");
       });
 
       expect(mockShowToast).toHaveBeenCalledWith(
@@ -616,7 +616,7 @@ describe("useGitActions", () => {
         );
 
         await act(async () => {
-          await result.current.createPR();
+          await result.current.createPR("C-1");
         });
 
         expect(mockShowToast).toHaveBeenCalledWith("gh CLI not installed", {

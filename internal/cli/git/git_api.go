@@ -1,12 +1,14 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
 )
 
 // PushResult contains the structured result of a push operation.
@@ -211,55 +213,13 @@ func PullRepoWorktreeResult(repoPath, currentBranch, sourceBranch, remote string
 	}, nil
 }
 
-// CreatePRResult creates a GitHub PR and returns structured result.
-func CreatePRResult(repoPath, sourceBranch, targetBranch, remote string) (*PRResult, error) {
-	r := resolveRemote(remote)
-
-	if err := validateGitRef(sourceBranch); err != nil {
+// CreatePRResult publishes an approved change through the host publisher.
+func CreatePRResult(ctx context.Context, workspace, lead, change string) (*PRResult, error) {
+	result, err := publish.PublishLocal(ctx, workspace, lead, change)
+	if err != nil {
 		return nil, err
 	}
-	if err := validateGitRef(targetBranch); err != nil {
-		return nil, err
-	}
-	if err := validateGitRef(r); err != nil {
-		return nil, err
-	}
-
-	if err := GitFetchRemote(repoPath, remote); err != nil {
-		return nil, fmt.Errorf("fetching: %v", err)
-	}
-
-	hasCommits, err := HasCommitsBetweenRemote(repoPath, remote, targetBranch, sourceBranch)
-	if err == nil && !hasCommits {
-		return &PRResult{NoCommits: true}, nil
-	}
-
-	if err := GitPushRemote(repoPath, remote, sourceBranch); err != nil {
-		return nil, fmt.Errorf("pushing branch: %v", err)
-	}
-
-	title, body := generatePRInfo(cli.GetDeps(nil), repoPath, r, targetBranch, sourceBranch)
-
-	result := cli.GetDeps(nil).Exec.Run(repoPath, "gh", "pr", "create",
-		"--base", targetBranch,
-		"--head", sourceBranch,
-		"--title", title,
-		"--body", body)
-
-	if result.Err != nil {
-		errMsg := result.Stderr + result.Stdout
-		if strings.Contains(errMsg, "already exists") {
-			url, urlErr := getExistingPRURL(cli.GetDeps(nil), repoPath, sourceBranch)
-			if urlErr != nil {
-				return nil, urlErr
-			}
-			return &PRResult{URL: url, AlreadyExists: true}, nil
-		}
-		return nil, fmt.Errorf("creating PR: %s", strings.TrimSpace(errMsg))
-	}
-
-	prURL := strings.TrimSpace(result.Stdout)
-	return &PRResult{URL: prURL, Created: true}, nil
+	return &PRResult{URL: result.PRURL, Created: !result.AlreadyExists, AlreadyExists: result.AlreadyExists}, nil
 }
 
 // ResetWorktreeResult hard-resets a worktree to a target branch and returns structured result.
@@ -341,7 +301,11 @@ func GetGitStatusSummary(worktreePath, targetBranch string) (*GitStatusSummary, 
 
 // CheckGhInstalled checks if the gh CLI is available.
 func CheckGhInstalled() error {
-	return checkGhInstalled(cli.GetDeps(nil))
+	result := cli.GetDeps(nil).Exec.Run(".", "gh", "--version")
+	if result.Err != nil {
+		return fmt.Errorf("gh CLI unavailable: %w", result.Err)
+	}
+	return nil
 }
 
 // getChangedFiles returns a list of changed files using git status --porcelain.

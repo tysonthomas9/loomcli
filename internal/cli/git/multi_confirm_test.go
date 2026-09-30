@@ -109,7 +109,7 @@ func TestResetAllConfirmsEachWorktreeAndCapturesApprovedOnes(t *testing.T) {
 	}
 }
 
-func TestSyncAndPRAskPerWorkspaceAndSkipDeclinedWork(t *testing.T) {
+func TestSyncAsksPerWorkspaceAndSkipsDeclinedWork(t *testing.T) {
 	root := t.TempDir()
 	config := &LoomConfig{DefaultWorkspace: "first", Workspaces: make(map[string]WorkspaceConfig)}
 	for _, name := range []string{"first", "second"} {
@@ -133,27 +133,15 @@ func TestSyncAndPRAskPerWorkspaceAndSkipDeclinedWork(t *testing.T) {
 		{"sync", "Sync workspace", func(s *confirmationSession) error {
 			return runWorkspaceSyncWithConfirmation(cli.GetDeps(nil), false, false, "", s)
 		}},
-		{"pr", "Create PRs for workspace", func(s *confirmationSession) error {
-			return prAllWorkspacesWithConfirmation(cli.GetDeps(nil), "", s)
-		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var approved []string
-			if tc.name == "sync" {
-				old := runConfirmedSync
-				runConfirmedSync = func(_ *cli.Deps, resolver *cli.Resolver, _, _ bool) error {
-					approved = append(approved, resolver.WorkspaceName())
-					return nil
-				}
-				t.Cleanup(func() { runConfirmedSync = old })
-			} else {
-				oldCheck, oldRun := checkConfirmedGh, runConfirmedPR
-				checkConfirmedGh = func(*cli.Deps) error { return nil }
-				runConfirmedPR = func(_ *cli.Deps, worktrees []cli.WorktreeInfo, _, _ string) {
-					approved = append(approved, worktrees[0].Workspace)
-				}
-				t.Cleanup(func() { checkConfirmedGh, runConfirmedPR = oldCheck, oldRun })
+			old := runConfirmedSync
+			runConfirmedSync = func(_ *cli.Deps, resolver *cli.Resolver, _, _ bool) error {
+				approved = append(approved, resolver.WorkspaceName())
+				return nil
 			}
+			t.Cleanup(func() { runConfirmedSync = old })
 			if err := tc.run(confirmationForTest("", false)); err == nil || !strings.Contains(strings.ToLower(err.Error()), "first") || !strings.Contains(strings.ToLower(err.Error()), "second") {
 				t.Fatalf("non-interactive refusal = %v", err)
 			}

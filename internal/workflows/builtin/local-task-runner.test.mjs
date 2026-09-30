@@ -36,6 +36,7 @@ if (process.env.FAKE_ENV_FILE) {
   const userName = spawnSync("git", ["config", "user.name"], { encoding: "utf8" });
   const localConfig = spawnSync("git", ["config", "--local", "--get-regexp", "^credential\\\\."], { encoding: "utf8" });
   const worktreeConfig = spawnSync("git", ["config", "--worktree", "--get-regexp", "^credential\\\\."], { encoding: "utf8" });
+  const pushURL = spawnSync("git", ["config", "remote.origin.pushurl"], { encoding: "utf8" });
   const push = process.env.FAKE_PUSH_URL
     ? spawnSync("git", ["push", process.env.FAKE_PUSH_URL, "HEAD:refs/heads/probe"], { encoding: "utf8" })
     : null;
@@ -44,6 +45,7 @@ if (process.env.FAKE_ENV_FILE) {
     credentialCode: credential.status, credentialPresent: credential.stdout?.includes("password=") ?? false,
     userName: userName.stdout?.trim(),
     localCredentialConfig: localConfig.stdout, worktreeCredentialConfig: worktreeConfig.stdout,
+    pushURL: pushURL.stdout?.trim(),
     pushExitCode: push?.status,
   }));
 }
@@ -956,6 +958,8 @@ describe("local-task-runner isolated worktree", () => {
     // Bare name => the fake CLI writes into its cwd, which must be the isolated
     // worktree, NOT the host worktree.
     process.env.FAKE_WRITE_FILE = "isolated-file.txt";
+    const envFile = path.join(tmpRoot, "isolated-git-env.json");
+    process.env.FAKE_ENV_FILE = envFile;
 
     const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: worktree }).toString().trim();
 
@@ -966,6 +970,7 @@ describe("local-task-runner isolated worktree", () => {
     assert.equal(out.base_ref, head, "top-level base_ref should equal host HEAD");
     assert.equal(out.patch_base_ref, head);
     assert.equal(out.runtimeMetadata.base_ref, head);
+    assert.equal(JSON.parse(fs.readFileSync(envFile, "utf8")).pushURL, "loom-no-push://task-copy");
     assert.ok(
       out.runtimeMetadata.exec_worktree_path.startsWith(path.dirname(worktree) + path.sep),
       "isolated worktree should be created as a sibling of the host repo",
@@ -1138,16 +1143,15 @@ describe("local-task-runner pull-request delivery gating", () => {
     });
 
     const out = await run();
-    assert.equal(out.status, "failed");
-    assert.equal(out.errorClass, "host_publish_required");
-    assert.match(out.errorMessage, /host publisher in P3\.3/);
-    assert.equal(out.exitCode, 1);
-    assert.equal(out.patch, undefined);
-    assert.ok(!fs.existsSync(backendMarker), "runner started the backend before rejecting PR mode");
+    assert.equal(out.status, "completed");
+    assert.equal(out.runtimeMetadata.delivery, "revision_for_review");
+    assert.ok(out.patch.includes("pr-change.txt"));
+    assert.ok(out.base_ref);
+    assert.ok(fs.existsSync(backendMarker), "runner did not start the backend");
     assert.ok(!fs.existsSync(ghMarker), "runner called gh auth token");
   });
 
-  it("rejects PR mode even when the agent would produce no changes", async () => {
+  it("returns no revision delivery when the agent produces no changes", async () => {
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
     process.env.LOOM_WORKTREE_PATH = worktree;
     process.env.LOOM_CODEX_BIN = fakeBin;
@@ -1163,9 +1167,8 @@ describe("local-task-runner pull-request delivery gating", () => {
     });
 
     const out = await run();
-    assert.equal(out.status, "failed");
-    assert.equal(out.errorClass, "host_publish_required");
-    assert.match(out.errorMessage, /host publisher in P3\.3/);
+    assert.equal(out.status, "completed");
+    assert.equal(out.runtimeMetadata.delivery, "revision_skipped_no_changes");
   });
 
   it("stacked mode stays with the host publisher", async () => {
@@ -1192,13 +1195,13 @@ describe("local-task-runner pull-request delivery gating", () => {
     });
 
     const out = await run();
-    assert.equal(out.status, "failed");
-    assert.equal(out.errorClass, "host_publish_required");
-    assert.match(out.errorMessage, /host publisher in P3\.3/);
-    assert.equal(out.exitCode, 1);
+    assert.equal(out.status, "completed");
+    assert.equal(out.runtimeMetadata.delivery, "revision_for_review");
+    assert.ok(out.patch.includes("stack-change.txt"));
+    assert.equal(out.runtimeMetadata.stack_id, "epic:E");
   });
 
-  it("rejects stacked PR mode before an empty unit runs", async () => {
+  it("returns an empty patch for an empty stacked unit", async () => {
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
     process.env.LOOM_WORKTREE_PATH = worktree;
     process.env.LOOM_CODEX_BIN = fakeBin;
@@ -1217,10 +1220,9 @@ describe("local-task-runner pull-request delivery gating", () => {
     });
 
     const out = await run();
-    assert.equal(out.status, "failed");
-    assert.equal(out.errorClass, "host_publish_required");
-    assert.match(out.errorMessage, /host publisher in P3\.3/);
-    assert.equal(out.patch, undefined);
+    assert.equal(out.status, "completed");
+    assert.equal(out.runtimeMetadata.delivery, "revision_skipped_no_changes");
+    assert.equal(out.patch, "");
   });
   // The actual canonical-branch push (commit in place → push loom/stack/<stack>/<task>,
   // no PR) is Stage 3's LIVE verify bar (2-task local epic → 2 branches on origin,

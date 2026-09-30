@@ -182,24 +182,24 @@ describe("git API functions", () => {
       };
       mockPost.mockResolvedValue(mockResult);
 
-      const result = await gitCreatePR("test-ws-id", "nova", "develop");
+      const result = await gitCreatePR("test-ws-id", "nova", "C-1");
 
       expect(mockPost).toHaveBeenCalledWith(
         "/api/workspaces/test-ws-id/agents/nova/git/pr",
-        { target: "develop" },
+        { change_id: "C-1" },
         { timeout: 60000 },
       );
       expect(result).toEqual(mockResult);
     });
 
-    it("passes undefined target when not specified", async () => {
+    it("requires the recorded change ID", async () => {
       mockPost.mockResolvedValue({});
 
-      await gitCreatePR("test-ws-id", "nova");
+      await gitCreatePR("test-ws-id", "nova", "C-2");
 
       expect(mockPost).toHaveBeenCalledWith(
         "/api/workspaces/test-ws-id/agents/nova/git/pr",
-        { target: undefined },
+        { change_id: "C-2" },
         { timeout: 60000 },
       );
     });

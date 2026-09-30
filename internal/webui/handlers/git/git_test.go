@@ -20,7 +20,7 @@ type mockGitOps struct {
 	resolveFunc            func(name string) (*ops.AgentWorktree, error)
 	pushFunc               func(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error)
 	pullFunc               func(worktreePath, currentBranch, sourceBranch, remote string) (*ops.GitPullResult, error)
-	createPRFunc           func(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPRResult, error)
+	createPRFunc           func(context.Context, string, string, string) (*ops.GitPRResult, error)
 	resetFunc              func(worktreePath, worktreeName, targetBranch string, force, push bool) (*ops.GitResetResult, error)
 	statusFunc             func(worktreePath, targetBranch string) (*ops.GitStatusResult, error)
 	getCurrentBranchFunc   func(worktreePath string) (string, error)
@@ -59,9 +59,9 @@ func (m *mockGitOps) Pull(worktreePath, currentBranch, sourceBranch, remote stri
 	return &ops.GitPullResult{Success: true, Message: "pulled"}, nil
 }
 
-func (m *mockGitOps) CreatePR(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPRResult, error) {
+func (m *mockGitOps) CreatePR(ctx context.Context, workspace, lead, change string) (*ops.GitPRResult, error) {
 	if m.createPRFunc != nil {
-		return m.createPRFunc(worktreePath, sourceBranch, targetBranch, remote)
+		return m.createPRFunc(ctx, workspace, lead, change)
 	}
 	return &ops.GitPRResult{URL: "https://github.com/test/pr/1", Created: true}, nil
 }
@@ -584,13 +584,16 @@ func TestGitSync_GetCurrentBranchError(t *testing.T) {
 
 func TestGitPR_Created(t *testing.T) {
 	svc := &mockAgentService{
-		createPRFunc: func(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {
+		createPRFunc: func(ctx context.Context, wsID, agentName, change string) (*ops.GitPRResult, error) {
+			if change != "C" {
+				t.Errorf("change = %q", change)
+			}
 			return &ops.GitPRResult{URL: "https://github.com/test/pr/1", Created: true}, nil
 		},
 	}
 	handler := handleGitPR(svc)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pr", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pr", strings.NewReader(`{"change_id":"C"}`))
 	req.SetPathValue("name", "test-agent")
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
@@ -621,7 +624,7 @@ func TestGitPR_AlreadyExists(t *testing.T) {
 	}
 	handler := handleGitPR(svc)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pr", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pr", strings.NewReader(`{"change_id":"C"}`))
 	req.SetPathValue("name", "test-agent")
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
@@ -652,7 +655,7 @@ func TestGitPR_GhNotInstalled(t *testing.T) {
 	}
 	handler := handleGitPR(svc)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pr", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pr", strings.NewReader(`{"change_id":"C"}`))
 	req.SetPathValue("name", "test-agent")
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
@@ -672,13 +675,11 @@ func TestGitPR_GhNotInstalled(t *testing.T) {
 	}
 }
 
-func TestGitPR_CustomTarget(t *testing.T) {
+func TestGitPR_RejectsLegacyTarget(t *testing.T) {
 	svc := &mockAgentService{
 		createPRFunc: func(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {
-			if target != "develop" {
-				t.Errorf("target = %q, want %q", target, "develop")
-			}
-			return &ops.GitPRResult{URL: "https://github.com/test/pr/2", Created: true}, nil
+			t.Fatal("legacy branch request reached publisher")
+			return nil, nil
 		},
 	}
 	handler := handleGitPR(svc)
@@ -691,8 +692,8 @@ func TestGitPR_CustomTarget(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusCreated)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
 	}
 }
 
@@ -704,7 +705,7 @@ func TestGitPR_OperationError(t *testing.T) {
 	}
 	handler := handleGitPR(svc)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pr", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/pr", strings.NewReader(`{"change_id":"C"}`))
 	req.SetPathValue("name", "test-agent")
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()

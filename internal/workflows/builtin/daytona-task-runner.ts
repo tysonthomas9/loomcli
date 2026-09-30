@@ -54,10 +54,6 @@ export async function run(ctx = {}) {
   const taskId = stringValue(request.task_id || request.taskId || process.env.LOOM_TASK_ID);
   const logs = [];
 
-  if (booleanValue(inputValue(request, "openPullRequest")) || booleanValue(inputValue(request, "stackedPullRequests"))) {
-    return failed("host_publish_required", "Pull requests return with the host publisher in P3.3; PR-mode runs are unavailable until then", taskRunId, request, logs);
-  }
-
   const mode = taskMode(request);
   if (DEMO_MODES.has(mode) && !demoModesEnabled(request)) {
     return failed(
@@ -107,10 +103,6 @@ export async function run(ctx = {}) {
 
     const task = taskContext.task;
     const delivery = deliveryPlan(request, task, taskRunId);
-    if (delivery.openPullRequest) {
-      return failed("host_publish_required", "Pull requests return with the host publisher in P3.3; PR-mode runs are unavailable until then", taskRunId, request, logs);
-    }
-
     const sdk = imports.daytona;
     const Daytona = sdk.Daytona || (sdk.default && sdk.default.Daytona);
     if (typeof Daytona !== "function") {
@@ -162,17 +154,6 @@ export async function run(ctx = {}) {
     if (head.exitCode !== 0 || !head.stdout.trim()) {
       return failed("daytona_repo_head_failed", textTail(head.stdout + head.stderr), taskRunId, request, logs, sandboxId, secrets);
     }
-    if (delivery.openPullRequest) {
-      const checkout = await setup.shell(
-        "git -C " + shellQuote(repoDir) + " checkout -B " + shellQuote(delivery.branch),
-        { timeout: 30 },
-      );
-      logs.push(commandLog("git checkout task branch", checkout));
-      if (checkout.exitCode !== 0) {
-        return failed("daytona_branch_checkout_failed", textTail(checkout.stdout + checkout.stderr), taskRunId, request, logs, sandboxId, secrets);
-      }
-    }
-
     const leakProbe = await setup.shell(sandboxLeakProbeCommand(), { timeout: 30 });
     const leakedEnvCount = numberValue(leakProbe.stdout.trim(), 0);
     if (leakedEnvCount !== 0) {
@@ -209,8 +190,6 @@ export async function run(ctx = {}) {
       diff: redact(diff.stdout || "", secrets),
       diffStat: redact(diffStat.stdout || "", secrets),
     }, logs);
-    const published = null;
-    const prArtifact = null;
     const transcriptEntries = redactTranscriptEntries(transcriptCollector.entries, secrets);
     const transcriptJSONL = serializeTranscriptJSONL(transcriptEntries);
     const usage = flueUsageToTaskUsage(response && response.usage, { costUnit: "usd" });
@@ -229,7 +208,7 @@ export async function run(ctx = {}) {
       transcript_entries: transcriptEntries,
       // Inline patch when there was no artifact client (daemon-leaf path).
       ...(patchArtifact && patchArtifact.inline ? { patch: patchArtifact.diff } : {}),
-      artifactIds: [patchArtifact, prArtifact].filter(Boolean).map((artifact) => artifact.id).filter(Boolean),
+      artifactIds: [patchArtifact].filter(Boolean).map((artifact) => artifact.id).filter(Boolean),
       runtimeMetadata: stringMetadata({
         task_runner: "daytona-task-runner",
         runtime_strategy: "flue-daytona-codex",
@@ -254,12 +233,6 @@ export async function run(ctx = {}) {
         daytona_repo_dir: repoDir,
         daytona_repo_head: head.stdout.trim(),
         patch_artifact_id: patchArtifact && patchArtifact.id,
-        github_pr_artifact_id: prArtifact && prArtifact.id,
-        github_pr_url: published && published.pullRequest && published.pullRequest.html_url,
-        github_pr_number: published && published.pullRequest && published.pullRequest.number,
-        github_pr_head: published && delivery.branch,
-        github_pr_base: published && delivery.baseBranch,
-        github_pr_commit: published && published.commitSha,
         daytona_sandbox_env_leak_count: "0",
         response_text: redact(textTail(stringValue(response && response.text), 1000), secrets),
       }),
@@ -834,6 +807,7 @@ function buildPrompt(request, task, repoDir) {
     JSON.stringify(task || { task_id: request.task_id || request.taskId }, null, 2),
     "",
     "Work directly in the repository. Keep the change focused on this task.",
+    "Use Git only to inspect work. Do not commit, push, create worktrees, apply patches, clean, or reset --hard; Loom captures a revision for review.",
     "Do not update or close Loom issues yourself; the workflow driver records task completion.",
     "Do not print environment variables or credentials.",
     "Before finishing, run relevant validation commands if they are available.",

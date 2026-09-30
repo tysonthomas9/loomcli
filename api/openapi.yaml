@@ -2610,10 +2610,19 @@ paths:
     post:
       operationId: gitCreatePR
       tags: [git]
-      summary: Create a pull request from agent worktree
+      summary: Publish an approved change from a lead working area
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [change_id]
+              properties:
+                change_id: {type: string}
       responses:
         "200":
           description: PR created

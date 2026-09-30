@@ -1,4 +1,4 @@
-package mirror
+package mirror_test
 
 import (
 	"context"
@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/mirror"
 )
 
 func git(t *testing.T, dir string, args ...string) string {
@@ -90,7 +91,7 @@ func TestCaptureMirrorAndLeasedDeletion(t *testing.T) {
 	for _, ref := range []string{revision, backup} {
 		git(t, repo, "update-ref", ref, base)
 	}
-	if err := SyncRepo(ctx, store, repo, base); err != nil {
+	if err := mirror.SyncRepo(ctx, store, repo, base); err != nil {
 		t.Fatal(err)
 	}
 	if got := git(t, remote, "rev-parse", result.CaptureRef); got != result.CaptureSHA {
@@ -112,7 +113,7 @@ func TestCaptureMirrorAndLeasedDeletion(t *testing.T) {
 		t.Fatalf("unexpected public refs: %s", out)
 	}
 	git(t, repo, "update-ref", "-d", result.CaptureRef)
-	if err := SyncRepo(ctx, store, repo, base); err != nil {
+	if err := mirror.SyncRepo(ctx, store, repo, base); err != nil {
 		t.Fatal(err)
 	}
 	if out := git(t, remote, "for-each-ref", "--format=%(refname)", result.CaptureRef); out != "" {
@@ -161,7 +162,7 @@ func TestP120CloneTaskSnapshotRefsMirrorFromCloneStore(t *testing.T) {
 	if got := git(t, clone, "rev-parse", captureRef); got == "" {
 		t.Fatal("clone capture ref missing")
 	}
-	if err := SyncRepo(ctx, store, clone, base); err != nil {
+	if err := mirror.SyncRepo(ctx, store, clone, base); err != nil {
 		t.Fatal(err)
 	}
 	for _, ref := range []string{captureRef, revisionRef} {
@@ -179,7 +180,7 @@ func TestSecretPathAndRemoteMoveRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	git(t, repo, "update-ref", ref, base)
-	if err := SyncRepo(ctx, store, repo, base); err != nil {
+	if err := mirror.SyncRepo(ctx, store, repo, base); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repo, "id_rsa"), []byte("fixture key"), 0600); err != nil {
@@ -189,7 +190,7 @@ func TestSecretPathAndRemoteMoveRefused(t *testing.T) {
 	git(t, repo, "commit", "-qm", "new secret")
 	secretSHA := git(t, repo, "rev-parse", "HEAD")
 	git(t, repo, "update-ref", ref, secretSHA)
-	if err := SyncRepo(ctx, store, repo, base); err == nil {
+	if err := mirror.SyncRepo(ctx, store, repo, base); err == nil {
 		t.Fatal("secret ref mirrored")
 	}
 	row, _, _ := store.MirrorState(ctx, repo, ref)
@@ -201,7 +202,7 @@ func TestSecretPathAndRemoteMoveRefused(t *testing.T) {
 	}
 	git(t, repo, "push", "origin", secretSHA+":"+ref)
 	git(t, repo, "update-ref", ref, base)
-	if err := SyncRepo(ctx, store, repo, base); err == nil {
+	if err := mirror.SyncRepo(ctx, store, repo, base); err == nil {
 		t.Fatal("remote drift was overwritten")
 	}
 	if got := git(t, remote, "rev-parse", ref); got != secretSHA {
@@ -228,7 +229,7 @@ func TestProviderRejectionRetainsLocalRefAndRetries(t *testing.T) {
 	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho provider rejected >&2\nexit 1\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := SyncRepo(ctx, store, repo, base); err == nil {
+	if err := mirror.SyncRepo(ctx, store, repo, base); err == nil {
 		t.Fatal("provider rejection was ignored")
 	}
 	row, found, err := store.MirrorState(ctx, repo, ref)
@@ -241,7 +242,7 @@ func TestProviderRejectionRetainsLocalRefAndRetries(t *testing.T) {
 	if err := os.Remove(hook); err != nil {
 		t.Fatal(err)
 	}
-	if err := SyncRepo(ctx, store, repo, base); err != nil {
+	if err := mirror.SyncRepo(ctx, store, repo, base); err != nil {
 		t.Fatal(err)
 	}
 	row, _, _ = store.MirrorState(ctx, repo, ref)
@@ -284,7 +285,7 @@ func TestTrackedSecretPatternInBaseIsAllowed(t *testing.T) {
 	}
 	git(t, repo, "update-ref", revisionBase, git(t, repo, "rev-parse", "HEAD"))
 	git(t, repo, "update-ref", revisionHead, result.CaptureSHA)
-	if err := SyncRepo(ctx, store, repo, workspaceBase); err != nil {
+	if err := mirror.SyncRepo(ctx, store, repo, workspaceBase); err != nil {
 		t.Fatal(err)
 	}
 	if got := git(t, remote, "rev-parse", result.CaptureRef); got != result.CaptureSHA {
@@ -313,7 +314,7 @@ func TestUnavailableProviderDoesNotBlockLocalCaptureAndRetries(t *testing.T) {
 		t.Fatal("local capture did not finish")
 	}
 	git(t, repo, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "unavailable.git"))
-	if err := SyncRepo(ctx, store, repo, base); err == nil {
+	if err := mirror.SyncRepo(ctx, store, repo, base); err == nil {
 		t.Fatal("unavailable provider did not fail")
 	}
 	row, _, err := store.MirrorState(ctx, repo, result.CaptureRef)
@@ -324,7 +325,7 @@ func TestUnavailableProviderDoesNotBlockLocalCaptureAndRetries(t *testing.T) {
 		t.Fatal("local capture lost while provider was unavailable")
 	}
 	git(t, repo, "remote", "set-url", "origin", remote)
-	if err := SyncRepo(ctx, store, repo, base); err != nil {
+	if err := mirror.SyncRepo(ctx, store, repo, base); err != nil {
 		t.Fatal(err)
 	}
 	if got := git(t, remote, "rev-parse", result.CaptureRef); got != result.CaptureSHA {
@@ -351,7 +352,7 @@ func TestCommittedSecretUnderCaptureIsNotMirrored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := SyncRepo(ctx, store, repo, base); err == nil {
+	if err := mirror.SyncRepo(ctx, store, repo, base); err == nil {
 		t.Fatal("secret capture was mirrored")
 	}
 	if out := git(t, remote, "for-each-ref", "--format=%(refname)", result.CaptureRef); out != "" {
@@ -378,7 +379,7 @@ func TestSecretInHistoryOfWIPRefIsNotMirrored(t *testing.T) {
 	git(t, repo, "rm", "-q", "id_rsa")
 	git(t, repo, "commit", "-qm", "drop key")
 	git(t, repo, "update-ref", ref, git(t, repo, "rev-parse", "HEAD"))
-	if err := SyncRepo(ctx, store, repo, base); err == nil {
+	if err := mirror.SyncRepo(ctx, store, repo, base); err == nil {
 		t.Fatal("secret history was mirrored")
 	}
 	if out := git(t, remote, "for-each-ref", "--format=%(refname)", ref); out != "" {
@@ -394,13 +395,13 @@ func TestSecondMirrorPassDoesNotPushAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	git(t, repo, "update-ref", ref, base)
-	if err := SyncRepo(ctx, store, repo, base); err != nil {
+	if err := mirror.SyncRepo(ctx, store, repo, base); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(remote, "hooks", "pre-receive"), []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := SyncRepo(ctx, store, repo, base); err != nil {
+	if err := mirror.SyncRepo(ctx, store, repo, base); err != nil {
 		t.Fatalf("second pass pushed again: %v", err)
 	}
 }
@@ -428,7 +429,7 @@ func TestResetCompletesWithLocalCaptureBeforeMirrorRetry(t *testing.T) {
 	if got := git(t, repo, "show", result.CaptureRef+":readme"); got != "edited before reset" {
 		t.Fatalf("Reset lost captured work: %q", got)
 	}
-	if err := SyncRepo(ctx, store, repo, base); err == nil {
+	if err := mirror.SyncRepo(ctx, store, repo, base); err == nil {
 		t.Fatal("provider rejection was ignored")
 	}
 	row, found, err := store.MirrorState(ctx, repo, result.CaptureRef)
@@ -438,7 +439,7 @@ func TestResetCompletesWithLocalCaptureBeforeMirrorRetry(t *testing.T) {
 	if err := os.Remove(hook); err != nil {
 		t.Fatal(err)
 	}
-	if err := SyncRepo(ctx, store, repo, base); err != nil {
+	if err := mirror.SyncRepo(ctx, store, repo, base); err != nil {
 		t.Fatal(err)
 	}
 	if got := git(t, remote, "rev-parse", result.CaptureRef); got != captured {

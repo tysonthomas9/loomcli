@@ -98,6 +98,15 @@ func TestCreateRemoveAndFailedAdd(t *testing.T) {
 	if err := copy.Create(ctx, "HEAD"); err != nil {
 		t.Fatalf("lock not released after failed add: %v", err)
 	}
+	if got := git(t, copy.Path(), "config", "remote.origin.pushurl"); got != "loom-no-push://task-copy" {
+		t.Fatalf("task copy pushurl = %q", got)
+	}
+	git(t, repo, "remote", "add", "origin", filepath.Join(filepath.Dir(repo), "remote.git"))
+	command := exec.Command("git", "push", "origin", "HEAD:refs/heads/task") //nolint:norawexec // Exercise plain Git push from the task copy.
+	command.Dir = copy.Path()
+	if output, err := command.CombinedOutput(); err == nil || !strings.Contains(string(output), "loom-no-push") {
+		t.Fatalf("task copy push bypassed sentinel: %v: %s", err, output)
+	}
 	if err := copy.Remove(ctx, CaptureComplete{}); !errors.Is(err, ErrCaptureRequired) {
 		t.Fatalf("remove without capture: %v", err)
 	}

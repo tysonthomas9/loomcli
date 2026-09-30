@@ -120,6 +120,9 @@ func (w *linkedWorktree) Create(ctx context.Context, base string) error {
 		return err
 	}
 	return w.repo.locked(ctx, func(ctx context.Context) error {
+		if _, err := w.repo.runner.Run(ctx, "config", "extensions.worktreeConfig", "true"); err != nil {
+			return fmt.Errorf("enable task copy worktree config: %w", err)
+		}
 		if _, err := os.Lstat(abs); err == nil {
 			return fmt.Errorf("task copy path exists: %s", abs)
 		} else if !errors.Is(err, os.ErrNotExist) {
@@ -131,6 +134,13 @@ func (w *linkedWorktree) Create(ctx context.Context, base string) error {
 			return err
 		}
 		_, err := w.repo.runner.Run(ctx, "worktree", "add", "--detach", abs, base)
+		if err == nil {
+			var copyRunner *gitexec.Runner
+			copyRunner, err = gitexec.New(abs, w.repo.pool.gitOptions)
+			if err == nil {
+				_, err = copyRunner.Run(ctx, "config", "--worktree", "remote.origin.pushurl", "loom-no-push://task-copy")
+			}
+		}
 		if err != nil {
 			// Git may leave a partial directory and registration on failure.
 			_, _ = w.repo.runner.Run(context.WithoutCancel(ctx), "worktree", "remove", "--force", abs)

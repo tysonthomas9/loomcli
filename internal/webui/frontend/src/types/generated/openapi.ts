@@ -1412,7 +1412,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create a pull request from agent worktree */
+    /** Publish an approved change from a lead working area */
     post: operations["gitCreatePR"];
     delete?: never;
     options?: never;
@@ -6652,7 +6652,13 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        "application/json": {
+          change_id: string;
+        };
+      };
+    };
     responses: {
       /** @description PR created */
       200: {

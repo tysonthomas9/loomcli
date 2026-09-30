@@ -35,7 +35,7 @@ export interface UseGitActionsReturn {
   push: (target?: string) => Promise<void>;
   pull: (source?: string) => Promise<void>;
   sync: () => Promise<void>;
-  createPR: (target?: string) => Promise<void>;
+  createPR: (changeId: string) => Promise<void>;
   reset: (branch?: string, force?: boolean) => Promise<void>;
   updateTarget: (branch: string) => Promise<void>;
   pushState: GitActionState;
@@ -194,11 +194,11 @@ export function useGitActions({
   }, [workspaceId, agentName, showToast, handleApiError]);
 
   const createPR = useCallback(
-    async (target?: string) => {
+    async (changeId: string) => {
       if (!agentName) return;
       setPrState({ isLoading: true, error: null });
       try {
-        const result = await gitCreatePR(workspaceId, agentName, target);
+        const result = await gitCreatePR(workspaceId, agentName, changeId);
         if (result.url && taskId) {
           try {
             if (result.already_exists) {
