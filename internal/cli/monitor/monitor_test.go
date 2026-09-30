@@ -1145,7 +1145,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		ResetWorkspaceRuntimeDirCache()
 
 		// Create worktree structure (relative to tmpDir)
-		wtDir := filepath.Join(tmpDir, "worktrees", "falcon")
+		wtDir := monitorAgentCheckoutPath(tmpDir, "falcon")
 		if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -1195,7 +1195,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		t.Cleanup(func() { defaultResolver = oldResolver })
 		ResetWorkspaceRuntimeDirCache()
 
-		wtDir := filepath.Join(tmpDir, "worktrees", "nova")
+		wtDir := monitorAgentCheckoutPath(tmpDir, "nova")
 		if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -1243,7 +1243,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		t.Cleanup(func() { defaultResolver = oldResolver })
 		ResetWorkspaceRuntimeDirCache()
 
-		wtDir := filepath.Join(tmpDir, "worktrees", "spark")
+		wtDir := monitorAgentCheckoutPath(tmpDir, "spark")
 		if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -1294,7 +1294,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		t.Cleanup(func() { defaultResolver = oldResolver })
 		ResetWorkspaceRuntimeDirCache()
 
-		wtDir := filepath.Join(tmpDir, "worktrees", "flux")
+		wtDir := monitorAgentCheckoutPath(tmpDir, "flux")
 		if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -1347,7 +1347,7 @@ func TestCollectAgentStatus(t *testing.T) {
 
 		// Create two worktrees
 		for _, name := range []string{"falcon", "nova"} {
-			wtDir := filepath.Join(tmpDir, "worktrees", name)
+			wtDir := monitorAgentCheckoutPath(tmpDir, name)
 			if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 				t.Fatal(err)
 			}
@@ -1403,7 +1403,7 @@ func TestCollectMonitorData(t *testing.T) {
 	t.Cleanup(func() { defaultResolver = oldResolver })
 	ResetWorkspaceRuntimeDirCache()
 
-	wtDir := filepath.Join(tmpDir, "worktrees", "test-agent")
+	wtDir := monitorAgentCheckoutPath(tmpDir, "test-agent")
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1485,7 +1485,7 @@ func TestCollectMonitorDataExported(t *testing.T) {
 	t.Cleanup(func() { defaultResolver = oldResolver })
 	ResetWorkspaceRuntimeDirCache()
 
-	wtDir := filepath.Join(tmpDir, "worktrees", "test-agent")
+	wtDir := monitorAgentCheckoutPath(tmpDir, "test-agent")
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1537,7 +1537,7 @@ func TestCollectAgentStatusOnlyExported(t *testing.T) {
 	t.Cleanup(func() { defaultResolver = oldResolver })
 	ResetWorkspaceRuntimeDirCache()
 
-	wtDir := filepath.Join(tmpDir, "worktrees", "solo")
+	wtDir := monitorAgentCheckoutPath(tmpDir, "solo")
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1586,7 +1586,7 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 	t.Cleanup(func() { defaultResolver = oldResolver })
 	ResetWorkspaceRuntimeDirCache()
 
-	wtDir := filepath.Join(tmpDir, "worktrees", "agent1")
+	wtDir := monitorAgentCheckoutPath(tmpDir, "agent1")
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1657,7 +1657,7 @@ func TestEpicsExcludedFromWorkQueueButStatsRemainCanonical(t *testing.T) {
 	t.Cleanup(func() { defaultResolver = oldResolver })
 	ResetWorkspaceRuntimeDirCache()
 
-	wtDir := filepath.Join(tmpDir, "worktrees", "agent1")
+	wtDir := monitorAgentCheckoutPath(tmpDir, "agent1")
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1724,7 +1724,7 @@ func TestMonitorStatsPreserveBackendTotals(t *testing.T) {
 	t.Cleanup(func() { defaultResolver = oldResolver })
 	ResetWorkspaceRuntimeDirCache()
 
-	wtDir := filepath.Join(tmpDir, "worktrees", "agent1")
+	wtDir := monitorAgentCheckoutPath(tmpDir, "agent1")
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1818,7 +1818,7 @@ func TestRunMonitorOneShot(t *testing.T) {
 	t.Cleanup(func() { defaultResolver = oldResolver })
 	ResetWorkspaceRuntimeDirCache()
 
-	wtDir := filepath.Join(tmpDir, "worktrees", "oneshot")
+	wtDir := monitorAgentCheckoutPath(tmpDir, "oneshot")
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -2225,7 +2225,7 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 			t.Cleanup(func() { defaultResolver = oldResolver })
 			ResetWorkspaceRuntimeDirCache()
 
-			wtDir := filepath.Join(tmpDir, "worktrees", "alpha")
+			wtDir := monitorAgentCheckoutPath(tmpDir, "alpha")
 			if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 				t.Fatal(err)
 			}
