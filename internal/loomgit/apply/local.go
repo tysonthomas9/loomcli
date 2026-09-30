@@ -54,18 +54,10 @@ func applyLocalWithStore(ctx context.Context, request Request, store *journal.SQ
 		if candidate.Name != repoName {
 			continue
 		}
-		path := candidate.ResolveAbsPath(workspace.Path)
 		options := gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}}
-		repo, err := pool.New(store, options).Admit(ctx, path)
+		repo, err := pool.New(store, options).Admit(ctx, selected.Path)
 		if err != nil {
 			return Result{}, err
-		}
-		workingRepo, err := pool.New(store, options).Admit(ctx, selected.Path)
-		if err != nil {
-			return Result{}, err
-		}
-		if !repo.SameStore(workingRepo) {
-			return Result{}, loomgit.NewError(loomgit.RepoSelectionRequired, "working area does not belong to change repo", nil)
 		}
 		runner, err := gitexec.New(selected.Path, options)
 		if err != nil {
@@ -83,12 +75,12 @@ func workingAreaForRepo(areas []journal.WorkingArea, repo string) (*journal.Work
 			continue
 		}
 		if selected != nil {
-			return nil, loomgit.NewError(loomgit.RepoSelectionRequired, "ambiguous working area for change repo and lead", nil)
+			return nil, loomgit.NewError(loomgit.AttentionRequired, "ambiguous working area for change repo and lead", nil)
 		}
 		selected = &areas[index]
 	}
 	if selected == nil || selected.Path == "" {
-		return nil, loomgit.NewError(loomgit.RepoSelectionRequired, "working area for change repo and lead is unavailable", nil)
+		return nil, loomgit.NewError(loomgit.AttentionRequired, "working area for change repo and lead is unavailable", nil)
 	}
 	return selected, nil
 }
