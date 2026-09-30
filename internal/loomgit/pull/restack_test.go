@@ -11,8 +11,36 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/reconcile"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 )
+
+type failingRestackStore struct {
+	Store
+	step string
+}
+
+func (store failingRestackStore) FinishRevision(ctx context.Context, revision loomgit.Revision) error {
+	if store.step == "revision" && revision.Operation == "restack" {
+		return errors.New("injected revision failure")
+	}
+	return store.Store.FinishRevision(ctx, revision)
+}
+
+func (store failingRestackStore) SavePullPlan(ctx context.Context, plan journal.PullPlan) error {
+	if store.step == "plan" {
+		return errors.New("injected plan failure")
+	}
+	return store.Store.SavePullPlan(ctx, plan)
+}
+
+func (store failingRestackStore) CompletePull(ctx context.Context, requestID, workspace, lead, repo, base string, layers []loomgit.AppliedLayer) error {
+	if store.step == "complete" {
+		return errors.New("injected completion failure")
+	}
+	return store.Store.CompletePull(ctx, requestID, workspace, lead, repo, base, layers)
+}
 
 func addRestackLayer(t *testing.T, f *fixture, number int, base, name, body string) string {
 	t.Helper()
@@ -188,5 +216,116 @@ func TestRestackLocalEntryUsesRegisteredWorkingArea(t *testing.T) {
 	revision, err := f.store.GetRevision(context.Background(), "W", "C1", 2)
 	if err != nil || revision.Operation != "restack" || revision.DerivedFromChange != "C1" || revision.DerivedFromNumber != 1 {
 		t.Fatalf("local derived revision: %+v, %v", revision, err)
+	}
+}
+
+func TestRestackPreSwapFailuresLeaveNoRefsOrPlan(t *testing.T) {
+	for _, step := range []string{"revision", "plan", "swap", "held"} {
+		t.Run(step, func(t *testing.T) {
+			f := newFixture(t)
+			trunk := preparePull(t, f)
+			if _, err := f.apply(t); err != nil {
+				t.Fatal(err)
+			}
+			base := advanceTrunk(t, f, trunk, "trunk advance")
+			if step == "held" {
+				if err := os.WriteFile(filepath.Join(trunk, "base"), []byte("trunk\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				trunkGit(t, trunk, "add", "base")
+				trunkGit(t, trunk, "commit", "-qm", "trunk file change")
+				base = f.git(t, "rev-parse", "main")
+				f.write(t, "base", "dirty\n")
+			}
+			old := f.git(t, "rev-parse", "HEAD")
+			refs := f.git(t, "for-each-ref", "--format=%(refname) %(objectname)", "refs/loom")
+			f.service.store = failingRestackStore{Store: f.store, step: step}
+			if step == "swap" {
+				f.service.beforeRestackSwap = func() error { return errors.New("injected pre-swap failure") }
+			}
+			_, err := f.service.Restack(context.Background(), RestackRequest{Workspace: "W", Lead: "L", Repo: "repo",
+				RequestID: "restack-" + step, BaseSHA: base})
+			if err == nil {
+				t.Fatal("expected injected failure")
+			}
+			if got := f.git(t, "rev-parse", "HEAD"); got != old {
+				t.Fatalf("HEAD moved: %s != %s", got, old)
+			}
+			if step == "held" {
+				body, readErr := os.ReadFile(filepath.Join(f.dir, "base"))
+				if readErr != nil || string(body) != "dirty\n" {
+					t.Fatalf("dirty working file changed: %q, %v", body, readErr)
+				}
+			}
+			if got := f.git(t, "for-each-ref", "--format=%(refname) %(objectname)", "refs/loom"); got != refs {
+				t.Fatalf("revision refs changed:\n%s\n%s", refs, got)
+			}
+			plans, err := f.store.PendingPullPlans(context.Background(), "W", "L")
+			if err != nil || len(plans) != 0 {
+				t.Fatalf("pending plan: %+v, %v", plans, err)
+			}
+			if _, err := f.store.GetRevision(context.Background(), "W", "C1", 2); err == nil {
+				t.Fatal("aborted derived revision persisted")
+			}
+		})
+	}
+}
+
+func TestRestackPostSwapFailureCompletesForward(t *testing.T) {
+	for _, step := range []string{"after-swap", "complete"} {
+		t.Run(step, func(t *testing.T) {
+			f := newFixture(t)
+			trunk := preparePull(t, f)
+			if _, err := f.apply(t); err != nil {
+				t.Fatal(err)
+			}
+			base := advanceTrunk(t, f, trunk, "trunk advance")
+			old := f.git(t, "rev-parse", "HEAD")
+			if step == "after-swap" {
+				f.service.beforeCompletePull = func() error { return errors.New("injected post-swap failure") }
+			} else {
+				f.service.store = failingRestackStore{Store: f.store, step: step}
+			}
+			result, err := f.service.Restack(context.Background(), RestackRequest{Workspace: "W", Lead: "L", Repo: "repo",
+				RequestID: "restack-recover", BaseSHA: base})
+			if err == nil || result.HeadSHA == old || f.git(t, "rev-parse", "HEAD") != result.HeadSHA {
+				t.Fatalf("post-swap state: %+v, %v", result, err)
+			}
+			if err := reconcile.RunOnce(context.Background(), reconcile.Handlers{Apply: reconcile.RecoverFunc(Recover)}); err != nil {
+				t.Fatal(err)
+			}
+			plans, err := f.store.PendingPullPlans(context.Background(), "W", "L")
+			if err != nil || len(plans) != 0 {
+				t.Fatalf("pending plan: %+v, %v", plans, err)
+			}
+			layers, err := f.service.appliedLog(context.Background(), "W", "L", result.HeadSHA)
+			if err != nil || len(layers) != 1 || layers[0].Change != "C1" || layers[0].NewTip != result.HeadSHA {
+				t.Fatalf("recovered layers: %+v, %v", layers, err)
+			}
+		})
+	}
+}
+
+func TestRestackPreSwapFailureRemovesNewOwnRevision(t *testing.T) {
+	f := newFixture(t)
+	trunk := preparePull(t, f)
+	if _, err := f.apply(t); err != nil {
+		t.Fatal(err)
+	}
+	f.commit(t, "own", "lead work\n", "lead change")
+	base := advanceTrunk(t, f, trunk, "trunk advance")
+	old := f.git(t, "rev-parse", "HEAD")
+	refs := f.git(t, "for-each-ref", "--format=%(refname) %(objectname)", "refs/loom")
+	f.service.beforeRestackSwap = func() error { return errors.New("injected pre-swap failure") }
+	_, err := f.service.Restack(context.Background(), RestackRequest{Workspace: "W", Lead: "L", Repo: "repo",
+		RequestID: "restack-own-abort", BaseSHA: base})
+	if err == nil {
+		t.Fatal("expected injected failure")
+	}
+	if f.git(t, "rev-parse", "HEAD") != old || f.git(t, "for-each-ref", "--format=%(refname) %(objectname)", "refs/loom") != refs {
+		t.Fatal("own-layer failure changed working area or revision refs")
+	}
+	if _, err := f.store.RevisionByRequest(context.Background(), "own:W:L:"+old); err == nil {
+		t.Fatal("aborted own revision persisted")
 	}
 }

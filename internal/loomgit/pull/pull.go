@@ -26,6 +26,8 @@ type Store interface {
 	SavePullPlan(context.Context, journal.PullPlan) error
 	PendingPullPlans(context.Context, string, string) ([]journal.PullPlan, error)
 	DiscardPullPlan(context.Context, string) error
+	AbortRestack(context.Context, string, string, string, []string) error
+	RevisionByRequest(context.Context, string) (loomgit.Revision, error)
 }
 
 type Service struct {
@@ -34,6 +36,7 @@ type Service struct {
 	runner             *gitexec.Runner
 	applier            *apply.Service
 	beforeCompletePull func() error
+	beforeRestackSwap  func() error
 	scratchParent      string
 }
 
@@ -115,7 +118,7 @@ func (s *Service) Restack(ctx context.Context, request RestackRequest) (PullResu
 				rebuilt[index].operation = "reorder"
 			}
 		}
-		return s.installPull(ctx, pullRequest, old, base, rebuilt, &result)
+		return s.installRestack(ctx, request, pullRequest, old, base, rebuilt, &result)
 	})
 	return result, err
 }
@@ -263,6 +266,11 @@ func (s *Service) installPull(ctx context.Context, request PullRequest, old, bas
 	if err := s.store.SavePullPlan(ctx, journal.PullPlan{RequestID: request.RequestID, Workspace: request.Workspace,
 		Lead: request.Lead, Repo: request.Repo, BaseSHA: base, Layers: completed}); err != nil {
 		return err
+	}
+	if len(rebuilt) > 0 && rebuilt[0].operation != "" && s.beforeRestackSwap != nil {
+		if err := s.beforeRestackSwap(); err != nil {
+			return err
+		}
 	}
 	result.Paths, err = s.applier.SwapPrepared(ctx, request.Workspace, request.Lead, request.RequestID, old, result.HeadSHA)
 	if err != nil {
