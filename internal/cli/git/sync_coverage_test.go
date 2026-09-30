@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
+func TestSyncSingleWorkspace_RestacksWithoutPush(t *testing.T) {
 	stubPullLocal(t)
 	// not parallel: uses SetupTestEnv, mock.Install(), defaultDeps.Agent mutation
 	tmpDir := t.TempDir()
@@ -23,25 +23,11 @@ func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
 		},
 	})
 
-	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
-		// Push phase: fetch, stash, checkout, pull, merge, push, restore-checkout
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"stash"}, Err: nil},
-		{Args: []string{"checkout", "main"}, Err: nil},
-		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "-m", "Merge api-branch into main", "--", "api-branch"}, Err: nil},
-		{Args: []string{"push", "origin", "main"}, Err: nil},
-		{Args: []string{"checkout", "api-branch"}, Err: nil},
-	})
+	outputMock := NewOutputCommandMock(t, nil)
 
 	cmdMock := NewCommandMock(t, []CommandStub{
 		// DiscoverWorktrees: GetCurrentBranch for api
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
-		// Push phase: stash list x2, GetCurrentBranch, HasCommitsBetweenRemote
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
-		{Name: "git", Args: []string{"log", "origin/main..api-branch", "--oneline"}, Stdout: "abc commit\n"},
 	})
 	cmdMock.Install()
 	outputMock.Install()
@@ -64,65 +50,15 @@ func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
 		t.Fatalf("failed to set workspace: %v", err)
 	}
 
-	syncSingleWorkspace(defaultDeps, resolver, false, false)
+	if err := syncSingleWorkspace(defaultDeps, resolver, false, false); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestSyncSingleWorkspace_PushOnly(t *testing.T) {
-	// not parallel: uses SetupTestEnv, mock.Install(), defaultDeps.Agent mutation
-	tmpDir := t.TempDir()
-	wsDir := tmpDir + "/ws"
-	repo1 := wsDir + "/api"
-	os.MkdirAll(repo1+"/.git", 0755)
-
-	setupWorkspaceConfig(t, &LoomConfig{
-		DefaultWorkspace: "ws1",
-		Workspaces: map[string]WorkspaceConfig{
-			"ws1": {
-				Path:  wsDir,
-				Repos: []RepoConfig{{Name: "api", Path: repo1, DefaultBranch: "main"}},
-			},
-		},
-	})
-
-	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
-		// Push phase only: fetch, stash, checkout, pull, merge, push, restore-checkout
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"stash"}, Err: nil},
-		{Args: []string{"checkout", "main"}, Err: nil},
-		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "-m", "Merge api-branch into main", "--", "api-branch"}, Err: nil},
-		{Args: []string{"push", "origin", "main"}, Err: nil},
-		{Args: []string{"checkout", "api-branch"}, Err: nil},
-	})
-
-	cmdMock := NewCommandMock(t, []CommandStub{
-		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
-		{Name: "git", Args: []string{"log", "origin/main..api-branch", "--oneline"}, Stdout: "abc commit\n"},
-	})
-	cmdMock.Install()
-	outputMock.Install()
-
-	origAgent := defaultDeps.Agent
-	defaultDeps.Agent = &MockAgentInvoker{
-		InteractiveFunc: func(workDir, prompt, agentName string) error {
-			t.Error("unexpected claude invocation")
-			return nil
-		},
+	if err := syncSingleWorkspace(defaultDeps, nil, true, false); err == nil {
+		t.Fatal("push-only should require explicit publish")
 	}
-	t.Cleanup(func() { defaultDeps.Agent = origAgent })
-
-	resolver, err := NewResolver()
-	if err != nil {
-		t.Fatalf("failed to create resolver: %v", err)
-	}
-	if err := resolver.SetWorkspace("ws1"); err != nil {
-		t.Fatalf("failed to set workspace: %v", err)
-	}
-
-	syncSingleWorkspace(defaultDeps, resolver, true, false)
 }
 
 func TestSyncSingleWorkspace_PullOnly(t *testing.T) {

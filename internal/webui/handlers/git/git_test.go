@@ -409,8 +409,47 @@ func TestGitSync_Success(t *testing.T) {
 	svc := &mockAgentService{
 		gitSyncFunc: func(ctx context.Context, wsID, agentName string) (*GitSyncResult, error) {
 			return &GitSyncResult{
-				PushResult: &ops.GitPushResult{Success: true, Message: "pushed"},
 				PullResult: &ops.GitPullResult{Success: true, Message: "pulled"},
+			}, nil
+		},
+	}
+	handler := handleGitSync(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/sync", nil)
+	req.SetPathValue("name", "test-agent")
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var resp GitSyncResult
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if resp.PushResult != nil {
+		t.Fatal("sync unexpectedly returned a push result")
+	}
+	if resp.PullResult == nil {
+		t.Fatal("expected PullResult to be non-nil")
+	}
+	if !resp.PullResult.Success {
+		t.Error("expected pull success to be true")
+	}
+}
+
+func TestGitSync_LegacyPushFieldIgnored(t *testing.T) {
+	svc := &mockAgentService{
+		gitSyncFunc: func(ctx context.Context, wsID, agentName string) (*GitSyncResult, error) {
+			return &GitSyncResult{
+				PushResult: &ops.GitPushResult{
+					Success:         false,
+					Message:         "conflict",
+					ConflictedFiles: []string{"a.go"},
+				},
 			}, nil
 		},
 	}
@@ -434,55 +473,12 @@ func TestGitSync_Success(t *testing.T) {
 	if resp.PushResult == nil {
 		t.Fatal("expected PushResult to be non-nil")
 	}
-	if resp.PullResult == nil {
-		t.Fatal("expected PullResult to be non-nil")
-	}
-	if !resp.PushResult.Success {
-		t.Error("expected push success to be true")
-	}
-	if !resp.PullResult.Success {
-		t.Error("expected pull success to be true")
-	}
-}
-
-func TestGitSync_PushConflict(t *testing.T) {
-	svc := &mockAgentService{
-		gitSyncFunc: func(ctx context.Context, wsID, agentName string) (*GitSyncResult, error) {
-			return &GitSyncResult{
-				PushResult: &ops.GitPushResult{
-					Success:         false,
-					Message:         "conflict",
-					ConflictedFiles: []string{"a.go"},
-				},
-			}, nil
-		},
-	}
-	handler := handleGitSync(svc)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/sync", nil)
-	req.SetPathValue("name", "test-agent")
-	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusConflict)
-	}
-
-	var resp GitSyncResult
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode error: %v", err)
-	}
-	if resp.PushResult == nil {
-		t.Fatal("expected PushResult to be non-nil")
-	}
 	if resp.PullResult != nil {
 		t.Error("expected PullResult to be nil when push has conflict")
 	}
 }
 
-func TestGitSync_PushError(t *testing.T) {
+func TestGitSync_Error(t *testing.T) {
 	svc := &mockAgentService{
 		gitSyncFunc: func(ctx context.Context, wsID, agentName string) (*GitSyncResult, error) {
 			return nil, errors.New("push failed")

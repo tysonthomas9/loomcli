@@ -157,7 +157,7 @@ func HandleGitPull(svc service.AgentService) http.HandlerFunc {
 // --- Sync ---
 
 // HandleGitSync handles POST /api/agents/{name}/git/sync
-// Full push+pull cycle: first push to target, then pull from target.
+// Sync restacks the working area onto its recorded trunk without pushing.
 func HandleGitSync(svc service.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
@@ -166,12 +166,6 @@ func HandleGitSync(svc service.AgentService) http.HandlerFunc {
 		result, err := svc.GitSync(r.Context(), wsID, agentName)
 		if err != nil {
 			writeAgentGitError(w, err, http.StatusBadGateway)
-			return
-		}
-
-		// Push conflict: return partial result
-		if result.PushResult != nil && !result.PushResult.Success && len(result.PushResult.ConflictedFiles) > 0 {
-			handler.WriteJSON(w, http.StatusConflict, result)
 			return
 		}
 

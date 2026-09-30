@@ -136,7 +136,7 @@ type AgentDiffStatResult struct {
 	Removed int
 }
 
-// GitSyncResult contains the combined push+pull results.
+// GitSyncResult contains the restack result; the push field is retained for older clients.
 type GitSyncResult struct {
 	PushResult *ops.GitPushResult `json:"push_result"`
 	PullResult *ops.GitPullResult `json:"pull_result"`
