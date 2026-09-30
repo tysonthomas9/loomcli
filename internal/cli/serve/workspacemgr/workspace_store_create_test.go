@@ -11,8 +11,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	loomworkspace "github.com/tysonthomas9/loomcli/internal/loomgit/workspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
@@ -31,7 +31,7 @@ func TestStoreBackedCreateEmptyWorkspaceCreatesStoreAndLocalState(t *testing.T) 
 		Name:   "my-ws",
 		Type:   "empty",
 		Repos:  []string{src},
-		Branch: "feature-work",
+		Branch: "main",
 		Path:   wsPath,
 	})
 	if err != nil {
@@ -156,64 +156,6 @@ func TestStoreBackedCreateWorkspaceRejectsExternalNonEmptyPath(t *testing.T) {
 	}
 }
 
-func TestAddWorktreesRecoversCorruptBranchRef(t *testing.T) {
-	src := initTestGitRepo(t, t.TempDir(), "app")
-	baseBranch := strings.TrimSpace(gitOutput(t, src, "branch", "--show-current"))
-	runGit(t, src, "checkout", "-b", "local-coder")
-	if err := os.WriteFile(filepath.Join(src, "agent.txt"), []byte("agent\n"), 0o644); err != nil {
-		t.Fatalf("write agent file: %v", err)
-	}
-	runGit(t, src, "add", "agent.txt")
-	runGit(t, src, "commit", "-m", "agent")
-	agentSHA := strings.TrimSpace(gitOutput(t, src, "rev-parse", "HEAD"))
-	runGit(t, src, "checkout", baseBranch)
-	corruptWorkspaceBranchRef(t, src, "local-coder")
-
-	wsDir := filepath.Join(t.TempDir(), "workspace")
-	ctx := service.WithCreateWarnings(context.Background())
-	created, repos, err := addWorktrees(ctx, []resolvedRepo{{path: src, name: "app"}}, wsDir, "local-coder")
-	if err != nil {
-		t.Fatalf("addWorktrees: %v", err)
-	}
-	if len(created) != 1 || len(repos) != 1 {
-		t.Fatalf("created=%d repos=%d, want one each", len(created), len(repos))
-	}
-	if warnings := service.GetCreateWarnings(ctx); len(warnings) != 0 {
-		t.Fatalf("warnings = %v, want none", warnings)
-	}
-	if got := strings.TrimSpace(gitOutput(t, filepath.Join(wsDir, "app"), "rev-parse", "HEAD")); got != agentSHA {
-		t.Fatalf("worktree HEAD = %s, want recovered reflog SHA %s", got, agentSHA)
-	}
-}
-
-func TestAddWorktreesSkipsUnrecoverableCheckoutWithWarning(t *testing.T) {
-	src := initTestGitRepo(t, t.TempDir(), "app")
-	wsDir := filepath.Join(t.TempDir(), "workspace")
-	blockedPath := filepath.Join(wsDir, "app")
-	if err := os.MkdirAll(blockedPath, 0o755); err != nil {
-		t.Fatalf("mkdir blocked checkout path: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(blockedPath, "not-a-checkout.txt"), []byte("blocked\n"), 0o644); err != nil {
-		t.Fatalf("write blocked checkout marker: %v", err)
-	}
-
-	ctx := service.WithCreateWarnings(context.Background())
-	created, repos, err := addWorktrees(ctx, []resolvedRepo{{path: src, name: "app"}}, wsDir, "local-coder")
-	if err != nil {
-		t.Fatalf("addWorktrees returned fatal error: %v", err)
-	}
-	if len(created) != 0 {
-		t.Fatalf("created = %v, want no created worktrees", created)
-	}
-	if len(repos) != 1 || repos[0].Path != blockedPath {
-		t.Fatalf("repos = %#v, want intended skipped checkout path", repos)
-	}
-	warnings := service.GetCreateWarnings(ctx)
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "Skipped checkout") {
-		t.Fatalf("warnings = %v, want skipped checkout warning", warnings)
-	}
-}
-
 func TestStoreBackedAddReposAttachesLocalRepoToEmptyWorkspace(t *testing.T) {
 	loomDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
@@ -235,7 +177,7 @@ func TestStoreBackedAddReposAttachesLocalRepoToEmptyWorkspace(t *testing.T) {
 	result, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		Repos:       []string{src},
-		Branch:      "feature-work",
+		Branch:      "main",
 	})
 	if err != nil {
 		t.Fatalf("add repo: %v", err)
@@ -251,8 +193,8 @@ func TestStoreBackedAddReposAttachesLocalRepoToEmptyWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list repos: %v", err)
 	}
-	if len(repos) != 1 || repos[0].Name != "api" || repos[0].DefaultBranch != "feature-work" {
-		t.Fatalf("repos = %#v, want api on feature-work", repos)
+	if len(repos) != 1 || repos[0].Name != "api" || repos[0].DefaultBranch != "main" {
+		t.Fatalf("repos = %#v, want api on main", repos)
 	}
 
 	sc, err := bootstrap.LoadStateCache()
@@ -265,6 +207,17 @@ func TestStoreBackedAddReposAttachesLocalRepoToEmptyWorkspace(t *testing.T) {
 	}
 	if local.Repos["api"] != filepath.Join(wsPath, "api") {
 		t.Fatalf("local repo path = %q", local.Repos["api"])
+	}
+	attached, err := loomworkspace.Records(context.Background(), "MY-WS")
+	if err != nil || len(attached) != 1 {
+		t.Fatalf("attached records=%v err=%v", attached, err)
+	}
+	wantBranch := "loom/ws/MY-WS/interactive/lead"
+	if attached[0].Repo != "api" || attached[0].Trunk != "main" || attached[0].WorkspaceBranch != wantBranch || attached[0].BaseSHA != strings.TrimSpace(gitOutput(t, src, "rev-parse", "main")) {
+		t.Fatalf("attached record=%+v", attached[0])
+	}
+	if got := strings.TrimSpace(gitOutput(t, filepath.Join(wsPath, "api"), "branch", "--show-current")); got != wantBranch {
+		t.Fatalf("attached branch=%q", got)
 	}
 }
 
@@ -315,6 +268,13 @@ func TestStoreBackedAddReposClonesRemoteRepoToEmptyWorkspace(t *testing.T) {
 	local := sc.Workspaces["MY-WS"]
 	if local.Repos["hello-world"] != filepath.Join(wsPath, "hello-world") {
 		t.Fatalf("local repo path = %q", local.Repos["hello-world"])
+	}
+	attached, err := loomworkspace.Records(context.Background(), "MY-WS")
+	if err != nil || len(attached) != 1 || attached[0].Repo != "hello-world" || attached[0].Trunk != "main" || attached[0].WorkspaceBranch != "loom/ws/MY-WS/interactive/lead" {
+		t.Fatalf("attached clone record=%v err=%v", attached, err)
+	}
+	if got := strings.TrimSpace(gitOutput(t, filepath.Join(wsPath, "hello-world"), "branch", "--show-current")); got != attached[0].WorkspaceBranch {
+		t.Fatalf("attached clone branch=%q", got)
 	}
 }
 
@@ -452,6 +412,12 @@ func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) 
 	}
 	if _, err := os.Stat(filepath.Join(wsPath, "app", ".git")); err != nil {
 		t.Fatalf("clone checkout not created: %v", err)
+	}
+	if got := strings.TrimSpace(gitOutput(t, filepath.Join(wsPath, "app"), "branch", "--show-current")); got != "loom/ws/CLONE-WS/interactive/lead" {
+		t.Fatalf("clone branch=%q", got)
+	}
+	if records, err := loomworkspace.Records(context.Background(), "CLONE-WS"); err != nil || len(records) != 1 || records[0].Trunk != "main" || records[0].WorkspaceBranch != "loom/ws/CLONE-WS/interactive/lead" {
+		t.Fatalf("clone records=%v err=%v", records, err)
 	}
 	sc, err := bootstrap.LoadStateCache()
 	if err != nil {
@@ -670,7 +636,7 @@ func initTestGitRepo(t *testing.T, parent, name string) string {
 	if err := os.MkdirAll(path, 0755); err != nil {
 		t.Fatalf("mkdir repo: %v", err)
 	}
-	runGit(t, path, "init")
+	runGit(t, path, "init", "-b", "main")
 	runGit(t, path, "config", "user.email", "test@example.com")
 	runGit(t, path, "config", "user.name", "Test User")
 	if err := os.WriteFile(filepath.Join(path, "README.md"), []byte("test\n"), 0644); err != nil {
@@ -699,19 +665,4 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %v failed: %v\n%s", args, err, out)
 	}
 	return string(out)
-}
-
-func corruptWorkspaceBranchRef(t *testing.T, repoPath, branch string) {
-	t.Helper()
-	common, err := gitbranch.CommonDir(repoPath)
-	if err != nil {
-		t.Fatalf("git common dir: %v", err)
-	}
-	refPath := filepath.Join(common, "refs", "heads", filepath.FromSlash(branch))
-	if err := os.MkdirAll(filepath.Dir(refPath), 0o755); err != nil {
-		t.Fatalf("mkdir branch ref parent: %v", err)
-	}
-	if err := os.WriteFile(refPath, nil, 0o644); err != nil {
-		t.Fatalf("corrupt branch ref: %v", err)
-	}
 }

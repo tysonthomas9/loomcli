@@ -11,16 +11,17 @@ import (
 
 // Store is a concurrency-safe in-memory implementation of the journal port.
 type Store struct {
-	mu        sync.Mutex
-	entries   map[string]loomgit.JournalEntry
-	byRequest map[string]string
-	leases    map[string]loomgit.Lease
-	events    []loomgit.OutboxEvent
-	nextID    int64
+	mu             sync.Mutex
+	entries        map[string]loomgit.JournalEntry
+	byRequest      map[string]string
+	leases         map[string]loomgit.Lease
+	events         []loomgit.OutboxEvent
+	workspaceRepos map[string][]loomgit.WorkspaceRepo
+	nextID         int64
 }
 
 func NewStore() *Store {
-	return &Store{entries: make(map[string]loomgit.JournalEntry), byRequest: make(map[string]string), leases: make(map[string]loomgit.Lease)}
+	return &Store{entries: make(map[string]loomgit.JournalEntry), byRequest: make(map[string]string), leases: make(map[string]loomgit.Lease), workspaceRepos: make(map[string][]loomgit.WorkspaceRepo)}
 }
 func (s *Store) Begin(_ context.Context, requestID, operation string) (loomgit.JournalEntry, bool, error) {
 	if requestID == "" || operation == "" {
@@ -129,4 +130,52 @@ func clone(e loomgit.JournalEntry) loomgit.JournalEntry {
 	return e
 }
 
+func (s *Store) CommitWorkspace(_ context.Context, prior loomgit.JournalEntry, repos []loomgit.WorkspaceRepo) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.entries[prior.ID]
+	if !ok || e.Version != prior.Version || e.Fence != prior.Fence || e.Phase != "started" {
+		return journal.ErrStale
+	}
+	seen := make(map[string]bool, len(repos))
+	for _, repo := range repos {
+		key := repo.Workspace + "\x00" + repo.Repo
+		if seen[key] {
+			return errors.New("workspace repo already exists")
+		}
+		seen[key] = true
+		for _, existing := range s.workspaceRepos[repo.Workspace] {
+			if existing.Repo == repo.Repo {
+				return errors.New("workspace repo already exists")
+			}
+		}
+	}
+	for _, repo := range repos {
+		s.workspaceRepos[repo.Workspace] = append(s.workspaceRepos[repo.Workspace], repo)
+	}
+	e.Phase = "done"
+	e.Version++
+	s.entries[e.ID] = e
+	return nil
+}
+
+func (s *Store) AbortWorkspace(_ context.Context, prior loomgit.JournalEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.entries[prior.ID]
+	if !ok || e.Version != prior.Version || e.Fence != prior.Fence || e.Phase != "started" {
+		return journal.ErrStale
+	}
+	delete(s.entries, prior.ID)
+	delete(s.byRequest, prior.RequestID)
+	return nil
+}
+
+func (s *Store) WorkspaceRepos(_ context.Context, workspace string) ([]loomgit.WorkspaceRepo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]loomgit.WorkspaceRepo(nil), s.workspaceRepos[workspace]...), nil
+}
+
 var _ loomgit.Store = (*Store)(nil)
+var _ loomgit.WorkspaceStore = (*Store)(nil)
