@@ -26,6 +26,13 @@ func RestackLocal(ctx context.Context, path, baseSHA string, order []string, req
 	})
 }
 
+func UnapplyLocal(ctx context.Context, path, change, requestID string) (PullResult, error) {
+	return withLocalService(ctx, path, func(service *Service, area journal.WorkingArea) (PullResult, error) {
+		return service.Restack(ctx, RestackRequest{Workspace: area.Workspace, Lead: area.Lead,
+			Repo: area.Repo, BaseSHA: area.BaseSHA, RemoveChange: change, RequestID: requestID})
+	})
+}
+
 func withLocalService(ctx context.Context, path string, action func(*Service, journal.WorkingArea) (PullResult, error)) (PullResult, error) {
 	journalPath := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
 	if _, err := os.Stat(journalPath); err != nil {

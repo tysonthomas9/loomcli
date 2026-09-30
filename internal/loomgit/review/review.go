@@ -45,6 +45,17 @@ func current(ctx context.Context, store Store, r loomgit.Revision) error {
 
 // Submit records a human decision, or a lead policy approval when enabled.
 func Submit(ctx context.Context, store Store, workspace, change string, number int, headSHA, kind, reason string, actor Actor) (loomgit.Verdict, error) {
+	return submit(ctx, store, workspace, change, number, headSHA, kind, reason, actor, "")
+}
+
+func SubmitForLead(ctx context.Context, store Store, workspace, change string, number int, headSHA, kind, reason string, actor Actor, lead string) (loomgit.Verdict, error) {
+	if lead == "" {
+		return loomgit.Verdict{}, errors.New("target lead is required")
+	}
+	return submit(ctx, store, workspace, change, number, headSHA, kind, reason, actor, lead)
+}
+
+func submit(ctx context.Context, store Store, workspace, change string, number int, headSHA, kind, reason string, actor Actor, lead string) (loomgit.Verdict, error) {
 	if actor.ID == "" || (actor.Kind != "human" && actor.Kind != "agent" && actor.Kind != "lead") {
 		return loomgit.Verdict{}, errors.New("actor kind and ID are required")
 	}
@@ -63,7 +74,7 @@ func Submit(ctx context.Context, store Store, workspace, change string, number i
 		return loomgit.Verdict{}, err
 	}
 	v := loomgit.Verdict{Workspace: workspace, Change: change, Number: number,
-		HeadSHA: r.HeadSHA, Kind: kind, ActorKind: actor.Kind, ActorID: actor.ID, Reason: reason}
+		HeadSHA: r.HeadSHA, Kind: kind, ActorKind: actor.Kind, ActorID: actor.ID, Reason: reason, TargetLead: lead}
 	v, err = store.RecordVerdict(ctx, v)
 	if err != nil {
 		if latest, lookupErr := store.LatestSourceNumber(ctx, workspace, change); lookupErr == nil && r.Kind == "source" && latest > r.Number {

@@ -21,6 +21,17 @@ func (s *SQLite) CompletePull(ctx context.Context, requestID, workspace, lead, r
 	if phase != "done" {
 		return ErrStale
 	}
+	var removed string
+	if err := tx.QueryRowContext(ctx, `SELECT remove_change FROM pull_plans WHERE request_id=? AND workspace=? AND lead=? AND repo=?`,
+		requestID, workspace, lead, repo).Scan(&removed); err != nil {
+		return err
+	}
+	if removed != "" {
+		if _, err := tx.ExecContext(ctx, `UPDATE applied_layers SET phase='unapplied'
+			WHERE workspace=? AND lead=? AND change_id=? AND phase='done'`, workspace, lead, removed); err != nil {
+			return err
+		}
+	}
 	for _, layer := range layers {
 		if err := insertPulledLayer(ctx, tx, layer); err != nil {
 			return err
@@ -67,8 +78,8 @@ func insertPulledLayer(ctx context.Context, tx *sql.Tx, layer loomgit.AppliedLay
 }
 
 type PullPlan struct {
-	RequestID, Workspace, Lead, Repo, BaseSHA, Phase string
-	Layers                                           []loomgit.AppliedLayer
+	RequestID, Workspace, Lead, Repo, BaseSHA, Phase, RemoveChange string
+	Layers                                                         []loomgit.AppliedLayer
 }
 
 func (s *SQLite) SavePullPlan(ctx context.Context, plan PullPlan) error {
@@ -76,13 +87,13 @@ func (s *SQLite) SavePullPlan(ctx context.Context, plan PullPlan) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO pull_plans(request_id,workspace,lead,repo,base_sha,layers)
-		VALUES (?,?,?,?,?,?)`, plan.RequestID, plan.Workspace, plan.Lead, plan.Repo, plan.BaseSHA, layers)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO pull_plans(request_id,workspace,lead,repo,base_sha,layers,remove_change)
+		VALUES (?,?,?,?,?,?,?)`, plan.RequestID, plan.Workspace, plan.Lead, plan.Repo, plan.BaseSHA, layers, plan.RemoveChange)
 	return err
 }
 
 func (s *SQLite) PendingPullPlans(ctx context.Context, workspace, lead string) ([]PullPlan, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT p.request_id,p.workspace,p.lead,p.repo,p.base_sha,p.layers,
+	rows, err := s.db.QueryContext(ctx, `SELECT p.request_id,p.workspace,p.lead,p.repo,p.base_sha,p.layers,p.remove_change,
 		COALESCE(a.phase,'') FROM pull_plans p LEFT JOIN applied_layers a ON a.request_id=p.request_id
 		WHERE p.workspace=? AND p.lead=? ORDER BY p.rowid`, workspace, lead)
 	if err != nil {
@@ -93,7 +104,7 @@ func (s *SQLite) PendingPullPlans(ctx context.Context, workspace, lead string) (
 }
 
 func (s *SQLite) OpenPullPlans(ctx context.Context) ([]PullPlan, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT p.request_id,p.workspace,p.lead,p.repo,p.base_sha,p.layers,
+	rows, err := s.db.QueryContext(ctx, `SELECT p.request_id,p.workspace,p.lead,p.repo,p.base_sha,p.layers,p.remove_change,
 		COALESCE(a.phase,'') FROM pull_plans p LEFT JOIN applied_layers a ON a.request_id=p.request_id
 		ORDER BY p.rowid`)
 	if err != nil {
@@ -108,7 +119,7 @@ func scanPullPlans(rows *sql.Rows) ([]PullPlan, error) {
 	for rows.Next() {
 		var plan PullPlan
 		var data []byte
-		if err := rows.Scan(&plan.RequestID, &plan.Workspace, &plan.Lead, &plan.Repo, &plan.BaseSHA, &data, &plan.Phase); err != nil {
+		if err := rows.Scan(&plan.RequestID, &plan.Workspace, &plan.Lead, &plan.Repo, &plan.BaseSHA, &data, &plan.RemoveChange, &plan.Phase); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(data, &plan.Layers); err != nil {

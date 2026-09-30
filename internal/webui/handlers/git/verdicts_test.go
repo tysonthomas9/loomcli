@@ -13,7 +13,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 )
 
 func TestTaskRevisionRoutesUseRecordedDriverRevision(t *testing.T) {
@@ -51,6 +53,18 @@ func TestTaskRevisionRoutesUseRecordedDriverRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	called := false
+	previousFollow := followApproved
+	previousArea := hasWorkingArea
+	hasWorkingArea = func(_ context.Context, _ *review.Local, _, _ string) (bool, error) { return true, nil }
+	followApproved = func(_ context.Context, workspace, lead string) (apply.FollowResult, error) {
+		called = true
+		if workspace != "W" || lead != "lead" {
+			t.Fatalf("follow target = %s/%s", workspace, lead)
+		}
+		return apply.FollowResult{Applied: []string{revision.Change}}, nil
+	}
+	t.Cleanup(func() { followApproved = previousFollow; hasWorkingArea = previousArea })
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/revisions", handleTaskRevisions)
 	mux.HandleFunc("POST /api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict", handleVerdict)
@@ -65,6 +79,9 @@ func TestTaskRevisionRoutesUseRecordedDriverRevision(t *testing.T) {
 	mux.ServeHTTP(post, httptest.NewRequest("POST", path, bytes.NewReader(body)))
 	if post.Code != 200 {
 		t.Fatalf("verdict: %d %s", post.Code, post.Body.String())
+	}
+	if !called {
+		t.Fatal("approval did not call working-area follow")
 	}
 	get = httptest.NewRecorder()
 	mux.ServeHTTP(get, httptest.NewRequest("GET", "/api/workspaces/W/issues/T/revisions", nil))

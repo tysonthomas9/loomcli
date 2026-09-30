@@ -46,11 +46,13 @@ func New(store Store, repo *pool.LocalRepo, runner *gitexec.Runner) *Service {
 
 type PullRequest struct {
 	Workspace, Lead, Repo, Remote, SourceBranch, RequestID string
+	RemoveChange                                           string
 }
 
 type RestackRequest struct {
 	Workspace, Lead, Repo, RequestID, BaseSHA string
 	Order                                     []string
+	RemoveChange                              string
 }
 
 type PullResult struct {
@@ -91,36 +93,74 @@ func (s *Service) Restack(ctx context.Context, request RestackRequest) (PullResu
 		if err != nil {
 			return err
 		}
+		layers, replayBase, err := withoutLayer(layers, request.RemoveChange, base)
+		if err != nil {
+			return err
+		}
 		layers, moved, err := orderLayers(layers, request.Order)
 		if err != nil {
 			return err
 		}
-		scratch, err := os.MkdirTemp(s.scratchParent, "loom-restack-")
+		cleanup, err := s.prepareRestackScratch(ctx, request.RemoveChange, base)
 		if err != nil {
-			return fmt.Errorf("create restack scratch: %w", err)
+			return err
 		}
-		defer func() {
-			_, _ = s.runner.Run(context.Background(), "worktree", "remove", "--force", scratch)
-			_ = os.Remove(scratch)
-		}()
-		if _, err := s.runner.Run(ctx, "worktree", "add", "--detach", filepath.Clean(scratch), base); err != nil {
-			return fmt.Errorf("create restack checkout: %w", err)
-		}
-		pullRequest := PullRequest{Workspace: request.Workspace, Lead: request.Lead, Repo: request.Repo, RequestID: request.RequestID}
-		rebuilt, cursor, paths, err := s.replayPullLayers(ctx, pullRequest, base, layers)
+		defer cleanup()
+		pullRequest := PullRequest{Workspace: request.Workspace, Lead: request.Lead, Repo: request.Repo,
+			RequestID: request.RequestID, RemoveChange: request.RemoveChange}
+		rebuilt, cursor, paths, err := s.replayPullLayers(ctx, pullRequest, replayBase, layers)
 		result.Paths, result.HeadSHA = paths, cursor
 		if err != nil {
 			return err
 		}
-		for index := range rebuilt {
-			rebuilt[index].operation = "restack"
-			if moved[rebuilt[index].layer.Change] {
-				rebuilt[index].operation = "reorder"
-			}
-		}
+		setRestackOperations(rebuilt, request.RemoveChange, moved)
 		return s.installRestack(ctx, request, pullRequest, old, base, rebuilt, &result)
 	})
 	return result, err
+}
+
+func withoutLayer(layers []loomgit.AppliedLayer, change, base string) ([]loomgit.AppliedLayer, string, error) {
+	if change == "" {
+		return layers, base, nil
+	}
+	for index, layer := range layers {
+		if layer.Change == change {
+			return layers[index+1:], layer.OldTip, nil
+		}
+	}
+	return nil, "", loomgit.NewError(loomgit.Stale, "layer is not in the working area", nil)
+}
+
+func (s *Service) prepareRestackScratch(ctx context.Context, removed, base string) (func(), error) {
+	if removed != "" {
+		return func() {}, nil
+	}
+	scratch, err := os.MkdirTemp(s.scratchParent, "loom-restack-")
+	if err != nil {
+		return nil, fmt.Errorf("create restack scratch: %w", err)
+	}
+	cleanup := func() {
+		_, _ = s.runner.Run(context.Background(), "worktree", "remove", "--force", scratch)
+		_ = os.Remove(scratch)
+	}
+	if _, err := s.runner.Run(ctx, "worktree", "add", "--detach", filepath.Clean(scratch), base); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("create restack checkout: %w", err)
+	}
+	return cleanup, nil
+}
+
+func setRestackOperations(rebuilt []pulledLayer, removed string, moved map[string]bool) {
+	for index := range rebuilt {
+		switch {
+		case removed != "":
+			rebuilt[index].operation = "unapply"
+		case moved[rebuilt[index].layer.Change]:
+			rebuilt[index].operation = "reorder"
+		default:
+			rebuilt[index].operation = "restack"
+		}
+	}
 }
 
 func orderLayers(layers []loomgit.AppliedLayer, order []string) ([]loomgit.AppliedLayer, map[string]bool, error) {
@@ -264,7 +304,7 @@ func (s *Service) installPull(ctx context.Context, request PullRequest, old, bas
 		return err
 	}
 	if err := s.store.SavePullPlan(ctx, journal.PullPlan{RequestID: request.RequestID, Workspace: request.Workspace,
-		Lead: request.Lead, Repo: request.Repo, BaseSHA: base, Layers: completed}); err != nil {
+		Lead: request.Lead, Repo: request.Repo, BaseSHA: base, Layers: completed, RemoveChange: request.RemoveChange}); err != nil {
 		return err
 	}
 	if len(rebuilt) > 0 && rebuilt[0].operation != "" && s.beforeRestackSwap != nil {

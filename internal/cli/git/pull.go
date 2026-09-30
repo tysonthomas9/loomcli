@@ -17,6 +17,7 @@ import (
 
 var pullLocal = pull.PullLocal
 var restackLocal = pull.RestackLocal
+var unapplyLocal = pull.UnapplyLocal
 
 var pullAll bool
 var pullWorkspace string
@@ -67,6 +68,40 @@ func init() {
 	cli.RegisterCommand(pullCmd)
 	restackCmd.Flags().StringP("workspace", "W", "", "Workspace to operate on")
 	cli.RegisterCommand(restackCmd)
+	unapplyCmd.Flags().StringP("workspace", "W", "", "Workspace to operate on")
+	cli.RegisterCommand(unapplyCmd)
+}
+
+var unapplyCmd = &cobra.Command{
+	Use:     "unapply <working-area> <change-id>",
+	Short:   "Remove a change layer and rebuild the working area",
+	GroupID: "git",
+	Args:    cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		resolver, err := cli.NewResolver()
+		if err != nil {
+			return err
+		}
+		workspace, _ := cmd.Flags().GetString("workspace")
+		if workspace != "" {
+			if err := resolver.SetWorkspace(workspace); err != nil {
+				return err
+			}
+		}
+		path, err := resolver.ResolveWorktreePath(args[0])
+		if err != nil {
+			return err
+		}
+		result, err := unapplyLocal(cmd.Context(), path, args[1], uuid.NewString())
+		if err != nil {
+			if len(result.Paths) > 0 {
+				return fmt.Errorf("%w: %s", err, strings.Join(result.Paths, ", "))
+			}
+			return err
+		}
+		fmt.Printf("Working area rebuilt at %s\n", result.HeadSHA)
+		return nil
+	},
 }
 
 var restackCmd = &cobra.Command{

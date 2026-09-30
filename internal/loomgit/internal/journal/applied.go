@@ -17,7 +17,16 @@ func createAppliedSchema(db *sql.DB) error {
 		commit_details BLOB NOT NULL DEFAULT '[]',
 		phase TEXT NOT NULL
 	);
-	CREATE INDEX IF NOT EXISTS applied_layers_lead ON applied_layers(workspace, lead);`)
+	CREATE INDEX IF NOT EXISTS applied_layers_lead ON applied_layers(workspace, lead);
+	CREATE TABLE IF NOT EXISTS lead_following (
+		workspace TEXT NOT NULL, lead TEXT NOT NULL, paused INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY(workspace, lead)
+	);
+	CREATE TABLE IF NOT EXISTS approval_follow (
+		workspace TEXT NOT NULL, lead TEXT NOT NULL, change_id TEXT NOT NULL,
+		revision INTEGER NOT NULL, verdict_id INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'approved',
+		paths BLOB NOT NULL DEFAULT '[]', PRIMARY KEY(workspace, lead, change_id, revision)
+	);`)
 	return err
 }
 
@@ -126,7 +135,7 @@ func (s *SQLite) AppliedLog(ctx context.Context, workspace, lead string) ([]loom
 
 func (s *SQLite) OpenApplied(ctx context.Context, workspace, lead string) ([]loomgit.AppliedLayer, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT request_id,workspace,lead,change_id,revision,old_tip,new_tip,commits,dropped,commit_details,phase
-		FROM applied_layers WHERE workspace=? AND lead=? AND phase NOT IN ('done','not_applied') ORDER BY rowid`, workspace, lead)
+		FROM applied_layers WHERE workspace=? AND lead=? AND phase NOT IN ('done','not_applied','unapplied') ORDER BY rowid`, workspace, lead)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +164,7 @@ type AppliedTarget struct {
 
 func (s *SQLite) OpenAppliedTargets(ctx context.Context) ([]AppliedTarget, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT workspace, lead FROM applied_layers
-		WHERE phase NOT IN ('done','not_applied') ORDER BY workspace, lead`)
+		WHERE phase NOT IN ('done','not_applied','unapplied') ORDER BY workspace, lead`)
 	if err != nil {
 		return nil, err
 	}
@@ -169,4 +178,83 @@ func (s *SQLite) OpenAppliedTargets(ctx context.Context) ([]AppliedTarget, error
 		targets = append(targets, target)
 	}
 	return targets, rows.Err()
+}
+
+type PendingApproval struct {
+	Workspace, Lead, Change, Repo, Predecessor, Status string
+	Revision, VerdictID                                int
+}
+
+func (s *SQLite) FollowingPaused(ctx context.Context, workspace, lead string) (bool, error) {
+	var paused int
+	err := s.db.QueryRowContext(ctx, `SELECT paused FROM lead_following WHERE workspace=? AND lead=?`, workspace, lead).Scan(&paused)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return paused != 0, err
+}
+
+func (s *SQLite) SetFollowingPaused(ctx context.Context, workspace, lead string, paused bool) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO lead_following(workspace,lead,paused) VALUES (?,?,?)
+		ON CONFLICT(workspace,lead) DO UPDATE SET paused=excluded.paused`, workspace, lead, paused)
+	return err
+}
+
+func (s *SQLite) PendingApprovals(ctx context.Context, workspace, lead string) ([]PendingApproval, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT a.workspace,a.lead,a.change_id,a.revision,a.verdict_id,a.status,
+		COALESCE(d.repo,''),COALESCE(l.predecessor_change,'')
+		FROM approval_follow a LEFT JOIN driver_changes d ON d.workspace=a.workspace AND d.change_id=a.change_id
+		LEFT JOIN local_lineage l ON l.workspace=d.workspace AND l.task_id=d.task_id AND l.repo=d.repo
+		WHERE a.workspace=? AND a.lead=? AND a.status NOT IN ('applied','superseded') ORDER BY a.verdict_id`, workspace, lead)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var pending []PendingApproval
+	for rows.Next() {
+		var approval PendingApproval
+		if err := rows.Scan(&approval.Workspace, &approval.Lead, &approval.Change, &approval.Revision,
+			&approval.VerdictID, &approval.Status, &approval.Repo, &approval.Predecessor); err != nil {
+			return nil, err
+		}
+		pending = append(pending, approval)
+	}
+	return pending, rows.Err()
+}
+
+func (s *SQLite) ApprovalApplied(ctx context.Context, requestID string) (bool, error) {
+	var phase string
+	err := s.db.QueryRowContext(ctx, `SELECT phase FROM applied_layers WHERE request_id=?`, requestID).Scan(&phase)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return phase == "done", err
+}
+
+func (s *SQLite) PredecessorApplied(ctx context.Context, workspace, lead, change string) (bool, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM applied_layers WHERE workspace=? AND lead=?
+		AND change_id=? AND phase='done'`, workspace, lead, change).Scan(&count)
+	return count > 0, err
+}
+
+func (s *SQLite) SetApprovalFollow(ctx context.Context, approval PendingApproval, status string, paths []string) error {
+	data, err := json.Marshal(paths)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE approval_follow SET status=?,paths=?
+		WHERE workspace=? AND lead=? AND change_id=? AND revision=? AND verdict_id=?`,
+		status, data, approval.Workspace, approval.Lead, approval.Change, approval.Revision, approval.VerdictID)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrStale
+	}
+	return nil
 }
