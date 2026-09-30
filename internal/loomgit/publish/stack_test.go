@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/landing"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/mirror"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
@@ -540,6 +541,98 @@ func TestPublishStackRecordedCreatesNativeStackAfterLeasedPush(t *testing.T) {
 	}
 	if selected, err := fixture.store.StackBackend(ctx, "W", "feature-1"); err != nil || selected != "native" {
 		t.Fatalf("backend = %q, %v", selected, err)
+	}
+}
+
+func (f *fakeForge) PullByNumber(_ context.Context, _, _ string, number int) (stackpublish.PR, error) {
+	for _, pr := range f.prs {
+		if pr.Number == number {
+			return pr, nil
+		}
+	}
+	return stackpublish.PR{}, os.ErrNotExist
+}
+
+func (f *fakeForge) PullsForCommit(context.Context, string, string, string) ([]stackpublish.PR, error) {
+	return nil, nil
+}
+
+func landingStackFixture(t *testing.T) (fixture, *fakeForge, loomgit.Revision) {
+	fixture := newFixture(t)
+	ctx := context.Background()
+	first := stackRevision(t, fixture, "A", 1, fixture.base)
+	second := stackRevision(t, fixture, "B", 1, first.HeadSHA)
+	git(t, fixture.repo, "branch", "-m", "loom/ws/W/interactive/L")
+	if err := fixture.store.SaveWorkingAreas(ctx, []journal.WorkingArea{{Workspace: "W", Lead: "L", Repo: "repo",
+		Path: fixture.repo, Branch: "loom/ws/W/interactive/L", BaseSHA: fixture.base, Mode: "worktree"}}); err != nil {
+		t.Fatal(err)
+	}
+	forge := &fakeForge{}
+	request := fixture.request()
+	request.forge = forge
+	if _, err := publishStack(ctx, fixture.store, StackRequest{Request: request, StackID: "feature-1", Changes: []string{"A", "B"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.RecordStackBackend(ctx, "W", "feature-1", "loom"); err != nil {
+		t.Fatal(err)
+	}
+	trunk := filepath.Join(t.TempDir(), "trunk")
+	git(t, fixture.repo, "worktree", "add", "-q", "--detach", trunk, fixture.base)
+	if err := os.WriteFile(filepath.Join(trunk, "A"), []byte("A1"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, trunk, "add", "A")
+	git(t, trunk, "commit", "-qm", "squash A")
+	merged := git(t, trunk, "rev-parse", "HEAD")
+	git(t, trunk, "push", "-q", "origin", "HEAD:refs/heads/develop")
+	if err := fixture.store.MarkLanded(ctx, "W", "A", "merge_commit"); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.OfferRestack(ctx, journal.RestackOffer{Workspace: "W", Change: "B", Predecessor: "A",
+		Repo: "repo", Revision: second.Number, TrunkSHA: merged}); err != nil {
+		t.Fatal(err)
+	}
+	configDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(configDir, "loomgit"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(filepath.Dir(fixture.repo), "store.db"), filepath.Join(configDir, "loomgit", "store.db")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	t.Setenv("GITHUB_TOKEN", "fixture-token")
+	if err := os.WriteFile(filepath.Join(fixture.repo, "unsaved.txt"), []byte("keep me"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return fixture, forge, second
+}
+
+func TestLandingReconcileRestacksPublishedStack(t *testing.T) {
+	fixture, forge, second := landingStackFixture(t)
+	ctx := context.Background()
+	if err := landing.ReconcileWithOptions(ctx, fixture.store, forge, landing.Options{Restack: RestackOffer}); err != nil {
+		t.Fatal(err)
+	}
+	restacked, err := fixture.store.SourceRevision(ctx, "W", "B")
+	if err != nil || restacked <= second.Number {
+		t.Fatalf("restacked revision = %d, %v", restacked, err)
+	}
+	derived, err := fixture.store.GetRevision(ctx, "W", "B", restacked)
+	if err != nil || derived.Operation != "restack" || derived.BaseSHA != git(t, fixture.remote, "rev-parse", "refs/heads/develop") {
+		t.Fatalf("derived revision = %+v, %v", derived, err)
+	}
+	publication, found, err := fixture.store.Publication(ctx, "W", "B")
+	if err != nil || !found || publication.Trunk != "develop" || publication.Head == second.HeadSHA {
+		t.Fatalf("restacked publication = %+v, %v", publication, err)
+	}
+	if got := git(t, fixture.remote, "rev-parse", "refs/heads/"+publication.Branch); got != publication.Head {
+		t.Fatalf("remote head = %s, want %s", got, publication.Head)
+	}
+	if forge.prs[1].Base != "develop" {
+		t.Fatalf("remaining PR base = %s", forge.prs[1].Base)
+	}
+	if contents, err := os.ReadFile(filepath.Join(fixture.repo, "unsaved.txt")); err != nil || string(contents) != "keep me" {
+		t.Fatalf("uncommitted file = %q, %v", contents, err)
 	}
 }
 
