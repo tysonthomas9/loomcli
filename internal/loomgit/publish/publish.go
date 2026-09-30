@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/githubtoken"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
@@ -192,7 +194,7 @@ func preflight(ctx context.Context, store Store, runner *gitexec.Runner, req Req
 	}
 	remote := strings.TrimSpace(string(remoteOut))
 	slug, err := githubSlug(remote)
-	if req.forge != nil && req.slug != "" {
+	if req.slug != "" {
 		slug = req.slug
 		err = nil
 	}
@@ -218,7 +220,7 @@ func preflight(ctx context.Context, store Store, runner *gitexec.Runner, req Req
 	}
 	forge := req.forge
 	if forge == nil {
-		forge = stackpublish.NewGitHubForge(token, nil, "")
+		forge = stackpublish.NewGitHubForge(token, nil, strings.TrimSpace(os.Getenv(connector.GitHubBaseURLEnvVar)))
 	}
 	return journal.Publication{Workspace: req.Workspace, Change: req.Change, Repo: req.Repo,
 		Branch: branch, Trunk: trunk, Slug: slug, Head: head, FeatureFlag: req.FeatureFlag}, forge, nil
@@ -338,7 +340,7 @@ func Reconcile(ctx context.Context, store Store, forge Forge, token string) erro
 		return errors.New("GitHub host credential unavailable")
 	}
 	if forge == nil {
-		forge = stackpublish.NewGitHubForge(token, nil, "")
+		forge = stackpublish.NewGitHubForge(token, nil, strings.TrimSpace(os.Getenv(connector.GitHubBaseURLEnvVar)))
 	}
 	stackGroups := make(map[string][]journal.Publication)
 	for _, publication := range publications {

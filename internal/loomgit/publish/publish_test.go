@@ -3,6 +3,8 @@ package publish
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
@@ -223,6 +226,36 @@ func TestPublishRequiresCredentialBeforePush(t *testing.T) {
 	}
 	if got := git(t, f.remote, "for-each-ref", "--format=%(refname)", "refs/heads"); got != "" {
 		t.Fatalf("pushed without credential: %s", got)
+	}
+}
+
+func TestPublishUsesConfiguredGitHubBaseURL(t *testing.T) {
+	f := newFixture(t)
+	revision := f.revision(t, 1, f.base, "one", "source")
+	f.approve(t, revision)
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests = append(requests, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.Method {
+		case http.MethodGet:
+			_, _ = writer.Write([]byte(`[]`))
+		case http.MethodPost:
+			writer.WriteHeader(http.StatusCreated)
+			_, _ = writer.Write([]byte(`{"number":1,"state":"open","head":{"ref":"loom/ws/W/change/C"},"base":{"ref":"develop"},"body":"Loom-Change-Id: C\n","html_url":"https://github.com/owner/repo/pull/1"}`))
+		default:
+			writer.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer server.Close()
+	t.Setenv(connector.GitHubBaseURLEnvVar, server.URL)
+	req := f.request()
+	req.forge = nil
+	if _, err := Publish(context.Background(), f.store, req); err != nil {
+		t.Fatal(err)
+	}
+	if len(requests) != 2 || requests[0] != "GET /repos/owner/repo/pulls" || requests[1] != "POST /repos/owner/repo/pulls" {
+		t.Fatalf("fake GitHub requests = %v", requests)
 	}
 }
 
