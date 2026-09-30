@@ -172,7 +172,7 @@ func TestPublishStackReportsUnchangedLayerDriftAndRetryConverges(t *testing.T) {
 	if !strings.Contains(err.Error(), "A") || !strings.Contains(err.Error(), first.HeadSHA) || !strings.Contains(err.Error(), "<absent>") {
 		t.Fatalf("drift error omits layer and SHA: %v", err)
 	}
-	reopened, err := journal.OpenSQLite(filepath.Join(filepath.Dir(fixture.repo), "store.db"))
+	reopened, err := journal.OpenSQLite(fixture.storePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestPublishStackReconcileRetainsDependentBase(t *testing.T) {
 		t.Fatalf("interrupted stack publish = %v", err)
 	}
 	forge.createError = nil
-	reopened, err := journal.OpenSQLite(filepath.Join(filepath.Dir(fixture.repo), "store.db"))
+	reopened, err := journal.OpenSQLite(fixture.storePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ func TestPublishStackReconcilePushesAllIntentsAfterRestart(t *testing.T) {
 	if err := fixture.store.BeginStackPublications(ctx, publications); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := journal.OpenSQLite(filepath.Join(filepath.Dir(fixture.repo), "store.db"))
+	reopened, err := journal.OpenSQLite(fixture.storePath)
 	if err != nil {
 		t.Fatal(err)
 	}

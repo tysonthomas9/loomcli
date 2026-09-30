@@ -13,6 +13,7 @@ var prWorkspace string
 var prStackWorkspace string
 var prStackResolver = cli.NewResolver
 var prStackPublish = publish.PublishStackLocal
+var deliveryModeCmd *cobra.Command
 
 var prCmd = &cobra.Command{
 	Use:     "pr <lead> <change>",
@@ -31,6 +32,39 @@ func init() {
 	cli.RegisterCommand(prCmd)
 	prStackCmd.Flags().StringVarP(&prStackWorkspace, "workspace", "W", "", "Workspace to operate on")
 	cli.RegisterCommand(prStackCmd)
+	deliveryModeCmd = &cobra.Command{
+		Use:     "delivery-mode [stack|trunk]",
+		Short:   "Show or set the workspace's Git delivery mode",
+		GroupID: "git",
+		Long:    "Trunk mode publishes one PR per change against trunk. Add a feature-flag:<name> label to a task to name its flag in the PR body.",
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolver, err := cli.NewResolver()
+			if err != nil {
+				return err
+			}
+			selected, _ := cmd.Flags().GetString("workspace")
+			if selected != "" {
+				if err := resolver.SetWorkspace(selected); err != nil {
+					return err
+				}
+			}
+			workspace := resolver.Config.Workspaces[resolver.WorkspaceName()]
+			if len(args) == 1 {
+				if err := publish.SetDeliveryModeLocal(cmd.Context(), workspace.ID, args[0]); err != nil {
+					return err
+				}
+			}
+			mode, err := publish.DeliveryModeLocal(cmd.Context(), workspace.ID)
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), mode)
+			return err
+		},
+	}
+	deliveryModeCmd.Flags().StringP("workspace", "W", "", "Workspace to operate on")
+	cli.RegisterCommand(deliveryModeCmd)
 }
 
 var prStackCmd = &cobra.Command{

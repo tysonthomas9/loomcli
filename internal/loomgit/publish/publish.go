@@ -31,6 +31,7 @@ type Store interface {
 	AdvancePublication(context.Context, journal.Publication) error
 	OpenPublications(context.Context) ([]journal.Publication, error)
 	Publication(context.Context, string, string) (journal.Publication, bool, error)
+	DeliveryMode(context.Context, string) (string, error)
 }
 
 type Forge interface {
@@ -46,6 +47,8 @@ type Request struct {
 	BaseSHA                 string
 	Branch                  string // If supplied, must be the branch owned by this change.
 	RepoName                string // Name in the recorded workspace repository list.
+	RevisionHead            string
+	FeatureFlag             string
 	forge                   Forge
 	token                   string
 	credential              func(context.Context) string
@@ -76,7 +79,7 @@ func Publish(ctx context.Context, store Store, req Request) (loomgit.Revision, e
 	if err != nil {
 		return loomgit.Revision{}, err
 	}
-	head, err := layerHead(ctx, apply.New(store, nil, area), area, req.Workspace, req.Lead, req.BaseSHA, req.Change)
+	head, err := selectedHead(ctx, store, req, area)
 	if err != nil {
 		return loomgit.Revision{}, err
 	}
@@ -85,6 +88,9 @@ func Publish(ctx context.Context, store Store, req Request) (loomgit.Revision, e
 		return loomgit.Revision{}, loomgit.NewError(loomgit.StaleSubject, "working-area layer has no recorded revision", err)
 	}
 	if err != nil {
+		return loomgit.Revision{}, err
+	}
+	if err := requireTrunkBase(ctx, store, runner, req, revision.BaseSHA); err != nil {
 		return loomgit.Revision{}, err
 	}
 	if err := review.RequireVerdict(ctx, store, req.Workspace, req.Change, revision.Number, head, "publish", ""); err != nil {
@@ -117,6 +123,45 @@ func requireNotStacked(ctx context.Context, store Store, req Request) error {
 	return nil
 }
 
+func requireTrunkBase(ctx context.Context, store Store, runner *gitexec.Runner, req Request, base string) error {
+	mode, err := store.DeliveryMode(ctx, req.Workspace)
+	if err != nil || mode != "trunk" {
+		return err
+	}
+	trunk, err := recordedTrunk(ctx, store, req)
+	if err != nil {
+		return err
+	}
+	if _, err := runner.Run(ctx, "fetch", "origin", trunk); err != nil {
+		return err
+	}
+	out, err := runner.Run(ctx, "rev-parse", "--verify", "refs/remotes/origin/"+trunk+"^{commit}")
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(string(out)) != base {
+		return loomgit.NewError(loomgit.ModeMismatch, "trunk PR revision is not based on the current trunk", nil)
+	}
+	return nil
+}
+
+func selectedHead(ctx context.Context, store Store, req Request, area *gitexec.Runner) (string, error) {
+	mode, err := store.DeliveryMode(ctx, req.Workspace)
+	if err != nil {
+		return "", err
+	}
+	if req.RevisionHead != "" {
+		if mode != "trunk" {
+			return "", loomgit.NewError(loomgit.ModeMismatch, "explicit trunk revision requires trunk mode", nil)
+		}
+		return req.RevisionHead, nil
+	}
+	if mode == "trunk" {
+		return "", loomgit.NewError(loomgit.ModeMismatch, "stack layer publication is disabled in trunk mode", nil)
+	}
+	return layerHead(ctx, apply.New(store, nil, area), area, req.Workspace, req.Lead, req.BaseSHA, req.Change)
+}
+
 func requireRevisionRef(ctx context.Context, runner *gitexec.Runner, req Request, revision loomgit.Revision, head string) error {
 	revisionRef, err := refname.RevisionHead(req.Workspace, req.Change, strconv.Itoa(revision.Number))
 	if err != nil {
@@ -130,6 +175,9 @@ func requireRevisionRef(ctx context.Context, runner *gitexec.Runner, req Request
 }
 
 func preflight(ctx context.Context, store Store, runner *gitexec.Runner, req Request, branch, head string) (journal.Publication, Forge, error) {
+	if req.FeatureFlag != "" && !featureFlagName.MatchString(req.FeatureFlag) {
+		return journal.Publication{}, nil, errors.New("invalid feature flag name")
+	}
 	remoteOut, err := runner.Run(ctx, "remote", "get-url", "--push", "origin")
 	if err != nil {
 		return journal.Publication{}, nil, err
@@ -165,7 +213,7 @@ func preflight(ctx context.Context, store Store, runner *gitexec.Runner, req Req
 		forge = stackpublish.NewGitHubForge(token, nil, "")
 	}
 	return journal.Publication{Workspace: req.Workspace, Change: req.Change, Repo: req.Repo,
-		Branch: branch, Trunk: trunk, Slug: slug, Head: head}, forge, nil
+		Branch: branch, Trunk: trunk, Slug: slug, Head: head, FeatureFlag: req.FeatureFlag}, forge, nil
 }
 
 func recordedTrunk(ctx context.Context, store Store, req Request) (string, error) {
@@ -218,6 +266,9 @@ func finishPublication(ctx context.Context, store Store, runner *gitexec.Runner,
 		return err
 	}
 	body := "Loom-Change-Id: " + publication.Change + "\n"
+	if publication.FeatureFlag != "" {
+		body += "Ships behind feature flag: " + publication.FeatureFlag + "\n"
+	}
 	for _, pr := range prs {
 		if pr.Head != publication.Branch || pr.State != "open" {
 			continue
@@ -227,8 +278,8 @@ func finishPublication(ctx context.Context, store Store, runner *gitexec.Runner,
 				return err
 			}
 		}
-		if !strings.Contains(pr.Body, body) {
-			if err := forge.UpdatePRBody(ctx, parts[0], parts[1], pr.Number, strings.TrimSpace(pr.Body)+"\n\n"+body); err != nil {
+		if !strings.Contains(pr.Body, strings.TrimSpace(body)) {
+			if err := forge.UpdatePRBody(ctx, parts[0], parts[1], pr.Number, mergeBody(pr.Body, body, publication.Change)); err != nil {
 				return err
 			}
 		}
@@ -241,8 +292,8 @@ func finishPublication(ctx context.Context, store Store, runner *gitexec.Runner,
 		if err != nil {
 			return err
 		}
-		if !strings.Contains(pr.Body, body) {
-			if err := forge.UpdatePRBody(ctx, parts[0], parts[1], pr.Number, strings.TrimSpace(pr.Body)+"\n\n"+body); err != nil {
+		if !strings.Contains(pr.Body, strings.TrimSpace(body)) {
+			if err := forge.UpdatePRBody(ctx, parts[0], parts[1], pr.Number, mergeBody(pr.Body, body, publication.Change)); err != nil {
 				return err
 			}
 		}
@@ -250,6 +301,17 @@ func finishPublication(ctx context.Context, store Store, runner *gitexec.Runner,
 	}
 	publication.Phase = "done"
 	return store.AdvancePublication(ctx, publication)
+}
+
+func mergeBody(existing, required, change string) string {
+	marker := "Loom-Change-Id: " + change
+	if !strings.Contains(existing, marker) {
+		return strings.TrimSpace(existing) + "\n\n" + required
+	}
+	if strings.Contains(existing, strings.TrimSpace(required)) {
+		return existing
+	}
+	return strings.TrimSpace(existing) + "\n" + strings.TrimPrefix(required, marker+"\n")
 }
 
 // Reconcile resumes durable publish intents after an interrupted push or PR create.

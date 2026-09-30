@@ -73,6 +73,7 @@ func git(t *testing.T, dir string, args ...string) string {
 
 type fixture struct {
 	repo, remote, base string
+	storePath          string
 	store              *journal.SQLite
 }
 
@@ -94,7 +95,11 @@ func newFixture(t *testing.T) fixture {
 	base := git(t, repo, "rev-parse", "HEAD")
 	git(t, root, "init", "-q", "--bare", remote)
 	git(t, repo, "remote", "add", "origin", remote)
-	store, err := journal.OpenSQLite(filepath.Join(root, "store.db"))
+	storePath := filepath.Join(root, "loomgit", "store.db")
+	if err := os.MkdirAll(filepath.Dir(storePath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := journal.OpenSQLite(storePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +115,7 @@ func newFixture(t *testing.T) fixture {
 	if err := store.CommitWorkspace(context.Background(), entry, []loomgit.WorkspaceRepo{{Workspace: "W", Repo: "repo", Trunk: "develop"}}); err != nil {
 		t.Fatal(err)
 	}
-	return fixture{repo, remote, base, store}
+	return fixture{repo: repo, remote: remote, base: base, storePath: storePath, store: store}
 }
 
 func (f fixture) revision(t *testing.T, number int, parent, body, kind string) loomgit.Revision {
@@ -157,6 +162,15 @@ func (f fixture) approve(t *testing.T, r loomgit.Revision) {
 func (f fixture) request() Request {
 	return Request{Workspace: "W", Lead: "L", Change: "C", Repo: f.repo, WorkingArea: f.repo,
 		BaseSHA: f.base, token: "fixture-token", slug: "owner/repo", forge: &fakeForge{}}
+}
+
+func TestPublishRefusesStackLayerInTrunkMode(t *testing.T) {
+	fixture := newFixture(t)
+	if err := fixture.store.SetDeliveryMode(context.Background(), "W", "trunk"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Publish(context.Background(), fixture.store, fixture.request())
+	codeIs(t, err, loomgit.ModeMismatch)
 }
 
 func (f fixture) published(t *testing.T) string {
@@ -309,6 +323,7 @@ func TestReconcileCompletesInterruptedPublish(t *testing.T) {
 	forge := &fakeForge{createError: errors.New("forge unavailable")}
 	req := f.request()
 	req.forge = forge
+	req.FeatureFlag = "new_checkout"
 	if _, err := Publish(context.Background(), f.store, req); err == nil {
 		t.Fatal("expected PR creation failure")
 	}
@@ -317,7 +332,9 @@ func TestReconcileCompletesInterruptedPublish(t *testing.T) {
 		t.Fatal(err)
 	}
 	publication, found, err := f.store.Publication(context.Background(), "W", "C")
-	if err != nil || !found || publication.Phase != "done" || publication.Head != r.HeadSHA || forge.creates != 2 {
+	if err != nil || !found || publication.Phase != "done" || publication.Head != r.HeadSHA ||
+		publication.FeatureFlag != "new_checkout" || len(forge.prs) != 1 ||
+		!strings.Contains(forge.prs[0].Body, "Ships behind feature flag: new_checkout") || forge.creates != 2 {
 		t.Fatalf("publication=%+v found=%t err=%v creates=%d", publication, found, err, forge.creates)
 	}
 }

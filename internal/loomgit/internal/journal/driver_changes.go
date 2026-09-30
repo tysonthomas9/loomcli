@@ -38,3 +38,12 @@ func (s *SQLite) RepoForChange(ctx context.Context, workspace, change string) (s
 	}
 	return repo, err
 }
+
+func (s *SQLite) TaskForChange(ctx context.Context, workspace, change string) (string, error) {
+	var task string
+	err := s.db.QueryRowContext(ctx, `SELECT task_id FROM driver_changes WHERE workspace=? AND change_id=?`, workspace, change).Scan(&task)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return task, err
+}

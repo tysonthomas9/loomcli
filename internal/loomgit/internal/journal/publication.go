@@ -10,6 +10,7 @@ import (
 
 type Publication struct {
 	Workspace, Change, Repo, Branch, Trunk, Slug, Head, StackID, Prior, DriftSHA string
+	FeatureFlag                                                                  string
 	Phase                                                                        string
 	PRNumber                                                                     int
 	PRURL                                                                        string
@@ -20,6 +21,7 @@ func createPublicationSchema(db *sql.DB) error {
 		workspace TEXT NOT NULL, change_id TEXT NOT NULL, repo TEXT NOT NULL,
 		branch TEXT NOT NULL, trunk TEXT NOT NULL, slug TEXT NOT NULL,
 		head_sha TEXT NOT NULL, phase TEXT NOT NULL,
+		feature_flag TEXT NOT NULL DEFAULT '',
 		pr_number INTEGER NOT NULL DEFAULT 0, pr_url TEXT NOT NULL DEFAULT '',
 		stack_id TEXT NOT NULL DEFAULT '', prior_sha TEXT NOT NULL DEFAULT '',
 		drift_sha TEXT NOT NULL DEFAULT '',
@@ -49,7 +51,7 @@ func createPublicationSchema(db *sql.DB) error {
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	for _, column := range []string{"stack_id", "prior_sha", "drift_sha"} {
+	for _, column := range []string{"stack_id", "prior_sha", "drift_sha", "feature_flag"} {
 		if columns[column] {
 			continue
 		}
@@ -94,9 +96,9 @@ func (s *SQLite) StackBackend(ctx context.Context, workspace, stackID string) (s
 
 func (s *SQLite) Publication(ctx context.Context, workspace, change string) (Publication, bool, error) {
 	var p Publication
-	err := s.db.QueryRowContext(ctx, `SELECT workspace,change_id,repo,branch,trunk,slug,head_sha,phase,pr_number,pr_url,stack_id,prior_sha,drift_sha
+	err := s.db.QueryRowContext(ctx, `SELECT workspace,change_id,repo,branch,trunk,slug,head_sha,feature_flag,phase,pr_number,pr_url,stack_id,prior_sha,drift_sha
 		FROM change_publications WHERE workspace=? AND change_id=?`, workspace, change).Scan(
-		&p.Workspace, &p.Change, &p.Repo, &p.Branch, &p.Trunk, &p.Slug, &p.Head, &p.Phase, &p.PRNumber, &p.PRURL, &p.StackID, &p.Prior, &p.DriftSHA)
+		&p.Workspace, &p.Change, &p.Repo, &p.Branch, &p.Trunk, &p.Slug, &p.Head, &p.FeatureFlag, &p.Phase, &p.PRNumber, &p.PRURL, &p.StackID, &p.Prior, &p.DriftSHA)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Publication{}, false, nil
 	}
@@ -113,12 +115,13 @@ type publicationExecer interface {
 
 func beginPublication(ctx context.Context, database publicationExecer, p Publication) error {
 	_, err := database.ExecContext(ctx, `INSERT INTO change_publications
-		(workspace,change_id,repo,branch,trunk,slug,head_sha,stack_id,prior_sha,phase) VALUES (?,?,?,?,?,?,?,?,?,'started')
+		(workspace,change_id,repo,branch,trunk,slug,head_sha,stack_id,prior_sha,feature_flag,phase) VALUES (?,?,?,?,?,?,?,?,?,?,'started')
 		ON CONFLICT(workspace,change_id) DO UPDATE SET repo=excluded.repo,branch=excluded.branch,
-		trunk=excluded.trunk,slug=excluded.slug,head_sha=excluded.head_sha,stack_id=excluded.stack_id,prior_sha=excluded.prior_sha,phase='started',drift_sha=''
+		trunk=excluded.trunk,slug=excluded.slug,head_sha=excluded.head_sha,stack_id=excluded.stack_id,prior_sha=excluded.prior_sha,feature_flag=excluded.feature_flag,
+		phase='started',drift_sha=''
 		WHERE change_publications.head_sha <> excluded.head_sha OR change_publications.trunk <> excluded.trunk
-		OR change_publications.stack_id <> excluded.stack_id OR change_publications.phase='drift'`,
-		p.Workspace, p.Change, p.Repo, p.Branch, p.Trunk, p.Slug, p.Head, p.StackID, p.Prior)
+		OR change_publications.stack_id <> excluded.stack_id OR change_publications.feature_flag <> excluded.feature_flag OR change_publications.phase='drift'`,
+		p.Workspace, p.Change, p.Repo, p.Branch, p.Trunk, p.Slug, p.Head, p.StackID, p.Prior, p.FeatureFlag)
 	return err
 }
 
@@ -192,7 +195,7 @@ func (s *SQLite) AdvancePublication(ctx context.Context, p Publication) error {
 }
 
 func (s *SQLite) OpenPublications(ctx context.Context) ([]Publication, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT workspace,change_id,repo,branch,trunk,slug,head_sha,phase,pr_number,pr_url,stack_id,prior_sha,drift_sha
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace,change_id,repo,branch,trunk,slug,head_sha,feature_flag,phase,pr_number,pr_url,stack_id,prior_sha,drift_sha
 		FROM change_publications WHERE phase <> 'done' ORDER BY workspace,change_id`)
 	if err != nil {
 		return nil, err
@@ -202,7 +205,7 @@ func (s *SQLite) OpenPublications(ctx context.Context) ([]Publication, error) {
 	for rows.Next() {
 		var p Publication
 		if err := rows.Scan(&p.Workspace, &p.Change, &p.Repo, &p.Branch, &p.Trunk, &p.Slug,
-			&p.Head, &p.Phase, &p.PRNumber, &p.PRURL, &p.StackID, &p.Prior, &p.DriftSHA); err != nil {
+			&p.Head, &p.FeatureFlag, &p.Phase, &p.PRNumber, &p.PRURL, &p.StackID, &p.Prior, &p.DriftSHA); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
