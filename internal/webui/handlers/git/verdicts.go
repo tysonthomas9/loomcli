@@ -57,6 +57,9 @@ func handleVerdict(w http.ResponseWriter, req *http.Request) {
 	defer func() { _ = store.Close() }()
 	if body.Lead == "" {
 		body.Lead = "lead"
+		if body.Actor.Kind == "lead" {
+			body.Lead = body.Actor.ID
+		}
 	}
 	v, err := store.SubmitForLead(req.Context(), req.PathValue("ws"), req.PathValue("change"), number,
 		body.HeadSHA, body.Verdict, body.Reason, body.Actor, body.Lead)
