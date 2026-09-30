@@ -25,6 +25,7 @@ func (recover RecoverFunc) Recover(ctx context.Context) error { return recover(c
 type Handlers struct {
 	Workspace Recoverer
 	Apply     Recoverer
+	Landing   Recoverer
 }
 
 // RunOnce classifies open journal entries before invoking any recovery owner.
@@ -67,7 +68,12 @@ func RunOnce(ctx context.Context, handlers Handlers) error {
 		}
 	}
 	if handlers.Apply != nil {
-		return handlers.Apply.Recover(ctx)
+		if err := handlers.Apply.Recover(ctx); err != nil {
+			return err
+		}
+	}
+	if handlers.Landing != nil {
+		return handlers.Landing.Recover(ctx)
 	}
 	return nil
 }

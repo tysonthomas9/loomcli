@@ -12,14 +12,15 @@ import "context"
 
 // PR is the repo-scoped view of a GitHub pull request the reconciler needs.
 type PR struct {
-	Number int
-	Head   string // head ref (branch) name
-	Base   string // base ref (branch) name
-	State  string // "open" | "closed"
-	Merged bool
-	Title  string
-	Body   string
-	URL    string
+	Number         int
+	Head           string // head ref (branch) name
+	Base           string // base ref (branch) name
+	State          string // "open" | "closed"
+	Merged         bool
+	MergeCommitSHA string
+	Title          string
+	Body           string
+	URL            string
 }
 
 // Forge is the repo-scoped Git/GitHub surface the reconciler depends on. Every

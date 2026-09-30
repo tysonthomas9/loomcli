@@ -8,22 +8,41 @@ import (
 
 func createPullSchema(db *sql.DB) error {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS landed_changes (
-        workspace TEXT NOT NULL, change_id TEXT NOT NULL,
+        workspace TEXT NOT NULL, change_id TEXT NOT NULL, rule TEXT NOT NULL DEFAULT '',
         PRIMARY KEY(workspace, change_id)
     );
     CREATE TABLE IF NOT EXISTS pull_plans (
         request_id TEXT PRIMARY KEY, workspace TEXT NOT NULL, lead TEXT NOT NULL,
         repo TEXT NOT NULL, base_sha TEXT NOT NULL, layers BLOB NOT NULL
     );`)
-	return err
+	if err != nil {
+		return err
+	}
+	return ensureLandedRule(db)
 }
 
-func (s *SQLite) MarkLanded(ctx context.Context, workspace, change string) error {
+func (s *SQLite) MarkLanded(ctx context.Context, workspace, change string, rule ...string) error {
 	if workspace == "" || change == "" {
 		return errors.New("workspace and change are required")
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO landed_changes(workspace, change_id) VALUES (?,?)`, workspace, change)
-	return err
+	selected := ""
+	if len(rule) > 0 {
+		selected = rule[0]
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO landed_changes(workspace, change_id, rule) VALUES (?,?,?)
+		ON CONFLICT(workspace, change_id) DO UPDATE SET rule=CASE
+		WHEN landed_changes.rule='' THEN excluded.rule ELSE landed_changes.rule END`, workspace, change, selected); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM merged_changes WHERE workspace=? AND change_id=?`, workspace, change); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *SQLite) IsLanded(ctx context.Context, workspace, change string) (bool, error) {

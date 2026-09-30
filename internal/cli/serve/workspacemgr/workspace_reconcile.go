@@ -9,6 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/applyrecovery"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/landing"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/reconcile"
 	loomworkspace "github.com/tysonthomas9/loomcli/internal/loomgit/workspace"
 	storepkg "github.com/tysonthomas9/loomcli/internal/store"
@@ -20,6 +21,7 @@ func ReconcileJournal(ctx context.Context, s storepkg.Store) error {
 	return reconcile.RunOnce(ctx, reconcile.Handlers{
 		Workspace: reconcile.RecoverFunc(func(ctx context.Context) error { return Reconcile(ctx, s) }),
 		Apply:     reconcile.RecoverFunc(func(ctx context.Context) error { return recoverPullThenApply(ctx, applyrecovery.Recover) }),
+		Landing:   reconcile.RecoverFunc(landing.RunOnce),
 	})
 }
 
