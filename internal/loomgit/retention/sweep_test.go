@@ -390,20 +390,28 @@ func TestSweepLandedCopyUsesCaptureAndWorkspaceWindow(t *testing.T) {
 	if _, err := os.Stat(copyPath); err != nil {
 		t.Fatalf("dry run removed copy: %v", err)
 	}
+	captureDone := make(chan error, 1)
+	go func() {
+		_, captureErr := agentcapture.Capture(ctx, copyPath, "W", "attempt-1", "T", "task")
+		captureDone <- captureErr
+	}()
 	results, err = sweep.Run(ctx, true)
-	if err != nil || results[0].Action != "remove" {
-		t.Fatalf("apply: %+v, %v", results, err)
+	if err := <-captureDone; err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(copyPath); !os.IsNotExist(err) {
-		t.Fatalf("copy remains: %v", err)
+	if err != nil || results[0].Action != "keep" || !strings.Contains(results[0].Reason, "worktree cleanup is disabled") {
+		t.Fatalf("unprotected worktree deletion: %+v, %v", results, err)
+	}
+	if _, err := os.Stat(copyPath); err != nil {
+		t.Fatalf("worktree removed: %v", err)
 	}
 	sweep.Now = func() time.Time { return start.Add(90 * 24 * time.Hour) }
 	results, err = sweep.Run(ctx, true)
-	if err != nil || len(results) != 2 || results[1].Action != "delete capture ref" {
-		t.Fatalf("capture expiry: %+v, %v", results, err)
+	if err != nil || len(results) != 1 || results[0].Action != "keep" {
+		t.Fatalf("retained capture ref: %+v, %v", results, err)
 	}
-	if _, err := runner.Run(ctx, "show-ref", "--verify", ref); err == nil {
-		t.Fatal("capture ref remains")
+	if _, err := runner.Run(ctx, "show-ref", "--verify", ref); err != nil {
+		t.Fatalf("capture ref removed before copy: %v", err)
 	}
 }
 

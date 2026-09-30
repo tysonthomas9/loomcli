@@ -289,10 +289,10 @@ func safeCopy(ctx context.Context, store *journal.SQLite, row journal.RetainedCo
 	if err := checkCopyContent(ctx, copyRunner, expected); err != nil {
 		return err
 	}
-	return removeCopy(ctx, store, row, apply, runner, copyRunner, expected)
+	return removeCopy(ctx, row, apply, runner, copyRunner, expected)
 }
 
-func removeCopy(ctx context.Context, store *journal.SQLite, row journal.RetainedCopy, apply bool,
+func removeCopy(ctx context.Context, row journal.RetainedCopy, apply bool,
 	runner, copyRunner *gitexec.Runner, expected string) error {
 	common, err := copyRunner.Run(ctx, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
@@ -306,7 +306,7 @@ func removeCopy(ctx context.Context, store *journal.SQLite, row journal.Retained
 		if !apply {
 			return nil
 		}
-		return removeWithLocks(ctx, store, row, runner, copyRunner, expected)
+		return errors.New("worktree cleanup is disabled until capture writers share the copy lease")
 	}
 	if err := cloneRefsCaptured(ctx, runner, copyRunner, expected); err != nil {
 		return err
@@ -320,69 +320,7 @@ func removeCopy(ctx context.Context, store *journal.SQLite, row journal.Retained
 	return errors.New("clone cleanup is disabled until capture writers share the copy lease")
 }
 
-func removeWithLocks(ctx context.Context, store *journal.SQLite, row journal.RetainedCopy,
-	sourceRunner, copyRunner *gitexec.Runner, expected string) error {
-	return withCopyLease(row.Path, func() error {
-		sourceRepo, err := pool.New(store).Admit(ctx, row.SourceRepo)
-		if err != nil {
-			return err
-		}
-		return sourceRepo.WithLock(ctx, func(ctx context.Context) error {
-			return removeLockedCopy(ctx, row, sourceRunner, copyRunner, expected, sourceRepo)
-		})
-	})
-}
-
-func removeLockedCopy(ctx context.Context, row journal.RetainedCopy, sourceRunner, copyRunner *gitexec.Runner,
-	expected string, sourceRepo *pool.LocalRepo) error {
-	ref, err := refname.AttemptCapture(row.Workspace, row.Attempt)
-	if err != nil {
-		return err
-	}
-	sha, err := sourceRunner.Run(ctx, "show-ref", "--verify", "--hash", ref)
-	if err != nil || strings.TrimSpace(string(sha)) != expected {
-		return errors.New("source capture ref changed")
-	}
-	if err := checkCopyContentWithLease(ctx, copyRunner, expected); err != nil {
-		return err
-	}
-	_, err = sourceRepo.Run(ctx, "worktree", "remove", "--force", row.Path)
-	return err
-}
-
-func withCopyLease(path string, action func() error) error {
-	root, err := os.OpenRoot(path)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = root.Close() }()
-	lock, err := root.OpenFile(".agent.lock", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return fmt.Errorf("copy lease unavailable: %w", err)
-	}
-	defer func() {
-		if current, err := root.Stat(".agent.lock"); err == nil {
-			if held, err := lock.Stat(); err == nil && os.SameFile(current, held) {
-				_ = root.Remove(".agent.lock")
-			}
-		}
-		_ = lock.Close()
-	}()
-	if _, err := fmt.Fprintf(lock, "{\"pid\":%d}", os.Getpid()); err != nil {
-		return err
-	}
-	return action()
-}
-
 func checkCopyContent(ctx context.Context, runner *gitexec.Runner, expected string) error {
-	return checkCopyContentStatus(ctx, runner, expected, false)
-}
-
-func checkCopyContentWithLease(ctx context.Context, runner *gitexec.Runner, expected string) error {
-	return checkCopyContentStatus(ctx, runner, expected, true)
-}
-
-func checkCopyContentStatus(ctx context.Context, runner *gitexec.Runner, expected string, ownLease bool) error {
 	head, err := runner.Run(ctx, "rev-parse", "HEAD")
 	if err != nil {
 		return err
@@ -393,9 +331,6 @@ func checkCopyContentStatus(ctx context.Context, runner *gitexec.Runner, expecte
 	status, err := runner.Run(ctx, "status", "--porcelain", "--untracked-files=all", "--ignored=matching")
 	if err != nil {
 		return err
-	}
-	if ownLease {
-		status = []byte(strings.ReplaceAll(string(status), "?? .agent.lock\n", ""))
 	}
 	if len(status) != 0 {
 		return errors.New("copy contains work outside its complete capture")
