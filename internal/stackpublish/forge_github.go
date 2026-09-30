@@ -27,7 +27,80 @@ type GitHubForge struct {
 	client  *http.Client
 }
 
-func (*GitHubForge) SupportsNativeStacks() bool { return false }
+func (g *GitHubForge) NativeStacksEnabled(ctx context.Context, owner, repo string) (bool, error) {
+	path := fmt.Sprintf("/repos/%s/%s/stacks?per_page=1", owner, repo)
+	status, data, _, err := g.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return false, err
+	}
+	if status == http.StatusNotFound {
+		return false, nil
+	}
+	if status != http.StatusOK {
+		return false, g.apiErr("GET", path, status, data)
+	}
+	return true, nil
+}
+
+type ghStack struct {
+	Number       int `json:"number"`
+	PullRequests []struct {
+		Number int `json:"number"`
+	} `json:"pull_requests"`
+}
+
+func (g *GitHubForge) EnsureNativeStack(ctx context.Context, owner, repo string, numbers []int) error {
+	if len(numbers) == 0 {
+		return fmt.Errorf("native stack requires pull requests")
+	}
+	path := fmt.Sprintf("/repos/%s/%s/stacks?pull_request=%d", owner, repo, numbers[0])
+	status, data, _, err := g.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return g.apiErr("GET", path, status, data)
+	}
+	var stacks []ghStack
+	if err := json.Unmarshal(data, &stacks); err != nil {
+		return fmt.Errorf("github stack decode: %w", err)
+	}
+	if len(stacks) == 0 {
+		return g.createNativeStack(ctx, owner, repo, numbers)
+	}
+	if len(stacks) != 1 || len(stacks[0].PullRequests) > len(numbers) {
+		return fmt.Errorf("native stack differs from Loom stack")
+	}
+	for index, pull := range stacks[0].PullRequests {
+		if pull.Number != numbers[index] {
+			return fmt.Errorf("native stack differs from Loom stack")
+		}
+	}
+	if len(stacks[0].PullRequests) == len(numbers) {
+		return nil
+	}
+	path = fmt.Sprintf("/repos/%s/%s/stacks/%d/add", owner, repo, stacks[0].Number)
+	status, data, _, err = g.do(ctx, http.MethodPost, path, map[string]any{"pull_requests": numbers[len(stacks[0].PullRequests):]})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return g.apiErr("POST", path, status, data)
+	}
+	return nil
+}
+
+func (g *GitHubForge) createNativeStack(ctx context.Context, owner, repo string, numbers []int) error {
+	path := fmt.Sprintf("/repos/%s/%s/stacks", owner, repo)
+	status, data, _, err := g.do(ctx, http.MethodPost, path, map[string]any{"pull_requests": numbers})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusCreated {
+		return g.apiErr("POST", path, status, data)
+	}
+	return nil
+}
 
 var _ Forge = (*GitHubForge)(nil)
 
@@ -129,6 +202,9 @@ func (g *GitHubForge) do(ctx context.Context, method, path string, body any) (in
 	req.Header.Set("Authorization", "Bearer "+g.token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	if strings.Contains(path, "/stacks") {
+		req.Header.Set("X-GitHub-Api-Version", "2026-03-10")
+	}
 	req.Header.Set("User-Agent", "loom-stack-publisher")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
