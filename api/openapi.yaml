@@ -2544,7 +2544,7 @@ paths:
     post:
       operationId: gitPush
       tags: [git]
-      summary: Push agent worktree to remote
+      summary: Legacy branch Push; returns an error directing callers to Apply
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
@@ -2558,8 +2558,8 @@ paths:
                   type: string
                   description: Remote branch target
       responses:
-        "200":
-          description: Push result
+        "400":
+          description: Branch Push is unavailable; use Apply
           content:
             application/json:
               schema:
@@ -2714,16 +2714,50 @@ paths:
     post:
       operationId: gitPushAll
       tags: [git]
-      summary: Push all agent worktrees to remote
+      summary: Legacy branch Push; returns an error directing callers to Apply
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
       responses:
-        "200":
-          description: Push results
+        "400":
+          description: Branch Push is unavailable; use Apply
           content:
             application/json:
               schema:
                 type: object
+
+  /api/workspaces/{ws}/git/apply:
+    post:
+      operationId: gitApply
+      tags: [git]
+      summary: Apply one approved revision to a local working area
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [change, revision]
+              properties:
+                change:
+                  type: string
+                revision:
+                  type: integer
+                  minimum: 1
+                lead:
+                  type: string
+                request_id:
+                  type: string
+      responses:
+        "200":
+          description: Revision applied locally
+          content:
+            application/json:
+              schema:
+                type: object
+        "409":
+          description: Review required or conflicting paths
 
   # ── Pull Requests ───────────────────────────────────────────────────────
   /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}:

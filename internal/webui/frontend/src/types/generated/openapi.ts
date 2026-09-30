@@ -1361,7 +1361,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Push agent worktree to remote */
+    /** Legacy branch Push; returns an error directing callers to Apply */
     post: operations["gitPush"];
     delete?: never;
     options?: never;
@@ -1480,8 +1480,25 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Push all agent worktrees to remote */
+    /** Legacy branch Push; returns an error directing callers to Apply */
     post: operations["gitPushAll"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/git/apply": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Apply one approved revision to a local working area */
+    post: operations["gitApply"];
     delete?: never;
     options?: never;
     head?: never;
@@ -6555,8 +6572,8 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Push result */
-      200: {
+      /** @description Branch Push is unavailable; use Apply */
+      400: {
         headers: {
           [name: string]: unknown;
         };
@@ -6766,7 +6783,39 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Push results */
+      /** @description Branch Push is unavailable; use Apply */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": Record<string, never>;
+        };
+      };
+    };
+  };
+  gitApply: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          change: string;
+          revision: number;
+          lead?: string;
+          request_id?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Revision applied locally */
       200: {
         headers: {
           [name: string]: unknown;
@@ -6774,6 +6823,13 @@ export interface operations {
         content: {
           "application/json": Record<string, never>;
         };
+      };
+      /** @description Review required or conflicting paths */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

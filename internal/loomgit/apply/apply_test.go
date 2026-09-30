@@ -324,3 +324,24 @@ func TestApplyRequiresApprovalBeforeAnyCheckoutChange(t *testing.T) {
 		t.Fatal("rejected revision changed checkout")
 	}
 }
+
+func TestApplyDoesNotPushBareRemote(t *testing.T) {
+	f := newFixture(t)
+	remote := filepath.Join(t.TempDir(), "origin.git")
+	if out, err := exec.Command("git", "init", "--bare", "-q", remote).CombinedOutput(); err != nil { //nolint:norawexec // Temporary bare remote for a local integration test.
+		t.Fatalf("init bare remote: %s: %v", out, err)
+	}
+	if out, err := exec.Command("git", "-C", f.dir, "remote", "add", "origin", remote).CombinedOutput(); err != nil { //nolint:norawexec // Temporary real-Git fixture, no network.
+		t.Fatalf("add remote: %s: %v", out, err)
+	}
+	if out, err := exec.Command("git", "-C", f.dir, "push", "origin", f.base+":refs/heads/main").CombinedOutput(); err != nil { //nolint:norawexec // Pushes only the test fixture to its temporary bare remote.
+		t.Fatalf("seed remote: %s: %v", out, err)
+	}
+	if _, err := f.apply(t); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("git", "--git-dir="+remote, "rev-parse", "refs/heads/main").CombinedOutput() //nolint:norawexec // Reads the temporary bare remote fixture.
+	if err != nil || strings.TrimSpace(string(out)) != f.base {
+		t.Fatalf("remote ref moved: %s: %v", out, err)
+	}
+}

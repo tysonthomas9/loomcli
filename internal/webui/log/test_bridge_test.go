@@ -68,6 +68,10 @@ func (m *mockAgentService) GetLog(ctx context.Context, wsID, agentName string, l
 func (m *mockAgentService) GetDiffStat(ctx context.Context, wsID, agentName string) (*service.AgentDiffStatResult, error) {
 	return &service.AgentDiffStatResult{}, nil
 }
+func (m *mockAgentService) GitApply(context.Context, ops.ApplyRevisionRequest) (*ops.GitPushResult, error) {
+	return nil, nil
+}
+
 func (m *mockAgentService) GitPush(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error) {
 	return &ops.GitPushResult{Success: true, Message: "pushed"}, nil
 }

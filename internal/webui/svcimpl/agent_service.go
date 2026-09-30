@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/ops"
@@ -147,63 +149,21 @@ func (s *agentServiceImpl) GetDiffStat(_ context.Context, wsID, agentName string
 }
 
 func (s *agentServiceImpl) GitPush(_ context.Context, wsID, agentName, target string) (*ops.GitPushResult, error) {
-	wt, err := s.resolveAgentWorktree(wsID, agentName)
-	if err != nil {
-		return nil, err
-	}
+	return nil, service.ErrValidation("branch Push is unavailable; provide change, revision and lead to Apply")
+}
 
-	if target == "" {
-		target = wt.DefaultBranch
+func (s *agentServiceImpl) GitApply(ctx context.Context, request ops.ApplyRevisionRequest) (*ops.GitPushResult, error) {
+	if request.Workspace == "" || request.Change == "" || request.Revision < 1 {
+		return nil, service.ErrValidation("change and revision are required")
 	}
-
-	result, err := s.gitOps.Push(wt.Path, wt.Branch, target, wt.Remote)
-	if err != nil {
-		return nil, err
+	if request.RequestID == "" {
+		request.RequestID = uuid.NewString()
 	}
-	return result, nil
+	return s.gitOps.ApplyRevision(ctx, request)
 }
 
 func (s *agentServiceImpl) GitPushAll(_ context.Context, wsID string) (*service.GitPushAllResult, error) {
-	worktrees, err := s.gitOps.ListAgentWorktrees(wsID)
-	if err != nil {
-		return nil, fmt.Errorf("listing worktrees: %w", err)
-	}
-
-	var results []service.GitPushAllWorktreeResult
-	pushed, failed := 0, 0
-
-	for _, wt := range worktrees {
-		r, ok := s.pushOneWorktree(wt)
-		results = append(results, r)
-		switch {
-		case ok:
-			pushed++
-		case r.Error != "":
-			failed++
-		}
-	}
-
-	return &service.GitPushAllResult{Results: results, Pushed: pushed, Failed: failed}, nil
-}
-
-// pushOneWorktree pushes a single worktree and returns the result.
-// The bool indicates whether the push was a successful new push.
-func (s *agentServiceImpl) pushOneWorktree(wt ops.AgentWorktree) (service.GitPushAllWorktreeResult, bool) {
-	remote := wt.Remote
-	if remote == "" {
-		remote = "origin"
-	}
-	result, pushErr := s.gitOps.Push(wt.Path, wt.Branch, wt.DefaultBranch, remote)
-	if pushErr != nil {
-		return service.GitPushAllWorktreeResult{Name: wt.Name, Error: pushErr.Error()}, false
-	}
-	if result.AlreadyUpToDate {
-		return service.GitPushAllWorktreeResult{Name: wt.Name, Success: true, Message: "already up to date"}, false
-	}
-	if !result.Success {
-		return service.GitPushAllWorktreeResult{Name: wt.Name, Error: result.Message}, false
-	}
-	return service.GitPushAllWorktreeResult{Name: wt.Name, Success: true, Message: result.Message}, true
+	return nil, service.ErrValidation("branch Push is unavailable; provide change, revision and lead to Apply")
 }
 
 func (s *agentServiceImpl) GitPull(_ context.Context, wsID, agentName, source string) (*ops.GitPullResult, error) {

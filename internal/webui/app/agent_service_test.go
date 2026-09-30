@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
@@ -265,114 +266,40 @@ func TestAgentService_GetDiffStat(t *testing.T) {
 // --- GitPush ---
 
 func TestAgentService_GitPush(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("happy path", func(t *testing.T) {
-		wt := testWorktree()
-		gitOps := &mockGitOps{
-			resolveFunc: func(name string) (*ops.AgentWorktree, error) {
-				return wt, nil
-			},
-			pushFunc: func(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error) {
-				return &ops.GitPushResult{
-					Success: true,
-					Message: "pushed to " + targetBranch,
-				}, nil
-			},
-		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
-
-		result, err := svc.GitPush(ctx, "ws", "test-agent", "develop")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !result.Success {
-			t.Errorf("Success = false, want true")
-		}
-	})
-
-	t.Run("default target when empty", func(t *testing.T) {
-		wt := testWorktree()
-		var capturedTarget string
-		gitOps := &mockGitOps{
-			resolveFunc: func(name string) (*ops.AgentWorktree, error) {
-				return wt, nil
-			},
-			pushFunc: func(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error) {
-				capturedTarget = targetBranch
-				return &ops.GitPushResult{Success: true, Message: "ok"}, nil
-			},
-		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
-
-		_, err := svc.GitPush(ctx, "ws", "test-agent", "")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if capturedTarget != wt.DefaultBranch {
-			t.Errorf("target = %q, want %q (default branch)", capturedTarget, wt.DefaultBranch)
-		}
-	})
+	called := false
+	gitOps := &mockGitOps{
+		pushFunc: func(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error) {
+			called = true
+			return &ops.GitPushResult{Success: true}, nil
+		},
+	}
+	svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
+	_, err := svc.GitPush(context.Background(), "ws", "test-agent", "main")
+	requireServiceError(t, err, service.KindValidation)
+	if !strings.Contains(err.Error(), "change, revision and lead") {
+		t.Fatalf("error should identify Apply inputs: %v", err)
+	}
+	if called {
+		t.Fatal("legacy Push writer was called")
+	}
 }
 
 // --- GitPushAll ---
 
 func TestAgentService_GitPushAll(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("multiple worktrees with mixed success and failure", func(t *testing.T) {
-		gitOps := &mockGitOps{
-			listAgentWorktreesFunc: func() ([]ops.AgentWorktree, error) {
-				return []ops.AgentWorktree{
-					{Name: "agent-ok", Path: "/tmp/wt/ok", Branch: "b-ok", DefaultBranch: "main", Remote: "origin"},
-					{Name: "agent-fail", Path: "/tmp/wt/fail", Branch: "b-fail", DefaultBranch: "main", Remote: "origin"},
-					{Name: "agent-uptodate", Path: "/tmp/wt/utd", Branch: "b-utd", DefaultBranch: "main", Remote: "origin"},
-				}, nil
-			},
-			pushFunc: func(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error) {
-				switch worktreePath {
-				case "/tmp/wt/ok":
-					return &ops.GitPushResult{Success: true, Message: "pushed"}, nil
-				case "/tmp/wt/fail":
-					return nil, errors.New("push failed: conflict")
-				case "/tmp/wt/utd":
-					return &ops.GitPushResult{Success: true, AlreadyUpToDate: true, Message: "already up to date"}, nil
-				}
-				return nil, errors.New("unexpected")
-			},
-		}
-		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
-
-		result, err := svc.GitPushAll(ctx, "ws")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if result.Pushed != 1 {
-			t.Errorf("Pushed = %d, want 1", result.Pushed)
-		}
-		if result.Failed != 1 {
-			t.Errorf("Failed = %d, want 1", result.Failed)
-		}
-		if len(result.Results) != 3 {
-			t.Fatalf("len(Results) = %d, want 3", len(result.Results))
-		}
-
-		// agent-ok: success
-		if !result.Results[0].Success {
-			t.Errorf("Results[0].Success = false, want true")
-		}
-		// agent-fail: error
-		if result.Results[1].Success {
-			t.Errorf("Results[1].Success = true, want false")
-		}
-		if result.Results[1].Error == "" {
-			t.Error("Results[1].Error should be non-empty")
-		}
-		// agent-uptodate: success but counted as already-up-to-date (not in pushed count)
-		if !result.Results[2].Success {
-			t.Errorf("Results[2].Success = false, want true")
-		}
-	})
+	called := false
+	gitOps := &mockGitOps{
+		pushFunc: func(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error) {
+			called = true
+			return &ops.GitPushResult{Success: true}, nil
+		},
+	}
+	svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
+	_, err := svc.GitPushAll(context.Background(), "ws")
+	requireServiceError(t, err, service.KindValidation)
+	if called {
+		t.Fatal("legacy Push writer was called")
+	}
 }
 
 // --- GitPull ---

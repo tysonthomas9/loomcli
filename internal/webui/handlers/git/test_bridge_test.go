@@ -341,6 +341,10 @@ func (m *mockAgentService) GetDiffStat(ctx context.Context, wsID, agentName stri
 	return &service.AgentDiffStatResult{}, nil
 }
 
+func (m *mockAgentService) GitApply(context.Context, ops.ApplyRevisionRequest) (*ops.GitPushResult, error) {
+	return nil, nil
+}
+
 func (m *mockAgentService) GitPush(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error) {
 	if m.gitPushFunc != nil {
 		return m.gitPushFunc(ctx, wsID, agentName, target)
