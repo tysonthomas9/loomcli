@@ -162,7 +162,7 @@ func TestRestackFourLayersConflictChangesNoRefs(t *testing.T) {
 		RequestID: "restack-conflict", BaseSHA: f.git(t, "rev-parse", "main"),
 		Order: []string{"C1", "C2", "C3", "C4"}})
 	var loomErr *loomgit.Error
-	if !errors.As(err, &loomErr) || loomErr.Code() != string(loomgit.Conflict) || !strings.Contains(strings.Join(result.Paths, ","), "file-3") {
+	if !errors.As(err, &loomErr) || loomErr.Code() != string(loomgit.Conflict) || !strings.Contains(strings.Join(result.Paths, ","), "file-3") || !strings.Contains(err.Error(), "fix-up task for C3") {
 		t.Fatalf("expected layer-3 conflict, got %+v, %v", result, err)
 	}
 	if f.git(t, "rev-parse", "HEAD") != old || f.git(t, "for-each-ref", "--format=%(refname) %(objectname)", "refs/loom") != refs {

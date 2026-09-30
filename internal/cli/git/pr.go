@@ -68,10 +68,10 @@ func init() {
 }
 
 var prStackCmd = &cobra.Command{
-	Use:     "pr-stack <stack> <lead> <change> [change...]",
+	Use:     "pr-stack <stack> <lead> [change...]",
 	Short:   "Publish approved working-area layers as a linear PR stack",
 	GroupID: "git",
-	Args:    cobra.MinimumNArgs(3),
+	Args:    cobra.MinimumNArgs(2),
 	RunE:    runPRStack,
 }
 

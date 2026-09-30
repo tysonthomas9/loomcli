@@ -287,7 +287,7 @@ func (s *Service) replayPullLayers(ctx context.Context, request PullRequest, bas
 		}
 		if trial.ConflictCommit != "" {
 			return nil, "", trial.ConflictingPaths,
-				loomgit.NewError(loomgit.Conflict, strings.Join(trial.ConflictingPaths, ", "), nil)
+				loomgit.NewError(loomgit.Conflict, strings.Join(trial.ConflictingPaths, ", ")+"; create a fix-up task for "+layer.Change, nil)
 		}
 		rebuilt = append(rebuilt, pulledLayer{source: source, trial: trial, base: cursor, original: layer,
 			layer: loomgit.AppliedLayer{RequestID: fmt.Sprintf("%s:layer:%d", request.RequestID, index),

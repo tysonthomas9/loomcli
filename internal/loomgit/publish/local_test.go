@@ -20,6 +20,89 @@ import (
 	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 )
 
+func TestPublishStackRecordedIncludesLeadOwnedLayer(t *testing.T) {
+	fixture := newFixture(t)
+	ctx := context.Background()
+	if _, err := fixture.store.DriverChange(ctx, "W", "T", "repo", "C"); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.SaveWorkingAreas(ctx, []journal.WorkingArea{{Workspace: "W", Lead: "L", Repo: "repo", Path: fixture.repo, BaseSHA: fixture.base}}); err != nil {
+		t.Fatal(err)
+	}
+	task := stackRevision(t, fixture, "C", 1, fixture.base)
+	if err := os.WriteFile(filepath.Join(fixture.repo, "own"), []byte("lead"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, fixture.repo, "add", "own")
+	git(t, fixture.repo, "commit", "-qm", "lead work")
+	leadHead := git(t, fixture.repo, "rev-parse", "HEAD")
+	cfg := &config.LoomConfig{Workspaces: map[string]config.WorkspaceConfig{
+		"workspace": {ID: "W", Path: fixture.repo, Repos: []config.RepoConfig{{Name: "repo", Path: fixture.repo}}},
+	}}
+	forge := &fakeForge{}
+	results, err := publishStackRecorded(ctx, fixture.store, cfg, "W", "feature", "L", []string{"C"}, forge, "fixture-token", "owner/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 2 || results[0].Revision.HeadSHA != task.HeadSHA || results[1].Revision.HeadSHA != leadHead {
+		t.Fatalf("published layers = %+v", results)
+	}
+	if len(forge.prs) != 2 || forge.prs[1].Base != forge.prs[0].Head {
+		t.Fatalf("PR chain = %+v", forge.prs)
+	}
+}
+
+func TestPublishStackRecordedRequiresHumanVerdictForLeadLayerWhenPolicyOff(t *testing.T) {
+	fixture := newFixture(t)
+	ctx := context.Background()
+	if _, err := fixture.store.DriverChange(ctx, "W", "T", "repo", "C"); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.SaveWorkingAreas(ctx, []journal.WorkingArea{{Workspace: "W", Lead: "L", Repo: "repo", Path: fixture.repo, BaseSHA: fixture.base}}); err != nil {
+		t.Fatal(err)
+	}
+	stackRevision(t, fixture, "C", 1, fixture.base)
+	if err := os.WriteFile(filepath.Join(fixture.repo, "own"), []byte("lead"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, fixture.repo, "add", "own")
+	git(t, fixture.repo, "commit", "-qm", "lead work")
+	if err := fixture.store.SetLeadMayApprovePublish(ctx, "W", false); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.LoomConfig{Workspaces: map[string]config.WorkspaceConfig{
+		"workspace": {ID: "W", Path: fixture.repo, Repos: []config.RepoConfig{{Name: "repo", Path: fixture.repo}}},
+	}}
+	forge := &fakeForge{}
+	_, err := publishStackRecorded(ctx, fixture.store, cfg, "W", "feature", "L", []string{"C"}, forge, "fixture-token", "owner/repo")
+	var coded *loomgit.Error
+	if !errors.As(err, &coded) || coded.Kind != loomgit.ReviewRequired || forge.creates != 0 {
+		t.Fatalf("policy-off publish = %v; PRs = %d", err, forge.creates)
+	}
+}
+
+func TestPublishStackRecordedOwnOnlyWorkingArea(t *testing.T) {
+	fixture := newFixture(t)
+	ctx := context.Background()
+	if err := fixture.store.SaveWorkingAreas(ctx, []journal.WorkingArea{{Workspace: "W", Lead: "L", Repo: "repo", Path: fixture.repo, BaseSHA: fixture.base}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixture.repo, "own"), []byte("lead"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, fixture.repo, "add", "own")
+	git(t, fixture.repo, "commit", "-qm", "lead work")
+	head := git(t, fixture.repo, "rev-parse", "HEAD")
+	cfg := &config.LoomConfig{Workspaces: map[string]config.WorkspaceConfig{
+		"workspace": {ID: "W", Path: fixture.repo, Repos: []config.RepoConfig{{Name: "repo", Path: fixture.repo}}},
+	}}
+	forge := &fakeForge{}
+	results, err := publishStackRecorded(ctx, fixture.store, cfg, "W", "feature", "L", nil, forge, "fixture-token", "owner/repo")
+	if err != nil || len(results) != 1 || results[0].Revision.HeadSHA != head || len(forge.prs) != 1 {
+		t.Fatalf("own-only publish = %+v, PRs = %+v, error = %v", results, forge.prs, err)
+	}
+}
+
 func TestPublishRecordedRequiresVerdictBeforePush(t *testing.T) {
 	fixture := newFixture(t)
 	revision := fixture.revision(t, 1, fixture.base, "change", "source")

@@ -41,6 +41,49 @@ func TestStackBackendRejectsTrunkMode(t *testing.T) {
 	codeIs(t, err, loomgit.ModeMismatch)
 }
 
+type limitedForge struct {
+	*fakeForge
+	limit int
+}
+
+func (forge limitedForge) StackLimit() int { return forge.limit }
+
+func TestPublishStackProviderLimitBeforePush(t *testing.T) {
+	fixture := newFixture(t)
+	first := stackRevision(t, fixture, "A", 1, fixture.base)
+	stackRevision(t, fixture, "B", 1, first.HeadSHA)
+	forge := limitedForge{fakeForge: &fakeForge{}, limit: 1}
+	request := fixture.request()
+	request.forge = forge
+	_, err := (LoomStackBackend{Store: fixture.store}).Publish(context.Background(), StackRequest{
+		Request: request, StackID: "feature", Changes: []string{"A", "B"}})
+	codeIs(t, err, loomgit.ProviderStackLimit)
+	if forge.creates != 0 || git(t, fixture.repo, "ls-remote", fixture.remote, "refs/heads/*") != "" {
+		t.Fatal("provider limit pushed a branch or opened a PR")
+	}
+}
+
+func TestPublishStackListsAllRevisionsNeedingApproval(t *testing.T) {
+	fixture := newFixture(t)
+	first := stackRevision(t, fixture, "A", 1, fixture.base)
+	second := stackRevision(t, fixture, "B", 1, first.HeadSHA)
+	ctx := context.Background()
+	for _, revision := range []loomgit.Revision{first, second} {
+		if _, err := review.Submit(ctx, fixture.store, "W", revision.Change, revision.Number, revision.HeadSHA,
+			"reject", "", review.Actor{Kind: "human", ID: "reviewer"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	request := fixture.request()
+	forge := &fakeForge{}
+	request.forge = forge
+	_, err := publishStack(ctx, fixture.store, StackRequest{Request: request, StackID: "feature", Changes: []string{"A", "B"}})
+	codeIs(t, err, loomgit.ReviewRequired)
+	if !strings.Contains(err.Error(), "A revision 1") || !strings.Contains(err.Error(), "B revision 1") || forge.creates != 0 {
+		t.Fatalf("missing review list: %v; PRs = %d", err, forge.creates)
+	}
+}
+
 func stackRevision(t *testing.T, fixture fixture, change string, number int, parent string) loomgit.Revision {
 	t.Helper()
 	git(t, fixture.repo, "reset", "-q", "--hard", parent)
@@ -108,6 +151,41 @@ func TestPublishStackPushesDerivedHeadsBeforeCreatingPRs(t *testing.T) {
 	for index, change := range []string{"A", "B"} {
 		if !strings.Contains(forge.prs[index].Body, "Loom-Change-Id: "+change) {
 			t.Fatalf("PR %s lacks change ID: %q", change, forge.prs[index].Body)
+		}
+	}
+}
+
+func TestPublishStackUsesEveryWorkingAreaLayerInOrder(t *testing.T) {
+	fixture := newFixture(t)
+	changes := make([]string, 0, 12)
+	parent := fixture.base
+	for index := range 12 {
+		change := "T" + strconv.Itoa(index+1)
+		revision := stackRevision(t, fixture, change, 1, parent)
+		changes = append(changes, change)
+		parent = revision.HeadSHA
+	}
+	request := fixture.request()
+	forge := &fakeForge{}
+	request.forge = forge
+	ctx := context.Background()
+	for _, subset := range [][]string{changes[:11], append([]string{changes[1], changes[0]}, changes[2:]...)} {
+		_, err := publishStack(ctx, fixture.store, StackRequest{Request: request, StackID: "feature", Changes: subset})
+		codeIs(t, err, loomgit.StackNotLinear)
+	}
+	if forge.creates != 0 {
+		t.Fatalf("invalid stack created %d PRs", forge.creates)
+	}
+	got, err := publishStack(ctx, fixture.store, StackRequest{Request: request, StackID: "feature", Changes: changes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 12 || len(forge.prs) != 12 || got[11].HeadSHA != parent {
+		t.Fatalf("published %d revisions and %d PRs", len(got), len(forge.prs))
+	}
+	for index := 1; index < len(forge.prs); index++ {
+		if forge.prs[index].Base != forge.prs[index-1].Head {
+			t.Fatalf("PR %d base = %q, want %q", index+1, forge.prs[index].Base, forge.prs[index-1].Head)
 		}
 	}
 }
