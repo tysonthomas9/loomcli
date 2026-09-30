@@ -18,6 +18,49 @@ type FollowResult struct {
 	Paths   []string `json:"paths,omitempty"`
 }
 
+func RecoverPending(ctx context.Context, store *journal.SQLite) error {
+	return recoverPendingWithConfig(ctx, store, config.LoadConfig)
+}
+
+func recoverPendingWithConfig(ctx context.Context, store *journal.SQLite, load func() (*config.LoomConfig, error)) error {
+	targets, err := store.PendingApprovalTargets(ctx)
+	if err != nil {
+		return err
+	}
+	var cfg *config.LoomConfig
+	var failures []error
+	for _, target := range targets {
+		paused, err := store.FollowingPaused(ctx, target.Workspace, target.Lead)
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		areas, err := store.WorkingAreas(ctx, target.Workspace, target.Lead)
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		if paused || len(areas) == 0 {
+			continue
+		}
+		if cfg == nil {
+			cfg, err = load()
+			if err != nil {
+				return err
+			}
+		}
+		_, err = followWithStore(ctx, store, cfg, target.Workspace, target.Lead)
+		var coded *loomgit.Error
+		if errors.As(err, &coded) && (coded.Kind == loomgit.Conflict || coded.Kind == loomgit.ApplyPending || coded.Kind == loomgit.SwapHeld) {
+			continue
+		}
+		if err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
+}
+
 func FollowLocal(ctx context.Context, workspace, lead string) (FollowResult, error) {
 	if workspace == "" || lead == "" {
 		return FollowResult{}, errors.New("workspace and lead are required")

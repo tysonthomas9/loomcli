@@ -123,8 +123,8 @@ func (s *SQLite) RecordVerdict(ctx context.Context, v loomgit.Verdict) (loomgit.
 	v.ID = id
 	if v.TargetLead != "" && (v.Kind == "approve" || v.Kind == "override" || v.Kind == "policy") {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO approval_follow(workspace,lead,change_id,revision,verdict_id)
-			VALUES (?,?,?,?,?) ON CONFLICT(workspace,lead,change_id,revision) DO UPDATE SET
-			verdict_id=excluded.verdict_id,status='approved',paths='[]'`, v.Workspace, v.TargetLead, v.Change, v.Number, v.ID); err != nil {
+			VALUES (?,?,?,?,?) ON CONFLICT(workspace,lead,change_id,revision) DO NOTHING`,
+			v.Workspace, v.TargetLead, v.Change, v.Number, v.ID); err != nil {
 			return v, err
 		}
 	}

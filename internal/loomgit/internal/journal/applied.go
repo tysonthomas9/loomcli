@@ -185,6 +185,28 @@ type PendingApproval struct {
 	Revision, VerdictID                                int
 }
 
+type ApprovalTarget struct {
+	Workspace, Lead string
+}
+
+func (s *SQLite) PendingApprovalTargets(ctx context.Context) ([]ApprovalTarget, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT workspace,lead FROM approval_follow
+		WHERE status NOT IN ('applied','superseded') ORDER BY workspace,lead`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var targets []ApprovalTarget
+	for rows.Next() {
+		var target ApprovalTarget
+		if err := rows.Scan(&target.Workspace, &target.Lead); err != nil {
+			return nil, err
+		}
+		targets = append(targets, target)
+	}
+	return targets, rows.Err()
+}
+
 func (s *SQLite) FollowingPaused(ctx context.Context, workspace, lead string) (bool, error) {
 	var paused int
 	err := s.db.QueryRowContext(ctx, `SELECT paused FROM lead_following WHERE workspace=? AND lead=?`, workspace, lead).Scan(&paused)

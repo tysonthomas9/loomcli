@@ -28,22 +28,22 @@ func TestApprovalFollowsWorkingAreaAfterResume(t *testing.T) {
 		Path: fixture.dir, Branch: "loom/ws/W/interactive/L", BaseSHA: fixture.base, Mode: "worktree"}}); err != nil {
 		t.Fatal(err)
 	}
-	config := &config.LoomConfig{Workspaces: map[string]config.WorkspaceConfig{
+	cfg := &config.LoomConfig{Workspaces: map[string]config.WorkspaceConfig{
 		"W": {ID: "W", Repos: []config.RepoConfig{{Name: "repo", Path: fixture.dir}}},
 	}}
 	if err := fixture.store.SetFollowingPaused(ctx, "W", "L", true); err != nil {
 		t.Fatal(err)
 	}
-	result, err := followWithStore(ctx, fixture.store, config, "W", "L")
+	result, err := followWithStore(ctx, fixture.store, cfg, "W", "L")
 	if err != nil || len(result.Pending) != 1 || fixture.git(t, "rev-parse", "HEAD") != fixture.base {
 		t.Fatalf("paused approval moved working area: %+v, %v", result, err)
 	}
 	if err := fixture.store.SetFollowingPaused(ctx, "W", "L", false); err != nil {
 		t.Fatal(err)
 	}
-	result, err = followWithStore(ctx, fixture.store, config, "W", "L")
-	if err != nil || len(result.Applied) != 1 || fixture.git(t, "rev-parse", "HEAD") != fixture.source {
-		t.Fatalf("resume did not follow approval: %+v, %v", result, err)
+	if err := recoverPendingWithConfig(ctx, fixture.store, func() (*config.LoomConfig, error) { return cfg, nil }); err != nil ||
+		fixture.git(t, "rev-parse", "HEAD") != fixture.source {
+		t.Fatalf("recovery did not follow durable approval: %v", err)
 	}
 	events, err := fixture.store.PendingEvents(ctx)
 	if err != nil {
@@ -58,9 +58,21 @@ func TestApprovalFollowsWorkingAreaAfterResume(t *testing.T) {
 	if !foundApplied {
 		t.Fatalf("applied outbox event missing new leaf: %+v", events)
 	}
-	result, err = followWithStore(ctx, fixture.store, config, "W", "L")
+	result, err = followWithStore(ctx, fixture.store, cfg, "W", "L")
 	if err != nil || len(result.Applied) != 0 {
 		t.Fatalf("approval followed twice: %+v, %v", result, err)
+	}
+	if _, err := review.SubmitForLead(ctx, fixture.store, "W", "C1", 1, fixture.source,
+		"approve", "", review.Actor{Kind: "human", ID: "reviewer"}, "L"); err != nil {
+		t.Fatal(err)
+	}
+	result, err = followWithStore(ctx, fixture.store, cfg, "W", "L")
+	if err != nil || len(result.Applied) != 0 {
+		t.Fatalf("repeat verdict reapplied the layer: %+v, %v", result, err)
+	}
+	layers, err := fixture.store.AppliedLog(ctx, "W", "L")
+	if err != nil || len(layers) != 1 {
+		t.Fatalf("repeat verdict changed the applied log: %+v, %v", layers, err)
 	}
 }
 

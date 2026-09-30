@@ -11,7 +11,29 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/pool"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 )
+
+func ApproveLocal(ctx context.Context, workspace, lead, change string, revision int, actor review.Actor) (FollowResult, error) {
+	path := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
+	store, err := journal.OpenSQLite(path)
+	if err != nil {
+		return FollowResult{}, err
+	}
+	r, err := store.GetRevision(ctx, workspace, change, revision)
+	if err != nil {
+		_ = store.Close()
+		return FollowResult{}, err
+	}
+	_, err = review.SubmitForLead(ctx, store, workspace, change, revision, r.HeadSHA, "approve", "", actor, lead)
+	if closeErr := store.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return FollowResult{}, err
+	}
+	return FollowLocal(ctx, workspace, lead)
+}
 
 func ApplyLocal(ctx context.Context, request Request) (Result, error) {
 	if request.Lead == "" {

@@ -56,6 +56,9 @@ func Recover(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := apply.RecoverPending(ctx, store); err != nil {
+		return err
+	}
 	dir := os.Getenv("LOOM_EVENTS_DIR")
 	if dir == "" {
 		dir = filepath.Join(config.GetConfigDir(), "events")
