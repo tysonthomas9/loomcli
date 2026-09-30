@@ -24,6 +24,9 @@ const ErrorClassLocalWorktreeUnprovisioned = "local_worktree_unprovisioned"
 
 type TaskWorktree struct {
 	Path         string
+	SourcePath   string
+	Kind         string
+	Reason       string
 	RepoName     string
 	SourceRepoID string
 	AttemptID    string
@@ -354,16 +357,19 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 			return TaskWorktree{}, fmt.Errorf("resolve task copy base for repo %q: %w", selected.Name, err)
 		}
 	}
-	baseSHA, err := taskcopy.Create(ctx, repoPath, target, workspaceKey, attemptID, req.PreviousAttemptID, base)
+	created, err := taskcopy.CreateDetailed(ctx, repoPath, target, workspaceKey, attemptID, req.PreviousAttemptID, base)
 	if err != nil {
 		return TaskWorktree{}, fmt.Errorf("create task copy for repo %q: %w", selected.Name, err)
 	}
 	return TaskWorktree{
 		Path:         target,
+		SourcePath:   repoPath,
+		Kind:         created.Kind,
+		Reason:       created.Reason,
 		RepoName:     selected.Name,
 		SourceRepoID: firstNonEmpty(selected.SourceRepoID, selected.Name),
 		AttemptID:    attemptID,
-		BaseSHA:      baseSHA,
+		BaseSHA:      created.BaseSHA,
 	}, nil
 }
 

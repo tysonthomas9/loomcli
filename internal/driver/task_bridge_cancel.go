@@ -28,7 +28,8 @@ func (e HostBridgeTaskExecutor) captureCancelledTask(req TaskExecRequest, copy T
 		revision, freezeErr := driverfreeze.FreezeCapture(ctx, driverfreeze.CaptureRequest{
 			Workspace: req.WorkspaceKey, Task: req.TaskID, Repo: copy.RepoName, Attempt: copy.AttemptID,
 			Worktree: copy.Path, Base: copy.BaseSHA, CaptureSHA: captured.SHA,
-			Outcome: "cancelled", Complete: captured.Complete,
+			SourceRepo: copy.SourcePath,
+			Outcome:    "cancelled", Complete: captured.Complete,
 		})
 		err = freezeErr
 		if err == nil {

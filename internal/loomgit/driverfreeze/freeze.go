@@ -17,11 +17,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/pool"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/taskcopy"
 )
 
 type Request struct {
 	Workspace, Task, Repo, Attempt string
 	Worktree, Base                 string
+	SourceRepo                     string
 	CommitHeadSHA                  string
 	Patch                          []byte
 	Outcome                        string
@@ -31,6 +33,7 @@ type Request struct {
 type CaptureRequest struct {
 	Workspace, Task, Repo, Attempt string
 	Worktree, Base, CaptureSHA     string
+	SourceRepo                     string
 	Outcome                        string
 	Complete                       bool
 }
@@ -83,6 +86,9 @@ func FreezeCaptureAt(ctx context.Context, journalPath string, in CaptureRequest)
 		})
 		return err
 	})
+	if err == nil && in.SourceRepo != "" {
+		err = taskcopy.ImportSnapshot(ctx, journalPath, in.SourceRepo, in.Worktree, in.Workspace, in.Attempt, revision.Change, revision.Number)
+	}
 	return revision, err
 }
 
@@ -142,6 +148,9 @@ func FreezeAt(ctx context.Context, journalPath string, in Request) (loomgit.Revi
 		revision, err = recordRevision(ctx, store, runner, in, tree)
 		return err
 	})
+	if err == nil && in.SourceRepo != "" {
+		err = taskcopy.ImportSnapshot(ctx, journalPath, in.SourceRepo, in.Worktree, in.Workspace, in.Attempt, revision.Change, revision.Number)
+	}
 	return revision, err
 }
 

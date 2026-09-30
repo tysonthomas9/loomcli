@@ -31,6 +31,7 @@ type TaskCopyBackend interface {
 	Remove(context.Context, CaptureComplete) error
 	Path() string
 	Kind() string
+	Reason() string
 }
 
 type Pool struct {
@@ -55,7 +56,8 @@ type LocalRepo struct {
 
 var _ loomgit.RepoStore = (*LocalRepo)(nil)
 
-func (r *LocalRepo) Path() string { return r.path }
+func (r *LocalRepo) Path() string                    { return r.path }
+func (r *LocalRepo) SameStore(other *LocalRepo) bool { return r.common == other.common }
 
 // WithLock serializes a revision's object and ref writes with worktree operations.
 func (r *LocalRepo) WithLock(ctx context.Context, action func(context.Context) error) error {
@@ -105,8 +107,9 @@ type linkedWorktree struct {
 	path string
 }
 
-func (w *linkedWorktree) Path() string { return w.path }
-func (w *linkedWorktree) Kind() string { return "linked_worktree" }
+func (w *linkedWorktree) Path() string   { return w.path }
+func (w *linkedWorktree) Kind() string   { return "worktree" }
+func (w *linkedWorktree) Reason() string { return "" }
 
 func (w *linkedWorktree) Create(ctx context.Context, base string) error {
 	if w.path == "" || base == "" {
