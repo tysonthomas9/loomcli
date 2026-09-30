@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/loomgit/stacklock"
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
 )
 
@@ -19,12 +20,22 @@ import (
 // token authenticates clone/fetch/push for a private GitHub https origin and is
 // ignored for ssh/file origins.
 func (r *Reconciler) PublishFromOrigin(ctx context.Context, ws string, id sl.StackID, repoURL, token string, opts Options) (*Report, error) {
+	var report *Report
+	err := stacklock.With(ctx, ws, string(id), func(lockedCtx context.Context) error {
+		var publishErr error
+		report, publishErr = r.publishFromOrigin(lockedCtx, ws, id, repoURL, token, opts)
+		return publishErr
+	})
+	return report, err
+}
+
+func (r *Reconciler) publishFromOrigin(ctx context.Context, ws string, id sl.StackID, repoURL, token string, opts Options) (*Report, error) {
 	repoPath, cleanup, err := provisionOriginCheckout(ctx, repoURL, token, id)
 	if err != nil {
 		return nil, err
 	}
 	defer cleanup()
-	return r.Publish(ctx, ws, id, repoPath, opts)
+	return r.publish(ctx, ws, id, repoPath, opts)
 }
 
 // provisionOriginCheckout clones repoURL into a fresh temp dir and fetches the
