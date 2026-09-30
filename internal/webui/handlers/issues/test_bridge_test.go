@@ -576,3 +576,7 @@ func (s *stubSessionService) ListSessionHistory(_ context.Context, _, _ string) 
 func (s *stubSessionService) GetSessionScrollback(_ context.Context, _, _, _ string) (*service.SessionScrollbackResult, error) {
 	return &service.SessionScrollbackResult{}, nil
 }
+
+func (m *mockGitOps) ListResetIgnored(context.Context, string) ([]ops.GitResetIgnoredFile, error) {
+	return []ops.GitResetIgnoredFile{}, nil
+}

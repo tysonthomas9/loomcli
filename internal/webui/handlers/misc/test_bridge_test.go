@@ -931,3 +931,7 @@ func (s *testSessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, i
 func (s *testSessionServiceImpl) GetSessionScrollback(ctx context.Context, wsID, issueID, recordID string) (*service.SessionScrollbackResult, error) {
 	return nil, service.ErrUnavailable("not implemented in test")
 }
+
+func (m *mockAgentService) GitResetPreview(context.Context, string, string) ([]ops.GitResetIgnoredFile, error) {
+	return []ops.GitResetIgnoredFile{}, nil
+}

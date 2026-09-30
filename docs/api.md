@@ -2918,6 +2918,10 @@ Create a GitHub PR from the agent's worktree branch to the target branch using t
   - `502` — `gh` CLI PR creation failed
   - `503` — `gh` CLI not installed (`{"error": "gh CLI not installed: install from https://cli.github.com/ and run 'gh auth login'"}`)
 
+### `GET /api/workspaces/{ws}/agents/{name}/git/reset-preview`
+
+Lists ignored paths and sizes that Reset will delete without capturing. The confirmation UI blocks Reset if this preview fails.
+
 ### `POST /api/workspaces/{ws}/agents/{name}/git/reset`
 
 Hard reset the worktree to a specified branch.
@@ -2935,16 +2939,16 @@ Hard reset the worktree to a specified branch.
 ```json
 {
   "branch": "target-branch",
-  "force": false,
-  "push": false
+  "force": false
 }
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `branch` | string | worktree's `DefaultBranch` | Branch to reset to. Validated against git ref regex. |
-| `force` | bool | `false` | If true, bypasses agent lock check |
-| `push` | bool | `false` | If true, force-pushes the branch to origin after resetting |
+| `force` | bool | `false` | If true, stops a running agent before capture; never bypasses branch protection |
+
+Reset accepts v2 working areas, captures local edits and commits under `refs/loom/ws/<workspace>/wip/<lead>/<id>` before discarding them, and never pushes. Ignored paths are listed with their sizes and removed locally; they are not captured. A request with `push: true` is rejected.
 
 - **Response:** `200 OK`
 
@@ -2953,7 +2957,9 @@ Hard reset the worktree to a specified branch.
   "success": true,
   "message": "reset to v2",
   "previous_branch": "agent/drift",
-  "pushed": false
+  "pushed": false,
+  "capture_ref": "refs/loom/ws/W/wip/L/1234",
+  "ignored": [{"path": ".env", "size": 8}]
 }
 ```
 

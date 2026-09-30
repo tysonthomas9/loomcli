@@ -17,6 +17,7 @@ import {
   gitSync,
   gitCreatePR,
   gitReset,
+  gitResetPreview,
   gitUpdateTarget,
 } from "../git";
 
@@ -228,6 +229,18 @@ describe("git API functions", () => {
         "/api/workspaces/test-ws-id/agents/nova/git/reset",
         { branch: undefined, force: undefined },
         { timeout: 60000 },
+      );
+    });
+  });
+
+  describe("gitResetPreview", () => {
+    it("fetches ignored paths and sizes before reset", async () => {
+      const preview = { ignored: [{ path: "build/output.bin", size: 2048 }] };
+      mockGet.mockResolvedValue(preview);
+
+      expect(await gitResetPreview("test-ws-id", "nova")).toEqual(preview);
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/agents/nova/git/reset-preview",
       );
     });
   });

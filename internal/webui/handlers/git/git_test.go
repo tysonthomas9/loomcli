@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -713,6 +714,52 @@ func TestGitPR_OperationError(t *testing.T) {
 
 // --- Reset tests ---
 
+func TestGitResetRejectsPushRequest(t *testing.T) {
+	svc := &mockAgentService{gitResetFunc: func(context.Context, string, string, string, bool, bool) (*ops.GitResetResult, error) {
+		t.Fatal("reset service called for push request")
+		return nil, nil
+	}}
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/reset", strings.NewReader(`{"push":true}`))
+	req.SetPathValue("name", "test-agent")
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
+	w := httptest.NewRecorder()
+	handleGitReset(svc).ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGitResetReturnsCaptureErrorCode(t *testing.T) {
+	svc := &mockAgentService{gitResetFunc: func(context.Context, string, string, string, bool, bool) (*ops.GitResetResult, error) {
+		return nil, loomgit.NewError(loomgit.CaptureIncomplete, ".env.local (secret_suspect)", nil)
+	}}
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/reset", nil)
+	req.SetPathValue("name", "test-agent")
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
+	w := httptest.NewRecorder()
+	handleGitReset(svc).ServeHTTP(w, req)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), `"code":"capture_incomplete"`) || !strings.Contains(w.Body.String(), ".env.local") {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGitResetPreviewListsIgnoredPaths(t *testing.T) {
+	svc := &mockAgentService{gitResetPreviewFunc: func(_ context.Context, wsID, agentName string) ([]ops.GitResetIgnoredFile, error) {
+		if wsID != "test-ws" || agentName != "test-agent" {
+			t.Fatalf("preview target = %s/%s", wsID, agentName)
+		}
+		return []ops.GitResetIgnoredFile{{Path: "build/output.bin", Size: 2048}}, nil
+	}}
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/git/reset-preview", nil)
+	req.SetPathValue("name", "test-agent")
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
+	w := httptest.NewRecorder()
+	HandleGitResetPreview(svc).ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"path":"build/output.bin"`) || !strings.Contains(w.Body.String(), `"size":2048`) {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+}
+
 func TestGitReset_Success(t *testing.T) {
 	svc := &mockAgentService{
 		gitResetFunc: func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error) {
@@ -1392,4 +1439,8 @@ func TestGitPushAll_DefaultRemote(t *testing.T) {
 	if resp.Pushed != 1 {
 		t.Errorf("pushed = %d, want 1", resp.Pushed)
 	}
+}
+
+func (m *mockGitOps) ListResetIgnored(context.Context, string) ([]ops.GitResetIgnoredFile, error) {
+	return []ops.GitResetIgnoredFile{}, nil
 }

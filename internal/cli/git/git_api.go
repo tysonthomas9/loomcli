@@ -35,10 +35,12 @@ type PRResult struct {
 
 // ResetResult contains the structured result of a reset operation.
 type ResetResult struct {
-	Success        bool   `json:"success"`
-	Message        string `json:"message"`
-	PreviousBranch string `json:"previous_branch,omitempty"`
-	Pushed         bool   `json:"pushed"`
+	Success        bool               `json:"success"`
+	Message        string             `json:"message"`
+	PreviousBranch string             `json:"previous_branch,omitempty"`
+	Pushed         bool               `json:"pushed"`
+	CaptureRef     string             `json:"capture_ref,omitempty"`
+	Ignored        []ResetIgnoredFile `json:"ignored,omitempty"`
 }
 
 // GitStatusSummary contains a comprehensive git status for a worktree.
@@ -262,57 +264,27 @@ func CreatePRResult(repoPath, sourceBranch, targetBranch, remote string) (*PRRes
 
 // ResetWorktreeResult hard-resets a worktree to a target branch and returns structured result.
 // Unlike resetWorktree, it does NOT prompt for confirmation — callers must handle that.
-// It DOES check the agent lock and returns an error if locked (unless force=true).
-// If push=true, force-pushes the branch to origin after resetting.
+// It checks protection and captures before any destructive step.
+// push is rejected for callers still using the old API.
 func ResetWorktreeResult(worktreePath, worktreeName, targetBranch string, force, push bool) (*ResetResult, error) {
-	// Check for active agent lock
-	lockInfo, running, checkErr := cli.CheckLock(worktreePath)
-	if checkErr == nil && running && !force {
-		duration := time.Since(lockInfo.StartedAt).Round(time.Second)
-		return nil, &LockedError{
-			AgentName: lockInfo.AgentName,
-			PID:       lockInfo.PID,
-			Duration:  duration,
-			TaskID:    lockInfo.TaskID,
-		}
-	}
-
-	currentBranch, err := cli.GetCurrentBranch(worktreePath)
-	if err != nil {
-		return nil, fmt.Errorf("getting current branch: %v", err)
-	}
-
-	// Check protected branch BEFORE any destructive operations (only relevant when pushing)
-	if push && isProtectedBranch(currentBranch) && !force {
-		return nil, fmt.Errorf("refusing to force-push to protected branch '%s'; set force=true to override", currentBranch)
-	}
-
-	if err := GitFetch(worktreePath); err != nil {
-		return nil, fmt.Errorf("fetching: %v", err)
-	}
-
-	if err := GitReset(worktreePath, "HEAD"); err != nil {
-		return nil, fmt.Errorf("resetting: %v", err)
-	}
-	if err := GitClean(worktreePath); err != nil {
-		return nil, fmt.Errorf("cleaning: %v", err)
-	}
-
-	if err := GitReset(worktreePath, "origin/"+targetBranch); err != nil {
-		return nil, fmt.Errorf("resetting to %s: %v", targetBranch, err)
-	}
-
 	if push {
-		if err := GitPushForce(worktreePath, currentBranch); err != nil {
-			return nil, fmt.Errorf("force pushing: %v", err)
-		}
+		return nil, fmt.Errorf("reset cannot push")
+	}
+	prepared, err := prepareReset(worktreePath, targetBranch, force)
+	if err != nil {
+		return nil, err
+	}
+	if err := finishReset(worktreePath, targetBranch); err != nil {
+		return nil, err
 	}
 
 	return &ResetResult{
 		Success:        true,
 		Message:        fmt.Sprintf("Reset complete: %s is now at origin/%s", worktreeName, targetBranch),
-		PreviousBranch: currentBranch,
-		Pushed:         push,
+		PreviousBranch: prepared.branch,
+		Pushed:         false,
+		CaptureRef:     prepared.capture.Ref,
+		Ignored:        ignoredResetEntries(prepared.capture),
 	}, nil
 }
 

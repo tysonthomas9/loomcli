@@ -308,6 +308,7 @@ type mockAgentService struct {
 	gitSyncFunc               func(ctx context.Context, wsID, agentName string) (*service.GitSyncResult, error)
 	createPRFunc              func(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error)
 	gitResetFunc              func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error)
+	gitResetPreviewFunc       func(ctx context.Context, wsID, agentName string) ([]ops.GitResetIgnoredFile, error)
 	gitStatusFunc             func(ctx context.Context, wsID, agentName string) (*ops.GitStatusResult, error)
 	setTargetBranchFunc       func(ctx context.Context, wsID, agentName, branch string) error
 }
@@ -477,4 +478,11 @@ func assertEnvelopeError(t *testing.T, body map[string]interface{}, dataFieldNam
 	if dataVal, ok := body[dataFieldName]; ok && dataVal != nil {
 		t.Errorf("unexpected '%s' field in error response: %v", dataFieldName, dataVal)
 	}
+}
+
+func (m *mockAgentService) GitResetPreview(ctx context.Context, wsID, agentName string) ([]ops.GitResetIgnoredFile, error) {
+	if m.gitResetPreviewFunc != nil {
+		return m.gitResetPreviewFunc(ctx, wsID, agentName)
+	}
+	return []ops.GitResetIgnoredFile{}, nil
 }

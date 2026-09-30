@@ -315,6 +315,14 @@ func (s *agentServiceImpl) GitReset(_ context.Context, wsID, agentName, branch s
 	return result, nil
 }
 
+func (s *agentServiceImpl) GitResetPreview(ctx context.Context, wsID, agentName string) ([]ops.GitResetIgnoredFile, error) {
+	wt, err := s.resolveAgentWorktree(wsID, agentName)
+	if err != nil {
+		return nil, err
+	}
+	return s.gitOps.ListResetIgnored(ctx, wt.Path)
+}
+
 func (s *agentServiceImpl) GitStatus(_ context.Context, wsID, agentName string) (*ops.GitStatusResult, error) {
 	wt, err := s.resolveAgentWorktree(wsID, agentName)
 	if err != nil {
