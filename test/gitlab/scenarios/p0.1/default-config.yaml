@@ -1,0 +1,8 @@
+name: default user config permits identity, signing and LFS without unsafe settings
+task: P0.1
+git: [min, latest]
+fixture: empty
+when:
+  - go_check: default_config_signing_lfs
+then:
+  - go_check: no_error

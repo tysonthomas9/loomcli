@@ -1,0 +1,8 @@
+name: killed agent work is captured on exit
+task: P1.4
+git: [min, latest]
+fixture: empty
+when:
+  - go_check: capture_after_kill
+then:
+  - go_check: supervisor_exit_capture

@@ -1,0 +1,8 @@
+name: journal keeps a started operation after SIGKILL without cgo
+task: P0.3
+git: [min, latest]
+fixture: empty
+when:
+  - go_check: journal_crash
+then:
+  - go_check: no_error

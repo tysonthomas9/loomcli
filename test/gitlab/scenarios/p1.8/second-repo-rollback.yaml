@@ -1,0 +1,8 @@
+name: second repository failure rolls back the first workspace checkout
+task: P1.8
+git: [min, latest]
+fixture: empty
+when:
+  - go_check: second_repo_rollback
+then:
+  - go_check: no_error

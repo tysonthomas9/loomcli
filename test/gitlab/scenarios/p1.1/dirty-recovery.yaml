@@ -1,0 +1,8 @@
+name: recovery preserves dirty task worktrees
+task: P1.1
+git: [min, latest]
+fixture: loomcli
+when:
+  - go_check: dirty_recovery
+then:
+  - go_check: no_error

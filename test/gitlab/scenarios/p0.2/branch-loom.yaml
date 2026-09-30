@@ -1,0 +1,10 @@
+name: user branch loom blocks the Loom namespace
+task: P0.2
+git: [min, latest]
+fixture: empty
+given:
+  - branch: loom
+when:
+  - go_check: namespace_conflict
+then:
+  - go_check: namespace_conflict

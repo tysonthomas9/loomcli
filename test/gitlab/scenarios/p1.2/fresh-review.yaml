@@ -1,0 +1,8 @@
+name: PR review uses a fresh detached worktree and preserves old scratch
+task: P1.2
+git: [min, latest]
+fixture: loomcli
+when:
+  - go_check: fresh_pr_review
+then:
+  - go_check: no_error

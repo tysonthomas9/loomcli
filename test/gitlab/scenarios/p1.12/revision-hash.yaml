@@ -1,0 +1,8 @@
+name: revision hashes and trees round-trip through import and derivation
+task: P1.12
+git: [min, latest]
+fixture: loomcli
+when:
+  - go_check: revision_round_trip
+then:
+  - go_check: no_error

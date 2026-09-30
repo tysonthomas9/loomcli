@@ -1,0 +1,8 @@
+name: small tmpfs fills and a second Unix user is available
+task: P0.5
+git: [min, latest]
+fixture: empty
+when:
+  - go_check: fault_tools
+then:
+  - go_check: no_error
