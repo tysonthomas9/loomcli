@@ -391,22 +391,11 @@ func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent 
 	if len(repos) == 0 {
 		return service.ErrValidation("This workspace has no repos yet — add one from the sidebar first.")
 	}
-	createdPaths := make(map[string]string, len(repos))
 	if interactive {
 		return ensureInteractiveWebAgentWorktrees(ctx, agent, ws.Path, repos)
 	}
-	for _, repo := range repos {
-		if repo.Path == "" {
-			return service.ErrValidation(fmt.Sprintf("repo %q has no local path on this machine", repo.Name))
-		}
-		target := localworkspace.AgentWorktreePath(ws.Path, repo.Name, agent.Name)
-		if err := localworkspace.EnsureGitWorktree(repo.Path, target, agent.Name); err != nil {
-			return service.ErrInternal(fmt.Sprintf("create worktree for repo %q", repo.Name), err)
-		}
-		createdPaths[repo.Name] = target
-	}
-	if err := localworkspace.RememberAgentWorktree(agent.WorkspaceKey, agent.Name, localworkspace.FirstWorktreePath(createdPaths)); err != nil {
-		return service.ErrInternal("update local agent state", err)
+	if _, err := localworkspace.EnsureAgentTaskCopyWorktrees(agent.WorkspaceKey, agent.Name, ws.Path, repos); err != nil {
+		return service.ErrInternal("create agent task copies", err)
 	}
 	return nil
 }

@@ -70,6 +70,10 @@ func ChangeBranch(workspace, change string) (string, error) {
 	return branch(workspace, "change", change)
 }
 
+func TaskCopyBranch(workspace, taskCopy string) (string, error) {
+	return branch(workspace, "task-copy", taskCopy)
+}
+
 func AttemptBase(workspace, attempt string) (string, error) {
 	return hidden(workspace, []string{attempt}, "attempt", attempt, "base")
 }

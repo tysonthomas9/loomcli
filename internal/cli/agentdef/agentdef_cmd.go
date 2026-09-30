@@ -269,18 +269,11 @@ func ensureAgentDefinitionLocalWorktrees(ctx context.Context, st store.Store, ag
 		return fmt.Errorf("workspace %s has no repos for agent %q", agent.WorkspaceKey, agent.Name)
 	}
 
-	created := make(map[string]string, len(selected))
 	if interactive {
 		return ensureInteractiveAgentWorktrees(ctx, agent, local.Path, selected)
 	}
-	for _, repo := range selected {
-		target := localworkspace.AgentWorktreePath(local.Path, repo.Name, agent.Name)
-		if err := localworkspace.EnsureGitWorktree(repo.Path, target, agent.Name); err != nil {
-			return fmt.Errorf("create worktree for repo %q: %w", repo.Name, err)
-		}
-		created[repo.Name] = target
-	}
-	return localworkspace.RememberAgentWorktree(agent.WorkspaceKey, agent.Name, localworkspace.FirstWorktreePath(created))
+	_, err = localworkspace.EnsureAgentTaskCopyWorktrees(agent.WorkspaceKey, agent.Name, local.Path, selected)
+	return err
 }
 
 func ensureInteractiveAgentWorktrees(ctx context.Context, agent domain.Agent, wsDir string, selected []localworkspace.Repo) error {

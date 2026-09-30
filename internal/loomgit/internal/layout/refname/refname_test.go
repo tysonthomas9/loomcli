@@ -30,6 +30,7 @@ func TestBuilders(t *testing.T) {
 	}{
 		{"interactive branch", func(id string) (string, error) { return InteractiveBranch("W1", id) }, "loom/ws/W1/interactive/L1", true},
 		{"change branch", func(id string) (string, error) { return ChangeBranch("W1", id) }, "loom/ws/W1/change/C1", true},
+		{"task copy branch", func(id string) (string, error) { return TaskCopyBranch("W1", id) }, "loom/ws/W1/task-copy/T1", true},
 		{"attempt base", func(id string) (string, error) { return AttemptBase("W1", id) }, "refs/loom/ws/W1/attempt/A1/base", false},
 		{"attempt capture", func(id string) (string, error) { return AttemptCapture("W1", id) }, "refs/loom/ws/W1/attempt/A1/capture", false},
 		{"revision base", func(id string) (string, error) { return RevisionBase("W1", id, "r1") }, "refs/loom/ws/W1/change/C1/r1/base", false},
@@ -40,7 +41,7 @@ func TestBuilders(t *testing.T) {
 		{"WIP", func(id string) (string, error) { return WIP("W1", id, "id1") }, "refs/loom/ws/W1/wip/L1/id1", false},
 		{"task copy", func(id string) (string, error) { return TaskCopyPath("W1", id) }, filepath.FromSlash("refs/loom/ws/W1/task-copy/T1"), false},
 	}
-	ids := []string{"L1", "C1", "A1", "A1", "C1", "C1", "C1", "123", "L1", "L1", "T1"}
+	ids := []string{"L1", "C1", "T1", "A1", "A1", "C1", "C1", "C1", "123", "L1", "L1", "T1"}
 	for i, tc := range builders {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := tc.fn(ids[i])

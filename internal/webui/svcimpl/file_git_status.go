@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	webuilog "github.com/tysonthomas9/loomcli/internal/webui/log"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -102,7 +103,7 @@ func (s *fileServiceImpl) workspaceGitStatus(ctx context.Context, wsID, target, 
 	return *result, nil
 }
 
-func workspaceFileCheckouts(_ string, wsRoot string, ws *ops.WorkspaceData) []gitStatusCheckout {
+func workspaceFileCheckouts(wsID string, wsRoot string, ws *ops.WorkspaceData) []gitStatusCheckout {
 	if ws == nil {
 		return nil
 	}
@@ -117,6 +118,9 @@ func workspaceFileCheckouts(_ string, wsRoot string, ws *ops.WorkspaceData) []gi
 	for _, agent := range ws.Agents {
 		for _, repo := range agentCheckoutRepos(ws.Repos, agent) {
 			path := filepath.Join(wsRoot, "worktrees", repo.Name, agent.Name)
+			if remembered, ok := localworkspace.RememberedAgentWorktreeForRepo(wsID, agent.Name, repo.Name); ok {
+				path = remembered
+			}
 			checkout, ok := workspaceCheckoutWithinRoot(wsRoot, path)
 			if !ok {
 				continue

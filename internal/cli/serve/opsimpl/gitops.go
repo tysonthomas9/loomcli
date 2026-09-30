@@ -17,6 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -142,7 +143,7 @@ func (g *GitOpsImpl) ResolveAgentWorktreeForRepo(workspaceID, name, repoName str
 	if !ok {
 		return nil, fmt.Errorf("%w: repo %q is not known in workspace %q", ops.ErrAgentRepoNotAllowed, repoName, workspaceID)
 	}
-	return resolveAgentWorktreeFromWSForRepo(&ops.WorkspaceData{Path: root}, name, repo)
+	return resolveAgentWorktreeFromWSForRepo(&ops.WorkspaceData{ID: workspaceID, Path: root}, name, repo)
 }
 
 // loadStoreWorkspace loads the workspace topology for store-backed agent
@@ -214,6 +215,9 @@ func resolveAgentWorktreeFromWS(ws *ops.WorkspaceData, workspaceID, name string)
 
 func resolveAgentWorktreeFromWSForRepo(ws *ops.WorkspaceData, name string, repo ops.WorkspaceRepo) (*ops.AgentWorktree, error) {
 	wtPath := filepath.Join(ws.Path, "worktrees", repo.Name, name)
+	if remembered, ok := localworkspace.RememberedAgentWorktreeForRepo(ws.ID, name, repo.Name); ok {
+		wtPath = remembered
+	}
 	if _, err := os.Stat(filepath.Join(wtPath, ".git")); err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("%w: agent %q worktree for repo %q is not checked out on this machine at %s", ops.ErrAgentWorktreeNotFound, name, repo.Name, wtPath)

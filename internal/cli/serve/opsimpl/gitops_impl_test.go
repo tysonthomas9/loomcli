@@ -339,7 +339,7 @@ func TestResolveAgentWorktreeForRepo_StoreBackedFleetDB(t *testing.T) {
 	if err := runGit(t, novaAPIPath, "init", "-b", "feature/nova"); err != nil {
 		t.Fatalf("git init nova api: %v", err)
 	}
-	anyDocsPath := filepath.Join(wsRoot, "worktrees", "docs", "any")
+	anyDocsPath := filepath.Join(wsRoot, ".loom", "task-copies", "docs", "T1")
 	if err := runGit(t, anyDocsPath, "init", "-b", "feature/any-docs"); err != nil {
 		t.Fatalf("git init any docs: %v", err)
 	}
@@ -350,6 +350,9 @@ func TestResolveAgentWorktreeForRepo_StoreBackedFleetDB(t *testing.T) {
 			Repos: map[string]string{
 				"api":  filepath.Join(wsRoot, "api"),
 				"docs": filepath.Join(wsRoot, "docs"),
+			},
+			Agents: map[string]bootstrap.AgentLocalState{
+				"any": {Worktree: anyDocsPath, Worktrees: map[string]string{"docs": anyDocsPath}},
 			},
 		}
 		return nil
