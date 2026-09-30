@@ -367,49 +367,12 @@ func normalizeCommand(command []string) ([]string, error) {
 
 //nolint:gosec // Node executes the generated local runner launcher.
 func (e HostBridgeTaskExecutor) runBuiltInFlueWorkflow(ctx context.Context, req TaskExecRequest) (bridgeTaskRunnerResult, error) {
-	input, err := json.Marshal(req)
-	if err != nil {
-		return bridgeTaskRunnerResult{}, fmt.Errorf("encode task runner request: %w", err)
-	}
 	launcherPath, cleanup, err := writeFlueTaskRunnerLauncher()
 	if err != nil {
 		return bridgeTaskRunnerResult{}, err
 	}
 	defer cleanup()
-
-	cmd := exec.CommandContext(ctx, "node", launcherPath)
-	if worktree := strings.TrimSpace(e.WorktreePath); worktree != "" {
-		cmd.Dir = worktree
-	}
-	baseEnv := taskRunnerBaseEnvForRequest(req, os.Environ())
-	env := append([]string{}, baseEnv...)
-	env = append(env, e.taskRunnerEnv(req, string(input))...)
-	cmd.Env = env
-	cmd.Stdin = bytes.NewReader(input)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	configureTaskRunnerProcess(cmd)
-	runErr := cmd.Run()
-	if ctx.Err() != nil {
-		terminateTaskRunnerGroup(cmd)
-	}
-	if err := runErr; err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return bridgeTaskRunnerResult{}, fmt.Errorf("built-in Flue task runner failed: %s", msg)
-	}
-	payload, err := lastJSONLine(stdout.Bytes())
-	if err != nil {
-		return bridgeTaskRunnerResult{}, err
-	}
-	var result bridgeTaskRunnerResult
-	if err := json.Unmarshal(payload, &result); err != nil {
-		return bridgeTaskRunnerResult{}, fmt.Errorf("decode built-in Flue task runner result: %w", err)
-	}
-	return result, nil
+	return e.runTaskRunnerProcess(ctx, req, []string{"node", launcherPath}, "built-in Flue task runner", "built-in Flue task runner")
 }
 
 func writeFlueTaskRunnerLauncher() (string, func(), error) {
@@ -432,6 +395,10 @@ func writeFlueTaskRunnerLauncher() (string, func(), error) {
 
 //nolint:gosec // Configured argv runs directly without shell expansion.
 func (e HostBridgeTaskExecutor) runCommand(ctx context.Context, req TaskExecRequest, command []string) (bridgeTaskRunnerResult, error) {
+	return e.runTaskRunnerProcess(ctx, req, command, "task runner command", "task runner")
+}
+
+func (e HostBridgeTaskExecutor) runTaskRunnerProcess(ctx context.Context, req TaskExecRequest, command []string, label, resultLabel string) (bridgeTaskRunnerResult, error) {
 	input, err := json.Marshal(req)
 	if err != nil {
 		return bridgeTaskRunnerResult{}, fmt.Errorf("encode task runner request: %w", err)
@@ -458,7 +425,7 @@ func (e HostBridgeTaskExecutor) runCommand(ctx context.Context, req TaskExecRequ
 		if msg == "" {
 			msg = err.Error()
 		}
-		return bridgeTaskRunnerResult{}, fmt.Errorf("task runner command failed: %s", msg)
+		return bridgeTaskRunnerResult{}, fmt.Errorf("%s failed: %s", label, msg)
 	}
 	payload, err := lastJSONLine(stdout.Bytes())
 	if err != nil {
@@ -466,7 +433,7 @@ func (e HostBridgeTaskExecutor) runCommand(ctx context.Context, req TaskExecRequ
 	}
 	var result bridgeTaskRunnerResult
 	if err := json.Unmarshal(payload, &result); err != nil {
-		return bridgeTaskRunnerResult{}, fmt.Errorf("decode task runner result: %w", err)
+		return bridgeTaskRunnerResult{}, fmt.Errorf("decode %s result: %w", resultLabel, err)
 	}
 	return result, nil
 }
