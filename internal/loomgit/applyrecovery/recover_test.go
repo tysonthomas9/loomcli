@@ -1,13 +1,17 @@
 package applyrecovery_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -20,17 +24,18 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/outbox"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	webgit "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 )
 
-func TestReconcileJournalBridgeApprovalFollowsAfterCrash(t *testing.T) {
+func bridgeApprovalFixture(t *testing.T) (context.Context, *journal.SQLite, journal.WorkingArea, string, loomgit.Revision) {
 	ctx, journalStore, area, base := recoveryFixture(t)
-	defer func() { _ = journalStore.Close() }()
+	t.Cleanup(func() { _ = journalStore.Close() })
 	root := os.Getenv("LOOM_CONFIG_DIR")
 	backend, err := bootstrap.OpenStore(ctx, root, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = backend.Close() }()
+	t.Cleanup(func() { _ = backend.Close() })
 	if _, err := backend.Store.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "W", Name: "Working area"}); err != nil {
 		t.Fatal(err)
 	}
@@ -82,6 +87,40 @@ func TestReconcileJournalBridgeApprovalFollowsAfterCrash(t *testing.T) {
 	if layers, err := journalStore.AppliedLog(ctx, "W", "L"); err != nil || len(layers) != 0 {
 		t.Fatalf("bridge bypassed review gate: %+v, %v", layers, err)
 	}
+	return ctx, journalStore, area, base, revision
+}
+
+func TestBridgeRevisionHTTPApprovalAppliesLayer(t *testing.T) {
+	ctx, journalStore, area, _, revision := bridgeApprovalFixture(t)
+	mux := http.NewServeMux()
+	webgit.NewModule(nil, nil).Register(mux)
+	list := httptest.NewRecorder()
+	mux.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/workspaces/W/issues/T/revisions", nil))
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), revision.HeadSHA) {
+		t.Fatalf("bridge revision missing from review route: %d %s", list.Code, list.Body.String())
+	}
+	body, err := json.Marshal(map[string]any{"head_sha": revision.HeadSHA, "verdict": "approve", "lead": "L",
+		"actor": map[string]string{"kind": "human", "id": "reviewer"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/workspaces/W/changes/" + revision.Change + "/revisions/" + strconv.Itoa(revision.Number) + "/verdict"
+	approved := httptest.NewRecorder()
+	mux.ServeHTTP(approved, httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body)))
+	if approved.Code != http.StatusOK {
+		t.Fatalf("HTTP approval failed: %d %s", approved.Code, approved.Body.String())
+	}
+	layers, err := journalStore.AppliedLog(ctx, "W", "L")
+	if err != nil || len(layers) != 1 || layers[0].Change != revision.Change {
+		t.Fatalf("HTTP approval did not apply bridge revision: %+v, %v", layers, err)
+	}
+	if got := recoveryGit(t, area.Path, "rev-parse", "HEAD"); got != layers[0].NewTip {
+		t.Fatalf("working area did not follow HTTP approval: %s", got)
+	}
+}
+
+func TestReconcileJournalBridgeApprovalFollowsAfterCrash(t *testing.T) {
+	ctx, journalStore, area, base, revision := bridgeApprovalFixture(t)
 	if _, err := review.SubmitForLead(ctx, journalStore, "W", revision.Change, revision.Number, revision.HeadSHA,
 		"approve", "", review.Actor{Kind: "human", ID: "reviewer"}, "L"); err != nil {
 		t.Fatal(err)
