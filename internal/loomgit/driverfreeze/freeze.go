@@ -46,7 +46,7 @@ func FreezeCapture(ctx context.Context, in CaptureRequest) (loomgit.Revision, er
 }
 
 func FreezeCaptureAt(ctx context.Context, journalPath string, in CaptureRequest) (loomgit.Revision, error) {
-	if in.Workspace == "" || in.Task == "" || in.Repo == "" || in.Attempt == "" || in.Worktree == "" || in.Base == "" || (in.Outcome != "cancelled" && in.Outcome != "failed" && in.Outcome != "completed" && in.Outcome != "abandoned") {
+	if in.Workspace == "" || in.Task == "" || in.Repo == "" || in.Attempt == "" || in.Worktree == "" || in.Base == "" || !terminalOutcome(in.Outcome) {
 		return loomgit.Revision{}, fmt.Errorf("capture requires workspace, task, repo, attempt, worktree, base and a terminal outcome")
 	}
 	if err := os.MkdirAll(filepath.Dir(journalPath), 0o700); err != nil {
@@ -57,8 +57,7 @@ func FreezeCaptureAt(ctx context.Context, journalPath string, in CaptureRequest)
 		return loomgit.Revision{}, err
 	}
 	defer func() { _ = store.Close() }()
-	options := gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}}
-	runner, err := gitexec.New(in.Worktree, options)
+	runner, err := gitexec.New(in.Worktree, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
 	if err != nil {
 		return loomgit.Revision{}, err
 	}
@@ -97,6 +96,15 @@ func FreezeCaptureAt(ctx context.Context, journalPath string, in CaptureRequest)
 			Attempt: in.Attempt, Path: in.Worktree, SourceRepo: in.SourceRepo, Complete: in.Complete})
 	})
 	return revision, err
+}
+
+func terminalOutcome(outcome string) bool {
+	switch outcome {
+	case "cancelled", "failed", "completed", "abandoned":
+		return true
+	default:
+		return false
+	}
 }
 
 // Freeze uses production journal and Git defaults. The patch is staged in a
