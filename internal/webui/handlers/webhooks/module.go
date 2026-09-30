@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/feedback"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/reconcile"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
@@ -47,6 +49,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/trigger-events/{eventId}", m.getTriggerEvent)
 	mux.HandleFunc("GET /api/workspaces/{ws}/trigger-deliveries", m.listTriggerDeliveries)
 	mux.HandleFunc("GET /api/workspaces/{ws}/trigger-deliveries/{deliveryId}", m.getTriggerDelivery)
+	mux.HandleFunc("GET /api/workspaces/{ws}/changes/{change}/feedback", m.listChangeFeedback)
 }
 
 func (m *Module) receiveWebhook(w http.ResponseWriter, r *http.Request) {
@@ -144,6 +147,17 @@ func (m *Module) dispatchWebhook(w http.ResponseWriter, r *http.Request, ws, nam
 		writeDomainError(w, err, "dispatch webhook failed")
 		return
 	}
+	if name == "github" {
+		forgeEvent, parseErr := feedback.ParseGitHub(event.EventType, event.DeliveryID, body)
+		if parseErr != nil {
+			writeError(w, http.StatusBadRequest, "invalid GitHub payload")
+			return
+		}
+		if err := reconcile.IngestForgeEvent(r.Context(), ws, forgeEvent); err != nil {
+			writeError(w, http.StatusInternalServerError, "record PR feedback failed")
+			return
+		}
+	}
 	// Dispatch-time await matching (AW7) runs after the durable fan-out so a
 	// matcher failure can never lose an admitted delivery.
 	m.notifyAwaits(r.Context(), ws, event, body)
@@ -157,6 +171,15 @@ func (m *Module) dispatchWebhook(w http.ResponseWriter, r *http.Request, ws, nam
 		"idempotency_key": idempotencyKey,
 		"deliveries":      result.Deliveries,
 	})
+}
+
+func (m *Module) listChangeFeedback(w http.ResponseWriter, r *http.Request) {
+	items, err := feedback.Status(r.Context(), r.PathValue("ws"), r.PathValue("change"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list PR feedback failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"feedback": items})
 }
 
 // notifyAwaits hands the admitted event to the dispatch-time await matcher
