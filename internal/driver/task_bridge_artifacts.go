@@ -273,10 +273,6 @@ func optionalInt64(value int64) *int64 {
 	return &value
 }
 
-func taskRunnerBaseEnv(env []string) []string {
-	return scopedSubprocessBaseEnv(env)
-}
-
 // taskRunnerBaseEnvForRequest selects the subprocess base env for a task runner
 // by entrypoint: the local task runner gets the trusted-local provider-cred
 // superset (§4.3); every other runner (Daytona/remote/node-module) keeps the
@@ -285,7 +281,7 @@ func taskRunnerBaseEnvForRequest(req TaskExecRequest, env []string) []string {
 	if isLocalTaskRunner(req) {
 		return localTaskRunnerBaseEnv(env)
 	}
-	return taskRunnerBaseEnv(env)
+	return scopedSubprocessBaseEnv(env)
 }
 
 func lastJSONLine(stdout []byte) ([]byte, error) {

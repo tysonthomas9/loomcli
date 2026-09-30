@@ -799,7 +799,7 @@ func (r NodeRunner) runtimeEnv(req RunRequest, input []byte) ([]string, error) {
 }
 
 func flueRuntimeEnv(req RunRequest, input []byte, execTaskCommand []string) ([]string, error) {
-	env := driverRuntimeBaseEnv(os.Environ())
+	env := scopedSubprocessBaseEnv(os.Environ())
 	env = append(env,
 		"LOOM_DRIVER_WORKSPACE="+req.Run.WorkspaceKey,
 		"LOOM_DRIVER_RUN_ID="+req.Run.RunID,
