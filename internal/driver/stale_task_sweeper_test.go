@@ -256,6 +256,42 @@ func TestStaleTaskSweeperRunOnce(t *testing.T) {
 	}
 }
 
+func TestStaleRemoteCaptureRequiresAttentionAndKeepsSandbox(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+		t.Fatal(err)
+	}
+	seedSweeperFixture(t, st, "WS", domain.DriverRunRunning, 10*time.Minute)
+	metadata := map[string]string{
+		"remote_capture_status":  "pending",
+		"remote_capture_attempt": "attempt-1",
+		"daytona_sandbox_id":     "sandbox-retained",
+	}
+	if _, err := st.TaskRuns().Heartbeat(ctx, "WS", "task-run-1", store.TaskRunHeartbeat{
+		HeartbeatAt: time.Now().UTC().Add(-10 * time.Minute), RuntimeMetadata: metadata,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sweeper := &StaleTaskSweeper{Store: st, WorkspaceKey: "WS", MaxAge: 5 * time.Minute}
+	result, err := sweeper.RunOnce(ctx)
+	if err != nil || result.Recovered != 1 {
+		t.Fatalf("sweep = %+v, %v", result, err)
+	}
+	taskRun, err := st.TaskRuns().Get(ctx, "WS", "task-run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if taskRun.Status != domain.TaskRunFailed || taskRun.ErrorClass != string(loomgit.AttentionRequired) ||
+		!strings.Contains(taskRun.ErrorMessage, "sandbox-retained") {
+		t.Fatalf("stale capture recovery = %s/%s: %s", taskRun.Status, taskRun.ErrorClass, taskRun.ErrorMessage)
+	}
+	if taskRun.RuntimeMetadata["daytona_sandbox_id"] != "sandbox-retained" ||
+		taskRun.RuntimeMetadata["remote_capture_status"] != "pending" {
+		t.Fatalf("retained sandbox capture metadata lost: %+v", taskRun.RuntimeMetadata)
+	}
+}
+
 func TestStaleTaskSweeperRequiresStore(t *testing.T) {
 	if _, err := (&StaleTaskSweeper{}).RunOnce(context.Background()); err == nil {
 		t.Fatal("RunOnce with nil store: expected error, got nil")
