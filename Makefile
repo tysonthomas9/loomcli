@@ -396,6 +396,13 @@ lint:
 	@echo "Running Go linter..."
 	golangci-lint run --timeout=5m --allow-parallel-runners
 	@./scripts/check-control-plane-paths.sh
+	@$(MAKE) lint-gitexec-sites
+
+# Migration inventory only: existing raw Git callers move in later tasks.
+.PHONY: lint-gitexec-sites
+lint-gitexec-sites:
+	@echo "Existing exec.Command(\"git\", ...) sites outside gitexec:"
+	@rg -n 'exec\.Command(Context)?\((ctx, )?"git"' --glob '*.go' internal | rg -v '^internal/loomgit/internal/gitexec/' || true
 
 # Run Go tests with coverage threshold enforcement
 test-coverage: test
