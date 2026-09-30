@@ -235,7 +235,6 @@ export async function run(ctx = {}) {
       result.runtimeMetadata.remote_capture_reason = result.errorMessage;
       return result;
     }
-    const patchArtifact = null;
     const published = null;
     const prArtifact = null;
     const transcriptEntries = redactTranscriptEntries(transcriptCollector.entries, secrets);
@@ -253,9 +252,7 @@ export async function run(ctx = {}) {
       logs: redact(logs.join("\n") + "\n", secrets),
       transcript: transcriptJSONL,
       transcript_entries: transcriptEntries,
-      // Inline patch when there was no artifact client (daemon-leaf path).
-      ...(patchArtifact && patchArtifact.inline ? { patch: patchArtifact.diff } : {}),
-      artifactIds: [patchArtifact].filter(Boolean).map((artifact) => artifact.id).filter(Boolean),
+      artifactIds: [prArtifact].filter(Boolean).map((artifact) => artifact.id).filter(Boolean),
       runtimeMetadata: stringMetadata({
         task_runner: "daytona-task-runner",
         runtime_strategy: "flue-daytona-codex",
@@ -284,7 +281,12 @@ export async function run(ctx = {}) {
         remote_capture_tree_hash: capture.treeHash,
         remote_capture_change_id: capture.changeId,
         remote_capture_revision: capture.revision,
-        patch_artifact_id: patchArtifact && patchArtifact.id,
+        github_pr_artifact_id: prArtifact && prArtifact.id,
+        github_pr_url: published && published.pullRequest && published.pullRequest.html_url,
+        github_pr_number: published && published.pullRequest && published.pullRequest.number,
+        github_pr_head: published && delivery.branch,
+        github_pr_base: published && delivery.baseBranch,
+        github_pr_commit: published && published.commitSha,
         daytona_sandbox_env_leak_count: "0",
         response_text: redact(textTail(stringValue(response && response.text), 1000), secrets),
       }),
@@ -891,48 +893,6 @@ async function loadTaskContext(logs) {
     logs.push("warning: task context lookup failed: " + errorMessage(error));
     return { client: client || null, task: null };
   }
-}
-
-async function uploadPatchArtifact(client, input, logs) {
-  const diff = input.diff === undefined || input.diff === null ? "" : String(input.diff);
-  if (!diff.trim()) {
-    return null;
-  }
-  if (!client) {
-    // No @loom/sdk/runner artifact client (e.g. the daemon-leaf path, which runs as
-    // a session rather than a driver TaskRun). Surface the patch INLINE on the result
-    // instead of failing — mirrors local-task-runner's top-level patch. The driver
-    // path always has a client and uploads as before.
-    return { id: "", inline: true, diff: input.diff || "", diffStat: input.diffStat || "" };
-  }
-  const metadata = stringMetadata({
-    task_run_id: input.taskRunId,
-    task_id: input.taskId,
-    runtime_strategy: "flue-daytona-codex",
-    task_runner: "daytona-task-runner",
-    sandbox_provider: "daytona",
-    repo_url: input.repoUrl,
-    repo_dir: input.repoDir,
-    repo_head: input.head,
-    diff_stat: textTail(input.diffStat, 1000),
-  });
-  const artifact = await client.artifacts.declare({
-    id: "patch-" + safeName(input.taskRunId),
-    type: "patch",
-    taskId: input.taskId,
-    summary: "Daytona remote repository patch",
-    mimeType: "text/x-diff",
-    metadata,
-  });
-  await artifact.upload(diff, { mimeType: "text/x-diff" });
-  await artifact.finalize({
-    summary: "Daytona remote repository patch",
-    mimeType: "text/x-diff",
-    sizeBytes: Buffer.byteLength(diff, "utf8"),
-    metadata,
-  });
-  logs.push("uploaded remote patch artifact " + artifact.id);
-  return artifact;
 }
 
 async function uploadPullRequestArtifact(client, input, logs) {
