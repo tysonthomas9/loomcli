@@ -484,6 +484,9 @@ func TestPublishStackRecordedEntryUsesConfiguredWorkingArea(t *testing.T) {
 	if selected, err := fixture.store.StackBackend(ctx, "W", "feature-1"); err != nil || selected != "loom" {
 		t.Fatalf("recorded backend = %q, %v", selected, err)
 	}
+	if result[0].Backend != "loom" || result[0].StatusReason == "" {
+		t.Fatalf("fallback status = %+v", result[0])
+	}
 }
 
 type nativeCapableForge struct{ *fakeForge }
@@ -492,11 +495,59 @@ func (nativeCapableForge) SupportsNativeStacks() bool { return true }
 
 type nativeBackend struct{ LoomStackBackend }
 
+type fakeNativeForge struct {
+	*fakeForge
+	stacks [][]int
+}
+
+func (forge *fakeNativeForge) NativeStacksEnabled(context.Context, string, string) (bool, error) {
+	return true, nil
+}
+
+func (forge *fakeNativeForge) EnsureNativeStack(_ context.Context, _, _ string, numbers []int) error {
+	forge.stacks = append(forge.stacks, append([]int(nil), numbers...))
+	return nil
+}
+
+func TestPublishStackRecordedCreatesNativeStackAfterLeasedPush(t *testing.T) {
+	fixture := newFixture(t)
+	first := stackRevision(t, fixture, "A", 1, fixture.base)
+	stackRevision(t, fixture, "B", 1, first.HeadSHA)
+	ctx := context.Background()
+	for _, change := range []string{"A", "B"} {
+		if _, err := fixture.store.DriverChange(ctx, "W", change, "repo", change); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := fixture.store.SaveWorkingAreas(ctx, []journal.WorkingArea{{Workspace: "W", Lead: "L", Repo: "repo", Path: fixture.repo, BaseSHA: fixture.base}}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.LoomConfig{Workspaces: map[string]config.WorkspaceConfig{
+		"workspace": {ID: "W", Path: fixture.repo, Repos: []config.RepoConfig{{Name: "repo", Path: fixture.repo}}},
+	}}
+	forge := &fakeNativeForge{fakeForge: &fakeForge{}}
+	for attempt := 0; attempt < 2; attempt++ {
+		results, err := publishStackRecorded(ctx, fixture.store, cfg, "W", "feature-1", "L", []string{"A", "B"}, forge, "fixture-token", "owner/repo")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if results[0].Backend != "native" || results[0].StatusReason != "" {
+			t.Fatalf("native status = %+v", results[0])
+		}
+	}
+	if len(forge.prs) != 2 || len(forge.stacks) != 2 || len(forge.stacks[0]) != 2 || forge.stacks[0][0] != forge.prs[0].Number || forge.stacks[0][1] != forge.prs[1].Number {
+		t.Fatalf("native stack calls = %+v, PRs = %+v", forge.stacks, forge.prs)
+	}
+	if selected, err := fixture.store.StackBackend(ctx, "W", "feature-1"); err != nil || selected != "native" {
+		t.Fatalf("backend = %q, %v", selected, err)
+	}
+}
+
 func TestChooseStackBackendUsesForgeCapabilityAndRecordsChoice(t *testing.T) {
 	fixture := newFixture(t)
 	loom := LoomStackBackend{Store: fixture.store}
 	native := nativeBackend{loom}
-	selected, err := chooseStackBackend(context.Background(), fixture.store, "W", "native-stack", nativeCapableForge{&fakeForge{}}, loom, native)
+	selected, err := chooseStackBackend(context.Background(), fixture.store, "W", "native-stack", "owner/repo", nativeCapableForge{&fakeForge{}}, loom, native)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,8 +557,7 @@ func TestChooseStackBackendUsesForgeCapabilityAndRecordsChoice(t *testing.T) {
 	if recorded, err := fixture.store.StackBackend(context.Background(), "W", "native-stack"); err != nil || recorded != "native" {
 		t.Fatalf("native selection = %q, %v", recorded, err)
 	}
-	github := stackpublish.NewGitHubForge("fixture-token", nil, "")
-	selected, err = chooseStackBackend(context.Background(), fixture.store, "W", "github-stack", github, loom, native)
+	selected, err = chooseStackBackend(context.Background(), fixture.store, "W", "github-stack", "owner/repo", &fakeForge{}, loom, native)
 	if err != nil {
 		t.Fatal(err)
 	}

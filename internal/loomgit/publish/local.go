@@ -28,6 +28,8 @@ type Result struct {
 	PRURL         string
 	PRNumber      int
 	AlreadyExists bool
+	Backend       string
+	StatusReason  string
 }
 
 var localPublishProvider = func() (Forge, string, string) { return nil, "", "" }
@@ -124,6 +126,13 @@ func openLocalStore() (*journal.SQLite, error) {
 }
 
 func publishStackRecorded(ctx context.Context, store *journal.SQLite, cfg *config.LoomConfig, workspace, stackID, lead string, changes []string, forge Forge, token, slug string) ([]Result, error) {
+	mode, err := store.DeliveryMode(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	if mode != "stack" {
+		return nil, loomgit.NewError(loomgit.ModeMismatch, "stack publication requires stack delivery mode", nil)
+	}
 	repoName, err := repoNameForStack(ctx, store, workspace, lead, changes)
 	if err != nil {
 		return nil, err
@@ -153,7 +162,13 @@ func publishStackRecorded(ctx context.Context, store *journal.SQLite, cfg *confi
 			}
 			forge = stackpublish.NewConfiguredGitHubForge(token)
 		}
-		backend, err := chooseStackBackend(ctx, store, workspace, stackID, forge, LoomStackBackend{Store: store}, nil)
+		if slug == "" {
+			slug, err = stackSlug(ctx, repo.ResolveAbsPath(configured.Path))
+			if err != nil {
+				return nil, err
+			}
+		}
+		backend, err := chooseStackBackend(ctx, store, workspace, stackID, slug, forge, LoomStackBackend{Store: store}, GitHubStackBackend{Store: store})
 		if err != nil {
 			return nil, err
 		}
@@ -164,19 +179,23 @@ func publishStackRecorded(ctx context.Context, store *journal.SQLite, cfg *confi
 		if err != nil {
 			return nil, err
 		}
-		return stackPublicationResults(ctx, store, workspace, changes, revisions)
+		return stackResults(ctx, store, workspace, changes, revisions, backend.Capabilities())
 	}
 	return nil, loomgit.NewError(loomgit.RepoSelectionRequired, "stack repo is not in the workspace", nil)
 }
 
-func stackPublicationResults(ctx context.Context, store *journal.SQLite, workspace string, changes []string, revisions []loomgit.Revision) ([]Result, error) {
+func stackResults(ctx context.Context, store *journal.SQLite, workspace string, changes []string, revisions []loomgit.Revision, capabilities StackCapabilities) ([]Result, error) {
 	results := make([]Result, 0, len(revisions))
+	backend, reason := "native", ""
+	if !capabilities.NativeStacks {
+		backend, reason = "loom", "GitHub native stacks are unavailable for this repository"
+	}
 	for index, revision := range revisions {
 		publication, found, err := store.Publication(ctx, workspace, changes[index])
 		if err != nil || !found {
 			return nil, errors.New("stack publication record unavailable")
 		}
-		results = append(results, Result{Revision: revision, PRURL: publication.PRURL, PRNumber: publication.PRNumber})
+		results = append(results, Result{Revision: revision, PRURL: publication.PRURL, PRNumber: publication.PRNumber, Backend: backend, StatusReason: reason})
 	}
 	return results, nil
 }
@@ -208,6 +227,18 @@ func orderedStackChanges(ctx context.Context, store *journal.SQLite, areaPath, w
 		}
 	}
 	return ordered, nil
+}
+
+func stackSlug(ctx context.Context, repoPath string) (string, error) {
+	runner, err := gitexec.New(repoPath, gitexec.Options{})
+	if err != nil {
+		return "", err
+	}
+	remote, err := runner.Run(ctx, "remote", "get-url", "--push", "origin")
+	if err != nil {
+		return "", err
+	}
+	return githubSlug(strings.TrimSpace(string(remote)))
 }
 
 func repoNameForStack(ctx context.Context, store *journal.SQLite, workspace, lead string, changes []string) (string, error) {
