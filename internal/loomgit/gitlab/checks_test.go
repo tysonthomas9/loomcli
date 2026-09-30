@@ -86,6 +86,17 @@ func (s *state) goCheck(name string) error {
 	case "workspace_creation_crash_adoption":
 		// Proves interrupted creation and attachment are adopted or kept for repair.
 		return s.packageTests("./internal/cli/serve/workspacemgr", "TestP19.*")
+	case "clone_mode":
+		for _, check := range []struct{ pkg, tests string }{
+			{"./internal/cli/serve/workspacemgr", "TestP120.*"},
+			{"./internal/loomgit/workspace", "TestP120CleanupFreshClone.*"},
+			{"./internal/loomgit/mirror", "TestP120CloneTaskSnapshotRefsMirrorFromCloneStore"},
+		} {
+			if err := s.packageTests(check.pkg, check.tests); err != nil {
+				return err
+			}
+		}
+		return nil
 	case "explicit_commit":
 		return s.checkExplicitCommit()
 	case "fixture_inventory":

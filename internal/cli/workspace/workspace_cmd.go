@@ -123,15 +123,30 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 	wsName := args[0]
 	branch := validateCreateInputs(wsName)
 	repoPaths := parseRepoPaths()
+	var localRepos, cloneURLs []string
+	for _, repo := range repoPaths {
+		repo = strings.TrimSpace(repo)
+		if service.IsCloneURL(repo) {
+			cloneURLs = append(cloneURLs, repo)
+		} else {
+			localRepos = append(localRepos, repo)
+		}
+	}
 
 	if err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		for _, url := range cloneURLs {
+			if err := service.ValidateCloneURL(url); err != nil {
+				return err
+			}
+		}
 		create := workspacemgr.BuildStoreBackedCreateWorkspace(h.Store)
 		result, err := create(ctx, service.WorkspaceCreateRequest{
-			Name:   wsName,
-			Type:   "empty",
-			Repos:  repoPaths,
-			Path:   wsCreatePath,
-			Branch: branch,
+			Name:      wsName,
+			Type:      "empty",
+			Repos:     localRepos,
+			CloneURLs: cloneURLs,
+			Path:      wsCreatePath,
+			Branch:    branch,
 		})
 		if err != nil {
 			return err

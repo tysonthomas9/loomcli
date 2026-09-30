@@ -5,10 +5,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	cligit "github.com/tysonthomas9/loomcli/internal/cli/git"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/capture"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
@@ -115,6 +117,57 @@ func TestCaptureMirrorAndLeasedDeletion(t *testing.T) {
 	}
 	if out := git(t, remote, "for-each-ref", "--format=%(refname)", result.CaptureRef); out != "" {
 		t.Fatalf("remote ref retained: %s", out)
+	}
+}
+
+func TestP120CloneTaskSnapshotRefsMirrorFromCloneStore(t *testing.T) {
+	ctx := context.Background()
+	source, provider, base, store := fixture(t)
+	git(t, source, "push", "origin", "main")
+	git(t, provider, "symbolic-ref", "HEAD", "refs/heads/main")
+	root := filepath.Dir(source)
+	clone, task := filepath.Join(root, "clone"), filepath.Join(root, "task")
+	git(t, root, "clone", provider, clone)
+	git(t, clone, "worktree", "add", "-b", "task", task)
+	if err := os.WriteFile(filepath.Join(task, "readme"), []byte("task edit\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	patch := git(t, task, "diff", "--binary") + "\n"
+	runner, err := gitexec.New(task, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := capture.Capture(ctx, runner, task, capture.Params{Workspace: "W", Attempt: "clone-task"}); err != nil {
+		t.Fatal(err)
+	}
+	revision, err := driverfreeze.FreezeAt(ctx, filepath.Join(root, "store.db"), driverfreeze.Request{
+		Workspace: "W", Task: "TASK", Repo: "clone", Attempt: "clone-task", Worktree: task,
+		Base: base, Patch: []byte(patch), Outcome: "completed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	captureRef, err := refname.AttemptCapture("W", "clone-task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	revisionRef, err := refname.RevisionHead("W", revision.Change, strconv.Itoa(revision.Number))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := git(t, clone, "rev-parse", revisionRef); got != revision.HeadSHA {
+		t.Fatalf("clone revision ref=%s", got)
+	}
+	if got := git(t, clone, "rev-parse", captureRef); got == "" {
+		t.Fatal("clone capture ref missing")
+	}
+	if err := SyncRepo(ctx, store, clone, base); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{captureRef, revisionRef} {
+		if got := git(t, provider, "rev-parse", ref); got == "" {
+			t.Fatalf("missing mirrored ref %s", ref)
+		}
 	}
 }
 

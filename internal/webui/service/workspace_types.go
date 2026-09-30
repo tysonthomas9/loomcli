@@ -11,8 +11,8 @@ type WorkspaceCreateRequest struct {
 	RequestID string   `json:"request_id,omitempty"` // stable identity for retried creation
 	Name      string   `json:"name"`
 	Type      string   `json:"type"`       // "empty", "clone", "template"
-	Repos     []string `json:"repos"`      // repo paths (for empty type)
-	CloneURLs []string `json:"clone_urls"` // multiple git URLs (for clone type)
+	Repos     []string `json:"repos"`      // local repo paths; may accompany clone URLs
+	CloneURLs []string `json:"clone_urls"` // git URLs; may accompany local repo paths
 	Branch    string   `json:"branch"`     // optional branch name
 	Path      string   `json:"path"`       // optional workspace directory override
 }

@@ -30,7 +30,7 @@ func BuildStoreBackedCreateWorkspace(s storepkg.Store) service.WorkspaceCreateFn
 		return nil
 	}
 	return func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
-		if req.Type == "clone" {
+		if req.Type == "clone" || len(req.CloneURLs) > 0 {
 			return createStoreBackedCloneWorkspace(ctx, s, req)
 		}
 		return createStoreBackedEmptyWorkspace(ctx, s, req)
@@ -218,8 +218,7 @@ func addReposToStoreBackedWorkspace(ctx context.Context, s storepkg.Store, req s
 	branch, err := loomgit.InteractiveBranch(key, "lead")
 	if err != nil {
 		cleanupAttachedWorktrees(created)
-		cleanupClonedRepos(clonedRepos)
-		return service.WorkspaceCreateResult{}, err
+		return service.WorkspaceCreateResult{}, errors.Join(err, cleanupClonedRepos(clonedRepos))
 	}
 	localRecords := make([]loomgit.WorkspaceRepo, 0, len(repos))
 	for _, repo := range prepared {
@@ -228,12 +227,11 @@ func addReposToStoreBackedWorkspace(ctx context.Context, s storepkg.Store, req s
 	for _, repo := range clonedRepos {
 		base, err := localworkspace.PrepareWorkspaceBase(repo.Path, key, "origin", trunk)
 		if err == nil {
-			_, err = cli.RunGitCommand(repo.Path, "checkout", "-b", branch, base)
+			err = loomgit.CheckoutNewBranch(ctx, repo.Path, branch, base)
 		}
 		if err != nil {
 			cleanupAttachedWorktrees(created)
-			cleanupClonedRepos(clonedRepos)
-			return service.WorkspaceCreateResult{}, fmt.Errorf("open cloned repo %q: %w", repo.Name, err)
+			return service.WorkspaceCreateResult{}, errors.Join(fmt.Errorf("open cloned repo %q: %w", repo.Name, err), cleanupClonedRepos(clonedRepos))
 		}
 		localRecords = append(localRecords, loomgit.WorkspaceRepo{Workspace: key, Repo: repo.Name, Trunk: trunk, WorkspaceBranch: branch, BaseSHA: base})
 	}
@@ -242,8 +240,7 @@ func addReposToStoreBackedWorkspace(ctx context.Context, s storepkg.Store, req s
 		session, err = loomworkspace.BeginAttach(ctx, key, wsDir, localRecords)
 		if err != nil {
 			cleanupAttachedWorktrees(created)
-			cleanupClonedRepos(clonedRepos)
-			return service.WorkspaceCreateResult{}, err
+			return service.WorkspaceCreateResult{}, errors.Join(err, cleanupClonedRepos(clonedRepos))
 		}
 		defer func() { _ = session.Close() }()
 	}
@@ -366,7 +363,9 @@ func persistAddReposRecords(ctx context.Context, s storepkg.Store, key, wsDir, b
 			}
 		}
 		cleanupAttachedWorktrees(created)
-		cleanupClonedRepos(clonedRepos)
+		if err := cleanupClonedRepos(clonedRepos); err != nil {
+			slog.Warn("retained clone during repo attachment rollback", "workspace", key, "err", err)
+		}
 	}
 
 	for _, r := range repos {
@@ -454,6 +453,27 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 		return service.WorkspaceCreateResult{}, err
 	}
 	wsDir := wsPlan.path
+	var resolved []resolvedRepo
+	if len(req.Repos) > 0 {
+		resolved, err = resolveRepoPaths(req.Repos)
+		if err != nil {
+			return service.WorkspaceCreateResult{}, err
+		}
+	}
+	seen := make(map[string]bool, len(resolved))
+	for _, repo := range resolved {
+		seen[repo.name] = true
+	}
+	plannedSeen := make(map[string]bool, len(seen)+len(cloneURLs))
+	for name := range seen {
+		plannedSeen[name] = true
+	}
+	plannedClones := make([]loomworkspace.Source, 0, len(cloneURLs))
+	for _, url := range cloneURLs {
+		name := deduplicateRepoName(repoNameFromURL(url), plannedSeen)
+		plannedSeen[name] = true
+		plannedClones = append(plannedClones, loomworkspace.Source{Name: name, Path: filepath.Join(wsDir, name)})
+	}
 	branch := req.Branch
 	if branch == "" {
 		branch = "main"
@@ -469,13 +489,17 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 		return service.WorkspaceCreateResult{}, err
 	}
 	committed := false
+	rolledBack := false
 	retainForRecovery := false
 	defer func() {
-		if !committed && !retainForRecovery {
+		if !committed && !retainForRecovery && !rolledBack {
 			_ = session.Rollback(context.Background())
 		}
 		_ = session.Close()
 	}()
+	if err := session.PlanClones(ctx, plannedClones); err != nil {
+		return service.WorkspaceCreateResult{}, err
+	}
 
 	if _, err := s.Workspaces().Create(ctx, storepkg.WorkspaceCreate{
 		Key:           key,
@@ -509,29 +533,51 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 		rollbackStore()
 		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace cloning: %w", err)
 	}
-	repos, err := cloneRepos(ctx, cloneURLs, wsDir)
+	repos, err := cloneReposWithSeen(ctx, cloneURLs, wsDir, seen)
 	if err != nil {
 		cleanupWorkspaceRoot(wsPlan)
+		if strings.Contains(err.Error(), "partial clone retained at ") {
+			retainForRecovery = true
+			_ = markCreationAttention(context.Background(), s, key, loomworkspace.Creation{Name: req.Name, Path: wsDir, Trunk: branch}, err)
+			return service.WorkspaceCreateResult{}, err
+		}
 		rollbackStore()
 		return service.WorkspaceCreateResult{}, err
+	}
+	rollbackClones := func() error {
+		if err := cleanupCloneWorkspace(wsPlan, repos[:len(cloneURLs)]); err != nil {
+			retainForRecovery = true
+			_ = markCreationAttention(context.Background(), s, key, loomworkspace.Creation{Name: req.Name, Path: wsDir, Trunk: branch}, err)
+			return err
+		}
+		if err := session.Rollback(context.Background()); err != nil {
+			retainForRecovery = true
+			_ = markCreationAttention(context.Background(), s, key, loomworkspace.Creation{Name: req.Name, Path: wsDir, Trunk: branch}, err)
+			return err
+		}
+		rolledBack = true
+		rollbackStore()
+		return nil
 	}
 	sources := make([]loomworkspace.Source, 0, len(repos))
 	for _, repo := range repos {
 		sources = append(sources, loomworkspace.Source{Name: repo.Name, Path: repo.Path})
 	}
+	localSources := make([]loomworkspace.Source, 0, len(resolved))
+	for _, repo := range resolved {
+		localSources = append(localSources, loomworkspace.Source{Name: repo.name, Path: repo.path})
+	}
+	if err := session.AddWorktrees(ctx, key, branch, wsDir, localSources); err != nil {
+		return service.WorkspaceCreateResult{}, errors.Join(err, rollbackClones())
+	}
 	if err := session.AdoptClones(ctx, sources); err != nil {
-		cleanupCloneWorkspace(wsPlan, repos)
-		rollbackStore()
-		return service.WorkspaceCreateResult{}, err
+		return service.WorkspaceCreateResult{}, errors.Join(err, rollbackClones())
 	}
-	rollbackClones := func() {
-		cleanupCloneWorkspace(wsPlan, repos)
-		rollbackStore()
+	for _, repo := range resolved {
+		repos = append(repos, worktreeRepoConfig(repo, filepath.Join(wsDir, repo.name), branch))
 	}
-
 	if err := updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateInitializing); err != nil {
-		rollbackClones()
-		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace initializing: %w", err)
+		return service.WorkspaceCreateResult{}, errors.Join(fmt.Errorf("mark workspace initializing: %w", err), rollbackClones())
 	}
 	for _, r := range repos {
 		remoteURL := gitRemoteURL(r.Path, "origin")
@@ -542,17 +588,14 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 			DefaultBranch: branch,
 			SourceRepoID:  r.SourceRepoID,
 		}); err != nil {
-			rollbackClones()
-			return service.WorkspaceCreateResult{}, fmt.Errorf("create repo %q in store: %w", r.Name, err)
+			return service.WorkspaceCreateResult{}, errors.Join(fmt.Errorf("create repo %q in store: %w", r.Name, err), rollbackClones())
 		}
 	}
 	if err := saveLocalWorkspaceState(key, wsDir, repos, true); err != nil {
-		rollbackClones()
-		return service.WorkspaceCreateResult{}, err
+		return service.WorkspaceCreateResult{}, errors.Join(err, rollbackClones())
 	}
 	if err := updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateReady); err != nil {
-		rollbackClones()
-		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace ready: %w", err)
+		return service.WorkspaceCreateResult{}, errors.Join(fmt.Errorf("mark workspace ready: %w", err), rollbackClones())
 	}
 	retainForRecovery = true
 	if err := session.RowsWritten(ctx); err != nil {

@@ -45,6 +45,15 @@ func InteractiveBranch(workspace, lead string) (string, error) {
 	return branch(workspace, "interactive", lead)
 }
 
+func IsInteractiveLeadBranch(name string) bool {
+	parts := strings.Split(name, "/")
+	if len(parts) != 5 {
+		return false
+	}
+	want, err := InteractiveBranch(parts[2], "lead")
+	return err == nil && name == want
+}
+
 func ChangeBranch(workspace, change string) (string, error) {
 	return branch(workspace, "change", change)
 }

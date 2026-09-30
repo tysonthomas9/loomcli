@@ -2,6 +2,7 @@ package workspacemgr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	loomworkspace "github.com/tysonthomas9/loomcli/internal/loomgit/workspace"
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
@@ -316,8 +318,7 @@ func cloneReposWithSeen(ctx context.Context, cloneURLs []string, wsDir string, s
 
 	for _, cloneURL := range cloneURLs {
 		if ctx.Err() != nil {
-			cleanupClonedRepos(repos)
-			return nil, ctx.Err()
+			return nil, errors.Join(ctx.Err(), cleanupClonedRepos(repos))
 		}
 
 		repoName := deduplicateRepoName(repoNameFromURL(cloneURL), seenNames)
@@ -325,8 +326,8 @@ func cloneReposWithSeen(ctx context.Context, cloneURLs []string, wsDir string, s
 
 		clonePath := filepath.Join(wsDir, repoName)
 		if err := localworkspace.CloneRepoTo(ctx, cloneURL, clonePath); err != nil {
-			cleanupClonedRepos(repos)
-			return nil, workspaceerrors.New(workspaceerrors.GitFailed, err.Error(), err)
+			cleanupErr := errors.Join(loomworkspace.CleanupFreshClone(clonePath), cleanupClonedRepos(repos))
+			return nil, errors.Join(workspaceerrors.New(workspaceerrors.GitFailed, err.Error(), err), cleanupErr)
 		}
 
 		repos = append(repos, config.RepoConfig{
@@ -339,12 +340,14 @@ func cloneReposWithSeen(ctx context.Context, cloneURLs []string, wsDir string, s
 	return repos, nil
 }
 
-func cleanupClonedRepos(repos []config.RepoConfig) {
+func cleanupClonedRepos(repos []config.RepoConfig) error {
+	var failures []error
 	for _, repo := range repos {
 		if repo.Path != "" {
-			_ = os.RemoveAll(repo.Path)
+			failures = append(failures, loomworkspace.CleanupFreshClone(repo.Path))
 		}
 	}
+	return errors.Join(failures...)
 }
 
 // deduplicateRepoName appends a numeric suffix if the name is already taken.
@@ -362,11 +365,14 @@ func deduplicateRepoName(name string, seen map[string]bool) string {
 
 func cleanupWorkspaceRoot(plan workspaceDirPlan) {
 	if plan.removeRootOnRollback && plan.path != "" {
-		_ = os.RemoveAll(plan.path)
+		_ = os.Remove(plan.path)
 	}
 }
 
-func cleanupCloneWorkspace(plan workspaceDirPlan, repos []config.RepoConfig) {
-	cleanupClonedRepos(repos)
+func cleanupCloneWorkspace(plan workspaceDirPlan, repos []config.RepoConfig) error {
+	if err := cleanupClonedRepos(repos); err != nil {
+		return err
+	}
 	cleanupWorkspaceRoot(plan)
+	return nil
 }
