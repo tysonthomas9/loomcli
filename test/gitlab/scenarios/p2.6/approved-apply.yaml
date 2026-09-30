@@ -1,0 +1,8 @@
+name: approved apply preserves working edits and serializes terminal commits
+task: P2.6
+git: [min, latest]
+fixture: loomcli
+when:
+  - go_check: approved_apply
+then:
+  - go_check: no_error

@@ -52,6 +52,20 @@ type Revision struct {
 	Incomplete                   bool
 }
 
+// AppliedLayer attributes commits installed in a lead's working area.
+// P2.13 extends this log with the lead's own change.
+type AppliedLayer struct {
+	RequestID, Workspace, Lead, Change string
+	Revision                           int
+	OldTip, NewTip, Phase              string
+	Commits, DroppedCommits            []string
+	CommitDetails                      []AppliedCommit
+}
+
+type AppliedCommit struct {
+	SHA, Change, Revision, Task, Attempt string
+}
+
 // Verdict is an immutable decision about one exact revision head.
 type Verdict struct {
 	ID                                        int64

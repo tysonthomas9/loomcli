@@ -69,6 +69,8 @@ func (s *state) goCheck(name string) error {
 	case "trial_merge":
 		// Proves clean, conflict, dropped-commit, and old-version behavior under the lab Git.
 		return s.packageTests("./internal/loomgit/internal/replay", "Test(TrialMergeCleanAndConflictLeaveCheckoutUnchanged|TrialMergeMultiCommitAndDrop|TrialMergeStopsAtFirstConflictingCommit|TrialMergeUsesFirstParentOfMergeCommit|TrialMergePreservesAuthorMessageAndTrailers|VersionRequirement)")
+	case "approved_apply":
+		return s.packageTests("./internal/loomgit/apply", "TestApply.*")
 	case "review_patch_ids":
 		return s.packageTests("./internal/loomgit/review", "TestCarryForwardCleanPatchIDsAndEmptyDroppedCommit")
 	case "process_lock":
