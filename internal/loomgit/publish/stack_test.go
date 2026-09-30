@@ -557,7 +557,7 @@ func (f *fakeForge) PullsForCommit(context.Context, string, string, string) ([]s
 	return nil, nil
 }
 
-func landingStackFixture(t *testing.T) (fixture, *fakeForge, loomgit.Revision) {
+func landingStackFixture(t *testing.T, conflict bool, backend string) (fixture, *fakeForge, loomgit.Revision) {
 	fixture := newFixture(t)
 	ctx := context.Background()
 	first := stackRevision(t, fixture, "A", 1, fixture.base)
@@ -573,18 +573,10 @@ func landingStackFixture(t *testing.T) (fixture, *fakeForge, loomgit.Revision) {
 	if _, err := publishStack(ctx, fixture.store, StackRequest{Request: request, StackID: "feature-1", Changes: []string{"A", "B"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.store.RecordStackBackend(ctx, "W", "feature-1", "loom"); err != nil {
+	if err := fixture.store.RecordStackBackend(ctx, "W", "feature-1", backend); err != nil {
 		t.Fatal(err)
 	}
-	trunk := filepath.Join(t.TempDir(), "trunk")
-	git(t, fixture.repo, "worktree", "add", "-q", "--detach", trunk, fixture.base)
-	if err := os.WriteFile(filepath.Join(trunk, "A"), []byte("A1"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	git(t, trunk, "add", "A")
-	git(t, trunk, "commit", "-qm", "squash A")
-	merged := git(t, trunk, "rev-parse", "HEAD")
-	git(t, trunk, "push", "-q", "origin", "HEAD:refs/heads/develop")
+	merged := squashLandingPredecessor(t, fixture, conflict)
 	if err := fixture.store.MarkLanded(ctx, "W", "A", "merge_commit"); err != nil {
 		t.Fatal(err)
 	}
@@ -607,8 +599,28 @@ func landingStackFixture(t *testing.T) (fixture, *fakeForge, loomgit.Revision) {
 	return fixture, forge, second
 }
 
+func squashLandingPredecessor(t *testing.T, fixture fixture, conflict bool) string {
+	t.Helper()
+	trunk := filepath.Join(t.TempDir(), "trunk")
+	git(t, fixture.repo, "worktree", "add", "-q", "--detach", trunk, fixture.base)
+	if err := os.WriteFile(filepath.Join(trunk, "A"), []byte("squashed A"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, trunk, "add", "A")
+	if conflict {
+		if err := os.WriteFile(filepath.Join(trunk, "B"), []byte("trunk B"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		git(t, trunk, "add", "B")
+	}
+	git(t, trunk, "commit", "-qm", "squash A")
+	merged := git(t, trunk, "rev-parse", "HEAD")
+	git(t, trunk, "push", "-q", "origin", "HEAD:refs/heads/develop")
+	return merged
+}
+
 func TestLandingReconcileRestacksPublishedStack(t *testing.T) {
-	fixture, forge, second := landingStackFixture(t)
+	fixture, forge, second := landingStackFixture(t, false, "loom")
 	ctx := context.Background()
 	if err := landing.ReconcileWithOptions(ctx, fixture.store, forge, landing.Options{Restack: RestackOffer}); err != nil {
 		t.Fatal(err)
@@ -633,6 +645,95 @@ func TestLandingReconcileRestacksPublishedStack(t *testing.T) {
 	}
 	if contents, err := os.ReadFile(filepath.Join(fixture.repo, "unsaved.txt")); err != nil || string(contents) != "keep me" {
 		t.Fatalf("uncommitted file = %q, %v", contents, err)
+	}
+}
+
+func TestLandingReconcilePersistsRestackConflict(t *testing.T) {
+	fixture, forge, second := landingStackFixture(t, true, "loom")
+	ctx := context.Background()
+	refs := git(t, fixture.repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/loom")
+	before := git(t, fixture.repo, "rev-parse", "HEAD")
+	options := landing.Options{Restack: RestackOffer}
+	codeIs(t, landing.ReconcileWithOptions(ctx, fixture.store, forge, options), loomgit.RestackConflict)
+	if got := git(t, fixture.repo, "rev-parse", "HEAD"); got != before {
+		t.Fatalf("working area changed from %s to %s", before, got)
+	}
+	if got := git(t, fixture.repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/loom"); got != refs {
+		t.Fatal("conflicting restack changed Loom refs")
+	}
+	publication, _, err := fixture.store.Publication(ctx, "W", "B")
+	if err != nil || publication.Head != second.HeadSHA || git(t, fixture.remote, "rev-parse", "refs/heads/"+publication.Branch) != second.HeadSHA {
+		t.Fatalf("conflicting restack moved published B: %+v, %v", publication, err)
+	}
+	store, err := journal.OpenSQLite(filepath.Join(filepath.Dir(fixture.repo), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	state, err := store.StackState(ctx, "W", "feature-1")
+	if err != nil || state.Status != "restack_conflict" || len(state.Paths) != 1 || state.Paths[0] != "B" {
+		t.Fatalf("durable stack state = %+v, %v", state, err)
+	}
+	codeIs(t, landing.ReconcileWithOptions(ctx, store, forge, options), loomgit.RestackConflict)
+	offers, err := store.OpenRestackOffers(ctx)
+	if err != nil || len(offers) != 1 {
+		t.Fatalf("retryable restack offers = %+v, %v", offers, err)
+	}
+	events, err := store.PendingEvents(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attention int
+	for _, event := range events {
+		if event.Kind == "git.attention_required" {
+			attention++
+			if !strings.Contains(string(event.Payload), "B") || !strings.Contains(string(event.Payload), "Resolve") {
+				t.Fatalf("attention payload = %s", event.Payload)
+			}
+		}
+	}
+	if attention != 1 {
+		t.Fatalf("attention events after retry = %d", attention)
+	}
+}
+
+func TestLandingReconcileHoldsOverlappingEdit(t *testing.T) {
+	fixture, forge, second := landingStackFixture(t, false, "loom")
+	ctx := context.Background()
+	if err := os.WriteFile(filepath.Join(fixture.repo, "A"), []byte("user edit"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	codeIs(t, landing.ReconcileWithOptions(ctx, fixture.store, forge,
+		landing.Options{Restack: RestackOffer}), loomgit.SwapHeld)
+	state, err := fixture.store.StackState(ctx, "W", "feature-1")
+	if err != nil || state.Status != "swap_held" || len(state.Paths) != 1 || state.Paths[0] != "A" {
+		t.Fatalf("held stack state = %+v, %v", state, err)
+	}
+	if contents, err := os.ReadFile(filepath.Join(fixture.repo, "A")); err != nil || string(contents) != "user edit" {
+		t.Fatalf("overlapping edit = %q, %v", contents, err)
+	}
+	publication, _, err := fixture.store.Publication(ctx, "W", "B")
+	if err != nil || publication.Head != second.HeadSHA {
+		t.Fatalf("held publication = %+v, %v", publication, err)
+	}
+}
+
+func TestLandingReconcileRefusesNativeWithoutAdoption(t *testing.T) {
+	fixture, forge, second := landingStackFixture(t, false, "native")
+	ctx := context.Background()
+	before := git(t, fixture.repo, "rev-parse", "HEAD")
+	codeIs(t, landing.ReconcileWithOptions(ctx, fixture.store, forge,
+		landing.Options{Restack: RestackOffer}), loomgit.AttentionRequired)
+	if got := git(t, fixture.repo, "rev-parse", "HEAD"); got != before {
+		t.Fatalf("native refusal changed working area from %s to %s", before, got)
+	}
+	publication, _, err := fixture.store.Publication(ctx, "W", "B")
+	if err != nil || publication.Head != second.HeadSHA || git(t, fixture.remote, "rev-parse", "refs/heads/"+publication.Branch) != second.HeadSHA {
+		t.Fatalf("native refusal changed publication: %+v, %v", publication, err)
+	}
+	offers, err := fixture.store.OpenRestackOffers(ctx)
+	if err != nil || len(offers) != 1 {
+		t.Fatalf("native refusal lost offer: %+v, %v", offers, err)
 	}
 }
 
@@ -691,5 +792,31 @@ func TestPublicationSchemaAddsStackIdentityToExistingJournal(t *testing.T) {
 	publication, found, err := store.Publication(context.Background(), "W", "A")
 	if err != nil || !found || publication.StackID != "feature-1" {
 		t.Fatalf("migrated publication = %+v, %v", publication, err)
+	}
+}
+
+func TestStackStatusSchemaUpgradesBackendRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "store.db")
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE stack_backends (
+		workspace TEXT NOT NULL, stack_id TEXT NOT NULL, backend TEXT NOT NULL,
+		PRIMARY KEY(workspace, stack_id));
+		INSERT INTO stack_backends VALUES ('W','feature-1','loom')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := journal.OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	state, err := store.StackState(context.Background(), "W", "feature-1")
+	if err != nil || state.Backend != "loom" || state.Status != "" || len(state.Paths) != 0 {
+		t.Fatalf("migrated stack state = %+v, %v", state, err)
 	}
 }

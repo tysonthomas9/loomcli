@@ -43,18 +43,42 @@ func RestackOffer(ctx context.Context, offer journal.RestackOffer, forge landing
 	}
 	var revision int
 	err = stacklock.With(ctx, offer.Workspace, publication.StackID, func(lockedCtx context.Context) error {
+		var paths []string
 		var restackErr error
-		revision, restackErr = pull.RestackOffer(lockedCtx, offer)
+		revision, paths, restackErr = pull.RestackOfferWithPaths(lockedCtx, offer)
 		if restackErr != nil {
-			var coded *loomgit.Error
-			if errors.As(restackErr, &coded) && coded.Code() == string(loomgit.Conflict) {
-				return loomgit.NewError(loomgit.RestackConflict, restackErr.Error(), restackErr)
-			}
-			return restackErr
+			return recordRestackError(lockedCtx, store, offer, publication.StackID, paths, restackErr)
+		}
+		if err := store.ClearStackAttention(lockedCtx, offer.Workspace, publication.StackID); err != nil {
+			return err
 		}
 		return publishRestackedOffer(lockedCtx, store, offer, publication, publisher)
 	})
 	return revision, err
+}
+
+func recordRestackError(ctx context.Context, store *journal.SQLite, offer journal.RestackOffer,
+	stackID string, paths []string, cause error) error {
+	var coded *loomgit.Error
+	if !errors.As(cause, &coded) {
+		return cause
+	}
+	status := ""
+	switch coded.Code() {
+	case string(loomgit.Conflict):
+		status = "restack_conflict"
+	case string(loomgit.SwapHeld):
+		status = "swap_held"
+	default:
+		return cause
+	}
+	if err := store.RecordStackAttention(ctx, offer, stackID, status, paths); err != nil {
+		return errors.Join(cause, err)
+	}
+	if status == "restack_conflict" {
+		return loomgit.NewError(loomgit.RestackConflict, cause.Error(), cause)
+	}
+	return cause
 }
 
 func publishRestackedOffer(ctx context.Context, store *journal.SQLite, offer journal.RestackOffer,

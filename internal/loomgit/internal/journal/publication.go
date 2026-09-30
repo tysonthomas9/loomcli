@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -66,9 +67,19 @@ func createPublicationSchema(db *sql.DB) error {
 func createStackBackendSchema(db *sql.DB) error {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS stack_backends (
 		workspace TEXT NOT NULL, stack_id TEXT NOT NULL, backend TEXT NOT NULL,
+		status TEXT NOT NULL DEFAULT '', paths TEXT NOT NULL DEFAULT '[]',
 		PRIMARY KEY(workspace, stack_id)
 	)`)
-	return err
+	if err != nil {
+		return err
+	}
+	for _, column := range []string{"status TEXT NOT NULL DEFAULT ''", "paths TEXT NOT NULL DEFAULT '[]'"} {
+		_, err = db.Exec(`ALTER TABLE stack_backends ADD COLUMN ` + column)
+		if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *SQLite) RecordStackBackend(ctx context.Context, workspace, stackID, backend string) error {
@@ -92,6 +103,67 @@ func (s *SQLite) StackBackend(ctx context.Context, workspace, stackID string) (s
 	var backend string
 	err := s.db.QueryRowContext(ctx, `SELECT backend FROM stack_backends WHERE workspace=? AND stack_id=?`, workspace, stackID).Scan(&backend)
 	return backend, err
+}
+
+type StackState struct {
+	Backend, Status string
+	Paths           []string
+}
+
+func (s *SQLite) StackState(ctx context.Context, workspace, stackID string) (StackState, error) {
+	var state StackState
+	var paths string
+	err := s.db.QueryRowContext(ctx, `SELECT backend,status,paths FROM stack_backends
+		WHERE workspace=? AND stack_id=?`, workspace, stackID).Scan(&state.Backend, &state.Status, &paths)
+	if err != nil {
+		return StackState{}, err
+	}
+	err = json.Unmarshal([]byte(paths), &state.Paths)
+	return state, err
+}
+
+func (s *SQLite) RecordStackAttention(ctx context.Context, offer RestackOffer, stackID, status string, paths []string) error {
+	if stackID == "" || (status != "restack_conflict" && status != "swap_held") || len(paths) == 0 {
+		return errors.New("stack, attention status and paths are required")
+	}
+	encodedPaths, err := json.Marshal(paths)
+	if err != nil {
+		return err
+	}
+	message := "Resolve the listed conflicts, then retry restack."
+	if status == "swap_held" {
+		message = "Save or move the listed working-area edits, then retry restack."
+	}
+	payload, err := json.Marshal(map[string]any{"workspace": offer.Workspace, "stack_id": stackID,
+		"change_id": offer.Change, "status": status, "paths": paths, "message": message})
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `UPDATE stack_backends SET status=?,paths=? WHERE workspace=? AND stack_id=?`,
+		status, string(encodedPaths), offer.Workspace, stackID)
+	if err != nil {
+		return err
+	}
+	if updated, err := result.RowsAffected(); err != nil || updated != 1 {
+		return errors.Join(err, ErrStale)
+	}
+	key := fmt.Sprintf("stack-attention:%s:%s:%s:%s:%s:%s", offer.Workspace, stackID,
+		offer.Change, offer.Predecessor, offer.TrunkSHA, status)
+	if err := queueEvent(ctx, tx, key, "git.attention_required", payload); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *SQLite) ClearStackAttention(ctx context.Context, workspace, stackID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE stack_backends SET status='',paths='[]'
+		WHERE workspace=? AND stack_id=?`, workspace, stackID)
+	return err
 }
 
 func (s *SQLite) Publication(ctx context.Context, workspace, change string) (Publication, bool, error) {
