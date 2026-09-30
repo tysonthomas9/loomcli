@@ -199,16 +199,8 @@ func (s Sweep) inspect(ctx context.Context, row journal.RetainedCopy, now time.T
 		result.Reason = "retention window open"
 		return result, nil
 	}
-	if err := safeCopy(ctx, s.Store, row, apply); err != nil {
-		result.Reason = err.Error()
-		return result, nil
-	}
-	result.Action = "remove"
-	if !apply {
-		result.Reason = "dry run"
-		return result, nil
-	}
-	return result, s.Store.MarkRetainedCopyRemoved(ctx, row)
+	result.Reason = safeCopy(ctx, s.Store, row).Error()
+	return result, nil
 }
 
 func (s Sweep) eligibility(ctx context.Context, row journal.RetainedCopy) (string, string, error) {
@@ -248,7 +240,7 @@ func (s Sweep) eligibility(ctx context.Context, row journal.RetainedCopy) (strin
 	return state, "", nil
 }
 
-func safeCopy(ctx context.Context, store *journal.SQLite, row journal.RetainedCopy, apply bool) error {
+func safeCopy(ctx context.Context, store *journal.SQLite, row journal.RetainedCopy) error {
 	if err := recordedAgentCopy(row); err != nil {
 		return err
 	}
@@ -289,10 +281,10 @@ func safeCopy(ctx context.Context, store *journal.SQLite, row journal.RetainedCo
 	if err := checkCopyContent(ctx, copyRunner, expected); err != nil {
 		return err
 	}
-	return removeCopy(ctx, row, apply, runner, copyRunner, expected)
+	return removeCopy(ctx, row, runner, copyRunner, expected)
 }
 
-func removeCopy(ctx context.Context, row journal.RetainedCopy, apply bool,
+func removeCopy(ctx context.Context, row journal.RetainedCopy,
 	runner, copyRunner *gitexec.Runner, expected string) error {
 	common, err := copyRunner.Run(ctx, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
@@ -303,9 +295,6 @@ func removeCopy(ctx context.Context, row journal.RetainedCopy, apply bool,
 		return err
 	}
 	if strings.TrimSpace(string(common)) == strings.TrimSpace(string(sourceCommon)) {
-		if !apply {
-			return nil
-		}
 		return errors.New("worktree cleanup is disabled until capture writers share the copy lease")
 	}
 	if err := cloneRefsCaptured(ctx, runner, copyRunner, expected); err != nil {
@@ -313,9 +302,6 @@ func removeCopy(ctx context.Context, row journal.RetainedCopy, apply bool,
 	}
 	if filepath.Base(row.Path) != row.Attempt {
 		return errors.New("clone path does not match recorded attempt")
-	}
-	if !apply {
-		return nil
 	}
 	return errors.New("clone cleanup is disabled until capture writers share the copy lease")
 }

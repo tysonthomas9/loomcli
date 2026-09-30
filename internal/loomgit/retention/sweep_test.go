@@ -384,7 +384,7 @@ func TestSweepLandedCopyUsesCaptureAndWorkspaceWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	results, err = sweep.Run(ctx, false)
-	if err != nil || results[0].Action != "remove" {
+	if err != nil || results[0].Action != "keep" || !strings.Contains(results[0].Reason, "worktree cleanup is disabled") {
 		t.Fatalf("dry run: %+v, %v", results, err)
 	}
 	if _, err := os.Stat(copyPath); err != nil {
