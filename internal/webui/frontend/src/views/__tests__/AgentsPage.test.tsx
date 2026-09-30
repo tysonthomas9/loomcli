@@ -191,7 +191,7 @@ describe("AgentsPage", () => {
     );
   });
 
-  it("shows the host publisher requirement for local PR mode", async () => {
+  it("queues local delivery for a GitHub-backed repo", async () => {
     mocks.localSettings = {
       settings: {
         agent_runtime: { default: "local" },
@@ -212,15 +212,20 @@ describe("AgentsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run lead epic" }));
 
     await waitFor(() => {
-      expect(mocks.showToast).toHaveBeenCalledWith(
-        expect.stringMatching(/host_publish_required.*host publisher in P3\.3/),
-        { type: "error" },
+      expect(startWorkflowRun).toHaveBeenCalledWith(
+        "DESKTOP-QA",
+        "epic-runner",
+        {
+          epicId: "EPIC-1",
+          leadName: "lead-1",
+          requestedBy: "ui",
+          runner: "local-task-runner",
+        },
       );
     });
-    expect(startWorkflowRun).not.toHaveBeenCalled();
   });
 
-  it("shows the host publisher requirement for Daytona PR mode", async () => {
+  it("queues Daytona without PR delivery for a GitHub-backed repo", async () => {
     mocks.localSettings = {
       settings: {
         agent_runtime: { default: "daytona" },
@@ -241,12 +246,19 @@ describe("AgentsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run lead epic" }));
 
     await waitFor(() => {
-      expect(mocks.showToast).toHaveBeenCalledWith(
-        expect.stringMatching(/host_publish_required.*host publisher in P3\.3/),
-        { type: "error" },
+      expect(startWorkflowRun).toHaveBeenCalledWith(
+        "DESKTOP-QA",
+        "epic-runner",
+        {
+          epicId: "EPIC-1",
+          leadName: "lead-1",
+          requestedBy: "ui",
+          runner: "daytona-task-runner",
+          repoUrl: "https://github.com/tyson/sandbox.git",
+          baseBranch: "develop",
+        },
       );
     });
-    expect(startWorkflowRun).not.toHaveBeenCalled();
   });
 
   it("renders the files tab with the agent-rooted v3 browser and gates shortcuts while inactive", async () => {
