@@ -76,6 +76,25 @@ func seedSweeperFixture(t *testing.T, st *memstore.Store, ws string, driverRunSt
 	}
 }
 
+type captureOrderStore struct {
+	store.Store
+	onRecover func(context.Context, string, string, store.StaleTaskRunRecovery)
+}
+
+func (st captureOrderStore) DriverRuns() store.DriverRunStore {
+	return captureOrderDriverRuns{DriverRunStore: st.Store.DriverRuns(), onRecover: st.onRecover}
+}
+
+type captureOrderDriverRuns struct {
+	store.DriverRunStore
+	onRecover func(context.Context, string, string, store.StaleTaskRunRecovery)
+}
+
+func (runs captureOrderDriverRuns) RecoverStaleTaskRuns(ctx context.Context, workspace, runID string, recovery store.StaleTaskRunRecovery) (*store.StaleTaskRunRecoveryResult, error) {
+	runs.onRecover(ctx, workspace, runID, recovery)
+	return runs.DriverRunStore.RecoverStaleTaskRuns(ctx, workspace, runID, recovery)
+}
+
 func TestStaleTaskSweeperRunOnce(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -248,27 +267,39 @@ func TestStaleTaskSweeperCapturesBeforeOwnershipRelease(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	sweeper := &StaleTaskSweeper{Store: st, WorkspaceKey: "WS", MaxAge: 5 * time.Minute}
-	result, err := sweeper.RunOnce(ctx)
-	if err != nil || result.Recovered != 1 {
-		t.Fatalf("sweep = %+v, %v", result, err)
-	}
-	if got, err := os.ReadFile(filepath.Join(copyPath, "untracked.txt")); err != nil || string(got) != "agent work\n" {
-		t.Fatalf("task copy was not retained: %q, %v", got, err)
-	}
 	gitStore, err := sql.Open("sqlite", journalPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = gitStore.Close() }()
 	var outcome, head string
-	var ready bool
-	err = gitStore.QueryRowContext(ctx, `SELECT outcome, head_sha, ready FROM change_revisions WHERE request_id = ?`, "driver:attempt-1").Scan(&outcome, &head, &ready)
-	if err != nil || outcome != "failed" || !ready {
-		t.Fatalf("failed revision = %q/%q/%v, %v", outcome, head, ready, err)
+	var ready, capturedBeforeRecovery bool
+	now := time.Now().UTC()
+	sweeper := &StaleTaskSweeper{Store: captureOrderStore{Store: st, onRecover: func(ctx context.Context, workspace, runID string, recovery store.StaleTaskRunRecovery) {
+		if workspace != "WS" || runID != "run-1" || !recovery.StaleBefore.Equal(now.Add(-5*time.Minute)) ||
+			recovery.ErrorClass != "stale_task_run" || recovery.ErrorMessage != "task run heartbeat is stale" {
+			t.Fatalf("unexpected ownership recovery: %s/%s %+v", workspace, runID, recovery)
+		}
+		if err := gitStore.QueryRowContext(ctx, `SELECT outcome, head_sha, ready FROM change_revisions WHERE request_id = ?`, "driver:attempt-1").Scan(&outcome, &head, &ready); err != nil || outcome != "failed" || !ready {
+			t.Fatalf("ownership released before failed capture: %q/%q/%v, %v", outcome, head, ready, err)
+		}
+		capturedBeforeRecovery = true
+	}}, WorkspaceKey: "WS", MaxAge: 5 * time.Minute, Now: func() time.Time { return now }}
+	result, err := sweeper.RunOnce(ctx)
+	if err != nil || result.Recovered != 1 || !capturedBeforeRecovery {
+		t.Fatalf("sweep = %+v, %v", result, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(copyPath, "untracked.txt")); err != nil || string(got) != "agent work\n" {
+		t.Fatalf("task copy was not retained: %q, %v", got, err)
 	}
 	if got := strings.TrimSpace(testGitOutput(t, source, "show", head+":untracked.txt")); got != "agent work" {
 		t.Fatalf("source revision lost work: %q", got)
+	}
+	if next, err := (&StaleTaskSweeper{Store: st, WorkspaceKey: "WS", MaxAge: 5 * time.Minute}).RunOnce(ctx); err != nil || next.Recovered != 0 {
+		t.Fatalf("cold sweep = %+v, %v", next, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(copyPath, "untracked.txt")); err != nil || string(got) != "agent work\n" {
+		t.Fatalf("cold sweep changed task copy: %q, %v", got, err)
 	}
 }
 

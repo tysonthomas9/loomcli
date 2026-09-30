@@ -45,7 +45,7 @@ func RunOnce(ctx context.Context, handlers Handlers) error {
 	if err != nil {
 		return err
 	}
-	var workspaceOpen, applyOpen bool
+	var workspaceOpen bool
 	for _, entry := range entries {
 		switch entry.Operation {
 		case "ensure_workspace", "attach_workspace_repos":
@@ -54,7 +54,6 @@ func RunOnce(ctx context.Context, handlers Handlers) error {
 				continue
 			}
 		case "apply":
-			applyOpen = true
 			if handlers.Apply != nil {
 				continue
 			}
@@ -67,7 +66,7 @@ func RunOnce(ctx context.Context, handlers Handlers) error {
 			return err
 		}
 	}
-	if applyOpen {
+	if handlers.Apply != nil {
 		return handlers.Apply.Recover(ctx)
 	}
 	return nil
