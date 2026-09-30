@@ -13,6 +13,20 @@ import (
 )
 
 func PullLocal(ctx context.Context, path, remote, sourceBranch, requestID string) (PullResult, error) {
+	return withLocalService(ctx, path, func(service *Service, area journal.WorkingArea) (PullResult, error) {
+		return service.Pull(ctx, PullRequest{Workspace: area.Workspace, Lead: area.Lead,
+			Repo: area.Repo, Remote: remote, SourceBranch: sourceBranch, RequestID: requestID})
+	})
+}
+
+func RestackLocal(ctx context.Context, path, baseSHA string, order []string, requestID string) (PullResult, error) {
+	return withLocalService(ctx, path, func(service *Service, area journal.WorkingArea) (PullResult, error) {
+		return service.Restack(ctx, RestackRequest{Workspace: area.Workspace, Lead: area.Lead,
+			Repo: area.Repo, BaseSHA: baseSHA, Order: order, RequestID: requestID})
+	})
+}
+
+func withLocalService(ctx context.Context, path string, action func(*Service, journal.WorkingArea) (PullResult, error)) (PullResult, error) {
 	journalPath := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
 	if _, err := os.Stat(journalPath); err != nil {
 		return PullResult{}, loomgit.NewError(loomgit.WorkspaceUnsupported, "revision journal is unavailable", err)
@@ -35,6 +49,5 @@ func PullLocal(ctx context.Context, path, remote, sourceBranch, requestID string
 	if err != nil {
 		return PullResult{}, err
 	}
-	return New(store, repo, runner).Pull(ctx, PullRequest{Workspace: area.Workspace, Lead: area.Lead,
-		Repo: area.Repo, Remote: remote, SourceBranch: sourceBranch, RequestID: requestID})
+	return action(New(store, repo, runner), area)
 }

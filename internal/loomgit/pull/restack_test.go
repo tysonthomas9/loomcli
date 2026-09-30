@@ -173,3 +173,20 @@ func TestRestackChangedPatchRequiresReview(t *testing.T) {
 		t.Fatalf("unchanged layer lost verdict: %v", err)
 	}
 }
+
+func TestRestackLocalEntryUsesRegisteredWorkingArea(t *testing.T) {
+	f := newFixture(t)
+	trunk := preparePull(t, f)
+	if _, err := f.apply(t); err != nil {
+		t.Fatal(err)
+	}
+	base := advanceTrunk(t, f, trunk, "trunk advance")
+	result, err := RestackLocal(context.Background(), f.dir, base, nil, "restack-local")
+	if err != nil || result.HeadSHA != f.git(t, "rev-parse", "HEAD") {
+		t.Fatalf("local restack: %+v, %v", result, err)
+	}
+	revision, err := f.store.GetRevision(context.Background(), "W", "C1", 2)
+	if err != nil || revision.Operation != "restack" || revision.DerivedFromChange != "C1" || revision.DerivedFromNumber != 1 {
+		t.Fatalf("local derived revision: %+v, %v", revision, err)
+	}
+}
