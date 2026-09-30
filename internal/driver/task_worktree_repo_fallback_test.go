@@ -3,11 +3,13 @@ package driver
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 )
 
 // captureWarnings redirects slog for the duration of a test and returns the
@@ -21,12 +23,7 @@ func captureWarnings(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-// A task with no repo selector lands in the alphabetically first workspace repo
-// because the list is sorted by name. That is arbitrary: with both registered, a
-// loomcli task is worked inside the fleet-db checkout. The pick is kept (most
-// issues currently arrive without a source_repo, and failing them would stop
-// dispatch) but it must be visible in the log.
-func TestSelectRepo_NoSelectorWarnsAboutTheArbitraryPick(t *testing.T) {
+func TestSelectRepo_NoSelectorRequiresSelection(t *testing.T) {
 	buf := captureWarnings(t)
 
 	repos := []*domain.Repo{
@@ -37,24 +34,16 @@ func TestSelectRepo_NoSelectorWarnsAboutTheArbitraryPick(t *testing.T) {
 	r := LocalTaskWorktreeResolver{}
 
 	got, err := r.selectRepo(context.Background(), "the live workspace", repos, TaskExecRequest{TaskID: "task-42"})
-	if err != nil {
-		t.Fatalf("selectRepo returned error: %v", err)
+	if got != nil || !errors.Is(err, loomgit.NewError(loomgit.RepoSelectionRequired, "", nil)) {
+		t.Fatalf("selectRepo = (%v, %v), want repo_selection_required", got, err)
 	}
-	if got == nil || got.Name != "fleet-db" {
-		t.Fatalf("selectRepo = %v, want the first repo (fleet-db)", got)
-	}
-
-	logged := buf.String()
-	if !strings.Contains(logged, "no repo selector") {
-		t.Errorf("fallback was not logged:\n%s", logged)
-	}
-	// The task id makes a wrong-repo diff traceable back to this pick, and the
-	// full candidate list is what tells a reader the pick was arbitrary rather
-	// than resolved — a chosen repo on its own looks deliberate.
 	for _, want := range []string{"task-42", "fleet-db", "harness-wrapper", "loomcli"} {
-		if !strings.Contains(logged, want) {
-			t.Errorf("warning does not mention %q:\n%s", want, logged)
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not mention %q: %v", want, err)
 		}
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("unexpected warning: %s", buf.String())
 	}
 }
 

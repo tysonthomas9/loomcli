@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -223,7 +224,7 @@ func TestStackLineageLookup_BaseRefForTask(t *testing.T) {
 // Regression for the review's HIGH finding: a stack with an empty RepoName (only
 // reachable via a hand-edited/legacy store) must NOT hijack an unrelated repo's
 // base, a stack for a different repo must not match, and a taskID present in more
-// than one stack for the same repo is ambiguous and falls open.
+// than one stack for the same repo is ambiguous and fails closed.
 func TestStackLineageLookup_RepoScopingAndAmbiguity(t *testing.T) {
 	ctx := context.Background()
 	stacks := stackstore.New(t.TempDir())
@@ -257,8 +258,22 @@ func TestStackLineageLookup_RepoScopingAndAmbiguity(t *testing.T) {
 	mustNode("epicA", "dup", "")
 	mustStack("epicB", "app", "trunk")
 	mustNode("epicB", "dup", "")
-	if ref, ok, err := lookup.BaseRefForTask(ctx, "TEST", "app", "dup"); err != nil || ok || ref != "" {
-		t.Fatalf("ambiguous task = (%q,%v,%v), want (\"\",false,nil)", ref, ok, err)
+	if ref, ok, err := lookup.BaseRefForTask(ctx, "TEST", "app", "dup"); ref != "" || ok ||
+		!errors.Is(err, loomgit.NewError(loomgit.LineageUnresolved, "", nil)) ||
+		!strings.Contains(err.Error(), "epicA") || !strings.Contains(err.Error(), "epicB") {
+		t.Fatalf("ambiguous task = (%q,%v,%v), want lineage_unresolved naming both stacks", ref, ok, err)
+	}
+}
+
+func TestStackLineageLookup_UnreadableStacksFile(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "stacks.json"), []byte("invalid json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, ok, err := (StackLineageLookup{Store: stackstore.New(dir)}).BaseRefForTask(ctx, "TEST", "app", "task-b")
+	if ok || !errors.Is(err, loomgit.NewError(loomgit.LineageUnresolved, "", nil)) {
+		t.Fatalf("unreadable stacks file = (%v, %v), want lineage_unresolved", ok, err)
 	}
 }
 
@@ -295,22 +310,17 @@ func TestStackLineageLookup_GraphCorruptionSurfaced(t *testing.T) {
 	}
 }
 
-// errLineage is a TaskLineageLookup that always errors, modeling a corrupt/
-// unreadable stack store on the dispatch hot path.
-type errLineage struct{}
-
-func (errLineage) BaseRefForTask(context.Context, string, string, string) (string, bool, error) {
-	return "", false, errors.New("boom: unreadable stack store")
-}
-
-// Regression for the review's MEDIUM finding: a lineage lookup ERROR must not
-// fail the task run — the resolver logs and falls back to the repo default
-// branch (pre-stacking behavior), so a corrupt stacks.json cannot break dispatch.
-func TestResolveTaskWorktree_LineageErrorFallsBackNotFatal(t *testing.T) {
+func TestResolveTaskWorktree_UnreadableStacksFileStopsBeforeTaskCopy(t *testing.T) {
 	f := setupLineageFixture(t)
-	r := LocalTaskWorktreeResolver{Store: f.resolver.Store, Lineage: errLineage{}}
-	got := resolveHead(t, r, "task-b", "task/run:err")
-	if got != f.mainHead {
-		t.Fatalf("lineage-error worktree HEAD = %s, want default-branch main HEAD %s (must not fail)", got, f.mainHead)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "stacks.json"), []byte("invalid json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := LocalTaskWorktreeResolver{Store: f.resolver.Store, Lineage: StackLineageLookup{Store: stackstore.New(dir)}}
+	_, err := r.ResolveTaskWorktree(context.Background(), TaskExecRequest{
+		WorkspaceKey: "TEST", TaskRunID: "task/run:err", TaskID: "task-b",
+	}, t.TempDir())
+	if !errors.Is(err, loomgit.NewError(loomgit.LineageUnresolved, "", nil)) {
+		t.Fatalf("unreadable stacks file = %v, want lineage_unresolved", err)
 	}
 }

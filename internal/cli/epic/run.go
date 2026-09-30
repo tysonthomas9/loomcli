@@ -143,16 +143,16 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 	// Stacked mode: project the epic's blocks DAG into the per-user stackstore
 	// before queueing so the workflow payload can carry the same lineage to
 	// sandboxed runners that cannot read the host stack store.
-	var stackProj *EpicStackProjection
-	if runStackedPRs && !runDryRun {
-		if proj, perr := projectEpicStackForRun(ctx, handle, ws, runParent, runID, runRepoURL, runBaseBranch); perr != nil {
-			fmt.Printf("[epic-run] WARN: stack projection skipped (tasks will base on the repo default branch): %v\n", perr)
-		} else {
-			stackProj = proj
-			fmt.Printf("[epic-run] projected stack %s on %s@%s: %d task(s) — %d chained, %d root(s) (%d fan-in, %d fan-out breaks); %d new\n",
-				proj.StackID, proj.RepoName, proj.RootBase, proj.Stats.Tasks, proj.Stats.LinearLinks, proj.Stats.Roots,
-				proj.Stats.FanInBreaks, proj.Stats.FanOutBreaks, len(proj.Created))
-		}
+	stackProj, err := prepareEpicRunStack(runStackedPRs, runDryRun, func() (*EpicStackProjection, error) {
+		return projectEpicStackForRun(ctx, handle, ws, runParent, runID, runRepoURL, runBaseBranch)
+	})
+	if err != nil {
+		return err
+	}
+	if stackProj != nil {
+		fmt.Printf("[epic-run] projected stack %s on %s@%s: %d task(s) — %d chained, %d root(s) (%d fan-in, %d fan-out breaks); %d new\n",
+			stackProj.StackID, stackProj.RepoName, stackProj.RootBase, stackProj.Stats.Tasks, stackProj.Stats.LinearLinks, stackProj.Stats.Roots,
+			stackProj.Stats.FanInBreaks, stackProj.Stats.FanOutBreaks, len(stackProj.Created))
 	}
 
 	payload, err := workflowPayload(stackProj)
@@ -189,6 +189,17 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	return nil
+}
+
+func prepareEpicRunStack(stacked, dryRun bool, project func() (*EpicStackProjection, error)) (*EpicStackProjection, error) {
+	if !stacked || dryRun {
+		return nil, nil
+	}
+	projection, err := project()
+	if err != nil {
+		return nil, fmt.Errorf("project epic stack: %w", err)
+	}
+	return projection, nil
 }
 
 func queueEpicWorkflowRun(ctx context.Context, st store.Store, ws, workflowName, runID string, payload json.RawMessage) (*domain.DriverRun, error) {
