@@ -60,8 +60,12 @@ func Capture(ctx context.Context, repo, workspace, attempt, taskID, taskTitle st
 // CaptureTaskCopy takes the agent lock before the source and copy repo leases.
 // Linked copies share the source lease, so they must not claim it twice.
 func CaptureTaskCopy(ctx context.Context, source, copyPath, workspace, attempt, taskID, taskTitle string) (Result, error) {
-	var result Result
 	journalPath := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
+	return CaptureTaskCopyAt(ctx, journalPath, source, copyPath, workspace, attempt, taskID, taskTitle)
+}
+
+func CaptureTaskCopyAt(ctx context.Context, journalPath, source, copyPath, workspace, attempt, taskID, taskTitle string) (Result, error) {
+	var result Result
 	err := WithTaskCopyLease(ctx, journalPath, source, copyPath, func(ctx context.Context) error {
 		var captureErr error
 		result, captureErr = Capture(ctx, copyPath, workspace, attempt, taskID, taskTitle)

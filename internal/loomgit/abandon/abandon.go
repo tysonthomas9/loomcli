@@ -207,7 +207,11 @@ func (service *Service) captureRevision(ctx context.Context, req Request) (loomg
 	if exists {
 		return loomgit.Revision{}, false, loomgit.NewError(loomgit.AttentionRequired, "abandonment capture exists without a completed record", nil)
 	}
-	captured, err := agentcapture.Capture(ctx, req.Worktree, req.Workspace, captureAttempt, req.Task, req.Task)
+	source := req.SourceRepo
+	if source == "" {
+		source = req.Worktree
+	}
+	captured, err := agentcapture.CaptureTaskCopyAt(ctx, service.JournalPath, source, req.Worktree, req.Workspace, captureAttempt, req.Task, req.Task)
 	if err != nil {
 		return loomgit.Revision{}, false, err
 	}

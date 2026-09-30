@@ -1,20 +1,7 @@
 import { api, ApiError, apiErrorFromResponse } from "@/api/common";
 import type { components } from "@/types/generated/openapi";
-import { post, wsUrl } from "@/api/common";
 
 export type ReviewRevision = components["schemas"]["ReviewRevision"];
-
-export async function applyRevision(
-  workspaceId: string,
-  revision: ReviewRevision,
-  lead?: string,
-): Promise<void> {
-  await post(wsUrl(workspaceId, "/git/apply"), {
-    change: revision.change_id,
-    revision: revision.number,
-    lead,
-  });
-}
 
 export async function getTaskRevisions(
   workspaceId: string,
