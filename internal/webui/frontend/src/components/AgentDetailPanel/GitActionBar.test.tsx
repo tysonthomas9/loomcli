@@ -567,7 +567,9 @@ describe("GitActionBar", () => {
       );
 
       fireEvent.click(screen.getByText("Create PR"));
-      fireEvent.change(screen.getByPlaceholderText("Change ID"), { target: { value: "C-1" } });
+      fireEvent.change(screen.getByPlaceholderText("Change ID"), {
+        target: { value: "C-1" },
+      });
 
       await act(async () => {
         fireEvent.click(screen.getByText("Create"));
@@ -592,7 +594,9 @@ describe("GitActionBar", () => {
 
       fireEvent.click(screen.getByText("Create PR"));
       expect(screen.getByText("Approved change ID")).toBeInTheDocument();
-      fireEvent.change(screen.getByPlaceholderText("Change ID"), { target: { value: "C-1" } });
+      fireEvent.change(screen.getByPlaceholderText("Change ID"), {
+        target: { value: "C-1" },
+      });
 
       await act(async () => {
         fireEvent.click(screen.getByText("Create"));

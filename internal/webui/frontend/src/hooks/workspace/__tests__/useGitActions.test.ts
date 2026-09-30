@@ -303,11 +303,7 @@ describe("useGitActions", () => {
         await result.current.createPR("C-1");
       });
 
-      expect(mockGitCreatePR).toHaveBeenCalledWith(
-        "test-ws-id",
-        "nova",
-        "C-1",
-      );
+      expect(mockGitCreatePR).toHaveBeenCalledWith("test-ws-id", "nova", "C-1");
       expect(mockShowToast).toHaveBeenCalledWith(
         "PR created: https://github.com/repo/pull/42",
         { type: "success" },
