@@ -10,7 +10,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/applyrecovery"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/landing"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/pull"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/reconcile"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/taskcopy"
 	loomworkspace "github.com/tysonthomas9/loomcli/internal/loomgit/workspace"
 	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -21,7 +23,22 @@ func ReconcileJournal(ctx context.Context, s storepkg.Store) error {
 	return reconcile.RunOnce(ctx, reconcile.Handlers{
 		Workspace: reconcile.RecoverFunc(func(ctx context.Context) error { return Reconcile(ctx, s) }),
 		Apply:     reconcile.RecoverFunc(func(ctx context.Context) error { return recoverPullThenApply(ctx, applyrecovery.Recover) }),
-		Landing:   reconcile.RecoverFunc(landing.RunOnce),
+		Landing: reconcile.RecoverFunc(func(ctx context.Context) error {
+			return landing.RunOnceWithOptions(ctx, landing.Options{
+				Dependents: func(ctx context.Context, workspace, change string) ([]landing.Dependent, error) {
+					lineages, err := taskcopy.DependentsOf(ctx, workspace, change)
+					if err != nil {
+						return nil, err
+					}
+					dependents := make([]landing.Dependent, 0, len(lineages))
+					for _, lineage := range lineages {
+						dependents = append(dependents, landing.Dependent{Task: lineage.Task, Repo: lineage.Repo})
+					}
+					return dependents, nil
+				},
+				Restack: pull.RestackOffer,
+			})
+		}),
 	})
 }
 

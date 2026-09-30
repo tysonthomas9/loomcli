@@ -19,6 +19,16 @@ func (s *SQLite) WorkingAreaByPath(ctx context.Context, path string) (WorkingAre
 	return area, err
 }
 
+func (s *SQLite) WorkingAreaForAppliedChange(ctx context.Context, workspace, change, repo string) (WorkingArea, error) {
+	var area WorkingArea
+	err := s.db.QueryRowContext(ctx, `SELECT w.workspace,w.lead,w.repo,w.path,w.branch,w.base_sha,w.mode
+		FROM applied_layers a JOIN working_areas w ON w.workspace=a.workspace AND w.lead=a.lead
+		WHERE a.workspace=? AND a.change_id=? AND w.repo=? AND a.phase='done'
+		ORDER BY a.rowid DESC LIMIT 1`, workspace, change, repo).Scan(&area.Workspace, &area.Lead,
+		&area.Repo, &area.Path, &area.Branch, &area.BaseSHA, &area.Mode)
+	return area, err
+}
+
 func createWorkingAreaSchema(db *sql.DB) error {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS working_areas (
 		workspace TEXT NOT NULL, lead TEXT NOT NULL, repo TEXT NOT NULL,
