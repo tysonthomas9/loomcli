@@ -128,6 +128,10 @@ func OpenSQLite(path string) (*SQLite, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("open delivery mode: %w", err)
 	}
+	if err := createAbandonSchema(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open abandonment journal: %w", err)
+	}
 	return &SQLite{db: db}, nil
 }
 func (s *SQLite) Close() error { return s.db.Close() }

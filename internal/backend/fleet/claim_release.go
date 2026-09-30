@@ -2,11 +2,29 @@ package fleet
 
 import (
 	"context"
+	"encoding/json"
 	"net/url"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
+
+func (b *FleetBackend) CurrentIssueLockHolder(ctx context.Context, id string) (string, error) {
+	resp, err := b.exec(ctx, "CurrentIssueLockHolder", "GET", "/issues/"+url.PathEscape(id)+"/lock", nil)
+	if backend.IsKind(err, backend.KindNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	var lock struct {
+		Holder string `json:"holder"`
+	}
+	if err := json.Unmarshal(resp.Data, &lock); err != nil {
+		return "", backend.ErrInternal("CurrentIssueLockHolder", "unmarshal response", err)
+	}
+	return lock.Holder, nil
+}
 
 // Actor-scoped claim/release operations. Split out of fleet.go to keep that
 // file under the 1000-line LOC ceiling after the release features landed.

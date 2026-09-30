@@ -34,6 +34,7 @@ type CaptureRequest struct {
 	Workspace, Task, Repo, Attempt string
 	Worktree, Base, CaptureSHA     string
 	SourceRepo                     string
+	RequestID                      string
 	Outcome                        string
 	Complete                       bool
 }
@@ -45,7 +46,7 @@ func FreezeCapture(ctx context.Context, in CaptureRequest) (loomgit.Revision, er
 }
 
 func FreezeCaptureAt(ctx context.Context, journalPath string, in CaptureRequest) (loomgit.Revision, error) {
-	if in.Workspace == "" || in.Task == "" || in.Repo == "" || in.Attempt == "" || in.Worktree == "" || in.Base == "" || (in.Outcome != "cancelled" && in.Outcome != "failed" && in.Outcome != "completed") {
+	if in.Workspace == "" || in.Task == "" || in.Repo == "" || in.Attempt == "" || in.Worktree == "" || in.Base == "" || (in.Outcome != "cancelled" && in.Outcome != "failed" && in.Outcome != "completed" && in.Outcome != "abandoned") {
 		return loomgit.Revision{}, fmt.Errorf("capture requires workspace, task, repo, attempt, worktree, base and a terminal outcome")
 	}
 	if err := os.MkdirAll(filepath.Dir(journalPath), 0o700); err != nil {
@@ -79,8 +80,12 @@ func FreezeCaptureAt(ctx context.Context, journalPath string, in CaptureRequest)
 		if err != nil {
 			return err
 		}
+		requestID := in.RequestID
+		if requestID == "" {
+			requestID = "driver:" + in.Attempt
+		}
 		revision, err = changeset.FreezeSource(ctx, store, runner, changeset.SourceInput{
-			Workspace: in.Workspace, Change: change, RequestID: "driver:" + in.Attempt,
+			Workspace: in.Workspace, Change: change, RequestID: requestID,
 			Attempt: in.Attempt, TaskID: in.Task, BaseSHA: in.Base, CaptureSHA: captureSHA,
 			Outcome: in.Outcome, Complete: in.Complete,
 		})
@@ -101,6 +106,10 @@ func Freeze(ctx context.Context, in Request) (loomgit.Revision, error) {
 // ChangeForTask resolves the same durable task layer used by Freeze.
 func ChangeForTask(ctx context.Context, workspace, task, repo string) (string, error) {
 	path := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
+	return ChangeForTaskAt(ctx, path, workspace, task, repo)
+}
+
+func ChangeForTaskAt(ctx context.Context, path, workspace, task, repo string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", err
 	}

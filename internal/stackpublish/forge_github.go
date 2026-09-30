@@ -211,7 +211,13 @@ func (g *GitHubForge) UpdatePRBase(ctx context.Context, owner, repo string, numb
 func (g *GitHubForge) ClosePR(ctx context.Context, owner, repo string, number int, comment string) error {
 	if strings.TrimSpace(comment) != "" {
 		cpath := fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repo, number)
-		_, _, _, _ = g.do(ctx, http.MethodPost, cpath, map[string]any{"body": comment}) // best-effort
+		status, data, _, err := g.do(ctx, http.MethodPost, cpath, map[string]any{"body": comment})
+		if err != nil {
+			return err
+		}
+		if status != http.StatusCreated {
+			return g.apiErr("POST", cpath, status, data)
+		}
 	}
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, number)
 	status, data, _, err := g.do(ctx, http.MethodPatch, path, map[string]any{"state": "closed"})
