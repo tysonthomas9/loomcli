@@ -130,6 +130,20 @@ func TestCapturePreservesTrackedClaudeSettings(t *testing.T) {
 	}
 }
 
+func TestCaptureExcludesStagedNewLoomClaudeSettings(t *testing.T) {
+	dir, runner := fixture(t)
+	path := ".claude/settings.json"
+	write(t, dir, path, `{"hooks":{"UserPromptSubmit":[{"hooks":[{"command":"loom skill materialize"}]}]}}`)
+	must(t, runner, "add", path)
+	result := capture(t, dir, runner)
+	if result.CaptureSHA != "" {
+		t.Fatalf("staged new Loom settings created capture %s", result.CaptureSHA)
+	}
+	if got := must(t, runner, "ls-files", "--cached", path); got != path {
+		t.Fatalf("staged user index changed: %s", got)
+	}
+}
+
 func TestCapturePreservesIndexAndCapturesLargeTrackedEdit(t *testing.T) {
 	dir, r := fixture(t)
 	write(t, dir, "tracked.bin", "before")
