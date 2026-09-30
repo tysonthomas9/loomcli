@@ -11,6 +11,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/githubtoken"
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/taskcopy"
@@ -18,7 +19,11 @@ import (
 )
 
 type Store interface {
+	loomgit.RevisionStore
 	PublishedChanges(context.Context) ([]journal.Publication, error)
+	LatestReadyRevision(context.Context, string, string) (int, string, error)
+	ProviderObservation(context.Context, string, string) (journal.ProviderObservation, bool, error)
+	RecordProviderObservation(context.Context, journal.ProviderObservation) error
 	LandingStatus(context.Context, string, string) (journal.LandingStatus, error)
 	MarkMerged(context.Context, string, string) error
 	MarkLanded(context.Context, string, string, ...string) error
@@ -120,8 +125,8 @@ func ReconcileWithOptions(ctx context.Context, store Store, forge Forge, options
 		if err != nil {
 			return err
 		}
-		if status.State != "landed" {
-			if err := detect(ctx, store, forge, item); err != nil {
+		if status.State != "landed" && status.State != "dependency_abandoned" {
+			if err := detect(ctx, store, forge, item, publications); err != nil {
 				return err
 			}
 		}
@@ -134,6 +139,9 @@ func ReconcileWithOptions(ctx context.Context, store Store, forge Forge, options
 				return err
 			}
 		}
+	}
+	if err := propagateClosure(ctx, store, publications); err != nil {
+		return err
 	}
 	if options.Restack != nil {
 		return runRestacks(ctx, store, forge, options.Restack)
@@ -180,18 +188,14 @@ func fetchPublications(ctx context.Context, store Store, publications []journal.
 	return fetched, nil
 }
 
-func detect(ctx context.Context, store Store, forge Forge, item fetchedPublication) error {
+func detect(ctx context.Context, store Store, forge Forge, item fetchedPublication, publications []journal.Publication) error {
 	publication := item.publication
-	parts := strings.Split(publication.Slug, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return errors.New("published repository slug is invalid")
-	}
-	pull, err := forge.PullByNumber(ctx, parts[0], parts[1], publication.PRNumber)
+	pull, err := ownedPull(ctx, forge, publication)
 	if err != nil {
 		return err
 	}
-	if pull.Number != publication.PRNumber || pull.Head != publication.Branch {
-		return fmt.Errorf("owned PR %d does not match published change %s", publication.PRNumber, publication.Change)
+	if err := observeProvider(ctx, store, item, pull, publications); err != nil {
+		return err
 	}
 	if !pull.Merged {
 		return nil
@@ -206,6 +210,27 @@ func detect(ctx context.Context, store Store, forge Forge, item fetchedPublicati
 		}
 		return store.MarkLanded(ctx, publication.Workspace, publication.Change, "merge_commit")
 	}
+	return detectAssociatedCommit(ctx, store, forge, item)
+}
+
+func ownedPull(ctx context.Context, forge Forge, publication journal.Publication) (stackpublish.PR, error) {
+	parts := strings.Split(publication.Slug, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return stackpublish.PR{}, errors.New("published repository slug is invalid")
+	}
+	pull, err := forge.PullByNumber(ctx, parts[0], parts[1], publication.PRNumber)
+	if err != nil {
+		return stackpublish.PR{}, err
+	}
+	if pull.Number != publication.PRNumber || pull.Head != publication.Branch {
+		return stackpublish.PR{}, fmt.Errorf("owned PR %d does not match published change %s", publication.PRNumber, publication.Change)
+	}
+	return pull, nil
+}
+
+func detectAssociatedCommit(ctx context.Context, store Store, forge Forge, item fetchedPublication) error {
+	publication := item.publication
+	parts := strings.Split(publication.Slug, "/")
 	commits, err := item.runner.Run(ctx, "log", "--format=%H", "--fixed-strings", "--grep=Loom-Change-Id: "+publication.Change, item.trunkRef)
 	if err != nil {
 		return err

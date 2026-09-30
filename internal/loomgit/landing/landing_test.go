@@ -18,10 +18,14 @@ import (
 
 type fakeForge struct {
 	pull       stackpublish.PR
+	pulls      map[int]stackpublish.PR
 	associated map[string][]stackpublish.PR
 }
 
-func (forge *fakeForge) PullByNumber(_ context.Context, _, _ string, _ int) (stackpublish.PR, error) {
+func (forge *fakeForge) PullByNumber(_ context.Context, _, _ string, number int) (stackpublish.PR, error) {
+	if forge.pulls != nil {
+		return forge.pulls[number], nil
+	}
 	return forge.pull, nil
 }
 
@@ -59,7 +63,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	forge := &fakeForge{pull: stackpublish.PR{Number: 42, Head: "loom/ws/W/change/A", State: "open"}, associated: map[string][]stackpublish.PR{}}
+	forge := &fakeForge{pull: stackpublish.PR{Number: 42, Head: "loom/ws/W/change/A", HeadSHA: initial, Base: "main", State: "open"}, associated: map[string][]stackpublish.PR{}}
 	return &fixture{store: store, forge: forge, source: source, remote: remote, initial: initial}
 }
 

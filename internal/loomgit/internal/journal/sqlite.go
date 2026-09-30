@@ -141,6 +141,10 @@ func OpenSQLite(path string) (*SQLite, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("open stack backend journal: %w", err)
 	}
+	if err := createProviderSchema(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open provider journal: %w", err)
+	}
 	if err := createFeedbackSchema(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("open feedback journal: %w", err)

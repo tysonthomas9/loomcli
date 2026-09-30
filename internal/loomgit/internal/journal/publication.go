@@ -342,3 +342,65 @@ func (s *SQLite) OpenPublications(ctx context.Context) ([]Publication, error) {
 	}
 	return out, rows.Err()
 }
+
+type ProviderObservation struct {
+	Workspace, Change, Base, HeadSHA, State string
+}
+
+func createProviderSchema(db *sql.DB) error {
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS provider_observations (
+		workspace TEXT NOT NULL, change_id TEXT NOT NULL, base_ref TEXT NOT NULL,
+		head_sha TEXT NOT NULL, state TEXT NOT NULL, PRIMARY KEY(workspace,change_id)
+	)`)
+	return err
+}
+
+func (s *SQLite) ProviderObservation(ctx context.Context, workspace, change string) (ProviderObservation, bool, error) {
+	var observation ProviderObservation
+	err := s.db.QueryRowContext(ctx, `SELECT workspace,change_id,base_ref,head_sha,state
+		FROM provider_observations WHERE workspace=? AND change_id=?`, workspace, change).Scan(
+		&observation.Workspace, &observation.Change, &observation.Base, &observation.HeadSHA, &observation.State)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ProviderObservation{}, false, nil
+	}
+	return observation, err == nil, err
+}
+
+func (s *SQLite) RecordProviderObservation(ctx context.Context, observation ProviderObservation) error {
+	if observation.Workspace == "" || observation.Change == "" || observation.Base == "" || observation.State == "" {
+		return errors.New("incomplete provider observation")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `INSERT INTO provider_observations(workspace,change_id,base_ref,head_sha,state)
+		VALUES (?,?,?,?,?) ON CONFLICT(workspace,change_id) DO UPDATE SET
+		base_ref=excluded.base_ref,head_sha=excluded.head_sha,state=excluded.state
+		WHERE base_ref<>excluded.base_ref OR head_sha<>excluded.head_sha OR state<>excluded.state`,
+		observation.Workspace, observation.Change, observation.Base, observation.HeadSHA, observation.State)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		payload, err := json.Marshal(observation)
+		if err != nil {
+			return err
+		}
+		key := "provider:" + observation.Workspace + ":" + observation.Change + ":" + observation.Base + ":" + observation.HeadSHA + ":" + observation.State
+		if err := queueEvent(ctx, tx, key, "git.provider_stack_changed", payload); err != nil {
+			return err
+		}
+		if observation.State == "diverged" {
+			if err := queueEvent(ctx, tx, key+":feedback", "git.feedback_recorded", payload); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
+}

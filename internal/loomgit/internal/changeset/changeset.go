@@ -178,7 +178,7 @@ func RecordDerived(ctx context.Context, store loomgit.RevisionStore, runner *git
 		return loomgit.Revision{}, err
 	}
 	switch in.Operation {
-	case "apply", "restack", "pull", "reorder", "unapply":
+	case "apply", "restack", "pull", "reorder", "unapply", "provider_restack":
 	default:
 		return loomgit.Revision{}, fmt.Errorf("invalid derived operation %q", in.Operation)
 	}

@@ -72,16 +72,23 @@ func (s *SQLite) MarkMerged(ctx context.Context, workspace, change string) error
 }
 
 func (s *SQLite) LandingStatus(ctx context.Context, workspace, change string) (LandingStatus, error) {
+	observation, found, err := s.ProviderObservation(ctx, workspace, change)
+	if err != nil {
+		return LandingStatus{}, err
+	}
+	if found && (observation.State == "diverged" || observation.State == "dependency_abandoned" || observation.State == "closed") {
+		return LandingStatus{State: observation.State}, nil
+	}
 	var rule string
-	err := s.db.QueryRowContext(ctx, `SELECT rule FROM landed_changes WHERE workspace=? AND change_id=?`, workspace, change).Scan(&rule)
+	err = s.db.QueryRowContext(ctx, `SELECT rule FROM landed_changes WHERE workspace=? AND change_id=?`, workspace, change).Scan(&rule)
 	if err == nil {
 		return LandingStatus{State: "landed", Rule: rule}, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return LandingStatus{}, err
 	}
-	var found int
-	err = s.db.QueryRowContext(ctx, `SELECT 1 FROM merged_changes WHERE workspace=? AND change_id=?`, workspace, change).Scan(&found)
+	var existing int
+	err = s.db.QueryRowContext(ctx, `SELECT 1 FROM merged_changes WHERE workspace=? AND change_id=?`, workspace, change).Scan(&existing)
 	if errors.Is(err, sql.ErrNoRows) {
 		offers, err := s.RestackOffers(ctx, workspace, change)
 		if err != nil {
@@ -90,7 +97,7 @@ func (s *SQLite) LandingStatus(ctx context.Context, workspace, change string) (L
 		if len(offers) > 0 {
 			return LandingStatus{State: "restack_available", Offer: &offers[0]}, nil
 		}
-		err = s.db.QueryRowContext(ctx, `SELECT 1 FROM change_publications WHERE workspace=? AND change_id=?`, workspace, change).Scan(&found)
+		err = s.db.QueryRowContext(ctx, `SELECT 1 FROM change_publications WHERE workspace=? AND change_id=?`, workspace, change).Scan(&existing)
 		if errors.Is(err, sql.ErrNoRows) {
 			return LandingStatus{State: "unknown"}, nil
 		}
@@ -106,7 +113,7 @@ func (s *SQLite) LandingStatus(ctx context.Context, workspace, change string) (L
 }
 
 func (s *SQLite) PublishedChanges(ctx context.Context) ([]Publication, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT workspace,change_id,repo,branch,trunk,slug,head_sha,feature_flag,phase,pr_number,pr_url
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace,change_id,repo,branch,trunk,slug,head_sha,feature_flag,phase,pr_number,pr_url,stack_id,prior_sha
 		FROM change_publications WHERE phase='done' AND pr_number>0 ORDER BY workspace,change_id`)
 	if err != nil {
 		return nil, err
@@ -117,7 +124,7 @@ func (s *SQLite) PublishedChanges(ctx context.Context) ([]Publication, error) {
 		var publication Publication
 		if err := rows.Scan(&publication.Workspace, &publication.Change, &publication.Repo,
 			&publication.Branch, &publication.Trunk, &publication.Slug, &publication.Head, &publication.FeatureFlag,
-			&publication.Phase, &publication.PRNumber, &publication.PRURL); err != nil {
+			&publication.Phase, &publication.PRNumber, &publication.PRURL, &publication.StackID, &publication.Prior); err != nil {
 			return nil, err
 		}
 		publications = append(publications, publication)
