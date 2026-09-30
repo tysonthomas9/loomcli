@@ -234,14 +234,11 @@ func (s *SQLite) OpenApplied(ctx context.Context, workspace, lead string) ([]loo
 type AppliedTarget struct {
 	Workspace string
 	Lead      string
-	Repo      string
 }
 
 func (s *SQLite) OpenAppliedTargets(ctx context.Context) ([]AppliedTarget, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT a.workspace,a.lead,COALESCE(p.repo,'') FROM applied_layers a
-		LEFT JOIN pull_plans p ON p.request_id=a.request_id
-		WHERE a.phase NOT IN ('done','not_applied')
-		UNION SELECT workspace,lead,repo FROM pull_plans ORDER BY workspace,lead,repo`)
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT workspace, lead FROM applied_layers
+		WHERE phase NOT IN ('done','not_applied') ORDER BY workspace, lead`)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +246,7 @@ func (s *SQLite) OpenAppliedTargets(ctx context.Context) ([]AppliedTarget, error
 	var targets []AppliedTarget
 	for rows.Next() {
 		var target AppliedTarget
-		if err := rows.Scan(&target.Workspace, &target.Lead, &target.Repo); err != nil {
+		if err := rows.Scan(&target.Workspace, &target.Lead); err != nil {
 			return nil, err
 		}
 		targets = append(targets, target)

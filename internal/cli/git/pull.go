@@ -12,10 +12,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/pull"
 )
 
-var pullLocal = apply.PullLocal
+var pullLocal = pull.PullLocal
 
 var pullAll bool
 var pullWorkspace string

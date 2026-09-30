@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/pull"
 )
 
 // PushResult contains the structured result of a push operation.
@@ -183,7 +183,7 @@ func pushBranchInRepoDetachedResult(repoPath, sourceBranch, targetBranch, remote
 // Unlike pullRepoWorktree, it does NOT launch an AI agent for conflicts.
 func PullRepoWorktreeResult(repoPath, currentBranch, sourceBranch, remote string) (*PullResult, error) {
 	_ = currentBranch
-	result, err := apply.PullLocal(context.Background(), repoPath, remote, sourceBranch, uuid.NewString())
+	result, err := pull.PullLocal(context.Background(), repoPath, remote, sourceBranch, uuid.NewString())
 	if err != nil {
 		if len(result.Paths) > 0 {
 			return &PullResult{Message: err.Error(), ConflictedFiles: result.Paths}, nil

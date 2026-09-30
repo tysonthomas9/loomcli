@@ -39,12 +39,11 @@ func Recover(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		selected := selectRecoveryArea(areas, target.Repo)
-		if selected == nil || selected.Path == "" {
+		if len(areas) != 1 || areas[0].Path == "" {
 			return loomgit.NewError(loomgit.AttentionRequired,
 				fmt.Sprintf("interrupted apply for %s/%s has no unique working area", target.Workspace, target.Lead), nil)
 		}
-		area := *selected
+		area := areas[0]
 		repo, err := pool.New(store, options).Admit(ctx, area.Path)
 		if err != nil {
 			return loomgit.NewError(loomgit.AttentionRequired, "open interrupted apply working area", err)
@@ -64,18 +63,4 @@ func Recover(ctx context.Context) error {
 	bus := events.NewBus(dir)
 	defer func() { _ = bus.Close() }()
 	return outbox.EmitPending(ctx, store, bus)
-}
-
-func selectRecoveryArea(areas []journal.WorkingArea, repo string) *journal.WorkingArea {
-	var selected *journal.WorkingArea
-	for index := range areas {
-		if repo != "" && areas[index].Repo != repo {
-			continue
-		}
-		if selected != nil {
-			return nil
-		}
-		selected = &areas[index]
-	}
-	return selected
 }

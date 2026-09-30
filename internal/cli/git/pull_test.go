@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/pull"
 )
 
 func TestPullCmdArgsValidation(t *testing.T) {
@@ -37,12 +37,12 @@ func TestPullRoutesToLocalRestackWithoutLegacyGit(t *testing.T) {
 	original := pullLocal
 	t.Cleanup(func() { pullLocal = original })
 	var calls []struct{ path, remote, branch string }
-	pullLocal = func(_ context.Context, path, remote, branch, requestID string) (apply.PullResult, error) {
+	pullLocal = func(_ context.Context, path, remote, branch, requestID string) (pull.PullResult, error) {
 		if requestID == "" {
 			t.Fatal("missing request ID")
 		}
 		calls = append(calls, struct{ path, remote, branch string }{path, remote, branch})
-		return apply.PullResult{HeadSHA: "restacked"}, nil
+		return pull.PullResult{HeadSHA: "restacked"}, nil
 	}
 	worktrees := []WorktreeInfo{
 		{Name: "api", Path: "/ws/api", Branch: "lead", Repo: &RepoConfig{Name: "api", DefaultBranch: "develop", Remote: "upstream"}},
@@ -66,8 +66,8 @@ func TestPullReportsHeldPaths(t *testing.T) {
 	deps, _, _, _, _ := NewTestDeps(t)
 	original := pullLocal
 	t.Cleanup(func() { pullLocal = original })
-	pullLocal = func(context.Context, string, string, string, string) (apply.PullResult, error) {
-		return apply.PullResult{Paths: []string{"file.txt"}}, errors.New("swap_held")
+	pullLocal = func(context.Context, string, string, string, string) (pull.PullResult, error) {
+		return pull.PullResult{Paths: []string{"file.txt"}}, errors.New("swap_held")
 	}
 	err := pullRepoWorktree(deps, "/ws/api", "lead", "main", "")
 	if err == nil || !strings.Contains(err.Error(), "file.txt") {
@@ -85,7 +85,7 @@ func stubPullLocal(t *testing.T) {
 	t.Helper()
 	original := pullLocal
 	t.Cleanup(func() { pullLocal = original })
-	pullLocal = func(context.Context, string, string, string, string) (apply.PullResult, error) {
-		return apply.PullResult{HeadSHA: "restacked"}, nil
+	pullLocal = func(context.Context, string, string, string, string) (pull.PullResult, error) {
+		return pull.PullResult{HeadSHA: "restacked"}, nil
 	}
 }

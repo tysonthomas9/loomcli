@@ -1,4 +1,4 @@
-package apply
+package pull
 
 import (
 	"context"
@@ -10,9 +10,100 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/pool"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 )
+
+type fixture struct {
+	dir          string
+	runner       *gitexec.Runner
+	store        *journal.SQLite
+	service      *Service
+	applier      *apply.Service
+	base, source string
+}
+
+func newFixture(t *testing.T) *fixture { return fixtureWithSource(t, nil) }
+
+func fixtureWithSource(t *testing.T, extend func(*testing.T, *fixture)) *fixture {
+	t.Helper()
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", dir).CombinedOutput(); err != nil { //nolint:norawexec // Temporary real-Git fixture, no network.
+		t.Fatalf("git init: %s: %v", out, err)
+	}
+	options := gitexec.Options{GlobalConfig: os.DevNull, SystemConfig: os.DevNull,
+		FallbackIdentity: gitexec.Identity{Name: "Test", Email: "test@example.com"}}
+	runner, err := gitexec.New(dir, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := journal.OpenSQLite(filepath.Join(t.TempDir(), "journal.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	repo, err := pool.New(store, options).Admit(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &fixture{dir: dir, runner: runner, store: store, service: New(store, repo, runner), applier: apply.New(store, repo, runner)}
+	f.commit(t, "base", "base\n", "base")
+	f.base = f.git(t, "rev-parse", "HEAD")
+	f.git(t, "checkout", "-q", "-b", "source")
+	f.source = f.commit(t, "change", "change\n", "change\n\nLoom-Change-Id: C1\nLoom-Revision: 1\nLoom-Task: T1\nLoom-Attempt: A1")
+	if extend != nil {
+		extend(t, f)
+		f.source = f.git(t, "rev-parse", "HEAD")
+	}
+	f.git(t, "checkout", "-q", "-b", "loom/ws/W/interactive/L", f.base)
+	r, err := store.ReserveRevision(context.Background(), loomgit.Revision{
+		Workspace: "W", Change: "C1", RequestID: "source", Kind: "source", Operation: "snapshot",
+		Outcome: "completed", BaseSHA: f.base, TreeHash: f.git(t, "rev-parse", f.source+"^{tree}"), SourceHeadSHA: f.source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.HeadSHA = f.source
+	if err := store.FinishRevision(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := review.Submit(context.Background(), store, "W", "C1", 1, f.source, "approve", "", review.Actor{Kind: "human", ID: "reviewer"}); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func (f *fixture) git(t *testing.T, args ...string) string {
+	t.Helper()
+	out, err := f.runner.Run(context.Background(), args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func (f *fixture) write(t *testing.T, name, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(f.dir, name), []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f *fixture) commit(t *testing.T, name, body, message string) string {
+	t.Helper()
+	f.write(t, name, body)
+	f.git(t, "add", name)
+	f.git(t, "commit", "-qm", message)
+	return f.git(t, "rev-parse", "HEAD")
+}
+
+func (f *fixture) apply(t *testing.T) (apply.Result, error) {
+	t.Helper()
+	return f.applier.Apply(context.Background(), apply.Request{Workspace: "W", Lead: "L", Change: "C1", Revision: 1, RequestID: "apply-1"})
+}
 
 func preparePull(t *testing.T, fixture *fixture) string {
 	t.Helper()
@@ -86,7 +177,7 @@ func TestPullRestacksAndCarriesVerdictWithoutPush(t *testing.T) {
 	if _, err := review.Submit(ctx, fixture.store, "W", "C2", revision.Number, secondHead, "approve", "", review.Actor{Kind: "human", ID: "reviewer"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.service.Apply(ctx, Request{Workspace: "W", Lead: "L", Change: "C2", Revision: revision.Number, RequestID: "apply-2"}); err != nil {
+	if _, err := fixture.applier.Apply(ctx, apply.Request{Workspace: "W", Lead: "L", Change: "C2", Revision: revision.Number, RequestID: "apply-2"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"trunk-1", "trunk-2", "trunk-3"} {
@@ -107,7 +198,7 @@ func TestPullRestacksAndCarriesVerdictWithoutPush(t *testing.T) {
 	if got := fixture.git(t, "status", "--porcelain"); !strings.Contains(got, "unrelated") {
 		t.Fatalf("uncommitted edit lost: %s", got)
 	}
-	log, err := fixture.service.AppliedLog(context.Background(), "W", "L")
+	log, err := fixture.service.appliedLog(context.Background(), "W", "L", fixture.git(t, "rev-parse", "HEAD"))
 	if err != nil || len(log) != 2 || log[0].Change != "C1" || log[1].Change != "C2" {
 		t.Fatalf("restacked log = %+v, %v", log, err)
 	}
@@ -205,15 +296,11 @@ func TestPullReconcileCompletesLayerLogAfterSwap(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected injected interruption")
 	}
-	targets, err := fixture.store.OpenAppliedTargets(context.Background())
-	if err != nil || len(targets) != 1 || targets[0].Repo != "repo" {
-		t.Fatalf("pull recovery target = %+v, %v", targets, err)
-	}
 	fixture.service.beforeCompletePull = nil
-	if err := fixture.service.Reconcile(context.Background(), "W", "L"); err != nil {
+	if err := fixture.service.repo.WithLock(context.Background(), func(ctx context.Context) error { return fixture.service.reconcilePullPlans(ctx, "W", "L", "repo") }); err != nil {
 		t.Fatal(err)
 	}
-	log, err := fixture.service.AppliedLog(context.Background(), "W", "L")
+	log, err := fixture.service.appliedLog(context.Background(), "W", "L", fixture.git(t, "rev-parse", "HEAD"))
 	if err != nil || len(log) != 1 || log[0].Change != "C1" {
 		t.Fatalf("recovered layer log = %+v, %v", log, err)
 	}

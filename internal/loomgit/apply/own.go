@@ -12,7 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 )
 
-func (s *Service) interleaveLayers(ctx context.Context, workspace, lead, base string, commits []string, tasks []loomgit.AppliedLayer, recordOwn bool) ([]loomgit.AppliedLayer, error) {
+func (s *Service) interleaveLayers(ctx context.Context, workspace, lead, base string, commits []string, tasks []loomgit.AppliedLayer) ([]loomgit.AppliedLayer, error) {
 	byCommit := make(map[string]int)
 	for i, layer := range tasks {
 		for _, sha := range layer.Commits {
@@ -26,7 +26,7 @@ func (s *Service) interleaveLayers(ctx context.Context, workspace, lead, base st
 		if len(own) == 0 {
 			return nil
 		}
-		layer, err := s.ownLayer(ctx, workspace, lead, previous, own, recordOwn)
+		layer, err := s.ownLayer(ctx, workspace, lead, previous, own)
 		if err != nil {
 			return err
 		}
@@ -55,7 +55,7 @@ func (s *Service) interleaveLayers(ctx context.Context, workspace, lead, base st
 	return result, nil
 }
 
-func (s *Service) ownLayer(ctx context.Context, workspace, lead, previous string, commits []string, recordOwn bool) (loomgit.AppliedLayer, error) {
+func (s *Service) ownLayer(ctx context.Context, workspace, lead, previous string, commits []string) (loomgit.AppliedLayer, error) {
 	change := ""
 	for _, sha := range commits {
 		message, err := git(ctx, s.runner, "show", "-s", "--format=%B", sha)
@@ -76,10 +76,8 @@ func (s *Service) ownLayer(ctx context.Context, workspace, lead, previous string
 	for _, sha := range commits {
 		layer.CommitDetails = append(layer.CommitDetails, loomgit.AppliedCommit{SHA: sha, Change: change})
 	}
-	if recordOwn {
-		if err := s.recordOwnLayer(ctx, &layer); err != nil {
-			return loomgit.AppliedLayer{}, err
-		}
+	if err := s.recordOwnLayer(ctx, &layer); err != nil {
+		return loomgit.AppliedLayer{}, err
 	}
 	return layer, nil
 }

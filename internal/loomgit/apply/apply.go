@@ -30,12 +30,6 @@ type Store interface {
 	AppliedLog(context.Context, string, string) ([]loomgit.AppliedLayer, error)
 	WorkingAreas(context.Context, string, string) ([]journal.WorkingArea, error)
 	OpenApplied(context.Context, string, string) ([]loomgit.AppliedLayer, error)
-	WorkspaceRepos(context.Context, string) ([]loomgit.WorkspaceRepo, error)
-	IsLanded(context.Context, string, string) (bool, error)
-	CompletePull(context.Context, string, string, string, string, string, []loomgit.AppliedLayer) error
-	SavePullPlan(context.Context, journal.PullPlan) error
-	PendingPullPlans(context.Context, string, string) ([]journal.PullPlan, error)
-	DiscardPullPlan(context.Context, string) error
 }
 
 type Request struct {
@@ -51,13 +45,12 @@ type Result struct {
 }
 
 type Service struct {
-	store              Store
-	repo               *pool.LocalRepo
-	runner             *gitexec.Runner
-	beforeIndexLock    func()
-	onIndexLocked      func()
-	beforeRecoverCAS   func()
-	beforeCompletePull func() error
+	store            Store
+	repo             *pool.LocalRepo
+	runner           *gitexec.Runner
+	beforeIndexLock  func()
+	onIndexLocked    func()
+	beforeRecoverCAS func()
 }
 
 func New(store Store, repo *pool.LocalRepo, runner *gitexec.Runner) *Service {
@@ -66,10 +59,6 @@ func New(store Store, repo *pool.LocalRepo, runner *gitexec.Runner) *Service {
 
 // AppliedLog interleaves applied task layers with contiguous lead-owned runs.
 func (s *Service) AppliedLog(ctx context.Context, workspace, lead string) ([]loomgit.AppliedLayer, error) {
-	return s.appliedLog(ctx, workspace, lead, true)
-}
-
-func (s *Service) appliedLog(ctx context.Context, workspace, lead string, recordOwn bool) ([]loomgit.AppliedLayer, error) {
 	tasks, err := s.store.AppliedLog(ctx, workspace, lead)
 	if err != nil {
 		return nil, err
@@ -78,21 +67,13 @@ func (s *Service) appliedLog(ctx context.Context, workspace, lead string, record
 	if err != nil {
 		return nil, err
 	}
-	if s.runner == nil && len(areas) > 0 {
-		return nil, errors.New("applied log requires working-area Git runner")
-	}
 	base := ""
-	for _, area := range areas {
-		if s.runner != nil && filepath.Clean(area.Path) == filepath.Clean(s.runner.Path()) {
-			base = area.BaseSHA
-			break
-		}
-	}
-	if base == "" {
-		if len(tasks) == 0 {
-			return tasks, nil
-		}
+	if len(areas) > 0 {
+		base = areas[0].BaseSHA
+	} else if len(tasks) > 0 {
 		base = tasks[0].OldTip
+	} else {
+		return tasks, nil
 	}
 	if s.runner == nil {
 		return nil, errors.New("applied log requires working-area Git runner")
@@ -105,7 +86,7 @@ func (s *Service) appliedLog(ctx context.Context, workspace, lead string, record
 	if err != nil {
 		return nil, err
 	}
-	return s.interleaveLayers(ctx, workspace, lead, base, strings.Fields(commits), tasks, recordOwn)
+	return s.interleaveLayers(ctx, workspace, lead, base, strings.Fields(commits), tasks)
 }
 
 // Apply uses one retry if a terminal commit moves HEAD before the index lock.

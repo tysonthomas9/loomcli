@@ -1,19 +1,42 @@
-package apply
+package pull
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/changeset"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
-	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/pool"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/replay"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 )
+
+type Store interface {
+	apply.Store
+	WorkspaceRepos(context.Context, string) ([]loomgit.WorkspaceRepo, error)
+	IsLanded(context.Context, string, string) (bool, error)
+	CompletePull(context.Context, string, string, string, string, string, []loomgit.AppliedLayer) error
+	SavePullPlan(context.Context, journal.PullPlan) error
+	PendingPullPlans(context.Context, string, string) ([]journal.PullPlan, error)
+	DiscardPullPlan(context.Context, string) error
+}
+
+type Service struct {
+	store              Store
+	repo               *pool.LocalRepo
+	runner             *gitexec.Runner
+	applier            *apply.Service
+	beforeCompletePull func() error
+}
+
+func New(store Store, repo *pool.LocalRepo, runner *gitexec.Runner) *Service {
+	return &Service{store: store, repo: repo, runner: runner, applier: apply.New(store, repo, runner)}
+}
 
 type PullRequest struct {
 	Workspace, Lead, Repo, Remote, SourceBranch, RequestID string
@@ -79,7 +102,7 @@ func (s *Service) pullFetched(ctx context.Context, request PullRequest, trunkRef
 		if err != nil {
 			return err
 		}
-		layers, err := s.appliedLog(ctx, request.Workspace, request.Lead, false)
+		layers, err := s.appliedLog(ctx, request.Workspace, request.Lead, old)
 		if err != nil {
 			return err
 		}
@@ -138,58 +161,24 @@ func (s *Service) replayPullLayers(ctx context.Context, request PullRequest, bas
 }
 
 func (s *Service) installPull(ctx context.Context, request PullRequest, old, base string, rebuilt []pulledLayer, result *PullResult) error {
-	return s.withPullIndexLock(ctx, request, old, func(branch, indexPath string, lockOwned, keepLock *bool) error {
-		completed, err := s.preparePulledLayers(ctx, request, rebuilt)
-		if err != nil {
+	completed, err := s.preparePulledLayers(ctx, request, rebuilt)
+	if err != nil {
+		return err
+	}
+	if err := s.store.SavePullPlan(ctx, journal.PullPlan{RequestID: request.RequestID, Workspace: request.Workspace,
+		Lead: request.Lead, Repo: request.Repo, BaseSHA: base, Layers: completed}); err != nil {
+		return err
+	}
+	result.Paths, err = s.applier.SwapPrepared(ctx, request.Workspace, request.Lead, request.RequestID, old, result.HeadSHA)
+	if err != nil {
+		return err
+	}
+	if s.beforeCompletePull != nil {
+		if err := s.beforeCompletePull(); err != nil {
 			return err
 		}
-		result.Paths, err = s.pendingPaths(ctx, old, result.HeadSHA)
-		if err != nil {
-			return err
-		}
-		if len(result.Paths) > 0 {
-			return loomgit.NewError(loomgit.SwapHeld, strings.Join(result.Paths, ", "), nil)
-		}
-		return s.finishPull(ctx, request, old, base, result.HeadSHA, branch, indexPath, completed, lockOwned, keepLock)
-	})
-}
-
-func (s *Service) withPullIndexLock(ctx context.Context, request PullRequest, old string,
-	action func(string, string, *bool, *bool) error) error {
-	branch, err := git(ctx, s.runner, "symbolic-ref", "HEAD")
-	if err != nil {
-		return err
 	}
-	want, err := refname.InteractiveBranch(request.Workspace, request.Lead)
-	if err != nil {
-		return err
-	}
-	if branch != "refs/heads/"+want {
-		return loomgit.NewError(loomgit.Stale, "working area branch differs from lead", nil)
-	}
-	indexPath, err := git(ctx, s.runner, "rev-parse", "--path-format=absolute", "--git-path", "index")
-	if err != nil {
-		return err
-	}
-	lock, err := os.OpenFile(indexPath+".lock", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600) //nolint:gosec // Git resolves the active index; O_EXCL reserves its lock.
-	if errors.Is(err, os.ErrExist) {
-		return loomgit.NewError(loomgit.SwapHeld, "working area index is locked", err)
-	}
-	if err != nil {
-		return err
-	}
-	lockOwned, keepLock := true, false
-	defer func() {
-		_ = lock.Close()
-		if lockOwned && !keepLock {
-			_ = os.Remove(indexPath + ".lock")
-		}
-	}()
-	actual, err := git(ctx, s.runner, "rev-parse", "HEAD")
-	if err != nil || actual != old {
-		return errors.Join(errHeadMoved, err)
-	}
-	return action(branch, indexPath, &lockOwned, &keepLock)
+	return s.store.CompletePull(ctx, request.RequestID, request.Workspace, request.Lead, request.Repo, base, completed)
 }
 
 func (s *Service) preparePulledLayers(ctx context.Context, request PullRequest, rebuilt []pulledLayer) ([]loomgit.AppliedLayer, error) {
@@ -197,7 +186,7 @@ func (s *Service) preparePulledLayers(ctx context.Context, request PullRequest, 
 	for index := range rebuilt {
 		item := &rebuilt[index]
 		if item.original.Revision == 0 {
-			if err := s.recordOwnLayer(ctx, &item.original); err != nil {
+			if err := s.applier.RecordOwnLayer(ctx, &item.original); err != nil {
 				return nil, err
 			}
 			source, err := s.store.GetRevision(ctx, request.Workspace, item.layer.Change, item.original.Revision)
@@ -220,7 +209,7 @@ func (s *Service) preparePulledLayers(ctx context.Context, request PullRequest, 
 		}
 		item.layer.Commits = strings.Fields(commits)
 		for _, sha := range item.layer.Commits {
-			attribution, err := s.attribute(ctx, sha, item.layer.Change)
+			attribution, err := s.applier.AttributeCommit(ctx, sha, item.layer.Change)
 			if err != nil {
 				return nil, err
 			}
@@ -232,26 +221,4 @@ func (s *Service) preparePulledLayers(ctx context.Context, request PullRequest, 
 		completed = append(completed, item.layer)
 	}
 	return completed, nil
-}
-
-func (s *Service) finishPull(ctx context.Context, request PullRequest, old, base, next, branch, indexPath string,
-	completed []loomgit.AppliedLayer, lockOwned, keepLock *bool) error {
-	aggregate := loomgit.AppliedLayer{RequestID: request.RequestID, Workspace: request.Workspace,
-		Lead: request.Lead, Change: "pull", OldTip: old, NewTip: next}
-	if err := s.store.SavePullPlan(ctx, journal.PullPlan{RequestID: request.RequestID, Workspace: request.Workspace,
-		Lead: request.Lead, Repo: request.Repo, BaseSHA: base, Layers: completed}); err != nil {
-		return err
-	}
-	if err := s.store.SaveApplied(ctx, aggregate); err != nil {
-		return err
-	}
-	if err := s.install(ctx, branch, indexPath, old, next, request.RequestID, lockOwned, keepLock); err != nil {
-		return err
-	}
-	if s.beforeCompletePull != nil {
-		if err := s.beforeCompletePull(); err != nil {
-			return err
-		}
-	}
-	return s.store.CompletePull(ctx, request.RequestID, request.Workspace, request.Lead, request.Repo, base, completed)
 }
