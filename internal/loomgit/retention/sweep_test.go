@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
@@ -99,8 +101,85 @@ func TestCloneRefsCapturedRejectsExtraLocalCommit(t *testing.T) {
 	if err := checkCopyContent(ctx, copyRunner, base); err != nil {
 		t.Fatal(err)
 	}
-	if err := cloneRefsCaptured(ctx, copyRunner, base); err == nil {
+	if err := cloneRefsCaptured(ctx, sourceRunner, copyRunner, base); err == nil {
 		t.Fatal("uncaptured local branch was accepted")
+	}
+}
+
+func TestSweepRemovesFullyFrozenClone(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	source, copyPath, journalPath := filepath.Join(root, "source"), filepath.Join(root, "A"), filepath.Join(root, "store.db")
+	options := gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Test", Email: "test@example.com"}}
+	rootRunner, err := gitexec.New(root, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rootRunner.Run(ctx, "init", source); err != nil {
+		t.Fatal(err)
+	}
+	sourceRunner, err := gitexec.New(source, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sourceRunner.Run(ctx, "commit", "--allow-empty", "-m", "base"); err != nil {
+		t.Fatal(err)
+	}
+	baseBytes, err := sourceRunner.Run(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := strings.TrimSpace(string(baseBytes))
+	if _, err := rootRunner.Run(ctx, "clone", "--local", source, copyPath); err != nil {
+		t.Fatal(err)
+	}
+	copyRunner, err := gitexec.New(copyPath, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := copyRunner.Run(ctx, "commit", "--allow-empty", "-m", "agent work"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(copyPath, "untracked.txt"), []byte("captured"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	captured, err := agentcapture.Capture(ctx, copyPath, "W", "A", "T", "task")
+	if err != nil || !captured.Complete {
+		t.Fatalf("capture: %+v, %v", captured, err)
+	}
+	revision, err := driverfreeze.FreezeCaptureAt(ctx, journalPath, driverfreeze.CaptureRequest{
+		Workspace: "W", Task: "T", Repo: "source", Attempt: "A", Worktree: copyPath,
+		Base: base, CaptureSHA: captured.SHA, Outcome: "cancelled", Complete: true, SourceRepo: source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revision.HeadSHA == captured.SHA {
+		t.Fatal("freeze did not create the rewritten revision head")
+	}
+	if err := os.Remove(filepath.Join(copyPath, "untracked.txt")); err != nil {
+		t.Fatal(err)
+	}
+	store, err := journal.OpenSQLite(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	if err := store.MarkLanded(ctx, "W", revision.Change); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)
+	sweep := Sweep{Store: store, Now: func() time.Time { return start }}
+	if _, err := sweep.Run(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	sweep.Now = func() time.Time { return start.Add(7 * 24 * time.Hour) }
+	results, err := sweep.Run(ctx, true)
+	if err != nil || len(results) != 1 || results[0].Action != "remove" {
+		t.Fatalf("expired clone: %+v, %v", results, err)
+	}
+	if _, err := os.Stat(copyPath); !os.IsNotExist(err) {
+		t.Fatalf("clone remains: %v", err)
 	}
 }
 
@@ -218,7 +297,7 @@ func TestSweepLandedCopyUsesCaptureAndWorkspaceWindow(t *testing.T) {
 	}
 	uncaptured := strings.TrimSpace(string(uncapturedBytes))
 	results, err = sweep.Run(ctx, true)
-	if err != nil || results[0].Action != "keep" || !strings.Contains(results[0].Reason, "HEAD differs") {
+	if err != nil || results[0].Action != "keep" || !strings.Contains(results[0].Reason, "HEAD is outside") {
 		t.Fatalf("clean uncaptured commit: %+v, %v", results, err)
 	}
 	if _, err := os.Stat(copyPath); err != nil {

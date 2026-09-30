@@ -318,7 +318,7 @@ func removeCopy(ctx context.Context, store *journal.SQLite, row journal.Retained
 			return err
 		})
 	}
-	if err := cloneRefsCaptured(ctx, copyRunner, expected); err != nil {
+	if err := cloneRefsCaptured(ctx, runner, copyRunner, expected); err != nil {
 		return err
 	}
 	if filepath.Base(row.Path) != row.Attempt {
@@ -335,8 +335,8 @@ func checkCopyContent(ctx context.Context, runner *gitexec.Runner, expected stri
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(string(head)) != expected {
-		return errors.New("copy HEAD differs from complete capture")
+	if _, err := runner.Run(ctx, "merge-base", "--is-ancestor", strings.TrimSpace(string(head)), expected); err != nil {
+		return errors.New("copy HEAD is outside complete capture")
 	}
 	status, err := runner.Run(ctx, "status", "--porcelain", "--untracked-files=all", "--ignored=matching")
 	if err != nil {
@@ -348,8 +348,8 @@ func checkCopyContent(ctx context.Context, runner *gitexec.Runner, expected stri
 	return nil
 }
 
-func cloneRefsCaptured(ctx context.Context, runner *gitexec.Runner, expected string) error {
-	refs, err := runner.Run(ctx, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/loom")
+func cloneRefsCaptured(ctx context.Context, sourceRunner, copyRunner *gitexec.Runner, expected string) error {
+	refs, err := copyRunner.Run(ctx, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/loom")
 	if err != nil {
 		return err
 	}
@@ -361,8 +361,15 @@ func cloneRefsCaptured(ctx context.Context, runner *gitexec.Runner, expected str
 		if len(fields) != 2 {
 			return errors.New("unexpected copy ref listing")
 		}
-		if _, err := runner.Run(ctx, "merge-base", "--is-ancestor", fields[1], expected); err != nil {
-			return fmt.Errorf("copy ref %s is outside complete capture: %w", fields[0], err)
+		if strings.HasPrefix(fields[0], refname.WorkspaceRefPrefix) {
+			sourceSHA, err := sourceRunner.Run(ctx, "show-ref", "--verify", "--hash", fields[0])
+			if err != nil || strings.TrimSpace(string(sourceSHA)) != fields[1] {
+				return fmt.Errorf("copy ref %s is not captured in source", fields[0])
+			}
+			continue
+		}
+		if _, err := copyRunner.Run(ctx, "merge-base", "--is-ancestor", fields[1], expected); err != nil {
+			return fmt.Errorf("copy branch %s is outside complete capture: %w", fields[0], err)
 		}
 	}
 	return nil
