@@ -31,10 +31,6 @@ func (l *Local) Submit(ctx context.Context, workspace, change string, number int
 	return Submit(ctx, l.store, workspace, change, number, headSHA, kind, reason, actor)
 }
 
-func (l *Local) RequireVerdict(ctx context.Context, workspace, change string, number int, headSHA, operation, targetLead string) error {
-	return RequireVerdict(ctx, l.store, workspace, change, number, headSHA, operation, targetLead)
-}
-
 type TaskRevision struct {
 	ChangeID   string `json:"change_id"`
 	Number     int    `json:"number"`

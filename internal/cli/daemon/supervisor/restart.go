@@ -540,15 +540,6 @@ func (s *Supervisor) getNoWorkBackoff() int {
 	return 30 // default seconds
 }
 
-// GetIdlePollInterval returns the configured idle poll interval in seconds.
-func (s *Supervisor) GetIdlePollInterval() int {
-	cfg := s.ConfigSnapshot()
-	if cfg.Daemon.RestartPolicy.IdlePollInterval != nil {
-		return *cfg.Daemon.RestartPolicy.IdlePollInterval
-	}
-	return 30 // default seconds
-}
-
 // DefaultSigtermTimeout is the default SIGTERM-to-SIGKILL window in seconds.
 const DefaultSigtermTimeout = 300
 

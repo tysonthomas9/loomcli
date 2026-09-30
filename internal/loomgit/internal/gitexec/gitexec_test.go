@@ -153,8 +153,8 @@ evil = !false
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Identity() != (Identity{Name: "Home Author", Email: "home@example.test"}) {
-		t.Fatalf("identity: %+v", r.Identity())
+	if r.identity != (Identity{Name: "Home Author", Email: "home@example.test"}) {
+		t.Fatalf("identity: %+v", r.identity)
 	}
 	joined := strings.Join(r.config, "\n")
 	for _, want := range []string{"filter.lfs.clean=git-lfs clean -- %f", "lfs.fetchinclude=assets/*", "commit.gpgsign=true", "gpg.format=openpgp", "user.signingkey=ABC123"} {

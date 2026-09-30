@@ -123,7 +123,3 @@ func GetUncommittedChangesCountDeps(deps *cli.Deps, path string) int {
 	}
 	return len(lines)
 }
-
-func GetUncommittedChangesCount(path string) int {
-	return GetUncommittedChangesCountDeps(cli.GetDeps(nil), path)
-}

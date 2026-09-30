@@ -6,10 +6,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
-	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -54,28 +52,6 @@ func (s *stubTerminalService) GetTerminalState(_ context.Context, _ string) (str
 func (s *stubTerminalService) PatchTerminalState(_ context.Context, _, _ string) error { return nil }
 func (s *stubTerminalService) StartSetup(_ context.Context, _ string, req service.TerminalSetupRequest) (*service.TerminalSetupResult, error) {
 	return &service.TerminalSetupResult{Backend: req.Backend, Action: req.Action}, nil
-}
-
-// stubSessionService implements SessionService with no-op defaults for module tests.
-type stubSessionService struct{}
-
-func (s *stubSessionService) ListTaskSessions(_ context.Context, _ string) ([]service.SessionListItem, error) {
-	return nil, nil
-}
-func (s *stubSessionService) GetSession(_ context.Context, _, _ string) (*service.SessionDetailData, error) {
-	return &service.SessionDetailData{}, nil
-}
-func (s *stubSessionService) GetSessionTranscript(_ context.Context, _, _ string) ([]sessions.TranscriptEntry, error) {
-	return nil, nil
-}
-func (s *stubSessionService) GetSessionDiff(_ context.Context, _, _ string) (string, error) {
-	return "", nil
-}
-func (s *stubSessionService) ListSessionHistory(_ context.Context, _, _ string) ([]sessionhistory.SessionRecord, error) {
-	return nil, nil
-}
-func (s *stubSessionService) GetSessionScrollback(_ context.Context, _, _, _ string) (*service.SessionScrollbackResult, error) {
-	return &service.SessionScrollbackResult{}, nil
 }
 
 // stubDiffService implements DiffService with no-op defaults for module tests.

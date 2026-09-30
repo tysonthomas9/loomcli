@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -89,122 +88,6 @@ func defaultHealthPingHandler(req rpc.Request) (rpc.Response, bool) {
 		return rpc.Response{Success: true}, true
 	}
 	return rpc.Response{}, false
-}
-
-// mockBlockedClient implements blockedClient for testing.
-type mockBlockedClient struct {
-	blockedFunc func(args *rpc.BlockedArgs) (*rpc.Response, error)
-}
-
-func (m *mockBlockedClient) Blocked(args *rpc.BlockedArgs) (*rpc.Response, error) {
-	if m.blockedFunc != nil {
-		return m.blockedFunc(args)
-	}
-	return nil, errors.New("blockedFunc not implemented")
-}
-
-// mockBlockedPool implements blockedConnectionGetter for testing.
-type mockBlockedPool struct {
-	getFunc func(ctx context.Context) (blockedClient, error)
-	putFunc func(client blockedClient)
-}
-
-func (m *mockBlockedPool) Get(ctx context.Context) (blockedClient, error) {
-	if m.getFunc != nil {
-		return m.getFunc(ctx)
-	}
-	return nil, errors.New("getFunc not implemented")
-}
-
-func (m *mockBlockedPool) Put(client blockedClient) {
-	if m.putFunc != nil {
-		m.putFunc(client)
-	}
-}
-
-// mockGraphClient implements graphClient for testing.
-type mockGraphClient struct {
-	getGraphDataFunc func(args *rpc.GetGraphDataArgs) (*rpc.GetGraphDataResponse, error)
-}
-
-func (m *mockGraphClient) GetGraphData(args *rpc.GetGraphDataArgs) (*rpc.GetGraphDataResponse, error) {
-	if m.getGraphDataFunc != nil {
-		return m.getGraphDataFunc(args)
-	}
-	return nil, errors.New("getGraphDataFunc not implemented")
-}
-
-// mockGraphPool implements graphConnectionGetter for testing.
-type mockGraphPool struct {
-	getFunc func(ctx context.Context) (graphClient, error)
-	putFunc func(client graphClient)
-}
-
-func (m *mockGraphPool) Get(ctx context.Context) (graphClient, error) {
-	if m.getFunc != nil {
-		return m.getFunc(ctx)
-	}
-	return nil, errors.New("getFunc not implemented")
-}
-
-func (m *mockGraphPool) Put(client graphClient) {
-	if m.putFunc != nil {
-		m.putFunc(client)
-	}
-}
-
-// mockReadyClient implements readyClient for testing.
-type mockReadyClient struct {
-	readyFunc    func(args *rpc.ReadyArgs) (*rpc.Response, error)
-	listFunc     func(args *rpc.ListArgs) (*rpc.Response, error)
-	getParentIDs func(args *rpc.GetParentIDsArgs) (*rpc.Response, error)
-}
-
-func (m *mockReadyClient) Ready(args *rpc.ReadyArgs) (*rpc.Response, error) {
-	if m.readyFunc != nil {
-		return m.readyFunc(args)
-	}
-	return nil, errors.New("readyFunc not implemented")
-}
-
-func (m *mockReadyClient) List(args *rpc.ListArgs) (*rpc.Response, error) {
-	if m.listFunc != nil {
-		return m.listFunc(args)
-	}
-	return nil, errors.New("listFunc not implemented")
-}
-
-func (m *mockReadyClient) GetParentIDs(args *rpc.GetParentIDsArgs) (*rpc.Response, error) {
-	if m.getParentIDs != nil {
-		return m.getParentIDs(args)
-	}
-	return nil, errors.New("getParentIDs not implemented")
-}
-
-// mockReadyPool implements readyConnectionGetter for testing.
-type mockReadyPool struct {
-	getFunc     func(ctx context.Context) (readyClient, error)
-	putFunc     func(client readyClient)
-	discardFunc func(client readyClient)
-}
-
-func (m *mockReadyPool) Get(ctx context.Context) (readyClient, error) {
-	if m.getFunc != nil {
-		return m.getFunc(ctx)
-	}
-	return nil, errors.New("getFunc not implemented")
-}
-
-func (m *mockReadyPool) Put(client readyClient) {
-	if m.putFunc != nil {
-		m.putFunc(client)
-	}
-}
-
-func (m *mockReadyPool) Discard(client readyClient) {
-	if m.discardFunc != nil {
-		m.discardFunc(client)
-	}
 }
 
 // Tests for parseListParams and handleListIssues from feature/web-ui branch

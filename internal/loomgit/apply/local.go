@@ -15,7 +15,7 @@ import (
 
 func ApplyLocal(ctx context.Context, request Request) (Result, error) {
 	if request.Lead == "" {
-		request.Lead = defaultLead(request.Workspace)
+		request.Lead = "lead"
 	}
 	path := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
 	if _, err := os.Stat(path); err != nil {
@@ -84,5 +84,3 @@ func workingAreaForRepo(areas []journal.WorkingArea, repo string) (*journal.Work
 	}
 	return selected, nil
 }
-
-func defaultLead(string) string { return "lead" }

@@ -16,17 +16,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
-// requireIntPtrD is a test helper to check pointer int values in daemon tests.
-func requireIntPtrD(t *testing.T, name string, got *int, want int) {
-	t.Helper()
-	if got == nil {
-		t.Fatalf("%s = nil, want %d", name, want)
-	}
-	if *got != want {
-		t.Errorf("%s = %d, want %d", name, *got, want)
-	}
-}
-
 // makeSupervisorConfig creates a DaemonConfig with defaults for testing.
 func makeSupervisorConfig(agents []cfgpkg.AgentEntry, roles map[string]cfgpkg.RoleConfig) *cfgpkg.DaemonConfig {
 	return &cfgpkg.DaemonConfig{

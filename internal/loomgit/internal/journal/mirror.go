@@ -20,13 +20,6 @@ func (s *SQLite) EnsureMirrorSchema(ctx context.Context) error {
 	return err
 }
 
-func (s *SQLite) MirrorRecord(ctx context.Context, repo, ref string) (MirrorRecord, error) {
-	var row MirrorRecord
-	err := s.db.QueryRowContext(ctx, `SELECT repo,ref,remote,sha,state,reason FROM mirror_refs WHERE repo=? AND ref=?`, repo, ref).
-		Scan(&row.Repo, &row.Ref, &row.Remote, &row.SHA, &row.State, &row.Reason)
-	return row, err
-}
-
 func (s *SQLite) PutMirrorRecord(ctx context.Context, row MirrorRecord) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO mirror_refs(repo,ref,remote,sha,state,reason) VALUES(?,?,?,?,?,?)
 		ON CONFLICT(repo,ref) DO UPDATE SET remote=excluded.remote,sha=excluded.sha,state=excluded.state,reason=excluded.reason`,
@@ -57,7 +50,9 @@ func (s *SQLite) DeleteMirrorRecord(ctx context.Context, repo, ref string) error
 }
 
 func (s *SQLite) MirrorState(ctx context.Context, repo, ref string) (MirrorRecord, bool, error) {
-	row, err := s.MirrorRecord(ctx, repo, ref)
+	var row MirrorRecord
+	err := s.db.QueryRowContext(ctx, `SELECT repo,ref,remote,sha,state,reason FROM mirror_refs WHERE repo=? AND ref=?`, repo, ref).
+		Scan(&row.Repo, &row.Ref, &row.Remote, &row.SHA, &row.State, &row.Reason)
 	if err == sql.ErrNoRows {
 		return MirrorRecord{}, false, nil
 	}

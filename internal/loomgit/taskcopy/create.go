@@ -16,13 +16,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/pool"
 )
 
-// Create records base before creating the copy. previousAttempt pins retries to
-// the first attempt's base even if the selected branch advances meanwhile.
-func Create(ctx context.Context, source, target, workspace, attempt, previousAttempt, base string) (string, error) {
-	return CreateAt(ctx, filepath.Join(config.GetConfigDir(), "loomgit", "store.db"),
-		source, target, workspace, attempt, previousAttempt, base)
-}
-
 type Result struct {
 	BaseSHA string
 	Kind    string
@@ -31,12 +24,6 @@ type Result struct {
 
 func CreateDetailed(ctx context.Context, source, target, workspace, attempt, previousAttempt, base string) (Result, error) {
 	return CreateDetailedAt(ctx, filepath.Join(config.GetConfigDir(), "loomgit", "store.db"), source, target, workspace, attempt, previousAttempt, base)
-}
-
-// CreateAt permits an isolated pool journal in tests.
-func CreateAt(ctx context.Context, journalPath, source, target, workspace, attempt, previousAttempt, base string) (string, error) {
-	result, err := CreateDetailedAt(ctx, journalPath, source, target, workspace, attempt, previousAttempt, base)
-	return result.BaseSHA, err
 }
 
 func CreateDetailedAt(ctx context.Context, journalPath, source, target, workspace, attempt, previousAttempt, base string) (Result, error) {

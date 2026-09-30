@@ -271,10 +271,6 @@ func HandleStatsWithDataSource(dataSource *MonitorDataSource) http.HandlerFunc {
 	}
 }
 
-func monitorDataForRequest(r *http.Request, collectDataFn func() *monitor.MonitorData, backendFn IssueBackendFn) *monitor.MonitorData {
-	return NewMonitorDataSource(collectDataFn, backendFn).Resolve(r)
-}
-
 // HandleSync returns an HTTP handler for the sync endpoint.
 func HandleSync(collectDataFn func() *monitor.MonitorData) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -345,26 +341,6 @@ func writeJSON(w http.ResponseWriter, v any) {
 	}
 }
 
-// getWorkspaceInfo returns workspace metadata for API responses.
-func getWorkspaceInfo(ctx context.Context, st store.Store, workspaceHint string) WorkspaceInfo {
-	info := WorkspaceInfo{Mode: "workspace"}
-	if st == nil {
-		return info
-	}
-	workspaces, err := st.Workspaces().List(ctx)
-	if err != nil {
-		return info
-	}
-	info.Workspaces = make([]string, 0, len(workspaces))
-	for _, ws := range workspaces {
-		info.Workspaces = append(info.Workspaces, ws.Name)
-	}
-	if _, wsName, ok := resolveMonitorWorkspace(ctx, st, workspaceHint); ok {
-		info.Name = wsName
-	}
-	return info
-}
-
 // groupAgentsByWorkspace groups agents by their workspace field.
 func groupAgentsByWorkspace(agents []monitor.AgentStatus) map[string][]monitor.AgentStatus {
 	groups := make(map[string][]monitor.AgentStatus)
@@ -376,10 +352,6 @@ func groupAgentsByWorkspace(agents []monitor.AgentStatus) map[string][]monitor.A
 		groups[ws] = append(groups[ws], agent)
 	}
 	return groups
-}
-
-func storeAgentsForMonitor(ctx context.Context, st store.Store, workspaceHint string) []monitor.AgentStatus {
-	return collectMonitorStoreData(ctx, st, workspaceHint).Agents
 }
 
 func latestAgentSessionsForMonitor(ctx context.Context, st store.Store, wsKey string) map[string]*domain.AgentSession {

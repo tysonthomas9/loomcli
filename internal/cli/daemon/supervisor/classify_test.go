@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -25,13 +24,6 @@ func writeLockFile(t *testing.T, dir string, info *cli.LockInfo) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, cli.LockFileName), data, 0600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func writeYieldFile(t *testing.T, dir, reason string) {
-	t.Helper()
-	if err := WriteYieldFile(dir, &YieldRequest{Reason: reason, RequestedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 }

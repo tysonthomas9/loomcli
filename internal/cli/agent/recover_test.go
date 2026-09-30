@@ -284,116 +284,23 @@ func TestAnalyzeTaskCompletion_ClaudeFails(t *testing.T) {
 	}
 }
 
-func TestAnalyzeTaskCompletion_ParsesMultilineResponse(t *testing.T) {
+func TestParseCompletionResponse(t *testing.T) {
 	t.Parallel()
-	deps, _, _, _, tracker := NewTestDeps(t)
-
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Multiline test", Status: "in_progress"}}
-
-	mock := NewCommandMock(t, []CommandStub{
-		{
-			Dir:    "/test/worktree",
-			Name:   "git",
-			Args:   []string{"log", "--oneline", "-20", "--all", "--grep", "task-multi"},
-			Stdout: "abc123 commit\n",
-			Err:    nil,
-		},
-	})
-	mock.InstallOn(deps)
-	installTextAnalysisResult(t, deps, "Let me analyze this...\n\nLooking at the commits:\nCOMPLETED: All requirements met\n\nDone.\n")
-
-	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-multi")
-
-	if !completed {
-		t.Error("expected completed=true for multiline response with COMPLETED")
-	}
-	if reason != "All requirements met" {
-		t.Errorf("unexpected reason: %q", reason)
-	}
-}
-
-func TestAnalyzeTaskCompletion_CaseInsensitive(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, tracker := NewTestDeps(t)
-
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Case test", Status: "in_progress"}}
-
-	mock := NewCommandMock(t, []CommandStub{
-		{
-			Dir:    "/test/worktree",
-			Name:   "git",
-			Args:   []string{"log", "--oneline", "-20", "--all", "--grep", "task-case"},
-			Stdout: "",
-			Err:    nil,
-		},
-	})
-	mock.InstallOn(deps)
-	installTextAnalysisResult(t, deps, "Completed: work was done correctly\n")
-
-	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-case")
-
-	if !completed {
-		t.Error("expected completed=true for lowercase 'Completed'")
-	}
-	if reason != "work was done correctly" {
-		t.Errorf("unexpected reason: %q", reason)
-	}
-}
-
-func TestAnalyzeTaskCompletion_ReasonWithColons(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, tracker := NewTestDeps(t)
-
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Colon test", Status: "in_progress"}}
-
-	mock := NewCommandMock(t, []CommandStub{
-		{
-			Dir:    "/test/worktree",
-			Name:   "git",
-			Args:   []string{"log", "--oneline", "-20", "--all", "--grep", "task-colon"},
-			Stdout: "",
-			Err:    nil,
-		},
-	})
-	mock.InstallOn(deps)
-	installTextAnalysisResult(t, deps, "INCOMPLETE: Missing: tests, docs, and coverage\n")
-
-	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-colon")
-
-	if completed {
-		t.Error("expected completed=false")
-	}
-	// Should capture everything after first colon
-	if reason != "Missing: tests, docs, and coverage" {
-		t.Errorf("unexpected reason: %q", reason)
-	}
-}
-
-func TestAnalyzeTaskCompletion_UnparseableResponse(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, tracker := NewTestDeps(t)
-
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Unparse test", Status: "in_progress"}}
-
-	mock := NewCommandMock(t, []CommandStub{
-		{
-			Dir:    "/test/worktree",
-			Name:   "git",
-			Args:   []string{"log", "--oneline", "-20", "--all", "--grep", "task-unparse"},
-			Stdout: "",
-			Err:    nil,
-		},
-	})
-	mock.InstallOn(deps)
-	installTextAnalysisResult(t, deps, "I'm not sure about this task.\n")
-
-	completed, reason := analyzeTaskCompletion(deps, "/test/worktree", "task-unparse")
-
-	if completed {
-		t.Error("expected completed=false when response is unparseable")
-	}
-	if reason != "Could not determine completion status" {
-		t.Errorf("unexpected reason: %q", reason)
+	for _, tc := range []struct {
+		name, response, reason string
+		completed              bool
+	}{
+		{"multiline", "Let me analyze this...\nCOMPLETED: All requirements met\nDone.\n", "All requirements met", true},
+		{"case insensitive", "Completed: work was done correctly\n", "work was done correctly", true},
+		{"reason with colons", "INCOMPLETE: Missing: tests, docs, and coverage\n", "Missing: tests, docs, and coverage", false},
+		{"unparseable", "I'm not sure about this task.\n", "Could not determine completion status", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			completed, reason := parseCompletionResponse(tc.response)
+			if completed != tc.completed || reason != tc.reason {
+				t.Fatalf("parseCompletionResponse() = %v, %q; want %v, %q", completed, reason, tc.completed, tc.reason)
+			}
+		})
 	}
 }
 

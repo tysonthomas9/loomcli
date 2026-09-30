@@ -317,7 +317,7 @@ func TestCaptureCleanTreeMakesNoCommit(t *testing.T) {
 	}
 }
 
-func TestFreezeSourceRewritesChainAndKeepsCapture(t *testing.T) {
+func TestRewriteSourceKeepsCapture(t *testing.T) {
 	dir, r := fixture(t)
 	base := must(t, r, "rev-parse", "HEAD")
 	write(t, dir, "c1", "one")
@@ -328,15 +328,12 @@ func TestFreezeSourceRewritesChainAndKeepsCapture(t *testing.T) {
 	must(t, r, "commit", "-qm", "agent c2")
 	write(t, dir, "edit", "three")
 	result := capture(t, dir, r)
-	frozen, err := FreezeSource(context.Background(), r, FreezeParams{Workspace: "ws", Attempt: "a1", TaskID: "task-1", ChangeID: "change-1", Revision: "1", BaseSHA: base, HeadSHA: result.CaptureSHA})
+	frozen, err := RewriteSource(context.Background(), r, FreezeParams{Workspace: "ws", Attempt: "a1", TaskID: "task-1", ChangeID: "change-1", Revision: "1", BaseSHA: base, HeadSHA: result.CaptureSHA})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := must(t, r, "rev-parse", result.CaptureRef); got != result.CaptureSHA {
 		t.Fatal("original capture ref moved")
-	}
-	if got := must(t, r, "rev-parse", "refs/loom/ws/ws/change/change-1/1/head"); got != frozen {
-		t.Fatal("source revision head mismatch")
 	}
 	commits := strings.Fields(must(t, r, "rev-list", "--reverse", base+".."+frozen))
 	if len(commits) != 3 {

@@ -19,23 +19,6 @@ type FreezeParams struct {
 	HeadSHA   string // capture SHA when Capture made one, otherwise the latest agent commit
 }
 
-// FreezeSource rewrites the attempt's linear commit chain once with durable
-// identity trailers. The original capture ref and commits remain untouched.
-func FreezeSource(ctx context.Context, runner loomgit.RepoStore, p FreezeParams) (string, error) {
-	ref, err := refname.RevisionHead(p.Workspace, p.ChangeID, p.Revision)
-	if err != nil {
-		return "", err
-	}
-	parent, err := RewriteSource(ctx, runner, p)
-	if err != nil {
-		return "", err
-	}
-	if err := runner.UpdateRef(ctx, ref, parent, strings.Repeat("0", len(parent))); err != nil {
-		return "", err
-	}
-	return parent, nil
-}
-
 // RewriteSource creates the source chain without publishing a revision ref.
 // The caller can verify and record it before installing refs.
 func RewriteSource(ctx context.Context, runner loomgit.RepoStore, p FreezeParams) (string, error) {

@@ -106,10 +106,6 @@ var trustedLocalProviderCredentials = map[string]struct{}{
 	"GH_TOKEN":     {},
 }
 
-func driverRuntimeBaseEnv(env []string) []string {
-	return scopedSubprocessBaseEnv(env)
-}
-
 // localTaskRunnerBaseEnv is the trusted-local superset of the strict driver
 // allowlist: it keeps everything scopedSubprocessBaseEnv admits (PATH/HOME/…)
 // and additionally admits the provider-credential allowlist so the local

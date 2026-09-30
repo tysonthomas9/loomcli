@@ -482,31 +482,6 @@ func ValidateAgentRepos(agents []AgentEntry) error {
 	return nil
 }
 
-// resolveRepoPath looks up a repo by name in the active workspace config and returns
-// its absolute path. Returns an error if the repo is not found or the path doesn't exist.
-func resolveRepoPath(repoName string) (string, error) {
-	ws, err := ResolveActiveWorkspace()
-	if err != nil {
-		return "", fmt.Errorf("resolving workspace: %w", err)
-	}
-	if ws == nil {
-		return "", fmt.Errorf("no active workspace configured")
-	}
-
-	for _, repo := range ws.Repos {
-		if repo.Name == repoName {
-			absPath := repo.ResolveAbsPath(ws.Path)
-			if info, err := os.Stat(absPath); err != nil {
-				return "", fmt.Errorf("repo path %q does not exist: %w", absPath, err)
-			} else if !info.IsDir() {
-				return "", fmt.Errorf("repo path %q is not a directory", absPath)
-			}
-			return absPath, nil
-		}
-	}
-	return "", fmt.Errorf("repo %q not found in workspace", repoName)
-}
-
 // OverlayDaemonSettings applies explicitly-set values from src onto dst.
 func OverlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 	if src.PIDFile != "" {
