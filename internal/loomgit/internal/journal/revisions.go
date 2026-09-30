@@ -3,6 +3,7 @@ package journal
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -56,9 +57,14 @@ func (s *SQLite) ReserveRevision(ctx context.Context, r loomgit.Revision) (loomg
 }
 
 func (s *SQLite) FinishRevision(ctx context.Context, r loomgit.Revision) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE change_revisions SET head_sha = ?, ready = 1
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `UPDATE change_revisions SET head_sha = ?, ready = 1
 		WHERE workspace = ? AND change_id = ? AND number = ? AND request_id = ?
-		AND (head_sha = '' OR head_sha = ?)`, r.HeadSHA, r.Workspace, r.Change, r.Number, r.RequestID, r.HeadSHA)
+		AND ready = 0 AND (head_sha = '' OR head_sha = ?)`, r.HeadSHA, r.Workspace, r.Change, r.Number, r.RequestID, r.HeadSHA)
 	if err != nil {
 		return err
 	}
@@ -66,10 +72,31 @@ func (s *SQLite) FinishRevision(ctx context.Context, r loomgit.Revision) error {
 	if err != nil {
 		return err
 	}
-	if n != 1 {
+	if n == 0 {
+		var head string
+		var ready bool
+		err := tx.QueryRowContext(ctx, `SELECT head_sha,ready FROM change_revisions
+			WHERE workspace=? AND change_id=? AND number=? AND request_id=?`,
+			r.Workspace, r.Change, r.Number, r.RequestID).Scan(&head, &ready)
+		if err == nil && ready && head == r.HeadSHA {
+			return nil
+		}
 		return ErrStale
 	}
-	return nil
+	payload, err := json.Marshal(struct {
+		Workspace string `json:"workspace"`
+		ChangeID  string `json:"change_id"`
+		Revision  int    `json:"revision"`
+		HeadSHA   string `json:"head_sha"`
+		Kind      string `json:"kind"`
+	}{r.Workspace, r.Change, r.Number, r.HeadSHA, r.Kind})
+	if err != nil {
+		return err
+	}
+	if err := queueEvent(ctx, tx, "revision-event:"+r.RequestID, "git.revision_created", payload); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *SQLite) GetRevision(ctx context.Context, workspace, change string, number int) (loomgit.Revision, error) {

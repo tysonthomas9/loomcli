@@ -191,6 +191,8 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.hub = appstores.NewHub()
 	go app.hub.Run()
 	cleanups = append(cleanups, func() { app.hub.Stop() })
+	app.stopLoomGitEvents = appstores.StartLoomGitEvents(ctx, app.hub, config.Logger)
+	cleanups = append(cleanups, app.stopLoomGitEvents)
 
 	// Bridge per-workspace backend mutations to SSE clients.
 	app.multiSub = appstores.NewMultiSub(ctx, app.hub, config.Logger)

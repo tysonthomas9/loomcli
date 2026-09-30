@@ -63,6 +63,7 @@ const (
 // context.Background() path" so backward compatibility is preserved.
 type Event struct {
 	Type        EventType       `json:"type"`
+	EventID     string          `json:"event_id,omitempty"`
 	Timestamp   time.Time       `json:"timestamp"`
 	Agent       string          `json:"agent,omitempty"`
 	Role        string          `json:"role,omitempty"`

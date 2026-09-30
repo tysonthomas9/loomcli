@@ -3,6 +3,7 @@ package journal
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 )
 
@@ -46,7 +47,12 @@ func (s *SQLite) BeginPublication(ctx context.Context, p Publication) error {
 }
 
 func (s *SQLite) AdvancePublication(ctx context.Context, p Publication) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE change_publications SET phase=?,pr_number=?,pr_url=?
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `UPDATE change_publications SET phase=?,pr_number=?,pr_url=?
 		WHERE workspace=? AND change_id=? AND head_sha=?`,
 		p.Phase, p.PRNumber, p.PRURL, p.Workspace, p.Change, p.Head)
 	if err != nil {
@@ -59,7 +65,23 @@ func (s *SQLite) AdvancePublication(ctx context.Context, p Publication) error {
 	if n != 1 {
 		return ErrStale
 	}
-	return nil
+	if p.Phase == "done" {
+		payload, err := json.Marshal(struct {
+			Workspace string `json:"workspace"`
+			ChangeID  string `json:"change_id"`
+			HeadSHA   string `json:"head_sha"`
+			PRNumber  int    `json:"pr_number"`
+			PRURL     string `json:"pr_url"`
+		}{p.Workspace, p.Change, p.Head, p.PRNumber, p.PRURL})
+		if err != nil {
+			return err
+		}
+		key := "publication-event:" + p.Workspace + ":" + p.Change + ":" + p.Head
+		if err := queueEvent(ctx, tx, key, "git.published", payload); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *SQLite) OpenPublications(ctx context.Context) ([]Publication, error) {

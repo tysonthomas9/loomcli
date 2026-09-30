@@ -39,7 +39,8 @@ func NextEventID() int64 {
 
 // MutationPayload represents mutation data sent to clients.
 type MutationPayload struct {
-	Cursor      string `json:"cursor,omitempty"`      // Durable stream cursor for SSE Last-Event-ID when available
+	Cursor      string `json:"cursor,omitempty"` // Durable stream cursor for SSE Last-Event-ID when available
+	EventID     string `json:"event_id,omitempty"`
 	Type        string `json:"type"`                  // create, update, delete, comment, status, bonded, squashed, burned, refresh, terminal_metadata, terminal_session_change
 	EntityType  string `json:"entity_type,omitempty"` // Generic changed entity type (issue, dependency, terminal, ...)
 	EntityID    string `json:"entity_id,omitempty"`   // Generic changed entity identifier

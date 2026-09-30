@@ -58,7 +58,12 @@ func (s *SQLite) SaveApplied(ctx context.Context, a loomgit.AppliedLayer) error 
 }
 
 func (s *SQLite) AdvanceApplied(ctx context.Context, requestID, oldPhase, nextPhase string) error {
-	r, err := s.db.ExecContext(ctx, `UPDATE applied_layers SET phase=? WHERE request_id=? AND phase=?`, nextPhase, requestID, oldPhase)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	r, err := tx.ExecContext(ctx, `UPDATE applied_layers SET phase=? WHERE request_id=? AND phase=?`, nextPhase, requestID, oldPhase)
 	if err != nil {
 		return err
 	}
@@ -69,7 +74,30 @@ func (s *SQLite) AdvanceApplied(ctx context.Context, requestID, oldPhase, nextPh
 	if n != 1 {
 		return ErrStale
 	}
-	return nil
+	if nextPhase == "done" {
+		var workspace, lead, change, sha string
+		var revision int
+		err = tx.QueryRowContext(ctx, `SELECT workspace,lead,change_id,revision,new_tip FROM applied_layers WHERE request_id=?`, requestID).
+			Scan(&workspace, &lead, &change, &revision, &sha)
+		if err != nil {
+			return err
+		}
+		payload, err := json.Marshal(struct {
+			Workspace    string `json:"workspace"`
+			Lead         string `json:"lead"`
+			ChangeID     string `json:"change_id"`
+			Revision     int    `json:"revision"`
+			WorkspaceSHA string `json:"workspace_sha"`
+		}{workspace, lead, change, revision, sha})
+		if err != nil {
+			return err
+		}
+		entryID := "apply-event:" + requestID
+		if err := queueEvent(ctx, tx, entryID, "git.integrated", payload); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *SQLite) AppliedLog(ctx context.Context, workspace, lead string) ([]loomgit.AppliedLayer, error) {
