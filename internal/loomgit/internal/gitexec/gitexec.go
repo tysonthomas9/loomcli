@@ -385,6 +385,10 @@ func (r *Runner) RunWithEnv(ctx context.Context, env map[string]string, args ...
 	for key := range env {
 		switch key {
 		case "GIT_INDEX_FILE", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE":
+		case "GIT_OPTIONAL_LOCKS":
+			if env[key] != "0" {
+				return nil, ErrForbidden
+			}
 		default:
 			return nil, ErrForbidden
 		}

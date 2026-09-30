@@ -60,6 +60,7 @@ type DoctorSummary struct {
 
 var doctorJSON bool
 var doctorFix bool
+var doctorIntegrity bool
 
 var doctorCmd = &cobra.Command{
 	Use:     "doctor",
@@ -73,7 +74,8 @@ actionable pass/warn/fail results.
 
 Examples:
   loom doctor              # Human-readable health report
-  loom doctor --json       # Machine-readable JSON output`,
+  loom doctor --json       # Machine-readable JSON output
+  loom doctor --integrity  # Also check recorded Git objects`,
 	Args: cobra.NoArgs,
 	RunE: runDoctor,
 	// Override PersistentPreRunE: doctor must run even when the backend
@@ -88,6 +90,7 @@ Examples:
 func init() {
 	doctorCmd.Flags().BoolVar(&doctorJSON, "json", false, "Output in JSON format")
 	doctorCmd.Flags().BoolVar(&doctorFix, "fix", false, "Automatically fix issues where possible")
+	doctorCmd.Flags().BoolVar(&doctorIntegrity, "integrity", false, "Check recorded Git objects with git fsck")
 	cli.RegisterCommand(doctorCmd)
 }
 
@@ -144,6 +147,7 @@ func collectDoctorChecks(cmd *cobra.Command) []checkFunc {
 		checkWorktrees, checkStaleLocks, checkStaleSignalFiles, checkStaleSessionRecords,
 		checkOrphanedTranscripts, checkAgentProfiles, checkOrphanedTmuxSessions, checkLoomDaemon, checkDaemonStuck, checkRedis,
 		func() CheckResult { return checkOrphanedFleetLocks(deps) })
+	checks = append(checks, func() CheckResult { return checkLoomGitInventory(cmd.Context(), doctorIntegrity) })
 	return checks
 }
 

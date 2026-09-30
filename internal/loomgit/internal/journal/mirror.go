@@ -44,6 +44,16 @@ func (s *SQLite) MirrorRecords(ctx context.Context) ([]MirrorRecord, error) {
 	return out, rows.Err()
 }
 
+func (s *SQLite) ExistingMirrorRecords(ctx context.Context) ([]MirrorRecord, error) {
+	var name string
+	if err := s.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name='mirror_refs'`).Scan(&name); err == sql.ErrNoRows {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	return s.MirrorRecords(ctx)
+}
+
 func (s *SQLite) DeleteMirrorRecord(ctx context.Context, repo, ref string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM mirror_refs WHERE repo=? AND ref=?`, repo, ref)
 	return err
