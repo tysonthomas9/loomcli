@@ -92,3 +92,50 @@ func TestDispatchLoomGitEventsDrainsDurableStore(t *testing.T) {
 		t.Fatalf("event not marked delivered: %+v, %v", pending, err)
 	}
 }
+
+func TestDispatchLoomGitEventsRetriesFullHub(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "journal.db")
+	store, err := outbox.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	entry, _, err := store.(loomgit.Store).Begin(ctx, "integrate-1", "integrate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.(loomgit.Store).Advance(ctx, entry, "done", nil, []loomgit.OutboxEvent{{Kind: "git.integrated",
+		Payload: []byte(`{"workspace":"W","change_id":"C"}`)}}); err != nil {
+		t.Fatal(err)
+	}
+	bus := events.NewBus(t.TempDir())
+	defer func() { _ = bus.Close() }()
+	hub := realtime.NewHub()
+	for range 1280 {
+		if !hub.TryBroadcast(&realtime.MutationPayload{WorkspaceID: "W"}) {
+			t.Fatal("hub rejected mutation before capacity")
+		}
+	}
+	if err := outbox.Dispatch(ctx, store, loomGitEventSink{bus: bus, hub: hub}); err == nil {
+		t.Fatal("dispatch accepted a full hub")
+	}
+	if pending, err := store.PendingEvents(ctx); err != nil || len(pending) != 1 {
+		t.Fatalf("event lost after full hub: %+v, %v", pending, err)
+	}
+	go hub.Run()
+	defer hub.Stop()
+	deadline := time.Now().Add(time.Second)
+	for {
+		if err := outbox.Dispatch(ctx, store, loomGitEventSink{bus: bus, hub: hub}); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("hub did not regain capacity")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if pending, err := store.PendingEvents(ctx); err != nil || len(pending) != 0 {
+		t.Fatalf("event not delivered after retry: %+v, %v", pending, err)
+	}
+}

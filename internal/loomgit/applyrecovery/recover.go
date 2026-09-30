@@ -8,11 +8,13 @@ import (
 	"path/filepath"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/pool"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/outbox"
 )
 
 func Recover(ctx context.Context) error {
@@ -54,5 +56,11 @@ func Recover(ctx context.Context) error {
 			return err
 		}
 	}
-	return nil
+	dir := os.Getenv("LOOM_EVENTS_DIR")
+	if dir == "" {
+		dir = filepath.Join(config.GetConfigDir(), "events")
+	}
+	bus := events.NewBus(dir)
+	defer func() { _ = bus.Close() }()
+	return outbox.EmitPending(ctx, store, bus)
 }

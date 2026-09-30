@@ -90,6 +90,34 @@ func TestReconcileJournalUnknownOperationDoesNotReplayApply(t *testing.T) {
 	}
 }
 
+func TestReconcileEmitsClosedApplyEventAfterCrash(t *testing.T) {
+	ctx, store, _, base := recoveryFixture(t)
+	t.Setenv("LOOM_EVENTS_DIR", "")
+	defer func() { _ = store.Close() }()
+	if err := store.SaveApplied(ctx, loomgit.AppliedLayer{RequestID: "closed", Workspace: "W", Lead: "L",
+		Change: "C", Revision: 1, OldTip: base, NewTip: base}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AdvanceApplied(ctx, "closed", "prepared", "done"); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspacemgr.ReconcileJournal(ctx, memstore.New()); err != nil {
+		t.Fatal(err)
+	}
+	files, err := os.ReadDir(filepath.Join(os.Getenv("LOOM_CONFIG_DIR"), "events"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("recovered event log: %+v, %v", files, err)
+	}
+	data, err := os.ReadFile(filepath.Join(os.Getenv("LOOM_CONFIG_DIR"), "events", files[0].Name()))
+	if err != nil || !strings.Contains(string(data), `"type":"git.integrated"`) ||
+		!strings.Contains(string(data), `"event_id":"loomgit:1"`) {
+		t.Fatalf("recovered event: %s, %v", data, err)
+	}
+	if pending, err := store.PendingEvents(ctx); err != nil || len(pending) != 1 {
+		t.Fatalf("event should await SSE acknowledgement: %+v, %v", pending, err)
+	}
+}
+
 func recoveryFixture(t *testing.T) (context.Context, *journal.SQLite, journal.WorkingArea, string) {
 	t.Helper()
 	root := t.TempDir()

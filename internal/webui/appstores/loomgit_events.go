@@ -34,15 +34,14 @@ func (sink loomGitEventSink) Emit(_ context.Context, event loomgit.OutboxEvent) 
 		return fmt.Errorf("loom git event %d has no workspace", event.ID)
 	}
 	id := "loomgit:" + strconv.FormatInt(event.ID, 10)
-	if err := sink.bus.Emit(events.Event{Type: events.EventType(event.Kind), EventID: id, Data: event.Payload}); err != nil {
+	if err := outbox.EmitJSONL(sink.bus, event); err != nil {
 		return err
 	}
-	if err := sink.bus.Flush(); err != nil {
-		return err
-	}
-	sink.hub.Broadcast(&realtime.MutationPayload{EventID: id, Type: "update", EntityType: "change",
+	if !sink.hub.TryBroadcast(&realtime.MutationPayload{EventID: id, Type: "update", EntityType: "change",
 		EntityID: subject.ChangeID, Action: event.Kind, WorkspaceID: subject.Workspace,
-		Timestamp: time.Now().UTC().Format(time.RFC3339Nano)})
+		Timestamp: time.Now().UTC().Format(time.RFC3339Nano)}) {
+		return fmt.Errorf("loom git event %d SSE queue is full", event.ID)
+	}
 	return nil
 }
 
