@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/taskcopy"
 	"github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
@@ -352,6 +353,7 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 	if err != nil {
 		return TaskWorktree{}, err
 	}
+	revisionSource := repoPath
 	attemptID := taskCopyAttemptID(taskRunID, req.SchedulerAttempt)
 	target, err := localworkspace.TaskCopyPath(local.Path, selected.Name, attemptID)
 	if err != nil {
@@ -359,6 +361,10 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 	}
 	base := ""
 	var localBase taskcopy.LineageBase
+	resolution, hasResolution, err := conflictResolutionFromInput(req.Input)
+	if err != nil {
+		return TaskWorktree{}, err
+	}
 	if req.ResumeAttemptID != "" && req.PreviousAttemptID != "" {
 		return TaskWorktree{}, fmt.Errorf("resume and retry cannot select the same task copy")
 	}
@@ -380,6 +386,17 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 			}
 		}
 	}
+	resolutionLead := ""
+	if hasResolution && req.ResumeAttemptID == "" {
+		parent, err := r.Store.AgentSessions().Get(ctx, workspaceKey, req.ParentSessionID)
+		if err != nil {
+			return TaskWorktree{}, fmt.Errorf("resolve delegating lead for conflict resolution: %w", err)
+		}
+		resolutionLead = parent.AgentID
+		if err := taskcopy.ValidateConflictResolution(ctx, workspaceKey, resolutionLead, req.TaskID, selected.Name, resolution.Change, resolution.Number); err != nil {
+			return TaskWorktree{}, fmt.Errorf("validate conflict resolution for repo %q: %w", selected.Name, err)
+		}
+	}
 	var created taskcopy.Result
 	if req.ResumeAttemptID != "" {
 		created, err = taskcopy.ResumeDetailed(ctx, repoPath, target, workspaceKey, attemptID, req.ResumeAttemptID)
@@ -392,6 +409,11 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 	if localBase.Ref != "" {
 		if err := taskcopy.RecordLineageBase(ctx, workspaceKey, req.TaskID, selected.Name, localBase); err != nil {
 			return TaskWorktree{}, fmt.Errorf("record dependent lineage: %w", err)
+		}
+	}
+	if hasResolution && req.ResumeAttemptID == "" {
+		if err := taskcopy.PrepareConflictResolution(ctx, revisionSource, target, workspaceKey, resolutionLead, req.TaskID, selected.Name, resolution.Change, resolution.Number); err != nil {
+			return TaskWorktree{}, fmt.Errorf("prepare conflict resolution for repo %q: %w", selected.Name, err)
 		}
 	}
 	return TaskWorktree{
@@ -670,12 +692,123 @@ func baseRevisionFromInput(input json.RawMessage) (BaseRevision, bool, error) {
 	return revision, true, nil
 }
 
+// WithConflictResolution starts a new reviewable attempt at the lead's tip.
+// The selected revision's commits are then cherry-picked in the task copy.
+func WithConflictResolution(input json.RawMessage, revision BaseRevision) (json.RawMessage, error) {
+	if revision.Change == "" || revision.Number < 1 {
+		return nil, errors.New("conflict resolution needs change and number")
+	}
+	obj := map[string]json.RawMessage{}
+	if len(input) > 0 {
+		if err := json.Unmarshal(input, &obj); err != nil {
+			return nil, err
+		}
+	}
+	data, err := json.Marshal(revision)
+	if err != nil {
+		return nil, err
+	}
+	obj["conflictResolution"] = data
+	return json.Marshal(obj)
+}
+
+func conflictResolutionFromInput(input json.RawMessage) (BaseRevision, bool, error) {
+	if len(input) == 0 {
+		return BaseRevision{}, false, nil
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(input, &obj); err != nil {
+		return BaseRevision{}, false, err
+	}
+	data, ok := obj["conflictResolution"]
+	if !ok {
+		return BaseRevision{}, false, nil
+	}
+	var revision BaseRevision
+	if err := json.Unmarshal(data, &revision); err != nil {
+		return BaseRevision{}, false, err
+	}
+	if revision.Change == "" || revision.Number < 1 {
+		return BaseRevision{}, false, errors.New("invalid conflict resolution revision")
+	}
+	return revision, true, nil
+}
+
+// WithCurrentWorkspaceState requests a fresh WIP snapshot of the delegating
+// lead's working area. Retries reuse the first attempt's pinned WIP base.
+func WithCurrentWorkspaceState(input json.RawMessage) (json.RawMessage, error) {
+	obj := map[string]json.RawMessage{}
+	if len(input) > 0 {
+		if err := json.Unmarshal(input, &obj); err != nil {
+			return nil, err
+		}
+	}
+	obj["delegateFromCurrentState"] = json.RawMessage("true")
+	return json.Marshal(obj)
+}
+
+func currentWorkspaceStateFromInput(input json.RawMessage) (bool, error) {
+	if len(input) == 0 {
+		return false, nil
+	}
+	var obj struct {
+		DelegateFromCurrentState bool `json:"delegateFromCurrentState"`
+	}
+	if err := json.Unmarshal(input, &obj); err != nil {
+		return false, err
+	}
+	return obj.DelegateFromCurrentState, nil
+}
+
+// Lead-created task runs use the current working area unless an explicit
+// revision or conflict-resolution action selects a different base.
+func createQueuedTaskRun(ctx context.Context, s store.Store, opts TaskRunRequestOptions, refs taskRunRequestRefs) (*domain.TaskRun, error) {
+	prepared, err := defaultTaskRunDelegation(opts)
+	if err != nil {
+		return nil, err
+	}
+	return createQueuedTaskRunPrepared(ctx, s, prepared, refs)
+}
+
+func defaultTaskRunDelegation(opts TaskRunRequestOptions) (TaskRunRequestOptions, error) {
+	if opts.ParentSessionID == "" || opts.ResumeAttemptID != "" {
+		return opts, nil
+	}
+	_, hasBase, err := baseRevisionFromInput(opts.Input)
+	if err != nil {
+		return opts, err
+	}
+	_, hasResolution, err := conflictResolutionFromInput(opts.Input)
+	if err != nil {
+		return opts, err
+	}
+	if hasBase || hasResolution {
+		return opts, nil
+	}
+	opts.Input, err = WithCurrentWorkspaceState(opts.Input)
+	return opts, err
+}
+
 func (r LocalTaskWorktreeResolver) delegatedBase(ctx context.Context, req TaskExecRequest, repoPath, repoName string) (string, string, bool, error) {
 	revision, hasRevision, err := baseRevisionFromInput(req.Input)
 	if err != nil {
 		return "", "", false, err
 	}
-	if !hasRevision && req.ParentSessionID == "" {
+	currentState, err := currentWorkspaceStateFromInput(req.Input)
+	if err != nil {
+		return "", "", false, err
+	}
+	_, hasResolution, err := conflictResolutionFromInput(req.Input)
+	if err != nil {
+		return "", "", false, err
+	}
+	if currentState && (hasRevision || hasResolution || req.ParentSessionID == "") {
+		return "", "", false, errors.New("current workspace state requires a delegating lead and no base revision")
+	}
+	if hasResolution && (hasRevision || req.ParentSessionID == "") {
+		return "", "", false, errors.New("conflict resolution requires a delegating lead and no base revision")
+	}
+	if !hasRevision && !hasResolution && req.ParentSessionID == "" {
 		return repoPath, "", false, nil
 	}
 	base := ""
@@ -693,6 +826,16 @@ func (r LocalTaskWorktreeResolver) delegatedBase(ctx context.Context, req TaskEx
 		}
 		if !hasRevision {
 			repoPath, base = leadPath, tip
+			if currentState && req.PreviousAttemptID == "" && req.ResumeAttemptID == "" {
+				captured, err := agentcapture.CaptureDelegatedWorkingArea(ctx, leadPath, req.WorkspaceKey, parent.AgentID)
+				if err != nil {
+					return "", "", false, fmt.Errorf("capture current workspace state: %w", err)
+				}
+				if !captured.Complete {
+					return "", "", false, loomgit.NewError(loomgit.CaptureIncomplete, "current workspace state contains uncaptured paths", nil)
+				}
+				base = captured.SHA
+			}
 		}
 	}
 	if hasRevision {

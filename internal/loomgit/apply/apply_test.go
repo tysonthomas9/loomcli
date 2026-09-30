@@ -152,6 +152,46 @@ func TestApplyEventIsDurableOnlyAfterCompletion(t *testing.T) {
 	}
 }
 
+func TestApplyWIPBasedRevisionLeavesUserEditsUncommitted(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.git(t, "checkout", "-q", "-b", "wip", f.base)
+	wip := f.commit(t, "user.txt", "user work\n", "workspace WIP")
+	agent := f.commit(t, "agent.txt", "agent work\n", "agent change")
+	f.git(t, "checkout", "-q", "loom/ws/W/interactive/L")
+	f.write(t, "user.txt", "user work\n")
+	revision, err := f.store.ReserveRevision(ctx, loomgit.Revision{
+		Workspace: "W", Change: "C2", RequestID: "wip-source", Kind: "source", Operation: "snapshot",
+		Outcome: "completed", BaseSHA: wip, TreeHash: f.git(t, "rev-parse", agent+"^{tree}"), SourceHeadSHA: agent,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision.HeadSHA = agent
+	if err := f.store.FinishRevision(ctx, revision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := review.Submit(ctx, f.store, "W", "C2", revision.Number, agent, "approve", "", review.Actor{Kind: "human", ID: "reviewer"}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := f.service.Apply(ctx, Request{Workspace: "W", Lead: "L", Change: "C2", Revision: revision.Number, RequestID: "apply-wip"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.git(t, "show", "HEAD:agent.txt"); got != "agent work" {
+		t.Fatalf("applied agent file = %q", got)
+	}
+	if got := f.git(t, "ls-tree", "HEAD", "user.txt"); got != "" {
+		t.Fatalf("WIP file entered applied layer: %q", got)
+	}
+	if got := f.git(t, "status", "--porcelain"); got != "?? user.txt" {
+		t.Fatalf("user edit status = %q", got)
+	}
+	if result.HeadSHA == agent || f.git(t, "rev-parse", "HEAD^1") != f.base {
+		t.Fatalf("agent layer did not replay onto lead tip: %+v", result)
+	}
+}
+
 func TestApplyReplayRecordsDerivedAndCarriesApproval(t *testing.T) {
 	f := newFixture(t)
 	target := f.commit(t, "target", "target\n", "target")

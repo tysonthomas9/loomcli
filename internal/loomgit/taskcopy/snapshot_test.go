@@ -9,8 +9,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/taskcopy"
 )
 
@@ -113,6 +116,90 @@ func TestResumeStartsFreshCopyAtCaptureWithOriginalBase(t *testing.T) {
 	}
 	if data, err := os.ReadFile(filepath.Join(oldCopy, "untracked")); err != nil || string(data) != "earlier work\n" {
 		t.Fatalf("old copy changed: %q, %v", data, err)
+	}
+}
+
+func TestConflictResolutionCopyCreatesNewRevisionForReview(t *testing.T) {
+	source, copyPath, _, base := fixture(t)
+	ctx := context.Background()
+	configDir := filepath.Dir(source)
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	journalPath := filepath.Join(configDir, "loomgit", "store.db")
+	if err := os.MkdirAll(filepath.Dir(journalPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := journal.OpenSQLite(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	git(t, source, "checkout", "-q", "-b", "agent", base)
+	if err := os.WriteFile(filepath.Join(source, "user-only"), []byte("uncommitted user work\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, source, "add", "user-only")
+	git(t, source, "-c", "user.name=Loom", "-c", "user.email=loom@localhost", "commit", "-qm", "workspace WIP")
+	wip := git(t, source, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(source, "tracked"), []byte("agent\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, source, "add", "tracked")
+	git(t, source, "-c", "user.name=Agent", "-c", "user.email=agent@example.test", "commit", "-qm", "agent")
+	agentHead := git(t, source, "rev-parse", "HEAD")
+	git(t, source, "checkout", "-q", "-b", "loom/ws/W/interactive/L", base)
+	if err := os.WriteFile(filepath.Join(source, "tracked"), []byte("lead\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, source, "add", "tracked")
+	git(t, source, "-c", "user.name=Lead", "-c", "user.email=lead@example.test", "commit", "-qm", "lead")
+	leadTip := git(t, source, "rev-parse", "HEAD")
+	if _, err := store.DriverChange(ctx, "W", "T", "source", "C"); err != nil {
+		t.Fatal(err)
+	}
+	revision, err := store.ReserveRevision(ctx, loomgit.Revision{Workspace: "W", Change: "C", RequestID: "agent-1", Kind: "source", Operation: "snapshot", Outcome: "completed", BaseSHA: wip, TreeHash: git(t, source, "rev-parse", agentHead+"^{tree}"), SourceHeadSHA: agentHead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision.HeadSHA = agentHead
+	if err := store.FinishRevision(ctx, revision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := review.Submit(ctx, store, "W", "C", 1, agentHead, "approve", "", review.Actor{Kind: "human", ID: "reviewer"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := taskcopy.CreateDetailedAt(ctx, journalPath, source, copyPath, "W", "resolution", "", leadTip); err != nil {
+		t.Fatal(err)
+	}
+	if err := taskcopy.PrepareConflictResolution(ctx, source, copyPath, "W", "L", "T", "source", "C", 1); err != nil {
+		t.Fatal(err)
+	}
+	if got := git(t, copyPath, "rev-parse", "HEAD"); got != leadTip {
+		t.Fatalf("resolution copy base = %s, want lead tip %s", got, leadTip)
+	}
+	if got := git(t, copyPath, "ls-files", "user-only"); got != "" {
+		t.Fatalf("WIP-only file entered resolution copy: %q", got)
+	}
+	if got := git(t, copyPath, "ls-files", "-u"); !strings.Contains(got, "tracked") {
+		t.Fatalf("conflict is not exposed in task copy: %q", got)
+	}
+	if got := git(t, source, "status", "--porcelain"); got != "" {
+		t.Fatalf("lead checkout changed: %q", got)
+	}
+	if err := os.WriteFile(filepath.Join(copyPath, "tracked"), []byte("resolved\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, copyPath, "add", "tracked")
+	git(t, copyPath, "-c", "user.name=Agent", "-c", "user.email=agent@example.test", "commit", "-qm", "resolve")
+	patch := git(t, copyPath, "diff", "--binary", leadTip, "HEAD") + "\n"
+	next, err := driverfreeze.FreezeAt(ctx, journalPath, driverfreeze.Request{Workspace: "W", Task: "T", Repo: "source", Attempt: "resolution", Worktree: copyPath, Base: leadTip, Patch: []byte(patch), Outcome: "completed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Change != "C" || next.Number != 2 || next.BaseSHA != leadTip {
+		t.Fatalf("resolution revision = %+v", next)
+	}
+	if err := review.RequireVerdict(ctx, store, "W", "C", 2, next.HeadSHA, "apply", "L"); err == nil {
+		t.Fatal("resolution revision bypassed review")
 	}
 }
 
