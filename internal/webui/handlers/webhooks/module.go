@@ -10,10 +10,15 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/feedback"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/reconcile"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
@@ -47,6 +52,8 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/trigger-events/{eventId}", m.getTriggerEvent)
 	mux.HandleFunc("GET /api/workspaces/{ws}/trigger-deliveries", m.listTriggerDeliveries)
 	mux.HandleFunc("GET /api/workspaces/{ws}/trigger-deliveries/{deliveryId}", m.getTriggerDelivery)
+	mux.HandleFunc("GET /api/workspaces/{ws}/changes/{change}/feedback", m.listChangeFeedback)
+	mux.HandleFunc("POST /api/workspaces/{ws}/changes/{change}/feedback/{delivery}/address", m.addressChangeFeedback)
 }
 
 func (m *Module) receiveWebhook(w http.ResponseWriter, r *http.Request) {
@@ -68,7 +75,10 @@ func (m *Module) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Normalize headers + body into routing metadata (does not trust payload).
+	if err := m.preverifyWebhook(r, adapter, ws, name, body); err != nil {
+		writeAdapterError(w, err)
+		return
+	}
 	event, err := adapter.Normalize(r, body)
 	if err != nil {
 		writeAdapterError(w, err)
@@ -87,6 +97,38 @@ func (m *Module) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	// 4-5. Dispatch durably and respond.
 	m.dispatchWebhook(w, r, ws, name, event, body)
+}
+
+func (m *Module) preverifyWebhook(r *http.Request, adapter Adapter, ws, source string, body []byte) error {
+	candidates, found, err := m.connectorSecretCandidates(r.Context(), ws, source, time.Now().UTC())
+	if err != nil {
+		slog.Error("webhook inbound secret resolution failed", "workspace", ws, "source_kind", source, "err", err)
+		return errInboundUnverified()
+	}
+	if !found {
+		enabled := true
+		bindings, listErr := m.store.TriggerBindings().List(r.Context(), ws, store.TriggerBindingFilter{
+			SourceKind: source, Enabled: &enabled})
+		if listErr != nil {
+			slog.Error("webhook inbound secret resolution failed", "workspace", ws, "source_kind", source, "err", listErr)
+			return errInboundUnverified()
+		}
+		for _, binding := range bindings {
+			secret, resolveErr := m.store.TriggerBindings().ResolveWebhookSecret(r.Context(), ws, binding.BindingID)
+			if resolveErr == nil {
+				candidates = append(candidates, inboundSecretCandidate{secret: secret})
+			} else {
+				slog.Error("webhook inbound secret resolution failed", "workspace", ws, "binding_id", binding.BindingID, "source_kind", source, "err", resolveErr)
+				return errInboundUnverified()
+			}
+		}
+	}
+	for _, candidate := range candidates {
+		if adapter.Verify(r, body, candidate.secret) == nil {
+			return nil
+		}
+	}
+	return errInboundUnverified()
 }
 
 // authorizeWebhook resolves the enabled binding for the event's route key,
@@ -144,6 +186,17 @@ func (m *Module) dispatchWebhook(w http.ResponseWriter, r *http.Request, ws, nam
 		writeDomainError(w, err, "dispatch webhook failed")
 		return
 	}
+	if name == "github" {
+		forgeEvent, parseErr := feedback.ParseGitHub(event.EventType, event.DeliveryID, body)
+		if parseErr != nil {
+			writeError(w, http.StatusBadRequest, "invalid GitHub payload")
+			return
+		}
+		if err := reconcile.IngestForgeEvent(r.Context(), ws, forgeEvent); err != nil {
+			writeError(w, http.StatusInternalServerError, "record PR feedback failed")
+			return
+		}
+	}
 	// Dispatch-time await matching (AW7) runs after the durable fan-out so a
 	// matcher failure can never lose an admitted delivery.
 	m.notifyAwaits(r.Context(), ws, event, body)
@@ -157,6 +210,45 @@ func (m *Module) dispatchWebhook(w http.ResponseWriter, r *http.Request, ws, nam
 		"idempotency_key": idempotencyKey,
 		"deliveries":      result.Deliveries,
 	})
+}
+
+func (m *Module) listChangeFeedback(w http.ResponseWriter, r *http.Request) {
+	items, err := feedback.Status(r.Context(), r.PathValue("ws"), r.PathValue("change"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list PR feedback failed")
+		return
+	}
+	if len(items) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"feedback": []any{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"feedback": items})
+}
+
+func (m *Module) addressChangeFeedback(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Attempt string `json:"attempt"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil || body.Attempt == "" {
+		writeError(w, http.StatusBadRequest, "attempt is required")
+		return
+	}
+	configDir := bootstrap.LoomDir()
+	if configDir == "" {
+		writeError(w, http.StatusInternalServerError, "feedback storage unavailable")
+		return
+	}
+	pathHash := sha256.Sum256([]byte(r.PathValue("ws") + "\x00" + r.PathValue("delivery")))
+	target := filepath.Join(configDir, "loomgit", "feedback-copies", hex.EncodeToString(pathHash[:16]))
+	request, err := feedback.Request(r.Context(), r.PathValue("ws"), r.PathValue("change"), r.PathValue("delivery"), target, body.Attempt)
+	if err != nil {
+		slog.Error("feedback request failed", "workspace", r.PathValue("ws"), "change", r.PathValue("change"), "err", err)
+		writeError(w, http.StatusConflict, "feedback request unavailable")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, request)
 }
 
 // notifyAwaits hands the admitted event to the dispatch-time await matcher

@@ -161,6 +161,27 @@ func (e BlockedIssueStatus) Valid() bool {
 	}
 }
 
+// Defines values for ChangeFeedbackStatus.
+const (
+	Addressed ChangeFeedbackStatus = "addressed"
+	Ignored   ChangeFeedbackStatus = "ignored"
+	Pending   ChangeFeedbackStatus = "pending"
+)
+
+// Valid indicates whether the value is a known member of the ChangeFeedbackStatus enum.
+func (e ChangeFeedbackStatus) Valid() bool {
+	switch e {
+	case Addressed:
+		return true
+	case Ignored:
+		return true
+	case Pending:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CreateIssueRequestIssueType.
 const (
 	CreateIssueRequestIssueTypeBug     CreateIssueRequestIssueType = "bug"
@@ -1723,6 +1744,33 @@ type BlockerRef struct {
 	Title    string `json:"title"`
 }
 
+// ChangeFeedback defines model for ChangeFeedback.
+type ChangeFeedback struct {
+	Actor       string `json:"actor"`
+	Association string `json:"association"`
+	Attempt     string `json:"attempt"`
+	BaseSha     string `json:"base_sha"`
+	Body        string `json:"body"`
+	Change      string `json:"change"`
+	DeliveryId  string `json:"delivery_id"`
+	HeadSha     string `json:"head_sha"`
+	Kind        string `json:"kind"`
+	PrNumber    int    `json:"pr_number"`
+	Prompt      string `json:"prompt"`
+
+	// RequestId Empty until addressing is requested.
+	RequestId string `json:"request_id"`
+
+	// Revision Zero until a captured revision addresses this feedback.
+	Revision  int                  `json:"revision"`
+	Status    ChangeFeedbackStatus `json:"status"`
+	Target    string               `json:"target"`
+	Workspace string               `json:"workspace"`
+}
+
+// ChangeFeedbackStatus defines model for ChangeFeedback.Status.
+type ChangeFeedbackStatus string
+
 // CloseRequest defines model for CloseRequest.
 type CloseRequest struct {
 	Force       *bool   `json:"force,omitempty"`
@@ -1832,6 +1880,22 @@ type ErrorResponse struct {
 
 // ErrorResponseSuccess defines model for ErrorResponse.Success.
 type ErrorResponseSuccess bool
+
+// FeedbackRevisionRequest defines model for FeedbackRevisionRequest.
+type FeedbackRevisionRequest struct {
+	Attempt    string `json:"attempt"`
+	BaseSha    string `json:"base_sha"`
+	Change     string `json:"change"`
+	DeliveryId string `json:"delivery_id"`
+	PrNumber   int    `json:"pr_number"`
+	Prompt     string `json:"prompt"`
+	RequestId  string `json:"request_id"`
+
+	// Revision Zero until the captured revision is recorded.
+	Revision  int    `json:"revision"`
+	Target    string `json:"target"`
+	Workspace string `json:"workspace"`
+}
 
 // FileBlameLine defines model for FileBlameLine.
 type FileBlameLine struct {
@@ -3348,6 +3412,11 @@ type ListBlockedParams struct {
 // ListBlockedParamsType defines parameters for ListBlocked.
 type ListBlockedParamsType string
 
+// AddressChangeFeedbackJSONBody defines parameters for AddressChangeFeedback.
+type AddressChangeFeedbackJSONBody struct {
+	Attempt string `json:"attempt"`
+}
+
 // SubmitRevisionVerdictJSONBody defines parameters for SubmitRevisionVerdict.
 type SubmitRevisionVerdictJSONBody struct {
 	Actor struct {
@@ -3760,6 +3829,9 @@ type UpdateGitTargetJSONRequestBody UpdateGitTargetJSONBody
 
 // StopAgentJSONRequestBody defines body for StopAgent for application/json ContentType.
 type StopAgentJSONRequestBody StopAgentJSONBody
+
+// AddressChangeFeedbackJSONRequestBody defines body for AddressChangeFeedback for application/json ContentType.
+type AddressChangeFeedbackJSONRequestBody AddressChangeFeedbackJSONBody
 
 // SubmitRevisionVerdictJSONRequestBody defines body for SubmitRevisionVerdict for application/json ContentType.
 type SubmitRevisionVerdictJSONRequestBody SubmitRevisionVerdictJSONBody

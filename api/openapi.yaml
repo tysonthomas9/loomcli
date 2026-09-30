@@ -3281,6 +3281,65 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/ReviewRevision"
+  /api/workspaces/{ws}/changes/{change}/feedback:
+    get:
+      operationId: listChangeFeedback
+      tags: [git]
+      summary: List verified feedback on a published change
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: change
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Feedback including ignored author associations
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [feedback]
+                properties:
+                  feedback:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ChangeFeedback"
+  /api/workspaces/{ws}/changes/{change}/feedback/{delivery}/address:
+    post:
+      operationId: addressChangeFeedback
+      tags: [git]
+      summary: Create an idempotent task-copy request from the published head
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: change
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: delivery
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [attempt]
+              properties:
+                attempt:
+                  type: string
+      responses:
+        "202":
+          description: Durable feedback revision request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackRevisionRequest"
   /api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict:
     post:
       operationId: submitRevisionVerdict
@@ -6086,6 +6145,70 @@ components:
           type: string
 
     # ── Session Schemas ─────────────────────────────────────────────────
+    ChangeFeedback:
+      type: object
+      required: [workspace, change, delivery_id, kind, actor, association, body, head_sha, status, pr_number, revision, request_id, target, attempt, base_sha, prompt]
+      properties:
+        workspace:
+          type: string
+        change:
+          type: string
+        delivery_id:
+          type: string
+        kind:
+          type: string
+        actor:
+          type: string
+        association:
+          type: string
+        body:
+          type: string
+        head_sha:
+          type: string
+        status:
+          type: string
+          enum: [pending, ignored, addressed]
+        pr_number:
+          type: integer
+        revision:
+          type: integer
+          description: Zero until a captured revision addresses this feedback.
+        request_id:
+          type: string
+          description: Empty until addressing is requested.
+        target:
+          type: string
+        attempt:
+          type: string
+        base_sha:
+          type: string
+        prompt:
+          type: string
+    FeedbackRevisionRequest:
+      type: object
+      required: [workspace, change, delivery_id, pr_number, request_id, target, attempt, base_sha, prompt, revision]
+      properties:
+        workspace:
+          type: string
+        change:
+          type: string
+        delivery_id:
+          type: string
+        pr_number:
+          type: integer
+        request_id:
+          type: string
+        target:
+          type: string
+        attempt:
+          type: string
+        base_sha:
+          type: string
+        prompt:
+          type: string
+        revision:
+          type: integer
+          description: Zero until the captured revision is recorded.
     ReviewRevision:
       type: object
       required: [change_id, number, head_sha, outcome, incomplete]
