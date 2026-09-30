@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
@@ -32,6 +34,7 @@ type Service struct {
 	runner             *gitexec.Runner
 	applier            *apply.Service
 	beforeCompletePull func() error
+	scratchParent      string
 }
 
 func New(store Store, repo *pool.LocalRepo, runner *gitexec.Runner) *Service {
@@ -42,6 +45,11 @@ type PullRequest struct {
 	Workspace, Lead, Repo, Remote, SourceBranch, RequestID string
 }
 
+type RestackRequest struct {
+	Workspace, Lead, Repo, RequestID, BaseSHA string
+	Order                                     []string
+}
+
 type PullResult struct {
 	HeadSHA         string
 	Paths           []string
@@ -49,11 +57,98 @@ type PullResult struct {
 }
 
 type pulledLayer struct {
-	source   loomgit.Revision
-	trial    replay.Result
-	base     string
-	layer    loomgit.AppliedLayer
-	original loomgit.AppliedLayer
+	source    loomgit.Revision
+	trial     replay.Result
+	base      string
+	layer     loomgit.AppliedLayer
+	original  loomgit.AppliedLayer
+	operation string
+}
+
+// Restack rebuilds the working area's layers on an explicit base. When supplied,
+// Order contains every current change exactly once; moved changes record reorder revisions.
+func (s *Service) Restack(ctx context.Context, request RestackRequest) (PullResult, error) {
+	if request.Workspace == "" || request.Lead == "" || request.Repo == "" || request.RequestID == "" || request.BaseSHA == "" {
+		return PullResult{}, errors.New("workspace, lead, repo, request ID and base are required")
+	}
+	var result PullResult
+	err := s.repo.WithLock(ctx, func(ctx context.Context) error {
+		if err := s.reconcilePullPlans(ctx, request.Workspace, request.Lead, request.Repo); err != nil {
+			return err
+		}
+		old, err := git(ctx, s.runner, "rev-parse", "HEAD")
+		if err != nil {
+			return err
+		}
+		base, err := git(ctx, s.runner, "rev-parse", "--verify", request.BaseSHA+"^{commit}")
+		if err != nil {
+			return err
+		}
+		layers, err := s.appliedLog(ctx, request.Workspace, request.Lead, old)
+		if err != nil {
+			return err
+		}
+		layers, moved, err := orderLayers(layers, request.Order)
+		if err != nil {
+			return err
+		}
+		scratch, err := os.MkdirTemp(s.scratchParent, "loom-restack-")
+		if err != nil {
+			return fmt.Errorf("create restack scratch: %w", err)
+		}
+		defer func() {
+			_, _ = s.runner.Run(context.Background(), "worktree", "remove", "--force", scratch)
+			_ = os.Remove(scratch)
+		}()
+		if _, err := s.runner.Run(ctx, "worktree", "add", "--detach", filepath.Clean(scratch), base); err != nil {
+			return fmt.Errorf("create restack checkout: %w", err)
+		}
+		pullRequest := PullRequest{Workspace: request.Workspace, Lead: request.Lead, Repo: request.Repo, RequestID: request.RequestID}
+		rebuilt, cursor, paths, err := s.replayPullLayers(ctx, pullRequest, base, layers)
+		result.Paths, result.HeadSHA = paths, cursor
+		if err != nil {
+			return err
+		}
+		for index := range rebuilt {
+			rebuilt[index].operation = "restack"
+			if moved[rebuilt[index].layer.Change] {
+				rebuilt[index].operation = "reorder"
+			}
+		}
+		return s.installPull(ctx, pullRequest, old, base, rebuilt, &result)
+	})
+	return result, err
+}
+
+func orderLayers(layers []loomgit.AppliedLayer, order []string) ([]loomgit.AppliedLayer, map[string]bool, error) {
+	if len(order) == 0 {
+		order = make([]string, 0, len(layers))
+		for _, layer := range layers {
+			order = append(order, layer.Change)
+		}
+	}
+	if len(order) != len(layers) {
+		return nil, nil, errors.New("restack order must name every layer exactly once")
+	}
+	byChange := make(map[string]loomgit.AppliedLayer, len(layers))
+	for _, layer := range layers {
+		if _, exists := byChange[layer.Change]; exists {
+			return nil, nil, fmt.Errorf("restack has repeated change %q", layer.Change)
+		}
+		byChange[layer.Change] = layer
+	}
+	ordered := make([]loomgit.AppliedLayer, 0, len(layers))
+	moved := make(map[string]bool, len(layers))
+	for index, change := range order {
+		layer, exists := byChange[change]
+		if !exists {
+			return nil, nil, fmt.Errorf("unknown or repeated restack layer %q", change)
+		}
+		delete(byChange, change)
+		ordered = append(ordered, layer)
+		moved[change] = layers[index].Change != change
+	}
+	return ordered, moved, nil
 }
 
 // Pull replays the working-area layers on its recorded trunk and installs one leaf.
@@ -195,9 +290,13 @@ func (s *Service) preparePulledLayers(ctx context.Context, request PullRequest, 
 			}
 			item.source = source
 		}
+		operation := item.operation
+		if operation == "" {
+			operation = "pull"
+		}
 		derived, err := changeset.RecordDerived(ctx, s.store, s.runner, changeset.DerivedInput{
 			Workspace: request.Workspace, Change: item.layer.Change, RequestID: item.layer.RequestID + ":derived",
-			FromNumber: item.source.Number, Operation: "pull", BaseSHA: item.base,
+			FromNumber: item.source.Number, Operation: operation, BaseSHA: item.base,
 			HeadSHA: item.trial.HeadSHA, Outcome: item.source.Outcome})
 		if err != nil {
 			return nil, err
