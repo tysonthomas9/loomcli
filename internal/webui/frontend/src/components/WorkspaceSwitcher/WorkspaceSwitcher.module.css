@@ -143,3 +143,27 @@
   outline: 2px solid var(--color-focus);
   outline-offset: -2px;
 }
+
+.removeButton {
+  width: 100%;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-danger);
+  cursor: pointer;
+  font: inherit;
+  text-align: center;
+}
+
+.removeButton:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+.deleteList {
+  max-height: 16rem;
+  overflow: auto;
+  padding-left: 1.25rem;
+  overflow-wrap: anywhere;
+}

@@ -29,40 +29,46 @@ var workspaceBackendOptions = []string{"claude", defaultWorkspaceBackend, "openc
 
 // WorkspaceServiceConfig holds the dependencies for workspace service construction.
 type WorkspaceServiceConfig struct {
-	Store          store.Store         // FleetDB-backed store; authoritative workspace source
-	MultiPool      *daemon.MultiPool   // For daemon-pool stats when local daemons are running
-	CreateFn       WorkspaceCreateFn   // Already wrapped with registry hooks
-	AddReposFn     WorkspaceAddReposFn // Store-backed repo attachment
-	DeleteFn       func(string) error  // Already wrapped with cleanup hooks
-	JobStore       JobStore            // For async creation; nil = async unavailable
-	SetDefaultFn   func(string) error  // Deprecated compatibility hook; default workspace selection is disabled.
-	ClearDefaultFn func() error        // Deprecated compatibility hook; default workspace selection is disabled.
+	Store             store.Store         // FleetDB-backed store; authoritative workspace source
+	MultiPool         *daemon.MultiPool   // For daemon-pool stats when local daemons are running
+	CreateFn          WorkspaceCreateFn   // Already wrapped with registry hooks
+	AddReposFn        WorkspaceAddReposFn // Store-backed repo attachment
+	DeleteFn          func(string) error  // Already wrapped with cleanup hooks
+	DeleteConfirmedFn func(string, string) error
+	DeletePreviewFn   func(string) (WorkspaceDeletePreview, error)
+	JobStore          JobStore           // For async creation; nil = async unavailable
+	SetDefaultFn      func(string) error // Deprecated compatibility hook; default workspace selection is disabled.
+	ClearDefaultFn    func() error       // Deprecated compatibility hook; default workspace selection is disabled.
 }
 
 type workspaceServiceImpl struct {
-	store          store.Store
-	multiPool      *daemon.MultiPool
-	createFn       WorkspaceCreateFn
-	addReposFn     WorkspaceAddReposFn
-	deleteFn       func(string) error
-	jobStore       JobStore
-	setDefaultFn   func(string) error
-	clearDefaultFn func() error
-	workspaceCache *workspaceDataCache
+	store             store.Store
+	multiPool         *daemon.MultiPool
+	createFn          WorkspaceCreateFn
+	addReposFn        WorkspaceAddReposFn
+	deleteFn          func(string) error
+	deleteConfirmedFn func(string, string) error
+	deletePreviewFn   func(string) (WorkspaceDeletePreview, error)
+	jobStore          JobStore
+	setDefaultFn      func(string) error
+	clearDefaultFn    func() error
+	workspaceCache    *workspaceDataCache
 }
 
 // NewWorkspaceService creates a new WorkspaceService from the given config.
 func NewWorkspaceService(cfg WorkspaceServiceConfig) WorkspaceService {
 	return &workspaceServiceImpl{
-		store:          cfg.Store,
-		multiPool:      cfg.MultiPool,
-		createFn:       cfg.CreateFn,
-		addReposFn:     cfg.AddReposFn,
-		deleteFn:       cfg.DeleteFn,
-		jobStore:       cfg.JobStore,
-		setDefaultFn:   cfg.SetDefaultFn,
-		clearDefaultFn: cfg.ClearDefaultFn,
-		workspaceCache: newWorkspaceDataCache(defaultWorkspaceDataCacheTTL),
+		store:             cfg.Store,
+		multiPool:         cfg.MultiPool,
+		createFn:          cfg.CreateFn,
+		addReposFn:        cfg.AddReposFn,
+		deleteFn:          cfg.DeleteFn,
+		deleteConfirmedFn: cfg.DeleteConfirmedFn,
+		deletePreviewFn:   cfg.DeletePreviewFn,
+		jobStore:          cfg.JobStore,
+		setDefaultFn:      cfg.SetDefaultFn,
+		clearDefaultFn:    cfg.ClearDefaultFn,
+		workspaceCache:    newWorkspaceDataCache(defaultWorkspaceDataCacheTTL),
 	}
 }
 
@@ -367,7 +373,7 @@ func (s *workspaceServiceImpl) workspaceJobFromStore(ctx context.Context, key st
 }
 
 func (s *workspaceServiceImpl) DeleteWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
-	if s.deleteFn == nil {
+	if s.deleteFn == nil && s.deleteConfirmedFn == nil {
 		return nil, ErrUnavailable("workspace deletion not available")
 	}
 	if s.store == nil {
@@ -382,8 +388,19 @@ func (s *workspaceServiceImpl) DeleteWorkspace(ctx context.Context, wsID string)
 			return nil, ErrNotFound(fmt.Sprintf("workspace with ID %q not found", wsID))
 		}
 	}
-	if err := s.deleteFn(key); err != nil {
+	var deleteErr error
+	if s.deleteConfirmedFn != nil {
+		fingerprint, _ := ctx.Value(workspaceDeleteFingerprintKey{}).(string)
+		deleteErr = s.deleteConfirmedFn(key, fingerprint)
+	} else {
+		deleteErr = s.deleteFn(key)
+	}
+	if err := deleteErr; err != nil {
 		errMsg := err.Error()
+		var unsaved interface{ UnsavedWork() bool }
+		if errors.As(err, &unsaved) {
+			return nil, ErrConflict(errMsg)
+		}
 		if strings.Contains(errMsg, "not found") {
 			return nil, ErrNotFound(errMsg)
 		}
@@ -403,6 +420,40 @@ func (s *workspaceServiceImpl) DeleteWorkspace(ctx context.Context, wsID string)
 	}
 	normalizeWorkspaceData(data)
 	return data, nil
+}
+
+type workspaceDeleteFingerprintKey struct{}
+
+func WithWorkspaceDeleteFingerprint(ctx context.Context, fingerprint string) context.Context {
+	return context.WithValue(ctx, workspaceDeleteFingerprintKey{}, fingerprint)
+}
+
+type WorkspaceDeleteItem struct {
+	Repo   string `json:"repo"`
+	Path   string `json:"path"`
+	Kind   string `json:"kind"`
+	Detail string `json:"detail,omitempty"`
+	Size   int64  `json:"size,omitempty"`
+}
+
+type WorkspaceDeletePreview struct {
+	Items       []WorkspaceDeleteItem `json:"items"`
+	Fingerprint string                `json:"fingerprint"`
+}
+
+func (s *workspaceServiceImpl) PreviewWorkspaceDeletion(ctx context.Context, wsID string) (WorkspaceDeletePreview, error) {
+	if s.deletePreviewFn == nil {
+		return WorkspaceDeletePreview{}, ErrUnavailable("workspace deletion preview unavailable")
+	}
+	key := wsID
+	if _, err := s.store.Workspaces().Get(ctx, key); err != nil {
+		ws, byNameErr := s.store.Workspaces().GetByName(ctx, wsID)
+		if byNameErr != nil {
+			return WorkspaceDeletePreview{}, ErrNotFound("workspace not found")
+		}
+		key = ws.Key
+	}
+	return s.deletePreviewFn(key)
 }
 
 func (s *workspaceServiceImpl) RenameWorkspace(ctx context.Context, wsID string, newName string) (*ops.WorkspaceData, error) {

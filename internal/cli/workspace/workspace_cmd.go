@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +15,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
+	loomworkspace "github.com/tysonthomas9/loomcli/internal/loomgit/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -28,6 +31,7 @@ var (
 
 	wsRemoveForce         bool
 	wsRemoveKeepWorktrees bool
+	wsRemoveFingerprint   string
 )
 
 var workspaceCmd = &cobra.Command{
@@ -74,15 +78,13 @@ var workspaceListCmd = &cobra.Command{
 var workspaceRemoveCmd = &cobra.Command{
 	Use:   "remove <name>",
 	Short: "Remove a workspace and its worktrees",
-	Long: `Remove a workspace and optionally clean up its git worktrees.
-
-By default, removes the workspace directory and runs git worktree remove
-for each repo. Use --keep-worktrees to only remove from config.
+	Long: `Preview and remove a workspace after confirming its exact work list.
+The --force compatibility flag does not bypass confirmation or safety checks.
 
 Examples:
   loom workspace remove myws
-  loom workspace remove myws --force
-  loom workspace remove myws --keep-worktrees`,
+  loom workspace remove myws --confirm-fingerprint <printed-fingerprint>
+  loom workspace remove myws --force --confirm-fingerprint <printed-fingerprint>`,
 	Args: cobra.ExactArgs(1),
 	Run:  runWorkspaceRemove,
 }
@@ -96,8 +98,9 @@ func init() {
 
 	workspaceListCmd.Flags().BoolVar(&wsListJSON, "json", false, "Output as JSON")
 
-	workspaceRemoveCmd.Flags().BoolVar(&wsRemoveForce, "force", false, "Remove even if worktrees are dirty")
+	workspaceRemoveCmd.Flags().BoolVar(&wsRemoveForce, "force", false, "Compatibility flag; still requires --confirm-fingerprint and safety checks")
 	workspaceRemoveCmd.Flags().BoolVar(&wsRemoveKeepWorktrees, "keep-worktrees", false, "Remove from config but don't delete git worktrees")
+	workspaceRemoveCmd.Flags().StringVar(&wsRemoveFingerprint, "confirm-fingerprint", "", "Confirm the exact work list printed by a previous remove attempt")
 
 	workspaceCmd.AddCommand(workspaceCreateCmd)
 	workspaceCmd.AddCommand(workspaceListCmd)
@@ -244,10 +247,19 @@ func runFleetWorkspaceList() error {
 	})
 }
 
+var withWorkspaceRemoveStore = cmdstore.WithStore
+
 func runWorkspaceRemove(cmd *cobra.Command, args []string) {
-	deps := cli.GetDeps(cmd)
+	if err := removeWorkspace(cmd, args); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func removeWorkspace(cmd *cobra.Command, args []string) error {
+	_ = cmd
 	wsName := args[0]
-	if err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+	return withWorkspaceRemoveStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		ws, err := h.Store.Workspaces().Get(ctx, wsName)
 		if err != nil {
 			if byName, byNameErr := h.Store.Workspaces().GetByName(ctx, wsName); byNameErr == nil {
@@ -256,26 +268,28 @@ func runWorkspaceRemove(cmd *cobra.Command, args []string) {
 				return fmt.Errorf("workspace %q not found: %w", wsName, err)
 			}
 		}
-		local, err := workspaceLocalConfig(ctx, h, ws.Key)
+		if wsRemoveKeepWorktrees {
+			return fmt.Errorf("--keep-worktrees cannot safely delete workspace records")
+		}
+		preview, err := serveadapter.BuildWorkspaceDeletePreviewFn(h.Store)(ws.Key)
 		if err != nil {
 			return err
 		}
-		if !wsRemoveKeepWorktrees {
-			checkRunningAgentsOrExit(local)
-			removeWorktrees(deps, local)
+		for _, item := range preview.Items {
+			fmt.Printf("%s %s %s %s (%d bytes)\n", item.Repo, item.Kind, item.Path, item.Detail, item.Size)
 		}
-		if err := h.Store.Workspaces().Delete(ctx, ws.Key); err != nil && !cmdstore.IsNotFound(err) {
-			return fmt.Errorf("delete workspace from fleet-db: %w", err)
-		}
-		if err := deleteWorkspaceLocalState(ws.Key); err != nil {
+		fmt.Printf("Delete fingerprint: %s\n", preview.Fingerprint)
+		fingerprint := wsRemoveFingerprint
+		if err := serveadapter.DeleteWorkspaceConfirmed(h.Store, ws.Key, fingerprint); err != nil {
+			var unsaved *loomworkspace.ErrUnsavedWork
+			if errors.As(err, &unsaved) {
+				return fmt.Errorf("%w; rerun with --confirm-fingerprint %s after reviewing this exact list", err, preview.Fingerprint)
+			}
 			return err
 		}
 		fmt.Printf("Workspace %q removed.\n", ws.Key)
 		return nil
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
+	})
 }
 
 func workspaceLocalConfig(ctx context.Context, h *bootstrap.StoreHandle, key string) (config.WorkspaceConfig, error) {

@@ -27,8 +27,12 @@ func TestWorkspaceDeleteFnDeletesStoreAndLocalState(t *testing.T) {
 		t.Fatalf("seed state cache: %v", err)
 	}
 
-	deleteFn := BuildWorkspaceDeleteFn(st)
-	if err := deleteFn("ALPHA"); err != nil {
+	deleteFn := BuildWorkspaceDeleteConfirmedFn(st)
+	preview, err := BuildWorkspaceDeletePreviewFn(st)("ALPHA")
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if err := deleteFn("ALPHA", preview.Fingerprint); err != nil {
 		t.Fatalf("delete workspace: %v", err)
 	}
 	if _, err := st.Workspaces().Get(ctx, "ALPHA"); !errors.Is(err, domain.ErrNotFound) {
@@ -46,6 +50,43 @@ func TestWorkspaceDeleteFnDeletesStoreAndLocalState(t *testing.T) {
 	}
 }
 
+func TestWorkspaceDeleteCLIAndUIShareConfirmedEntryPoint(t *testing.T) {
+	for _, entry := range []struct {
+		name string
+		call func(store.Store, string, string) error
+	}{
+		{"cli", DeleteWorkspaceConfirmed},
+		{"ui", func(s store.Store, key, fingerprint string) error {
+			return BuildWorkspaceDeleteConfirmedFn(s)(key, fingerprint)
+		}},
+	} {
+		t.Run(entry.name, func(t *testing.T) {
+			t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+			ctx := context.Background()
+			st := memstore.New()
+			if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+				sc.Workspaces["ALPHA"] = bootstrap.WorkspaceLocalState{Path: "/tmp/alpha"}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			preview, err := BuildWorkspaceDeletePreviewFn(st)("ALPHA")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := entry.call(st, "ALPHA", preview.Fingerprint); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.Workspaces().Get(ctx, "ALPHA"); !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("workspace row remains: %v", err)
+			}
+		})
+	}
+}
+
 func TestWorkspaceDeleteFnDoesNotClearStateWhenStoreDeleteFails(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
@@ -58,8 +99,12 @@ func TestWorkspaceDeleteFnDoesNotClearStateWhenStoreDeleteFails(t *testing.T) {
 		t.Fatalf("seed state cache: %v", err)
 	}
 
-	deleteFn := BuildWorkspaceDeleteFn(st)
-	if err := deleteFn("MISSING"); !errors.Is(err, domain.ErrNotFound) {
+	deleteFn := BuildWorkspaceDeleteConfirmedFn(st)
+	preview, err := BuildWorkspaceDeletePreviewFn(st)("MISSING")
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if err := deleteFn("MISSING", preview.Fingerprint); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("delete err = %v, want ErrNotFound", err)
 	}
 	sc, err := bootstrap.LoadStateCache()
@@ -71,5 +116,23 @@ func TestWorkspaceDeleteFnDoesNotClearStateWhenStoreDeleteFails(t *testing.T) {
 	}
 	if _, ok := sc.Workspaces["MISSING"]; !ok {
 		t.Fatal("local workspace state was removed despite store delete failure")
+	}
+}
+
+func TestWorkspaceDeleteRefusesMissingLocalPath(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := BuildWorkspaceDeletePreviewFn(st)("ALPHA"); err == nil {
+		t.Fatal("preview should refuse missing local path")
+	}
+	if err := BuildWorkspaceDeleteConfirmedFn(st)("ALPHA", "fingerprint"); err == nil {
+		t.Fatal("delete should refuse missing local path")
+	}
+	if _, err := st.Workspaces().Get(ctx, "ALPHA"); err != nil {
+		t.Fatalf("workspace row deleted without a local path: %v", err)
 	}
 }

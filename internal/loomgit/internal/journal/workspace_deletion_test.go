@@ -1,0 +1,73 @@
+package journal
+
+import (
+	"context"
+	"path/filepath"
+	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
+)
+
+func TestFinishWorkspaceDeletionLeavesTombstoneAndClearsCreationRecords(t *testing.T) {
+	ctx := context.Background()
+	st, err := OpenSQLite(filepath.Join(t.TempDir(), "journal.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	entry, _, err := st.Begin(ctx, "workspace-create:TEST", "ensure_workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err = st.Advance(ctx, entry, "checkouts_added", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err = st.Advance(ctx, entry, "rows_written", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CommitWorkspace(ctx, entry, []loomgit.WorkspaceRepo{{Workspace: "TEST", Repo: "repo", Trunk: "main", WorkspaceBranch: "lead", BaseSHA: "abc"}}); err != nil {
+		t.Fatal(err)
+	}
+	attach, _, err := st.Begin(ctx, "workspace-add:TEST:repo", "attach_workspace_repos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _, err := st.Begin(ctx, "workspace-add:OTHER:repo", "attach_workspace_repos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.ExecContext(ctx, `INSERT INTO workspace_settings(workspace) VALUES ('TEST')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishWorkspaceDeletion(ctx, "TEST"); err != nil {
+		t.Fatal(err)
+	}
+	var attachCount, otherCount int
+	if err := st.db.QueryRowContext(ctx, `SELECT count(*) FROM journal_entries WHERE id=?`, attach.ID).Scan(&attachCount); err != nil || attachCount != 0 {
+		t.Fatalf("deleted workspace attachment remains: %d, %v", attachCount, err)
+	}
+	if err := st.db.QueryRowContext(ctx, `SELECT count(*) FROM journal_entries WHERE id=?`, other.ID).Scan(&otherCount); err != nil || otherCount != 1 {
+		t.Fatalf("other workspace attachment changed: %d, %v", otherCount, err)
+	}
+	repos, err := st.WorkspaceRepos(ctx, "TEST")
+	if err != nil || len(repos) != 0 {
+		t.Fatalf("repos=%v err=%v", repos, err)
+	}
+	var prefix string
+	if err := st.db.QueryRowContext(ctx, `SELECT ref_prefix FROM workspace_ref_tombstones WHERE workspace='TEST'`).Scan(&prefix); err != nil {
+		t.Fatal(err)
+	}
+	if prefix != "refs/loom/ws/TEST/" {
+		t.Fatalf("prefix=%q", prefix)
+	}
+	var settings int
+	if err := st.db.QueryRowContext(ctx, `SELECT count(*) FROM workspace_settings WHERE workspace='TEST'`).Scan(&settings); err != nil || settings != 0 {
+		t.Fatalf("settings=%d err=%v", settings, err)
+	}
+	_, created, err := st.Begin(ctx, "workspace-create:TEST", "ensure_workspace")
+	if err != nil || !created {
+		t.Fatalf("recreate journal: created=%v err=%v", created, err)
+	}
+}

@@ -190,11 +190,32 @@ export async function renameWorkspace(
  */
 export async function deleteWorkspace(
   workspaceId: string,
+  fingerprint: string,
 ): Promise<WorkspaceData | null> {
   const response = await del<ApiResult<WorkspaceData>>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}`,
+    { headers: { "X-Loom-Delete-Fingerprint": fingerprint } },
   );
   return unwrap(response);
+}
+
+export interface WorkspaceDeletePreview {
+  items: Array<{
+    repo: string;
+    path: string;
+    kind: string;
+    detail?: string;
+    size?: number;
+  }>;
+  fingerprint: string;
+}
+
+export async function previewWorkspaceDeletion(
+  workspaceId: string,
+): Promise<WorkspaceDeletePreview> {
+  return get<WorkspaceDeletePreview>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/delete/preview`,
+  );
 }
 
 /**

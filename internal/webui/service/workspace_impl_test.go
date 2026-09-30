@@ -87,6 +87,43 @@ func TestDeleteWorkspace_StoreBackedUsesWorkspaceKey(t *testing.T) {
 	}
 }
 
+func TestDeleteWorkspace_PreviewAndConfirmedDeleteUseSameKey(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
+		t.Fatal(err)
+	}
+	var previewKey, deletedKey, passedFingerprint string
+	svc := NewWorkspaceService(WorkspaceServiceConfig{
+		Store: st,
+		DeletePreviewFn: func(key string) (WorkspaceDeletePreview, error) {
+			previewKey = key
+			return WorkspaceDeletePreview{Fingerprint: "exact"}, nil
+		},
+		DeleteConfirmedFn: func(key, fingerprint string) error {
+			deletedKey = key
+			passedFingerprint = fingerprint
+			return st.Workspaces().Delete(ctx, key)
+		},
+	})
+	previewer, ok := svc.(interface {
+		PreviewWorkspaceDeletion(context.Context, string) (WorkspaceDeletePreview, error)
+	})
+	if !ok {
+		t.Fatal("service has no deletion preview")
+	}
+	preview, err := previewer.PreviewWorkspaceDeletion(ctx, "ALPHA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.DeleteWorkspace(WithWorkspaceDeleteFingerprint(ctx, preview.Fingerprint), "ALPHA"); err != nil {
+		t.Fatal(err)
+	}
+	if previewKey != "ALPHA" || deletedKey != "ALPHA" || passedFingerprint != "exact" {
+		t.Fatalf("preview=%q delete=%q fingerprint=%q", previewKey, deletedKey, passedFingerprint)
+	}
+}
+
 func TestListWorkspaces_StoreBackedMarksActiveWithoutDefault(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	t.Setenv("LOOM_WORKSPACE", "BETA")

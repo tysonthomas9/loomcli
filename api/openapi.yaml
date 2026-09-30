@@ -294,6 +294,12 @@ paths:
       summary: Delete a workspace
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
+        - name: X-Loom-Delete-Fingerprint
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Fingerprint returned by the deletion preview
       responses:
         "200":
           description: Workspace deleted
@@ -303,6 +309,21 @@ paths:
                 $ref: "#/components/schemas/MessageResponse"
         "404":
           description: Workspace not found
+
+  /api/workspaces/{ws}/delete/preview:
+    get:
+      operationId: previewWorkspaceDeletion
+      tags: [workspaces]
+      summary: List local work that workspace deletion would remove
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Work list and confirmation fingerprint
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceDeletePreview"
 
   /api/workspaces/{ws}/monitor/status:
     get:
@@ -5715,6 +5736,30 @@ components:
           type: string
 
     # ── Workspace Schemas ───────────────────────────────────────────────
+    WorkspaceDeletePreview:
+      type: object
+      required: [items, fingerprint]
+      properties:
+        fingerprint:
+          type: string
+        items:
+          type: array
+          items:
+            type: object
+            required: [repo, path, kind]
+            properties:
+              repo:
+                type: string
+              path:
+                type: string
+              kind:
+                type: string
+              detail:
+                type: string
+              size:
+                type: integer
+                format: int64
+
     WorkspaceResponse:
       type: object
       required: [id, name, path, repos, groups, agents, workspaces, default_workspace]

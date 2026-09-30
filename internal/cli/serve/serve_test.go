@@ -253,8 +253,8 @@ func TestApplyWorkspaceConfig_NilStoreDoesNotWireWorkspaceFns(t *testing.T) {
 	if cfg.WorkspaceIDResolverFn != nil {
 		t.Fatal("WorkspaceIDResolverFn should be nil without store")
 	}
-	if cfg.WorkspaceDeleteFn != nil {
-		t.Fatal("WorkspaceDeleteFn should be nil without store")
+	if cfg.WorkspaceDeleteConfirmedFn != nil || cfg.WorkspaceDeletePreviewFn != nil {
+		t.Fatal("workspace deletion should be unavailable without store")
 	}
 	if cfg.SetDefaultWorkspaceFn != nil {
 		t.Fatal("SetDefaultWorkspaceFn should be nil without store")
@@ -279,8 +279,8 @@ func TestApplyWorkspaceConfig_StoreWiresStoreBackedFns(t *testing.T) {
 	if cfg.WorkspaceIDResolverFn == nil {
 		t.Fatal("WorkspaceIDResolverFn was nil")
 	}
-	if cfg.WorkspaceDeleteFn == nil {
-		t.Fatal("WorkspaceDeleteFn was nil")
+	if cfg.WorkspaceDeleteConfirmedFn == nil || cfg.WorkspaceDeletePreviewFn == nil {
+		t.Fatal("workspace deletion functions were nil")
 	}
 	if cfg.SetDefaultWorkspaceFn != nil {
 		t.Fatal("SetDefaultWorkspaceFn should be nil; default workspace selection is removed")
