@@ -3,6 +3,7 @@ package applyrecovery_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -10,12 +11,95 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
+	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/outbox"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+func TestReconcileJournalBridgeApprovalFollowsAfterCrash(t *testing.T) {
+	ctx, journalStore, area, base := recoveryFixture(t)
+	defer func() { _ = journalStore.Close() }()
+	root := os.Getenv("LOOM_CONFIG_DIR")
+	backend, err := bootstrap.OpenStore(ctx, root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = backend.Close() }()
+	if _, err := backend.Store.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "W", Name: "Working area"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backend.Store.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "W", Name: "repo"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := bootstrap.MutateStateCache(func(state *bootstrap.StateCache) error {
+		state.Workspaces["W"] = bootstrap.WorkspaceLocalState{Path: root, Repos: map[string]string{"repo": area.Path}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(area.Path, "change")
+	if err := os.WriteFile(file, []byte("approved\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recoveryGit(t, area.Path, "add", "-N", "change")
+	patch := recoveryGit(t, area.Path, "diff", "--binary")
+	recoveryGit(t, area.Path, "reset", "--", "change")
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	runnerOutput, err := json.Marshal(map[string]any{
+		"status": "completed", "exit_code": 0, "patch": patch + "\n", "patch_base_ref": base,
+		"runtime_metadata": map[string]string{"repo_name": "repo"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputPath := filepath.Join(root, "runner-output.json")
+	if err := os.WriteFile(outputPath, runnerOutput, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bridge := driver.HostBridgeTaskExecutor{Store: memstore.New(), WorktreePath: area.Path,
+		Command: []string{"cat", outputPath}}
+	result, err := bridge.ExecuteTask(ctx, driver.TaskExecRequest{WorkspaceKey: "W", DriverRunID: "driver-run",
+		TaskRunID: "task-run", TaskID: "T", WorkerProfileID: "worker", ProviderProfile: "flue-daytona",
+		LeaseID: "lease", LeaseToken: "token", FencingToken: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RuntimeMetadata["patch_back_status"] != "frozen" {
+		t.Fatalf("bridge did not freeze revision: %+v", result)
+	}
+	revision, err := journalStore.GetRevision(ctx, "W", result.RuntimeMetadata["change_id"], 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if layers, err := journalStore.AppliedLog(ctx, "W", "L"); err != nil || len(layers) != 0 {
+		t.Fatalf("bridge bypassed review gate: %+v, %v", layers, err)
+	}
+	if _, err := review.SubmitForLead(ctx, journalStore, "W", revision.Change, revision.Number, revision.HeadSHA,
+		"approve", "", review.Actor{Kind: "human", ID: "reviewer"}, "L"); err != nil {
+		t.Fatal(err)
+	}
+	if got := recoveryGit(t, area.Path, "rev-parse", "HEAD"); got != base {
+		t.Fatalf("approval applied before reconciliation: %s", got)
+	}
+	if err := workspacemgr.ReconcileJournal(ctx, memstore.New()); err != nil {
+		t.Fatal(err)
+	}
+	layers, err := journalStore.AppliedLog(ctx, "W", "L")
+	if err != nil || len(layers) != 1 || layers[0].Change != revision.Change {
+		t.Fatalf("recovered approval did not apply: %+v, %v", layers, err)
+	}
+	if got := recoveryGit(t, area.Path, "rev-parse", "HEAD"); got != layers[0].NewTip {
+		t.Fatalf("working area did not follow recovered approval: %s", got)
+	}
+}
 
 func TestReconcileJournalRecoversInterruptedApplyAtStartupAndTick(t *testing.T) {
 	ctx, store, area, base := recoveryFixture(t)
