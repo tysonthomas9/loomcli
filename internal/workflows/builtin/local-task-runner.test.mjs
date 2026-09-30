@@ -56,6 +56,12 @@ if (process.env.FAKE_WRITE_FILE) {
     : path.join(process.cwd(), process.env.FAKE_WRITE_FILE);
   fs.writeFileSync(target, "hello from fake backend\\n");
 }
+if (process.env.FAKE_TRAP_TERM) {
+  process.on("SIGTERM", () => process.exit(0));
+}
+if (process.env.FAKE_SLEEP_MS) {
+  await new Promise((resolve) => setTimeout(resolve, Number(process.env.FAKE_SLEEP_MS)));
+}
 if (process.env.FAKE_STREAM_ERROR) {
   process.stdout.write(JSON.stringify({ type: "error", error: { message: process.env.FAKE_STREAM_ERROR } }) + "\\n");
   process.exit(exit);
@@ -116,6 +122,9 @@ const ENV_KEYS = [
   "LOOM_TASK_RUN_REQUEST_JSON",
   "FAKE_EXIT_CODE",
   "FAKE_WRITE_FILE",
+  "FAKE_SLEEP_MS",
+  "FAKE_TRAP_TERM",
+  "LOOM_LOCAL_TASK_TIMEOUT_MS",
   "FAKE_STREAM_ERROR",
   "FAKE_STDIN_FILE",
   "FAKE_USAGE_TOKENS",
@@ -837,6 +846,57 @@ describe("local-task-runner success", () => {
 });
 
 describe("local-task-runner isolated worktree", () => {
+  it("returns timeout with the captured edit and base", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.FAKE_WRITE_FILE = "timeout-edit.txt";
+    process.env.FAKE_SLEEP_MS = "3000";
+    process.env.LOOM_LOCAL_TASK_TIMEOUT_MS = "500";
+    const base = execFileSync("git", ["rev-parse", "HEAD"], { cwd: worktree }).toString().trim();
+
+    const out = await run();
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "timeout");
+    assert.equal(out.base_ref, base);
+    assert.equal(out.patch_base_ref, base);
+    assert.match(out.patch, /timeout-edit\.txt/);
+  });
+
+  it("keeps timeout when the CLI exits zero after SIGTERM", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.FAKE_WRITE_FILE = "graceful-timeout-edit.txt";
+    process.env.FAKE_SLEEP_MS = "3000";
+    process.env.FAKE_TRAP_TERM = "1";
+    process.env.LOOM_LOCAL_TASK_TIMEOUT_MS = "500";
+
+    const out = await run();
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "timeout");
+    assert.match(out.patch, /graceful-timeout-edit\.txt/);
+  });
+
+  it("retains the sibling when Git capture fails", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.FAKE_WRITE_FILE = "retained-edit.txt";
+    const git = execFileSync("which", ["git"]).toString().trim();
+    const wrapper = path.join(binDir, "git");
+    fs.writeFileSync(wrapper, `#!/bin/sh\ncase " $* " in *" diff "*) exit 1;; esac\nexec "${git}" "$@"\n`, { mode: 0o755 });
+    process.env.PATH = binDir + path.delimiter + process.env.PATH;
+
+    const out = await run();
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "capture_failed");
+    assert.equal(Object.hasOwn(out, "patch"), false);
+    const retained = out.runtimeMetadata.retained_path;
+    assert.ok(retained);
+    assert.ok(fs.existsSync(path.join(retained, "retained-edit.txt")));
+  });
+
   it("runs in a fresh task copy and reports its recorded base", async () => {
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
     process.env.LOOM_CODEX_BIN = fakeBin;
@@ -895,7 +955,7 @@ describe("local-task-runner isolated worktree", () => {
     assert.ok(out.patch.includes("isolated-file.txt"), "patch should reference the file created in the isolated worktree");
   });
 
-  it("falls back to in-place execution with empty base_ref when the worktree is not a git repo", async () => {
+  it("keeps in-place work when the directory is not a Git repo and capture fails", async () => {
     const nonGit = path.join(tmpRoot, "non-git");
     fs.mkdirSync(nonGit, { recursive: true });
 
@@ -906,13 +966,12 @@ describe("local-task-runner isolated worktree", () => {
     process.env.FAKE_WRITE_FILE = "in-place.txt";
 
     const out = await run();
-    assert.equal(out.status, "completed", "non-git fallback should still complete");
+    assert.equal(out.status, "failed", "non-git work cannot be captured");
+    assert.equal(out.errorClass, "capture_failed");
     // No git HEAD => in-place execution, empty base_ref (patch-back not possible).
-    assert.equal(out.base_ref, "", "base_ref should be empty in the non-git fallback");
-    assert.equal(out.patch_base_ref, "");
-    // The CLI ran in place: exec_worktree_path is the host (non-git) directory,
-    // and the file was written there.
-    assert.equal(out.runtimeMetadata.exec_worktree_path, nonGit);
+    assert.equal(Object.hasOwn(out, "patch"), false);
+    // The CLI ran in place, and the un-capturable edit remains for recovery.
+    assert.equal(out.runtimeMetadata.retained_path, nonGit);
     assert.ok(fs.existsSync(path.join(nonGit, "in-place.txt")), "in-place run should write into the host directory");
   });
 });

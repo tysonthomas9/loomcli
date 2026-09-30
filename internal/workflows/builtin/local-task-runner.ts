@@ -145,12 +145,14 @@ export async function run(ctx = {}) {
   const usesStdinPrompt = backendUsesStdinPrompt(backend);
 
   let exitCode;
+  let resultTimedOut = false;
   let stdout = "";
   let stderr = "";
   let patchInfo;
   let prInfo = null;
   let stackInfo = null;
   let prFailure = null;
+  let captureError = null;
   try {
     let result;
     try {
@@ -171,6 +173,7 @@ export async function run(ctx = {}) {
       });
     }
     exitCode = result.code;
+    resultTimedOut = result.timedOut === true;
     stdout = result.stdout;
     stderr = result.stderr;
 
@@ -182,17 +185,21 @@ export async function run(ctx = {}) {
       logs.push("stderr:\n" + textTail(stderr, 2000));
     }
 
-    patchInfo = await capturePatch(execWorktree, baseRef);
+    try {
+      patchInfo = await capturePatch(execWorktree, baseRef);
+    } catch (error) {
+      captureError = error;
+    }
 
     // Stacked delivery: commit in place and push the canonical branch on the
     // predecessor base. No PR is opened here — the post-drain reconcile does it.
-    if (stacked && exitCode === 0) {
+    if (!captureError && stacked && exitCode === 0) {
       if (patchInfo.filesChanged === 0) {
         logs.push("stacked: the agent produced no changes; no branch pushed (empty unit)");
       } else {
         prFailure = { class: "host_publish_required", message: "stackedPullRequests requires host-side publishing" };
       }
-    } else if (openPR && exitCode === 0) {
+    } else if (!captureError && openPR && exitCode === 0) {
       if (!isolated) {
         prFailure = { class: "github_repo_unresolved", message: "openPullRequest requires a git worktree (no isolated worktree was created)" };
       } else if (patchInfo.filesChanged === 0) {
@@ -202,9 +209,18 @@ export async function run(ctx = {}) {
       }
     }
   } finally {
-    if (isolated) {
+    if (isolated && !captureError) {
       await removeIsolatedWorktree(worktree, isolated.path, logs);
     }
+  }
+
+  if (captureError) {
+    const retainedPath = isolated ? isolated.path : execWorktree;
+    const failure = failed("capture_failed", `Git patch capture failed: ${errorMessage(captureError)}`, {
+      taskRunId, taskId, backend, request, logs, headBefore,
+    });
+    failure.runtimeMetadata = { ...failure.runtimeMetadata, patch_back_status: "retained", retained_path: retainedPath };
+    return failure;
   }
 
   // Fail closed when PR delivery was requested but could not be completed.
@@ -301,7 +317,7 @@ export async function run(ctx = {}) {
     return {
       status: "failed",
       exitCode: failureExitCode,
-      errorClass: "local_agent_failed",
+      errorClass: exitCode === 124 && resultTimedOut ? "timeout" : "local_agent_failed",
       errorMessage: failureMessage,
       logs: logs.join("\n") + "\n",
       logsRef: "logs://" + taskRunId,
@@ -512,8 +528,11 @@ async function execBackend(binary, args, options) {
           reject(error);
           return;
         }
-        const code = error && typeof error.code === "number" ? error.code : error && error.killed ? 124 : 0;
-        resolve({ code, stdout: String(stdout || ""), stderr: String(stderr || "") });
+        // A CLI may handle the timeout signal and exit 0. The timer still ended
+        // the run, so the signal takes precedence over its exit code.
+        const timedOut = error?.killed === true || child.killed === true;
+        const code = timedOut ? 124 : error && typeof error.code === "number" ? error.code : 0;
+        resolve({ code, timedOut, stdout: String(stdout || ""), stderr: String(stderr || "") });
       },
     );
     if (options.live === true && booleanValue(process.env.LOOM_TASK_RUNNER_STREAM_STDERR)) {
@@ -787,33 +806,17 @@ async function gitHead(worktree) {
 // captured patch complete whether the agent committed (the daemon TS leaf's prompt
 // asks it to) or left the change in the working tree.
 async function capturePatch(worktree, base) {
-  const head = await gitHead(worktree);
-  try {
-    await execBackend("git", ["-C", worktree, "add", "-N", "--", "."], { cwd: worktree });
-  } catch {
-    // best-effort: an empty or non-git worktree just yields an empty patch.
-  }
+  const current = await execBackend("git", ["-C", worktree, "rev-parse", "HEAD"], { cwd: worktree });
+  if (current.code !== 0) throw new Error(`git rev-parse HEAD exited ${current.code}: ${textTail(current.stderr, 400)}`);
+  const head = current.stdout.trim();
+  const add = await execBackend("git", ["-C", worktree, "add", "-N", "--", "."], { cwd: worktree });
+  if (add.code !== 0) throw new Error(`git add -N exited ${add.code}: ${textTail(add.stderr, 400)}`);
   const range = base ? [base] : [];
-  let patch = "";
-  try {
-    const diff = await execBackend("git", ["-C", worktree, "diff", "--binary", ...range, "--", "."], { cwd: worktree });
-    if (diff.code === 0) {
-      patch = diff.stdout;
-    }
-  } catch {
-    patch = "";
-  }
-  let stat = "";
-  try {
-    const diffStat = await execBackend("git", ["-C", worktree, "diff", "--numstat", ...range, "--", "."], { cwd: worktree });
-    if (diffStat.code === 0) {
-      stat = diffStat.stdout;
-    }
-  } catch {
-    stat = "";
-  }
-  const counts = parseNumstat(stat);
-  return { head, patch, ...counts };
+  const diff = await execBackend("git", ["-C", worktree, "diff", "--binary", ...range, "--", "."], { cwd: worktree });
+  if (diff.code !== 0) throw new Error(`git diff --binary exited ${diff.code}: ${textTail(diff.stderr, 400)}`);
+  const diffStat = await execBackend("git", ["-C", worktree, "diff", "--numstat", ...range, "--", "."], { cwd: worktree });
+  if (diffStat.code !== 0) throw new Error(`git diff --numstat exited ${diffStat.code}: ${textTail(diffStat.stderr, 400)}`);
+  return { head, patch: diff.stdout, ...parseNumstat(diffStat.stdout) };
 }
 
 // parseNumstat sums added/removed lines and counts changed files from

@@ -136,6 +136,27 @@ func TestHostBridgeTaskExecutorFreezesPatchUploadsAndFinalizesArtifact(t *testin
 	}
 }
 
+func TestHostBridgeRetainsCaptureFailureWithoutFreezingEmptyPatch(t *testing.T) {
+	repo := newPatchBackRepo(t)
+	repo.commitFile("file.txt", "old\n", "base")
+	retained := filepath.Join(t.TempDir(), "sibling")
+	executor := HostBridgeTaskExecutor{
+		Store: memstore.New(), WorktreePath: repo.dir,
+		Command: hostBridgeHelperCommand(t, "capture_failed", retained, ""),
+	}
+	result, err := executor.ExecuteTask(context.Background(), hostBridgeTaskExecRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != domain.TaskRunFailed || result.ErrorClass != "capture_failed" ||
+		result.RuntimeMetadata["patch_back_status"] != "retained" || result.RuntimeMetadata["retained_path"] != retained {
+		t.Fatalf("capture failure result = %+v", result)
+	}
+	if result.RuntimeMetadata["revision"] != "" {
+		t.Fatalf("empty patch was frozen: %+v", result.RuntimeMetadata)
+	}
+}
+
 func TestHostBridgeTaskExecutorFreezesDespiteLocalEdit(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
@@ -894,6 +915,15 @@ func TestHostBridgeTaskExecutorHelperProcess(t *testing.T) {
 	base := args[len(args)-2]
 	patch := args[len(args)-1]
 	switch mode {
+	case "capture_failed":
+		result := map[string]any{
+			"status": "failed", "exit_code": 1,
+			"error_class": "capture_failed", "error_message": "git diff failed",
+			"runtime_metadata": map[string]string{"patch_back_status": "retained", "retained_path": base},
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+			t.Fatalf("encode result: %v", err)
+		}
 	case "success":
 		result := map[string]any{
 			"status":         "completed",
