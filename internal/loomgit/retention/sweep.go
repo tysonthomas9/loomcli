@@ -327,10 +327,48 @@ func removeCopy(ctx context.Context, store *journal.SQLite, row journal.Retained
 	if !apply {
 		return nil
 	}
-	return os.RemoveAll(row.Path)
+	return removeCloneWithLease(ctx, row.Path, runner, copyRunner, expected)
+}
+
+func removeCloneWithLease(ctx context.Context, path string, sourceRunner, copyRunner *gitexec.Runner, expected string) error {
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	lock, err := root.OpenFile(".agent.lock", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("copy lease unavailable: %w", err)
+	}
+	defer func() {
+		if current, err := root.Stat(".agent.lock"); err == nil {
+			if held, err := lock.Stat(); err == nil && os.SameFile(current, held) {
+				_ = root.Remove(".agent.lock")
+			}
+		}
+		_ = lock.Close()
+	}()
+	if _, err := fmt.Fprintf(lock, "{\"pid\":%d}", os.Getpid()); err != nil {
+		return err
+	}
+	if err := checkCopyContentWithLease(ctx, copyRunner, expected); err != nil {
+		return err
+	}
+	if err := cloneRefsCaptured(ctx, sourceRunner, copyRunner, expected); err != nil {
+		return err
+	}
+	return os.RemoveAll(path)
 }
 
 func checkCopyContent(ctx context.Context, runner *gitexec.Runner, expected string) error {
+	return checkCopyContentStatus(ctx, runner, expected, false)
+}
+
+func checkCopyContentWithLease(ctx context.Context, runner *gitexec.Runner, expected string) error {
+	return checkCopyContentStatus(ctx, runner, expected, true)
+}
+
+func checkCopyContentStatus(ctx context.Context, runner *gitexec.Runner, expected string, ownLease bool) error {
 	head, err := runner.Run(ctx, "rev-parse", "HEAD")
 	if err != nil {
 		return err
@@ -342,6 +380,9 @@ func checkCopyContent(ctx context.Context, runner *gitexec.Runner, expected stri
 	if err != nil {
 		return err
 	}
+	if ownLease {
+		status = []byte(strings.ReplaceAll(string(status), "?? .agent.lock\n", ""))
+	}
 	if len(status) != 0 {
 		return errors.New("copy contains work outside its complete capture")
 	}
@@ -349,7 +390,7 @@ func checkCopyContent(ctx context.Context, runner *gitexec.Runner, expected stri
 }
 
 func cloneRefsCaptured(ctx context.Context, sourceRunner, copyRunner *gitexec.Runner, expected string) error {
-	refs, err := copyRunner.Run(ctx, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/loom")
+	refs, err := copyRunner.Run(ctx, "for-each-ref", "--format=%(refname) %(objectname)", "refs")
 	if err != nil {
 		return err
 	}

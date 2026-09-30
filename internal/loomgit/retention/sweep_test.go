@@ -174,7 +174,37 @@ func TestSweepRemovesFullyFrozenClone(t *testing.T) {
 		t.Fatal(err)
 	}
 	sweep.Now = func() time.Time { return start.Add(7 * 24 * time.Hour) }
+	if _, err := copyRunner.Run(ctx, "commit", "--allow-empty", "-m", "uncaptured tag work"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := copyRunner.Run(ctx, "tag", "uncaptured"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := copyRunner.Run(ctx, "reset", "--hard", base); err != nil {
+		t.Fatal(err)
+	}
 	results, err := sweep.Run(ctx, true)
+	if err != nil || len(results) != 1 || results[0].Action != "keep" {
+		t.Fatalf("uncaptured tag must retain clone: %+v, %v", results, err)
+	}
+	if _, err := os.Stat(copyPath); err != nil {
+		t.Fatalf("clone with uncaptured tag removed: %v", err)
+	}
+	if _, err := copyRunner.Run(ctx, "tag", "-d", "uncaptured"); err != nil {
+		t.Fatal(err)
+	}
+	leasePath := filepath.Join(copyPath, ".agent.lock")
+	if err := os.WriteFile(leasePath, []byte("{\"pid\":1}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	results, err = sweep.Run(ctx, true)
+	if err != nil || len(results) != 1 || results[0].Action != "keep" {
+		t.Fatalf("leased clone must remain: %+v, %v", results, err)
+	}
+	if err := os.Remove(leasePath); err != nil {
+		t.Fatal(err)
+	}
+	results, err = sweep.Run(ctx, true)
 	if err != nil || len(results) != 1 || results[0].Action != "remove" {
 		t.Fatalf("expired clone: %+v, %v", results, err)
 	}
