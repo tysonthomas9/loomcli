@@ -114,8 +114,6 @@ func New(dir string, opts Options) (*Runner, error) {
 	return r, nil
 }
 
-func (r *Runner) Identity() Identity { return r.identity }
-
 func (r *Runner) Path() string { return r.dir }
 
 // CheckRefFormat validates a complete ref or a branch through the Git process boundary.

@@ -200,25 +200,6 @@ func (s *Session) prepareSources(ctx context.Context, workspace, trunk, branch s
 	return repos, nil
 }
 
-// AdoptClones opens the default lead's branch inside freshly cloned repos.
-// The caller owns clone directories and removes them if this returns an error.
-func AdoptClones(ctx context.Context, workspace, trunk string, sources []Source) (*Session, error) {
-	return AdoptClonesRequest(ctx, workspace, workspace, "", trunk, "", sources)
-}
-
-func AdoptClonesRequest(ctx context.Context, workspace, name, requestID, trunk, wsDir string, sources []Source) (*Session, error) {
-	s, err := BeginCloneRequest(ctx, workspace, name, requestID, trunk, wsDir)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.AdoptClones(ctx, sources); err != nil {
-		_ = s.Rollback(context.Background())
-		_ = s.Close()
-		return nil, err
-	}
-	return s, nil
-}
-
 // BeginCloneRequest owns the clone directories before they are created.
 func BeginCloneRequest(ctx context.Context, workspace, name, requestID, trunk, wsDir string) (*Session, error) {
 	plan := journal.WorkspaceCreation{RequestID: requestID, Kind: "clone", Name: name, Path: wsDir, Trunk: trunk}
