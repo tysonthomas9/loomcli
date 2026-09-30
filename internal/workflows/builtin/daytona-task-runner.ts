@@ -356,9 +356,11 @@ const path = require("node:path");
 const cp = require("node:child_process");
 const input = JSON.parse(process.argv[1]);
 const repo = input.repo;
-const git = (args, env) => cp.execFileSync("git", args, {
-  cwd: repo, env: { ...process.env, ...env }, maxBuffer: 64 * 1024 * 1024,
-});
+const git = (args, env) => {
+  const clean = { ...process.env, ...env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/bin/false", SSH_ASKPASS: "/bin/false" };
+  delete clean.GIT_CONFIG_PARAMETERS;
+  return cp.execFileSync("git", args, { cwd: repo, env: clean, maxBuffer: 64 * 1024 * 1024 });
+};
 const value = (args, env) => git(args, env).toString("utf8").trim();
 const paths = (args) => git(args).toString("utf8").split("\0").filter(Boolean);
 const secret = (name) => name.split("/").some((part) => {
@@ -422,9 +424,10 @@ try {
   const token = fs.readFileSync(input.tokenPath, "utf8").trim();
   let pushError = "";
   try {
-    git(["push", "--force", input.proxyURL, captureSha + ":" + input.ref], {
-      GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.extraHeader",
-      GIT_CONFIG_VALUE_0: "Authorization: Bearer " + token,
+  git(["push", "--force", input.proxyURL, captureSha + ":" + input.ref], {
+      GIT_CONFIG_COUNT: "2", GIT_CONFIG_KEY_0: "credential.helper",
+      GIT_CONFIG_VALUE_0: "", GIT_CONFIG_KEY_1: "http.extraHeader",
+      GIT_CONFIG_VALUE_1: "Authorization: Bearer " + token,
     });
   } catch (error) {
     pushError = String(error.stderr || error.message || error).trim().slice(-1000);
@@ -552,7 +555,7 @@ class DaytonaSandboxApi {
     const response = await this.sandbox.process.executeCommand(
       command,
       options.cwd,
-      options.env,
+      sandboxGitEnv(options.env),
       options.timeout,
     );
     return {
@@ -561,6 +564,18 @@ class DaytonaSandboxApi {
       exitCode: response.exitCode || 0,
     };
   }
+}
+
+export function sandboxGitEnv(extra = {}) {
+  const env = { ...extra };
+  env.GIT_CONFIG_PARAMETERS = "";
+  env.GIT_CONFIG_COUNT = "1";
+  env.GIT_CONFIG_KEY_0 = "credential.helper";
+  env.GIT_CONFIG_VALUE_0 = "";
+  env.GIT_TERMINAL_PROMPT = "0";
+  env.GIT_ASKPASS = "/bin/false";
+  env.SSH_ASKPASS = "/bin/false";
+  return env;
 }
 
 async function configureCodexAuth(imports, model, request) {
@@ -932,6 +947,8 @@ export function cloneCommand(repoUrl, repoDir, branch) {
     "git clone" +
       (branch ? " --branch " + shellQuote(branch) : "") +
       " " + shellQuote(repoUrl) + " " + shellQuote(repoDir),
+    "git -C " + shellQuote(repoDir) + " config remote.origin.pushurl loom-no-push://task-copy",
+    "git -C " + shellQuote(repoDir) + " config credential.helper ''",
   ];
   return parts.join(" && ");
 }

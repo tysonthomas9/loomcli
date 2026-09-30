@@ -262,7 +262,12 @@ describe("remote sandbox capture", () => {
     const base = git(source, "rev-parse", "HEAD");
     git(source, "remote", "add", "origin", provider);
     git(source, "push", "-q", "origin", "main");
-    git(root, "clone", "-q", provider, task);
+    execFileSync("sh", ["-c", mod.cloneCommand(provider, task, "")], { cwd: root, env });
+    assert.equal(git(task, "config", "remote.origin.pushurl"), "loom-no-push://task-copy");
+    assert.equal(git(task, "config", "--get-all", "credential.helper"), "");
+    assert.throws(() => git(task, "push", "origin", "HEAD:refs/heads/direct"));
+    assert.equal(mod.sandboxGitEnv({ GIT_CONFIG_PARAMETERS: "'credential.helper=unsafe'" }).GIT_CONFIG_PARAMETERS, "");
+    assert.equal(mod.sandboxGitEnv().GIT_TERMINAL_PROMPT, "0");
     for (const name of ["one", "two"]) {
       fs.writeFileSync(path.join(task, name), name);
       git(task, "add", name);
