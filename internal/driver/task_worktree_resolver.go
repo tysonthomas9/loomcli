@@ -760,6 +760,35 @@ func currentWorkspaceStateFromInput(input json.RawMessage) (bool, error) {
 	return obj.DelegateFromCurrentState, nil
 }
 
+// Lead-created task runs use the current working area unless an explicit
+// revision or conflict-resolution action selects a different base.
+func createQueuedTaskRun(ctx context.Context, s store.Store, opts TaskRunRequestOptions, refs taskRunRequestRefs) (*domain.TaskRun, error) {
+	prepared, err := defaultTaskRunDelegation(opts)
+	if err != nil {
+		return nil, err
+	}
+	return createQueuedTaskRunPrepared(ctx, s, prepared, refs)
+}
+
+func defaultTaskRunDelegation(opts TaskRunRequestOptions) (TaskRunRequestOptions, error) {
+	if opts.ParentSessionID == "" {
+		return opts, nil
+	}
+	_, hasBase, err := baseRevisionFromInput(opts.Input)
+	if err != nil {
+		return opts, err
+	}
+	_, hasResolution, err := conflictResolutionFromInput(opts.Input)
+	if err != nil {
+		return opts, err
+	}
+	if hasBase || hasResolution {
+		return opts, nil
+	}
+	opts.Input, err = WithCurrentWorkspaceState(opts.Input)
+	return opts, err
+}
+
 func (r LocalTaskWorktreeResolver) delegatedBase(ctx context.Context, req TaskExecRequest, repoPath, repoName string) (string, string, bool, error) {
 	revision, hasRevision, err := baseRevisionFromInput(req.Input)
 	if err != nil {

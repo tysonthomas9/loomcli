@@ -95,10 +95,15 @@ func TestDelegatedTaskFromCurrentWorkspaceState(t *testing.T) {
 	if _, err := f.resolver.Store.AgentSessions().Create(ctx, store.AgentSessionCreate{WorkspaceKey: "TEST", SessionID: "lead-session", AgentID: "L1", Kind: domain.AgentSessionKindOrchestration}); err != nil {
 		t.Fatal(err)
 	}
-	request := TaskExecRequest{WorkspaceKey: "TEST", TaskRunID: "task/current", TaskID: "current", ParentSessionID: "lead-session", SandboxPlacement: domain.TaskRunPlacement{RepoRef: "frontend"}}
-	request.Input, err = WithCurrentWorkspaceState(nil)
+	queued, err := createQueuedTaskRun(ctx, f.resolver.Store, TaskRunRequestOptions{
+		WorkspaceKey: "TEST", TaskRunID: "task/current", TaskID: "current", ParentSessionID: "lead-session",
+	}, taskRunRequestRefs{TaskRunID: "task/current"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	request := TaskExecRequest{WorkspaceKey: "TEST", TaskRunID: queued.TaskRunID, TaskID: queued.TaskID, ParentSessionID: queued.RuntimeMetadata["parent_session_id"], Input: queued.Input, SandboxPlacement: domain.TaskRunPlacement{RepoRef: "frontend"}}
+	if current, err := currentWorkspaceStateFromInput(request.Input); err != nil || !current {
+		t.Fatalf("lead delegation did not request current state: %s, %v", request.Input, err)
 	}
 	copy, err := f.resolver.ResolveTaskWorktree(ctx, request, t.TempDir())
 	if err != nil {
@@ -164,9 +169,19 @@ func TestDelegatedTaskFromCurrentWorkspaceState(t *testing.T) {
 	leadTip := strings.TrimSpace(testGitOutput(t, leadPath, "rev-parse", "HEAD"))
 	request.TaskRunID = "task/conflict"
 	request.SchedulerAttempt = 0
-	request.Input, err = WithConflictResolution(nil, BaseRevision{Change: revision.Change, Number: revision.Number})
+	resolutionInput, err := WithConflictResolution(nil, BaseRevision{Change: revision.Change, Number: revision.Number})
 	if err != nil {
 		t.Fatal(err)
+	}
+	resolutionRun, err := createQueuedTaskRun(ctx, f.resolver.Store, TaskRunRequestOptions{
+		WorkspaceKey: "TEST", TaskRunID: "task/conflict", TaskID: "current", ParentSessionID: "lead-session", Input: resolutionInput,
+	}, taskRunRequestRefs{TaskRunID: "task/conflict"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Input = resolutionRun.Input
+	if current, err := currentWorkspaceStateFromInput(request.Input); err != nil || current {
+		t.Fatalf("conflict action was replaced by current-state delegation: %s, %v", request.Input, err)
 	}
 	resolution, err := f.resolver.ResolveTaskWorktree(ctx, request, t.TempDir())
 	if err != nil {

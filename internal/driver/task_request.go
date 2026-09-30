@@ -514,7 +514,7 @@ func newTaskRunRequestRefs(opts TaskRunRequestOptions, parent *domain.DriverRun)
 	return refs
 }
 
-func createQueuedTaskRun(ctx context.Context, s store.Store, opts TaskRunRequestOptions, refs taskRunRequestRefs) (*domain.TaskRun, error) {
+func createQueuedTaskRunPrepared(ctx context.Context, s store.Store, opts TaskRunRequestOptions, refs taskRunRequestRefs) (*domain.TaskRun, error) {
 	runtimeMetadata := map[string]string{
 		"driver_run_id": opts.DriverRunID,
 		"requested_by":  "driver",
