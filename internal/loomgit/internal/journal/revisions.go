@@ -96,6 +96,18 @@ func (s *SQLite) FinishRevision(ctx context.Context, r loomgit.Revision) error {
 	if err := queueEvent(ctx, tx, "revision-event:"+r.RequestID, "git.revision_created", payload); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `UPDATE feedback_requests SET revision = ?
+		WHERE workspace = ? AND change_id = ? AND request_id = ? AND base_sha = ? AND revision = 0`,
+		r.Number, r.Workspace, r.Change, r.RequestID, r.BaseSHA); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE change_feedback SET status = 'addressed'
+		WHERE workspace = ? AND change_id = ? AND status = 'pending' AND delivery_id IN
+		(SELECT delivery_id FROM feedback_requests WHERE workspace = ? AND change_id = ?
+		AND request_id = ? AND base_sha = ? AND revision = ?)`, r.Workspace, r.Change,
+		r.Workspace, r.Change, r.RequestID, r.BaseSHA, r.Number); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 

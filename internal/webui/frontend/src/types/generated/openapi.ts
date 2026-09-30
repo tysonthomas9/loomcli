@@ -1709,6 +1709,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/changes/{change}/feedback": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List verified feedback on a published change */
+    get: operations["listChangeFeedback"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/changes/{change}/feedback/{delivery}/address": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Create an idempotent task-copy request from the published head */
+    post: operations["addressChangeFeedback"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict": {
     parameters: {
       query?: never;
@@ -3162,6 +3196,40 @@ export interface components {
       name: string;
       role: string;
       status: string;
+    };
+    ChangeFeedback: {
+      workspace: string;
+      change: string;
+      delivery_id: string;
+      kind: string;
+      actor: string;
+      association: string;
+      body: string;
+      head_sha: string;
+      /** @enum {string} */
+      status: "pending" | "ignored" | "addressed";
+      pr_number: number;
+      /** @description Zero until a captured revision addresses this feedback. */
+      revision: number;
+      /** @description Empty until addressing is requested. */
+      request_id: string;
+      target: string;
+      attempt: string;
+      base_sha: string;
+      prompt: string;
+    };
+    FeedbackRevisionRequest: {
+      workspace: string;
+      change: string;
+      delivery_id: string;
+      pr_number: number;
+      request_id: string;
+      target: string;
+      attempt: string;
+      base_sha: string;
+      prompt: string;
+      /** @description Zero until the captured revision is recorded. */
+      revision: number;
     };
     ReviewRevision: {
       change_id: string;
@@ -7403,6 +7471,63 @@ export interface operations {
             success: boolean;
             data: components["schemas"]["ReviewRevision"][];
           };
+        };
+      };
+    };
+  };
+  listChangeFeedback: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        change: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Feedback including ignored author associations */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            feedback: components["schemas"]["ChangeFeedback"][];
+          };
+        };
+      };
+    };
+  };
+  addressChangeFeedback: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        change: string;
+        delivery: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          attempt: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Durable feedback revision request */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FeedbackRevisionRequest"];
         };
       };
     };

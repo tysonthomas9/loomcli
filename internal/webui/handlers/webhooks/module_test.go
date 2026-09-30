@@ -52,6 +52,40 @@ func newServer(st store.Store) *http.ServeMux {
 	return mux
 }
 
+type observedGithubAdapter struct{ normalized *bool }
+
+func (adapter observedGithubAdapter) Name() string { return "github" }
+
+func (adapter observedGithubAdapter) Normalize(r *http.Request, body []byte) (NormalizedEvent, error) {
+	*adapter.normalized = true
+	return githubAdapter{}.Normalize(r, body)
+}
+
+func (observedGithubAdapter) Verify(r *http.Request, body []byte, secret string) error {
+	return githubAdapter{}.Verify(r, body, secret)
+}
+
+func TestWebhookVerifiesSignatureBeforeNormalize(t *testing.T) {
+	module := NewModule(seedStore(t, true))
+	normalized := false
+	module.adapters["github"] = observedGithubAdapter{normalized: &normalized}
+	mux := http.NewServeMux()
+	module.Register(mux)
+	request := signedRequest("github", "bad-signature", prOpenedBody)
+	request.Header.Set(githubSignatureHeader, "sha256=00")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized || normalized {
+		t.Fatalf("invalid signature reached Normalize: status=%d normalized=%t", response.Code, normalized)
+	}
+	request = signedRequest("github", "valid-signature", prOpenedBody)
+	response = httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || !normalized {
+		t.Fatalf("valid signature was not normalized: status=%d normalized=%t body=%s", response.Code, normalized, response.Body.String())
+	}
+}
+
 func signedRequest(name, delivery string, body []byte) *http.Request {
 	r := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+testWS+"/webhooks/"+name, bytes.NewReader(body))
 	r.Header.Set(githubEventHeader, "pull_request")
@@ -365,8 +399,8 @@ func TestReceiveWebhookDisabledBinding(t *testing.T) {
 	mux := newServer(seedStore(t, false))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, signedRequest("github", "d", prOpenedBody))
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rr.Code)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rr.Code)
 	}
 }
 
