@@ -1,382 +1,91 @@
 package git
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/loomgit/pull"
 )
 
-func TestPullCmd_ArgsValidation(t *testing.T) {
-	// Save and restore the global flag
-	origPullAll := pullAll
-	defer func() { pullAll = origPullAll }()
-
-	tests := []struct {
-		name      string
-		args      []string
-		allFlag   bool
-		wantError bool
-		errorMsg  string
+func TestPullCmdArgsValidation(t *testing.T) {
+	original := pullAll
+	t.Cleanup(func() { pullAll = original })
+	for _, test := range []struct {
+		all   bool
+		args  []string
+		valid bool
 	}{
-		{
-			name:      "without --all, no args",
-			args:      []string{},
-			allFlag:   false,
-			wantError: true,
-			errorMsg:  "requires 1-2 arguments",
-		},
-		{
-			name:      "without --all, one arg (success)",
-			args:      []string{"falcon"},
-			allFlag:   false,
-			wantError: false,
-		},
-		{
-			name:      "without --all, two args (success)",
-			args:      []string{"falcon", "main"},
-			allFlag:   false,
-			wantError: false,
-		},
-		{
-			name:      "without --all, three args",
-			args:      []string{"falcon", "main", "extra"},
-			allFlag:   false,
-			wantError: true,
-			errorMsg:  "requires 1-2 arguments",
-		},
-		{
-			name:      "with --all, no args (success)",
-			args:      []string{},
-			allFlag:   true,
-			wantError: false,
-		},
-		{
-			name:      "with --all, one arg (success)",
-			args:      []string{"main"},
-			allFlag:   true,
-			wantError: false,
-		},
-		{
-			name:      "with --all, two args",
-			args:      []string{"main", "extra"},
-			allFlag:   true,
-			wantError: true,
-			errorMsg:  "--all flag accepts at most 1 argument",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Set the flag state
-			pullAll = tc.allFlag
-
-			// Call the Args validation function directly
-			err := pullCmd.Args(pullCmd, tc.args)
-
-			if tc.wantError {
-				if err == nil {
-					t.Errorf("expected error containing %q, got nil", tc.errorMsg)
-					return
-				}
-				if tc.errorMsg != "" && !strings.Contains(err.Error(), tc.errorMsg) {
-					t.Errorf("expected error containing %q, got %q", tc.errorMsg, err.Error())
-				}
-			} else if err != nil {
-				t.Errorf("expected no error, got %v", err)
-			}
-		})
-	}
-}
-
-func TestSourceBranchDisplay(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name   string
-		input  string
-		expect string
-	}{
-		{"empty returns per-repo default", "", "(per-repo default)"},
-		{"non-empty returns as-is", "main", "main"},
-		{"feature branch", "feature/web-ui", "feature/web-ui"},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := sourceBranchDisplay(tc.input)
-			if got != tc.expect {
-				t.Errorf("sourceBranchDisplay(%q) = %q, want %q", tc.input, got, tc.expect)
-			}
-		})
-	}
-}
-
-func TestPullWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	worktrees := []WorktreeInfo{
-		{
-			Name:   "repo-a",
-			Path:   "/ws/repo-a",
-			Branch: "feat-a",
-			Repo:   &RepoConfig{Name: "repo-a", DefaultBranch: "main", Remote: ""},
-		},
-		{
-			Name:   "repo-b",
-			Path:   "/ws/repo-b",
-			Branch: "feat-b",
-			Repo:   &RepoConfig{Name: "repo-b", DefaultBranch: "main", Remote: ""},
-		},
-	}
-
-	outputStubs := []OutputCommandStub{
-		// repo-a: fetch, merge, push
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/main", "-m", "Pull from main"}, Err: nil},
-		{Args: []string{"push", "origin", "feat-a"}, Err: nil},
-		// repo-b: fetch, merge, push
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/main", "-m", "Pull from main"}, Err: nil},
-		{Args: []string{"push", "origin", "feat-b"}, Err: nil},
-	}
-
-	cmdMock := NewCommandMock(t, []CommandStub{})
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.InstallOn(deps)
-
-	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
-		t.Error("unexpected claude invocation")
-		return nil
-	}}
-
-	pullWorkspaceWorktrees(deps, worktrees, "main")
-	mergeCalls := 0
-	for _, call := range outputMock.calls {
-		if len(call.Args) > 0 && call.Args[0] == "merge" {
-			mergeCalls++
-			if strings.Join(call.Args, " ") != "merge origin/main -m Pull from main" {
-				t.Fatalf("pull merge message: %v", call.Args)
-			}
+		{false, nil, false},
+		{false, []string{"lead"}, true},
+		{false, []string{"lead", "main"}, true},
+		{false, []string{"lead", "main", "extra"}, false},
+		{true, nil, true},
+		{true, []string{"main"}, true},
+		{true, []string{"main", "extra"}, false},
+	} {
+		pullAll = test.all
+		if got := pullCmd.Args(pullCmd, test.args) == nil; got != test.valid {
+			t.Fatalf("all=%t args=%v valid=%t, want %t", test.all, test.args, got, test.valid)
 		}
 	}
-	if mergeCalls != 2 {
-		t.Fatalf("pull merge calls = %d, want 2", mergeCalls)
-	}
 }
 
-func TestPullWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
-	t.Parallel()
+func TestPullRoutesToLocalRestackWithoutLegacyGit(t *testing.T) {
 	deps, _, _, _, _ := NewTestDeps(t)
-
+	original := pullLocal
+	t.Cleanup(func() { pullLocal = original })
+	var calls []struct{ path, remote, branch string }
+	pullLocal = func(_ context.Context, path, remote, branch, requestID string) (pull.PullResult, error) {
+		if requestID == "" {
+			t.Fatal("missing request ID")
+		}
+		calls = append(calls, struct{ path, remote, branch string }{path, remote, branch})
+		return pull.PullResult{HeadSHA: "restacked"}, nil
+	}
 	worktrees := []WorktreeInfo{
-		{
-			Name:   "repo-a",
-			Path:   "/ws/repo-a",
-			Branch: "feat-a",
-			Repo:   &RepoConfig{Name: "repo-a", DefaultBranch: "develop", Remote: ""},
-		},
-		{
-			Name:   "repo-b",
-			Path:   "/ws/repo-b",
-			Branch: "feat-b",
-			Repo:   &RepoConfig{Name: "repo-b", DefaultBranch: "staging", Remote: ""},
-		},
+		{Name: "api", Path: "/ws/api", Branch: "lead", Repo: &RepoConfig{Name: "api", DefaultBranch: "develop", Remote: "upstream"}},
+		{Name: "web", Path: "/ws/web", Branch: "lead", Repo: &RepoConfig{Name: "web", DefaultBranch: "main"}},
+		{Name: "missing", Path: "/ws/missing"},
 	}
-
-	outputStubs := []OutputCommandStub{
-		// repo-a pulls from "develop"
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/develop", "-m", "Pull from develop"}, Err: nil},
-		{Args: []string{"push", "origin", "feat-a"}, Err: nil},
-		// repo-b pulls from "staging"
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/staging", "-m", "Pull from staging"}, Err: nil},
-		{Args: []string{"push", "origin", "feat-b"}, Err: nil},
-	}
-
-	cmdMock := NewCommandMock(t, []CommandStub{})
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.InstallOn(deps)
-
-	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
-		t.Error("unexpected claude invocation")
-		return nil
-	}}
-
-	// sourceBranch="" means use per-repo DefaultBranch
 	pullWorkspaceWorktrees(deps, worktrees, "")
+	if len(calls) != 2 || calls[0].path != "/ws/api" || calls[0].remote != "upstream" || calls[0].branch != "" ||
+		calls[1].path != "/ws/web" || calls[1].branch != "" {
+		t.Fatalf("pull routes = %+v", calls)
+	}
+	if err := pullRepoWorktree(deps, "/ws/api", "lead", "main", ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 3 || calls[2].branch != "main" || calls[2].remote != "" {
+		t.Fatalf("explicit pull route = %+v", calls)
+	}
 }
 
-func TestPullRepoWorktree_CustomRemote(t *testing.T) {
-	t.Parallel()
+func TestPullReportsHeldPaths(t *testing.T) {
 	deps, _, _, _, _ := NewTestDeps(t)
-
-	outputStubs := []OutputCommandStub{
-		{Args: []string{"fetch", "upstream"}, Err: nil},
-		{Args: []string{"merge", "upstream/main", "-m", "Pull from main"}, Err: nil},
-		{Args: []string{"push", "upstream", "feat-a"}, Err: nil},
+	original := pullLocal
+	t.Cleanup(func() { pullLocal = original })
+	pullLocal = func(context.Context, string, string, string, string) (pull.PullResult, error) {
+		return pull.PullResult{Paths: []string{"file.txt"}}, errors.New("swap_held")
 	}
-
-	cmdMock := NewCommandMock(t, []CommandStub{})
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.InstallOn(deps)
-
-	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
-		t.Error("unexpected claude invocation")
-		return nil
-	}}
-
-	err := pullRepoWorktree(deps, "/ws/repo-a", "feat-a", "main", "upstream")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+	err := pullRepoWorktree(deps, "/ws/api", "lead", "main", "")
+	if err == nil || !strings.Contains(err.Error(), "file.txt") {
+		t.Fatalf("held path missing from error: %v", err)
 	}
 }
 
-func TestPullRepoWorktree_EmptyRemoteDefaultsToOrigin(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	outputStubs := []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/main", "-m", "Pull from main"}, Err: nil},
-		{Args: []string{"push", "origin", "feat-a"}, Err: nil},
-	}
-
-	cmdMock := NewCommandMock(t, []CommandStub{})
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.InstallOn(deps)
-
-	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
-		t.Error("unexpected claude invocation")
-		return nil
-	}}
-
-	err := pullRepoWorktree(deps, "/ws/repo-a", "feat-a", "main", "")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+func TestPullCmdRegistration(t *testing.T) {
+	if pullCmd.GroupID != "git" || pullCmd.Flags().Lookup("all") == nil || pullCmd.Flags().Lookup("workspace") == nil {
+		t.Fatal("pull command registration changed")
 	}
 }
 
-func TestPullWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	worktrees := []WorktreeInfo{
-		{
-			Name:   "repo-a",
-			Path:   "/ws/repo-a",
-			Branch: "feat-a",
-			Repo:   nil, // should be skipped
-		},
-		{
-			Name:   "repo-b",
-			Path:   "/ws/repo-b",
-			Branch: "feat-b",
-			Repo:   &RepoConfig{Name: "repo-b", DefaultBranch: "main", Remote: ""},
-		},
+func stubPullLocal(t *testing.T) {
+	t.Helper()
+	original := pullLocal
+	t.Cleanup(func() { pullLocal = original })
+	pullLocal = func(context.Context, string, string, string, string) (pull.PullResult, error) {
+		return pull.PullResult{HeadSHA: "restacked"}, nil
 	}
-
-	// Only repo-b should be processed
-	outputStubs := []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/main", "-m", "Pull from main"}, Err: nil},
-		{Args: []string{"push", "origin", "feat-b"}, Err: nil},
-	}
-
-	cmdMock := NewCommandMock(t, []CommandStub{})
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.InstallOn(deps)
-
-	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
-		t.Error("unexpected claude invocation")
-		return nil
-	}}
-
-	pullWorkspaceWorktrees(deps, worktrees, "main")
-}
-
-func TestPullWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	worktrees := []WorktreeInfo{
-		{
-			Name:   "repo-a",
-			Path:   "/ws/repo-a",
-			Branch: "feat-a",
-			Repo:   &RepoConfig{Name: "repo-a", DefaultBranch: "develop", Remote: ""},
-		},
-	}
-
-	// CLI source "release" overrides per-repo "develop"
-	outputStubs := []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/release", "-m", "Pull from release"}, Err: nil},
-		{Args: []string{"push", "origin", "feat-a"}, Err: nil},
-	}
-
-	cmdMock := NewCommandMock(t, []CommandStub{})
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, outputStubs)
-	outputMock.InstallOn(deps)
-
-	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
-		t.Error("unexpected claude invocation")
-		return nil
-	}}
-
-	pullWorkspaceWorktrees(deps, worktrees, "release")
-}
-
-func TestPullCmd_GroupID(t *testing.T) {
-	t.Parallel()
-	// Verify command is in the "git" group
-	if pullCmd.GroupID != "git" {
-		t.Errorf("expected pull command to be in 'git' group, got %q", pullCmd.GroupID)
-	}
-}
-
-func TestPullCmd_Flags(t *testing.T) {
-	t.Parallel()
-	// Verify flags are registered
-	if allFlag := pullCmd.Flags().Lookup("all"); allFlag == nil {
-		t.Error("expected --all flag to be registered")
-	}
-	if wsFlag := pullCmd.Flags().Lookup("workspace"); wsFlag == nil {
-		t.Error("expected --workspace flag to be registered")
-	}
-
-	// Verify shorthand flags
-	if allFlag := pullCmd.Flags().ShorthandLookup("a"); allFlag == nil {
-		t.Error("expected -a shorthand flag to be registered")
-	}
-	if wsFlag := pullCmd.Flags().ShorthandLookup("W"); wsFlag == nil {
-		t.Error("expected -W shorthand flag to be registered")
-	}
-}
-
-func TestPullWorkspaceWorktrees_EmptyList(t *testing.T) {
-	t.Parallel()
-	deps, _, _, _, _ := NewTestDeps(t)
-
-	// Empty worktree list should produce no errors and no git commands
-	worktrees := []WorktreeInfo{}
-
-	// No output stubs - no commands should be called
-	cmdMock := NewCommandMock(t, []CommandStub{})
-	cmdMock.InstallOn(deps)
-	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
-	outputMock.InstallOn(deps)
-
-	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
-		t.Error("unexpected claude invocation")
-		return nil
-	}}
-
-	// Should not panic or call any commands
-	pullWorkspaceWorktrees(deps, worktrees, "main")
 }

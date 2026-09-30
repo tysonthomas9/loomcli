@@ -11,6 +11,14 @@ type WorkingArea struct {
 	Workspace, Lead, Repo, Path, Branch, BaseSHA, Mode string
 }
 
+func (s *SQLite) WorkingAreaByPath(ctx context.Context, path string) (WorkingArea, error) {
+	var area WorkingArea
+	err := s.db.QueryRowContext(ctx, `SELECT workspace,lead,repo,path,branch,base_sha,mode
+		FROM working_areas WHERE path=?`, path).Scan(&area.Workspace, &area.Lead, &area.Repo,
+		&area.Path, &area.Branch, &area.BaseSHA, &area.Mode)
+	return area, err
+}
+
 func createWorkingAreaSchema(db *sql.DB) error {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS working_areas (
 		workspace TEXT NOT NULL, lead TEXT NOT NULL, repo TEXT NOT NULL,

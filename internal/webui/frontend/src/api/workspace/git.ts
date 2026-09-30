@@ -34,7 +34,7 @@ export interface GitPullResult {
 }
 
 export interface GitSyncResult {
-  push_result: GitPushResult;
+  push_result: GitPushResult | null;
   pull_result: GitPullResult;
 }
 

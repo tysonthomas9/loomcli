@@ -196,16 +196,6 @@ func (s *agentServiceImpl) GitSync(_ context.Context, wsID, agentName string) (*
 
 	target := wt.DefaultBranch
 
-	pushResult, err := s.gitOps.Push(wt.Path, wt.Branch, target, wt.Remote)
-	if err != nil {
-		return nil, fmt.Errorf("push failed: %w", err)
-	}
-
-	// If push resulted in conflicts, return immediately with partial result
-	if !pushResult.Success && len(pushResult.ConflictedFiles) > 0 {
-		return &service.GitSyncResult{PushResult: pushResult}, nil
-	}
-
 	currentBranch, err := s.gitOps.GetCurrentBranch(wt.Path)
 	if err != nil {
 		return nil, fmt.Errorf("getting current branch: %w", err)
@@ -217,7 +207,6 @@ func (s *agentServiceImpl) GitSync(_ context.Context, wsID, agentName string) (*
 	}
 
 	return &service.GitSyncResult{
-		PushResult: pushResult,
 		PullResult: pullResult,
 	}, nil
 }

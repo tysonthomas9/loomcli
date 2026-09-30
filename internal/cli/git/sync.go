@@ -16,35 +16,33 @@ var syncYes bool
 
 var syncCmd = &cobra.Command{
 	Use:     "sync",
-	Short:   "Push completed work then pull latest into all worktrees",
+	Short:   "Restack all working areas onto their recorded trunks",
 	GroupID: "git",
-	Long: `Sync performs a full push + pull cycle for all worktrees.
+	Long: `Sync fetches each recorded trunk and restacks its working area.
 
 This command:
-1. Finds all worktrees with completed work (ready to push)
-2. Pushes each to main (or per-repo default)
-3. Pulls main into all worktrees
+1. Finds the workspace's working areas
+2. Pulls each recorded trunk and restacks unlanded layers
 
-This is the recommended way to keep worktrees in sync with the main branch.
+Sync never publishes or pushes. Use loom publish for an approved revision.
 
 Flags:
-  --push-only        Only push (skip pulling)
-  --pull-only        Only pull (skip pushing)
+  --push-only        Unsupported; use loom publish
+  --pull-only        Alias for sync
   -W, --workspace    Workspace to operate on
   -y, --yes          Confirm every workspace in non-interactive mode
 
 Examples:
-  loom sync                      # Full sync: push all ready + pull all
-  loom sync --push-only          # Only push completed work
-  loom sync --pull-only          # Only pull latest (same as pull --all)
+  loom sync                      # Restack all working areas
+  loom sync --pull-only          # Same as sync
   loom sync -W myworkspace       # Sync specific workspace`,
 	Args: cobra.NoArgs,
 	RunE: runFullSync,
 }
 
 func init() {
-	syncCmd.Flags().BoolVar(&syncPushOnly, "push-only", false, "Only push (skip pulling)")
-	syncCmd.Flags().BoolVar(&syncPullOnly, "pull-only", false, "Only pull (skip pushing)")
+	syncCmd.Flags().BoolVar(&syncPushOnly, "push-only", false, "Unsupported; use loom publish")
+	syncCmd.Flags().BoolVar(&syncPullOnly, "pull-only", false, "Alias for sync")
 	syncCmd.Flags().StringVarP(&syncWorkspaceFlag, "workspace", "W", "", "Workspace to operate on")
 	syncCmd.Flags().BoolVarP(&syncYes, "yes", "y", false, "Confirm every workspace without prompting")
 	cli.RegisterCommand(syncCmd)
@@ -55,10 +53,8 @@ func runFullSync(cmd *cobra.Command, args []string) error {
 	pushOnly, _ := cmd.Flags().GetBool("push-only")
 	pullOnly, _ := cmd.Flags().GetBool("pull-only")
 	ws, _ := cmd.Flags().GetString("workspace")
-
-	if pushOnly && pullOnly {
-		fmt.Fprintln(os.Stderr, "Error: --push-only and --pull-only are mutually exclusive")
-		os.Exit(1)
+	if pushOnly {
+		return fmt.Errorf("sync no longer pushes; use loom publish for an approved revision")
 	}
 
 	return runWorkspaceSync(deps, pushOnly, pullOnly, ws)
@@ -161,11 +157,11 @@ func syncConfirmedWorkspace(deps *cli.Deps, resolver *cli.Resolver, name string,
 
 var runConfirmedSync = syncSingleWorkspace
 
-// syncSingleWorkspace returns an error only for failures that mean the sync did
-// not happen. A push phase that completed with per-repo errors is reported but
-// not fatal — that is the pre-existing contract of pushWorkspaceWorktrees, and
-// changing it belongs to a different change than this one.
 func syncSingleWorkspace(deps *cli.Deps, resolver *cli.Resolver, pushOnly, pullOnly bool) error {
+	if pushOnly {
+		return fmt.Errorf("sync no longer pushes; use loom publish for an approved revision")
+	}
+	_ = pullOnly
 	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error discovering repos: %v\n", err)
@@ -177,20 +173,10 @@ func syncSingleWorkspace(deps *cli.Deps, resolver *cli.Resolver, pushOnly, pullO
 		return nil
 	}
 
-	// Phase 1: Push (unless pull-only)
-	if !pullOnly {
-		fmt.Println("")
-		fmt.Println("--- Phase 1: Push ---")
-		if err := pushWorkspaceWorktrees(deps, worktrees, "", ""); err != nil {
-			fmt.Fprintf(os.Stderr, "Push phase completed with errors: %v\n", err)
-		}
-	}
-
-	// Phase 2: Pull (unless push-only)
-	if !pushOnly {
-		fmt.Println("")
-		fmt.Println("--- Phase 2: Pull ---")
-		pullWorkspaceWorktrees(deps, worktrees, "")
+	fmt.Println("")
+	fmt.Println("--- Pull ---")
+	if err := pullWorkspaceWorktrees(deps, worktrees, ""); err != nil {
+		return err
 	}
 	return nil
 }

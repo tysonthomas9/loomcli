@@ -1,41 +1,49 @@
 package git
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
+
+	"github.com/google/uuid"
 
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/pull"
 )
+
+var pullLocal = pull.PullLocal
 
 var pullAll bool
 var pullWorkspace string
 
 var pullCmd = &cobra.Command{
 	Use:               "pull [worktree] [branch]",
-	Short:             "Pull branch into worktree",
+	Short:             "Restack working area onto its recorded trunk",
 	GroupID:           "git",
 	ValidArgsFunction: cli.WorktreeThenBranchCompletion,
 	Long: `Pull latest changes from a branch into worktree(s).
 
-Merges the source branch (e.g., main) INTO the worktree branch, updating
-the worktree with the latest changes. If conflicts occur, Claude
-is launched to resolve them.
+Fetches the recorded trunk and replays each unlanded layer onto it.
+Conflicts and overlapping uncommitted edits hold the swap for review.
+Pull never pushes or starts an agent.
 
 Arguments:
   worktree    Worktree name (e.g., falcon)
-  branch      Source branch to pull from (default: main or per-repo default)
+  branch      Optional guard; must equal the recorded trunk
 
 Flags:
   -a, --all          Pull into all worktrees
   -W, --workspace    Workspace to operate on
 
 Examples:
-  loom pull falcon                        # Pull main (or per-repo default) into falcon
-  loom pull falcon main                   # Pull main into falcon explicitly
-  loom pull --all                         # Pull into all worktrees from their defaults
-  loom pull --all main                    # Pull main into all worktrees
+  loom pull falcon                        # Restack falcon onto its recorded trunk
+  loom pull falcon main                   # Require main to be its recorded trunk
+  loom pull --all                         # Restack all working areas
+  loom pull --all main                    # Require main for every working area
   loom pull -W myworkspace falcon         # Pull in specific workspace`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if pullAll {
@@ -75,8 +83,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 		if len(args) == 1 {
 			sourceBranch = args[0]
 		}
-		pullAllWorkspaces(deps, sourceBranch)
-		return nil
+		return pullAllWorkspaces(deps, sourceBranch)
 	}
 
 	worktreeName = args[0]
@@ -102,7 +109,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func pullAllWorkspaces(deps *cli.Deps, sourceBranch string) {
+func pullAllWorkspaces(deps *cli.Deps, sourceBranch string) error {
 	resolver, err := cli.NewResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
@@ -112,7 +119,7 @@ func pullAllWorkspaces(deps *cli.Deps, sourceBranch string) {
 	wsNames := resolver.WorkspaceNames()
 	if len(wsNames) == 0 {
 		fmt.Println("No workspaces found.")
-		return
+		return nil
 	}
 
 	fmt.Println("=========================================")
@@ -120,31 +127,39 @@ func pullAllWorkspaces(deps *cli.Deps, sourceBranch string) {
 	fmt.Println("=========================================")
 	fmt.Println("")
 
+	var failures []error
 	for _, wsName := range wsNames {
-		fmt.Printf("--- Workspace: %s ---\n", wsName)
-		if err := resolver.SetWorkspace(wsName); err != nil {
-			fmt.Fprintf(os.Stderr, "Error setting workspace %s: %v\n", wsName, err)
-			continue
+		if err := pullOneWorkspace(deps, resolver, wsName, sourceBranch); err != nil {
+			failures = append(failures, err)
 		}
-
-		worktrees, err := resolver.DiscoverWorktrees()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error discovering repos in workspace %s: %v\n", wsName, err)
-			continue
-		}
-
-		if len(worktrees) == 0 {
-			fmt.Printf("No repos found in workspace %s\n", wsName)
-			continue
-		}
-
-		pullWorkspaceWorktrees(deps, worktrees, sourceBranch)
-		fmt.Println("")
 	}
 
 	fmt.Println("=========================================")
-	fmt.Println("All workspaces pulled!")
+	if len(failures) == 0 {
+		fmt.Println("All workspaces restacked.")
+	} else {
+		fmt.Printf("Pull failed in %d workspace(s).\n", len(failures))
+	}
 	fmt.Println("=========================================")
+	return errors.Join(failures...)
+}
+
+func pullOneWorkspace(deps *cli.Deps, resolver *cli.Resolver, name, sourceBranch string) error {
+	fmt.Printf("--- Workspace: %s ---\n", name)
+	if err := resolver.SetWorkspace(name); err != nil {
+		return fmt.Errorf("setting workspace %s: %w", name, err)
+	}
+	worktrees, err := resolver.DiscoverWorktrees()
+	if err != nil {
+		return fmt.Errorf("discovering repos in workspace %s: %w", name, err)
+	}
+	if len(worktrees) == 0 {
+		fmt.Printf("No repos found in workspace %s\n", name)
+		return nil
+	}
+	err = pullWorkspaceWorktrees(deps, worktrees, sourceBranch)
+	fmt.Println("")
+	return err
 }
 
 func pullWorkspaceRepo(deps *cli.Deps, resolver *cli.Resolver, worktreeName, sourceBranch string) {
@@ -177,10 +192,7 @@ func pullWorkspaceRepo(deps *cli.Deps, resolver *cli.Resolver, worktreeName, sou
 
 	source := sourceBranch
 	if source == "" {
-		source = matched.Repo.DefaultBranch
-		if source == "" {
-			source = "main"
-		}
+		source = "(recorded trunk)"
 	}
 
 	remote := matched.Repo.Remote
@@ -190,39 +202,33 @@ func pullWorkspaceRepo(deps *cli.Deps, resolver *cli.Resolver, worktreeName, sou
 	fmt.Println("=========================================")
 	fmt.Println("")
 
-	err = pullRepoWorktree(deps, matched.Path, matched.Branch, source, remote)
+	err = pullRepoWorktree(deps, matched.Path, matched.Branch, sourceBranch, remote)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func pullWorkspaceWorktrees(deps *cli.Deps, worktrees []cli.WorktreeInfo, sourceBranch string) {
+func pullWorkspaceWorktrees(deps *cli.Deps, worktrees []cli.WorktreeInfo, sourceBranch string) error {
 	type result struct {
 		repo    string
 		success bool
 		err     string
 	}
 	var results []result
+	var failures []error
 
 	for _, wt := range worktrees {
 		if wt.Repo == nil {
 			continue
 		}
 
-		source := sourceBranch
-		if source == "" {
-			source = wt.Repo.DefaultBranch
-			if source == "" {
-				source = "main"
-			}
-		}
-
 		remote := wt.Repo.Remote
 
-		err := pullRepoWorktree(deps, wt.Path, wt.Branch, source, remote)
+		err := pullRepoWorktree(deps, wt.Path, wt.Branch, sourceBranch, remote)
 		if err != nil {
 			results = append(results, result{repo: wt.Name, success: false, err: err.Error()})
+			failures = append(failures, fmt.Errorf("%s: %w", wt.Name, err))
 		} else {
 			results = append(results, result{repo: wt.Name, success: true})
 		}
@@ -238,59 +244,24 @@ func pullWorkspaceWorktrees(deps *cli.Deps, worktrees []cli.WorktreeInfo, source
 			fmt.Printf("  ✗ %s: %s\n", r.repo, r.err)
 		}
 	}
+	return errors.Join(failures...)
 }
 
-func pullRepoWorktree(deps *cli.Deps, repoPath, currentBranch, sourceBranch, remote string) error {
-	r := resolveRemote(remote)
-
-	fmt.Println("=========================================")
-	fmt.Printf("Pull: %s <- %s (repo: %s, remote: %s)\n", currentBranch, sourceBranch, repoPath, r)
-	fmt.Println("=========================================")
-
-	// Fetch latest
-	if err := gitFetchRemote(deps, repoPath, remote); err != nil {
-		return fmt.Errorf("fetching: %v", err)
-	}
-
-	// Attempt merge
-	mergeMsg := fmt.Sprintf("Pull from %s", sourceBranch)
-	if err := gitMergeRemote(deps, repoPath, remote, sourceBranch, mergeMsg); err != nil {
-		// Check for conflicts
-		conflicts, conflictErr := getConflictedFilesDeps(deps, repoPath)
-		if conflictErr != nil || len(conflicts) == 0 {
-			return fmt.Errorf("merge failed: %v", err)
+func pullRepoWorktree(_ *cli.Deps, repoPath, _, sourceBranch, remote string) error {
+	result, err := pullLocal(context.Background(), repoPath, remote, sourceBranch, uuid.NewString())
+	if err != nil {
+		if len(result.Paths) > 0 {
+			return fmt.Errorf("%w: %s", err, strings.Join(result.Paths, ", "))
 		}
-
-		fmt.Println("")
-		fmt.Println("⚠ Merge conflicts detected. Launching AI agent to resolve...")
-		fmt.Println("")
-		fmt.Println("Conflicted files:")
-		for _, f := range conflicts {
-			fmt.Printf("  - %s\n", f)
-		}
-		fmt.Println("")
-
-		// Launch Claude for conflict resolution
-		if err := invokeAgentForConflictsDeps(deps, repoPath, sourceBranch, currentBranch, conflicts); err != nil {
-			return fmt.Errorf("resolving conflicts: %v", err)
-		}
-		return nil
+		return err
 	}
-
-	fmt.Println("✓ Pull completed successfully (no conflicts)")
-
-	// Push
-	if err := gitPushRemote(deps, repoPath, remote, currentBranch); err != nil {
-		return fmt.Errorf("pushing: %v", err)
-	}
-
-	fmt.Printf("✓ Pushed to %s/%s\n", r, currentBranch)
+	fmt.Printf("Restacked working area at %s\n", result.HeadSHA)
 	return nil
 }
 
 func sourceBranchDisplay(source string) string {
 	if source == "" {
-		return "(per-repo default)"
+		return "(recorded trunk)"
 	}
 	return source
 }

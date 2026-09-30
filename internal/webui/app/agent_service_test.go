@@ -370,7 +370,8 @@ func TestAgentService_GitSync(t *testing.T) {
 				return wt, nil
 			},
 			pushFunc: func(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error) {
-				return &ops.GitPushResult{Success: true, Message: "pushed"}, nil
+				t.Fatal("sync must not push")
+				return nil, nil
 			},
 			getCurrentBranchFunc: func(worktreePath string) (string, error) {
 				return wt.Branch, nil
@@ -385,32 +386,28 @@ func TestAgentService_GitSync(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if result.PushResult == nil {
-			t.Fatal("PushResult is nil")
+		if result.PushResult != nil {
+			t.Fatal("sync unexpectedly pushed")
 		}
 		if result.PullResult == nil {
 			t.Fatal("PullResult is nil")
-		}
-		if !result.PushResult.Success {
-			t.Errorf("PushResult.Success = false, want true")
 		}
 		if !result.PullResult.Success {
 			t.Errorf("PullResult.Success = false, want true")
 		}
 	})
 
-	t.Run("push conflict returns partial result", func(t *testing.T) {
+	t.Run("pull conflict returns partial result", func(t *testing.T) {
 		wt := testWorktree()
 		gitOps := &mockGitOps{
 			resolveFunc: func(name string) (*ops.AgentWorktree, error) {
 				return wt, nil
 			},
-			pushFunc: func(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error) {
-				return &ops.GitPushResult{
-					Success:         false,
-					Message:         "conflicts detected",
-					ConflictedFiles: []string{"file1.go", "file2.go"},
-				}, nil
+			getCurrentBranchFunc: func(worktreePath string) (string, error) {
+				return wt.Branch, nil
+			},
+			pullFunc: func(worktreePath, currentBranch, sourceBranch, remote string) (*ops.GitPullResult, error) {
+				return &ops.GitPullResult{ConflictedFiles: []string{"file1.go", "file2.go"}}, nil
 			},
 		}
 		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
@@ -419,17 +416,11 @@ func TestAgentService_GitSync(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if result.PushResult == nil {
-			t.Fatal("PushResult is nil")
+		if result.PushResult != nil {
+			t.Fatal("sync unexpectedly pushed")
 		}
-		if result.PullResult != nil {
-			t.Error("PullResult should be nil when push has conflicts")
-		}
-		if result.PushResult.Success {
-			t.Error("PushResult.Success = true, want false")
-		}
-		if len(result.PushResult.ConflictedFiles) != 2 {
-			t.Errorf("len(ConflictedFiles) = %d, want 2", len(result.PushResult.ConflictedFiles))
+		if result.PullResult == nil || len(result.PullResult.ConflictedFiles) != 2 {
+			t.Errorf("PullResult = %+v, want two conflict paths", result.PullResult)
 		}
 	})
 }

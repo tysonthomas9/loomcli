@@ -7,6 +7,7 @@ import (
 )
 
 func TestRunWorkspaceSync_MultipleWorkspaces(t *testing.T) {
+	stubPullLocal(t)
 	syncYes = true
 	t.Cleanup(func() { syncYes = false })
 	tmpDir := t.TempDir()
@@ -43,15 +44,7 @@ func TestRunWorkspaceSync_MultipleWorkspaces(t *testing.T) {
 	flexMock.AddStub("git", []string{"log", "--oneline", "@{upstream}..HEAD"}, CommandResult{}).WithMinCalls(2)
 	flexMock.Install()
 
-	// OutputCommandMock for pull phase of both workspaces
-	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/main", "-m", "Pull from main"}, Err: nil},
-		{Args: []string{"push", "origin", "dev-branch"}, Err: nil},
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/main", "-m", "Pull from main"}, Err: nil},
-		{Args: []string{"push", "origin", "dev-branch"}, Err: nil},
-	})
+	outputMock := NewOutputCommandMock(t, nil)
 	outputMock.Install()
 
 	origAgent := defaultDeps.Agent
@@ -67,6 +60,7 @@ func TestRunWorkspaceSync_MultipleWorkspaces(t *testing.T) {
 }
 
 func TestRunWorkspaceSync_SpecificWorkspaceFlag(t *testing.T) {
+	stubPullLocal(t)
 	tmpDir := t.TempDir()
 	wsADir := tmpDir + "/ws-a"
 	repoA := wsADir + "/repo-a"
@@ -100,11 +94,7 @@ func TestRunWorkspaceSync_SpecificWorkspaceFlag(t *testing.T) {
 	})
 	cmdMock.Install()
 
-	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/main", "-m", "Pull from main"}, Err: nil},
-		{Args: []string{"push", "origin", "feature-a"}, Err: nil},
-	})
+	outputMock := NewOutputCommandMock(t, nil)
 	outputMock.Install()
 
 	origAgent := defaultDeps.Agent
@@ -165,6 +155,7 @@ func TestRunWorkspaceSync_UnknownWorkspace(t *testing.T) {
 }
 
 func TestRunFullSync_DispatchesToWorkspaceMode(t *testing.T) {
+	stubPullLocal(t)
 	syncYes = true
 	t.Cleanup(func() { syncYes = false })
 	tmpDir := t.TempDir()
@@ -195,12 +186,7 @@ func TestRunFullSync_DispatchesToWorkspaceMode(t *testing.T) {
 	})
 	cmdMock.Install()
 
-	// Workspace pull: fetch, merge, push
-	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"merge", "origin/main", "-m", "Pull from main"}, Err: nil},
-		{Args: []string{"push", "origin", "api-branch"}, Err: nil},
-	})
+	outputMock := NewOutputCommandMock(t, nil)
 	outputMock.Install()
 
 	origAgent := defaultDeps.Agent

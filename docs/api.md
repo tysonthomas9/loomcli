@@ -2788,7 +2788,7 @@ Merge the source branch INTO the agent's current worktree branch.
 
 ### `POST /api/workspaces/{ws}/agents/{name}/git/sync`
 
-Two-phase operation: first pushes worktree branch to default target, then pulls from target back into worktree. If push fails with conflicts, pull is NOT attempted.
+Fetches the recorded trunk and restacks the working area onto it. Sync does not push or publish.
 
 - **Auth:** Required
 - **Path params:**
@@ -2799,51 +2799,27 @@ Two-phase operation: first pushes worktree branch to default target, then pulls 
 | `name` | string | Agent name (validated: `^[a-zA-Z0-9_-]+$`) |
 
 - **Request Body:** None
-- **Response:** `200 OK` (both succeed)
+- **Response:** `200 OK` (restack succeeds)
 
 ```json
 {
-  "push_result": {
-    "success": true,
-    "message": "merged agent/drift into v2",
-    "already_up_to_date": false
-  },
+  "push_result": null,
   "pull_result": {
     "success": true,
-    "message": "merged v2 into agent/drift",
+    "message": "Restacked working area onto recorded trunk",
     "already_up_to_date": false
   }
 }
 ```
 
-- **Response:** `409 Conflict` (push conflicts — pull not attempted)
+- **Response:** `409 Conflict` (restack conflicts or the swap is held)
 
 ```json
 {
-  "push_result": {
-    "success": false,
-    "message": "merge conflicts detected",
-    "already_up_to_date": false,
-    "conflicted_files": ["file.go"]
-  },
-  "pull_result": null
-}
-```
-
-`pull_result` is null when push has conflicts.
-
-- **Response:** `409 Conflict` (push succeeds, pull conflicts)
-
-```json
-{
-  "push_result": {
-    "success": true,
-    "message": "merged agent/drift into v2",
-    "already_up_to_date": false
-  },
+  "push_result": null,
   "pull_result": {
     "success": false,
-    "message": "merge conflicts detected",
+    "message": "conflict on pull",
     "already_up_to_date": false,
     "conflicted_files": ["file.go"]
   }
@@ -2854,7 +2830,7 @@ Two-phase operation: first pushes worktree branch to default target, then pulls 
   - `400` — missing/invalid agent name
   - `404` — agent worktree not found in this workspace
   - `500` — getting current branch failed (`{"error": "getting current branch: ..."}`)
-  - `502` — push or pull git operation failed
+  - `502` — fetch or restack operation failed
 
 ### `POST /api/workspaces/{ws}/agents/{name}/git/pr`
 

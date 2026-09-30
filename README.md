@@ -118,8 +118,8 @@ daemon     Supervise multiple agents with auto-restart
 ### Git Operations
 ```
 push       Push worktree branch to target with AI conflict resolution
-pull       Pull integration branch into worktrees with AI conflict resolution
-sync       Full sync: push all completed work, then pull into all worktrees
+pull       Restack a working area onto its recorded trunk without pushing
+sync       Restack all working areas without pushing (--pull-only is an alias)
 pr         Create GitHub PR from worktree branch
 reset      Hard reset worktree to a specific branch
 ```
@@ -151,8 +151,8 @@ loom lead                     # Default interactive terminal agent
 
 # Git operations
 loom push --all               # Push all worktrees to main
-loom pull --all               # Pull main into all worktrees
-loom sync                     # Full sync: push all + pull all
+loom pull --all               # Restack all working areas onto their trunks
+loom sync                     # Restack all working areas; never push
 loom pr falcon                # Create PR from falcon to main
 
 # Monitoring

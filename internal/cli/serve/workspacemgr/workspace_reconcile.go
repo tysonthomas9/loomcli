@@ -19,7 +19,7 @@ import (
 func ReconcileJournal(ctx context.Context, s storepkg.Store) error {
 	return reconcile.RunOnce(ctx, reconcile.Handlers{
 		Workspace: reconcile.RecoverFunc(func(ctx context.Context) error { return Reconcile(ctx, s) }),
-		Apply:     reconcile.RecoverFunc(applyrecovery.Recover),
+		Apply:     reconcile.RecoverFunc(func(ctx context.Context) error { return recoverPullThenApply(ctx, applyrecovery.Recover) }),
 	})
 }
 
