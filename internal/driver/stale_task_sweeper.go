@@ -117,10 +117,11 @@ func (s *StaleTaskSweeper) sweepWorkspace(ctx context.Context, ws string, staleB
 		if err := captureStaleTaskCopies(ctx, runIDs[id], staleBefore); err != nil {
 			return err
 		}
+		errorClass, errorMessage := staleRecoveryReason(runIDs[id], staleBefore)
 		result, err := s.Store.DriverRuns().RecoverStaleTaskRuns(ctx, ws, id, store.StaleTaskRunRecovery{
 			StaleBefore:  staleBefore,
-			ErrorClass:   staleTaskRunErrorClass,
-			ErrorMessage: staleTaskRunErrorMessage,
+			ErrorClass:   errorClass,
+			ErrorMessage: errorMessage,
 		})
 		if err != nil {
 			return fmt.Errorf("recover stale task runs for driver run %q: %w", id, err)
@@ -139,6 +140,18 @@ func (s *StaleTaskSweeper) sweepWorkspace(ctx context.Context, ws string, staleB
 		out.RecoveredTaskRunIDs = append(out.RecoveredTaskRunIDs, result.RecoveredTaskRunIDs...)
 	}
 	return nil
+}
+
+func staleRecoveryReason(tasks []*domain.TaskRun, staleBefore time.Time) (string, string) {
+	for _, task := range tasks {
+		if !task.LastHeartbeat.Before(staleBefore) || task.RuntimeMetadata["remote_capture_status"] != "pending" {
+			continue
+		}
+		sandboxID := task.RuntimeMetadata["daytona_sandbox_id"]
+		return string(loomgit.AttentionRequired), fmt.Sprintf(
+			"remote capture pending in retained Daytona sandbox %q after stale task run; manual recovery required", sandboxID)
+	}
+	return staleTaskRunErrorClass, staleTaskRunErrorMessage
 }
 
 func captureStaleTaskCopies(ctx context.Context, tasks []*domain.TaskRun, staleBefore time.Time) error {

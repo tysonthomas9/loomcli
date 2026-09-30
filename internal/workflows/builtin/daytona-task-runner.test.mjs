@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { after, before, describe, it } from "node:test";
 
@@ -235,5 +236,112 @@ describe("daytona-task-runner stack lineage parity (Stage 5)", () => {
     assert.ok(cmd.includes("--branch"), "clones the predecessor base branch");
     assert.ok(!cmd.includes("fixture-token") && !cmd.includes("AUTHORIZATION"), "clone command contains no credential");
     assert.throws(() => mod.cloneCommand("https://user:fixture-token@github.com/o/r.git", "/work/repo", ""), /credentials/);
+  });
+});
+
+describe("remote sandbox capture", () => {
+  it("keeps two commits and edits while excluding secrets and ignored files", () => {
+    const root = fs.mkdtempSync(path.join(stageRoot, "capture-"));
+    const source = path.join(root, "source");
+    const provider = path.join(root, "provider.git");
+    const task = path.join(root, "task");
+    fs.mkdirSync(source);
+    const env = {
+      ...process.env,
+      GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_AUTHOR_NAME: "Loom", GIT_AUTHOR_EMAIL: "loom@localhost",
+      GIT_COMMITTER_NAME: "Loom", GIT_COMMITTER_EMAIL: "loom@localhost",
+    };
+    const git = (cwd, ...args) => execFileSync("git", args, { cwd, env, encoding: "utf8" }).trim();
+    git(root, "init", "--bare", "-q", "-b", "main", provider);
+    git(source, "init", "-q", "-b", "main");
+    fs.writeFileSync(path.join(source, "readme"), "base\n");
+    fs.writeFileSync(path.join(source, ".gitignore"), "*.log\n");
+    git(source, "add", ".");
+    git(source, "commit", "-qm", "base");
+    const base = git(source, "rev-parse", "HEAD");
+    git(source, "remote", "add", "origin", provider);
+    git(source, "push", "-q", "origin", "main");
+    execFileSync("sh", ["-c", mod.cloneCommand(provider, task, "")], { cwd: root, env });
+    assert.equal(git(task, "config", "remote.origin.pushurl"), "loom-no-push://task-copy");
+    assert.equal(git(task, "config", "--get-all", "credential.helper"), "");
+    assert.throws(() => git(task, "push", "origin", "HEAD:refs/heads/direct"));
+    assert.equal(mod.sandboxGitEnv({ GIT_CONFIG_PARAMETERS: "'credential.helper=unsafe'" }).GIT_CONFIG_PARAMETERS, "");
+    assert.equal(mod.sandboxGitEnv().GIT_TERMINAL_PROMPT, "0");
+    for (const name of ["one", "two"]) {
+      fs.writeFileSync(path.join(task, name), name);
+      git(task, "add", name);
+      git(task, "commit", "-qm", name);
+    }
+    fs.writeFileSync(path.join(task, "readme"), "edited\n");
+    fs.writeFileSync(path.join(task, ".env"), "SECRET=fixture\n");
+    fs.writeFileSync(path.join(task, "scratch.log"), "ignored\n");
+    const tokenPath = path.join(root, "scoped-token");
+    fs.writeFileSync(tokenPath, "fixture-scoped-token");
+    const ref = "refs/loom/ws/W/attempt/run-a1/capture";
+    const input = { repo: task, workspace: "W", attempt: "run-a1", ref, proxyURL: provider, tokenPath };
+    const output = execFileSync("node", ["-e", mod.remoteCaptureScript(), "--", JSON.stringify(input)], { env, encoding: "utf8" });
+    const capture = JSON.parse(output);
+    assert.equal(capture.complete, false);
+    assert.equal(capture.retained, true);
+    assert.ok(capture.entries.some((entry) => entry.path === ".env" && entry.class === "secret_suspect"));
+    assert.ok(capture.entries.some((entry) => entry.path === "scratch.log" && entry.class === "listed"));
+    assert.equal(git(provider, "rev-parse", ref), capture.captureSha);
+    assert.equal(git(task, "rev-list", "--count", `${base}..${capture.captureSha}`), "3");
+    assert.equal(git(task, "show", `${capture.captureSha}:readme`), "edited");
+    assert.ok(!git(task, "ls-tree", "-r", "--name-only", capture.captureSha).includes(".env"));
+    assert.equal(fs.existsSync(tokenPath), false);
+  });
+
+  it("reattaches a retained sandbox and retries with a fresh scoped token", async () => {
+    const priorFetch = globalThis.fetch;
+    const priorAPI = process.env.LOOM_TASK_RUN_API_URL;
+    process.env.LOOM_TASK_RUN_API_URL = "http://loom.test";
+    let tokenCount = 0;
+    let pushCount = 0;
+    let finalized = 0;
+    const uploaded = [];
+    const sandbox = {
+      fs: { uploadFile: async (content, file) => uploaded.push({ content: String(content), file }) },
+      process: { executeCommand: async (command) => {
+        assert.ok(command.includes("capture.git"));
+        pushCount++;
+        return { exitCode: 0, result: JSON.stringify({
+          captureSha: "a".repeat(40), treeHash: "b".repeat(40), complete: true,
+          pushError: pushCount === 1 ? "connection refused" : "",
+        }) };
+      } },
+    };
+    const provider = { get: async (sandboxId) => {
+      assert.equal(sandboxId, "retained-sandbox");
+      return sandbox;
+    } };
+    globalThis.fetch = async (url) => {
+      if (url.endsWith("/capture-token")) {
+        tokenCount++;
+        return { ok: true, json: async () => ({ token: `scoped-${tokenCount}`, attempt: "run-a1", ref: "refs/loom/ws/W/attempt/run-a1/capture" }) };
+      }
+      if (url.endsWith("/capture-pending")) {
+        return { ok: false, json: async () => ({ message: "proxy has no retained pack" }) };
+      }
+      if (url.endsWith("/capture-finalize")) {
+        finalized++;
+        return { ok: true, json: async () => ({ changeId: "change", revision: 1 }) };
+      }
+      throw new Error("unexpected capture operation: " + url);
+    };
+    try {
+      const input = { request: { workspace_key: "W", task_run_id: "run" }, repoUrl: "provider", repoDir: "/repo", baseSha: "c".repeat(40) };
+      await assert.rejects(mod.retryRetainedCapture(await provider.get("retained-sandbox"), input, []), /proxy has no retained pack/);
+      const recovered = await mod.retryRetainedCapture(await provider.get("retained-sandbox"), input, []);
+      assert.equal(recovered.changeId, "change");
+      assert.deepEqual(uploaded.map((item) => item.content), ["scoped-1", "scoped-2"]);
+      assert.equal(pushCount, 2);
+      assert.equal(finalized, 1);
+    } finally {
+      globalThis.fetch = priorFetch;
+      if (priorAPI === undefined) delete process.env.LOOM_TASK_RUN_API_URL;
+      else process.env.LOOM_TASK_RUN_API_URL = priorAPI;
+    }
   });
 });

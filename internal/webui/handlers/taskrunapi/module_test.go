@@ -483,3 +483,12 @@ func TestTaskRunWrongWorkspaceRejected(t *testing.T) {
 		t.Fatalf("wrong-workspace get = %d, want 401", resp.StatusCode)
 	}
 }
+
+func TestCaptureAttemptKeepsOriginalOnRetry(t *testing.T) {
+	if got := captureAttempt("run", map[string]string{"scheduler_attempt": "2", "remote_capture_attempt": "run-a1"}); got != "run-a1" {
+		t.Fatalf("retry attempt = %q, want run-a1", got)
+	}
+	if got := captureAttempt("run", map[string]string{"scheduler_attempt": "2", "remote_capture_attempt": "other-a1"}); got != "run-a3" {
+		t.Fatalf("foreign attempt = %q, want run-a3", got)
+	}
+}

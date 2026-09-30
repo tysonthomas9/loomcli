@@ -62,6 +62,11 @@ func taskCopyAttemptID(taskRunID string, schedulerAttempt int) string {
 	return fmt.Sprintf("%s-a%d", name, schedulerAttempt+1)
 }
 
+// TaskCopyAttemptID is the canonical attempt identity used by remote capture.
+func TaskCopyAttemptID(taskRunID string, schedulerAttempt int) string {
+	return taskCopyAttemptID(taskRunID, schedulerAttempt)
+}
+
 func requeueClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, execResult TaskExecResult, completion taskExecCompletion, metadata map[string]string, retry taskRunRetryDecisionResult) (*domain.TaskRun, error) {
 	metadata = taskRunRetryMetadata(claimed, retry, completion, metadata)
 	requeued, err := s.TaskRuns().Requeue(ctx, claimed.WorkspaceKey, claimed.TaskRunID, store.TaskRunRequeue{
@@ -116,7 +121,17 @@ func taskRunRetryBackoff(attempt int) time.Duration {
 	return backoff
 }
 
-func taskRunRetryMetadata(_ *domain.TaskRun, retry taskRunRetryDecisionResult, completion taskExecCompletion, metadata map[string]string) map[string]string {
+func taskRunRetryMetadata(claimed *domain.TaskRun, retry taskRunRetryDecisionResult, completion taskExecCompletion, metadata map[string]string) map[string]string {
+	if claimed != nil {
+		if metadata == nil {
+			metadata = map[string]string{}
+		}
+		for _, key := range []string{"daytona_sandbox_id", "daytona_repo_dir", "remote_capture_status", "remote_capture_attempt", "remote_capture_base_sha", "remote_capture_repo_url"} {
+			if metadata[key] == "" && claimed.RuntimeMetadata[key] != "" {
+				metadata[key] = claimed.RuntimeMetadata[key]
+			}
+		}
+	}
 	return schedulerMetadata(metadata, "retrying", retry.Attempt, retry.MaxAttempts, completion)
 }
 

@@ -45,8 +45,8 @@ func FreezeCapture(ctx context.Context, in CaptureRequest) (loomgit.Revision, er
 }
 
 func FreezeCaptureAt(ctx context.Context, journalPath string, in CaptureRequest) (loomgit.Revision, error) {
-	if in.Workspace == "" || in.Task == "" || in.Repo == "" || in.Attempt == "" || in.Worktree == "" || in.Base == "" || (in.Outcome != "cancelled" && in.Outcome != "failed") {
-		return loomgit.Revision{}, fmt.Errorf("interrupted capture requires workspace, task, repo, attempt, worktree, base and cancelled or failed outcome")
+	if in.Workspace == "" || in.Task == "" || in.Repo == "" || in.Attempt == "" || in.Worktree == "" || in.Base == "" || (in.Outcome != "cancelled" && in.Outcome != "failed" && in.Outcome != "completed") {
+		return loomgit.Revision{}, fmt.Errorf("capture requires workspace, task, repo, attempt, worktree, base and a terminal outcome")
 	}
 	if err := os.MkdirAll(filepath.Dir(journalPath), 0o700); err != nil {
 		return loomgit.Revision{}, err

@@ -79,28 +79,31 @@ type Config struct {
 	FleetBaseURL string
 	// LocalSettingsDir is the app-local data directory containing sealed
 	// runtime credentials configured from Settings.
-	LocalSettingsDir string
+	LocalSettingsDir   string
+	CaptureJournalPath string
 	// IssueBackends overrides the default fleet-db issue backend factory.
 	IssueBackends IssueBackendFactory
 }
 
 // Module serves the workspace-scoped task-run routes.
 type Module struct {
-	store            store.Store
-	issueBackends    IssueBackendFactory
-	localSettingsDir string
-	ops              map[string]opHandler
-	now              func() time.Time
+	store              store.Store
+	issueBackends      IssueBackendFactory
+	localSettingsDir   string
+	captureJournalPath string
+	ops                map[string]opHandler
+	now                func() time.Time
 }
 
 // NewModule constructs the task-run API module. Nil-safe: with a nil store,
 // Register registers nothing.
 func NewModule(cfg Config) *Module {
 	m := &Module{
-		store:            cfg.Store,
-		issueBackends:    cfg.IssueBackends,
-		localSettingsDir: strings.TrimSpace(cfg.LocalSettingsDir),
-		now:              func() time.Time { return time.Now().UTC() },
+		store:              cfg.Store,
+		issueBackends:      cfg.IssueBackends,
+		localSettingsDir:   strings.TrimSpace(cfg.LocalSettingsDir),
+		captureJournalPath: strings.TrimSpace(cfg.CaptureJournalPath),
+		now:                func() time.Time { return time.Now().UTC() },
 	}
 	m.ops = map[string]opHandler{
 		"get":                m.get,
@@ -113,6 +116,11 @@ func NewModule(cfg Config) *Module {
 		"artifact-get":       m.artifactGet,
 		"artifact-list":      m.artifactList,
 		"artifact-finalize":  m.artifactFinalize,
+		"capture-token":      m.captureToken,
+		"capture-register":   m.captureRegister,
+		"capture-state":      m.captureState,
+		"capture-pending":    m.capturePending,
+		"capture-finalize":   m.captureFinalize,
 	}
 	if m.issueBackends == nil {
 		m.issueBackends = defaultIssueBackends(cfg.FleetBaseURL)
@@ -146,6 +154,8 @@ func (m *Module) Register(mux *http.ServeMux) {
 	// Raw artifact content upload: the body is the content itself, so it
 	// cannot ride the JSON {op} route.
 	mux.HandleFunc("PUT /api/workspaces/{ws}/task-run/artifacts/{artifactId}/content", m.handleArtifactContent)
+	mux.HandleFunc("GET /api/workspaces/{ws}/task-run/capture.git/info/refs", m.capturePush)
+	mux.HandleFunc("POST /api/workspaces/{ws}/task-run/capture.git/git-receive-pack", m.capturePush)
 }
 
 // leaseIdentity is the per-request task-run lease identity: the same

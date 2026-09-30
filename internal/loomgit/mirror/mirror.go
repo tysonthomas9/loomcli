@@ -78,6 +78,17 @@ func (p gitPusher) Push(ctx context.Context, remote, ref, localSHA, expected str
 	return err
 }
 
+// FetchRef fetches one provider ref using the host credential resolver.
+// The returned SHA names FETCH_HEAD; callers verify it before freezing.
+func FetchRef(ctx context.Context, runner *gitexec.Runner, remote, ref string) (string, error) {
+	pusher := gitPusher{runner}
+	if _, err := pusher.run(ctx, remote, "fetch", "--no-tags", remote, ref); err != nil {
+		return "", err
+	}
+	out, err := runner.Run(ctx, "rev-parse", "--verify", "FETCH_HEAD^{commit}")
+	return strings.TrimSpace(string(out)), err
+}
+
 // SyncRepo scans local Loom refs. Each pass is independent; failed refs stay
 // recorded for the next pass, and no caller waits for this before a reset.
 func SyncRepo(ctx context.Context, store Store, repo, baseSHA string) error {
