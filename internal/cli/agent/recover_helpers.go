@@ -52,16 +52,12 @@ func analyzeTaskCompletion(deps *cli.Deps, worktreePath, taskID string) (complet
 
 	prompt := buildCompletionAnalysisPrompt(taskID, taskDetails, gitOutput)
 
-	analysis, err := runCompletionAnalysis(ctxForCompletionAnalysis(), deps, worktreePath, prompt)
+	analysis, err := runCompletionAnalysis(context.Background(), deps, worktreePath, prompt)
 	if err != nil {
 		return false, fmt.Sprintf("Claude analysis failed: %v", err)
 	}
 
 	return parseCompletionResponse(analysis)
-}
-
-func ctxForCompletionAnalysis() context.Context {
-	return context.Background()
 }
 
 func runCompletionAnalysis(ctx context.Context, deps *cli.Deps, worktreePath, prompt string) (string, error) {
@@ -239,42 +235,31 @@ func confirmKill(pid int) bool {
 	return git.ConfirmAction(fmt.Sprintf("Kill agent process (PID %d)?", pid))
 }
 
-// recoveryTarget identifies a repo directory to check for untracked files.
-type recoveryTarget struct {
-	path string
-}
-
 // reportUntrackedFiles lists leftovers without changing any workspace files.
 func reportUntrackedFiles(worktreePath string) {
-	for _, target := range resolveRecoveryTargets(worktreePath) {
-		output, err := git.RunGitCommand(target.path, "status", "--porcelain", "--untracked-files=all")
+	paths := []string{worktreePath}
+	resolver := cli.GetDefaultResolver()
+	if resolver.Mode == cli.ModeWorkspace {
+		if worktrees, err := resolver.DiscoverWorktrees(); err == nil && len(worktrees) > 0 {
+			paths = make([]string, 0, len(worktrees))
+			for _, worktree := range worktrees {
+				paths = append(paths, worktree.Path)
+			}
+		}
+	}
+	for _, path := range paths {
+		output, err := git.RunGitCommand(path, "status", "--porcelain", "--untracked-files=all")
 		if err != nil {
-			fmt.Printf("[recover] WARN: could not list untracked files in %s: %v\n", target.path, err)
+			fmt.Printf("[recover] WARN: could not list untracked files in %s: %v\n", path, err)
 			continue
 		}
 		for _, line := range strings.Split(strings.TrimRight(output, "\n"), "\n") {
 			if !strings.HasPrefix(line, "?? ") {
 				continue
 			}
-			fmt.Printf("[recover] untracked file left in %s: %s\n", target.path, line[3:])
+			fmt.Printf("[recover] untracked file left in %s: %s\n", path, line[3:])
 		}
 	}
-}
-
-// resolveRecoveryTargets returns the repo directories to scan for leftovers.
-func resolveRecoveryTargets(worktreePath string) []recoveryTarget {
-	resolver := cli.GetDefaultResolver()
-	if resolver.Mode == cli.ModeWorkspace {
-		worktrees, err := resolver.DiscoverWorktrees()
-		if err == nil && len(worktrees) > 0 {
-			targets := make([]recoveryTarget, 0, len(worktrees))
-			for _, wt := range worktrees {
-				targets = append(targets, recoveryTarget{path: wt.Path})
-			}
-			return targets
-		}
-	}
-	return []recoveryTarget{{path: worktreePath}}
 }
 
 // resetOrphanedAgentTasks finds all in_progress tasks assigned to the given agent
