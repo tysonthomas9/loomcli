@@ -81,6 +81,25 @@ func TestPullCmdRegistration(t *testing.T) {
 	}
 }
 
+func TestRestackCommandRoutesOrderToLocalWorkingArea(t *testing.T) {
+	original := restackLocal
+	t.Cleanup(func() { restackLocal = original })
+	called := false
+	restackLocal = func(_ context.Context, path, base string, order []string, requestID string) (pull.PullResult, error) {
+		called = true
+		if path != "/ws/lead" || base != "base-sha" || len(order) != 2 || order[0] != "C2" || order[1] != "C1" || requestID == "" {
+			t.Fatalf("restack route = path %q base %q order %v request %q", path, base, order, requestID)
+		}
+		return pull.PullResult{HeadSHA: "rebuilt"}, nil
+	}
+	if err := restackRepoWorktree(context.Background(), "/ws/lead", "base-sha", []string{"C2", "C1"}); err != nil || !called {
+		t.Fatalf("restack route: called=%t err=%v", called, err)
+	}
+	if restackCmd.Flags().Lookup("workspace") == nil || restackCmd.GroupID != "git" || restackCmd.Args(restackCmd, []string{"lead", "base-sha"}) != nil {
+		t.Fatal("restack command registration changed")
+	}
+}
+
 func stubPullLocal(t *testing.T) {
 	t.Helper()
 	original := pullLocal

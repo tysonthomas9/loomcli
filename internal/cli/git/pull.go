@@ -16,6 +16,7 @@ import (
 )
 
 var pullLocal = pull.PullLocal
+var restackLocal = pull.RestackLocal
 
 var pullAll bool
 var pullWorkspace string
@@ -64,6 +65,44 @@ func init() {
 	pullCmd.Flags().BoolVarP(&pullAll, "all", "a", false, "Pull into all worktrees")
 	pullCmd.Flags().StringVarP(&pullWorkspace, "workspace", "W", "", "Workspace to operate on")
 	cli.RegisterCommand(pullCmd)
+	restackCmd.Flags().StringP("workspace", "W", "", "Workspace to operate on")
+	cli.RegisterCommand(restackCmd)
+}
+
+var restackCmd = &cobra.Command{
+	Use:     "restack <working-area> <base-sha> [change-id ...]",
+	Short:   "Restack a working area's layers onto an explicit commit",
+	GroupID: "git",
+	Args:    cobra.MinimumNArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		resolver, err := cli.NewResolver()
+		if err != nil {
+			return err
+		}
+		workspace, _ := cmd.Flags().GetString("workspace")
+		if workspace != "" {
+			if err := resolver.SetWorkspace(workspace); err != nil {
+				return err
+			}
+		}
+		path, err := resolver.ResolveWorktreePath(args[0])
+		if err != nil {
+			return err
+		}
+		return restackRepoWorktree(cmd.Context(), path, args[1], args[2:])
+	},
+}
+
+func restackRepoWorktree(ctx context.Context, path, baseSHA string, order []string) error {
+	result, err := restackLocal(ctx, path, baseSHA, order, uuid.NewString())
+	if err != nil {
+		if len(result.Paths) > 0 {
+			return fmt.Errorf("%w: %s", err, strings.Join(result.Paths, ", "))
+		}
+		return err
+	}
+	fmt.Printf("Restacked working area at %s\n", result.HeadSHA)
+	return nil
 }
 
 func runPull(cmd *cobra.Command, args []string) error {
