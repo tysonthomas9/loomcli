@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/mirror"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 )
@@ -126,6 +127,76 @@ func TestPublishStackStaleLeaseChangesNoBranchOrPRBase(t *testing.T) {
 	}
 	if secondNew.HeadSHA == second.HeadSHA {
 		t.Fatal("test did not produce a new derived head")
+	}
+}
+
+type deletingPusher struct {
+	mirror.RefPusher
+	test    *testing.T
+	remote  string
+	ref     string
+	queries int
+}
+
+func (pusher *deletingPusher) RemoteSHA(ctx context.Context, remote, ref string) (string, error) {
+	if ref == pusher.ref {
+		pusher.queries++
+		if pusher.queries == 2 {
+			git(pusher.test, pusher.remote, "update-ref", "-d", ref)
+		}
+	}
+	return pusher.RefPusher.RemoteSHA(ctx, remote, ref)
+}
+
+func TestPublishStackReportsUnchangedLayerDriftAndRetryConverges(t *testing.T) {
+	fixture := newFixture(t)
+	first := stackRevision(t, fixture, "A", 1, fixture.base)
+	second := stackRevision(t, fixture, "B", 1, first.HeadSHA)
+	firstBranch, _ := refname.ChangeBranch("W", "A")
+	secondBranch, _ := refname.ChangeBranch("W", "B")
+	git(t, fixture.repo, "push", fixture.remote, first.HeadSHA+":refs/heads/"+firstBranch)
+	runner, err := gitexec.New(fixture.repo, gitexec.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := fixture.request()
+	forge := &fakeForge{}
+	request.forge = forge
+	stack := StackRequest{Request: request, StackID: "feature-1", Changes: []string{"A", "B"},
+		pusher: &deletingPusher{RefPusher: mirror.NewPusher(runner), test: t, remote: fixture.remote, ref: "refs/heads/" + firstBranch}}
+	_, err = publishStack(context.Background(), fixture.store, stack)
+	codeIs(t, err, loomgit.StackDrift)
+	if !strings.Contains(err.Error(), "A") || !strings.Contains(err.Error(), first.HeadSHA) || !strings.Contains(err.Error(), "<absent>") {
+		t.Fatalf("drift error omits layer and SHA: %v", err)
+	}
+	reopened, err := journal.OpenSQLite(filepath.Join(filepath.Dir(fixture.repo), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reopened.Close() }()
+	publication, found, err := reopened.Publication(context.Background(), "W", "A")
+	if err != nil || !found || publication.Phase != "drift" || publication.DriftSHA != "" {
+		t.Fatalf("durable drift = %+v, %v", publication, err)
+	}
+	if got := git(t, fixture.remote, "rev-parse", "refs/heads/"+secondBranch); got != second.HeadSHA {
+		t.Fatalf("changed layer head = %s", got)
+	}
+	if len(forge.prs) != 0 {
+		t.Fatalf("PRs changed before recovery: %+v", forge.prs)
+	}
+	stack.pusher = nil
+	if _, err := publishStack(context.Background(), reopened, stack); err != nil {
+		t.Fatal(err)
+	}
+	publication, found, err = reopened.Publication(context.Background(), "W", "A")
+	if err != nil || !found || publication.Phase != "done" || publication.DriftSHA != "" {
+		t.Fatalf("recovered publication = %+v, %v", publication, err)
+	}
+	if got := git(t, fixture.remote, "rev-parse", "refs/heads/"+firstBranch); got != first.HeadSHA {
+		t.Fatalf("recovered first layer head = %s", got)
+	}
+	if len(forge.prs) != 2 || forge.prs[1].Base != firstBranch {
+		t.Fatalf("recovered PRs = %+v", forge.prs)
 	}
 }
 

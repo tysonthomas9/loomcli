@@ -19,6 +19,7 @@ type StackRequest struct {
 	Request
 	StackID string
 	Changes []string
+	pusher  mirror.RefPusher
 }
 
 type stackLayer struct {
@@ -54,8 +55,11 @@ func publishStack(ctx context.Context, store Store, request StackRequest) ([]loo
 	if err := store.BeginStackPublications(ctx, publications); err != nil {
 		return nil, err
 	}
-	pusher := mirror.NewPusher(runner)
-	if err := pushStackHeads(ctx, runner, pusher, layers); err != nil {
+	pusher := request.pusher
+	if pusher == nil {
+		pusher = mirror.NewPusher(runner)
+	}
+	if err := pushStackHeads(ctx, store, runner, pusher, layers); err != nil {
 		return nil, err
 	}
 	result := make([]loomgit.Revision, 0, len(layers))
@@ -69,7 +73,7 @@ func publishStack(ctx context.Context, store Store, request StackRequest) ([]loo
 	return result, nil
 }
 
-func pushStackHeads(ctx context.Context, runner *gitexec.Runner, pusher mirror.RefPusher, layers []stackLayer) error {
+func pushStackHeads(ctx context.Context, store Store, runner *gitexec.Runner, pusher mirror.RefPusher, layers []stackLayer) error {
 	remoteBytes, err := runner.Run(ctx, "remote", "get-url", "--push", "origin")
 	if err != nil {
 		return err
@@ -79,6 +83,7 @@ func pushStackHeads(ctx context.Context, runner *gitexec.Runner, pusher mirror.R
 		return errors.New("origin push remote is empty")
 	}
 	pushes := make([]mirror.LeasedRef, 0, len(layers))
+	unchanged := make([]stackLayer, 0, len(layers))
 	for _, layer := range layers {
 		ref := "refs/heads/" + layer.publication.Branch
 		actual, err := pusher.RemoteSHA(ctx, remote, ref)
@@ -90,8 +95,12 @@ func pushStackHeads(ctx context.Context, runner *gitexec.Runner, pusher mirror.R
 		}
 		if actual != layer.revision.HeadSHA {
 			pushes = append(pushes, mirror.LeasedRef{Ref: ref, Head: layer.revision.HeadSHA, Expected: layer.prior})
+		} else {
+			unchanged = append(unchanged, layer)
 		}
 	}
+	// Changed layers move atomically or not at all; unchanged layers are verified before
+	// and after, and drift is reported and repaired on retry, not prevented by Git.
 	if err := mirror.PushAtomic(ctx, runner, remote, pushes); err != nil {
 		for _, layer := range layers {
 			actual, readErr := pusher.RemoteSHA(ctx, remote, "refs/heads/"+layer.publication.Branch)
@@ -101,7 +110,26 @@ func pushStackHeads(ctx context.Context, runner *gitexec.Runner, pusher mirror.R
 		}
 		return fmt.Errorf("atomic stack push: %w", err)
 	}
+	for _, layer := range unchanged {
+		actual, err := pusher.RemoteSHA(ctx, remote, "refs/heads/"+layer.publication.Branch)
+		if err != nil {
+			return err
+		}
+		if actual != layer.revision.HeadSHA {
+			if err := store.RecordPublicationDrift(ctx, layer.publication, actual); err != nil {
+				return err
+			}
+			return loomgit.NewError(loomgit.StackDrift, fmt.Sprintf("stack layer %s moved from %s to %s during publish", layer.publication.Change, layer.revision.HeadSHA, displaySHA(actual)), nil)
+		}
+	}
 	return nil
+}
+
+func displaySHA(sha string) string {
+	if sha == "" {
+		return "<absent>"
+	}
+	return sha
 }
 
 func stackLayers(ctx context.Context, store Store, runner, area *gitexec.Runner, request StackRequest, applied []loomgit.AppliedLayer) ([]stackLayer, Forge, error) {

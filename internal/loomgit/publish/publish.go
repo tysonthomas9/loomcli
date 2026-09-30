@@ -27,6 +27,7 @@ type Store interface {
 	WorkspaceRepos(context.Context, string) ([]loomgit.WorkspaceRepo, error)
 	BeginPublication(context.Context, journal.Publication) error
 	BeginStackPublications(context.Context, []journal.Publication) error
+	RecordPublicationDrift(context.Context, journal.Publication, string) error
 	AdvancePublication(context.Context, journal.Publication) error
 	OpenPublications(context.Context) ([]journal.Publication, error)
 	Publication(context.Context, string, string) (journal.Publication, bool, error)
@@ -285,7 +286,7 @@ func Reconcile(ctx context.Context, store Store, forge Forge, token string) erro
 		for _, publication := range group {
 			layers = append(layers, stackLayer{publication: publication, revision: loomgit.Revision{HeadSHA: publication.Head}, prior: publication.Prior})
 		}
-		if err := pushStackHeads(ctx, runner, mirror.NewPusher(runner), layers); err != nil {
+		if err := pushStackHeads(ctx, store, runner, mirror.NewPusher(runner), layers); err != nil {
 			return err
 		}
 	}

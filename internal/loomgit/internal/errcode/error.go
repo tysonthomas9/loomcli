@@ -19,6 +19,7 @@ const (
 	StaleSubject          Code = "stale_subject"
 	StackLocked           Code = "stack_locked"
 	StackNotLinear        Code = "stack_not_linear"
+	StackDrift            Code = "stack_drift"
 	RefNamespaceConflict  Code = "ref_namespace_conflict"
 	ProviderStackLimit    Code = "provider_stack_limit"
 	Diverged              Code = "diverged"
@@ -41,7 +42,7 @@ const (
 var All = []Code{
 	ReviewRequired, Conflict, Stale, CaptureIncomplete, UnsavedWork, Protected,
 	RepoSelectionRequired, LineageUnresolved, TaskCopyCreateFailed, BaseRefUnresolvable,
-	StaleSubject, StackLocked, StackNotLinear, RefNamespaceConflict, ProviderStackLimit,
+	StaleSubject, StackLocked, StackNotLinear, StackDrift, RefNamespaceConflict, ProviderStackLimit,
 	Diverged, DependencyAbandoned, MergeNotAuthorized, MergeBlocked, ModeMismatch,
 	IntegrityMissing, AttentionRequired, ApplyPending, SwapHeld, RestackConflict,
 	RevisionSuperseded, HashMismatch, CaptureFailed, SecretPathRefused, WorkspaceUnsupported,

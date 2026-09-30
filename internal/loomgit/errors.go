@@ -20,6 +20,7 @@ const (
 	StaleSubject          = errcode.StaleSubject
 	StackLocked           = errcode.StackLocked
 	StackNotLinear        = errcode.StackNotLinear
+	StackDrift            = errcode.StackDrift
 	RefNamespaceConflict  = errcode.RefNamespaceConflict
 	ProviderStackLimit    = errcode.ProviderStackLimit
 	Diverged              = errcode.Diverged
