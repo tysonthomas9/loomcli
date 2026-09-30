@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/githubtoken"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
+	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 )
 
 type Result struct {
@@ -38,6 +40,97 @@ func PublishLocal(ctx context.Context, workspace, lead, change string) (Result, 
 		return Result{}, err
 	}
 	return publishRecorded(ctx, store, cfg, workspace, lead, change, nil, "", "")
+}
+
+// PublishStackLocal publishes the requested applied layers in working-area order.
+func PublishStackLocal(ctx context.Context, workspace, stackID, lead string, changes []string) ([]Result, error) {
+	if workspace == "" || stackID == "" || lead == "" || len(changes) == 0 {
+		return nil, errors.New("workspace, stack ID, lead and changes are required")
+	}
+	path := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
+	if _, err := os.Stat(path); err != nil {
+		return nil, loomgit.NewError(loomgit.WorkspaceUnsupported, "revision journal is unavailable", err)
+	}
+	store, err := journal.OpenSQLite(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = store.Close() }()
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	return publishStackRecorded(ctx, store, cfg, workspace, stackID, lead, changes, nil, "", "")
+}
+
+func publishStackRecorded(ctx context.Context, store *journal.SQLite, cfg *config.LoomConfig, workspace, stackID, lead string, changes []string, forge Forge, token, slug string) ([]Result, error) {
+	repoName, err := repoNameForStack(ctx, store, workspace, changes)
+	if err != nil {
+		return nil, err
+	}
+	area, err := workingArea(ctx, store, workspace, lead, repoName)
+	if err != nil {
+		return nil, err
+	}
+	_, configured, found := config.WorkspaceByID(cfg, workspace)
+	if !found {
+		return nil, loomgit.NewError(loomgit.WorkspaceUnsupported, "workspace is unavailable", nil)
+	}
+	for _, repo := range configured.Repos {
+		if repo.Name != repoName {
+			continue
+		}
+		if forge == nil {
+			if token == "" {
+				token = githubtoken.GitHub(ctx)
+			}
+			if token == "" {
+				return nil, errors.New("GitHub host credential unavailable")
+			}
+			forge = stackpublish.NewGitHubForge(token, nil, "")
+		}
+		backend, err := chooseStackBackend(ctx, store, workspace, stackID, forge, LoomStackBackend{Store: store}, nil)
+		if err != nil {
+			return nil, err
+		}
+		revisions, err := backend.Publish(ctx, StackRequest{Request: Request{
+			Workspace: workspace, Lead: lead, Repo: repo.ResolveAbsPath(configured.Path),
+			WorkingArea: area.Path, BaseSHA: area.BaseSHA, RepoName: repoName, forge: forge, token: token, slug: slug,
+		}, StackID: stackID, Changes: changes})
+		if err != nil {
+			return nil, err
+		}
+		results := make([]Result, 0, len(revisions))
+		for index, revision := range revisions {
+			publication, found, err := store.Publication(ctx, workspace, changes[index])
+			if err != nil || !found {
+				return nil, errors.New("stack publication record unavailable")
+			}
+			results = append(results, Result{Revision: revision, PRURL: publication.PRURL, PRNumber: publication.PRNumber})
+		}
+		return results, nil
+	}
+	return nil, loomgit.NewError(loomgit.RepoSelectionRequired, "stack repo is not in the workspace", nil)
+}
+
+func repoNameForStack(ctx context.Context, store *journal.SQLite, workspace string, changes []string) (string, error) {
+	if len(changes) == 0 {
+		return "", errors.New("stack has no changes")
+	}
+	repoName, err := store.RepoForChange(ctx, workspace, changes[0])
+	if err != nil {
+		return "", err
+	}
+	for _, change := range changes[1:] {
+		other, err := store.RepoForChange(ctx, workspace, change)
+		if err != nil {
+			return "", err
+		}
+		if other != repoName {
+			return "", loomgit.NewError(loomgit.StackNotLinear, "stack changes span repositories", nil)
+		}
+	}
+	return repoName, nil
 }
 
 func publishRecorded(ctx context.Context, store *journal.SQLite, cfg *config.LoomConfig, workspace, lead, change string, forge Forge, token, slug string) (Result, error) {
