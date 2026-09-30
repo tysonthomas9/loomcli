@@ -31,6 +31,22 @@ func (l *Local) Submit(ctx context.Context, workspace, change string, number int
 	return Submit(ctx, l.store, workspace, change, number, headSHA, kind, reason, actor)
 }
 
+func (l *Local) SubmitForLead(ctx context.Context, workspace, change string, number int, headSHA, kind, reason string, actor Actor, lead string) (loomgit.Verdict, error) {
+	return SubmitForLead(ctx, l.store, workspace, change, number, headSHA, kind, reason, actor, lead)
+}
+
+func (l *Local) FollowingPaused(ctx context.Context, workspace, lead string) (bool, error) {
+	return l.store.FollowingPaused(ctx, workspace, lead)
+}
+
+func (l *Local) SetFollowingPaused(ctx context.Context, workspace, lead string, paused bool) error {
+	return l.store.SetFollowingPaused(ctx, workspace, lead, paused)
+}
+
+func (l *Local) WorkingAreas(ctx context.Context, workspace, lead string) ([]journal.WorkingArea, error) {
+	return l.store.WorkingAreas(ctx, workspace, lead)
+}
+
 type TaskRevision struct {
 	ChangeID   string `json:"change_id"`
 	Number     int    `json:"number"`

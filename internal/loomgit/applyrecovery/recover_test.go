@@ -1,21 +1,144 @@
 package applyrecovery_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
+	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/outbox"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
+	"github.com/tysonthomas9/loomcli/internal/store"
+	webgit "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 )
+
+func bridgeApprovalFixture(t *testing.T) (context.Context, *journal.SQLite, journal.WorkingArea, string, loomgit.Revision) {
+	ctx, journalStore, area, base := recoveryFixture(t)
+	t.Cleanup(func() { _ = journalStore.Close() })
+	root := os.Getenv("LOOM_CONFIG_DIR")
+	backend, err := bootstrap.OpenStore(ctx, root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = backend.Close() })
+	if _, err := backend.Store.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "W", Name: "Working area"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backend.Store.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "W", Name: "repo"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := bootstrap.MutateStateCache(func(state *bootstrap.StateCache) error {
+		state.Workspaces["W"] = bootstrap.WorkspaceLocalState{Path: root, Repos: map[string]string{"repo": area.Path}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(area.Path, "change")
+	if err := os.WriteFile(file, []byte("approved\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recoveryGit(t, area.Path, "add", "-N", "change")
+	patch := recoveryGit(t, area.Path, "diff", "--binary")
+	recoveryGit(t, area.Path, "reset", "--", "change")
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	runnerOutput, err := json.Marshal(map[string]any{
+		"status": "completed", "exit_code": 0, "patch": patch + "\n", "patch_base_ref": base,
+		"runtime_metadata": map[string]string{"repo_name": "repo"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputPath := filepath.Join(root, "runner-output.json")
+	if err := os.WriteFile(outputPath, runnerOutput, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bridge := driver.HostBridgeTaskExecutor{Store: memstore.New(), WorktreePath: area.Path,
+		Command: []string{"cat", outputPath}}
+	result, err := bridge.ExecuteTask(ctx, driver.TaskExecRequest{WorkspaceKey: "W", DriverRunID: "driver-run",
+		TaskRunID: "task-run", TaskID: "T", WorkerProfileID: "worker", ProviderProfile: "flue-daytona",
+		LeaseID: "lease", LeaseToken: "token", FencingToken: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RuntimeMetadata["patch_back_status"] != "frozen" {
+		t.Fatalf("bridge did not freeze revision: %+v", result)
+	}
+	revision, err := journalStore.GetRevision(ctx, "W", result.RuntimeMetadata["change_id"], 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if layers, err := journalStore.AppliedLog(ctx, "W", "L"); err != nil || len(layers) != 0 {
+		t.Fatalf("bridge bypassed review gate: %+v, %v", layers, err)
+	}
+	return ctx, journalStore, area, base, revision
+}
+
+func TestBridgeRevisionHTTPApprovalAppliesLayer(t *testing.T) {
+	ctx, journalStore, area, _, revision := bridgeApprovalFixture(t)
+	mux := http.NewServeMux()
+	webgit.NewModule(nil, nil).Register(mux)
+	list := httptest.NewRecorder()
+	mux.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/workspaces/W/issues/T/revisions", nil))
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), revision.HeadSHA) {
+		t.Fatalf("bridge revision missing from review route: %d %s", list.Code, list.Body.String())
+	}
+	body, err := json.Marshal(map[string]any{"head_sha": revision.HeadSHA, "verdict": "approve", "lead": "L",
+		"actor": map[string]string{"kind": "human", "id": "reviewer"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/workspaces/W/changes/" + revision.Change + "/revisions/" + strconv.Itoa(revision.Number) + "/verdict"
+	approved := httptest.NewRecorder()
+	mux.ServeHTTP(approved, httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body)))
+	if approved.Code != http.StatusOK {
+		t.Fatalf("HTTP approval failed: %d %s", approved.Code, approved.Body.String())
+	}
+	layers, err := journalStore.AppliedLog(ctx, "W", "L")
+	if err != nil || len(layers) != 1 || layers[0].Change != revision.Change {
+		t.Fatalf("HTTP approval did not apply bridge revision: %+v, %v", layers, err)
+	}
+	if got := recoveryGit(t, area.Path, "rev-parse", "HEAD"); got != layers[0].NewTip {
+		t.Fatalf("working area did not follow HTTP approval: %s", got)
+	}
+}
+
+func TestReconcileJournalBridgeApprovalFollowsAfterCrash(t *testing.T) {
+	ctx, journalStore, area, base, revision := bridgeApprovalFixture(t)
+	if _, err := review.SubmitForLead(ctx, journalStore, "W", revision.Change, revision.Number, revision.HeadSHA,
+		"approve", "", review.Actor{Kind: "human", ID: "reviewer"}, "L"); err != nil {
+		t.Fatal(err)
+	}
+	if got := recoveryGit(t, area.Path, "rev-parse", "HEAD"); got != base {
+		t.Fatalf("approval applied before reconciliation: %s", got)
+	}
+	if err := workspacemgr.ReconcileJournal(ctx, memstore.New()); err != nil {
+		t.Fatal(err)
+	}
+	layers, err := journalStore.AppliedLog(ctx, "W", "L")
+	if err != nil || len(layers) != 1 || layers[0].Change != revision.Change {
+		t.Fatalf("recovered approval did not apply: %+v, %v", layers, err)
+	}
+	if got := recoveryGit(t, area.Path, "rev-parse", "HEAD"); got != layers[0].NewTip {
+		t.Fatalf("working area did not follow recovered approval: %s", got)
+	}
+}
 
 func TestReconcileJournalRecoversInterruptedApplyAtStartupAndTick(t *testing.T) {
 	ctx, store, area, base := recoveryFixture(t)

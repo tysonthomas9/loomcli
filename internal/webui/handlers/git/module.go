@@ -51,4 +51,5 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/changes/{change}/revisions/{r}/interdiff", HandleRevisionDiff(true))
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/revisions", handleTaskRevisions)
 	mux.HandleFunc("POST /api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict", handleVerdict)
+	mux.HandleFunc("PUT /api/workspaces/{ws}/git/following/{lead}", handleFollowing)
 }

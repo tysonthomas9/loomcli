@@ -13,12 +13,40 @@ func createPullSchema(db *sql.DB) error {
     );
     CREATE TABLE IF NOT EXISTS pull_plans (
         request_id TEXT PRIMARY KEY, workspace TEXT NOT NULL, lead TEXT NOT NULL,
-        repo TEXT NOT NULL, base_sha TEXT NOT NULL, layers BLOB NOT NULL
+        repo TEXT NOT NULL, base_sha TEXT NOT NULL, layers BLOB NOT NULL,
+        remove_change TEXT NOT NULL DEFAULT ''
     );`)
 	if err != nil {
 		return err
 	}
-	return ensureLandedRule(db)
+	if err := ensureLandedRule(db); err != nil {
+		return err
+	}
+	return ensurePullRemoveChange(db)
+}
+
+func ensurePullRemoveChange(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(pull_plans)`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return err
+		}
+		if name == "remove_change" {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE pull_plans ADD COLUMN remove_change TEXT NOT NULL DEFAULT ''`)
+	return err
 }
 
 func (s *SQLite) MarkLanded(ctx context.Context, workspace, change string, rule ...string) error {

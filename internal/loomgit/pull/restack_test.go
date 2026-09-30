@@ -74,6 +74,71 @@ func addRestackLayer(t *testing.T, f *fixture, number int, base, name, body stri
 	return head
 }
 
+func TestUnapplyRebuildsUpperLayerAndKeepsEdits(t *testing.T) {
+	f := newFixture(t)
+	preparePull(t, f)
+	if _, err := f.apply(t); err != nil {
+		t.Fatal(err)
+	}
+	second := addRestackLayer(t, f, 2, f.source, "second", "two\n")
+	addRestackLayer(t, f, 3, second, "third", "three\n")
+	if err := os.WriteFile(filepath.Join(f.dir, "personal"), []byte("keep\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := f.service.Restack(context.Background(), RestackRequest{Workspace: "W", Lead: "L", Repo: "repo",
+		RequestID: "unapply-2", BaseSHA: f.base, RemoveChange: "C2"})
+	if err != nil {
+		t.Fatalf("unapply: %+v, %v", result, err)
+	}
+	if result.HeadSHA != f.git(t, "rev-parse", "HEAD") || f.git(t, "show", "HEAD:third") != "three" {
+		t.Fatalf("working area did not follow rebuilt leaf: %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(f.dir, "second")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("removed layer still in working area: %v", err)
+	}
+	if body, err := os.ReadFile(filepath.Join(f.dir, "personal")); err != nil || string(body) != "keep\n" {
+		t.Fatalf("uncommitted edit changed: %q, %v", body, err)
+	}
+	revision, err := f.store.GetRevision(context.Background(), "W", "C3", 2)
+	if err != nil || revision.Operation != "unapply" {
+		t.Fatalf("derived revision: %+v, %v", revision, err)
+	}
+	verdict, err := f.store.LatestVerdict(context.Background(), revision)
+	if err != nil || verdict.Kind != "carried" {
+		t.Fatalf("derived verdict: %+v, %v", verdict, err)
+	}
+	if _, err := f.store.GetRevision(context.Background(), "W", "C1", 2); !errors.Is(err, journal.ErrNotFound) {
+		t.Fatalf("lower layer should retain its revision: %v", err)
+	}
+	if active, err := f.store.PredecessorApplied(context.Background(), "W", "L", "C2"); err != nil || active {
+		t.Fatalf("removed layer is still active: %t, %v", active, err)
+	}
+}
+
+func TestUnapplyConflictLeavesLeafAndRevisionRefsUntouched(t *testing.T) {
+	f := newFixture(t)
+	preparePull(t, f)
+	if _, err := f.apply(t); err != nil {
+		t.Fatal(err)
+	}
+	second := addRestackLayer(t, f, 2, f.source, "change", "two\n")
+	addRestackLayer(t, f, 3, second, "change", "three\n")
+	old := f.git(t, "rev-parse", "HEAD")
+	refs := f.git(t, "for-each-ref", "--format=%(refname) %(objectname)", "refs/loom")
+	result, err := f.service.Restack(context.Background(), RestackRequest{Workspace: "W", Lead: "L", Repo: "repo",
+		RequestID: "unapply-conflict", BaseSHA: f.base, RemoveChange: "C2"})
+	var coded *loomgit.Error
+	if !errors.As(err, &coded) || coded.Kind != loomgit.Conflict || len(result.Paths) == 0 {
+		t.Fatalf("expected conflict paths: %+v, %v", result, err)
+	}
+	if head := f.git(t, "rev-parse", "HEAD"); head != old {
+		t.Fatalf("working area moved to %s", head)
+	}
+	if after := f.git(t, "for-each-ref", "--format=%(refname) %(objectname)", "refs/loom"); after != refs {
+		t.Fatal("conflict changed revision refs")
+	}
+}
+
 func TestRestackFourLayersConflictChangesNoRefs(t *testing.T) {
 	f := newFixture(t)
 	trunk := preparePull(t, f)

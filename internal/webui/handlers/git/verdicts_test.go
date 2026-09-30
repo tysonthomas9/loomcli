@@ -13,7 +13,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 )
 
 func TestTaskRevisionRoutesUseRecordedDriverRevision(t *testing.T) {
@@ -51,6 +53,20 @@ func TestTaskRevisionRoutesUseRecordedDriverRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	called := false
+	calledLead := ""
+	previousFollow := followApproved
+	previousArea := hasWorkingArea
+	hasWorkingArea = func(_ context.Context, _ *review.Local, _, _ string) (bool, error) { return true, nil }
+	followApproved = func(_ context.Context, workspace, lead string) (apply.FollowResult, error) {
+		called = true
+		calledLead = lead
+		if workspace != "W" {
+			t.Fatalf("follow target = %s/%s", workspace, lead)
+		}
+		return apply.FollowResult{Applied: []string{revision.Change}}, nil
+	}
+	t.Cleanup(func() { followApproved = previousFollow; hasWorkingArea = previousArea })
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/revisions", handleTaskRevisions)
 	mux.HandleFunc("POST /api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict", handleVerdict)
@@ -66,9 +82,19 @@ func TestTaskRevisionRoutesUseRecordedDriverRevision(t *testing.T) {
 	if post.Code != 200 {
 		t.Fatalf("verdict: %d %s", post.Code, post.Body.String())
 	}
+	if !called || calledLead != "lead" {
+		t.Fatalf("human approval did not follow default lead: %t, %s", called, calledLead)
+	}
+	leadBody, _ := json.Marshal(map[string]any{"head_sha": revision.HeadSHA, "verdict": "approve",
+		"actor": map[string]string{"kind": "lead", "id": "L1"}})
+	leadPost := httptest.NewRecorder()
+	mux.ServeHTTP(leadPost, httptest.NewRequest("POST", path, bytes.NewReader(leadBody)))
+	if leadPost.Code != 200 || calledLead != "L1" {
+		t.Fatalf("lead approval did not follow its own area: %d %s, target %s", leadPost.Code, leadPost.Body.String(), calledLead)
+	}
 	get = httptest.NewRecorder()
 	mux.ServeHTTP(get, httptest.NewRequest("GET", "/api/workspaces/W/issues/T/revisions", nil))
-	if get.Code != 200 || !strings.Contains(get.Body.String(), `"verdict":"approve"`) {
+	if get.Code != 200 || !strings.Contains(get.Body.String(), `"verdict":"policy"`) {
 		t.Fatalf("list after approval: %d %s", get.Code, get.Body.String())
 	}
 }

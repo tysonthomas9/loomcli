@@ -73,6 +73,7 @@ type Verdict struct {
 	Workspace, Change                         string
 	Number                                    int
 	HeadSHA, Kind, ActorKind, ActorID, Reason string
+	TargetLead                                string
 	SourceVerdictID                           int64
 }
 
