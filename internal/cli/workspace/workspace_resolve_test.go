@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -47,8 +48,29 @@ func TestResolveWorkspaceTarget_RepoName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveWorkspaceTarget() error = %v", err)
 	}
-	if target.WorkDir != repoPath || target.AgentName != "repo1" {
+	if target.WorkDir != repoPath || target.AgentName != "repo1" || target.Repo != "repo1" {
 		t.Fatalf("target = %+v, want repo path/name", target)
+	}
+}
+
+func TestResolveWorkspaceTarget_UnboundAgentKeepsRepoIdentity(t *testing.T) {
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "checkout")
+	createGitRepo(t, repoPath)
+	worktree := filepath.Join(root, "worktrees", "source-repo", "agent")
+	cmd := exec.Command("git", "-C", repoPath, "worktree", "add", "-b", "agent", worktree) //nolint:norawexec // Real Git worktree proves repo ownership.
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("add worktree: %v: %s", err, out)
+	}
+	resolver := testResolver(&LoomConfig{Workspaces: map[string]WorkspaceConfig{
+		"myws": {Path: root, Repos: []RepoConfig{{Name: "source-repo", Path: repoPath}}},
+	}}, "myws")
+	target, err := resolveWorkspaceTarget(resolver, "agent", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.WorkDir != worktree || target.Repo != "source-repo" {
+		t.Fatalf("unbound target = %+v, want source-repo", target)
 	}
 }
 

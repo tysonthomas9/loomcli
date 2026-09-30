@@ -73,7 +73,7 @@ func TestLocalTaskRunnerSettingsNeverExportGitHubToken(t *testing.T) {
 	}
 }
 
-func TestHostBridgeTaskExecutorAppliesPatchUploadsAndFinalizesArtifact(t *testing.T) {
+func TestHostBridgeTaskExecutorFreezesPatchUploadsAndFinalizesArtifact(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("LOOM_FLEET_DB_URL", "https://fleet.invalid")
 	t.Setenv("LOOM_FLEET_DB_API_KEY", "broad-secret")
@@ -98,14 +98,14 @@ func TestHostBridgeTaskExecutorAppliesPatchUploadsAndFinalizesArtifact(t *testin
 	if result.Status != domain.TaskRunCompleted || result.ExitCode != 0 {
 		t.Fatalf("result status/exit = %q/%d, want completed and zero exit", result.Status, result.ExitCode)
 	}
-	if repo.read("file.txt") != "new\n" {
-		t.Fatalf("file content = %q, want patched content", repo.read("file.txt"))
+	if repo.read("file.txt") != "old\n" {
+		t.Fatalf("file content = %q, want untouched worktree", repo.read("file.txt"))
 	}
 	if len(result.ArtifactIDs) != 1 || result.ArtifactIDs[0] != "patch-task-run-1" {
 		t.Fatalf("artifact ids = %+v, want patch-task-run-1", result.ArtifactIDs)
 	}
-	if result.RuntimeMetadata["patch_back_status"] != PatchBackApplied {
-		t.Fatalf("metadata = %+v, want patch-back applied", result.RuntimeMetadata)
+	if result.RuntimeMetadata["patch_back_status"] != "frozen" || result.RuntimeMetadata["change_id"] == "" {
+		t.Fatalf("metadata = %+v, want frozen revision", result.RuntimeMetadata)
 	}
 	artifact, err := st.Artifacts().Get(ctx, "WS", "patch-task-run-1")
 	if err != nil {
@@ -119,7 +119,7 @@ func TestHostBridgeTaskExecutorAppliesPatchUploadsAndFinalizesArtifact(t *testin
 	}
 }
 
-func TestHostBridgeTaskExecutorPreservesFinalizedPatchArtifactOnConflict(t *testing.T) {
+func TestHostBridgeTaskExecutorFreezesDespiteLocalEdit(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	repo := newPatchBackRepo(t)
@@ -136,8 +136,8 @@ func TestHostBridgeTaskExecutorPreservesFinalizedPatchArtifactOnConflict(t *test
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
 	}
-	if result.Status != domain.TaskRunFailed || result.ErrorClass != PatchBackConflict {
-		t.Fatalf("result = %+v, want failed patch conflict", result)
+	if result.Status != domain.TaskRunCompleted {
+		t.Fatalf("result = %+v, want completed frozen revision", result)
 	}
 	if repo.read("file.txt") != "local edit\n" {
 		t.Fatalf("file content = %q, want local edit preserved", repo.read("file.txt"))
@@ -145,8 +145,8 @@ func TestHostBridgeTaskExecutorPreservesFinalizedPatchArtifactOnConflict(t *test
 	if len(result.ArtifactIDs) != 1 || result.ArtifactIDs[0] != "patch-task-run-1" {
 		t.Fatalf("artifact ids = %+v, want preserved patch artifact id", result.ArtifactIDs)
 	}
-	if result.RuntimeMetadata["patch_preserved"] != "true" || result.RuntimeMetadata["patch_back_status"] != PatchBackConflict {
-		t.Fatalf("metadata = %+v, want preserved patch conflict", result.RuntimeMetadata)
+	if result.RuntimeMetadata["patch_back_status"] != "frozen" {
+		t.Fatalf("metadata = %+v, want frozen revision", result.RuntimeMetadata)
 	}
 	artifact, err := st.Artifacts().Get(ctx, "WS", "patch-task-run-1")
 	if err != nil {
@@ -154,6 +154,63 @@ func TestHostBridgeTaskExecutorPreservesFinalizedPatchArtifactOnConflict(t *test
 	}
 	if artifact.DurableStatus != "finalized" || artifact.ContentHash == "" {
 		t.Fatalf("artifact = %+v, want finalized patch artifact despite conflict", artifact)
+	}
+}
+
+func TestBridgeFreezeOutcomesAndIntegrity(t *testing.T) {
+	for _, tc := range []struct {
+		name, status, errorClass, base, hash, wantStatus, wantOutcome, wantPatchStatus string
+	}{
+		{name: "completed", status: "completed", base: "valid", wantStatus: "completed", wantOutcome: "completed", wantPatchStatus: "frozen"},
+		{name: "failed", status: "failed", base: "valid", wantStatus: "failed", wantOutcome: "failed", wantPatchStatus: "frozen"},
+		{name: "cancelled", status: "cancelled", base: "valid", wantStatus: "cancelled", wantOutcome: "cancelled", wantPatchStatus: "frozen"},
+		{name: "timeout", status: "failed", errorClass: "DEADLINE_EXCEEDED", base: "valid", wantStatus: "failed", wantOutcome: "timeout", wantPatchStatus: "frozen"},
+		{name: "mismatched hash", status: "completed", base: "valid", hash: "sha256:bad", wantStatus: "failed", wantPatchStatus: "retained"},
+		{name: "missing base", status: "failed", wantStatus: "failed", wantPatchStatus: "retained"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newPatchBackRepo(t)
+			base := repo.commitFile("file.txt", "old\n", "base")
+			patch := []byte("diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n")
+			if tc.base == "" {
+				base = ""
+			}
+			st := memstore.New()
+			req := hostBridgeTaskExecRequest()
+			runner := bridgeTaskRunnerResult{PatchBaseRef: base, ContentHash: tc.hash}
+			result := TaskExecResult{Status: domain.TaskRunStatus(tc.status), ErrorClass: tc.errorClass}
+			got, err := (HostBridgeTaskExecutor{Store: st, WorktreePath: repo.dir}).finalizeAndFreezePatch(context.Background(), req, runner, patch, result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got.Status) != tc.wantStatus || got.RuntimeMetadata["patch_back_status"] != tc.wantPatchStatus {
+				t.Fatalf("result = %+v", got)
+			}
+			if repo.read("file.txt") != "old\n" {
+				t.Fatal("worktree changed")
+			}
+			artifact, err := st.Artifacts().Get(context.Background(), req.WorkspaceKey, "patch-"+req.TaskRunID)
+			if err != nil || artifact.DurableStatus != "finalized" {
+				t.Fatalf("patch artifact not retained: %+v, %v", artifact, err)
+			}
+			if tc.hash != "" && got.ErrorClass != "hash_mismatch" {
+				t.Fatalf("error class = %q", got.ErrorClass)
+			}
+			if tc.wantOutcome == "" && repo.git("for-each-ref", "--format=%(refname)", "refs/loom/") != "" {
+				t.Fatal("retained patch installed a revision ref")
+			}
+			if tc.wantOutcome != "" {
+				if got.RuntimeMetadata["change_id"] == "" || got.RuntimeMetadata["revision"] != "1" {
+					t.Fatalf("missing revision: %+v", got)
+				}
+				if !strings.Contains(repo.git("show", "-s", "--format=%B", got.RuntimeMetadata["revision_head_sha"]), "Loom-Change-Id: "+got.RuntimeMetadata["change_id"]) {
+					t.Fatal("missing change trailer")
+				}
+				if diff := repo.git("diff", base+".."+got.RuntimeMetadata["revision_head_sha"]); !strings.Contains(diff, "+new") {
+					t.Fatalf("revision is not reviewable: %s", diff)
+				}
+			}
+		})
 	}
 }
 

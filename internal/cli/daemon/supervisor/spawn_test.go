@@ -39,6 +39,36 @@ func TestBuildCommandOmitsGitHubCredentials(t *testing.T) {
 	}
 }
 
+func TestBuildCommandExportsResolvedRepoForBoundAndUnboundAgents(t *testing.T) {
+	for _, entryRepo := range []string{"source-repo", ""} {
+		t.Run("entry-repo="+entryRepo, func(t *testing.T) {
+			s := &Supervisor{ConfigSnapshot: func() *cfgpkg.DaemonConfig {
+				return &cfgpkg.DaemonConfig{Daemon: cfgpkg.DaemonSettings{}}
+			}, ProjectDir: t.TempDir()}
+			ap := &AgentProcess{
+				Entry:        cfgpkg.AgentEntry{Worktree: "agent", Role: "task", Repo: entryRepo},
+				WorktreePath: t.TempDir(), WorktreeRepo: "source-repo",
+			}
+			cmd, err := s.buildCommand(ap)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var resolved, bound string
+			for _, item := range cmd.Env {
+				if strings.HasPrefix(item, "LOOM_WORKTREE_REPO=") {
+					resolved = strings.TrimPrefix(item, "LOOM_WORKTREE_REPO=")
+				}
+				if strings.HasPrefix(item, "LOOM_AGENT_REPO=") {
+					bound = strings.TrimPrefix(item, "LOOM_AGENT_REPO=")
+				}
+			}
+			if resolved != "source-repo" || bound != entryRepo {
+				t.Fatalf("repo env: worktree=%q bound=%q, want source-repo/%q", resolved, bound, entryRepo)
+			}
+		})
+	}
+}
+
 func TestAppendRoleEnv_MaxBudgetUSD(t *testing.T) {
 	t.Parallel()
 

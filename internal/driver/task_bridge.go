@@ -3,16 +3,21 @@ package driver
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -124,10 +129,14 @@ type bridgeTaskRunnerResult struct {
 	ErrorMessage            string               `json:"error_message"`
 	ErrorMessageCamel       string               `json:"errorMessage"`
 	Patch                   string               `json:"patch"`
+	ContentHash             string               `json:"content_hash"`
+	ContentHashCamel        string               `json:"contentHash"`
 	PatchPath               string               `json:"patch_path"`
 	PatchPathCamel          string               `json:"patchPath"`
 	PatchBaseRef            string               `json:"patch_base_ref"`
 	PatchBaseRefCamel       string               `json:"patchBaseRef"`
+	CommitHeadSHA           string               `json:"commit_head_sha"`
+	CommitHeadSHACamel      string               `json:"commitHeadSha"`
 	BaseRef                 string               `json:"base_ref"`
 	BaseRefCamel            string               `json:"baseRef"`
 	PatchArtifactID         string               `json:"patch_artifact_id"`
@@ -140,6 +149,8 @@ type bridgeTaskRunnerResult struct {
 	PatchVisibilityCamel    string               `json:"patchVisibility"`
 	PatchRedactionStatus    string               `json:"patch_redaction_status"`
 	PatchRedactionStatusAlt string               `json:"patchRedactionStatus"`
+	PatchContentHash        string               `json:"patch_content_hash"`
+	PatchContentHashCamel   string               `json:"patchContentHash"`
 }
 
 type bridgeArtifact struct {
@@ -298,7 +309,7 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	if len(patch) == 0 {
 		return result, nil
 	}
-	return e.finalizeAndApplyPatch(ctx, req, runnerResult, patch, result)
+	return e.finalizeAndFreezePatch(ctx, req, runnerResult, patch, result)
 }
 
 func (e HostBridgeTaskExecutor) bridgeRunner(ctx context.Context, req TaskExecRequest) (func() (bridgeTaskRunnerResult, error), error) {
@@ -352,6 +363,7 @@ func normalizeCommand(command []string) ([]string, error) {
 	return out, nil
 }
 
+//nolint:gosec // Node executes the generated local runner launcher.
 func (e HostBridgeTaskExecutor) runBuiltInFlueWorkflow(ctx context.Context, req TaskExecRequest) (bridgeTaskRunnerResult, error) {
 	input, err := json.Marshal(req)
 	if err != nil {
@@ -363,7 +375,7 @@ func (e HostBridgeTaskExecutor) runBuiltInFlueWorkflow(ctx context.Context, req 
 	}
 	defer cleanup()
 
-	cmd := exec.CommandContext(ctx, "node", launcherPath) //nolint:gosec // fixed local runtime for bundled Flue workflow runners.
+	cmd := exec.CommandContext(ctx, "node", launcherPath)
 	if worktree := strings.TrimSpace(e.WorktreePath); worktree != "" {
 		cmd.Dir = worktree
 	}
@@ -418,12 +430,13 @@ func writeFlueTaskRunnerLauncher() (string, func(), error) {
 	return launcher.Name(), cleanup, nil
 }
 
+//nolint:gosec // Configured argv runs directly without shell expansion.
 func (e HostBridgeTaskExecutor) runCommand(ctx context.Context, req TaskExecRequest, command []string) (bridgeTaskRunnerResult, error) {
 	input, err := json.Marshal(req)
 	if err != nil {
 		return bridgeTaskRunnerResult{}, fmt.Errorf("encode task runner request: %w", err)
 	}
-	cmd := exec.CommandContext(ctx, command[0], command[1:]...) //nolint:gosec // configured argv vector; no shell expansion.
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	if worktree := strings.TrimSpace(e.WorktreePath); worktree != "" {
 		cmd.Dir = worktree
 	}
@@ -797,7 +810,7 @@ func taskRunPlacementJSON(placement domain.TaskRunPlacement) string {
 	return string(b)
 }
 
-func (e HostBridgeTaskExecutor) finalizeAndApplyPatch(ctx context.Context, req TaskExecRequest, runner bridgeTaskRunnerResult, patch []byte, result TaskExecResult) (TaskExecResult, error) {
+func (e HostBridgeTaskExecutor) finalizeAndFreezePatch(ctx context.Context, req TaskExecRequest, runner bridgeTaskRunnerResult, patch []byte, result TaskExecResult) (TaskExecResult, error) {
 	if e.Store == nil {
 		return TaskExecResult{}, fmt.Errorf("store required for patch artifact finalization: %w", domain.ErrInvalid)
 	}
@@ -814,17 +827,65 @@ func (e HostBridgeTaskExecutor) finalizeAndApplyPatch(ctx context.Context, req T
 	}
 	result.RuntimeMetadata["patch_artifact_id"] = finalized.ArtifactID
 	result.RuntimeMetadata["patch_content_hash"] = finalized.ContentHash
-	if strings.TrimSpace(e.WorktreePath) == "" || strings.TrimSpace(baseRef) == "" {
+	actual := sha256.Sum256(patch)
+	actualHash := "sha256:" + hex.EncodeToString(actual[:])
+	expectedHash := firstNonEmpty(runner.ContentHash, runner.ContentHashCamel, runner.PatchContentHash, runner.PatchContentHashCamel)
+	if expectedHash == "" {
+		for _, artifact := range runner.finalizedArtifacts() {
+			if artifact.Type == "patch" {
+				expectedHash = firstNonEmpty(artifact.ContentHash, artifact.ContentHashCamel)
+				break
+			}
+		}
+	}
+	if expectedHash == "" {
+		expectedHash = finalized.ContentHash
+	}
+	if !strings.EqualFold(expectedHash, actualHash) {
 		result.Status = domain.TaskRunFailed
 		if result.ExitCode == 0 {
 			result.ExitCode = 1
 		}
-		result.ErrorClass = "patch_back_base_required"
-		result.ErrorMessage = "patch artifact requires worktree path and base ref for local patch-back"
-		result.RuntimeMetadata["patch_back_status"] = PatchBackBaseUnreachable
+		result.ErrorClass = "hash_mismatch"
+		result.ErrorMessage = "runner patch content hash differs from artifact bytes"
+		result.RuntimeMetadata["patch_back_status"] = "retained"
 		return result, nil
 	}
-	return e.applyPatchBack(ctx, baseRef, patch, result)
+	if strings.TrimSpace(e.WorktreePath) == "" || strings.TrimSpace(baseRef) == "" {
+		result.RuntimeMetadata["patch_back_status"] = "retained"
+		return result, nil
+	}
+	outcome := string(result.Status)
+	if result.Status == domain.TaskRunFailed {
+		switch strings.ToLower(result.ErrorClass) {
+		case "timeout", "timed_out", "deadline_exceeded":
+			outcome = "timeout"
+		}
+	}
+	repoName := firstNonEmpty(result.RuntimeMetadata["repo_name"], result.RuntimeMetadata["source_repo_id"])
+	if repoName == "" {
+		repoName = filepath.Base(e.WorktreePath)
+	}
+	revision, err := driverfreeze.Freeze(ctx, driverfreeze.Request{
+		Workspace: req.WorkspaceKey, Task: req.TaskID, Repo: repoName, Attempt: req.TaskRunID,
+		Worktree: e.WorktreePath, Base: baseRef, Patch: patch, Outcome: outcome,
+		CommitHeadSHA: firstNonEmpty(runner.CommitHeadSHA, runner.CommitHeadSHACamel),
+	})
+	if err != nil {
+		result.Status = domain.TaskRunFailed
+		if result.ExitCode == 0 {
+			result.ExitCode = 1
+		}
+		result.ErrorClass = "revision_freeze_failed"
+		result.ErrorMessage = err.Error()
+		result.RuntimeMetadata["patch_back_status"] = "retained"
+		return result, nil
+	}
+	result.RuntimeMetadata["patch_back_status"] = "frozen"
+	result.RuntimeMetadata["change_id"] = revision.Change
+	result.RuntimeMetadata["revision"] = strconv.Itoa(revision.Number)
+	result.RuntimeMetadata["revision_head_sha"] = revision.HeadSHA
+	return result, nil
 }
 
 func (e HostBridgeTaskExecutor) createPatchArtifact(ctx context.Context, req TaskExecRequest, runner bridgeTaskRunnerResult, patch []byte) (*domain.Artifact, string, error) {
@@ -877,35 +938,6 @@ func (e HostBridgeTaskExecutor) createPatchArtifact(ctx context.Context, req Tas
 		return nil, "", fmt.Errorf("finalize patch artifact: %w", err)
 	}
 	return finalized, baseRef, nil
-}
-
-func (e HostBridgeTaskExecutor) applyPatchBack(ctx context.Context, baseRef string, patch []byte, result TaskExecResult) (TaskExecResult, error) {
-	patchBack, err := ApplyPatchBack(ctx, PatchBackOptions{
-		WorktreePath: e.WorktreePath,
-		BaseRef:      baseRef,
-		Patch:        patch,
-	})
-	if err != nil {
-		return TaskExecResult{}, err
-	}
-	result.RuntimeMetadata["patch_back_status"] = patchBack.Status
-	if patchBack.BaseSHA != "" {
-		result.RuntimeMetadata["patch_back_base_sha"] = patchBack.BaseSHA
-	}
-	if patchBack.CurrentHEAD != "" {
-		result.RuntimeMetadata["patch_back_head_sha"] = patchBack.CurrentHEAD
-	}
-	if patchBack.Applied {
-		return result, nil
-	}
-	result.Status = domain.TaskRunFailed
-	if result.ExitCode == 0 {
-		result.ExitCode = 1
-	}
-	result.ErrorClass = firstNonEmpty(patchBack.ErrorClass, patchBack.Status)
-	result.ErrorMessage = patchBack.ErrorMessage
-	result.RuntimeMetadata["patch_preserved"] = "true"
-	return result, nil
 }
 
 func firstNonNilStrings(values ...[]string) []string {

@@ -56,6 +56,11 @@ type LocalRepo struct {
 var _ loomgit.RepoStore = (*LocalRepo)(nil)
 
 func (r *LocalRepo) Path() string { return r.path }
+
+// WithLock serializes a revision's object and ref writes with worktree operations.
+func (r *LocalRepo) WithLock(ctx context.Context, action func(context.Context) error) error {
+	return r.locked(ctx, action)
+}
 func (r *LocalRepo) Run(ctx context.Context, args ...string) ([]byte, error) {
 	return r.runner.Run(ctx, args...)
 }

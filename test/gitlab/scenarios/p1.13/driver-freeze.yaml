@@ -1,0 +1,8 @@
+name: driver patches freeze as immutable revisions without editing the worktree
+task: P1.13
+git: [min, latest]
+fixture: loomcli
+when:
+  - go_check: driver_freeze
+then:
+  - go_check: no_error

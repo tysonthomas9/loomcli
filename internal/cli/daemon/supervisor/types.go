@@ -19,6 +19,7 @@ type AgentProcess struct {
 	Entry        cfgpkg.AgentEntry  // agent configuration from FleetDB
 	RoleConfig   cfgpkg.RoleConfig  // resolved role configuration
 	WorktreePath string             // resolved worktree path
+	WorktreeRepo string             // workspace repo owning the worktree, even for unbound agents
 	RepoConfig   *cfgpkg.RepoConfig // per-repo config (nil in non-workspace mode)
 
 	Cmd                    *exec.Cmd         // current subprocess (nil when not running)

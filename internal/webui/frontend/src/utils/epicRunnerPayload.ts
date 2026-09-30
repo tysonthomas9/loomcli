@@ -51,6 +51,7 @@ export function epicRunnerRuntimePayload({
       "Daytona runtime requires a GitHub repo URL or owner/repo repo selection",
     );
   }
+  // Until P3.3 moves publishing to the host, Daytona keeps its runner delivery.
   return {
     runner: "daytona-task-runner",
     repoUrl: repo.repoUrl,
