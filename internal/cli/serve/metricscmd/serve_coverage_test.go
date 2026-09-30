@@ -126,7 +126,7 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	falconWorktree := filepath.Join(wsRoot, "worktrees", "repo-a", "falcon")
+	falconWorktree := filepath.Join(wsRoot, ".loom", "task-copies", "repo-a", "T1")
 	if err := runGitForMetricsTest(t, falconWorktree, "init", "-b", "feature/falcon"); err != nil {
 		t.Fatalf("init falcon worktree: %v", err)
 	}
@@ -135,6 +135,9 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 		sc.Workspaces["WS1"] = bootstrap.WorkspaceLocalState{
 			Path:  wsRoot,
 			Repos: map[string]string{"repo-a": filepath.Join(wsRoot, "repo-a")},
+			Agents: map[string]bootstrap.AgentLocalState{
+				"falcon": {Worktrees: map[string]string{"repo-a": falconWorktree}, TaskCopyIDs: map[string]string{"repo-a": "T1"}},
+			},
 		}
 		return nil
 	}); err != nil {
