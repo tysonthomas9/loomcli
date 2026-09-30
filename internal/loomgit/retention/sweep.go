@@ -14,7 +14,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
-	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/pool"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/mirror"
 )
 
@@ -62,7 +61,7 @@ func (s Sweep) Run(ctx context.Context, apply bool) ([]Result, error) {
 			return results, err
 		}
 		if row.Removed && !row.CaptureRefRemoved {
-			captureResult, captureErr := s.captureRef(ctx, row, now().UTC(), apply)
+			captureResult, captureErr := s.captureRef(ctx, row, now().UTC())
 			results = append(results, captureResult)
 			if captureErr != nil {
 				return results, captureErr
@@ -115,7 +114,7 @@ func (s Sweep) tombstones(ctx context.Context, now time.Time, apply bool) ([]Res
 	return results, nil
 }
 
-func (s Sweep) captureRef(ctx context.Context, row journal.RetainedCopy, now time.Time, apply bool) (Result, error) {
+func (s Sweep) captureRef(ctx context.Context, row journal.RetainedCopy, now time.Time) (Result, error) {
 	result := Result{Workspace: row.Workspace, Change: row.Change, Attempt: row.Attempt,
 		Action: "keep", Reason: "capture ref retention window open"}
 	policy, err := s.Store.RetentionPolicy(ctx, row.Workspace)
@@ -138,32 +137,9 @@ func (s Sweep) captureRef(ctx context.Context, row journal.RetainedCopy, now tim
 		result.Reason = "complete capture SHA unavailable"
 		return result, nil
 	}
-	result.Path, result.Action = ref, "delete capture ref"
-	if !apply {
-		result.Reason = "dry run"
-		return result, nil
-	}
-	repo, err := pool.New(s.Store).Admit(ctx, row.SourceRepo)
-	if err != nil {
-		result.Action, result.Reason = "keep", err.Error()
-		return result, nil
-	}
-	err = repo.WithLock(ctx, func(ctx context.Context) error {
-		sha, err := repo.Run(ctx, "show-ref", "--verify", "--hash", ref)
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(string(sha)) != expected {
-			return errors.New("capture ref changed")
-		}
-		_, err = repo.Run(ctx, "update-ref", "-d", ref, strings.TrimSpace(string(sha)))
-		return err
-	})
-	if err != nil {
-		result.Action, result.Reason = "keep", err.Error()
-		return result, nil
-	}
-	return result, s.Store.MarkCaptureRefRemoved(ctx, row)
+	result.Path = ref
+	result.Reason = "eligible; capture-ref deletion disabled until capture is lease-covered (P4.6b)"
+	return result, nil
 }
 
 func (s Sweep) inspect(ctx context.Context, row journal.RetainedCopy, now time.Time, apply bool) (Result, error) {

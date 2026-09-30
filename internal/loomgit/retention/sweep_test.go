@@ -405,10 +405,16 @@ func TestSweepLandedCopyUsesCaptureAndWorkspaceWindow(t *testing.T) {
 	if _, err := os.Stat(copyPath); err != nil {
 		t.Fatalf("worktree removed: %v", err)
 	}
+	if err := store.MarkRetainedCopyRemoved(ctx, journal.RetainedCopy{Workspace: "W", Attempt: "attempt-1"}); err != nil {
+		t.Fatal(err)
+	}
 	sweep.Now = func() time.Time { return start.Add(90 * 24 * time.Hour) }
-	results, err = sweep.Run(ctx, true)
-	if err != nil || len(results) != 1 || results[0].Action != "keep" {
-		t.Fatalf("retained capture ref: %+v, %v", results, err)
+	for _, apply := range []bool{false, true} {
+		results, err = sweep.Run(ctx, apply)
+		if err != nil || len(results) != 2 || results[1].Action != "keep" ||
+			results[1].Reason != "eligible; capture-ref deletion disabled until capture is lease-covered (P4.6b)" {
+			t.Fatalf("retained capture ref (apply=%t): %+v, %v", apply, results, err)
+		}
 	}
 	if _, err := runner.Run(ctx, "show-ref", "--verify", ref); err != nil {
 		t.Fatalf("capture ref removed before copy: %v", err)
