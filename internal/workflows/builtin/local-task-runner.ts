@@ -111,8 +111,8 @@ export async function run(ctx = {}) {
   // worktree (LOOM_WORKTREE_PATH) stays clean — the driver host-bridge applies
   // the returned patch to that clean host worktree via patch-back. Editing the
   // host worktree in place would make patch-back re-apply changes that already
-  // exist (conflict). When the host worktree is not a git repo / has no HEAD,
-  // fall back to in-place execution with no base_ref (patch-back not possible).
+  // exist (conflict). A missing Git HEAD or failed sibling creation stops the
+  // attempt before the backend CLI can touch the host worktree.
   // Stacked mode (the host bridge sets LOOM_TASK_RUN_STACKED when the task
   // belongs to a stack): the host worktree is ALREADY a per-task checkout cut
   // from the predecessor's branch, so the agent runs IN PLACE (no isolated
@@ -124,7 +124,14 @@ export async function run(ctx = {}) {
   const stackId = stringValue(process.env.LOOM_TASK_RUN_STACK_ID);
 
   const freshCopy = booleanValue(process.env.LOOM_TASK_COPY_FRESH);
-  const isolated = (stacked || freshCopy) ? null : await setupIsolatedWorktree(worktree, taskRunId, logs);
+  let isolated;
+  try {
+    isolated = (stacked || freshCopy) ? null : await setupIsolatedWorktree(worktree, taskRunId, logs);
+  } catch (error) {
+    return failed("task_copy_create_failed", `Could not create isolated task worktree: ${errorMessage(error)}`, {
+      taskRunId, taskId, backend, request, logs, headBefore,
+    });
+  }
   const execWorktree = isolated ? isolated.path : worktree;
   const baseRef = freshCopy ? stringValue(process.env.LOOM_TASK_COPY_BASE_SHA) :
     (stacked ? stackBaseRef : (isolated ? isolated.base : ""));
@@ -563,13 +570,10 @@ async function execBackend(binary, args, options) {
 // setupIsolatedWorktree creates a linked git worktree checked out at the host
 // worktree's HEAD, so the backend CLI edits an isolated copy and the host
 // worktree stays clean for the driver host-bridge to patch-back the result.
-// Returns null when the host worktree is not a git repo / has no HEAD (the CLI
-// then runs in place, like the legacy behavior, with no base_ref).
 async function setupIsolatedWorktree(hostWorktree, taskRunId, logs) {
   const head = await gitHead(hostWorktree);
   if (!head) {
-    logs.push("isolated worktree: host worktree has no git HEAD; running in place (no patch base_ref)");
-    return null;
+    throw new Error("host worktree has no Git HEAD");
   }
   const safe = String(taskRunId || "task").replace(/[^A-Za-z0-9_.-]/g, "_");
   // Keep the isolated worktree near the host repo instead of under os.tmpdir().
@@ -580,8 +584,7 @@ async function setupIsolatedWorktree(hostWorktree, taskRunId, logs) {
     cwd: hostWorktree,
   });
   if (add.code !== 0) {
-    logs.push("isolated worktree: `git worktree add` failed (" + textTail(add.stderr, 400) + "); running in place");
-    return null;
+    throw new Error("git worktree add failed: " + textTail(add.stderr, 400));
   }
   logs.push("isolated worktree at " + isolatedPath + " (base " + head + ")");
   return { path: isolatedPath, base: head };
