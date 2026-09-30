@@ -333,7 +333,7 @@ func (service *Service) closePR(ctx context.Context, store *journal.SQLite, row 
 	}
 	forge := service.Forge
 	if forge == nil {
-		forge = stackpublish.NewGitHubForge(githubtoken.GitHub(ctx), nil, "")
+		forge = stackpublish.NewConfiguredGitHubForge(githubtoken.GitHub(ctx))
 	}
 	if err := forge.ClosePR(ctx, parts[0], parts[1], row.PRNumber, "Abandoned by "+row.RequestedBy+": "+row.Reason); err != nil {
 		return fmt.Errorf("close PR: %w", err)
