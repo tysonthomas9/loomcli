@@ -119,3 +119,26 @@ func (s *SQLite) OpenApplied(ctx context.Context, workspace, lead string) ([]loo
 	}
 	return result, rows.Err()
 }
+
+type AppliedTarget struct {
+	Workspace string
+	Lead      string
+}
+
+func (s *SQLite) OpenAppliedTargets(ctx context.Context) ([]AppliedTarget, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT workspace, lead FROM applied_layers
+		WHERE phase NOT IN ('done','not_applied') ORDER BY workspace, lead`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var targets []AppliedTarget
+	for rows.Next() {
+		var target AppliedTarget
+		if err := rows.Scan(&target.Workspace, &target.Lead); err != nil {
+			return nil, err
+		}
+		targets = append(targets, target)
+	}
+	return targets, rows.Err()
+}

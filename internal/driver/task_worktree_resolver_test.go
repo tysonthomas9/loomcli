@@ -14,6 +14,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -109,6 +111,34 @@ func TestLocalTaskWorktreeResolverCreatesIsolatedTaskRunWorktree(t *testing.T) {
 	}
 	if got := strings.TrimSpace(testGitOutput(t, repoPath, "rev-parse", "refs/loom/ws/TEST/attempt/"+retry.AttemptID+"/base")); got != head {
 		t.Fatalf("retry base ref = %s, want %s", got, head)
+	}
+	writeTestFile(t, filepath.Join(resolved.Path, "untracked.txt"), "crash work\n")
+	captured, err := agentcapture.Capture(ctx, resolved.Path, "TEST", resolved.AttemptID, "TEST-1", "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := driverfreeze.FreezeCapture(ctx, driverfreeze.CaptureRequest{
+		Workspace: "TEST", Task: "TEST-1", Repo: "app", Attempt: resolved.AttemptID,
+		Worktree: resolved.Path, Base: head, CaptureSHA: captured.SHA, SourceRepo: repoPath,
+		Outcome: "failed", Complete: captured.Complete,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := (LocalTaskWorktreeResolver{Store: st}).ResolveTaskWorktree(ctx, TaskExecRequest{
+		WorkspaceKey: "TEST", TaskRunID: "resume-run", TaskID: "TEST-1",
+		ResumeAttemptID: resolved.AttemptID,
+	}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.Path == resolved.Path || resumed.BaseSHA != head {
+		t.Fatalf("resume copy = %+v, want fresh copy with original base %s", resumed, head)
+	}
+	if got := strings.TrimSpace(testGitOutput(t, resumed.Path, "show", "HEAD:untracked.txt")); got != "crash work" {
+		t.Fatalf("resume lost captured work: %q", got)
+	}
+	if got := strings.TrimSpace(testGitOutput(t, resolved.Path, "rev-parse", "HEAD")); got != firstHead {
+		t.Fatalf("resume changed crash-dirty copy: %s", got)
 	}
 	path, err := localworkspace.TaskCopyPath(workspacePath, "app", taskCopyAttemptID("task/run:1", 2))
 	if err != nil {

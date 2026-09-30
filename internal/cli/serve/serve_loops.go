@@ -17,10 +17,31 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
+
+func startLoomGitReconciler(ctx context.Context, st store.Store) {
+	if st == nil {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := workspacemgr.ReconcileJournal(ctx, st); err != nil && !errors.Is(err, context.Canceled) {
+					slog.Error("Loom Git reconcile failed", "err", err)
+				}
+			}
+		}
+	}()
+}
 
 // startStaleTaskSweeper launches the always-on server-side stale TaskRun
 // sweeper. Unlike the driver executor it is NOT gated behind

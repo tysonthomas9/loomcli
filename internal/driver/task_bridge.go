@@ -223,6 +223,9 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	}
 	if resolvedWorktree.Path != "" {
 		defer func() { result = withTaskWorktreeMetadata(result, resolvedWorktree) }()
+		if heartbeatErr := e.recordTaskCopy(ctx, req, resolvedWorktree); heartbeatErr != nil {
+			return TaskExecResult{}, heartbeatErr
+		}
 	}
 	// Stacked task? Compute the binding (canonical output branch + base ref) once.
 	// Local runs resolve the repo from the host worktree; daytona/named runs (no

@@ -8,9 +8,20 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/applyrecovery"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/reconcile"
 	loomworkspace "github.com/tysonthomas9/loomcli/internal/loomgit/workspace"
 	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 )
+
+// ReconcileJournal classifies open journal work before dispatching it to the
+// workspace owner. Apply recovery is wired by its owner separately.
+func ReconcileJournal(ctx context.Context, s storepkg.Store) error {
+	return reconcile.RunOnce(ctx, reconcile.Handlers{
+		Workspace: reconcile.RecoverFunc(func(ctx context.Context) error { return Reconcile(ctx, s) }),
+		Apply:     reconcile.RecoverFunc(applyrecovery.Recover),
+	})
+}
 
 // Reconcile adopts every open workspace creation before serve accepts work.
 // A checkout mismatch remains journal-owned and is surfaced for repair.

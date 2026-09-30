@@ -86,12 +86,19 @@ func TestEnsureWorkingAreaSeparatesLeadsAndKeepsTheirWork(t *testing.T) {
 	}
 	gitDeleteTest(t, a[0].Path, "add", "only-l1")
 	gitDeleteTest(t, a[0].Path, "commit", "-m", "own")
+	untracked := filepath.Join(a[0].Path, "unfinished-l1")
+	if err := os.WriteFile(untracked, []byte("work in progress"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := os.Stat(filepath.Join(b[0].Path, "only-l1")); !os.IsNotExist(err) {
 		t.Fatalf("L1 work visible in L2: %v", err)
 	}
 	again, err := EnsureWorkingArea(ctx, "W", "L1", wsDir, sources)
 	if err != nil || again[0].Path != a[0].Path || gitDeleteTest(t, again[0].Path, "rev-parse", "HEAD") == base {
 		t.Fatalf("lost L1 work: %+v %v", again, err)
+	}
+	if got, err := os.ReadFile(untracked); err != nil || string(got) != "work in progress" {
+		t.Fatalf("cold working-area reuse lost untracked work: %q, %v", got, err)
 	}
 	if _, err := EnsureWorkingArea(ctx, "W", "L1", wsDir, []WorkingAreaSource{{Name: "other", Path: source}}); err == nil {
 		t.Fatal("reused working area for a different repo")
