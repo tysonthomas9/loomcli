@@ -30,6 +30,17 @@ func (f *fakeForge) UpdatePRBase(_ context.Context, _, _ string, number int, bas
 	return os.ErrNotExist
 }
 
+func TestStackBackendRejectsTrunkMode(t *testing.T) {
+	fixture := newFixture(t)
+	ctx := context.Background()
+	if err := fixture.store.SetDeliveryMode(ctx, "W", "trunk"); err != nil {
+		t.Fatal(err)
+	}
+	backend := LoomStackBackend{Store: fixture.store}
+	_, err := backend.Publish(ctx, StackRequest{Request: fixture.request(), StackID: "feature-1", Changes: []string{"A"}})
+	codeIs(t, err, loomgit.ModeMismatch)
+}
+
 func stackRevision(t *testing.T, fixture fixture, change string, number int, parent string) loomgit.Revision {
 	t.Helper()
 	git(t, fixture.repo, "reset", "-q", "--hard", parent)
