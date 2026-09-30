@@ -286,18 +286,14 @@ func safeCopy(ctx context.Context, store *journal.SQLite, row journal.RetainedCo
 	if err != nil {
 		return err
 	}
-	status, err := copyRunner.Run(ctx, "status", "--porcelain", "--untracked-files=all", "--ignored=matching")
-	if err != nil {
+	if err := checkCopyContent(ctx, copyRunner, expected); err != nil {
 		return err
 	}
-	if len(status) != 0 {
-		return errors.New("copy contains work outside its complete capture")
-	}
-	return removeCopy(ctx, store, row, apply, runner, copyRunner)
+	return removeCopy(ctx, store, row, apply, runner, copyRunner, expected)
 }
 
 func removeCopy(ctx context.Context, store *journal.SQLite, row journal.RetainedCopy, apply bool,
-	runner, copyRunner *gitexec.Runner) error {
+	runner, copyRunner *gitexec.Runner, expected string) error {
 	common, err := copyRunner.Run(ctx, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return err
@@ -315,9 +311,15 @@ func removeCopy(ctx context.Context, store *journal.SQLite, row journal.Retained
 			return err
 		}
 		return repo.WithLock(ctx, func(ctx context.Context) error {
+			if err := checkCopyContent(ctx, copyRunner, expected); err != nil {
+				return err
+			}
 			_, err := repo.Run(ctx, "worktree", "remove", row.Path)
 			return err
 		})
+	}
+	if err := cloneRefsCaptured(ctx, copyRunner, expected); err != nil {
+		return err
 	}
 	if filepath.Base(row.Path) != row.Attempt {
 		return errors.New("clone path does not match recorded attempt")
@@ -326,6 +328,44 @@ func removeCopy(ctx context.Context, store *journal.SQLite, row journal.Retained
 		return nil
 	}
 	return os.RemoveAll(row.Path)
+}
+
+func checkCopyContent(ctx context.Context, runner *gitexec.Runner, expected string) error {
+	head, err := runner.Run(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(string(head)) != expected {
+		return errors.New("copy HEAD differs from complete capture")
+	}
+	status, err := runner.Run(ctx, "status", "--porcelain", "--untracked-files=all", "--ignored=matching")
+	if err != nil {
+		return err
+	}
+	if len(status) != 0 {
+		return errors.New("copy contains work outside its complete capture")
+	}
+	return nil
+}
+
+func cloneRefsCaptured(ctx context.Context, runner *gitexec.Runner, expected string) error {
+	refs, err := runner.Run(ctx, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/loom")
+	if err != nil {
+		return err
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(refs)), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			return errors.New("unexpected copy ref listing")
+		}
+		if _, err := runner.Run(ctx, "merge-base", "--is-ancestor", fields[1], expected); err != nil {
+			return fmt.Errorf("copy ref %s is outside complete capture: %w", fields[0], err)
+		}
+	}
+	return nil
 }
 
 func recordedAgentCopy(row journal.RetainedCopy) error {

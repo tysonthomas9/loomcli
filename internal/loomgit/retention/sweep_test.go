@@ -56,6 +56,54 @@ func TestSweepWithoutAbandonStateKeepsCopy(t *testing.T) {
 	}
 }
 
+func TestCloneRefsCapturedRejectsExtraLocalCommit(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	source, copyPath := filepath.Join(root, "source"), filepath.Join(root, "copy")
+	options := gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Test", Email: "test@example.com"}}
+	rootRunner, err := gitexec.New(root, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rootRunner.Run(ctx, "init", source); err != nil {
+		t.Fatal(err)
+	}
+	sourceRunner, err := gitexec.New(source, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sourceRunner.Run(ctx, "commit", "--allow-empty", "-m", "base"); err != nil {
+		t.Fatal(err)
+	}
+	baseBytes, err := sourceRunner.Run(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := strings.TrimSpace(string(baseBytes))
+	if _, err := rootRunner.Run(ctx, "clone", "--local", source, copyPath); err != nil {
+		t.Fatal(err)
+	}
+	copyRunner, err := gitexec.New(copyPath, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := copyRunner.Run(ctx, "checkout", "-b", "extra"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := copyRunner.Run(ctx, "commit", "--allow-empty", "-m", "uncaptured"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := copyRunner.Run(ctx, "checkout", "--detach", base); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkCopyContent(ctx, copyRunner, base); err != nil {
+		t.Fatal(err)
+	}
+	if err := cloneRefsCaptured(ctx, copyRunner, base); err == nil {
+		t.Fatal("uncaptured local branch was accepted")
+	}
+}
+
 func TestSweepLandedCopyUsesCaptureAndWorkspaceWindow(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -73,7 +121,13 @@ func TestSweepLandedCopyUsesCaptureAndWorkspaceWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runner.Run(ctx, "commit", "--allow-empty", "-m", "base"); err != nil {
+	if err := os.WriteFile(filepath.Join(source, "tracked.txt"), []byte("base"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Run(ctx, "add", "tracked.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Run(ctx, "commit", "-m", "base"); err != nil {
 		t.Fatal(err)
 	}
 	headBytes, err := runner.Run(ctx, "rev-parse", "HEAD")
@@ -149,6 +203,54 @@ func TestSweepLandedCopyUsesCaptureAndWorkspaceWindow(t *testing.T) {
 		t.Fatalf("changed capture ref: %+v, %v", results, err)
 	}
 	if err := runner.UpdateRef(ctx, ref, head, other); err != nil {
+		t.Fatal(err)
+	}
+	copyRunner, err := gitexec.New(copyPath, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := copyRunner.Run(ctx, "commit", "--allow-empty", "-m", "new uncaptured commit"); err != nil {
+		t.Fatal(err)
+	}
+	uncapturedBytes, err := copyRunner.Run(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uncaptured := strings.TrimSpace(string(uncapturedBytes))
+	results, err = sweep.Run(ctx, true)
+	if err != nil || results[0].Action != "keep" || !strings.Contains(results[0].Reason, "HEAD differs") {
+		t.Fatalf("clean uncaptured commit: %+v, %v", results, err)
+	}
+	if _, err := os.Stat(copyPath); err != nil {
+		t.Fatalf("copy with new commit removed: %v", err)
+	}
+	if out, err := copyRunner.Run(ctx, "cat-file", "-t", uncaptured); err != nil || strings.TrimSpace(string(out)) != "commit" {
+		t.Fatalf("new commit lost: %q, %v", out, err)
+	}
+	if _, err := copyRunner.Run(ctx, "checkout", "--detach", head); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(copyPath, "tracked.txt"), []byte("dirty"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	results, err = sweep.Run(ctx, true)
+	if err != nil || results[0].Action != "keep" {
+		t.Fatalf("dirty tracked path: %+v, %v", results, err)
+	}
+	if err := os.WriteFile(filepath.Join(copyPath, "tracked.txt"), []byte("base"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, ".git", "info", "exclude"), []byte("ignored.txt\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(copyPath, "ignored.txt"), []byte("ignored"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	results, err = sweep.Run(ctx, true)
+	if err != nil || results[0].Action != "keep" {
+		t.Fatalf("ignored path: %+v, %v", results, err)
+	}
+	if err := os.Remove(filepath.Join(copyPath, "ignored.txt")); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(copyPath, "uncaptured.txt"), []byte("work"), 0o600); err != nil {
