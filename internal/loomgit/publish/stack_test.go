@@ -160,7 +160,10 @@ func TestPublishStackReportsUnchangedLayerDriftAndRetryConverges(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := fixture.request()
-	forge := &fakeForge{}
+	forge := &fakeForge{prs: []stackpublish.PR{
+		{Number: 1, Head: firstBranch, Base: "original-first", State: "open"},
+		{Number: 2, Head: secondBranch, Base: "original-second", State: "open"},
+	}}
 	request.forge = forge
 	stack := StackRequest{Request: request, StackID: "feature-1", Changes: []string{"A", "B"},
 		pusher: &deletingPusher{RefPusher: mirror.NewPusher(runner), test: t, remote: fixture.remote, ref: "refs/heads/" + firstBranch}}
@@ -181,8 +184,8 @@ func TestPublishStackReportsUnchangedLayerDriftAndRetryConverges(t *testing.T) {
 	if got := git(t, fixture.remote, "rev-parse", "refs/heads/"+secondBranch); got != second.HeadSHA {
 		t.Fatalf("changed layer head = %s", got)
 	}
-	if len(forge.prs) != 0 {
-		t.Fatalf("PRs changed before recovery: %+v", forge.prs)
+	if len(forge.prs) != 2 || forge.prs[0].Base != "original-first" || forge.prs[1].Base != "original-second" {
+		t.Fatalf("PR bases changed before recovery: %+v", forge.prs)
 	}
 	stack.pusher = nil
 	if _, err := publishStack(context.Background(), reopened, stack); err != nil {
