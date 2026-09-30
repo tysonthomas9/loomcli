@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"testing"
 	"time"
 
@@ -240,12 +239,13 @@ func TestStartServer_WriteTimeout(t *testing.T) {
 
 	// Wait for the server to be ready by polling the health endpoint
 	serverAddr := fmt.Sprintf("http://127.0.0.1:%d", port)
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := shutdownTestClient(5 * time.Second)
 
 	var ready bool
 	for i := 0; i < 50; i++ {
 		resp, err := client.Get(serverAddr + "/api/health")
 		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 			ready = true
 			break
@@ -266,7 +266,6 @@ func TestStartServer_WriteTimeout(t *testing.T) {
 		t.Fatalf("health request failed: %v", err)
 	}
 	defer resp.Body.Close()
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		cancel()
@@ -292,6 +291,9 @@ func TestStartServer_WriteTimeout(t *testing.T) {
 	}
 
 	// Shut down the server
+	if err := resp.Body.Close(); err != nil {
+		t.Fatalf("close health response: %v", err)
+	}
 	cancel()
 
 	select {
@@ -378,10 +380,7 @@ func TestStartServer_WriteTimeout_NonStreamingEndpoint(t *testing.T) {
 	serverAddr := fmt.Sprintf("http://127.0.0.1:%d", port)
 	// This test checks one completed response, not connection reuse. Avoid
 	// leaving a keep-alive connection active while asserting shutdown.
-	client := &http.Client{
-		Timeout:   5 * time.Second,
-		Transport: &http.Transport{DisableKeepAlives: true},
-	}
+	client := shutdownTestClient(5 * time.Second)
 
 	// Wait for the server to be ready
 	var ready bool

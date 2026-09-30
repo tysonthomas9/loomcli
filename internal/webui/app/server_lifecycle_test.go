@@ -20,12 +20,20 @@ func waitForServerReady(t *testing.T, client *http.Client, serverAddr string) {
 	for i := 0; i < 100; i++ {
 		resp, err := client.Get(serverAddr + "/health")
 		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 			return
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
 	t.Fatal("server did not become ready within timeout")
+}
+
+func shutdownTestClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: &http.Transport{DisableKeepAlives: true},
+	}
 }
 
 // TestStartServer_GracefulShutdown_CompletesWithinTimeout verifies that
@@ -51,7 +59,7 @@ func TestStartServer_GracefulShutdown_CompletesWithinTimeout(t *testing.T) {
 	}()
 
 	serverAddr := fmt.Sprintf("http://127.0.0.1:%d", port)
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := shutdownTestClient(5 * time.Second)
 	waitForServerReady(t, client, serverAddr)
 
 	// Cancel context to trigger shutdown
@@ -127,7 +135,7 @@ func TestStartServer_DefaultsApplied(t *testing.T) {
 	}()
 
 	serverAddr := fmt.Sprintf("http://127.0.0.1:%d", port)
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := shutdownTestClient(5 * time.Second)
 	waitForServerReady(t, client, serverAddr)
 
 	// Verify server responds to health checks (confirms defaults applied)
@@ -136,6 +144,7 @@ func TestStartServer_DefaultsApplied(t *testing.T) {
 		cancel()
 		t.Fatalf("health request failed: %v", err)
 	}
+	_, _ = io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -178,7 +187,7 @@ func TestStartServer_FleetJWTKey_PreProvisioned(t *testing.T) {
 	}()
 
 	serverAddr := fmt.Sprintf("http://127.0.0.1:%d", port)
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := shutdownTestClient(5 * time.Second)
 	waitForServerReady(t, client, serverAddr)
 
 	cancel()
@@ -214,7 +223,7 @@ func TestStartServer_ConcurrentRequests_DuringShutdown(t *testing.T) {
 	}()
 
 	serverAddr := fmt.Sprintf("http://127.0.0.1:%d", port)
-	client := &http.Client{Timeout: 2 * time.Second}
+	client := shutdownTestClient(2 * time.Second)
 	waitForServerReady(t, client, serverAddr)
 
 	// Launch concurrent requests
