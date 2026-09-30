@@ -73,6 +73,8 @@ func (s *state) goCheck(name string) error {
 			return fmt.Errorf("capture ref=%s, SHA=%s, err=%v", ref, s.result.CaptureSHA, err)
 		}
 		return nil
+	case "ignored_capture_inventory":
+		return s.packageTests("./internal/loomgit/internal/capture", "TestIgnored(NestedRepository|ExtendedAttribute)DoesNotMakeCaptureIncomplete")
 	case "provider_policy":
 		// Proves the bare remote accepts ordinary pushes and rejects secrets and oversized blobs.
 		return s.checkProvider()
