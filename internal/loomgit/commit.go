@@ -2,6 +2,8 @@ package loomgit
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -49,6 +51,10 @@ func Commit(ctx context.Context, repo string, settings WorkspaceSettingsStore, r
 		return "", fmt.Errorf("commit requires a branch: %w", err)
 	}
 	ref := strings.TrimSpace(string(refBytes))
+	req.ChangeID, err = resolveCommitChange(ctx, r, ref, req)
+	if err != nil {
+		return "", err
+	}
 	parentBytes, err := r.Run(ctx, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		return "", err
@@ -75,6 +81,17 @@ func Commit(ctx context.Context, repo string, settings WorkspaceSettingsStore, r
 		return "", err
 	}
 	return sha, nil
+}
+
+func resolveCommitChange(ctx context.Context, r *gitexec.Runner, ref string, req CommitRequest) (string, error) {
+	if req.ChangeID != "" {
+		return req.ChangeID, nil
+	}
+	branch, err := InteractiveBranch(req.Workspace, req.Agent)
+	if err != nil || ref != "refs/heads/"+branch {
+		return "", errors.New("change ID is required outside the lead working area")
+	}
+	return ownChangeID(ctx, r)
 }
 
 func treeForPaths(ctx context.Context, r *gitexec.Runner, parent string, paths []string) (string, error) {
@@ -105,8 +122,8 @@ func treeForPaths(ctx context.Context, r *gitexec.Runner, parent string, paths [
 
 func validateCommitRequest(ctx context.Context, repo string, settings WorkspaceSettingsStore, req CommitRequest) error {
 	if repo == "" || settings == nil || req.Workspace == "" || len(req.Paths) == 0 ||
-		strings.TrimSpace(req.Message) == "" || strings.TrimSpace(req.ChangeID) == "" || strings.TrimSpace(req.Agent) == "" {
-		return errors.New("repo, workspace, paths, message, change ID and agent are required")
+		strings.TrimSpace(req.Message) == "" || strings.TrimSpace(req.Agent) == "" {
+		return errors.New("repo, workspace, paths, message and agent are required")
 	}
 	if strings.ContainsAny(req.ChangeID+req.Agent, "\r\n") {
 		return errors.New("commit trailer values must be single-line")
@@ -119,6 +136,36 @@ func validateCommitRequest(ctx context.Context, repo string, settings WorkspaceS
 		return errors.New("auto-commit is disabled for this workspace")
 	}
 	return nil
+}
+
+func ownChangeID(ctx context.Context, r *gitexec.Runner) (string, error) {
+	commits, err := r.Run(ctx, "rev-list", "--first-parent", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	for _, sha := range strings.Fields(string(commits)) {
+		message, err := r.Run(ctx, "show", "-s", "--format=%B", sha)
+		if err != nil {
+			return "", err
+		}
+		for _, line := range strings.Split(string(message), "\n") {
+			if id, ok := strings.CutPrefix(line, "Loom-Change-Id: "); ok {
+				if strings.HasPrefix(id, "own-") {
+					return id, nil
+				}
+				return newOwnChangeID()
+			}
+		}
+	}
+	return newOwnChangeID()
+}
+
+func newOwnChangeID() (string, error) {
+	var random [12]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return "", err
+	}
+	return "own-" + hex.EncodeToString(random[:]), nil
 }
 
 func refuseMerge(ctx context.Context, r *gitexec.Runner, repo string) error {

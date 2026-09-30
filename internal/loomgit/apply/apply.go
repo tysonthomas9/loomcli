@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/changeset"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/pool"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/replay"
@@ -22,9 +23,11 @@ import (
 type Store interface {
 	loomgit.RevisionStore
 	review.Store
+	SetRevisionAuthor(context.Context, loomgit.Revision, string, string) error
 	SaveApplied(context.Context, loomgit.AppliedLayer) error
 	AdvanceApplied(context.Context, string, string, string) error
 	AppliedLog(context.Context, string, string) ([]loomgit.AppliedLayer, error)
+	WorkingAreas(context.Context, string, string) ([]journal.WorkingArea, error)
 }
 
 type Request struct {
@@ -51,10 +54,36 @@ func New(store Store, repo *pool.LocalRepo, runner *gitexec.Runner) *Service {
 	return &Service{store: store, repo: repo, runner: runner}
 }
 
-// AppliedLog returns the applied task layers in branch order. Lead-owned work
-// is added by P2.13, which owns working-area creation and its lead change.
+// AppliedLog interleaves applied task layers with contiguous lead-owned runs.
 func (s *Service) AppliedLog(ctx context.Context, workspace, lead string) ([]loomgit.AppliedLayer, error) {
-	return s.store.AppliedLog(ctx, workspace, lead)
+	tasks, err := s.store.AppliedLog(ctx, workspace, lead)
+	if err != nil {
+		return nil, err
+	}
+	areas, err := s.store.WorkingAreas(ctx, workspace, lead)
+	if err != nil {
+		return nil, err
+	}
+	base := ""
+	if len(areas) > 0 {
+		base = areas[0].BaseSHA
+	} else if len(tasks) > 0 {
+		base = tasks[0].OldTip
+	} else {
+		return tasks, nil
+	}
+	if s.runner == nil {
+		return nil, errors.New("applied log requires working-area Git runner")
+	}
+	head, err := git(ctx, s.runner, "rev-parse", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	commits, err := git(ctx, s.runner, "rev-list", "--first-parent", "--reverse", base+".."+head)
+	if err != nil {
+		return nil, err
+	}
+	return s.interleaveLayers(ctx, workspace, lead, base, strings.Fields(commits), tasks)
 }
 
 // Apply uses one retry if a terminal commit moves HEAD before the index lock.

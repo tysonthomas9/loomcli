@@ -404,9 +404,7 @@ func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent 
 	if err != nil {
 		return err
 	}
-	if domain.ResolveRoleKind(role, agent.RoleName) == domain.RoleKindInteractive {
-		return nil
-	}
+	interactive := domain.ResolveRoleKind(role, agent.RoleName) == domain.RoleKindInteractive
 	ws, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, agent.WorkspaceKey)
 	if err != nil {
 		return service.ErrInternal("load workspace for agent worktree", err)
@@ -434,6 +432,9 @@ func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent 
 		return service.ErrValidation("This workspace has no repos yet — add one from the sidebar first.")
 	}
 	createdPaths := make(map[string]string, len(repos))
+	if interactive {
+		return ensureInteractiveWebAgentWorktrees(ctx, agent, ws.Path, repos)
+	}
 	for _, repo := range repos {
 		if repo.Path == "" {
 			return service.ErrValidation(fmt.Sprintf("repo %q has no local path on this machine", repo.Name))
@@ -445,6 +446,17 @@ func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent 
 		createdPaths[repo.Name] = target
 	}
 	if err := localworkspace.RememberAgentWorktree(agent.WorkspaceKey, agent.Name, localworkspace.FirstWorktreePath(createdPaths)); err != nil {
+		return service.ErrInternal("update local agent state", err)
+	}
+	return nil
+}
+
+func ensureInteractiveWebAgentWorktrees(ctx context.Context, agent domain.Agent, wsDir string, repos []localworkspace.Repo) error {
+	paths, err := ops.EnsureInteractiveWorkingArea(ctx, agent.WorkspaceKey, agent.Name, wsDir, repos)
+	if err != nil {
+		return service.ErrInternal("create lead working area", err)
+	}
+	if err := localworkspace.RememberAgentWorktree(agent.WorkspaceKey, agent.Name, localworkspace.FirstWorktreePath(paths)); err != nil {
 		return service.ErrInternal("update local agent state", err)
 	}
 	return nil

@@ -77,7 +77,7 @@ func (f fixture) revision(t *testing.T, number int, parent, body, kind string) l
 	if err := f.store.FinishRevision(ctx, r); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.SaveApplied(ctx, loomgit.AppliedLayer{RequestID: "apply-" + strconv.Itoa(number), Workspace: "W", Lead: "L", Change: "C", Revision: r.Number, OldTip: parent, NewTip: head}); err != nil {
+	if err := f.store.SaveApplied(ctx, loomgit.AppliedLayer{RequestID: "apply-" + strconv.Itoa(number), Workspace: "W", Lead: "L", Change: "C", Revision: r.Number, OldTip: parent, NewTip: head, Commits: []string{head}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.store.AdvanceApplied(ctx, "apply-"+strconv.Itoa(number), "prepared", "done"); err != nil {

@@ -1,0 +1,8 @@
+name: two leads retain isolated working areas and ordered layers
+task: P2.13
+git: [min, latest]
+fixture: loomcli
+when:
+  - go_check: lead_working_areas
+then:
+  - go_check: no_error

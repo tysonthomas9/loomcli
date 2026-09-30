@@ -71,6 +71,11 @@ func (s *state) goCheck(name string) error {
 		return s.packageTests("./internal/loomgit/internal/replay", "Test(TrialMergeCleanAndConflictLeaveCheckoutUnchanged|TrialMergeMultiCommitAndDrop|TrialMergeStopsAtFirstConflictingCommit|TrialMergeUsesFirstParentOfMergeCommit|TrialMergePreservesAuthorMessageAndTrailers|VersionRequirement)")
 	case "approved_apply":
 		return s.packageTests("./internal/loomgit/apply", "TestApply.*")
+	case "lead_working_areas":
+		if err := s.packageTests("./internal/loomgit/workspace", "TestEnsureWorkingAreaSeparatesLeadsAndKeepsTheirWork"); err != nil {
+			return err
+		}
+		return s.packageTests("./internal/loomgit/apply", "TestAppliedLogInterleavesOwnAndTaskLayers")
 	case "review_patch_ids":
 		return s.packageTests("./internal/loomgit/review", "TestCarryForwardCleanPatchIDsAndEmptyDroppedCommit")
 	case "process_lock":
