@@ -88,15 +88,15 @@ func TestCaptureExcludesRuntimeFiles(t *testing.T) {
 	dir, runner := fixture(t)
 	for _, path := range []string{
 		".agent.checkpoint.json", ".agent.lock", ".agent.lock.flock",
-		".codex/hooks.json",
-		"agent.lock", ".codex/user.txt", "work.txt",
+		".codex/hooks.json", "agent.lock", ".codex/config.toml", "work.txt",
 	} {
 		write(t, dir, path, path)
 	}
+	write(t, dir, ".claude/settings.json", `{"hooks":{"UserPromptSubmit":[{"hooks":[{"command":"loom skill materialize"}]}]}}`)
 	result := capture(t, dir, runner)
 	for _, path := range []string{
 		".agent.checkpoint.json", ".agent.lock", ".agent.lock.flock",
-		".codex/hooks.json",
+		".codex/hooks.json", ".claude/settings.json",
 	} {
 		if _, ok := classes(result.Manifest.Entries)[path]; ok {
 			t.Errorf("runtime path %q entered manifest", path)
@@ -105,9 +105,16 @@ func TestCaptureExcludesRuntimeFiles(t *testing.T) {
 			t.Errorf("runtime path %q entered capture", path)
 		}
 	}
-	for _, path := range []string{"agent.lock", ".codex/user.txt", "work.txt"} {
+	for _, path := range []string{"agent.lock", ".codex/config.toml", "work.txt"} {
 		must(t, runner, "cat-file", "-e", result.CaptureSHA+":"+path)
 	}
+}
+
+func TestCapturePreservesUserClaudeSettings(t *testing.T) {
+	dir, runner := fixture(t)
+	write(t, dir, ".claude/settings.json", `{"model":"opus","hooks":{"UserPromptSubmit":[{"hooks":[{"command":"loom skill materialize"}]}]}}`)
+	result := capture(t, dir, runner)
+	must(t, runner, "cat-file", "-e", result.CaptureSHA+":.claude/settings.json")
 }
 
 func TestCapturePreservesIndexAndCapturesLargeTrackedEdit(t *testing.T) {

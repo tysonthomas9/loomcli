@@ -2,8 +2,10 @@ package supervisor
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +17,7 @@ import (
 	"github.com/olesho/harness-wrapper/pkg/discovery"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -22,6 +25,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	gitweb "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 )
@@ -116,6 +121,138 @@ func TestSpawnAndWaitFreezesCompletedRevision(t *testing.T) {
 	assertRevision()
 	if ap.CaptureRetained {
 		t.Fatal("repeated exit unexpectedly retained the worktree")
+	}
+}
+
+func TestTwoSupervisorExitsApplyWithoutRuntimeFileConflicts(t *testing.T) {
+	dir := captureRepo(t)
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	base := gitForCaptureTest(t, dir, "rev-parse", "HEAD")
+	area := filepath.Join(t.TempDir(), "lead")
+	gitForCaptureTest(t, dir, "worktree", "add", "-b", "loom/ws/WS/interactive/L", area, base)
+	setupCaptureApplyArea(t, configDir, dir, area, base)
+	previous := loomExecutablePath
+	loomExecutablePath = func() (string, error) { return exec.LookPath("true") }
+	t.Cleanup(func() { loomExecutablePath = previous })
+	s := newTestSupervisor()
+	s.WorkspaceID, s.Shutdown, s.Concurrency = "WS", make(chan struct{}), NewConcurrencyTracker(nil)
+	s.EmitEvent = func(events.Event) {}
+	s.ControlStore = memstore.New()
+	s.IssueBackend = clitest.NewMockIssueBackend()
+	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "agent", Role: "task", Backend: "codex"},
+		WorktreePath: dir, BeforeRef: base, AssignedTaskID: "task-1"}
+	for index := 1; index <= 2; index++ {
+		writeRuntimeExitFiles(t, dir, index)
+		ap.AgentSessionID = fmt.Sprintf("session-%d", index)
+		writeLockFile(t, dir, &cli.LockInfo{PID: os.Getpid(), AgentName: "agent", TaskID: "task-1", RunID: ap.AgentSessionID})
+		s.Concurrency.Acquire("task")
+		s.spawnAndWait(ap)
+		revisions := taskRevisionResponse(t)
+		if len(revisions) != index || revisions[0].Number != index || revisions[0].HeadSHA == "" {
+			t.Fatalf("exit %d revisions = %+v", index, revisions)
+		}
+		assertCapturedRuntimePaths(t, dir, revisions[0].HeadSHA)
+		approveAndApplyExit(t, revisions[0], area)
+	}
+}
+
+func setupCaptureApplyArea(t *testing.T, configDir, source, area, base string) {
+	t.Helper()
+	handle, err := bootstrap.OpenStore(context.Background(), configDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = handle.Close() })
+	if _, err := handle.Store.Workspaces().Create(context.Background(), store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handle.Store.Repos().Create(context.Background(), store.RepoCreate{WorkspaceKey: "WS", Name: filepath.Base(source)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := bootstrap.MutateStateCache(func(state *bootstrap.StateCache) error {
+		state.Workspaces["WS"] = bootstrap.WorkspaceLocalState{Path: configDir, Repos: map[string]string{filepath.Base(source): source}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(configDir, "loomgit"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(configDir, "loomgit", "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS working_areas (workspace TEXT NOT NULL, lead TEXT NOT NULL, repo TEXT NOT NULL, path TEXT NOT NULL, branch TEXT NOT NULL, base_sha TEXT NOT NULL, mode TEXT NOT NULL, PRIMARY KEY(workspace, lead, repo))`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO working_areas VALUES (?,?,?,?,?,?,?)`, "WS", "L", filepath.Base(source), area, "loom/ws/WS/interactive/L", base, "worktree"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeRuntimeExitFiles(t *testing.T, dir string, index int) {
+	t.Helper()
+	for path, value := range map[string]string{
+		fmt.Sprintf("work-%d.txt", index): "agent work", ".agent.checkpoint.json": fmt.Sprint(index),
+		".agent.lock.flock": fmt.Sprint(index), ".codex/hooks.json": fmt.Sprint(index),
+		".claude/settings.json": fmt.Sprintf(`{"hooks":{"UserPromptSubmit":[{"matcher":"%d","hooks":[{"command":"loom skill materialize"}]}]}}`, index),
+		"agent.lock":            "user file", ".codex/config.toml": "user config",
+	} {
+		full := filepath.Join(dir, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(value), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func assertCapturedRuntimePaths(t *testing.T, dir, head string) {
+	t.Helper()
+	for _, path := range []string{".agent.checkpoint.json", ".agent.lock", ".agent.lock.flock", ".codex/hooks.json", ".claude/settings.json"} {
+		if gitForCaptureTest(t, dir, "ls-tree", "-r", "--name-only", head, "--", path) != "" {
+			t.Errorf("runtime file %s entered revision %s", path, head)
+		}
+	}
+	for _, path := range []string{"agent.lock", ".codex/config.toml"} {
+		if gitForCaptureTest(t, dir, "ls-tree", "-r", "--name-only", head, "--", path) != path {
+			t.Errorf("user file %s missing from revision %s", path, head)
+		}
+	}
+}
+
+func approveAndApplyExit(t *testing.T, revision apiTaskRevision, area string) {
+	t.Helper()
+	reviewer, err := review.OpenLocal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reviewer.Close()
+	items, err := reviewer.TaskRevisions(context.Background(), "WS", "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := ""
+	for _, item := range items {
+		if item.Number == revision.Number {
+			change = item.ChangeID
+		}
+	}
+	if change == "" {
+		t.Fatalf("revision %d has no change", revision.Number)
+	}
+	if _, err := reviewer.SubmitForLead(context.Background(), "WS", change, revision.Number, revision.HeadSHA, "approve", "", review.Actor{Kind: "human", ID: "reviewer"}, "L"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := apply.ApplyLocal(context.Background(), apply.Request{Workspace: "WS", Lead: "L", Change: change, Revision: revision.Number, RequestID: fmt.Sprintf("apply-%d", revision.Number)})
+	if err != nil || result.ConflictCommit != "" {
+		t.Fatalf("apply revision %d: %+v, %v", revision.Number, result, err)
+	}
+	if gitForCaptureTest(t, area, "rev-parse", "HEAD") != result.HeadSHA {
+		t.Fatal("working area did not advance")
 	}
 }
 

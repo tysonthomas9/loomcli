@@ -110,27 +110,27 @@ func verifyAfterWrite(ctx context.Context, runner loomgit.RepoStore, repo string
 		known[entry.Path] = entry
 	}
 	for _, path := range lines(changed) {
-		if runtimePath(path) {
+		if excludedRuntimePath(repo, path) {
 			continue
 		}
 		markChanged(manifest, known, path, "changed after capture write")
 	}
 	for _, path := range append(paths[2], paths[3]...) {
-		if runtimePath(path) {
+		if excludedRuntimePath(repo, path) {
 			continue
 		}
 		if _, ok := known[path]; !ok {
 			markChanged(manifest, known, path, "appeared after capture write")
 		}
 	}
-	verifyExtras(manifest, known, extras)
+	verifyExtras(manifest, repo, known, extras)
 	manifest.Retained = !manifest.Complete
 	return nil
 }
 
-func verifyExtras(manifest *Manifest, known map[string]Entry, extras []Entry) {
+func verifyExtras(manifest *Manifest, repo string, known map[string]Entry, extras []Entry) {
 	for _, entry := range extras {
-		if runtimePath(entry.Path) {
+		if excludedRuntimePath(repo, entry.Path) {
 			continue
 		}
 		if old, ok := known[entry.Path]; !ok || old.Class != entry.Class || old.Reason != entry.Reason {
