@@ -26,11 +26,23 @@ func ApplyLocal(ctx context.Context, request Request) (Result, error) {
 		return Result{}, err
 	}
 	defer func() { _ = store.Close() }()
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return Result{}, err
+	}
+	return applyLocalWithStore(ctx, request, store, cfg)
+}
+
+func applyLocalWithStore(ctx context.Context, request Request, store *journal.SQLite, cfg *config.LoomConfig) (Result, error) {
 	repoName, err := store.RepoForChange(ctx, request.Workspace, request.Change)
 	if err != nil {
 		return Result{}, fmt.Errorf("find repo for change: %w", err)
 	}
-	cfg, err := config.LoadConfig()
+	areas, err := store.WorkingAreas(ctx, request.Workspace, request.Lead)
+	if err != nil {
+		return Result{}, err
+	}
+	selected, err := workingAreaForRepo(areas, repoName)
 	if err != nil {
 		return Result{}, err
 	}
@@ -48,13 +60,37 @@ func ApplyLocal(ctx context.Context, request Request) (Result, error) {
 		if err != nil {
 			return Result{}, err
 		}
-		runner, err := gitexec.New(path, options)
+		workingRepo, err := pool.New(store, options).Admit(ctx, selected.Path)
+		if err != nil {
+			return Result{}, err
+		}
+		if !repo.SameStore(workingRepo) {
+			return Result{}, loomgit.NewError(loomgit.RepoSelectionRequired, "working area does not belong to change repo", nil)
+		}
+		runner, err := gitexec.New(selected.Path, options)
 		if err != nil {
 			return Result{}, err
 		}
 		return New(store, repo, runner).Apply(ctx, request)
 	}
 	return Result{}, loomgit.NewError(loomgit.RepoSelectionRequired, "change repo is not in the workspace", nil)
+}
+
+func workingAreaForRepo(areas []journal.WorkingArea, repo string) (*journal.WorkingArea, error) {
+	var selected *journal.WorkingArea
+	for index := range areas {
+		if areas[index].Repo != repo {
+			continue
+		}
+		if selected != nil {
+			return nil, loomgit.NewError(loomgit.RepoSelectionRequired, "ambiguous working area for change repo and lead", nil)
+		}
+		selected = &areas[index]
+	}
+	if selected == nil || selected.Path == "" {
+		return nil, loomgit.NewError(loomgit.RepoSelectionRequired, "working area for change repo and lead is unavailable", nil)
+	}
+	return selected, nil
 }
 
 func defaultLead(string) string { return "lead" }
