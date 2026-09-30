@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/hookcfg"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
@@ -81,42 +82,15 @@ func runtimePath(path string) bool {
 	return false
 }
 
-func excludedRuntimePath(repo, path string) bool {
+func excludedRuntimePath(repo, path string, tracked bool) bool {
 	if runtimePath(path) {
 		return true
 	}
-	if path != ".claude/settings.json" {
+	if path != ".claude/settings.json" || tracked {
 		return false
 	}
 	data, err := os.ReadFile(filepath.Join(repo, ".claude", "settings.json")) //nolint:gosec // Fixed filename inside the captured repo.
-	if err != nil {
-		return false
-	}
-	var settings map[string]json.RawMessage
-	if json.Unmarshal(data, &settings) != nil || len(settings) != 1 {
-		return false
-	}
-	var events map[string][]struct {
-		Hooks []struct {
-			Command string `json:"command"`
-		} `json:"hooks"`
-	}
-	if json.Unmarshal(settings["hooks"], &events) != nil || len(events) == 0 {
-		return false
-	}
-	for _, groups := range events {
-		for _, group := range groups {
-			if len(group.Hooks) == 0 {
-				return false
-			}
-			for _, hook := range group.Hooks {
-				if !strings.HasPrefix(hook.Command, "loom ") {
-					return false
-				}
-			}
-		}
-	}
-	return true
+	return err == nil && hookcfg.ManagedOnlySettings(data)
 }
 
 func lines(data []byte) []string {
@@ -230,7 +204,7 @@ func saveManifest(ctx context.Context, runner loomgit.RepoStore, repo string, ma
 
 func recordIgnored(manifest *Manifest, repo string, paths []string, seen map[string]bool) {
 	for _, path := range paths {
-		if seen[path] || excludedRuntimePath(repo, path) {
+		if seen[path] || excludedRuntimePath(repo, path, false) {
 			seen[path] = true
 			continue
 		}
@@ -300,7 +274,7 @@ func scanWorkingTree(ctx context.Context, runner loomgit.RepoStore, repo string,
 	var toStage []string
 	var total int64
 	for _, path := range append(append(tracked, changed...), untracked...) {
-		if excludedRuntimePath(repo, path) {
+		if excludedRuntimePath(repo, path, trackedSet[path]) {
 			seen[path] = true
 			continue
 		}
@@ -324,7 +298,7 @@ func scanWorkingTree(ctx context.Context, runner loomgit.RepoStore, repo string,
 		manifest.Entries = append(manifest.Entries, entry)
 	}
 	recordIgnored(manifest, repo, ignored, seen)
-	recordExtras(manifest, repo, extras, seen)
+	recordExtras(manifest, repo, extras, seen, trackedSet)
 	if err := stagePaths(ctx, runner, env, toStage); err != nil {
 		return err
 	}
@@ -333,9 +307,9 @@ func scanWorkingTree(ctx context.Context, runner loomgit.RepoStore, repo string,
 	return nil
 }
 
-func recordExtras(manifest *Manifest, repo string, extras []Entry, seen map[string]bool) {
+func recordExtras(manifest *Manifest, repo string, extras []Entry, seen map[string]bool, tracked map[string]bool) {
 	for _, entry := range extras {
-		if seen[entry.Path] || excludedRuntimePath(repo, entry.Path) {
+		if seen[entry.Path] || excludedRuntimePath(repo, entry.Path, tracked[entry.Path]) {
 			continue
 		}
 		manifest.Entries = append(manifest.Entries, entry)

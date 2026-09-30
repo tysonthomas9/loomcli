@@ -169,6 +169,22 @@ func TestSupportsBackend(t *testing.T) {
 	}
 }
 
+func TestManagedOnlySettings(t *testing.T) {
+	for _, test := range []struct {
+		name, body string
+		want       bool
+	}{
+		{"Loom only", `{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"loom skill materialize"}]}]}}`, true},
+		{"mixed", `{"model":"opus","hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"loom skill materialize"}]}]}}`, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := ManagedOnlySettings([]byte(test.body)); got != test.want {
+				t.Fatalf("ManagedOnlySettings = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestEnsureMergesUserHooksAndPreservesUnrelatedSettings(t *testing.T) {
 	t.Parallel()
 

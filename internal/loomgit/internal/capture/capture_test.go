@@ -117,6 +117,19 @@ func TestCapturePreservesUserClaudeSettings(t *testing.T) {
 	must(t, runner, "cat-file", "-e", result.CaptureSHA+":.claude/settings.json")
 }
 
+func TestCapturePreservesTrackedClaudeSettings(t *testing.T) {
+	dir, runner := fixture(t)
+	path := ".claude/settings.json"
+	write(t, dir, path, `{"hooks":{"UserPromptSubmit":[{"hooks":[{"command":"loom skill materialize"}]}]}}`)
+	must(t, runner, "add", path)
+	must(t, runner, "commit", "-qm", "user settings")
+	write(t, dir, path, `{"hooks":{"UserPromptSubmit":[{"hooks":[{"command":"loom transcript save"}]}]}}`)
+	result := capture(t, dir, runner)
+	if got := must(t, runner, "show", result.CaptureSHA+":"+path); !strings.Contains(got, "loom transcript save") {
+		t.Fatalf("tracked settings omitted: %s", got)
+	}
+}
+
 func TestCapturePreservesIndexAndCapturesLargeTrackedEdit(t *testing.T) {
 	dir, r := fixture(t)
 	write(t, dir, "tracked.bin", "before")

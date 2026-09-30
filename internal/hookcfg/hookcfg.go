@@ -51,6 +51,44 @@ func SupportsBackend(backend string) bool {
 	return ok
 }
 
+func ManagedOnlySettings(data []byte) bool {
+	root, err := parseObject(data)
+	if err != nil || len(root.fields) != 1 || root.fields[0].key != "hooks" {
+		return false
+	}
+	hooks, err := hooksObject(root)
+	if err != nil || len(hooks.fields) == 0 {
+		return false
+	}
+	for _, event := range hooks.fields {
+		groups, err := parseArray(event.value)
+		if err != nil || len(groups) == 0 {
+			return false
+		}
+		for _, raw := range groups {
+			group, err := parseObject(raw)
+			if err != nil {
+				return false
+			}
+			hookData, ok := group.get("hooks")
+			if !ok {
+				return false
+			}
+			commands, err := parseArray(hookData)
+			if err != nil || len(commands) == 0 {
+				return false
+			}
+			for _, raw := range commands {
+				command, err := hookCommand(raw)
+				if err != nil || !strings.HasPrefix(command, loomCommandPrefix) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
 // EnsureSkillMaterializeHook installs the pre-turn skill materialization hook
 // in workDir, and is a no-op for a backend with no native hook adapter.
 //
