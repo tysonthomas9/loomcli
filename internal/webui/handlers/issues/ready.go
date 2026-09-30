@@ -107,45 +107,6 @@ func HandleReadyWithBackend(pool daemon.Pool, backendFn IssueBackendFn) http.Han
 	}
 }
 
-// readyInterceptor captures the pool-handler's response so the wrapper can
-// decide whether to forward or fall through to the backend path without
-// double-writing to the real ResponseWriter. Mirrors graphInterceptor in
-// the git package.
-type readyInterceptor struct {
-	header     http.Header
-	body       []byte
-	statusCode int
-}
-
-func (g *readyInterceptor) Header() http.Header { return g.header }
-
-func (g *readyInterceptor) WriteHeader(code int) {
-	if g.statusCode == 0 {
-		g.statusCode = code
-	}
-}
-
-func (g *readyInterceptor) Write(b []byte) (int, error) {
-	if g.statusCode == 0 {
-		g.statusCode = http.StatusOK
-	}
-	g.body = append(g.body, b...)
-	return len(b), nil
-}
-
-func (g *readyInterceptor) flushTo(w http.ResponseWriter) {
-	for k, vs := range g.header {
-		for _, v := range vs {
-			w.Header().Add(k, v)
-		}
-	}
-	if g.statusCode == 0 {
-		g.statusCode = http.StatusOK
-	}
-	w.WriteHeader(g.statusCode)
-	_, _ = w.Write(g.body)
-}
-
 // serveReadyViaBackend materializes a ready-style response from the supplied
 // IssueBackend and writes it to w. Returns true when it served the request
 // (including backend errors), false when no backend is wired so the caller

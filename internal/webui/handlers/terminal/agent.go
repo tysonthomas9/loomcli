@@ -29,11 +29,6 @@ func agentLogTokenScope(agentName string) string {
 	return "agent:" + agentName + ":logs"
 }
 
-const (
-	agentTerminalModeTmux    = "tmux"
-	agentTerminalModeArchive = "archive"
-)
-
 type agentTerminalInfoResponse struct {
 	Success bool                   `json:"success"`
 	Data    *agentTerminalInfoData `json:"data,omitempty"`

@@ -315,44 +315,6 @@ func HandleGraphWithBackend(pool daemon.Pool, backendFn IssueBackendFn) http.Han
 	}
 }
 
-// graphInterceptor captures the pool-handler's response so the wrapper can
-// decide whether to forward or fall through to the backend path without
-// double-writing to the real ResponseWriter.
-type graphInterceptor struct {
-	header     http.Header
-	body       []byte
-	statusCode int
-}
-
-func (g *graphInterceptor) Header() http.Header { return g.header }
-
-func (g *graphInterceptor) WriteHeader(code int) {
-	if g.statusCode == 0 {
-		g.statusCode = code
-	}
-}
-
-func (g *graphInterceptor) Write(b []byte) (int, error) {
-	if g.statusCode == 0 {
-		g.statusCode = http.StatusOK
-	}
-	g.body = append(g.body, b...)
-	return len(b), nil
-}
-
-func (g *graphInterceptor) flushTo(w http.ResponseWriter) {
-	for k, vs := range g.header {
-		for _, v := range vs {
-			w.Header().Add(k, v)
-		}
-	}
-	if g.statusCode == 0 {
-		g.statusCode = http.StatusOK
-	}
-	w.WriteHeader(g.statusCode)
-	_, _ = w.Write(g.body)
-}
-
 // serveGraphViaBackend materializes a GraphResponse from the supplied
 // IssueBackend and writes it to w. Returns true when it served the request
 // (success OR backend error), false when no backend is wired so the caller

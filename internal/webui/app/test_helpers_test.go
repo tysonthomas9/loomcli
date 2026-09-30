@@ -86,17 +86,6 @@ func (s *stubPool) Stats() daemon.PoolStats {
 }
 func (s *stubPool) Close() error { return nil }
 
-// newTestSessionStore creates a sessions.Store rooted in a temporary directory.
-func newTestSessionStore(t *testing.T) *sessions.Store {
-	t.Helper()
-	dir := t.TempDir()
-	store, err := sessions.NewStore(dir)
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	return store
-}
-
 // newTestSessionStoreWithDir creates a sessions.Store and returns the base dir (for configByIDFn).
 func newTestSessionStoreWithDir(t *testing.T) (*sessions.Store, string) {
 	t.Helper()

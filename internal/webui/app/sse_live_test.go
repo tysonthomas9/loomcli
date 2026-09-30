@@ -62,34 +62,6 @@ func connectSSE(t *testing.T, serverURL string, headers map[string]string) *sseT
 	}
 }
 
-// connectSSEForWorkspace connects to the SSE endpoint for a specific workspace.
-func connectSSEForWorkspace(t *testing.T, serverURL, wsID string, headers map[string]string) *sseTestClient {
-	t.Helper()
-
-	req, err := http.NewRequest(http.MethodGet, serverURL+"/api/workspaces/"+wsID+"/events", nil)
-	if err != nil {
-		t.Fatalf("failed to create request: %v", err)
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-
-	client := &http.Client{Timeout: 0}
-	resp, err := client.Do(req) //nolint:gosec // G704 — test hits local httptest server
-	if err != nil {
-		t.Fatalf("failed to connect to SSE endpoint: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
-		t.Fatalf("unexpected status: %d", resp.StatusCode)
-	}
-
-	return &sseTestClient{
-		resp:    resp,
-		scanner: bufio.NewScanner(resp.Body),
-	}
-}
-
 // connectSSEWithQuery connects with a query string (e.g. "?since=12345").
 func connectSSEWithQuery(t *testing.T, serverURL, query string, headers map[string]string) *sseTestClient {
 	t.Helper()
