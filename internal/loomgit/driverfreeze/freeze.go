@@ -93,13 +93,9 @@ func FreezeCaptureAt(ctx context.Context, journalPath string, in CaptureRequest)
 	}
 	var revision loomgit.Revision
 	err = agentcapture.WithTaskCopyLease(ctx, journalPath, sourceForFreeze(in.SourceRepo, in.Worktree), in.Worktree, func(ctx context.Context) error {
-		captureSHA := in.CaptureSHA
-		if captureSHA == "" {
-			head, err := runner.Run(ctx, "rev-parse", "HEAD")
-			if err != nil {
-				return err
-			}
-			captureSHA = strings.TrimSpace(string(head))
+		captureSHA, err := captureSHAForRequest(ctx, runner, in.CaptureSHA)
+		if err != nil {
+			return err
 		}
 		change, err := changeForTask(ctx, store, in.Workspace, in.Task, in.Repo)
 		if err != nil {
@@ -129,6 +125,14 @@ func FreezeCaptureAt(ctx context.Context, journalPath string, in CaptureRequest)
 			Attempt: in.Attempt, Path: in.Worktree, SourceRepo: in.SourceRepo, Complete: in.Complete})
 	})
 	return revision, err
+}
+
+func captureSHAForRequest(ctx context.Context, runner *gitexec.Runner, captureSHA string) (string, error) {
+	if captureSHA != "" {
+		return captureSHA, nil
+	}
+	head, err := runner.Run(ctx, "rev-parse", "HEAD")
+	return strings.TrimSpace(string(head)), err
 }
 
 func terminalOutcome(outcome string) bool {

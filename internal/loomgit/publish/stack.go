@@ -32,12 +32,8 @@ func publishStack(ctx context.Context, store Store, request StackRequest) ([]loo
 	if request.StackID == "" || len(request.Changes) == 0 {
 		return nil, errors.New("stack ID and changes are required")
 	}
-	mode, err := store.DeliveryMode(ctx, request.Workspace)
-	if err != nil {
+	if err := requireStackMode(ctx, store, request.Workspace); err != nil {
 		return nil, err
-	}
-	if mode != "stack" {
-		return nil, loomgit.NewError(loomgit.ModeMismatch, "stack publication requires stack delivery mode", nil)
 	}
 	runner, err := gitexec.New(request.Repo, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
 	if err != nil {
