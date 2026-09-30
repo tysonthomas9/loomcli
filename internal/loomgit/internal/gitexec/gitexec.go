@@ -311,10 +311,27 @@ func (w *cappedWriter) Write(p []byte) (int, error) {
 
 // Run returns stdout. On failure stderr and command arguments are redacted.
 func (r *Runner) Run(ctx context.Context, args ...string) ([]byte, error) {
-	return r.run(ctx, nil, args...)
+	return r.runWithEnv(ctx, nil, nil, args...)
 }
 
 func (r *Runner) run(ctx context.Context, input io.Reader, args ...string) ([]byte, error) {
+	return r.runWithEnv(ctx, input, nil, args...)
+}
+
+// RunWithEnv permits only the Git variables needed for an isolated index and
+// preserving commit authors during source-revision freezing.
+func (r *Runner) RunWithEnv(ctx context.Context, env map[string]string, args ...string) ([]byte, error) {
+	for key := range env {
+		switch key {
+		case "GIT_INDEX_FILE", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE":
+		default:
+			return nil, ErrForbidden
+		}
+	}
+	return r.runWithEnv(ctx, nil, env, args...)
+}
+
+func (r *Runner) runWithEnv(ctx context.Context, input io.Reader, env map[string]string, args ...string) ([]byte, error) {
 	if forbidden(args) {
 		return nil, ErrForbidden
 	}
@@ -334,6 +351,9 @@ func (r *Runner) run(ctx context.Context, input io.Reader, args ...string) ([]by
 	cmd := exec.CommandContext(ctx, "git", argv...) //nolint:gosec // Git argv is screened above; no shell.
 	cmd.Dir = r.dir
 	cmd.Env = cleanEnv(os.Environ())
+	for key, value := range env {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
 	cmd.Stdin = input
 	out, stderr := &cappedWriter{max: r.cap}, &cappedWriter{max: r.cap}
 	cmd.Stdout, cmd.Stderr = out, stderr
