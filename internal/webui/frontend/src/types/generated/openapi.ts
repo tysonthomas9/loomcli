@@ -1675,6 +1675,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/issues/{id}/revisions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List reviewable revisions for a task */
+    get: operations["listTaskRevisions"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Record a verdict for an exact revision head */
+    post: operations["submitRevisionVerdict"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/files/stat": {
     parameters: {
       query?: never;
@@ -3111,6 +3145,14 @@ export interface components {
       name: string;
       role: string;
       status: string;
+    };
+    ReviewRevision: {
+      change_id: string;
+      number: number;
+      head_sha: string;
+      outcome: string;
+      incomplete: boolean;
+      verdict?: string;
     };
     /** @description Session audit record from dto.SessionResponse */
     SessionResponse: {
@@ -7266,6 +7308,72 @@ export interface operations {
     requestBody?: never;
     responses: {
       /** @description File diff */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": Record<string, never>;
+        };
+      };
+    };
+  };
+  listTaskRevisions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Revisions with current verdicts */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data: components["schemas"]["ReviewRevision"][];
+          };
+        };
+      };
+    };
+  };
+  submitRevisionVerdict: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        change: string;
+        r: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          head_sha: string;
+          /** @enum {string} */
+          verdict: "approve" | "reject" | "override";
+          reason?: string;
+          actor: {
+            /** @enum {string} */
+            kind: "human" | "agent" | "lead";
+            id: string;
+          };
+        };
+      };
+    };
+    responses: {
+      /** @description Recorded SHA-bound verdict */
       200: {
         headers: {
           [name: string]: unknown;

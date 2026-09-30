@@ -52,6 +52,15 @@ type Revision struct {
 	Incomplete                   bool
 }
 
+// Verdict is an immutable decision about one exact revision head.
+type Verdict struct {
+	ID                                        int64
+	Workspace, Change                         string
+	Number                                    int
+	HeadSHA, Kind, ActorKind, ActorID, Reason string
+	SourceVerdictID                           int64
+}
+
 // WorkspaceRepo records the trunk independently of the lead's working branch.
 type WorkspaceRepo struct {
 	Workspace, Repo, Trunk, WorkspaceBranch string

@@ -128,9 +128,15 @@ if [ "$IS_EXEC" = "true" ] && [ "$IS_JSON" = "true" ]; then
         exit "$EXIT_CODE"
     fi
 
-    # Non-interactive JSON mode: read prompt from stdin
+    # AFT review fixture: emit a real task-run patch when the task design asks.
     if [ ! -t 0 ]; then
-        cat > /dev/null
+        prompt="$(cat)"
+        if [[ "$prompt" =~ STUB_CODEX_PATCH=([a-zA-Z0-9._/-]+) ]]; then
+            write_path="${BASH_REMATCH[1]}"
+            validate_relative_path "$write_path"
+            mkdir -p "$(dirname "$write_path")"
+            printf 'task=%s run=%s\n' "${LOOM_TASK_ID:-}" "${LOOM_TASK_RUN_ID:-}" > "$write_path"
+        fi
     fi
 
     jq -nc --arg o "$RESPONSE" '{"status":"completed","output":$o}'

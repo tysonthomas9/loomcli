@@ -288,7 +288,7 @@ func builtinVerb(verb string) bool {
 		"describe", "diff", "diff-tree", "fetch", "for-each-ref", "fsck", "grep",
 		"hash-object", "init", "log", "ls-files", "ls-remote", "ls-tree", "merge",
 		"merge-base", "merge-tree", "mktree", "mv", "notes", "pull", "push",
-		"range-diff", "read-tree", "rebase", "reflog", "remote", "reset", "restore", "rev-list",
+		"patch-id", "range-diff", "read-tree", "rebase", "reflog", "remote", "reset", "restore", "rev-list",
 		"rev-parse", "revert", "rm", "show", "show-ref", "status", "submodule",
 		"symbolic-ref", "tag", "update-index", "update-ref", "verify-commit",
 		"version", "worktree", "write-tree", "receive-pack", "index-pack":

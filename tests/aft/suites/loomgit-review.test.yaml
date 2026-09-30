@@ -1,0 +1,79 @@
+# A real TaskRun produces the revision; the deterministic Codex CLI fixture only
+# supplies the agent's file edit. The verdict is recorded through the mounted UI.
+suite: loomgit-review
+classification: { area: reviews, feature: revision-review, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: >-
+  d="$AFT_WORK_DIR/review-repo";
+  mkdir -p "$d"; git -C "$d" init -q -b main;
+  git -C "$d" -c user.email=e2e@x -c user.name=e2e commit --allow-empty -m init -q;
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces"
+  -H "Content-Type: application/json"
+  -d "{\"name\":\"e2e-ws-review\",\"type\":\"empty\",\"repos\":[\"$d\"]}"
+  >/dev/null
+teardown: >-
+  AFT_WS=E2E-WS-REVIEW "$AFT_TESTS_DIR/scripts/close-open-issues.sh";
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW" >/dev/null || true
+
+tests:
+  - name: operator approves a real task revision from the task detail panel
+    intent: An agent edits a task repo through a TaskRun, then an operator approves the recorded head SHA in the Revisions section
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-REVIEW/issues"
+          body:
+            title: "review epic $RUN_ID"
+            issue_type: "epic"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "reviewEpicId"
+        intent: "An orchestration client creates the review epic"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-REVIEW/issues"
+          body:
+            title: "review task $RUN_ID"
+            issue_type: "task"
+            priority: 2
+            parent: "${var:reviewEpicId}"
+            design: "STUB_CODEX_PATCH=review-output.txt"
+          save:
+            - from: "data.id"
+              as: "reviewTaskId"
+        intent: "An orchestration client creates a designed task whose deterministic backend edits its real task copy"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-REVIEW/workflows/epic-runner"
+          body:
+            epicId: "${var:reviewEpicId}"
+            runner: "local-task-runner"
+        intent: "An orchestration client starts the real local TaskRun workflow"
+      - run: >-
+          task="$(cat "$AFT_WORK_DIR/reviewTaskId")";
+          for i in $(seq 1 45); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/issues/$task/revisions" | grep -q '"head_sha"' && exit 0;
+            sleep 2;
+          done;
+          echo "TaskRun did not record a revision"; exit 1
+        intent: "Wait until the TaskRun records a reviewable revision through the product path"
+      - open: /ws/E2E-WS-REVIEW/kanban
+        intent: "Load the new workspace before following a task deep link"
+      - wait:
+          fn: "!!document.querySelector('[data-testid=board-toolbar]')"
+        intent: "Wait until the workspace board has finished mounting"
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-REVIEW/issues/$(cat "$AFT_WORK_DIR/reviewTaskId")"
+        intent: "Open the recorded task through the same browser session using its runtime ID"
+      - wait: { text: Revisions }
+      - expect: { visible: { testid: revisions-section } }
+      - click: { role: button, name: Approve, exact: true }
+      - api:
+          method: "GET"
+          path: "/api/workspaces/E2E-WS-REVIEW/issues/${var:reviewTaskId}/revisions"
+          assert:
+            - path: "data.0.verdict"
+              equals: "approve"
+        intent: "An operator confirms that the UI action persisted approval for the recorded revision"

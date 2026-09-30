@@ -1,0 +1,23 @@
+.section {
+  margin-block: 1rem;
+}
+.revision {
+  border-top: 1px solid var(--border-color, #ddd);
+  padding-block: 0.75rem;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.override {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.override input {
+  min-width: 12rem;
+}

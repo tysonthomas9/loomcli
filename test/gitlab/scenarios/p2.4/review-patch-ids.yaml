@@ -1,0 +1,8 @@
+name: review verdict carries through clean patch-equivalent replay
+task: P2.4
+git: [min, latest]
+fixture: loomcli
+when:
+  - go_check: review_patch_ids
+then:
+  - go_check: no_error
