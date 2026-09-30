@@ -83,17 +83,7 @@ func (s *SQLite) FinishRevision(ctx context.Context, r loomgit.Revision) error {
 		}
 		return ErrStale
 	}
-	payload, err := json.Marshal(struct {
-		Workspace string `json:"workspace"`
-		ChangeID  string `json:"change_id"`
-		Revision  int    `json:"revision"`
-		HeadSHA   string `json:"head_sha"`
-		Kind      string `json:"kind"`
-	}{r.Workspace, r.Change, r.Number, r.HeadSHA, r.Kind})
-	if err != nil {
-		return err
-	}
-	if err := queueEvent(ctx, tx, "revision-event:"+r.RequestID, "git.revision_created", payload); err != nil {
+	if err := queueRevisionEvent(ctx, tx, r); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE feedback_requests SET revision = ?
@@ -109,6 +99,20 @@ func (s *SQLite) FinishRevision(ctx context.Context, r loomgit.Revision) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+func queueRevisionEvent(ctx context.Context, tx *sql.Tx, revision loomgit.Revision) error {
+	payload, err := json.Marshal(struct {
+		Workspace string `json:"workspace"`
+		ChangeID  string `json:"change_id"`
+		Revision  int    `json:"revision"`
+		HeadSHA   string `json:"head_sha"`
+		Kind      string `json:"kind"`
+	}{revision.Workspace, revision.Change, revision.Number, revision.HeadSHA, revision.Kind})
+	if err != nil {
+		return err
+	}
+	return queueEvent(ctx, tx, "revision-event:"+revision.RequestID, "git.revision_created", payload)
 }
 
 func (s *SQLite) GetRevision(ctx context.Context, workspace, change string, number int) (loomgit.Revision, error) {
