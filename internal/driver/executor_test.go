@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
+
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -405,6 +407,14 @@ func TestNodeRunnerCancellationPropagatesToBuiltFlueServer(t *testing.T) {
 	}
 	startedPath := filepath.Join(root, "started")
 	cancelledPath := filepath.Join(root, "cancelled")
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatalf("watch cancellation events: %v", err)
+	}
+	defer watcher.Close()
+	if err := watcher.Add(root); err != nil {
+		t.Fatalf("watch test directory: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(dist, "server.mjs"), []byte(`
 import fs from 'node:fs';
 
@@ -412,8 +422,10 @@ const startedPath = `+strconv.Quote(startedPath)+`;
 const cancelledPath = `+strconv.Quote(cancelledPath)+`;
 
 function recordCancelled(signal) {
-  fs.writeFileSync(cancelledPath, signal);
-  process.exit(0);
+  setTimeout(() => {
+    fs.writeFileSync(cancelledPath, signal);
+    process.exit(0);
+  }, 100);
 }
 
 process.once('SIGINT', () => recordCancelled('SIGINT'));
@@ -430,10 +442,12 @@ if (process.send) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	done := make(chan struct {
 		result RunResult
 		err    error
 	}, 1)
+	runnerDone := make(chan struct{})
 	go func() {
 		result, err := (NodeRunner{}).Run(ctx, RunRequest{
 			Run: &domain.DriverRun{
@@ -455,9 +469,11 @@ if (process.send) {
 			result RunResult
 			err    error
 		}{result: result, err: err}
+		close(runnerDone)
 	}()
-	waitForFile(t, startedPath)
+	waitForFileEvent(t, watcher, startedPath, nil)
 	cancel()
+	waitForFileEvent(t, watcher, cancelledPath, runnerDone)
 	select {
 	case out := <-done:
 		if out.err != nil {
@@ -474,7 +490,6 @@ if (process.send) {
 		// exactly its own deadline while the code behaved correctly.
 		t.Fatal("NodeRunner.Run did not return after cancellation")
 	}
-	waitForFile(t, cancelledPath)
 }
 
 func TestNodeRunnerBuiltFlueServerReceivesNoFleetDBHandoff(t *testing.T) {
@@ -549,19 +564,30 @@ if (process.send) {
 	}
 }
 
-func waitForFile(t *testing.T, path string) {
+func waitForFileEvent(t *testing.T, watcher *fsnotify.Watcher, path string, runnerDone <-chan struct{}) {
 	t.Helper()
-	// The sentinel is written by a real child process (node) reacting to
-	// signals; loaded CI runners under -race have blown a 5s deadline.
-	// Healthy runs still return within milliseconds.
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
+	deadline := time.NewTimer(30 * time.Second)
+	defer deadline.Stop()
+	for {
 		if _, err := os.Stat(path); err == nil {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case event := <-watcher.Events:
+			if event.Name == path && event.Has(fsnotify.Create) {
+				return
+			}
+		case err := <-watcher.Errors:
+			t.Fatalf("watch %s: %v", path, err)
+		case <-runnerDone:
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("runner returned before child wrote %s: %v", path, err)
+			}
+			return
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for %s", path)
+		}
 	}
-	t.Fatalf("timed out waiting for %s", path)
 }
 
 func writeExecutable(t *testing.T, dir, name, content string) string {

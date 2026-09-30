@@ -262,6 +262,7 @@ if (!serverPath || !workflowName) {
 
 let completed = false;
 let invoked = false;
+let cancellationSignal = null;
 const child = fork(serverPath, [], {
   cwd: bundleRoot,
   env: {
@@ -346,6 +347,7 @@ child.on('error', (error) => {
 function shutdown(signal) {
   if (completed) return;
   completed = true;
+  cancellationSignal = signal;
   try { child.kill(signal); } catch {}
   setTimeout(() => {
     try { child.kill('SIGKILL'); } catch {}
@@ -355,13 +357,15 @@ function shutdown(signal) {
     summary: 'Flue local runner cancelled',
     errorClass: 'driver_cancelled',
   }));
-  process.exit(signal === 'SIGINT' ? 130 : 143);
 }
 
 process.once('SIGINT', () => shutdown('SIGINT'));
 process.once('SIGTERM', () => shutdown('SIGTERM'));
 
 child.on('exit', (code, signal) => {
+  if (cancellationSignal) {
+    process.exit(cancellationSignal === 'SIGINT' ? 130 : 143);
+  }
   if (completed) return;
   finish({
     status: 'failed',

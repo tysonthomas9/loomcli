@@ -97,7 +97,7 @@ func TestCachedValue_ConcurrentCoalescing(t *testing.T) {
 
 func TestCachedValue_ExpiryAfterCoalescing(t *testing.T) {
 	var calls atomic.Int32
-	c := newCachedValue[*MonitorData](10*time.Millisecond, func() *MonitorData {
+	c := newCachedValue[*MonitorData](time.Hour, func() *MonitorData {
 		calls.Add(1)
 		return &MonitorData{Timestamp: time.Now()}
 	})
@@ -117,8 +117,11 @@ func TestCachedValue_ExpiryAfterCoalescing(t *testing.T) {
 		t.Fatalf("expected 1 call from first batch, got %d", calls.Load())
 	}
 
-	// Wait for TTL to expire
-	time.Sleep(20 * time.Millisecond)
+	// Expire the first result without letting scheduler delays split the
+	// concurrent batch across a short TTL.
+	c.mu.Lock()
+	c.cachedAt = time.Now().Add(-2 * time.Hour)
+	c.mu.Unlock()
 
 	// Second call triggers new collection
 	c.get()
