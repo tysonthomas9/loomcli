@@ -305,11 +305,6 @@ func normalizeRepoName(name string) string {
 	return out
 }
 
-// cloneRepos clones each URL into the workspace directory, deduplicating names.
-func cloneRepos(ctx context.Context, cloneURLs []string, wsDir string) ([]config.RepoConfig, error) {
-	return cloneReposWithSeen(ctx, cloneURLs, wsDir, make(map[string]bool))
-}
-
 func cloneReposWithSeen(ctx context.Context, cloneURLs []string, wsDir string, seenNames map[string]bool) ([]config.RepoConfig, error) {
 	var repos []config.RepoConfig
 	if seenNames == nil {

@@ -23,7 +23,6 @@ import (
 var (
 	agentBusOnce sync.Once
 	agentBus     *events.Bus
-	agentBusErr  error
 )
 
 // AgentEventBus returns a process-wide events.Bus subscribed to the OTel
@@ -50,7 +49,6 @@ func initAgentEventBus() {
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		slog.Warn("agent-events: mkdir failed (events disabled)", "dir", dir, "err", err)
-		agentBusErr = err
 		return
 	}
 
@@ -103,6 +101,5 @@ func TestingResetAgentEventBus() {
 		_ = agentBus.Close()
 	}
 	agentBus = nil
-	agentBusErr = nil
 	agentBusOnce = sync.Once{}
 }

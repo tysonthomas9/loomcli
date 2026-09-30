@@ -46,12 +46,6 @@ type runtimeInfo struct {
 	Error            string    `json:"error,omitempty"`
 }
 
-type runtimeStatus struct {
-	Runtime *runtimeInfo `json:"runtime,omitempty"`
-	Healthy bool         `json:"healthy"`
-	Error   string       `json:"error,omitempty"`
-}
-
 // RuntimeSnapshot is the exported, JSON-stable view of the local runtime
 // state used by higher-level workspace diagnostics.
 type RuntimeSnapshot struct {

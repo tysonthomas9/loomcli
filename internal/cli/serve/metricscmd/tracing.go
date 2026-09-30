@@ -5,7 +5,6 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -27,14 +26,4 @@ func startSpan(ctx context.Context, name string, attrs ...attribute.KeyValue) (c
 		trace.WithSpanKind(trace.SpanKindInternal),
 		trace.WithAttributes(attrs...),
 	)
-}
-
-// recordErr maps an error to the span and applies the contract's
-// low-cardinality status convention. nil is a no-op.
-func recordErr(span trace.Span, err error) {
-	if err == nil {
-		return
-	}
-	span.RecordError(err)
-	span.SetStatus(codes.Error, "error")
 }
