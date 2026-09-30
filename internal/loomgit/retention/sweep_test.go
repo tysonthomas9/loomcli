@@ -112,6 +112,7 @@ func TestCloneRefsCapturedRejectsExtraLocalCommit(t *testing.T) {
 func TestSweepRemovesFullyFrozenCloneAfterCaptureLease(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(root, "config"))
 	source, copyPath, journalPath := filepath.Join(root, "source"), filepath.Join(root, "A"), filepath.Join(root, "store.db")
 	options := gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Test", Email: "test@example.com"}}
 	rootRunner, err := gitexec.New(root, options)
@@ -235,6 +236,50 @@ func TestSweepRemovesFullyFrozenCloneAfterCaptureLease(t *testing.T) {
 	}
 	sourceRepo, err := pool.New(store).Admit(ctx, source)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cli.AcquireLock(copyPath, "capture", "loom"); err != nil {
+		t.Fatal(err)
+	}
+	freezeSourceReady := make(chan struct{})
+	freezeSourceRelease := make(chan struct{})
+	freezeSourceDone := make(chan error, 1)
+	go func() {
+		freezeSourceDone <- sourceRepo.WithLock(ctx, func(context.Context) error {
+			close(freezeSourceReady)
+			<-freezeSourceRelease
+			return nil
+		})
+	}()
+	<-freezeSourceReady
+	freezeStarted := make(chan struct{})
+	freezeDone := make(chan error, 1)
+	go func() {
+		close(freezeStarted)
+		_, freezeErr := driverfreeze.FreezeCaptureAt(ctx, journalPath, driverfreeze.CaptureRequest{
+			Workspace: "W", Task: "T", Repo: "source", Attempt: "A", Worktree: copyPath,
+			Base: base, CaptureSHA: captured.SHA, Outcome: "cancelled", Complete: true, SourceRepo: source,
+		})
+		freezeDone <- freezeErr
+	}()
+	<-freezeStarted
+	select {
+	case freezeErr := <-freezeDone:
+		t.Fatalf("freeze bypassed source lease: %v", freezeErr)
+	case <-time.After(100 * time.Millisecond):
+	}
+	results, err = sweep.Run(ctx, true)
+	if err != nil || len(results) != 1 || results[0].Action != "keep" || results[0].Reason != "agent lock held" {
+		t.Fatalf("sweep raced active freeze: %+v, %v", results, err)
+	}
+	close(freezeSourceRelease)
+	if err := <-freezeSourceDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-freezeDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := cli.ReleaseLock(copyPath); err != nil {
 		t.Fatal(err)
 	}
 	leaseStarted := make(chan struct{})

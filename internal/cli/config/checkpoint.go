@@ -17,6 +17,10 @@ type Checkpoint struct {
 	TaskID      string    `json:"task_id"`
 	EpicID      string    `json:"epic_id,omitempty"`
 	CaptureRef  string    `json:"capture_ref,omitempty"`
+	FreezeBase  string    `json:"freeze_base,omitempty"`
+	FreezeID    string    `json:"freeze_id,omitempty"`
+	FreezeRepo  string    `json:"freeze_repo,omitempty"`
+	FreezeState string    `json:"freeze_state,omitempty"`
 	Retained    bool      `json:"retained,omitempty"`
 	ExitCode    int       `json:"exit_code"`
 	ErrorClass  string    `json:"error_class,omitempty"`

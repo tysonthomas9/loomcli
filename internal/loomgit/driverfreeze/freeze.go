@@ -37,12 +37,42 @@ type CaptureRequest struct {
 	RequestID                      string
 	Outcome                        string
 	Complete                       bool
+	SkipRetention                  bool
 }
 
-// FreezeCapture records a host capture after cancellation, including a
-// partial capture. The caller retains the task copy for recovery.
+// FreezeCapture records a host capture as a source revision. The caller retains
+// the worktree for recovery.
 func FreezeCapture(ctx context.Context, in CaptureRequest) (loomgit.Revision, error) {
 	return FreezeCaptureAt(ctx, filepath.Join(config.GetConfigDir(), "loomgit", "store.db"), in)
+}
+
+func CaptureAlreadyFrozen(ctx context.Context, workspace, task, repo, attempt string) (bool, error) {
+	path := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	store, err := journal.OpenSQLite(path)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = store.Close() }()
+	change, err := changeForTask(ctx, store, workspace, task, repo)
+	if err != nil {
+		return false, err
+	}
+	revision, err := store.RevisionByRequest(ctx, "driver:"+attempt)
+	if errors.Is(err, journal.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if revision.Workspace != workspace || revision.Change != change {
+		return false, fmt.Errorf("attempt %q belongs to another task", attempt)
+	}
+	return revision.Ready, nil
 }
 
 func FreezeCaptureAt(ctx context.Context, journalPath string, in CaptureRequest) (loomgit.Revision, error) {
@@ -91,6 +121,9 @@ func FreezeCaptureAt(ctx context.Context, journalPath string, in CaptureRequest)
 			if err := taskcopy.ImportSnapshotUnderLease(ctx, journalPath, in.SourceRepo, in.Worktree, in.Workspace, in.Attempt, revision.Change, revision.Number); err != nil {
 				return err
 			}
+		}
+		if in.SkipRetention {
+			return nil
 		}
 		return store.RecordRetainedCopy(ctx, journal.RetainedCopy{Workspace: in.Workspace, Change: revision.Change,
 			Attempt: in.Attempt, Path: in.Worktree, SourceRepo: in.SourceRepo, Complete: in.Complete})
