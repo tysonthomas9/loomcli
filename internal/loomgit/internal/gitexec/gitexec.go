@@ -40,6 +40,7 @@ type Options struct {
 	FallbackIdentity Identity // Used only when the user has no complete Git identity.
 	Timeout          time.Duration
 	OutputCap        int
+	ReadOnly         bool // Restrict the runner to Git reads; no identity is required.
 }
 
 type Runner struct {
@@ -48,6 +49,7 @@ type Runner struct {
 	config   []string
 	timeout  time.Duration
 	cap      int
+	readOnly bool
 }
 
 type CommandError struct {
@@ -80,7 +82,7 @@ func New(dir string, opts Options) (*Runner, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &Runner{dir: dir, timeout: opts.Timeout, cap: opts.OutputCap}
+	r := &Runner{dir: dir, timeout: opts.Timeout, cap: opts.OutputCap, readOnly: opts.ReadOnly}
 	if r.timeout <= 0 {
 		r.timeout = defaultTimeout
 	}
@@ -105,7 +107,7 @@ func New(dir string, opts Options) (*Runner, error) {
 	if r.identity.Name == "" || r.identity.Email == "" {
 		r.identity = opts.FallbackIdentity
 	}
-	if r.identity.Name == "" || r.identity.Email == "" {
+	if !r.readOnly && (r.identity.Name == "" || r.identity.Email == "") {
 		return nil, errors.New("git user.name and user.email are required")
 	}
 	return r, nil
@@ -285,7 +287,7 @@ func builtinVerb(verb string) bool {
 		"describe", "diff", "diff-tree", "fetch", "for-each-ref", "fsck", "grep",
 		"hash-object", "init", "log", "ls-files", "ls-remote", "ls-tree", "merge",
 		"merge-base", "merge-tree", "mktree", "mv", "notes", "pull", "push",
-		"read-tree", "rebase", "reflog", "remote", "reset", "restore", "rev-list",
+		"range-diff", "read-tree", "rebase", "reflog", "remote", "reset", "restore", "rev-list",
 		"rev-parse", "revert", "rm", "show", "show-ref", "status", "submodule",
 		"symbolic-ref", "tag", "update-index", "update-ref", "verify-commit",
 		"version", "worktree", "write-tree":
@@ -388,6 +390,9 @@ func (r *Runner) RunWithEnv(ctx context.Context, env map[string]string, args ...
 
 func (r *Runner) runWithEnv(ctx context.Context, input io.Reader, env map[string]string, args ...string) ([]byte, error) {
 	if forbidden(args) {
+		return nil, ErrForbidden
+	}
+	if r.readOnly && (len(args) == 0 || (args[0] != "diff" && args[0] != "range-diff" && args[0] != "rev-parse" && !(len(args) == 3 && args[0] == "cat-file" && args[1] == "-s"))) {
 		return nil, ErrForbidden
 	}
 	ctx, cancel := context.WithTimeout(ctx, r.timeout)

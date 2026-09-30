@@ -6,7 +6,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
-// Module registers the 13 workspace-scoped git operation and diff routes
+// Module registers workspace-scoped git operation and diff routes
 // on a [*http.ServeMux].
 //
 // The module is only constructed when ops.GitOps is non-nil. All routes are
@@ -25,7 +25,7 @@ func NewModule(agentSvc service.AgentService, diffSvc service.DiffService) *Modu
 	}
 }
 
-// Register implements [Module] by registering 13 git and diff routes.
+// Register implements [Module] by registering git and diff routes.
 func (m *Module) Register(mux *http.ServeMux) {
 	// Git operations (agent-scoped)
 	mux.HandleFunc("POST /api/workspaces/{ws}/git/push-all", HandleGitPushAll(m.agentSvc))
@@ -45,4 +45,6 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/diff/commits", HandleDiffCommits(m.diffSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/diff/files", HandleDiffFiles(m.diffSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/diff/file", HandleDiffFile(m.diffSvc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/changes/{change}/revisions/{r}/diff", HandleRevisionDiff(false))
+	mux.HandleFunc("GET /api/workspaces/{ws}/changes/{change}/revisions/{r}/interdiff", HandleRevisionDiff(true))
 }

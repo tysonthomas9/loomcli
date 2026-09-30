@@ -1,0 +1,8 @@
+name: revision diff includes Snapshot work, preserves oversized files, and rejects missing bases
+task: P2.2
+git: [min, latest]
+fixture: loomcli
+when:
+  - go_check: revision_diff
+then:
+  - go_check: no_error

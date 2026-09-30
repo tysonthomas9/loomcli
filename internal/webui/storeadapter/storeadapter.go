@@ -260,6 +260,11 @@ func resolveRepoPath(wsKey, repoName string) string {
 	return ""
 }
 
+// ResolveRepoPath returns the local checkout recorded for a workspace repo.
+func ResolveRepoPath(wsKey, repoName string) string {
+	return resolveRepoPath(wsKey, repoName)
+}
+
 // DefaultWorkspaceKey is retained for compatibility with older callers.
 // Default workspace selection has been removed, so it always returns empty.
 func DefaultWorkspaceKey() string {
