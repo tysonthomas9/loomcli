@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
 )
@@ -80,7 +81,7 @@ func lines(data []byte) []string {
 	return parts
 }
 
-func git(ctx context.Context, runner *gitexec.Runner, args ...string) (string, error) {
+func git(ctx context.Context, runner loomgit.RepoStore, args ...string) (string, error) {
 	out, err := runner.Run(ctx, args...)
 	return strings.TrimSpace(string(out)), err
 }
@@ -139,7 +140,7 @@ func classifyPath(repo, path string, total int64, tracked, ignored bool) (Entry,
 	return entry, false
 }
 
-func stagePaths(ctx context.Context, runner *gitexec.Runner, env map[string]string, paths []string) error {
+func stagePaths(ctx context.Context, runner loomgit.RepoStore, env map[string]string, paths []string) error {
 	if len(paths) == 0 {
 		return nil
 	}
@@ -161,7 +162,7 @@ func stagePaths(ctx context.Context, runner *gitexec.Runner, env map[string]stri
 	return err
 }
 
-func saveManifest(ctx context.Context, runner *gitexec.Runner, repo string, manifest Manifest) (string, error) {
+func saveManifest(ctx context.Context, runner loomgit.RepoStore, repo string, manifest Manifest) (string, error) {
 	gitPath, err := git(ctx, runner, "rev-parse", "--git-path", "loom/capture")
 	if err != nil {
 		return "", err
@@ -195,7 +196,7 @@ func recordIgnored(manifest *Manifest, repo string, paths []string, seen map[str
 	}
 }
 
-func collectWorkingPaths(ctx context.Context, runner *gitexec.Runner) ([][]string, error) {
+func collectWorkingPaths(ctx context.Context, runner loomgit.RepoStore) ([][]string, error) {
 	commands := [][]string{
 		{"ls-tree", "-r", "--name-only", "-z", "HEAD"},
 		{"diff", "--no-renames", "--name-only", "-z", "HEAD"},
@@ -214,7 +215,7 @@ func collectWorkingPaths(ctx context.Context, runner *gitexec.Runner) ([][]strin
 	return paths, nil
 }
 
-func scanWorkingTree(ctx context.Context, runner *gitexec.Runner, repo string, env map[string]string, manifest *Manifest) error {
+func scanWorkingTree(ctx context.Context, runner loomgit.RepoStore, repo string, env map[string]string, manifest *Manifest) error {
 	paths, err := collectWorkingPaths(ctx, runner)
 	if err != nil {
 		return err
@@ -263,7 +264,7 @@ func scanWorkingTree(ctx context.Context, runner *gitexec.Runner, repo string, e
 	return nil
 }
 
-func advanceCaptureRef(ctx context.Context, runner *gitexec.Runner, repo, ref, next, head string) error {
+func advanceCaptureRef(ctx context.Context, runner loomgit.RepoStore, repo, ref, next, head string) error {
 	expected := strings.Repeat("0", len(head))
 	exists, err := gitexec.RefExists(repo, ref)
 	if err != nil {
@@ -278,7 +279,7 @@ func advanceCaptureRef(ctx context.Context, runner *gitexec.Runner, repo, ref, n
 	return runner.UpdateRef(ctx, ref, next, expected)
 }
 
-func captureCommit(ctx context.Context, runner *gitexec.Runner, head string, p Params, tree []byte) (string, error) {
+func captureCommit(ctx context.Context, runner loomgit.RepoStore, head string, p Params, tree []byte) (string, error) {
 	headTree, err := git(ctx, runner, "rev-parse", "HEAD^{tree}")
 	if err != nil {
 		return "", err
@@ -293,7 +294,7 @@ func captureCommit(ctx context.Context, runner *gitexec.Runner, head string, p P
 
 // Capture records the working tree against HEAD. Callers must hold the task
 // copy's repository lock while invoking it.
-func Capture(ctx context.Context, runner *gitexec.Runner, repo string, p Params) (Result, error) {
+func Capture(ctx context.Context, runner loomgit.RepoStore, repo string, p Params) (Result, error) {
 	var result Result
 	ref, err := refname.AttemptCapture(p.Workspace, p.Attempt)
 	if err != nil {
