@@ -47,7 +47,7 @@ func LocalDependents(ctx context.Context, workspace, change string) ([]Dependent
 
 type Options struct {
 	Dependents func(context.Context, string, string) ([]Dependent, error)
-	Restack    func(context.Context, journal.RestackOffer) (int, error)
+	Restack    func(context.Context, journal.RestackOffer, Forge) (int, error)
 }
 
 type Forge interface {
@@ -136,7 +136,7 @@ func ReconcileWithOptions(ctx context.Context, store Store, forge Forge, options
 		}
 	}
 	if options.Restack != nil {
-		return runRestacks(ctx, store, options.Restack)
+		return runRestacks(ctx, store, forge, options.Restack)
 	}
 	return nil
 }
@@ -273,13 +273,13 @@ func offerDependents(ctx context.Context, store Store, item fetchedPublication, 
 	return nil
 }
 
-func runRestacks(ctx context.Context, store Store, restack func(context.Context, journal.RestackOffer) (int, error)) error {
+func runRestacks(ctx context.Context, store Store, forge Forge, restack func(context.Context, journal.RestackOffer, Forge) (int, error)) error {
 	offers, err := store.OpenRestackOffers(ctx)
 	if err != nil {
 		return err
 	}
 	for _, offer := range offers {
-		derivedRevision, err := restack(ctx, offer)
+		derivedRevision, err := restack(ctx, offer, forge)
 		if err != nil {
 			return err
 		}

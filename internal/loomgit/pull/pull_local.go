@@ -26,6 +26,13 @@ func RestackLocal(ctx context.Context, path, baseSHA string, order []string, req
 	})
 }
 
+func AdoptRestackLocal(ctx context.Context, path, baseSHA string, order []string, heads map[string]string, requestID string) (PullResult, error) {
+	return withLocalService(ctx, path, func(service *Service, area journal.WorkingArea) (PullResult, error) {
+		return service.Restack(ctx, RestackRequest{Workspace: area.Workspace, Lead: area.Lead,
+			Repo: area.Repo, BaseSHA: baseSHA, Order: order, Heads: heads, RequestID: requestID})
+	})
+}
+
 func UnapplyLocal(ctx context.Context, path, change, requestID string) (PullResult, error) {
 	return withLocalService(ctx, path, func(service *Service, area journal.WorkingArea) (PullResult, error) {
 		return service.Restack(ctx, RestackRequest{Workspace: area.Workspace, Lead: area.Lead,

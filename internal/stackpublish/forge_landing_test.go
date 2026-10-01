@@ -15,7 +15,7 @@ func TestGitHubForgeLandingQueriesOwnedPRAndAssociation(t *testing.T) {
 		}
 		switch request.URL.Path {
 		case "/repos/owner/repo/pulls/42":
-			_, _ = fmt.Fprint(writer, `{"number":42,"state":"closed","merged_at":"2026-09-30T00:00:00Z","merge_commit_sha":"abc123","head":{"ref":"loom/ws/W/change/A"}}`)
+			_, _ = fmt.Fprint(writer, `{"number":42,"state":"closed","merged_at":"2026-09-30T00:00:00Z","merge_commit_sha":"abc123","head":{"ref":"loom/ws/W/change/A","sha":"head123"}}`)
 		case "/repos/owner/repo/commits/abc123/pulls":
 			_, _ = fmt.Fprint(writer, `[{"number":42,"state":"closed","merged_at":"2026-09-30T00:00:00Z"}]`)
 		default:
@@ -25,7 +25,7 @@ func TestGitHubForgeLandingQueriesOwnedPRAndAssociation(t *testing.T) {
 	defer server.Close()
 	forge := NewGitHubForge("token", server.Client(), server.URL)
 	pull, err := forge.PullByNumber(context.Background(), "owner", "repo", 42)
-	if err != nil || !pull.Merged || pull.MergeCommitSHA != "abc123" || pull.Head != "loom/ws/W/change/A" {
+	if err != nil || !pull.Merged || pull.MergeCommitSHA != "abc123" || pull.Head != "loom/ws/W/change/A" || pull.HeadSHA != "head123" {
 		t.Fatalf("owned PR = %+v, %v", pull, err)
 	}
 	associated, err := forge.PullsForCommit(context.Background(), "owner", "repo", "abc123")

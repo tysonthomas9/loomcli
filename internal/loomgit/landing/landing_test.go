@@ -136,7 +136,7 @@ func TestMergeRecordLandsWithoutTrailerAndOffersDependent(t *testing.T) {
 			t.Fatalf("dependent lookup = %s/%s", workspace, change)
 		}
 		return []Dependent{{Task: "task-B", Repo: "repo"}}, nil
-	}, Restack: func(_ context.Context, offer journal.RestackOffer) (int, error) {
+	}, Restack: func(_ context.Context, offer journal.RestackOffer, _ Forge) (int, error) {
 		restackCalls++
 		if offer.Change != "B" || offer.Revision != 1 || offer.TrunkSHA != merged {
 			t.Fatalf("restack offer = %+v", offer)
@@ -237,7 +237,7 @@ func TestRestackOfferSurvivesCallbackFailure(t *testing.T) {
 	fixture.forge.pull.MergeCommitSHA = fixture.initial
 	options := Options{Dependents: func(context.Context, string, string) ([]Dependent, error) {
 		return []Dependent{{Task: "task-B", Repo: "repo"}}, nil
-	}, Restack: func(context.Context, journal.RestackOffer) (int, error) {
+	}, Restack: func(context.Context, journal.RestackOffer, Forge) (int, error) {
 		return 0, errors.New("restack unavailable")
 	}}
 	if err := ReconcileWithOptions(ctx, fixture.store, fixture.forge, options); err == nil {
@@ -251,7 +251,7 @@ func TestRestackOfferSurvivesCallbackFailure(t *testing.T) {
 	if err != nil || len(open) != 1 {
 		t.Fatalf("pending restack offers = %+v, %v", open, err)
 	}
-	options.Restack = func(context.Context, journal.RestackOffer) (int, error) { return 2, nil }
+	options.Restack = func(context.Context, journal.RestackOffer, Forge) (int, error) { return 2, nil }
 	if err := ReconcileWithOptions(ctx, fixture.store, fixture.forge, options); err != nil {
 		t.Fatal(err)
 	}

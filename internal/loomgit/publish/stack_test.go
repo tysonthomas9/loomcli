@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/landing"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/mirror"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
@@ -84,14 +85,17 @@ func TestPublishStackListsAllRevisionsNeedingApproval(t *testing.T) {
 	}
 }
 
-func stackRevision(t *testing.T, fixture fixture, change string, number int, parent string) loomgit.Revision {
+func stackRevision(t *testing.T, fixture fixture, change string, number int, parent string, changedPatch ...bool) loomgit.Revision {
 	t.Helper()
 	git(t, fixture.repo, "reset", "-q", "--hard", parent)
-	path := filepath.Join(fixture.repo, change)
-	if err := os.WriteFile(path, []byte(change+strconv.Itoa(number)), 0600); err != nil {
+	name, content := change, change+strconv.Itoa(number)
+	if len(changedPatch) > 0 && changedPatch[0] {
+		name, content = "file", "source\nbase\n"
+	}
+	if err := os.WriteFile(filepath.Join(fixture.repo, name), []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
-	git(t, fixture.repo, "add", change)
+	git(t, fixture.repo, "add", name)
 	git(t, fixture.repo, "commit", "-qm", change+" layer")
 	head := git(t, fixture.repo, "rev-parse", "HEAD")
 	ctx := context.Background()
@@ -543,6 +547,409 @@ func TestPublishStackRecordedCreatesNativeStackAfterLeasedPush(t *testing.T) {
 	}
 }
 
+func (f *fakeForge) PullByNumber(_ context.Context, _, _ string, number int) (stackpublish.PR, error) {
+	for _, pr := range f.prs {
+		if pr.Number == number {
+			return pr, nil
+		}
+	}
+	return stackpublish.PR{}, os.ErrNotExist
+}
+
+func (f *fakeForge) PullsForCommit(context.Context, string, string, string) ([]stackpublish.PR, error) {
+	return nil, nil
+}
+
+func landingStackFixture(t *testing.T, conflict bool, backend string, changedPatch ...bool) (fixture, *fakeForge, loomgit.Revision) {
+	fixture := newFixture(t)
+	ctx := context.Background()
+	first := stackRevision(t, fixture, "A", 1, fixture.base)
+	second := stackRevision(t, fixture, "B", 1, first.HeadSHA, changedPatch...)
+	git(t, fixture.repo, "branch", "-m", "loom/ws/W/interactive/L")
+	if err := fixture.store.SaveWorkingAreas(ctx, []journal.WorkingArea{{Workspace: "W", Lead: "L", Repo: "repo",
+		Path: fixture.repo, Branch: "loom/ws/W/interactive/L", BaseSHA: fixture.base, Mode: "worktree"}}); err != nil {
+		t.Fatal(err)
+	}
+	forge := &fakeForge{}
+	request := fixture.request()
+	request.forge = forge
+	if _, err := publishStack(ctx, fixture.store, StackRequest{Request: request, StackID: "feature-1", Changes: []string{"A", "B"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.RecordStackBackend(ctx, "W", "feature-1", backend); err != nil {
+		t.Fatal(err)
+	}
+	merged := squashLandingPredecessor(t, fixture, conflict, changedPatch...)
+	if err := fixture.store.MarkLanded(ctx, "W", "A", "merge_commit"); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.OfferRestack(ctx, journal.RestackOffer{Workspace: "W", Change: "B", Predecessor: "A",
+		Repo: "repo", Revision: second.Number, TrunkSHA: merged}); err != nil {
+		t.Fatal(err)
+	}
+	configDir := t.TempDir()
+	if err := os.Symlink(filepath.Join(filepath.Dir(fixture.repo), "loomgit"), filepath.Join(configDir, "loomgit")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	t.Setenv("GITHUB_TOKEN", "fixture-token")
+	if err := os.WriteFile(filepath.Join(fixture.repo, "unsaved.txt"), []byte("keep me"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return fixture, forge, second
+}
+
+func squashLandingPredecessor(t *testing.T, fixture fixture, conflict bool, changedPatch ...bool) string {
+	t.Helper()
+	trunk := filepath.Join(t.TempDir(), "trunk")
+	git(t, fixture.repo, "worktree", "add", "-q", "--detach", trunk, fixture.base)
+	if err := os.WriteFile(filepath.Join(trunk, "A"), []byte("squashed A"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, trunk, "add", "A")
+	if len(changedPatch) > 0 && changedPatch[0] {
+		if err := os.WriteFile(filepath.Join(trunk, "file"), []byte("base\ntrunk\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		git(t, trunk, "add", "file")
+	}
+	if conflict {
+		if err := os.WriteFile(filepath.Join(trunk, "B"), []byte("trunk B"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		git(t, trunk, "add", "B")
+	}
+	git(t, trunk, "commit", "-qm", "squash A")
+	merged := git(t, trunk, "rev-parse", "HEAD")
+	git(t, trunk, "push", "-q", "origin", "HEAD:refs/heads/develop")
+	return merged
+}
+
+func TestLandingReconcileRestacksPublishedStack(t *testing.T) {
+	fixture, forge, second := landingStackFixture(t, false, "loom")
+	ctx := context.Background()
+	if err := landing.RunAtWithOptions(ctx, filepath.Join(config.GetConfigDir(), "loomgit", "store.db"),
+		forge, "", landing.Options{Restack: RestackOffer}); err != nil {
+		t.Fatal(err)
+	}
+	restacked, err := fixture.store.SourceRevision(ctx, "W", "B")
+	if err != nil || restacked <= second.Number {
+		t.Fatalf("restacked revision = %d, %v", restacked, err)
+	}
+	derived, err := fixture.store.GetRevision(ctx, "W", "B", restacked)
+	if err != nil || derived.Operation != "restack" || derived.BaseSHA != git(t, fixture.remote, "rev-parse", "refs/heads/develop") {
+		t.Fatalf("derived revision = %+v, %v", derived, err)
+	}
+	publication, found, err := fixture.store.Publication(ctx, "W", "B")
+	if err != nil || !found || publication.Trunk != "develop" || publication.Head == second.HeadSHA {
+		t.Fatalf("restacked publication = %+v, %v", publication, err)
+	}
+	if got := git(t, fixture.remote, "rev-parse", "refs/heads/"+publication.Branch); got != publication.Head {
+		t.Fatalf("remote head = %s, want %s", got, publication.Head)
+	}
+	if forge.prs[1].Base != "develop" {
+		t.Fatalf("remaining PR base = %s", forge.prs[1].Base)
+	}
+	if contents, err := os.ReadFile(filepath.Join(fixture.repo, "unsaved.txt")); err != nil || string(contents) != "keep me" {
+		t.Fatalf("uncommitted file = %q, %v", contents, err)
+	}
+}
+
+func TestLandingReconcilePersistsRestackConflict(t *testing.T) {
+	fixture, forge, second := landingStackFixture(t, true, "loom")
+	ctx := context.Background()
+	refs := git(t, fixture.repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/loom")
+	before := git(t, fixture.repo, "rev-parse", "HEAD")
+	options := landing.Options{Restack: RestackOffer}
+	codeIs(t, landing.ReconcileWithOptions(ctx, fixture.store, forge, options), loomgit.RestackConflict)
+	if got := git(t, fixture.repo, "rev-parse", "HEAD"); got != before {
+		t.Fatalf("working area changed from %s to %s", before, got)
+	}
+	if got := git(t, fixture.repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/loom"); got != refs {
+		t.Fatal("conflicting restack changed Loom refs")
+	}
+	publication, _, err := fixture.store.Publication(ctx, "W", "B")
+	if err != nil || publication.Head != second.HeadSHA || git(t, fixture.remote, "rev-parse", "refs/heads/"+publication.Branch) != second.HeadSHA {
+		t.Fatalf("conflicting restack moved published B: %+v, %v", publication, err)
+	}
+	store, err := journal.OpenSQLite(filepath.Join(filepath.Dir(fixture.repo), "loomgit", "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	state, err := store.StackState(ctx, "W", "feature-1")
+	if err != nil || state.Status != "restack_conflict" || len(state.Paths) != 1 || state.Paths[0] != "B" {
+		t.Fatalf("durable stack state = %+v, %v", state, err)
+	}
+	codeIs(t, landing.ReconcileWithOptions(ctx, store, forge, options), loomgit.RestackConflict)
+	offers, err := store.OpenRestackOffers(ctx)
+	if err != nil || len(offers) != 1 {
+		t.Fatalf("retryable restack offers = %+v, %v", offers, err)
+	}
+	events, err := store.PendingEvents(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attention int
+	for _, event := range events {
+		if event.Kind == "git.attention_required" {
+			attention++
+			if !strings.Contains(string(event.Payload), "B") || !strings.Contains(string(event.Payload), "Resolve") {
+				t.Fatalf("attention payload = %s", event.Payload)
+			}
+		}
+	}
+	if attention != 1 {
+		t.Fatalf("attention events after retry = %d", attention)
+	}
+}
+
+func TestLandingReconcileSignalsChangedPatchForReviewOnce(t *testing.T) {
+	fixture, forge, second := landingStackFixture(t, false, "loom", true)
+	ctx := context.Background()
+	publication, found, err := fixture.store.Publication(ctx, "W", "B")
+	if err != nil || !found {
+		t.Fatal(err)
+	}
+	remoteBefore := git(t, fixture.remote, "rev-parse", "refs/heads/"+publication.Branch)
+	options := landing.Options{Restack: RestackOffer}
+	for range 2 {
+		codeIs(t, landing.RunAtWithOptions(ctx, filepath.Join(config.GetConfigDir(), "loomgit", "store.db"),
+			forge, "", options), loomgit.ReviewRequired)
+	}
+	revisionNumber, err := fixture.store.SourceRevision(ctx, "W", "B")
+	if err != nil || revisionNumber <= second.Number {
+		t.Fatalf("changed-patch revision = %d, %v", revisionNumber, err)
+	}
+	derived, err := fixture.store.GetRevision(ctx, "W", "B", revisionNumber)
+	if err != nil || derived.Operation != "restack" {
+		t.Fatalf("changed-patch derived revision = %+v, %v", derived, err)
+	}
+	codeIs(t, review.RequireVerdict(ctx, fixture.store, "W", "B", revisionNumber,
+		derived.HeadSHA, "publish", ""), loomgit.ReviewRequired)
+	if after := git(t, fixture.remote, "rev-parse", "refs/heads/"+publication.Branch); after != remoteBefore {
+		t.Fatalf("unreviewed B was pushed: %s -> %s", remoteBefore, after)
+	}
+	if forge.prs[1].Base != forge.prs[0].Head {
+		t.Fatalf("unreviewed B PR was retargeted to %s", forge.prs[1].Base)
+	}
+	assertReviewAttention(t, fixture, revisionNumber)
+}
+
+func assertReviewAttention(t *testing.T, fixture fixture, revision int) {
+	t.Helper()
+	ctx := context.Background()
+	state, err := fixture.store.StackState(ctx, "W", "feature-1")
+	if err != nil || state.Status != "review_required" {
+		t.Fatalf("restack review state = %+v, %v", state, err)
+	}
+	events, err := fixture.store.PendingEvents(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, event := range events {
+		if event.Kind != "git.attention_required" {
+			continue
+		}
+		count++
+		payload := string(event.Payload)
+		if !strings.Contains(payload, `"change_id":"B"`) || !strings.Contains(payload, `"lead":"L"`) ||
+			!strings.Contains(payload, `"status":"review_required"`) ||
+			!strings.Contains(payload, `"revision":`+strconv.Itoa(revision)) {
+			t.Fatalf("restack review attention = %s", payload)
+		}
+	}
+	if count != 1 {
+		t.Fatalf("restack review attention events = %d, want one", count)
+	}
+}
+
+func TestLandingReconcileHoldsOverlappingEdit(t *testing.T) {
+	fixture, forge, second := landingStackFixture(t, false, "loom")
+	ctx := context.Background()
+	if err := os.WriteFile(filepath.Join(fixture.repo, "A"), []byte("user edit"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	codeIs(t, landing.ReconcileWithOptions(ctx, fixture.store, forge,
+		landing.Options{Restack: RestackOffer}), loomgit.SwapHeld)
+	state, err := fixture.store.StackState(ctx, "W", "feature-1")
+	if err != nil || state.Status != "swap_held" || len(state.Paths) != 1 || state.Paths[0] != "A" {
+		t.Fatalf("held stack state = %+v, %v", state, err)
+	}
+	if contents, err := os.ReadFile(filepath.Join(fixture.repo, "A")); err != nil || string(contents) != "user edit" {
+		t.Fatalf("overlapping edit = %q, %v", contents, err)
+	}
+	publication, _, err := fixture.store.Publication(ctx, "W", "B")
+	if err != nil || publication.Head != second.HeadSHA {
+		t.Fatalf("held publication = %+v, %v", publication, err)
+	}
+}
+
+func TestLandingReconcileRefusesNativeWithoutProviderHead(t *testing.T) {
+	fixture, forge, second := landingStackFixture(t, false, "native")
+	ctx := context.Background()
+	before := git(t, fixture.repo, "rev-parse", "HEAD")
+	forge.prs[1].Base = "develop"
+	codeIs(t, landing.ReconcileWithOptions(ctx, fixture.store, forge,
+		landing.Options{Restack: RestackOffer}), loomgit.AttentionRequired)
+	if got := git(t, fixture.repo, "rev-parse", "HEAD"); got != before {
+		t.Fatalf("native refusal changed working area from %s to %s", before, got)
+	}
+	publication, _, err := fixture.store.Publication(ctx, "W", "B")
+	if err != nil || publication.Head != second.HeadSHA || git(t, fixture.remote, "rev-parse", "refs/heads/"+publication.Branch) != second.HeadSHA {
+		t.Fatalf("native refusal changed publication: %+v, %v", publication, err)
+	}
+	offers, err := fixture.store.OpenRestackOffers(ctx)
+	if err != nil || len(offers) != 1 {
+		t.Fatalf("native refusal lost offer: %+v, %v", offers, err)
+	}
+}
+
+func TestNativeBackendDoesNotReplayLocally(t *testing.T) {
+	fixture := newFixture(t)
+	before := git(t, fixture.repo, "rev-parse", "HEAD")
+	codeIs(t, (GitHubStackBackend{Store: fixture.store}).Restack(context.Background(), StackRequest{}, "restack"),
+		loomgit.AttentionRequired)
+	if after := git(t, fixture.repo, "rev-parse", "HEAD"); after != before {
+		t.Fatalf("native backend moved working area: %s -> %s", before, after)
+	}
+}
+
+func TestLandingReconcileAdoptsNativeProviderHead(t *testing.T) {
+	fixture, forge, second := landingStackFixture(t, false, "native")
+	ctx := context.Background()
+	merged := git(t, fixture.remote, "rev-parse", "refs/heads/develop")
+	provider := filepath.Join(t.TempDir(), "provider")
+	git(t, fixture.repo, "worktree", "add", "-q", "--detach", provider, merged)
+	git(t, provider, "cherry-pick", second.HeadSHA)
+	providerHead := git(t, provider, "rev-parse", "HEAD")
+	publication, found, err := fixture.store.Publication(ctx, "W", "B")
+	if err != nil || !found {
+		t.Fatal(err)
+	}
+	git(t, provider, "push", "--force", "origin", "HEAD:refs/heads/"+publication.Branch)
+	forge.prs[1].Base = "develop"
+	forge.prs[1].HeadSHA = providerHead
+	if err := landing.ReconcileWithOptions(ctx, fixture.store, forge, landing.Options{Restack: RestackOffer}); err != nil {
+		t.Fatal(err)
+	}
+	assertNativeAdoption(t, fixture, forge, second, merged, providerHead, publication.Branch)
+}
+
+func assertNativeAdoption(t *testing.T, fixture fixture, forge *fakeForge, second loomgit.Revision,
+	merged, providerHead, branch string) {
+	t.Helper()
+	ctx := context.Background()
+	derivedNumber, err := fixture.store.SourceRevision(ctx, "W", "B")
+	if err != nil || derivedNumber <= second.Number {
+		t.Fatalf("derived revision = %d, %v", derivedNumber, err)
+	}
+	derived, err := fixture.store.GetRevision(ctx, "W", "B", derivedNumber)
+	if err != nil || derived.Operation != "restack" || derived.HeadSHA != providerHead || derived.BaseSHA != merged {
+		t.Fatalf("adopted revision = %+v, %v", derived, err)
+	}
+	if err := review.RequireVerdict(ctx, fixture.store, "W", "B", derivedNumber, providerHead, "publish", ""); err != nil {
+		t.Fatalf("patch-equivalent native verdict was not carried: %v", err)
+	}
+	pubRef, _ := refname.Publication("W", "B")
+	if got := git(t, fixture.repo, "rev-parse", pubRef); got != providerHead {
+		t.Fatalf("publication ref = %s, want %s", got, providerHead)
+	}
+	if got := git(t, fixture.repo, "rev-parse", "HEAD"); got != providerHead {
+		t.Fatalf("working area = %s, want %s", got, providerHead)
+	}
+	if got := git(t, fixture.remote, "rev-parse", "refs/heads/"+branch); got != providerHead {
+		t.Fatalf("provider branch changed from %s to %s", providerHead, got)
+	}
+	if contents, err := os.ReadFile(filepath.Join(fixture.repo, "unsaved.txt")); err != nil || string(contents) != "keep me" {
+		t.Fatalf("uncommitted file = %q, %v", contents, err)
+	}
+	assertNativeAdoptionRestart(t, fixture, forge, second, merged, providerHead, derivedNumber)
+}
+
+func assertNativeAdoptionRestart(t *testing.T, fixture fixture, forge *fakeForge, second loomgit.Revision,
+	merged, providerHead string, derivedNumber int) {
+	t.Helper()
+	ctx := context.Background()
+	retry, err := RestackOffer(ctx, journal.RestackOffer{Workspace: "W", Change: "B", Predecessor: "A",
+		Repo: "repo", Revision: second.Number, TrunkSHA: merged}, forge)
+	if err != nil || retry != derivedNumber {
+		t.Fatalf("native restack retry = %d, %v", retry, err)
+	}
+	restarted, err := journal.OpenSQLite(filepath.Join(filepath.Dir(fixture.repo), "loomgit", "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = restarted.Close() }()
+	recorded, found, err := restarted.Publication(ctx, "W", "B")
+	if err != nil || !found || recorded.Head != providerHead || recorded.Trunk != "develop" {
+		t.Fatalf("restarted native publication = %+v, %v", recorded, err)
+	}
+	offers, err := restarted.RestackOffers(ctx, "W", "B")
+	if err != nil || len(offers) != 1 || offers[0].DerivedRevision != derivedNumber {
+		t.Fatalf("restarted native offer = %+v, %v", offers, err)
+	}
+}
+
+func TestLandingReconcileAdoptsTwoNativeHeads(t *testing.T) {
+	fixture, forge, second := landingStackFixture(t, false, "native")
+	third := stackRevision(t, fixture, "C", 1, second.HeadSHA)
+	request := fixture.request()
+	request.forge = forge
+	if _, err := publishStack(context.Background(), fixture.store, StackRequest{Request: request,
+		StackID: "feature-1", Changes: []string{"A", "B", "C"}}); err != nil {
+		t.Fatal(err)
+	}
+	merged := git(t, fixture.remote, "rev-parse", "refs/heads/develop")
+	provider := filepath.Join(t.TempDir(), "provider")
+	git(t, fixture.repo, "worktree", "add", "-q", "--detach", provider, merged)
+	git(t, provider, "cherry-pick", second.HeadSHA)
+	secondHead := git(t, provider, "rev-parse", "HEAD")
+	git(t, provider, "push", "--force", "origin", "HEAD:refs/heads/"+forge.prs[1].Head)
+	git(t, provider, "cherry-pick", third.HeadSHA)
+	thirdHead := git(t, provider, "rev-parse", "HEAD")
+	git(t, provider, "push", "--force", "origin", "HEAD:refs/heads/"+forge.prs[2].Head)
+	forge.prs[1].Base, forge.prs[1].HeadSHA = "develop", secondHead
+	forge.prs[2].Base, forge.prs[2].HeadSHA = forge.prs[1].Head, thirdHead
+	if err := landing.ReconcileWithOptions(context.Background(), fixture.store, forge, landing.Options{Restack: RestackOffer}); err != nil {
+		t.Fatal(err)
+	}
+	assertTwoNativeHeads(t, fixture, merged, []string{secondHead, thirdHead})
+}
+
+func assertTwoNativeHeads(t *testing.T, fixture fixture, merged string, heads []string) {
+	t.Helper()
+	ctx := context.Background()
+	for index, change := range []string{"B", "C"} {
+		publication, found, err := fixture.store.Publication(ctx, "W", change)
+		if err != nil || !found || publication.Head != heads[index] {
+			t.Fatalf("adopted %s publication = %+v, %v", change, publication, err)
+		}
+		revisionNumber, err := fixture.store.SourceRevision(ctx, "W", change)
+		if err != nil || revisionNumber <= 1 {
+			t.Fatalf("adopted %s revision = %d, %v", change, revisionNumber, err)
+		}
+		revision, err := fixture.store.GetRevision(ctx, "W", change, revisionNumber)
+		if err != nil || revision.Operation != "restack" || revision.HeadSHA != heads[index] {
+			t.Fatalf("adopted %s revision = %+v, %v", change, revision, err)
+		}
+		if err := review.RequireVerdict(ctx, fixture.store, "W", change, revisionNumber, heads[index], "publish", ""); err != nil {
+			t.Fatalf("adopted %s verdict = %v", change, err)
+		}
+		ref, _ := refname.Publication("W", change)
+		if got := git(t, fixture.repo, "rev-parse", ref); got != heads[index] {
+			t.Fatalf("adopted %s ref = %s", change, got)
+		}
+	}
+	if got := git(t, fixture.repo, "rev-parse", "HEAD"); got != heads[1] {
+		t.Fatalf("native leaf = %s, want %s", got, heads[1])
+	}
+	if derived, err := fixture.store.GetRevision(ctx, "W", "B", 2); err != nil || derived.BaseSHA != merged {
+		t.Fatalf("native base = %+v, %v", derived, err)
+	}
+}
+
 func TestChooseStackBackendUsesForgeCapabilityAndRecordsChoice(t *testing.T) {
 	fixture := newFixture(t)
 	loom := LoomStackBackend{Store: fixture.store}
@@ -598,5 +1005,31 @@ func TestPublicationSchemaAddsStackIdentityToExistingJournal(t *testing.T) {
 	publication, found, err := store.Publication(context.Background(), "W", "A")
 	if err != nil || !found || publication.StackID != "feature-1" {
 		t.Fatalf("migrated publication = %+v, %v", publication, err)
+	}
+}
+
+func TestStackStatusSchemaUpgradesBackendRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "store.db")
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE stack_backends (
+		workspace TEXT NOT NULL, stack_id TEXT NOT NULL, backend TEXT NOT NULL,
+		PRIMARY KEY(workspace, stack_id));
+		INSERT INTO stack_backends VALUES ('W','feature-1','loom')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := journal.OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	state, err := store.StackState(context.Background(), "W", "feature-1")
+	if err != nil || state.Backend != "loom" || state.Status != "" || len(state.Paths) != 0 {
+		t.Fatalf("migrated stack state = %+v, %v", state, err)
 	}
 }
