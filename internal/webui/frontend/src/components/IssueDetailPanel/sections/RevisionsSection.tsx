@@ -10,9 +10,11 @@ import styles from "./RevisionsSection.module.css";
 export function RevisionsSection({
   workspaceId,
   taskId,
+  lead,
 }: {
   workspaceId: string;
   taskId: string;
+  lead?: string | undefined;
 }): JSX.Element {
   const [revisions, setRevisions] = useState<ReviewRevision[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,6 +62,7 @@ export function RevisionsSection({
         revision,
         verdict,
         detail,
+        lead,
       );
       if (status) setFollow((prev) => ({ ...prev, [key]: status }));
       setRevisions(await getTaskRevisions(workspaceId, taskId));
@@ -73,11 +76,12 @@ export function RevisionsSection({
   }
 
   async function apply(revision: ReviewRevision) {
+    if (!lead) return;
     const key = `${revision.change_id}:${revision.number}`;
     setBusy(key);
     setError("");
     try {
-      await applyRevision(workspaceId, revision);
+      await applyRevision(workspaceId, revision, lead);
       setFollow((prev) => ({ ...prev, [key]: "applied" }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not apply revision");
@@ -112,10 +116,14 @@ export function RevisionsSection({
             </div>
             {follow[key] === "approved_waiting_for_working_area" && (
               <div className={styles.actions}>
-                <span>Approved: Apply to create the lead working area</span>
+                <span>
+                  {lead
+                    ? "Approved: Apply to create the lead working area"
+                    : "Approved: Apply needs a single workspace lead"}
+                </span>
                 <button
                   type="button"
-                  disabled={Boolean(busy)}
+                  disabled={Boolean(busy) || !lead}
                   onClick={() => void apply(revision)}
                 >
                   Apply

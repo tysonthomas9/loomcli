@@ -3423,6 +3423,8 @@ paths:
                   enum: [approve, reject, override]
                 reason:
                   type: string
+                lead:
+                  type: string
                 actor:
                   type: object
                   required: [kind, id]

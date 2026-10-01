@@ -27,6 +27,7 @@ export async function submitRevisionVerdict(
   revision: ReviewRevision,
   verdict: "approve" | "reject" | "override",
   reason: string,
+  lead?: string,
 ): Promise<string | undefined> {
   const { data, error, response } = await api.POST(
     "/api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict",
@@ -42,6 +43,7 @@ export async function submitRevisionVerdict(
         head_sha: revision.head_sha,
         verdict,
         reason,
+        ...(lead ? { lead } : {}),
         actor: { kind: "human", id: "local-user" },
       },
     },
@@ -53,13 +55,14 @@ export async function submitRevisionVerdict(
 export async function applyRevision(
   workspaceId: string,
   revision: ReviewRevision,
+  lead: string,
 ): Promise<void> {
   const { error, response } = await api.POST("/api/workspaces/{ws}/git/apply", {
     params: { path: { ws: workspaceId } },
     body: {
       change: revision.change_id,
       revision: revision.number,
-      lead: "lead",
+      lead,
     },
   });
   if (error) throw apiErrorFromResponse(error, response);

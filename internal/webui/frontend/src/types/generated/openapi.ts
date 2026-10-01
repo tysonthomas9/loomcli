@@ -7643,6 +7643,7 @@ export interface operations {
           /** @enum {string} */
           verdict: "approve" | "reject" | "override";
           reason?: string;
+          lead?: string;
           actor: {
             /** @enum {string} */
             kind: "human" | "agent" | "lead";

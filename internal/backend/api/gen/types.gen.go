@@ -3452,6 +3452,7 @@ type SubmitRevisionVerdictJSONBody struct {
 		Kind SubmitRevisionVerdictJSONBodyActorKind `json:"kind"`
 	} `json:"actor"`
 	HeadSha string                               `json:"head_sha"`
+	Lead    *string                              `json:"lead,omitempty"`
 	Reason  *string                              `json:"reason,omitempty"`
 	Verdict SubmitRevisionVerdictJSONBodyVerdict `json:"verdict"`
 }

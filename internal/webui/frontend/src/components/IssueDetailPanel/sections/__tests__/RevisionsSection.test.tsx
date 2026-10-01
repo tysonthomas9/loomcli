@@ -38,19 +38,39 @@ describe("RevisionsSection", () => {
     submitRevisionVerdict.mockResolvedValue(
       "approved_waiting_for_working_area",
     );
-    render(<RevisionsSection workspaceId="W" taskId="T" />);
+    render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
     fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
     expect(
       await screen.findByText(
         "Approved: Apply to create the lead working area",
       ),
     ).toBeInTheDocument();
+    expect(submitRevisionVerdict).toHaveBeenCalledWith(
+      "W",
+      revision,
+      "approve",
+      "",
+      "lead-a",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     expect(await screen.findByText("Applied")).toBeInTheDocument();
-    expect(applyRevision).toHaveBeenCalledWith("W", revision);
+    expect(applyRevision).toHaveBeenCalledWith("W", revision, "lead-a");
     expect(
       screen.queryByText("Approved: Apply to create the lead working area"),
     ).not.toBeInTheDocument();
+  });
+
+  it("does not Apply to a guessed lead when none is known", async () => {
+    submitRevisionVerdict.mockResolvedValue(
+      "approved_waiting_for_working_area",
+    );
+    render(<RevisionsSection workspaceId="W" taskId="T" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    expect(
+      await screen.findByText("Approved: Apply needs a single workspace lead"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
+    expect(applyRevision).not.toHaveBeenCalled();
   });
 
   it("records approval for the displayed revision and exact head", async () => {
@@ -62,6 +82,7 @@ describe("RevisionsSection", () => {
         revision,
         "approve",
         "",
+        undefined,
       ),
     );
   });
@@ -82,6 +103,7 @@ describe("RevisionsSection", () => {
         revision,
         "override",
         "review exception",
+        undefined,
       ),
     );
   });
@@ -95,6 +117,7 @@ describe("RevisionsSection", () => {
         revision,
         "reject",
         "",
+        undefined,
       ),
     );
   });
