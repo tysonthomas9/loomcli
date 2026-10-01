@@ -80,6 +80,9 @@ type Pending struct {
 	// Abandoned is set once Abandon released the caller; the request is
 	// still in flight and applies whenever it is delivered.
 	Abandoned bool
+	// Hook and AfterOwnershipKill are send-time stamps; see Record.
+	Hook               bool
+	AfterOwnershipKill bool
 
 	req   *http.Request
 	reply chan reply
@@ -137,6 +140,14 @@ type Record struct {
 	LeaseAttempt string
 	// ReqStatus is the "status" a session PATCH asked for.
 	ReqStatus string
+
+	// Completion-hook stamps, taken when the request was SENT (see
+	// BeginHooks, OwnershipKilled). ClaimedBefore is the issue the sending
+	// attempt's own claim record names at apply time: the issue of its last
+	// successful claim ("" if it never claimed).
+	Hook               bool
+	AfterOwnershipKill bool
+	ClaimedBefore      string
 }
 
 // Observation is a local fact about an attempt that never crosses the wire:
@@ -182,6 +193,10 @@ type Sim struct {
 	leaseOf   map[string]string   // session lease ID → creating attempt
 	ended     map[string]bool     // attempts whose process is gone
 	obs       []Observation
+
+	claimed   map[string]string // attempt → issue of its last successful claim
+	hookPhase map[string]bool   // attempts currently running completion hooks
+	killed    map[string]bool   // attempts whose ownership kill was recorded
 }
 
 // New builds a Sim at start for workspace.
@@ -200,6 +215,9 @@ func New(start time.Time, workspace string, guards Guards) *Sim {
 		sessionOf: map[string]string{},
 		leaseOf:   map[string]string{},
 		ended:     map[string]bool{},
+		claimed:   map[string]string{},
+		hookPhase: map[string]bool{},
+		killed:    map[string]bool{},
 	}
 	s.cond = sync.NewCond(&s.mu)
 	return s
@@ -345,6 +363,7 @@ func (s *Sim) stampBefore(rec *Record) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	rec.ClaimedBefore = s.claimed[rec.Attempt]
 	if a := s.auth[rec.IssueID]; a != "" && rec.HolderBefore != "" && rec.HolderBefore == s.claimOf[a] {
 		rec.AuthorityBefore = a
 	}
@@ -379,13 +398,15 @@ func (s *Sim) Deliver(seq int, d Delivery, at time.Time) Record {
 	}
 	rec := Record{Seq: p.Seq, AttemptSeq: p.AttemptSeq, Attempt: p.Attempt, Method: p.Method, Path: p.Path, Query: p.Query,
 		Actor: p.Actor, Body: p.Body, SentAt: p.SentAt, AppliedAt: s.Clock.Now(), Delivery: d,
-		IssueID: issueIDFromPath(p.Path), Abandoned: p.Abandoned}
+		IssueID: issueIDFromPath(p.Path), Abandoned: p.Abandoned,
+		Hook: p.Hook, AfterOwnershipKill: p.AfterOwnershipKill}
 	s.stampBefore(&rec)
 	rp := s.serve(p, d, &rec)
 	s.noteControlPlane(rec)
 	s.mu.Lock()
 	if rec.IssueID != "" && rec.Method == "POST" && strings.HasSuffix(rec.Path, "/claim") && rec.Status/100 == 2 && d != Drop {
 		s.auth[rec.IssueID] = rec.Attempt
+		s.claimed[rec.Attempt] = rec.IssueID
 	}
 	s.records = append(s.records, rec)
 	s.mu.Unlock()
@@ -645,17 +666,19 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	s.seq++
 	s.attSeq[t.attempt]++
 	p := &Pending{
-		Seq:        s.seq,
-		AttemptSeq: s.attSeq[t.attempt],
-		Attempt:    t.attempt,
-		Method:     req.Method,
-		Path:       strings.TrimPrefix(req.URL.Path, "/api/v1/"+s.Workspace),
-		Query:      req.URL.RawQuery,
-		Actor:      req.Header.Get("X-Actor"),
-		Body:       string(body),
-		SentAt:     s.Clock.Now(),
-		req:        clone,
-		reply:      make(chan reply, 1),
+		Seq:                s.seq,
+		AttemptSeq:         s.attSeq[t.attempt],
+		Attempt:            t.attempt,
+		Method:             req.Method,
+		Path:               strings.TrimPrefix(req.URL.Path, "/api/v1/"+s.Workspace),
+		Query:              req.URL.RawQuery,
+		Actor:              req.Header.Get("X-Actor"),
+		Body:               string(body),
+		SentAt:             s.Clock.Now(),
+		Hook:               s.hookPhase[t.attempt],
+		AfterOwnershipKill: s.killed[t.attempt],
+		req:                clone,
+		reply:              make(chan reply, 1),
 	}
 	s.pending = append(s.pending, p)
 	s.running--

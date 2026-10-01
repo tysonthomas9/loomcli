@@ -159,6 +159,7 @@ func (s *Sim) Check() Report {
 			})
 		}
 	}
+	rep.Violations = append(rep.Violations, s.checkHookWrites()...)
 	rep.Violations = append(rep.Violations, s.checkObservations()...)
 	rep.Violations = append(rep.Violations, s.checkSessionsTerminate()...)
 	return rep
