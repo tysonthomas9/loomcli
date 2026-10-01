@@ -104,7 +104,7 @@ type CreateRequest struct {
 	FirstMessage string
 	// Bridge is set only by Loom's host-owned bridge wiring, never from a
 	// request body or any model or agent input.
-	Bridge BridgeCaps
+	Bridge BridgeCaps `json:"-"`
 }
 
 // BridgeCaps are the agent's Loom bridge capabilities that replace gh and git push.

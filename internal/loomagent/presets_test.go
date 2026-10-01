@@ -2,6 +2,7 @@ package loomagent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"go/build"
 	"os"
@@ -260,5 +261,20 @@ func TestPolicyGHAndGitPushDeniesNeedBothBridgeCaps(t *testing.T) {
 	lead, _ := Resolve(mustPreset(t, "lead"), CreateRequest{Bridge: BridgeCaps{HasPublish: true}}, "opencode", nil)
 	if got := decide(lead.Rules, "bash", "gh pr create"); got != "allow" {
 		t.Errorf("lead without github_read: bash gh = %s, want allow", got)
+	}
+}
+
+func TestPolicyBridgeCapsNotSetFromJSON(t *testing.T) {
+	var req CreateRequest
+	body := `{"Preset":"lead","Bridge":{"HasGitHubRead":true,"HasPublish":true},"bridge":{"HasGitHubRead":true,"HasPublish":true}}`
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Preset != "lead" || req.Bridge != (BridgeCaps{}) {
+		t.Fatalf("decoded request = %+v; Bridge must stay host-only", req)
+	}
+	out, err := json.Marshal(CreateRequest{Bridge: BridgeCaps{HasGitHubRead: true, HasPublish: true}})
+	if err != nil || strings.Contains(string(out), "Bridge") || strings.Contains(string(out), "HasPublish") {
+		t.Fatalf("encoded request = %s, %v", out, err)
 	}
 }
