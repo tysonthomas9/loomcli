@@ -367,7 +367,7 @@ func (x *sessionHandle) Prompt(_ context.Context, in loomharness.Input) error {
 	s.running, s.lastInterrupt = true, false
 	s.inputs[in.Key] = loomharness.LandedFound
 	h.emit(s, loomharness.Event{Type: loomharness.EventMessageDelivered, InputKey: in.Key, Text: in.Text}, true)
-	h.emit(s, loomharness.Event{Type: loomharness.EventTurnStarted}, true)
+	h.emit(s, loomharness.Event{Type: loomharness.EventTurnStarted, InputKey: in.Key}, true)
 	h.run(s)
 	return nil
 }

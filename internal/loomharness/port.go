@@ -167,7 +167,7 @@ type Event struct {
 	ItemKind   string // message | reasoning | tool
 	Seq        int64
 	Time       time.Time
-	InputKey   string // the delivered input's key, for message.delivered
+	InputKey   string // the input's key, for message.delivered and the turn.started it began
 	AskID      string
 	Text       string
 	StopReason string // completed | cancelled | failed, for turn.completed

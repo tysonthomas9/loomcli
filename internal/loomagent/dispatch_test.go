@@ -423,9 +423,9 @@ func TestDispatchHandedIgnoresOtherSessionEvents(t *testing.T) {
 }
 
 // TestDispatchStaleCompletionKeepsNextTurn: an older turn's late
-// turn.completed (or turn.started) that arrives after the next message was
-// handed over and delivered changes nothing; only the new turn's own events
-// name and end it.
+// turn.completed or turn.started, arriving after the next message was handed
+// over (before or after its delivery), changes nothing; only the new turn's
+// own start, which names its input, binds it, and only its completion ends it.
 func TestDispatchStaleCompletionKeepsNextTurn(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
@@ -438,25 +438,28 @@ func TestDispatchStaleCompletionKeepsNextTurn(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	running := func(want string) {
+		t.Helper()
+		if got := s.get(t, a.AgentID); got.State != StateActive || deref(got.RunningTurnID) != want {
+			t.Fatalf("running turn = %s %v; want active %s", got.State, got.RunningTurnID, want)
+		}
+	}
 	k1, k2 := defaultInputKey("", a.AgentID, "u1"), defaultInputKey("", a.AgentID, "c1")
 	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "first", user))
 	ev(loomharness.EventMessageDelivered, "", k1)
-	ev(loomharness.EventTurnStarted, "T1", "")
+	ev(loomharness.EventTurnStarted, "T1", k1)
 	mustSendMsg(t, s, sendReq(a.AgentID, "c1", "child done", child))
 	ev(loomharness.EventTurnCompleted, "T1", "") // hands c1 over
+	running(k2)
+	ev(loomharness.EventTurnStarted, "T1", k1) // the old turn's late start, c1 still handed
+	ev(loomharness.EventTurnStarted, "T1", "")
+	running(k2)
 	ev(loomharness.EventMessageDelivered, "", k2)
-	if got := s.get(t, a.AgentID); deref(got.RunningTurnID) != k2 || slotState(t, s, a.AgentID, "c1") != loomstore.SlotDelivered {
-		t.Fatalf("c1 not running: turn %v slot %s", got.RunningTurnID, slotState(t, s, a.AgentID, "c1"))
-	}
 	ev(loomharness.EventTurnCompleted, "T1", "") // the old turn's late completion
-	if got := s.get(t, a.AgentID); got.State != StateActive || deref(got.RunningTurnID) != k2 {
-		t.Fatalf("a stale completion ended the next turn: %s %v", got.State, got.RunningTurnID)
-	}
-	ev(loomharness.EventTurnStarted, "T2", "")
-	ev(loomharness.EventTurnStarted, "T1", "") // a stale start never renames a named turn
-	if got := s.get(t, a.AgentID); deref(got.RunningTurnID) != "T2" {
-		t.Fatalf("running turn = %v; want T2", got.RunningTurnID)
-	}
+	running(k2)
+	ev(loomharness.EventTurnStarted, "T2", k2)
+	ev(loomharness.EventTurnStarted, "T1", k1) // a stale start never renames a named turn
+	running("T2")
 	ev(loomharness.EventTurnCompleted, "T2", "")
 	if got := s.get(t, a.AgentID); got.State != StateIdle || got.RunningTurnID != nil {
 		t.Fatalf("T2's completion: %s %v", got.State, got.RunningTurnID)

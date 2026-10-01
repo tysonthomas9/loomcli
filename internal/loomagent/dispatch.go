@@ -203,7 +203,7 @@ func (s *Service) HarnessEvent(ctx context.Context, agentID string, e loomharnes
 	case loomharness.EventMessageDelivered:
 		return s.delivered(ctx, a, e.InputKey)
 	case loomharness.EventTurnStarted:
-		return s.turnStarted(ctx, a, e.TurnID)
+		return s.turnStarted(ctx, a, e)
 	case loomharness.EventTurnCompleted:
 		return s.turnCompleted(ctx, a, e)
 	}
@@ -211,18 +211,15 @@ func (s *Service) HarnessEvent(ctx context.Context, agentID string, e loomharnes
 }
 
 // turnStarted names a's running turn turnID, only while the turn is still
-// known by its input key: a named turn is never renamed.
-func (s *Service) turnStarted(ctx context.Context, a loomstore.Agent, turnID string) error {
-	if a.RunningTurnID == nil || turnID == "" {
+// known by its input key and the event says that input started it: a stale
+// start, or one for a named turn, changes nothing.
+func (s *Service) turnStarted(ctx context.Context, a loomstore.Agent, e loomharness.Event) error {
+	if a.RunningTurnID == nil || e.TurnID == "" || e.InputKey != *a.RunningTurnID {
 		return nil
 	}
-	slots, err := s.store.Slots(ctx, a.AgentID)
-	if err != nil || !slices.ContainsFunc(slots, func(sl loomstore.Slot) bool { return deref(sl.NativeKey) == *a.RunningTurnID }) {
-		return err
-	}
 	to := a.StateOf()
-	to.RunningTurn = &turnID
-	_, err = s.setState(ctx, a, to)
+	to.RunningTurn = &e.TurnID
+	_, err := s.setState(ctx, a, to)
 	return err
 }
 
