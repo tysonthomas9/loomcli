@@ -66,6 +66,7 @@ type session struct {
 	running       bool
 	ask           string
 	crashed       bool // a turn was running when the harness died; Resume first
+	closed        bool // Close stopped the runtime; history stays, Resume reopens
 	lastInterrupt bool
 }
 
@@ -270,8 +271,9 @@ type sessionHandle struct {
 	ref loomharness.NativeRef
 }
 
-// Resume recovers the session under the same root. A turn cut off by a crash
-// either continues (Turn.ResumeContinues) or ends cancelled with its ask lost.
+// Resume recovers the session under the same root and reopens a closed one.
+// A turn cut off by a crash or Close loses its open ask (R20), then either
+// continues (Turn.ResumeContinues) or ends cancelled.
 func (x *sessionHandle) Resume(_ context.Context, l loomharness.Launch) (loomharness.NativeRef, error) {
 	x.h.mu.Lock()
 	defer x.h.mu.Unlock()
@@ -282,13 +284,16 @@ func (x *sessionHandle) Resume(_ context.Context, l loomharness.Launch) (loomhar
 	if l.Root != s.ref.Root {
 		return loomharness.NativeRef{}, fmt.Errorf("fake %s not under root %q: %w", s.ref.NativeID, l.Root, loomharness.ErrSessionNotFound)
 	}
+	s.closed = false
 	if s.crashed {
 		s.crashed = false
 		if s.turn.ResumeContinues {
-			x.h.emit(s, loomharness.Event{Type: loomharness.EventTurnResumed}, true)
-			if s.ask == "" {
-				x.h.run(s)
+			if s.ask != "" {
+				x.h.emit(s, loomharness.Event{Type: loomharness.EventAskLost, AskID: s.ask}, true)
+				s.ask = ""
 			}
+			x.h.emit(s, loomharness.Event{Type: loomharness.EventTurnResumed}, true)
+			x.h.run(s)
 		} else {
 			x.h.endTurn(s, "cancelled")
 		}
@@ -302,6 +307,9 @@ func (x *sessionHandle) Prompt(_ context.Context, in loomharness.Input) error {
 	defer h.mu.Unlock()
 	s, err := h.lookup(x.ref)
 	if err != nil {
+		return err
+	}
+	if err := s.open(); err != nil {
 		return err
 	}
 	if s.crashed {
@@ -335,6 +343,9 @@ func (x *sessionHandle) Interrupt(context.Context) (bool, error) {
 	x.h.mu.Lock()
 	defer x.h.mu.Unlock()
 	s, err := x.h.lookup(x.ref)
+	if err == nil {
+		err = s.open()
+	}
 	if err != nil || !s.running || s.crashed {
 		return false, err
 	}
@@ -347,6 +358,9 @@ func (x *sessionHandle) Reply(_ context.Context, askID string, r loomharness.Rep
 	defer x.h.mu.Unlock()
 	s, err := x.h.lookup(x.ref)
 	if err != nil {
+		return err
+	}
+	if err := s.open(); err != nil {
 		return err
 	}
 	if s.crashed || s.ask == "" || s.ask != askID {
@@ -425,13 +439,38 @@ func (x *sessionHandle) Move(_ context.Context, dir string) error {
 
 func (x *sessionHandle) Unload(context.Context) error { return x.idle(func(*session) {}, true) }
 
-func (x *sessionHandle) Close(context.Context) error { return x.idle(func(*session) {}, false) }
+// Close stops the session's runtime and keeps its history. A running turn
+// dies as in a crash. Until Resume, only HasInput, Messages and Status work.
+func (x *sessionHandle) Close(context.Context) error {
+	x.h.mu.Lock()
+	defer x.h.mu.Unlock()
+	s, err := x.h.lookup(x.ref)
+	if err != nil {
+		return err
+	}
+	if s.running {
+		s.crashed = true
+	}
+	s.closed = true
+	return nil
+}
 
-// idle applies fn to the session, refusing with ErrBusy mid-turn when needIdle.
+// open refuses calls that need the session's runtime after Close.
+func (s *session) open() error {
+	if s.closed {
+		return fmt.Errorf("fake %s closed; Resume to reopen: %w", s.ref.NativeID, loomharness.ErrUnavailable)
+	}
+	return nil
+}
+
+// idle applies fn to an open session, refusing with ErrBusy mid-turn when needIdle.
 func (x *sessionHandle) idle(fn func(*session), needIdle bool) error {
 	x.h.mu.Lock()
 	defer x.h.mu.Unlock()
 	s, err := x.h.lookup(x.ref)
+	if err == nil {
+		err = s.open()
+	}
 	if err != nil {
 		return err
 	}
