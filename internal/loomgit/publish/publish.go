@@ -87,6 +87,9 @@ func Publish(ctx context.Context, store Store, req Request) (loomgit.Revision, e
 	if err := requireTrunkBase(ctx, store, runner, req, revision.BaseSHA); err != nil {
 		return loomgit.Revision{}, err
 	}
+	if err := requireChange(ctx, runner, revision.BaseSHA, head); err != nil {
+		return loomgit.Revision{}, err
+	}
 	if err := review.RequireVerdict(ctx, store, req.Workspace, req.Change, revision.Number, head, "publish", ""); err != nil {
 		return loomgit.Revision{}, err
 	}
@@ -149,6 +152,18 @@ func requireTrunkBase(ctx context.Context, store Store, runner *gitexec.Runner, 
 	}
 	if strings.TrimSpace(string(out)) != base {
 		return loomgit.NewError(loomgit.ModeMismatch, "trunk PR revision is not based on the current trunk", nil)
+	}
+	return nil
+}
+
+// requireChange refuses a head whose tree equals its base, so no PR ever carries an empty layer.
+func requireChange(ctx context.Context, runner *gitexec.Runner, base, head string) error {
+	out, err := runner.Run(ctx, "rev-parse", base+"^{tree}", head+"^{tree}")
+	if err != nil {
+		return err
+	}
+	if trees := strings.Fields(string(out)); len(trees) != 2 || trees[0] == trees[1] {
+		return loomgit.NewError(loomgit.StaleSubject, "revision has no change relative to its base", nil)
 	}
 	return nil
 }

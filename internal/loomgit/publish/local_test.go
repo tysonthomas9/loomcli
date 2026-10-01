@@ -227,7 +227,11 @@ func TestPublishRecordedTrunkReplaysIndependentLayer(t *testing.T) {
 	fixture := newFixture(t)
 	ctx := context.Background()
 	git(t, fixture.repo, "push", "origin", fixture.base+":refs/heads/develop")
-	git(t, fixture.repo, "commit", "--allow-empty", "-qm", "independent A")
+	if err := os.WriteFile(filepath.Join(fixture.repo, "a"), []byte("independent A\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, fixture.repo, "add", "a")
+	git(t, fixture.repo, "commit", "-qm", "independent A")
 	predecessor := git(t, fixture.repo, "rev-parse", "HEAD")
 	first, err := fixture.store.ReserveRevision(ctx, loomgit.Revision{Workspace: "W", Change: "A", RequestID: "A-source",
 		Kind: "source", Operation: "capture", Outcome: "completed", BaseSHA: fixture.base, TreeHash: predecessor, SourceHeadSHA: predecessor})
