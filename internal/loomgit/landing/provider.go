@@ -38,7 +38,9 @@ func expectedBase(ctx context.Context, store Store, publication journal.Publicat
 func observeProvider(ctx context.Context, store Store, forge Forge, item fetchedPublication, pull stackpublish.PR, all []journal.Publication) error {
 	publication := item.publication
 	if pull.HeadSHA == "" || pull.Base == "" {
-		return errors.New("provider PR omitted head SHA or base")
+		// GitHub omits these while it is still restacking a native stack. Record
+		// nothing yet; merge detection and the restack offer handle the PR.
+		return nil
 	}
 	previous, found, err := store.ProviderObservation(ctx, publication.Workspace, publication.Change)
 	if err != nil {

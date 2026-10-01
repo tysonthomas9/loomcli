@@ -308,3 +308,20 @@ func TestNativeAutoRestackAfterMergeIsNotDrift(t *testing.T) {
 		}
 	}
 }
+
+func TestProviderPRWithoutHeadSkipsObservationAndStillLands(t *testing.T) {
+	fixture := newFixture(t)
+	publishProviderChange(t, fixture, "A", fixture.initial, "", 41)
+	fixture.forge.pull = stackpublish.PR{Number: 41, Head: "loom/ws/W/change/A", State: "closed",
+		Merged: true, MergeCommitSHA: fixture.initial}
+	if err := Reconcile(context.Background(), fixture.store, fixture.forge); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := fixture.store.ProviderObservation(context.Background(), "W", "A"); err != nil || found {
+		t.Fatalf("incomplete provider PR recorded an observation: found=%v, %v", found, err)
+	}
+	status, err := fixture.store.LandingStatus(context.Background(), "W", "A")
+	if err != nil || status.State != "landed" {
+		t.Fatalf("landing status = %+v, %v", status, err)
+	}
+}
