@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -243,26 +244,33 @@ func (a *Adapter) stopLocked() {
 	}
 }
 
-// env is the configured environment plus the Loom presets merged into
-// OPENCODE_CONFIG_CONTENT, which OpenCode applies over the user's config.
+// githubTokens never reach the server: agents publish through Loom (R32).
+var githubTokens = []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN"}
+
+// env is the configured environment without GitHub tokens, plus the Loom
+// presets merged into OPENCODE_CONFIG_CONTENT, which OpenCode applies over the
+// user's config.
 func (a *Adapter) env() ([]string, error) {
 	env := a.cfg.Env
 	if env == nil {
 		env = os.Environ()
 	}
-	if len(a.cfg.Presets) == 0 {
-		return env, nil
-	}
 	content := map[string]any{}
 	out := make([]string, 0, len(env)+1)
 	for _, kv := range env {
-		if v, ok := strings.CutPrefix(kv, "OPENCODE_CONFIG_CONTENT="); ok {
+		k, v, _ := strings.Cut(kv, "=")
+		switch {
+		case slices.Contains(githubTokens, k):
+		case k == "OPENCODE_CONFIG_CONTENT" && len(a.cfg.Presets) > 0:
 			if err := json.Unmarshal([]byte(v), &content); err != nil {
 				return nil, fmt.Errorf("opencode: merge presets into OPENCODE_CONFIG_CONTENT: %w", err)
 			}
-			continue
+		default:
+			out = append(out, kv)
 		}
-		out = append(out, kv)
+	}
+	if len(a.cfg.Presets) == 0 {
+		return out, nil
 	}
 	agents, _ := content["agents"].(map[string]any)
 	if agents == nil {

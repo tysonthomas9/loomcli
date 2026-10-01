@@ -41,6 +41,13 @@ func fakeOpenCode(mode string) int {
 	}
 	state := os.Getenv("XDG_STATE_HOME")
 	_ = os.WriteFile(filepath.Join(state, "config-content"), []byte(os.Getenv("OPENCODE_CONFIG_CONTENT")), 0o600)
+	var tokens []string
+	for _, k := range githubTokens {
+		if v, ok := os.LookupEnv(k); ok {
+			tokens = append(tokens, k+"="+v)
+		}
+	}
+	_ = os.WriteFile(filepath.Join(state, "github-tokens"), []byte(strings.Join(tokens, "\n")), 0o600)
 	l, err := net.Listen("tcp", "127.0.0.1:"+args[slices.Index(args, "--port")+1])
 	if err != nil {
 		return 1
@@ -69,8 +76,13 @@ func fakeOpenCode(mode string) int {
 
 func fakeAdapter(t *testing.T, mode, version string, presets ...loomharness.PresetConfig) (*Adapter, string) {
 	t.Helper()
+	return fakeAdapterEnv(t, mode, version, nil, presets...)
+}
+
+func fakeAdapterEnv(t *testing.T, mode, version string, extra []string, presets ...loomharness.PresetConfig) (*Adapter, string) {
+	t.Helper()
 	state := t.TempDir()
-	a := New(Config{Bin: os.Args[0], Presets: presets, Env: append(os.Environ(),
+	a := New(Config{Bin: os.Args[0], Presets: presets, Env: append(append(os.Environ(), extra...),
 		"LOOM_FAKE_OPENCODE="+mode,
 		"LOOM_FAKE_OPENCODE_VERSION="+version,
 		"XDG_STATE_HOME="+state,
@@ -194,5 +206,23 @@ func TestAdapterUnavailableAfterRepeatedFailures(t *testing.T) {
 	h, err := a.Health(ctx)
 	if err != nil || h.OK || !strings.Contains(h.Warning, "harness_unavailable") {
 		t.Fatalf("Health = %+v, %v; want harness_unavailable", h, err)
+	}
+}
+
+func TestOpenCodeServeStripsGitHubTokens(t *testing.T) {
+	for _, presets := range [][]loomharness.PresetConfig{nil, {{Name: "lead", Persona: "p"}}} {
+		a, state := fakeAdapterEnv(t, "serve", "opencode v2.0.19",
+			[]string{"GITHUB_TOKEN=ghp_secret", "GH_TOKEN=gho_secret", "GH_ENTERPRISE_TOKEN=ghe_secret", "LOOM_KEEP=1"}, presets...)
+		if _, err := a.Models(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		b, err := os.ReadFile(filepath.Join(state, "github-tokens"))
+		if err != nil || len(b) != 0 {
+			t.Fatalf("opencode serve saw GitHub tokens %q (%v)", b, err)
+		}
+		env, err := a.env()
+		if err != nil || !slices.Contains(env, "LOOM_KEEP=1") {
+			t.Fatalf("other env dropped: %v", err)
+		}
 	}
 }
