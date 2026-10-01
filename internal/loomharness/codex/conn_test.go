@@ -158,3 +158,17 @@ func TestConnErrorAndGap(t *testing.T) {
 		t.Fatalf("call after end: %v", err)
 	}
 }
+
+// TestConnRouteAfterEnd: a thread that registers its route after the
+// connection ended (the server died between Conn and Route) still gets its
+// gap, at once.
+func TestConnRouteAfterEnd(t *testing.T) {
+	c, p := newPair(t, nil)
+	_ = p.out.Close()
+	<-c.Done()
+	var got []Message
+	c.Route("late", func(m Message) { got = append(got, m) })()
+	if len(got) != 1 || !got[0].Gap || got[0].ThreadID != "late" {
+		t.Fatalf("late route got %+v, want one gap", got)
+	}
+}

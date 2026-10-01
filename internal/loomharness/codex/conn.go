@@ -130,13 +130,20 @@ func (c *Conn) RespondError(id protocol.RequestId, code int64, message string) e
 }
 
 // Route sends the messages for threadID to h until the returned func is
-// called. A later Route for the same thread replaces h.
+// called. A later Route for the same thread replaces h. On a connection that
+// has already ended, h gets its Gap at once, before Route returns.
 func (c *Conn) Route(threadID string, h Handler) (unroute func()) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	ended := c.err != nil
 	c.routeN++
 	n := c.routeN
-	c.routes[threadID] = route{h: h, n: n}
+	if !ended {
+		c.routes[threadID] = route{h: h, n: n}
+	}
+	c.mu.Unlock()
+	if ended {
+		h(Message{ThreadID: threadID, Gap: true})
+	}
 	return func() {
 		c.mu.Lock()
 		defer c.mu.Unlock()
