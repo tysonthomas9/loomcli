@@ -68,16 +68,40 @@ func OpenCreations(ctx context.Context) ([]*Recovery, error) {
 		return nil, err
 	}
 	var recoveries []*Recovery
+	closeRecoveries := func() {
+		for _, recovery := range recoveries {
+			_ = recovery.Close()
+		}
+	}
 	for _, entry := range entries {
 		if entry.Operation != "ensure_workspace" && entry.Operation != "attach_workspace_repos" {
 			continue
 		}
+		var lock *os.File
+		if entry.Operation == "ensure_workspace" {
+			workspace := strings.TrimPrefix(entry.RequestID, "workspace-create:")
+			lock, err = tryCreationLock(workspace)
+			if err != nil {
+				closeRecoveries()
+				return nil, err
+			}
+			if lock == nil {
+				continue
+			}
+		}
 		recovery, err := openRecovery(ctx, st, path, entry)
 		if err != nil {
+			if lock != nil {
+				_ = releaseCreationLock(lock)
+			}
+			closeRecoveries()
 			return nil, err
 		}
 		if recovery != nil {
+			recovery.lock = lock
 			recoveries = append(recoveries, recovery)
+		} else if lock != nil {
+			_ = releaseCreationLock(lock)
 		}
 	}
 	return recoveries, nil

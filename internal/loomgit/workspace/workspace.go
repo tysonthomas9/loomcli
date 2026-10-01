@@ -28,6 +28,7 @@ type checkout struct {
 // journal entry. The caller rolls it back if FleetDB registration fails.
 type Session struct {
 	store    *journal.SQLite
+	lock     *os.File
 	entry    loomgit.JournalEntry
 	created  []checkout
 	repos    []loomgit.WorkspaceRepo
@@ -86,7 +87,14 @@ func (s *Session) Rollback(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (s *Session) Close() error { return s.store.Close() }
+func (s *Session) Close() error {
+	err := s.store.Close()
+	if s.lock != nil {
+		err = errors.Join(err, releaseCreationLock(s.lock))
+		s.lock = nil
+	}
+	return err
+}
 
 // Records returns the committed local repo records for a workspace.
 func Records(ctx context.Context, workspace string) ([]loomgit.WorkspaceRepo, error) {
@@ -361,13 +369,19 @@ func beginSession(ctx context.Context, workspace string, repos []loomgit.Workspa
 	if err := os.MkdirAll(filepath.Join(config.GetConfigDir(), "loomgit"), 0o700); err != nil {
 		return nil, err
 	}
+	lock, err := acquireCreationLock(workspace)
+	if err != nil {
+		return nil, err
+	}
 	st, err := journal.OpenSQLite(filepath.Join(config.GetConfigDir(), "loomgit", "store.db"))
 	if err != nil {
+		_ = releaseCreationLock(lock)
 		return nil, err
 	}
 	entry, created, err := st.Begin(ctx, "workspace-create:"+workspace, "ensure_workspace")
 	if err != nil || !created {
 		_ = st.Close()
+		_ = releaseCreationLock(lock)
 		if err != nil {
 			return nil, err
 		}
@@ -376,7 +390,8 @@ func beginSession(ctx context.Context, workspace string, repos []loomgit.Workspa
 	if err := st.SaveWorkspaceCreation(ctx, entry, plan); err != nil {
 		_ = st.AbortWorkspace(context.Background(), entry)
 		_ = st.Close()
+		_ = releaseCreationLock(lock)
 		return nil, err
 	}
-	return &Session{store: st, entry: entry, repos: repos}, nil
+	return &Session{store: st, lock: lock, entry: entry, repos: repos}, nil
 }
