@@ -546,9 +546,9 @@ FAKE_GH_BASE=""
 # every other tier keeps the degraded/no-credential contract the existing suites
 # assert. Started BEFORE serve so its base URL can be injected into the server env.
 start_fake_github() {
-    local log="$REPORT_DIR/fake-github.log" port
+    local fixture="${1:-server.mjs}" log="$REPORT_DIR/fake-github.log" port
     : > "$log"
-    node "$SCRIPT_DIR/fixtures/fake-github/server.mjs" >>"$log" 2>&1 &
+    node "$SCRIPT_DIR/fixtures/fake-github/$fixture" >>"$log" 2>&1 &
     FAKE_GH_PID=$!
     for _ in $(seq 1 30); do
         port="$(grep -oE 'listening [0-9]+' "$log" 2>/dev/null | awk '{print $2}' | head -1)"
@@ -726,6 +726,8 @@ LOCK_WRITTEN=1
 # PR-review live tier only: every other tier keeps the degraded-connector contract.
 if [[ -n "$AFT_LIVE" && "${AFT_LIVE_SUITE_KIND:-}" == "prreview" ]]; then
     start_fake_github || exit 1
+elif [[ "$AFT_SUITE_GLOB" == loomgit-* ]]; then
+    start_fake_github forge-server.mjs || exit 1
 fi
 echo "[aft] starting e2e stack (api :${E2E_PORT}, frontend :${E2E_FRONTEND_PORT}; log: $REPORT_DIR/server.log)..."
 # Stub AI backends — scoped to the SERVER process only, never this script's env:
@@ -770,6 +772,7 @@ else
         E2E_PORT="$E2E_PORT" E2E_FRONTEND_PORT="$E2E_FRONTEND_PORT" FLEET_DB_REPO="$FLEET_DB_REPO" \
         PATH="$SERVER_PATH" OPENAI_API_KEY="stub-e2e" FLUE_REPO="$FLUE_REPO" \
         ${FAKE_GH_BASE:+LOOM_CONNECTOR_GITHUB_BASE_URL="$FAKE_GH_BASE"} \
+        ${FAKE_GH_BASE:+GITHUB_TOKEN=aft-fixture-token} \
         LOOM_REAL_FLUE_CMD_JSON="$FLUE_CMD_JSON" \
         bash "$REPO_ROOT/scripts/start-e2e-server.sh" >"$REPORT_DIR/server.log" 2>&1 &
 fi

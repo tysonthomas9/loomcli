@@ -131,14 +131,14 @@ tests:
 
   - name: landed stacked change restacks its dependent into a derived revision
     skip: true
-    intent: "Expected failure on 5f26b8f: this AFT stack cannot publish X through P2.14 or merge its owned PR through a fake forge; without that publication, serve's P4.4 landing reconciler has no real entry-point event to feed P3.4 restack"
+    intent: "Expected failure on 5f26b8f: P2.14 approved Apply is missing, so this suite cannot publish applied X or create an owned PR; the local fake forge now supplies the later merge leg"
     steps:
       - run: >-
-          echo 'Prerequisite: create stacked task changes X and Y through TaskRuns, approve and Apply both through the UI, then Publish X through the product API using a fake forge with an owned PR';
+          echo 'Prerequisite: create stacked task changes X and Y through TaskRuns, approve and Apply both through the UI, then POST /api/workspaces/E2E-WS-REVIEW/agents/lead/git/pr for X';
           exit 1
         intent: "Require actual stacked publications rather than seeding journal rows or Git refs as substitute evidence"
       - run: >-
-          echo 'Merge X in the fake forge and advance the bare remote trunk; restart serve to invoke its landing reconciliation entry point';
+          echo 'Merge X in the fake forge via /__merge and advance the bare remote trunk; restart serve to invoke its landing reconciliation entry point';
           exit 1
         intent: "P4.4 must detect the landed owned PR and mark Y restack_available"
       - run: >-
