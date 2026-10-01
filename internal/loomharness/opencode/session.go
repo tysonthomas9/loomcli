@@ -41,7 +41,7 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 	if err != nil {
 		return loomharness.NativeRef{}, err
 	}
-	return ref, nil
+	return ref, c.Session(ref).isolate(ctx)
 }
 
 // nativeActions maps Loom's permission actions to the actions OpenCode
@@ -101,11 +101,34 @@ func (s *Session) Resume(ctx context.Context, l loomharness.Launch) (loomharness
 	if err := s.c.call(ctx, "GET", s.path(""), nil, nil); err != nil {
 		return loomharness.NativeRef{}, err
 	}
-	return loomharness.NativeRef{Root: l.Root, NativeID: s.ref.NativeID}, nil
+	return loomharness.NativeRef{Root: l.Root, NativeID: s.ref.NativeID}, s.isolate(ctx)
+}
+
+// isolate sets the environment OpenCode gives this session's shell commands,
+// which otherwise is the server's own, per-boot password included
+// (packages/core/src/shell.ts:259-271 at b30c4d0). OpenCode keeps it in
+// memory only, so every prompt sets it again in case the server restarted.
+func (s *Session) isolate(ctx context.Context) error {
+	if s.c.shellEnv == nil {
+		return nil
+	}
+	env, err := s.c.shellEnv()
+	if err != nil {
+		return err
+	}
+	vars := make(map[string]string, len(env))
+	for _, kv := range env {
+		k, v, _ := strings.Cut(kv, "=")
+		vars[k] = v
+	}
+	return s.c.call(ctx, "PUT", s.path("/environment"), map[string]any{"variables": vars}, nil)
 }
 
 // Prompt queues in.Text under the native id in.Key; the first write of an id wins.
 func (s *Session) Prompt(ctx context.Context, in loomharness.Input) error {
+	if err := s.isolate(ctx); err != nil {
+		return err
+	}
 	return s.c.call(ctx, "POST", s.path("/prompt"), map[string]string{"id": in.Key, "text": in.Text, "delivery": "queue"}, nil)
 }
 

@@ -57,7 +57,7 @@ func fakeOpenCode(mode string) int {
 	}
 	_ = os.WriteFile(filepath.Join(state, "config-content"), []byte(os.Getenv("OPENCODE_CONFIG_CONTENT")), 0o600)
 	var tokens []string
-	for _, k := range []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_TOKEN_FILE"} {
+	for _, k := range []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_TOKEN_FILE", "LOOM_PR_GIT_PASSWORD"} {
 		if v, ok := os.LookupEnv(k); ok {
 			tokens = append(tokens, k+"="+v)
 		}
@@ -270,7 +270,7 @@ func TestOpenCodeServeStripsGitHubTokens(t *testing.T) {
 	for _, presets := range [][]loomharness.PresetConfig{nil, {{Name: "lead", Persona: "p"}}} {
 		a, state := fakeAdapterEnv(t, "serve", "opencode v2.0.19",
 			[]string{"GITHUB_TOKEN=ghp_secret", "GH_TOKEN=gho_secret", "GH_ENTERPRISE_TOKEN=ghe_secret",
-				"GITHUB_TOKEN_FILE=/tmp/token", "LOOM_KEEP=1"}, presets...)
+				"GITHUB_TOKEN_FILE=/tmp/token", "LOOM_PR_GIT_PASSWORD=pr_secret", "LOOM_KEEP=1"}, presets...)
 		if _, err := a.Models(context.Background()); err != nil {
 			t.Fatal(err)
 		}
