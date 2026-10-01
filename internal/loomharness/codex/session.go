@@ -303,7 +303,7 @@ func offered(ask Message, decision string) (string, error) {
 		return decision, nil
 	case decision == "acceptForSession":
 		return "", fmt.Errorf("codex: command ask %s does not offer an always-allow (acceptForSession): %w", askID(ask.ID), errors.ErrUnsupported)
-	case decision == "decline" && has("cancel"):
+	case decision == "decline" && has("cancel"): // stricter, never wider: the action still does not run, and the turn stops too
 		return "cancel", nil
 	}
 	return decision, nil
