@@ -68,12 +68,18 @@ func OpenCreations(ctx context.Context) ([]*Recovery, error) {
 		return nil, err
 	}
 	var recoveries []*Recovery
+	closeRecoveries := func() {
+		for _, recovery := range recoveries {
+			_ = recovery.Close()
+		}
+	}
 	for _, entry := range entries {
 		if entry.Operation != "ensure_workspace" && entry.Operation != "attach_workspace_repos" {
 			continue
 		}
-		recovery, err := openRecovery(ctx, st, path, entry)
+		recovery, err := recoverOpenEntry(ctx, st, path, entry)
 		if err != nil {
+			closeRecoveries()
 			return nil, err
 		}
 		if recovery != nil {
@@ -81,6 +87,39 @@ func OpenCreations(ctx context.Context) ([]*Recovery, error) {
 		}
 	}
 	return recoveries, nil
+}
+
+func recoverOpenEntry(ctx context.Context, st *journal.SQLite, path string, entry loomgit.JournalEntry) (*Recovery, error) {
+	var lock *os.File
+	var err error
+	if entry.Operation == "ensure_workspace" {
+		lock, err = tryCreationLock()
+		if err != nil || lock == nil {
+			return nil, err
+		}
+	}
+	current, err := st.Get(ctx, entry.ID)
+	if errors.Is(err, journal.ErrNotFound) || current.Phase == "done" {
+		if lock != nil {
+			_ = releaseCreationLock(lock)
+		}
+		return nil, nil
+	}
+	if err != nil {
+		if lock != nil {
+			_ = releaseCreationLock(lock)
+		}
+		return nil, err
+	}
+	recovery, err := openRecovery(ctx, st, path, current)
+	if err != nil || recovery == nil {
+		if lock != nil {
+			_ = releaseCreationLock(lock)
+		}
+		return recovery, err
+	}
+	recovery.lock = lock
+	return recovery, nil
 }
 
 func openRecovery(ctx context.Context, st *journal.SQLite, path string, entry loomgit.JournalEntry) (*Recovery, error) {
