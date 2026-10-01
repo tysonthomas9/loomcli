@@ -24,7 +24,7 @@ func TestServeRejectsOldGitAtStartup(t *testing.T) {
 		t.Fatalf("expected stable unsupported Git error, got %v", err)
 	}
 	t.Setenv("LOOM_TEST_SERVE_GIT_CHILD", "1")
-	output, err := exec.Command(os.Args[0], "-test.run=^TestServeRejectsOldGitAtStartup$").CombinedOutput()
+	output, err := exec.Command(os.Args[0], "-test.run=^TestServeRejectsOldGitAtStartup$").CombinedOutput() //nolint:norawexec // Child process proves serve rejects old Git before startup.
 	if err == nil || !strings.Contains(string(output), "git_version_unsupported") {
 		t.Fatalf("serve did not fail at startup with stable code: %v: %s", err, output)
 	}
