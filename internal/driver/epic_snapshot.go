@@ -8,8 +8,23 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+func recordEpicPublication(ctx context.Context, st store.Store, run *domain.DriverRun, result RunResult) RunResult {
+	if result.Status != domain.DriverRunCompleted {
+		return result
+	}
+	candidate := *run
+	candidate.Status = result.Status
+	if err := driverfreeze.RecordEpicRun(ctx, st.TaskRuns(), &candidate); err != nil {
+		result.Status = domain.DriverRunNeedsReview
+		result.Summary = "epic PR delivery could not be prepared: " + err.Error()
+		result.ErrorClass = "epic_pr_delivery_failed"
+	}
+	return result
+}
 
 const (
 	defaultEpicSnapshotReadyLimit   = 256

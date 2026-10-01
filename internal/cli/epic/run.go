@@ -21,8 +21,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/githubtoken"
-	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -106,7 +104,7 @@ func runnerNeedsLocalPreflight(runner string) bool {
 	return r == "" || r == runtimepreflight.LocalTaskRunnerEntrypoint
 }
 
-//nolint:funlen // The command wires validation, queueing, optional projection, execution, and post-drain publish.
+//nolint:funlen // The command wires validation, queueing, and execution.
 func runEpicRun(cmd *cobra.Command, _ []string) error {
 	if err := validateEpicRunFlags(); err != nil {
 		return err
@@ -130,18 +128,8 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
-		if _, err := publish.GitHubSlug(selected.RemoteURL); err != nil {
-			return fmt.Errorf("epic PR delivery requires a GitHub origin: %w", err)
-		}
-		mode, err := publish.DeliveryModeLocal(ctx, ws)
-		if err != nil {
+		if err := publish.CheckEpicPRDelivery(ctx, ws, selected.RemoteURL); err != nil {
 			return err
-		}
-		if mode != "stack" {
-			return loomgit.NewError(loomgit.ModeMismatch, "epic PR delivery requires stack mode", nil)
-		}
-		if githubtoken.GitHub(ctx) == "" {
-			return errors.New("GitHub host credential unavailable")
 		}
 	}
 
@@ -186,12 +174,6 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// The host publisher sees only approved revisions in the applied log.
-	if (runOpenPR || runStackedPRs) && !runDryRun {
-		if rerr := ReconcileEpicStack(ctx, ws, resolveLeadName(runLead), publish.PublishStackLocal); rerr != nil {
-			fmt.Printf("[epic-run] stack awaits approved, applied revisions: %v\n", rerr)
-		}
-	}
 	return nil
 }
 

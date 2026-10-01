@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/outbox"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -102,5 +103,8 @@ func dispatchLoomGitEvents(ctx context.Context, path string, sink loomGitEventSi
 	}
 	defer func() { _ = store.Close() }()
 	sink.store = store
-	return outbox.Dispatch(ctx, store, sink)
+	if err := outbox.Dispatch(ctx, store, sink); err != nil {
+		return err
+	}
+	return publish.ReconcileEpicPublicationsAt(ctx, path)
 }

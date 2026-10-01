@@ -27,7 +27,10 @@ func createAppliedSchema(db *sql.DB) error {
 		revision INTEGER NOT NULL, verdict_id INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'approved',
 		paths BLOB NOT NULL DEFAULT '[]', PRIMARY KEY(workspace, lead, change_id, revision)
 	);`)
-	return err
+	if err != nil {
+		return err
+	}
+	return createEpicPublicationSchema(db)
 }
 
 // SaveApplied records the intended ref transition before the checkout is touched.
@@ -265,4 +268,62 @@ func (s *SQLite) SetApprovalFollow(ctx context.Context, approval PendingApproval
 		return ErrStale
 	}
 	return nil
+}
+
+type EpicPublication struct {
+	Workspace string
+	RunID     string
+	Lead      string
+	Changes   []string
+}
+
+func createEpicPublicationSchema(db *sql.DB) error {
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS epic_publications (
+		workspace TEXT NOT NULL, run_id TEXT NOT NULL, lead TEXT NOT NULL,
+		changes BLOB NOT NULL, done INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY(workspace,run_id)
+	);
+	CREATE INDEX IF NOT EXISTS epic_publications_pending ON epic_publications(done,workspace,lead);`)
+	return err
+}
+
+func (s *SQLite) RecordEpicPublication(ctx context.Context, intent EpicPublication) error {
+	if intent.Workspace == "" || intent.RunID == "" || intent.Lead == "" || len(intent.Changes) == 0 {
+		return errors.New("incomplete epic publication")
+	}
+	changes, err := json.Marshal(intent.Changes)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO epic_publications(workspace,run_id,lead,changes)
+		VALUES (?,?,?,?) ON CONFLICT(workspace,run_id) DO NOTHING`,
+		intent.Workspace, intent.RunID, intent.Lead, changes)
+	return err
+}
+
+func (s *SQLite) PendingEpicPublications(ctx context.Context) ([]EpicPublication, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace,run_id,lead,changes FROM epic_publications
+		WHERE done=0 ORDER BY rowid`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var intents []EpicPublication
+	for rows.Next() {
+		var intent EpicPublication
+		var changes []byte
+		if err := rows.Scan(&intent.Workspace, &intent.RunID, &intent.Lead, &changes); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(changes, &intent.Changes); err != nil {
+			return nil, err
+		}
+		intents = append(intents, intent)
+	}
+	return intents, rows.Err()
+}
+
+func (s *SQLite) CompleteEpicPublication(ctx context.Context, workspace, runID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE epic_publications SET done=1 WHERE workspace=? AND run_id=?`, workspace, runID)
+	return err
 }

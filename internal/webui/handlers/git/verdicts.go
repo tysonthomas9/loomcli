@@ -9,6 +9,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
@@ -39,6 +40,10 @@ var hasWorkingArea = func(ctx context.Context, store *review.Local, workspace, l
 }
 
 func handleVerdict(w http.ResponseWriter, req *http.Request) {
+	handleVerdictWithPublisher(w, req, publish.ReconcileEpicLead)
+}
+
+func handleVerdictWithPublisher(w http.ResponseWriter, req *http.Request, publisher func(context.Context, string, string) error) {
 	number, err := strconv.Atoi(req.PathValue("r"))
 	if err != nil || number < 1 {
 		handler.WriteJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "invalid_revision"})
@@ -68,13 +73,14 @@ func handleVerdict(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if v.Kind == "approve" || v.Kind == "override" || v.Kind == "policy" {
-		followVerdict(w, req, store, v, body.Lead)
+		followVerdict(w, req, store, v, body.Lead, publisher)
 		return
 	}
 	handler.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "data": v, "status": "recorded"})
 }
 
-func followVerdict(w http.ResponseWriter, req *http.Request, store *review.Local, verdict loomgit.Verdict, lead string) {
+func followVerdict(w http.ResponseWriter, req *http.Request, store *review.Local, verdict loomgit.Verdict,
+	lead string, publisher func(context.Context, string, string) error) {
 	status := "approved_waiting_for_working_area"
 	available, areaErr := hasWorkingArea(req.Context(), store, verdict.Workspace, lead)
 	if areaErr != nil {
@@ -107,6 +113,11 @@ func followVerdict(w http.ResponseWriter, req *http.Request, store *review.Local
 			}
 		} else {
 			status = "applied"
+			if err := publisher(req.Context(), verdict.Workspace, lead); err != nil {
+				handler.WriteJSON(w, http.StatusConflict, map[string]any{"success": false,
+					"error": "publish_failed", "message": err.Error(), "status": status})
+				return
+			}
 		}
 	}
 	handler.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "data": verdict, "status": status})

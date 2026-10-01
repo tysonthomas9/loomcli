@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,16 +12,65 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/epic"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	webgit "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 )
 
 type epicForge struct{ prs []stackpublish.PR }
+
+type epicRunner struct{}
+
+func (epicRunner) Run(context.Context, driver.RunRequest) (driver.RunResult, error) {
+	return driver.RunResult{Status: domain.DriverRunCompleted, Summary: "epic drained"}, nil
+}
+
+func finishEpicEntry(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	runtime := memstore.New()
+	if _, err := runtime.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "W", Name: "epic"}); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	dist := filepath.Join(root, "dist")
+	if err := os.MkdirAll(filepath.Join(dist, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"server.mjs": "export default {};\n", "assets/workflow.mjs": "export default {};\n"} {
+		if err := os.WriteFile(filepath.Join(dist, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	registered, err := driver.RegisterFlueDriver(ctx, runtime, driver.RegisterFlueOptions{
+		WorkspaceKey: "W", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "test", Activate: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := json.RawMessage(`{"epicId":"E","leadName":"L","openPullRequest":true,"runner":"daytona-task-runner"}`)
+	if _, err := driver.CreateDriverRun(ctx, runtime, driver.RunOptions{WorkspaceKey: "W",
+		DriverID: registered.Driver.DriverID, EpicID: "E", RunID: "epic-run", Payload: payload}); err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range []string{"T", "T2"} {
+		if _, err := runtime.TaskRuns().Create(ctx, store.TaskRunCreate{WorkspaceKey: "W",
+			TaskRunID: "run-" + task, DriverRunID: "epic-run", TaskID: task, Status: domain.TaskRunCompleted}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := (&driver.Executor{Store: runtime, WorkspaceKey: "W", RunID: "epic-run", WorkDir: root,
+		NodeID: "node", LeaseID: "lease", Runner: epicRunner{}, HeartbeatInterval: -1}).RunOnce(ctx)
+	if err != nil || result.Final == nil || result.Final.Status != domain.DriverRunCompleted {
+		t.Fatalf("epic finish = %+v, %v", result, err)
+	}
+}
 
 func (forge *epicForge) ListStackPRs(_ context.Context, _, _, prefix string) ([]stackpublish.PR, error) {
 	var found []stackpublish.PR
@@ -112,33 +160,34 @@ func TestEpicFrozenTasksHTTPApprovalPublishesLinearStack(t *testing.T) {
 	ctx, store, area, base, first := bridgeApprovalFixture(t)
 	second := freezeSecondEpicTask(t, area, base)
 	prepareEpicPublication(t, store, area, base)
-	forge := &epicForge{}
-	publisher := func(ctx context.Context, workspace, stackID, lead string, changes []string) ([]publish.Result, error) {
-		return publish.PublishStackWithProvider(ctx, workspace, stackID, lead, changes, forge, "fixture-token", "owner/repo")
+	finishEpicEntry(t)
+	reopened, err := journal.OpenSQLite(filepath.Join(os.Getenv("LOOM_CONFIG_DIR"), "loomgit", "store.db"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := epic.ReconcileEpicStack(ctx, "W", "L", publisher); err == nil || len(forge.prs) != 0 {
+	intents, err := reopened.PendingEpicPublications(ctx)
+	_ = reopened.Close()
+	if err != nil || len(intents) != 1 || len(intents[0].Changes) != 2 {
+		t.Fatalf("epic intent after reopen = %+v, %v", intents, err)
+	}
+	forge := &epicForge{}
+	if err := publish.ReconcileEpicPublicationsWithProvider(ctx, forge, "fixture-token", "owner/repo"); err != nil || len(forge.prs) != 0 {
 		t.Fatalf("unapproved epic published: %v, %+v", err, forge.prs)
 	}
 	mux := http.NewServeMux()
-	webgit.NewModule(nil, nil).Register(mux)
+	webgit.NewModule(nil, nil, func(ctx context.Context, workspace, lead string) error {
+		return publish.ReconcileEpicLeadWithProvider(ctx, workspace, lead, forge, "fixture-token", "owner/repo")
+	}).Register(mux)
 	approveEpicRevision(t, mux, first)
+	if len(forge.prs) != 0 {
+		t.Fatalf("partially approved epic published: %+v", forge.prs)
+	}
 	approveEpicRevision(t, mux, second)
 	layers, err := store.AppliedLog(ctx, "W", "L")
 	if err != nil || len(layers) != 2 {
 		t.Fatalf("applied layers = %+v, %v", layers, err)
 	}
-	if err := store.SetDeliveryMode(ctx, "W", "trunk"); err != nil {
-		t.Fatal(err)
-	}
-	err = epic.ReconcileEpicStack(ctx, "W", "L", publisher)
-	var coded *loomgit.Error
-	if !errors.As(err, &coded) || coded.Kind != loomgit.ModeMismatch || len(forge.prs) != 0 {
-		t.Fatalf("trunk epic publish = %v; PRs=%+v", err, forge.prs)
-	}
-	if err := store.SetDeliveryMode(ctx, "W", "stack"); err != nil {
-		t.Fatal(err)
-	}
-	if err := epic.ReconcileEpicStack(ctx, "W", "L", publisher); err != nil {
+	if err := publish.ReconcileEpicPublicationsWithProvider(ctx, forge, "fixture-token", "owner/repo"); err != nil {
 		t.Fatal(err)
 	}
 	if len(forge.prs) != 2 || forge.prs[0].Base != "main" || forge.prs[1].Base != forge.prs[0].Head {
