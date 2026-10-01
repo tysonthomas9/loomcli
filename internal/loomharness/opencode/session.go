@@ -108,20 +108,24 @@ func (s *Session) Resume(ctx context.Context, l loomharness.Launch) (loomharness
 // which otherwise is the server's own, per-boot password included
 // (packages/core/src/shell.ts:259-271 at b30c4d0). OpenCode keeps it in
 // memory only, so every prompt sets it again in case the server restarted.
+// Callers fail closed: no prompt is sent unless this succeeds.
 func (s *Session) isolate(ctx context.Context) error {
 	if s.c.shellEnv == nil {
 		return nil
 	}
 	env, err := s.c.shellEnv()
 	if err != nil {
-		return err
+		return fmt.Errorf("opencode: set session environment: %w", err)
 	}
 	vars := make(map[string]string, len(env))
 	for _, kv := range env {
 		k, v, _ := strings.Cut(kv, "=")
 		vars[k] = v
 	}
-	return s.c.call(ctx, "PUT", s.path("/environment"), map[string]any{"variables": vars}, nil)
+	if err := s.c.call(ctx, "PUT", s.path("/environment"), map[string]any{"variables": vars}, nil); err != nil {
+		return fmt.Errorf("opencode: set session environment: %w", err)
+	}
+	return nil
 }
 
 // Prompt queues in.Text under the native id in.Key; the first write of an id wins.

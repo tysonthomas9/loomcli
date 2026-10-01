@@ -58,8 +58,8 @@ func fakeOpenCode(mode string) int {
 	_ = os.WriteFile(filepath.Join(state, "config-content"), []byte(os.Getenv("OPENCODE_CONFIG_CONTENT")), 0o600)
 	var tokens []string
 	for _, k := range []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_TOKEN_FILE", "LOOM_PR_GIT_PASSWORD"} {
-		if v, ok := os.LookupEnv(k); ok {
-			tokens = append(tokens, k+"="+v)
+		if _, ok := os.LookupEnv(k); ok {
+			tokens = append(tokens, k) // names only: test output never carries values
 		}
 	}
 	_ = os.WriteFile(filepath.Join(state, "github-tokens"), []byte(strings.Join(tokens, "\n")), 0o600)

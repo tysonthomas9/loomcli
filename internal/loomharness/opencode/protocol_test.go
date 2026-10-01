@@ -24,10 +24,14 @@ type store struct {
 	deleted  []string
 	streams  [][]string // one scripted /api/event stream per connection
 	conns    int
+	envs     map[string]map[string]string // in memory only in OpenCode: lost on restart
+	envFail  bool
+	bareRuns int // prompts accepted while the session had no environment
 }
 
 func newStore() *store {
-	return &store{sessions: map[string]map[string]any{}, messages: map[string][]map[string]any{}, active: map[string]string{}}
+	return &store{sessions: map[string]map[string]any{}, messages: map[string][]map[string]any{}, active: map[string]string{},
+		envs: map[string]map[string]string{}}
 }
 
 func fakeServer(t *testing.T, st *store) *Client {
@@ -101,9 +105,26 @@ func fakeServer(t *testing.T, st *store) *Client {
 				return
 			}
 		}
+		if st.envs[id] == nil {
+			st.bareRuns++
+		}
 		m := map[string]any{"id": body["id"], "type": "user", "text": body["text"], "time": map[string]int64{"created": 1}}
 		st.messages[id] = append(st.messages[id], m)
 		reply(w, 200, map[string]any{"data": m})
+	})
+	mux.HandleFunc("PUT /api/session/{id}/environment", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Variables map[string]string `json:"variables"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		if st.envFail {
+			reply(w, 500, map[string]string{"_tag": "UnknownError", "message": "boom"})
+			return
+		}
+		st.envs[r.PathValue("id")] = body.Variables
+		w.WriteHeader(204)
 	})
 	mux.HandleFunc("POST /api/session/{id}/move", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]string
@@ -387,6 +408,58 @@ func TestProtocolAuthErrors(t *testing.T) {
 		err := translate(status, []byte(`{"_tag":"UnauthorizedError","message":"Authentication required"}`))
 		if !isCode(err, "auth_failed") || !errors.Is(err, loomharness.ErrUnavailable) {
 			t.Fatalf("%d -> %v; want auth_failed", status, err)
+		}
+	}
+}
+
+// TestProtocolSessionEnvironment: the filtered environment is set before any
+// prompt can run, on Open, Resume and every Prompt (OpenCode loses it on
+// restart), and a failure to set it stops the prompt instead of letting it
+// run with the server's inherited environment.
+func TestProtocolSessionEnvironment(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	var envErr error
+	c.shellEnv = func() ([]string, error) { return []string{"LOOM_MARK=1", "PATH=/bin"}, envErr }
+	restart := func() { st.mu.Lock(); clear(st.envs); st.mu.Unlock() }
+
+	ref, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Dir: "/repo"})
+	if err != nil || st.envs[ref.NativeID]["LOOM_MARK"] != "1" {
+		t.Fatalf("Open did not set the session environment: %v", err)
+	}
+	s := c.Session(ref)
+	restart()
+	if _, err := s.Resume(ctx, loomharness.Launch{}); err != nil || st.envs[ref.NativeID] == nil {
+		t.Fatalf("Resume did not set the session environment: %v", err)
+	}
+	restart()
+	if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-1", "r1"), Text: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if st.bareRuns != 0 {
+		t.Fatal("a prompt ran with the server's inherited environment")
+	}
+
+	for name, fail := range map[string]func(){
+		"PUT fails":     func() { st.envFail, envErr = true, nil },
+		"env not built": func() { st.envFail, envErr = false, errors.New("bad presets") },
+	} {
+		fail()
+		restart()
+		n := len(st.messages[ref.NativeID])
+		err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-1", name), Text: "hi"})
+		if err == nil || !strings.Contains(err.Error(), "session environment") {
+			t.Fatalf("%s: Prompt = %v; want a session environment error", name, err)
+		}
+		if len(st.messages[ref.NativeID]) != n || st.bareRuns != 0 {
+			t.Fatalf("%s: the prompt reached OpenCode without a session environment", name)
+		}
+		if _, err := s.Resume(ctx, loomharness.Launch{}); err == nil {
+			t.Fatalf("%s: Resume succeeded without a session environment", name)
+		}
+		if _, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-2-" + name, Dir: "/repo"}); err == nil {
+			t.Fatalf("%s: Open succeeded without a session environment", name)
 		}
 	}
 }
