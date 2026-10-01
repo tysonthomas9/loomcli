@@ -24,7 +24,8 @@ import (
 
 // TestCompatibility is the R22 copy-of-data check: the pinned v2 build opens
 // a copy of the user's OpenCode database and creates a session, and the 1.18
-// executable can still read the same data afterwards. It never opens the
+// executable can still read its own data afterwards. It also pins the known
+// incompatibility: 1.18 cannot see sessions v2 creates. It never opens the
 // user's database for writing.
 //
 // LOOM_REAL_OPENCODE=1 enables it. LOOM_OPENCODE_V2, LOOM_OPENCODE_V1 and
@@ -83,6 +84,18 @@ func TestCompatibility(t *testing.T) {
 		if !after[id] {
 			t.Errorf("1.18 session %s missing after v2 used the data", id)
 		}
+	}
+
+	// R22 DoD: 1.18 should also read the session v2 created. On 2.0.19 it
+	// cannot: v2 keeps new sessions in its own tables (session_v2), so the
+	// result is INCOMPATIBLE for two-way use. The test asserts that observed
+	// state, so it fails if a new build changes it either way.
+	_, exportErr := runErr(v1, repo, env, "export", created)
+	visible := after[created]
+	t.Logf("R22 finding: v2-created session %s visible to 1.18: table=%v export=%v (INCOMPATIBLE for two-way use when both false)",
+		created, visible, exportErr == nil)
+	if visible || exportErr == nil {
+		t.Errorf("1.18 can now see v2 session %s; the R22 INCOMPATIBLE finding is out of date, so re-check two-way use", created)
 	}
 }
 
@@ -169,6 +182,14 @@ func openRO(t *testing.T, path string) *sql.DB {
 
 func run(t *testing.T, bin, dir string, env []string, args ...string) string {
 	t.Helper()
+	out, err := runErr(bin, dir, env, args...)
+	if err != nil {
+		t.Fatalf("%s %v: %v", bin, args, err)
+	}
+	return out
+}
+
+func runErr(bin, dir string, env []string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
@@ -177,9 +198,9 @@ func run(t *testing.T, bin, dir string, env []string, args ...string) string {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("%s %v: %v\n%s", bin, args, err, stderr.String())
+		return string(out), fmt.Errorf("%w\n%s", err, stderr.String())
 	}
-	return string(out)
+	return string(out), nil
 }
 
 // createWithV2 runs `serve` on the copy, creates a session, reads it back and
