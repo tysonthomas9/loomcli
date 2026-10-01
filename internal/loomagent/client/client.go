@@ -1,7 +1,8 @@
 // Package client is the typed Go client of the Agent API REST routes
-// (design v2 §9.1), scoped to one workspace. It sends each write's RequestID
-// as the Idempotency-Key header and never sends an actor: the server takes
-// the caller from the request's authentication.
+// (design v2 §9.1), scoped to one workspace. It sends and decodes the
+// agentsv1 wire types, sends each write's RequestID as the Idempotency-Key
+// header, and never sends an actor: the server takes the caller from the
+// request's authentication.
 package client
 
 import (
@@ -17,6 +18,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/loomagent"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentsv1"
 )
 
 // TokenSource returns the bearer token for a request; "" sends none.
@@ -60,13 +62,13 @@ func (e *StatusError) Error() string {
 }
 
 // Create creates an agent (POST agents).
-func (c *Client) Create(ctx context.Context, req loomagent.CreateRequest) (a loomagent.AgentInfo, err error) {
-	return a, c.do(ctx, http.MethodPost, "agents", nil, req.RequestID, req, &a)
+func (c *Client) Create(ctx context.Context, requestID string, b agentsv1.CreateBody) (a agentsv1.Agent, err error) {
+	return a, c.do(ctx, http.MethodPost, "agents", nil, requestID, b, &a)
 }
 
 // List returns one page of agents and the next page's cursor. The workspace
 // is the client's; f.WorkspaceID and f.IncludeDeleted are not sent.
-func (c *Client) List(ctx context.Context, f loomstore.AgentFilter) ([]loomagent.AgentInfo, string, error) {
+func (c *Client) List(ctx context.Context, f loomstore.AgentFilter) (l agentsv1.AgentList, err error) {
 	q := url.Values{}
 	for k, v := range map[string]string{"owner_kind": f.OwnerKind, "owner_id": f.OwnerID, "parent": f.Parent,
 		"root": f.Root, "preset": f.Preset, "mode": f.Mode, "harness": f.Harness, "role_kind": f.RoleKind,
@@ -82,65 +84,61 @@ func (c *Client) List(ctx context.Context, f loomstore.AgentFilter) ([]loomagent
 	if f.Limit > 0 {
 		q.Set("limit", strconv.Itoa(f.Limit))
 	}
-	var out struct {
-		Agents []loomagent.AgentInfo `json:"agents"`
-		Next   string                `json:"next"`
-	}
-	err := c.do(ctx, http.MethodGet, "agents", q, "", nil, &out)
-	return out.Agents, out.Next, err
+	return l, c.do(ctx, http.MethodGet, "agents", q, "", nil, &l)
 }
 
 // Get returns an agent with its waiting messages and open asks.
-func (c *Client) Get(ctx context.Context, agentID string) (a loomagent.AgentInfo, err error) {
+func (c *Client) Get(ctx context.Context, agentID string) (a agentsv1.Agent, err error) {
 	return a, c.do(ctx, http.MethodGet, agent(agentID), nil, "", nil, &a)
 }
 
 // Update changes an agent's name, model or harness (PATCH).
-func (c *Client) Update(ctx context.Context, req loomagent.UpdateRequest) (a loomagent.AgentInfo, err error) {
-	return a, c.do(ctx, http.MethodPatch, agent(req.AgentID), nil, req.RequestID, req, &a)
+func (c *Client) Update(ctx context.Context, requestID, agentID string, b agentsv1.UpdateBody) (a agentsv1.Agent, err error) {
+	return a, c.do(ctx, http.MethodPatch, agent(agentID), nil, requestID, b, &a)
 }
 
-// Delete deletes an agent.
-func (c *Client) Delete(ctx context.Context, req loomagent.DeleteRequest) error {
+// Delete deletes an agent. fingerprint confirms the unsaved work an earlier
+// unsaved_work error listed.
+func (c *Client) Delete(ctx context.Context, requestID, agentID string, cascade bool, fingerprint string) error {
 	q := url.Values{}
-	if req.Cascade {
+	if cascade {
 		q.Set("cascade", "true")
 	}
-	if req.Fingerprint != "" {
-		q.Set("fingerprint", req.Fingerprint)
+	if fingerprint != "" {
+		q.Set("fingerprint", fingerprint)
 	}
-	return c.do(ctx, http.MethodDelete, agent(req.AgentID), q, req.RequestID, nil, nil)
+	return c.do(ctx, http.MethodDelete, agent(agentID), q, requestID, nil, nil)
 }
 
-// Archive archives an agent.
-func (c *Client) Archive(ctx context.Context, req loomagent.ArchiveRequest) error {
-	return c.do(ctx, http.MethodPost, agent(req.AgentID)+"/archive", nil, req.RequestID, req, nil)
+// Archive archives an agent; reason "" is done.
+func (c *Client) Archive(ctx context.Context, requestID, agentID, reason string) error {
+	return c.do(ctx, http.MethodPost, agent(agentID)+"/archive", nil, requestID, agentsv1.ArchiveBody{Reason: reason}, nil)
 }
 
 // Unarchive unarchives an agent.
-func (c *Client) Unarchive(ctx context.Context, req loomagent.ArchiveRequest) error {
-	return c.do(ctx, http.MethodPost, agent(req.AgentID)+"/unarchive", nil, req.RequestID, req, nil)
+func (c *Client) Unarchive(ctx context.Context, requestID, agentID string) error {
+	return c.do(ctx, http.MethodPost, agent(agentID)+"/unarchive", nil, requestID, nil, nil)
 }
 
-// Send sends a message from the authenticated caller.
-func (c *Client) Send(ctx context.Context, req loomagent.SendRequest) (r loomagent.SendResult, err error) {
-	return r, c.do(ctx, http.MethodPost, agent(req.AgentID)+"/messages", nil, req.RequestID, req, &r)
+// Send sends text from the authenticated caller.
+func (c *Client) Send(ctx context.Context, requestID, agentID, text string) (r agentsv1.SendResult, err error) {
+	return r, c.do(ctx, http.MethodPost, agent(agentID)+"/messages", nil, requestID, agentsv1.SendBody{Text: text}, &r)
 }
 
 // Withdraw clears the authenticated caller's waiting message.
-func (c *Client) Withdraw(ctx context.Context, req loomagent.WithdrawRequest) (r loomagent.WithdrawResult, err error) {
-	return r, c.do(ctx, http.MethodDelete, agent(req.AgentID)+"/messages/waiting", nil, req.RequestID, nil, &r)
+func (c *Client) Withdraw(ctx context.Context, requestID, agentID string) (r agentsv1.WithdrawResult, err error) {
+	return r, c.do(ctx, http.MethodDelete, agent(agentID)+"/messages/waiting", nil, requestID, nil, &r)
 }
 
 // Respond answers an open ask.
-func (c *Client) Respond(ctx context.Context, req loomagent.RespondRequest) error {
-	return c.do(ctx, http.MethodPost, agent(req.AgentID)+"/asks/"+url.PathEscape(req.AskID), nil, req.RequestID, req, nil)
+func (c *Client) Respond(ctx context.Context, requestID, agentID, askID string, b agentsv1.RespondBody) error {
+	return c.do(ctx, http.MethodPost, agent(agentID)+"/asks/"+url.PathEscape(askID), nil, requestID, b, nil)
 }
 
 // ListEvents returns one snapshot-pinned page of an agent's events after
 // q.After. To resume after a drop, call it again with After set to the last
 // event's Seq (or the page's Next).
-func (c *Client) ListEvents(ctx context.Context, q loomstore.EventQuery) (p loomstore.EventPage, err error) {
+func (c *Client) ListEvents(ctx context.Context, q loomstore.EventQuery) (p agentsv1.EventPage, err error) {
 	v := url.Values{}
 	for k, n := range map[string]int64{"after": q.After, "snapshot": q.Snapshot, "limit": int64(q.Limit)} {
 		if n > 0 {
@@ -154,16 +152,14 @@ func (c *Client) ListEvents(ctx context.Context, q loomstore.EventQuery) (p loom
 }
 
 // Presets lists the presets.
-func (c *Client) Presets(ctx context.Context) ([]loomagent.Preset, error) {
-	var out struct {
-		Presets []loomagent.Preset `json:"presets"`
-	}
-	err := c.do(ctx, http.MethodGet, "presets", nil, "", nil, &out)
-	return out.Presets, err
+func (c *Client) Presets(ctx context.Context) ([]agentsv1.Preset, error) {
+	var l agentsv1.PresetList
+	err := c.do(ctx, http.MethodGet, "presets", nil, "", nil, &l)
+	return l.Presets, err
 }
 
 // Preset returns a preset by name or name@version.
-func (c *Client) Preset(ctx context.Context, name string) (p loomagent.Preset, err error) {
+func (c *Client) Preset(ctx context.Context, name string) (p agentsv1.Preset, err error) {
 	return p, c.do(ctx, http.MethodGet, "presets/"+url.PathEscape(name), nil, "", nil, &p)
 }
 
@@ -224,16 +220,14 @@ func (c *Client) do(ctx context.Context, method, path string, q url.Values, requ
 // a code, else a *StatusError.
 func decodeError(status int, raw []byte) error {
 	var e struct {
-		Error, Kind    string
-		Code           loomagent.Code
-		Allowed, Paths []string
-		Fingerprint    string
+		agentsv1.Error
+		Kind string `json:"kind"`
 	}
 	if json.Unmarshal(raw, &e) != nil {
-		e.Error = strings.TrimSpace(string(raw))
+		e.Error.Error = strings.TrimSpace(string(raw))
 	}
 	if e.Code != "" {
-		return &loomagent.Error{Code: e.Code, Message: e.Error, Allowed: e.Allowed, Paths: e.Paths, Fingerprint: e.Fingerprint}
+		return &loomagent.Error{Code: e.Code, Message: e.Error.Error, Allowed: e.Allowed, Paths: e.Paths, Fingerprint: e.Fingerprint}
 	}
-	return &StatusError{Status: status, Message: e.Error, Kind: e.Kind}
+	return &StatusError{Status: status, Message: e.Error.Error, Kind: e.Kind}
 }

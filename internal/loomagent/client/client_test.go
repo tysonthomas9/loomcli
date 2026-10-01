@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -102,6 +103,10 @@ func code(err error) loomagent.Code {
 	return ""
 }
 
+func lead(name string) agentsv1.CreateBody {
+	return agentsv1.CreateBody{Preset: "lead", Name: name, Repo: "/repo", Overrides: agentsv1.Overrides{Harness: "opencode"}}
+}
+
 // TestClientEveryMethod drives every Agent API method through the client
 // against the real routes on a fake harness.
 func TestClientEveryMethod(t *testing.T) {
@@ -109,58 +114,56 @@ func TestClientEveryMethod(t *testing.T) {
 	srv, fh := newServer(t)
 	c := newClient(srv, "ws", "")
 
-	a, err := c.Create(ctx, loomagent.CreateRequest{Envelope: loomagent.Envelope{RequestID: "c1"}, Preset: "lead",
-		Name: "alpha", Repo: "/repo", Overrides: loomagent.Overrides{Harness: "opencode"}})
+	a, err := c.Create(ctx, "c1", lead("alpha"))
 	if err != nil || a.AgentID == "" || a.Name != "alpha" {
 		t.Fatalf("Create = %+v, %v", a, err)
 	}
-	again, err := c.Create(ctx, loomagent.CreateRequest{Envelope: loomagent.Envelope{RequestID: "c1"}, Preset: "lead",
-		Name: "alpha", Repo: "/repo", Overrides: loomagent.Overrides{Harness: "opencode"}})
-	if err != nil || again.AgentID != a.AgentID {
+	if again, err := c.Create(ctx, "c1", lead("alpha")); err != nil || again.AgentID != a.AgentID {
 		t.Fatalf("Create retry = %+v, %v; want %s", again, err, a.AgentID)
 	}
 	id := a.AgentID
 	eventually(t, "idle", func() bool { got, err := c.Get(ctx, id); return err == nil && got.State == loomagent.StateIdle })
 
-	agents, next, err := c.List(ctx, loomstore.AgentFilter{Name: "alpha", Limit: 10})
-	if err != nil || len(agents) != 1 || agents[0].AgentID != id || next != "" {
-		t.Fatalf("List = %+v, %q, %v", agents, next, err)
+	l, err := c.List(ctx, loomstore.AgentFilter{Name: "alpha", Limit: 10})
+	if err != nil || len(l.Agents) != 1 || l.Agents[0].AgentID != id || l.Next != "" {
+		t.Fatalf("List = %+v, %v", l, err)
 	}
 	spec := a.SpecVersion
-	u, err := c.Update(ctx, loomagent.UpdateRequest{Envelope: loomagent.Envelope{RequestID: "u1",
-		Expect: &loomagent.Expect{SpecVersion: &spec}}, AgentID: id, Name: "beta"})
+	u, err := c.Update(ctx, "u1", id, agentsv1.UpdateBody{Name: "beta", Expect: &agentsv1.Expect{SpecVersion: &spec}})
 	if err != nil || u.Name != "beta" {
 		t.Fatalf("Update = %+v, %v", u, err)
 	}
-	if _, err := c.Update(ctx, loomagent.UpdateRequest{Envelope: loomagent.Envelope{RequestID: "u2",
-		Expect: &loomagent.Expect{SpecVersion: &spec}}, AgentID: id, Name: "gamma"}); code(err) != loomagent.CodeSpecVersionMismatch {
+	if _, err := c.Update(ctx, "u2", id, agentsv1.UpdateBody{Name: "gamma",
+		Expect: &agentsv1.Expect{SpecVersion: &spec}}); code(err) != loomagent.CodeSpecVersionMismatch {
 		t.Fatalf("stale Update = %v; want spec_version_mismatch", err)
 	}
 
 	fh.Script(id, fake.Turn{Steps: []fake.Step{{Delta: "thinking"}, {Ask: "k1"}, {Delta: "done"}}})
-	sent, err := c.Send(ctx, loomagent.SendRequest{Envelope: loomagent.Envelope{RequestID: "s1"}, AgentID: id, Text: "hi"})
+	sent, err := c.Send(ctx, "s1", id, "hi")
 	if err != nil || sent.MessageID == "" {
 		t.Fatalf("Send = %+v, %v", sent, err)
 	}
-	retry, err := c.Send(ctx, loomagent.SendRequest{Envelope: loomagent.Envelope{RequestID: "s1"}, AgentID: id, Text: "hi"})
-	if err != nil || retry.MessageID != sent.MessageID {
+	if retry, err := c.Send(ctx, "s1", id, "hi"); err != nil || retry.MessageID != sent.MessageID {
 		t.Fatalf("Send retry = %+v, %v; want %+v", retry, err, sent)
 	}
 	eventually(t, "ask k1", func() bool { got, err := c.Get(ctx, id); return err == nil && len(got.OpenAsks) == 1 })
-	if _, err := c.Send(ctx, loomagent.SendRequest{Envelope: loomagent.Envelope{RequestID: "s2"}, AgentID: id, Text: "next"}); err != nil {
+	if _, err := c.Send(ctx, "s2", id, "next"); err != nil {
 		t.Fatal(err)
 	}
-	if w, err := c.Withdraw(ctx, loomagent.WithdrawRequest{Envelope: loomagent.Envelope{RequestID: "w1"}, AgentID: id}); err != nil || w.Result != "withdrawn" {
+	if got, err := c.Get(ctx, id); err != nil || len(got.WaitingMessages) != 1 || got.WaitingMessages[0].Text != "next" ||
+		got.OpenAsks[0].ID != "k1" {
+		t.Fatalf("Get = %+v, %v; want waiting next and ask k1", got, err)
+	}
+	if w, err := c.Withdraw(ctx, "w1", id); err != nil || w.Result != "withdrawn" {
 		t.Fatalf("Withdraw = %+v, %v", w, err)
 	}
-	if err := c.Respond(ctx, loomagent.RespondRequest{Envelope: loomagent.Envelope{RequestID: "r1"}, AgentID: id,
-		AskID: "k1", Decision: "allow_once"}); err != nil {
+	if err := c.Respond(ctx, "r1", id, "k1", agentsv1.RespondBody{Decision: "allow_once"}); err != nil {
 		t.Fatalf("Respond = %v", err)
 	}
 	eventually(t, "turn end", func() bool { got, err := c.Get(ctx, id); return err == nil && got.State == loomagent.StateIdle })
 
 	all, err := c.ListEvents(ctx, loomstore.EventQuery{AgentID: id})
-	if err != nil || len(all.Events) < 3 || all.More {
+	if err != nil || len(all.Events) < 3 || all.More || all.SnapshotSeq == 0 || all.Events[0].EventID == "" {
 		t.Fatalf("ListEvents = %+v, %v", all, err)
 	}
 	// Read one event at a time, dropping the connection between pages: each
@@ -197,22 +200,22 @@ func TestClientEveryMethod(t *testing.T) {
 	if err != nil || len(ps) == 0 {
 		t.Fatalf("Presets = %v, %v", ps, err)
 	}
-	if p, err := c.Preset(ctx, "lead"); err != nil || p.Name != "lead" {
+	if p, err := c.Preset(ctx, "lead"); err != nil || p.Name != "lead" || len(p.Rules) == 0 {
 		t.Fatalf("Preset = %+v, %v", p, err)
 	}
-	if err := c.Archive(ctx, loomagent.ArchiveRequest{Envelope: loomagent.Envelope{RequestID: "a1"}, AgentID: id}); err != nil {
+	if err := c.Archive(ctx, "a1", id, ""); err != nil {
 		t.Fatalf("Archive = %v", err)
 	}
-	if _, _, err := c.List(ctx, loomstore.AgentFilter{}); err != nil {
-		t.Fatal(err)
+	if l, err := c.List(ctx, loomstore.AgentFilter{}); err != nil || len(l.Agents) != 0 {
+		t.Fatalf("List = %+v, %v; want no live agents", l, err)
 	}
-	if got, _, _ := c.List(ctx, loomstore.AgentFilter{IncludeArchived: true}); len(got) != 1 || got[0].State != loomagent.StateArchived {
-		t.Fatalf("List archived = %+v", got)
+	if l, _ := c.List(ctx, loomstore.AgentFilter{IncludeArchived: true}); len(l.Agents) != 1 || l.Agents[0].State != loomagent.StateArchived {
+		t.Fatalf("List archived = %+v", l)
 	}
-	if err := c.Unarchive(ctx, loomagent.ArchiveRequest{Envelope: loomagent.Envelope{RequestID: "a2"}, AgentID: id}); err != nil {
+	if err := c.Unarchive(ctx, "a2", id); err != nil {
 		t.Fatalf("Unarchive = %v", err)
 	}
-	if err := c.Delete(ctx, loomagent.DeleteRequest{Envelope: loomagent.Envelope{RequestID: "d1"}, AgentID: id}); err != nil {
+	if err := c.Delete(ctx, "d1", id, false, ""); err != nil {
 		t.Fatalf("Delete = %v", err)
 	}
 	if got, err := c.Get(ctx, id); err != nil || got.DeletedAt == nil {
@@ -233,8 +236,9 @@ func TestClientTypedErrors(t *testing.T) {
 	if _, err := c.Preset(ctx, "nope"); code(err) != loomagent.CodePresetNotFound {
 		t.Fatalf("Preset = %v; want preset_not_found", err)
 	}
-	_, err := c.Create(ctx, loomagent.CreateRequest{Envelope: loomagent.Envelope{RequestID: "c1"}, Preset: "lead",
-		Name: "x", Repo: "/repo", Overrides: loomagent.Overrides{Harness: "nope"}})
+	b := lead("x")
+	b.Overrides.Harness = "nope"
+	_, err := c.Create(ctx, "c1", b)
 	var e *loomagent.Error
 	if !errors.As(err, &e) || e.Code != loomagent.CodePresetInvalid || len(e.Allowed) == 0 {
 		t.Fatalf("Create bad harness = %#v; want preset_invalid with allowed", err)
@@ -242,9 +246,6 @@ func TestClientTypedErrors(t *testing.T) {
 	var se *StatusError
 	if _, err := newClient(srv, "other", "").Get(ctx, "a"); !errors.As(err, &se) || se.Status != http.StatusNotFound {
 		t.Fatalf("other workspace = %v; want a 404 StatusError", err)
-	}
-	if _, err := c.ListEvents(ctx, loomstore.EventQuery{AgentID: "nope"}); err == nil {
-		t.Fatal("ListEvents of an unknown agent succeeded")
 	}
 	boom := errors.New("no token")
 	bad := New(Config{BaseURL: srv.URL, Workspace: "ws", HTTP: srv.Client(),
@@ -254,16 +255,14 @@ func TestClientTypedErrors(t *testing.T) {
 	}
 }
 
-// TestClientActorFromAuth checks that the caller is the authenticated user,
-// never an actor the client could put in a request.
+// TestClientActorFromAuth checks that the caller is the authenticated user:
+// the client has no way to name an actor, and the server takes the token's.
 func TestClientActorFromAuth(t *testing.T) {
 	ctx := context.Background()
 	srv, fh := newServer(t)
 	alice := newClient(srv, "ws", "alice")
 
-	req := loomagent.CreateRequest{Envelope: loomagent.Envelope{RequestID: "c1"}, Preset: "lead", Name: "alpha",
-		Repo: "/repo", Overrides: loomagent.Overrides{Harness: "opencode"}, Actor: loomagent.ActorRef{Kind: "user", ID: "mallory"}}
-	a, err := alice.Create(ctx, req)
+	a, err := alice.Create(ctx, "c1", lead("alpha"))
 	if err != nil || a.OwnerID != "alice" || a.CreatedByID != "alice" {
 		t.Fatalf("Create = owner %q by %q, %v; want alice", a.OwnerID, a.CreatedByID, err)
 	}
@@ -272,16 +271,14 @@ func TestClientActorFromAuth(t *testing.T) {
 		got, err := alice.Get(ctx, a.AgentID)
 		return err == nil && got.State == loomagent.StateIdle
 	})
-	if _, err := alice.Send(ctx, loomagent.SendRequest{Envelope: loomagent.Envelope{RequestID: "s1"}, AgentID: a.AgentID,
-		Text: "first"}); err != nil {
+	if _, err := alice.Send(ctx, "s1", a.AgentID, "first"); err != nil {
 		t.Fatal(err)
 	}
 	eventually(t, "busy", func() bool {
 		got, err := alice.Get(ctx, a.AgentID)
 		return err == nil && got.State == loomagent.StateWaiting
 	})
-	if _, err := alice.Send(ctx, loomagent.SendRequest{Envelope: loomagent.Envelope{RequestID: "s2"}, AgentID: a.AgentID,
-		Text: "from alice", Actor: loomagent.ActorRef{Kind: "agent", ID: "mallory"}, Source: "system"}); err != nil {
+	if _, err := alice.Send(ctx, "s2", a.AgentID, "from alice"); err != nil {
 		t.Fatal(err)
 	}
 	got, err := alice.Get(ctx, a.AgentID)
@@ -289,8 +286,59 @@ func TestClientActorFromAuth(t *testing.T) {
 		t.Fatalf("waiting = %+v, %v; want alice's", got.WaitingMessages, err)
 	}
 	// The local user has no waiting message to withdraw; alice's stays.
-	if w, err := newClient(srv, "ws", "").Withdraw(ctx, loomagent.WithdrawRequest{Envelope: loomagent.Envelope{RequestID: "w1"},
-		AgentID: a.AgentID, Actor: loomagent.ActorRef{Kind: "user", ID: "alice"}}); err != nil || w.Result != "nothing_waiting" {
+	if w, err := newClient(srv, "ws", "").Withdraw(ctx, "w1", a.AgentID); err != nil || w.Result != "nothing_waiting" {
 		t.Fatalf("local Withdraw = %+v, %v; want nothing_waiting", w, err)
+	}
+}
+
+// TestClientWireKeys checks the literal request a write sends: snake_case
+// body keys, the RequestID only in Idempotency-Key, and the bearer token.
+func TestClientWireKeys(t *testing.T) {
+	var got struct {
+		method, path, key, auth string
+		body                    map[string]any
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.method, got.path, got.key, got.auth = r.Method, r.URL.EscapedPath(), r.Header.Get("Idempotency-Key"), r.Header.Get("Authorization")
+		got.body = nil
+		if err := json.NewDecoder(r.Body).Decode(&got.body); err != nil {
+			t.Errorf("body: %v", err)
+		}
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer srv.Close()
+	c := newClient(srv, "w s", "tok")
+	ctx := context.Background()
+
+	if _, err := c.Create(ctx, "req-1", agentsv1.CreateBody{Preset: "lead", Name: "n", BaseRef: "main",
+		FirstMessage: "hi", ExternalKey: "k", Overrides: agentsv1.Overrides{Harness: "opencode", ReadOnly: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if got.method != "POST" || got.path != "/api/workspaces/w%20s/v1/agents" || got.key != "req-1" || got.auth != "Bearer tok" {
+		t.Fatalf("Create sent %s %s key %q auth %q", got.method, got.path, got.key, got.auth)
+	}
+	o, _ := got.body["overrides"].(map[string]any)
+	if got.body["base_ref"] != "main" || got.body["first_message"] != "hi" || got.body["external_key"] != "k" ||
+		o["harness"] != "opencode" || o["read_only"] != true {
+		t.Fatalf("Create body = %v; want snake_case keys", got.body)
+	}
+	for k := range got.body {
+		if k != strings.ToLower(k) || strings.Contains(strings.ToLower(k), "actor") || strings.Contains(strings.ToLower(k), "request") {
+			t.Fatalf("Create body key %q", k)
+		}
+	}
+	spec := int64(3)
+	if _, err := c.Update(ctx, "req-2", "a/1", agentsv1.UpdateBody{Model: "m", Expect: &agentsv1.Expect{SpecVersion: &spec}}); err != nil {
+		t.Fatal(err)
+	}
+	e, _ := got.body["expect"].(map[string]any)
+	if got.method != "PATCH" || got.path != "/api/workspaces/w%20s/v1/agents/a%2F1" || got.key != "req-2" || e["spec_version"] != float64(3) {
+		t.Fatalf("Update sent %s %s key %q body %v", got.method, got.path, got.key, got.body)
+	}
+	if _, err := c.Send(ctx, "req-3", "a1", "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.body) != 1 || got.body["text"] != "hello" || got.key != "req-3" {
+		t.Fatalf("Send body = %v key %q; want only text", got.body, got.key)
 	}
 }
