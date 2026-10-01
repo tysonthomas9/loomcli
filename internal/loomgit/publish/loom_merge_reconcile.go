@@ -132,9 +132,17 @@ func submitLoomMerge(ctx context.Context, store *journal.SQLite, forge loomMerge
 	if queued[pr.Number] {
 		return nil
 	}
+	merge, err = recordLoomAttempt(ctx, store, merge)
+	if err != nil {
+		return err
+	}
 	result, err := forge.MergeLoomPull(ctx, owner, repo, pr.Number, pr.HeadSHA)
 	if err != nil {
-		return blockLoomMerge(ctx, store, merge, loomgit.MergeBlocked, err.Error())
+		var rejected *stackpublish.LoomMergeRejectedError
+		if errors.As(err, &rejected) {
+			return blockLoomMerge(ctx, store, merge, loomgit.MergeBlocked, err.Error())
+		}
+		return loomgit.NewError(loomgit.AttentionRequired, "merge submission outcome is unknown", err)
 	}
 	if result.Details.ExpectedHeadSHA != "" && result.Details.ExpectedHeadSHA != pr.HeadSHA {
 		return blockLoomMerge(ctx, store, merge, loomgit.Stale, "provider accepted a different merge head")
@@ -143,11 +151,23 @@ func submitLoomMerge(ctx context.Context, store *journal.SQLite, forge loomMerge
 		return setLoomPhase(ctx, store, merge, "landing", merge.Index, "")
 	}
 	if result.Status == "failed" {
-		return nil
+		return blockLoomMerge(ctx, store, merge, loomgit.MergeBlocked, "provider merge failed: "+result.Details.Message)
 	}
 	after := merge
 	after.Phase, after.ProviderRequestID = "merging", result.Details.UUID
 	return store.AdvanceLoomMerge(ctx, merge, after)
+}
+
+func recordLoomAttempt(ctx context.Context, store *journal.SQLite, merge journal.LoomMerge) (journal.LoomMerge, error) {
+	if merge.DispatchAttempts >= 2 {
+		return merge, loomgit.NewError(loomgit.AttentionRequired, "merge outcome remains unknown after pinned recovery", nil)
+	}
+	after := merge
+	after.DispatchAttempts++
+	if err := store.AdvanceLoomMerge(ctx, merge, after); err != nil {
+		return merge, err
+	}
+	return store.LoomMerge(ctx, merge.Workspace, merge.StackID)
 }
 
 func pollLoomMerge(ctx context.Context, store *journal.SQLite, forge loomMergeForge,
@@ -165,9 +185,7 @@ func pollLoomMerge(ctx context.Context, store *journal.SQLite, forge loomMergeFo
 	if result.Status == "pending" || result.Status == "enqueued" || result.Status == "merged" {
 		return nil
 	}
-	after := merge
-	after.Phase, after.ProviderRequestID = "dispatching", ""
-	return store.AdvanceLoomMerge(ctx, merge, after)
+	return blockLoomMerge(ctx, store, merge, loomgit.MergeBlocked, "provider merge failed: "+result.Details.Message)
 }
 
 func loomMergeHealth(ctx context.Context, forge loomMergeForge, publication journal.Publication,
@@ -377,7 +395,7 @@ func setLoomPhase(ctx context.Context, store *journal.SQLite, before journal.Loo
 	after := before
 	after.Phase, after.Index, after.Reason = phase, index, reason
 	if index != before.Index {
-		after.PRNumber, after.DispatchHead, after.ProviderRequestID = 0, "", ""
+		after.PRNumber, after.DispatchHead, after.ProviderRequestID, after.DispatchAttempts = 0, "", "", 0
 	}
 	return store.AdvanceLoomMerge(ctx, before, after)
 }

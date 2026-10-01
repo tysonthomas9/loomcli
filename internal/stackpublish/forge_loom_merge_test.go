@@ -3,6 +3,7 @@ package stackpublish
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -66,6 +67,35 @@ func TestGitHubForgeLoomMergeAdoptsMatchingConflictOnly(t *testing.T) {
 	}
 	if _, err := forge.MergeLoomPull(context.Background(), "owner", "repo", 7, "other-head"); err == nil {
 		t.Fatal("adopted request for another head")
+	}
+}
+
+func TestGitHubForgeLoomMergeRejectsDefinitiveHTTPFailure(t *testing.T) {
+	for _, status := range []int{http.StatusMethodNotAllowed, http.StatusUnprocessableEntity} {
+		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			writer.WriteHeader(status)
+			_, _ = writer.Write([]byte(`{"message":"not mergeable"}`))
+		}))
+		forge := NewGitHubForge("fixture", server.Client(), server.URL)
+		_, err := forge.MergeLoomPull(context.Background(), "owner", "repo", 7, "confirmed-head")
+		var rejected *LoomMergeRejectedError
+		if !errors.As(err, &rejected) {
+			t.Errorf("status %d should reject definitively: %v", status, err)
+		}
+		server.Close()
+	}
+}
+
+func TestGitHubForgeLoomMergeTreatsServerErrorAsUnknown(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	forge := NewGitHubForge("fixture", server.Client(), server.URL)
+	_, err := forge.MergeLoomPull(context.Background(), "owner", "repo", 7, "confirmed-head")
+	var rejected *LoomMergeRejectedError
+	if err == nil || errors.As(err, &rejected) {
+		t.Fatalf("5xx outcome should be unknown, got %v", err)
 	}
 }
 

@@ -3,6 +3,7 @@ package stackpublish
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -16,8 +17,14 @@ type LoomMergeResult struct {
 		ExpectedHeadSHA string `json:"expected_head_sha"`
 		MergeAction     string `json:"merge_action"`
 		BypassRules     bool   `json:"bypass_rules"`
+		Message         string `json:"message"`
 	} `json:"details"`
 }
+
+type LoomMergeRejectedError struct{ Cause error }
+
+func (err *LoomMergeRejectedError) Error() string { return err.Cause.Error() }
+func (err *LoomMergeRejectedError) Unwrap() error { return err.Cause }
 
 func (g *GitHubForge) MergeLoomPull(ctx context.Context, owner, repo string, number int, head string) (LoomMergeResult, error) {
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge-async", owner, repo, number)
@@ -28,7 +35,11 @@ func (g *GitHubForge) MergeLoomPull(ctx context.Context, owner, repo string, num
 		return LoomMergeResult{}, err
 	}
 	if status != http.StatusAccepted && status != http.StatusOK && status != http.StatusConflict {
-		return LoomMergeResult{}, g.apiErr("PUT", path, status, data)
+		cause := g.apiErr("PUT", path, status, data)
+		if status >= 400 && status < 500 && status != http.StatusTooManyRequests {
+			return LoomMergeResult{}, &LoomMergeRejectedError{Cause: cause}
+		}
+		return LoomMergeResult{}, cause
 	}
 	result, err := decodeLoomMergeResult(data)
 	if err != nil {
@@ -36,10 +47,10 @@ func (g *GitHubForge) MergeLoomPull(ctx context.Context, owner, repo string, num
 	}
 	if status == http.StatusConflict && (result.Details.UUID == "" || result.Details.ExpectedHeadSHA != head ||
 		result.Details.MergeAction != "default" || result.Details.BypassRules) {
-		return LoomMergeResult{}, fmt.Errorf("github existing loom merge differs from requested head or action")
+		return LoomMergeResult{}, &LoomMergeRejectedError{Cause: errors.New("github existing loom merge differs from requested head or action")}
 	}
 	if result.Details.BypassRules {
-		return LoomMergeResult{}, fmt.Errorf("github loom merge bypassed repository rules")
+		return LoomMergeResult{}, &LoomMergeRejectedError{Cause: errors.New("github loom merge bypassed repository rules")}
 	}
 	return result, nil
 }

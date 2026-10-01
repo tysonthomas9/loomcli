@@ -19,12 +19,17 @@ func (allowedMerge) AuthorizeMerge(context.Context, StackRequest, string) error 
 
 type mergeForgeFake struct {
 	*fakeForge
-	merged      int
-	deleted     []string
-	checks      string
-	queued      bool
-	pending     bool
-	retargetErr error
+	merged        int
+	deleted       []string
+	checks        string
+	queued        bool
+	pending       bool
+	putStatus     string
+	pollStatus    string
+	unknownOnce   bool
+	unknownAlways bool
+	rejectPut     bool
+	retargetErr   error
 }
 
 func (forge *mergeForgeFake) PullByNumber(_ context.Context, _, _ string, number int) (stackpublish.PR, error) {
@@ -62,11 +67,21 @@ func (forge *mergeForgeFake) MergeLoomPull(_ context.Context, _, _ string, numbe
 	for index := range forge.prs {
 		if forge.prs[index].Number == number && forge.prs[index].HeadSHA == head {
 			forge.merged++
-			if !forge.pending {
+			if forge.rejectPut {
+				return stackpublish.LoomMergeResult{}, &stackpublish.LoomMergeRejectedError{Cause: errors.New("request rejected")}
+			}
+			if (forge.unknownOnce && forge.merged == 1) || forge.unknownAlways {
+				return stackpublish.LoomMergeResult{}, errors.New("connection lost after submission")
+			}
+			if !forge.pending && forge.putStatus != "failed" {
 				forge.prs[index].Merged = true
 				forge.prs[index].State = "closed"
 			}
 			result := stackpublish.LoomMergeResult{Status: "pending"}
+			if forge.putStatus != "" {
+				result.Status = forge.putStatus
+				result.Details.Message = "checks rejected"
+			}
 			result.Details.UUID, result.Details.ExpectedHeadSHA = "request-1", head
 			return result, nil
 		}
@@ -81,6 +96,10 @@ func (forge *mergeForgeFake) LoomMergeStatus(_ context.Context, _, _ string, _ i
 	result := stackpublish.LoomMergeResult{Status: "pending"}
 	if !forge.pending {
 		result.Status = "merged"
+	}
+	if forge.pollStatus != "" {
+		result.Status = forge.pollStatus
+		result.Details.Message = "merge queue rejected"
 	}
 	result.Details.UUID = uuid
 	return result, nil
@@ -241,7 +260,7 @@ func TestLoomMergeDispatchingRecoveryKeepsExactHead(t *testing.T) {
 		t.Fatal(err)
 	}
 	after := before
-	after.Phase, after.PRNumber, after.DispatchHead = "dispatching", forge.prs[0].Number, forge.prs[0].HeadSHA
+	after.Phase, after.PRNumber, after.DispatchHead, after.DispatchAttempts = "dispatching", forge.prs[0].Number, forge.prs[0].HeadSHA, 1
 	if err := item.store.AdvanceLoomMerge(ctx, before, after); err != nil {
 		t.Fatal(err)
 	}
@@ -251,8 +270,79 @@ func TestLoomMergeDispatchingRecoveryKeepsExactHead(t *testing.T) {
 		}
 	}
 	recovered, err := item.store.LoomMerge(ctx, "W", "feature")
-	if err != nil || recovered.Phase != "merging" || recovered.ProviderRequestID == "" || forge.merged != 1 {
+	if err != nil || recovered.Phase != "merging" || recovered.ProviderRequestID == "" || recovered.DispatchAttempts != 2 || forge.merged != 1 {
 		t.Fatalf("recovered dispatch = %+v, calls = %d, err = %v", recovered, forge.merged, err)
+	}
+}
+
+func TestLoomMergeDefinitiveFailureNeverRetries(t *testing.T) {
+	for _, failureAt := range []string{"put", "poll", "rejected"} {
+		t.Run(failureAt, func(t *testing.T) {
+			item, forge, request := loomMergeFixture(t)
+			forge.pending = true
+			if failureAt == "put" {
+				forge.putStatus = "failed"
+			} else if failureAt == "poll" {
+				forge.pollStatus = "failed"
+			} else {
+				forge.rejectPut = true
+			}
+			ctx := context.Background()
+			if err := (LoomStackBackend{Store: item.store}).MergeUpTo(ctx, request, "A"); err != nil {
+				t.Fatal(err)
+			}
+			if failureAt == "poll" {
+				if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+					t.Fatal(err)
+				}
+			}
+			codeIs(t, ReconcileLoomMergesAt(ctx, item.storePath, forge), loomgit.MergeBlocked)
+			for range 2 {
+				if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+					t.Fatal(err)
+				}
+			}
+			merge, err := item.store.LoomMerge(ctx, "W", "feature")
+			if err != nil || merge.Phase != "blocked" || !strings.Contains(merge.Reason, "rejected") || forge.merged != 1 {
+				t.Fatalf("failed request replay = %+v, calls = %d, err = %v", merge, forge.merged, err)
+			}
+		})
+	}
+}
+
+func TestLoomMergeUnknownSubmissionRetriesOnce(t *testing.T) {
+	item, forge, request := loomMergeFixture(t)
+	forge.pending, forge.unknownOnce = true, true
+	ctx := context.Background()
+	if err := (LoomStackBackend{Store: item.store}).MergeUpTo(ctx, request, "A"); err != nil {
+		t.Fatal(err)
+	}
+	codeIs(t, ReconcileLoomMergesAt(ctx, item.storePath, forge), loomgit.AttentionRequired)
+	if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+		t.Fatal(err)
+	}
+	merge, err := item.store.LoomMerge(ctx, "W", "feature")
+	if err != nil || merge.Phase != "merging" || merge.DispatchAttempts != 2 || forge.merged != 2 {
+		t.Fatalf("unknown recovery = %+v, calls = %d, err = %v", merge, forge.merged, err)
+	}
+}
+
+func TestLoomMergeUnknownSubmissionHasRecoveryLimit(t *testing.T) {
+	item, forge, request := loomMergeFixture(t)
+	forge.unknownAlways = true
+	ctx := context.Background()
+	if err := (LoomStackBackend{Store: item.store}).MergeUpTo(ctx, request, "A"); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		codeIs(t, ReconcileLoomMergesAt(ctx, item.storePath, forge), loomgit.AttentionRequired)
+	}
+	merge, err := item.store.LoomMerge(ctx, "W", "feature")
+	if err != nil || merge.Phase != "dispatching" || merge.DispatchAttempts != 2 || forge.merged != 2 {
+		t.Fatalf("unknown recovery limit = %+v, calls = %d, err = %v", merge, forge.merged, err)
 	}
 }
 

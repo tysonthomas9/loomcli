@@ -542,6 +542,7 @@ type LoomMerge struct {
 	PRNumber          int              `json:"pr_number,omitempty"`
 	DispatchHead      string           `json:"dispatch_head,omitempty"`
 	ProviderRequestID string           `json:"provider_request_id,omitempty"`
+	DispatchAttempts  int              `json:"dispatch_attempts,omitempty"`
 	Version           int              `json:"-"`
 }
 
