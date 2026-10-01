@@ -362,12 +362,27 @@ func (s *Service) purgeLeftover(ctx context.Context, n loomstore.NativeSession) 
 	return s.store.ClearPurgePending(ctx, n)
 }
 
+// sweepPause runs between the sweep's read of the pending list and its
+// purges; tests use it to interleave a re-Open.
+var sweepPause = func() {}
+
 // PurgeLeftovers retries every purge-pending session; the dispatcher runs it
-// at start-up, so a purge that failed is retried after a restart.
+// at start-up, so a purge that failed is retried after a restart. Each purge
+// runs under its owner's agent lock, which Create and a harness switch hold
+// around Open, and only if the mark is still there: a re-Open that returned
+// the same session as a working one cleared it.
 func (s *Service) PurgeLeftovers(ctx context.Context) error {
 	pending, err := s.store.PurgePending(ctx)
+	sweepPause()
 	for _, n := range pending {
-		err = errors.Join(err, s.purgeLeftover(ctx, n))
+		err = errors.Join(err, func() error {
+			defer s.lock(n.AgentID)()
+			now, err := s.store.PurgePending(ctx)
+			if err != nil || !slices.Contains(now, n) {
+				return err
+			}
+			return s.purgeLeftover(ctx, n)
+		}())
 	}
 	return err
 }

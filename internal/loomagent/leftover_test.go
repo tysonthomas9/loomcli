@@ -86,3 +86,43 @@ func TestHarnessSwitchOpenLeftoverPurged(t *testing.T) {
 		t.Fatalf("harness = %s; the failed switch changed it", a.Harness)
 	}
 }
+
+// TestCreateOpenLeftoverSweepRacesReopen: the start-up sweep reads a
+// purge-pending session, then pauses; a retried Create re-Opens the same
+// session as its working one, which clears the mark. When the sweep goes on
+// it re-checks the mark under the agent lock and leaves the session alone.
+func TestCreateOpenLeftoverSweepRacesReopen(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	fh.FailOpen(errors.New("open failed after creating"), true)
+	fh.FailPurge(errors.New("purge down"))
+	if _, err := e.service(ServiceConfig{}).Create(ctx, leadReq("r1")); err == nil {
+		t.Fatal("Create succeeded with a failing Open")
+	}
+	fh.FailOpen(nil, false)
+	fh.FailPurge(nil)
+	s := e.service(ServiceConfig{}) // restart
+	paused, resume := make(chan struct{}), make(chan struct{})
+	sweepPause = func() { close(paused); <-resume }
+	t.Cleanup(func() { sweepPause = func() {} })
+	swept := make(chan error, 1)
+	go func() { swept <- s.PurgeLeftovers(ctx) }()
+	<-paused // the sweep holds the pending ref
+	info, err := s.Create(ctx, leadReq("r1")) // the retry re-Opens the same session
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(resume)
+	if err := <-swept; err != nil {
+		t.Fatal(err)
+	}
+	a := s.get(t, info.AgentID)
+	ref := loomharness.NativeRef{Root: *a.HarnessSessionRoot, NativeID: *a.HarnessSessionID}
+	if !exists(fh, ref) {
+		t.Fatal("the sweep purged the agent's working session")
+	}
+	if p, _ := e.st.PurgePending(ctx); len(p) != 0 {
+		t.Fatalf("purge-pending = %v", p)
+	}
+}
