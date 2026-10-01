@@ -26,6 +26,9 @@ type Adapter struct {
 	mu    sync.Mutex
 	feeds map[*feed]struct{}
 	asks  map[string]map[string]Message // open server requests by root, then ask id
+	// starts holds each thread's turn.started until the turn's user item
+	// gives it the input's key (codex sends turn/started first).
+	starts map[loomharness.NativeRef]loomharness.Event
 
 	openMu sync.Mutex         // one Open at a time, so a key never gets two threads
 	opened map[opening]string // thread ids this process opened, until purged
@@ -36,7 +39,7 @@ type opening struct{ root, dir, key string }
 
 // NewAdapter returns an adapter; cfg.Unrouted is its own.
 func NewAdapter(cfg Config) *Adapter {
-	a := &Adapter{feeds: map[*feed]struct{}{}, asks: map[string]map[string]Message{}, opened: map[opening]string{}}
+	a := &Adapter{feeds: map[*feed]struct{}{}, asks: map[string]map[string]Message{}, starts: map[loomharness.NativeRef]loomharness.Event{}, opened: map[opening]string{}}
 	cfg.Unrouted = a.receive
 	a.Supervisor = New(cfg)
 	return a
@@ -211,6 +214,11 @@ func (a *Adapter) receive(root string, m Message) {
 		a.mu.Lock()
 		lost := a.asks[root]
 		delete(a.asks, root)
+		for ref := range a.starts {
+			if ref.Root == root {
+				delete(a.starts, ref)
+			}
+		}
 		a.mu.Unlock()
 		a.publish(loomharness.Event{Type: loomharness.EventFeedGap, Session: loomharness.NativeRef{Root: root}})
 		for id, ask := range lost {
@@ -238,6 +246,28 @@ func (a *Adapter) receive(root string, m Message) {
 		}
 	}
 	if e, ok := live(root, m); ok {
+		a.started(e)
+	}
+}
+
+// started publishes e, holding a turn.started until the next event of its
+// thread: the turn's user item, whose key it then carries, or whatever
+// came instead (a turn with no Loom input keeps an empty key).
+func (a *Adapter) started(e loomharness.Event) {
+	a.mu.Lock()
+	start, held := a.starts[e.Session]
+	delete(a.starts, e.Session)
+	if e.Type == loomharness.EventTurnStarted {
+		a.starts[e.Session] = e
+	}
+	a.mu.Unlock()
+	if held {
+		if e.Type == loomharness.EventMessageDelivered && e.TurnID == start.TurnID {
+			start.InputKey = e.InputKey
+		}
+		a.publish(start)
+	}
+	if e.Type != loomharness.EventTurnStarted {
 		a.publish(e)
 	}
 }

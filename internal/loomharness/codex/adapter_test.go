@@ -440,7 +440,7 @@ func TestCodexRecordedFrames(t *testing.T) {
 		a.receive("/root", m)
 	}
 	want := []brief{
-		{Type: loomharness.EventTurnStarted, Thread: thread, Turn: turn},
+		{Type: loomharness.EventTurnStarted, Thread: thread, Turn: turn, Key: "key-4"},
 		{Type: loomharness.EventMessageDelivered, Thread: thread, Turn: turn, Item: userID, Kind: "message", Key: "key-4", Text: "run it"},
 		{Type: loomharness.EventItemStarted, Thread: thread, Turn: turn, Item: "c1exec_command", Kind: "tool"},
 		{Type: loomharness.EventAskOpened, Thread: thread, Turn: turn, Item: "c1exec_command", Ask: "0"},
@@ -457,6 +457,20 @@ func TestCodexRecordedFrames(t *testing.T) {
 		e := next(t, feed)
 		if got := briefOf(e); got != w || e.Session.Root != "/root" || e.Time.IsZero() {
 			t.Fatalf("event %d: %+v (root %q), want %+v", i, got, e.Session.Root, w)
+		}
+	}
+
+	// A turn with no user item keeps an empty key; the start a gap cut off
+	// is dropped.
+	a.receive("/root", Message{Method: "turn/started", ThreadID: "t-2", Params: json.RawMessage(`{"threadId":"t-2","turn":{"id":"u-1"}}`)})
+	a.receive("/root", Message{Method: "turn/completed", ThreadID: "t-2", Params: json.RawMessage(`{"threadId":"t-2","turn":{"id":"u-1","status":"failed"}}`)})
+	a.receive("/root", Message{Method: "turn/started", ThreadID: "t-2", Params: json.RawMessage(`{"threadId":"t-2","turn":{"id":"u-2"}}`)})
+	for _, w := range []brief{
+		{Type: loomharness.EventTurnStarted, Thread: "t-2", Turn: "u-1"},
+		{Type: loomharness.EventTurnCompleted, Thread: "t-2", Turn: "u-1", Stop: "failed"},
+	} {
+		if got := briefOf(next(t, feed)); got != w {
+			t.Fatalf("got %+v, want %+v", got, w)
 		}
 	}
 

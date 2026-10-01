@@ -146,12 +146,13 @@ func TestContract(t *testing.T) {
 			t.Fatal(err)
 		}
 		live = until(t, ref.NativeID, loomharness.EventTurnCompleted)
-		var delivered, answered bool
+		var started, delivered, answered bool
 		for _, e := range live {
+			started = started || e.Type == loomharness.EventTurnStarted && e.InputKey == "key-1"
 			delivered = delivered || e.Type == loomharness.EventMessageDelivered && e.InputKey == "key-1" && e.Text == "say hello"
 			answered = answered || e.Type == loomharness.EventItemCompleted && e.ItemKind == "message" && e.Text == "hello from codex"
 		}
-		if last := live[len(live)-1]; !delivered || !answered || last.StopReason != "completed" || last.Session.Root != ref.Root {
+		if last := live[len(live)-1]; !started || !delivered || !answered || last.StopReason != "completed" || last.Session.Root != ref.Root {
 			t.Fatalf("live events %+v", live)
 		}
 		if l, err := s.HasInput(ctx, "key-1"); err != nil || l != loomharness.LandedFound {
