@@ -17,8 +17,12 @@ import (
 // EventTurnCompleted is the saved Loom event for a native turn.completed.
 const EventTurnCompleted = "agent.turn_completed"
 
-// feedRetry is how long RunFeed waits before it opens the feed again.
-var feedRetry = 200 * time.Millisecond
+// RunFeed waits feedRetry before it reopens the feed, doubling up to
+// feedRetryMax while reads keep failing; a read that ingested events resets it.
+var feedRetry, feedRetryMax = 200 * time.Millisecond, 30 * time.Second
+
+// errFeedClosed is a feed that ended while ctx was still live.
+var errFeedClosed = errors.New("loomagent: the harness feed closed")
 
 // RunFeed ingests the named harness's live feed until ctx ends (§5.2): each
 // completed native event of an agent's session is saved in agent_events and
@@ -26,29 +30,41 @@ var feedRetry = 200 * time.Millisecond
 // feed.gap it backfills every live agent's session from its native history,
 // so events the feed missed, or that came while Loom was down, are saved
 // once (stable EventIDs) and never invented from the live bus. A failed save
-// or history read is logged and the feed is reopened, so the backfill after
-// the reconnect reads past nothing unsaved.
+// or history read, or a closed feed, reopens the feed after a backoff, so
+// the backfill after the reconnect reads past nothing unsaved. A warning is
+// logged when the failure changes, not on every retry.
 func (s *Service) RunFeed(ctx context.Context, harness string) {
+	wait, last := feedRetry, ""
 	for h := s.harnesses[harness]; h != nil && ctx.Err() == nil; {
-		if err := s.readFeed(ctx, harness, h); err != nil && ctx.Err() == nil {
-			slog.Warn("loomagent: event ingestion failed; reopening the feed to backfill", "harness", harness, "error", err)
+		read, err := s.readFeed(ctx, harness, h)
+		if ctx.Err() != nil {
+			return
+		}
+		if read {
+			wait, last = feedRetry, ""
+		}
+		if err.Error() != last {
+			last = err.Error()
+			slog.Warn("loomagent: event ingestion stopped; reopening the feed to backfill", "harness", harness, "error", err)
 		}
 		select {
 		case <-ctx.Done():
-		case <-time.After(feedRetry):
+		case <-time.After(wait):
 		}
+		wait = min(2*wait, feedRetryMax)
 	}
 }
 
-// readFeed backfills, then ingests h's feed until it ends or a save fails.
-func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Harness) error {
+// readFeed backfills, then ingests h's feed until it ends or a save fails;
+// it always returns an error, and read reports whether it ingested a live event.
+func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Harness) (read bool, err error) {
 	f, err := h.Feed(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = f.Close() }()
 	if err := s.backfill(ctx, harness); err != nil { // after subscribing, so nothing falls between
-		return err
+		return false, err
 	}
 	for e := range f.Events() {
 		if e.Type == loomharness.EventFeedGap {
@@ -57,10 +73,11 @@ func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Ha
 			err = s.ingest(ctx, harness, e)
 		}
 		if err != nil {
-			return err
+			return read, err
 		}
+		read = true
 	}
-	return nil
+	return read, errFeedClosed
 }
 
 // backfill ingests the native history of every live agent's current session.

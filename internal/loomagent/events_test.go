@@ -281,3 +281,40 @@ func TestOpenCodeEventsBackfillRetriesFailedRead(t *testing.T) {
 		t.Fatal("the history read never failed")
 	}
 }
+
+// closedFeeds is a harness whose every feed is already closed.
+type closedFeeds struct {
+	loomharness.Harness
+	opened *atomic.Int32
+}
+
+func (c closedFeeds) Feed(context.Context) (loomharness.Feed, error) {
+	c.opened.Add(1)
+	ch := make(chan loomharness.Event)
+	close(ch)
+	return closedFeed(ch), nil
+}
+
+type closedFeed chan loomharness.Event
+
+func (f closedFeed) Events() <-chan loomharness.Event { return f }
+func (closedFeed) Close() error                       { return nil }
+
+// TestOpenCodeEventsBackfillBacksOffOnClosedFeed: a feed that keeps closing
+// is reopened (and history backfilled) with a doubling backoff, not at a
+// fixed rate; RunFeed still ends at once on ctx cancel.
+func TestOpenCodeEventsBackfillBacksOffOnClosedFeed(t *testing.T) {
+	retry, retryMax := feedRetry, feedRetryMax
+	feedRetry, feedRetryMax = 10*time.Millisecond, time.Second
+	t.Cleanup(func() { feedRetry, feedRetryMax = retry, retryMax })
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	var opened atomic.Int32
+	s.harnesses["opencode"] = closedFeeds{e.h, &opened}
+	stop := startFeed(s, e)
+	time.Sleep(600 * time.Millisecond) // a fixed 10 ms retry would open ~60 times
+	stop()
+	if n := opened.Load(); n < 2 || n > 8 {
+		t.Fatalf("the closed feed was opened %d times in 600 ms; want a doubling backoff (2-8)", n)
+	}
+}
