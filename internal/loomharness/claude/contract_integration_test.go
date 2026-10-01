@@ -87,7 +87,10 @@ func localLoginToken(t *testing.T) string {
 	if err != nil {
 		t.Skip("real Claude: cannot resolve the account for the local Claude login")
 	}
-	out, err := exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials", "-a", u.Username, "-w").Output()
+	// Name the login keychain file: the test binary's HOME is the owned /tmp
+	// root, so security's default search list would not find it.
+	keychain := filepath.Join(u.HomeDir, "Library", "Keychains", "login.keychain-db")
+	out, err := exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials", "-a", u.Username, "-w", keychain).Output()
 	if err != nil {
 		t.Skip("real Claude: cannot read the local Claude login from the login keychain (run `claude` once to log in); no fallback to ~/.claude")
 	}
