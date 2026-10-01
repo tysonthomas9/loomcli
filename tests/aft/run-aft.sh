@@ -732,6 +732,8 @@ if [[ -n "$AFT_LIVE" && "${AFT_LIVE_SUITE_KIND:-}" == "prreview" ]]; then
     start_fake_github || exit 1
 elif [[ "$AFT_SUITE_GLOB" == loomgit-* ]]; then
     start_fake_github forge-server.mjs || exit 1
+    export AFT_GIT_CONFIG_GLOBAL="$REPORT_DIR/operator.gitconfig"
+    printf '[user]\n\tname = AFT Operator\n\temail = aft-operator@example.test\n' > "$AFT_GIT_CONFIG_GLOBAL"
 fi
 echo "[aft] starting e2e stack (api :${E2E_PORT}, frontend :${E2E_FRONTEND_PORT}; log: $REPORT_DIR/server.log)..."
 # Stub AI backends — scoped to the SERVER process only, never this script's env:
@@ -774,6 +776,7 @@ else
     env -u LOOM_WEBUI_GITHUB_TOKEN -u GH_TOKEN -u GITHUB_TOKEN \
         -u GEMINI_API_KEY -u GOOGLE_API_KEY \
         E2E_PORT="$E2E_PORT" E2E_FRONTEND_PORT="$E2E_FRONTEND_PORT" FLEET_DB_REPO="$FLEET_DB_REPO" \
+        ${AFT_GIT_CONFIG_GLOBAL:+GIT_CONFIG_GLOBAL="$AFT_GIT_CONFIG_GLOBAL"} \
         PATH="$SERVER_PATH" OPENAI_API_KEY="stub-e2e" FLUE_REPO="$FLUE_REPO" \
         ${FAKE_GH_BASE:+LOOM_CONNECTOR_GITHUB_BASE_URL="$FAKE_GH_BASE"} \
         ${FAKE_GH_BASE:+GITHUB_TOKEN=aft-fixture-token} \

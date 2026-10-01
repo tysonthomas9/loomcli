@@ -97,21 +97,39 @@ tests:
       - wait: { text: Revisions }
       - click: { role: button, name: Approve, exact: true }
       - run: >-
+          repo="$AFT_WORK_DIR/stack-repo";
+          for attempt in $(seq 1 40); do
+            lead="$(git -C "$repo" rev-parse refs/heads/loom/ws/E2E-WS-STACK/interactive/lead)";
+            git -C "$repo" show "$lead:stack-x.txt" >/dev/null 2>&1 && break;
+            sleep 0.25;
+          done;
+          git -C "$repo" show "$lead:stack-x.txt" >/dev/null;
+          change="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"][0]["change_id"])' "$AFT_WORK_DIR/stack-x-revisions.json")";
+          python3 -c 'import sqlite3,sys; db=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); assert db.execute("select count(*) from applied_layers where workspace=? and lead=? and change_id=? and phase=?",("E2E-WS-STACK","lead",sys.argv[2],"done")).fetchone()[0] == 1' "$AFT_LOOM_CONFIG_DIR/loomgit/store.db" "$change"
+        intent: UI approval alone applies X into the lead ref and durable AppliedLog
+      - run: >-
           agent-browser --session "$AFT_SESSION" open
           "$AFT_BASE_URL/ws/E2E-WS-STACK/issues/$(cat "$AFT_WORK_DIR/stackYId")"
         intent: Open Y's reviewable revision
       - wait: { text: Revisions }
       - click: { role: button, name: Approve, exact: true }
       - run: >-
-          api="$AFT_BASE_URL/api/workspaces/E2E-WS-STACK";
-          for name in x y; do
-            read change revision < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["change_id"],item["number"])' "$AFT_WORK_DIR/stack-$name-revisions.json");
-            curl -sf -X POST "$api/git/apply" -H 'Content-Type: application/json' -d "{\"change\":\"$change\",\"revision\":$revision,\"lead\":\"lead\"}" > "$AFT_WORK_DIR/stack-$name-applied.json";
-            grep -q '"success":true' "$AFT_WORK_DIR/stack-$name-applied.json";
+          repo="$AFT_WORK_DIR/stack-repo";
+          for attempt in $(seq 1 40); do
+            lead="$(git -C "$repo" rev-parse refs/heads/loom/ws/E2E-WS-STACK/interactive/lead)";
+            git -C "$repo" show "$lead:stack-y.txt" >/dev/null 2>&1 && break;
+            sleep 0.25;
           done;
-          git -C "$AFT_WORK_DIR/stack-repo" rev-parse refs/heads/loom/ws/E2E-WS-STACK/interactive/lead > "$AFT_WORK_DIR/stack-lead-before-merge"
-        intent: Apply both approved layers into the lead area without advancing provider trunk
+          git -C "$repo" show "$lead:stack-y.txt" >/dev/null;
+          change="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"][0]["change_id"])' "$AFT_WORK_DIR/stack-y-revisions.json")";
+          python3 -c 'import sqlite3,sys; db=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); assert db.execute("select count(*) from applied_layers where workspace=? and lead=? and change_id=? and phase=?",("E2E-WS-STACK","lead",sys.argv[2],"done")).fetchone()[0] == 1' "$AFT_LOOM_CONFIG_DIR/loomgit/store.db" "$change"
+        intent: UI approval alone applies Y into the lead ref and durable AppliedLog
       - run: >-
+          test -f "$AFT_WORK_DIR/stack-repo/README.md";
+          git -C "$AFT_WORK_DIR/stack-repo" rev-parse refs/heads/loom/ws/E2E-WS-STACK/interactive/lead > "$AFT_WORK_DIR/stack-lead-before-merge"
+        intent: Record the lead area after UI approval, without any separate HTTP Apply call
+      - run: >-
+          set -e;
           api="$AFT_BASE_URL/api/workspaces/E2E-WS-STACK";
           x="$(cat "$AFT_WORK_DIR/stackXId")";
           curl -sf "$api/issues/$x/revisions" > "$AFT_WORK_DIR/stack-x-latest.json";
@@ -138,14 +156,64 @@ tests:
           for attempt in $(seq 1 45); do
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-STACK/issues/$y/revisions" > "$AFT_WORK_DIR/stack-y-after-merge.json";
             count="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["data"]))' "$AFT_WORK_DIR/stack-y-after-merge.json")";
-            test "$count" -ge 3 && exit 0;
+            derived="$(python3 -c 'import sqlite3,sys; db=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); row=db.execute("select o.derived_revision from restack_offers o join change_revisions r on r.workspace=o.workspace and r.change_id=o.change_id and r.number=o.derived_revision where o.workspace=? and o.task_id=? and r.kind=? and r.operation=?",("E2E-WS-STACK",sys.argv[2],"derived","restack")).fetchone(); print(row[0] if row else 0)' "$AFT_LOOM_CONFIG_DIR/loomgit/store.db" "$y")";
+            test "$count" -ge 2 && test "$derived" -ge 2 && exit 0;
             sleep 2;
           done;
           echo 'Landing did not derive Y revision'; exit 1
-        intent: Require a later Y revision produced by the product landing and restack path
+        intent: Require a durable Y restack offer linked to a derived revision after X lands
       - run: >-
           repo="$AFT_WORK_DIR/stack-repo";
           lead="$(git -C "$repo" rev-parse refs/heads/loom/ws/E2E-WS-STACK/interactive/lead)";
           git -C "$repo" show "$lead:stack-y.txt" >/dev/null;
           test "$(git --git-dir="$AFT_WORK_DIR/stack-origin.git" rev-parse refs/heads/main)" != "$lead"
         intent: Confirm the lead area retains Y while provider trunk contains only landed X
+
+  - name: abandoning a retained task copy preserves incomplete capture
+    intent: A product Abandon captures an unsafe task copy, records an incomplete revision, and keeps the copy for recovery
+    steps:
+      - run: >-
+          set -e;
+          repo="$AFT_WORK_DIR/stack-repo";
+          copy="$(git -C "$repo" worktree list --porcelain | awk '/^worktree / {path=substr($0,10)} /\/task-copies\/stack-repo\/.*-e2e-ws-stack-3-a1$/ {print path}')";
+          test -d "$copy";
+          printf 'private-key-material\n' > "$copy/id_ed25519";
+          printf '%s\n' "$copy" > "$AFT_WORK_DIR/stack-y-copy";
+          attempt="$(basename "$copy")";
+          y="$(cat "$AFT_WORK_DIR/stackYId")";
+          LOOM_WORKSPACE=E2E-WS-STACK LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" abandon "$y"
+          --workspace-id E2E-WS-STACK --repo-name stack-repo --attempt "$attempt"
+          --task-copy "$copy" --source-repo "$repo" --reason 'AFT abandon with unsafe file' --yes
+          > "$AFT_WORK_DIR/stack-abandon.txt";
+          grep -q 'capture complete: false' "$AFT_WORK_DIR/stack-abandon.txt";
+          test -f "$copy/id_ed25519"
+        intent: Abandon uses the real task copy, marks capture incomplete, and retains the unsafe file
+      - run: >-
+          set -e;
+          y="$(cat "$AFT_WORK_DIR/stackYId")";
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-STACK/issues/$y/revisions" > "$AFT_WORK_DIR/stack-y-abandoned.json";
+          python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; assert item["outcome"]=="abandoned" and item["incomplete"] is True' "$AFT_WORK_DIR/stack-y-abandoned.json"
+        intent: The revision API reports the abandoned capture as incomplete rather than reviewable
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-STACK/issues/$(cat "$AFT_WORK_DIR/stackYId")"
+        intent: Open the abandoned task in the review UI
+      - wait: { text: Incomplete capture }
+        intent: The review UI warns that the captured task copy is incomplete
+
+  - name: foreign trunk push reports a diverged published change
+    intent: An unrelated provider push replaces trunk after X published, and product inventory reports the divergence
+    steps:
+      - run: >-
+          set -e;
+          repo="$AFT_WORK_DIR/stack-repo";
+          printf 'foreign replacement\n' > "$repo/foreign.txt";
+          git -C "$repo" add foreign.txt;
+          git -C "$repo" -c user.name=Foreign -c user.email=foreign@example.test commit -q -m 'foreign trunk replacement';
+          git -C "$repo" push -q --force origin main;
+          test "$(git --git-dir="$AFT_WORK_DIR/stack-origin.git" rev-parse refs/heads/main)" = "$(git -C "$repo" rev-parse refs/heads/main)"
+        intent: A foreign force-push advances the disposable provider trunk away from the published commit
+      - run: >-
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" doctor --json > "$AFT_WORK_DIR/stack-doctor.json" || true;
+          python3 -c 'import json,sys; checks=json.load(open(sys.argv[1]))["checks"]; detail=next(check["detail"] for check in checks if check["name"]=="loom_git_inventory"); assert "publication E2E-WS-STACK/" in detail and "diverged" in detail, detail' "$AFT_WORK_DIR/stack-doctor.json"
+        intent: The product doctor inventory flags the published X entry as diverged with a next action

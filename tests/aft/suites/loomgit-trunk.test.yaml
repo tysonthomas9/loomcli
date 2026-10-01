@@ -1,0 +1,120 @@
+suite: loomgit-trunk
+classification: { area: reviews, feature: trunk-publish-identity, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: >-
+  set -e;
+  repo="$AFT_WORK_DIR/trunk-repo";
+  remote="$AFT_WORK_DIR/trunk-origin.git";
+  git init -q --bare "$remote";
+  git -C "$remote" symbolic-ref HEAD refs/heads/main;
+  git init -q -b main "$repo";
+  printf 'base\n' > "$repo/README.md";
+  git -C "$repo" add README.md;
+  git -C "$repo" -c user.name=AFT -c user.email=aft@example.test commit -q -m base;
+  git -C "$repo" config core.sshCommand "sh $AFT_TESTS_DIR/fixtures/fake-github/git-ssh-bridge.sh $remote";
+  git -C "$repo" remote add origin git@github.com:owner/repo.git;
+  git -C "$repo" push -q origin main;
+  curl -sf -X POST "$AFT_FAKE_GH_BASE/__reset" >/dev/null;
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H 'Content-Type: application/json'
+  -d "{\"name\":\"e2e-ws-trunk\",\"type\":\"empty\",\"repos\":[\"$repo\"]}" >/dev/null;
+  LOOM_WORKSPACE=E2E-WS-TRUNK LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" delivery-mode trunk --workspace E2E-WS-TRUNK >/dev/null
+teardown: >-
+  AFT_WS=E2E-WS-TRUNK "$AFT_TESTS_DIR/scripts/close-open-issues.sh";
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-TRUNK" >/dev/null || true
+
+tests:
+  - name: trunk replay requires and uses the operator Git identity
+    intent: Expected fail on 02f975361 — trunk Publish resolves task labels without its workspace, so 502 no-active-workspace precedes the identity gate
+    skip: true
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-TRUNK/issues
+          body:
+            title: "trunk epic $RUN_ID"
+            issue_type: epic
+            priority: 2
+          save:
+            - from: data.id
+              as: trunkEpicId
+        intent: Create the task's epic through the product API
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-TRUNK/issues
+          body:
+            title: "trunk task $RUN_ID"
+            issue_type: task
+            priority: 2
+            parent: "${var:trunkEpicId}"
+            design: STUB_CODEX_PATCH=trunk-change.txt
+          save:
+            - from: data.id
+              as: trunkTaskId
+        intent: Create the task that will produce a real TaskRun revision
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-TRUNK/workflows/epic-runner
+          body:
+            epicId: "${var:trunkEpicId}"
+            runner: local-task-runner
+        intent: Start the deterministic agent through the product driver
+      - run: >-
+          set -e;
+          task="$(cat "$AFT_WORK_DIR/trunkTaskId")";
+          for attempt in $(seq 1 45); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-TRUNK/issues/$task/revisions" > "$AFT_WORK_DIR/trunk-revisions.json";
+            grep -q '"head_sha"' "$AFT_WORK_DIR/trunk-revisions.json" && exit 0;
+            sleep 2;
+          done;
+          exit 1
+        intent: Wait for the task completion path to freeze a revision
+      - run: >-
+          set -e;
+          api="$AFT_BASE_URL/api/workspaces/E2E-WS-TRUNK";
+          read change revision sha < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["change_id"],item["number"],item["head_sha"])' "$AFT_WORK_DIR/trunk-revisions.json");
+          curl -sf -X POST "$api/changes/$change/revisions/$revision/verdict" -H 'Content-Type: application/json'
+          -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" >/dev/null;
+          curl -sf -X POST "$api/git/apply" -H 'Content-Type: application/json'
+          -d "{\"change\":\"$change\",\"revision\":$revision,\"lead\":\"lead\"}" >/dev/null;
+          printf '%s\n' "$change" > "$AFT_WORK_DIR/trunk-change-id"
+        intent: Approve and apply the genuine revision to create the lead working area
+      - run: >-
+          set -e;
+          repo="$AFT_WORK_DIR/trunk-repo";
+          printf 'foreign trunk edit\n' > "$repo/foreign.txt";
+          git -C "$repo" add foreign.txt;
+          git -C "$repo" -c user.name=Foreign -c user.email=foreign@example.test commit -q -m 'foreign trunk advance';
+          git -C "$repo" push -q origin main
+        intent: A separate contributor advances provider trunk after the task revision was frozen
+      - run: >-
+          set -e;
+          api="$AFT_BASE_URL/api/workspaces/E2E-WS-TRUNK";
+          change="$(cat "$AFT_WORK_DIR/trunk-change-id")";
+          : > "$AFT_GIT_CONFIG_GLOBAL";
+          status="$(curl -s -o "$AFT_WORK_DIR/trunk-no-identity.json" -w '%{http_code}' -X POST "$api/agents/lead/git/pr" -H 'Content-Type: application/json' -d "{\"change_id\":\"$change\"}")";
+          printf '[user]\n\tname = AFT Operator\n\temail = aft-operator@example.test\n' > "$AFT_GIT_CONFIG_GLOBAL";
+          test "$status" = 502;
+          grep -q 'git user.name and user.email are required' "$AFT_WORK_DIR/trunk-no-identity.json"
+        intent: Trunk replay fails clearly when the server has no configured user identity
+      - run: >-
+          set -e;
+          api="$AFT_BASE_URL/api/workspaces/E2E-WS-TRUNK";
+          change="$(cat "$AFT_WORK_DIR/trunk-change-id")";
+          status="$(curl -s -o "$AFT_WORK_DIR/trunk-derived-gate.json" -w '%{http_code}' -X POST "$api/agents/lead/git/pr" -H 'Content-Type: application/json' -d "{\"change_id\":\"$change\"}")";
+          test "$status" = 409;
+          task="$(cat "$AFT_WORK_DIR/trunkTaskId")";
+          curl -sf "$api/issues/$task/revisions" > "$AFT_WORK_DIR/trunk-derived.json";
+          read revision sha < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; assert item["number"] > 1; print(item["number"],item["head_sha"])' "$AFT_WORK_DIR/trunk-derived.json");
+          curl -sf -X POST "$api/changes/$change/revisions/$revision/verdict" -H 'Content-Type: application/json'
+          -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" >/dev/null;
+          curl -sf -X POST "$api/agents/lead/git/pr" -H 'Content-Type: application/json' -d "{\"change_id\":\"$change\"}" > "$AFT_WORK_DIR/trunk-publish.json";
+          grep -q '"created":true' "$AFT_WORK_DIR/trunk-publish.json"
+        intent: A configured user can approve the derived replay and publish the PR
+      - run: >-
+          set -e;
+          repo="$AFT_WORK_DIR/trunk-repo";
+          change="$(cat "$AFT_WORK_DIR/trunk-change-id")";
+          git -C "$repo" fetch -q origin "loom/ws/E2E-WS-TRUNK/change/$change";
+          sha="$(git -C "$repo" rev-parse FETCH_HEAD)";
+          test "$(git -C "$repo" show -s --format='%an <%ae>|%cn <%ce>' "$sha")" = 'AFT Operator <aft-operator@example.test>|AFT Operator <aft-operator@example.test>'
+        intent: The actual PR commit author and committer are the configured operator
