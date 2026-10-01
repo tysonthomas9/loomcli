@@ -93,14 +93,17 @@ func resumeLoomMerge(ctx context.Context, store *journal.SQLite, request StackRe
 	if err != nil {
 		return false, err
 	}
-	if existing.Phase == "done" || existing.Phase == "blocked" {
-		return false, nil
-	}
 	if existing.Target != target || len(existing.Layers) != len(request.Changes) {
+		if existing.Phase == "done" || existing.Phase == "blocked" {
+			return false, nil
+		}
 		return false, loomgit.NewError(loomgit.Stale, "merge request differs from active intent", nil)
 	}
 	for index, change := range request.Changes {
 		if existing.Layers[index].Change != change {
+			if existing.Phase == "done" || existing.Phase == "blocked" {
+				return false, nil
+			}
 			return false, loomgit.NewError(loomgit.Stale, "merge order differs from active intent", nil)
 		}
 	}

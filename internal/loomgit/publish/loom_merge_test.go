@@ -142,6 +142,35 @@ func TestLoomMergeRestartsAtEachPhaseAndDeletesAfterLanding(t *testing.T) {
 	}
 }
 
+func TestLoomMergeTerminalReplayDoesNotRearm(t *testing.T) {
+	for _, phase := range []string{"blocked", "done"} {
+		t.Run(phase, func(t *testing.T) {
+			item, _, request := loomMergeFixture(t)
+			ctx := context.Background()
+			backend := LoomStackBackend{Store: item.store}
+			if err := backend.MergeUpTo(ctx, request, "A"); err != nil {
+				t.Fatal(err)
+			}
+			before, err := item.store.LoomMerge(ctx, "W", "feature")
+			if err != nil {
+				t.Fatal(err)
+			}
+			after := before
+			after.Phase = phase
+			if err := item.store.AdvanceLoomMerge(ctx, before, after); err != nil {
+				t.Fatal(err)
+			}
+			if err := backend.MergeUpTo(ctx, request, "A"); err != nil {
+				t.Fatal(err)
+			}
+			replayed, err := item.store.LoomMerge(ctx, "W", "feature")
+			if err != nil || replayed.Phase != phase || replayed.Version != before.Version+1 {
+				t.Fatalf("terminal replay = %+v, %v", replayed, err)
+			}
+		})
+	}
+}
+
 func TestLoomMergeFailsClosedWithoutAuthorization(t *testing.T) {
 	item, forge, request := loomMergeFixture(t)
 	request.MergeAuthority = nil
@@ -325,6 +354,39 @@ func TestLoomMergeThreeLayersRestacksBetweenMerges(t *testing.T) {
 	merge, err := item.store.LoomMerge(ctx, "W", "feature")
 	if err != nil || merge.Phase != "done" || forge.merged != 3 || len(forge.deleted) != 3 {
 		t.Fatalf("merge = %+v, merged = %d, deleted = %v, err = %v", merge, forge.merged, forge.deleted, err)
+	}
+}
+
+func TestLoomMergeBelowTopRetargetsBeforeDeletion(t *testing.T) {
+	item, forge, request := threeLayerMergeFixture(t)
+	ctx := context.Background()
+	if err := (LoomStackBackend{Store: item.store}).MergeUpTo(ctx, request, "B"); err != nil {
+		t.Fatal(err)
+	}
+	for index, change := range []string{"A", "B"} {
+		if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+			t.Fatal(err)
+		}
+		landed := squashMergeLayer(t, item, change)
+		if err := item.store.MarkLanded(ctx, "W", change, "merge_commit"); err != nil {
+			t.Fatal(err)
+		}
+		for range 2 {
+			if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if len(forge.deleted) != index {
+			t.Fatalf("deleted branch before next PR restacked: %v", forge.deleted)
+		}
+		restackAfterMerge(t, item, forge, change, []string{"B", "C"}[index], landed)
+		if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+			t.Fatal(err)
+		}
+	}
+	merge, err := item.store.LoomMerge(ctx, "W", "feature")
+	if err != nil || merge.Phase != "done" || forge.merged != 2 || len(forge.deleted) != 2 || forge.prs[2].Base != "develop" {
+		t.Fatalf("below-top merge = %+v, merged = %d, deleted = %v, next = %+v, err = %v", merge, forge.merged, forge.deleted, forge.prs[2], err)
 	}
 }
 

@@ -180,6 +180,19 @@ func reconcileLoomRestack(ctx context.Context, store *journal.SQLite, forge loom
 			return nil
 		}
 	}
+	for _, layer := range merge.Layers[merge.Index+1:] {
+		dependent, found, err := store.Publication(ctx, merge.Workspace, layer.Change)
+		if err != nil || !found {
+			return errors.Join(err, fmt.Errorf("dependent publication %s is unavailable", layer.Change))
+		}
+		pr, err := forge.PullByNumber(ctx, owner, repo, dependent.PRNumber)
+		if err != nil {
+			return err
+		}
+		if pr.State == "open" && pr.Base == publication.Branch {
+			return blockLoomMerge(ctx, store, merge, loomgit.MergeBlocked, "open PR still targets merged branch")
+		}
+	}
 	if err := forge.DeleteLoomBranch(ctx, owner, repo, publication.Branch); err != nil {
 		return blockLoomMerge(ctx, store, merge, loomgit.MergeBlocked, err.Error())
 	}

@@ -565,7 +565,8 @@ func (s *SQLite) BeginLoomMerge(ctx context.Context, merge LoomMerge) (LoomMerge
 	_, err = s.db.ExecContext(ctx, `INSERT INTO loom_stack_merges(workspace,stack_id,request_id,state)
 		VALUES(?,?,?,?) ON CONFLICT(workspace,stack_id) DO UPDATE SET request_id=excluded.request_id,
 		state=excluded.state,version=loom_stack_merges.version+1
-		WHERE json_extract(loom_stack_merges.state,'$.phase') IN ('done','blocked')`,
+		WHERE loom_stack_merges.request_id != excluded.request_id
+		AND json_extract(loom_stack_merges.state,'$.phase') IN ('done','blocked')`,
 		merge.Workspace, merge.StackID, merge.RequestID, data)
 	if err != nil {
 		return LoomMerge{}, err
