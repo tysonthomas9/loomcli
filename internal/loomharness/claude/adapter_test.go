@@ -283,14 +283,37 @@ func TestClaudeUnsupportedMethodsFailExplicitly(t *testing.T) {
 	a, _, f := newAdapter(t)
 	_, s := open(t, a, f, "agent-later")
 	ctx := context.Background()
-	if err := s.Reply(ctx, "ask", loomharness.Reply{Allow: true}); !errors.Is(err, loomharness.ErrUnavailable) {
-		t.Fatalf("Reply = %v", err)
+	// Asks arrive with the 5.2 permission tool: until then every reply,
+	// including an always-allow and a question's answer, fails explicitly
+	// rather than being narrowed or dropped.
+	for _, r := range []loomharness.Reply{{Allow: true}, {Allow: true, Always: true}, {Answer: "yes"}} {
+		if err := s.Reply(ctx, "ask", r); !errors.Is(err, loomharness.ErrUnavailable) {
+			t.Fatalf("Reply(%+v) = %v", r, err)
+		}
 	}
 	if _, err := s.HasInput(ctx, "k"); !errors.Is(err, loomharness.ErrUnavailable) {
 		t.Fatalf("HasInput = %v", err)
 	}
 	if _, err := s.Messages(ctx, "", 10); !errors.Is(err, loomharness.ErrUnavailable) {
 		t.Fatalf("Messages = %v", err)
+	}
+}
+
+// TestClaudeOpensNoAsksBefore52: no frame opens an ask before the 5.2
+// permission tool, so no ask can carry the wrong kind; Claude's
+// AskUserQuestion stays a tool item until 5.2 maps it to a question ask.
+func TestClaudeOpensNoAsksBefore52(t *testing.T) {
+	m := newMapper(loomharness.NativeRef{NativeID: "s"})
+	for _, raw := range []string{
+		`{"type":"assistant","message":{"id":"msg_q","content":[{"type":"tool_use","id":"toolu_q","name":"AskUserQuestion","input":{"questions":[]}}]}}`,
+		`{"type":"assistant","message":{"id":"msg_b","content":[{"type":"tool_use","id":"toolu_b","name":"Bash","input":{"command":"ls"}}]}}`,
+		`{"type":"result","subtype":"success"}`,
+	} {
+		for _, e := range m.frame([]byte(raw)) {
+			if e.Type == loomharness.EventAskOpened || e.ItemKind == "question" || e.ItemKind == "approval" {
+				t.Fatalf("frame %s opened an ask: %+v", raw, e)
+			}
+		}
 	}
 }
 
