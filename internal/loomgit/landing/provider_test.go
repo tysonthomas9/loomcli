@@ -325,3 +325,35 @@ func TestProviderPRWithoutHeadSkipsObservationAndStillLands(t *testing.T) {
 		t.Fatalf("landing status = %+v, %v", status, err)
 	}
 }
+
+func TestProviderRetargetAfterTwoLandedLayersExpectsStackTrunk(t *testing.T) {
+	fixture, ctx := newFixture(t), context.Background()
+	pulls, trunk := map[int]stackpublish.PR{}, "main"
+	for index, change := range []string{"A", "B", "C"} {
+		branch, number, prior := "loom/ws/W/change/"+change, 41+index, fixture.initial
+		if index == 0 {
+			prior = ""
+		}
+		publication := journal.Publication{Workspace: "W", Change: change, Repo: fixture.source, Branch: branch,
+			Trunk: trunk, Slug: "owner/repo", Head: fixture.initial, StackID: "feature", Prior: prior}
+		if err := fixture.store.BeginPublication(ctx, publication); err != nil {
+			t.Fatal(err)
+		}
+		publication.Phase, publication.PRNumber = "done", number
+		if err := fixture.store.AdvancePublication(ctx, publication); err != nil {
+			t.Fatal(err)
+		}
+		pulls[number] = stackpublish.PR{Number: number, Head: branch, HeadSHA: fixture.initial, Base: "main",
+			State: "closed", Merged: index < 2, MergeCommitSHA: fixture.initial}
+		trunk = branch
+	}
+	pulls[43] = stackpublish.PR{Number: 43, Head: "loom/ws/W/change/C", HeadSHA: fixture.initial, Base: "main", State: "open"}
+	fixture.forge.pulls = pulls
+	if err := Reconcile(ctx, fixture.store, fixture.forge); err != nil {
+		t.Fatal(err)
+	}
+	observation, found, err := fixture.store.ProviderObservation(ctx, "W", "C")
+	if err != nil || !found || observation.Base != "main" || observation.State != "open" {
+		t.Fatalf("C retargeted to trunk after A and B landed = %+v, found=%v, %v", observation, found, err)
+	}
+}
