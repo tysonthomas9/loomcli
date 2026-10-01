@@ -94,4 +94,9 @@ func TestContractNestedEnv(t *testing.T) {
 			t.Errorf("grandchild shell saw %s", k)
 		}
 	}
+	// Pinned finding: plain serve hands tools the server's own environment,
+	// so a session shell sees Loom's per-boot server password.
+	if _, pw := a.endpoint(); !strings.Contains(env, "OPENCODE_SERVER_PASSWORD="+pw) {
+		t.Errorf("grandchild shell no longer sees the server password; update this pin")
+	}
 }
