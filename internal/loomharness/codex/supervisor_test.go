@@ -2,6 +2,7 @@ package codex
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -23,7 +24,9 @@ import (
 // until stdin closes. Methods: initialize (codexHome is its CODEX_HOME or
 // ~/.codex), env (token names present, CODEX_HOME, LOOM_MARK), pid, exit
 // (dies), and ask, which sends a server request for params.threadId and
-// returns the answer it got back. Each app-server first starts a detached
+// returns the answer it got back (params.method picks the request, default
+// item/tool/requestUserInput); the thread methods are threads.go's fake
+// store in $CODEX_HOME. Each app-server first starts a detached
 // grandchild (its own session, as codex's exec sessions are) and appends its
 // pid to $CODEX_HOME/children; LOOM_FAKE_CODEX=sleep is that grandchild.
 func TestMain(m *testing.M) {
@@ -57,9 +60,11 @@ func fakeCodex() int {
 		var req struct {
 			ID     json.RawMessage
 			Method string
-			Params struct{ ThreadID string }
+			Params json.RawMessage
 		}
 		_ = json.Unmarshal(in.Bytes(), &req)
+		var p struct{ ThreadID, Method string }
+		_ = json.Unmarshal(req.Params, &p)
 		var result any
 		switch req.Method {
 		case "initialize":
@@ -71,11 +76,19 @@ func fakeCodex() int {
 		case "exit":
 			return 1
 		case "ask":
-			_ = out.Encode(map[string]any{"id": "srv-1", "method": "item/tool/requestUserInput", "params": map[string]string{"threadId": req.Params.ThreadID}})
+			method := cmp.Or(p.Method, "item/tool/requestUserInput")
+			_ = out.Encode(map[string]any{"id": "srv-1", "method": method, "params": map[string]string{"threadId": p.ThreadID}})
 			in.Scan()
 			result = json.RawMessage(in.Bytes())
 		default:
-			continue // a notification
+			if !strings.HasPrefix(req.Method, "thread/") {
+				continue // a notification
+			}
+			var err error
+			if result, err = fakeThreads(home, req.Method, req.Params); err != nil {
+				_ = out.Encode(map[string]any{"id": req.ID, "error": map[string]any{"code": -32600, "message": err.Error()}})
+				continue
+			}
 		}
 		_ = out.Encode(map[string]any{"id": req.ID, "result": result})
 	}

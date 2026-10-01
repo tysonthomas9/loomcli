@@ -119,7 +119,8 @@ func decl(b *bytes.Buffer, name string, s schema) {
 				tag += ",omitempty"
 			}
 			comment(b, p)
-			fmt.Fprintf(b, "%s %s `json:%q`\n", strings.ToUpper(k[:1])+k[1:], goType(props[k], req), tag)
+			field := strings.TrimLeft(k, "_$") // "_meta" -> "Meta"
+			fmt.Fprintf(b, "%s %s `json:%q`\n", strings.ToUpper(field[:1])+field[1:], goType(props[k], req), tag)
 		}
 		b.WriteString("}\n\n")
 	case enum != nil && s["type"] == "string":

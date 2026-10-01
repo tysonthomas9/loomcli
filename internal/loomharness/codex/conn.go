@@ -25,6 +25,15 @@ type Message struct {
 	// Gap is set once, when the connection ends: this thread's running turn
 	// and its unanswered server requests are lost.
 	Gap bool
+	c   *Conn // the connection it came on, where a server request is answered
+}
+
+// Respond answers this server request on the connection it came on.
+func (m Message) Respond(result any) error { return m.c.Respond(m.ID, result) }
+
+// RespondError refuses this server request on the connection it came on.
+func (m Message) RespondError(code int64, message string) error {
+	return m.c.RespondError(m.ID, code, message)
 }
 
 // Handler receives messages on the connection's one reader, in arrival
@@ -211,7 +220,7 @@ func (c *Conn) read(r io.Reader) {
 			c.resolve(m)
 			continue
 		}
-		msg := Message{ID: m.ID, Method: m.Method, Params: m.Params, ThreadID: threadOf(m.Params)}
+		msg := Message{ID: m.ID, Method: m.Method, Params: m.Params, ThreadID: threadOf(m.Params), c: c}
 		if h := c.handler(msg.ThreadID); h != nil {
 			h(msg)
 		} else if msg.ID != nil {

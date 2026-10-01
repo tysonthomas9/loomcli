@@ -9,11 +9,196 @@ import "encoding/json"
 // IMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.
 type AbsolutePathBuf = string
 
+type ActivePermissionProfile struct {
+	// Parent profile identifier from the selected permissions profile's `extends` setting, when present.
+	Extends *string `json:"extends,omitempty"`
+	// Identifier from `default_permissions` or the implicit built-in default, such as `:workspace` or a user-defined `[permissions.<id>]` profile.
+	Id string `json:"id"`
+}
+
+type AdditionalContextEntry struct {
+	Kind  AdditionalContextKind `json:"kind"`
+	Value string                `json:"value"`
+}
+
+type AdditionalContextKind string
+
+const (
+	AdditionalContextKindUntrusted   AdditionalContextKind = "untrusted"
+	AdditionalContextKindApplication AdditionalContextKind = "application"
+)
+
+type AgentMessageDelivery string
+
+const (
+	AgentMessageDeliveryAsync AgentMessageDelivery = "async"
+)
+
+type AgentMessageDeltaNotification struct {
+	Delta    string `json:"delta"`
+	ItemId   string `json:"itemId"`
+	ThreadId string `json:"threadId"`
+	TurnId   string `json:"turnId"`
+}
+
+type AgentPath = string
+
+// Configures who approval requests are routed to for review. Examples include sandbox escapes, blocked network access, MCP approval prompts, and ARC escalations. Defaults to `user`. `auto_review` uses a carefully prompted subagent to gather relevant context and apply a risk-based decision framework before approving or denying the request. The legacy value `guardian_subagent` is accepted for compatibility.
+type ApprovalsReviewer string
+
+const (
+	ApprovalsReviewerUser             ApprovalsReviewer = "user"
+	ApprovalsReviewerAutoReview       ApprovalsReviewer = "auto_review"
+	ApprovalsReviewerGuardianSubagent ApprovalsReviewer = "guardian_subagent"
+)
+
+type AskForApproval = json.RawMessage
+
+type AsyncUserInputQuestion struct {
+	Options []string `json:"options,omitempty"`
+	Title   string   `json:"title"`
+}
+
+type ByteRange struct {
+	End   int64 `json:"end"`
+	Start int64 `json:"start"`
+}
+
+// Location used to resolve a selected capability root.
+type CapabilityRootLocation = json.RawMessage
+
 type ClientInfo struct {
 	Name    string  `json:"name"`
 	Title   *string `json:"title,omitempty"`
 	Version string  `json:"version"`
 }
+
+// This translation layer make sure that we expose codex error code in camel case.
+//
+// When an upstream HTTP status is available (for example, from the Responses API or a provider), it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant.
+type CodexErrorInfo = json.RawMessage
+
+type CollabAgentState struct {
+	Message *string           `json:"message,omitempty"`
+	Status  CollabAgentStatus `json:"status"`
+}
+
+type CollabAgentStatus string
+
+const (
+	CollabAgentStatusPendingInit CollabAgentStatus = "pendingInit"
+	CollabAgentStatusRunning     CollabAgentStatus = "running"
+	CollabAgentStatusInterrupted CollabAgentStatus = "interrupted"
+	CollabAgentStatusCompleted   CollabAgentStatus = "completed"
+	CollabAgentStatusErrored     CollabAgentStatus = "errored"
+	CollabAgentStatusShutdown    CollabAgentStatus = "shutdown"
+	CollabAgentStatusNotFound    CollabAgentStatus = "notFound"
+)
+
+type CollabAgentTool string
+
+const (
+	CollabAgentToolSpawnAgent     CollabAgentTool = "spawnAgent"
+	CollabAgentToolSendInput      CollabAgentTool = "sendInput"
+	CollabAgentToolResumeAgent    CollabAgentTool = "resumeAgent"
+	CollabAgentToolWait           CollabAgentTool = "wait"
+	CollabAgentToolCloseAgent     CollabAgentTool = "closeAgent"
+	CollabAgentToolSendMessage    CollabAgentTool = "sendMessage"
+	CollabAgentToolFollowupTask   CollabAgentTool = "followupTask"
+	CollabAgentToolInterruptAgent CollabAgentTool = "interruptAgent"
+	CollabAgentToolListAgents     CollabAgentTool = "listAgents"
+)
+
+type CollabAgentToolCallStatus string
+
+const (
+	CollabAgentToolCallStatusInProgress  CollabAgentToolCallStatus = "inProgress"
+	CollabAgentToolCallStatusCompleted   CollabAgentToolCallStatus = "completed"
+	CollabAgentToolCallStatusFailed      CollabAgentToolCallStatus = "failed"
+	CollabAgentToolCallStatusInterrupted CollabAgentToolCallStatus = "interrupted"
+)
+
+// Collaboration mode for a Codex session.
+type CollaborationMode struct {
+	Mode     ModeKind `json:"mode"`
+	Settings Settings `json:"settings"`
+}
+
+type CommandAction = json.RawMessage
+
+type CommandExecutionSource string
+
+const (
+	CommandExecutionSourceAgent                  CommandExecutionSource = "agent"
+	CommandExecutionSourceUserShell              CommandExecutionSource = "userShell"
+	CommandExecutionSourceUnifiedExecStartup     CommandExecutionSource = "unifiedExecStartup"
+	CommandExecutionSourceUnifiedExecInteraction CommandExecutionSource = "unifiedExecInteraction"
+)
+
+type CommandExecutionStatus string
+
+const (
+	CommandExecutionStatusInProgress CommandExecutionStatus = "inProgress"
+	CommandExecutionStatusCompleted  CommandExecutionStatus = "completed"
+	CommandExecutionStatusFailed     CommandExecutionStatus = "failed"
+	CommandExecutionStatusDeclined   CommandExecutionStatus = "declined"
+)
+
+// Requested cyber treatment for a ChatGPT-authenticated Codex turn. Authorization and model-tier restrictions remain server-owned.
+type CyberAccessProgram string
+
+const (
+	CyberAccessProgramStandard     CyberAccessProgram = "standard"
+	CyberAccessProgramDaybreakBlue CyberAccessProgram = "daybreakBlue"
+	CyberAccessProgramDaybreakRed  CyberAccessProgram = "daybreakRed"
+)
+
+type DynamicToolCallOutputContentItem = json.RawMessage
+
+type DynamicToolCallStatus string
+
+const (
+	DynamicToolCallStatusInProgress DynamicToolCallStatus = "inProgress"
+	DynamicToolCallStatusCompleted  DynamicToolCallStatus = "completed"
+	DynamicToolCallStatusFailed     DynamicToolCallStatus = "failed"
+)
+
+type DynamicToolNamespaceTool = json.RawMessage
+
+type DynamicToolSpec = json.RawMessage
+
+type FileUpdateChange struct {
+	Diff string          `json:"diff"`
+	Kind PatchChangeKind `json:"kind"`
+	Path string          `json:"path"`
+}
+
+type FunctionCallOutputBody = json.RawMessage
+
+// Responses API compatible content items that can be returned by a tool call. This is a subset of ContentItem with the types we support as function call outputs.
+type FunctionCallOutputContentItem = json.RawMessage
+
+type GitInfo struct {
+	Branch    *string `json:"branch,omitempty"`
+	OriginUrl *string `json:"originUrl,omitempty"`
+	Sha       *string `json:"sha,omitempty"`
+}
+
+type HookPromptFragment struct {
+	HookRunId string `json:"hookRunId"`
+	Text      string `json:"text"`
+}
+
+type ImageDetail string
+
+const (
+	ImageDetailAuto     ImageDetail = "auto"
+	ImageDetailLow      ImageDetail = "low"
+	ImageDetailHigh     ImageDetail = "high"
+	ImageDetailOriginal ImageDetail = "original"
+)
+
+type ImageGenerationFailure = json.RawMessage
 
 // Client-declared capabilities negotiated during initialize.
 type InitializeCapabilities struct {
@@ -46,6 +231,25 @@ type InitializeResponse struct {
 	// Operating system for the running app-server target, for example `"macos"`, `"linux"`, or `"windows"`.
 	PlatformOs string `json:"platformOs"`
 	UserAgent  string `json:"userAgent"`
+}
+
+// Canonical user-input modality tags advertised by a model.
+type InputModality = json.RawMessage
+
+type ItemCompletedNotification struct {
+	// Unix timestamp (in milliseconds) when this item lifecycle completed.
+	CompletedAtMs int64      `json:"completedAtMs"`
+	Item          ThreadItem `json:"item"`
+	ThreadId      string     `json:"threadId"`
+	TurnId        string     `json:"turnId"`
+}
+
+type ItemStartedNotification struct {
+	Item ThreadItem `json:"item"`
+	// Unix timestamp (in milliseconds) when this item lifecycle started.
+	StartedAtMs int64  `json:"startedAtMs"`
+	ThreadId    string `json:"threadId"`
+	TurnId      string `json:"turnId"`
 }
 
 // A response to a request that indicates an error occurred.
@@ -81,9 +285,736 @@ type JSONRPCResponse struct {
 	Result json.RawMessage `json:"result"`
 }
 
+type LegacyAppPathString = string
+
+type McpAppDisplayMode string
+
+const (
+	McpAppDisplayModeInline     McpAppDisplayMode = "inline"
+	McpAppDisplayModeFullscreen McpAppDisplayMode = "fullscreen"
+)
+
+// UI resource and display preference for model invocations, captured from the tool descriptor.
+type McpAppUi struct {
+	PreferredModelDisplayMode McpAppDisplayMode `json:"preferredModelDisplayMode"`
+	ResourceUri               string            `json:"resourceUri"`
+}
+
+type McpToolCallAppContext struct {
+	ActionName  *string `json:"actionName,omitempty"`
+	AppName     *string `json:"appName,omitempty"`
+	ConnectorId string  `json:"connectorId"`
+	LinkId      *string `json:"linkId,omitempty"`
+	ResourceUri *string `json:"resourceUri,omitempty"`
+}
+
+type McpToolCallError struct {
+	Message string `json:"message"`
+}
+
+type McpToolCallResult struct {
+	Meta              json.RawMessage   `json:"_meta,omitempty"`
+	Content           []json.RawMessage `json:"content"`
+	StructuredContent json.RawMessage   `json:"structuredContent,omitempty"`
+}
+
+type McpToolCallStatus string
+
+const (
+	McpToolCallStatusInProgress McpToolCallStatus = "inProgress"
+	McpToolCallStatusCompleted  McpToolCallStatus = "completed"
+	McpToolCallStatusFailed     McpToolCallStatus = "failed"
+)
+
+type MemoryCitation struct {
+	Entries   []MemoryCitationEntry `json:"entries"`
+	ThreadIds []string              `json:"threadIds"`
+}
+
+type MemoryCitationEntry struct {
+	LineEnd   int64  `json:"lineEnd"`
+	LineStart int64  `json:"lineStart"`
+	Note      string `json:"note"`
+	Path      string `json:"path"`
+}
+
+// Classifies an assistant message as interim commentary or final answer text.
+//
+// Providers do not emit this consistently, so callers must treat `None` as "phase unknown" and keep compatibility behavior for legacy models.
+type MessagePhase = json.RawMessage
+
+type MisalignmentErrorDetails struct {
+	// A substantive localized explanation is required before offering continuation.
+	DetailedExplanation *string `json:"detailedExplanation,omitempty"`
+	// Open-ended classification; clients must accept categories added by Responses.
+	ErrorType *string `json:"errorType,omitempty"`
+	// Instruction to submit as the next turn's user input if continuation is confirmed.
+	Steer *MisalignmentSteer `json:"steer,omitempty"`
+}
+
+type MisalignmentSteer struct {
+	Message string `json:"message"`
+}
+
+// Initial collaboration mode to use when the TUI starts.
+type ModeKind string
+
+const (
+	ModeKindPlan    ModeKind = "plan"
+	ModeKindDefault ModeKind = "default"
+)
+
+type Model struct {
+	// Deprecated: use `serviceTiers` instead.
+	AdditionalSpeedTiers []string              `json:"additionalSpeedTiers,omitempty"`
+	AvailabilityNux      *ModelAvailabilityNux `json:"availabilityNux,omitempty"`
+	// Null when the catalog does not provide access-program metadata.
+	AvailableAccessPrograms *ModelAccessPrograms `json:"availableAccessPrograms,omitempty"`
+	DefaultReasoningEffort  ReasoningEffort      `json:"defaultReasoningEffort"`
+	// Catalog default service tier id for this model, when one is configured.
+	DefaultServiceTier *string         `json:"defaultServiceTier,omitempty"`
+	Description        string          `json:"description"`
+	DisplayName        string          `json:"displayName"`
+	Hidden             bool            `json:"hidden"`
+	Id                 string          `json:"id"`
+	InputModalities    []InputModality `json:"inputModalities,omitempty"`
+	IsDefault          bool            `json:"isDefault"`
+	Model              string          `json:"model"`
+	ModelSpecialty     *string         `json:"modelSpecialty,omitempty"`
+	// Multi-agent runtime declared by this model, when available.
+	MultiAgentVersion         MultiAgentVersion       `json:"multiAgentVersion,omitempty"`
+	ServiceTiers              []ModelServiceTier      `json:"serviceTiers,omitempty"`
+	SupportedReasoningEfforts []ReasoningEffortOption `json:"supportedReasoningEfforts"`
+	// @deprecated Always false; models no longer support personality selection.
+	SupportsPersonality bool              `json:"supportsPersonality,omitempty"`
+	Upgrade             *string           `json:"upgrade,omitempty"`
+	UpgradeInfo         *ModelUpgradeInfo `json:"upgradeInfo,omitempty"`
+}
+
+// Caller-specific explicit access programs advertised by model discovery.
+type ModelAccessPrograms struct {
+	// Accepted explicit selections.
+	Cyber []CyberAccessProgram `json:"cyber"`
+}
+
+type ModelAvailabilityNux struct {
+	Message string `json:"message"`
+}
+
+type ModelListParams struct {
+	// Opaque pagination cursor returned by a previous call.
+	Cursor *string `json:"cursor,omitempty"`
+	// When true, include models that are hidden from the default picker list.
+	IncludeHidden *bool `json:"includeHidden,omitempty"`
+	// Optional page size; defaults to a reasonable server-side value.
+	Limit *int64 `json:"limit,omitempty"`
+}
+
+type ModelListResponse struct {
+	Data []Model `json:"data"`
+	// Opaque cursor to pass to the next call to continue after the last item. If None, there are no more items to return.
+	NextCursor *string `json:"nextCursor,omitempty"`
+}
+
+type ModelServiceTier struct {
+	Description string `json:"description"`
+	Id          string `json:"id"`
+	Name        string `json:"name"`
+}
+
+type ModelUpgradeInfo struct {
+	MigrationMarkdown *string `json:"migrationMarkdown,omitempty"`
+	Model             string  `json:"model"`
+	ModelLink         *string `json:"modelLink,omitempty"`
+	// Informational Unix timestamp for this upgrade's scheduled retirement, if known.
+	RetirementAt *int64  `json:"retirementAt,omitempty"`
+	UpgradeCopy  *string `json:"upgradeCopy,omitempty"`
+}
+
+// Controls the effective multi-agent delegation instructions for a turn. `custom` means the configured mode hint defines the policy instead of a built-in policy.
+type MultiAgentMode = json.RawMessage
+
+// Multi-agent runtime supported by a model.
+type MultiAgentVersion string
+
+const (
+	MultiAgentVersionDisabled MultiAgentVersion = "disabled"
+	MultiAgentVersionV1       MultiAgentVersion = "v1"
+	MultiAgentVersionV2       MultiAgentVersion = "v2"
+)
+
+type NetworkAccess string
+
+const (
+	NetworkAccessRestricted NetworkAccess = "restricted"
+	NetworkAccessEnabled    NetworkAccess = "enabled"
+)
+
+type NonSteerableTurnKind string
+
+const (
+	NonSteerableTurnKindReview  NonSteerableTurnKind = "review"
+	NonSteerableTurnKindCompact NonSteerableTurnKind = "compact"
+)
+
+type PatchApplyStatus string
+
+const (
+	PatchApplyStatusInProgress PatchApplyStatus = "inProgress"
+	PatchApplyStatusCompleted  PatchApplyStatus = "completed"
+	PatchApplyStatusFailed     PatchApplyStatus = "failed"
+	PatchApplyStatusDeclined   PatchApplyStatus = "declined"
+)
+
+type PatchChangeKind = json.RawMessage
+
+// Deprecated: `friendly` and `pragmatic` no longer select a style.
+type Personality string
+
+const (
+	PersonalityNone      Personality = "none"
+	PersonalityFriendly  Personality = "friendly"
+	PersonalityPragmatic Personality = "pragmatic"
+)
+
+// A non-empty reasoning effort value advertised by the model.
+type ReasoningEffort = string
+
+type ReasoningEffortOption struct {
+	Description     string          `json:"description"`
+	ReasoningEffort ReasoningEffort `json:"reasoningEffort"`
+}
+
+// A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#reasoning-summaries
+type ReasoningSummary = json.RawMessage
+
+type ReasoningSummaryTextDeltaNotification struct {
+	Delta        string `json:"delta"`
+	ItemId       string `json:"itemId"`
+	SummaryIndex int64  `json:"summaryIndex"`
+	ThreadId     string `json:"threadId"`
+	TurnId       string `json:"turnId"`
+}
+
+type ReasoningTextDeltaNotification struct {
+	ContentIndex int64  `json:"contentIndex"`
+	Delta        string `json:"delta"`
+	ItemId       string `json:"itemId"`
+	ThreadId     string `json:"threadId"`
+	TurnId       string `json:"turnId"`
+}
+
 type RequestId = json.RawMessage
+
+type SandboxMode string
+
+const (
+	SandboxModeReadOnly         SandboxMode = "read-only"
+	SandboxModeWorkspaceWrite   SandboxMode = "workspace-write"
+	SandboxModeDangerFullAccess SandboxMode = "danger-full-access"
+)
+
+type SandboxPolicy = json.RawMessage
+
+// A user-selected root that can expose one or more runtime capabilities.
+type SelectedCapabilityRoot struct {
+	// Stable identifier supplied by the capability selection platform.
+	Id string `json:"id"`
+	// Where the selected root can be resolved.
+	Location CapabilityRootLocation `json:"location"`
+}
+
+type ServerRequestResolvedNotification struct {
+	RequestId RequestId `json:"requestId"`
+	ThreadId  string    `json:"threadId"`
+}
+
+type SessionSource = json.RawMessage
+
+// Settings for a collaboration mode.
+type Settings struct {
+	Developer_instructions *string         `json:"developer_instructions,omitempty"`
+	Model                  string          `json:"model"`
+	Reasoning_effort       ReasoningEffort `json:"reasoning_effort,omitempty"`
+}
+
+type SortDirection string
+
+const (
+	SortDirectionAsc  SortDirection = "asc"
+	SortDirectionDesc SortDirection = "desc"
+)
+
+type SubAgentActivityKind string
+
+const (
+	SubAgentActivityKindStarted     SubAgentActivityKind = "started"
+	SubAgentActivityKindInteracted  SubAgentActivityKind = "interacted"
+	SubAgentActivityKindInterrupted SubAgentActivityKind = "interrupted"
+	SubAgentActivityKindCompleted   SubAgentActivityKind = "completed"
+)
+
+type SubAgentSource = json.RawMessage
+
+type TextElement struct {
+	// Byte range in the parent `text` buffer that this element occupies.
+	ByteRange ByteRange `json:"byteRange"`
+	// Optional human-readable placeholder for the element, displayed in the UI.
+	Placeholder *string `json:"placeholder,omitempty"`
+}
+
+type Thread struct {
+	// Optional random unique nickname assigned to an AgentControl-spawned sub-agent.
+	AgentNickname *string `json:"agentNickname,omitempty"`
+	// Optional role (agent_role) assigned to an AgentControl-spawned sub-agent.
+	AgentRole *string `json:"agentRole,omitempty"`
+	// Whether the app server accepts direct turn input for this loaded thread. `None` means the capability is unavailable, such as for an unloaded stored thread.
+	CanAcceptDirectInput *bool `json:"canAcceptDirectInput,omitempty"`
+	// Version of the CLI that created the thread.
+	CliVersion string `json:"cliVersion"`
+	// Unix timestamp (in seconds) when the thread was created.
+	CreatedAt int64 `json:"createdAt"`
+	// Working directory captured for the thread.
+	Cwd AbsolutePathBuf `json:"cwd"`
+	// Saved Daybreak choice, independent of turn execution. Null if unset.
+	DaybreakEnabled *bool `json:"daybreakEnabled,omitempty"`
+	// Current environments for a loaded thread, in priority order, primary first. `null` means the thread is not loaded or the server does not expose its selection. An empty list means no environments are selected. This does not report connection status.
+	Environments []ThreadEnvironment `json:"environments,omitempty"`
+	// Whether the thread is ephemeral and should not be materialized on disk.
+	Ephemeral bool `json:"ephemeral"`
+	// Optional implementation-specific thread data.
+	Extra ThreadExtra `json:"extra,omitempty"`
+	// Source thread id when this thread was created by forking another thread.
+	ForkedFromId *string `json:"forkedFromId,omitempty"`
+	// Optional Git metadata captured when the thread was created.
+	GitInfo *GitInfo `json:"gitInfo,omitempty"`
+	// Persisted thread history contract selected when this thread was created.
+	HistoryMode ThreadHistoryMode `json:"historyMode,omitempty"`
+	// Identifier for this thread. Codex-generated thread IDs are UUIDv7.
+	Id string `json:"id"`
+	// Current configured model when loaded, otherwise the latest persisted model. Null when unavailable. This is not per-turn execution telemetry.
+	Model *string `json:"model,omitempty"`
+	// Model provider used for this thread (for example, 'openai').
+	ModelProvider string `json:"modelProvider"`
+	// Optional user-facing thread title.
+	Name *string `json:"name,omitempty"`
+	// Originator recorded when the thread was created, independent of its current client or executor. Null when the recorded originator is unavailable.
+	Originator *string `json:"originator,omitempty"`
+	// The ID of the parent thread. This will only be set if this thread is a subagent.
+	ParentThreadId *string `json:"parentThreadId,omitempty"`
+	// [UNSTABLE] Path to the thread on disk.
+	Path *string `json:"path,omitempty"`
+	// Usually the first user message in the thread, if available.
+	Preview string `json:"preview"`
+	// Canonical project assignment owned by app-server, if any.
+	ProjectId *string `json:"projectId"`
+	// Current configured reasoning effort when loaded, otherwise the latest persisted effort. Null when unset or unavailable. This is not per-turn execution telemetry.
+	ReasoningEffort ReasoningEffort `json:"reasoningEffort,omitempty"`
+	// Unix timestamp (in seconds) used for thread recency ordering.
+	RecencyAt *int64 `json:"recencyAt,omitempty"`
+	// The independently persisted section selected for this thread, if any.
+	Section *ThreadSection `json:"section,omitempty"`
+	// Unix timestamp in seconds when the thread entered its current section.
+	SectionEnteredAt *int64 `json:"sectionEnteredAt,omitempty"`
+	// Session id shared by threads that belong to the same session tree.
+	SessionId string `json:"sessionId"`
+	// Origin of the thread (CLI, VSCode, codex exec, codex app-server, etc.).
+	Source SessionSource `json:"source"`
+	// Current runtime status for the thread.
+	Status ThreadStatus `json:"status"`
+	// Optional analytics source classification for this thread.
+	ThreadSource ThreadSource `json:"threadSource,omitempty"`
+	// Only populated on `thread/resume`, `thread/fork`, and `thread/read` (when `includeTurns` is true) responses. For all other responses and notifications returning a Thread, the turns field will be an empty list.
+	Turns []Turn `json:"turns"`
+	// Unix timestamp (in seconds) when the thread was last updated.
+	UpdatedAt int64 `json:"updatedAt"`
+}
+
+type ThreadActiveFlag string
+
+const (
+	ThreadActiveFlagWaitingOnApproval  ThreadActiveFlag = "waitingOnApproval"
+	ThreadActiveFlagWaitingOnUserInput ThreadActiveFlag = "waitingOnUserInput"
+)
+
+type ThreadDeleteParams struct {
+	ThreadId string `json:"threadId"`
+}
+
+type ThreadDeleteResponse = json.RawMessage
+
+// An environment selected by a loaded thread, independent of connection status.
+type ThreadEnvironment struct {
+	Cwd                   LegacyAppPathString   `json:"cwd"`
+	EnvironmentId         string                `json:"environmentId"`
+	RuntimeWorkspaceRoots []LegacyAppPathString `json:"runtimeWorkspaceRoots"`
+}
+
+// Extra app-server data for a thread.
+type ThreadExtra = json.RawMessage
+
+type ThreadHistoryMode string
+
+const (
+	ThreadHistoryModeLegacy    ThreadHistoryMode = "legacy"
+	ThreadHistoryModePaginated ThreadHistoryMode = "paginated"
+)
+
+type ThreadId = string
+
+type ThreadItem = json.RawMessage
+
+type ThreadListCwdFilter = json.RawMessage
+
+type ThreadListParams struct {
+	// Optional ancestor thread filter. Returns spawned descendants at any depth, excluding the ancestor itself. Mutually exclusive with `parentThreadId`.
+	AncestorThreadId *string `json:"ancestorThreadId,omitempty"`
+	// Optional archived filter; when set to true, only archived threads are returned. If false or null, only non-archived threads are returned.
+	Archived *bool `json:"archived,omitempty"`
+	// Opaque pagination cursor returned by a previous call.
+	Cursor *string `json:"cursor,omitempty"`
+	// Optional cwd filter or filters; when set, only threads whose session cwd exactly matches one of these paths are returned.
+	Cwd ThreadListCwdFilter `json:"cwd,omitempty"`
+	// Optional page size; defaults to a reasonable server-side value.
+	Limit *int64 `json:"limit,omitempty"`
+	// Optional provider filter; when set, only sessions recorded under these providers are returned. When present but empty, includes all providers.
+	ModelProviders []string `json:"modelProviders,omitempty"`
+	// Optional originator allowlist, matching any supplied value exactly. Supported by hosted backends only; the local app-server rejects a nonempty list. Omitted or empty lists leave originators unrestricted.
+	Originators []string `json:"originators,omitempty"`
+	// Optional direct parent thread filter. Mutually exclusive with `ancestorThreadId`.
+	ParentThreadId *string `json:"parentThreadId,omitempty"`
+	// Omit to include every project, set to null for unassigned threads, or provide a project ID to return only threads in that project.
+	ProjectId *string `json:"projectId,omitempty"`
+	// Optional substring filter for the extracted thread title.
+	SearchTerm *string `json:"searchTerm,omitempty"`
+	// Omit to include every section, set to `null` for unsectioned threads, or provide a section ID to return only threads in that section.
+	SectionId *string `json:"sectionId,omitempty"`
+	// Optional sort direction; defaults to descending (newest first).
+	SortDirection SortDirection `json:"sortDirection,omitempty"`
+	// Optional sort key; defaults to created_at.
+	SortKey ThreadSortKey `json:"sortKey,omitempty"`
+	// Optional source filter; when set, only sessions from these source kinds are returned. When omitted or empty, defaults to interactive sources.
+	SourceKinds []ThreadSourceKind `json:"sourceKinds,omitempty"`
+	// If true, return from the state DB without scanning JSONL rollouts to repair thread metadata. Omitted or false preserves scan-and-repair behavior.
+	UseStateDbOnly bool `json:"useStateDbOnly,omitempty"`
+}
+
+type ThreadListResponse struct {
+	// Opaque cursor to pass as `cursor` when reversing `sortDirection`. This is only populated when the page contains at least one thread. Use it with the opposite `sortDirection`; for timestamp sorts it anchors at the start of the page timestamp so same-second updates are not skipped.
+	BackwardsCursor *string  `json:"backwardsCursor,omitempty"`
+	Data            []Thread `json:"data"`
+	// Opaque cursor to pass to the next call to continue after the last item. if None, there are no more items to return.
+	NextCursor *string `json:"nextCursor,omitempty"`
+}
+
+type ThreadReadParams struct {
+	// When true, include turns and their items from rollout history. Full-history hydration is deprecated for paginated threads; prefer a metadata-only read and page with `thread/turns/list` and `thread/items/list`.
+	IncludeTurns bool   `json:"includeTurns,omitempty"`
+	ThreadId     string `json:"threadId"`
+}
+
+type ThreadReadResponse struct {
+	Thread Thread `json:"thread"`
+}
+
+// An independently persisted, user-visible thread section.
+type ThreadSection struct {
+	// Optional appearance synchronized across clients.
+	Appearance *ThreadSectionAppearance `json:"appearance,omitempty"`
+	// Opaque UUIDv7 identity that remains stable when the section is renamed.
+	Id string `json:"id"`
+	// The current user-visible section name.
+	Name string `json:"name"`
+}
+
+// Extensible visual presentation for a custom thread section.
+type ThreadSectionAppearance struct {
+	Color *string `json:"color,omitempty"`
+	Icon  *string `json:"icon,omitempty"`
+}
+
+type ThreadSetNameParams struct {
+	Name     string `json:"name"`
+	ThreadId string `json:"threadId"`
+}
+
+type ThreadSortKey string
+
+const (
+	ThreadSortKeyCreatedAt       ThreadSortKey = "created_at"
+	ThreadSortKeyUpdatedAt       ThreadSortKey = "updated_at"
+	ThreadSortKeyRecencyAt       ThreadSortKey = "recency_at"
+	ThreadSortKeySectionPosition ThreadSortKey = "section_position"
+)
+
+type ThreadSource = string
+
+type ThreadSourceKind string
+
+const (
+	ThreadSourceKindCli                 ThreadSourceKind = "cli"
+	ThreadSourceKindVscode              ThreadSourceKind = "vscode"
+	ThreadSourceKindExec                ThreadSourceKind = "exec"
+	ThreadSourceKindAppServer           ThreadSourceKind = "appServer"
+	ThreadSourceKindSubAgent            ThreadSourceKind = "subAgent"
+	ThreadSourceKindSubAgentReview      ThreadSourceKind = "subAgentReview"
+	ThreadSourceKindSubAgentCompact     ThreadSourceKind = "subAgentCompact"
+	ThreadSourceKindSubAgentThreadSpawn ThreadSourceKind = "subAgentThreadSpawn"
+	ThreadSourceKindSubAgentOther       ThreadSourceKind = "subAgentOther"
+	ThreadSourceKindUnknown             ThreadSourceKind = "unknown"
+)
+
+type ThreadStartParams struct {
+	// Allow a provider with an authoritative static model catalog to replace an unavailable requested model with its default.
+	AllowProviderModelFallback bool           `json:"allowProviderModelFallback,omitempty"`
+	ApprovalPolicy             AskForApproval `json:"approvalPolicy,omitempty"`
+	// Override where approval requests are routed for review on this thread and subsequent turns.
+	ApprovalsReviewer ApprovalsReviewer `json:"approvalsReviewer,omitempty"`
+	BaseInstructions  *string           `json:"baseInstructions,omitempty"`
+	Config            json.RawMessage   `json:"config,omitempty"`
+	Cwd               *string           `json:"cwd,omitempty"`
+	// Initial Daybreak choice for this persistent thread. Omitted or null leaves it unset. This does not select a turn's `cyberAccessProgram` or grant access. Not supported for ephemeral threads.
+	DaybreakEnabled       *bool             `json:"daybreakEnabled,omitempty"`
+	DeveloperInstructions *string           `json:"developerInstructions,omitempty"`
+	DynamicTools          []DynamicToolSpec `json:"dynamicTools,omitempty"`
+	// Optional sticky environments for this thread.
+	//
+	// Omitted selects the default environment when environment access is enabled. Empty disables environment access for turns that do not provide a turn override. Non-empty selects the first environment as the current turn environment.
+	Environments []TurnEnvironmentParams `json:"environments,omitempty"`
+	Ephemeral    *bool                   `json:"ephemeral,omitempty"`
+	// If true, opt into emitting raw Responses API items on the event stream. This is for internal use only (e.g. Codex Cloud).
+	ExperimentalRawEvents bool `json:"experimentalRawEvents,omitempty"`
+	// Persisted thread history contract to use for this new thread.
+	HistoryMode ThreadHistoryMode `json:"historyMode,omitempty"`
+	// Test-only experimental field used to validate experimental gating and schema filtering behavior in a stable way.
+	MockExperimentalField *string `json:"mockExperimentalField,omitempty"`
+	Model                 *string `json:"model,omitempty"`
+	ModelProvider         *string `json:"modelProvider,omitempty"`
+	// @deprecated Ignored. Use Ultra reasoning effort for proactive multi-agent behavior.
+	MultiAgentMode MultiAgentMode `json:"multiAgentMode,omitempty"`
+	// Named profile id for this thread. Cannot be combined with `sandbox`.
+	Permissions *string `json:"permissions,omitempty"`
+	// @deprecated `friendly` and `pragmatic` no longer select a style.
+	Personality Personality `json:"personality,omitempty"`
+	// Optional project identity for this new thread. Durable threads persist the assignment; ephemeral threads expose it only in live responses.
+	ProjectId *string `json:"projectId,omitempty"`
+	// Replace the thread's runtime workspace roots. Paths must be absolute.
+	RuntimeWorkspaceRoots []AbsolutePathBuf `json:"runtimeWorkspaceRoots,omitempty"`
+	Sandbox               SandboxMode       `json:"sandbox,omitempty"`
+	// Capability roots selected for this thread by the hosting platform.
+	SelectedCapabilityRoots []SelectedCapabilityRoot `json:"selectedCapabilityRoots,omitempty"`
+	ServiceName             *string                  `json:"serviceName,omitempty"`
+	ServiceTier             *string                  `json:"serviceTier,omitempty"`
+	SessionStartSource      ThreadStartSource        `json:"sessionStartSource,omitempty"`
+	// Optional client-supplied analytics source classification for this thread.
+	ThreadSource ThreadSource `json:"threadSource,omitempty"`
+}
+
+type ThreadStartResponse struct {
+	// Named or implicit built-in profile that produced the active permissions, when known.
+	ActivePermissionProfile *ActivePermissionProfile `json:"activePermissionProfile,omitempty"`
+	ApprovalPolicy          AskForApproval           `json:"approvalPolicy"`
+	// Reviewer currently used for approval requests on this thread.
+	ApprovalsReviewer ApprovalsReviewer `json:"approvalsReviewer"`
+	Cwd               AbsolutePathBuf   `json:"cwd"`
+	// Saved list of disabled plugin IDs. Does not yet filter plugin capabilities.
+	DisabledPluginIds []string `json:"disabledPluginIds,omitempty"`
+	// Environment-native paths to instruction source files currently loaded for this thread.
+	InstructionSources []LegacyAppPathString `json:"instructionSources,omitempty"`
+	Model              string                `json:"model"`
+	ModelProvider      string                `json:"modelProvider"`
+	// @deprecated Always `explicitRequestOnly`. Use `reasoningEffort` for Ultra behavior.
+	MultiAgentMode  MultiAgentMode  `json:"multiAgentMode,omitempty"`
+	ReasoningEffort ReasoningEffort `json:"reasoningEffort,omitempty"`
+	// Thread-scoped runtime workspace roots used to materialize `:workspace_roots`.
+	RuntimeWorkspaceRoots []AbsolutePathBuf `json:"runtimeWorkspaceRoots,omitempty"`
+	// Legacy sandbox policy retained for compatibility. Experimental clients should prefer `activePermissionProfile` for profile provenance.
+	Sandbox     SandboxPolicy `json:"sandbox"`
+	ServiceTier *string       `json:"serviceTier,omitempty"`
+	Thread      Thread        `json:"thread"`
+}
+
+type ThreadStartSource string
+
+const (
+	ThreadStartSourceStartup ThreadStartSource = "startup"
+	ThreadStartSourceClear   ThreadStartSource = "clear"
+)
+
+type ThreadStatus = json.RawMessage
+
+type ThreadTokenUsage struct {
+	Last               TokenUsageBreakdown `json:"last"`
+	ModelContextWindow *int64              `json:"modelContextWindow,omitempty"`
+	Total              TokenUsageBreakdown `json:"total"`
+}
+
+type ThreadTokenUsageUpdatedNotification struct {
+	ThreadId   string           `json:"threadId"`
+	TokenUsage ThreadTokenUsage `json:"tokenUsage"`
+	TurnId     string           `json:"turnId"`
+}
+
+type ThreadTurnsListParams struct {
+	// Opaque cursor to pass to the next call to continue after the last turn.
+	Cursor *string `json:"cursor,omitempty"`
+	// How much item detail to include for each returned turn; defaults to summary.
+	ItemsView TurnItemsView `json:"itemsView,omitempty"`
+	// Optional turn page size.
+	Limit *int64 `json:"limit,omitempty"`
+	// Optional turn pagination direction; defaults to descending.
+	SortDirection SortDirection `json:"sortDirection,omitempty"`
+	ThreadId      string        `json:"threadId"`
+}
+
+type ThreadTurnsListResponse struct {
+	// Opaque cursor to pass as `cursor` when reversing `sortDirection`. This is only populated when the page contains at least one turn. Use it with the opposite `sortDirection` to include the anchor turn again and catch updates to that turn.
+	BackwardsCursor *string `json:"backwardsCursor,omitempty"`
+	Data            []Turn  `json:"data"`
+	// Opaque cursor to pass to the next call to continue after the last turn. if None, there are no more turns to return.
+	NextCursor *string `json:"nextCursor,omitempty"`
+}
+
+type TokenUsageBreakdown struct {
+	CacheWriteInputTokens int64 `json:"cacheWriteInputTokens,omitempty"`
+	CachedInputTokens     int64 `json:"cachedInputTokens"`
+	InputTokens           int64 `json:"inputTokens"`
+	OutputTokens          int64 `json:"outputTokens"`
+	ReasoningOutputTokens int64 `json:"reasoningOutputTokens"`
+	TotalTokens           int64 `json:"totalTokens"`
+}
+
+type Turn struct {
+	// Unix timestamp (in seconds) when the turn completed.
+	CompletedAt *int64 `json:"completedAt,omitempty"`
+	// Duration between turn start and completion in milliseconds, if known.
+	DurationMs *int64 `json:"durationMs,omitempty"`
+	// Only populated when the Turn's status is failed.
+	Error *TurnError `json:"error,omitempty"`
+	// Identifier for this turn. Codex-generated turn IDs are UUIDv7.
+	Id string `json:"id"`
+	// Thread items currently included in this turn payload.
+	Items []ThreadItem `json:"items"`
+	// Describes how much of `items` has been loaded for this turn.
+	ItemsView TurnItemsView `json:"itemsView,omitempty"`
+	// Unix timestamp (in seconds) when the turn started.
+	StartedAt *int64     `json:"startedAt,omitempty"`
+	Status    TurnStatus `json:"status"`
+}
+
+type TurnCompletedNotification struct {
+	ThreadId string `json:"threadId"`
+	Turn     Turn   `json:"turn"`
+}
+
+type TurnEnvironmentParams struct {
+	Cwd           LegacyAppPathString `json:"cwd"`
+	EnvironmentId string              `json:"environmentId"`
+	// Environment-native runtime workspace roots. Omitted defaults to `cwd`.
+	RuntimeWorkspaceRoots []LegacyAppPathString `json:"runtimeWorkspaceRoots,omitempty"`
+}
+
+type TurnError struct {
+	AdditionalDetails *string        `json:"additionalDetails,omitempty"`
+	CodexErrorInfo    CodexErrorInfo `json:"codexErrorInfo,omitempty"`
+	Message           string         `json:"message"`
+	// Optional public explanation and continuation instruction for a misalignment block.
+	Misalignment *MisalignmentErrorDetails `json:"misalignment,omitempty"`
+}
+
+type TurnInterruptParams struct {
+	ThreadId string `json:"threadId"`
+	TurnId   string `json:"turnId"`
+}
+
+type TurnItemsView = json.RawMessage
+
+type TurnStartParams struct {
+	// Optional client-provided context fragments keyed by an opaque source identifier.
+	AdditionalContext map[string]AdditionalContextEntry `json:"additionalContext,omitempty"`
+	// Override the approval policy for this turn and subsequent turns.
+	ApprovalPolicy AskForApproval `json:"approvalPolicy,omitempty"`
+	// Override where approval requests are routed for review on this turn and subsequent turns.
+	ApprovalsReviewer   ApprovalsReviewer `json:"approvalsReviewer,omitempty"`
+	ClientUserMessageId *string           `json:"clientUserMessageId,omitempty"`
+	// EXPERIMENTAL - Set a pre-set collaboration mode. Takes precedence over model, reasoning_effort, and developer instructions if set.
+	//
+	// For `collaboration_mode.settings.developer_instructions`, `null` means "use the built-in instructions for the selected mode".
+	CollaborationMode *CollaborationMode `json:"collaborationMode,omitempty"`
+	// Override the working directory for this turn and subsequent turns.
+	Cwd *string `json:"cwd,omitempty"`
+	// EXPERIMENTAL - Request a workspace-authorized cyber program for this turn. Omission preserves automatic behavior. This does not grant access.
+	CyberAccessProgram CyberAccessProgram `json:"cyberAccessProgram,omitempty"`
+	// Replace this thread's disabled plugin IDs. Omitted/null preserves the list; [] clears it.
+	DisabledPluginIds []string `json:"disabledPluginIds,omitempty"`
+	// Override the reasoning effort for this turn and subsequent turns.
+	Effort ReasoningEffort `json:"effort,omitempty"`
+	// Optional environments for this turn and subsequent turns.
+	//
+	// Omitted uses the thread sticky environments. Empty disables environment access for this turn. Non-empty selects the first environment as the current turn environment for this turn.
+	Environments []TurnEnvironmentParams `json:"environments,omitempty"`
+	Input        []UserInput             `json:"input"`
+	// Override the model for this turn and subsequent turns.
+	Model *string `json:"model,omitempty"`
+	// @deprecated Ignored. Use `effort: "ultra"` for proactive multi-agent behavior.
+	MultiAgentMode MultiAgentMode `json:"multiAgentMode,omitempty"`
+	// Optional JSON Schema used to constrain the final assistant message for this turn.
+	OutputSchema json.RawMessage `json:"outputSchema,omitempty"`
+	// Select a named permissions profile id for this turn and subsequent turns. Cannot be combined with `sandboxPolicy`.
+	Permissions *string `json:"permissions,omitempty"`
+	// @deprecated `friendly` and `pragmatic` no longer select a style. Changing this does not rewrite the thread's existing instructions.
+	Personality Personality `json:"personality,omitempty"`
+	// Optional metadata to enrich Codex's ResponsesAPI turn metadata.
+	//
+	// Entries are flattened into the JSON string sent as `client_metadata["x-codex-turn-metadata"]` on ResponsesAPI HTTP and websocket requests.
+	//
+	// They are not sent as top-level ResponsesAPI `client_metadata` keys, and reserved keys such as `session_id`, `thread_id`, `turn_id`, and `window_id` cannot be overridden.
+	ResponsesapiClientMetadata map[string]string `json:"responsesapiClientMetadata,omitempty"`
+	// Replace the thread's runtime workspace roots for this turn and subsequent turns. Paths must be absolute.
+	RuntimeWorkspaceRoots []AbsolutePathBuf `json:"runtimeWorkspaceRoots,omitempty"`
+	// Override the sandbox policy for this turn and subsequent turns.
+	SandboxPolicy SandboxPolicy `json:"sandboxPolicy,omitempty"`
+	// Override the service tier for this turn and subsequent turns.
+	ServiceTier *string `json:"serviceTier,omitempty"`
+	// Override the service tier only when this request starts a new turn. Use "default" for standard speed. Omitted or null inherits the thread's tier. Does not change the thread's tier or a turn being steered.
+	ServiceTierForTurn *string `json:"serviceTierForTurn,omitempty"`
+	// Override the reasoning summary for this turn and subsequent turns.
+	Summary    ReasoningSummary `json:"summary,omitempty"`
+	ThreadId   string           `json:"threadId"`
+	ToolOutput *TurnToolOutput  `json:"toolOutput,omitempty"`
+	// Optional source classification for the caller that starts this turn. Ignored when this request steers an already-active turn.
+	TurnTrigger *string `json:"turnTrigger,omitempty"`
+}
+
+type TurnStartResponse struct {
+	Turn Turn `json:"turn"`
+}
+
+type TurnStartedNotification struct {
+	ThreadId string `json:"threadId"`
+	Turn     Turn   `json:"turn"`
+}
+
+type TurnStatus string
+
+const (
+	TurnStatusCompleted   TurnStatus = "completed"
+	TurnStatusInterrupted TurnStatus = "interrupted"
+	TurnStatusFailed      TurnStatus = "failed"
+	TurnStatusInProgress  TurnStatus = "inProgress"
+)
+
+type TurnToolOutput struct {
+	Name      string                 `json:"name"`
+	Namespace *string                `json:"namespace,omitempty"`
+	Output    FunctionCallOutputBody `json:"output"`
+}
+
+type UserInput = json.RawMessage
 
 type W3cTraceContext struct {
 	Traceparent *string `json:"traceparent,omitempty"`
 	Tracestate  *string `json:"tracestate,omitempty"`
 }
+
+type WebSearchAction = json.RawMessage
