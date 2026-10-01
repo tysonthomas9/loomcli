@@ -109,33 +109,19 @@ func (s *SQLite) AdvanceApplied(ctx context.Context, requestID, oldPhase, nextPh
 	return tx.Commit()
 }
 
+const appliedLayersWhere = `SELECT request_id,workspace,lead,change_id,revision,old_tip,new_tip,commits,dropped,commit_details,phase
+		FROM applied_layers WHERE workspace=? AND lead=? AND `
+
 func (s *SQLite) AppliedLog(ctx context.Context, workspace, lead string) ([]loomgit.AppliedLayer, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT request_id,workspace,lead,change_id,revision,old_tip,new_tip,commits,dropped,commit_details,phase
-		FROM applied_layers WHERE workspace=? AND lead=? AND phase='done' ORDER BY rowid`, workspace, lead)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var result []loomgit.AppliedLayer
-	for rows.Next() {
-		var a loomgit.AppliedLayer
-		var commits, dropped, details []byte
-		if err := rows.Scan(&a.RequestID, &a.Workspace, &a.Lead, &a.Change, &a.Revision,
-			&a.OldTip, &a.NewTip, &commits, &dropped, &details, &a.Phase); err != nil {
-			return nil, err
-		}
-		if err := errors.Join(json.Unmarshal(commits, &a.Commits), json.Unmarshal(dropped, &a.DroppedCommits),
-			json.Unmarshal(details, &a.CommitDetails)); err != nil {
-			return nil, err
-		}
-		result = append(result, a)
-	}
-	return result, rows.Err()
+	return s.appliedLayers(ctx, appliedLayersWhere+`phase='done' ORDER BY rowid`, workspace, lead)
 }
 
 func (s *SQLite) OpenApplied(ctx context.Context, workspace, lead string) ([]loomgit.AppliedLayer, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT request_id,workspace,lead,change_id,revision,old_tip,new_tip,commits,dropped,commit_details,phase
-		FROM applied_layers WHERE workspace=? AND lead=? AND phase NOT IN ('done','not_applied','unapplied') ORDER BY rowid`, workspace, lead)
+	return s.appliedLayers(ctx, appliedLayersWhere+`phase NOT IN ('done','not_applied','unapplied') ORDER BY rowid`, workspace, lead)
+}
+
+func (s *SQLite) appliedLayers(ctx context.Context, query, workspace, lead string) ([]loomgit.AppliedLayer, error) {
+	rows, err := s.db.QueryContext(ctx, query, workspace, lead)
 	if err != nil {
 		return nil, err
 	}

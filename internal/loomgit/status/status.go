@@ -1,6 +1,7 @@
 package status
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -249,19 +250,13 @@ func scanWithoutJournal(ctx context.Context, local *bootstrap.StateCache) Snapsh
 func sortEntries(out *Snapshot) {
 	sort.Slice(out.Entries, func(left, right int) bool {
 		first, second := out.Entries[left], out.Entries[right]
-		if first.Workspace != second.Workspace {
-			return first.Workspace < second.Workspace
-		}
-		if first.Kind != second.Kind {
-			return first.Kind < second.Kind
-		}
-		if first.Repo != second.Repo {
-			return first.Repo < second.Repo
-		}
-		if first.ID != second.ID {
-			return first.ID < second.ID
-		}
-		return first.Path < second.Path
+		return cmp.Or(
+			cmp.Compare(first.Workspace, second.Workspace),
+			cmp.Compare(first.Kind, second.Kind),
+			cmp.Compare(first.Repo, second.Repo),
+			cmp.Compare(first.ID, second.ID),
+			cmp.Compare(first.Path, second.Path),
+		) < 0
 	})
 }
 
