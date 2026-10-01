@@ -52,6 +52,7 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 	if err != nil {
 		return loomharness.NativeRef{}, err
 	}
+	c.remember(ref)
 	return ref, s.isolate(ctx)
 }
 
@@ -187,7 +188,9 @@ func (s *Session) Resume(ctx context.Context, l loomharness.Launch, rules []loom
 	if err := s.install(ctx, native); err != nil {
 		return loomharness.NativeRef{}, err
 	}
-	return loomharness.NativeRef{Root: l.Root, NativeID: s.ref.NativeID}, s.isolate(ctx)
+	ref := loomharness.NativeRef{Root: l.Root, NativeID: s.ref.NativeID}
+	s.c.remember(ref)
+	return ref, s.isolate(ctx)
 }
 
 // install replaces the session's permission rules with rules (b30c4d0:

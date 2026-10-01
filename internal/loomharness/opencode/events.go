@@ -47,11 +47,15 @@ func (f *feed) Close() error {
 func (f *feed) run(ctx context.Context, c *Client, body io.ReadCloser) {
 	defer close(f.done)
 	defer close(f.ch)
-	m := mapper{seq: map[string]int64{}, turn: map[string]string{}}
+	m := newMapper(c.rootOf)
 	for {
 		readSSE(body, func(data []byte) bool {
-			e, ok := m.mapEvent(data)
-			return !ok || f.send(ctx, e)
+			for _, e := range m.process(data) {
+				if !f.send(ctx, e) {
+					return false
+				}
+			}
+			return true
 		})
 		_ = body.Close()
 		for wait := 100 * time.Millisecond; ; wait = min(wait*2, 2*time.Second) {
@@ -65,8 +69,10 @@ func (f *feed) run(ctx context.Context, c *Client, body io.ReadCloser) {
 				break
 			}
 		}
-		if !f.send(ctx, loomharness.Event{Type: loomharness.EventFeedGap, Time: time.Now()}) {
-			return
+		for _, e := range append(m.flush(), loomharness.Event{Type: loomharness.EventFeedGap, Time: time.Now()}) {
+			if !f.send(ctx, e) {
+				return
+			}
 		}
 	}
 }
@@ -121,6 +127,70 @@ func readSSE(r io.Reader, fn func([]byte) bool) {
 type mapper struct {
 	seq  map[string]int64
 	turn map[string]string
+	// root gives the Root of a session Loom opened or resumed ("" for any
+	// other session); every event carries it, since dispatch matches Root
+	// plus NativeID.
+	root func(nativeID string) string
+	// OpenCode publishes session.execution.started before the runner
+	// delivers the input that began it (core/src/session/execution.ts:113-116,
+	// runner/llm.ts:88-99), so turn.started is held until the session's next
+	// event and takes its InputKey from an inbox delivery (port contract,
+	// e87989bc8). An input delivered while no turn runs is kept for the next
+	// start instead.
+	pending map[string]loomharness.Event
+	input   map[string]string
+}
+
+func newMapper(root func(string) string) *mapper {
+	return &mapper{seq: map[string]int64{}, turn: map[string]string{}, root: root,
+		pending: map[string]loomharness.Event{}, input: map[string]string{}}
+}
+
+// process maps one native event to the port events it releases, in order.
+func (m *mapper) process(raw []byte) []loomharness.Event {
+	e, ok := m.mapEvent(raw)
+	if !ok {
+		return nil
+	}
+	if m.root != nil {
+		e.Session.Root = m.root(e.Session.NativeID)
+	}
+	sid := e.Session.NativeID
+	var out []loomharness.Event
+	if start, held := m.pending[sid]; held {
+		delete(m.pending, sid)
+		if e.Type == loomharness.EventMessageDelivered {
+			start.InputKey = e.InputKey
+		}
+		out = append(out, start)
+	}
+	switch e.Type {
+	case loomharness.EventTurnStarted:
+		if key, ok := m.input[sid]; ok {
+			delete(m.input, sid)
+			e.InputKey = key
+			return append(out, e)
+		}
+		m.pending[sid] = e
+		return out
+	case loomharness.EventMessageDelivered:
+		if len(out) == 0 && e.TurnID == "" {
+			m.input[sid] = e.InputKey
+		}
+	case loomharness.EventTurnCompleted:
+		delete(m.input, sid)
+	}
+	return append(out, e)
+}
+
+// flush releases every held turn.started, without an InputKey.
+func (m *mapper) flush() []loomharness.Event {
+	var out []loomharness.Event
+	for sid, e := range m.pending {
+		out = append(out, e)
+		delete(m.pending, sid)
+	}
+	return out
 }
 
 type wireEvent struct {

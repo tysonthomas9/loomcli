@@ -126,6 +126,18 @@ func TestContract(t *testing.T) {
 		events.wait(t, "turn completed", func(e loomharness.Event) bool {
 			return e.Session.NativeID == ref.NativeID && e.Type == loomharness.EventTurnCompleted && e.StopReason == "completed"
 		})
+		// 1.6d: dispatch matches Root plus NativeID, and binds a turn by the
+		// InputKey of its turn.started.
+		events.wait(t, "turn.started for the prompt", func(e loomharness.Event) bool {
+			return e.Session == ref && e.Type == loomharness.EventTurnStarted && e.InputKey == key
+		})
+		events.mu.Lock()
+		for _, e := range events.events {
+			if e.Session.NativeID == ref.NativeID && e.Session.Root != sbx {
+				t.Errorf("%s event has Root %q; want %q", e.Type, e.Session.Root, sbx)
+			}
+		}
+		events.mu.Unlock()
 		if got, err := s.HasInput(ctx, key); err != nil || got != loomharness.LandedFound {
 			t.Fatalf("HasInput = %v, %v", got, err)
 		}

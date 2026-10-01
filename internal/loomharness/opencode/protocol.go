@@ -33,11 +33,26 @@ type Client struct {
 
 	rulesMu sync.Mutex
 	rules   map[string][]map[string]string // native session id -> the rules Loom last installed
+	roots   map[string]string              // native session id -> the Root Loom opened or resumed it with
+}
+
+// remember records the Root of a session Loom opened or resumed, for the feed.
+func (c *Client) remember(ref loomharness.NativeRef) {
+	c.rulesMu.Lock()
+	defer c.rulesMu.Unlock()
+	c.roots[ref.NativeID] = ref.Root
+}
+
+// rootOf is the recorded Root of a session, or "".
+func (c *Client) rootOf(nativeID string) string {
+	c.rulesMu.Lock()
+	defer c.rulesMu.Unlock()
+	return c.roots[nativeID]
 }
 
 // NewClient returns a client for the server at base with the per-boot password.
 func NewClient(base, password string) *Client {
-	return &Client{base: strings.TrimRight(base, "/"), password: password, http: &http.Client{}, rules: map[string][]map[string]string{}}
+	return &Client{base: strings.TrimRight(base, "/"), password: password, http: &http.Client{}, rules: map[string][]map[string]string{}, roots: map[string]string{}}
 }
 
 func (c *Client) setEndpoint(base, password string) {
