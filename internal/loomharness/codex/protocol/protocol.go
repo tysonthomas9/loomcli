@@ -28,6 +28,19 @@ const (
 	AdditionalContextKindApplication AdditionalContextKind = "application"
 )
 
+type AdditionalFileSystemPermissions struct {
+	Entries          []FileSystemSandboxEntry `json:"entries,omitempty"`
+	GlobScanMaxDepth *int64                   `json:"globScanMaxDepth,omitempty"`
+	// This will be removed in favor of `entries`.
+	Read []LegacyAppPathString `json:"read,omitempty"`
+	// This will be removed in favor of `entries`.
+	Write []LegacyAppPathString `json:"write,omitempty"`
+}
+
+type AdditionalNetworkPermissions struct {
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
 type AgentMessageDelivery string
 
 const (
@@ -126,6 +139,12 @@ type CollaborationMode struct {
 
 type CommandAction = json.RawMessage
 
+type CommandExecutionApprovalDecision = json.RawMessage
+
+type CommandExecutionRequestApprovalResponse struct {
+	Decision CommandExecutionApprovalDecision `json:"decision"`
+}
+
 type CommandExecutionSource string
 
 const (
@@ -167,6 +186,29 @@ type DynamicToolNamespaceTool = json.RawMessage
 
 type DynamicToolSpec = json.RawMessage
 
+type FileChangeApprovalDecision = json.RawMessage
+
+type FileChangeRequestApprovalResponse struct {
+	Decision FileChangeApprovalDecision `json:"decision"`
+}
+
+type FileSystemAccessMode string
+
+const (
+	FileSystemAccessModeRead  FileSystemAccessMode = "read"
+	FileSystemAccessModeWrite FileSystemAccessMode = "write"
+	FileSystemAccessModeDeny  FileSystemAccessMode = "deny"
+)
+
+type FileSystemPath = json.RawMessage
+
+type FileSystemSandboxEntry struct {
+	Access FileSystemAccessMode `json:"access"`
+	Path   FileSystemPath       `json:"path"`
+}
+
+type FileSystemSpecialPath = json.RawMessage
+
 type FileUpdateChange struct {
 	Diff string          `json:"diff"`
 	Kind PatchChangeKind `json:"kind"`
@@ -182,6 +224,11 @@ type GitInfo struct {
 	Branch    *string `json:"branch,omitempty"`
 	OriginUrl *string `json:"originUrl,omitempty"`
 	Sha       *string `json:"sha,omitempty"`
+}
+
+type GrantedPermissionProfile struct {
+	FileSystem *AdditionalFileSystemPermissions `json:"fileSystem,omitempty"`
+	Network    *AdditionalNetworkPermissions    `json:"network,omitempty"`
 }
 
 type HookPromptFragment struct {
@@ -298,6 +345,24 @@ const (
 type McpAppUi struct {
 	PreferredModelDisplayMode McpAppDisplayMode `json:"preferredModelDisplayMode"`
 	ResourceUri               string            `json:"resourceUri"`
+}
+
+type McpServerElicitationAction string
+
+const (
+	McpServerElicitationActionAccept  McpServerElicitationAction = "accept"
+	McpServerElicitationActionDecline McpServerElicitationAction = "decline"
+	McpServerElicitationActionCancel  McpServerElicitationAction = "cancel"
+)
+
+type McpServerElicitationRequestResponse struct {
+	// Optional client metadata for form-mode action handling.
+	Meta   json.RawMessage            `json:"_meta,omitempty"`
+	Action McpServerElicitationAction `json:"action"`
+	// Structured user input for accepted elicitations, mirroring RMCP `CreateElicitationResult`.
+	//
+	// This is nullable because decline/cancel responses have no content.
+	Content json.RawMessage `json:"content,omitempty"`
 }
 
 type McpToolCallAppContext struct {
@@ -450,6 +515,18 @@ const (
 	NetworkAccessEnabled    NetworkAccess = "enabled"
 )
 
+type NetworkPolicyAmendment struct {
+	Action NetworkPolicyRuleAction `json:"action"`
+	Host   string                  `json:"host"`
+}
+
+type NetworkPolicyRuleAction string
+
+const (
+	NetworkPolicyRuleActionAllow NetworkPolicyRuleAction = "allow"
+	NetworkPolicyRuleActionDeny  NetworkPolicyRuleAction = "deny"
+)
+
 type NonSteerableTurnKind string
 
 const (
@@ -467,6 +544,32 @@ const (
 )
 
 type PatchChangeKind = json.RawMessage
+
+type PermissionGrantScope string
+
+const (
+	PermissionGrantScopeTurn    PermissionGrantScope = "turn"
+	PermissionGrantScopeSession PermissionGrantScope = "session"
+)
+
+type PermissionsRequestApprovalParams struct {
+	Cwd           LegacyAppPathString      `json:"cwd"`
+	EnvironmentId *string                  `json:"environmentId,omitempty"`
+	ItemId        string                   `json:"itemId"`
+	Permissions   RequestPermissionProfile `json:"permissions"`
+	Reason        *string                  `json:"reason,omitempty"`
+	// Unix timestamp (in milliseconds) when this approval request started.
+	StartedAtMs int64  `json:"startedAtMs"`
+	ThreadId    string `json:"threadId"`
+	TurnId      string `json:"turnId"`
+}
+
+type PermissionsRequestApprovalResponse struct {
+	Permissions GrantedPermissionProfile `json:"permissions"`
+	Scope       PermissionGrantScope     `json:"scope,omitempty"`
+	// Review every subsequent command in this turn before normal sandboxed execution.
+	StrictAutoReview *bool `json:"strictAutoReview,omitempty"`
+}
 
 // Deprecated: `friendly` and `pragmatic` no longer select a style.
 type Personality string
@@ -505,6 +608,11 @@ type ReasoningTextDeltaNotification struct {
 }
 
 type RequestId = json.RawMessage
+
+type RequestPermissionProfile struct {
+	FileSystem *AdditionalFileSystemPermissions `json:"fileSystem,omitempty"`
+	Network    *AdditionalNetworkPermissions    `json:"network,omitempty"`
+}
 
 type SandboxMode string
 
@@ -882,6 +990,43 @@ type TokenUsageBreakdown struct {
 	OutputTokens          int64 `json:"outputTokens"`
 	ReasoningOutputTokens int64 `json:"reasoningOutputTokens"`
 	TotalTokens           int64 `json:"totalTokens"`
+}
+
+// EXPERIMENTAL. Captures a user's answer to a request_user_input question.
+type ToolRequestUserInputAnswer struct {
+	Answers []string `json:"answers"`
+}
+
+// EXPERIMENTAL. Defines a single selectable option for request_user_input.
+type ToolRequestUserInputOption struct {
+	Description string `json:"description"`
+	Label       string `json:"label"`
+}
+
+// EXPERIMENTAL. Params sent with a request_user_input event.
+type ToolRequestUserInputParams struct {
+	// @deprecated Use `isBlocking` to decide whether the request should block.
+	AutoResolutionMs *int64                         `json:"autoResolutionMs,omitempty"`
+	IsBlocking       bool                           `json:"isBlocking"`
+	ItemId           string                         `json:"itemId"`
+	Questions        []ToolRequestUserInputQuestion `json:"questions"`
+	ThreadId         string                         `json:"threadId"`
+	TurnId           string                         `json:"turnId"`
+}
+
+// EXPERIMENTAL. Represents one request_user_input question and its required options.
+type ToolRequestUserInputQuestion struct {
+	Header   string                       `json:"header"`
+	Id       string                       `json:"id"`
+	IsOther  bool                         `json:"isOther,omitempty"`
+	IsSecret bool                         `json:"isSecret,omitempty"`
+	Options  []ToolRequestUserInputOption `json:"options,omitempty"`
+	Question string                       `json:"question"`
+}
+
+// EXPERIMENTAL. Response payload mapping question ids to answers.
+type ToolRequestUserInputResponse struct {
+	Answers map[string]ToolRequestUserInputAnswer `json:"answers"`
 }
 
 type Turn struct {

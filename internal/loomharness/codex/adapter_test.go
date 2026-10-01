@@ -2,6 +2,7 @@ package codex
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -452,7 +453,7 @@ func TestCodexRecordedFrames(t *testing.T) {
 		{Type: loomharness.EventTurnStarted, Thread: thread, Turn: turn, Key: "key-4"},
 		{Type: loomharness.EventMessageDelivered, Thread: thread, Turn: turn, Item: userID, Kind: "message", Key: "key-4", Text: "run it"},
 		{Type: loomharness.EventItemStarted, Thread: thread, Turn: turn, Item: "c1exec_command", Kind: "tool"},
-		{Type: loomharness.EventAskOpened, Thread: thread, Turn: turn, Item: "c1exec_command", Ask: "0"},
+		{Type: loomharness.EventAskOpened, Thread: thread, Turn: turn, Item: "c1exec_command", Kind: "approval", Ask: "0"},
 		{Type: loomharness.EventAskResolved, Thread: thread, Ask: "0"},
 		{Type: loomharness.EventItemCompleted, Thread: thread, Turn: turn, Item: "c1exec_command", Kind: "tool"},
 		{Type: loomharness.EventUsage, Thread: thread, Turn: turn},
@@ -587,6 +588,80 @@ func TestCodexRefusesOtherServerRequests(t *testing.T) {
 	}
 	if answer.Error == nil || answer.Error.Code != -32601 {
 		t.Fatalf("answer %+v, want a -32601 refusal", answer)
+	}
+}
+
+// TestCodexReply answers each ask kind through the fake app-server: a
+// question is ItemKind question, an approval approval; Always is codex's
+// session grant where the ask offers one and once where it does not; a
+// question gets the answer; an answered or foreign ask is refused.
+func TestCodexReply(t *testing.T) {
+	f := newFixture(t, "codex-cli 0.157.1")
+	a, ctx := newAdapter(t, f), context.Background()
+	conn, err := a.Conn(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed, err := a.Feed(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = feed.Close() }()
+	s := a.Session(loomharness.NativeRef{Root: a.Root(""), NativeID: "t-1"})
+	allow, always, deny := loomharness.Reply{Allow: true}, loomharness.Reply{Allow: true, Always: true}, loomharness.Reply{}
+	perms := `{"threadId":"t-1","turnId":"u","itemId":"i","cwd":"/w","startedAtMs":1,"permissions":{"network":{"enabled":true}}}`
+	form := `{"threadId":"t-1","serverName":"m","mode":"form","message":"name?","requestedSchema":{"type":"object","properties":{"n":{"type":"string"}},"required":["n"]}}`
+	for _, c := range []struct {
+		name, method, params, kind string
+		r                          loomharness.Reply
+		want                       string // the result codex gets; "" when Reply fails
+	}{
+		{"command always", "item/commandExecution/requestApproval", `{"threadId":"t-1"}`, "approval", always, `{"decision":"acceptForSession"}`},
+		{"command always not offered", "item/commandExecution/requestApproval", `{"threadId":"t-1","availableDecisions":["accept","cancel"]}`, "approval", always, `{"decision":"accept"}`},
+		{"command deny not offered", "item/commandExecution/requestApproval", `{"threadId":"t-1","availableDecisions":["accept","cancel"]}`, "approval", deny, `{"decision":"cancel"}`},
+		{"file once", "item/fileChange/requestApproval", `{"threadId":"t-1"}`, "approval", allow, `{"decision":"accept"}`},
+		{"file always", "item/fileChange/requestApproval", `{"threadId":"t-1"}`, "approval", always, `{"decision":"acceptForSession"}`},
+		{"file deny", "item/fileChange/requestApproval", `{"threadId":"t-1"}`, "approval", deny, `{"decision":"decline"}`},
+		{"permissions once", "item/permissions/requestApproval", perms, "approval", allow, `{"permissions":{"network":{"enabled":true}},"scope":"turn"}`},
+		{"permissions always", "item/permissions/requestApproval", perms, "approval", always, `{"permissions":{"network":{"enabled":true}},"scope":"session"}`},
+		{"permissions deny", "item/permissions/requestApproval", perms, "approval", deny, `{"permissions":{},"scope":"turn"}`},
+		{"user input", "item/tool/requestUserInput", `{"threadId":"t-1","questions":[{"id":"q1","header":"h","question":"which?"}]}`, "question", loomharness.Reply{Answer: "blue"}, `{"answers":{"q1":{"answers":["blue"]}}}`},
+		{"form", "mcpServer/elicitation/request", form, "question", loomharness.Reply{Answer: "Ada"}, `{"action":"accept","content":{"n":"Ada"}}`},
+		{"form declined", "mcpServer/elicitation/request", form, "question", deny, `{"action":"decline"}`},
+		{"device proof", "mcpServer/elicitation/request", `{"threadId":"t-1","mode":"openai/userVerification"}`, "question", allow, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := make(chan json.RawMessage, 1)
+			go func() {
+				var r struct{ Result json.RawMessage }
+				_ = conn.Call(ctx, "ask", map[string]any{"threadId": "t-1", "method": c.method, "params": json.RawMessage(c.params)}, &r)
+				got <- r.Result
+			}()
+			e := next(t, feed)
+			if e.Type != loomharness.EventAskOpened || e.ItemKind != c.kind || e.AskID != "srv-1" {
+				t.Fatalf("event %+v, want ask.opened %s srv-1", e, c.kind)
+			}
+			if err := a.Session(loomharness.NativeRef{Root: a.Root(""), NativeID: "t-2"}).Reply(ctx, "srv-1", c.r); err == nil {
+				t.Fatal("another thread answered the ask")
+			}
+			err := s.Reply(ctx, "srv-1", c.r)
+			if c.want == "" {
+				if err == nil {
+					t.Fatal("Reply answered an ask Loom cannot answer")
+				}
+				err = s.Reply(ctx, "srv-1", deny) // the ask stays open: it can still be declined
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Reply(ctx, "srv-1", c.r); err == nil {
+				t.Fatal("an answered ask was answered again")
+			}
+			want := cmp.Or(c.want, `{"action":"decline"}`)
+			if r := <-got; string(r) != want {
+				t.Fatalf("codex got %s, want %s", r, want)
+			}
+		})
 	}
 }
 

@@ -64,7 +64,8 @@ func live(root string, m Message) (loomharness.Event, bool) {
 	return askOpened(e, m)
 }
 
-// askOpened maps a server request that is an ask.
+// askOpened maps a server request that is an ask: a question when it asks
+// for the user's input, else an approval.
 func askOpened(e loomharness.Event, m Message) (loomharness.Event, bool) {
 	if m.ID == nil || !askMethods[m.Method] {
 		return e, false
@@ -75,6 +76,10 @@ func askOpened(e loomharness.Event, m Message) (loomharness.Event, bool) {
 	}
 	_ = json.Unmarshal(m.Params, &p)
 	e.Type, e.AskID, e.TurnID, e.ItemID = loomharness.EventAskOpened, askID(m.ID), p.TurnID, p.ItemID
+	e.ItemKind = "approval"
+	if m.Method == "item/tool/requestUserInput" || m.Method == "mcpServer/elicitation/request" {
+		e.ItemKind = "question"
+	}
 	return e, true
 }
 

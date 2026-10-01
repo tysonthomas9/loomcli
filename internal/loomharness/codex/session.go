@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -185,4 +186,127 @@ func (s *Session) turns(ctx context.Context, p protocol.ThreadTurnsListParams) (
 		return protocol.ThreadTurnsListResponse{}, nil
 	}
 	return r, err
+}
+
+// Reply answers an open ask on this thread with codex's own decision. An
+// approval allowed Always is codex's session-wide grant: acceptForSession
+// (codex's session approval cache) or a permissions grant scoped "session";
+// a command ask that does not offer acceptForSession is accepted once.
+// A question gets r.Answer: request_user_input as its first question's
+// answer, an MCP form elicitation as its first required field. With no
+// answer and no Allow, an elicitation is declined.
+func (s *Session) Reply(_ context.Context, askID string, r loomharness.Reply) error {
+	s.a.mu.Lock()
+	ask, ok := s.a.asks[s.ref.Root][askID]
+	s.a.mu.Unlock()
+	if !ok || ask.ThreadID != s.ref.NativeID {
+		return fmt.Errorf("codex: ask %s is not open on thread %s", askID, s.ref.NativeID)
+	}
+	result, err := answer(ask, r)
+	if err != nil {
+		return err
+	}
+	s.a.mu.Lock()
+	_, ok = s.a.asks[s.ref.Root][askID]
+	delete(s.a.asks[s.ref.Root], askID) // answered once; serverRequest/resolved follows
+	s.a.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("codex: ask %s was answered or lost meanwhile", askID)
+	}
+	return ask.Respond(result)
+}
+
+// answer is the response payload for ask's method.
+func answer(ask Message, r loomharness.Reply) (any, error) {
+	decision := "decline"
+	switch {
+	case r.Allow && r.Always:
+		decision = "acceptForSession"
+	case r.Allow:
+		decision = "accept"
+	}
+	switch ask.Method {
+	case "item/commandExecution/requestApproval":
+		return protocol.CommandExecutionRequestApprovalResponse{Decision: quote(offered(ask, decision))}, nil
+	case "item/fileChange/requestApproval":
+		return protocol.FileChangeRequestApprovalResponse{Decision: quote(decision)}, nil
+	case "item/permissions/requestApproval":
+		var p protocol.PermissionsRequestApprovalParams
+		if err := json.Unmarshal(ask.Params, &p); err != nil {
+			return nil, fmt.Errorf("codex: permissions ask %s: %w", askID(ask.ID), err)
+		}
+		grant := protocol.PermissionsRequestApprovalResponse{Scope: protocol.PermissionGrantScopeTurn} // nothing granted denies
+		if r.Allow {
+			grant.Permissions = protocol.GrantedPermissionProfile(p.Permissions)
+		}
+		if r.Allow && r.Always {
+			grant.Scope = protocol.PermissionGrantScopeSession
+		}
+		return grant, nil
+	case "item/tool/requestUserInput":
+		var p protocol.ToolRequestUserInputParams
+		if err := json.Unmarshal(ask.Params, &p); err != nil || len(p.Questions) == 0 {
+			return nil, fmt.Errorf("codex: question %s has no questions (%v)", askID(ask.ID), err)
+		}
+		out := protocol.ToolRequestUserInputResponse{Answers: map[string]protocol.ToolRequestUserInputAnswer{}}
+		if r.Answer != "" {
+			out.Answers[p.Questions[0].Id] = protocol.ToolRequestUserInputAnswer{Answers: []string{r.Answer}}
+		}
+		return out, nil
+	case "mcpServer/elicitation/request":
+		return elicitation(ask, r)
+	}
+	return nil, fmt.Errorf("codex: ask %s is a %s, which Loom cannot answer", askID(ask.ID), ask.Method)
+}
+
+// elicitation answers an MCP elicitation: a form gets r.Answer in its first
+// required field, a URL is accepted as opened; a device-proof request can
+// only be declined.
+func elicitation(ask Message, r loomharness.Reply) (protocol.McpServerElicitationRequestResponse, error) {
+	if !r.Allow && r.Answer == "" {
+		return protocol.McpServerElicitationRequestResponse{Action: protocol.McpServerElicitationActionDecline}, nil
+	}
+	var p struct {
+		Mode            string `json:"mode"`
+		RequestedSchema struct {
+			Required []string `json:"required"`
+		} `json:"requestedSchema"`
+	}
+	_ = json.Unmarshal(ask.Params, &p)
+	accept := protocol.McpServerElicitationRequestResponse{Action: protocol.McpServerElicitationActionAccept}
+	switch {
+	case p.Mode == "url":
+		return accept, nil
+	case strings.HasSuffix(strings.ToLower(p.Mode), "form") && len(p.RequestedSchema.Required) > 0:
+		accept.Content, _ = json.Marshal(map[string]string{p.RequestedSchema.Required[0]: r.Answer})
+		return accept, nil
+	}
+	return accept, fmt.Errorf("codex: elicitation %s (mode %q) cannot be answered with text", askID(ask.ID), p.Mode)
+}
+
+// offered narrows decision to what the command ask lists in its
+// availableDecisions (all, when it lists none): a session grant codex does
+// not offer becomes accept, a decline it does not offer becomes cancel.
+func offered(ask Message, decision string) string {
+	var p struct {
+		AvailableDecisions []json.RawMessage `json:"availableDecisions"`
+	}
+	_ = json.Unmarshal(ask.Params, &p)
+	has := func(d string) bool {
+		return p.AvailableDecisions == nil || slices.ContainsFunc(p.AvailableDecisions, func(r json.RawMessage) bool { return string(r) == string(quote(d)) })
+	}
+	switch {
+	case has(decision):
+		return decision
+	case decision == "acceptForSession":
+		return "accept"
+	case decision == "decline" && has("cancel"):
+		return "cancel"
+	}
+	return decision
+}
+
+func quote(s string) json.RawMessage {
+	b, _ := json.Marshal(s)
+	return b
 }

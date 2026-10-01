@@ -64,7 +64,10 @@ func fakeCodex() int {
 			Params json.RawMessage
 		}
 		_ = json.Unmarshal(in.Bytes(), &req)
-		var p struct{ ThreadID, Method string }
+		var p struct {
+			ThreadID, Method string
+			Params           json.RawMessage // the ask's params; default {threadId}
+		}
 		_ = json.Unmarshal(req.Params, &p)
 		var result any
 		switch req.Method {
@@ -78,7 +81,11 @@ func fakeCodex() int {
 			return 1
 		case "ask":
 			method := cmp.Or(p.Method, "item/tool/requestUserInput")
-			_ = out.Encode(map[string]any{"id": "srv-1", "method": method, "params": map[string]string{"threadId": p.ThreadID}})
+			params := p.Params
+			if params == nil {
+				params = json.RawMessage(fmt.Sprintf(`{"threadId":%q}`, p.ThreadID))
+			}
+			_ = out.Encode(map[string]any{"id": "srv-1", "method": method, "params": params})
 			in.Scan()
 			result = json.RawMessage(in.Bytes())
 		default:
