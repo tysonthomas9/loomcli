@@ -18,23 +18,17 @@ import (
 func stubHarnessVersion(t *testing.T, versions map[string]string) *int {
 	t.Helper()
 	calls := 0
-	prev := probeHarnessVersion
-	probeHarnessVersion = func(binary string) string {
+	prev := agentprofile.ProbeVersionFunc
+	agentprofile.ProbeVersionFunc = func(binary string) string {
 		calls++
 		return versions[binary]
 	}
-	resetHarnessVersionCache()
+	agentprofile.ResetVersionCache()
 	t.Cleanup(func() {
-		probeHarnessVersion = prev
-		resetHarnessVersionCache()
+		agentprofile.ProbeVersionFunc = prev
+		agentprofile.ResetVersionCache()
 	})
 	return &calls
-}
-
-func resetHarnessVersionCache() {
-	harnessVersionMu.Lock()
-	harnessVersionCache = map[string]harnessVersionEntry{}
-	harnessVersionMu.Unlock()
 }
 
 // writeProfile materializes a claude profile root for worktree and writes a
@@ -251,27 +245,6 @@ func TestHarnessVersionProbedOncePerBinary(t *testing.T) {
 	}
 }
 
-// A failed probe must not poison the cache: the next boot re-probes.
-func TestHarnessVersionFailureNotCached(t *testing.T) {
-	resetHarnessVersionCache()
-	prev := probeHarnessVersion
-	t.Cleanup(func() { probeHarnessVersion = prev; resetHarnessVersionCache() })
-	results := []string{"", "2.1.234 (Claude Code)"}
-	probeHarnessVersion = func(string) string {
-		out := results[0]
-		if len(results) > 1 {
-			results = results[1:]
-		}
-		return out
-	}
-	if got := harnessVersion("claude"); got != "" {
-		t.Fatalf("first probe should fail, got %q", got)
-	}
-	if got := harnessVersion("claude"); got != "2.1.234 (Claude Code)" {
-		t.Errorf("second probe should re-run, got %q", got)
-	}
-}
-
 // An agent name agentprofile.Dir refuses resolves to no profile root at all,
 // which is the same situation as an absent directory: legacy env, no error.
 func TestAppendProfileEnv_UnresolvableAgentNameLeavesEnvUntouched(t *testing.T) {
@@ -380,36 +353,6 @@ func TestAppendProfileEnv_UnusableAgentNameResolvesNothing(t *testing.T) {
 	}
 }
 
-// The three harness tables are one vocabulary split across three maps: a
-// harness missing from any of them either exports nothing, verifies against
-// nothing, or panics a caller that assumed symmetry. The binary must stay a
-// BARE name so it resolves on PATH exactly as the backends layer launches it —
-// which is also what the provisioner pins its manifest version from.
-func TestProfileHarnessTablesAgree(t *testing.T) {
-	harnesses := ProfileHarnesses()
-	if len(harnesses) != len(profileHarnessEnvVar) || len(harnesses) != len(agentprofile.HarnessBinary) {
-		t.Fatalf("harnesses %v, env vars %v, binaries %v", harnesses, profileHarnessEnvVar, agentprofile.HarnessBinary)
-	}
-	for _, harness := range harnesses {
-		if ProfileEnvVar(harness) == "" {
-			t.Errorf("harness %q exports no config-root variable", harness)
-		}
-		binary := ProfileHarnessBinary(harness)
-		if binary == "" {
-			t.Errorf("harness %q pins no version binary", harness)
-		}
-		if filepath.Base(binary) != binary {
-			t.Errorf("harness %q binary %q must be a bare PATH name", harness, binary)
-		}
-	}
-	// ProfileHarnesses hands out a copy; mutating it must not move the order
-	// every agent's environment is built in.
-	harnesses[0] = "mutated"
-	if ProfileHarnesses()[0] == "mutated" {
-		t.Error("ProfileHarnesses leaked its backing array")
-	}
-}
-
 // The auth-rotation race this closes: a profile whose claude root carries its
 // own `claude setup-token` identity must spawn with it, so nothing about the
 // agent's login depends on the operator's own refresh schedule.
@@ -496,38 +439,6 @@ func TestAppendProfileEnv_EmptyTokenFileRefusesBoot(t *testing.T) {
 	_, err := AppendProfileEnv(nil, projectDir, "worker")
 	if !errors.Is(err, ErrProfileTokenUnreadable) {
 		t.Fatalf("empty token file must refuse boot, got %v", err)
-	}
-}
-
-// The credential must never travel anywhere but the child's environment — not
-// into an error an operator pastes into a ticket, and not into a log line.
-func TestProfileSecretEnv_ErrorNeverCarriesTheToken(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "oauth-token")
-	if err := os.MkdirAll(path, 0o755); err != nil { // a directory: readable path, unreadable file
-		t.Fatal(err)
-	}
-	_, err := ProfileSecretEnv(dir, "claude")
-	if !errors.Is(err, ErrProfileTokenUnreadable) {
-		t.Fatalf("unreadable token file must refuse, got %v", err)
-	}
-	if !strings.Contains(err.Error(), path) {
-		t.Errorf("error must name the file to repair, got %q", err)
-	}
-}
-
-// codex has no setup-token equivalent, so its root gets a config variable and
-// nothing else even if a stray file of that name is sitting there.
-func TestProfileSecretEnv_HarnessWithoutTokenInjectsNothing(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "oauth-token"), []byte("sk-ant-oat01-stray"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for _, harness := range []string{"codex", "unknown"} {
-		got, err := ProfileSecretEnv(dir, harness)
-		if err != nil || len(got) != 0 {
-			t.Errorf("harness %q: got %v (err %v), want nothing", harness, got, err)
-		}
 	}
 }
 
