@@ -97,14 +97,15 @@ func TestAdapterContract(t *testing.T) {
 			t.Fatalf("no message.delivered for %s in %v", key, types(got))
 		}
 	})
+	// The moved dir lives for the whole test: Model and Close still run in it.
+	moved, err := os.MkdirTemp("", "loom-claude-moved-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(moved) })
 	t.Run("Move", func(t *testing.T) {
 		// Move runs before Model, on the haiku process, so only the dir
 		// changes; Model's turn is then the run's only sonnet turn.
-		moved, err := os.MkdirTemp("", "loom-claude-moved-")
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = os.RemoveAll(moved) })
 		if err := s.Move(ctx, moved); err != nil {
 			t.Fatal(err)
 		}
