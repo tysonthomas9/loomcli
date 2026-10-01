@@ -372,19 +372,19 @@ func TestVerifyAgentOwnership_InconclusivePastValidityFailsClosed(t *testing.T) 
 // Direct tests of the pure dual-clock validity predicate.
 func TestOwnershipWithinValidity_DualClockClauses(t *testing.T) {
 	ttl := time.Minute
-	if !ownershipWithinValidity(time.Now(), ttl) {
+	if !ownershipWithinValidity(time.Now(), time.Now(), ttl) {
 		t.Fatal("fresh anchor: want within validity")
 	}
 	// Monotonic clause expired (anchor carries a monotonic reading).
-	if ownershipWithinValidity(time.Now().Add(-2*ttl), ttl) {
+	if ownershipWithinValidity(time.Now(), time.Now().Add(-2*ttl), ttl) {
 		t.Fatal("stale monotonic anchor: want past validity")
 	}
 	// Wall clause expired (monotonic reading stripped via Round(0), so only
 	// the wall-clock path is exercised).
-	if ownershipWithinValidity(time.Now().Add(-2*ttl).Round(0), ttl) {
+	if ownershipWithinValidity(time.Now(), time.Now().Add(-2*ttl).Round(0), ttl) {
 		t.Fatal("stale wall-only anchor: want past validity")
 	}
-	if ownershipWithinValidity(time.Time{}, ttl) {
+	if ownershipWithinValidity(time.Now(), time.Time{}, ttl) {
 		t.Fatal("zero anchor: want past validity (fail closed)")
 	}
 }
@@ -395,13 +395,13 @@ func TestOwnershipHeartbeatDelay_CapsAtRemainingValidity(t *testing.T) {
 	ap := newOwnershipVerifyAgent()
 
 	ap.OwnershipRenewedAt = time.Now()
-	if got := nextOwnershipHeartbeatDelay(ap, interval, ttl); got != interval {
+	if got := (&Supervisor{}).nextOwnershipHeartbeatDelay(ap, interval, ttl); got != interval {
 		t.Fatalf("fresh renewal delay = %v, want base interval %v", got, interval)
 	}
 
 	remaining := 3 * time.Second
 	ap.OwnershipRenewedAt = time.Now().Add(-(ttl - remaining))
-	got := nextOwnershipHeartbeatDelay(ap, interval, ttl)
+	got := (&Supervisor{}).nextOwnershipHeartbeatDelay(ap, interval, ttl)
 	if got <= 0 {
 		t.Fatalf("near-expiry delay = %v, want positive remaining validity", got)
 	}
@@ -413,7 +413,7 @@ func TestOwnershipHeartbeatDelay_CapsAtRemainingValidity(t *testing.T) {
 	}
 
 	ap.OwnershipRenewedAt = time.Now().Add(-ttl)
-	if got := nextOwnershipHeartbeatDelay(ap, interval, ttl); got != 0 {
+	if got := (&Supervisor{}).nextOwnershipHeartbeatDelay(ap, interval, ttl); got != 0 {
 		t.Fatalf("expired renewal delay = %v, want immediate verification", got)
 	}
 }

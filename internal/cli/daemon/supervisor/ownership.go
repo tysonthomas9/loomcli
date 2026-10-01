@@ -40,7 +40,7 @@ func (s *Supervisor) acquireAgentOwnership(ap *AgentProcess) ownershipAcquireOut
 	ttl := defaultLeaseTTL
 	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
 	defer cancel()
-	sentAt := time.Now()
+	sentAt := s.clk().Now()
 	lease, err := s.ControlStore.AgentOwnershipLeases().Acquire(ctx, store.AgentOwnershipLeaseAcquire{
 		WorkspaceKey:    s.WorkspaceID,
 		AgentID:         ap.Entry.Worktree,
@@ -122,7 +122,7 @@ func (s *Supervisor) startOwnershipHeartbeat(ap *AgentProcess) func() {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		timer := time.NewTimer(nextOwnershipHeartbeatDelay(ap, interval, ttl))
+		timer := s.clk().NewTimer(s.nextOwnershipHeartbeatDelay(ap, interval, ttl))
 		defer timer.Stop()
 		for {
 			select {
@@ -130,11 +130,11 @@ func (s *Supervisor) startOwnershipHeartbeat(ap *AgentProcess) func() {
 				return
 			case <-s.Shutdown:
 				return
-			case <-timer.C:
+			case <-timer.C():
 				if !s.heartbeatAgentOwnership(ap, ttl) {
 					return
 				}
-				timer.Reset(nextOwnershipHeartbeatDelay(ap, interval, ttl))
+				timer.Reset(s.nextOwnershipHeartbeatDelay(ap, interval, ttl))
 			}
 		}
 	}()
@@ -165,14 +165,14 @@ func ownershipHeartbeatBaseInterval(ttl time.Duration) time.Duration {
 	return interval
 }
 
-func nextOwnershipHeartbeatDelay(ap *AgentProcess, interval, ttl time.Duration) time.Duration {
+func (s *Supervisor) nextOwnershipHeartbeatDelay(ap *AgentProcess, interval, ttl time.Duration) time.Duration {
 	if interval <= 0 {
 		return 0
 	}
 	ap.Mu.Lock()
 	renewedAt := ap.OwnershipRenewedAt
 	ap.Mu.Unlock()
-	remaining := ownershipRemainingValidity(renewedAt, ttl)
+	remaining := ownershipRemainingValidity(s.clk().Now(), renewedAt, ttl)
 	if remaining <= 0 {
 		return 0
 	}
@@ -196,7 +196,7 @@ func (s *Supervisor) doOwnershipHeartbeat(ap *AgentProcess, ttl time.Duration) e
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
 	defer cancel()
-	sentAt := time.Now()
+	sentAt := s.clk().Now()
 	lease, err := s.ControlStore.AgentOwnershipLeases().Heartbeat(ctx, s.WorkspaceID, agentID, token, ttl)
 	if err != nil {
 		return err
@@ -283,7 +283,7 @@ func (s *Supervisor) continueOwnershipIfWithinValidity(ap *AgentProcess, ttl tim
 	ap.Mu.Lock()
 	renewedAt := ap.OwnershipRenewedAt
 	ap.Mu.Unlock()
-	if ownershipWithinValidity(renewedAt, ttl) {
+	if ownershipWithinValidity(s.clk().Now(), renewedAt, ttl) {
 		slog.Warn("ownership verification inconclusive; continuing within lease validity window", "worktree", ap.Entry.Worktree, "err", hbErr)
 		return true
 	}
@@ -291,11 +291,10 @@ func (s *Supervisor) continueOwnershipIfWithinValidity(ap *AgentProcess, ttl tim
 	return false
 }
 
-func ownershipRemainingValidity(renewedAt time.Time, ttl time.Duration) time.Duration {
+func ownershipRemainingValidity(now, renewedAt time.Time, ttl time.Duration) time.Duration {
 	if renewedAt.IsZero() || ttl <= 0 {
 		return 0
 	}
-	now := time.Now()
 	monoRemaining := ttl - now.Sub(renewedAt)
 	wallRemaining := ttl - now.Round(0).Sub(renewedAt.Round(0))
 	if monoRemaining <= 0 || wallRemaining <= 0 {
@@ -318,8 +317,8 @@ func ownershipRemainingValidity(renewedAt time.Time, ttl time.Duration) time.Dur
 // steps. Either clause expiring ends fail-open — over-counting is safe.
 // Residual assumption: the monotonic clock does not freeze during the same
 // window in which the wall clock steps backward.
-func ownershipWithinValidity(renewedAt time.Time, ttl time.Duration) bool {
-	return ownershipRemainingValidity(renewedAt, ttl) > 0
+func ownershipWithinValidity(now, renewedAt time.Time, ttl time.Duration) bool {
+	return ownershipRemainingValidity(now, renewedAt, ttl) > 0
 }
 
 // isTypedDomainError reports whether the error carries a domain sentinel —
@@ -345,7 +344,7 @@ func (s *Supervisor) killAgentForOwnership(ap *AgentProcess, reason string, hbEr
 		ExitCode:  -1,
 		Message:   fmt.Sprintf("ownership heartbeat failed (%s): %v", reason, hbErr),
 		Backend:   backend,
-		Timestamp: time.Now(),
+		Timestamp: s.clk().Now(),
 	}
 	ap.Mu.Unlock()
 	s.StopAgent(ap, s.GetSigtermTimeout())
@@ -353,7 +352,7 @@ func (s *Supervisor) killAgentForOwnership(ap *AgentProcess, reason string, hbEr
 
 func (s *Supervisor) sleepBeforeOwnershipRetry(ap *AgentProcess) bool {
 	ap.Mu.Lock()
-	ap.BackoffUntil = time.Now().Add(defaultOwnershipRetryInterval)
+	ap.BackoffUntil = s.clk().Now().Add(defaultOwnershipRetryInterval)
 	ap.Mu.Unlock()
 	defer func() {
 		ap.Mu.Lock()
@@ -361,7 +360,7 @@ func (s *Supervisor) sleepBeforeOwnershipRetry(ap *AgentProcess) bool {
 		ap.Mu.Unlock()
 	}()
 	select {
-	case <-time.After(defaultOwnershipRetryInterval):
+	case <-s.clk().After(defaultOwnershipRetryInterval):
 		return true
 	case <-s.Shutdown:
 		s.setShutdownStopReason(ap)

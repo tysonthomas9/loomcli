@@ -17,6 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
+	"github.com/tysonthomas9/loomcli/internal/clock"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
@@ -150,6 +151,11 @@ type Supervisor struct {
 	// Zero means use the package default (defaultMaxRetriesBlockInterval). Tests set
 	// a small value to avoid the 60s wait.
 	maxRetriesBlockInterval time.Duration
+
+	// Clock drives ownership validity, heartbeat timers, liveness ticks and
+	// kill deadlines. Nil means the real clock; deterministic simulations
+	// inject clock.Fake.
+	Clock clock.Clock
 }
 
 // NewAgent creates an AgentProcess from an agent entry, resolving the worktree path
