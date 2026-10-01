@@ -372,7 +372,7 @@ func prepareTrunkRequest(ctx context.Context, store *journal.SQLite, request *Re
 }
 
 func trunkRevision(ctx context.Context, store *journal.SQLite, req Request) (string, error) {
-	runner, err := gitexec.New(req.Repo, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
+	runner, err := gitexec.New(req.Repo, gitexec.Options{})
 	if err != nil {
 		return "", err
 	}
