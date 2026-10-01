@@ -101,7 +101,9 @@ func (c *Client) stream(ctx context.Context) (io.ReadCloser, error) {
 }
 
 // readSSE calls fn with each event's data until the stream ends or fn
-// returns false.
+// returns false. It only parses the stream OpenCode sends (GET /api/event)
+// and never writes SSE frames; Loom's own SSE output goes through the
+// realtime writer.
 func readSSE(r io.Reader, fn func([]byte) bool) {
 	br := bufio.NewReader(r)
 	var data []string
