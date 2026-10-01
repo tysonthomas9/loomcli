@@ -28,8 +28,9 @@ import (
 // incompatibility: 1.18 cannot see sessions v2 creates. It never opens the
 // user's database for writing.
 //
-// LOOM_REAL_OPENCODE=1 enables it. LOOM_OPENCODE_V2, LOOM_OPENCODE_V1 and
-// LOOM_OPENCODE_DB override the default binary and database paths.
+// LOOM_REAL_OPENCODE=1 and LOOM_OPENCODE_DB (an owned /tmp copy; there is
+// no default) enable it. LOOM_OPENCODE_V2 and LOOM_OPENCODE_V1 override the
+// default binary paths.
 func TestCompatibility(t *testing.T) {
 	if os.Getenv("LOOM_REAL_OPENCODE") != "1" {
 		t.Skip("set LOOM_REAL_OPENCODE=1 to run against real OpenCode binaries")
@@ -40,7 +41,15 @@ func TestCompatibility(t *testing.T) {
 	}
 	v2 := envOr("LOOM_OPENCODE_V2", filepath.Join(home, ".loom/harness/opencode/2.0.19/opencode"))
 	v1 := envOr("LOOM_OPENCODE_V1", filepath.Join(home, ".opencode/bin/opencode"))
-	src := envOr("LOOM_OPENCODE_DB", filepath.Join(home, ".local/share/opencode/opencode.db"))
+	// No default source: the user's real database is never read unless a
+	// copy is named explicitly, and it must be an owned /tmp copy.
+	src := os.Getenv("LOOM_OPENCODE_DB")
+	if src == "" {
+		t.Skip("set LOOM_OPENCODE_DB to an owned /tmp copy of an OpenCode database; there is no default")
+	}
+	if !ownedTmp(filepath.Dir(src)) {
+		t.Fatalf("LOOM_OPENCODE_DB %s is not in an owned /tmp directory", src)
+	}
 
 	out := run(t, v2, "", nil, "--version")
 	got, err := loomharness.ParseVersion(out)
@@ -53,7 +62,7 @@ func TestCompatibility(t *testing.T) {
 	t.Logf("v2 %s: %s", v2, strings.TrimSpace(out))
 	t.Logf("v1 %s: %s", v1, strings.TrimSpace(run(t, v1, "", nil, "--version")))
 
-	sbx := t.TempDir()
+	sbx := newSandbox(t, "loom-opencode-compat-", "{}")
 	env := sandboxEnv(sbx)
 	data := filepath.Join(sbx, "data", "opencode")
 	repo := filepath.Join(sbx, "repo")

@@ -677,8 +677,13 @@ func hostEnv() []string {
 }
 
 // sandboxEnv is an explicitly selected environment: hostEnv, plus
-// OpenCode's HOME, TMPDIR and XDG roots under sbx.
+// OpenCode's HOME, TMPDIR and XDG roots under sbx. It fails closed (panics)
+// unless sbx is an owned directory under /tmp, so no real test can run an
+// OpenCode process against the user's own HOME or XDG data.
 func sandboxEnv(sbx string) []string {
+	if !ownedTmp(sbx) {
+		panic("opencode real tests need an owned /tmp sandbox, got " + sbx)
+	}
 	return append(hostEnv(),
 		"HOME="+filepath.Join(sbx, "home"),
 		"TMPDIR="+filepath.Join(sbx, "tmp")+"/",
@@ -862,4 +867,18 @@ func (m *fakeModel) saw(text string, times int) int {
 		}
 	}
 	return n
+}
+
+// ownedTmp reports whether dir is a directory under /tmp owned by this user.
+func ownedTmp(dir string) bool {
+	clean := filepath.Clean(dir)
+	if !strings.HasPrefix(clean, "/tmp/") && !strings.HasPrefix(clean, "/private/tmp/") {
+		return false
+	}
+	fi, err := os.Stat(clean)
+	if err != nil || !fi.IsDir() {
+		return false
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	return ok && int(st.Uid) == os.Getuid()
 }

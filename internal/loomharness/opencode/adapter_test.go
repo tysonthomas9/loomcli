@@ -55,6 +55,9 @@ func fakeOpenCode(mode string) int {
 	if mode == "hang" {
 		time.Sleep(time.Hour)
 	}
+	if mode == "spoof" {
+		return spoofService(state)
+	}
 	regFile := filepath.Join(state, "opencode", "service.json")
 	var reg registration
 	live := func() bool {
@@ -132,6 +135,30 @@ func fakeOpenCode(mode string) int {
 	if cur, err := os.ReadFile(regFile); err == nil && string(cur) == string(b) {
 		_ = os.Remove(regFile)
 	}
+	return 0
+}
+
+// spoofService registers a service it does not run honestly: the
+// registration and /api/info name the test process's pid, which does not hold
+// this listener. It records whether any request carried credentials.
+func spoofService(state string) int {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 1
+	}
+	victim := os.Getppid()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			appendLine(filepath.Join(state, "spoof-auth-seen"), "yes")
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"pid": victim})
+	})
+	go func() { _ = http.Serve(l, mux) }() //nolint:gosec // G114: test-only fake server.
+	b, _ := json.Marshal(registration{ID: "spoof", Version: "2.0.19", URL: "http://" + l.Addr().String(), PID: victim, Password: "fixture-spoof"}) //nolint:gosec // G117: synthetic password.
+	_ = os.MkdirAll(filepath.Join(state, "opencode"), 0o700)
+	_ = os.WriteFile(filepath.Join(state, "opencode", "service.json"), b, 0o600)
+	time.Sleep(time.Hour)
 	return 0
 }
 
@@ -447,6 +474,16 @@ func TestAdapterCancelledStart(t *testing.T) {
 	if serverPID(a) != 0 {
 		t.Fatal("a service that never registered is in use")
 	}
+	// The next call waits for the service the cancelled call started; it
+	// never starts a second one beside it.
+	short, stop := context.WithTimeout(context.Background(), 3*time.Second)
+	defer stop()
+	if _, err := a.Models(short); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Models after a cancelled start = %v; want to keep waiting", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(state, "fake-pids")); len(strings.Fields(string(b))) != 1 {
+		t.Fatalf("services started: %q; want exactly one", b)
+	}
 }
 
 func TestOpenCodeServeStripsGitHubTokens(t *testing.T) {
@@ -530,5 +567,70 @@ func TestAdapterPresetFiles(t *testing.T) {
 	t.Cleanup(b.Stop)
 	if _, err := b.Models(context.Background()); !errors.Is(err, loomharness.ErrUnavailable) {
 		t.Fatalf("Models with presets and no worktrees root = %v; want ErrUnavailable", err)
+	}
+}
+
+// TestAdapterRefusesNewerVersion: Loom runs exactly 2.0.19, so a newer
+// binary is refused without starting anything, and a newer registered
+// service is refused and left alone.
+func TestAdapterRefusesNewerVersion(t *testing.T) {
+	a, state := fakeAdapter(t, "serve", "opencode v2.0.20")
+	h, err := a.Health(context.Background())
+	if err != nil || h.OK || !strings.Contains(h.Warning, "exactly 2.0.19") {
+		t.Fatalf("Health = %+v, %v; want refused", h, err)
+	}
+	if _, err := a.Models(context.Background()); !errors.Is(err, loomharness.ErrUnavailable) || !strings.Contains(err.Error(), "exactly 2.0.19") {
+		t.Fatalf("Models = %v; want the exact-version refusal", err)
+	}
+	if _, err := os.Stat(filepath.Join(state, "fake-pids")); err == nil {
+		t.Fatal("a newer binary started a service")
+	}
+
+	state, config := fakeRoots(t)
+	user := userService(t, state, config, "LOOM_FAKE_SERVICE_VERSION=2.0.20")
+	b := New(Config{Bin: os.Args[0], Env: fakeEnv("serve", "opencode v2.0.19", state, config)})
+	t.Cleanup(b.Stop)
+	if _, err := b.Models(context.Background()); !errors.Is(err, loomharness.ErrUnavailable) || !strings.Contains(err.Error(), "2.0.20") {
+		t.Fatalf("Models with a 2.0.20 service = %v; want refused", err)
+	}
+	if !alive(user.PID) || startedPID(b) != 0 {
+		t.Fatal("the newer service was stopped or competed with")
+	}
+}
+
+// TestAdapterRefusesSpoofedRegistration: a process that writes a
+// registration and answers /api/info with another live pid is refused
+// before any password is sent to it.
+func TestAdapterRefusesSpoofedRegistration(t *testing.T) {
+	state, config := fakeRoots(t)
+	cmd := exec.Command(os.Args[0], "serve", "--service") //nolint:norawexec // the test binary plays a spoofing process, outside the adapter.
+	cmd.Env = fakeEnv("spoof", "opencode v2.0.19", state, config)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = cmd.Wait() }()
+	waitFor(t, "the spoofed registration", func() bool {
+		_, err := os.Stat(filepath.Join(state, "opencode", "service.json"))
+		return err == nil
+	})
+	a := New(Config{Bin: os.Args[0], Env: fakeEnv("serve", "opencode v2.0.19", state, config)})
+	t.Cleanup(a.Stop)
+	_, err := a.Models(context.Background())
+	if !errors.Is(err, loomharness.ErrUnavailable) || !strings.Contains(err.Error(), "does not hold the listening socket") {
+		t.Fatalf("Models with a spoofed registration = %v; want refused", err)
+	}
+	if _, err := os.Stat(filepath.Join(state, "spoof-auth-seen")); err == nil {
+		t.Fatal("Loom sent the password to the spoofing process")
+	}
+	if serverPID(a) != 0 {
+		t.Fatal("Loom uses the spoofed endpoint")
+	}
+}
+
+func TestOwnsRefusesForeignURLs(t *testing.T) {
+	for _, u := range []string{"https://127.0.0.1:1", "http://example.com:80", "http://10.0.0.1:80", "http://127.0.0.1", "http://127.0.0.1:1/x", "::"} {
+		if err := owns(context.Background(), registration{URL: u, PID: os.Getpid()}); !errors.Is(err, loomharness.ErrUnavailable) {
+			t.Errorf("owns(%q) = %v; want refused", u, err)
+		}
 	}
 }

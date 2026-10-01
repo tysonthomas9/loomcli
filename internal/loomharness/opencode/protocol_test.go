@@ -634,8 +634,14 @@ func TestProtocolPromptReappliesRules(t *testing.T) {
 		t.Fatalf("Prompt ran under %s; want Loom's %s", got, want)
 	}
 
-	st.patchErr = true
+	// A client that never installed rules for the session refuses.
+	fresh := NewClient(c.base, "pw")
 	n := len(st.messages[ref.NativeID])
+	if err := fresh.Session(ref).Prompt(ctx, loomharness.Input{Key: PromptID("agent-1", "r0"), Text: "hi"}); !isCode(err, "bad_request") || len(st.messages[ref.NativeID]) != n {
+		t.Fatalf("Prompt with no installed rules = %v; want bad_request and nothing sent", err)
+	}
+
+	st.patchErr = true
 	if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-1", "r2"), Text: "hi"}); err == nil {
 		t.Fatal("Prompt succeeded with a failed rules install")
 	}

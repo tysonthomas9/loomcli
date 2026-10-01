@@ -240,10 +240,13 @@ func (s *Session) Prompt(ctx context.Context, in loomharness.Input) error {
 	s.c.rulesMu.Lock()
 	rules, ok := s.c.rules[s.ref.NativeID]
 	s.c.rulesMu.Unlock()
-	if ok {
-		if err := s.install(ctx, rules); err != nil {
-			return err
-		}
+	if !ok {
+		// R-H: no prompt runs under rules Loom did not install in this
+		// process; Open or Resume installs them first.
+		return &Error{Code: "bad_request", Message: fmt.Sprintf("opencode: no permission rules installed for session %s; Open or Resume it first", s.ref.NativeID)}
+	}
+	if err := s.install(ctx, rules); err != nil {
+		return err
 	}
 	if err := s.isolate(ctx); err != nil {
 		return err

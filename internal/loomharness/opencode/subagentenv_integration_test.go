@@ -34,7 +34,7 @@ var secretNames = []string{"OPENCODE_SERVER_PASSWORD", "OPENCODE_PASSWORD", "GIT
 //   - ReusedUserService: on the user's own service (started with every
 //     secret), the session's shell gets Loom's per-session environment and
 //     sees none, but subagent shells get the service's own environment and
-//     see them all. Accepted for Phase 1 (Tyson, 18:00 UTC): Loom subagents
+//     see them all. Accepted for Phase 1 (Tyson, 17:50/17:52 UTC): Loom subagents
 //     see the user's env and tokens when his service runs.
 //   - PlainServeControl: plain `opencode serve` without Loom leaks to every
 //     shell.
