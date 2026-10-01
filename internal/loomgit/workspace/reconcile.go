@@ -93,13 +93,25 @@ func recoverOpenEntry(ctx context.Context, st *journal.SQLite, path string, entr
 	var lock *os.File
 	var err error
 	if entry.Operation == "ensure_workspace" {
-		workspace := strings.TrimPrefix(entry.RequestID, "workspace-create:")
-		lock, err = tryCreationLock(workspace)
+		lock, err = tryCreationLock()
 		if err != nil || lock == nil {
 			return nil, err
 		}
 	}
-	recovery, err := openRecovery(ctx, st, path, entry)
+	current, err := st.Get(ctx, entry.ID)
+	if errors.Is(err, journal.ErrNotFound) || current.Phase == "done" {
+		if lock != nil {
+			_ = releaseCreationLock(lock)
+		}
+		return nil, nil
+	}
+	if err != nil {
+		if lock != nil {
+			_ = releaseCreationLock(lock)
+		}
+		return nil, err
+	}
+	recovery, err := openRecovery(ctx, st, path, current)
 	if err != nil || recovery == nil {
 		if lock != nil {
 			_ = releaseCreationLock(lock)

@@ -369,7 +369,7 @@ func beginSession(ctx context.Context, workspace string, repos []loomgit.Workspa
 	if err := os.MkdirAll(filepath.Join(config.GetConfigDir(), "loomgit"), 0o700); err != nil {
 		return nil, err
 	}
-	lock, err := acquireCreationLock(workspace)
+	lock, err := acquireCreationLock()
 	if err != nil {
 		return nil, err
 	}

@@ -1,9 +1,7 @@
 package workspace
 
 import (
-	"crypto/sha256"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -11,24 +9,24 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
-func creationLockPath(workspace string) string {
-	return filepath.Join(config.GetConfigDir(), "loomgit", fmt.Sprintf("creation-%x.lock", sha256.Sum256([]byte(workspace))))
+func creationLockPath() string {
+	return filepath.Join(config.GetConfigDir(), "loomgit", "creation.lock")
 }
 
-func acquireCreationLock(workspace string) (*os.File, error) {
-	return openCreationLock(workspace, false)
+func acquireCreationLock() (*os.File, error) {
+	return openCreationLock(false)
 }
 
-func tryCreationLock(workspace string) (*os.File, error) {
-	return openCreationLock(workspace, true)
+func tryCreationLock() (*os.File, error) {
+	return openCreationLock(true)
 }
 
-func openCreationLock(workspace string, nonblocking bool) (*os.File, error) {
-	path := creationLockPath(workspace)
+func openCreationLock(nonblocking bool) (*os.File, error) {
+	path := creationLockPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	//nolint:gosec // The filename is a hash of the workspace key under the configured Loom directory.
+	//nolint:gosec // The path is a fixed lock inode in the configured Loom directory.
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
@@ -48,5 +46,7 @@ func openCreationLock(workspace string, nonblocking bool) (*os.File, error) {
 }
 
 func releaseCreationLock(file *os.File) error {
+	// Keep this single inode for the lifetime of the Loom config directory.
+	// Unlinking it here could let another process lock a different inode.
 	return errors.Join(syscall.Flock(int(file.Fd()), syscall.LOCK_UN), file.Close())
 }
