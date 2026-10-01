@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
@@ -42,7 +41,7 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 	if len(rules) > 0 {
 		body["permissions"] = rules
 	}
-	defer c.lockOpen(ref.NativeID)()
+	defer c.lockID(ref.NativeID)()
 	s := c.Session(ref)
 	existed, err := c.create(ctx, s, body)
 	if err != nil {
@@ -68,31 +67,23 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 	return c.discard(ref, err)
 }
 
-// create POSTs the session. existed reports that it was there before this
-// Open: a repeat Open finds the session an earlier one made, and b30c4d0
-// answers a repeat POST with success, so only a GET tells whether this Open
-// made it. A failed GET reports existed, as nothing was created.
+// create POSTs the session unless it is there already. existed reports that
+// it was there before this Open: a repeat Open finds the session an earlier
+// one made, and b30c4d0 answers a repeat POST with success and ignores its
+// body, so only a GET tells whether this Open made it, and a repeat needs no
+// POST (Open installs the rules and environment again). A failed GET
+// reports existed, as nothing was created.
 func (c *Client) create(ctx context.Context, s *Session, body map[string]any) (existed bool, err error) {
-	if err := c.call(ctx, "GET", s.path(""), nil, nil); err != nil && !errors.Is(err, loomharness.ErrSessionNotFound) {
+	if err := c.call(ctx, "GET", s.path(""), nil, nil); err == nil {
+		return true, nil
+	} else if !errors.Is(err, loomharness.ErrSessionNotFound) {
 		return true, err
-	} else if err == nil {
-		existed = true
 	}
 	err = c.call(ctx, "POST", "/api/session", body, nil)
 	if isCode(err, "input_id_conflict") {
 		return true, nil
 	}
-	return existed, err
-}
-
-// lockOpen allows one Open per session id at a time (per id, not global),
-// so "did not exist before" holds from the GET through any cleanup:
-// otherwise a concurrent Open for the same key could create the session in
-// between and this one's cleanup would delete it. It returns the unlock.
-func (c *Client) lockOpen(id string) func() {
-	mu, _ := c.opening.LoadOrStore(id, new(sync.Mutex))
-	mu.(*sync.Mutex).Lock()
-	return mu.(*sync.Mutex).Unlock
+	return false, err
 }
 
 // discard deletes a session a failed Open created, so the failure leaves
@@ -107,7 +98,7 @@ func (c *Client) discard(ref loomharness.NativeRef, cause error) (loomharness.Na
 	c.rulesMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := c.Purge(ctx, []loomharness.NativeRef{ref}); err != nil {
+	if err := c.purge(ctx, ref); err != nil { // Open holds ref's lock
 		return ref, errors.Join(cause, fmt.Errorf("opencode: remove the session a failed Open created: %w", err))
 	}
 	return loomharness.NativeRef{}, cause
@@ -195,12 +186,24 @@ func nativeRules(rules []loomharness.PermissionRule) ([]map[string]string, error
 }
 
 // Purge deletes exactly the given recorded sessions; one already gone is fine.
+// Each delete holds the session id's lock (lockID).
 func (c *Client) Purge(ctx context.Context, owned []loomharness.NativeRef) error {
 	for _, ref := range owned {
-		err := c.call(ctx, "DELETE", "/api/session/"+url.PathEscape(ref.NativeID), nil, nil)
-		if err != nil && !errors.Is(err, loomharness.ErrSessionNotFound) {
+		unlock := c.lockID(ref.NativeID)
+		err := c.purge(ctx, ref)
+		unlock()
+		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// purge deletes one session; the caller holds its lockID.
+func (c *Client) purge(ctx context.Context, ref loomharness.NativeRef) error {
+	err := c.call(ctx, "DELETE", "/api/session/"+url.PathEscape(ref.NativeID), nil, nil)
+	if err != nil && !errors.Is(err, loomharness.ErrSessionNotFound) {
+		return err
 	}
 	return nil
 }
@@ -226,6 +229,7 @@ func (s *Session) Resume(ctx context.Context, l loomharness.Launch, rules []loom
 	if err != nil {
 		return loomharness.NativeRef{}, err
 	}
+	defer s.c.lockID(s.ref.NativeID)()
 	var info struct {
 		Data struct {
 			Agent    string `json:"agent"`

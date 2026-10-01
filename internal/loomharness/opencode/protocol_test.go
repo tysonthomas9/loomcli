@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -34,7 +36,7 @@ type store struct {
 	patchErr bool
 	delErr   bool                // DELETE /api/session/{id} fails
 	postErr  bool                // POST /api/session creates the session, then fails
-	race     *openRace           // pairs two concurrent session GETs, fails the second create
+	race     *openRace           // pairs two concurrent session GETs, counts creates
 	agents   map[string]bool     // agent ids the service offers
 	agentDir []string            // location[directory] of each agent lookup
 	loading  bool                // the location lists no agents yet
@@ -65,7 +67,8 @@ func fakeServer(t *testing.T, st *store) *Client {
 		defer st.mu.Unlock()
 		id, _ := body["id"].(string)
 		if st.race != nil {
-			if st.race.posts++; st.race.posts == 2 {
+			if st.race.posts++; st.race.posts == st.race.failPost {
+				st.sessions[id] = body // committed, then the reply is lost
 				reply(w, 504, map[string]string{"_tag": "UnknownError", "message": "timeout"})
 				return
 			}
@@ -804,16 +807,16 @@ func TestProtocolOpenLeavesNothingOnError(t *testing.T) {
 	}
 }
 
-// openRace replays codex's interleaving (verdict 8d783c86): two Opens for one
-// key both find no session, the first creates it, and the second's create
-// fails, so its cleanup would delete the first's session. pair holds the
-// first session GET until a second arrives (or 300ms pass).
+// openRace replays codex's interleavings (verdicts 8d783c86, 9f81cf39): two
+// Opens for one key. pair holds the first session GET until a second arrives
+// (or 300ms pass), so without the per-id lock both find no session.
 type openRace struct {
-	once  sync.Once
-	both  chan struct{}
-	mu    sync.Mutex
-	gets  int
-	posts int // guarded by store.mu
+	once     sync.Once
+	both     chan struct{}
+	mu       sync.Mutex
+	gets     int
+	posts    int // guarded by store.mu
+	failPost int // this create commits the session, then answers 504
 }
 
 func (r *openRace) pair() {
@@ -833,25 +836,46 @@ func (r *openRace) pair() {
 	}
 }
 
-// TestProtocolConcurrentOpenKeepsSession: a failed Open never deletes the
-// session a concurrent Open for the same key created.
-func TestProtocolConcurrentOpenKeepsSession(t *testing.T) {
-	ctx := context.Background()
+type openResult struct {
+	ref loomharness.NativeRef
+	err error
+}
+
+func openPair(c *Client, spec loomharness.OpenSpec) []openResult {
+	out := make(chan openResult, 2)
+	for range 2 {
+		go func() { ref, err := c.Open(context.Background(), spec); out <- openResult{ref, err} }()
+	}
+	return []openResult{<-out, <-out}
+}
+
+// TestProtocolConcurrentOpenSameRef: two concurrent Opens of one key both
+// return its ref, and only the first creates it (a repeat sends no POST).
+func TestProtocolConcurrentOpenSameRef(t *testing.T) {
 	st := newStore()
 	c := fakeServer(t, st)
 	st.race = &openRace{}
 	spec := loomharness.OpenSpec{Key: "agent-1", Dir: "/repo"}
-	type result struct {
-		ref loomharness.NativeRef
-		err error
+	for _, r := range openPair(c, spec) {
+		if r.err != nil || r.ref.NativeID != SessionID(spec.Key) {
+			t.Fatalf("Open = %+v, %v; want the session's ref", r.ref, r.err)
+		}
 	}
-	out := make(chan result, 2)
-	for range 2 {
-		go func() { ref, err := c.Open(ctx, spec); out <- result{ref, err} }()
+	if st.race.posts != 1 {
+		t.Fatalf("%d creates; want 1", st.race.posts)
 	}
+}
+
+// TestProtocolConcurrentOpenKeepsSession: when the first of two concurrent
+// Opens has its create committed and then answered 504, its cleanup never
+// deletes the session the other Open returns.
+func TestProtocolConcurrentOpenKeepsSession(t *testing.T) {
+	st := newStore()
+	c := fakeServer(t, st)
+	st.race = &openRace{failPost: 1}
+	spec := loomharness.OpenSpec{Key: "agent-1", Dir: "/repo"}
 	var ok, failed int
-	for range 2 {
-		r := <-out
+	for _, r := range openPair(c, spec) {
 		switch {
 		case r.err == nil && r.ref.NativeID == SessionID(spec.Key):
 			ok++
@@ -866,5 +890,143 @@ func TestProtocolConcurrentOpenKeepsSession(t *testing.T) {
 	st.mu.Unlock()
 	if ok != 1 || failed != 1 || !kept {
 		t.Fatalf("%d Opens succeeded, %d failed, session kept %v; want 1, 1, true", ok, failed, kept)
+	}
+}
+
+// pauseRT holds the first request hit matches (after its response when
+// after is set, else instead of sending it, answering 500) until release.
+type pauseRT struct {
+	next    http.RoundTripper
+	hit     func(*http.Request) bool
+	after   bool
+	once    sync.Once
+	paused  chan struct{}
+	release chan struct{}
+}
+
+func (p *pauseRT) RoundTrip(r *http.Request) (*http.Response, error) {
+	mine := false
+	if p.hit(r) {
+		p.once.Do(func() { mine = true })
+	}
+	if !mine {
+		return p.next.RoundTrip(r)
+	}
+	if p.after {
+		resp, err := p.next.RoundTrip(r)
+		close(p.paused)
+		<-p.release
+		return resp, err
+	}
+	close(p.paused)
+	<-p.release
+	return &http.Response{StatusCode: 500, Header: http.Header{}, Request: r,
+		Body: io.NopCloser(strings.NewReader(`{"_tag":"UnknownError","message":"boom"}`))}, nil
+}
+
+func pause(c *Client, after bool, hit func(*http.Request) bool) *pauseRT {
+	p := &pauseRT{next: http.DefaultTransport, hit: hit, after: after, paused: make(chan struct{}), release: make(chan struct{})}
+	c.http.Transport = p
+	return p
+}
+
+// notDone fails if done is ready within 100ms: the call should be waiting.
+func notDone[T any](t *testing.T, what string, done chan T) {
+	t.Helper()
+	select {
+	case <-done:
+		t.Fatalf("%s ran while Open held the session id", what)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// TestProtocolPurgeWaitsForOpen (codex 9f81cf39 #1): a Purge of a stale ref
+// does not run while an Open of the same id is between its rules install
+// and its return, so Open never reports a session Purge removed under it.
+func TestProtocolPurgeWaitsForOpen(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	spec := loomharness.OpenSpec{Key: "agent-1", Dir: "/repo"}
+	stale, err := c.Open(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Purge(ctx, []loomharness.NativeRef{stale}); err != nil {
+		t.Fatal(err)
+	}
+	p := pause(c, true, func(r *http.Request) bool { return r.Method == "PATCH" })
+	opened := make(chan openResult, 1)
+	go func() { ref, err := c.Open(ctx, spec); opened <- openResult{ref, err} }()
+	<-p.paused
+	purged := make(chan error, 1)
+	go func() { purged <- c.Purge(ctx, []loomharness.NativeRef{stale}) }()
+	notDone(t, "Purge", purged)
+	close(p.release)
+	if r := <-opened; r.err != nil {
+		t.Fatalf("Open = %v", r.err)
+	}
+	if err := <-purged; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestProtocolResumeWaitsForOpenCleanup (codex 9f81cf39 #2): a Resume of
+// the id a failing Open created waits for Open's cleanup, so it never
+// returns a session that cleanup then deletes.
+func TestProtocolResumeWaitsForOpenCleanup(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	c.shellEnv = func() ([]string, error) { return []string{"PATH=/bin"}, nil }
+	spec := loomharness.OpenSpec{Key: "agent-1", Dir: "/repo"}
+	ref := loomharness.NativeRef{NativeID: SessionID(spec.Key)}
+	p := pause(c, false, func(r *http.Request) bool { return r.Method == "PUT" })
+	opened := make(chan openResult, 1)
+	go func() { ref, err := c.Open(ctx, spec); opened <- openResult{ref, err} }()
+	<-p.paused
+	resumed := make(chan openResult, 1)
+	go func() {
+		ref, err := c.Session(ref).Resume(ctx, loomharness.Launch{}, nil)
+		resumed <- openResult{ref, err}
+	}()
+	notDone(t, "Resume", resumed)
+	close(p.release)
+	if r := <-opened; r.err == nil {
+		t.Fatal("Open succeeded with a failed environment")
+	}
+	r := <-resumed
+	st.mu.Lock()
+	_, exists := st.sessions[ref.NativeID]
+	st.mu.Unlock()
+	if r.err == nil && !exists {
+		t.Fatal("Resume returned a session Open's cleanup then deleted")
+	}
+}
+
+// TestProtocolIDLocksFreed (codex 9f81cf39 #3): the per-id lock entries go
+// once no Open, Resume or Purge holds or waits on them.
+func TestProtocolIDLocksFreed(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	var wg sync.WaitGroup
+	for i := range 100 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ref, err := c.Open(ctx, loomharness.OpenSpec{Key: fmt.Sprintf("k%d", i%10), Dir: "/repo"})
+			if err == nil {
+				_, _ = c.Session(ref).Resume(ctx, loomharness.Launch{}, nil)
+				_ = c.Purge(ctx, []loomharness.NativeRef{ref})
+			}
+		}()
+	}
+	wg.Wait()
+	c.idsMu.Lock()
+	n := len(c.ids)
+	c.idsMu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d per-id lock entries left; want 0", n)
 	}
 }
