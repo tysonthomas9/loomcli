@@ -76,12 +76,27 @@ func scopeResolverToWorkspace(resolver *cli.Resolver, workspaceID string) error 
 	return resolver.SetWorkspace(wsName)
 }
 
+func resolverForWorkspace(workspaceID string) (*cli.Resolver, error) {
+	if workspaceID == "" {
+		return cli.NewResolver()
+	}
+	cfg, err := config.LoadConfigCached()
+	if err != nil {
+		return nil, err
+	}
+	resolver := &cli.Resolver{Mode: cli.ModeWorkspace, Config: cfg}
+	if err := scopeResolverToWorkspace(resolver, workspaceID); err != nil {
+		return nil, err
+	}
+	return resolver, nil
+}
+
 func (g *GitOpsImpl) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentWorktree, error) {
 	if g != nil && g.store != nil {
 		return g.resolveAgentWorktreeFromStore(context.Background(), workspaceID, name)
 	}
 
-	resolver, err := cli.NewResolver()
+	resolver, err := resolverForWorkspace(workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("creating resolver: %v", err)
 	}
@@ -122,7 +137,7 @@ func (g *GitOpsImpl) ResolveAgentWorktreeForRepo(workspaceID, name, repoName str
 		return resolveAgentWorktreeFromWSForRepo(ws, name, repo)
 	}
 
-	resolver, err := cli.NewResolver()
+	resolver, err := resolverForWorkspace(workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("creating resolver: %v", err)
 	}
@@ -247,7 +262,7 @@ func (g *GitOpsImpl) ResolveWorkspaceRoot(workspaceID string) (string, error) {
 	}
 
 	// Non-store (config) path: resolve the workspace folder from local config.
-	resolver, err := cli.NewResolver()
+	resolver, err := resolverForWorkspace(workspaceID)
 	if err != nil {
 		return "", fmt.Errorf("creating resolver: %v", err)
 	}
@@ -274,7 +289,7 @@ func (g *GitOpsImpl) ResolveWorkspaceData(workspaceID string) (*ops.WorkspaceDat
 }
 
 func resolveConfigWorkspaceData(workspaceID string) (*ops.WorkspaceData, error) {
-	resolver, err := cli.NewResolver()
+	resolver, err := resolverForWorkspace(workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("creating resolver: %v", err)
 	}
@@ -657,7 +672,7 @@ func (g *GitOpsImpl) listWorkspaceRepos(workspaceID string) ([]ops.WorkspaceRepo
 		return ws.Repos, nil
 	}
 
-	resolver, err := cli.NewResolver()
+	resolver, err := resolverForWorkspace(workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("creating resolver: %v", err)
 	}
@@ -822,7 +837,7 @@ func (g *GitOpsImpl) CheckGhInstalled() error {
 }
 
 func (g *GitOpsImpl) SetRepoDefaultBranch(workspaceID, repoName, branch string) error {
-	resolver, err := cli.NewResolver()
+	resolver, err := resolverForWorkspace(workspaceID)
 	if err != nil {
 		return err
 	}
@@ -837,7 +852,7 @@ func (g *GitOpsImpl) ListAgentWorktrees(workspaceID string) ([]ops.AgentWorktree
 		return g.listAgentWorktreesFromStore(context.Background(), workspaceID)
 	}
 
-	resolver, err := cli.NewResolver()
+	resolver, err := resolverForWorkspace(workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("creating resolver: %v", err)
 	}
