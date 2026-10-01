@@ -122,7 +122,7 @@ func mergeStackView(ctx context.Context, store *journal.SQLite, workspace, lead,
 	if err != nil {
 		return MergeStackView{}, err
 	}
-	runner, err := gitexec.New(area.Path, gitexec.Options{})
+	runner, err := gitexec.New(area.Path, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
 	if err != nil {
 		return MergeStackView{}, err
 	}
