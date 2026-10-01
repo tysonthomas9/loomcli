@@ -160,6 +160,8 @@ tests:
             test "$count" -ge 2 && test "$derived" -ge 2 && exit 0;
             sleep 2;
           done;
+          python3 -c 'import sqlite3,sys; source=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); target=sqlite3.connect(sys.argv[2]); source.backup(target)' "$AFT_LOOM_CONFIG_DIR/loomgit/store.db" "$AFT_WORK_DIR/stack-store-on-restack-timeout.db";
+          cp "$AFT_TESTS_DIR/reports/server.log" "$AFT_WORK_DIR/stack-server-on-restack-timeout.log";
           echo 'Landing did not derive Y revision'; exit 1
         intent: Require a durable Y restack offer linked to a derived revision after X lands
       - run: >-
@@ -172,16 +174,57 @@ tests:
   - name: abandoning a retained task copy preserves incomplete capture
     intent: A product Abandon captures an unsafe task copy, records an incomplete revision, and keeps the copy for recovery
     steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-STACK/issues
+          body:
+            title: "abandon epic $RUN_ID"
+            issue_type: epic
+            priority: 2
+          save:
+            - from: data.id
+              as: stackAbandonEpicId
+        intent: Create a separate epic for an unpublished task copy
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-STACK/issues
+          body:
+            title: "abandon task $RUN_ID"
+            issue_type: task
+            priority: 2
+            parent: "${var:stackAbandonEpicId}"
+            design: STUB_CODEX_PATCH=stack-abandon.txt
+          save:
+            - from: data.id
+              as: stackAbandonTaskId
+        intent: Create a task that can be abandoned before publication
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-STACK/workflows/epic-runner
+          body:
+            epicId: "${var:stackAbandonEpicId}"
+            runner: local-task-runner
+        intent: Run the task through the real TaskRun copy path
+      - run: >-
+          task="$(cat "$AFT_WORK_DIR/stackAbandonTaskId")";
+          for attempt in $(seq 1 45); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-STACK/issues/$task/revisions" > "$AFT_WORK_DIR/stack-abandon-before.json";
+            grep -q '"head_sha"' "$AFT_WORK_DIR/stack-abandon-before.json" && exit 0;
+            sleep 2;
+          done;
+          echo 'Abandon task did not freeze a revision'; exit 1
+        intent: Wait for the unpublished task copy to produce a reviewable revision
       - run: >-
           set -e;
           repo="$AFT_WORK_DIR/stack-repo";
-          copy="$(git -C "$repo" worktree list --porcelain | awk '/^worktree / {path=substr($0,10)} /\/task-copies\/stack-repo\/.*-e2e-ws-stack-3-a1$/ {print path}')";
+          task="$(cat "$AFT_WORK_DIR/stackAbandonTaskId")";
+          task_lower="$(printf '%s' "$task" | tr '[:upper:]' '[:lower:]')";
+          copy="$(git -C "$repo" worktree list --porcelain | awk -v suffix="-$task_lower-a1" '/^worktree / {path=substr($0,10); if (substr(path,length(path)-length(suffix)+1)==suffix) print path}')";
           test -d "$copy";
           printf 'private-key-material\n' > "$copy/id_ed25519";
-          printf '%s\n' "$copy" > "$AFT_WORK_DIR/stack-y-copy";
+          printf '%s\n' "$copy" > "$AFT_WORK_DIR/stack-abandon-copy";
           attempt="$(basename "$copy")";
-          y="$(cat "$AFT_WORK_DIR/stackYId")";
-          LOOM_WORKSPACE=E2E-WS-STACK LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" abandon "$y"
+          LOOM_WORKSPACE=E2E-WS-STACK LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" abandon "$task"
           --workspace-id E2E-WS-STACK --repo-name stack-repo --attempt "$attempt"
           --task-copy "$copy" --source-repo "$repo" --reason 'AFT abandon with unsafe file' --yes
           > "$AFT_WORK_DIR/stack-abandon.txt";
@@ -190,13 +233,13 @@ tests:
         intent: Abandon uses the real task copy, marks capture incomplete, and retains the unsafe file
       - run: >-
           set -e;
-          y="$(cat "$AFT_WORK_DIR/stackYId")";
-          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-STACK/issues/$y/revisions" > "$AFT_WORK_DIR/stack-y-abandoned.json";
-          python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; assert item["outcome"]=="abandoned" and item["incomplete"] is True' "$AFT_WORK_DIR/stack-y-abandoned.json"
+          task="$(cat "$AFT_WORK_DIR/stackAbandonTaskId")";
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-STACK/issues/$task/revisions" > "$AFT_WORK_DIR/stack-abandoned.json";
+          python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; assert item["outcome"]=="abandoned" and item["incomplete"] is True' "$AFT_WORK_DIR/stack-abandoned.json"
         intent: The revision API reports the abandoned capture as incomplete rather than reviewable
       - run: >-
           agent-browser --session "$AFT_SESSION" open
-          "$AFT_BASE_URL/ws/E2E-WS-STACK/issues/$(cat "$AFT_WORK_DIR/stackYId")"
+          "$AFT_BASE_URL/ws/E2E-WS-STACK/issues/$(cat "$AFT_WORK_DIR/stackAbandonTaskId")"
         intent: Open the abandoned task in the review UI
       - wait: { text: Incomplete capture }
         intent: The review UI warns that the captured task copy is incomplete
