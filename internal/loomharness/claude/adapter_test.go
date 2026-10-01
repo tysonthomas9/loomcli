@@ -449,14 +449,19 @@ func TestClaudePurgeRefusesSymlinks(t *testing.T) {
 func snapshot(t *testing.T, root string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+	r, err := os.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	err = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		rel, _ := filepath.Rel(root, p)
 		out[rel] = d.Type().String()
 		if d.Type().IsRegular() {
-			b, err := os.ReadFile(p)
+			b, err := r.ReadFile(rel)
 			out[rel] += " " + string(b)
 			return err
 		}
