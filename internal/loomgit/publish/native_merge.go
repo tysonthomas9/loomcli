@@ -20,7 +20,7 @@ type nativeMergeStore interface {
 	Store
 	BeginNativeMerge(context.Context, journal.NativeMerge) error
 	OpenNativeMerges(context.Context) ([]journal.NativeMerge, error)
-	AdvanceNativeMerge(context.Context, journal.NativeMerge, string, string, int) error
+	AdvanceNativeMerge(context.Context, journal.NativeMerge, string, string) error
 	RecordNativeMergeRequest(context.Context, journal.NativeMerge, string) error
 	BlockNativeMerge(context.Context, journal.NativeMerge, string) error
 	LandingStatus(context.Context, string, string) (journal.LandingStatus, error)
@@ -163,7 +163,7 @@ func submitNativeMerge(ctx context.Context, store nativeMergeStore, forge native
 	if err := checkNativePrefix(ctx, store, forge, merge, parts); err != nil {
 		return err
 	}
-	if err := store.AdvanceNativeMerge(ctx, merge, "dispatching", publication.Head, merge.Index); err != nil {
+	if err := store.AdvanceNativeMerge(ctx, merge, "dispatching", publication.Head); err != nil {
 		return err
 	}
 	merge.Phase, merge.Head = "dispatching", publication.Head
@@ -300,5 +300,5 @@ func pollNativeMerge(ctx context.Context, store nativeMergeStore, forge nativeMe
 			return nil
 		}
 	}
-	return store.AdvanceNativeMerge(ctx, merge, "done", merge.Head, merge.Index)
+	return store.AdvanceNativeMerge(ctx, merge, "done", merge.Head)
 }

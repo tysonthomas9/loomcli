@@ -75,7 +75,7 @@ func TestNativeMergeDispatchRecoverySkipsResendAfterMerge(t *testing.T) {
 	if err != nil || len(merges) != 1 {
 		t.Fatalf("merges=%v err=%v", merges, err)
 	}
-	if err := caseFixture.store.AdvanceNativeMerge(ctx, merges[0], "dispatching", forge.prs[1].HeadSHA, 0); err != nil {
+	if err := caseFixture.store.AdvanceNativeMerge(ctx, merges[0], "dispatching", forge.prs[1].HeadSHA); err != nil {
 		t.Fatal(err)
 	}
 	for index := range forge.prs {
@@ -99,7 +99,7 @@ func TestNativeMergeDispatchRecoveryResendsLostRequest(t *testing.T) {
 	if err != nil || len(merges) != 1 {
 		t.Fatalf("merges=%v err=%v", merges, err)
 	}
-	if err := caseFixture.store.AdvanceNativeMerge(ctx, merges[0], "dispatching", forge.prs[0].HeadSHA, 0); err != nil {
+	if err := caseFixture.store.AdvanceNativeMerge(ctx, merges[0], "dispatching", forge.prs[0].HeadSHA); err != nil {
 		t.Fatal(err)
 	}
 	forge.recoverUUID, forge.recoverNew = "request-uuid", true
@@ -270,7 +270,7 @@ func TestNativeMergeUnknownSubmissionRequiresAttention(t *testing.T) {
 	if err != nil || len(merges) != 1 {
 		t.Fatalf("merges = %v, %v", merges, err)
 	}
-	if err := caseFixture.store.AdvanceNativeMerge(ctx, merges[0], "dispatching", forge.prs[0].HeadSHA, 0); err != nil {
+	if err := caseFixture.store.AdvanceNativeMerge(ctx, merges[0], "dispatching", forge.prs[0].HeadSHA); err != nil {
 		t.Fatal(err)
 	}
 	codeIs(t, ReconcileNativeMerges(ctx, caseFixture.store, forge), loomgit.AttentionRequired)
@@ -291,7 +291,7 @@ func TestNativeMergeRecoversAcceptedRequestAfterCrash(t *testing.T) {
 			if err != nil || len(merges) != 1 {
 				t.Fatalf("merges = %v, %v", merges, err)
 			}
-			if err := caseFixture.store.AdvanceNativeMerge(ctx, merges[0], "dispatching", forge.prs[0].HeadSHA, 0); err != nil {
+			if err := caseFixture.store.AdvanceNativeMerge(ctx, merges[0], "dispatching", forge.prs[0].HeadSHA); err != nil {
 				t.Fatal(err)
 			}
 			forge.recoverUUID = "request-uuid"
