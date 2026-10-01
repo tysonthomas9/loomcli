@@ -68,7 +68,7 @@ func (forge *mergeForgeFake) MergeLoomPull(_ context.Context, _, _ string, numbe
 		if forge.prs[index].Number == number && forge.prs[index].HeadSHA == head {
 			forge.merged++
 			if forge.rejectPut {
-				return stackpublish.LoomMergeResult{}, &stackpublish.LoomMergeRejectedError{Cause: errors.New("request rejected")}
+				return stackpublish.LoomMergeResult{}, &stackpublish.LoomMergeRejectedError{Cause: errors.New("unshaped 409 rejected")}
 			}
 			if (forge.unknownOnce && forge.merged == 1) || forge.unknownAlways {
 				return stackpublish.LoomMergeResult{}, errors.New("connection lost after submission")

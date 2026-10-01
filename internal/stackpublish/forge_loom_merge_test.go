@@ -70,6 +70,22 @@ func TestGitHubForgeLoomMergeAdoptsMatchingConflictOnly(t *testing.T) {
 	}
 }
 
+func TestGitHubForgeLoomMergeRejectsUnshapedConflict(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		requests++
+		writer.WriteHeader(http.StatusConflict)
+		_, _ = writer.Write([]byte(`{"message":"merge already in progress"}`))
+	}))
+	defer server.Close()
+	forge := NewGitHubForge("fixture", server.Client(), server.URL)
+	_, err := forge.MergeLoomPull(context.Background(), "owner", "repo", 7, "confirmed-head")
+	var rejected *LoomMergeRejectedError
+	if !errors.As(err, &rejected) || requests != 1 {
+		t.Fatalf("unshaped conflict = %v, requests = %d", err, requests)
+	}
+}
+
 func TestGitHubForgeLoomMergeRejectsDefinitiveHTTPFailure(t *testing.T) {
 	for _, status := range []int{http.StatusMethodNotAllowed, http.StatusUnprocessableEntity} {
 		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {

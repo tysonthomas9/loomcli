@@ -43,6 +43,9 @@ func (g *GitHubForge) MergeLoomPull(ctx context.Context, owner, repo string, num
 	}
 	result, err := decodeLoomMergeResult(data)
 	if err != nil {
+		if status == http.StatusConflict {
+			return LoomMergeResult{}, &LoomMergeRejectedError{Cause: fmt.Errorf("github existing loom merge cannot be matched: %w", err)}
+		}
 		return result, err
 	}
 	if status == http.StatusConflict && (result.Details.UUID == "" || result.Details.ExpectedHeadSHA != head ||
