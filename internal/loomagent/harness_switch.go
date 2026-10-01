@@ -64,7 +64,8 @@ func (s *Service) switchHarness(ctx context.Context, a loomstore.Agent, req Upda
 		return failed(err)
 	}
 	to := a.SpecOf()
-	to.Harness, to.HarnessSessionID, to.SpecJSON, to.Model = req.Harness, &ref.NativeID, string(spec), nil
+	to.Harness, to.HarnessSessionID, to.HarnessSessionRoot = req.Harness, &ref.NativeID, &ref.Root
+	to.SpecJSON, to.Model = string(spec), nil
 	if model != "" {
 		to.Model = &model
 	}
@@ -130,32 +131,33 @@ func (s *Service) stopTurn(ctx context.Context, a loomstore.Agent) (loomstore.Ag
 
 // resume recovers a's current session before a hand-over. A different
 // returned ref is recorded as another owned session and becomes current;
-// every earlier ref stays owned. It is safe to repeat.
-func (s *Service) resume(ctx context.Context, a loomstore.Agent) (loomstore.Agent, loomharness.Session, error) {
+// every earlier ref stays owned. It is safe to repeat; current then returns
+// the resumed session.
+func (s *Service) resume(ctx context.Context, a loomstore.Agent) (loomstore.Agent, error) {
 	sess, ref, err := s.current(ctx, a)
 	if err != nil || sess == nil {
-		return a, sess, err
+		return a, err
 	}
 	l, err := s.launch(ctx, a, a.Harness)
 	if err != nil {
-		return a, nil, err
+		return a, err
 	}
 	got, err := sess.Resume(ctx, l)
 	if err != nil {
-		return a, nil, harnessErr(err)
+		return a, harnessErr(err)
 	}
 	if err := s.store.RecordNativeSession(ctx, loomstore.NativeSession{AgentID: a.AgentID, Harness: a.Harness,
 		NativeRoot: got.Root, NativeID: got.NativeID}); err != nil {
-		return a, nil, err
+		return a, err
 	}
 	if got == ref {
-		return a, sess, nil
+		return a, nil
 	}
 	to := a.SpecOf()
-	to.HarnessSessionID = &got.NativeID
+	to.HarnessSessionID, to.HarnessSessionRoot = &got.NativeID, &got.Root
 	if err := s.store.CompareAndSetSpec(ctx, a.AgentID, a.SpecVersion, to); err != nil {
-		return a, nil, err
+		return a, err
 	}
-	a.HarnessSessionID = to.HarnessSessionID
-	return a, s.harnesses[a.Harness].Session(got), nil
+	a.HarnessSessionID, a.HarnessSessionRoot = to.HarnessSessionID, to.HarnessSessionRoot
+	return a, nil
 }
