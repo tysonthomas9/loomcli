@@ -11,8 +11,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
@@ -717,14 +717,14 @@ func (s *Supervisor) mirrorNativeTranscript(ap *AgentProcess) error {
 		return fmt.Errorf("no local session handle for this run")
 	}
 	switch sess.Meta.Backend {
-	case backendnames.Codex:
+	case backends.NameCodex:
 		path, err := sess.SyncLatestCodexRollout(ap.WorktreePath, sess.Meta.StartedAt)
 		if err == nil && path == "" {
 			return fmt.Errorf("no codex rollout for %s since %s",
 				ap.WorktreePath, sess.Meta.StartedAt.Format(time.RFC3339))
 		}
 		return err
-	case backendnames.Claude:
+	case backends.NameClaude:
 		// Empty claudeUUID: newest-by-mtime in the worktree's project dir, the
 		// same resolution the supervisor's finalize uses.
 		path, err := sess.SyncLatestClaudeTranscript(ap.WorktreePath, "", sess.Meta.StartedAt)

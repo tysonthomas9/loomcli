@@ -116,7 +116,7 @@ func (s *Supervisor) supervisedAgentBody(name string, ap *AgentProcess) {
 // does not see a zero-valued tick on its first scan.
 func (s *Supervisor) RegisterTick(name string) {
 	tick := new(atomic.Int64)
-	tick.Store(time.Now().UnixNano())
+	tick.Store(s.clk().Now().UnixNano())
 	s.Ticks.Store(name, tick)
 }
 
@@ -133,7 +133,7 @@ func (s *Supervisor) RecordTick(name string) {
 	if !ok {
 		return
 	}
-	tick.Store(time.Now().UnixNano())
+	tick.Store(s.clk().Now().UnixNano())
 }
 
 // LoadTick returns the last recorded tick time for a goroutine name, and false

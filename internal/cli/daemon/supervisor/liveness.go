@@ -77,16 +77,16 @@ func (s *Supervisor) livenessWatchdog() {
 // livenessWatchdogEvery is livenessWatchdog with an explicit scan interval,
 // allowing tests to drive the watchdog loop without real-time waits.
 func (s *Supervisor) livenessWatchdogEvery(interval time.Duration) {
-	ticker := time.NewTicker(interval)
+	ticker := s.clk().NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-s.Shutdown:
 			return
-		case <-ticker.C:
+		case <-ticker.C():
 			s.RecordTick(GoroutineLivenessWatchdog)
-			s.scanTicks(time.Now())
+			s.scanTicks(s.clk().Now())
 			if s.livenessFatalSignaled {
 				// The fatal has been routed and the daemon is already draining
 				// toward exit. Scanning on would re-flag the same ticks every
@@ -349,7 +349,7 @@ func (s *Supervisor) startAgentWaitHeartbeatEvery(ap *AgentProcess, interval tim
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		ticker := time.NewTicker(interval)
+		ticker := s.clk().NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -357,7 +357,7 @@ func (s *Supervisor) startAgentWaitHeartbeatEvery(ap *AgentProcess, interval tim
 				return
 			case <-s.Shutdown:
 				return
-			case <-ticker.C:
+			case <-ticker.C():
 				s.RecordTick(tickName)
 			}
 		}
@@ -403,7 +403,7 @@ func (s *Supervisor) startWorkerHeartbeatEvery(ap *AgentProcess, interval time.D
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		ticker := time.NewTicker(interval)
+		ticker := s.clk().NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -411,7 +411,7 @@ func (s *Supervisor) startWorkerHeartbeatEvery(ap *AgentProcess, interval time.D
 				return
 			case <-s.Shutdown:
 				return
-			case <-ticker.C:
+			case <-ticker.C():
 				ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
 				err := s.ControlStore.Workers().Heartbeat(ctx, s.WorkspaceID, workerID)
 				cancel()

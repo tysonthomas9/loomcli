@@ -216,7 +216,7 @@ func (s *Supervisor) checkWatchdog(ap *AgentProcess, outputTimeout int, logPath 
 	if lastActivity.Before(lastStart) {
 		lastActivity = lastStart
 	}
-	s.applyIdleKill(ap, time.Since(lastActivity), outputTimeout, activitySource, worktreeName)
+	s.applyIdleKill(ap, s.clk().Now().Sub(lastActivity), outputTimeout, activitySource, worktreeName)
 }
 
 // applyIdleKill kills the agent when it has been silent past outputTimeout,
@@ -285,7 +285,7 @@ func (s *Supervisor) applyRunDurationKill(ap *AgentProcess, lastStart time.Time,
 	if maxRun <= 0 || lastStart.IsZero() {
 		return false
 	}
-	ran := time.Since(lastStart)
+	ran := s.clk().Now().Sub(lastStart)
 	if ran <= maxRun {
 		return false
 	}
@@ -304,14 +304,14 @@ func (s *Supervisor) applyRunDurationKill(ap *AgentProcess, lastStart time.Time,
 
 // healthChecker runs periodic health checks in a goroutine.
 func (s *Supervisor) healthChecker() {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := s.clk().NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-s.Shutdown:
 			return
-		case <-ticker.C:
+		case <-ticker.C():
 			s.checkAgentHealth()
 			s.RecordTick(GoroutineHealthChecker)
 		}
