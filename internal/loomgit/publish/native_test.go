@@ -178,7 +178,7 @@ func TestRecordedNativeStackStaleLeaseLeavesStackAndBases(t *testing.T) {
 // its predecessor's branch as GitHub stacks are.
 func nativeFourLayerStack(t *testing.T) (fixture, *fakeForge, []loomgit.Revision) {
 	t.Helper()
-	fixture, ctx := newFixture(t), context.Background()
+	fixture, ctx := newFixture(t, "main"), context.Background()
 	revisions, parent := []loomgit.Revision{}, fixture.base
 	for _, change := range []string{"A", "B", "C", "D"} {
 		revision := stackRevision(t, fixture, change, 1, parent)
@@ -232,12 +232,12 @@ func mergePR(pr *stackpublish.PR, mergeCommit string) {
 func TestLandingRecordsSquashedStackLayersOnTrunkAndRestacksNative(t *testing.T) {
 	fixture, forge, revisions := nativeFourLayerStack(t)
 	ctx := context.Background()
-	squashes := squashOnto(t, fixture, fixture.base, "develop", "A", "B", "C")
+	squashes := squashOnto(t, fixture, fixture.base, "main", "A", "B", "C")
 	for index := range squashes {
 		mergePR(&forge.prs[index], squashes[index])
 	}
 	provider := squashOnto(t, fixture, squashes[2], forge.prs[3].Head, "D")[0]
-	forge.prs[3].Base, forge.prs[3].HeadSHA = "develop", provider
+	forge.prs[3].Base, forge.prs[3].HeadSHA = "main", provider
 	if err := fixture.store.OfferRestack(ctx, journal.RestackOffer{Workspace: "W", Change: "D", Predecessor: "C",
 		Repo: "repo", Revision: revisions[3].Number, TrunkSHA: squashes[2]}); err != nil {
 		t.Fatal(err)
@@ -251,7 +251,7 @@ func TestLandingRecordsSquashedStackLayersOnTrunkAndRestacksNative(t *testing.T)
 		}
 	}
 	publication, found, err := fixture.store.Publication(ctx, "W", "D")
-	if err != nil || !found || publication.Head != provider || publication.Trunk != "develop" {
+	if err != nil || !found || publication.Head != provider || publication.Trunk != "main" {
 		t.Fatalf("restacked D publication = %+v, %v", publication, err)
 	}
 	if revision, err := fixture.store.SourceRevision(ctx, "W", "D"); err != nil || revision <= revisions[3].Number {
@@ -262,7 +262,7 @@ func TestLandingRecordsSquashedStackLayersOnTrunkAndRestacksNative(t *testing.T)
 func TestLandingIgnoresMergeIntoPredecessorBranchOffTrunk(t *testing.T) {
 	fixture, forge, revisions := nativeFourLayerStack(t)
 	ctx := context.Background()
-	squashes := squashOnto(t, fixture, fixture.base, "develop", "A", "B")
+	squashes := squashOnto(t, fixture, fixture.base, "main", "A", "B")
 	mergePR(&forge.prs[0], squashes[0])
 	mergePR(&forge.prs[1], squashes[1])
 	intoB := squashOnto(t, fixture, revisions[1].HeadSHA, forge.prs[1].Head, "C")[0]
