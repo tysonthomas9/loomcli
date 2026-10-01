@@ -108,7 +108,7 @@ func TestCreateOpenLeftoverSweepRacesReopen(t *testing.T) {
 	t.Cleanup(func() { sweepPause = func() {} })
 	swept := make(chan error, 1)
 	go func() { swept <- s.PurgeLeftovers(ctx) }()
-	<-paused // the sweep holds the pending ref
+	<-paused                                  // the sweep holds the pending ref
 	info, err := s.Create(ctx, leadReq("r1")) // the retry re-Opens the same session
 	if err != nil {
 		t.Fatal(err)
