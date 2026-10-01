@@ -78,8 +78,8 @@ const markerPrefix = "loom:"
 // Open returns the thread for spec.Key in spec.Dir on spec.Launch.Root's
 // app-server: the one this process opened, else the one named for the key,
 // else a new one. The ref names the canonical root the thread lives under.
-// When naming a new thread fails, the ref is returned with the error so the
-// caller can record and Purge it.
+// An error returns the zero ref and leaves nothing behind: a new thread that
+// cannot be named is deleted again.
 //
 // The launch root alone selects the profile (its server runs with
 // CODEX_HOME set to it); codex profiles carry no secret env.
@@ -99,8 +99,11 @@ func (a *Adapter) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharn
 		return loomharness.NativeRef{}, err
 	}
 	marker := markerPrefix + spec.Key
-	if ref.NativeID, err = adopt(ctx, conn, spec.Dir, marker); err != nil || ref.NativeID != "" {
-		return ref, err
+	if ref.NativeID, err = adopt(ctx, conn, spec.Dir, marker); err != nil {
+		return loomharness.NativeRef{}, err
+	}
+	if ref.NativeID != "" {
+		return ref, nil
 	}
 	params := protocol.ThreadStartParams{Cwd: &spec.Dir, HistoryMode: protocol.ThreadHistoryModePaginated}
 	if spec.Model != "" {
@@ -115,7 +118,13 @@ func (a *Adapter) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharn
 	}
 	ref.NativeID = started.Thread.Id
 	if err := conn.Call(ctx, "thread/name/set", protocol.ThreadSetNameParams{ThreadId: ref.NativeID, Name: marker}, nil); err != nil {
-		return ref, fmt.Errorf("codex thread/name/set: %w", err)
+		// Delete the unnamed thread even when ctx has ended.
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), startTimeout)
+		defer cancel()
+		if derr := a.delete(dctx, ref); derr != nil {
+			return loomharness.NativeRef{}, fmt.Errorf("codex thread/name/set: %w (and deleting the new thread %s failed: %w)", err, ref.NativeID, derr)
+		}
+		return loomharness.NativeRef{}, fmt.Errorf("codex thread/name/set: %w", err)
 	}
 	a.opened[key] = ref.NativeID
 	return ref, nil
@@ -155,13 +164,8 @@ func adopt(ctx context.Context, conn *Conn, dir, marker string) (string, error) 
 // app-server of its recorded root; one already gone is fine.
 func (a *Adapter) Purge(ctx context.Context, owned []loomharness.NativeRef) error {
 	for _, ref := range owned {
-		err := a.Session(ref).call(ctx, "thread/delete", protocol.ThreadDeleteParams{ThreadId: ref.NativeID}, nil)
-		var rpc *RPCError
-		if errors.As(err, &rpc) && strings.HasPrefix(rpc.Message, "no rollout found") {
-			err = nil // deleted before
-		}
-		if err != nil {
-			return fmt.Errorf("codex purge %s under %s: %w", ref.NativeID, ref.Root, err)
+		if err := a.delete(ctx, ref); err != nil {
+			return err
 		}
 		a.openMu.Lock()
 		for k, id := range a.opened {
@@ -170,6 +174,19 @@ func (a *Adapter) Purge(ctx context.Context, owned []loomharness.NativeRef) erro
 			}
 		}
 		a.openMu.Unlock()
+	}
+	return nil
+}
+
+// delete deletes one thread on its recorded root; one already gone is fine.
+func (a *Adapter) delete(ctx context.Context, ref loomharness.NativeRef) error {
+	err := a.Session(ref).call(ctx, "thread/delete", protocol.ThreadDeleteParams{ThreadId: ref.NativeID}, nil)
+	var rpc *RPCError
+	if errors.As(err, &rpc) && strings.HasPrefix(rpc.Message, "no rollout found") {
+		return nil // deleted before
+	}
+	if err != nil {
+		return fmt.Errorf("codex delete %s under %s: %w", ref.NativeID, ref.Root, err)
 	}
 	return nil
 }

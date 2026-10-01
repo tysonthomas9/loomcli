@@ -51,7 +51,8 @@ func saveStore(home string, s fakeStore) {
 // fakeThreads serves the thread methods from the store, with codex 0.157.1's
 // error messages. thread/list pages one listed thread at a time; thread/turns/list
 // returns $CODEX_HOME/turns-<id>.json, and a thread without one is not
-// materialized. Deleting fails while $CODEX_HOME/fail-delete exists.
+// materialized. Deleting fails while $CODEX_HOME/fail-delete exists, and
+// naming while $CODEX_HOME/fail-name exists.
 func fakeThreads(home, method string, raw json.RawMessage) (any, error) {
 	var p struct {
 		ThreadID, Cwd, Name, SearchTerm, Cursor string
@@ -99,6 +100,9 @@ func fakeThreads(home, method string, raw json.RawMessage) (any, error) {
 	}
 	switch method {
 	case "thread/name/set":
+		if _, err := os.Stat(filepath.Join(home, "fail-name")); err == nil {
+			return nil, errors.New("name store unavailable")
+		}
 		t.Name = p.Name
 		s.Threads[p.ThreadID] = t
 		saveStore(home, s)
@@ -578,5 +582,39 @@ func TestCodexRefusesOtherServerRequests(t *testing.T) {
 	}
 	if answer.Error == nil || answer.Error.Code != -32601 {
 		t.Fatalf("answer %+v, want a -32601 refusal", answer)
+	}
+}
+
+// TestCodexOpenLeavesNothingOnError: when the new thread cannot be named,
+// Open deletes it and returns the zero ref with the error; when the delete
+// fails too, both errors are returned, still with the zero ref.
+func TestCodexOpenLeavesNothingOnError(t *testing.T) {
+	f := newFixture(t, "codex-cli 0.157.1")
+	a, ctx := newAdapter(t, f), context.Background()
+	root := a.Root("")
+	saveStore(root, fakeStore{Threads: map[string]fakeThread{}})
+	if err := os.WriteFile(filepath.Join(root, "fail-name"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := a.Open(ctx, spec("k1", "/work", ""))
+	if err == nil || !strings.Contains(err.Error(), "name store unavailable") || ref != (loomharness.NativeRef{}) {
+		t.Fatalf("got %+v, %v; want the zero ref and the naming error", ref, err)
+	}
+	if n := len(loadStore(root).Threads); n != 0 {
+		t.Fatalf("%d threads left behind", n)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "fail-delete"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ref, err = a.Open(ctx, spec("k1", "/work", ""))
+	if err == nil || !strings.Contains(err.Error(), "disk full") || ref != (loomharness.NativeRef{}) {
+		t.Fatalf("got %+v, %v; want the zero ref and both errors", ref, err)
+	}
+
+	_ = os.Remove(filepath.Join(root, "fail-name"))
+	_ = os.Remove(filepath.Join(root, "fail-delete"))
+	if ref, err = a.Open(ctx, spec("k1", "/work", "")); err != nil || ref.NativeID == "" {
+		t.Fatalf("Open after the failures: %+v %v", ref, err)
 	}
 }
