@@ -1,17 +1,21 @@
 import { useEffect, useState } from "react";
 import {
+  applyRevision,
   getTaskRevisions,
   submitRevisionVerdict,
   type ReviewRevision,
 } from "@/hooks/api";
+import { ApiError } from "@/types";
 import styles from "./RevisionsSection.module.css";
 
 export function RevisionsSection({
   workspaceId,
   taskId,
+  lead,
 }: {
   workspaceId: string;
   taskId: string;
+  lead?: string | undefined;
 }): JSX.Element {
   const [revisions, setRevisions] = useState<ReviewRevision[]>([]);
   const [loading, setLoading] = useState(true);
@@ -19,6 +23,7 @@ export function RevisionsSection({
   const [busy, setBusy] = useState("");
   const [override, setOverride] = useState("");
   const [reason, setReason] = useState("");
+  const [follow, setFollow] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let active = true;
@@ -49,15 +54,41 @@ export function RevisionsSection({
     verdict: "approve" | "reject" | "override",
     detail = "",
   ) {
-    setBusy(`${revision.change_id}:${revision.number}`);
+    const key = `${revision.change_id}:${revision.number}`;
+    setBusy(key);
     setError("");
     try {
-      await submitRevisionVerdict(workspaceId, revision, verdict, detail);
+      const status = await submitRevisionVerdict(
+        workspaceId,
+        revision,
+        verdict,
+        detail,
+        lead,
+      );
+      if (status) setFollow((prev) => ({ ...prev, [key]: status }));
       setRevisions(await getTaskRevisions(workspaceId, taskId));
       setOverride("");
       setReason("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not record verdict");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function apply(revision: ReviewRevision) {
+    if (!lead) return;
+    const key = `${revision.change_id}:${revision.number}`;
+    setBusy(key);
+    setError("");
+    try {
+      await applyRevision(workspaceId, revision, lead);
+      setFollow((prev) => ({ ...prev, [key]: "applied" }));
+    } catch (err) {
+      // 404: the lead agent does not exist, so Apply cannot open its area.
+      if (err instanceof ApiError && err.status === 404)
+        setFollow((prev) => ({ ...prev, [key]: "" }));
+      setError(err instanceof Error ? err.message : "Could not apply revision");
     } finally {
       setBusy("");
     }
@@ -87,6 +118,23 @@ export function RevisionsSection({
                 ? "Incomplete capture"
                 : (revision.verdict ?? "Awaiting review")}
             </div>
+            {follow[key] === "approved_waiting_for_working_area" && (
+              <div className={styles.actions}>
+                <span>
+                  {lead
+                    ? "Approved: Apply to create the lead working area"
+                    : "Approved: Apply needs a single workspace lead"}
+                </span>
+                <button
+                  type="button"
+                  disabled={Boolean(busy) || !lead}
+                  onClick={() => void apply(revision)}
+                >
+                  Apply
+                </button>
+              </div>
+            )}
+            {follow[key] === "applied" && <div>Applied</div>}
             <div className={styles.actions}>
               <button
                 type="button"

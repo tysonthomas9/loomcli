@@ -462,6 +462,9 @@ func (g *GitOpsImpl) ApplyRevision(ctx context.Context, request ops.ApplyRevisio
 		if len(result.Paths) > 0 {
 			return &ops.GitPushResult{ConflictedFiles: result.Paths, Message: err.Error()}, nil
 		}
+		if errors.Is(err, apply.ErrNoWorkingArea) {
+			return nil, &ops.NoWorkingAreaError{Err: err}
+		}
 		return nil, err
 	}
 	return &ops.GitPushResult{

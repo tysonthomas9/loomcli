@@ -2,6 +2,7 @@ package apply
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/pool"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 )
+
+// ErrNoWorkingArea is the cause when the lead has no working area for the
+// change repo (as opposed to an ambiguous one).
+var ErrNoWorkingArea = errors.New("no working area for change repo and lead")
 
 func ApproveLocal(ctx context.Context, workspace, lead, change string, revision int, actor review.Actor) (FollowResult, error) {
 	path := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
@@ -102,7 +107,7 @@ func workingAreaForRepo(areas []journal.WorkingArea, repo string) (*journal.Work
 		selected = &areas[index]
 	}
 	if selected == nil || selected.Path == "" {
-		return nil, loomgit.NewError(loomgit.AttentionRequired, "working area for change repo and lead is unavailable", nil)
+		return nil, loomgit.NewError(loomgit.AttentionRequired, "working area for change repo and lead is unavailable", ErrNoWorkingArea)
 	}
 	return selected, nil
 }

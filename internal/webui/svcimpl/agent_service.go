@@ -159,7 +159,40 @@ func (s *agentServiceImpl) GitApply(ctx context.Context, request ops.ApplyRevisi
 	if request.RequestID == "" {
 		request.RequestID = uuid.NewString()
 	}
+	result, err := s.gitOps.ApplyRevision(ctx, request)
+	var noArea *ops.NoWorkingAreaError
+	if err == nil || s.store == nil || !errors.As(err, &noArea) {
+		return result, err
+	}
+	// The lead has no usable working area: open it the way lead creation does,
+	// but only for a lead agent that already exists.
+	lead := request.Lead
+	if lead == "" {
+		lead = "lead"
+	}
+	agent, getErr := s.store.Agents().Get(ctx, request.Workspace, lead)
+	if errors.Is(getErr, domain.ErrNotFound) {
+		return nil, service.ErrNotFound(fmt.Sprintf("lead agent %q does not exist: create the lead agent first", lead))
+	}
+	if getErr != nil {
+		return nil, classifyStoreError("load lead agent", getErr)
+	}
+	role, roleErr := s.loadAgentRoleForKind(ctx, agent.WorkspaceKey, agent.RoleName)
+	if roleErr != nil {
+		return nil, roleErr
+	}
+	if domain.ResolveRoleKind(role, agent.RoleName) != domain.RoleKindInteractive {
+		return nil, service.ErrValidation(fmt.Sprintf("agent %q is not a lead", lead))
+	}
+	if ensureErr := ensureLeadWorkingArea(ctx, s, *agent); ensureErr != nil {
+		return nil, ensureErr
+	}
 	return s.gitOps.ApplyRevision(ctx, request)
+}
+
+// ensureLeadWorkingArea is replaced in tests.
+var ensureLeadWorkingArea = func(ctx context.Context, s *agentServiceImpl, agent domain.Agent) error {
+	return s.ensureLocalAgentWorktrees(ctx, agent)
 }
 
 func (s *agentServiceImpl) GitPushAll(_ context.Context, wsID string) (*service.GitPushAllResult, error) {

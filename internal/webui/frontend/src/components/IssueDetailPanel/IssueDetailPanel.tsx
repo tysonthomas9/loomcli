@@ -86,6 +86,7 @@ import { ErrorToast } from "../ErrorToast";
 import { useSplitRatio, useToast } from "@/hooks/ui";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { RevisionsSection } from "./sections/RevisionsSection";
+import { isLeadRole } from "@/utils/agentRole";
 import { SessionsTab } from "./sessions";
 import styles from "./IssueDetailPanel.module.css";
 import { formatDate, isIssueDetails } from "./utils";
@@ -610,6 +611,8 @@ function DefaultContent({
   // Agent data for StartWorkButton (shared store, no duplicate polling)
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
+  const leadAgents = agents.filter((a) => isLeadRole(a.role));
+  const revisionLead = leadAgents.length === 1 ? leadAgents[0]?.name : "";
   const agentTasks = useStore(agentStore, (s) => s.agentTasks);
 
   // Epic overview data (Aether design, pin 25): the epic's child tickets
@@ -1579,7 +1582,11 @@ function DefaultContent({
 
             {/* Full-width sections below the columns */}
             {issue.issue_type === "task" && (
-              <RevisionsSection workspaceId={workspaceId} taskId={issue.id} />
+              <RevisionsSection
+                workspaceId={workspaceId}
+                taskId={issue.id}
+                lead={revisionLead}
+              />
             )}
 
             <LabelEditor
