@@ -42,7 +42,8 @@ func fakeClaude() {
 		return
 	}
 	nested, _ := exec.Command("env").Output() //nolint:norawexec // a real child stands in for a Claude tool subprocess: its inherited env is what the test checks
-	dump(map[string]any{"args": args, "env": os.Environ(), "nested": strings.Split(string(nested), "\n")})
+	cwd, _ := os.Getwd()
+	dump(map[string]any{"args": args, "env": os.Environ(), "nested": strings.Split(string(nested), "\n"), "cwd": cwd})
 	root := os.Getenv("CLAUDE_CONFIG_DIR")
 	if root == "" {
 		root = os.Getenv("LOOM_FAKE_CLAUDE_ROOT")
@@ -62,7 +63,7 @@ func fakeClaude() {
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 	_ = os.WriteFile(path, nil, 0o600)
 	out := json.NewEncoder(os.Stdout)
-	inited, running := false, false
+	inited, running, n := false, false, 0
 	sc := bufio.NewScanner(os.Stdin)
 	for sc.Scan() {
 		var in struct {
@@ -79,12 +80,14 @@ func fakeClaude() {
 				_ = out.Encode(map[string]any{"type": "system", "subtype": "init", "session_id": id,
 					"capabilities": []string{"interrupt_receipt_v1"}})
 			}
+			n++
 			if strings.Contains(in.Message.Content, "hang") {
 				running = true
-				_ = out.Encode(map[string]any{"type": "stream_event"})
-			} else {
-				_ = out.Encode(map[string]any{"type": "result", "subtype": "success", "session_id": id})
+				_ = out.Encode(map[string]any{"type": "stream_event", "event": map[string]any{"type": "ping"}})
+				continue
 			}
+			fakeTurn(out, fmt.Sprintf("msg_%d", n), in.UUID, in.Message.Content)
+			_ = out.Encode(map[string]any{"type": "result", "subtype": "success", "session_id": id})
 		case "control_request":
 			_ = out.Encode(map[string]any{"type": "control_response",
 				"response": map[string]any{"subtype": "success", "request_id": in.RequestID}})
@@ -94,6 +97,33 @@ func fakeClaude() {
 			}
 		}
 	}
+}
+
+// fakeTurn emits one assistant message in the 2.1.285 partial-message shape.
+// The prompt text selects extras: "tool", "task", "resume" and "die".
+func fakeTurn(out *json.Encoder, msg, key, prompt string) {
+	ev := func(e map[string]any) {
+		_ = out.Encode(map[string]any{"type": "stream_event", "event": e, "user_message_uuids": []string{key}})
+	}
+	if strings.Contains(prompt, "resume") {
+		_ = out.Encode(map[string]any{"type": "system", "subtype": "status", "resume_reason": "interrupted_turn"})
+	}
+	ev(map[string]any{"type": "message_start", "message": map[string]any{"id": msg}})
+	if strings.Contains(prompt, "die") {
+		os.Exit(3)
+	}
+	if strings.Contains(prompt, "tool") {
+		ev(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "tool_use", "id": "toolu_1", "name": "Bash"}})
+		_ = out.Encode(map[string]any{"type": "assistant", "message": map[string]any{"id": msg, "content": []any{map[string]any{"type": "tool_use", "id": "toolu_1"}}}})
+		_ = out.Encode(map[string]any{"type": "user", "message": map[string]any{"content": []any{map[string]any{"type": "tool_result", "tool_use_id": "toolu_1"}}}})
+	}
+	if strings.Contains(prompt, "task") {
+		_ = out.Encode(map[string]any{"type": "system", "subtype": "task_started", "task_type": "local_agent", "task_id": "task_1"})
+	}
+	ev(map[string]any{"type": "content_block_start", "index": 1, "content_block": map[string]any{"type": "text", "text": ""}})
+	ev(map[string]any{"type": "content_block_delta", "index": 1, "delta": map[string]any{"type": "text_delta", "text": "hi"}})
+	_ = out.Encode(map[string]any{"type": "assistant", "message": map[string]any{"id": msg, "content": []any{map[string]any{"type": "text", "text": "hi"}}}})
+	ev(map[string]any{"type": "content_block_stop", "index": 1})
 }
 
 func dump(v any) {
@@ -107,6 +137,7 @@ func dump(v any) {
 
 type launchDump struct {
 	Args, Env, Nested []string
+	Cwd               string
 }
 
 func launches(t *testing.T, path string) []launchDump {
@@ -261,7 +292,7 @@ func TestClaudeSessionIDInUseResumes(t *testing.T) {
 
 func TestClaudeVersionGate(t *testing.T) {
 	f, cfg := newFixture(t, "2.1.200")
-	p := NewProcess(cfg, ProcessSpec{SessionID: SessionID("old"), Dir: t.TempDir()})
+	p := NewProcess(cfg, ProcessSpec{SessionID: SessionID("old"), Launch: loomharness.Launch{Root: f.root}, Dir: t.TempDir()})
 	var tooOld *loomharness.TooOldError
 	if err := p.Prompt(context.Background(), "k", "hi"); !errors.As(err, &tooOld) || !errors.Is(err, loomharness.ErrUnavailable) {
 		t.Fatalf("too-old claude = %v", err)
@@ -271,7 +302,7 @@ func TestClaudeVersionGate(t *testing.T) {
 	}
 
 	f, cfg = newFixture(t, "2.1.999")
-	p = NewProcess(cfg, ProcessSpec{SessionID: SessionID("new"), Dir: t.TempDir()})
+	p = NewProcess(cfg, ProcessSpec{SessionID: SessionID("new"), Launch: loomharness.Launch{Root: f.root}, Dir: t.TempDir()})
 	defer func() { _ = p.Close(context.Background()) }()
 	if err := p.Prompt(context.Background(), "k", "hi"); err != nil {
 		t.Fatal(err)
