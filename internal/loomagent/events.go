@@ -17,6 +17,9 @@ import (
 // EventTurnCompleted is the saved Loom event for a native turn.completed.
 const EventTurnCompleted = "agent.turn_completed"
 
+// replayCrash runs between a replay's commit and its apply; tests crash there.
+var replayCrash = func() {}
+
 // RunFeed waits feedRetry before it reopens the feed, doubling up to
 // feedRetryMax while reads keep failing; a read that ingested events resets it.
 var feedRetry, feedRetryMax = 200 * time.Millisecond, 30 * time.Second
@@ -30,8 +33,9 @@ var errFeedClosed = errors.New("loomagent: the harness feed closed")
 // feed.gap it backfills every live agent's session from its native history,
 // so events the feed missed, or that came while Loom was down, are saved
 // once (stable EventIDs) and never invented from the live bus. A failed save
-// or history read, or a closed feed, reopens the feed after a backoff, so
-// the backfill after the reconnect reads past nothing unsaved. A warning is
+// or history read, or a closed feed, reopens the feed after a backoff; a
+// replay is all or nothing, so the backfill after the reconnect replays a
+// failed one whole. A warning is
 // logged when the failure changes, not on every retry.
 func (s *Service) RunFeed(ctx context.Context, harness string) {
 	wait, last := feedRetry, ""
@@ -138,6 +142,7 @@ func (s *Service) replay(ctx context.Context, harness string, a loomstore.Agent)
 	if err != nil {
 		return err
 	}
+	replayCrash() // committed, not yet applied: the next replay applies it
 	return s.applyFold(ctx, a.AgentID, f)
 }
 
@@ -251,8 +256,8 @@ func (s *Service) flipAttention(ctx context.Context, agentID string, raise bool)
 	return err
 }
 
-// ingest saves one native event of an owned session, then applies it. A
-// repeat (live after backfill, or backfill after live) saves nothing new, and
+// ingest saves one live native event of an owned session, then applies it.
+// A repeat of an event a replay already saved saves nothing new, and
 // HarnessEvent ignores events of a turn that is not running. ok reports
 // that e belonged to a live agent's session and was handled.
 func (s *Service) ingest(ctx context.Context, harness string, e loomharness.Event) (ok bool, err error) {

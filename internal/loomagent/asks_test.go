@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -518,5 +519,91 @@ func TestReplayAppliesMissedEvents(t *testing.T) {
 	}
 	if got := askIDs(t, s, a.AgentID); !slices.Equal(got, []string{"a1:approval"}) {
 		t.Fatalf("open asks = %v", got)
+	}
+}
+
+// TestReplayRetryConverges: after a replay fails (page 2 does not read, or
+// its write fails) or crashes between its commit and its apply, a retry in
+// the same process or after a restart ends exactly as an uninterrupted
+// replay does: the same new rows, once each, in order, the same open asks
+// and the same state.
+func TestReplayRetryConverges(t *testing.T) {
+	type outcome struct {
+		kinds []string
+		asks  []string
+		state string
+	}
+	run := func(mode string) outcome {
+		e := newCreateEnv(t)
+		fh := e.h.Harness.(*fake.Harness)
+		s := e.service(ServiceConfig{})
+		stop := startFeed(s, e)
+		a, ref := newLead(t, e, s, "alpha")
+		fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
+		mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
+		eventually(t, "a1 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) })
+		stop()
+		turn := deref(s.get(t, a.AgentID).RunningTurnID)
+		before := len(rows(t, s, a.AgentID, 0))
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		item := func(id string) loomharness.Event {
+			return loomharness.Event{Type: loomharness.EventItemCompleted, Session: ref, TurnID: turn, ItemID: id, ItemKind: "message"}
+		}
+		page2 := []loomharness.Event{item("new2"), {Type: loomharness.EventTurnCompleted, Session: ref, TurnID: turn, StopReason: "end_turn"}}
+		w := tweaked{Harness: e.h, page1: []loomharness.Event{item("new1"),
+			{Type: loomharness.EventAskResolved, Session: ref, TurnID: turn, AskID: "a1"}}}
+		good := w
+		good.page2 = func() (loomharness.MessagePage, error) { return loomharness.MessagePage{Events: page2}, nil }
+		switch mode {
+		case "read", "read+restart":
+			w.msgErr = errors.New("page 2 failed")
+		case "write":
+			w.page2 = func() (loomharness.MessagePage, error) {
+				cancel()
+				return loomharness.MessagePage{Events: page2}, nil
+			}
+		case "crash+restart":
+			w = good
+			replayCrash = func() { panic("crash") }
+			t.Cleanup(func() { replayCrash = func() {} })
+		}
+		if mode != "clean" {
+			s.harnesses["opencode"] = w
+			func() {
+				defer func() { _ = recover() }()
+				if err := s.replay(ctx, "opencode", s.get(t, a.AgentID)); err == nil {
+					t.Fatalf("%s: the first replay succeeded", mode)
+				}
+			}()
+			replayCrash = func() {}
+			if n := len(rows(t, s, a.AgentID, 0)) - before; mode != "crash+restart" && n != 0 {
+				t.Fatalf("%s: the failed replay saved %d rows", mode, n)
+			}
+			if strings.HasSuffix(mode, "+restart") {
+				s = e.service(ServiceConfig{})
+			}
+		}
+		s.harnesses["opencode"] = good
+		if err := s.replay(context.Background(), "opencode", s.get(t, a.AgentID)); err != nil {
+			t.Fatalf("%s: retry: %v", mode, err)
+		}
+		var out outcome
+		for _, r := range rows(t, s, a.AgentID, 0)[before:] {
+			out.kinds = append(out.kinds, r.Kind)
+		}
+		out.asks, out.state = askIDs(t, s, a.AgentID), s.get(t, a.AgentID).State
+		return out
+	}
+	want := run("clean")
+	t.Logf("clean: %+v", want)
+	if want.state != StateIdle || len(want.asks) != 0 || !slices.Contains(want.kinds, string(loomharness.EventAskResolved)) ||
+		slices.Contains(want.kinds, KindAskLost) {
+		t.Fatalf("clean replay = %+v; want a1 resolved, no ask.lost, idle", want)
+	}
+	for _, mode := range []string{"read", "write", "read+restart", "crash+restart"} {
+		if got := run(mode); !slices.Equal(got.kinds, want.kinds) || !slices.Equal(got.asks, want.asks) || got.state != want.state {
+			t.Fatalf("%s: %+v; want %+v", mode, got, want)
+		}
 	}
 }
