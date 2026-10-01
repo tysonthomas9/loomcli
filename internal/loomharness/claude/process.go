@@ -36,6 +36,7 @@ type Config struct {
 	Env     []string    // the base environment; nil is the user's own (R1)
 	Args    []string    // extra flags, such as the permission tool and MCP config
 	OnFrame func(Frame) // every stdout frame in order, called from the reader; may be nil
+	OnExit  func()      // the running process exited without Close; may be nil
 }
 
 // Frame is one stdout line of the stream-json protocol.
@@ -105,6 +106,7 @@ type Process struct {
 	busy    bool
 	pending map[string]chan controlResponse
 	warning string
+	closing bool // Close or a failed launch is stopping the process
 }
 
 // NewProcess returns a process; nothing starts until the first Prompt.
@@ -117,6 +119,13 @@ func (p *Process) Warning() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.warning
+}
+
+// Busy reports whether a prompted turn is running (until its result).
+func (p *Process) Busy() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.busy
 }
 
 // Prompt sends one user message, keyed by key (echoed as its uuid), and
@@ -263,8 +272,22 @@ func (p *Process) read(cmd *exec.Cmd, stdout io.Reader, exited, inited, first ch
 	if p.cmd == cmd {
 		p.cmd, p.busy = nil, false
 	}
+	lost := !p.closing && isClosed(first)
+	p.closing = false
 	p.mu.Unlock()
 	close(exited)
+	if lost && p.cfg.OnExit != nil {
+		p.cfg.OnExit()
+	}
+}
+
+func isClosed(ch chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
 }
 
 func closeOnce(ch chan struct{}) {
@@ -342,6 +365,7 @@ func (p *Process) Close(context.Context) error {
 func (p *Process) stop() {
 	p.mu.Lock()
 	cmd, exited := p.cmd, p.exited
+	p.closing = cmd != nil
 	p.mu.Unlock()
 	if cmd == nil {
 		return
