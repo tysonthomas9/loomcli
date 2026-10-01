@@ -16,18 +16,19 @@ type Harness interface {
 	Name() string // "opencode" | "codex" | "claude"
 	Models(ctx context.Context) ([]Model, error)
 	Health(ctx context.Context) (Health, error)
-	Open(ctx context.Context, spec OpenSpec) (SessionRef, error) // idempotent by spec.Key
-	Session(ref SessionRef) Session
+	Open(ctx context.Context, spec OpenSpec) (NativeRef, error) // idempotent by spec.Key
+	Session(ref NativeRef) Session
 	Feed(ctx context.Context) (Feed, error) // live events for all sessions; ends on disconnect
-	// Purge deletes exactly the recorded native IDs it is given, never more.
-	Purge(ctx context.Context, owned []SessionRef) error
+	// Purge deletes exactly the recorded refs it is given, never more, and
+	// never resolves a root itself.
+	Purge(ctx context.Context, owned []NativeRef) error
 	Restart(ctx context.Context) error // a no-op for Claude
 }
 
 // Session is one native session, thread or Claude session.
 type Session interface {
-	Resume(ctx context.Context) error           // recover the same native session before hand-over
-	Prompt(ctx context.Context, in Input) error // only when idle; in.Key is the native key
+	Resume(ctx context.Context, l Launch) (NativeRef, error) // recover the same native session before hand-over
+	Prompt(ctx context.Context, in Input) error              // only when idle; in.Key is the native key
 	Interrupt(ctx context.Context) (interrupted bool, err error)
 	Reply(ctx context.Context, askID string, r Reply) error
 	HasInput(ctx context.Context, key string) (Landed, error)
@@ -39,15 +40,25 @@ type Session interface {
 	Close(ctx context.Context) error                  // stop this runtime; native history is kept
 }
 
-// SessionRef is the provider-native session or thread ID.
-type SessionRef struct {
-	Harness string
-	ID      string
+// NativeRef is a provider-native session or thread ID plus the root it lives
+// under. Loom records every NativeRef an agent owns (loomstore ownership row:
+// native_root, native_id) and passes those records back to Purge.
+type NativeRef struct {
+	Root     string
+	NativeID string
+}
+
+// Launch is the opaque per-agent launch input (profile root and secret env).
+// The port never interprets it; adapters return the Root they used.
+type Launch struct {
+	Root string
+	Env  map[string]string
 }
 
 // OpenSpec describes a session to open.
 type OpenSpec struct {
 	Key      string // stable, derived from the AgentID
+	Launch   Launch
 	Preset   PresetConfig
 	Dir      string // the agent's worktree
 	Model    string
@@ -145,7 +156,7 @@ const (
 // catch-up read; Seq is the native sequence number when there is one.
 type Event struct {
 	Type       EventType
-	Session    SessionRef
+	Session    NativeRef
 	TurnID     string
 	ItemID     string
 	ItemKind   string // message | reasoning | tool
