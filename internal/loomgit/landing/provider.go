@@ -32,7 +32,7 @@ func expectedBase(ctx context.Context, store Store, publication journal.Publicat
 			return predecessor.Branch, nil
 		}
 	}
-	return publication.Trunk, nil
+	return targetTrunk(publication, all), nil
 }
 
 func observeProvider(ctx context.Context, store Store, forge Forge, item fetchedPublication, pull stackpublish.PR, all []journal.Publication) error {

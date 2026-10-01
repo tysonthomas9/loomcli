@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/landing"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 )
 
@@ -168,5 +171,108 @@ func TestRecordedNativeStackStaleLeaseLeavesStackAndBases(t *testing.T) {
 	firstBranch, _ := refname.ChangeBranch("W", "A")
 	if got := git(t, fixture.remote, "rev-parse", "refs/heads/"+firstBranch); got != first.HeadSHA {
 		t.Fatalf("first branch moved to %s after stale lease", got)
+	}
+}
+
+// nativeFourLayerStack publishes A-D as one native stack, with each PR based on
+// its predecessor's branch as GitHub stacks are.
+func nativeFourLayerStack(t *testing.T) (fixture, *fakeForge, []loomgit.Revision) {
+	t.Helper()
+	fixture, ctx := newFixture(t), context.Background()
+	revisions, parent := []loomgit.Revision{}, fixture.base
+	for _, change := range []string{"A", "B", "C", "D"} {
+		revision := stackRevision(t, fixture, change, 1, parent)
+		revisions, parent = append(revisions, revision), revision.HeadSHA
+	}
+	git(t, fixture.repo, "branch", "-m", "loom/ws/W/interactive/L")
+	if err := fixture.store.SaveWorkingAreas(ctx, []journal.WorkingArea{{Workspace: "W", Lead: "L", Repo: "repo",
+		Path: fixture.repo, Branch: "loom/ws/W/interactive/L", BaseSHA: fixture.base, Mode: "worktree"}}); err != nil {
+		t.Fatal(err)
+	}
+	forge, request := &fakeForge{}, fixture.request()
+	request.forge = forge
+	if _, err := publishStack(ctx, fixture.store, StackRequest{Request: request, StackID: "feature-1",
+		Changes: []string{"A", "B", "C", "D"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.RecordStackBackend(ctx, "W", "feature-1", "native"); err != nil {
+		t.Fatal(err)
+	}
+	if forge.prs[2].Base != forge.prs[1].Head {
+		t.Fatalf("C PR base = %s, want predecessor branch %s", forge.prs[2].Base, forge.prs[1].Head)
+	}
+	t.Setenv("LOOM_CONFIG_DIR", filepath.Dir(fixture.repo))
+	t.Setenv("GITHUB_TOKEN", "fixture-token")
+	return fixture, forge, revisions
+}
+
+// squashOnto commits one new squash commit per change onto start in a scratch
+// worktree, pushes the result to branch, and returns the new commits.
+func squashOnto(t *testing.T, fixture fixture, start, branch string, changes ...string) []string {
+	t.Helper()
+	trunk := filepath.Join(t.TempDir(), "trunk")
+	git(t, fixture.repo, "worktree", "add", "-q", "--detach", trunk, start)
+	commits := make([]string, 0, len(changes))
+	for _, change := range changes {
+		if err := os.WriteFile(filepath.Join(trunk, change), []byte(change+"1"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		git(t, trunk, "add", change)
+		git(t, trunk, "commit", "-qm", "squash "+change)
+		commits = append(commits, git(t, trunk, "rev-parse", "HEAD"))
+	}
+	git(t, trunk, "push", "-q", "--force", "origin", "HEAD:refs/heads/"+branch)
+	return commits
+}
+
+func mergePR(pr *stackpublish.PR, mergeCommit string) {
+	pr.Merged, pr.State, pr.MergeCommitSHA = true, "closed", mergeCommit
+}
+
+func TestLandingRecordsSquashedStackLayersOnTrunkAndRestacksNative(t *testing.T) {
+	fixture, forge, revisions := nativeFourLayerStack(t)
+	ctx := context.Background()
+	squashes := squashOnto(t, fixture, fixture.base, "develop", "A", "B", "C")
+	for index := range squashes {
+		mergePR(&forge.prs[index], squashes[index])
+	}
+	provider := squashOnto(t, fixture, squashes[2], forge.prs[3].Head, "D")[0]
+	forge.prs[3].Base, forge.prs[3].HeadSHA = "develop", provider
+	if err := fixture.store.OfferRestack(ctx, journal.RestackOffer{Workspace: "W", Change: "D", Predecessor: "C",
+		Repo: "repo", Revision: revisions[3].Number, TrunkSHA: squashes[2]}); err != nil {
+		t.Fatal(err)
+	}
+	if err := landing.ReconcileWithOptions(ctx, fixture.store, forge, landing.Options{Restack: RestackOffer}); err != nil {
+		t.Fatalf("native restack after stacked landing: %v", err)
+	}
+	for _, change := range []string{"A", "B", "C"} {
+		if status, err := fixture.store.LandingStatus(ctx, "W", change); err != nil || status.State != "landed" {
+			t.Fatalf("%s landing = %+v, %v", change, status, err)
+		}
+	}
+	publication, found, err := fixture.store.Publication(ctx, "W", "D")
+	if err != nil || !found || publication.Head != provider || publication.Trunk != "develop" {
+		t.Fatalf("restacked D publication = %+v, %v", publication, err)
+	}
+	if revision, err := fixture.store.SourceRevision(ctx, "W", "D"); err != nil || revision <= revisions[3].Number {
+		t.Fatalf("D derived revision = %d, %v", revision, err)
+	}
+}
+
+func TestLandingIgnoresMergeIntoPredecessorBranchOffTrunk(t *testing.T) {
+	fixture, forge, revisions := nativeFourLayerStack(t)
+	ctx := context.Background()
+	squashes := squashOnto(t, fixture, fixture.base, "develop", "A", "B")
+	mergePR(&forge.prs[0], squashes[0])
+	mergePR(&forge.prs[1], squashes[1])
+	intoB := squashOnto(t, fixture, revisions[1].HeadSHA, forge.prs[1].Head, "C")[0]
+	mergePR(&forge.prs[2], intoB)
+	if err := landing.ReconcileWithOptions(ctx, fixture.store, forge, landing.Options{}); err != nil {
+		t.Fatal(err)
+	}
+	for change, want := range map[string]string{"A": "landed", "B": "landed", "C": "merged", "D": "published"} {
+		if status, err := fixture.store.LandingStatus(ctx, "W", change); err != nil || status.State != want {
+			t.Fatalf("%s landing = %+v, %v; want %s", change, status, err, want)
+		}
 	}
 }
