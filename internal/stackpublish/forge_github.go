@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,8 @@ import (
 
 // DefaultGitHubBaseURL is the GitHub REST API root.
 const DefaultGitHubBaseURL = "https://api.github.com"
+
+var ErrMergeQueueRequired = errors.New("merge queue required")
 
 // GitHubForge is a repo-scoped GitHub implementation of Forge over the REST API.
 // The token is used for API calls and is supplied to git push via an env-backed
@@ -111,6 +114,12 @@ func (g *GitHubForge) MergeNativePull(ctx context.Context, owner, repo string, n
 		return err
 	}
 	if status != http.StatusAccepted && status != http.StatusOK {
+		message := strings.ToLower(string(data))
+		if (status == http.StatusUnprocessableEntity || status == http.StatusConflict) &&
+			strings.Contains(message, "merge queue") &&
+			(strings.Contains(message, "required") || strings.Contains(message, "must")) {
+			return fmt.Errorf("github native merge: %w", ErrMergeQueueRequired)
+		}
 		return g.apiErr("PUT", path, status, data)
 	}
 	var result struct {

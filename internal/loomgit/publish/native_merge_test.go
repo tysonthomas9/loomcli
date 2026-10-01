@@ -17,6 +17,7 @@ type fakeMergeForge struct {
 	*fakeForge
 	prs       []stackpublish.PR
 	submitted []int
+	mergeErr  error
 }
 
 func (forge *fakeMergeForge) PullByNumber(_ context.Context, _, _ string, number int) (stackpublish.PR, error) {
@@ -29,6 +30,9 @@ func (forge *fakeMergeForge) PullByNumber(_ context.Context, _, _ string, number
 }
 
 func (forge *fakeMergeForge) MergeNativePull(_ context.Context, _, _ string, number int, head string) error {
+	if forge.mergeErr != nil {
+		return forge.mergeErr
+	}
 	pr, err := forge.PullByNumber(context.Background(), "", "", number)
 	if err != nil || pr.HeadSHA != head {
 		return journal.ErrStale
@@ -170,6 +174,20 @@ func TestNativeMergeStopsAfterHigherLayerMoves(t *testing.T) {
 	forge.prs[1].HeadSHA = "human-pushed"
 	codeIs(t, ReconcileNativeMerges(ctx, caseFixture.store, forge), loomgit.Stale)
 	if len(forge.submitted) != 1 {
+		t.Fatalf("submitted = %v", forge.submitted)
+	}
+}
+
+func TestNativeMergeQueueRequiredStopsWithoutRetry(t *testing.T) {
+	caseFixture, forge, request := nativeMergeFixture(t)
+	request.forge = forge
+	forge.mergeErr = stackpublish.ErrMergeQueueRequired
+	ctx := context.Background()
+	codeIs(t, (GitHubStackBackend{Store: caseFixture.store}).MergeUpTo(ctx, request, "B"), loomgit.MergeQueueRequired)
+	if err := ReconcileNativeMerges(ctx, caseFixture.store, forge); err != nil {
+		t.Fatal(err)
+	}
+	if len(forge.submitted) != 0 {
 		t.Fatalf("submitted = %v", forge.submitted)
 	}
 }

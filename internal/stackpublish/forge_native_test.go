@@ -3,6 +3,7 @@ package stackpublish
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -91,5 +92,17 @@ func TestGitHubForgeNativeAsyncMerge(t *testing.T) {
 	defer server.Close()
 	if err := NewGitHubForge("fixture", server.Client(), server.URL).MergeNativePull(context.Background(), "owner", "repo", 11, "abc"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestGitHubForgeNativeMergeQueueRejection(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = writer.Write([]byte(`{"message":"Merge queue is required for this branch"}`))
+	}))
+	defer server.Close()
+	err := NewGitHubForge("fixture", server.Client(), server.URL).MergeNativePull(context.Background(), "owner", "repo", 11, "abc")
+	if !errors.Is(err, ErrMergeQueueRequired) {
+		t.Fatalf("queue rejection = %v", err)
 	}
 }

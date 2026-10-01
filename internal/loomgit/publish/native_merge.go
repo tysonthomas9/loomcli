@@ -181,6 +181,14 @@ func submitNativeMerge(ctx context.Context, store nativeMergeStore, forge native
 		return err
 	}
 	if err := forge.MergeNativePull(ctx, parts[0], parts[1], publication.PRNumber, pr.HeadSHA); err != nil {
+		if errors.Is(err, stackpublish.ErrMergeQueueRequired) {
+			merge.Phase, merge.Head = "dispatching", pr.HeadSHA
+			message := "GitHub requires this PR to merge through its merge queue"
+			if blockErr := store.BlockNativeMerge(ctx, merge, message); blockErr != nil {
+				return blockErr
+			}
+			return loomgit.NewError(loomgit.MergeQueueRequired, message, err)
+		}
 		return err
 	}
 	merge.Phase, merge.Head = "dispatching", pr.HeadSHA
