@@ -384,9 +384,10 @@ func descendants(procs map[int]process, roots []int) []int {
 	return out
 }
 
-// githubTokens never reach the server: agents publish through Loom (R32).
-// Inherited OpenCode passwords are dropped too; spawn sets its own.
-var githubTokens = []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN"}
+// githubTokens never reach the server, nor the processes it starts: agents
+// publish through Loom (R32). Inherited OpenCode passwords are dropped too;
+// spawn sets its own.
+var githubTokens = []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_TOKEN_FILE"}
 
 // env is the configured environment without GitHub tokens, plus the Loom
 // presets merged into OPENCODE_CONFIG_CONTENT, which OpenCode applies over the
