@@ -92,7 +92,7 @@ func localLoginToken(t *testing.T) string {
 	keychain := filepath.Join(u.HomeDir, "Library", "Keychains", "login.keychain-db")
 	out, err := exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials", "-a", u.Username, "-w", keychain).Output()
 	if err != nil {
-		t.Skip("real Claude: cannot read the local Claude login from the login keychain (run `claude` once to log in); no fallback to ~/.claude")
+		t.Skip("real Claude login: absent/unreadable from the login keychain (run `claude` once to log in); no fallback to ~/.claude")
 	}
 	var c struct {
 		ClaudeAiOauth struct {
@@ -101,12 +101,25 @@ func localLoginToken(t *testing.T) string {
 		} `json:"claudeAiOauth"`
 	}
 	if json.Unmarshal(out, &c) != nil || c.ClaudeAiOauth.AccessToken == "" {
-		t.Skip("real Claude: the local Claude login has no OAuth access token")
+		t.Skip("real Claude login: absent/unreadable (no OAuth access token)")
 	}
 	if time.UnixMilli(c.ClaudeAiOauth.ExpiresAt).Before(time.Now().Add(15 * time.Minute)) {
-		t.Skip("real Claude: the local Claude login token expires within 15 minutes; run `claude` once to refresh it (tests never refresh or write it)")
+		t.Skip("real Claude login: present, expires soon (within 15 minutes); run `claude` once to refresh it (tests never refresh or write it)")
 	}
 	return c.ClaudeAiOauth.AccessToken
+}
+
+// TestLocalLoginTokenPreflight is the $0 first step of a real run: it only
+// reads the login token as the real tests do (owned HOME, explicit login
+// keychain file) and reports its state, never the token. No claude launch.
+// It skips with "absent/unreadable" or "expires soon" from localLoginToken.
+func TestLocalLoginTokenPreflight(t *testing.T) {
+	if os.Getenv("LOOM_REAL_CLAUDE") != "1" {
+		t.Skip("set LOOM_REAL_CLAUDE=1 to read the local Claude login")
+	}
+	if localLoginToken(t) != "" {
+		t.Log("real Claude login: present, expires in >15m")
+	}
 }
 
 // authAccepted runs `claude auth status`, which takes no model turn, with the
