@@ -154,7 +154,7 @@ func spoofService(state string) int {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"pid": victim})
 	})
-	go func() { _ = http.Serve(l, mux) }() //nolint:gosec // G114: test-only fake server.
+	go func() { _ = http.Serve(l, mux) }()                                                                                                         //nolint:gosec // G114: test-only fake server.
 	b, _ := json.Marshal(registration{ID: "spoof", Version: "2.0.19", URL: "http://" + l.Addr().String(), PID: victim, Password: "fixture-spoof"}) //nolint:gosec // G117: synthetic password.
 	_ = os.MkdirAll(filepath.Join(state, "opencode"), 0o700)
 	_ = os.WriteFile(filepath.Join(state, "opencode", "service.json"), b, 0o600)
