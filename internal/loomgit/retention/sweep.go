@@ -377,10 +377,6 @@ func removeCopy(ctx context.Context, row journal.RetainedCopy,
 	return nil
 }
 
-func checkCopyContent(ctx context.Context, runner *gitexec.Runner, expected string) error {
-	return checkCopyContentWithLock(ctx, runner, expected, false)
-}
-
 func checkCopyContentWithLock(ctx context.Context, runner *gitexec.Runner, expected string, ownAgentLock bool) error {
 	head, err := runner.Run(ctx, "rev-parse", "HEAD")
 	if err != nil {

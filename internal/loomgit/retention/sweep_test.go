@@ -101,7 +101,7 @@ func TestCloneRefsCapturedRejectsExtraLocalCommit(t *testing.T) {
 	if _, err := copyRunner.Run(ctx, "checkout", "--detach", base); err != nil {
 		t.Fatal(err)
 	}
-	if err := checkCopyContent(ctx, copyRunner, base); err != nil {
+	if err := checkCopyContentWithLock(ctx, copyRunner, base, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := cloneRefsCaptured(ctx, sourceRunner, copyRunner, base); err == nil {
