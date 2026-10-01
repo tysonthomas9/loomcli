@@ -75,7 +75,7 @@ func recordLoomMerge(ctx context.Context, store *journal.SQLite, request StackRe
 }
 
 func validateLoomMergeOrder(ctx context.Context, store *journal.SQLite, request StackRequest) error {
-	area, err := gitexec.New(request.WorkingArea, gitexec.Options{})
+	area, err := gitexec.New(request.WorkingArea, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
 	if err != nil {
 		return err
 	}
