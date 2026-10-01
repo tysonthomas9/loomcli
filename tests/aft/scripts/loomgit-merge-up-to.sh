@@ -8,6 +8,8 @@ if [[ "$backend" == native ]]; then workspace="E2E-WS-MERGE-NATIVE"; else worksp
 api="$AFT_BASE_URL/api/workspaces/$workspace"
 repo="$case_dir/merge-repo"
 remote="$case_dir/origin.git"
+export LOOM_CONNECTOR_GITHUB_BASE_URL="$AFT_FAKE_GH_BASE"
+export GITHUB_TOKEN=aft-fixture-token
 
 loom() {
   LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace "$workspace" "$@"
@@ -67,20 +69,32 @@ for layer in 1 2 3 4; do
     sleep 2
   done
   grep -q '"head_sha"' "$case_dir/revisions-$layer.json"
+done
+
+for layer in 1 2 3 4; do
+  task="$(cat "$case_dir/task-$layer.id")"
   read -r change revision sha < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["change_id"],item["number"],item["head_sha"])' "$case_dir/revisions-$layer.json")
   printf '%s\n' "$change" > "$case_dir/change-$layer.id"
-  curl -fsS -X POST "$api/changes/$change/revisions/$revision/verdict" -H 'Content-Type: application/json' \
-    -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" >/dev/null
+  curl -sS --fail-with-body -X POST "$api/changes/$change/revisions/$revision/verdict" -H 'Content-Type: application/json' \
+    -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" > "$case_dir/verdict-$layer.json"
   curl -fsS -X POST "$api/git/apply" -H 'Content-Type: application/json' \
     -d "{\"change\":\"$change\",\"revision\":$revision,\"lead\":\"lead\"}" > "$case_dir/apply-$layer.json"
   grep -q '"success":true' "$case_dir/apply-$layer.json"
+done
+
+for layer in 1 2 3 4; do
+  task="$(cat "$case_dir/task-$layer.id")"
+  change="$(cat "$case_dir/change-$layer.id")"
   curl -fsS "$api/issues/$task/revisions" > "$case_dir/applied-revisions-$layer.json"
   read -r applied_revision applied_sha < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["number"],item["head_sha"])' "$case_dir/applied-revisions-$layer.json")
   curl -fsS -X POST "$api/changes/$change/revisions/$applied_revision/verdict" -H 'Content-Type: application/json' \
     -d "{\"head_sha\":\"$applied_sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" >/dev/null
 done
 
-LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" pr-stack aft-chain lead --workspace "$workspace" > "$case_dir/publish.txt"
+LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" pr-stack aft-chain lead \
+  "$(cat "$case_dir/change-1.id")" "$(cat "$case_dir/change-2.id")" \
+  "$(cat "$case_dir/change-3.id")" "$(cat "$case_dir/change-4.id")" \
+  --workspace "$workspace" > "$case_dir/publish.txt"
 curl -fsS "$AFT_FAKE_GH_BASE/__pulls" > "$case_dir/pulls-before.json"
 python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); assert len(p)==4, p; assert [x["base"]["ref"] for x in p]==["main"]+[x["head"]["ref"] for x in p[:3]], p' "$case_dir/pulls-before.json"
 target="$(cat "$case_dir/change-3.id")"

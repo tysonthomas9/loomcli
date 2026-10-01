@@ -143,7 +143,7 @@ const server = createServer(async (request, response) => {
         const pull = pulls.find((item) => item.number === number);
         pull.state = "closed";
         pull.merged_at = new Date().toISOString();
-        pull.merge_commit_sha = sha;
+        pull.merge_commit_sha = currentPull(pull).head.sha;
       }
       const successor = stack && pulls.find((item) => item.number === stack.numbers[numbers.length]);
       if (successor) successor.base.ref = "main";
