@@ -109,17 +109,19 @@ func (s *SQLite) AdvanceApplied(ctx context.Context, requestID, oldPhase, nextPh
 	return tx.Commit()
 }
 
+const appliedLayersWhere = `SELECT request_id,workspace,lead,change_id,revision,old_tip,new_tip,commits,dropped,commit_details,phase
+		FROM applied_layers WHERE workspace=? AND lead=? AND `
+
 func (s *SQLite) AppliedLog(ctx context.Context, workspace, lead string) ([]loomgit.AppliedLayer, error) {
-	return s.appliedLayers(ctx, workspace, lead, "phase='done'")
+	return s.appliedLayers(ctx, appliedLayersWhere+`phase='done' ORDER BY rowid`, workspace, lead)
 }
 
 func (s *SQLite) OpenApplied(ctx context.Context, workspace, lead string) ([]loomgit.AppliedLayer, error) {
-	return s.appliedLayers(ctx, workspace, lead, "phase NOT IN ('done','not_applied','unapplied')")
+	return s.appliedLayers(ctx, appliedLayersWhere+`phase NOT IN ('done','not_applied','unapplied') ORDER BY rowid`, workspace, lead)
 }
 
-func (s *SQLite) appliedLayers(ctx context.Context, workspace, lead, phaseCondition string) ([]loomgit.AppliedLayer, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT request_id,workspace,lead,change_id,revision,old_tip,new_tip,commits,dropped,commit_details,phase
-		FROM applied_layers WHERE workspace=? AND lead=? AND `+phaseCondition+` ORDER BY rowid`, workspace, lead)
+func (s *SQLite) appliedLayers(ctx context.Context, query, workspace, lead string) ([]loomgit.AppliedLayer, error) {
+	rows, err := s.db.QueryContext(ctx, query, workspace, lead)
 	if err != nil {
 		return nil, err
 	}
