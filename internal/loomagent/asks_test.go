@@ -102,22 +102,21 @@ func TestGetOpenAsksIntegration(t *testing.T) {
 	fh.Script(beta.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "b1"}}})
 	mustSendMsg(t, s1, sendReq(alpha.AgentID, "u1", "go", user))
 	mustSendMsg(t, s1, sendReq(beta.AgentID, "u1", "go", user))
-	eventually(t, "the approvals open", func() bool {
+	eventually(t, "the approvals open and alpha waits on approval", func() bool {
+		a := s1.get(t, alpha.AgentID)
 		return slices.Equal(askIDs(t, s1, alpha.AgentID), []string{"a1:approval"}) &&
-			slices.Equal(askIDs(t, s1, beta.AgentID), []string{"b1:approval"})
+			slices.Equal(askIDs(t, s1, beta.AgentID), []string{"b1:approval"}) &&
+			s1.get(t, beta.AgentID).State == StateWaiting && a.State == StateWaiting && deref(a.WaitingOn) == "approval"
 	})
-	if a := s1.get(t, alpha.AgentID); a.State != StateWaiting || deref(a.WaitingOn) != "approval" {
-		t.Fatalf("alpha %s on %q; want waiting on approval", a.State, deref(a.WaitingOn))
-	}
 	wantCode(t, s1.Respond(ctx, RespondRequest{AgentID: alpha.AgentID, AskID: "zz", Decision: "allow_once"}), CodeAskNotFound)
 	if err := s1.Respond(ctx, RespondRequest{AgentID: alpha.AgentID, AskID: "a1", Decision: "allow_once"}); err != nil {
 		t.Fatal(err)
 	}
 	wantCode(t, s1.Respond(ctx, RespondRequest{AgentID: alpha.AgentID, AskID: "a1", Decision: "allow_once"}), CodeAskNotFound)
-	eventually(t, "the question opens", func() bool { return slices.Equal(askIDs(t, s1, alpha.AgentID), []string{"q1:question"}) })
-	if a := s1.get(t, alpha.AgentID); a.State != StateWaiting || deref(a.WaitingOn) != "input" {
-		t.Fatalf("alpha %s on %q; want waiting on input", a.State, deref(a.WaitingOn))
-	}
+	eventually(t, "the question opens and alpha waits on input", func() bool {
+		a := s1.get(t, alpha.AgentID)
+		return slices.Equal(askIDs(t, s1, alpha.AgentID), []string{"q1:question"}) && a.State == StateWaiting && deref(a.WaitingOn) == "input"
+	})
 
 	stop1() // serve restarts; meanwhile beta's approval stopped being pending
 	s2 := e.service(ServiceConfig{})
@@ -311,7 +310,9 @@ func TestFailedBackfillKeepsOpenAsks(t *testing.T) {
 	a, _ := newLead(t, e, s, "alpha")
 	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
 	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
-	eventually(t, "a1 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) })
+	eventually(t, "a1 opens", func() bool {
+		return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) && s.get(t, a.AgentID).State == StateWaiting
+	})
 	stop()
 	var reads atomic.Int32
 	s.harnesses["opencode"] = tweaked{Harness: e.h, msgErr: errors.New("history read failed"), reads: &reads}
@@ -345,7 +346,9 @@ func TestRespondAlwaysNotNarrowed(t *testing.T) {
 	a, _ := newLead(t, e, s, "alpha")
 	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
 	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
-	eventually(t, "a1 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) })
+	eventually(t, "a1 opens", func() bool {
+		return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) && s.get(t, a.AgentID).State == StateWaiting
+	})
 	stop()
 	var replies []loomharness.Reply
 	s.harnesses["opencode"] = tweaked{Harness: e.h, alwaysErr: loomharness.ErrUnavailable, replies: &replies}
@@ -377,7 +380,9 @@ func TestProbePartialBackfillKeepsOpenAsk(t *testing.T) {
 		a, ref := newLead(t, e, s, "alpha")
 		fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
 		mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
-		eventually(t, "a1 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) })
+		eventually(t, "a1 opens", func() bool {
+			return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) && s.get(t, a.AgentID).State == StateWaiting
+		})
 		stop()
 		ctx, cancel := context.WithCancel(context.Background())
 		turn := deref(s.get(t, a.AgentID).RunningTurnID)
@@ -471,7 +476,9 @@ func TestReplayedTurnEndLosesItsAsk(t *testing.T) {
 		a, ref := newLead(t, e, s, "alpha")
 		fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
 		mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
-		eventually(t, "a1 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) })
+		eventually(t, "a1 opens", func() bool {
+			return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) && s.get(t, a.AgentID).State == StateWaiting
+		})
 		stop()
 		turn := deref(s.get(t, a.AgentID).RunningTurnID)
 		extra := []loomharness.Event{{Type: loomharness.EventTurnCompleted, Session: ref, TurnID: turn, StopReason: "cancelled"}}
@@ -541,7 +548,9 @@ func TestReplayRetryConverges(t *testing.T) {
 		a, ref := newLead(t, e, s, "alpha")
 		fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
 		mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
-		eventually(t, "a1 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) })
+		eventually(t, "a1 opens", func() bool {
+			return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) && s.get(t, a.AgentID).State == StateWaiting
+		})
 		stop()
 		turn := deref(s.get(t, a.AgentID).RunningTurnID)
 		before := len(rows(t, s, a.AgentID, 0))
