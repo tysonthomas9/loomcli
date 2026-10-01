@@ -6,7 +6,8 @@
 #
 ARG GO_VERSION=1.27.1
 
-FROM golang:${GO_VERSION}-bookworm
+FROM golang:${GO_VERSION}-trixie
+COPY scripts/check-git-version.sh internal/loomgit/gitversion/minimum.txt /tmp/git-check/
 
 # System packages + Node.js 20 in one layer
 RUN apt-get update \
@@ -14,6 +15,7 @@ RUN apt-get update \
         tmux git jq curl ca-certificates gnupg \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
+    && sh /tmp/git-check/check-git-version.sh /tmp/git-check/minimum.txt \
     && rm -rf /var/lib/apt/lists/*
 
 # Playwright chromium (the expensive part — ~2-3 min)

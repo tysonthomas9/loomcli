@@ -28,11 +28,13 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 go build -o /out/loom ./cmd/loom
 
 # ── Stage 2: runtime ──
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
+COPY scripts/check-git-version.sh internal/loomgit/gitversion/minimum.txt /tmp/git-check/
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates git jq nodejs npm tmux wget \
     && npm install -g @openai/codex@${CODEX_CLI_VERSION} \
     && npm cache clean --force \
+    && sh /tmp/git-check/check-git-version.sh /tmp/git-check/minimum.txt \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /out/loom /usr/local/bin/loom
 COPY test/fleetdb/empty-daemon-manager.sh /usr/local/bin/loom-empty-daemon-manager

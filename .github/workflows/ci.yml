@@ -40,6 +40,9 @@ jobs:
       - name: Install Git LFS for gitexec tests
         run: sudo apt-get update && sudo apt-get install -y git-lfs gnupg
 
+      - name: Check Loom Git version
+        run: sh scripts/check-git-version.sh internal/loomgit/gitversion/minimum.txt
+
       - name: Decoupling smoke (no frontend dist)
         run: |
           rm -rf internal/webui/frontend/dist
@@ -87,6 +90,9 @@ jobs:
 
       - name: Install Git LFS for gitexec tests
         run: sudo apt-get update && sudo apt-get install -y git-lfs gnupg
+
+      - name: Check Loom Git version
+        run: sh scripts/check-git-version.sh internal/loomgit/gitversion/minimum.txt
 
       - name: Run tests with coverage
         run: go test -race -coverprofile=coverage.out -tags=integration -timeout 15m ./...
@@ -171,6 +177,14 @@ jobs:
         run: |
           git config --global user.name "CI Bot"
           git config --global user.email "ci@loomcli.test"
+
+      - name: Install current Git
+        run: |
+          brew install git
+          echo "$(brew --prefix git)/bin" >> "$GITHUB_PATH"
+
+      - name: Check Loom Git version
+        run: sh scripts/check-git-version.sh internal/loomgit/gitversion/minimum.txt
 
       - name: Test
         run: go test -v -race -timeout 15m ./...

@@ -43,10 +43,12 @@
 # Build context: the staging dir assembled by build.sh
 # (bin/ loom-sdk/ flue-src/ a1-github-review/).
 
-FROM docker.io/library/node:22-slim
+FROM docker.io/library/node:22-trixie-slim
+COPY check-git-version.sh minimum.txt /tmp/git-check/
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git curl ca-certificates lsof \
+    && sh /tmp/git-check/check-git-version.sh /tmp/git-check/minimum.txt \
     && rm -rf /var/lib/apt/lists/*
 
 # The codex CLI the A1 review task runner spawns. Pinned to the same package

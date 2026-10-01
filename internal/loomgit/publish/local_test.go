@@ -20,6 +20,23 @@ import (
 	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 )
 
+func useExplicitGitIdentity(t *testing.T) {
+	t.Helper()
+	configPath := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(configPath, []byte("[user]\nname = Test User\nemail = test@example.test\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", configPath)
+}
+
+func TestTrunkRevisionRequiresUserIdentity(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "missing-config"))
+	_, err := trunkRevision(context.Background(), nil, Request{})
+	if err == nil || !strings.Contains(err.Error(), "git user.name and user.email are required") {
+		t.Fatalf("trunk revision without user identity: %v", err)
+	}
+}
+
 func TestPublishStackRecordedIncludesLeadOwnedLayer(t *testing.T) {
 	fixture := newFixture(t)
 	ctx := context.Background()
@@ -156,6 +173,7 @@ func TestPublishRecordedRequiresVerdictBeforePush(t *testing.T) {
 }
 
 func TestPublishRecordedTrunkReplaysIndependentLayer(t *testing.T) {
+	useExplicitGitIdentity(t)
 	fixture := newFixture(t)
 	ctx := context.Background()
 	git(t, fixture.repo, "push", "origin", fixture.base+":refs/heads/develop")
@@ -286,6 +304,7 @@ func TestPublishRecordedTrunkHoldsDependentUntilLanding(t *testing.T) {
 }
 
 func TestPublishRecordedTrunkVerdictHoldSurvivesReopen(t *testing.T) {
+	useExplicitGitIdentity(t)
 	fixture := newFixture(t)
 	ctx := context.Background()
 	git(t, fixture.repo, "push", "origin", fixture.base+":refs/heads/develop")
@@ -324,6 +343,7 @@ func TestPublishRecordedTrunkVerdictHoldSurvivesReopen(t *testing.T) {
 }
 
 func TestPublishRecordedTrunkChangedPatchWaitsForVerdict(t *testing.T) {
+	useExplicitGitIdentity(t)
 	fixture := newFixture(t)
 	ctx := context.Background()
 	file := filepath.Join(fixture.repo, "file")
@@ -406,6 +426,7 @@ func TestFeatureFlagLabel(t *testing.T) {
 }
 
 func TestPublishLocalEntryReplaysTrunkLayer(t *testing.T) {
+	useExplicitGitIdentity(t)
 	fixture := newFixture(t)
 	ctx := context.Background()
 	configureLocalWorkspace(t, fixture)
@@ -450,6 +471,7 @@ func (landedForge) PullsForCommit(context.Context, string, string, string) ([]st
 }
 
 func TestLandingReconcilePublishesTrunkDependent(t *testing.T) {
+	useExplicitGitIdentity(t)
 	fixture := newFixture(t)
 	ctx := context.Background()
 	configureLocalWorkspace(t, fixture)

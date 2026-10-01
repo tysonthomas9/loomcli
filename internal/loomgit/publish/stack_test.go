@@ -244,7 +244,7 @@ func TestPublishStackReportsUnchangedLayerDriftAndRetryConverges(t *testing.T) {
 	firstBranch, _ := refname.ChangeBranch("W", "A")
 	secondBranch, _ := refname.ChangeBranch("W", "B")
 	git(t, fixture.repo, "push", fixture.remote, first.HeadSHA+":refs/heads/"+firstBranch)
-	runner, err := gitexec.New(fixture.repo, gitexec.Options{})
+	runner, err := gitexec.New(fixture.repo, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Test", Email: "test@example.test"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +378,7 @@ func TestPublishStackReconcilePushesAllIntentsAfterRestart(t *testing.T) {
 	request := fixture.request()
 	request.forge = &fakeForge{}
 	ctx := context.Background()
-	runner, err := gitexec.New(fixture.repo, gitexec.Options{})
+	runner, err := gitexec.New(fixture.repo, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Test", Email: "test@example.test"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +440,7 @@ func TestStackLayersRejectsTwoChildrenAndMergeParent(t *testing.T) {
 	second := stackRevision(t, fixture, "B", 1, fixture.base)
 	git(t, fixture.repo, "merge", "--no-ff", "-m", "join", first.HeadSHA)
 	merge := git(t, fixture.repo, "rev-parse", "HEAD")
-	runner, err := gitexec.New(fixture.repo, gitexec.Options{})
+	runner, err := gitexec.New(fixture.repo, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Test", Email: "test@example.test"}})
 	if err != nil {
 		t.Fatal(err)
 	}

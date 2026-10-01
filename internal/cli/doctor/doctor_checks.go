@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/gitversion"
 )
 
 // --- individual checks ---
@@ -24,7 +25,7 @@ func checkGit(deps *cli.Deps) CheckResult {
 		return CheckResult{
 			Name:    "git",
 			Status:  StatusFail,
-			Summary: "git not found",
+			Summary: gitversion.ErrorCode + ": git not found (requires Git " + gitversion.Minimum + "+)",
 			Detail:  "Install from https://git-scm.com",
 		}
 	}
@@ -34,18 +35,18 @@ func checkGit(deps *cli.Deps) CheckResult {
 	if len(matches) < 3 {
 		return CheckResult{
 			Name:    "git",
-			Status:  StatusWarn,
-			Summary: fmt.Sprintf("git found but version unparseable: %s", versionStr),
+			Status:  StatusFail,
+			Summary: gitversion.Check(versionStr).Error(),
 		}
 	}
 
 	major, _ := strconv.Atoi(matches[1])
 	minor, _ := strconv.Atoi(matches[2])
-	if major < 2 || (major == 2 && minor < 20) {
+	if err := gitversion.Check(versionStr); err != nil {
 		return CheckResult{
 			Name:    "git",
 			Status:  StatusFail,
-			Summary: fmt.Sprintf("git %d.%d found (requires >= 2.20 for worktree support)", major, minor),
+			Summary: err.Error(),
 			Detail:  "Upgrade git from https://git-scm.com",
 		}
 	}

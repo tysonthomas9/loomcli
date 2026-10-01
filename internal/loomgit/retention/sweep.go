@@ -145,7 +145,7 @@ func (s Sweep) captureRef(ctx context.Context, row journal.RetainedCopy, now tim
 		result.Reason = "dry run"
 		return result, nil
 	}
-	poolRepo, err := pool.New(s.Store).Admit(ctx, row.SourceRepo)
+	poolRepo, err := pool.New(s.Store, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}}).Admit(ctx, row.SourceRepo)
 	if err != nil {
 		result.Action, result.Reason = "keep", err.Error()
 		return result, nil
@@ -238,7 +238,7 @@ func (s Sweep) removeEligible(ctx context.Context, row journal.RetainedCopy, app
 }
 
 func (s Sweep) removeCopyUnderLeases(ctx context.Context, row journal.RetainedCopy, lockID string) error {
-	leasePool := pool.New(s.Store)
+	leasePool := pool.New(s.Store, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
 	sourceRepo, err := leasePool.Admit(ctx, row.SourceRepo)
 	if err != nil {
 		return err

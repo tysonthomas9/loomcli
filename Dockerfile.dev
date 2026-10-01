@@ -36,7 +36,8 @@ RUN --mount=type=cache,target=/root/.npm \
 # Debian (glibc) rather than Alpine (musl): cursor-agent ships glibc-only Linux
 # binaries (a glibc node + *.linux-*-gnu.node addons) that cannot run on musl.
 # glibc also runs the codex/claude/opencode CLIs, so every local backend works here.
-FROM node:24-bookworm-slim AS runtime
+FROM node:24-trixie-slim AS runtime
+COPY scripts/check-git-version.sh internal/loomgit/gitversion/minimum.txt /tmp/git-check/
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -47,6 +48,7 @@ RUN apt-get update \
         > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends gh \
+    && sh /tmp/git-check/check-git-version.sh /tmp/git-check/minimum.txt \
     && rm -rf /var/lib/apt/lists/*
 
 # Real AI backend CLIs. Users can override any of these at runtime:

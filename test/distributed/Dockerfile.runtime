@@ -1,5 +1,7 @@
 FROM alpine:3.20
+COPY scripts/check-git-version.sh internal/loomgit/gitversion/minimum.txt /tmp/git-check/
 
 RUN apk add --no-cache ca-certificates curl git tmux wget
+RUN sh /tmp/git-check/check-git-version.sh /tmp/git-check/minimum.txt
 
 WORKDIR /workspace

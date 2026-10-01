@@ -8,26 +8,18 @@
 #
 # ─── Two runtime targets ─────────────────────────────────────────────────────
 #
-#   runtime           (DEFAULT) distroless/static, nonroot. The production
-#                     reference image: minimal attack surface, no shell, no
-#                     package manager. API-only — see the caveat below.
-#   runtime-terminal  debian:bookworm-slim + bash/git/procps/wget, nonroot.
+#   runtime           (DEFAULT) same nonroot Debian runtime as runtime-terminal.
+#                     Git is required for Loom Git operations.
+#   runtime-terminal  debian:trixie-slim + bash/git/procps/wget, nonroot.
 #                     Used by docker-compose.dev.yml to smoke-test the full
 #                     stack including the Web UI terminal.
 #
-# Why two: the terminal feature spawns a PTY running $SHELL, falling back to
-# /bin/bash (internal/webui/terminal/pty_manager.go), and container health
-# probes of the CMD-SHELL form need a shell too. distroless has neither, so on
-# the `runtime` image the terminal cannot start and an in-container healthcheck
-# cannot run. Rather than downgrade the production image's hardening to serve a
-# dev smoke test, the shell-bearing variant is a separate, explicitly selected
-# target. The tradeoff is size and attack surface: `runtime-terminal` carries a
-# full Debian userland (~30x the base layer) and a package manager, which is
-# exactly what you do not want facing a network.
+# Loom Git invokes Git in the serving process, so the default runtime includes
+# the same Git-capable userland as the terminal target.
 #
 # `runtime` is deliberately the LAST stage in this file, so a bare
-# `docker build -f deploy/server/Dockerfile .` (as deploy/README.md Shape 2
-# instructs) still produces the hardened image. Select the other explicitly:
+# `docker build -f deploy/server/Dockerfile .` uses the Git-capable image.
+# Select the terminal target explicitly:
 # `docker build --target runtime-terminal …`.
 
 ARG GO_VERSION=1.27.1
@@ -58,7 +50,8 @@ RUN set -eux; \
 #
 # Not the default — see the header. Selected by docker-compose.dev.yml via
 # `build.target: runtime-terminal`.
-FROM debian:bookworm-slim AS runtime-terminal
+FROM debian:trixie-slim AS runtime-terminal
+COPY scripts/check-git-version.sh internal/loomgit/gitversion/minimum.txt /tmp/git-check/
 
 # bash: the PTY's shell (pty_manager falls back to /bin/bash, not /bin/sh).
 # git:  the workspace seed creates a fixture repo and git worktrees.
@@ -67,6 +60,8 @@ FROM debian:bookworm-slim AS runtime-terminal
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash ca-certificates git procps wget \
     && rm -rf /var/lib/apt/lists/*
+
+RUN sh /tmp/git-check/check-git-version.sh /tmp/git-check/minimum.txt
 
 ENV SHELL=/bin/bash
 
@@ -95,8 +90,8 @@ USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/loom"]
 CMD ["serve", "--port", "8080", "--bind", "0.0.0.0"]
 
-# ─── Stage 3: Runtime (default, hardened) ────────────────────────────────────
-FROM gcr.io/distroless/static-debian12:nonroot AS runtime
+# ─── Stage 3: Runtime (default) ───────────────────────────────────────────────
+FROM runtime-terminal AS runtime
 
 COPY --from=builder /out/loom /usr/local/bin/loom
 

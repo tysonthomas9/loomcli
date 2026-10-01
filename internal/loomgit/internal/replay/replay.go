@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/gitversion"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 )
 
@@ -32,18 +32,7 @@ type Engine struct {
 
 func New(repo loomgit.RepoStore) *Engine { return &Engine{repo: repo} }
 
-var versionPattern = regexp.MustCompile(`^git version (\d+)\.(\d+)(?:\.\d+)?(?:\s|$)`)
 var shaPattern = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
-
-func supportedVersion(output string) bool {
-	m := versionPattern.FindStringSubmatch(strings.TrimSpace(output))
-	if m == nil {
-		return false
-	}
-	major, _ := strconv.Atoi(m[1])
-	minor, _ := strconv.Atoi(m[2])
-	return major > 2 || major == 2 && minor >= 40
-}
 
 func (e *Engine) checkVersion(ctx context.Context) error {
 	e.once.Do(func() {
@@ -52,9 +41,7 @@ func (e *Engine) checkVersion(ctx context.Context) error {
 			e.versionErr = fmt.Errorf("git version check: %w", err)
 			return
 		}
-		if !supportedVersion(string(out)) {
-			e.versionErr = fmt.Errorf("trial merge requires Git 2.40 or newer (found %q)", strings.TrimSpace(string(out)))
-		}
+		e.versionErr = gitversion.Check(string(out))
 	})
 	return e.versionErr
 }
