@@ -97,20 +97,9 @@ func TestAdapterContract(t *testing.T) {
 			t.Fatalf("no message.delivered for %s in %v", key, types(got))
 		}
 	})
-	t.Run("Model", func(t *testing.T) {
-		if err := s.SetModel(ctx, "sonnet"); err != nil {
-			t.Fatal(err)
-		}
-		_, got := turn(t, "Reply with exactly the word MODEL.")
-		if a := args(); !slices.Contains(a, "sonnet") || !slices.Contains(a, "--resume") || !strings.Contains(text(got), "MODEL") {
-			t.Fatalf("model switch: args %v, text %q", a, text(got))
-		}
-	})
 	t.Run("Move", func(t *testing.T) {
-		// Back to haiku, so a run has exactly one sonnet turn (Model's).
-		if err := s.SetModel(ctx, "haiku"); err != nil {
-			t.Fatal(err)
-		}
+		// Move runs before Model, on the haiku process, so only the dir
+		// changes; Model's turn is then the run's only sonnet turn.
 		moved, err := os.MkdirTemp("", "loom-claude-moved-")
 		if err != nil {
 			t.Fatal(err)
@@ -122,6 +111,15 @@ func TestAdapterContract(t *testing.T) {
 		_, got := turn(t, "Reply with only the absolute path of your current working directory.")
 		if a := args(); !slices.Contains(a, "--resume") || !slices.Contains(a, ref.NativeID) || !strings.Contains(text(got), filepath.Base(moved)) {
 			t.Fatalf("move: args %v, text %q", a, text(got))
+		}
+	})
+	t.Run("Model", func(t *testing.T) {
+		if err := s.SetModel(ctx, "sonnet"); err != nil {
+			t.Fatal(err)
+		}
+		_, got := turn(t, "Reply with exactly the word MODEL.")
+		if a := args(); !slices.Contains(a, "sonnet") || !slices.Contains(a, "--resume") || !strings.Contains(text(got), "MODEL") {
+			t.Fatalf("model switch: args %v, text %q", a, text(got))
 		}
 	})
 	t.Run("Close", func(t *testing.T) {
