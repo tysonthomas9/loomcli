@@ -61,7 +61,7 @@ func newServer(t *testing.T, identity *middleware.UserIdentity) *httptest.Server
 			return svc
 		}
 		return nil
-	}, nil).Register(mux, ws)
+	}, nil).Register(mux, ws, nil)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv

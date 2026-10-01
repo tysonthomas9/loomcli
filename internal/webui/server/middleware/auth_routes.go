@@ -44,9 +44,10 @@ func isPublicRoute(method, path string) bool {
 	case normalizedPath == "/api/config":
 		// Auth discovery endpoint must be accessible without JWT (bootstrap)
 		return true
-	case normalizedPath == "/api/events":
-		// Workspace-scoped SSE endpoint (/api/workspaces/{ws}/events) uses its own auth
-		// (sseAuth middleware or token exchange). Matched via stripWorkspacePrefix normalization.
+	case normalizedPath == "/api/events", normalizedPath == "/api/v1/events":
+		// Workspace-scoped SSE endpoints (/api/workspaces/{ws}/events and the
+		// Agent API's /api/workspaces/{ws}/v1/events) use their own one-time
+		// token auth. Matched via stripWorkspacePrefix normalization.
 		return true
 	case normalizedPath == "/api/terminal/ws":
 		// Terminal WebSocket uses its own one-time token auth (validated in handler)

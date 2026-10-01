@@ -17,8 +17,9 @@ import (
 
 // Handler routes Agent API calls to the workspace's loomagent service.
 type Handler struct {
-	services func(ws string) *loomagent.Service
-	presets  loomagent.Presets
+	services      func(ws string) *loomagent.Service
+	presets       loomagent.Presets
+	validateToken func(token, workspace string) (string, error)
 }
 
 // New returns a Handler. services returns the workspace's Agent API service,
@@ -34,8 +35,14 @@ type route func(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (i
 
 // Register adds every route to the outer mux, each wrapped in the workspace
 // middleware. PATCH must not go through the nested workspace mux.
-func (h *Handler) Register(mux *http.ServeMux, workspace middleware.Middleware) {
+// validateToken checks the event stream's one-time token (the webui SSE
+// token from GET /api/workspaces/{ws}/events/token); nil is open mode, where
+// the stream, like every route, needs no token.
+func (h *Handler) Register(mux *http.ServeMux, workspace middleware.Middleware,
+	validateToken func(token, workspace string) (string, error)) {
+	h.validateToken = validateToken
 	const p = "/api/workspaces/{ws}/v1/"
+	mux.Handle("GET "+p+"events", workspace(http.HandlerFunc(h.stream)))
 	for pattern, fn := range map[string]route{
 		"POST " + p + "agents":                         h.create,
 		"GET " + p + "agents":                          list,

@@ -17,6 +17,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentsv1"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	"github.com/tysonthomas9/loomcli/internal/webui/subscription"
 )
 
 type workspace struct{}
@@ -37,7 +39,8 @@ func (workspace) Publish(context.Context, loomagent.PublishRequest) (loomagent.P
 
 // newServer serves workspace "ws" through the agentsv1 routes on a fake
 // OpenCode harness. A bearer token is taken as the signed-in user's id; a
-// request without one is the local user.
+// request without one is the local user. The event stream needs a one-time
+// token from the webui SSE token route.
 func newServer(t *testing.T) (*httptest.Server, *fake.Harness) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -56,13 +59,12 @@ func newServer(t *testing.T) (*httptest.Server, *fake.Harness) {
 		}})
 	done := make(chan struct{})
 	go func() { defer close(done); svc.RunFeed(ctx, "opencode") }()
+	tokens, err := realtime.NewTokenStore()
+	if err != nil {
+		t.Fatal(err)
+	}
 	mux := http.NewServeMux()
-	agentsv1.New(func(ws string) *loomagent.Service {
-		if ws == "ws" {
-			return svc
-		}
-		return nil
-	}, nil).Register(mux, func(next http.Handler) http.Handler {
+	auth := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := middleware.WithWorkspace(r.Context(), r.PathValue("ws"))
 			if tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
@@ -70,10 +72,18 @@ func newServer(t *testing.T) (*httptest.Server, *fake.Harness) {
 			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
-	})
+	}
+	mux.Handle("GET /api/workspaces/{ws}/events/token", auth(subscription.HandleSSEToken(tokens)))
+	agentsv1.New(func(ws string) *loomagent.Service {
+		if ws == "ws" {
+			return svc
+		}
+		return nil
+	}, nil).Register(mux, auth, tokens.Validate)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(func() {
 		srv.Close()
+		tokens.Stop()
 		cancel()
 		<-done
 		st.Close()

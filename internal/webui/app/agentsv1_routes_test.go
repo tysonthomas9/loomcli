@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomagent"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
 	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentsv1"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -87,5 +88,47 @@ func TestAgentAPIPatchAndCorsThroughServer(t *testing.T) {
 
 	if resp := do(http.MethodGet, "/api/workspaces/nope/v1/agents", "", nil); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("unknown workspace = %d", resp.StatusCode)
+	}
+}
+
+// TestAgentAPISSEUsesServerTokens: the Agent API stream is on the app mux and
+// checks the server's one-time SSE tokens.
+func TestAgentAPISSEUsesServerTokens(t *testing.T) {
+	ctx := context.Background()
+	st, err := loomstore.Open(ctx, filepath.Join(t.TempDir(), "loom.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	svc := loomagent.New(loomagent.ServiceConfig{Store: st, WorkspaceID: "ws"})
+	tokens, err := appstores.NewTokenStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(tokens.Stop)
+	app := &Server{
+		multiPool:  daemon.NewMultiPool(middleware.WorkspaceFromContext, 1),
+		config:     webui.ServerConfig{AgentAPIRoutes: agentsv1.New(func(string) *loomagent.Service { return svc }, nil).Register},
+		wsExistsFn: func(id string) bool { return id == "ws" },
+		sseTokens:  tokens,
+	}
+	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	setupTestRoutes(t, app)
+	srv := httptest.NewServer(app.mux)
+	t.Cleanup(srv.Close)
+	get := func(query string) int {
+		resp, err := srv.Client().Get(srv.URL + "/api/workspaces/ws/v1/events?" + query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if status := get("agents=zz"); status != http.StatusUnauthorized {
+		t.Fatalf("no token = %d", status)
+	}
+	tok, _ := tokens.Generate("u", "ws")
+	if status := get("agents=zz&after=zz:0&token=" + tok); status != http.StatusNotFound {
+		t.Fatalf("fresh token, unknown agent = %d; want 404 from the handler", status)
 	}
 }

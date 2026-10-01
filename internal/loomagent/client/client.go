@@ -165,8 +165,17 @@ func (c *Client) Preset(ctx context.Context, name string) (p agentsv1.Preset, er
 
 func agent(id string) string { return "agents/" + url.PathEscape(id) }
 
-// do sends one request; a non-2xx answer is returned by decodeError.
+// do sends one request to path under the Agent API; a non-2xx answer is
+// returned by decodeError.
 func (c *Client) do(ctx context.Context, method, path string, q url.Values, requestID string, in, out any) error {
+	u := c.base + path
+	if len(q) > 0 {
+		u += "?" + q.Encode()
+	}
+	return c.doURL(ctx, method, u, requestID, in, out)
+}
+
+func (c *Client) doURL(ctx context.Context, method, u, requestID string, in, out any) error {
 	var body io.Reader
 	if in != nil {
 		b, err := json.Marshal(in)
@@ -174,10 +183,6 @@ func (c *Client) do(ctx context.Context, method, path string, q url.Values, requ
 			return err
 		}
 		body = bytes.NewReader(b)
-	}
-	u := c.base + path
-	if len(q) > 0 {
-		u += "?" + q.Encode()
 	}
 	req, err := http.NewRequestWithContext(ctx, method, u, body)
 	if err != nil {

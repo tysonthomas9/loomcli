@@ -213,9 +213,13 @@ type EventPage struct {
 func eventPageOut(p loomstore.EventPage) EventPage {
 	out := EventPage{Events: []Event{}, SnapshotSeq: p.SnapshotSeq, Next: p.Next, More: p.More}
 	for _, e := range p.Events {
-		out.Events = append(out.Events, Event{e.AgentID, e.Seq, e.EventID, e.Kind, e.TurnID, e.Payload, e.CreatedAt})
+		out.Events = append(out.Events, eventOut(e))
 	}
 	return out
+}
+
+func eventOut(e loomstore.Event) Event {
+	return Event{e.AgentID, e.Seq, e.EventID, e.Kind, e.TurnID, e.Payload, e.CreatedAt}
 }
 
 // SendResult is what Send returns.

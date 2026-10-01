@@ -156,7 +156,11 @@ func (app *Server) registerWorkspaceRoutes() {
 	app.mux.Handle("PATCH /api/workspaces/{ws}/config/backend", workspaceMW(handlermux.HandleWorkspaceBackendPatch(app.workspaceSvc)))
 	app.mux.Handle("PATCH /api/workspaces/{ws}/config/design-format", workspaceMW(handlermux.HandleWorkspaceDesignFormatPatch(app.workspaceSvc)))
 	if app.config.AgentAPIRoutes != nil {
-		app.config.AgentAPIRoutes(app.mux, workspaceMW)
+		var validateToken func(token, workspace string) (string, error)
+		if app.sseTokens != nil {
+			validateToken = app.sseTokens.Validate
+		}
+		app.config.AgentAPIRoutes(app.mux, workspaceMW, validateToken)
 	}
 	if statusHandler := app.config.MonitorHandlers.Status; statusHandler != nil {
 		app.mux.Handle("GET /api/workspaces/{ws}/monitor/status", workspaceMW(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
