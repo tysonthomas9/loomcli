@@ -130,6 +130,9 @@ func New(cfg ServiceConfig) *Service {
 	if s.bridge == nil {
 		s.bridge = noBridge
 	}
+	if s.events == nil {
+		s.events = NewEventLog(cfg.Store)
+	}
 	if s.inputKey == nil {
 		s.inputKey = defaultInputKey
 	}
@@ -182,8 +185,7 @@ func (s *Service) setState(ctx context.Context, a loomstore.Agent, to loomstore.
 	before := a
 	a.State, a.StateReason, a.WaitingOn, a.Outcome = to.State, to.StateReason, to.WaitingOn, to.Outcome
 	a.AttentionReason, a.RunningTurnID, a.Attempt = to.AttentionReason, to.RunningTurn, to.Attempt
-	s.publishChange(before, a)
-	return a, nil
+	return a, s.publishChange(ctx, before, a)
 }
 
 // raiseAttention sets Attention{reason} beside a's state.
@@ -209,12 +211,13 @@ func (s *Service) handOver(ctx context.Context, a loomstore.Agent, nativeKey fun
 	return s.store.HandNext(ctx, a.AgentID, nativeKey)
 }
 
-func (s *Service) publishChange(before, after loomstore.Agent) {
-	e := Event{AgentID: after.AgentID, Time: time.Now()}
+// publishChange saves, then publishes, the events of a's committed change.
+func (s *Service) publishChange(ctx context.Context, before, after loomstore.Agent) error {
+	e, out := Event{AgentID: after.AgentID, Time: time.Now()}, []Event{}
 	if before.State != after.State {
 		c := e
 		c.Type, c.From, c.To, c.Reason = EventStateChanged, before.State, after.State, deref(after.StateReason)
-		s.Bus.publish(c)
+		out = append(out, c)
 	}
 	if deref(before.AttentionReason) != deref(after.AttentionReason) {
 		c := e
@@ -222,19 +225,25 @@ func (s *Service) publishChange(before, after loomstore.Agent) {
 		if after.AttentionReason == nil {
 			c.Type, c.Reason = EventAttentionCleared, deref(before.AttentionReason)
 		}
-		s.Bus.publish(c)
+		out = append(out, c)
 	}
 	if after.Mode == "persistent" && after.State == StateIdle &&
 		(before.State == StateActive || before.State == StateWaiting) {
 		c := e
 		c.Type, c.TurnID = EventIdle, deref(before.RunningTurnID)
-		s.Bus.publish(c)
+		out = append(out, c)
 	}
 	if r := settledReason(after); r != "" && settledReason(before) == "" {
 		c := e
 		c.Type, c.Reason, c.Outcome, c.Attempt = EventSettled, r, deref(after.Outcome), after.Attempt
-		s.Bus.publish(c)
+		out = append(out, c)
 	}
+	for _, c := range out {
+		if err := s.emit(ctx, c, after.DeletedAt == nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // settledReason is why a is settled (§5.1), or "" when it is not.

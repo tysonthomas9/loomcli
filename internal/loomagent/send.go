@@ -91,9 +91,13 @@ func (s *Service) accepted(ctx context.Context, a loomstore.Agent, rec loomstore
 	if reopen {
 		after := a
 		after.State, after.Attempt, after.Outcome, after.FinishedAt = StateActive, a.Attempt+1, nil, nil
-		s.publishChange(a, after)
+		if err := s.publishChange(ctx, a, after); err != nil {
+			return SendResult{}, err
+		}
 	}
-	s.Bus.publish(Event{AgentID: a.AgentID, Type: EventWaiting, Reason: sender, Time: time.Now()})
+	if err := s.emit(ctx, Event{AgentID: a.AgentID, Type: EventWaiting, Reason: sender, Time: time.Now()}, true); err != nil {
+		return SendResult{}, err
+	}
 	res, err := decodeResult(rec)
 	if err != nil {
 		return res, err

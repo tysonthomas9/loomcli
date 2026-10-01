@@ -81,7 +81,9 @@ func (s *Service) finishArchive(ctx context.Context, a loomstore.Agent, reason s
 		if a, err = s.setState(ctx, a, loomstore.AgentState{State: StateArchived, Outcome: a.Outcome, Attempt: a.Attempt}); err != nil {
 			return err
 		}
-		s.Bus.publish(Event{AgentID: a.AgentID, Type: EventArchived, Reason: reason, Time: time.Now()})
+		if err := s.emit(ctx, Event{AgentID: a.AgentID, Type: EventArchived, Reason: reason, Time: time.Now()}, true); err != nil {
+			return err
+		}
 	}
 	now := time.Now()
 	return s.store.SetArchive(ctx, a.AgentID, sp(reason), &now)
@@ -164,8 +166,10 @@ func (s *Service) Delete(ctx context.Context, req DeleteRequest) error {
 	}
 	before := a
 	a.DeletedAt = sp(loomstore.Stamp(now))
-	s.publishChange(before, a)
-	s.Bus.publish(Event{AgentID: a.AgentID, Type: EventDeleted, Time: now})
+	if err := s.publishChange(ctx, before, a); err != nil {
+		return err
+	}
+	s.Bus.publish(Event{AgentID: a.AgentID, Type: EventDeleted, Time: now}) // its history is purged: not saved
 	return nil
 }
 
@@ -243,7 +247,9 @@ func (s *Service) stop(ctx context.Context, a loomstore.Agent) (loomstore.Agent,
 			return a, err
 		}
 		if res == loomstore.Withdrawn {
-			s.Bus.publish(Event{AgentID: a.AgentID, Type: EventWithdrawn, Reason: sl.Sender, Time: time.Now()})
+			if err := s.emit(ctx, Event{AgentID: a.AgentID, Type: EventWithdrawn, Reason: sl.Sender, Time: time.Now()}, true); err != nil {
+				return a, err
+			}
 		}
 	}
 	return a, nil
