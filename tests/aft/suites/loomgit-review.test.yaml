@@ -139,10 +139,15 @@ tests:
       - run: >-
           test "$(cat "$AFT_WORK_DIR/apply-trunk-before")" = "$(git -C "$AFT_WORK_DIR/review-repo" rev-parse refs/heads/main)"
         intent: "Confirm that applying the layer did not advance trunk"
+      - run: >-
+          expected="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"][0]["head_sha"])' "$AFT_WORK_DIR/review-revisions.json")";
+          actual="$(git -C "$AFT_WORK_DIR/review-repo" rev-parse refs/heads/loom/ws/E2E-WS-REVIEW/interactive/lead)";
+          test "$actual" = "$expected"
+        intent: "Confirm the approved revision, not trunk, is the lead working area's new head"
 
   - name: landed stacked change restacks its dependent into a derived revision
     skip: true
-    intent: "Expected failure on 0b39b764b: daemon-managed dependent tasks do not record Loom Git lineage, so landing cannot offer a derived restack; a driver TaskRun dependent is still required"
+    intent: "Expected failure on batch 7 top 2d07a4f8: daemon-managed dependents lack Loom Git lineage (P1.23); a driver TaskRun dependent must be staged before X lands"
     steps:
       - run: >-
           echo 'Prerequisite: create stacked task changes X and Y through TaskRuns, approve and Apply both through the UI, then POST /api/workspaces/E2E-WS-REVIEW/agents/lead/git/pr for X';
