@@ -27,7 +27,7 @@ type SendRequest struct {
 // SendResult is what Send returns, and what its receipt stores.
 type SendResult struct {
 	MessageID string `json:"messageId"`        // from AgentID, sender and RequestID
-	State     string `json:"state"`            // waiting; the 1.6 dispatcher hands it over
+	State     string `json:"state"`            // handed if the dispatcher handed it over at once, else waiting
 	Replaced  bool   `json:"replaced"`         // this Send replaced the sender's waiting text
 	TurnID    string `json:"turnId,omitempty"` // set by the dispatcher when a turn starts at once
 }
@@ -37,8 +37,9 @@ type SendResult struct {
 // slot change and the RequestID receipt commit together, so a retry of any
 // earlier Send returns its stored result and changes nothing. Send to a
 // finished single task starts its next attempt and cancels its R29 history
-// deadline in that same transaction. Send never calls the harness: the
-// dispatcher (§8.1.1) hands the oldest waiting slot over.
+// deadline in that same transaction. Send never calls the harness itself:
+// it then runs the dispatcher (§8.1.1) under the same lock, which hands the
+// oldest waiting slot over if no turn runs.
 func (s *Service) Send(ctx context.Context, req SendRequest) (SendResult, error) {
 	if req.RequestID == "" {
 		return SendResult{}, invalid("Send needs a RequestID")
@@ -62,20 +63,16 @@ func (s *Service) Send(ctx context.Context, req SendRequest) (SendResult, error)
 	if a, err = s.live(ctx, req.AgentID); err != nil {
 		return SendResult{}, err
 	}
-	switch a.State {
-	case StateArchived, StateStopping:
-		return SendResult{}, &Error{Code: CodeAgentArchived, Message: a.AgentID}
-	case StateCreating:
-		return SendResult{}, &Error{Code: CodeHarnessUnavailable, Message: a.AgentID + " is still being created"}
+	if err := sendable(a); err != nil {
+		return SendResult{}, err
 	}
 	sender := senderOf(req.Actor)
 	reopen := a.State == StateFinished
-	var res SendResult
 	rec, retry, err := s.store.Send(ctx, loomstore.SlotSend{AgentID: a.AgentID, Sender: sender,
 		RequestID: req.RequestID, Body: req.Text, Source: req.Source, Reopen: reopen,
 		Result: func(replaced bool) (string, error) {
-			res = SendResult{MessageID: messageID(a.AgentID, sender, req.RequestID), State: loomstore.SlotWaiting, Replaced: replaced}
-			b, err := json.Marshal(res)
+			b, err := json.Marshal(SendResult{MessageID: messageID(a.AgentID, sender, req.RequestID),
+				State: loomstore.SlotWaiting, Replaced: replaced})
 			return string(b), err
 		}})
 	switch {
@@ -84,13 +81,44 @@ func (s *Service) Send(ctx context.Context, req SendRequest) (SendResult, error)
 	case retry:
 		return decodeResult(rec)
 	}
+	return s.accepted(ctx, a, rec, sender, reopen)
+}
+
+// accepted publishes an accepted Send's changes, then runs the dispatcher,
+// which hands the message over if no turn runs. It returns the receipt's
+// result: state handed if it was.
+func (s *Service) accepted(ctx context.Context, a loomstore.Agent, rec loomstore.Receipt, sender string, reopen bool) (SendResult, error) {
 	if reopen {
 		after := a
 		after.State, after.Attempt, after.Outcome, after.FinishedAt = StateActive, a.Attempt+1, nil, nil
 		s.publishChange(a, after)
 	}
 	s.Bus.publish(Event{AgentID: a.AgentID, Type: EventWaiting, Reason: sender, Time: time.Now()})
-	return res, nil
+	res, err := decodeResult(rec)
+	if err != nil {
+		return res, err
+	}
+	if a, err = s.live(ctx, a.AgentID); err != nil {
+		return res, err
+	}
+	if _, err := s.wake(ctx, a); err != nil {
+		return res, err
+	}
+	if rec, err = s.store.GetReceipt(ctx, a.AgentID, rec.RequestID); err != nil {
+		return res, err
+	}
+	return decodeResult(rec)
+}
+
+// sendable refuses a Send to an agent that can't take one; it stores nothing.
+func sendable(a loomstore.Agent) error {
+	switch a.State {
+	case StateArchived, StateStopping:
+		return &Error{Code: CodeAgentArchived, Message: a.AgentID}
+	case StateCreating:
+		return &Error{Code: CodeHarnessUnavailable, Message: a.AgentID + " is still being created"}
+	}
+	return nil
 }
 
 // sendErr maps a refused slot change to its public error.

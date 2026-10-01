@@ -12,6 +12,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/tysonthomas9/loomcli/internal/loomharness"
+	"github.com/tysonthomas9/loomcli/internal/loomharness/fake"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
 )
 
@@ -19,6 +21,13 @@ var (
 	user  = ActorRef{Kind: "user", ID: "u"}
 	child = ActorRef{Kind: "agent", ID: "c1"}
 )
+
+// busy is an agent with a turn running.
+func busy(id, mode, state string) loomstore.Agent {
+	a := svcAgent(id, mode, state)
+	a.RunningTurnID = sp("turn_1")
+	return a
+}
 
 func sendReq(agentID, requestID, text string, from ActorRef) SendRequest {
 	return SendRequest{Envelope: Envelope{RequestID: requestID}, AgentID: agentID, Text: text, Source: "user_chat", Actor: from}
@@ -83,9 +92,9 @@ func serviceAt(t *testing.T, path string, agents ...loomstore.Agent) *Service {
 // message per sender; a sender's second Send replaces only its own text and
 // keeps its place, and each fill or edit emits message.waiting.
 func TestSendBusyReplacesOnlySendersBody(t *testing.T) {
-	for _, state := range []string{StateActive, StateWaiting, StateIdle} {
+	for _, state := range []string{StateActive, StateWaiting} {
 		t.Run(state, func(t *testing.T) {
-			s := newService(t, ServiceConfig{}, svcAgent("a1", "persistent", state))
+			s := newService(t, ServiceConfig{}, busy("a1", "persistent", state))
 			sub := s.Bus.Subscribe("a1")
 			r1 := mustSendMsg(t, s, sendReq("a1", "r1", "check the tests", user))
 			mustSendMsg(t, s, sendReq("a1", "c1", "task_completed:c1:1", child))
@@ -100,7 +109,7 @@ func TestSendBusyReplacesOnlySendersBody(t *testing.T) {
 				t.Fatalf("events = %v", got)
 			}
 			if a := s.get(t, "a1"); a.State != state {
-				t.Fatalf("Send changed the state to %s; only the dispatcher hands over", a.State)
+				t.Fatalf("Send changed the state of a busy agent to %s", a.State)
 			}
 		})
 	}
@@ -112,7 +121,7 @@ func TestSendBusyReplacesOnlySendersBody(t *testing.T) {
 func TestSendStaleReceiptRetryIsNoOp(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "loom.db")
-	s := serviceAt(t, path, svcAgent("a1", "persistent", StateActive))
+	s := serviceAt(t, path, busy("a1", "persistent", StateActive))
 	sub := s.Bus.Subscribe("a1")
 	retry := func(s *Service, req SendRequest, want SendResult, wantWaiting []string) {
 		t.Helper()
@@ -135,9 +144,11 @@ func TestSendStaleReceiptRetryIsNoOp(t *testing.T) {
 	retry(s, sendReq("a1", "r1", "one", user), r1, []string{"user:u=two"})
 	retry(s, sendReq("a1", "r2", "two", user), r2, []string{"user:u=two"}) // the latest Send too
 
-	// Delivered: R2 was delivered, R3 waits.
+	// Delivered: R2 was handed over and delivered, R3 waits. R2's receipt now
+	// reports the hand-over (§4.9 "a late retry of an older Send").
 	deliverNext(t, s, "a1")
 	r3 := mustSendMsg(t, s, sendReq("a1", "r3", "three", user))
+	r2.State = "handed"
 	retry(s, sendReq("a1", "r2", "two", user), r2, []string{"user:u=three"})
 	retry(s, sendReq("a1", "r1", "one", user), r1, []string{"user:u=three"})
 
@@ -159,7 +170,7 @@ func TestSendStaleReceiptRetryIsNoOp(t *testing.T) {
 // TestSendConcurrentRetriesOneEffect: many concurrent Sends of one RequestID
 // fill the slot once and all return the same result.
 func TestSendConcurrentRetriesOneEffect(t *testing.T) {
-	s := newService(t, ServiceConfig{}, svcAgent("a1", "persistent", StateActive))
+	s := newService(t, ServiceConfig{}, busy("a1", "persistent", StateActive))
 	sub := s.Bus.Subscribe("a1")
 	var wg sync.WaitGroup
 	results := make([]SendResult, 16)
@@ -186,7 +197,7 @@ func TestSendConcurrentRetriesOneEffect(t *testing.T) {
 // message; a handed one is already_handed; each clear emits message.withdrawn.
 func TestWithdrawWaitingVsHanded(t *testing.T) {
 	ctx := context.Background()
-	s := newService(t, ServiceConfig{}, svcAgent("a1", "persistent", StateActive))
+	s := newService(t, ServiceConfig{}, busy("a1", "persistent", StateActive))
 	sub := s.Bus.Subscribe("a1")
 	withdraw := func(from ActorRef, want string) {
 		t.Helper()
@@ -243,7 +254,7 @@ func TestSendStateChecks(t *testing.T) {
 		t.Fatalf("Send without a RequestID = %v", err)
 	}
 	// A retry is answered from its receipt before any state check.
-	a := svcAgent("later", "persistent", StateActive)
+	a := busy("later", "persistent", StateActive)
 	s2 := newService(t, ServiceConfig{}, a)
 	r := mustSendMsg(t, s2, sendReq("later", "r1", "hi", user))
 	if err := s2.Archive(ctx, ArchiveRequest{AgentID: "later", Reason: ArchiveCancelled}); err != nil {
@@ -254,46 +265,69 @@ func TestSendStateChecks(t *testing.T) {
 	}
 }
 
-// TestSendNewBackgroundAttemptCancelsExpiry: a Send to a finished background
-// single task starts its next attempt and clears its R29 deadline in the
-// receipt's transaction; a retry starts nothing; after a purge Send fails
+// TestSendNewBackgroundAttemptCancelsExpiry: a background single task's
+// turn ends as failed, so it is finished with its R29 deadline set; a Send
+// starts the next attempt, clears the deadline in the receipt's transaction
+// and is prompted at once; a retry starts nothing; after a purge Send fails
 // with history_expired.
 func TestSendNewBackgroundAttemptCancelsExpiry(t *testing.T) {
 	ctx := context.Background()
-	old := loomstore.Stamp(time.Now().Add(-loomstore.HistoryRetention - time.Hour))
-	task := func(id string) loomstore.Agent {
-		a := svcAgent(id, "single_task", StateFinished)
-		a.InteractionMode, a.RoleKind, a.Outcome, a.FinishedAt = "background", "daemon", sp("failed"), sp(old)
-		return a
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	daemon := ActorRef{Kind: "system", ID: "daemon"}
+	task := func(name string) (loomstore.Agent, loomharness.NativeRef) {
+		info, err := s.Create(ctx, CreateRequest{Envelope: Envelope{RequestID: name}, Preset: "daemon-worker", Name: name,
+			Repo: "/repo", Overrides: Overrides{Harness: "opencode"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustSendMsg(t, s, sendReq(info.AgentID, name+"-go", "fix the issue", daemon))
+		a := s.get(t, info.AgentID)
+		ref := loomharness.NativeRef{Root: *a.HarnessSessionRoot, NativeID: *a.HarnessSessionID}
+		if err := s.HarnessEvent(ctx, a.AgentID, loomharness.Event{Type: loomharness.EventTurnCompleted, Session: ref,
+			TurnID: *a.RunningTurnID, StopReason: "failed"}); err != nil {
+			t.Fatal(err)
+		}
+		a = s.get(t, a.AgentID)
+		if a.State != StateFinished || deref(a.Outcome) != "failed" || a.FinishedAt == nil || a.Attempt != 0 {
+			t.Fatalf("after the turn: state %s outcome %v finished_at %v attempt %d", a.State, deref(a.Outcome), a.FinishedAt, a.Attempt)
+		}
+		return a, ref
 	}
-	s := newService(t, ServiceConfig{}, task("t1"), task("t2"))
-	sub := s.Bus.Subscribe("t1")
-	r := mustSendMsg(t, s, sendReq("t1", "retry-1", "try again", ActorRef{Kind: "system", ID: "daemon"}))
-	a := s.get(t, "t1")
-	if a.State != StateActive || a.Attempt != 2 || a.Outcome != nil || a.FinishedAt != nil || r.State != "waiting" {
-		t.Fatalf("after Send: state %s attempt %d outcome %v finished_at %v result %+v", a.State, a.Attempt, a.Outcome, a.FinishedAt, r)
+	later := time.Now().Add(loomstore.HistoryRetention + time.Hour) // the deadline has passed
+
+	a, ref := task("t1")
+	sub := s.Bus.Subscribe(a.AgentID)
+	r := mustSendMsg(t, s, sendReq(a.AgentID, "retry-1", "try again", daemon))
+	got := s.get(t, a.AgentID)
+	if got.State != StateActive || got.Attempt != 1 || got.Outcome != nil || got.FinishedAt != nil || r.State != "handed" {
+		t.Fatalf("after Send: state %s attempt %d outcome %v finished_at %v result %+v", got.State, got.Attempt, got.Outcome, got.FinishedAt, r)
 	}
 	if got := types(drain(sub)); !slices.Equal(got, []string{EventStateChanged, EventWaiting}) {
 		t.Fatalf("events = %v", got)
 	}
-	if err := s.store.MarkHistoryPurged(ctx, "t1", time.Now()); !errors.Is(err, loomstore.ErrNotDue) {
+	if _, turns := e.h.Harness.(*fake.Harness).Rules(ref); len(turns) != 2 {
+		t.Fatalf("turns run = %d; want 2", len(turns))
+	}
+	if err := e.st.MarkHistoryPurged(ctx, a.AgentID, later); !errors.Is(err, loomstore.ErrNotDue) {
 		t.Fatalf("sweep after the new attempt = %v; want ErrNotDue", err)
 	}
-	if got, err := s.Send(ctx, sendReq("t1", "retry-1", "try again", ActorRef{Kind: "system", ID: "daemon"})); err != nil || got != r {
-		t.Fatalf("retry = %+v, %v", got, err)
+	if again, err := s.Send(ctx, sendReq(a.AgentID, "retry-1", "try again", daemon)); err != nil || again != r {
+		t.Fatalf("retry = %+v, %v", again, err)
 	}
-	if a := s.get(t, "t1"); a.Attempt != 2 {
-		t.Fatalf("a retry started attempt %d", a.Attempt)
+	if got := s.get(t, a.AgentID); got.Attempt != 1 {
+		t.Fatalf("a retry started attempt %d", got.Attempt)
 	}
 
-	if err := s.store.MarkHistoryPurged(ctx, "t2", time.Now()); err != nil {
+	b, _ := task("t2")
+	if err := e.st.MarkHistoryPurged(ctx, b.AgentID, later); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Send(ctx, sendReq("t2", "retry-1", "try again", user)); !isCode(err, CodeHistoryExpired) {
+	if _, err := s.Send(ctx, sendReq(b.AgentID, "retry-1", "try again", daemon)); !isCode(err, CodeHistoryExpired) {
 		t.Fatalf("Send after purge = %v; want history_expired", err)
 	}
-	if a := s.get(t, "t2"); a.State != StateFinished || a.Attempt != 1 {
-		t.Fatalf("a refused Send changed the agent: %s attempt %d", a.State, a.Attempt)
+	if got := s.get(t, b.AgentID); got.State != StateFinished || got.Attempt != 0 {
+		t.Fatalf("a refused Send changed the agent: %s attempt %d", got.State, got.Attempt)
 	}
 }
 
@@ -304,7 +338,7 @@ func TestSendNewBackgroundAttemptCancelsExpiry(t *testing.T) {
 // child completion records is stored and replaced losslessly.
 func TestSendPayloadNearRESTLimitLossless(t *testing.T) {
 	const restBodyLimit = 1 << 20
-	s := newService(t, ServiceConfig{}, svcAgent("a1", "persistent", StateActive))
+	s := newService(t, ServiceConfig{}, busy("a1", "persistent", StateActive))
 	unit := "résumé ✓ 日本語 \"quoted\"\n\t<tag>&\\ 🚀 "
 	encode := func(text string) []byte {
 		b, _ := json.Marshal(map[string]any{"agentId": "a1", "requestId": "r1", "text": text, "source": "user_chat"})
@@ -339,8 +373,8 @@ func TestSendPayloadNearRESTLimitLossless(t *testing.T) {
 }
 
 // TestSendToCreatingRunsCreateStep: Create crashed before opening the
-// session; Send finishes Create (step 3) itself, then stores the message
-// behind the creator's first message.
+// session; Send finishes Create (step 3) itself, which hands over the
+// creator's first message, then stores its own message behind it.
 func TestSendToCreatingRunsCreateStep(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
@@ -361,10 +395,11 @@ func TestSendToCreatingRunsCreateStep(t *testing.T) {
 	}
 	a := s.get(t, created.AgentID)
 	owned, _ := e.st.NativeSessions(ctx, a.AgentID)
-	if a.State != StateIdle || a.CreateStep != stepDone || len(owned) != 1 {
+	if a.State != StateActive || a.CreateStep != stepDone || len(owned) != 1 {
 		t.Fatalf("after Send: state %s step %d owned %d", a.State, a.CreateStep, len(owned))
 	}
-	if got := waiting(t, s, a.AgentID); len(got) != 2 || !strings.HasSuffix(got[0], "=hello") || got[1] != "user:u=and this" {
+	// The first message was handed over when Create finished; this one waits.
+	if got := waiting(t, s, a.AgentID); len(got) != 1 || got[0] != "user:u=and this" {
 		t.Fatalf("waiting = %q", got)
 	}
 }

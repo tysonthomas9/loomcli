@@ -1,0 +1,431 @@
+package loomagent
+
+import (
+	"context"
+	"slices"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/loomharness"
+	"github.com/tysonthomas9/loomcli/internal/loomharness/fake"
+	"github.com/tysonthomas9/loomcli/internal/loomstore"
+)
+
+// eventually waits up to 5s for ok.
+func eventually(t *testing.T, what string, ok func() bool) {
+	t.Helper()
+	for end := time.Now().Add(5 * time.Second); !ok(); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
+}
+
+// pump applies the harness feed to s as the 1.6d ingestion will: each event
+// goes to the agent that owns its session.
+func pump(t *testing.T, s *Service, h loomharness.Harness, st *loomstore.Store) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	feed, err := h.Feed(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	t.Cleanup(func() { cancel(); _ = feed.Close(); <-done })
+	go func() {
+		defer close(done)
+		for e := range feed.Events() {
+			id, err := st.NativeSessionOwner(ctx, "opencode", e.Session.Root, e.Session.NativeID)
+			if err == nil {
+				_ = s.HarnessEvent(ctx, id, e)
+			}
+		}
+	}()
+}
+
+// newLead creates a lead on e's fake harness and returns it with its session.
+func newLead(t *testing.T, e *createEnv, s *Service, name string) (loomstore.Agent, loomharness.NativeRef) {
+	t.Helper()
+	info, err := s.Create(context.Background(), CreateRequest{Envelope: Envelope{RequestID: name}, Preset: "lead",
+		Name: name, Repo: "/repo", Overrides: Overrides{Harness: "opencode"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := s.get(t, info.AgentID)
+	return a, loomharness.NativeRef{Root: *a.HarnessSessionRoot, NativeID: *a.HarnessSessionID}
+}
+
+func slotState(t *testing.T, s *Service, agentID, requestID string) string {
+	t.Helper()
+	slots, err := s.store.Slots(context.Background(), agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sl := range slots {
+		if sl.RequestID == requestID {
+			return sl.State
+		}
+	}
+	return ""
+}
+
+// turnsRun is how many turns the fake ran on ref.
+func turnsRun(e *createEnv, ref loomharness.NativeRef) int {
+	_, turns := e.h.Harness.(*fake.Harness).Rules(ref)
+	return len(turns)
+}
+
+// handedReqs lists which of reqs were handed over, by their receipts (a
+// sender's slot row is reused by its next message).
+func handedReqs(t *testing.T, s *Service, agentID string, reqs ...string) []string {
+	t.Helper()
+	var out []string
+	for _, req := range reqs {
+		rec, err := s.store.GetReceipt(context.Background(), agentID, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r, _ := decodeResult(rec); r.State == loomstore.SlotHanded {
+			out = append(out, req)
+		}
+	}
+	return out
+}
+
+// crashDispatchAt makes the dispatcher crash at point; the returned func runs
+// f and reports whether it crashed there.
+func crashDispatchAt(t *testing.T, point string) func(func()) bool {
+	t.Helper()
+	type crash struct{}
+	dispatchCrash = func(p string) {
+		if p == point {
+			panic(crash{})
+		}
+	}
+	t.Cleanup(func() { dispatchCrash = func(string) {} })
+	return func(f func()) (crashed bool) {
+		defer func() {
+			if r := recover(); r != nil {
+				if _, ok := r.(crash); !ok {
+					panic(r)
+				}
+				crashed = true
+				dispatchCrash = func(string) {}
+			}
+		}()
+		f()
+		return false
+	}
+}
+
+// TestHarnessSwitchIdleDispatchUnderAgentLock drives the 1.5→1.6 hand-off: a
+// harness switch stops a running turn and publishes agent.idle while it holds
+// the agent lock, with one message waiting. The real dispatcher consumes that
+// event from the Bus (asynchronously) while another caller asks for dispatch
+// at the same time. The switch returns, and the message is handed over once,
+// on the new session, and never again.
+func TestHarnessSwitchIdleDispatchUnderAgentLock(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	e := newSwitchEnv(t, StateActive)
+	e.startTurn(t)
+	to := e.s.get(t, "a1").StateOf()
+	to.RunningTurn = sp("turn_0")
+	if err := e.s.store.CompareAndSetState(ctx, "a1", e.s.get(t, "a1").StateOf(), to); err != nil {
+		t.Fatal(err)
+	}
+	mustSendMsg(t, e.s, sendReq("a1", "r-next", "next", user)) // waits: a turn runs
+	if got := slotState(t, e.s, "a1", "r-next"); got != loomstore.SlotWaiting {
+		t.Fatalf("slot = %s; want waiting", got)
+	}
+	idle := e.s.Bus.Subscribe("a1")
+	defer e.s.Bus.Unsubscribe(idle)
+	stopped := make(chan struct{})
+	go func() { defer close(stopped); e.s.RunDispatcher(ctx) }()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	var switchErr error
+	go func() { defer wg.Done(); _, switchErr = e.s.Update(ctx, switchReq("r1", 1, "fb")) }()
+	go func() { // a concurrent dispatch request, contending for the lock
+		defer wg.Done()
+		eventually(t, "agent.idle published", func() bool {
+			return slices.ContainsFunc(drain(idle), func(ev Event) bool { return ev.Type == EventIdle })
+		})
+		_ = e.s.Dispatch(ctx, "a1")
+	}()
+	finished := make(chan struct{})
+	go func() { wg.Wait(); close(finished) }()
+	select {
+	case <-finished:
+	case <-time.After(10 * time.Second):
+		t.Fatal("deadlock: the switch or the dispatch never returned")
+	}
+	if switchErr != nil {
+		t.Fatal(switchErr)
+	}
+	a := e.s.get(t, "a1")
+	newRef := loomharness.NativeRef{Root: "/root/fb", NativeID: *a.HarnessSessionID}
+	key := defaultInputKey("fb", "a1", "r-next")
+	eventually(t, "the hand-over", func() bool { return slotState(t, e.s, "a1", "r-next") == loomstore.SlotHanded })
+	if l, _ := e.fb.Session(newRef).HasInput(ctx, key); l != loomharness.LandedFound {
+		t.Fatalf("message on the new session: %s", l)
+	}
+	if l, _ := e.fa.Session(e.old).HasInput(ctx, key); l != loomharness.LandedNotFound {
+		t.Fatalf("message on the old session: %s", l)
+	}
+	// No second dispatch: more wakes find the turn running.
+	_ = e.s.Dispatch(ctx, "a1")
+	time.Sleep(50 * time.Millisecond)
+	if _, turns := e.fb.Rules(newRef); len(turns) != 1 {
+		t.Fatalf("turns on the new session = %d; want 1", len(turns))
+	}
+	if a := e.s.get(t, "a1"); a.State != StateActive || deref(a.RunningTurnID) == "" {
+		t.Fatalf("after the hand-over: %s turn %v", a.State, a.RunningTurnID)
+	}
+	cancel()
+	<-stopped
+}
+
+// TestDispatchCreateFirstMessageOnceAcrossRestart: the creator's first
+// message is handed over when Create finishes, exactly once; a restart and a
+// replayed Create hand nothing again.
+func TestDispatchCreateFirstMessageOnceAcrossRestart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	e := newCreateEnv(t)
+	req := leadReq("r1")
+	req.FirstMessage = "hello"
+	info, err := e.service(ServiceConfig{}).Create(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := e.service(ServiceConfig{}) // restart
+	go s.RunDispatcher(ctx)         // its start-up sweep
+	if _, err := s.Create(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Dispatch(ctx, info.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	a := s.get(t, info.AgentID)
+	ref := loomharness.NativeRef{Root: *a.HarnessSessionRoot, NativeID: *a.HarnessSessionID}
+	if n := turnsRun(e, ref); n != 1 || slotState(t, s, a.AgentID, "create:r1") != loomstore.SlotHanded {
+		t.Fatalf("first message turns = %d, slot %s", n, slotState(t, s, a.AgentID, "create:r1"))
+	}
+	if l, _ := e.h.Session(ref).HasInput(ctx, defaultInputKey("opencode", a.AgentID, "create:r1")); l != loomharness.LandedFound {
+		t.Fatalf("first message landed = %s", l)
+	}
+}
+
+// TestDispatchHandedCrashRecovery covers a crash between the hand-over and
+// the state change: on restart the dispatcher asks the harness whether the
+// input landed. Not found: it goes back in line and is prompted once with
+// the same key. Found: it is marked delivered and never resent. Unknown:
+// Attention delivery_unknown and nothing is sent.
+func TestDispatchHandedCrashRecovery(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		delivery  loomharness.Landed
+		ask       bool
+		wantSlot  string
+		wantTurns int
+		wantState string
+		attention string
+	}{
+		{"not_found", loomharness.LandedNotFound, false, loomstore.SlotHanded, 1, StateActive, ""},
+		{"found_running", loomharness.LandedFound, true, loomstore.SlotDelivered, 1, StateActive, ""},
+		{"found_ended", loomharness.LandedFound, false, loomstore.SlotDelivered, 1, StateIdle, ""},
+		{"unknown", loomharness.LandedUnknown, false, loomstore.SlotHanded, 0, StateIdle, AttentionDeliveryUnknown},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			e := newCreateEnv(t)
+			fh := e.h.Harness.(*fake.Harness)
+			s := e.service(ServiceConfig{})
+			a, ref := newLead(t, e, s, "alpha")
+			turn := fake.Turn{Delivery: c.delivery}
+			if c.ask {
+				turn.Steps = []fake.Step{{Ask: "ask1"}}
+			}
+			fh.Script(a.AgentID, turn)
+			run := crashDispatchAt(t, "prompted")
+			if !run(func() { _, _ = s.Send(ctx, sendReq(a.AgentID, "s1", "go", user)) }) {
+				t.Fatal("did not crash")
+			}
+			if c.delivery != loomharness.LandedFound {
+				if err := fh.Restart(ctx); err != nil { // the scripted delivery killed the harness
+					t.Fatal(err)
+				}
+			}
+			s = e.service(ServiceConfig{}) // Loom restarts
+			if err := s.Dispatch(ctx, a.AgentID); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Dispatch(ctx, a.AgentID); err != nil { // repeating changes nothing
+				t.Fatal(err)
+			}
+			got := s.get(t, a.AgentID)
+			landed := 0
+			if l, _ := e.h.Session(ref).HasInput(ctx, defaultInputKey("opencode", a.AgentID, "s1")); l == loomharness.LandedFound {
+				landed = 1
+			}
+			if st := slotState(t, s, a.AgentID, "s1"); st != c.wantSlot || landed != c.wantTurns ||
+				got.State != c.wantState || deref(got.AttentionReason) != c.attention {
+				t.Fatalf("slot %s landed %d state %s attention %q", st, landed, got.State, deref(got.AttentionReason))
+			}
+		})
+	}
+}
+
+// TestDispatchOldestFirstOneTurnAtATime: messages from three senders wait
+// while a turn runs; each turn end hands over exactly the next one, oldest
+// first, after staging skills and installing the current policy; nothing is
+// handed while a turn runs and a delivered message is never resent.
+func TestDispatchOldestFirstOneTurnAtATime(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	var mu sync.Mutex
+	caps, prepared := BridgeCaps{}, 0
+	s := e.service(ServiceConfig{
+		Bridge: func(context.Context, Preset) (BridgeCaps, error) { mu.Lock(); defer mu.Unlock(); return caps, nil },
+		PrepareWorktree: func(context.Context, Target, loomstore.Agent) error {
+			mu.Lock()
+			defer mu.Unlock()
+			prepared++
+			return nil
+		},
+	})
+	pump(t, s, e.h, e.st)
+	a, ref := newLead(t, e, s, "alpha")
+	mu.Lock()
+	prepared = 0 // Create stages skills when it opens the session; count hand-overs only
+	mu.Unlock()
+	ask := func(id string) fake.Turn { return fake.Turn{Steps: []fake.Step{{Delta: id}, {Ask: id}}} }
+	fh.Script(a.AgentID, ask("t1"), ask("t2"), ask("t3"), ask("t4"))
+
+	if r := mustSendMsg(t, s, sendReq(a.AgentID, "u1", "first", user)); r.State != "handed" {
+		t.Fatalf("Send to an idle agent = %+v; want handed", r)
+	}
+	reqs := []string{"u1", "c1", "x1", "u2"}
+	mustSendMsg(t, s, sendReq(a.AgentID, "c1", "child done", child))
+	mustSendMsg(t, s, sendReq(a.AgentID, "x1", "from the system", ActorRef{Kind: "system", ID: "x"}))
+	eventually(t, "u1 delivered", func() bool { return slotState(t, s, a.AgentID, "u1") == loomstore.SlotDelivered })
+	mustSendMsg(t, s, sendReq(a.AgentID, "u2", "second", user)) // the user's slot is free again
+	if err := s.Dispatch(ctx, a.AgentID); err != nil {          // a turn runs: nothing more
+		t.Fatal(err)
+	}
+	if got := handedReqs(t, s, a.AgentID, reqs...); !slices.Equal(got, []string{"u1"}) {
+		t.Fatalf("handed = %v while a turn runs", got)
+	}
+	mu.Lock()
+	caps = BridgeCaps{HasGitHubRead: true, HasPublish: true} // the bridge registers before the next turn
+	mu.Unlock()
+	for i, ask := range []string{"t1", "t2", "t3"} {
+		if err := fh.Session(ref).Reply(ctx, ask, loomharness.Reply{Allow: true}); err != nil {
+			t.Fatal(err)
+		}
+		eventually(t, "the next hand-over", func() bool { return len(handedReqs(t, s, a.AgentID, reqs...)) == i+2 })
+	}
+	// Oldest first: c1 and x1 waited before u2 was sent.
+	order := []string{"u1"}
+	for _, req := range []string{"c1", "x1", "u2"} {
+		if slices.Contains(handedReqs(t, s, a.AgentID, req), req) {
+			order = append(order, req)
+		}
+	}
+	if !slices.Equal(order, reqs) {
+		t.Fatalf("hand-over order = %v", order)
+	}
+	_, turns := fh.Rules(ref)
+	if hasPublishDenies(turns[0]) || !hasPublishDenies(turns[len(turns)-1]) {
+		t.Fatalf("turn rules: first %v, last %v; want the current policy at each hand-over", turns[0], turns[len(turns)-1])
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if prepared != 4 {
+		t.Fatalf("PrepareWorktree ran %d times for 4 hand-overs", prepared)
+	}
+	if err := fh.Session(ref).Reply(ctx, "t4", loomharness.Reply{Allow: true}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "idle", func() bool { return s.get(t, a.AgentID).State == StateIdle })
+	slots, _ := s.store.Slots(ctx, a.AgentID)
+	for _, sl := range slots {
+		if sl.State != loomstore.SlotDelivered {
+			t.Fatalf("%s's %s = %s; want delivered", sl.Sender, sl.RequestID, sl.State)
+		}
+	}
+	if err := s.Dispatch(ctx, a.AgentID); err != nil || s.get(t, a.AgentID).State != StateIdle {
+		t.Fatalf("a delivered message was handed again: %v", err)
+	}
+}
+
+// TestDispatchArchiveDoneAndSingleTaskOutcome: Archive(done) on a busy lead
+// lets the turn and the waiting messages finish, then archives; a single
+// task finishes with its turn's stop reason as the outcome.
+func TestDispatchArchiveDoneAndSingleTaskOutcome(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	pump(t, s, e.h, e.st)
+	a, ref := newLead(t, e, s, "alpha")
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "t1"}}}, fake.Turn{Steps: []fake.Step{{Ask: "t2"}}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "first", user))
+	mustSendMsg(t, s, sendReq(a.AgentID, "c1", "child done", child))
+	if err := s.Archive(ctx, ArchiveRequest{AgentID: a.AgentID, Reason: ArchiveDone}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Send(ctx, sendReq(a.AgentID, "u2", "late", user)); !isCode(err, CodeAgentArchived) {
+		t.Fatalf("Send while stopping = %v", err)
+	}
+	if err := fh.Session(ref).Reply(ctx, "t1", loomharness.Reply{Allow: true}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the waiting message's turn", func() bool { return len(handedReqs(t, s, a.AgentID, "u1", "c1")) == 2 })
+	if got := s.get(t, a.AgentID); got.State != StateStopping {
+		t.Fatalf("state = %s; want stopping until the waiting message ran", got.State)
+	}
+	if err := fh.Session(ref).Reply(ctx, "t2", loomharness.Reply{Allow: true}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "archived", func() bool { return s.get(t, a.AgentID).State == StateArchived })
+
+	info, err := s.Create(ctx, CreateRequest{Envelope: Envelope{RequestID: "w1"}, Preset: "daemon-worker", Name: "w",
+		Repo: "/repo", Overrides: Overrides{Harness: "opencode"}, FirstMessage: "fix it"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the task finished", func() bool { return s.get(t, info.AgentID).State == StateFinished })
+	if got := s.get(t, info.AgentID); deref(got.Outcome) != "completed" || got.FinishedAt == nil || got.RunningTurnID != nil {
+		t.Fatalf("finished task: outcome %q finished_at %v turn %v", deref(got.Outcome), got.FinishedAt, got.RunningTurnID)
+	}
+}
+
+// TestDispatchHandedIgnoresOtherSessionEvents: a turn.completed from a session
+// that is not the agent's current one, or for a turn that is not running,
+// changes nothing.
+func TestDispatchHandedIgnoresOtherSessionEvents(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	a, ref := newLead(t, e, s, "alpha")
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "t1"}}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "first", user))
+	for _, ev := range []loomharness.Event{
+		{Type: loomharness.EventTurnCompleted, Session: loomharness.NativeRef{Root: ref.Root, NativeID: "other"}, StopReason: "completed"},
+		{Type: loomharness.EventTurnCompleted, Session: ref, TurnID: "an-old-turn", StopReason: "cancelled"},
+	} {
+		if err := s.HarnessEvent(ctx, a.AgentID, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := s.get(t, a.AgentID); got.State != StateActive || got.RunningTurnID == nil {
+		t.Fatalf("a stray turn.completed ended the turn: %s %v", got.State, got.RunningTurnID)
+	}
+}

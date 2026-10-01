@@ -271,7 +271,10 @@ func (s *Service) finishCreate(ctx context.Context, agentID string) (loomstore.A
 		return a, err
 	}
 	a.CreateStep = stepDone
-	return a, s.store.SetCreateStep(ctx, a.AgentID, stepDone, nil, nil, nil)
+	if err := s.store.SetCreateStep(ctx, a.AgentID, stepDone, nil, nil, nil); err != nil {
+		return a, err
+	}
+	return s.wake(ctx, a) // hand over the first message
 }
 
 // ensureWorktree ensures a's owned working copy through the Workspace port

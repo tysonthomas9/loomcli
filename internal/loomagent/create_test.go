@@ -183,7 +183,8 @@ func TestCreateReplayReturnsOneAgent(t *testing.T) {
 		t.Fatalf("reviewer working copy = %+v", e.ws.ensured[1])
 	}
 	slots, _ := e.st.Slots(ctx, r1.AgentID)
-	if len(slots) != 1 || slots[0].Body != "review it" || slots[0].State != loomstore.SlotWaiting {
+	// The dispatcher handed the first message over once, at the end of Create.
+	if len(slots) != 1 || slots[0].Body != "review it" || slots[0].State != loomstore.SlotHanded {
 		t.Fatalf("first message slots = %+v", slots)
 	}
 
@@ -236,9 +237,11 @@ func TestCreateCrashAtEachStepConverges(t *testing.T) {
 			row, _ := e.st.GetAgent(ctx, a.AgentID)
 			owned, _ := e.st.NativeSessions(ctx, a.AgentID)
 			slots, _ := e.st.Slots(ctx, a.AgentID)
-			if row.State != StateIdle || row.CreateStep != stepDone || len(owned) != 1 ||
-				*row.HarnessSessionID != owned[0].NativeID || len(slots) != 1 ||
-				e.events(t, a.AgentID, KindAgentCreated) != 1 {
+			// The first message is handed over exactly once (one turn ran).
+			_, turns := e.h.Harness.(*fake.Harness).Rules(loomharness.NativeRef{Root: *row.HarnessSessionRoot, NativeID: *row.HarnessSessionID})
+			if row.State != StateActive || row.CreateStep != stepDone || len(owned) != 1 ||
+				*row.HarnessSessionID != owned[0].NativeID || len(slots) != 1 || slots[0].State != loomstore.SlotHanded ||
+				len(turns) != 1 || e.events(t, a.AgentID, KindAgentCreated) != 1 {
 				t.Fatalf("after replay: row %+v owned %+v slots %d", row, owned, len(slots))
 			}
 			if *row.WorktreePath != "/wt/"+a.AgentID {

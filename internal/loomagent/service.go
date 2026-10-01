@@ -78,6 +78,11 @@ type ServiceConfig struct {
 	// or the bridge is down; the agent then does not launch. nil registers
 	// none. Loom never takes capabilities from a request or a stored row.
 	Bridge func(ctx context.Context, p Preset) (BridgeCaps, error)
+	// InputKey derives the native input key the dispatcher prompts with from
+	// the AgentID and the Send's RequestID, per harness (design v2 §4.9); the
+	// same message always gets the same key, so HasInput can find it after a
+	// crash. nil uses OpenCode's msg_ form.
+	InputKey func(harness, agentID, requestID string) string
 }
 
 // Backend is a workspace default harness and model.
@@ -101,6 +106,7 @@ type Service struct {
 	presets     Presets
 	backend     func(context.Context) (Backend, error)
 	bridge      func(context.Context, Preset) (BridgeCaps, error)
+	inputKey    func(harness, agentID, requestID string) string
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
@@ -112,7 +118,8 @@ func New(cfg ServiceConfig) *Service {
 		resolveRepo: cfg.ResolveRepo, prepare: cfg.PrepareWorktree, target: cfg.Target,
 		interrupt: cfg.Interrupt, purge: cfg.Purge, harnesses: cfg.Harnesses, launch: cfg.Launch,
 		workspaceID: cfg.WorkspaceID, presets: cfg.Presets, backend: cfg.DefaultBackend, bridge: cfg.Bridge,
-		locks: map[string]*sync.Mutex{}}
+		inputKey: cfg.InputKey,
+		locks:    map[string]*sync.Mutex{}}
 	if s.presets == nil {
 		s.presets = BuiltinPresets{}
 	}
@@ -121,6 +128,9 @@ func New(cfg ServiceConfig) *Service {
 	}
 	if s.bridge == nil {
 		s.bridge = func(context.Context, Preset) (BridgeCaps, error) { return BridgeCaps{}, nil }
+	}
+	if s.inputKey == nil {
+		s.inputKey = defaultInputKey
 	}
 	if s.target == "" {
 		s.target = TargetLocal

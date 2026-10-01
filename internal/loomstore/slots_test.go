@@ -370,3 +370,60 @@ func TestReceiptReopenRacesSweep(t *testing.T) {
 		}
 	}
 }
+
+// TestSlotHandedRequeueReceiptAndFinish covers the dispatcher's store calls:
+// HandNext marks the Send's receipt handed in its transaction; Requeue puts a
+// handed message back in line in its old place; PendingAgents lists agents
+// with a waiting or handed slot; a turn ending in finished sets finished_at.
+func TestSlotHandedRequeueReceiptAndFinish(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newSlotStore(t)
+	mustSend(t, s, send("user:u", "r1", "one"))
+	mustSend(t, s, send("agent:c", "r2", "two"))
+	if ids, _ := s.PendingAgents(ctx); len(ids) != 1 || ids[0] != "a1" {
+		t.Fatalf("pending = %v", ids)
+	}
+	sl, err := s.HandNext(ctx, "a1", nativeKey)
+	if err != nil || sl.RequestID != "r1" {
+		t.Fatalf("HandNext = %+v, %v", sl, err)
+	}
+	if r, _ := s.GetReceipt(ctx, "a1", "r1"); r.ResultJSON != `{"req":"r1","replaced":false,"state":"handed"}` {
+		t.Fatalf("receipt after hand-over = %s", r.ResultJSON)
+	}
+	if err := s.Requeue(ctx, "a1", "user:u", "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Requeue(ctx, "a1", "user:u", "r1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second Requeue = %v", err)
+	}
+	if again, _ := s.HandNext(ctx, "a1", nativeKey); again.RequestID != "r1" { // its place kept
+		t.Fatalf("after Requeue the next hand-over is %s", again.RequestID)
+	}
+	for _, sl := range []string{"user:u", "agent:c"} {
+		cur := slotOf(t, s, sl)
+		if cur.State == SlotWaiting {
+			if _, err := s.HandNext(ctx, "a1", nativeKey); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := s.MarkDelivered(ctx, "a1", sl, slotOf(t, s, sl).RequestID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ids, _ := s.PendingAgents(ctx); len(ids) != 0 {
+		t.Fatalf("pending after delivery = %v", ids)
+	}
+
+	task := agent("t1", "background")
+	task.Mode, task.State = "single_task", "active"
+	if err := s.InsertAgent(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	from := AgentState{State: "active"}
+	if err := s.CompareAndSetState(ctx, "t1", from, AgentState{State: "finished", Outcome: ptr("completed")}); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := s.GetAgent(ctx, "t1"); a.FinishedAt == nil {
+		t.Fatal("a finished turn set no finished_at")
+	}
+}

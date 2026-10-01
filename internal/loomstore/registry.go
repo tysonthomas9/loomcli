@@ -235,13 +235,17 @@ var ErrStateChanged = errors.New("loomstore: agent state changed")
 
 // CompareAndSetState sets agentID's state columns to `to` only if they still
 // equal `from` and the agent is not deleted; otherwise it returns ErrStateChanged.
+// A turn ending in finished (from active or waiting) also sets finished_at,
+// the background R29 deadline, in the same statement.
 func (s *Store) CompareAndSetState(ctx context.Context, agentID string, from, to AgentState) error {
+	now := Stamp(time.Now())
 	res, err := s.db.ExecContext(ctx, `UPDATE agents SET state = ?, state_reason = ?, waiting_on = ?, outcome = ?,
-		attention_reason = ?, running_turn_id = ?, attempt = ?, updated_at = ?
+		attention_reason = ?, running_turn_id = ?, attempt = ?, updated_at = ?,
+		finished_at = CASE WHEN ? = 'finished' AND state IN ('active','waiting') THEN ? ELSE finished_at END
 		WHERE agent_id = ? AND deleted_at IS NULL AND state = ? AND state_reason IS ? AND waiting_on IS ?
 		AND outcome IS ? AND attention_reason IS ? AND running_turn_id IS ? AND attempt = ?`,
 		to.State, to.StateReason, to.WaitingOn, to.Outcome, to.AttentionReason, to.RunningTurn, to.Attempt,
-		Stamp(time.Now()), agentID, from.State, from.StateReason, from.WaitingOn, from.Outcome,
+		now, to.State, now, agentID, from.State, from.StateReason, from.WaitingOn, from.Outcome,
 		from.AttentionReason, from.RunningTurn, from.Attempt)
 	if err != nil {
 		return err
