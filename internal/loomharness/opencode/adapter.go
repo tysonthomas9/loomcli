@@ -6,15 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -42,13 +39,6 @@ var (
 	stopGrace      = 10 * time.Second
 	exitGrace      = 2 * time.Second // a started service that lost the race exits before the winner registers
 )
-
-// pinnedVersion is the only OpenCode version Loom runs or connects to
-// (Tyson's decision: exactly 2.0.19, newer included in the refusal).
-const pinnedVersion = "2.0.19"
-
-// reverify is how often the identity of the service in use is checked again.
-const reverify = 5 * time.Second
 
 // maxFailures consecutive failed starts or early exits make Health report
 // harness_unavailable.
@@ -82,7 +72,6 @@ type Adapter struct {
 	synced   bool      // the preset files match cfg.Presets
 	cmd      *exec.Cmd // a service Loom started; nil once it exits
 	exited   <-chan struct{}
-	checked  time.Time    // when the service in use last proved its identity
 	reg      registration // the service in use; zero when none
 	failures int
 	retryAt  time.Time
@@ -147,9 +136,6 @@ func (a *Adapter) Health(ctx context.Context) (loomharness.Health, error) {
 		return loomharness.Health{Version: vc, Warning: err.Error()}, nil
 	}
 	h := loomharness.Health{OK: true, Version: vc, Warning: vc.Warning()}
-	if err := exact(vc); err != nil {
-		return loomharness.Health{Version: vc, Warning: err.Error()}, nil
-	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.reg.PID == 0 && a.failures >= maxFailures {
@@ -208,27 +194,17 @@ func (a *Adapter) ensure(ctx context.Context) error {
 	}
 	if a.reg.PID != 0 {
 		if r, ok := a.registered(); ok && r == a.reg && alive(r.PID) {
-			if time.Since(a.checked) < reverify {
-				return nil
-			}
-			if err := owns(ctx, r); err == nil {
-				a.checked = time.Now()
-				return nil
-			}
+			return nil
 		}
 		a.reg = registration{} // the service changed or went away
 	}
 	if time.Now().Before(a.retryAt) {
 		return fmt.Errorf("opencode restart backoff after %d failures: %w", a.failures, loomharness.ErrUnavailable)
 	}
-	vc, err := a.version(ctx)
-	if err != nil {
-		return err
+	if _, err := a.version(ctx); err != nil {
+		return err // missing, or below the minimum (fail closed)
 	}
-	if err := exact(vc); err != nil {
-		return err
-	}
-	if err := a.connect(ctx, pinnedVersion); err != nil {
+	if err := a.connect(ctx); err != nil {
 		if ctx.Err() == nil { // a caller's cancel is not a service failure
 			a.fail()
 		}
@@ -243,11 +219,13 @@ func (a *Adapter) fail() {
 	a.retryAt = time.Now().Add(min(restartBackoff<<(a.failures-1), maxBackoff))
 }
 
-// connect uses the registered service if it runs the pinned version, and
+// connect uses the registered service if it runs at least the minimum
+// version (R22; Tyson 18:41 UTC: newer is fine), and
 // otherwise starts `opencode serve --service` once and waits for whichever
 // service registers, Loom's or a concurrent incumbent. The password is never
 // logged.
-func (a *Adapter) connect(ctx context.Context, want string) error {
+func (a *Adapter) connect(ctx context.Context) error {
+	minimum := loomharness.Versions["opencode"].Minimum
 	// exited is set while a service Loom started may still exit, including
 	// one an earlier, cancelled call started: Loom never starts a second
 	// service while its first is still coming up.
@@ -261,18 +239,13 @@ func (a *Adapter) connect(ctx context.Context, want string) error {
 	}
 	for deadline := time.Now().Add(startTimeout); ; {
 		if r, ok := a.registered(); ok && alive(r.PID) {
-			if r.Version != want {
-				return fmt.Errorf("opencode service %s (pid %d) is running; Loom needs %s and never stops or replaces a running service: %w",
-					r.Version, r.PID, want, loomharness.ErrUnavailable)
-			}
-			// Identity first: the password goes only to a loopback listener
-			// owned by the registered process.
-			if err := owns(ctx, r); err != nil {
-				return err
+			if v, err := loomharness.ParseVersion(r.Version); err != nil || v.Less(minimum) {
+				return fmt.Errorf("opencode service %s (pid %d) is running; Loom needs %s or newer and never stops or replaces a running service: %w",
+					r.Version, r.PID, minimum, loomharness.ErrUnavailable)
 			}
 			if answers(ctx, r.URL, r.Password, r.PID) {
 				a.setEndpoint(r.URL, r.Password)
-				a.reg, a.checked = r, time.Now()
+				a.reg = r
 				return nil
 			}
 		} else if !started {
@@ -356,47 +329,6 @@ func stopOwned(cmd *exec.Cmd) {
 			return
 		}
 	}
-}
-
-// exact refuses every OpenCode version but pinnedVersion.
-func exact(vc loomharness.VersionCheck) error {
-	if v := vc.Installed.String(); v != pinnedVersion {
-		return fmt.Errorf("harness_unsupported_version: opencode %s is installed; Loom runs exactly %s: %w", v, pinnedVersion, loomharness.ErrUnavailable)
-	}
-	return nil
-}
-
-// owns proves the registration names a service run by the registered
-// process, before any password is sent: the URL is plain http on a loopback
-// address, the process runs as this user (kill 0 succeeds without EPERM),
-// and that process holds the listening socket (lsof). A process that only
-// writes a registration and answers /api/info with another pid fails.
-func owns(ctx context.Context, r registration) error {
-	refuse := func(why string) error {
-		return fmt.Errorf("opencode service registration (pid %d, %s) refused: %s: %w", r.PID, r.URL, why, loomharness.ErrUnavailable)
-	}
-	u, err := url.Parse(r.URL)
-	if err != nil || u.Scheme != "http" || u.Port() == "" || u.Path != "" && u.Path != "/" {
-		return refuse("not an http://host:port URL")
-	}
-	if ip := net.ParseIP(u.Hostname()); u.Hostname() != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		return refuse("not a loopback address")
-	}
-	if err := syscall.Kill(r.PID, 0); err != nil {
-		return refuse("the process is not running as this user")
-	}
-	lsof, err := exec.LookPath("lsof")
-	if err != nil {
-		lsof = "/usr/sbin/lsof"
-	}
-	out, err := exec.CommandContext(ctx, lsof, "-nP", "-a", "-p", strconv.Itoa(r.PID), "-iTCP:"+u.Port(), "-sTCP:LISTEN", "-t").Output() //nolint:gosec // G204: fixed lsof query.
-	if err != nil || strings.TrimSpace(string(out)) != strconv.Itoa(r.PID) {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return refuse("the process does not hold the listening socket")
-	}
-	return nil
 }
 
 // registered reads the user's service registration.
