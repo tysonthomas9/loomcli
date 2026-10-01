@@ -34,6 +34,8 @@ type Client struct {
 	rulesMu sync.Mutex
 	rules   map[string][]map[string]string // native session id -> the rules Loom last installed
 	roots   map[string]string              // native session id -> the Root Loom opened or resumed it with
+
+	opening sync.Map // native session id -> *sync.Mutex held by an Open for that id
 }
 
 // remember records the Root of a session Loom opened or resumed, for the feed.

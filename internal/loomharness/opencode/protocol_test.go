@@ -34,6 +34,7 @@ type store struct {
 	patchErr bool
 	delErr   bool                // DELETE /api/session/{id} fails
 	postErr  bool                // POST /api/session creates the session, then fails
+	race     *openRace           // pairs two concurrent session GETs, fails the second create
 	agents   map[string]bool     // agent ids the service offers
 	agentDir []string            // location[directory] of each agent lookup
 	loading  bool                // the location lists no agents yet
@@ -63,6 +64,12 @@ func fakeServer(t *testing.T, st *store) *Client {
 		st.mu.Lock()
 		defer st.mu.Unlock()
 		id, _ := body["id"].(string)
+		if st.race != nil {
+			if st.race.posts++; st.race.posts == 2 {
+				reply(w, 504, map[string]string{"_tag": "UnknownError", "message": "timeout"})
+				return
+			}
+		}
 		if _, ok := st.sessions[id]; ok {
 			reply(w, 409, map[string]string{"_tag": "ConflictError", "message": "exists"})
 			return
@@ -97,6 +104,9 @@ func fakeServer(t *testing.T, st *store) *Client {
 		reply(w, 200, map[string]any{"data": data})
 	})
 	mux.HandleFunc("GET /api/session/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if st.race != nil {
+			st.race.pair()
+		}
 		st.mu.Lock()
 		defer st.mu.Unlock()
 		if s, ok := st.sessions[r.PathValue("id")]; ok {
@@ -791,5 +801,70 @@ func TestProtocolOpenLeavesNothingOnError(t *testing.T) {
 	st.patchErr = true
 	if again, err := c.Open(ctx, spec); err == nil || again != (loomharness.NativeRef{}) || !exists(id) {
 		t.Fatalf("a failed repeat Open = %+v, %v, session kept %v; want the zero ref and the earlier session kept", again, err, exists(id))
+	}
+}
+
+// openRace replays codex's interleaving (verdict 8d783c86): two Opens for one
+// key both find no session, the first creates it, and the second's create
+// fails, so its cleanup would delete the first's session. pair holds the
+// first session GET until a second arrives (or 300ms pass).
+type openRace struct {
+	once  sync.Once
+	both  chan struct{}
+	mu    sync.Mutex
+	gets  int
+	posts int // guarded by store.mu
+}
+
+func (r *openRace) pair() {
+	r.once.Do(func() { r.both = make(chan struct{}) })
+	r.mu.Lock()
+	r.gets++
+	n := r.gets
+	r.mu.Unlock()
+	if n == 2 {
+		close(r.both)
+	}
+	if n == 1 {
+		select {
+		case <-r.both:
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+}
+
+// TestProtocolConcurrentOpenKeepsSession: a failed Open never deletes the
+// session a concurrent Open for the same key created.
+func TestProtocolConcurrentOpenKeepsSession(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	st.race = &openRace{}
+	spec := loomharness.OpenSpec{Key: "agent-1", Dir: "/repo"}
+	type result struct {
+		ref loomharness.NativeRef
+		err error
+	}
+	out := make(chan result, 2)
+	for range 2 {
+		go func() { ref, err := c.Open(ctx, spec); out <- result{ref, err} }()
+	}
+	var ok, failed int
+	for range 2 {
+		r := <-out
+		switch {
+		case r.err == nil && r.ref.NativeID == SessionID(spec.Key):
+			ok++
+		case r.err != nil && r.ref == (loomharness.NativeRef{}):
+			failed++
+		default:
+			t.Errorf("Open = %+v, %v", r.ref, r.err)
+		}
+	}
+	st.mu.Lock()
+	_, kept := st.sessions[SessionID(spec.Key)]
+	st.mu.Unlock()
+	if ok != 1 || failed != 1 || !kept {
+		t.Fatalf("%d Opens succeeded, %d failed, session kept %v; want 1, 1, true", ok, failed, kept)
 	}
 }

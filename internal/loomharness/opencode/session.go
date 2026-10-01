@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
@@ -41,6 +42,13 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 	if len(rules) > 0 {
 		body["permissions"] = rules
 	}
+	// One Open per session id at a time (per id, not global), so "did not
+	// exist before" holds from the GET through any cleanup: otherwise a
+	// concurrent Open for the same key could create the session in between
+	// and this one's cleanup would delete it.
+	mu, _ := c.opening.LoadOrStore(ref.NativeID, new(sync.Mutex))
+	mu.(*sync.Mutex).Lock()
+	defer mu.(*sync.Mutex).Unlock()
 	s := c.Session(ref)
 	// A repeat Open finds the session an earlier one made; b30c4d0 answers a
 	// repeat POST with success, so only a GET tells whether this Open made it.
