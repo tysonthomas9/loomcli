@@ -128,3 +128,20 @@ tests:
       - run: >-
           test "$(cat "$AFT_WORK_DIR/apply-trunk-before")" = "$(git -C "$AFT_WORK_DIR/review-repo" rev-parse refs/heads/main)"
         intent: "Confirm that applying the layer did not advance trunk"
+
+  - name: landed stacked change restacks its dependent into a derived revision
+    skip: true
+    intent: "Expected failure on 5f26b8f: this AFT stack cannot publish X through P2.14 or merge its owned PR through a fake forge; without that publication, serve's P4.4 landing reconciler has no real entry-point event to feed P3.4 restack"
+    steps:
+      - run: >-
+          echo 'Prerequisite: create stacked task changes X and Y through TaskRuns, approve and Apply both through the UI, then Publish X through the product API using a fake forge with an owned PR';
+          exit 1
+        intent: "Require actual stacked publications rather than seeding journal rows or Git refs as substitute evidence"
+      - run: >-
+          echo 'Merge X in the fake forge and advance the bare remote trunk; restart serve to invoke its landing reconciliation entry point';
+          exit 1
+        intent: "P4.4 must detect the landed owned PR and mark Y restack_available"
+      - run: >-
+          echo 'Read Y revisions and assert a new restack operation derives from its source revision and uses the landed trunk SHA';
+          exit 1
+        intent: "P3.4 must create a real derived revision rather than an independently seeded revision"
