@@ -25,7 +25,9 @@ type Status struct {
 }
 
 // Status reports the uncommitted paths of the worktree s owns, with a
-// fingerprint that changes whenever a path or its content changes.
+// fingerprint that changes whenever a path or its content changes. A missing
+// worktree reports a zero Status (nothing uncommitted); a path that exists but
+// is not owned by s fails with ErrNotOwned.
 func (w *Worktrees) Status(ctx context.Context, s Spec) (Status, error) {
 	if err := checkSpec(s); err != nil {
 		return Status{}, err
@@ -35,6 +37,11 @@ func (w *Worktrees) Status(ctx context.Context, s Spec) (Status, error) {
 		return Status{}, err
 	}
 	defer w.lock(path)()
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		return Status{}, nil // absent: nothing uncommitted
+	} else if err != nil {
+		return Status{}, fmt.Errorf("agentworktree: stat %s: %w", path, err)
+	}
 	wt, err := w.owned(ctx, s, path)
 	if err != nil {
 		return Status{}, err

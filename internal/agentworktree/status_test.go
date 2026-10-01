@@ -115,6 +115,24 @@ func TestWorkspaceStatusDetachedPRRef(t *testing.T) {
 	}
 }
 
+func TestWorkspaceStatusMissingIsAbsent(t *testing.T) {
+	ctx := context.Background()
+	ws, _, repo := portSetup(t)
+	s := loomagent.WorkspaceSpec{Key: "agt_m", Repo: repo, BaseRef: "main", Branch: "loom/agent/agt_m"}
+	if st, err := ws.Status(ctx, s); err != nil || len(st.Uncommitted) != 0 {
+		t.Fatalf("never-made Status = %+v, %v; want absent", st, err)
+	}
+	if _, err := ws.Ensure(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.Remove(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := ws.Status(ctx, s); err != nil || len(st.Uncommitted) != 0 {
+		t.Fatalf("removed Status = %+v, %v; want absent", st, err)
+	}
+}
+
 func TestWorkspaceStatusRefusesForeign(t *testing.T) {
 	ctx := context.Background()
 	ws, _, repo := portSetup(t)
