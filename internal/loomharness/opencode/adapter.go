@@ -1,6 +1,7 @@
 package opencode
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -41,12 +42,16 @@ var (
 // harness_unavailable.
 const maxFailures = 3
 
-// Adapter is the OpenCode harness: it supervises one plain `opencode serve`
+// Adapter is the OpenCode harness: it supervises one `opencode serve --stdio`
 // on a free loopback port with a random per-boot password (R-D) and serves
-// the port through Client. It never uses --service, so the user's own
-// OpenCode service registration and config are never touched. The
-// server starts on first use, restarts with backoff when it exits, and is
-// stopped only by Loom's own Stop or Restart calls.
+// the port through Client. --stdio is plain serve that deletes the password
+// from its own environment once read (packages/cli/src/server-process.ts:73-77
+// at b30c4d0), so no tool, subagent or nested subagent inherits it; it
+// announces {"url"} on stdout and exits when stdin closes. Loom holds stdin
+// for the server's lifetime. It never uses --service, so the user's own
+// OpenCode service registration and config are never touched. The server
+// starts on first use, restarts with backoff when it exits, and is stopped
+// only by Loom's own Stop or Restart calls.
 //
 // Loom owns the process tree it starts. The server runs in its own process
 // group, but OpenCode starts shell commands and its PTY daemon detached, so
@@ -64,6 +69,7 @@ type Adapter struct {
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd // the owned server; nil when none runs
+	stdin    *os.File  // held open for the server's lifetime; closing it stops the server
 	exited   chan struct{}
 	failures int
 	retryAt  time.Time
@@ -186,24 +192,19 @@ func (a *Adapter) spawn(ctx context.Context) error {
 		return err
 	}
 	password := newPassword()
-	env = append(env, "OPENCODE_SERVER_PASSWORD="+password)
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	base, port, err := freePort()
 	if err != nil {
 		return fmt.Errorf("opencode: free port: %w: %w", loomharness.ErrUnavailable, err)
 	}
-	base := "http://" + l.Addr().String()
-	port := strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
-	_ = l.Close()
-	cmd := exec.Command(a.cfg.Bin, "serve", "--hostname", "127.0.0.1", "--port", port) //nolint:gosec // G204: the configured OpenCode binary.
-	cmd.Env = env
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd := a.serveCmd(env, port, password)
 	a.reap() // leftovers of a crashed server: no duplicate survivor
-	if err := cmd.Start(); err != nil {
+	inW, outR, err := startPiped(cmd)
+	if err != nil {
 		return fmt.Errorf("opencode serve: %w: %w", loomharness.ErrUnavailable, err)
 	}
-	exited := make(chan struct{})
-	started := time.Now()
-	go a.watch(cmd, exited, started)
+	exited, started, urls := make(chan struct{}), time.Now(), make(chan string, 1)
+	go announced(outR, urls)
+	go a.watch(cmd, inW, exited, started)
 	go a.track(cmd.Process.Pid, exited)
 	kill := func(err error) error {
 		a.record(cmd.Process.Pid)
@@ -212,6 +213,7 @@ func (a *Adapter) spawn(ctx context.Context) error {
 		a.reap()
 		return err
 	}
+	listening := false
 	for deadline := started.Add(startTimeout); ; {
 		select {
 		case <-exited:
@@ -219,11 +221,16 @@ func (a *Adapter) spawn(ctx context.Context) error {
 			return fmt.Errorf("opencode serve exited during start: %w", loomharness.ErrUnavailable)
 		case <-ctx.Done():
 			return kill(ctx.Err())
+		case url := <-urls:
+			if url != base {
+				return kill(fmt.Errorf("opencode serve announced %q, not its owned listener %s: %w", url, base, loomharness.ErrUnavailable))
+			}
+			listening = true
 		case <-time.After(100 * time.Millisecond):
 		}
-		if answers(ctx, base, password, cmd.Process.Pid) {
+		if listening && answers(ctx, base, password, cmd.Process.Pid) {
 			a.setEndpoint(base, password)
-			a.cmd, a.exited = cmd, exited
+			a.cmd, a.stdin, a.exited = cmd, inW, exited
 			a.record(cmd.Process.Pid)
 			return nil
 		}
@@ -233,6 +240,47 @@ func (a *Adapter) spawn(ctx context.Context) error {
 	}
 }
 
+// serveCmd is the owned `opencode serve --stdio` on the loopback port, in its
+// own process group, with the per-boot password.
+func (a *Adapter) serveCmd(env []string, port, password string) *exec.Cmd {
+	cmd := exec.Command(a.cfg.Bin, "serve", "--stdio", "--hostname", "127.0.0.1", "--port", port) //nolint:gosec // G204: the configured OpenCode binary.
+	cmd.Env = append(slices.Clip(env), "OPENCODE_SERVER_PASSWORD="+password)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	return cmd
+}
+
+// freePort picks a free loopback port and returns its base URL and number.
+func freePort() (base, port string, err error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", "", err
+	}
+	defer func() { _ = l.Close() }()
+	return "http://" + l.Addr().String(), strconv.Itoa(l.Addr().(*net.TCPAddr).Port), nil
+}
+
+// startPiped starts cmd with stdin and stdout on fresh pipes and returns
+// Loom's ends: the stdin writer it holds and the stdout reader.
+func startPiped(cmd *exec.Cmd) (stdin, stdout *os.File, err error) {
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		return nil, nil, err
+	}
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		_, _ = inR.Close(), inW.Close()
+		return nil, nil, err
+	}
+	cmd.Stdin, cmd.Stdout = inR, outW
+	err = cmd.Start()
+	_, _ = inR.Close(), outW.Close()
+	if err != nil {
+		_, _ = inW.Close(), outR.Close()
+		return nil, nil, err
+	}
+	return inW, outR, nil
+}
+
 // newPassword is a random per-boot server password.
 func newPassword() string {
 	b := make([]byte, 32)
@@ -240,10 +288,29 @@ func newPassword() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
+// announced sends the URL from the server's {"url"} stdout line, then drains
+// stdout so the server never blocks writing to it.
+func announced(out *os.File, urls chan<- string) {
+	defer func() { _ = out.Close() }()
+	sc := bufio.NewScanner(out)
+	for sc.Scan() {
+		var line struct {
+			URL string `json:"url"`
+		}
+		if json.Unmarshal(sc.Bytes(), &line) == nil && line.URL != "" {
+			select {
+			case urls <- line.URL:
+			default:
+			}
+		}
+	}
+}
+
 // watch reaps the server and, when it exits on its own, restarts it after
 // the backoff.
-func (a *Adapter) watch(cmd *exec.Cmd, exited chan struct{}, started time.Time) {
+func (a *Adapter) watch(cmd *exec.Cmd, stdin *os.File, exited chan struct{}, started time.Time) {
 	_ = cmd.Wait()
+	_ = stdin.Close()
 	close(exited)
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -258,8 +325,9 @@ func (a *Adapter) watch(cmd *exec.Cmd, exited chan struct{}, started time.Time) 
 	time.AfterFunc(time.Until(a.retryAt), func() { _ = a.ensure(context.Background()) })
 }
 
-// stopLocked sends SIGTERM to the owned server's process group, waits, then
-// SIGKILLs it, and reaps the detached rest of the tree.
+// stopLocked closes the owned server's stdin, which stops a --stdio server,
+// waits, then SIGKILLs its process group, and reaps the detached rest of the
+// tree.
 func (a *Adapter) stopLocked() {
 	cmd, exited := a.cmd, a.exited
 	if cmd == nil {
@@ -267,7 +335,7 @@ func (a *Adapter) stopLocked() {
 	}
 	a.cmd = nil
 	a.record(cmd.Process.Pid)
-	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+	_ = a.stdin.Close()
 	select {
 	case <-exited:
 	case <-time.After(stopGrace):

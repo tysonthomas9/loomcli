@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -19,9 +23,12 @@ import (
 var secretNames = []string{"OPENCODE_SERVER_PASSWORD", "OPENCODE_PASSWORD", "GITHUB_TOKEN", "GH_TOKEN",
 	"GH_ENTERPRISE_TOKEN", "GITHUB_TOKEN_FILE", "LOOM_PR_GIT_PASSWORD"}
 
-// TestContractSubagentEnv checks what a shell sees inside a subagent child
-// session and inside a subagent of a subagent, before and after a server
-// restart, driven by the AFT fake-model fixture (2.0d).
+// TestContractSubagentEnv proves no tool process sees the server password or
+// a GitHub/publish alias: not the session's first shell, not a subagent's,
+// not a subagent-of-a-subagent's, before and after a server restart. Driven
+// by the AFT fake-model fixture (2.0d) with synthetic credentials; only names
+// are asserted or printed. The control runs plain `opencode serve` without
+// Loom's filters and shows the leak the adapter's --stdio launch prevents.
 func TestContractSubagentEnv(t *testing.T) {
 	if os.Getenv("LOOM_REAL_OPENCODE") != "1" {
 		t.Skip("set LOOM_REAL_OPENCODE=1 to run against the real OpenCode build")
@@ -55,68 +62,134 @@ func TestContractSubagentEnv(t *testing.T) {
 		t.Setenv(k, "fixture-"+strings.ToLower(k))
 	}
 	t.Setenv("LOOM_NESTED_MARKER", "kept")
-
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	a := New(Config{Bin: bin, Env: contractEnv(sbx)})
-	var owned []loomharness.NativeRef
-	t.Cleanup(func() {
-		if err := a.Purge(context.Background(), owned); err != nil {
-			t.Errorf("cleanup purge: %v", err)
-		}
-		a.Stop()
-	})
-	waitFor(t, "aft/m in Models", func() bool { models, err := a.Models(ctx); return err == nil && hasModel(models, "aft/m") })
-	ref, err := a.Open(ctx, loomharness.OpenSpec{
-		Key: "subagent-1", Launch: loomharness.Launch{Root: sbx}, Dir: repo, Model: "aft/m",
-		Rules: []loomharness.PermissionRule{{Action: "*", Resource: "*", Effect: "allow"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	owned = append(owned, ref)
-
-	spawn := map[string]any{"tool_calls": []map[string]any{{"name": "subagent",
-		"arguments": map[string]string{"agent": "general", "description": "env check", "prompt": "check env"}}}}
-	for i, restart := range []bool{false, true} {
-		if restart {
-			if err := a.Restart(ctx); err != nil {
-				t.Fatal(err)
-			}
-		}
-		child := filepath.Join(sbx, fmt.Sprintf("child-%d.txt", i))
-		grandchild := filepath.Join(sbx, fmt.Sprintf("grandchild-%d.txt", i))
-		// One FIFO queue serves every session in order: parent spawns, child
-		// dumps and spawns, grandchild dumps, then each finishes.
-		b, _ := json.Marshal(map[string]any{"steps": []any{
-			spawn, map[string]any{"bash": "env > " + child}, spawn, map[string]any{"bash": "env > " + grandchild},
-			map[string]any{"text": "grandchild done"}, map[string]any{"text": "child done"}, map[string]any{"text": "parent done"},
-		}})
-		resp, err := http.Post(fixture+"/__script", "application/json", strings.NewReader(string(b)))
-		if err != nil || resp.StatusCode != http.StatusOK {
-			t.Fatalf("script: %v %v", resp, err)
-		}
-		_ = resp.Body.Close()
-		if err := a.Session(ref).Prompt(ctx, loomharness.Input{Key: PromptID("subagent-1", child), Text: "spawn"}); err != nil {
-			t.Fatal(err)
-		}
-		for _, f := range []string{child, grandchild} {
-			var env string
-			waitFor(t, filepath.Base(f), func() bool {
-				out, err := os.ReadFile(f)
-				env = string(out)
-				return err == nil && strings.Contains(env, "LOOM_NESTED_MARKER=kept")
-			})
-			// Pinned finding: OpenCode creates subagent sessions without the
-			// parent's environment, so their shells get the server's own,
-			// per-boot password included. GitHub/publish aliases never
-			// reach the server, so they stay absent.
+	// contractEnv drops OPENCODE_*; put the synthetic server passwords back.
+	parentEnv := append(contractEnv(sbx), "OPENCODE_SERVER_PASSWORD=fixture-opencode_server_password",
+		"OPENCODE_PASSWORD=fixture-opencode_password")
+	spec := loomharness.OpenSpec{Launch: loomharness.Launch{Root: sbx}, Dir: repo, Model: "aft/m",
+		Rules: []loomharness.PermissionRule{{Action: "*", Resource: "*", Effect: "allow"}}}
+	check := func(t *testing.T, envs map[string]string, leaked func(name string) bool) {
+		t.Helper()
+		for role, env := range envs {
 			for _, k := range secretNames {
-				saw := strings.Contains(env, "\n"+k+"=") || strings.HasPrefix(env, k+"=")
-				if want := k == "OPENCODE_SERVER_PASSWORD"; saw != want {
-					t.Errorf("restart=%v: %s shell saw %s = %v; pinned %v", restart, strings.TrimSuffix(filepath.Base(f), ".txt"), k, saw, want)
+				if saw := strings.Contains(env, "\n"+k+"=") || strings.HasPrefix(env, k+"="); saw != leaked(k) {
+					t.Errorf("%s shell saw %s = %v; want %v", role, k, saw, leaked(k))
 				}
 			}
 		}
 	}
+
+	t.Run("Adapter", func(t *testing.T) {
+		a := New(Config{Bin: bin, Env: parentEnv})
+		var owned []loomharness.NativeRef
+		t.Cleanup(func() {
+			if err := a.Purge(context.Background(), owned); err != nil {
+				t.Errorf("cleanup purge: %v", err)
+			}
+			a.Stop()
+		})
+		waitFor(t, "aft/m in Models", func() bool { models, err := a.Models(ctx); return err == nil && hasModel(models, "aft/m") })
+		spec.Key = "subagent-1"
+		ref, err := a.Open(ctx, spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		owned = append(owned, ref)
+		for i, restart := range []bool{false, true} {
+			if restart {
+				if err := a.Restart(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			envs := subagentShells(t, ctx, a.Client, ref, fixture, filepath.Join(sbx, fmt.Sprintf("adapter-%d", i)))
+			check(t, envs, func(string) bool { return false })
+		}
+	})
+
+	t.Run("PlainServeControl", func(t *testing.T) {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		base := "http://" + l.Addr().String()
+		_ = l.Close()
+		cmd := exec.Command(bin, "serve", "--hostname", "127.0.0.1", "--port", strings.TrimPrefix(base, "http://127.0.0.1:"))
+		cmd.Env = parentEnv // every synthetic credential, unfiltered
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); _ = cmd.Wait() })
+		c := NewClient(base, "fixture-opencode_password") // OPENCODE_PASSWORD wins over OPENCODE_SERVER_PASSWORD
+		waitFor(t, "plain serve", func() bool { return answers(ctx, base, "fixture-opencode_password", cmd.Process.Pid) })
+		spec.Key = "subagent-control"
+		ref, err := c.Open(ctx, spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = c.Purge(context.Background(), []loomharness.NativeRef{ref}) })
+		envs := subagentShells(t, ctx, c, ref, fixture, filepath.Join(sbx, "control"))
+		check(t, envs, func(string) bool { return true })
+	})
+}
+
+// subagentShells scripts a session whose first tool dumps its environment,
+// then spawns a subagent that dumps and spawns another that dumps. It returns
+// each dump by role, after checking that two nested subagent sessions ran.
+func subagentShells(t *testing.T, ctx context.Context, c *Client, ref loomharness.NativeRef, fixture, dir string) map[string]string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dump := func(role string) map[string]any { return map[string]any{"bash": "env > " + filepath.Join(dir, role)} }
+	spawn := map[string]any{"tool_calls": []map[string]any{{"name": "subagent",
+		"arguments": map[string]string{"agent": "general", "description": "env check", "prompt": "check env"}}}}
+	// One FIFO queue serves every session in turn.
+	b, _ := json.Marshal(map[string]any{"steps": []any{dump("parent"), spawn, dump("child"), spawn, dump("grandchild"),
+		map[string]any{"text": "grandchild done"}, map[string]any{"text": "child done"}, map[string]any{"text": "parent done"}}})
+	resp, err := http.Post(fixture+"/__script", "application/json", strings.NewReader(string(b)))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("script: %v %v", resp, err)
+	}
+	_ = resp.Body.Close()
+	before := len(childSessions(t, ctx, c, ref.NativeID))
+	if err := c.Session(ref).Prompt(ctx, loomharness.Input{Key: PromptID(ref.NativeID, dir), Text: "spawn"}); err != nil {
+		t.Fatal(err)
+	}
+	envs := map[string]string{}
+	for _, role := range []string{"parent", "child", "grandchild"} {
+		waitFor(t, role+" env dump", func() bool {
+			out, err := os.ReadFile(filepath.Join(dir, role))
+			envs[role] = string(out)
+			return err == nil && strings.Contains(envs[role], "LOOM_NESTED_MARKER=kept")
+		})
+	}
+	kids := childSessions(t, ctx, c, ref.NativeID)
+	if len(kids) != before+1 || len(childSessions(t, ctx, c, kids[len(kids)-1])) != 1 {
+		t.Fatalf("subagents did not run: %d children (was %d)", len(kids), before)
+	}
+	return envs
+}
+
+// childSessions lists the ids of sessions whose parent is id, oldest first.
+func childSessions(t *testing.T, ctx context.Context, c *Client, id string) []string {
+	t.Helper()
+	var page struct {
+		Data []struct {
+			ID       string `json:"id"`
+			ParentID string `json:"parentID"`
+		} `json:"data"`
+	}
+	if err := c.call(ctx, "GET", "/api/session", nil, &page); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, s := range page.Data {
+		if s.ParentID == id {
+			ids = append(ids, s.ID)
+		}
+	}
+	slices.Sort(ids)
+	return ids
 }

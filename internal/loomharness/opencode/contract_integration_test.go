@@ -77,8 +77,11 @@ func TestContract(t *testing.T) {
 		if err := a.Purge(context.Background(), owned); err != nil {
 			t.Errorf("cleanup purge: %v", err)
 		}
-		pid := serverPID(a)
+		pid, start := serverPID(a), time.Now()
 		a.Stop()
+		if took := time.Since(start); took >= stopGrace {
+			t.Errorf("Stop took %s: the server ignored its stdin closing and was killed", took)
+		}
 		if alive(pid) || len(a.owned()) != 0 {
 			t.Errorf("owned tree still running after Stop: server %v, owned %v", alive(pid), a.owned())
 		}
@@ -535,7 +538,7 @@ func readAll(t *testing.T, files []string) map[string]string {
 	return out
 }
 
-// loomServes lists running plain `serve` processes of bin (not --service).
+// loomServes lists running `serve --stdio` processes of bin, as Loom starts them.
 func loomServes(t *testing.T, bin string) []int {
 	t.Helper()
 	out, err := exec.Command("ps", "-axo", "pid=,command=").Output()
@@ -544,7 +547,7 @@ func loomServes(t *testing.T, bin string) []int {
 	}
 	var pids []int
 	for _, line := range strings.Split(string(out), "\n") {
-		if strings.Contains(line, bin+" serve --hostname") && !strings.Contains(line, "--service") {
+		if strings.Contains(line, bin+" serve --stdio --hostname") {
 			var pid int
 			_, _ = fmt.Sscan(line, &pid)
 			pids = append(pids, pid)
