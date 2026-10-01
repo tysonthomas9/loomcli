@@ -18,10 +18,14 @@ import (
 
 type fakeForge struct {
 	pull       stackpublish.PR
+	pulls      map[int]stackpublish.PR
 	associated map[string][]stackpublish.PR
 }
 
-func (forge *fakeForge) PullByNumber(_ context.Context, _, _ string, _ int) (stackpublish.PR, error) {
+func (forge *fakeForge) PullByNumber(_ context.Context, _, _ string, number int) (stackpublish.PR, error) {
+	if forge.pulls != nil {
+		return forge.pulls[number], nil
+	}
 	return forge.pull, nil
 }
 
@@ -54,12 +58,15 @@ func newFixture(t *testing.T) *fixture {
 	initial := git(t, source, "rev-parse", "HEAD")
 	git(t, root, "clone", "-q", "--bare", source, remote)
 	git(t, source, "remote", "add", "origin", remote)
-	store, err := journal.OpenSQLite(filepath.Join(root, "store.db"))
+	if err := os.Mkdir(filepath.Join(root, "loomgit"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := journal.OpenSQLite(filepath.Join(root, "loomgit", "store.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	forge := &fakeForge{pull: stackpublish.PR{Number: 42, Head: "loom/ws/W/change/A", State: "open"}, associated: map[string][]stackpublish.PR{}}
+	forge := &fakeForge{pull: stackpublish.PR{Number: 42, Head: "loom/ws/W/change/A", HeadSHA: initial, Base: "main", State: "open"}, associated: map[string][]stackpublish.PR{}}
 	return &fixture{store: store, forge: forge, source: source, remote: remote, initial: initial}
 }
 

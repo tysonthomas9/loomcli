@@ -97,65 +97,31 @@ func OpenSQLite(path string) (*SQLite, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("open journal: %w", err)
 	}
-	if err := createOutboxDeliverySchema(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("open outbox delivery: %w", err)
-	}
-	if err := createDriverChanges(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("open driver changes: %w", err)
-	}
-	if err := createLocalLineageSchema(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("open local lineage: %w", err)
-	}
-	if err := createRevisionCompleteness(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("open revision completeness: %w", err)
-	}
-	if err := createReviewSchema(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("open review journal: %w", err)
-	}
-	if err := initWorkspaceCreationSchema(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("open workspace creation journal: %w", err)
-	}
-	if err := createAppliedSchema(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("open applied journal: %w", err)
-	}
-	if err := createPullSchema(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("open pull journal: %w", err)
-	}
-	if err := createWorkingAreaSchema(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("open working areas: %w", err)
-	}
-	if err := createPublicationSchema(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("open publication journal: %w", err)
-	}
-	if err := createStackBackendSchema(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("open stack backend journal: %w", err)
-	}
-	if err := createFeedbackSchema(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("open feedback journal: %w", err)
-	}
-	if err := ensureDeliveryMode(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("open delivery mode: %w", err)
-	}
-	if err := createAbandonSchema(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("open abandonment journal: %w", err)
-	}
-	if err := createRetentionSchema(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("open retention journal: %w", err)
+	for _, step := range []struct {
+		name   string
+		create func(*sql.DB) error
+	}{
+		{"outbox delivery", createOutboxDeliverySchema},
+		{"driver changes", createDriverChanges},
+		{"local lineage", createLocalLineageSchema},
+		{"revision completeness", createRevisionCompleteness},
+		{"review journal", createReviewSchema},
+		{"workspace creation journal", initWorkspaceCreationSchema},
+		{"applied journal", createAppliedSchema},
+		{"pull journal", createPullSchema},
+		{"working areas", createWorkingAreaSchema},
+		{"publication journal", createPublicationSchema},
+		{"stack backend journal", createStackBackendSchema},
+		{"provider journal", createProviderSchema},
+		{"feedback journal", createFeedbackSchema},
+		{"delivery mode", ensureDeliveryMode},
+		{"abandonment journal", createAbandonSchema},
+		{"retention journal", createRetentionSchema},
+	} {
+		if err := step.create(db); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("open %s: %w", step.name, err)
+		}
 	}
 	return &SQLite{db: db}, nil
 }
