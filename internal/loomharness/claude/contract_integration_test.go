@@ -66,8 +66,8 @@ func realBin(t *testing.T) string {
 func ownedLaunch(t *testing.T) loomharness.Launch {
 	t.Helper()
 	root := os.Getenv("LOOM_REAL_CLAUDE_CONFIG_DIR")
-	if !strings.HasPrefix(root, "/tmp/") && !strings.HasPrefix(root, "/private/tmp/") {
-		t.Fatalf("set LOOM_REAL_CLAUDE_CONFIG_DIR to an owned, logged-in Claude config dir under /tmp (got %q); real tests never use ~/.claude", root)
+	if r, err := resolve(root); root == "" || err != nil || !strings.HasPrefix(r, "/private/tmp/") {
+		t.Fatalf("set LOOM_REAL_CLAUDE_CONFIG_DIR to an owned, logged-in Claude config dir under /tmp (got %q, resolved %q); real tests never use ~/.claude", root, r)
 	}
 	l := loomharness.Launch{Root: root, Env: map[string]string{"CLAUDE_CONFIG_DIR": root}}
 	if file := os.Getenv("LOOM_REAL_CLAUDE_OAUTH_TOKEN_FILE"); file != "" {
@@ -83,15 +83,19 @@ func ownedLaunch(t *testing.T) loomharness.Launch {
 func startReal(t *testing.T, args ...string) *realRun {
 	t.Helper()
 	bin := realBin(t)
-	dir, err := os.MkdirTemp("/tmp", "loom-claude-contract-")
+	dir, err := os.MkdirTemp("", "loom-claude-contract-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	l := ownedLaunch(t)
 	r := &realRun{frames: make(chan Frame, 100000), dir: dir, id: SessionID(uuid.NewString())}
-	r.p = newTestProcess(t, Config{Bin: bin, Env: hostEnv(), Args: args, OnFrame: func(f Frame) { r.frames <- f }},
-		ProcessSpec{SessionID: r.id, Launch: l, Dir: dir, Model: "haiku"})
+	cfg := Config{Bin: bin, Env: hostEnv(), Args: args, OnFrame: func(f Frame) { r.frames <- f }}
+	spec := ProcessSpec{SessionID: r.id, Launch: l, Dir: dir, Model: "haiku"}
+	if err := isolated(cfg, spec, l.Root); err != nil {
+		t.Fatal(err)
+	}
+	r.p = NewProcess(cfg, spec)
 	t.Cleanup(func() { _ = r.p.Close(context.Background()) })
 	return r
 }

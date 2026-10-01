@@ -41,6 +41,9 @@ func TestMain(m *testing.M) {
 func fakeClaude() {
 	args := os.Args[1:]
 	if slices.Contains(args, "--version") {
+		if path := os.Getenv("LOOM_FAKE_CLAUDE_VERSION_DUMP"); path != "" {
+			_ = os.WriteFile(path, []byte(strings.Join(os.Environ(), "\n")), 0o600)
+		}
 		fmt.Println(os.Getenv("LOOM_FAKE_CLAUDE_VERSION") + " (Claude Code)")
 		return
 	}
@@ -380,7 +383,7 @@ func launchEnv(t *testing.T, l loomharness.Launch, extra ...string) []string {
 
 func TestClaudeAgentProfileEnv(t *testing.T) {
 	claudeOnPath(t, "2.1.285")
-	project := t.TempDir()
+	project, userOwn := t.TempDir(), t.TempDir() // userOwn stands in for the user's own config root
 	// The profile is keyed by the agent's fixed profile key, not its name, so
 	// a renamed agent still selects its original profile.
 	dir := writeProfile(t, project, "agent-key", "2.1.285", map[string]string{"settings.json": "{}"})
@@ -393,21 +396,21 @@ func TestClaudeAgentProfileEnv(t *testing.T) {
 		if l.Root != dir || l.Root != sessions.ClaudeConfigDirFor(project, "agent-key") {
 			t.Fatalf("root %q, want the profile %q that transcript discovery resolves", l.Root, dir)
 		}
-		if v, _ := lookup(launchEnv(t, l, "CLAUDE_CONFIG_DIR=/user/own"), "CLAUDE_CONFIG_DIR"); v != dir {
+		if v, _ := lookup(launchEnv(t, l, "CLAUDE_CONFIG_DIR="+userOwn), "CLAUDE_CONFIG_DIR"); v != dir {
 			t.Fatalf("spawned CLAUDE_CONFIG_DIR = %q, want %q", v, dir)
 		}
 	})
 	t.Run("absent profile inherits the user's login", func(t *testing.T) {
-		t.Setenv("CLAUDE_CONFIG_DIR", "/user/own")
+		t.Setenv("CLAUDE_CONFIG_DIR", userOwn)
 		l, err := LaunchFor(project, "renamed-or-other")
 		if err != nil || len(l.Env) != 0 {
 			t.Fatalf("absent profile = %+v, %v", l, err)
 		}
-		if l.Root != "/user/own" || l.Root != sessions.ClaudeConfigDirFor(project, "renamed-or-other") {
+		if l.Root != userOwn || l.Root != sessions.ClaudeConfigDirFor(project, "renamed-or-other") {
 			t.Fatalf("root = %q", l.Root)
 		}
-		env := launchEnv(t, l, "CLAUDE_CONFIG_DIR=/user/own")
-		if v, _ := lookup(env, "CLAUDE_CONFIG_DIR"); v != "/user/own" {
+		env := launchEnv(t, l, "CLAUDE_CONFIG_DIR="+userOwn)
+		if v, _ := lookup(env, "CLAUDE_CONFIG_DIR"); v != userOwn {
 			t.Fatalf("inherited CLAUDE_CONFIG_DIR changed to %q", v)
 		}
 		if v, _ := lookup(env, "HOME"); v != os.Getenv("HOME") {
@@ -467,8 +470,9 @@ func TestClaudeLeadInheritedProfileRepair(t *testing.T) {
 	if _, err := LaunchFor(project, "drift"); !errors.Is(err, agentprofile.ErrVersionDrift) {
 		t.Fatalf("drifted profile = %v, want ErrProfileVersionDrift", err)
 	}
-	t.Setenv("CLAUDE_CONFIG_DIR", "/operator/own")
-	if l, err := LaunchFor(project, "lead"); err != nil || len(l.Env) != 0 || l.Root != "/operator/own" {
+	operator := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", operator)
+	if l, err := LaunchFor(project, "lead"); err != nil || len(l.Env) != 0 || l.Root != operator {
 		t.Fatalf("inherited root = %+v, %v", l, err)
 	}
 }
