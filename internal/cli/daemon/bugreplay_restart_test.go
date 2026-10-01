@@ -69,7 +69,7 @@ func TestBugReplay_PR535_RefuseBootWithInheritedAgentIdentity(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestBugReplay_PR535_RefuseBootWithInheritedAgentIdentity$")
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestBugReplay_PR535_RefuseBootWithInheritedAgentIdentity$") //nolint:norawexec // self-exec: runDaemonBody isolates its process group and must run in a child
 	cmd.Dir = t.TempDir()
 	cmd.Env = append(os.Environ(),
 		"BUGREPLAY_RESTART_535_CHILD=1",

@@ -12,7 +12,7 @@
 #   LOOM_TLA_CACHE        jar cache dir (default ~/.cache/loom-tla)
 #   LOOM_TLA_SCRATCH      TLC metadata dir (default $TMPDIR/loom-tla-daemon-attempt)
 #   LOOM_TLA_MIN_FREE_MB  refuse to start a run below this free space (default 2048)
-#   LOOM_TLA_CAP_MB       kill a run whose scratch exceeds this size (default 1024)
+#   LOOM_TLA_CAP_MB       kill a run whose scratch exceeds this size (default 900)
 #   LOOM_TLA_WORKERS      TLC workers (default auto)
 set -euo pipefail
 
@@ -25,7 +25,7 @@ CACHE="${LOOM_TLA_CACHE:-$HOME/.cache/loom-tla}/${TLA_VERSION}"
 JAR="$CACHE/tla2tools.jar"
 SCRATCH="${LOOM_TLA_SCRATCH:-${TMPDIR:-/tmp}/loom-tla-daemon-attempt}"
 MIN_FREE_MB="${LOOM_TLA_MIN_FREE_MB:-2048}"
-CAP_MB="${LOOM_TLA_CAP_MB:-1024}"
+CAP_MB="${LOOM_TLA_CAP_MB:-900}"
 WORKERS="${LOOM_TLA_WORKERS:-auto}"
 
 # name|expect|invariant (invariant is the one a "fail" run must violate)
@@ -58,11 +58,29 @@ CASES=(
   "c_pass_reconcile|pass|"
   "c_pass_reconcile_crash|pass|"
   "c_fail_reconcile_pgskew|fail|NoStrandedBeforeClaim"
+  # Fix for the PgSkew gap: G4 also guards session create.
+  "c_pass_reconcile_pgskew_fenced|pass|"
+  # Last-attempt liveness stays open in this module. Stage d owns it (task
+  # 20ad52d8, branch formal/daemon-attempt-stage-d: DaemonAttemptD.tla,
+  # rule F durable retry + reaper, d_pass_finalize_liveness).
   "c_stranded_reconcile|fail|NoStrandedSession"
   # #761, #348, #92, #541: every agent claims as one FleetDB actor.
   "b_fail_shared_actor|fail|NoForeignIssueWrite"
   "b_fail_shared_actor_double|fail|NoDoubleWork"
   "b_pass_actor_no_double|pass|"
+  # Wave 3 bucket-B replays; each pair isolates one model extension.
+  "b_fail_non_atomic_538|fail|NoDoubleWork"
+  "b_pass_atomic_538|pass|"
+  "b_fail_hook_closed_780|fail|NoForeignIssueWrite"
+  "b_pass_hook_closed_780|pass|"
+  "b_fail_deferred_734|fail|NoDeferredStatusLoss"
+  "b_pass_deferred_734|pass|"
+  "b_fail_deferred_reset_734|fail|NoDeferredStatusLoss"
+  "b_pass_deferred_reset_734|pass|"
+  "b_fail_assignment_634|fail|NoAssignedClaimLeak"
+  "b_pass_assignment_634|pass|"
+  "b_fail_review_crash_381|fail|NoStrandedReview"
+  "b_pass_review_crash_381|pass|"
 )
 
 command -v java >/dev/null || { echo "java not found (TLC needs Java 11+)" >&2; exit 2; }
@@ -107,7 +125,7 @@ for entry in "${CASES[@]}"; do
   log="$SCRATCH/$name.log"
   # -cleanup makes TLC clear its own states directory; nothing else is removed.
   (cd "$MODEL_DIR" && exec java -XX:+UseParallelGC -cp "$JAR" tlc2.TLC \
-      -deadlock -cleanup -checkpoint 0 -workers "$WORKERS" \
+      -deadlock -cleanup -gzip -checkpoint 0 -workers "$WORKERS" \
       -metadir "$meta" -config "$name.cfg" DaemonAttempt.tla) >"$log" 2>&1 &
   pid=$!
   capped=0
@@ -120,16 +138,7 @@ for entry in "${CASES[@]}"; do
   set +e; wait "$pid"; code=$?; set -e
   states="$(grep -Eo '[0-9,]+ distinct states found' "$log" | tail -1 || true)"
   if (( capped )); then
-    # A killed TLC skips -cleanup, so remove this run's own metadir, but only
-    # after checking it is the per-config directory this script created.
-    if [[ "$(basename "$SCRATCH")" == loom-tla-daemon-attempt* \
-          && "$meta" == "$SCRATCH/$name" && -d "$meta" && ! -L "$meta" \
-          && -O "$meta" ]]; then
-      rm -rf -- "$meta"
-      detail="scratch exceeded ${CAP_MB} MB; run stopped and its metadir removed; see $log"
-    else
-      detail="scratch exceeded ${CAP_MB} MB; ownership check failed, left $meta; see $log"
-    fi
+    detail="scratch exceeded ${CAP_MB} MB; run stopped; scratch left at $meta; see $log"
     result=CAPPED
   elif [[ "$expect" == pass ]] && (( code == 0 )) && grep -q 'No error has been found' "$log"; then
     result=ok; detail="no violation; $states"
