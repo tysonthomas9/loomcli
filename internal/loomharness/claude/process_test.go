@@ -41,7 +41,7 @@ func fakeClaude() {
 		fmt.Println(os.Getenv("LOOM_FAKE_CLAUDE_VERSION") + " (Claude Code)")
 		return
 	}
-	nested, _ := exec.Command("env").Output()
+	nested, _ := exec.Command("env").Output() //nolint:norawexec // a real child stands in for a Claude tool subprocess: its inherited env is what the test checks
 	dump(map[string]any{"args": args, "env": os.Environ(), "nested": strings.Split(string(nested), "\n")})
 	root := os.Getenv("CLAUDE_CONFIG_DIR")
 	if root == "" {
