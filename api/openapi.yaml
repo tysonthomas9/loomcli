@@ -2631,6 +2631,57 @@ paths:
               schema:
                 type: object
 
+  /api/workspaces/{ws}/agents/{name}/git/merge-up-to:
+    get:
+      operationId: gitMergePreview
+      tags: [git]
+      summary: Preview a recorded stack merge and its per-layer progress
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+        - in: query
+          name: stack_id
+          required: true
+          schema: {type: string}
+        - in: query
+          name: target
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: Stack merge state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergeStackView"
+    post:
+      operationId: gitMergeUpTo
+      tags: [git]
+      summary: Create a human-confirmed merge request for exact stack heads
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stack_id, target, heads]
+              properties:
+                stack_id: {type: string}
+                target: {type: string}
+                heads:
+                  type: array
+                  items: {type: string}
+      responses:
+        "200":
+          description: Merge request recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergeStackView"
+
   /api/workspaces/{ws}/agents/{name}/git/reset-preview:
     get:
       operationId: gitResetPreview
@@ -4624,6 +4675,25 @@ components:
         type: string
 
   schemas:
+    MergeStackView:
+      type: object
+      required: [stack_id, target, backend, phase, layers]
+      properties:
+        stack_id: {type: string}
+        target: {type: string}
+        backend: {type: string}
+        phase: {type: string}
+        reason: {type: string}
+        layers:
+          type: array
+          items:
+            type: object
+            required: [change, head, pr_url, state]
+            properties:
+              change: {type: string}
+              head: {type: string}
+              pr_url: {type: string}
+              state: {type: string}
     # ── Response Envelopes ──────────────────────────────────────────────
     ErrorResponse:
       type: object

@@ -73,6 +73,42 @@ func TestPrStackCommandCallsPublisherWithOrderedChanges(t *testing.T) {
 	}
 }
 
+func TestMergeUpToCommandRequiresExactHumanConfirmation(t *testing.T) {
+	oldResolver, oldPreview, oldRequest := prStackResolver, prMergePreview, prMergeRequest
+	t.Cleanup(func() { prStackResolver, prMergePreview, prMergeRequest = oldResolver, oldPreview, oldRequest })
+	prStackResolver = func() (*cli.Resolver, error) {
+		return &cli.Resolver{Workspace: "workspace", Config: &config.LoomConfig{Workspaces: map[string]config.WorkspaceConfig{
+			"workspace": {ID: "W"},
+		}}}, nil
+	}
+	prMergePreview = func(_ context.Context, workspace, lead, stack, target string) (publish.MergeStackView, error) {
+		if workspace != "W" || lead != "L" || stack != "feature" || target != "C" {
+			t.Fatalf("preview %s %s %s %s", workspace, lead, stack, target)
+		}
+		return publish.MergeStackView{StackID: stack, Target: target, Layers: []publish.MergeLayerView{
+			{Change: "A", Head: "head-A"}, {Change: "B", Head: "head-B"}, {Change: "C", Head: "head-C"}, {Change: "D", Head: "head-D"},
+		}}, nil
+	}
+	called := 0
+	prMergeRequest = func(_ context.Context, _, _, _, _ string, heads []string) (publish.MergeStackView, error) {
+		called++
+		if !reflect.DeepEqual(heads, []string{"head-A", "head-B", "head-C", "head-D"}) {
+			t.Fatalf("heads: %v", heads)
+		}
+		return publish.MergeStackView{Phase: "ready"}, nil
+	}
+	cmd := *mergeUpToCmd
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetIn(strings.NewReader("merge B\n"))
+	if err := runMergeUpTo(&cmd, []string{"feature", "L", "C"}); err == nil || called != 0 {
+		t.Fatalf("incorrect confirmation: err=%v calls=%d", err, called)
+	}
+	cmd.SetIn(strings.NewReader("merge C\n"))
+	if err := runMergeUpTo(&cmd, []string{"feature", "L", "C"}); err != nil || called != 1 {
+		t.Fatalf("confirmed merge: err=%v calls=%d", err, called)
+	}
+}
+
 func TestDeliveryModeCommandSetsWorkspaceMode(t *testing.T) {
 	root := t.TempDir()
 	setupWorkspaceConfigInDir(t, root, &config.LoomConfig{
