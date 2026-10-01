@@ -2,11 +2,13 @@ package driverfreeze
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -66,6 +68,12 @@ func epicRunChanges(ctx context.Context, journalStore *journal.SQLite, workspace
 			continue
 		}
 		attempt := strings.TrimSpace(task.RuntimeMetadata["attempt_id"])
+		if attempt == "" && task.RuntimeMetadata["remote_capture_status"] == "frozen" {
+			remote := strings.TrimSpace(task.RuntimeMetadata["remote_capture_attempt"])
+			if epicRemoteAttempt(task.TaskRunID, remote) {
+				attempt = remote
+			}
+		}
 		if attempt == "" {
 			return nil, fmt.Errorf("task run %s has no frozen attempt identity", task.TaskRunID)
 		}
@@ -85,4 +93,17 @@ func epicRunChanges(ctx context.Context, journalStore *journal.SQLite, workspace
 		}
 	}
 	return changes, nil
+}
+
+func epicRemoteAttempt(runID, attempt string) bool {
+	name := runID
+	for _, character := range runID {
+		if !((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || character == '-' || character == '_' || character == '.') {
+			name = "hex-" + hex.EncodeToString([]byte(runID))
+			break
+		}
+	}
+	number, err := strconv.Atoi(strings.TrimPrefix(attempt, name+"-a"))
+	return strings.HasPrefix(attempt, name+"-a") && err == nil && number > 0
 }

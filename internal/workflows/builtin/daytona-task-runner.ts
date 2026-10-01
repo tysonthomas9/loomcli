@@ -149,6 +149,7 @@ export async function run(ctx = {}) {
           runtimeMetadata: stringMetadata({
             task_runner: "daytona-task-runner", daytona_sandbox_id: sandboxId,
             remote_capture_status: "frozen", remote_capture_sha: capture.captureSha,
+            remote_capture_attempt: captureContext.attempt,
             remote_capture_tree_hash: capture.treeHash,
             remote_capture_change_id: capture.changeId, remote_capture_revision: capture.revision,
           }),
@@ -266,6 +267,7 @@ export async function run(ctx = {}) {
         daytona_repo_dir: repoDir,
         daytona_repo_head: head.stdout.trim(),
         remote_capture_status: "frozen",
+        remote_capture_attempt: captureContext.attempt,
         remote_capture_sha: capture.captureSha,
         remote_capture_tree_hash: capture.treeHash,
         remote_capture_change_id: capture.changeId,

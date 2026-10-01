@@ -27,7 +27,10 @@ import (
 type epicForge struct{ prs []stackpublish.PR }
 
 type epicRunner struct{}
-type epicTaskRun struct{ id, run string }
+type epicTaskRun struct {
+	id, run  string
+	metadata map[string]string
+}
 
 func (epicRunner) Run(context.Context, driver.RunRequest) (driver.RunResult, error) {
 	return driver.RunResult{Status: domain.DriverRunCompleted, Summary: "epic drained"}, nil
@@ -61,9 +64,13 @@ func finishEpicEntry(t *testing.T, tasks []epicTaskRun) *domain.DriverRun {
 		t.Fatal(err)
 	}
 	for _, task := range tasks {
+		metadata := task.metadata
+		if metadata == nil {
+			metadata = map[string]string{"attempt_id": task.run + "-a1"}
+		}
 		if _, err := runtime.TaskRuns().Create(ctx, store.TaskRunCreate{WorkspaceKey: "W",
 			TaskRunID: task.run, DriverRunID: "epic-run", TaskID: task.id, Status: domain.TaskRunCompleted,
-			RuntimeMetadata: map[string]string{"attempt_id": task.run + "-a1"}}); err != nil {
+			RuntimeMetadata: metadata}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -163,7 +170,8 @@ func TestEpicFrozenTasksHTTPApprovalPublishesLinearStack(t *testing.T) {
 	ctx, store, area, base, first := bridgeApprovalFixture(t)
 	second := freezeSecondEpicTask(t, area, base)
 	prepareEpicPublication(t, store, area, base)
-	if run := finishEpicEntry(t, []epicTaskRun{{"T", "task-run"}, {"T2", "run-T2"}}); run.Status != domain.DriverRunCompleted {
+	if run := finishEpicEntry(t, []epicTaskRun{{id: "T", run: "task-run"}, {id: "T2", run: "run-T2",
+		metadata: map[string]string{"remote_capture_status": "frozen", "remote_capture_attempt": "run-T2-a1"}}}); run.Status != domain.DriverRunCompleted {
 		t.Fatalf("epic finish = %+v", run)
 	}
 	reopened, err := journal.OpenSQLite(filepath.Join(os.Getenv("LOOM_CONFIG_DIR"), "loomgit", "store.db"))
@@ -205,12 +213,28 @@ func TestEpicRunCannotReuseEarlierTaskRevision(t *testing.T) {
 	if !earlier.Ready {
 		t.Fatal("earlier task revision is not ready")
 	}
-	run := finishEpicEntry(t, []epicTaskRun{{"T", "current-run"}})
+	run := finishEpicEntry(t, []epicTaskRun{{id: "T", run: "current-run"}})
 	if run.Status != domain.DriverRunNeedsReview || run.ErrorClass != "epic_pr_delivery_failed" {
 		t.Fatalf("stale revision allowed epic delivery: %+v", run)
 	}
 	intents, err := journalStore.PendingEpicPublications(ctx)
 	if err != nil || len(intents) != 0 {
 		t.Fatalf("stale run recorded publication intent: %+v, %v", intents, err)
+	}
+}
+
+func TestEpicDaytonaRunCannotReuseEarlierCapture(t *testing.T) {
+	ctx, journalStore, _, _, earlier := bridgeApprovalFixture(t)
+	if !earlier.Ready {
+		t.Fatal("earlier task revision is not ready")
+	}
+	run := finishEpicEntry(t, []epicTaskRun{{id: "T", run: "current-run", metadata: map[string]string{
+		"remote_capture_status": "frozen", "remote_capture_attempt": "task-run-a1"}}})
+	if run.Status != domain.DriverRunNeedsReview || run.ErrorClass != "epic_pr_delivery_failed" {
+		t.Fatalf("stale Daytona capture allowed epic delivery: %+v", run)
+	}
+	intents, err := journalStore.PendingEpicPublications(ctx)
+	if err != nil || len(intents) != 0 {
+		t.Fatalf("stale Daytona run recorded publication intent: %+v, %v", intents, err)
 	}
 }
