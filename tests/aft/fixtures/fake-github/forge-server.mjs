@@ -46,12 +46,14 @@ const server = createServer(async (request, response) => {
   const path = url.pathname;
 
   if (path === "/__requests" && request.method === "GET") return send(response, 200, requests);
-  if (path === "/__pulls" && request.method === "GET") return send(response, 200, pulls);
+  if (path === "/__pulls" && request.method === "GET") return send(response, 200, pulls.filter((pull) => !url.searchParams.has("workspace") || pull.head.ref.includes(`/ws/${url.searchParams.get("workspace")}/`)));
   if (path === "/__reset" && request.method === "POST") {
-    pulls.length = 0;
+    if (!body.preserve) pulls.length = 0;
     requests.length = 0;
-    stacks.length = 0;
-    merges.clear();
+    if (!body.preserve) {
+      stacks.length = 0;
+      merges.clear();
+    }
     remote = body.remote || "";
     nativeStacks = body.native_stacks === true;
     return send(response, 200, { ok: true });

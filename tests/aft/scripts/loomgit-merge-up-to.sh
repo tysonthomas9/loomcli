@@ -26,7 +26,7 @@ if [[ "$phase" == setup ]]; then
   git -C "$repo" config core.sshCommand "sh $AFT_TESTS_DIR/fixtures/fake-github/git-ssh-bridge.sh $remote"
   git -C "$repo" remote add origin git@github.com:owner/repo.git
   git -C "$repo" push -q origin main
-  python3 -c 'import json,sys; print(json.dumps({"remote":sys.argv[1],"native_stacks":sys.argv[2]=="native"}))' "$remote" "$backend" |
+  python3 -c 'import json,sys; print(json.dumps({"remote":sys.argv[1],"native_stacks":sys.argv[2]=="native","preserve":sys.argv[2]=="loom"}))' "$remote" "$backend" |
     curl -fsS -X POST "$AFT_FAKE_GH_BASE/__reset" -H 'Content-Type: application/json' -d @- >/dev/null
   curl -fsS -X POST "$AFT_BASE_URL/api/workspaces" -H 'Content-Type: application/json' \
     -d "{\"name\":\"e2e-ws-merge-$backend\",\"type\":\"empty\",\"repos\":[\"$repo\"]}" >/dev/null
@@ -98,7 +98,7 @@ LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" pr-stack aft-chain lead \
   "$(cat "$case_dir/change-1.id")" "$(cat "$case_dir/change-2.id")" \
   "$(cat "$case_dir/change-3.id")" "$(cat "$case_dir/change-4.id")" \
   --workspace "$workspace" > "$case_dir/publish.txt"
-curl -fsS "$AFT_FAKE_GH_BASE/__pulls" > "$case_dir/pulls-before.json"
+curl -fsS "$AFT_FAKE_GH_BASE/__pulls?workspace=$workspace" > "$case_dir/pulls-before.json"
 python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); assert len(p)==4, p; assert [x["base"]["ref"] for x in p]==["main"]+[x["head"]["ref"] for x in p[:3]], p' "$case_dir/pulls-before.json"
 target="$(cat "$case_dir/change-3.id")"
 curl -fsS "$api/agents/lead/git/merge-up-to?stack_id=aft-chain&target=$target" > "$case_dir/preview.json"
@@ -131,7 +131,7 @@ for layer in 1 2 3 4; do
   grep -q "$change:" "$case_dir/ui-state.txt"
 done
 agent-browser --session "$AFT_SESSION" screenshot "$case_dir/merge-ui.png" >/dev/null
-curl -fsS "$AFT_FAKE_GH_BASE/__pulls" > "$case_dir/pulls-after.json"
+curl -fsS "$AFT_FAKE_GH_BASE/__pulls?workspace=$workspace" > "$case_dir/pulls-after.json"
 python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); assert all(x["merged_at"] for x in p[:3]), p; assert p[3]["state"]=="open" and p[3]["base"]["ref"]=="main", p' "$case_dir/pulls-after.json"
 for layer in 1 2 3; do git --git-dir="$remote" show "main:merge-$layer.txt" >/dev/null; done
 if git --git-dir="$remote" show main:merge-4.txt >/dev/null 2>&1; then exit 1; fi
