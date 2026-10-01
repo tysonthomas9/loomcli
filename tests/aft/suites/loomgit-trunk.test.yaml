@@ -108,7 +108,10 @@ tests:
           change="$(cat "$AFT_WORK_DIR/trunk-change-id")";
           git -C "$repo" fetch -q origin "loom/ws/E2E-WS-TRUNK/change/$change";
           sha="$(git -C "$repo" rev-parse FETCH_HEAD)";
+          source="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"][0]["head_sha"])' "$AFT_WORK_DIR/trunk-revisions.json")";
+          source_author="$(git -C "$repo" show -s --format='%an <%ae>' "$source")";
           test "$sha" != "$(git --git-dir="$AFT_WORK_DIR/trunk-origin.git" rev-parse refs/heads/main)";
           test "$(git -C "$repo" show "$sha:trunk-change.txt")" != '';
-          test "$(git -C "$repo" show -s --format='%an <%ae>|%cn <%ce>' "$sha")" = 'AFT Operator <aft-operator@example.test>|AFT Operator <aft-operator@example.test>'
-        intent: The PR contains the task edit and its commit author and committer are the configured operator
+          test "$source_author" = 'AFT Operator <aft-operator@example.test>';
+          test "$(git -C "$repo" show -s --format='%an <%ae>|%cn <%ce>' "$sha")" = "$source_author|AFT Operator <aft-operator@example.test>"
+        intent: The PR contains the task edit, keeps the task author, and uses the configured operator as committer
