@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
@@ -377,5 +378,76 @@ func TestHostPusherDeletesBranchWithExactLease(t *testing.T) {
 	actual, err := pusher.RemoteSHA(ctx, remote, ref)
 	if err != nil || actual != "" {
 		t.Fatalf("deleted branch = %q, %v", actual, err)
+	}
+}
+
+// publishedFromWorkspace records a publication the way Publish does: from the
+// workspace checkout, a worktree of the task copy's source repository.
+func publishedFromWorkspace(t *testing.T, foreign bool) (*Service, Request, *fakeForge, *fakePusher) {
+	t.Helper()
+	ctx, root := context.Background(), t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", root)
+	t.Setenv("HOME", root)
+	source, area, copyPath := filepath.Join(root, "source"), filepath.Join(root, "ws", "repo"), filepath.Join(root, "task")
+	git(t, root, "init", "-q", source)
+	git(t, source, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-q", "--allow-empty", "-m", "base")
+	base := git(t, source, "rev-parse", "HEAD")
+	git(t, source, "remote", "add", "origin", filepath.Join(root, "remote.git"))
+	git(t, source, "worktree", "add", "-q", "--detach", area, base)
+	if foreign {
+		git(t, root, "clone", "-q", source, area+"-foreign")
+		area += "-foreign"
+	}
+	journalPath := filepath.Join(root, "loomgit", "store.db")
+	if _, err := taskcopy.CreateDetailedAt(ctx, journalPath, source, copyPath, "W", "A", "", base); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(copyPath, "work.txt"), []byte("work\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := journal.OpenSQLite(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	change, err := store.DriverChange(ctx, "W", "T", "repo", "change")
+	if err != nil {
+		t.Fatal(err)
+	}
+	branch, err := refname.ChangeBranch("W", change)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publication := journal.Publication{Workspace: "W", Change: change, Repo: area, Branch: branch,
+		Trunk: "main", Slug: "owner/repo", Head: base}
+	if err := store.BeginPublication(ctx, publication); err != nil {
+		t.Fatal(err)
+	}
+	publication.PRNumber, publication.Phase = 7, "done"
+	if err := store.AdvancePublication(ctx, publication); err != nil {
+		t.Fatal(err)
+	}
+	forge, pusher := &fakeForge{}, &fakePusher{sha: base}
+	service := &Service{JournalPath: journalPath, Forge: forge, Pusher: pusher, Claims: &fakeClaims{}, Sessions: memstore.New().AgentSessions()}
+	return service, Request{Workspace: "W", Task: "T", Repo: "repo", Attempt: "A", Worktree: copyPath,
+		SourceRepo: source, Reason: "dropped", RequestedBy: "operator"}, forge, pusher
+}
+
+func TestAbandonPublishedFromWorkspaceWorktree(t *testing.T) {
+	service, request, forge, pusher := publishedFromWorkspace(t, false)
+	result, err := service.Run(context.Background(), request)
+	if err != nil || !result.Complete || result.Revision.Outcome != "abandoned" {
+		t.Fatalf("abandon = %+v, %v", result, err)
+	}
+	if forge.closed != 1 || pusher.deleted != 1 {
+		t.Fatalf("closed=%d deleted=%d", forge.closed, pusher.deleted)
+	}
+}
+
+func TestAbandonRefusesPublicationFromAnotherRepository(t *testing.T) {
+	service, request, forge, pusher := publishedFromWorkspace(t, true)
+	_, err := service.Run(context.Background(), request)
+	if !errors.Is(err, loomgit.NewError(loomgit.StaleSubject, "", nil)) || forge.closed != 0 || pusher.deleted != 0 {
+		t.Fatalf("foreign publication = %v closed=%d deleted=%d", err, forge.closed, pusher.deleted)
 	}
 }
