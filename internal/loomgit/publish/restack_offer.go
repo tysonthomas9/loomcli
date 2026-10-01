@@ -59,6 +59,9 @@ func RestackOffer(ctx context.Context, offer journal.RestackOffer, forge landing
 		if err := store.ClearStackAttention(lockedCtx, offer.Workspace, publication.StackID); err != nil {
 			return err
 		}
+		if err := prepareMergeRestack(lockedCtx, store, offer, publication, forge, publisher); err != nil {
+			return err
+		}
 		return publishRestackedOffer(lockedCtx, store, offer, publication, publisher)
 	})
 	return revision, err

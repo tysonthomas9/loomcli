@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 )
 
@@ -521,4 +522,131 @@ func (s *SQLite) RecordProviderObservation(ctx context.Context, observation Prov
 		}
 	}
 	return tx.Commit()
+}
+
+type LoomMergeLayer struct {
+	Change   string `json:"change"`
+	Head     string `json:"head"`
+	Revision int    `json:"revision"`
+}
+
+type LoomMerge struct {
+	Workspace         string           `json:"workspace"`
+	StackID           string           `json:"stack_id"`
+	Target            string           `json:"target"`
+	RequestID         string           `json:"request_id"`
+	Layers            []LoomMergeLayer `json:"layers"`
+	Index             int              `json:"index"`
+	Phase             string           `json:"phase"`
+	Reason            string           `json:"reason,omitempty"`
+	PRNumber          int              `json:"pr_number,omitempty"`
+	DispatchHead      string           `json:"dispatch_head,omitempty"`
+	ProviderRequestID string           `json:"provider_request_id,omitempty"`
+	DispatchAttempts  int              `json:"dispatch_attempts,omitempty"`
+	Version           int              `json:"-"`
+}
+
+func (s *SQLite) ensureLoomMergeSchema(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS loom_stack_merges (
+		workspace TEXT NOT NULL, stack_id TEXT NOT NULL, request_id TEXT NOT NULL,
+		state BLOB NOT NULL, version INTEGER NOT NULL DEFAULT 1,
+		PRIMARY KEY(workspace,stack_id), UNIQUE(request_id))`)
+	return err
+}
+
+func (s *SQLite) BeginLoomMerge(ctx context.Context, merge LoomMerge) (LoomMerge, error) {
+	if merge.Workspace == "" || merge.StackID == "" || merge.Target == "" || merge.RequestID == "" || len(merge.Layers) == 0 {
+		return LoomMerge{}, errors.New("merge intent is incomplete")
+	}
+	if err := s.ensureLoomMergeSchema(ctx); err != nil {
+		return LoomMerge{}, err
+	}
+	merge.Phase = "ready"
+	data, err := json.Marshal(merge)
+	if err != nil {
+		return LoomMerge{}, err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO loom_stack_merges(workspace,stack_id,request_id,state)
+		VALUES(?,?,?,?) ON CONFLICT(workspace,stack_id) DO UPDATE SET request_id=excluded.request_id,
+		state=excluded.state,version=loom_stack_merges.version+1
+		WHERE loom_stack_merges.request_id != excluded.request_id
+		AND json_extract(loom_stack_merges.state,'$.phase') IN ('done','blocked')`,
+		merge.Workspace, merge.StackID, merge.RequestID, data)
+	if err != nil {
+		return LoomMerge{}, err
+	}
+	recorded, err := s.LoomMerge(ctx, merge.Workspace, merge.StackID)
+	if err != nil {
+		return LoomMerge{}, err
+	}
+	if recorded.RequestID != merge.RequestID || recorded.Target != merge.Target || !reflect.DeepEqual(recorded.Layers, merge.Layers) {
+		return LoomMerge{}, errors.New("merge intent differs from recorded request")
+	}
+	return recorded, nil
+}
+
+func (s *SQLite) LoomMerge(ctx context.Context, workspace, stackID string) (LoomMerge, error) {
+	if err := s.ensureLoomMergeSchema(ctx); err != nil {
+		return LoomMerge{}, err
+	}
+	var data []byte
+	var version int
+	err := s.db.QueryRowContext(ctx, `SELECT state,version FROM loom_stack_merges WHERE workspace=? AND stack_id=?`, workspace, stackID).Scan(&data, &version)
+	if err != nil {
+		return LoomMerge{}, err
+	}
+	var merge LoomMerge
+	if err := json.Unmarshal(data, &merge); err != nil {
+		return LoomMerge{}, err
+	}
+	merge.Version = version
+	return merge, nil
+}
+
+func (s *SQLite) OpenLoomMerges(ctx context.Context) ([]LoomMerge, error) {
+	if err := s.ensureLoomMergeSchema(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT state,version FROM loom_stack_merges`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var merges []LoomMerge
+	for rows.Next() {
+		var data []byte
+		var merge LoomMerge
+		if err := rows.Scan(&data, &merge.Version); err != nil {
+			return nil, err
+		}
+		version := merge.Version
+		if err := json.Unmarshal(data, &merge); err != nil {
+			return nil, err
+		}
+		merge.Version = version
+		if merge.Phase != "done" && merge.Phase != "blocked" {
+			merges = append(merges, merge)
+		}
+	}
+	return merges, rows.Err()
+}
+
+func (s *SQLite) AdvanceLoomMerge(ctx context.Context, before, after LoomMerge) error {
+	data, err := json.Marshal(after)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE loom_stack_merges SET state=?,version=version+1
+		WHERE workspace=? AND stack_id=? AND version=?`, data, before.Workspace, before.StackID, before.Version)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrStale
+	}
+	return nil
 }
