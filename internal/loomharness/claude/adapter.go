@@ -110,8 +110,9 @@ func (a *Adapter) session(ref loomharness.NativeRef) *Session {
 // recorded ref, under the ref's own recorded root; it never re-resolves a
 // root and never runs `claude project purge`. It stops the session's process
 // first. It deletes only regular files reached through real directories
-// inside the recorded root: a symlinked projects or project directory, or a
-// symlinked transcript, that holds the session is refused, never followed.
+// inside the recorded root: a recorded root with a symlink anywhere on its
+// path, a symlinked projects or project directory, or a symlinked transcript,
+// that holds the session is refused, never followed.
 // A ref whose root or id cannot be proven fails; an already deleted
 // transcript is fine, so a failed purge can be retried after a restart.
 func (a *Adapter) Purge(ctx context.Context, owned []loomharness.NativeRef) error {
@@ -119,8 +120,8 @@ func (a *Adapter) Purge(ctx context.Context, owned []loomharness.NativeRef) erro
 		if _, err := uuid.Parse(ref.NativeID); err != nil || !filepath.IsAbs(ref.Root) {
 			return fmt.Errorf("claude purge: cannot prove the session path for %q under %q", ref.NativeID, ref.Root)
 		}
-		if info, err := os.Stat(ref.Root); err != nil || !info.IsDir() {
-			return fmt.Errorf("claude purge: recorded root %s: cannot prove it exists: %v", ref.Root, err)
+		if err := realDir(ref.Root); err != nil {
+			return fmt.Errorf("claude purge: recorded root %s: %w", ref.Root, err)
 		}
 		a.mu.Lock()
 		s := a.sessions[ref]
@@ -135,6 +136,23 @@ func (a *Adapter) Purge(ctx context.Context, owned []loomharness.NativeRef) erro
 		}
 	}
 	return nil
+}
+
+// realDir proves p is an existing directory reached without any symlink:
+// p and every directory above it are checked with Lstat, never followed.
+func realDir(p string) error {
+	for cur := filepath.Clean(p); ; cur = filepath.Dir(cur) {
+		info, err := os.Lstat(cur)
+		if err != nil {
+			return fmt.Errorf("cannot prove it exists: %w", err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("%s is a symlink or not a directory; refusing", cur)
+		}
+		if cur == filepath.Dir(cur) {
+			return nil
+		}
+	}
 }
 
 // purgeOne removes ref's transcript from every real project directory of its

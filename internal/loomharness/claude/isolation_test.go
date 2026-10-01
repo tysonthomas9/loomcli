@@ -32,9 +32,12 @@ func ownTestHome() func() {
 	if err != nil {
 		panic(err)
 	}
+	// Use the resolved path (/tmp is a symlink on macOS) so test roots are
+	// real directories, as Purge requires.
 	if ownedRoot, err = filepath.EvalSymlinks(home); err != nil {
 		panic(err)
 	}
+	home = ownedRoot
 	tmp := filepath.Join(home, "tmp")
 	if err := os.Mkdir(tmp, 0o700); err != nil {
 		panic(err)

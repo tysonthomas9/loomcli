@@ -414,7 +414,20 @@ func TestClaudePurgeRefusesSymlinks(t *testing.T) {
 	if err := os.Symlink(victim, filepath.Join(linkedFile, "projects", "-wt", n+".jsonl")); err != nil {
 		t.Fatal(err)
 	}
-	for name, root := range map[string]string{"project dir": linkedProject, "projects dir": linkedProjects, "transcript": linkedFile} {
+	// The recorded root itself, or a directory above it, is a symlink to
+	// the outside root.
+	linkedRoot := filepath.Join(t.TempDir(), "root")
+	if err := os.Symlink(outside, linkedRoot); err != nil {
+		t.Fatal(err)
+	}
+	linkedParent := filepath.Join(t.TempDir(), "parent")
+	if err := os.Symlink(filepath.Dir(outside), linkedParent); err != nil {
+		t.Fatal(err)
+	}
+	for name, root := range map[string]string{
+		"project dir": linkedProject, "projects dir": linkedProjects, "transcript": linkedFile,
+		"root": linkedRoot, "root parent": filepath.Join(linkedParent, filepath.Base(outside)),
+	} {
 		if err := New(Config{}).Purge(ctx, []loomharness.NativeRef{{Root: root, NativeID: n}}); err == nil {
 			t.Errorf("symlinked %s: purge did not refuse", name)
 		}
