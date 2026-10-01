@@ -659,7 +659,7 @@ func TestBugReplay_PR427_ChildStdoutIsAnOSFile(t *testing.T) {
 	s.ProjectDir = tmp
 	s.WorkspaceID = "WS427"
 	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "replay-427", Role: "task"}}
-	cmd := exec.Command("true")
+	cmd := &exec.Cmd{} // never started: only the Stdout/Stderr wiring is inspected
 
 	s.setupAgentLogFile(ap, cmd)
 	t.Cleanup(func() { ap.Mu.Lock(); closeAgentLogs(ap); ap.Mu.Unlock() })
