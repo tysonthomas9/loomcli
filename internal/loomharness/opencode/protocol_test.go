@@ -1191,8 +1191,8 @@ func TestProtocolReplyAlwaysIsSessionScoped(t *testing.T) {
 	}
 	st.patchErr = false
 	// Every PATCH failed, the restore too, so the session fails closed.
-	if err := sa.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r2"), Text: "hi"}); !isCode(err, "bad_request") {
-		t.Fatalf("Prompt after a failed grant and restore = %v; want bad_request", err)
+	if err := sa.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r2"), Text: "hi"}); !errors.Is(err, loomharness.ErrQuarantined) {
+		t.Fatalf("Prompt after a failed grant and restore = %v; want ErrQuarantined", err)
 	}
 
 	if _, err := sa.Resume(ctx, loomharness.Launch{}, deny); err != nil {
@@ -1224,11 +1224,11 @@ func TestProtocolAlwaysGrantRollsBack(t *testing.T) {
 	}
 	refused := func(t *testing.T, st *store, s *Session, want string) {
 		t.Helper()
-		if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "p"), Text: "hi"}); err == nil || !strings.Contains(err.Error(), want) {
-			t.Fatalf("Prompt = %v; want an error containing %q", err, want)
+		if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "p"), Text: "hi"}); !errors.Is(err, loomharness.ErrQuarantined) || !strings.Contains(err.Error(), want) {
+			t.Fatalf("Prompt = %v; want ErrQuarantined containing %q", err, want)
 		}
-		if err := s.Reply(ctx, "per_1", loomharness.Reply{}); err == nil || !strings.Contains(err.Error(), want) {
-			t.Fatalf("Reply (deny) = %v; want an error containing %q", err, want)
+		if err := s.Reply(ctx, "per_1", loomharness.Reply{}); !errors.Is(err, loomharness.ErrQuarantined) || !strings.Contains(err.Error(), want) {
+			t.Fatalf("Reply (deny) = %v; want ErrQuarantined containing %q", err, want)
 		}
 		if _, sent := st.replies["per_1"]; sent {
 			t.Fatal("a reply reached the ask of a quarantined session")
@@ -1256,6 +1256,11 @@ func TestProtocolAlwaysGrantRollsBack(t *testing.T) {
 		if _, sent := st.replies["per_1"]; sent || st.stops != 0 {
 			t.Fatalf("answered %v, stops %d; want the ask open and no stop", sent, st.stops)
 		}
+		if err := s.Reply(ctx, "per_1", loomharness.Reply{}); errors.Is(err, loomharness.ErrQuarantined) {
+			t.Fatalf("a restored session reports ErrQuarantined: %v", err)
+		}
+		delete(st.replies, "per_1")
+		st.perms["per_1"] = permReq{Session: s.ref.NativeID, Action: "shell", Resources: []string{"ls"}, Save: []string{"ls *"}}
 		works(t, st, s)
 	})
 
@@ -1263,8 +1268,8 @@ func TestProtocolAlwaysGrantRollsBack(t *testing.T) {
 		st, c, s := setup(t)
 		st.patchLie = 2
 		err := s.Reply(ctx, "per_1", always)
-		if err == nil || !strings.Contains(err.Error(), "Always grant on session") || !strings.Contains(err.Error(), "active turn was stopped") {
-			t.Fatalf("Reply = %v; want the unconfirmed grant and the stop named", err)
+		if !errors.Is(err, loomharness.ErrQuarantined) || !strings.Contains(err.Error(), "Always grant on session") || !strings.Contains(err.Error(), "active turn was stopped") {
+			t.Fatalf("Reply = %v; want ErrQuarantined naming the unconfirmed grant and the stop", err)
 		}
 		if st.stops != 1 {
 			t.Fatalf("%d stops; want the active turn stopped once", st.stops)
@@ -1293,8 +1298,8 @@ func TestProtocolAlwaysGrantRollsBack(t *testing.T) {
 		st, _, s := setup(t)
 		st.patchLie, st.hangLie = 2, true
 		err := s.Reply(ctx, "per_1", always)
-		if err == nil || !strings.Contains(err.Error(), "active turn was stopped") {
-			t.Fatalf("Reply = %v; want the stop attempted and confirmed", err)
+		if !errors.Is(err, loomharness.ErrQuarantined) || !strings.Contains(err.Error(), "active turn was stopped") {
+			t.Fatalf("Reply = %v; want ErrQuarantined and the stop attempted and confirmed", err)
 		}
 		st.mu.Lock()
 		stops := st.stops
@@ -1316,8 +1321,8 @@ func TestProtocolAlwaysGrantRollsBack(t *testing.T) {
 			set(st)
 			st.patchLie = 2
 			err := s.Reply(ctx, "per_1", always)
-			if err == nil || !strings.Contains(err.Error(), "native stop unconfirmed") || strings.Contains(err.Error(), "turn was stopped") {
-				t.Fatalf("Reply = %v; want native stop unconfirmed", err)
+			if !errors.Is(err, loomharness.ErrQuarantined) || !strings.Contains(err.Error(), "native stop unconfirmed") || strings.Contains(err.Error(), "turn was stopped") {
+				t.Fatalf("Reply = %v; want ErrQuarantined with native stop unconfirmed", err)
 			}
 			refused(t, st, s, "quarantined")
 		})

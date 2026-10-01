@@ -375,9 +375,9 @@ func (s *Session) quarantine(cause error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), cleanupWait)
 	defer cancel()
 	if _, err := s.Interrupt(ctx); err != nil {
-		return errors.Join(cause, fmt.Errorf("opencode: %s; native stop unconfirmed, tools may still run under the grant; no Loom prompt or reply until Open or Resume: %w", why, err))
+		return errors.Join(cause, fmt.Errorf("opencode: %s; native stop unconfirmed, tools may still run under the grant; no Loom prompt or reply until Open or Resume (%w): %w", why, loomharness.ErrQuarantined, err))
 	}
-	return errors.Join(cause, fmt.Errorf("opencode: %s; its active turn was stopped; no Loom prompt or reply until Open or Resume", why))
+	return errors.Join(cause, fmt.Errorf("opencode: %s; its active turn was stopped; no Loom prompt or reply until Open or Resume: %w", why, loomharness.ErrQuarantined))
 }
 
 // usable fails unless Loom installed this session's rules in this process
@@ -387,7 +387,7 @@ func (s *Session) usable() error {
 	defer s.c.rulesMu.Unlock()
 	sid := s.ref.NativeID
 	if why, ok := s.c.held[sid]; ok {
-		return &Error{Code: "bad_request", Message: "opencode: session quarantined: " + why + "; Open or Resume it to reinstall Loom's rules"}
+		return fmt.Errorf("opencode: %s; Open or Resume it to reinstall Loom's rules: %w", why, loomharness.ErrQuarantined)
 	}
 	if _, ok := s.c.rules[sid]; !ok {
 		// R-H: nothing runs under rules Loom did not install in this
