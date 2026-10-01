@@ -1,18 +1,15 @@
 package opencode
 
 import (
-	"bufio"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -21,10 +18,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 )
 
-// Config configures the one supervised OpenCode server.
+// Config configures the adapter's use of the user's OpenCode service.
 type Config struct {
 	Bin     string                     // the pinned build (LOOM_OPENCODE_BIN)
-	Env     []string                   // the server's environment; nil is the user's own (R1)
+	Env     []string                   // the environment of a service Loom starts, and where its registration lives; nil is the user's own (R1)
 	Presets []loomharness.PresetConfig // rendered as loom-<name> agents over the user's config
 }
 
@@ -32,55 +29,61 @@ type Config struct {
 var (
 	restartBackoff = time.Second      // doubled per consecutive failure
 	maxBackoff     = 30 * time.Second // backoff cap
-	stableAfter    = time.Minute      // an exit after this long is a fresh failure
-	trackEvery     = time.Second      // how often the server's descendants are recorded
 	startTimeout   = time.Minute
 	stopGrace      = 10 * time.Second
+	exitGrace      = 2 * time.Second // a started service that lost the race exits before the winner registers
 )
 
 // maxFailures consecutive failed starts or early exits make Health report
 // harness_unavailable.
 const maxFailures = 3
 
-// Adapter is the OpenCode harness: it supervises one `opencode serve --stdio`
-// on a free loopback port with a random per-boot password (R-D) and serves
-// the port through Client. --stdio is plain serve that deletes the password
-// from its own environment once read (packages/cli/src/server-process.ts:73-77
-// at b30c4d0), so no tool, subagent or nested subagent inherits it; it
-// announces {"url"} on stdout and exits when stdin closes. Loom holds stdin
-// for the server's lifetime. It never uses --service, so the user's own
-// OpenCode service registration and config are never touched. The server
-// starts on first use, restarts with backoff when it exits, and is stopped
-// only by Loom's own Stop or Restart calls.
+// Adapter is the OpenCode harness in shared service mode (Tyson, 2026-10-01
+// 17:50-18:00 UTC). It uses whichever `opencode serve --service` is
+// registered for the user (R1 roots), his own included, and starts one with
+// Loom's filtered environment only when none runs.
 //
-// Loom owns the process tree it starts. The server runs in its own process
-// group, but OpenCode starts shell commands and its PTY daemon detached, so
-// they leave that group and outlive a crashed server. While the server runs,
-// track records its descendants (by parent PID) with their start times; reap
-// signals exactly the recorded processes that still have the same start
-// time, plus their current descendants. It never pattern-kills and never
-// touches a process outside that tree, such as the user's own OpenCode.
+// The registered service is found the way OpenCode's own clients find it:
+// <XDG_STATE_HOME>/opencode/service.json holds its id, version, url, pid and
+// password (OpenCode b30c4d0 cli/src/services/service-registration.ts:20-38),
+// and it must answer /api/info with that pid (client/src/effect/service.ts:
+// 30-48). A service of any version but the pinned one is refused, never
+// stopped or replaced. A service's boot sweep resumes interrupted turns from
+// the shared database (server/src/process.ts:104-107,
+// core/src/session/execution/restart.ts), which is how running turns survive
+// a crash.
+//
+// Loom never stops, restarts or signals a service it did not start. It
+// leaves a service it started running when it shuts down (Stop), so the
+// user's clients keep using it. The only service it ever signals is one it
+// started whose registration still names it, and only on an explicit
+// Restart.
 type Adapter struct {
 	*Client
 	cfg Config
 
-	treeMu sync.Mutex
-	tree   map[int]string // recorded descendant PID -> start time
-
 	mu       sync.Mutex
-	cmd      *exec.Cmd // the owned server; nil when none runs
-	stdin    *os.File  // held open for the server's lifetime; closing it stops the server
-	exited   chan struct{}
+	cmd      *exec.Cmd    // a service Loom started; nil once it exits
+	reg      registration // the service in use; zero when none
 	failures int
 	retryAt  time.Time
 	stopped  bool
+}
+
+// registration is OpenCode's service registration file.
+type registration struct {
+	ID       string `json:"id"`
+	Version  string `json:"version"`
+	URL      string `json:"url"`
+	PID      int    `json:"pid"`
+	Password string `json:"password"`
 }
 
 var _ loomharness.Harness = (*Adapter)(nil)
 
 // New returns an adapter; nothing starts until the first call.
 func New(cfg Config) *Adapter {
-	a := &Adapter{Client: NewClient("", ""), cfg: cfg, tree: map[int]string{}}
+	a := &Adapter{Client: NewClient("", ""), cfg: cfg}
 	a.ready, a.shellEnv = a.ensure, a.env
 	return a
 }
@@ -113,8 +116,8 @@ func (a *Adapter) Models(ctx context.Context) ([]loomharness.Model, error) {
 }
 
 // Health checks the installed version (refused below the minimum) and
-// reports harness_unavailable after repeated failed starts. It never starts
-// the server.
+// reports harness_unavailable after repeated failed connects. It never
+// starts a service.
 func (a *Adapter) Health(ctx context.Context) (loomharness.Health, error) {
 	vc, err := a.version(ctx)
 	if err != nil {
@@ -123,28 +126,33 @@ func (a *Adapter) Health(ctx context.Context) (loomharness.Health, error) {
 	h := loomharness.Health{OK: true, Version: vc, Warning: vc.Warning()}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.cmd == nil && a.failures >= maxFailures {
+	if a.reg.PID == 0 && a.failures >= maxFailures {
 		h.OK, h.Warning = false, fmt.Sprintf("harness_unavailable: opencode failed %d times in a row", a.failures)
 	}
 	return h, nil
 }
 
-// Restart stops the owned server and starts a new one.
+// Restart reconnects to the registered service. Only a service Loom started
+// and that is still registered as itself is stopped first; any other is
+// never signaled.
 func (a *Adapter) Restart(ctx context.Context) error {
 	a.mu.Lock()
-	a.stopLocked()
-	a.retryAt = time.Time{}
+	if a.cmd != nil && a.reg.PID == a.cmd.Process.Pid {
+		if r, ok := a.registered(); ok && r == a.reg {
+			stopOwned(a.cmd)
+		}
+	}
+	a.reg, a.retryAt = registration{}, time.Time{}
 	a.mu.Unlock()
 	return a.ensure(ctx)
 }
 
-// Stop stops the owned server for good (loom serve shutdown).
+// Stop disconnects Loom for good (loom serve shutdown). It leaves every
+// service running, including one Loom started.
 func (a *Adapter) Stop() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.stopped = true
-	a.stopLocked()
-	a.reap() // also after a crash, when no server runs
+	a.stopped, a.reg = true, registration{}
 }
 
 func (a *Adapter) version(ctx context.Context) (loomharness.VersionCheck, error) {
@@ -157,25 +165,33 @@ func (a *Adapter) version(ctx context.Context) (loomharness.VersionCheck, error)
 	return loomharness.CheckVersion("opencode", string(out))
 }
 
-// ensure starts the server if none runs. It is the Client's ready hook.
+// ensure keeps the Client pointed at the registered service. It is the
+// Client's ready hook: while the registration still names the service in
+// use it returns at once, else it finds or starts one.
 func (a *Adapter) ensure(ctx context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	switch {
-	case a.cmd != nil:
-		return nil
-	case a.stopped:
+	if a.stopped {
 		return fmt.Errorf("opencode stopped: %w", loomharness.ErrUnavailable)
-	case time.Now().Before(a.retryAt):
+	}
+	if a.reg.PID != 0 {
+		if r, ok := a.registered(); ok && r == a.reg && alive(r.PID) {
+			return nil
+		}
+		a.reg = registration{} // the service changed or went away
+	}
+	if time.Now().Before(a.retryAt) {
 		return fmt.Errorf("opencode restart backoff after %d failures: %w", a.failures, loomharness.ErrUnavailable)
 	}
-	if _, err := a.version(ctx); err != nil {
+	vc, err := a.version(ctx)
+	if err != nil {
 		return err
 	}
-	if err := a.spawn(ctx); err != nil {
+	if err := a.connect(ctx, vc.Installed.String()); err != nil {
 		a.fail()
 		return err
 	}
+	a.failures = 0
 	return nil
 }
 
@@ -184,277 +200,154 @@ func (a *Adapter) fail() {
 	a.retryAt = time.Now().Add(min(restartBackoff<<(a.failures-1), maxBackoff))
 }
 
-// spawn starts `opencode serve` with a fresh password and waits until it
-// answers with its own pid. The password is never logged.
-func (a *Adapter) spawn(ctx context.Context) error {
-	env, err := a.env()
-	if err != nil {
-		return err
-	}
-	password := newPassword()
-	base, port, err := freePort()
-	if err != nil {
-		return fmt.Errorf("opencode: free port: %w: %w", loomharness.ErrUnavailable, err)
-	}
-	cmd := a.serveCmd(env, port, password)
-	a.reap() // leftovers of a crashed server: no duplicate survivor
-	inW, outR, err := startPiped(cmd)
-	if err != nil {
-		return fmt.Errorf("opencode serve: %w: %w", loomharness.ErrUnavailable, err)
-	}
-	exited, started, urls := make(chan struct{}), time.Now(), make(chan string, 1)
-	go announced(outR, urls)
-	go a.watch(cmd, inW, exited, started)
-	go a.track(cmd.Process.Pid, exited)
-	kill := func(err error) error {
-		a.record(cmd.Process.Pid)
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		<-exited
-		a.reap()
-		return err
-	}
-	listening := false
-	for deadline := started.Add(startTimeout); ; {
-		select {
-		case <-exited:
-			a.reap()
-			return fmt.Errorf("opencode serve exited during start: %w", loomharness.ErrUnavailable)
-		case <-ctx.Done():
-			return kill(ctx.Err())
-		case url := <-urls:
-			if url != base {
-				return kill(fmt.Errorf("opencode serve announced %q, not its owned listener %s: %w", url, base, loomharness.ErrUnavailable))
+// connect uses the registered service if it runs the pinned version, and
+// otherwise starts `opencode serve --service` once and waits for whichever
+// service registers, Loom's or a concurrent incumbent. The password is never
+// logged.
+func (a *Adapter) connect(ctx context.Context, want string) error {
+	var exited <-chan struct{} // set while the service Loom started may still exit
+	started, gone := false, false
+	for deadline := time.Now().Add(startTimeout); ; {
+		if r, ok := a.registered(); ok && alive(r.PID) {
+			if r.Version != want {
+				return fmt.Errorf("opencode service %s (pid %d) is running; Loom needs %s and never stops or replaces a running service: %w",
+					r.Version, r.PID, want, loomharness.ErrUnavailable)
 			}
-			listening = true
+			if answers(ctx, r.URL, r.Password, r.PID) {
+				a.setEndpoint(r.URL, r.Password)
+				a.reg = r
+				return nil
+			}
+		} else if !started {
+			var err error
+			if exited, err = a.start(); err != nil {
+				return err
+			}
+			started = true
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-exited:
+			// It failed, or an incumbent won the port; give the incumbent
+			// a moment to register.
+			exited, gone = nil, true
+			if d := time.Now().Add(exitGrace); d.Before(deadline) {
+				deadline = d
+			}
 		case <-time.After(100 * time.Millisecond):
 		}
-		if listening && answers(ctx, base, password, cmd.Process.Pid) {
-			a.setEndpoint(base, password)
-			a.cmd, a.stdin, a.exited = cmd, inW, exited
-			a.record(cmd.Process.Pid)
-			return nil
-		}
 		if time.Now().After(deadline) {
-			return kill(fmt.Errorf("opencode serve not ready after %s: %w", startTimeout, loomharness.ErrUnavailable))
-		}
-	}
-}
-
-// serveCmd is the owned `opencode serve --stdio` on the loopback port, in its
-// own process group, with the per-boot password.
-func (a *Adapter) serveCmd(env []string, port, password string) *exec.Cmd {
-	cmd := exec.Command(a.cfg.Bin, "serve", "--stdio", "--hostname", "127.0.0.1", "--port", port) //nolint:gosec // G204: the configured OpenCode binary.
-	cmd.Env = append(slices.Clip(env), "OPENCODE_SERVER_PASSWORD="+password)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	return cmd
-}
-
-// freePort picks a free loopback port and returns its base URL and number.
-func freePort() (base, port string, err error) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return "", "", err
-	}
-	defer func() { _ = l.Close() }()
-	return "http://" + l.Addr().String(), strconv.Itoa(l.Addr().(*net.TCPAddr).Port), nil
-}
-
-// startPiped starts cmd with stdin and stdout on fresh pipes and returns
-// Loom's ends: the stdin writer it holds and the stdout reader.
-func startPiped(cmd *exec.Cmd) (stdin, stdout *os.File, err error) {
-	inR, inW, err := os.Pipe()
-	if err != nil {
-		return nil, nil, err
-	}
-	outR, outW, err := os.Pipe()
-	if err != nil {
-		_, _ = inR.Close(), inW.Close()
-		return nil, nil, err
-	}
-	cmd.Stdin, cmd.Stdout = inR, outW
-	err = cmd.Start()
-	_, _ = inR.Close(), outW.Close()
-	if err != nil {
-		_, _ = inW.Close(), outR.Close()
-		return nil, nil, err
-	}
-	return inW, outR, nil
-}
-
-// newPassword is a random per-boot server password.
-func newPassword() string {
-	b := make([]byte, 32)
-	_, _ = rand.Read(b) // crypto/rand.Read never fails (Go 1.24+)
-	return base64.RawURLEncoding.EncodeToString(b)
-}
-
-// announced sends the URL from the server's {"url"} stdout line, then drains
-// stdout so the server never blocks writing to it.
-func announced(out *os.File, urls chan<- string) {
-	defer func() { _ = out.Close() }()
-	sc := bufio.NewScanner(out)
-	for sc.Scan() {
-		var line struct {
-			URL string `json:"url"`
-		}
-		if json.Unmarshal(sc.Bytes(), &line) == nil && line.URL != "" {
-			select {
-			case urls <- line.URL:
-			default:
+			if gone {
+				return fmt.Errorf("opencode serve --service exited during start and no service registered: %w", loomharness.ErrUnavailable)
 			}
+			return fmt.Errorf("no OpenCode service answered within %s: %w", startTimeout, loomharness.ErrUnavailable)
 		}
 	}
 }
 
-// watch reaps the server and, when it exits on its own, restarts it after
-// the backoff.
-func (a *Adapter) watch(cmd *exec.Cmd, stdin *os.File, exited chan struct{}, started time.Time) {
+// start launches `opencode serve --service` with Loom's filtered environment
+// in its own session, so it outlives Loom. Without --port or --hostname it
+// binds where the user's own service would (server-process.ts:61-62). At
+// listen time it writes the registration and, only if absent, a password
+// into <XDG_CONFIG_HOME>/opencode/service.json (server-process.ts:127-139).
+func (a *Adapter) start() (<-chan struct{}, error) {
+	env, err := a.env()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(a.cfg.Bin, "serve", "--service") //nolint:gosec // G204: the configured OpenCode binary.
+	cmd.Env = env
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("opencode serve --service: %w: %w", loomharness.ErrUnavailable, err)
+	}
+	a.cmd = cmd
+	exited := make(chan struct{})
+	go a.watch(cmd, exited)
+	return exited, nil
+}
+
+// watch reaps a service Loom started. When it was the service in use, the
+// next call finds or starts one; after the backoff, ensure runs once by
+// itself so a service boots and resumes interrupted turns without waiting
+// for a Loom call.
+func (a *Adapter) watch(cmd *exec.Cmd, exited chan struct{}) {
 	_ = cmd.Wait()
-	_ = stdin.Close()
 	close(exited)
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.cmd != cmd {
-		return // stopped on purpose, or a start that failed
+	if a.cmd == cmd {
+		a.cmd = nil
 	}
-	a.cmd = nil
-	if time.Since(started) >= stableAfter {
-		a.failures = 0
+	if a.reg.PID != cmd.Process.Pid || a.stopped {
+		return
 	}
+	a.reg = registration{}
 	a.fail()
 	time.AfterFunc(time.Until(a.retryAt), func() { _ = a.ensure(context.Background()) })
 }
 
-// stopLocked closes the owned server's stdin, which stops a --stdio server,
-// waits, then SIGKILLs its process group, and reaps the detached rest of the
-// tree.
-func (a *Adapter) stopLocked() {
-	cmd, exited := a.cmd, a.exited
-	if cmd == nil {
-		return
-	}
-	a.cmd = nil
-	a.record(cmd.Process.Pid)
-	_ = a.stdin.Close()
-	select {
-	case <-exited:
-	case <-time.After(stopGrace):
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		<-exited
-	}
-	a.reap()
-}
-
-// track records the server's descendants until it exits.
-func (a *Adapter) track(server int, exited <-chan struct{}) {
-	for {
-		a.record(server)
-		select {
-		case <-exited:
-			return
-		case <-time.After(trackEvery):
-		}
-	}
-}
-
-// record adds the current descendants of server to the recorded tree.
-func (a *Adapter) record(server int) {
-	procs := processes()
-	a.treeMu.Lock()
-	defer a.treeMu.Unlock()
-	for _, pid := range descendants(procs, []int{server}) {
-		a.tree[pid] = procs[pid].start
-	}
-}
-
-// owned lists the recorded processes that still run with the same start
-// time, plus their current descendants, and forgets the rest.
-func (a *Adapter) owned() []int {
-	procs := processes()
-	a.treeMu.Lock()
-	defer a.treeMu.Unlock()
-	var roots []int
-	for pid, start := range a.tree {
-		if p, ok := procs[pid]; ok && p.start == start {
-			roots = append(roots, pid)
-		} else {
-			delete(a.tree, pid)
-		}
-	}
-	return append(roots, descendants(procs, roots)...)
-}
-
-// reap stops the owned processes: SIGTERM, then SIGKILL after stopGrace. It
-// lists them again before each signal, so an exited, reused PID is never hit.
-func (a *Adapter) reap() {
-	sig := syscall.SIGTERM
-	for deadline := time.Now().Add(stopGrace); ; time.Sleep(50 * time.Millisecond) {
-		pids := a.owned()
-		if len(pids) == 0 {
-			return
-		}
+// stopOwned stops a service Loom started: SIGTERM, then SIGKILL after
+// stopGrace. A graceful stop keeps its turns' execution claims, so the next
+// service's boot sweep resumes them (restart.ts:36-41).
+func stopOwned(cmd *exec.Cmd) {
+	_ = cmd.Process.Signal(syscall.SIGTERM)
+	for deadline := time.Now().Add(stopGrace); alive(cmd.Process.Pid); time.Sleep(50 * time.Millisecond) {
 		if time.Now().After(deadline) {
-			sig = syscall.SIGKILL
-		}
-		for _, pid := range pids {
-			_ = syscall.Kill(pid, sig)
-		}
-		if sig == syscall.SIGKILL {
+			_ = cmd.Process.Kill()
 			return
 		}
 	}
 }
 
-type process struct {
-	ppid  int
-	start string
+// registered reads the user's service registration.
+func (a *Adapter) registered() (registration, bool) {
+	var r registration
+	b, err := os.ReadFile(a.registrationFile())
+	if err != nil || json.Unmarshal(b, &r) != nil || r.PID <= 0 || r.URL == "" {
+		return registration{}, false
+	}
+	return r, true
 }
 
-// processes is the ps table: PID -> parent and start time. Zombies are left
-// out; they are already dead.
-func processes() map[int]process {
-	out, err := exec.Command("ps", "-axo", "pid=,ppid=,stat=,lstart=").Output()
-	if err != nil {
-		return nil
+// registrationFile is <XDG_STATE_HOME or HOME/.local/state>/opencode/
+// service.json of the environment Loom runs OpenCode with
+// (util/src/global-roots.ts:8, service-config.ts:29-32).
+func (a *Adapter) registrationFile() string {
+	env := a.cfg.Env
+	if env == nil {
+		env = os.Environ()
 	}
-	procs := map[int]process{}
-	for _, line := range strings.Split(string(out), "\n") {
-		f := strings.Fields(line)
-		if len(f) < 4 || strings.HasPrefix(f[2], "Z") {
-			continue
-		}
-		pid, err1 := strconv.Atoi(f[0])
-		ppid, err2 := strconv.Atoi(f[1])
-		if err1 == nil && err2 == nil {
-			procs[pid] = process{ppid: ppid, start: strings.Join(f[3:], " ")}
-		}
-	}
-	return procs
-}
-
-// descendants lists every process below roots in procs.
-func descendants(procs map[int]process, roots []int) []int {
-	kids := map[int][]int{}
-	for pid, p := range procs {
-		kids[p.ppid] = append(kids[p.ppid], pid)
-	}
-	var out []int
-	for queue := slices.Clone(roots); len(queue) > 0; {
-		pid := queue[0]
-		queue = queue[1:]
-		for _, k := range kids[pid] {
-			if k != os.Getpid() {
-				out = append(out, k)
-				queue = append(queue, k)
+	get := func(k string) string {
+		v := ""
+		for _, kv := range env {
+			if name, val, _ := strings.Cut(kv, "="); name == k {
+				v = val
 			}
 		}
+		return v
 	}
-	return out
+	state := get("XDG_STATE_HOME")
+	if state == "" {
+		state = filepath.Join(get("HOME"), ".local", "state")
+	}
+	return filepath.Join(state, "opencode", "service.json")
 }
 
-// githubTokens never reach the server, nor the processes it starts: agents
-// publish through Loom (R32). Inherited OpenCode passwords are dropped too;
-// spawn sets its own, and sessions get env without it (see Session.isolate).
+// alive reports whether pid runs; EPERM means it runs as another user.
+func alive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+// githubTokens never reach a service Loom starts, nor the processes it
+// starts: agents publish through Loom (R32). Inherited OpenCode passwords
+// are dropped too; a service reads its own from its config, and sessions get
+// env without either (see Session.isolate).
 var githubTokens = []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_TOKEN_FILE", "LOOM_PR_GIT_PASSWORD"}
 
 // env is the configured environment without GitHub tokens, plus the Loom
@@ -497,7 +390,7 @@ func (a *Adapter) env() ([]string, error) {
 	return append(out, "OPENCODE_CONFIG_CONTENT="+string(b)), nil
 }
 
-// answers reports whether the server at base is up and is our process.
+// answers reports whether the server at base is up and is process pid.
 func answers(ctx context.Context, base, password string, pid int) bool {
 	req, err := http.NewRequestWithContext(ctx, "GET", base+"/api/info", nil)
 	if err != nil {

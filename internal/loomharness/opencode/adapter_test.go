@@ -7,14 +7,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -22,19 +23,21 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 )
 
-// TestMain lets the test binary play `opencode` for the supervisor tests:
-// LOOM_FAKE_OPENCODE=serve answers --version and serves /api/info and
-// /api/model like `opencode serve --stdio`, checking OPENCODE_SERVER_PASSWORD,
-// announcing {"url"} on stdout and exiting when stdin closes; =badurl
-// announces another listener; =exit fails every serve, and serve without
-// --stdio or with --service is refused. serve,
-// exit-child and hang first start a detached grandchild (=sleep), as
-// OpenCode does for shell commands, and record its pid in children.
+// TestMain lets the test binary play `opencode` for the supervisor tests.
+// LOOM_FAKE_OPENCODE=serve answers --version and, for `serve --service`,
+// behaves like OpenCode's service mode: it exits at once when a live service
+// is registered (the incumbent), else listens on a free loopback port, keeps
+// the password from $XDG_CONFIG_HOME/opencode/service.json or initializes an
+// absent one there, registers {id, version, url, pid, password} in
+// $XDG_STATE_HOME/opencode/service.json, serves /api/info and /api/model,
+// and on SIGTERM removes the registration if it still owns it. =exit fails
+// every serve; =hang never registers. Every fake process records its pid in
+// $XDG_STATE_HOME/fake-pids so cleanup stops exactly those.
 func TestMain(m *testing.M) {
 	if mode := os.Getenv("LOOM_FAKE_OPENCODE"); mode != "" {
 		os.Exit(fakeOpenCode(mode))
 	}
-	restartBackoff, maxBackoff, trackEvery = 10*time.Millisecond, 50*time.Millisecond, 20*time.Millisecond
+	restartBackoff, maxBackoff, exitGrace = 10*time.Millisecond, 50*time.Millisecond, 300*time.Millisecond
 	os.Exit(m.Run())
 }
 
@@ -44,36 +47,66 @@ func fakeOpenCode(mode string) int {
 		fmt.Println(os.Getenv("LOOM_FAKE_OPENCODE_VERSION"))
 		return 0
 	}
-	if mode == "sleep" {
-		time.Sleep(time.Hour)
-		return 0
-	}
-	if mode == "exit" || slices.Contains(args, "--service") || !slices.Contains(args, "--stdio") {
+	if mode == "exit" || !slices.Equal(args, []string{"serve", "--service"}) {
 		return 1
 	}
-	state := os.Getenv("XDG_STATE_HOME")
-	spawnDetached(state)
-	switch mode {
-	case "exit-child":
-		time.Sleep(300 * time.Millisecond) // a child born just before a crash can escape tracking
-		return 1
-	case "hang":
+	state, config := os.Getenv("XDG_STATE_HOME"), os.Getenv("XDG_CONFIG_HOME")
+	appendLine(filepath.Join(state, "fake-pids"), fmt.Sprint(os.Getpid()))
+	if mode == "hang" {
 		time.Sleep(time.Hour)
+	}
+	regFile := filepath.Join(state, "opencode", "service.json")
+	var reg registration
+	live := func() bool {
+		b, err := os.ReadFile(regFile)
+		return err == nil && json.Unmarshal(b, &reg) == nil && alive(reg.PID)
+	}
+	if live() {
+		return 0 // the incumbent keeps the registration
+	}
+	// The lock plays the service's fixed port: one process wins it, and the
+	// others exit once the winner registers (server-process.ts:143-156).
+	_ = os.MkdirAll(filepath.Dir(regFile), 0o700)
+	port, err := os.OpenFile(filepath.Join(state, "port.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return 1
+	}
+	if syscall.Flock(int(port.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
+		for range 50 {
+			if live() {
+				return 0
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		return 1
 	}
 	_ = os.WriteFile(filepath.Join(state, "config-content"), []byte(os.Getenv("OPENCODE_CONFIG_CONTENT")), 0o600)
 	var tokens []string
-	for _, k := range []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_TOKEN_FILE", "LOOM_PR_GIT_PASSWORD"} {
+	for _, k := range []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_TOKEN_FILE", "LOOM_PR_GIT_PASSWORD",
+		"OPENCODE_SERVER_PASSWORD", "OPENCODE_PASSWORD"} {
 		if _, ok := os.LookupEnv(k); ok {
 			tokens = append(tokens, k) // names only: test output never carries values
 		}
 	}
-	_ = os.WriteFile(filepath.Join(state, "github-tokens"), []byte(strings.Join(tokens, "\n")), 0o600)
-	l, err := net.Listen("tcp", "127.0.0.1:"+args[slices.Index(args, "--port")+1])
+	_ = os.WriteFile(filepath.Join(state, "secret-names"), []byte(strings.Join(tokens, "\n")), 0o600)
+
+	cfgFile := filepath.Join(config, "opencode", "service.json")
+	cfg := map[string]any{}
+	if b, err := os.ReadFile(cfgFile); err == nil {
+		_ = json.Unmarshal(b, &cfg)
+	}
+	pw, _ := cfg["password"].(string)
+	if pw == "" {
+		pw = fmt.Sprintf("fake-%d", os.Getpid())
+		cfg["password"] = pw
+		b, _ := json.Marshal(cfg)
+		_ = os.MkdirAll(filepath.Dir(cfgFile), 0o700)
+		_ = os.WriteFile(cfgFile, b, 0o600)
+	}
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return 1
 	}
-	pw := os.Getenv("OPENCODE_SERVER_PASSWORD")
-	_ = os.WriteFile(filepath.Join(state, "password-sha256"), []byte(sha(pw)), 0o600) // never the value
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/info", func(w http.ResponseWriter, r *http.Request) {
 		if _, got, _ := r.BasicAuth(); got != pw {
@@ -86,84 +119,93 @@ func fakeOpenCode(mode string) int {
 		_, _ = w.Write([]byte(`{"data":[{"id":"m","providerID":"fake","name":"M"}]}`))
 	})
 	go func() { _ = http.Serve(l, mux) }() //nolint:gosec // G114: test-only fake server.
-	url := "http://" + l.Addr().String()
-	if mode == "badurl" {
-		url = "http://127.0.0.1:1"
+	version := os.Getenv("LOOM_FAKE_SERVICE_VERSION")
+	if version == "" {
+		version = "2.0.19"
 	}
-	b, _ := json.Marshal(map[string]string{"url": url})
-	fmt.Println(string(b))
-	stdin := make(chan struct{})
-	go func() { _, _ = io.Copy(io.Discard, os.Stdin); close(stdin) }()
+	reg = registration{ID: fmt.Sprintf("id-%d", os.Getpid()), Version: version, URL: "http://" + l.Addr().String(), PID: os.Getpid(), Password: pw}
+	b, _ := json.Marshal(reg) //nolint:gosec // G117: the fake writes OpenCode's registration format; synthetic password.
+	_ = os.WriteFile(regFile, b, 0o600)
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM)
-	select {
-	case <-sig:
-	case <-stdin:
-		_ = os.WriteFile(filepath.Join(state, "stdin-closed"), nil, 0o600)
+	<-sig
+	if cur, err := os.ReadFile(regFile); err == nil && string(cur) == string(b) {
+		_ = os.Remove(regFile)
 	}
 	return 0
 }
 
-// spawnDetached starts a grandchild in its own session, so it leaves the
-// server's process group.
-func spawnDetached(state string) {
-	env := append(slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "LOOM_FAKE_OPENCODE=") }), "LOOM_FAKE_OPENCODE=sleep")
-	p, err := os.StartProcess(os.Args[0], os.Args[:1], &os.ProcAttr{Env: env, Sys: &syscall.SysProcAttr{Setsid: true}})
-	if err != nil {
-		return
-	}
-	f, err := os.OpenFile(filepath.Join(state, "children"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+func appendLine(file, line string) {
+	f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err == nil {
-		_, _ = fmt.Fprintln(f, p.Pid)
+		_, _ = fmt.Fprintln(f, line)
 		_ = f.Close()
 	}
 }
 
-// children reads the grandchild pids a fake server recorded.
-func children(t *testing.T, state string) []int {
-	t.Helper()
-	b, _ := os.ReadFile(filepath.Join(state, "children"))
-	var pids []int
-	for _, f := range strings.Fields(string(b)) {
-		var pid int
-		_, _ = fmt.Sscan(f, &pid)
-		pids = append(pids, pid)
-	}
-	return pids
-}
-
-func liveCount(pids []int) int {
-	n := 0
-	for _, p := range pids {
-		if alive(p) {
-			n++
-		}
-	}
-	return n
-}
-
 func sha(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
 
-func fakeAdapter(t *testing.T, mode, version string, presets ...loomharness.PresetConfig) (*Adapter, string) {
+// fakeRoots makes the state and config roots of one fake user and stops
+// every fake process started for them at cleanup.
+func fakeRoots(t *testing.T) (state, config string) {
 	t.Helper()
-	return fakeAdapterEnv(t, mode, version, nil, presets...)
+	state, config = t.TempDir(), t.TempDir()
+	t.Cleanup(func() {
+		b, _ := os.ReadFile(filepath.Join(state, "fake-pids"))
+		for _, f := range strings.Fields(string(b)) {
+			var pid int
+			_, _ = fmt.Sscan(f, &pid)
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+	return state, config
 }
 
-func fakeAdapterEnv(t *testing.T, mode, version string, extra []string, presets ...loomharness.PresetConfig) (*Adapter, string) {
-	t.Helper()
-	state := t.TempDir()
-	a := New(Config{Bin: os.Args[0], Presets: presets, Env: append(append(hostEnv(), extra...),
+func fakeEnv(mode, version, state, config string, extra ...string) []string {
+	return append(append(hostEnv(), extra...),
 		"LOOM_FAKE_OPENCODE="+mode,
 		"LOOM_FAKE_OPENCODE_VERSION="+version,
 		"XDG_STATE_HOME="+state,
+		"XDG_CONFIG_HOME="+config,
 		"OPENCODE_SERVER_PASSWORD=inherited",
 		`OPENCODE_CONFIG_CONTENT={"theme":"user","agents":{"mine":{"system":"user agent"}}}`,
-	)})
+	)
+}
+
+func fakeAdapter(t *testing.T, mode, version string, presets ...loomharness.PresetConfig) (*Adapter, string) {
+	t.Helper()
+	state, config := fakeRoots(t)
+	a := New(Config{Bin: os.Args[0], Presets: presets, Env: fakeEnv(mode, version, state, config)})
 	t.Cleanup(a.Stop)
 	return a, state
 }
 
+// userService starts a fake service the way the user's own client would,
+// outside any adapter, and waits for its registration.
+func userService(t *testing.T, state, config string, extra ...string) registration {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "serve", "--service") //nolint:norawexec // the test binary plays the user's own service, outside the adapter.
+	cmd.Env = fakeEnv("serve", "opencode v2.0.19", state, config, extra...)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = cmd.Wait() }()
+	var reg registration
+	waitFor(t, "user service registration", func() bool {
+		b, err := os.ReadFile(filepath.Join(state, "opencode", "service.json"))
+		return err == nil && json.Unmarshal(b, &reg) == nil && reg.PID == cmd.Process.Pid
+	})
+	return reg
+}
+
 func serverPID(a *Adapter) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.reg.PID
+}
+
+// startedPID is the service this adapter started, or 0.
+func startedPID(a *Adapter) int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.cmd == nil {
@@ -174,17 +216,20 @@ func serverPID(a *Adapter) int {
 
 func waitFor(t *testing.T, what string, ok func() bool) {
 	t.Helper()
-	for deadline := time.Now().Add(10 * time.Second); !ok(); time.Sleep(10 * time.Millisecond) {
+	waitWithin(t, 10*time.Second, what, ok)
+}
+
+func waitWithin(t *testing.T, d time.Duration, what string, ok func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(d); !ok(); time.Sleep(10 * time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for %s", what)
 		}
 	}
 }
 
-func alive(pid int) bool { return pid > 0 && syscall.Kill(pid, 0) == nil }
-
 func TestAdapterRefusesOldVersion(t *testing.T) {
-	a, _ := fakeAdapter(t, "serve", "opencode 1.18.32")
+	a, state := fakeAdapter(t, "serve", "opencode 1.18.32")
 	h, err := a.Health(context.Background())
 	if err != nil || h.OK || !strings.Contains(h.Warning, "harness_too_old") {
 		t.Fatalf("Health = %+v, %v; want refused", h, err)
@@ -194,26 +239,31 @@ func TestAdapterRefusesOldVersion(t *testing.T) {
 	if !errors.As(err, &old) || !errors.Is(err, loomharness.ErrUnavailable) {
 		t.Fatalf("Models err = %v; want TooOldError", err)
 	}
-	if serverPID(a) != 0 {
-		t.Fatal("a server started below the minimum version")
+	if _, err := os.Stat(filepath.Join(state, "fake-pids")); err == nil {
+		t.Fatal("a service started below the minimum version")
 	}
 }
 
-func TestAdapterLifecycle(t *testing.T) {
+// TestAdapterStartsServiceWhenNoneRuns: with nothing registered, Loom starts
+// `opencode serve --service` with its filtered environment and presets; the
+// service initializes the absent config password, and Loom uses the
+// registered endpoint.
+func TestAdapterStartsServiceWhenNoneRuns(t *testing.T) {
 	ctx := context.Background()
 	a, state := fakeAdapter(t, "serve", "opencode v2.0.19", loomharness.PresetConfig{Name: "lead", Persona: "be the lead"})
 	if serverPID(a) != 0 {
-		t.Fatal("server started before first use")
+		t.Fatal("service started before first use")
 	}
 	models, err := a.Models(ctx)
 	if err != nil || len(models) != 1 || models[0].ID != "fake/m" {
 		t.Fatalf("Models = %v, %v", models, err)
 	}
-	pid := serverPID(a)
-	base, pw := a.endpoint()
-	served, _ := os.ReadFile(filepath.Join(state, "password-sha256"))
-	if !strings.HasPrefix(base, "http://127.0.0.1:") || len(pw) < 40 || string(served) != sha(pw) {
-		t.Fatalf("endpoint = %s; per-boot password set through OPENCODE_SERVER_PASSWORD: %v", base, string(served) == sha(pw))
+	reg, ok := a.registered()
+	if !ok || reg.PID != startedPID(a) || serverPID(a) != reg.PID {
+		t.Fatalf("Loom does not use the service it started: registered %d, started %d, in use %d", reg.PID, startedPID(a), serverPID(a))
+	}
+	if base, pw := a.endpoint(); base != reg.URL || sha(pw) != sha(reg.Password) {
+		t.Fatal("endpoint is not the registered url and password")
 	}
 
 	b, err := os.ReadFile(filepath.Join(state, "config-content"))
@@ -234,39 +284,147 @@ func TestAdapterLifecycle(t *testing.T) {
 		content.Agents["loom-lead"].System != "be the lead" || content.Agents["loom-lead"].Mode != "primary" {
 		t.Fatalf("merged config content = %s", b)
 	}
+}
 
-	// An exit restarts the server after the backoff.
+// TestAdapterKeepsExistingServicePassword: the only write Loom's start
+// causes is initializing an absent password; an existing one is kept.
+func TestAdapterKeepsExistingServicePassword(t *testing.T) {
+	state, config := fakeRoots(t)
+	cfgFile := filepath.Join(config, "opencode", "service.json")
+	_ = os.MkdirAll(filepath.Dir(cfgFile), 0o700)
+	before := []byte(`{"password":"fixture-existing","port":4321}`)
+	if err := os.WriteFile(cfgFile, before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := New(Config{Bin: os.Args[0], Env: fakeEnv("serve", "opencode v2.0.19", state, config)})
+	t.Cleanup(a.Stop)
+	if _, err := a.Models(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(cfgFile)
+	if string(after) != string(before) {
+		t.Fatal("the service config changed although it had a password")
+	}
+	if _, pw := a.endpoint(); sha(pw) != sha("fixture-existing") {
+		t.Fatal("Loom does not use the existing service password")
+	}
+}
+
+// TestAdapterReusesRegisteredService: a service the user started is used as
+// is; Restart only reconnects and Stop leaves it running.
+func TestAdapterReusesRegisteredService(t *testing.T) {
+	ctx := context.Background()
+	state, config := fakeRoots(t)
+	user := userService(t, state, config)
+	a := New(Config{Bin: os.Args[0], Env: fakeEnv("serve", "opencode v2.0.19", state, config)})
+	t.Cleanup(a.Stop)
+	if _, err := a.Models(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if serverPID(a) != user.PID || startedPID(a) != 0 {
+		t.Fatalf("in use %d, started %d; want the user's %d and none started", serverPID(a), startedPID(a), user.PID)
+	}
+	if err := a.Restart(ctx); err != nil || !alive(user.PID) || serverPID(a) != user.PID {
+		t.Fatalf("Restart = %v: user service alive %v, in use %d", err, alive(user.PID), serverPID(a))
+	}
+	a.Stop()
+	if !alive(user.PID) {
+		t.Fatal("Stop stopped the user's service")
+	}
+	if _, err := a.Models(ctx); !errors.Is(err, loomharness.ErrUnavailable) {
+		t.Fatalf("Models after Stop = %v; want ErrUnavailable", err)
+	}
+}
+
+// TestAdapterRefusesWrongServiceVersion: a registered service of another
+// version is refused with a clear error and left running and registered.
+func TestAdapterRefusesWrongServiceVersion(t *testing.T) {
+	state, config := fakeRoots(t)
+	user := userService(t, state, config, "LOOM_FAKE_SERVICE_VERSION=2.0.18")
+	regFile := filepath.Join(state, "opencode", "service.json")
+	before, _ := os.ReadFile(regFile)
+	a := New(Config{Bin: os.Args[0], Env: fakeEnv("serve", "opencode v2.0.19", state, config)})
+	t.Cleanup(a.Stop)
+	_, err := a.Models(context.Background())
+	if !errors.Is(err, loomharness.ErrUnavailable) || !strings.Contains(err.Error(), "2.0.18") || !strings.Contains(err.Error(), "never stops or replaces") {
+		t.Fatalf("Models = %v; want a clear wrong-version refusal", err)
+	}
+	after, _ := os.ReadFile(regFile)
+	if !alive(user.PID) || string(after) != string(before) || startedPID(a) != 0 {
+		t.Fatal("the wrong-version service was stopped, replaced or competed with")
+	}
+}
+
+// TestAdapterIncumbentRace: adapters starting at once end up on one service.
+func TestAdapterIncumbentRace(t *testing.T) {
+	state, config := fakeRoots(t)
+	var adapters []*Adapter
+	for range 3 {
+		a := New(Config{Bin: os.Args[0], Env: fakeEnv("serve", "opencode v2.0.19", state, config)})
+		t.Cleanup(a.Stop)
+		adapters = append(adapters, a)
+	}
+	var wg sync.WaitGroup
+	errs := make([]error, len(adapters))
+	for i, a := range adapters {
+		wg.Add(1)
+		go func() { defer wg.Done(); _, errs[i] = a.Models(context.Background()) }()
+	}
+	wg.Wait()
+	reg, _ := adapters[0].registered()
+	for i, a := range adapters {
+		if errs[i] != nil || serverPID(a) != reg.PID {
+			t.Fatalf("adapter %d: %v, in use %d; want the registered %d", i, errs[i], serverPID(a), reg.PID)
+		}
+	}
+	// The losers exit once the winner registers.
+	waitFor(t, "one service after the race", func() bool {
+		live := 0
+		b, _ := os.ReadFile(filepath.Join(state, "fake-pids"))
+		for _, f := range strings.Fields(string(b)) {
+			var pid int
+			_, _ = fmt.Sscan(f, &pid)
+			if alive(pid) {
+				live++
+			}
+		}
+		return live == 1 && alive(reg.PID)
+	})
+}
+
+// TestAdapterOwnedServiceLifecycle: a crash of the service Loom started is
+// recovered by starting another, Restart replaces only that owned service,
+// and Loom's shutdown leaves it running.
+func TestAdapterOwnedServiceLifecycle(t *testing.T) {
+	ctx := context.Background()
+	a, _ := fakeAdapter(t, "serve", "opencode v2.0.19")
+	if _, err := a.Models(ctx); err != nil {
+		t.Fatal(err)
+	}
+	pid := serverPID(a)
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "restart after crash", func() bool { p := serverPID(a); return p != 0 && p != pid })
+	waitFor(t, "a new service after the crash", func() bool { p := serverPID(a); return p != 0 && p != pid })
 	if _, err := a.Models(ctx); err != nil {
-		t.Fatalf("Models after restart: %v", err)
+		t.Fatalf("Models after crash: %v", err)
 	}
 
 	pid = serverPID(a)
 	if err := a.Restart(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if alive(pid) || serverPID(a) == pid {
-		t.Fatalf("Restart left %d running", pid)
-	}
-	if _, pw2 := a.endpoint(); pw2 == pw {
-		t.Fatal("Restart reused the password; want a new one per boot")
+	if alive(pid) || serverPID(a) == pid || serverPID(a) == 0 {
+		t.Fatalf("Restart of the owned service: old alive %v, in use %d", alive(pid), serverPID(a))
 	}
 
-	// Stop signals only the owned process.
-	other, _ := fakeAdapter(t, "serve", "opencode v2.0.19")
-	if _, err := other.Models(ctx); err != nil {
-		t.Fatal(err)
-	}
 	pid = serverPID(a)
 	a.Stop()
-	if alive(pid) || !alive(serverPID(other)) {
-		t.Fatalf("Stop: ours alive=%v, other alive=%v", alive(pid), alive(serverPID(other)))
+	if !alive(pid) {
+		t.Fatal("Stop stopped the service Loom started; it must keep running for the user")
 	}
-	if _, err := a.Models(ctx); !errors.Is(err, loomharness.ErrUnavailable) {
-		t.Fatalf("Models after Stop = %v; want ErrUnavailable", err)
+	if reg, ok := a.registered(); !ok || reg.PID != pid {
+		t.Fatal("Stop changed the registration")
 	}
 }
 
@@ -285,109 +443,39 @@ func TestAdapterUnavailableAfterRepeatedFailures(t *testing.T) {
 	}
 }
 
+func TestAdapterCancelledStart(t *testing.T) {
+	a, state := fakeAdapter(t, "hang", "opencode v2.0.19")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { // cancel once the service process runs, mid-start
+		waitFor(t, "the started service", func() bool { _, err := os.Stat(filepath.Join(state, "fake-pids")); return err == nil })
+		cancel()
+	}()
+	if _, err := a.Models(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Models = %v; want the cancelled start", err)
+	}
+	if serverPID(a) != 0 {
+		t.Fatal("a service that never registered is in use")
+	}
+}
+
 func TestOpenCodeServeStripsGitHubTokens(t *testing.T) {
 	for _, presets := range [][]loomharness.PresetConfig{nil, {{Name: "lead", Persona: "p"}}} {
-		a, state := fakeAdapterEnv(t, "serve", "opencode v2.0.19",
-			[]string{"GITHUB_TOKEN=ghp_secret", "GH_TOKEN=gho_secret", "GH_ENTERPRISE_TOKEN=ghe_secret",
-				"GITHUB_TOKEN_FILE=/tmp/token", "LOOM_PR_GIT_PASSWORD=pr_secret", "LOOM_KEEP=1"}, presets...)
+		state, config := fakeRoots(t)
+		a := New(Config{Bin: os.Args[0], Presets: presets, Env: fakeEnv("serve", "opencode v2.0.19", state, config,
+			"GITHUB_TOKEN=fixture-ghp", "GH_TOKEN=fixture-gho", "GH_ENTERPRISE_TOKEN=fixture-ghe",
+			"GITHUB_TOKEN_FILE=/tmp/fixture-token", "LOOM_PR_GIT_PASSWORD=fixture-pr", "OPENCODE_PASSWORD=fixture-pw", "LOOM_KEEP=1")})
+		t.Cleanup(a.Stop)
 		if _, err := a.Models(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		b, err := os.ReadFile(filepath.Join(state, "github-tokens"))
+		b, err := os.ReadFile(filepath.Join(state, "secret-names"))
 		if err != nil || len(b) != 0 {
-			t.Fatalf("opencode serve saw GitHub tokens %q (%v)", b, err)
+			t.Fatalf("opencode serve --service saw secret names %q (%v)", b, err)
 		}
 		env, err := a.env()
 		if err != nil || !slices.Contains(env, "LOOM_KEEP=1") {
 			t.Fatalf("other env dropped: %v", err)
 		}
 	}
-}
-
-func TestAdapterOwnedProcessTree(t *testing.T) {
-	ctx := context.Background()
-	a, state := fakeAdapter(t, "serve", "opencode v2.0.19")
-	other, otherState := fakeAdapter(t, "serve", "opencode v2.0.19")
-	for _, x := range []*Adapter{a, other} {
-		if _, err := x.Models(ctx); err != nil {
-			t.Fatal(err)
-		}
-	}
-	first := children(t, state)
-	if len(first) != 1 || !alive(first[0]) {
-		t.Fatalf("grandchild %v not running", first)
-	}
-
-	// A crashed server leaves its detached grandchild behind; the restart
-	// reaps it before starting a new tree.
-	pid := serverPID(a)
-	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, "restart after crash", func() bool { p := serverPID(a); return p != 0 && p != pid })
-	waitFor(t, "crashed tree reaped", func() bool { return !alive(first[0]) })
-	if got := children(t, state); len(got) != 2 || liveCount(got) != 1 {
-		t.Fatalf("after crash restart: children %v, %d alive; want exactly one", got, liveCount(got))
-	}
-
-	if err := a.Restart(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if got := children(t, state); len(got) != 3 || liveCount(got) != 1 || !alive(got[2]) {
-		t.Fatalf("after Restart: children %v, %d alive; want only the newest", got, liveCount(got))
-	}
-
-	pid = serverPID(a)
-	a.Stop()
-	if alive(pid) || liveCount(children(t, state)) != 0 || len(a.owned()) != 0 {
-		t.Fatalf("Stop left the owned tree running: server %v, %d children, owned %v", alive(pid), liveCount(children(t, state)), a.owned())
-	}
-	if !alive(serverPID(other)) || liveCount(children(t, otherState)) != 1 {
-		t.Fatal("Stop touched another adapter's tree")
-	}
-}
-
-func TestAdapterReapsFailedAndCancelledStarts(t *testing.T) {
-	a, state := fakeAdapter(t, "exit-child", "opencode v2.0.19")
-	if _, err := a.Models(context.Background()); !errors.Is(err, loomharness.ErrUnavailable) {
-		t.Fatalf("Models = %v; want ErrUnavailable", err)
-	}
-	if got := children(t, state); len(got) != 1 || liveCount(got) != 0 {
-		t.Fatalf("failed start left children %v running", got)
-	}
-
-	b, state := fakeAdapter(t, "hang", "opencode v2.0.19")
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	if _, err := b.Models(ctx); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("Models = %v; want the cancelled start", err)
-	}
-	if got := children(t, state); len(got) != 1 || liveCount(got) != 0 || len(b.owned()) != 0 {
-		t.Fatalf("cancelled start left children %v (owned %v)", got, b.owned())
-	}
-}
-
-// TestAdapterStdioLifecycle: Loom holds the server's stdin, Stop closes it
-// for a clean exit, and a {"url"} line naming any listener but the owned one
-// fails the start without leaving a survivor.
-func TestAdapterStdioLifecycle(t *testing.T) {
-	ctx := context.Background()
-	a, state := fakeAdapter(t, "serve", "opencode v2.0.19")
-	if _, err := a.Models(ctx); err != nil {
-		t.Fatal(err)
-	}
-	pid, kids := serverPID(a), children(t, state)
-	a.Stop()
-	if _, err := os.Stat(filepath.Join(state, "stdin-closed")); err != nil || alive(pid) || liveCount(kids) != 0 {
-		t.Fatalf("Stop: stdin close seen %v, server alive %v, %d tools left", err == nil, alive(pid), liveCount(kids))
-	}
-
-	bad, badState := fakeAdapter(t, "badurl", "opencode v2.0.19")
-	if _, err := bad.Models(ctx); !errors.Is(err, loomharness.ErrUnavailable) || !strings.Contains(err.Error(), "owned listener") {
-		t.Fatalf("Models with a foreign url = %v; want an owned-listener error", err)
-	}
-	if serverPID(bad) != 0 {
-		t.Fatal("server with a foreign url kept as the owned one")
-	}
-	waitFor(t, "foreign-url start reaped", func() bool { return liveCount(children(t, badState)) == 0 })
 }

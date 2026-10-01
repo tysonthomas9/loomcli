@@ -22,7 +22,11 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 		"metadata": spec.Metadata,
 	}
 	if spec.Preset.Name != "" {
-		body["agent"] = "loom-" + spec.Preset.Name
+		agent := "loom-" + spec.Preset.Name
+		if err := c.hasAgent(ctx, agent, spec.Dir); err != nil {
+			return loomharness.NativeRef{}, err
+		}
+		body["agent"] = agent
 	}
 	if provider, model, ok := strings.Cut(spec.Model, "/"); ok {
 		body["model"] = map[string]string{"providerID": provider, "id": model}
@@ -49,6 +53,45 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 	}
 	return ref, s.isolate(ctx)
 }
+
+// hasAgent fails closed when the running service has no agent named agent
+// for dir. OpenCode accepts an unknown agent id at session create without an
+// error, and a service Loom did not start lacks Loom's presets. It reads the
+// agent list for dir: b30c4d0's GET /api/agent/:id ignores the location and
+// misses configured agents (server/src/handlers/agent.ts:15-25). A location
+// that is still loading lists no agents at all, not even the built-in ones,
+// so an empty list is retried until agentWait.
+func (c *Client) hasAgent(ctx context.Context, agent, dir string) error {
+	for deadline := time.Now().Add(agentWait); ; {
+		var r struct {
+			Data []struct {
+				ID string `json:"id"`
+			} `json:"data"`
+		}
+		if err := c.call(ctx, "GET", "/api/agent?location[directory]="+url.QueryEscape(dir), nil, &r); err != nil {
+			return err
+		}
+		for _, a := range r.Data {
+			if a.ID == agent {
+				return nil
+			}
+		}
+		if len(r.Data) > 0 {
+			return &Error{Code: "bad_request", Message: fmt.Sprintf("preset %s is not on the running OpenCode service (a service Loom did not start has no Loom presets)", agent)}
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("opencode lists no agents for %s after %s: %w", dir, agentWait, loomharness.ErrUnavailable)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+// agentWait bounds hasAgent's wait for a loading location's agents.
+var agentWait = 15 * time.Second
 
 // nativeActions maps Loom's permission actions to the actions OpenCode
 // b30c4d0 asserts: packages/core/src/tool/plugin/shell.ts asserts "shell";
@@ -129,6 +172,9 @@ func (s *Session) install(ctx context.Context, rules []map[string]string) error 
 	if err := s.c.call(ctx, "PATCH", s.path(""), map[string]any{"permissions": rules}, nil); err != nil {
 		return fmt.Errorf("opencode: install session permissions: %w", err)
 	}
+	s.c.rulesMu.Lock()
+	defer s.c.rulesMu.Unlock()
+	s.c.rules[s.ref.NativeID] = rules
 	return nil
 }
 
@@ -156,8 +202,21 @@ func (s *Session) isolate(ctx context.Context) error {
 	return nil
 }
 
-// Prompt queues in.Text under the native id in.Key; the first write of an id wins.
+// Prompt queues in.Text under the native id in.Key; the first write of an id
+// wins. It first installs the rules Loom last gave Open or Resume and sets
+// the session environment again, failing closed: a turn the service resumed
+// on its own at boot ran under the stored rules and the service's process
+// environment (the accepted 18:00 UTC exception), and this Prompt is where
+// Loom's own apply again.
 func (s *Session) Prompt(ctx context.Context, in loomharness.Input) error {
+	s.c.rulesMu.Lock()
+	rules, ok := s.c.rules[s.ref.NativeID]
+	s.c.rulesMu.Unlock()
+	if ok {
+		if err := s.install(ctx, rules); err != nil {
+			return err
+		}
+	}
 	if err := s.isolate(ctx); err != nil {
 		return err
 	}

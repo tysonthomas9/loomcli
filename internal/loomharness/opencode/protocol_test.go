@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 )
@@ -29,6 +30,9 @@ type store struct {
 	envFail  bool
 	bareRuns int // prompts accepted while the session had no environment
 	patchErr bool
+	agents   map[string]bool // agent ids the service offers
+	agentDir []string        // location[directory] of each agent lookup
+	loading  bool            // the location lists no agents yet
 }
 
 func newStore() *store {
@@ -60,6 +64,19 @@ func fakeServer(t *testing.T, st *store) *Client {
 		}
 		st.sessions[id] = body
 		reply(w, 200, map[string]any{"data": body})
+	})
+	mux.HandleFunc("GET /api/agent", func(w http.ResponseWriter, r *http.Request) {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		st.agentDir = append(st.agentDir, r.URL.Query().Get("location[directory]"))
+		data := []map[string]string{{"id": "build"}}
+		if st.loading {
+			data = nil
+		}
+		for id := range st.agents {
+			data = append(data, map[string]string{"id": id})
+		}
+		reply(w, 200, map[string]any{"data": data})
 	})
 	mux.HandleFunc("GET /api/session/active", func(w http.ResponseWriter, _ *http.Request) {
 		st.mu.Lock()
@@ -214,6 +231,7 @@ func TestProtocolDerivedIDs(t *testing.T) {
 func TestProtocolSessionMethods(t *testing.T) {
 	ctx := context.Background()
 	st := newStore()
+	st.agents = map[string]bool{"loom-lead": true}
 	c := fakeServer(t, st)
 	spec := loomharness.OpenSpec{
 		Key: "agent-1", Launch: loomharness.Launch{Root: "/root"}, Dir: "/repo", Model: "openai/gpt-x",
@@ -528,5 +546,77 @@ func TestProtocolResumeInstallsPermissions(t *testing.T) {
 	}
 	if _, err := s.Resume(ctx, loomharness.Launch{}, []loomharness.PermissionRule{{Action: "webfetch", Resource: "*", Effect: "deny"}}); err == nil {
 		t.Fatal("Resume accepted a rule with no OpenCode action")
+	}
+}
+
+// TestProtocolPresetFailsClosed: a preset the running service lacks (a
+// service Loom did not start has no loom-* agents) refuses Open before any
+// session exists, instead of running as OpenCode's default agent.
+func TestProtocolPresetFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	spec := loomharness.OpenSpec{Key: "agent-1", Dir: "/repo dir", Preset: loomharness.PresetConfig{Name: "lead"}}
+	if _, err := c.Open(ctx, spec); !isCode(err, "bad_request") || !strings.Contains(err.Error(), "loom-lead") {
+		t.Fatalf("Open with a missing preset = %v; want bad_request", err)
+	}
+	if len(st.sessions) != 0 {
+		t.Fatal("a refused preset created a session")
+	}
+	st.loading = true
+	defer func(d time.Duration) { agentWait = d }(agentWait)
+	agentWait = 300 * time.Millisecond
+	if _, err := c.Open(ctx, spec); !errors.Is(err, loomharness.ErrUnavailable) || len(st.sessions) != 0 {
+		t.Fatalf("Open while the location loads = %v; want ErrUnavailable and no session", err)
+	}
+	st.loading = false
+	st.agents = map[string]bool{"loom-lead": true}
+	ref, err := c.Open(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.sessions[ref.NativeID]["agent"] != "loom-lead" || st.agentDir[len(st.agentDir)-1] != "/repo dir" {
+		t.Fatalf("session agent %v, looked up in %q", st.sessions[ref.NativeID]["agent"], st.agentDir)
+	}
+}
+
+// TestProtocolPromptReappliesRules: every Prompt installs the rules Loom last
+// installed before the prompt runs, so a turn Loom starts never runs under
+// rules someone else (or a boot-swept turn) left on the session row. A failed
+// install sends nothing.
+func TestProtocolPromptReappliesRules(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	deny := []loomharness.PermissionRule{{Action: "bash", Resource: "gh *", Effect: "deny"}}
+	ref, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Dir: "/repo", Rules: deny})
+	if err != nil {
+		t.Fatal(err)
+	}
+	perms := func() string {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		b, _ := json.Marshal(st.sessions[ref.NativeID]["permissions"])
+		return string(b)
+	}
+	want := perms()
+	st.mu.Lock()
+	st.sessions[ref.NativeID]["permissions"] = []map[string]string{{"action": "*", "resource": "*", "effect": "allow"}}
+	st.mu.Unlock()
+	s := c.Session(ref)
+	if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-1", "r1"), Text: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := perms(); got != want {
+		t.Fatalf("Prompt ran under %s; want Loom's %s", got, want)
+	}
+
+	st.patchErr = true
+	n := len(st.messages[ref.NativeID])
+	if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-1", "r2"), Text: "hi"}); err == nil {
+		t.Fatal("Prompt succeeded with a failed rules install")
+	}
+	if len(st.messages[ref.NativeID]) != n {
+		t.Fatal("the prompt reached OpenCode without Loom's rules")
 	}
 }

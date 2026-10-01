@@ -28,11 +28,14 @@ type Client struct {
 	http     *http.Client
 	ready    func(context.Context) error // starts a supervised server on first use; nil for a fixed one
 	shellEnv func() ([]string, error)    // environment for session shell commands; nil leaves OpenCode's default
+
+	rulesMu sync.Mutex
+	rules   map[string][]map[string]string // native session id -> the rules Loom last installed
 }
 
 // NewClient returns a client for the server at base with the per-boot password.
 func NewClient(base, password string) *Client {
-	return &Client{base: strings.TrimRight(base, "/"), password: password, http: &http.Client{}}
+	return &Client{base: strings.TrimRight(base, "/"), password: password, http: &http.Client{}, rules: map[string][]map[string]string{}}
 }
 
 func (c *Client) setEndpoint(base, password string) {

@@ -1,6 +1,7 @@
 package opencode
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -24,66 +25,44 @@ import (
 )
 
 // TestContract runs the adapter against the pinned b30c4d0 build in a /tmp
-// sandbox (own HOME and XDG roots) with a local fake OpenAI-compatible model,
-// so no login, network or user data is touched. It purges every session it
-// opens. LOOM_REAL_OPENCODE=1 enables it; LOOM_OPENCODE_BIN overrides the
-// binary.
+// sandbox (own HOME and XDG roots, so its own service registration and
+// config) with a local fake OpenAI-compatible model, so no login, network or
+// user data is touched. The sandbox user's own `opencode serve --service`
+// runs first: Loom reuses it unchanged, then starts its own service once the
+// user's stops, and leaves that one running at shutdown. It purges every
+// session it opens. LOOM_REAL_OPENCODE=1 enables it; LOOM_OPENCODE_BIN
+// overrides the binary.
 func TestContract(t *testing.T) {
-	if os.Getenv("LOOM_REAL_OPENCODE") != "1" {
-		t.Skip("set LOOM_REAL_OPENCODE=1 to run against the real OpenCode build")
-	}
-	bin := os.Getenv("LOOM_OPENCODE_BIN")
-	if bin == "" {
-		home, _ := os.UserHomeDir()
-		bin = filepath.Join(home, ".loom/harness/opencode/2.0.19/opencode")
-	}
+	bin := realOpenCode(t)
 	model := newFakeModel(t)
-	sbx, err := os.MkdirTemp("/tmp", "loom-opencode-contract-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(sbx) })
+	sbx := newSandbox(t, "loom-opencode-contract-", fakeModelConfig(model.URL))
 	repo, moved := filepath.Join(sbx, "repo"), filepath.Join(sbx, "moved")
-	for _, d := range []string{filepath.Join(sbx, "home"), filepath.Join(sbx, "tmp"), filepath.Join(sbx, "config/opencode"), repo, moved} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	userConfig := fmt.Sprintf(`{"provider":{"fake":{"name":"Fake","npm":"@ai-sdk/openai-compatible",
-		"options":{"baseURL":%q,"apiKey":"x"},
-		"models":{"m":{"name":"M","limit":{"context":100000,"output":4000}},"m2":{"name":"M2","limit":{"context":100000,"output":4000}}}}},
-		"model":"fake/m"}`, model.URL+"/v1")
-	if err := os.WriteFile(filepath.Join(sbx, "config/opencode/opencode.json"), []byte(userConfig), 0o600); err != nil {
+	if err := os.MkdirAll(moved, 0o755); err != nil {
 		t.Fatal(err)
 	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	// A separate --service instance in the same sandbox, started first: Loom's
-	// plain server must run beside it and leave its registration and config
-	// byte-for-byte unchanged.
-	svcPW := startService(t, bin, sbx)
-	registration := []string{filepath.Join(sbx, "state/opencode/service.json"), filepath.Join(sbx, "config/opencode/service.json")}
-	before := readAll(t, registration)
-	t.Cleanup(func() {
-		if after := readAll(t, registration); !maps.Equal(before, after) {
-			t.Errorf("Loom changed the OpenCode service registration or config:\nbefore %v\nafter  %v", before, after)
-		}
-	})
+	// The sandbox user's own service: Loom must use it as it is and leave its
+	// registration and config byte-for-byte unchanged.
+	user := startService(t, bin, sbx, contractEnv(sbx))
+	regFile, cfgFile := filepath.Join(sbx, "state/opencode/service.json"), filepath.Join(sbx, "config/opencode/service.json")
+	before := readAll(t, []string{regFile, cfgFile})
 	a := New(Config{Bin: bin, Env: contractEnv(sbx), Presets: []loomharness.PresetConfig{{Name: "tester", Persona: "LOOM-PERSONA-MARKER"}}})
+	if !strings.HasPrefix(a.registrationFile(), sbx+"/") {
+		t.Fatal("the adapter looks for a service outside the sandbox")
+	}
 	var owned []loomharness.NativeRef
 	t.Cleanup(func() {
 		if err := a.Purge(context.Background(), owned); err != nil {
 			t.Errorf("cleanup purge: %v", err)
 		}
-		pid, start := serverPID(a), time.Now()
+		pid := serverPID(a)
 		a.Stop()
-		if took := time.Since(start); took >= stopGrace {
-			t.Errorf("Stop took %s: the server ignored its stdin closing and was killed", took)
-		}
-		if alive(pid) || len(a.owned()) != 0 {
-			t.Errorf("owned tree still running after Stop: server %v, owned %v", alive(pid), a.owned())
+		// Intended (Tyson, 18:00 UTC): Loom's shutdown leaves the service it
+		// started running for the user's clients. The sandbox cleanup stops it.
+		if pid == 0 || !alive(pid) {
+			t.Errorf("Loom's shutdown stopped its service (pid %d); it must keep running", pid)
 		}
 	})
 
@@ -93,10 +72,10 @@ func TestContract(t *testing.T) {
 	}
 	// The model snapshot fills in after OpenCode's plugins settle.
 	waitFor(t, "fake/m in Models", func() bool { models, err := a.Models(ctx); return err == nil && hasModel(models, "fake/m") })
-	t.Run("Auth", func(t *testing.T) {
+	t.Run("ReuseAndAuth", func(t *testing.T) {
 		base, pw := a.endpoint()
-		if pw == svcPW {
-			t.Fatal("Loom's server reuses the service password")
+		if serverPID(a) != user.PID || base != user.URL || pw != user.Password {
+			t.Fatalf("Loom does not use the registered service: pid %d, want %d", serverPID(a), user.PID)
 		}
 		if err := NewClient(base, pw).call(ctx, "GET", "/api/session/active", nil, nil); err != nil {
 			t.Fatalf("right password: %v", err)
@@ -114,6 +93,20 @@ func TestContract(t *testing.T) {
 		}
 	})
 
+	launch := loomharness.Launch{Root: sbx}
+	t.Run("PresetFailsClosedOnUserService", func(t *testing.T) {
+		// The user's service has no loom-* agents; Open refuses rather than
+		// run the session as OpenCode's default agent.
+		_, err := a.Open(ctx, loomharness.OpenSpec{Key: "preset-missing", Launch: launch, Preset: loomharness.PresetConfig{Name: "tester"},
+			Dir: repo, Model: "fake/m"})
+		if !isCode(err, "bad_request") || !strings.Contains(err.Error(), "loom-tester") {
+			t.Fatalf("Open with a preset the service lacks = %v; want bad_request", err)
+		}
+		if _, err := a.Session(loomharness.NativeRef{NativeID: SessionID("preset-missing")}).Resume(ctx, launch, nil); !isCode(err, "session_missing") {
+			t.Fatalf("a refused preset created a session: %v", err)
+		}
+	})
+
 	feed, err := a.Feed(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -122,8 +115,7 @@ func TestContract(t *testing.T) {
 	events := collect(feed)
 
 	spec := loomharness.OpenSpec{
-		Key: "agent-1", Launch: loomharness.Launch{Root: sbx}, Preset: loomharness.PresetConfig{Name: "tester"},
-		Dir: repo, Model: "fake/m", Metadata: map[string]string{"loom_agent_id": "agent-1"},
+		Key: "agent-1", Launch: launch, Dir: repo, Model: "fake/m", Metadata: map[string]string{"loom_agent_id": "agent-1"},
 		Rules: []loomharness.PermissionRule{{Action: "bash", Resource: "*", Effect: "ask"}},
 	}
 	ref, err := a.Open(ctx, spec)
@@ -161,9 +153,6 @@ func TestContract(t *testing.T) {
 		}
 		if delivered != 1 || model.requests("hello") != 1 {
 			t.Fatalf("retry: %d delivered messages, %d model turns; want 1 and 1", delivered, model.requests("hello"))
-		}
-		if !model.sawSystem("LOOM-PERSONA-MARKER") {
-			t.Fatal("the loom-tester preset persona never reached the model (preset merge)")
 		}
 	})
 
@@ -277,14 +266,64 @@ func TestContract(t *testing.T) {
 		}
 	})
 
+	t.Run("RestartKeepsUserService", func(t *testing.T) {
+		if err := a.Restart(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if !alive(user.PID) || serverPID(a) != user.PID {
+			t.Fatalf("Restart touched the user's service: alive %v, in use %d", alive(user.PID), serverPID(a))
+		}
+		if got, err := s.Resume(ctx, spec.Launch, spec.Rules); err != nil || got != ref {
+			t.Fatalf("Resume = %v, %v; want %v", got, err, ref)
+		}
+		if after := readAll(t, []string{regFile, cfgFile}); !maps.Equal(before, after) {
+			t.Fatal("Loom changed the user's service registration or config")
+		}
+	})
+
+	t.Run("StartsServiceWhenNoneRuns", func(t *testing.T) {
+		// The user stops his service (the test owns it). Loom's next call
+		// starts one with its filtered environment and presets; the configured
+		// password is used and the config is not rewritten.
+		stopService(t, user.PID)
+		if got, err := s.Resume(ctx, spec.Launch, spec.Rules); err != nil || got != ref {
+			t.Fatalf("Resume = %v, %v; want %v", got, err, ref)
+		}
+		reg, ok := a.registered()
+		if !ok || reg.PID == user.PID || serverPID(a) != reg.PID {
+			t.Fatalf("Loom does not use the service it started: registered %+v, in use %d", reg.PID, serverPID(a))
+		}
+		if _, pw := a.endpoint(); pw != user.Password {
+			t.Fatal("Loom's service does not use the configured password")
+		}
+		if after := readAll(t, []string{cfgFile}); after[cfgFile] != before[cfgFile] {
+			t.Fatal("the service config changed although it had a password")
+		}
+		pref, err := a.Open(ctx, loomharness.OpenSpec{Key: "agent-preset", Launch: launch, Preset: loomharness.PresetConfig{Name: "tester"},
+			Dir: repo, Model: "fake/m"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		owned = append(owned, pref)
+		if err := a.Session(pref).Prompt(ctx, loomharness.Input{Key: PromptID("agent-preset", "req-1"), Text: "persona check"}); err != nil {
+			t.Fatal(err)
+		}
+		events.wait(t, "preset turn completed", func(e loomharness.Event) bool {
+			return e.Session.NativeID == pref.NativeID && e.Type == loomharness.EventTurnCompleted
+		})
+		if !model.sawSystem("LOOM-PERSONA-MARKER") {
+			t.Fatal("the loom-tester preset persona never reached the model (preset merge)")
+		}
+	})
+
 	t.Run("RestartResume", func(t *testing.T) {
 		pid := serverPID(a)
 		_, pw := a.endpoint()
 		if err := a.Restart(ctx); err != nil {
 			t.Fatal(err)
 		}
-		if _, pw2 := a.endpoint(); serverPID(a) == pid || alive(pid) || pw2 == pw || len(pw2) < 40 {
-			t.Fatalf("restart: pid %d -> %d (old alive %v), new per-boot password %v", pid, serverPID(a), alive(pid), pw2 != pw && len(pw2) >= 40)
+		if _, pw2 := a.endpoint(); serverPID(a) == pid || alive(pid) || pw2 != pw {
+			t.Fatalf("restart of Loom's service: pid %d -> %d (old alive %v), same configured password %v", pid, serverPID(a), alive(pid), pw2 == pw)
 		}
 		got, err := s.Resume(ctx, spec.Launch, spec.Rules)
 		if err != nil || got != ref {
@@ -303,70 +342,6 @@ func TestContract(t *testing.T) {
 		if st, err := s.Status(ctx); err != nil || st.LastTurnInterrupt {
 			t.Fatalf("Status after a completed turn = %+v, %v; want LastTurnInterrupt false", st, err)
 		}
-
-	})
-
-	t.Run("OwnedTree", func(t *testing.T) {
-		// OpenCode runs shell commands detached from the server's group, so a
-		// crashed server leaves them behind; the restart must reap them.
-		shellCtx, stop := context.WithTimeout(ctx, 5*time.Second)
-		defer stop()
-		go func() { _ = a.call(shellCtx, "POST", sp("/shell"), map[string]string{"command": "sleep 300"}, nil) }()
-		pid := serverPID(a)
-		var orphans []int
-		waitFor(t, "detached shell command", func() bool {
-			orphans = slices.DeleteFunc(a.owned(), func(p int) bool { return p == pid })
-			return len(orphans) > 0
-		})
-		for _, o := range orphans {
-			if g, err := syscall.Getpgid(o); err == nil && g == pid {
-				t.Fatalf("shell command %d is in the server's group; the test no longer exercises a detached tree", o)
-			}
-		}
-		time.Sleep(2 * trackEvery) // let track record the command
-		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
-			t.Fatal(err)
-		}
-		waitFor(t, "restart after crash", func() bool { p := serverPID(a); return p != 0 && p != pid })
-		if n := liveCount(orphans); n != 0 {
-			t.Fatalf("%d processes of the crashed tree survived the restart: %v", n, orphans)
-		}
-	})
-
-	t.Run("CrashResume", func(t *testing.T) {
-		key := PromptID("agent-1", "req-crash")
-		if err := s.Prompt(ctx, loomharness.Input{Key: key, Text: "SLOW crash"}); err != nil {
-			t.Fatal(err)
-		}
-		waitFor(t, "running turn", func() bool {
-			st, err := s.Status(ctx)
-			return err == nil && st.Running && model.requests("SLOW crash") > 0
-		})
-		pid := serverPID(a)
-		if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
-			t.Fatal(err)
-		}
-		waitFor(t, "restart after crash", func() bool { p := serverPID(a); return p != 0 && p != pid })
-		if got, err := s.Resume(ctx, spec.Launch, spec.Rules); err != nil || got != ref {
-			t.Fatalf("Resume after crash = %v, %v", got, err)
-		}
-		// R-D evidence: plain serve keeps the session but does not resume the
-		// interrupted turn (OpenCode's crash recovery runs only in --service
-		// mode). Pinned so a behavior change is noticed; Loom must not
-		// auto-continue (Decision Agent).
-		time.Sleep(8 * time.Second)
-		if st, err := s.Status(ctx); err != nil || st.Running {
-			t.Fatalf("Status after crash = %+v, %v; want not running", st, err)
-		}
-		if n := model.requests("SLOW crash"); n != 1 {
-			t.Fatalf("model saw %d SLOW crash turns; plain serve now resumes, revisit R-D", n)
-		}
-		for _, e := range allEvents(t, s, 200) {
-			if e.Type == loomharness.EventTurnResumed {
-				t.Fatalf("plain serve emitted %s; revisit R-D", e.Type)
-			}
-		}
-		_, _ = s.Interrupt(ctx)
 	})
 
 	t.Run("PolicyMeaning", func(t *testing.T) {
@@ -434,14 +409,15 @@ func TestContract(t *testing.T) {
 	})
 
 	t.Run("StartFailureAndCancel", func(t *testing.T) {
-		servers := func() []int { return loomServes(t, bin) }
-		before := servers()
-		b := New(Config{Bin: bin, Env: contractEnv(sbx)})
+		// Fresh sandbox users, so no service is registered for them.
+		other := newSandbox(t, "loom-opencode-start-", fakeModelConfig(model.URL))
+		before := loomServes(t, bin)
+		b := New(Config{Bin: bin, Env: contractEnv(other)})
 		t.Cleanup(b.Stop)
 		short, stop := context.WithCancel(ctx)
 		defer stop()
-		go func() { // cancel once the new server process exists, mid-start
-			for len(servers()) == len(before) && short.Err() == nil {
+		go func() { // cancel once the new service process exists, mid-start
+			for len(loomServes(t, bin)) == len(before) && short.Err() == nil {
 				time.Sleep(5 * time.Millisecond)
 			}
 			stop()
@@ -449,19 +425,30 @@ func TestContract(t *testing.T) {
 		if _, err := b.Models(short); !errors.Is(err, context.Canceled) {
 			t.Fatalf("Models with a cancelled start = %v; want context.Canceled", err)
 		}
+		// The started service is never reaped: it registers, and the next
+		// call uses it instead of starting another.
+		waitFor(t, "the cancelled start's service", func() bool { _, err := b.Models(ctx); return err == nil })
+		reg, ok := b.registered()
+		if !ok || serverPID(b) != reg.PID {
+			t.Fatalf("Loom does not use the service its cancelled start left: %v, in use %d", ok, serverPID(b))
+		}
+		if started := slices.DeleteFunc(loomServes(t, bin), func(p int) bool { return slices.Contains(before, p) }); !slices.Equal(started, []int{reg.PID}) {
+			t.Fatalf("a cancelled start left services %v; want only %d", started, reg.PID)
+		}
+
 		// A data root that is a file makes serve exit during start.
-		notDir := filepath.Join(sbx, "not-a-dir")
+		bad := newSandbox(t, "loom-opencode-fail-", fakeModelConfig(model.URL))
+		notDir := filepath.Join(bad, "not-a-dir")
 		if err := os.WriteFile(notDir, nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		c := New(Config{Bin: bin, Env: append(contractEnv(sbx), "XDG_DATA_HOME="+notDir)})
+		c := New(Config{Bin: bin, Env: append(contractEnv(bad), "XDG_DATA_HOME="+notDir)})
 		t.Cleanup(c.Stop)
-		_, err := c.Models(ctx)
-		if !errors.Is(err, loomharness.ErrUnavailable) {
+		if _, err := c.Models(ctx); !errors.Is(err, loomharness.ErrUnavailable) {
 			t.Fatalf("Models with a failed start = %v; want ErrUnavailable", err)
 		}
-		if after := servers(); !slices.Equal(after, before) {
-			t.Fatalf("a cancelled or failed start left servers: before %v, after %v", before, after)
+		if _, ok := c.registered(); ok {
+			t.Fatal("a failed start registered a service")
 		}
 	})
 
@@ -486,43 +473,176 @@ func TestContract(t *testing.T) {
 	})
 }
 
-// startService runs `opencode serve --service` in the sandbox, as a user's
-// own background service would, and returns its password. The test owns it
-// and stops it at cleanup.
-func startService(t *testing.T, bin, sbx string) string {
+// TestServiceModeRunningTurnRecovery proves a running turn survives a crash
+// of the service in shared service mode: the next service's boot sweep
+// resumes it from the shared database (turn.resumed) and finishes it. First
+// the sandbox user's own service crashes and Loom's next call starts one (a
+// cross-owner resume); then the service Loom started crashes and Loom starts
+// another by itself, with no Loom call. Accepted by Tyson (18:00 UTC); the
+// resumed turn runs under the rules installed last until Loom's next Prompt
+// (the boot-sweep exception, autonomous sweep only).
+func TestServiceModeRunningTurnRecovery(t *testing.T) {
+	bin := realOpenCode(t)
+	model := newFakeModel(t)
+	sbx := newSandbox(t, "loom-opencode-recovery-", fakeModelConfig(model.URL))
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	user := startService(t, bin, sbx, contractEnv(sbx))
+	a := New(Config{Bin: bin, Env: contractEnv(sbx)})
+	var owned []loomharness.NativeRef
+	t.Cleanup(func() {
+		if err := a.Purge(context.Background(), owned); err != nil {
+			t.Errorf("cleanup purge: %v", err)
+		}
+		a.Stop()
+	})
+	waitFor(t, "fake/m in Models", func() bool { models, err := a.Models(ctx); return err == nil && hasModel(models, "fake/m") })
+	ref, err := a.Open(ctx, loomharness.OpenSpec{Key: "recover-1", Launch: loomharness.Launch{Root: sbx}, Dir: filepath.Join(sbx, "repo"),
+		Model: "fake/m", Rules: []loomharness.PermissionRule{{Action: "*", Resource: "*", Effect: "allow"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned = append(owned, ref)
+	s := a.Session(ref)
+
+	for i, c := range []struct {
+		name  string
+		crash func(t *testing.T) int // kills the service in use, returns its pid
+		call  bool                   // Loom calls in after the crash
+	}{
+		{"UserServiceCrash", func(t *testing.T) int { _ = syscall.Kill(user.PID, syscall.SIGKILL); return user.PID }, true},
+		{"LoomServiceCrash", func(t *testing.T) int {
+			pid := serverPID(a)
+			if pid == user.PID || pid == 0 {
+				t.Fatalf("the service in use (%d) is not one Loom started", pid)
+			}
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+			return pid
+		}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			text := fmt.Sprintf("SLOW crash %d", i)
+			if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("recover-1", text), Text: text}); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, "running turn", func() bool { st, err := s.Status(ctx); return err == nil && st.Running && model.requests(text) > 0 })
+			pid := c.crash(t)
+			if c.call {
+				waitWithin(t, time.Minute, "Loom's call after the crash", func() bool { _, err := s.Status(ctx); return err == nil })
+			}
+			// The boot sweep continues the turn with OpenCode's restart notice.
+			waitWithin(t, time.Minute, "the resumed turn's model request", func() bool { return model.saw(restartNotice, i+1) > 0 })
+			if p := serverPID(a); p == pid || p == 0 {
+				t.Fatalf("service in use %d after the crash of %d", p, pid)
+			}
+			waitWithin(t, time.Minute, "the resumed turn to finish", func() bool { st, err := s.Status(ctx); return err == nil && !st.Running })
+			n := 0
+			for _, e := range allEvents(t, s, 200) {
+				if e.Type == loomharness.EventTurnResumed {
+					n++
+				}
+			}
+			if n != i+1 {
+				t.Fatalf("%d turn.resumed events; want %d", n, i+1)
+			}
+		})
+	}
+}
+
+// restartNotice is the synthetic message OpenCode's boot sweep continues an
+// interrupted turn with (core/src/session/execution/restart.ts).
+const restartNotice = "The server restarted while you were working"
+
+func realOpenCode(t *testing.T) string {
 	t.Helper()
+	if os.Getenv("LOOM_REAL_OPENCODE") != "1" {
+		t.Skip("set LOOM_REAL_OPENCODE=1 to run against the real OpenCode build")
+	}
+	if bin := os.Getenv("LOOM_OPENCODE_BIN"); bin != "" {
+		return bin
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".loom/harness/opencode/2.0.19/opencode")
+}
+
+func fakeModelConfig(url string) string {
+	return fmt.Sprintf(`{"provider":{"fake":{"name":"Fake","npm":"@ai-sdk/openai-compatible",
+		"options":{"baseURL":%q,"apiKey":"x"},
+		"models":{"m":{"name":"M","limit":{"context":100000,"output":4000}},"m2":{"name":"M2","limit":{"context":100000,"output":4000}}}}},
+		"model":"fake/m"}`, url+"/v1")
+}
+
+// newSandbox makes a /tmp sandbox for one OpenCode user: HOME, TMPDIR and XDG
+// roots, a repo, opencodeJSON as the user config, and a service config with
+// a free loopback port and no password, so a service started there never
+// binds the default port (0xc0de) a real user's service uses. At cleanup it
+// stops the service registered in the sandbox (Loom leaves the one it starts
+// running) and removes the sandbox. Nothing outside the sandbox is touched.
+func newSandbox(t *testing.T, prefix, opencodeJSON string) string {
+	t.Helper()
+	sbx, err := os.MkdirTemp("/tmp", prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		var reg registration
+		if b, err := os.ReadFile(filepath.Join(sbx, "state/opencode/service.json")); err == nil && json.Unmarshal(b, &reg) == nil && alive(reg.PID) {
+			stopService(t, reg.PID)
+		}
+		_ = os.RemoveAll(sbx)
+	})
+	for _, d := range []string{filepath.Join(sbx, "home"), filepath.Join(sbx, "tmp"), filepath.Join(sbx, "config/opencode"), filepath.Join(sbx, "repo")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	port := fmt.Sprint(l.Addr().(*net.TCPAddr).Port)
+	port := l.Addr().(*net.TCPAddr).Port
 	_ = l.Close()
-	cmd := exec.Command(bin, "serve", "--service", "--hostname", "127.0.0.1", "--port", port)
-	cmd.Env = contractEnv(sbx)
+	for name, content := range map[string]string{"opencode.json": opencodeJSON, "service.json": fmt.Sprintf(`{"port":%d}`, port)} {
+		if err := os.WriteFile(filepath.Join(sbx, "config/opencode", name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return sbx
+}
+
+// startService runs `opencode serve --service` in the sandbox with env, as
+// the sandbox user's own service, and returns its registration.
+func startService(t *testing.T, bin, sbx string, env []string) registration {
+	t.Helper()
+	cmd := exec.Command(bin, "serve", "--service")
+	cmd.Env = env
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	go func() { _ = cmd.Wait() }()
 	t.Cleanup(func() {
-		_ = cmd.Process.Signal(syscall.SIGTERM)
-		done := make(chan struct{})
-		go func() { _ = cmd.Wait(); close(done) }()
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			_ = cmd.Process.Kill()
-			<-done
+		if alive(cmd.Process.Pid) {
+			stopService(t, cmd.Process.Pid)
 		}
 	})
-	var reg struct {
-		PID      int    `json:"pid"`
-		Password string `json:"password"`
-	}
-	waitFor(t, "--service registration", func() bool {
+	var reg registration
+	waitWithin(t, time.Minute, "--service registration", func() bool {
 		b, err := os.ReadFile(filepath.Join(sbx, "state/opencode/service.json"))
 		return err == nil && json.Unmarshal(b, &reg) == nil && reg.PID == cmd.Process.Pid &&
-			answers(context.Background(), "http://127.0.0.1:"+port, reg.Password, reg.PID)
+			answers(context.Background(), reg.URL, reg.Password, reg.PID)
 	})
-	return reg.Password
+	return reg
+}
+
+// stopService stops a sandbox service: SIGTERM, then SIGKILL after 10s.
+func stopService(t *testing.T, pid int) {
+	t.Helper()
+	_ = syscall.Kill(pid, syscall.SIGTERM)
+	for start := time.Now(); alive(pid) && time.Since(start) < 15*time.Second; time.Sleep(50 * time.Millisecond) {
+		if time.Since(start) > 10*time.Second {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	}
 }
 
 func readAll(t *testing.T, files []string) map[string]string {
@@ -538,7 +658,8 @@ func readAll(t *testing.T, files []string) map[string]string {
 	return out
 }
 
-// loomServes lists running `serve --stdio` processes of bin, as Loom starts them.
+// loomServes lists running `serve --service` processes of bin. It only
+// lists; tests never signal a process they did not start.
 func loomServes(t *testing.T, bin string) []int {
 	t.Helper()
 	out, err := exec.Command("ps", "-axo", "pid=,command=").Output()
@@ -547,7 +668,7 @@ func loomServes(t *testing.T, bin string) []int {
 	}
 	var pids []int
 	for _, line := range strings.Split(string(out), "\n") {
-		if strings.Contains(line, bin+" serve --stdio --hostname") {
+		if strings.HasSuffix(strings.TrimSpace(line), bin+" serve --service") {
 			var pid int
 			_, _ = fmt.Sscan(line, &pid)
 			pids = append(pids, pid)
@@ -670,7 +791,8 @@ func (l *eventLog) wait(t *testing.T, what string, match func(loomharness.Event)
 
 // fakeModel is an OpenAI-compatible chat completions server. A turn whose
 // last message contains SLOW streams one chunk and then holds until the
-// request is cancelled.
+// request is cancelled, unless OpenCode's restart notice follows it (the
+// boot sweep resumed it).
 type fakeModel struct {
 	*httptest.Server
 	mu     sync.Mutex
@@ -703,7 +825,7 @@ func newFakeModel(t *testing.T) *fakeModel {
 			w.(http.Flusher).Flush()
 		}
 		chunk(map[string]string{"role": "assistant", "content": "working "}, nil)
-		if strings.Contains(last, "SLOW") {
+		if strings.Contains(last, "SLOW") && !strings.Contains(string(raw[bytes.LastIndex(raw, []byte("SLOW")):]), restartNotice) {
 			select {
 			case <-r.Context().Done():
 			case <-time.After(time.Minute):
@@ -749,4 +871,18 @@ func (m *fakeModel) sawSystem(text string) bool {
 		}
 	}
 	return false
+}
+
+// saw counts agent turns (not title requests) whose request contains text
+// at least times times.
+func (m *fakeModel) saw(text string, times int) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, b := range m.bodies {
+		if !strings.Contains(b, "You are a title generator") && strings.Count(b, text) >= times {
+			n++
+		}
+	}
+	return n
 }

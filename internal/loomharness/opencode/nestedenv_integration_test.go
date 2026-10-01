@@ -28,23 +28,11 @@ func TestContractNestedEnv(t *testing.T) {
 		bin = filepath.Join(home, ".loom/harness/opencode/2.0.19/opencode")
 	}
 	fixture := startFakeModelFixture(t)
-	sbx, err := os.MkdirTemp("/tmp", "loom-opencode-nested-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(sbx) })
-	repo := filepath.Join(sbx, "repo")
-	for _, d := range []string{filepath.Join(sbx, "home"), filepath.Join(sbx, "tmp"), filepath.Join(sbx, "config/opencode"), repo} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
 	config := fmt.Sprintf(`{"provider":{"aft":{"name":"AFT fake","npm":"@ai-sdk/openai-compatible",
 		"options":{"baseURL":%q,"apiKey":"x"},
 		"models":{"m":{"name":"M","limit":{"context":100000,"output":4000}}}}},"model":"aft/m"}`, fixture+"/v1")
-	if err := os.WriteFile(filepath.Join(sbx, "config/opencode/opencode.json"), []byte(config), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	sbx := newSandbox(t, "loom-opencode-nested-", config)
+	repo := filepath.Join(sbx, "repo")
 
 	// The parent (loom serve) environment: scrubbed, plus synthetic tokens.
 	tokens := map[string]string{"GITHUB_TOKEN": "ghp_nested", "GH_TOKEN": "gho_nested",
