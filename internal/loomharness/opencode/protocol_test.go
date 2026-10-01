@@ -36,6 +36,7 @@ type store struct {
 	bareRuns int // prompts accepted while the session had no environment
 	patchErr bool
 	delErr   bool                // DELETE /api/session/{id} fails
+	patchLie int                 // the next n session PATCHes commit, then answer 500
 	postErr  bool                // POST /api/session creates the session, then fails
 	race     *openRace           // pairs two concurrent session GETs, counts creates
 	perms    map[string]permReq  // pending permission asks by id, readable and answerable
@@ -132,6 +133,10 @@ func fakeServer(t *testing.T, st *store) *Client {
 			missing(w, r.PathValue("id"))
 		case st.patchErr:
 			reply(w, 500, map[string]string{"_tag": "UnknownError", "message": "boom"})
+		case st.patchLie > 0:
+			st.patchLie--
+			s["permissions"] = body["permissions"]
+			reply(w, 500, map[string]string{"_tag": "UnknownError", "message": "boom after commit"})
 		default:
 			if p, ok := body["permissions"]; ok {
 				s["permissions"] = p
@@ -1094,7 +1099,8 @@ func (st *store) effect(sid, action, resource string) string {
 // request in the session is allowed, Loom's deny rules still win, another
 // session is unaffected, every Prompt keeps the grant and Resume ends it.
 // Always on a question or on an ask with no save patterns is an explicit
-// error and leaves the ask open, as does a failed grant install.
+// error and leaves the ask open, as does a failed grant install (with its
+// restore failing too, the session then refuses prompts until Resume).
 func TestProtocolReplyAlwaysIsSessionScoped(t *testing.T) {
 	ctx := context.Background()
 	st := newStore()
@@ -1156,14 +1162,67 @@ func TestProtocolReplyAlwaysIsSessionScoped(t *testing.T) {
 		t.Fatal("the ask was answered though its grant failed")
 	}
 	st.patchErr = false
-	if err := sa.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r2"), Text: "hi"}); err != nil {
-		t.Fatal(err)
+	// Every PATCH failed, the restore too, so the session fails closed.
+	if err := sa.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r2"), Text: "hi"}); !isCode(err, "bad_request") {
+		t.Fatalf("Prompt after a failed grant and restore = %v; want bad_request", err)
 	}
-	check("after a failed grant", a.NativeID, "ls x", "ask")
-	check("after a failed grant", a.NativeID, "git log", "allow")
 
 	if _, err := sa.Resume(ctx, loomharness.Launch{}, deny); err != nil {
 		t.Fatal(err)
 	}
 	check("after Resume", a.NativeID, "git log", "ask")
+}
+
+// TestProtocolAlwaysGrantRollsBack (codex, 11588cd1e): a grant PATCH that
+// commits and then answers 500 leaves no grant: Reply puts the rules back
+// without it and the ask stays open. When the restore fails as well, the
+// error says so and the session refuses prompts until Resume installs
+// Loom's rules again.
+func TestProtocolAlwaysGrantRollsBack(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	rules := []loomharness.PermissionRule{{Action: "bash", Resource: "*", Effect: "ask"}}
+	ref, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-a", Dir: "/repo", Rules: rules})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := c.Session(ref)
+	always := loomharness.Reply{Allow: true, Always: true}
+
+	st.patchLie = 1
+	st.perms["per_1"] = permReq{Session: ref.NativeID, Action: "shell", Resources: []string{"ls"}, Save: []string{"ls *"}}
+	if err := s.Reply(ctx, "per_1", always); err == nil {
+		t.Fatal("Reply succeeded with a failed grant install")
+	}
+	if _, sent := st.replies["per_1"]; sent {
+		t.Fatal("the ask was answered though its grant failed")
+	}
+	if got := st.effect(ref.NativeID, "shell", "ls x"); got != "ask" {
+		t.Fatalf("after a committed-then-failed grant, ls x = %s; want ask", got)
+	}
+	if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r1"), Text: "hi"}); err != nil {
+		t.Fatalf("Prompt after a restored grant: %v", err)
+	}
+	if got := st.effect(ref.NativeID, "shell", "ls x"); got != "ask" {
+		t.Fatalf("after Prompt, ls x = %s; want ask", got)
+	}
+
+	st.patchLie = 2
+	err = s.Reply(ctx, "per_1", always)
+	if err == nil || !strings.Contains(err.Error(), "no prompts until Open or Resume") {
+		t.Fatalf("Reply with a failed restore = %v; want the restore error", err)
+	}
+	if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r2"), Text: "hi"}); !isCode(err, "bad_request") {
+		t.Fatalf("Prompt after a failed restore = %v; want bad_request (fail closed)", err)
+	}
+	if _, err := s.Resume(ctx, loomharness.Launch{}, rules); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.effect(ref.NativeID, "shell", "ls x"); got != "ask" {
+		t.Fatalf("after Resume, ls x = %s; want ask", got)
+	}
+	if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r3"), Text: "hi"}); err != nil {
+		t.Fatalf("Prompt after Resume: %v", err)
+	}
 }

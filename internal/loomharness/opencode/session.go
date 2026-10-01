@@ -331,9 +331,22 @@ func (s *Session) grant(ctx context.Context, id string) error {
 		return &Error{Code: "bad_request", Message: fmt.Sprintf("opencode: no permission rules installed for session %s; Open or Resume it first", sid)}
 	}
 	if err := s.install(ctx, rules); err != nil {
+		// The PATCH may have committed before failing, so put the rules
+		// without this grant back; the restore outlives a cancelled ctx.
 		s.c.rulesMu.Lock()
 		s.c.grants[sid] = prev
 		s.c.rulesMu.Unlock()
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		if rerr := s.install(rctx, rules); rerr != nil {
+			// Fail closed: with no cached rules Prompt refuses the session
+			// until Open or Resume installs Loom's rules again.
+			s.c.rulesMu.Lock()
+			delete(s.c.rules, sid)
+			delete(s.c.grants, sid)
+			s.c.rulesMu.Unlock()
+			return errors.Join(err, fmt.Errorf("opencode: restore session %s permissions without the grant (no prompts until Open or Resume): %w", sid, rerr))
+		}
 		return err
 	}
 	return nil
