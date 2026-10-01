@@ -52,7 +52,12 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 	}
 	if err := c.call(ctx, "POST", "/api/session", body, nil); err != nil {
 		if !isCode(err, "input_id_conflict") {
-			return loomharness.NativeRef{}, err
+			if existed {
+				return loomharness.NativeRef{}, err
+			}
+			// The POST may have failed after OpenCode created the session
+			// (a timeout, a 5xx after commit): remove it if it is there.
+			return c.discard(ref, err)
 		}
 		existed = true
 	}

@@ -33,6 +33,7 @@ type store struct {
 	bareRuns int // prompts accepted while the session had no environment
 	patchErr bool
 	delErr   bool                // DELETE /api/session/{id} fails
+	postErr  bool                // POST /api/session creates the session, then fails
 	agents   map[string]bool     // agent ids the service offers
 	agentDir []string            // location[directory] of each agent lookup
 	loading  bool                // the location lists no agents yet
@@ -67,6 +68,10 @@ func fakeServer(t *testing.T, st *store) *Client {
 			return
 		}
 		st.sessions[id] = body
+		if st.postErr {
+			reply(w, 500, map[string]string{"_tag": "UnknownError", "message": "boom after commit"})
+			return
+		}
 		reply(w, 200, map[string]any{"data": body})
 	})
 	mux.HandleFunc("GET /api/agent", func(w http.ResponseWriter, r *http.Request) {
@@ -741,7 +746,8 @@ func TestProtocolPromptReappliesRules(t *testing.T) {
 }
 
 // TestProtocolOpenLeavesNothingOnError: when Open fails after creating the
-// session (rules install or environment), it deletes the session and returns
+// session (a create POST that errors after OpenCode made it, rules install
+// or environment), it deletes the session and returns
 // the zero ref with the error; when that delete fails too, it returns the
 // session's ref with both errors, for the caller to record and Purge. A
 // failed repeat Open never removes the session an earlier Open made.
@@ -754,7 +760,7 @@ func TestProtocolOpenLeavesNothingOnError(t *testing.T) {
 	spec := loomharness.OpenSpec{Key: "agent-1", Launch: loomharness.Launch{Root: "/root-a"}, Dir: "/repo"}
 	id := SessionID(spec.Key)
 
-	for name, fail := range map[string]*bool{"install": &st.patchErr, "environment": &st.envFail} {
+	for name, fail := range map[string]*bool{"create": &st.postErr, "install": &st.patchErr, "environment": &st.envFail} {
 		*fail = true
 		ref, err := c.Open(ctx, spec)
 		if err == nil || ref != (loomharness.NativeRef{}) || exists(id) {
