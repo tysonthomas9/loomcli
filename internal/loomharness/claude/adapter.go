@@ -83,7 +83,16 @@ func (a *Adapter) Open(_ context.Context, spec loomharness.OpenSpec) (loomharnes
 	if l.Root == "" {
 		l.Root = sessions.ClaudeConfigDir()
 	}
-	ref := loomharness.NativeRef{Root: l.Root, NativeID: SessionID(spec.Key)}
+	// Record the root once, canonical, so a root reached through a symlink
+	// (a dotfile-managed ~/.claude) stays purgeable: Purge never resolves a
+	// recorded root and refuses symlinks. CLAUDE_CONFIG_DIR is left as given,
+	// since Claude keys its keychain login by that exact string.
+	root, err := canonical(l.Root)
+	if err != nil {
+		return loomharness.NativeRef{}, fmt.Errorf("claude: config root %s: %w", l.Root, err)
+	}
+	l.Root = root
+	ref := loomharness.NativeRef{Root: root, NativeID: SessionID(spec.Key)}
 	s := a.session(ref)
 	s.mu.Lock()
 	s.spec.Launch, s.spec.Dir, s.spec.Model = l, spec.Dir, spec.Model
@@ -136,6 +145,25 @@ func (a *Adapter) Purge(ctx context.Context, owned []loomharness.NativeRef) erro
 		}
 	}
 	return nil
+}
+
+// canonical returns absolute path p with every symlink resolved; a path that
+// does not exist yet resolves through its longest existing parent.
+func canonical(p string) (string, error) {
+	if !filepath.IsAbs(p) {
+		return "", fmt.Errorf("%q is not an absolute path", p)
+	}
+	var rest []string
+	for cur := filepath.Clean(p); ; cur = filepath.Dir(cur) {
+		r, err := filepath.EvalSymlinks(cur)
+		if err == nil {
+			return filepath.Join(append([]string{r}, rest...)...), nil
+		}
+		if !os.IsNotExist(err) || cur == filepath.Dir(cur) {
+			return "", err
+		}
+		rest = append([]string{filepath.Base(cur)}, rest...)
+	}
 }
 
 // realDir proves p is an existing directory reached without any symlink:

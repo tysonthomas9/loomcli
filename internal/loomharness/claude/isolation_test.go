@@ -48,22 +48,6 @@ func ownTestHome() func() {
 	return func() { _ = os.RemoveAll(home) }
 }
 
-// resolve returns p with every symlink resolved; a path that does not exist
-// yet resolves through its longest existing parent.
-func resolve(p string) (string, error) {
-	var rest []string
-	for cur := filepath.Clean(p); ; cur = filepath.Dir(cur) {
-		r, err := filepath.EvalSymlinks(cur)
-		if err == nil {
-			return filepath.Join(append([]string{r}, rest...)...), nil
-		}
-		if !os.IsNotExist(err) || cur == filepath.Dir(cur) {
-			return "", err
-		}
-		rest = append([]string{filepath.Base(cur)}, rest...)
-	}
-}
-
 // within reports whether resolved path p is root or below it.
 func within(p, root string) bool {
 	return p == root || strings.HasPrefix(p, root+string(filepath.Separator))
@@ -90,7 +74,7 @@ func isolated(cfg Config, spec ProcessSpec) error {
 		if !filepath.IsAbs(p) {
 			return fmt.Errorf("isolation: %s %q is not an absolute path", name, p)
 		}
-		r, err := resolve(p)
+		r, err := canonical(p)
 		if err != nil {
 			return fmt.Errorf("isolation: %s %q: %w", name, p, err)
 		}
@@ -153,7 +137,7 @@ func TestClaudeTestIsolationGuard(t *testing.T) {
 			t.Errorf("%s: not refused", name)
 		}
 	}
-	if h, _ := resolve(os.Getenv("HOME")); !within(h, ownedRoot) || !strings.HasPrefix(ownedRoot, "/private/tmp/") {
+	if h, _ := canonical(os.Getenv("HOME")); !within(h, ownedRoot) || !strings.HasPrefix(ownedRoot, "/private/tmp/") {
 		t.Fatalf("the test binary's HOME %q is not in an owned /tmp root (%q)", h, ownedRoot)
 	}
 }

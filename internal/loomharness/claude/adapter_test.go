@@ -341,6 +341,38 @@ func TestClaudePurgeUsesRecordedRoot(t *testing.T) {
 	}
 }
 
+// TestClaudeSymlinkedRootOpensCanonical: a config root reached through a
+// symlink (a dotfile-managed ~/.claude) is recorded canonical at Open, so
+// Purge, which refuses symlinks, still removes its transcript. The child's
+// CLAUDE_CONFIG_DIR stays as given.
+func TestClaudeSymlinkedRootOpensCanonical(t *testing.T) {
+	ctx := context.Background()
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "claude")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	a := New(Config{})
+	l := loomharness.Launch{Root: link, Env: map[string]string{"CLAUDE_CONFIG_DIR": link}}
+	ref, err := a.Open(ctx, loomharness.OpenSpec{Key: "agent-linked", Launch: l, Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Root != real {
+		t.Fatalf("ref root = %s, want the canonical %s", ref.Root, real)
+	}
+	if got := a.session(ref).spec.Launch.Env["CLAUDE_CONFIG_DIR"]; got != link {
+		t.Fatalf("CLAUDE_CONFIG_DIR = %s, want it unchanged (%s)", got, link)
+	}
+	transcript := writeTranscript(t, real, "-wt", ref.NativeID+".jsonl")
+	if err := a.Purge(ctx, []loomharness.NativeRef{ref}); err != nil {
+		t.Fatal(err)
+	}
+	if exists(transcript) {
+		t.Fatal("the transcript under the symlinked root survived")
+	}
+}
+
 func TestClaudePurgeFailsVisiblyAndRetries(t *testing.T) {
 	root := t.TempDir()
 	n := uuid.NewString()
