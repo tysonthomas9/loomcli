@@ -242,19 +242,24 @@ func TestContract(t *testing.T) {
 // neither the Claude process nor a tool subprocess it runs receives a GitHub
 // token, on first launch and on relaunch, while Claude's own auth and the
 // host's credentials stay intact.
+var strippedTokens = []string{"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_TOKEN_FILE"}
+
 func TestClaudeNestedLaunchStripsGitHubTokens(t *testing.T) {
 	for _, kv := range seededGitHubTokens {
 		k, v, _ := strings.Cut(kv, "=")
 		t.Setenv(k, v)
 	}
 	r := startReal(t, "--allowedTools", "Bash")
-	for i, name := range []string{"first.env", "relaunch.env"} {
+	for i, name := range []string{"first.presence", "relaunch.presence"} {
 		if i == 1 {
 			if err := r.p.Close(context.Background()); err != nil {
 				t.Fatal(err)
 			}
 		}
-		res, _ := r.prompt(t, "Use the Bash tool to run exactly this command: env > "+name+"\nThen reply DONE.")
+		// The tool records only whether each variable is set, never a value:
+		// the child's environment holds the login token.
+		cmd := `for k in ` + strings.Join(strippedTokens, " ") + `; do if printenv "$k" >/dev/null; then echo "$k=present"; else echo "$k=absent"; fi; done > ` + name
+		res, _ := r.prompt(t, "Use the Bash tool to run exactly this command: "+cmd+"\nThen reply DONE.")
 		if res.Subtype != "success" {
 			t.Fatalf("launch %d: %+v", i, res)
 		}
@@ -266,14 +271,16 @@ func TestClaudeNestedLaunchStripsGitHubTokens(t *testing.T) {
 		}
 		raw, err := os.ReadFile(filepath.Join(r.dir, name))
 		if err != nil {
-			t.Fatalf("launch %d: the tool did not write its env: %v", i, err)
+			t.Fatalf("launch %d: the tool did not write its report: %v", i, err)
 		}
 		nested := strings.Split(string(raw), "\n")
-		for _, k := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_TOKEN_FILE"} {
+		for _, k := range strippedTokens {
 			if _, ok := lookup(spawned, k); ok {
 				t.Errorf("launch %d: %s reached the claude process", i, k)
 			}
-			if _, ok := lookup(nested, k); ok {
+			if got, ok := lookup(nested, k); !ok {
+				t.Errorf("launch %d: the tool did not report %s", i, k)
+			} else if got != "absent" {
 				t.Errorf("launch %d: %s reached the nested tool", i, k)
 			}
 		}
