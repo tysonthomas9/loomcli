@@ -31,10 +31,13 @@ Extra aft flags go through `AFT_ARGS`, e.g.
 `make test-aft AFT_ARGS="--screenshots --record-all"`.
 Use `make test-aft AFT_ARGS="--suite 'loomgit-*'"` to select matching
 product suites. This wrapper flag selects YAML filenames under `suites/` and
+`forge-suites/` and
 cannot be combined with `AFT_SUITES` or the live backend tier.
 The `loomgit-*` selection starts an isolated fake GitHub REST forge and gives
 serve a fixture-only token and the existing `LOOM_CONNECTOR_GITHUB_BASE_URL`.
-`loomgit-forge` checks its local bare Git transport and PR/merge API contract;
+The forge contract case lives outside the default suite directory so unrelated
+degraded-credential cases keep their original environment. `loomgit-forge` checks
+its local bare Git transport and PR/merge API contract;
 it does not claim that product Publish or landing has run.
 
 The harness starts `scripts/start-e2e-server.sh` (loom API on `E2E_PORT`, default 8090;

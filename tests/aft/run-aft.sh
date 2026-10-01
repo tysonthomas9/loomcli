@@ -62,9 +62,13 @@ if [[ -n "$AFT_SUITE_GLOB" ]]; then
         exit 1
     fi
     shopt -s nullglob
-    AFT_SUITE_PATHS=("$SCRIPT_DIR"/suites/${AFT_SUITE_GLOB}.test.yaml)
+    AFT_SUITE_CANDIDATES=("$SCRIPT_DIR"/suites/${AFT_SUITE_GLOB}.test.yaml "$SCRIPT_DIR"/forge-suites/${AFT_SUITE_GLOB}.test.yaml)
     shopt -u nullglob
-    if [[ ${#AFT_SUITE_PATHS[@]} -eq 0 || ! -f "${AFT_SUITE_PATHS[0]}" ]]; then
+    AFT_SUITE_PATHS=()
+    for candidate in "${AFT_SUITE_CANDIDATES[@]}"; do
+        [[ -f "$candidate" ]] && AFT_SUITE_PATHS+=("$candidate")
+    done
+    if [[ ${#AFT_SUITE_PATHS[@]} -eq 0 ]]; then
         echo "[aft] --suite matched no files: $AFT_SUITE_GLOB" >&2
         exit 1
     fi
