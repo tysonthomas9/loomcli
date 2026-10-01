@@ -87,7 +87,7 @@ func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Ha
 	return read, errFeedClosed
 }
 
-// backfill ingests the native history of every live agent's current session.
+// backfill replays the native history of every live agent's current session.
 // A session the harness no longer has is left to Reconcile (session_missing).
 func (s *Service) backfill(ctx context.Context, harness string) error {
 	agents, _, err := s.store.ListAgents(ctx, loomstore.AgentFilter{WorkspaceID: s.workspaceID, Harness: harness})
@@ -98,47 +98,120 @@ func (s *Service) backfill(ctx context.Context, harness string) error {
 		if a.HarnessSessionID == nil {
 			continue
 		}
-		s.rebuild(a.AgentID, true) // the replay shows which open asks remain
-		err := s.replay(ctx, harness, a)
-		if err == nil {
-			err = s.loseAsks(ctx, a.AgentID)
-		}
-		s.rebuild(a.AgentID, false) // a failed or partial replay loses no ask
-		if err != nil && !errors.Is(err, loomharness.ErrSessionNotFound) {
+		if err := s.replay(ctx, harness, a); err != nil && !errors.Is(err, loomharness.ErrSessionNotFound) {
 			return err
 		}
 	}
 	return nil
 }
 
-// replay ingests a's whole current native history in order. A first pass
-// reads every page without keeping it, so a failed read saves and changes
-// nothing; the second ingests page by page, keeping memory to one page.
+// replay saves a's whole current native history all or nothing: it reads
+// one page at a time into a single store transaction, so a failed read or
+// write saves, publishes and changes nothing. While reading it keeps only
+// the history's net effect (a fold); once committed, the new rows are
+// published and the fold is applied to a under its lock.
 func (s *Service) replay(ctx context.Context, harness string, a loomstore.Agent) error {
-	sess := s.harnesses[harness].Session(loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: *a.HarnessSessionID})
-	read := func(ingest bool) error {
+	ref := loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: *a.HarnessSessionID}
+	sess := s.harnesses[harness].Session(ref)
+	f := fold{running: deref(a.RunningTurnID), asks: map[string]*Ask{}}
+	err := s.events.AppendAll(ctx, a.AgentID, func(add func(loomstore.Event) error) error {
 		for after := ""; ; {
 			page, err := sess.Messages(ctx, after, 100)
 			if err != nil {
 				return err
 			}
 			for _, e := range page.Events {
-				if !ingest || e.Type == loomharness.EventDelta {
+				kind, ok := savedKinds[e.Type]
+				if !ok || e.Session != ref {
 					continue // a delta is live only: a subscriber had it, or missed it with the gap
 				}
-				if _, err := s.ingest(ctx, harness, e); err != nil {
+				if err := add(nativeRow(a.AgentID, kind, e)); err != nil {
 					return err
 				}
+				f.add(e)
 			}
 			if after = page.Next; after == "" {
 				return nil
 			}
 		}
-	}
-	if err := read(false); err != nil {
+	})
+	if err != nil {
 		return err
 	}
-	return read(true)
+	return s.applyFold(ctx, a.AgentID, f)
+}
+
+// fold is the net effect of a replayed history on its agent, which had
+// running as its running turn (an input key until turn.started names it).
+type fold struct {
+	running   string
+	turn      string // the turn a turn.started named for running's input
+	delivered bool   // running's input was delivered
+	ended     *loomharness.Event
+	asks      map[string]*Ask // the history's asks: open, or nil once closed
+}
+
+// add folds in e.
+func (f *fold) add(e loomharness.Event) {
+	switch e.Type {
+	case loomharness.EventMessageDelivered:
+		f.delivered = f.delivered || (f.running != "" && e.InputKey == f.running)
+	case loomharness.EventTurnStarted:
+		if f.running != "" && e.InputKey == f.running && e.TurnID != "" {
+			f.turn = e.TurnID
+		}
+	case loomharness.EventTurnCompleted:
+		if e.TurnID != "" && (e.TurnID == f.turn || e.TurnID == f.running) {
+			f.ended = &e
+		}
+	case loomharness.EventAskOpened:
+		ask := askOf(e)
+		f.asks[e.AskID] = &ask
+	case loomharness.EventAskResolved, loomharness.EventAskLost:
+		f.asks[e.AskID] = nil
+	}
+}
+
+// applyFold applies a committed replay's net effect to agentID: the open
+// asks become the history's, an ask open before that the history no longer
+// has is saved as ask.lost, then the delivery, turn start and turn end are
+// applied as the live events would be (each a no-op once applied); the
+// turn end saves ask.lost for its asks still open.
+func (s *Service) applyFold(ctx context.Context, agentID string, f fold) error {
+	defer s.lock(agentID)()
+	a, err := s.live(ctx, agentID)
+	if isCode(err, CodeAgentNotFound) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	for id, ask := range f.asks {
+		if ask != nil {
+			s.setAsk(agentID, *ask, true)
+		} else {
+			s.setAsk(agentID, Ask{ID: id}, false)
+		}
+	}
+	if err := s.loseOpen(ctx, a, f.asks); err != nil {
+		return err
+	}
+	if f.delivered {
+		if err := s.delivered(ctx, a, f.running); err != nil {
+			return err
+		}
+	}
+	if f.turn != "" {
+		if err := s.turnStarted(ctx, a, loomharness.Event{TurnID: f.turn, InputKey: f.running}); err != nil {
+			return err
+		}
+		if a, err = s.live(ctx, agentID); err != nil {
+			return err
+		}
+	}
+	if f.ended != nil {
+		return s.turnCompleted(ctx, a, *f.ended)
+	}
+	return s.syncWaiting(ctx, a)
 }
 
 // harnessAttention raises Attention harness_unavailable on each live agent

@@ -43,6 +43,44 @@ func (l *EventLog) Append(ctx context.Context, e loomstore.Event) (loomstore.Eve
 	if err != nil {
 		return got, err
 	}
+	l.fanout(got)
+	return got, nil
+}
+
+// AppendAll appends the events fn adds to agentID in one transaction and
+// publishes the new ones only after the commit: if fn or the commit fails,
+// nothing is saved or published. fn must not append through l itself.
+func (l *EventLog) AppendAll(ctx context.Context, agentID string, fn func(add func(loomstore.Event) error) error) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	before, err := l.store.AppendEvents(ctx, agentID, fn)
+	if err != nil {
+		return err
+	}
+	q := loomstore.EventQuery{AgentID: agentID, After: before}
+	for {
+		p, err := l.store.ListEvents(ctx, q)
+		if err != nil { // saved but not all published: its subscribers reconnect from their cursors
+			for s := range l.subs {
+				if s.agents[agentID] {
+					delete(l.subs, s)
+					close(s.live)
+				}
+			}
+			return err
+		}
+		for _, e := range p.Events {
+			l.fanout(e)
+		}
+		if !p.More {
+			return nil
+		}
+		q.After, q.Snapshot = p.Next, p.SnapshotSeq
+	}
+}
+
+// fanout hands a committed event to its agent's live subscribers, under l.mu.
+func (l *EventLog) fanout(got loomstore.Event) {
 	for s := range l.subs {
 		if !s.agents[got.AgentID] {
 			continue
@@ -54,7 +92,6 @@ func (l *EventLog) Append(ctx context.Context, e loomstore.Event) (loomstore.Eve
 			close(s.live)
 		}
 	}
-	return got, nil
 }
 
 // Page reads one snapshot-pinned page of an agent's committed events.

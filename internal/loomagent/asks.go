@@ -100,25 +100,17 @@ func (s *Service) setAsk(agentID string, ask Ask, open bool) {
 
 // askEvent applies a native ask event to a's open asks and its waiting state.
 func (s *Service) askEvent(ctx context.Context, a loomstore.Agent, e loomharness.Event) error {
+	s.setAsk(a.AgentID, askOf(e), e.Type == loomharness.EventAskOpened)
+	return s.syncWaiting(ctx, a)
+}
+
+// askOf is the ask a native ask event names.
+func askOf(e loomharness.Event) Ask {
 	typ := "approval"
 	if e.ItemKind == "question" {
 		typ = "question"
 	}
-	ask := &Ask{ID: e.AskID, Type: typ, About: e.Text, TurnID: e.TurnID}
-	if e.Type != loomharness.EventAskOpened {
-		ask = nil
-	}
-	s.mu.Lock()
-	seen := s.rebuilding[a.AgentID]
-	if seen != nil {
-		seen[e.AskID] = ask // staged: loseAsks applies it once the replay completes
-	}
-	s.mu.Unlock()
-	if seen != nil {
-		return nil
-	}
-	s.setAsk(a.AgentID, Ask{ID: e.AskID, Type: typ, About: e.Text, TurnID: e.TurnID}, ask != nil)
-	return s.syncWaiting(ctx, a)
+	return Ask{ID: e.AskID, Type: typ, About: e.Text, TurnID: e.TurnID}
 }
 
 // syncWaiting sets a running agent waiting{approval|input} while an ask of
@@ -143,31 +135,14 @@ func (s *Service) syncWaiting(ctx context.Context, a loomstore.Agent) error {
 	return err
 }
 
-// endTurnAsks saves one ask.lost for each ask of a's ended turn still open:
-// in its table, overlaid by a replay's staged changes. A turn that ended
-// cannot take its answer.
+// endTurnAsks saves ask.lost for each ask of a's ended turn still open: a
+// turn that ended cannot take its answer.
 func (s *Service) endTurnAsks(ctx context.Context, a loomstore.Agent, turnID string) error {
 	ref := loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: deref(a.HarnessSessionID)}
-	s.mu.Lock()
-	open := map[string]*Ask{}
-	for id, ask := range s.asks[a.AgentID] {
-		open[id] = &ask
-	}
-	staged := s.rebuilding[a.AgentID]
-	for id, ask := range staged {
-		open[id] = ask
-	}
-	var asks []Ask
-	for id, ask := range open {
-		if ask != nil && ask.TurnID == turnID {
-			asks = append(asks, *ask)
-			if staged != nil {
-				staged[id] = nil
-			}
+	for _, ask := range s.openAsks(a.AgentID) {
+		if ask.TurnID != turnID {
+			continue
 		}
-	}
-	s.mu.Unlock()
-	for _, ask := range asks {
 		s.setAsk(a.AgentID, ask, false)
 		row := nativeRow(a.AgentID, KindAskLost, loomharness.Event{Type: loomharness.EventAskLost, Session: ref, AskID: ask.ID, TurnID: turnID})
 		if _, err := s.events.Append(ctx, row); err != nil {
@@ -175,48 +150,6 @@ func (s *Service) endTurnAsks(ctx context.Context, a loomstore.Agent, turnID str
 		}
 	}
 	return nil
-}
-
-// rebuild starts (start) or ends a replay of agentID's native history and
-// returns the ask changes it staged (nil: closed). The open asks stay as
-// they are meanwhile: only a replay that completes, through loseAsks,
-// applies its changes or may find an ask gone.
-func (s *Service) rebuild(agentID string, start bool) map[string]*Ask {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	seen := s.rebuilding[agentID]
-	delete(s.rebuilding, agentID)
-	if start {
-		s.rebuilding[agentID] = map[string]*Ask{}
-	}
-	return seen
-}
-
-// loseAsks ends a completed replay of agentID's native history: it applies
-// the staged ask changes, then every ask its saved log or table shows open
-// that the history did not is saved as
-// ask.lost (it was answered or cancelled while Loom was down, or its process
-// ended). Then it syncs a's waiting state. An ask is never dropped silently.
-func (s *Service) loseAsks(ctx context.Context, agentID string) error {
-	defer s.lock(agentID)()
-	seen := s.rebuild(agentID, false)
-	a, err := s.live(ctx, agentID)
-	if isCode(err, CodeAgentNotFound) {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	for id, ask := range seen {
-		if ask != nil {
-			s.setAsk(agentID, *ask, true)
-		} else {
-			s.setAsk(agentID, Ask{ID: id}, false)
-		}
-	}
-	if err := s.loseOpen(ctx, a, seen); err != nil {
-		return err
-	}
-	return s.syncWaiting(ctx, a)
 }
 
 // loseOpen saves one ask.lost, with its AskID, for each of a's open asks not

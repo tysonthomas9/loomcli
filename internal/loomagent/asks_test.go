@@ -2,6 +2,7 @@ package loomagent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"sync/atomic"
@@ -29,7 +30,8 @@ func askIDs(t *testing.T, s *Service, agentID string) []string {
 
 // tweaked wraps a harness: its history leaves out ask gone (as OpenCode's
 // lists only asks still pending), or fails with msgErr (after a first page
-// page1, if set), and ends with extra; a Reply with Always
+// page1, if set; page2, if set, serves the page after it), and ends with
+// extra; a Reply with Always
 // fails with alwaysErr. It counts history reads and records replies.
 type tweaked struct {
 	loomharness.Harness
@@ -37,6 +39,7 @@ type tweaked struct {
 	msgErr, alwaysErr error
 	reads             *atomic.Int32
 	page1, extra      []loomharness.Event
+	page2             func() (loomharness.MessagePage, error)
 	replies           *[]loomharness.Reply
 }
 
@@ -55,6 +58,9 @@ func (p tweakedSession) Messages(ctx context.Context, after string, limit int) (
 	}
 	if p.w.page1 != nil && after == "" {
 		return loomharness.MessagePage{Events: p.w.page1, Next: "p2"}, nil
+	}
+	if p.w.page2 != nil && after == "p2" {
+		return p.w.page2()
 	}
 	if p.w.msgErr != nil {
 		return loomharness.MessagePage{}, p.w.msgErr
@@ -358,32 +364,98 @@ func TestRespondAlwaysNotNarrowed(t *testing.T) {
 }
 
 // TestProbePartialBackfillKeepsOpenAsk: a replay whose first page resolves
-// open ask a1 and whose second page fails saves and changes nothing: a1 is
-// still open, with no ask.resolved or ask.lost saved.
+// open ask a1 and saves a new item, and whose second page then fails to
+// read or to save, saves, publishes and changes nothing: no row is added, a
+// subscriber gets nothing, and a1 is still open.
 func TestProbePartialBackfillKeepsOpenAsk(t *testing.T) {
-	e := newCreateEnv(t)
-	fh := e.h.Harness.(*fake.Harness)
-	s := e.service(ServiceConfig{})
-	stop := startFeed(s, e)
-	a, ref := newLead(t, e, s, "alpha")
-	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
-	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
-	eventually(t, "a1 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) })
-	stop()
-	turn := deref(s.get(t, a.AgentID).RunningTurnID)
-	var reads atomic.Int32
-	s.harnesses["opencode"] = tweaked{Harness: e.h, msgErr: errors.New("page 2 failed"), reads: &reads,
-		page1: []loomharness.Event{{Type: loomharness.EventAskResolved, Session: ref, TurnID: turn, AskID: "a1"}}}
-	stop = startFeed(s, e)
-	eventually(t, "two partial backfills", func() bool { return reads.Load() >= 4 })
-	stop()
-	if got := askIDs(t, s, a.AgentID); !slices.Equal(got, []string{"a1:approval"}) {
-		t.Fatalf("open asks after a partial backfill = %v", got)
+	for _, fail := range []string{"read", "write"} {
+		e := newCreateEnv(t)
+		fh := e.h.Harness.(*fake.Harness)
+		s := e.service(ServiceConfig{})
+		stop := startFeed(s, e)
+		a, ref := newLead(t, e, s, "alpha")
+		fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
+		mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
+		eventually(t, "a1 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) })
+		stop()
+		ctx, cancel := context.WithCancel(context.Background())
+		turn := deref(s.get(t, a.AgentID).RunningTurnID)
+		item := func(id string) loomharness.Event {
+			return loomharness.Event{Type: loomharness.EventItemCompleted, Session: ref, TurnID: turn, ItemID: id, ItemKind: "message"}
+		}
+		w := tweaked{Harness: e.h, page1: []loomharness.Event{item("new1"),
+			{Type: loomharness.EventAskResolved, Session: ref, TurnID: turn, AskID: "a1"}}}
+		if fail == "read" {
+			w.msgErr = errors.New("page 2 failed")
+		} else {
+			w.page2 = func() (loomharness.MessagePage, error) {
+				cancel() // the store write of page 2's event fails
+				return loomharness.MessagePage{Events: []loomharness.Event{item("new2")}}, nil
+			}
+		}
+		s.harnesses["opencode"] = w
+		sub, err := s.Subscribe(context.Background(), SubscribeRequest{AgentIDs: []string{a.AgentID}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := len(rows(t, s, a.AgentID, 0))
+		if err := s.replay(ctx, "opencode", s.get(t, a.AgentID)); err == nil {
+			t.Fatalf("%s: the replay succeeded", fail)
+		}
+		cancel()
+		if n := len(rows(t, s, a.AgentID, 0)); n != before {
+			t.Fatalf("%s: a failed replay saved %d rows", fail, n-before)
+		}
+		quiet(t, sub)
+		if got := askIDs(t, s, a.AgentID); !slices.Equal(got, []string{"a1:approval"}) {
+			t.Fatalf("%s: open asks after a failed replay = %v", fail, got)
+		}
+		if ag := s.get(t, a.AgentID); ag.State != StateWaiting {
+			t.Fatalf("%s: state %s; want still waiting", fail, ag.State)
+		}
 	}
-	saved := rows(t, s, a.AgentID, 0)
-	if lost, resolved := kinds(saved, KindAskLost), kinds(saved, string(loomharness.EventAskResolved)); len(lost)+len(resolved) != 0 {
-		t.Fatalf("a partial backfill saved %d ask.lost and %d ask.resolved", len(lost), len(resolved))
+}
+
+// TestAppendAllAllOrNothing: a batch whose fn fails saves and publishes
+// none of the events it added; a batch that commits publishes each new
+// event once, in order, and not one it already had.
+func TestAppendAllAllOrNothing(t *testing.T) {
+	ctx := context.Background()
+	s := newService(t, ServiceConfig{}, svcAgent("a1", "persistent", StateIdle))
+	if err := s.appendEvent(ctx, "a1", "note", "old", nil); err != nil {
+		t.Fatal(err)
 	}
+	sub, err := s.events.Subscribe(ctx, map[string]int64{"a1": LiveOnly})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := func(id string) loomstore.Event {
+		return loomstore.Event{AgentID: "a1", EventID: id, Kind: "note", Payload: json.RawMessage(`{}`)}
+	}
+	err = s.events.AppendAll(ctx, "a1", func(add func(loomstore.Event) error) error {
+		if err := add(row("x1")); err != nil {
+			return err
+		}
+		return errors.New("boom")
+	})
+	if err == nil || len(rows(t, s, "a1", 0)) != 1 {
+		t.Fatalf("failed batch: err %v, rows %d; want an error and only the old row", err, len(rows(t, s, "a1", 0)))
+	}
+	quiet(t, sub)
+	if err := s.events.AppendAll(ctx, "a1", func(add func(loomstore.Event) error) error {
+		for _, id := range []string{"old", "y1", "y2"} {
+			if err := add(row(id)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(recv(t, sub, 2)); !slices.Equal(got, []string{"y1", "y2"}) {
+		t.Fatalf("published %v; want y1, y2", got)
+	}
+	quiet(t, sub)
 }
 
 // TestReplayedTurnEndLosesItsAsk: a replay whose history ends the turn of
@@ -418,5 +490,33 @@ func TestReplayedTurnEndLosesItsAsk(t *testing.T) {
 		if lost := kinds(rows(t, s, a.AgentID, 0), KindAskLost); len(lost) != want {
 			t.Fatalf("resolved %v: ask.lost rows = %d; want %d", resolved, len(lost), want)
 		}
+	}
+}
+
+// TestReplayAppliesMissedEvents: with no feed running, a replay applies
+// the delivery, turn start and ask the live feed missed: the message is
+// delivered, the turn is named and the agent waits on the open ask.
+func TestReplayAppliesMissedEvents(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	a, _ := newLead(t, e, s, "alpha")
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
+	key := deref(s.get(t, a.AgentID).RunningTurnID)
+	if err := s.replay(ctx, "opencode", s.get(t, a.AgentID)); err != nil {
+		t.Fatal(err)
+	}
+	ag := s.get(t, a.AgentID)
+	if ag.RunningTurnID == nil || *ag.RunningTurnID == key || ag.State != StateWaiting {
+		t.Fatalf("turn %v state %s; want the named turn, waiting", ag.RunningTurnID, ag.State)
+	}
+	slots, err := s.store.Slots(ctx, a.AgentID)
+	if err != nil || len(slots) != 1 || slots[0].State != loomstore.SlotDelivered {
+		t.Fatalf("slots = %+v, %v; want the message delivered", slots, err)
+	}
+	if got := askIDs(t, s, a.AgentID); !slices.Equal(got, []string{"a1:approval"}) {
+		t.Fatalf("open asks = %v", got)
 	}
 }
