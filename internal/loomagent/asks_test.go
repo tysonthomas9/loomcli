@@ -387,27 +387,36 @@ func TestProbePartialBackfillKeepsOpenAsk(t *testing.T) {
 }
 
 // TestReplayedTurnEndLosesItsAsk: a replay whose history ends the turn of
-// open ask a1 reports a1 lost once and leaves it closed.
+// open ask a1 reports a1 lost once and leaves it closed; if the history
+// resolves a1 first, the turn end reports nothing lost.
 func TestReplayedTurnEndLosesItsAsk(t *testing.T) {
-	e := newCreateEnv(t)
-	fh := e.h.Harness.(*fake.Harness)
-	s := e.service(ServiceConfig{})
-	stop := startFeed(s, e)
-	a, ref := newLead(t, e, s, "alpha")
-	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
-	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
-	eventually(t, "a1 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) })
-	stop()
-	turn := deref(s.get(t, a.AgentID).RunningTurnID)
-	s.harnesses["opencode"] = tweaked{Harness: e.h,
-		extra: []loomharness.Event{{Type: loomharness.EventTurnCompleted, Session: ref, TurnID: turn, StopReason: "cancelled"}}}
-	stop = startFeed(s, e)
-	eventually(t, "the turn ends", func() bool { return s.get(t, a.AgentID).State == StateIdle })
-	stop()
-	if got := askIDs(t, s, a.AgentID); len(got) != 0 {
-		t.Fatalf("open asks after their turn ended = %v", got)
-	}
-	if lost := kinds(rows(t, s, a.AgentID, 0), KindAskLost); len(lost) != 1 {
-		t.Fatalf("ask.lost rows = %d; want a1 lost once", len(lost))
+	for _, resolved := range []bool{false, true} {
+		e := newCreateEnv(t)
+		fh := e.h.Harness.(*fake.Harness)
+		s := e.service(ServiceConfig{})
+		stop := startFeed(s, e)
+		a, ref := newLead(t, e, s, "alpha")
+		fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
+		mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
+		eventually(t, "a1 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) })
+		stop()
+		turn := deref(s.get(t, a.AgentID).RunningTurnID)
+		extra := []loomharness.Event{{Type: loomharness.EventTurnCompleted, Session: ref, TurnID: turn, StopReason: "cancelled"}}
+		if resolved {
+			extra = append([]loomharness.Event{{Type: loomharness.EventAskResolved, Session: ref, TurnID: turn, AskID: "a1"}}, extra...)
+		}
+		s.harnesses["opencode"] = tweaked{Harness: e.h, extra: extra}
+		stop = startFeed(s, e)
+		eventually(t, "the turn ends and a1 closes", func() bool {
+			return s.get(t, a.AgentID).State == StateIdle && len(askIDs(t, s, a.AgentID)) == 0
+		})
+		stop()
+		want := 1
+		if resolved {
+			want = 0
+		}
+		if lost := kinds(rows(t, s, a.AgentID, 0), KindAskLost); len(lost) != want {
+			t.Fatalf("resolved %v: ask.lost rows = %d; want %d", resolved, len(lost), want)
+		}
 	}
 }

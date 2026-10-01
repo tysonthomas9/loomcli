@@ -143,24 +143,31 @@ func (s *Service) syncWaiting(ctx context.Context, a loomstore.Agent) error {
 	return err
 }
 
-// endTurnAsks saves ask.lost for each ask of a's ended turn still open, in
-// its table or a replay's staged state: a turn that ended cannot take its
-// answer.
+// endTurnAsks saves one ask.lost for each ask of a's ended turn still open:
+// in its table, overlaid by a replay's staged changes. A turn that ended
+// cannot take its answer.
 func (s *Service) endTurnAsks(ctx context.Context, a loomstore.Agent, turnID string) error {
 	ref := loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: deref(a.HarnessSessionID)}
-	asks := s.openAsks(a.AgentID)
 	s.mu.Lock()
-	for id, ask := range s.rebuilding[a.AgentID] {
+	open := map[string]*Ask{}
+	for id, ask := range s.asks[a.AgentID] {
+		open[id] = &ask
+	}
+	staged := s.rebuilding[a.AgentID]
+	for id, ask := range staged {
+		open[id] = ask
+	}
+	var asks []Ask
+	for id, ask := range open {
 		if ask != nil && ask.TurnID == turnID {
-			s.rebuilding[a.AgentID][id] = nil
 			asks = append(asks, *ask)
+			if staged != nil {
+				staged[id] = nil
+			}
 		}
 	}
 	s.mu.Unlock()
 	for _, ask := range asks {
-		if ask.TurnID != turnID {
-			continue
-		}
 		s.setAsk(a.AgentID, ask, false)
 		row := nativeRow(a.AgentID, KindAskLost, loomharness.Event{Type: loomharness.EventAskLost, Session: ref, AskID: ask.ID, TurnID: turnID})
 		if _, err := s.events.Append(ctx, row); err != nil {
