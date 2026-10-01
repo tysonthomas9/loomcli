@@ -126,8 +126,13 @@ func TestEventsLiveAndCatchUpItemIDsMatch(t *testing.T) {
 	}
 }
 
+// TestEventsFormAsks: a form is a question ask (ItemKind question on its
+// ask.opened); a permission ask keeps no ItemKind (an approval).
 func TestEventsFormAsks(t *testing.T) {
 	m := mapper{seq: map[string]int64{}, turn: map[string]string{}}
+	if e, ok := m.mapEvent([]byte(`{"type":"permission.asked","data":{"sessionID":"ses_1","id":"per_1"}}`)); !ok || e.ItemKind != "" {
+		t.Fatalf("permission.asked -> %+v, %v; want no ItemKind", e, ok)
+	}
 	for _, c := range []struct {
 		raw  string
 		want loomharness.EventType
@@ -139,6 +144,9 @@ func TestEventsFormAsks(t *testing.T) {
 		e, ok := m.mapEvent([]byte(c.raw))
 		if !ok || e.Type != c.want || e.Session.NativeID != "ses_1" || !strings.HasPrefix(e.AskID, "frm_") {
 			t.Fatalf("%s -> %+v, %v", c.raw, e, ok)
+		}
+		if want := map[bool]string{true: "question"}[c.want == loomharness.EventAskOpened]; e.ItemKind != want {
+			t.Fatalf("%s -> ItemKind %q; want %q", c.raw, e.ItemKind, want)
 		}
 	}
 }

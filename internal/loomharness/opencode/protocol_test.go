@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -37,6 +38,8 @@ type store struct {
 	delErr   bool                // DELETE /api/session/{id} fails
 	postErr  bool                // POST /api/session creates the session, then fails
 	race     *openRace           // pairs two concurrent session GETs, counts creates
+	perms    map[string]permReq  // pending permission asks by id, readable and answerable
+	replies  map[string]string   // permission ask id -> the decision Loom sent
 	agents   map[string]bool     // agent ids the service offers
 	agentDir []string            // location[directory] of each agent lookup
 	loading  bool                // the location lists no agents yet
@@ -45,7 +48,7 @@ type store struct {
 
 func newStore() *store {
 	return &store{sessions: map[string]map[string]any{}, messages: map[string][]map[string]any{}, active: map[string]string{},
-		envs: map[string]map[string]string{}}
+		envs: map[string]map[string]string{}, perms: map[string]permReq{}, replies: map[string]string{}}
 }
 
 func fakeServer(t *testing.T, st *store) *Client {
@@ -266,6 +269,30 @@ func fakeServer(t *testing.T, st *store) *Client {
 		}
 	}
 	mux.HandleFunc("GET /api/session/{id}/permission", pending("per_"))
+	mux.HandleFunc("GET /api/session/{id}/permission/{rid}", func(w http.ResponseWriter, r *http.Request) {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		p, ok := st.perms[r.PathValue("rid")]
+		if !ok || p.Session != r.PathValue("id") {
+			reply(w, 404, map[string]string{"_tag": "PermissionNotFoundError", "message": "no request"})
+			return
+		}
+		reply(w, 200, map[string]any{"data": p})
+	})
+	mux.HandleFunc("POST /api/session/{id}/permission/{rid}/reply", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		rid := r.PathValue("rid")
+		if p, ok := st.perms[rid]; !ok || p.Session != r.PathValue("id") {
+			reply(w, 404, map[string]string{"_tag": "PermissionNotFoundError", "message": "no request"})
+			return
+		}
+		delete(st.perms, rid)
+		st.replies[rid] = body["decision"]
+		w.WriteHeader(204)
+	})
 	mux.HandleFunc("GET /api/session/{id}/form", pending("frm_"))
 	mux.HandleFunc("GET /api/event", func(w http.ResponseWriter, r *http.Request) {
 		st.mu.Lock()
@@ -432,7 +459,7 @@ func TestProtocolMessagesPagesAndMapsItems(t *testing.T) {
 		"turn.started msg_u2   msg_u2  ",
 		"message.delivered msg_u2 message msg_u2 msg_u2  ",
 		"ask.opened msg_u2    per_1 ",
-		"ask.opened msg_u2    frm_1 ",
+		"ask.opened msg_u2 question   frm_1 ",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("events:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -1029,4 +1056,114 @@ func TestProtocolIDLocksFreed(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("%d per-id lock entries left; want 0", n)
 	}
+}
+
+// permReq is a pending OpenCode permission request (schema/src/permission.ts).
+type permReq struct {
+	Session   string   `json:"sessionID"`
+	Action    string   `json:"action"`
+	Resources []string `json:"resources"`
+	Save      []string `json:"save,omitempty"`
+}
+
+// effect is what OpenCode decides for action on resource under the session's
+// stored rules: the last matching rule wins, "*" matches anything, and no
+// match asks (core/src/permission.ts:87-97).
+func (st *store) effect(sid, action, resource string) string {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	b, _ := json.Marshal(st.sessions[sid]["permissions"])
+	var rules []map[string]string
+	_ = json.Unmarshal(b, &rules)
+	match := func(pattern, s string) bool {
+		re := "^" + strings.ReplaceAll(regexp.QuoteMeta(pattern), `\*`, ".*") + "$"
+		ok, _ := regexp.MatchString(re, s)
+		return ok
+	}
+	for i := len(rules) - 1; i >= 0; i-- {
+		if match(rules[i]["action"], action) && match(rules[i]["resource"], resource) {
+			return rules[i]["effect"]
+		}
+	}
+	return "ask"
+}
+
+// TestProtocolReplyAlwaysIsSessionScoped: an allowed Always reply answers
+// the ask "once" (never OpenCode's project-wide "always") and adds a grant
+// for the ask's save patterns to that session's rules only. A later matching
+// request in the session is allowed, Loom's deny rules still win, another
+// session is unaffected, every Prompt keeps the grant and Resume ends it.
+// Always on a question or on an ask with no save patterns is an explicit
+// error and leaves the ask open, as does a failed grant install.
+func TestProtocolReplyAlwaysIsSessionScoped(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	ask := []loomharness.PermissionRule{{Action: "bash", Resource: "*", Effect: "ask"}}
+	deny := append(slices.Clone(ask), loomharness.PermissionRule{Action: "bash", Resource: "git push*", Effect: "deny"})
+	a, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-a", Dir: "/repo", Rules: deny})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-b", Dir: "/repo", Rules: ask})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sa := c.Session(a)
+	always := loomharness.Reply{Allow: true, Always: true}
+	st.perms["per_1"] = permReq{Session: a.NativeID, Action: "shell", Resources: []string{"git status"}, Save: []string{"git *"}}
+	if err := sa.Reply(ctx, "per_1", always); err != nil {
+		t.Fatal(err)
+	}
+	if st.replies["per_1"] != "once" {
+		t.Fatalf("decision sent %q; want once (OpenCode's always is project-wide)", st.replies["per_1"])
+	}
+	check := func(when string, sid, resource, want string) {
+		t.Helper()
+		if got := st.effect(sid, "shell", resource); got != want {
+			t.Fatalf("%s: %s in %s = %s; want %s", when, resource, sid, got, want)
+		}
+	}
+	check("after Always", a.NativeID, "git log", "allow")
+	check("after Always", a.NativeID, "git push origin", "deny")
+	check("after Always", a.NativeID, "rm -rf x", "ask")
+	check("after Always", b.NativeID, "git log", "ask")
+
+	if err := sa.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r1"), Text: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	check("after Prompt", a.NativeID, "git log", "allow")
+	check("after Prompt", a.NativeID, "git push origin", "deny")
+
+	refused := func(what, id string, r loomharness.Reply) {
+		t.Helper()
+		if err := sa.Reply(ctx, id, r); !isCode(err, "bad_request") {
+			t.Fatalf("%s: Reply = %v; want bad_request", what, err)
+		}
+		if _, sent := st.replies[id]; sent {
+			t.Fatalf("%s: the ask was answered", what)
+		}
+	}
+	st.perms["per_2"] = permReq{Session: a.NativeID, Action: "shell", Resources: []string{"make"}}
+	refused("no save patterns", "per_2", always)
+	refused("question", "frm_1", loomharness.Reply{Allow: true, Always: true, Answer: "blue"})
+	st.patchErr = true
+	st.perms["per_3"] = permReq{Session: a.NativeID, Action: "shell", Resources: []string{"ls"}, Save: []string{"ls *"}}
+	if err := sa.Reply(ctx, "per_3", always); err == nil {
+		t.Fatal("Reply succeeded with a failed grant install")
+	}
+	if _, sent := st.replies["per_3"]; sent {
+		t.Fatal("the ask was answered though its grant failed")
+	}
+	st.patchErr = false
+	if err := sa.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r2"), Text: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	check("after a failed grant", a.NativeID, "ls x", "ask")
+	check("after a failed grant", a.NativeID, "git log", "allow")
+
+	if _, err := sa.Resume(ctx, loomharness.Launch{}, deny); err != nil {
+		t.Fatal(err)
+	}
+	check("after Resume", a.NativeID, "git log", "ask")
 }

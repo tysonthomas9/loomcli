@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -53,6 +54,7 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 		return c.discard(ref, err)
 	}
 	// A repeat may find the session holding older rules, so always install.
+	c.dropGrants(ref.NativeID)
 	err = s.install(ctx, rules)
 	if err == nil {
 		err = s.isolate(ctx)
@@ -246,6 +248,7 @@ func (s *Session) Resume(ctx context.Context, l loomharness.Launch, rules []loom
 			return loomharness.NativeRef{}, err
 		}
 	}
+	s.c.dropGrants(s.ref.NativeID)
 	if err := s.install(ctx, native); err != nil {
 		return loomharness.NativeRef{}, err
 	}
@@ -259,14 +262,80 @@ func (s *Session) Resume(ctx context.Context, l loomharness.Launch, rules []loom
 // stores them on the session row before the PATCH returns
 // (session/projector.ts:584-590, committed with the event in bus.ts:380-402)
 // and re-reads that row at every permission check (permission.ts:158-175),
-// so they also survive a server restart.
+// so they also survive a server restart. The session's Always grants
+// (grant) go in after rules, then rules' deny rules again: OpenCode applies
+// the last matching rule (core/src/permission.ts:87-97), so a grant beats
+// Loom's asks and Loom's denies still beat a grant.
 func (s *Session) install(ctx context.Context, rules []map[string]string) error {
-	if err := s.c.call(ctx, "PATCH", s.path(""), map[string]any{"permissions": rules}, nil); err != nil {
+	s.c.rulesMu.Lock()
+	grants := s.c.grants[s.ref.NativeID]
+	s.c.rulesMu.Unlock()
+	native := rules
+	if len(grants) > 0 {
+		native = append(slices.Clone(rules), grants...)
+		for _, r := range rules {
+			if r["effect"] == "deny" {
+				native = append(native, r)
+			}
+		}
+	}
+	if err := s.c.call(ctx, "PATCH", s.path(""), map[string]any{"permissions": native}, nil); err != nil {
 		return fmt.Errorf("opencode: install session permissions: %w", err)
 	}
 	s.c.rulesMu.Lock()
 	defer s.c.rulesMu.Unlock()
 	s.c.rules[s.ref.NativeID] = rules
+	return nil
+}
+
+// dropGrants ends a session's Always grants: they last until Loom opens or
+// resumes the session again, like codex's and Claude's session grants.
+func (c *Client) dropGrants(id string) {
+	c.rulesMu.Lock()
+	defer c.rulesMu.Unlock()
+	delete(c.grants, id)
+}
+
+// grant makes an "always allow" reply to permission ask id last for this
+// session: an allow rule for the ask's action and each of its save patterns
+// joins the session's rules (install). OpenCode's own "always" saves the
+// rule for the whole project in its database, reaching every session there
+// (core/src/permission.ts:295-320), so Loom never sends it. An ask with no
+// save patterns offers nothing to keep allowing, so Always is refused, with
+// the ask left open.
+func (s *Session) grant(ctx context.Context, id string) error {
+	var ask struct {
+		Data struct {
+			Action string   `json:"action"`
+			Save   []string `json:"save"`
+		} `json:"data"`
+	}
+	if err := s.c.call(ctx, "GET", s.path("/permission/"+url.PathEscape(id)), nil, &ask); err != nil {
+		return err
+	}
+	if len(ask.Data.Save) == 0 {
+		return &Error{Code: "bad_request", Message: "opencode: permission " + id + " has no pattern to always allow; reply once or reject"}
+	}
+	sid := s.ref.NativeID
+	s.c.rulesMu.Lock()
+	rules, ok := s.c.rules[sid]
+	prev := s.c.grants[sid]
+	next := slices.Clone(prev)
+	for _, p := range ask.Data.Save {
+		next = append(next, map[string]string{"action": ask.Data.Action, "resource": p, "effect": "allow"})
+	}
+	s.c.grants[sid] = next
+	s.c.rulesMu.Unlock()
+	if !ok {
+		s.c.dropGrants(sid)
+		return &Error{Code: "bad_request", Message: fmt.Sprintf("opencode: no permission rules installed for session %s; Open or Resume it first", sid)}
+	}
+	if err := s.install(ctx, rules); err != nil {
+		s.c.rulesMu.Lock()
+		s.c.grants[sid] = prev
+		s.c.rulesMu.Unlock()
+		return err
+	}
 	return nil
 }
 
@@ -394,13 +463,11 @@ func (s *Session) Messages(ctx context.Context, after string, limit int) (loomha
 		out.Next = url.Values{"c": {page.Cursor.Next}, "t": {turn}}.Encode()
 		return out, nil
 	}
-	asks, err := s.pendingAsks(ctx)
+	asks, err := s.pendingAsks(ctx, ref, turn)
 	if err != nil {
 		return loomharness.MessagePage{}, err
 	}
-	for _, id := range asks {
-		out.Events = append(out.Events, loomharness.Event{Type: loomharness.EventAskOpened, Session: ref, AskID: id, TurnID: turn})
-	}
+	out.Events = append(out.Events, asks...)
 	return out, nil
 }
 
@@ -413,23 +480,24 @@ func parseCursor(after string) (native, turn string, known bool) {
 	return after, "", after == ""
 }
 
-// pendingAsks lists the session's pending permission and form ids.
-func (s *Session) pendingAsks(ctx context.Context) ([]string, error) {
-	var ids []string
-	for _, kind := range []string{"/permission", "/form"} {
+// pendingAsks lists the session's pending permission and form asks as
+// ask.opened events; a form, from the form list, is a question.
+func (s *Session) pendingAsks(ctx context.Context, ref loomharness.NativeRef, turn string) ([]loomharness.Event, error) {
+	var out []loomharness.Event
+	for _, list := range []struct{ path, kind string }{{"/permission", ""}, {"/form", "question"}} {
 		var r struct {
 			Data []struct {
 				ID string `json:"id"`
 			} `json:"data"`
 		}
-		if err := s.c.call(ctx, "GET", s.path(kind), nil, &r); err != nil {
+		if err := s.c.call(ctx, "GET", s.path(list.path), nil, &r); err != nil {
 			return nil, fmt.Errorf("list pending asks: %w", err)
 		}
 		for _, a := range r.Data {
-			ids = append(ids, a.ID)
+			out = append(out, loomharness.Event{Type: loomharness.EventAskOpened, Session: ref, AskID: a.ID, ItemKind: list.kind, TurnID: turn})
 		}
 	}
-	return ids, nil
+	return out, nil
 }
 
 // turnOf finds the turn holding stored message anchor: the first message
@@ -521,10 +589,15 @@ func (s *Session) Interrupt(ctx context.Context) (bool, error) {
 }
 
 // Reply answers a permission ask (per_ id) or a question form (frm_ id). A
-// form gets r.Answer in its first field.
+// form gets r.Answer in its first field. An allowed Always installs a
+// session grant (grant) before allowing this ask once; a question has no
+// Always, so one asked with Always is refused and left open.
 func (s *Session) Reply(ctx context.Context, askID string, r loomharness.Reply) error {
 	id := url.PathEscape(askID)
 	if strings.HasPrefix(askID, "frm_") {
+		if r.Always {
+			return &Error{Code: "bad_request", Message: "opencode: question " + askID + " has no always reply"}
+		}
 		var form struct {
 			Data struct {
 				Fields []struct {
@@ -544,6 +617,11 @@ func (s *Session) Reply(ctx context.Context, askID string, r loomharness.Reply) 
 	body := map[string]string{"decision": "reject"}
 	if r.Allow {
 		body["decision"] = "once"
+		if r.Always {
+			if err := s.grant(ctx, askID); err != nil {
+				return err
+			}
+		}
 	}
 	if r.Answer != "" {
 		body["message"] = r.Answer

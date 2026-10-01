@@ -225,9 +225,12 @@ func TestContract(t *testing.T) {
 		if err := a.call(ctx, "POST", sp("/form"), body, &form); err != nil {
 			t.Fatal(err)
 		}
-		events.wait(t, "form ask.opened", func(e loomharness.Event) bool {
-			return e.Type == loomharness.EventAskOpened && e.AskID == form.Data.ID && e.Session.NativeID == ref.NativeID
+		events.wait(t, "form ask.opened as a question", func(e loomharness.Event) bool {
+			return e.Type == loomharness.EventAskOpened && e.AskID == form.Data.ID && e.Session.NativeID == ref.NativeID && e.ItemKind == "question"
 		})
+		if err := s.Reply(ctx, form.Data.ID, loomharness.Reply{Allow: true, Always: true, Answer: "blue"}); !isCode(err, "bad_request") {
+			t.Fatalf("question Reply with Always = %v; want bad_request, the form left open", err)
+		}
 		if err := s.Reply(ctx, form.Data.ID, loomharness.Reply{Answer: "blue"}); err != nil {
 			t.Fatal(err)
 		}
@@ -282,6 +285,66 @@ func TestContract(t *testing.T) {
 		}
 		if len(hk) < 6 {
 			t.Errorf("history has %d saved events", len(hk))
+		}
+	})
+
+	// 1.6b follow-up: Reply.Always is a session grant. In the real engine a
+	// later matching request in that session is allowed, Loom's deny still
+	// wins, another session still asks, and nothing is saved project-wide.
+	t.Run("ReplyAlwaysIsSessionScoped", func(t *testing.T) {
+		rules := []loomharness.PermissionRule{{Action: "bash", Resource: "*", Effect: "ask"}, {Action: "bash", Resource: "git push*", Effect: "deny"}}
+		ga, err := a.Open(ctx, loomharness.OpenSpec{Key: "agent-always", Launch: launch, Dir: repo, Model: "fake/m", Rules: rules})
+		if err != nil {
+			t.Fatal(err)
+		}
+		owned = append(owned, ga)
+		create := func(sid, resource string, save ...string) (string, error) {
+			var r struct {
+				Data struct {
+					Effect string `json:"effect"`
+				} `json:"data"`
+			}
+			body := map[string]any{"action": "shell", "resources": []string{resource}}
+			if len(save) > 0 {
+				body["save"] = save
+			}
+			err := a.call(ctx, "POST", "/api/session/"+sid+"/permission", body, &r)
+			return r.Data.Effect, err
+		}
+		pendingIn := func(sid string) string {
+			var l struct {
+				Data []struct {
+					ID string `json:"id"`
+				} `json:"data"`
+			}
+			if a.call(ctx, "GET", "/api/session/"+sid+"/permission", nil, &l) == nil && len(l.Data) == 1 {
+				return l.Data[0].ID
+			}
+			return ""
+		}
+		answer := func(sid string, r loomharness.Reply, resource string, save ...string) {
+			t.Helper()
+			done := make(chan error, 1)
+			go func() { _, err := create(sid, resource, save...); done <- err }()
+			var id string
+			waitFor(t, "pending permission", func() bool { id = pendingIn(sid); return id != "" })
+			if err := a.Session(loomharness.NativeRef{NativeID: sid}).Reply(ctx, id, r); err != nil {
+				t.Fatal(err)
+			}
+			<-done
+		}
+		answer(ga.NativeID, loomharness.Reply{Allow: true, Always: true}, "git status", "git *")
+		for resource, want := range map[string]string{"git log": "allow", "git push origin": "deny"} {
+			if got, err := create(ga.NativeID, resource); err != nil || got != want {
+				t.Errorf("%s after Always = %q, %v; want %s", resource, got, err, want)
+			}
+		}
+		answer(ref.NativeID, loomharness.Reply{}, "git log") // another session still asks
+		var saved struct {
+			Data []json.RawMessage `json:"data"`
+		}
+		if err := a.call(ctx, "GET", "/api/permission/saved", nil, &saved); err != nil || len(saved.Data) != 0 {
+			t.Fatalf("saved permissions = %d, %v; want none project-wide", len(saved.Data), err)
 		}
 	})
 

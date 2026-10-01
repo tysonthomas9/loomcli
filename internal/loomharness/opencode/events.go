@@ -303,8 +303,10 @@ func (m *mapper) fill(e *loomharness.Event, w wireEvent) bool {
 		e.Type, e.StopReason = loomharness.EventTurnCompleted, stopReason(lastDot(w.Type))
 	case "session.execution.succeeded", "session.execution.failed":
 		e.Type, e.StopReason = loomharness.EventTurnCompleted, stopReason(lastDot(w.Type))
-	case "permission.asked", "form.created":
+	case "permission.asked":
 		e.Type, e.AskID = loomharness.EventAskOpened, d.ID
+	case "form.created":
+		e.Type, e.ItemKind, e.AskID = loomharness.EventAskOpened, "question", d.ID
 	case "form.replied", "form.cancelled":
 		e.Type, e.AskID = loomharness.EventAskResolved, d.ID
 	case "permission.replied":
