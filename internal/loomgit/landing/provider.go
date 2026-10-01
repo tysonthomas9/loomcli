@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/changeset"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
@@ -151,14 +152,18 @@ func layerMerged(ctx context.Context, store Store, forge Forge, publication jour
 
 // nativeShaped reports whether a provider move is GitHub restacking a native
 // stack rather than a foreign retarget or push. The PR keeps its expected base,
-// or moves to trunk once the layer directly below merged, and a moved head is
-// rebuilt on a base tip that the recorded head did not already contain.
+// or moves to trunk once the layer directly below merged. A moved head must be
+// rebuilt on a base tip the recorded head did not already contain, and carry
+// exactly the recorded layer's patches.
 func nativeShaped(ctx context.Context, store Store, forge Forge, item fetchedPublication,
 	pull stackpublish.PR, base string, all []journal.Publication) (bool, error) {
 	publication := item.publication
+	predecessor, found := stackPredecessor(publication, all)
+	if !found {
+		return false, nil
+	}
 	if pull.Base != base {
-		predecessor, found := stackPredecessor(publication, all)
-		if !found || pull.Base != targetTrunk(publication, all) {
+		if pull.Base != targetTrunk(publication, all) {
 			return false, nil
 		}
 		if merged, err := layerMerged(ctx, store, forge, predecessor); err != nil || !merged {
@@ -178,8 +183,11 @@ func nativeShaped(ctx context.Context, store Store, forge Forge, item fetchedPub
 	if onTip, err := isAncestor(ctx, item.runner, tip, pull.HeadSHA); err != nil || !onTip {
 		return false, err
 	}
-	stale, err := isAncestor(ctx, item.runner, tip, publication.Head)
-	return !stale, err
+	if stale, err := isAncestor(ctx, item.runner, tip, publication.Head); err != nil || stale {
+		return false, err
+	}
+	return review.PatchesMatch(ctx, item.runner, loomgit.Revision{BaseSHA: predecessor.Head, HeadSHA: publication.Head},
+		loomgit.Revision{BaseSHA: tip, HeadSHA: pull.HeadSHA})
 }
 
 func fetchTip(ctx context.Context, runner *gitexec.Runner, branch string) (string, error) {

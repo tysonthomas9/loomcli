@@ -64,6 +64,12 @@ func CarryForward(ctx context.Context, store Store, runner *gitexec.Runner, sour
 	return v, err == nil, err
 }
 
+// PatchesMatch reports whether two revisions' commit ranges carry the same
+// patches in the same order.
+func PatchesMatch(ctx context.Context, runner *gitexec.Runner, source, derived loomgit.Revision) (bool, error) {
+	return patchesMatch(ctx, runner, source, derived, nil)
+}
+
 func patchesMatch(ctx context.Context, runner *gitexec.Runner, source, derived loomgit.Revision, droppedCommits []string) (bool, error) {
 	sourceCommits, err := commitList(ctx, runner, source.BaseSHA, source.HeadSHA)
 	if err != nil {

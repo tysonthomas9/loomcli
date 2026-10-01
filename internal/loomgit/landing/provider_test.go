@@ -367,11 +367,9 @@ func squashOntoMain(t *testing.T, fixture *fixture, layer string) string {
 	return git(t, fixture.source, "rev-parse", "HEAD")
 }
 
-// adoptNativeRestack has GitHub restack B onto the squashed A and C onto the
-// new B, then records Loom's adoption of both heads, as native restack does.
-func adoptNativeRestack(t *testing.T, fixture *fixture, heads map[string]string) {
+// githubRestack has GitHub restack B onto the squashed A and C onto the new B.
+func githubRestack(t *testing.T, fixture *fixture, heads map[string]string) {
 	t.Helper()
-	ctx := context.Background()
 	git(t, fixture.source, "switch", "-q", "-c", "github-restack", heads["squash A"])
 	git(t, fixture.source, "cherry-pick", heads["B"])
 	heads["restacked B"] = git(t, fixture.source, "rev-parse", "HEAD")
@@ -379,6 +377,13 @@ func adoptNativeRestack(t *testing.T, fixture *fixture, heads map[string]string)
 	heads["restacked C"] = git(t, fixture.source, "rev-parse", "HEAD")
 	git(t, fixture.source, "push", "-q", "--force", "origin", heads["restacked B"]+":refs/heads/loom/ws/W/change/B",
 		heads["restacked C"]+":refs/heads/loom/ws/W/change/C")
+}
+
+// adoptNativeRestack records Loom's adoption of GitHub's restacked B and C heads.
+func adoptNativeRestack(t *testing.T, fixture *fixture, heads map[string]string) {
+	t.Helper()
+	ctx := context.Background()
+	githubRestack(t, fixture, heads)
 	b, _, errB := fixture.store.Publication(ctx, "W", "B")
 	c, _, errC := fixture.store.Publication(ctx, "W", "C")
 	if errB != nil || errC != nil {
@@ -444,4 +449,14 @@ func TestRetargetToTrunkAfterTwoLandedLayersIsExpected(t *testing.T) {
 			t.Fatalf("%s landing = %+v, %v", change, status, err)
 		}
 	}
+}
+
+func TestNativeForeignPushDuringPendingRestackIsDrift(t *testing.T) {
+	fixture, heads := stackedLineage(t, true)
+	githubRestack(t, fixture, heads)
+	pushed := fixture.commit(t, "foreign edit")
+	git(t, fixture.source, "push", "-q", "--force", "origin", "HEAD:refs/heads/loom/ws/W/change/C")
+	fixture.forge.pulls = lineagePulls(heads, stackpublish.PR{HeadSHA: pushed, Base: "loom/ws/W/change/B"})
+	assertObservation(t, fixture, "C", "diverged")
+	assertObservation(t, fixture, "B", "native_restack")
 }
