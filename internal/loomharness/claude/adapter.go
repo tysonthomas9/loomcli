@@ -267,12 +267,15 @@ func (s *Session) Prompt(ctx context.Context, in loomharness.Input) error {
 	}
 	s.mu.Lock()
 	s.proc = proc
-	s.m.pending[in.Key] = true
+	s.m.pending[in.Key], s.m.handed = true, in.Key
 	s.mu.Unlock()
 	err := proc.Prompt(ctx, in.Key, in.Text)
 	if err != nil {
 		s.mu.Lock()
 		delete(s.m.pending, in.Key)
+		if s.m.handed == in.Key {
+			s.m.handed = ""
+		}
 		s.mu.Unlock()
 	}
 	return err

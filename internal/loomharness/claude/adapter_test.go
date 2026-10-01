@@ -108,6 +108,9 @@ func TestClaudeFramesMapToEvents(t *testing.T) {
 			t.Fatalf("event %d %+v: want turn %s, session %v, rising seq", i, e, turn, ref)
 		}
 	}
+	if got[0].InputKey != key {
+		t.Fatalf("turn.started InputKey = %q, want the handed key %s", got[0].InputKey, key)
+	}
 	if d := got[1]; d.InputKey != key || d.ItemID != key {
 		t.Fatalf("delivered = %+v, want key %s", d, key)
 	}
@@ -477,5 +480,29 @@ func TestClaudeHealthStripsGitHubTokens(t *testing.T) {
 		if _, ok := lookup(env, k); ok {
 			t.Errorf("%s reached claude --version", k)
 		}
+	}
+}
+
+// TestClaudeSelfStartedTurnHasNoInputKey: a turn Claude starts without a
+// handed input carries no InputKey; a handed key binds only the next turn.
+func TestClaudeSelfStartedTurnHasNoInputKey(t *testing.T) {
+	m := newMapper(loomharness.NativeRef{NativeID: "s"})
+	start := func() loomharness.Event {
+		got := m.frame([]byte(`{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_a"}}}`))
+		if len(got) == 0 || got[0].Type != loomharness.EventTurnStarted {
+			t.Fatalf("no turn.started: %v", types(got))
+		}
+		m.frame([]byte(`{"type":"result","subtype":"success"}`))
+		return got[0]
+	}
+	if e := start(); e.InputKey != "" {
+		t.Fatalf("self-started turn InputKey = %q", e.InputKey)
+	}
+	m.handed = "key-1"
+	if e := start(); e.InputKey != "key-1" {
+		t.Fatalf("handed turn InputKey = %q", e.InputKey)
+	}
+	if e := start(); e.InputKey != "" {
+		t.Fatalf("the key bound a second turn: %q", e.InputKey)
 	}
 }

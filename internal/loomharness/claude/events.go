@@ -24,6 +24,7 @@ type mapper struct {
 	open            int    // the open content block's index
 	toolMsg         map[string]string
 	pending         map[string]bool // prompted keys not yet delivered
+	handed          string          // the prompted key no turn has started for yet
 	cancelled       bool            // Loom interrupted the running turn
 	lastInterrupted bool
 }
@@ -78,8 +79,11 @@ func (m *mapper) frame(raw []byte) []loomharness.Event {
 		out = append(out, e)
 	}
 	if startsTurn(f) && m.turnID == "" {
+		// A prompt is handed only while idle, so the next turn is its turn;
+		// a turn Claude starts by itself carries no key.
 		m.turnID = uuid.NewString()
-		emit(loomharness.Event{Type: loomharness.EventTurnStarted})
+		emit(loomharness.Event{Type: loomharness.EventTurnStarted, InputKey: m.handed})
+		m.handed = ""
 	}
 	if f.Type == "stream_event" || f.Type == "assistant" {
 		m.delivered(append(f.UserMessageUUIDs, f.UserMessageUUID), emit)
@@ -210,7 +214,7 @@ func (m *mapper) item(msg string, index int, b block) (kind, id string) {
 // exited ends the turn state when the process died; events in between are
 // lost, so it emits feed.gap.
 func (m *mapper) exited() loomharness.Event {
-	m.turnID, m.cancelled, m.msgID = "", false, ""
+	m.turnID, m.cancelled, m.msgID, m.handed = "", false, "", ""
 	m.seq++
 	return loomharness.Event{Type: loomharness.EventFeedGap, Session: m.ref, Seq: m.seq, Time: time.Now()}
 }
