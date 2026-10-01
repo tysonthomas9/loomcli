@@ -56,7 +56,8 @@ func (s *Service) RunFeed(ctx context.Context, harness string) {
 }
 
 // readFeed backfills, then ingests h's feed until it ends or a save fails;
-// it always returns an error, and read reports whether it ingested a live event.
+// it always returns an error, and read reports whether it ingested a live
+// native event (a feed.gap is not one).
 func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Harness) (read bool, err error) {
 	f, err := h.Feed(ctx)
 	if err != nil {
@@ -75,7 +76,7 @@ func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Ha
 		if err != nil {
 			return read, err
 		}
-		read = true
+		read = read || e.Type != loomharness.EventFeedGap
 	}
 	return read, errFeedClosed
 }
