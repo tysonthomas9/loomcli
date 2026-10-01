@@ -2,6 +2,7 @@ package landing
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -34,7 +35,7 @@ func expectedBase(ctx context.Context, store Store, publication journal.Publicat
 	return publication.Trunk, nil
 }
 
-func observeProvider(ctx context.Context, store Store, item fetchedPublication, pull stackpublish.PR, all []journal.Publication) error {
+func observeProvider(ctx context.Context, store Store, forge Forge, item fetchedPublication, pull stackpublish.PR, all []journal.Publication) error {
 	publication := item.publication
 	if pull.HeadSHA == "" || pull.Base == "" {
 		return errors.New("provider PR omitted head SHA or base")
@@ -52,10 +53,8 @@ func observeProvider(ctx context.Context, store Store, item fetchedPublication, 
 		state = "closed"
 	} else if pull.Merged {
 		state = "merged"
-	} else if pull.Base != base {
-		state = "diverged"
-	} else if pull.HeadSHA != publication.Head && (!found || previous.HeadSHA != pull.HeadSHA) {
-		state, err = reconcileHead(ctx, store, item, pull)
+	} else if pull.Base != base || pull.HeadSHA != publication.Head && (!found || previous.HeadSHA != pull.HeadSHA) {
+		state, err = providerMove(ctx, store, forge, item, pull, base, all)
 		if err != nil {
 			return err
 		}
@@ -64,6 +63,78 @@ func observeProvider(ctx context.Context, store Store, item fetchedPublication, 
 	}
 	return store.RecordProviderObservation(ctx, journal.ProviderObservation{Workspace: publication.Workspace,
 		Change: publication.Change, Base: pull.Base, HeadSHA: pull.HeadSHA, State: state})
+}
+
+// providerMove classifies a provider-side base or head change. GitHub restacks
+// a native stack itself after a lower layer merges; Loom's restack offer adopts
+// those heads, so the move is neither drift nor a provider restack revision.
+func providerMove(ctx context.Context, store Store, forge Forge, item fetchedPublication,
+	pull stackpublish.PR, base string, all []journal.Publication) (string, error) {
+	native, err := nativeRestackPending(ctx, store, forge, item.publication, all)
+	if err != nil {
+		return "", err
+	}
+	if native {
+		return "native_restack", nil
+	}
+	if pull.Base != base {
+		return "diverged", nil
+	}
+	return reconcileHead(ctx, store, item, pull)
+}
+
+type stackBackends interface {
+	StackBackend(context.Context, string, string) (string, error)
+}
+
+func nativeRestackPending(ctx context.Context, store Store, forge Forge, publication journal.Publication, all []journal.Publication) (bool, error) {
+	backends, ok := store.(stackBackends)
+	if !ok || publication.StackID == "" {
+		return false, nil
+	}
+	backend, err := backends.StackBackend(ctx, publication.Workspace, publication.StackID)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && backend != "native" {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	current := publication
+	for range all {
+		predecessor, found := stackPredecessor(current, all)
+		if !found {
+			return false, nil
+		}
+		status, err := store.LandingStatus(ctx, predecessor.Workspace, predecessor.Change)
+		if err != nil {
+			return false, err
+		}
+		if status.State == "landed" || status.State == "merged" {
+			return true, nil
+		}
+		pull, err := ownedPull(ctx, forge, predecessor)
+		if err != nil {
+			return false, err
+		}
+		if pull.Merged {
+			return true, nil
+		}
+		current = predecessor
+	}
+	return false, nil
+}
+
+func stackPredecessor(publication journal.Publication, all []journal.Publication) (journal.Publication, bool) {
+	for _, candidate := range all {
+		if candidate.Workspace != publication.Workspace || candidate.StackID != publication.StackID ||
+			candidate.Change == publication.Change {
+			continue
+		}
+		if candidate.Branch == publication.Trunk || publication.Prior != "" && candidate.Head == publication.Prior {
+			return candidate, true
+		}
+	}
+	return journal.Publication{}, false
 }
 
 func reconcileHead(ctx context.Context, store Store, item fetchedPublication, pull stackpublish.PR) (string, error) {

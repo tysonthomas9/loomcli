@@ -195,7 +195,7 @@ func detect(ctx context.Context, store Store, forge Forge, item fetchedPublicati
 	if err != nil {
 		return err
 	}
-	if err := observeProvider(ctx, store, item, pull, publications); err != nil {
+	if err := observeProvider(ctx, store, forge, item, pull, publications); err != nil {
 		return err
 	}
 	if !pull.Merged {

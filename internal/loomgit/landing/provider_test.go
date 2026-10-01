@@ -248,3 +248,63 @@ func TestProviderUnexpectedRetargetIsDurableDrift(t *testing.T) {
 		t.Fatalf("retarget observation = %+v, %v, %v", observation, found, err)
 	}
 }
+
+func TestNativeAutoRestackAfterMergeIsNotDrift(t *testing.T) {
+	fixture := newFixture(t)
+	ctx := context.Background()
+	heads := map[string]string{}
+	trunk, prior := "main", ""
+	for index, change := range []string{"A", "B", "C"} {
+		branch := "loom/ws/W/change/" + change
+		git(t, fixture.source, "switch", "-q", "-c", branch)
+		heads[change] = fixture.commit(t, change+" patch")
+		git(t, fixture.source, "push", "-q", "origin", "HEAD:refs/heads/"+branch)
+		publication := journal.Publication{Workspace: "W", Change: change, Repo: fixture.source, Branch: branch,
+			Trunk: trunk, Slug: "owner/repo", Head: heads[change], StackID: "feature", Prior: prior}
+		if err := fixture.store.BeginPublication(ctx, publication); err != nil {
+			t.Fatal(err)
+		}
+		publication.Phase, publication.PRNumber = "done", 41+index
+		if err := fixture.store.AdvancePublication(ctx, publication); err != nil {
+			t.Fatal(err)
+		}
+		sourceRevision(t, fixture, change, heads[change])
+		trunk, prior = branch, heads[change]
+	}
+	if err := fixture.store.RecordStackBackend(ctx, "W", "feature", "native"); err != nil {
+		t.Fatal(err)
+	}
+	git(t, fixture.source, "switch", "-q", "main")
+	git(t, fixture.source, "merge", "-q", "--no-ff", "-m", "merge A", "loom/ws/W/change/A")
+	merge := git(t, fixture.source, "rev-parse", "HEAD")
+	git(t, fixture.source, "push", "-q", "origin", "main")
+	git(t, fixture.source, "switch", "-q", "-c", "github-restack")
+	git(t, fixture.source, "cherry-pick", heads["B"])
+	restackedB := git(t, fixture.source, "rev-parse", "HEAD")
+	git(t, fixture.source, "cherry-pick", heads["C"])
+	restackedC := git(t, fixture.source, "rev-parse", "HEAD")
+	git(t, fixture.source, "push", "-q", "--force", "origin", restackedB+":refs/heads/loom/ws/W/change/B",
+		restackedC+":refs/heads/loom/ws/W/change/C")
+	fixture.forge.pulls = map[int]stackpublish.PR{
+		41: {Number: 41, Head: "loom/ws/W/change/A", HeadSHA: heads["A"], Base: "main", State: "closed", Merged: true, MergeCommitSHA: merge},
+		42: {Number: 42, Head: "loom/ws/W/change/B", HeadSHA: restackedB, Base: "main", State: "open"},
+		43: {Number: 43, Head: "loom/ws/W/change/C", HeadSHA: restackedC, Base: "loom/ws/W/change/B", State: "open"},
+	}
+	if err := Reconcile(ctx, fixture.store, fixture.forge); err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []string{"B", "C"} {
+		observation, found, err := fixture.store.ProviderObservation(ctx, "W", change)
+		if err != nil || !found || observation.State != "native_restack" {
+			t.Fatalf("%s observation = %+v, found=%v, %v", change, observation, found, err)
+		}
+		status, err := fixture.store.LandingStatus(ctx, "W", change)
+		if err != nil || status.State == "diverged" {
+			t.Fatalf("%s native auto-restack status = %+v, %v", change, status, err)
+		}
+		number, _, err := fixture.store.LatestReadyRevision(ctx, "W", change)
+		if err != nil || number != 1 {
+			t.Fatalf("%s native auto-restack created provider revision %d, %v", change, number, err)
+		}
+	}
+}
