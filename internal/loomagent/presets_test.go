@@ -239,6 +239,22 @@ func TestPolicyGHAndGitPushDeniesNeedBothBridgeCaps(t *testing.T) {
 			if want := caps.HasGitHubRead && caps.HasPublish; hasDeny(c.Rules) != want {
 				t.Errorf("%s %+v: denies present = %v, want %v", p.Name, caps, !want, want)
 			}
+			if !slices.Equal(c.Rules[:len(p.Rules)], p.Rules) { // the preset's own denies are kept
+				t.Errorf("%s %+v: preset rules = %v", p.Name, caps, c.Rules)
+			}
+		}
+	}
+	// Read-only and denied-tool denies stay in every case.
+	ro := Overrides{ReadOnly: true, DeniedTools: []string{"webfetch"}}
+	for _, caps := range []BridgeCaps{{}, {HasGitHubRead: true}, {HasPublish: true}, {HasGitHubRead: true, HasPublish: true}} {
+		c, err := Resolve(mustPreset(t, "daemon-worker"), CreateRequest{Overrides: ro, Bridge: caps}, "opencode", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range []string{"edit", "bash", "webfetch"} {
+			if got := decide(c.Rules, a, "x"); got != "deny" {
+				t.Errorf("%+v: %s = %s, want deny", caps, a, got)
+			}
 		}
 	}
 	lead, _ := Resolve(mustPreset(t, "lead"), CreateRequest{Bridge: BridgeCaps{HasPublish: true}}, "opencode", nil)

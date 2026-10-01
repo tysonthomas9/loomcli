@@ -100,7 +100,8 @@ type CreateRequest struct {
 	BaseRef      string
 	ExternalKey  string
 	FirstMessage string
-	// Bridge is set by the server from the agent's bridge, never from a request body.
+	// Bridge is set only by Loom's host-owned bridge wiring, never from a
+	// request body or any model or agent input.
 	Bridge BridgeCaps
 }
 
