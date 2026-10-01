@@ -187,8 +187,13 @@ func (s *Service) swapLocked(ctx context.Context, in Request, source loomgit.Rev
 	if len(paths) != 0 {
 		return Result{Paths: paths}, loomgit.NewError(loomgit.ApplyPending, strings.Join(paths, ", "), nil)
 	}
+	layerBase := old
+	if old == source.HeadSHA {
+		// The lead already holds this exact revision: it is the layer, not an empty derived one.
+		layerBase, trial = source.BaseSHA, replay.Result{HeadSHA: old}
+	}
 	result := Result{HeadSHA: trial.HeadSHA, DroppedCommits: trial.DroppedCommits}
-	if old != source.BaseSHA {
+	if layerBase != source.BaseSHA {
 		result.Derived, err = changeset.RecordDerived(ctx, s.store, s.runner, changeset.DerivedInput{
 			Workspace: in.Workspace, Change: in.Change, RequestID: in.RequestID + ":derived:" + old,
 			FromNumber: source.Number, Operation: "apply", BaseSHA: old,
@@ -198,7 +203,7 @@ func (s *Service) swapLocked(ctx context.Context, in Request, source loomgit.Rev
 			return Result{}, err
 		}
 	}
-	if err := s.recordLayer(ctx, in, source, old, trial, result.Derived); err != nil {
+	if err := s.recordLayer(ctx, in, source, layerBase, trial, result.Derived); err != nil {
 		return Result{}, err
 	}
 	if err := s.install(ctx, branch, indexPath, old, trial.HeadSHA, in.RequestID, lockOwned, keepLock); err != nil {
