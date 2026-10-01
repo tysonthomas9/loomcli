@@ -377,3 +377,31 @@ func TestRedactionAtWrite(t *testing.T) {
 		t.Fatal("invalid JSON payload accepted")
 	}
 }
+
+func TestRedactionCoversMetadataPathAndSignature(t *testing.T) {
+	ctx := context.Background()
+	s := openAt(t, filepath.Join(t.TempDir(), "loom.db"))
+	if err := s.InsertAgent(ctx, agent("a1", "interactive")); err != nil {
+		t.Fatal(err)
+	}
+	inPath := "Zq8vN2xLp4Rt7Wm9Ks1Yd6Hf3Jc5Bg0Ua"
+	inSig := "ghp_" + strings.Repeat("aB3dE5fG7h", 3) + "123456"
+	inImage := "Hx7Qk2Vn9Lr4Tp6Wz1Mb8Yc3Fd5Gs0Ja"
+	payload := fmt.Sprintf(`{"metadata":{"path":"/tmp/%s","signature":"%s"},"block":{"type":"image","data":"%s"}}`,
+		inPath, inSig, inImage)
+	if _, err := s.AppendEvent(ctx, Event{AgentID: "a1", EventID: "e1", Kind: "tool", Payload: json.RawMessage(payload)}); err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	if err := s.db.QueryRow(`SELECT redacted_payload FROM agent_events`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{inPath, inSig, inImage} {
+		if strings.Contains(stored, secret) {
+			t.Fatalf("secret %q kept in stored payload: %s", secret, stored)
+		}
+	}
+	if !json.Valid([]byte(stored)) {
+		t.Fatalf("stored payload not JSON: %s", stored)
+	}
+}
