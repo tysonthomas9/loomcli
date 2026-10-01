@@ -63,8 +63,8 @@ type Supervisor struct {
 type server struct {
 	mu       sync.Mutex // held while starting or stopping
 	conn     *Conn
-	cmd      *exec.Cmd
-	exited   chan struct{} // closed once the server exited and its tree was reaped
+	group    *proctree.Group // the app-server and its process group
+	exited   chan struct{}   // closed once the server exited and its tree was reaped
 	tree     *proctree.Tree
 	failures int
 	retryAt  time.Time
@@ -221,9 +221,10 @@ func (s *Supervisor) start(ctx context.Context, root string, srv *server) error 
 	if s.cfg.Unrouted != nil {
 		fallback = func(m Message) { s.cfg.Unrouted(root, m) }
 	}
+	group := proctree.NewGroup(cmd)
 	conn, exited, started := NewConn(outR, inW, fallback), make(chan struct{}), time.Now()
-	go srv.tree.Track(cmd.Process.Pid, conn.Done(), trackEvery)
-	go srv.watch(cmd, conn, outR, exited, started)
+	go srv.tree.Track(group.Pid(), conn.Done(), trackEvery)
+	go srv.watch(group, conn, outR, exited, started)
 
 	ictx, cancel := context.WithTimeout(ctx, startTimeout)
 	defer cancel()
@@ -239,31 +240,31 @@ func (s *Supervisor) start(ctx context.Context, root string, srv *server) error 
 		err = conn.Notify("initialized", nil)
 	}
 	if err != nil {
-		srv.tree.Record(cmd.Process.Pid)
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		srv.tree.Record(group.Pid())
+		group.Kill()
 		<-exited
 		return fmt.Errorf("codex app-server start for %s: %w", root, err)
 	}
-	srv.conn, srv.cmd, srv.exited = conn, cmd, exited
+	srv.conn, srv.group, srv.exited = conn, group, exited
 	return nil
 }
 
-// watch waits for the server to exit, then reaps the rest of its process
-// group and its recorded tree; its connection ends with a gap for its own
-// threads only, and the next Conn starts a new one after the backoff.
-func (srv *server) watch(cmd *exec.Cmd, conn *Conn, stdout *os.File, exited chan struct{}, started time.Time) {
-	_ = cmd.Wait()
-	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // what is left of its process group
+// watch waits for the server to exit, kills the rest of its process group
+// before the server is reaped (proctree.Group), and reaps its recorded tree;
+// its connection ends with a gap for its own threads only, and the next
+// Conn starts a new one after the backoff.
+func (srv *server) watch(group *proctree.Group, conn *Conn, stdout *os.File, exited chan struct{}, started time.Time) {
+	_ = group.Wait()
 	_, _ = conn.Close(), stdout.Close()
 	<-conn.Done()
 	srv.tree.Reap(stopGrace)
 	close(exited)
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
-	if srv.cmd != cmd {
+	if srv.group != group {
 		return // stopped on purpose, or a start that failed
 	}
-	srv.conn, srv.cmd = nil, nil
+	srv.conn, srv.group = nil, nil
 	if time.Since(started) >= stableAfter {
 		srv.failures = 0
 	}
@@ -271,22 +272,22 @@ func (srv *server) watch(cmd *exec.Cmd, conn *Conn, stdout *os.File, exited chan
 }
 
 // stop records the server's tree, closes its stdin, which stops an
-// app-server, SIGKILLs its process group after stopGrace, and waits until
-// watch has reaped the tree.
+// app-server, SIGKILLs its process group after stopGrace (only while the
+// server is unreaped), and waits until watch has reaped the tree.
 func (srv *server) stop() {
-	cmd, exited := srv.cmd, srv.exited
-	if cmd == nil {
+	group, exited := srv.group, srv.exited
+	if group == nil {
 		return
 	}
-	srv.tree.Record(cmd.Process.Pid)
+	srv.tree.Record(group.Pid())
 	_ = srv.conn.Close()
-	srv.conn, srv.cmd = nil, nil
+	srv.conn, srv.group = nil, nil
 	select {
 	case <-exited:
 		return
 	case <-time.After(stopGrace):
 	}
-	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	group.Kill()
 	<-exited
 }
 

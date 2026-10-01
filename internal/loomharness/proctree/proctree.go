@@ -2,18 +2,20 @@
 // servers start tool commands that leave their process group (OpenCode's
 // shell commands and PTY daemon, codex's exec sessions), so they outlive a
 // crashed or stopped server. A Tree records the descendants of a server while
-// it runs, by parent PID, with their start times; Reap signals exactly the
-// recorded processes that still run with the same start time, plus their
-// current descendants. It never pattern-kills and never touches a process
+// it runs, by parent PID, with their exact kernel start times; Reap signals
+// exactly the recorded processes that still run with the same start time,
+// plus their current descendants, and checks the start time again right
+// before each signal. It never pattern-kills and never touches a process
 // outside the recorded tree, such as the user's own harness.
+//
+// A process is recorded when Track samples it while it descends from the
+// server. One that is started and orphaned (its parent exits) between two
+// samples is reparented away first and is not recorded, so it is not reaped.
 package proctree
 
 import (
 	"os"
-	"os/exec"
 	"slices"
-	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -22,11 +24,11 @@ import (
 // Tree is the recorded process tree of one supervisor.
 type Tree struct {
 	mu   sync.Mutex
-	tree map[int]string // recorded descendant PID -> start time
+	tree map[int]int64 // recorded descendant PID -> start time
 }
 
 // New returns an empty tree.
-func New() *Tree { return &Tree{tree: map[int]string{}} }
+func New() *Tree { return &Tree{tree: map[int]int64{}} }
 
 // Track records root's descendants every interval until exited is closed.
 func (t *Tree) Track(root int, exited <-chan struct{}, every time.Duration) {
@@ -53,34 +55,51 @@ func (t *Tree) Record(root int) {
 // Owned lists the recorded processes that still run with the same start
 // time, plus their current descendants, and forgets the rest.
 func (t *Tree) Owned() []int {
+	var pids []int
+	for pid := range t.owned() {
+		pids = append(pids, pid)
+	}
+	return pids
+}
+
+// owned is Owned with each process's start time.
+func (t *Tree) owned() map[int]int64 {
 	procs := processes()
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	out := map[int]int64{}
 	var roots []int
 	for pid, start := range t.tree {
 		if p, ok := procs[pid]; ok && p.start == start {
 			roots = append(roots, pid)
+			out[pid] = start
 		} else {
 			delete(t.tree, pid)
 		}
 	}
-	return append(roots, descendants(procs, roots)...)
+	for _, pid := range descendants(procs, roots) {
+		out[pid] = procs[pid].start
+	}
+	return out
 }
 
-// Reap stops the owned processes: SIGTERM, then SIGKILL after grace. It lists
-// them again before each signal, so an exited, reused PID is never hit.
+// Reap stops the owned processes: SIGTERM, then SIGKILL after grace. It
+// lists them again before each round and re-checks each start time right
+// before its signal, so a PID reused by another process is not hit.
 func (t *Tree) Reap(grace time.Duration) {
 	sig := syscall.SIGTERM
 	for deadline := time.Now().Add(grace); ; time.Sleep(50 * time.Millisecond) {
-		pids := t.Owned()
-		if len(pids) == 0 {
+		owned := t.owned()
+		if len(owned) == 0 {
 			return
 		}
 		if time.Now().After(deadline) {
 			sig = syscall.SIGKILL
 		}
-		for _, pid := range pids {
-			_ = syscall.Kill(pid, sig)
+		for pid, start := range owned {
+			if now, ok := startOf(pid); ok && now == start {
+				_ = syscall.Kill(pid, sig)
+			}
 		}
 		if sig == syscall.SIGKILL {
 			return
@@ -90,29 +109,7 @@ func (t *Tree) Reap(grace time.Duration) {
 
 type process struct {
 	ppid  int
-	start string
-}
-
-// processes is the ps table: PID -> parent and start time. Zombies are left
-// out; they are already dead.
-func processes() map[int]process {
-	out, err := exec.Command("ps", "-axo", "pid=,ppid=,stat=,lstart=").Output()
-	if err != nil {
-		return nil
-	}
-	procs := map[int]process{}
-	for _, line := range strings.Split(string(out), "\n") {
-		f := strings.Fields(line)
-		if len(f) < 4 || strings.HasPrefix(f[2], "Z") {
-			continue
-		}
-		pid, err1 := strconv.Atoi(f[0])
-		ppid, err2 := strconv.Atoi(f[1])
-		if err1 == nil && err2 == nil {
-			procs[pid] = process{ppid: ppid, start: strings.Join(f[3:], " ")}
-		}
-	}
-	return procs
+	start int64 // exact kernel start time
 }
 
 // descendants lists every process below roots in procs, never Loom itself.

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
+	"github.com/tysonthomas9/loomcli/internal/loomharness/proctree"
 )
 
 // TestMain lets the test binary play `codex` for the supervisor tests when
@@ -389,5 +390,24 @@ func TestCodexRootStableWhenCreated(t *testing.T) {
 	}
 	if after := s.Root(dir); after != before {
 		t.Fatalf("Root changed when the directory appeared: %s, then %s", before, after)
+	}
+}
+
+// TestCodexConnNeverReturnsDeadConn: while watch is still reaping a server
+// whose connection has ended, Conn refuses rather than returning the dead
+// connection.
+func TestCodexConnNeverReturnsDeadConn(t *testing.T) {
+	s := New(Config{Env: []string{}})
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dead := NewConn(r, w, nil)
+	_ = w.Close() // the reader sees EOF: the connection ends
+	<-dead.Done()
+	s.servers[s.Root("")] = &server{conn: dead, tree: proctree.New()}
+	c, err := s.Conn(context.Background(), "")
+	if c != nil || !errors.Is(err, loomharness.ErrUnavailable) {
+		t.Fatalf("Conn returned %v, %v; want no connection and ErrUnavailable", c, err)
 	}
 }

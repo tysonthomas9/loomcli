@@ -50,8 +50,8 @@ func TestCodexNestedLaunchStripsGitHubTokens(t *testing.T) {
 			t.Fatalf("root %q: %v", root, err)
 		}
 		srv := s.servers[s.Root(root)]
-		pids[srv.cmd.Process.Pid] = true
-		assertEnvNames(t, "app-server for "+s.Root(root), processEnv(t, srv.cmd.Process.Pid))
+		pids[srv.group.Pid()] = true
+		assertEnvNames(t, "app-server for "+s.Root(root), processEnv(t, srv.group.Pid()))
 		var res struct {
 			ExitCode int
 			Stdout   string
