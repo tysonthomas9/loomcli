@@ -96,8 +96,13 @@ type Input struct {
 
 // Reply answers an ask.
 type Reply struct {
-	Allow  bool
-	Always bool // with Allow: for the rest of the session; an adapter that cannot keep it fails Reply (never narrows it)
+	Allow bool
+	// Always, with Allow, grants for the rest of this native session only: on
+	// every harness the grant is gone after a Resume or a harness switch, and
+	// it is never broader than the session (no project-wide or persistent
+	// grant, such as OpenCode's "always"). An adapter that cannot honour it
+	// fails Reply with an explicit error, never narrowing it; the ask stays open.
+	Always bool
 	Answer string
 }
 
