@@ -208,7 +208,8 @@ func TestOpenCodeWatchReplayAfterRestart(t *testing.T) {
 // TestOpenCodeEventsNativeIDs: a row's EventID uses only ids the live feed
 // and a catch-up read share: an item seen live (with its TurnID) and in
 // history (without one) is one row; two usage events of one turn are two
-// rows, whether they carry their step's ItemID or only a native Seq.
+// rows, whether they carry their step's ItemID or only a native Seq; two
+// resumes of one turn are two rows, each the same live and in history.
 func TestOpenCodeEventsNativeIDs(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
@@ -223,14 +224,17 @@ func TestOpenCodeEventsNativeIDs(t *testing.T) {
 		{Type: loomharness.EventUsage, Session: ref, TurnID: "T1", ItemID: "step2"},
 		{Type: loomharness.EventUsage, Session: ref, TurnID: "T1", Seq: 7},
 		{Type: loomharness.EventUsage, Session: ref, TurnID: "T1", Seq: 8},
+		{Type: loomharness.EventTurnResumed, Session: ref, TurnID: "T1", ItemID: "resume1"},
+		{Type: loomharness.EventTurnResumed, Session: ref, TurnID: "T1", ItemID: "resume2"},
+		{Type: loomharness.EventTurnResumed, Session: ref, TurnID: "T1", ItemID: "resume2", Seq: 9}, // resume2 from history
 	} {
 		if err := s.ingest(ctx, "opencode", ev); err != nil {
 			t.Fatal(err)
 		}
 	}
 	got := rows(t, s, a.AgentID, n)
-	if len(kinds(got, "item.completed")) != 1 || len(kinds(got, "usage")) != 4 {
-		t.Fatalf("rows %v; want one item and four usage", ids(got))
+	if len(kinds(got, "item.completed")) != 1 || len(kinds(got, "usage")) != 4 || len(kinds(got, "turn.resumed")) != 2 {
+		t.Fatalf("rows %v; want one item, four usage and two resumes", ids(got))
 	}
 }
 

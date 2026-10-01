@@ -156,8 +156,8 @@ var savedKinds = map[loomharness.EventType]string{
 // nativeRow is e as a saved row. Its EventID uses only ids the live feed and
 // a catch-up read share (the port contract): the session's Root and NativeID
 // and the event's own id: InputKey for a delivery, AskID for an ask, TurnID
-// for a turn boundary, else ItemID (a usage carries its step's id), else the
-// native Seq. TurnID is never part of an item's id.
+// for a turn start or end, else ItemID (a usage its step's id, a turn.resumed
+// its resume's id), else the native Seq. TurnID is never part of an item's id.
 func nativeRow(agentID, kind string, e loomharness.Event) loomstore.Event {
 	key := e.ItemID
 	switch e.Type {
@@ -165,7 +165,7 @@ func nativeRow(agentID, kind string, e loomharness.Event) loomstore.Event {
 		key = e.InputKey
 	case loomharness.EventAskOpened, loomharness.EventAskResolved, loomharness.EventAskLost:
 		key = e.AskID
-	case loomharness.EventTurnStarted, loomharness.EventTurnCompleted, loomharness.EventTurnResumed:
+	case loomharness.EventTurnStarted, loomharness.EventTurnCompleted:
 		key = e.TurnID
 	}
 	if key == "" {
