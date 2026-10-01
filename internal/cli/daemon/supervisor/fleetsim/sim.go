@@ -15,6 +15,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/clock"
+	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 )
 
 // BaseURL is the address every simulated FleetBackend targets. Nothing listens
@@ -91,11 +92,18 @@ type Record struct {
 	AppliedAt  time.Time
 	Delivery   Delivery
 	Status     int // 0 when dropped
-	IssueID    string
+	// RespBody is the fake server's response body. It is source-derived,
+	// never an observed FleetDB body.
+	RespBody string
+	IssueID  string
 	// Server state for IssueID immediately before apply, for the oracle.
 	HolderBefore   string
 	StatusBefore   string
 	AssigneeBefore string
+	// AuthorityBefore is the attempt holding write authority on IssueID at
+	// apply time: the attempt whose claim most recently succeeded, while its
+	// claim actor still holds the live lock. "" means nobody holds authority.
+	AuthorityBefore string
 }
 
 // Sim couples a fake clock, the FleetDB model and the interposer, and
@@ -117,6 +125,7 @@ type Sim struct {
 	attSeq  map[string]int
 	records []Record
 	claimOf map[string]string // attempt → claim actor
+	auth    map[string]string // issue → attempt of the last successful claim
 }
 
 // New builds a Sim at start for workspace.
@@ -130,6 +139,7 @@ func New(start time.Time, workspace string, guards Guards) *Sim {
 		errs:      map[string]error{},
 		claimOf:   map[string]string{},
 		attSeq:    map[string]int{},
+		auth:      map[string]string{},
 	}
 	s.cond = sync.NewCond(&s.mu)
 	return s
@@ -165,6 +175,20 @@ func (s *Sim) Backend(attempt, actor string) *fleet.FleetBackend {
 		panic(err) // static config; cannot fail
 	}
 	return b
+}
+
+// ControlStore returns the real Loom control-plane client
+// (internal/infra/fleetdb) wired to this Sim, attributed to attempt.
+func (s *Sim) ControlStore(attempt, actor string) *fleetdb.Client {
+	c, err := fleetdb.New(fleetdb.Config{
+		BaseURL:    BaseURL,
+		Actor:      actor,
+		HTTPClient: &http.Client{Transport: &transport{sim: s, attempt: attempt}},
+	})
+	if err != nil {
+		panic(err) // static config; cannot fail
+	}
+	return c
 }
 
 // Go starts a named actor. Its goroutine counts as running until it parks on
@@ -225,11 +249,44 @@ func (s *Sim) Pending() []Pending {
 	return out
 }
 
+// AwaitPending blocks until at least n requests are parked. Use it for
+// requests issued by goroutines the supervisor starts itself (heartbeat
+// tickers), which are not Sim actors; such goroutines must not run
+// concurrently with Sim actors, because only actors count toward quiescence.
+func (s *Sim) AwaitPending(n int) []Pending {
+	s.mu.Lock()
+	for len(s.pending) < n {
+		s.cond.Wait()
+	}
+	out := make([]Pending, 0, len(s.pending))
+	for _, p := range s.pending {
+		out = append(out, *p)
+	}
+	s.mu.Unlock()
+	return out
+}
+
 // Records returns the interposer log in apply order.
 func (s *Sim) Records() []Record {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]Record(nil), s.records...)
+}
+
+// stampBefore records the issue state and attempt authority the request
+// meets at apply time.
+func (s *Sim) stampBefore(rec *Record) {
+	if rec.IssueID == "" {
+		return
+	}
+	if is, holder, ok := s.Server.Snapshot(rec.IssueID); ok {
+		rec.HolderBefore, rec.StatusBefore, rec.AssigneeBefore = holder, is.Status, is.Assignee
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if a := s.auth[rec.IssueID]; a != "" && rec.HolderBefore != "" && rec.HolderBefore == s.claimOf[a] {
+		rec.AuthorityBefore = a
+	}
 }
 
 // Deliver resolves the pending request seq. When at is non-zero the fake clock
@@ -260,11 +317,7 @@ func (s *Sim) Deliver(seq int, d Delivery, at time.Time) Record {
 	rec := Record{Seq: p.Seq, AttemptSeq: p.AttemptSeq, Attempt: p.Attempt, Method: p.Method, Path: p.Path, Query: p.Query,
 		Actor: p.Actor, Body: p.Body, SentAt: p.SentAt, AppliedAt: s.Clock.Now(), Delivery: d,
 		IssueID: issueIDFromPath(p.Path)}
-	if rec.IssueID != "" {
-		if is, holder, ok := s.Server.Snapshot(rec.IssueID); ok {
-			rec.HolderBefore, rec.StatusBefore, rec.AssigneeBefore = holder, is.Status, is.Assignee
-		}
-	}
+	s.stampBefore(&rec)
 	var rp reply
 	if d == Drop {
 		rp.err = ErrRequestDropped
@@ -273,6 +326,7 @@ func (s *Sim) Deliver(seq int, d Delivery, at time.Time) Record {
 		p.req.Body = io.NopCloser(strings.NewReader(p.Body))
 		s.Server.ServeHTTP(rr, p.req)
 		rec.Status = rr.Code
+		rec.RespBody = rr.Body.String()
 		if d == ApplyLoseResponse {
 			rp.err = ErrResponseLost
 		} else {
@@ -282,6 +336,9 @@ func (s *Sim) Deliver(seq int, d Delivery, at time.Time) Record {
 		}
 	}
 	s.mu.Lock()
+	if rec.IssueID != "" && rec.Method == "POST" && strings.HasSuffix(rec.Path, "/claim") && rec.Status/100 == 2 && d != Drop {
+		s.auth[rec.IssueID] = rec.Attempt
+	}
 	s.records = append(s.records, rec)
 	s.mu.Unlock()
 	p.reply <- rp

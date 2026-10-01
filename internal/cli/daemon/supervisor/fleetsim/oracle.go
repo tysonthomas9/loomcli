@@ -45,11 +45,20 @@ func (r Report) Has(inv string) bool {
 	return false
 }
 
-// Invariant names. NoSupersededWrite mirrors the TLA+ invariant of the same
-// name in test/formal/daemon-attempt (an issue write accepted from an attempt
-// that is no longer the claim owner).
+// Invariant names. Authority is per attempt (the harness analog of the
+// model's fencing token): the attempt whose claim most recently succeeded
+// holds it while its claim actor holds the live lock.
+//
+// NoSupersededWrite mirrors the TLA+ invariant of the same name in
+// test/formal/daemon-attempt: a workflow write accepted from an attempt while
+// a different attempt holds authority.
+//
+// NoWriteWithoutAuthority is enforcement-map row S6 (a_fail_fence_eq): a
+// workflow write accepted from an attempt while nobody holds authority, e.g.
+// after its lock was released or expired and before any reacquire.
 const (
-	InvNoSupersededWrite = "NoSupersededWrite"
+	InvNoSupersededWrite       = "NoSupersededWrite"
+	InvNoWriteWithoutAuthority = "NoWriteWithoutAuthority"
 )
 
 // workflowWrite reports whether the request mutates issue workflow state on
@@ -70,10 +79,13 @@ func workflowWrite(r Record) bool {
 	return false
 }
 
-// Check evaluates the trace. Ownership at apply time is the live claim-lock
-// holder, or, when no lock is live, the assignee of an in_progress issue. A
-// write is attributed to the attempt that sent it (the interposer knows),
-// never to its X-Actor header.
+// Check evaluates the trace. Authority is per attempt: at apply time it
+// belongs to the attempt whose claim most recently succeeded, while that
+// attempt's claim actor still holds the live lock (Record.AuthorityBefore). An
+// accepted workflow write from any other attempt is NoSupersededWrite; one
+// applied while nobody holds authority is NoWriteWithoutAuthority. A write is
+// attributed to the attempt that sent it (the interposer knows), never to its
+// X-Actor header; attempts never bound with BindAttempt are not judged.
 func (s *Sim) Check() Report {
 	var rep Report
 	for _, r := range s.Records() {
@@ -88,15 +100,19 @@ func (s *Sim) Check() Report {
 		if r.Status < 200 || r.Status >= 300 || claim == "" {
 			continue
 		}
-		owner := r.HolderBefore
-		if owner == "" && r.StatusBefore == "in_progress" {
-			owner = r.AssigneeBefore
-		}
-		if owner != "" && owner != claim {
+		switch {
+		case r.AuthorityBefore == r.Attempt:
+		case r.AuthorityBefore != "":
 			rep.Violations = append(rep.Violations, Violation{
 				Invariant: InvNoSupersededWrite, Seq: r.Seq, Attempt: r.Attempt,
-				Detail: fmt.Sprintf("%s %s accepted (%d) as X-Actor %q while claim owner is %q (attempt claims as %q)",
-					r.Method, r.Path, r.Status, r.Actor, owner, claim),
+				Detail: fmt.Sprintf("%s %s accepted (%d) as X-Actor %q while attempt %q (claims as %q) holds authority",
+					r.Method, r.Path, r.Status, r.Actor, r.AuthorityBefore, s.ClaimActor(r.AuthorityBefore)),
+			})
+		default:
+			rep.Violations = append(rep.Violations, Violation{
+				Invariant: InvNoWriteWithoutAuthority, Seq: r.Seq, Attempt: r.Attempt,
+				Detail: fmt.Sprintf("%s %s accepted (%d) as X-Actor %q with no live authority (lock holder %q, status %s)",
+					r.Method, r.Path, r.Status, r.Actor, r.HolderBefore, r.StatusBefore),
 			})
 		}
 	}

@@ -38,6 +38,7 @@ const (
 	ReaperInterval     = 30 * time.Second  // claim_reaper.go defaultClaimReaperInterval
 	defaultCloseReason = "Closed"
 	systemActor        = "system"
+	heartbeatLockTTL   = 300 * time.Second // storage/worker.go defaultHeartbeatLockTTL
 )
 
 // Guards are server behaviors that the pinned FleetDB does NOT have. They
@@ -47,6 +48,10 @@ type Guards struct {
 	// RejectNonHolderWorkflowWrites answers 409 to /assign and /close when a
 	// live claim lock is held by an actor other than the request's X-Actor.
 	RejectNonHolderWorkflowWrites bool
+	// OwnershipLeasesUnsupported answers 404 to every
+	// /agent-ownership-leases route, standing in for an older server without
+	// that capability (the pinned server has the routes). Used for S1.
+	OwnershipLeasesUnsupported bool
 }
 
 // Issue is the modeled issue row.
@@ -91,6 +96,7 @@ type Server struct {
 	issues    map[string]*Issue
 	locks     map[string]lock
 	events    []Event
+	workers   map[string]string // worker ID → current task ("" when idle)
 	unmodeled []string
 	mux       *http.ServeMux
 }
@@ -103,12 +109,17 @@ func NewServer(clk clock.Clock, workspace string, guards Guards) *Server {
 		guards:    guards,
 		issues:    map[string]*Issue{},
 		locks:     map[string]lock{},
+		workers:   map[string]string{},
 	}
 	mux := http.NewServeMux()
 	p := "/api/v1/{workspace}"
 	mux.HandleFunc("GET "+p+"/issues/ready", s.handleReady)
 	mux.HandleFunc("GET "+p+"/ready", s.handleReady)
 	mux.HandleFunc("GET "+p+"/issues/{id}", s.handleGet)
+	mux.HandleFunc("GET "+p+"/issues/{id}/deps", s.handleEmptyList("dependencies"))
+	mux.HandleFunc("GET "+p+"/issues/{id}/comments", s.handleEmptyList("comments"))
+	mux.HandleFunc("POST "+p+"/workers/{id}/heartbeat", s.handleWorkerHeartbeat)
+	mux.HandleFunc(p+"/agent-ownership-leases/", s.handleOwnershipLeases)
 	mux.HandleFunc("GET "+p+"/issues", s.handleList)
 	mux.HandleFunc("POST "+p+"/issues/{id}/claim", s.handleClaim)
 	mux.HandleFunc("POST "+p+"/issues/{id}/assign", s.handleAssign)
@@ -205,8 +216,70 @@ func (s *Server) ReapStaleClaims() []string {
 	return reverted
 }
 
-// ServeHTTP dispatches to the modeled routes.
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+// ServeHTTP dispatches to the modeled routes. As with the pinned server in
+// --auth-dev-mode, a request carrying no X-Actor has no identity and is
+// rejected by the auth middleware with 401 before any handler runs.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.TrimSpace(r.Header.Get("X-Actor")) == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required", nil)
+		return
+	}
+	s.mux.ServeHTTP(w, r)
+}
+
+// WorkerTask reports the worker registry entry (current task) for id.
+func (s *Server) WorkerTask(id string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.workers[id]
+	return t, ok
+}
+
+func (s *Server) handleEmptyList(key string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		_, ok := s.issues[r.PathValue("id")]
+		s.mu.Unlock()
+		if !ok {
+			writeError(w, http.StatusNotFound, "not_found", "issue not found", nil)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{key: []any{}})
+	}
+}
+
+// handleWorkerHeartbeat follows storage/worker.go HeartbeatWorker: unknown
+// worker → success=false no_active_session; a current task whose lock is
+// missing or held by someone else → HTTP 200 with success=false
+// ownership_lost; otherwise the task lock is extended by 300s.
+func (s *Server) handleWorkerHeartbeat(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := r.PathValue("id")
+	task, ok := s.workers[id]
+	if !ok {
+		writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": "no_active_session"})
+		return
+	}
+	if task != "" {
+		if s.liveHolderLocked(task) != id {
+			writeJSON(w, http.StatusOK, map[string]any{"success": false, "error": "ownership_lost"})
+			return
+		}
+		s.locks[task] = lock{holder: id, expiresAt: s.clk.Now().Add(heartbeatLockTTL)}
+		writeJSON(w, http.StatusOK, map[string]any{"success": true, "ttl": int(heartbeatLockTTL.Seconds())})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+func (s *Server) handleOwnershipLeases(w http.ResponseWriter, r *http.Request) {
+	if s.guards.OwnershipLeasesUnsupported {
+		writeError(w, http.StatusNotFound, "not_found", "not found", nil)
+		return
+	}
+	s.handleUnmodeled(w, r)
+}
 
 func (s *Server) liveHolderLocked(id string) string {
 	l, ok := s.locks[id]
@@ -329,6 +402,7 @@ func (s *Server) handleClaim(w http.ResponseWriter, r *http.Request) {
 	is.Status, is.Assignee, is.UpdatedAt = "in_progress", actor, now
 	s.appendLocked(Event{At: now, Actor: actor, Action: "issue.claim", Issue: id,
 		Before: before, After: "status=in_progress assignee=" + actor})
+	s.workers[actor] = id // ClaimIssue best-effort worker registration
 	writeJSON(w, http.StatusOK, issueJSON(is))
 }
 
@@ -461,6 +535,7 @@ func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request) {
 	}
 	s.appendLocked(Event{At: now, Actor: actor, Action: "issue.release", Issue: id,
 		Before: "status=in_progress assignee=" + actor, After: "status=open assignee="})
+	s.workers[actor] = "" // ReleaseIssue re-registers the worker idle
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -37,6 +37,11 @@ const (
 	simOldActor  = "local-coder"
 	simNewActor  = "local-coder2"
 	simWorkspace = "LOCALMODE"
+	// simDaemonActor is the daemon process X-Actor of the local-mode stack
+	// (test/local-mode/docker-compose.yml LOOM_FLEET_DB_ACTOR). It only appears
+	// on reads and on writes that use the configured actor; the captured
+	// writes all carry explicit actors.
+	simDaemonActor = "local-mode-harness@fixture.local"
 )
 
 // simAttempt is one agent attempt: its own Supervisor value (so the
@@ -52,7 +57,7 @@ func newSimAttempt(sim *fleetsim.Sim, name, worktree string) *simAttempt {
 	sim.BindAttempt(name, worktree)
 	return &simAttempt{
 		name: name,
-		s:    &Supervisor{IssueBackend: sim.Backend(name, ""), Clock: sim.Clock},
+		s:    &Supervisor{IssueBackend: sim.Backend(name, simDaemonActor), Clock: sim.Clock, WorkspaceID: simWorkspace, NodeID: "node-" + worktree},
 		ap:   &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: worktree, Role: "task"}},
 	}
 }
@@ -114,7 +119,9 @@ func deliverAt(t *testing.T, sim *fleetsim.Sim, m fleetsim.Match, at time.Time, 
 	return rec
 }
 
-func TestFleetSim_ReplaysObservedStaleWorkerWrite(t *testing.T) {
+// S2 (issue side: worker paused past the lock TTL) and S10 (agent writes via
+// `loom data`, accepted): calibrated against both captured runs.
+func TestFleetSim_S2_S10_ReplaysObservedStaleWorkerWrite(t *testing.T) {
 	for _, run := range fleetsim.ObservedRuns {
 		t.Run(run.Name, func(t *testing.T) {
 			sim, old := preSegment(t, run)
@@ -153,7 +160,7 @@ func TestFleetSim_ReplaysObservedStaleWorkerWrite(t *testing.T) {
 			deliverAt(t, sim, fleetsim.Req(old.name, "POST", "/release-lock"), w[3].At, "finalize release-lock")
 			var recoverErr error
 			sim.Go("old-recover-release", func() error {
-				recoverErr = sim.Backend(old.name, "").ReleaseIssueLock(context.Background(), simIssue, simOldActor)
+				recoverErr = sim.Backend(old.name, simDaemonActor).ReleaseIssueLock(context.Background(), simIssue, simOldActor)
 				return nil
 			})
 			deliverAt(t, sim, fleetsim.Req(old.name, "POST", "/release-lock"), w[4].At, "recovery release-lock")
@@ -214,6 +221,8 @@ func TestFleetSim_ReplaysObservedStaleWorkerWrite(t *testing.T) {
 type simRaceOutcome struct {
 	trace     string
 	violation bool
+	anyFlag   bool
+	staleOK   bool // some stale assign/close was accepted
 	claimed   bool
 	// stale writes applied after the successor's claim
 	staleAfterClaim bool
@@ -246,26 +255,37 @@ func runSeededRace(t *testing.T, seed int64) simRaceOutcome {
 		if r.Attempt == "successor" && strings.HasSuffix(r.Path, "/claim") && r.Status == 200 {
 			claimIdx = i
 		}
-		if r.Attempt == old.name && claimIdx >= 0 && r.Status/100 == 2 &&
-			(strings.HasSuffix(r.Path, "/assign") || strings.HasSuffix(r.Path, "/close")) {
+		stale := r.Attempt == old.name && r.Status/100 == 2 &&
+			(strings.HasSuffix(r.Path, "/assign") || strings.HasSuffix(r.Path, "/close"))
+		if stale {
+			out.staleOK = true
+		}
+		if stale && claimIdx >= 0 {
 			out.staleAfterClaim = true
 		}
 	}
 	out.trace = b.String()
 	out.claimed = succ.ap.AssignedTaskID == simIssue
-	out.violation = sim.Check().Has(fleetsim.InvNoSupersededWrite)
+	rep := sim.Check()
+	out.violation = rep.Has(fleetsim.InvNoSupersededWrite)
+	out.anyFlag = len(rep.Violations) > 0
 	return out
 }
 
-// Across seeded interleavings the oracle flags NoSupersededWrite exactly when
-// a stale worker write is applied after the successor's claim, both outcomes
-// occur, and every seed replays byte-identically.
-func TestFleetSim_SeededInterleavingsMatchOracle(t *testing.T) {
+// S2/S6 across seeded interleavings: the oracle flags NoSupersededWrite
+// exactly when a stale worker write is applied after the successor's claim;
+// every accepted stale write is flagged (NoWriteWithoutAuthority when no
+// successor has claimed yet); both outcomes occur; every seed replays
+// byte-identically.
+func TestFleetSim_S2_S6_SeededInterleavingsMatchOracle(t *testing.T) {
 	var violating, clean int
 	for seed := int64(1); seed <= 64; seed++ {
 		got := runSeededRace(t, seed)
 		if got.violation != got.staleAfterClaim {
 			t.Fatalf("seed %d: violation=%v but staleAfterClaim=%v\n%s", seed, got.violation, got.staleAfterClaim, got.trace)
+		}
+		if got.staleOK != got.anyFlag {
+			t.Fatalf("seed %d: accepted stale write=%v but flagged=%v\n%s", seed, got.staleOK, got.anyFlag, got.trace)
 		}
 		if got.violation && !got.claimed {
 			t.Fatalf("seed %d: violation without a successor claim\n%s", seed, got.trace)
@@ -288,7 +308,8 @@ func TestFleetSim_SeededInterleavingsMatchOracle(t *testing.T) {
 // Late apply: the old worker's assign is SENT before the successor claims
 // (lower sequence number, earlier fake send time) but the interposer holds it
 // until after the claim applies. The server accepts it anyway.
-func TestFleetSim_LateAppliedStaleWriteIsAccepted(t *testing.T) {
+// S2 with a delayed request: see the comment above.
+func TestFleetSim_S2_LateAppliedStaleWriteIsAccepted(t *testing.T) {
 	run := fleetsim.ObservedRuns[0]
 	sim, old := preSegment(t, run)
 	worker := fleetsim.NewScriptedWorker(sim, old.name, simOperator,
