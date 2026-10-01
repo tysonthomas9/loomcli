@@ -100,6 +100,10 @@ jobs:
         if: inputs.mode != 'strict'
         run: make test-aft AFT_ARGS="--record --screenshots --storyboard --junit tests/aft/reports/junit.xml"
 
+      - name: Run Loom Git aft suites with fake forge
+        if: inputs.mode != 'strict'
+        run: make test-aft AFT_ARGS="--suite 'loomgit-*' --record --screenshots --storyboard --junit tests/aft/reports/loomgit-junit.xml"
+
       - name: Install claude CLI
         if: inputs.mode == 'strict'
         run: npm install -g @anthropic-ai/claude-code
