@@ -10,6 +10,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 )
 
@@ -647,5 +648,117 @@ func restackAfterMerge(t *testing.T, item fixture, forge *mergeForgeFake, predec
 			t.Fatalf("publication %s: %v", change, err)
 		}
 		forge.prs[index].HeadSHA = publication.Head
+	}
+}
+
+func TestLoomMergeAdvancesAfterNoOpRestack(t *testing.T) {
+	item, forge, request := threeLayerMergeFixture(t)
+	ctx := context.Background()
+	reapproveSameHead(t, item, "B", forge.prs[1].HeadSHA)
+	if err := (LoomStackBackend{Store: item.store}).MergeUpTo(ctx, request, "B"); err != nil {
+		t.Fatal(err)
+	}
+	for index, change := range []string{"A", "B"} {
+		if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+			t.Fatal(err)
+		}
+		head := forge.prs[index].HeadSHA
+		git(t, item.repo, "push", "-q", "origin", head+":refs/heads/develop")
+		if err := item.store.MarkLanded(ctx, "W", change, "merge_commit"); err != nil {
+			t.Fatal(err)
+		}
+		next := forge.prs[index+1].HeadSHA
+		restackAfterMerge(t, item, forge, change, []string{"B", "C"}[index], head)
+		if forge.prs[index+1].HeadSHA != next {
+			t.Fatalf("no-op restack moved %s", forge.prs[index+1].Head)
+		}
+		for range 3 {
+			if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	merge, err := item.store.LoomMerge(ctx, "W", "feature")
+	if err != nil || merge.Phase != "done" || forge.merged != 2 || len(forge.deleted) != 2 {
+		t.Fatalf("no-op restack merge = %+v, merged = %d, deleted = %v, err = %v", merge, forge.merged, forge.deleted, err)
+	}
+}
+
+func reapproveSameHead(t *testing.T, item fixture, change, head string) {
+	t.Helper()
+	ctx := context.Background()
+	revision, err := item.store.ReserveRevision(ctx, loomgit.Revision{Workspace: "W", Change: change,
+		RequestID: change + "-reapprove", Kind: "derived", Operation: "apply", Outcome: "completed",
+		BaseSHA: head, TreeHash: head, SourceHeadSHA: head, DerivedFromChange: change, DerivedFromNumber: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision.HeadSHA = head
+	if err := item.store.FinishRevision(ctx, revision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := review.Submit(ctx, item.store, "W", change, revision.Number, head, "approve", "", review.Actor{Kind: "human", ID: "reviewer"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoomMergeNoOpRestackStopsOnMovedHead(t *testing.T) {
+	item, forge, request := threeLayerMergeFixture(t)
+	ctx := context.Background()
+	if err := (LoomStackBackend{Store: item.store}).MergeUpTo(ctx, request, "B"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+		t.Fatal(err)
+	}
+	head := forge.prs[0].HeadSHA
+	git(t, item.repo, "push", "-q", "origin", head+":refs/heads/develop")
+	if err := item.store.MarkLanded(ctx, "W", "A", "merge_commit"); err != nil {
+		t.Fatal(err)
+	}
+	restackAfterMerge(t, item, forge, "A", "B", head)
+	forge.prs[1].HeadSHA = head
+	var err error
+	for range 3 {
+		if err = ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+			break
+		}
+	}
+	codeIs(t, err, loomgit.Stale)
+	merge, mergeErr := item.store.LoomMerge(ctx, "W", "feature")
+	if mergeErr != nil || merge.Phase != "blocked" || forge.merged != 1 {
+		t.Fatalf("moved no-op head merge = %+v, merged = %d, err = %v", merge, forge.merged, mergeErr)
+	}
+}
+
+func TestLoomMergeSquashRestackAfterSameHeadReapproval(t *testing.T) {
+	item, forge, request := threeLayerMergeFixture(t)
+	ctx := context.Background()
+	reapproveSameHead(t, item, "B", forge.prs[1].HeadSHA)
+	if err := (LoomStackBackend{Store: item.store}).MergeUpTo(ctx, request, "B"); err != nil {
+		t.Fatal(err)
+	}
+	for index, change := range []string{"A", "B"} {
+		if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+			t.Fatal(err)
+		}
+		landed := squashMergeLayer(t, item, change)
+		if err := item.store.MarkLanded(ctx, "W", change, "merge_commit"); err != nil {
+			t.Fatal(err)
+		}
+		next := forge.prs[index+1].HeadSHA
+		restackAfterMerge(t, item, forge, change, []string{"B", "C"}[index], landed)
+		if forge.prs[index+1].HeadSHA == next {
+			t.Fatalf("squash restack kept %s", forge.prs[index+1].Head)
+		}
+		for range 3 {
+			if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	merge, err := item.store.LoomMerge(ctx, "W", "feature")
+	if err != nil || merge.Phase != "done" || forge.merged != 2 || len(forge.deleted) != 2 {
+		t.Fatalf("re-approved squash merge = %+v, merged = %d, deleted = %v, err = %v", merge, forge.merged, forge.deleted, err)
 	}
 }

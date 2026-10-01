@@ -298,7 +298,9 @@ func loomNextLayerReady(ctx context.Context, store *journal.SQLite, forge loomMe
 		return false, nil
 	}
 	if publication.Head == next.Head {
-		return false, nil
+		if done, err := loomRestackDone(ctx, store, next.Change, landed); err != nil || !done {
+			return false, err
+		}
 	}
 	if pr.Base != landed.Trunk {
 		return false, loomgit.NewError(loomgit.Stale, "restacked PR changed or was not retargeted", nil)
@@ -308,6 +310,16 @@ func loomNextLayerReady(ctx context.Context, store *journal.SQLite, forge loomMe
 		return ready, err
 	}
 	return true, confirmNextHeadAfterChecks(ctx, store, forge, merge, publication, owner, repo, landed.Trunk)
+}
+
+func loomRestackDone(ctx context.Context, store *journal.SQLite, change string, landed journal.Publication) (bool, error) {
+	offers, err := store.RestackOffers(ctx, landed.Workspace, change)
+	for _, offer := range offers {
+		if offer.Predecessor == landed.Change && offer.DerivedRevision > 0 {
+			return true, nil
+		}
+	}
+	return false, err
 }
 
 func loomNextChecks(ctx context.Context, forge loomMergeForge, publication journal.Publication,
@@ -370,14 +382,17 @@ func requireConfirmedHead(ctx context.Context, store *journal.SQLite, merge jour
 		return loomgit.NewError(loomgit.Stale, "merge layer is outside confirmation", nil)
 	}
 	revision, err := store.RevisionByHead(ctx, merge.Workspace, original.Change, publication.Head)
+	if publication.Head == original.Head {
+		revision, err = store.GetRevision(ctx, merge.Workspace, original.Change, original.Revision)
+	}
 	if err != nil {
 		return loomgit.NewError(loomgit.Stale, "merge head has no recorded revision", err)
 	}
 	if err := review.RequireVerdict(ctx, store, merge.Workspace, original.Change, revision.Number, revision.HeadSHA, "publish", ""); err != nil {
 		return err
 	}
-	for revision.Number != original.Revision {
-		if revision.DerivedFromChange != original.Change || revision.DerivedFromNumber < original.Revision || revision.DerivedFromNumber >= revision.Number {
+	for revision.Number != original.Revision && revision.HeadSHA != original.Head {
+		if revision.DerivedFromChange != original.Change || revision.DerivedFromNumber < 1 || revision.DerivedFromNumber >= revision.Number {
 			return loomgit.NewError(loomgit.Stale, "merge head was not derived from confirmation", nil)
 		}
 		revision, err = store.GetRevision(ctx, merge.Workspace, original.Change, revision.DerivedFromNumber)
