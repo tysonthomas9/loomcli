@@ -107,6 +107,10 @@ func TestAdapterContract(t *testing.T) {
 		}
 	})
 	t.Run("Move", func(t *testing.T) {
+		// Back to haiku, so a run has exactly one sonnet turn (Model's).
+		if err := s.SetModel(ctx, "haiku"); err != nil {
+			t.Fatal(err)
+		}
 		moved, err := os.MkdirTemp("", "loom-claude-moved-")
 		if err != nil {
 			t.Fatal(err)
