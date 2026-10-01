@@ -89,23 +89,45 @@ func (a *Adapter) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharn
 	if len(spec.Rules) > 0 || len(spec.Preset.Tools) > 0 {
 		return loomharness.NativeRef{}, errors.New("codex: permission rules and preset tools are not installed yet (4.2); refusing to open a thread without them")
 	}
-	ref := loomharness.NativeRef{Root: a.Root(spec.Launch.Root)}
+	ref, created, err := a.adoptOrCreate(ctx, spec)
+	if err == nil {
+		return ref, nil
+	}
+	if !created {
+		return loomharness.NativeRef{}, err
+	}
+	// Delete the new thread outside openMu, so a slow delete never holds up
+	// another Open, and even when ctx has ended.
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	defer cancel()
+	if derr := a.delete(dctx, ref); derr != nil {
+		return ref, fmt.Errorf("%w (and deleting the new thread %s failed: %w)", err, ref.NativeID, derr)
+	}
+	return loomharness.NativeRef{}, err
+}
+
+// cleanupTimeout bounds deleting a thread Open created but could not name.
+var cleanupTimeout = 10 * time.Second
+
+// adoptOrCreate is Open's step under openMu: the thread this process opened
+// for the key, else the one named for it, else a new named one. created
+// reports a new thread that it could not name; that thread is unnamed and
+// unrecorded, so no other Open can adopt it.
+func (a *Adapter) adoptOrCreate(ctx context.Context, spec loomharness.OpenSpec) (ref loomharness.NativeRef, created bool, err error) {
+	ref = loomharness.NativeRef{Root: a.Root(spec.Launch.Root)}
 	key := opening{ref.Root, spec.Dir, spec.Key}
 	a.openMu.Lock()
 	defer a.openMu.Unlock()
 	if ref.NativeID = a.opened[key]; ref.NativeID != "" {
-		return ref, nil
+		return ref, false, nil
 	}
 	conn, err := a.Conn(ctx, ref.Root)
 	if err != nil {
-		return loomharness.NativeRef{}, err
+		return ref, false, err
 	}
 	marker := markerPrefix + spec.Key
-	if ref.NativeID, err = adopt(ctx, conn, spec.Dir, marker); err != nil {
-		return loomharness.NativeRef{}, err
-	}
-	if ref.NativeID != "" {
-		return ref, nil
+	if ref.NativeID, err = adopt(ctx, conn, spec.Dir, marker); err != nil || ref.NativeID != "" {
+		return ref, false, err
 	}
 	params := protocol.ThreadStartParams{Cwd: &spec.Dir, HistoryMode: protocol.ThreadHistoryModePaginated}
 	if spec.Model != "" {
@@ -116,20 +138,14 @@ func (a *Adapter) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharn
 	}
 	var started protocol.ThreadStartResponse
 	if err := conn.Call(ctx, "thread/start", params, &started); err != nil {
-		return loomharness.NativeRef{}, fmt.Errorf("codex thread/start: %w", err)
+		return ref, false, fmt.Errorf("codex thread/start: %w", err)
 	}
 	ref.NativeID = started.Thread.Id
 	if err := conn.Call(ctx, "thread/name/set", protocol.ThreadSetNameParams{ThreadId: ref.NativeID, Name: marker}, nil); err != nil {
-		// Delete the unnamed thread even when ctx has ended.
-		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), startTimeout)
-		defer cancel()
-		if derr := a.delete(dctx, ref); derr != nil {
-			return ref, fmt.Errorf("codex thread/name/set: %w (and deleting the new thread %s failed: %w)", err, ref.NativeID, derr)
-		}
-		return loomharness.NativeRef{}, fmt.Errorf("codex thread/name/set: %w", err)
+		return ref, true, fmt.Errorf("codex thread/name/set: %w", err)
 	}
 	a.opened[key] = ref.NativeID
-	return ref, nil
+	return ref, false, nil
 }
 
 // adopt finds the thread named marker in dir: "" when none, an error when

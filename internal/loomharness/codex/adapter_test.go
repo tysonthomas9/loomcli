@@ -52,7 +52,8 @@ func saveStore(home string, s fakeStore) {
 // error messages. thread/list pages one listed thread at a time; thread/turns/list
 // returns $CODEX_HOME/turns-<id>.json, and a thread without one is not
 // materialized. Deleting fails while $CODEX_HOME/fail-delete exists, and
-// naming while $CODEX_HOME/fail-name exists.
+// naming while $CODEX_HOME/fail-name exists; with $CODEX_HOME/slow-delete a
+// delete writes $CODEX_HOME/deleting and takes 3 s.
 func fakeThreads(home, method string, raw json.RawMessage) (any, error) {
 	var p struct {
 		ThreadID, Cwd, Name, SearchTerm, Cursor string
@@ -87,6 +88,10 @@ func fakeThreads(home, method string, raw json.RawMessage) (any, error) {
 	case "thread/delete":
 		if _, err := os.Stat(filepath.Join(home, "fail-delete")); err == nil {
 			return nil, errors.New("disk full")
+		}
+		if _, err := os.Stat(filepath.Join(home, "slow-delete")); err == nil {
+			_ = os.WriteFile(filepath.Join(home, "deleting"), nil, 0o600)
+			time.Sleep(3 * time.Second)
 		}
 		if !ok {
 			return nil, fmt.Errorf("no rollout found for thread id %s", p.ThreadID)
@@ -626,5 +631,54 @@ func TestCodexOpenLeavesNothingOnError(t *testing.T) {
 	}
 	if ref, err = a.Open(ctx, spec("k1", "/work", "")); err != nil || ref.NativeID == "" {
 		t.Fatalf("Open after the failures: %+v %v", ref, err)
+	}
+}
+
+// TestCodexSlowCleanupDoesNotBlockOpen: while Open deletes a thread it could
+// not name, another Open (another key, on another root's server) is not held
+// up by it.
+func TestCodexSlowCleanupDoesNotBlockOpen(t *testing.T) {
+	f := newFixture(t, "codex-cli 0.157.1")
+	a, ctx := newAdapter(t, f), context.Background()
+	root := a.Root("")
+	saveStore(root, fakeStore{Threads: map[string]fakeThread{}})
+	for _, name := range []string{"fail-name", "slow-delete"} {
+		if err := os.WriteFile(filepath.Join(root, name), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	type result struct {
+		ref loomharness.NativeRef
+		err error
+	}
+	failing := make(chan result, 1)
+	go func() {
+		ref, err := a.Open(ctx, spec("k1", "/work", ""))
+		failing <- result{ref, err}
+	}()
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if _, err := os.Stat(filepath.Join(root, "deleting")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the cleanup delete never started")
+		}
+	}
+
+	octx, cancel := context.WithTimeout(ctx, 2*time.Second) // well inside the 3 s delete
+	defer cancel()
+	other, err := a.Open(octx, spec("k2", "/work", f.profile))
+	if err != nil || other.NativeID == "" {
+		t.Fatalf("Open during another key's cleanup: %+v %v", other, err)
+	}
+	select {
+	case r := <-failing:
+		t.Fatalf("the failing Open returned before its slow delete: %+v %v", r.ref, r.err)
+	default:
+	}
+
+	r := <-failing
+	if r.err == nil || r.ref != (loomharness.NativeRef{}) || len(loadStore(root).Threads) != 0 {
+		t.Fatalf("failing Open: %+v %v, threads %v; want the zero ref and nothing left", r.ref, r.err, loadStore(root).Threads)
 	}
 }
