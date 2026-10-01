@@ -5,8 +5,11 @@ package realtime
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http/httptest"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -263,4 +266,110 @@ func TestBugReplay626e(t *testing.T) {
 	if got := strings.Count(secondResponse.Body.String(), "event: mutation\n"); got != 0 {
 		t.Fatalf("#626e: event already applied before reconnect was applied %d more times: %s", got, secondResponse.Body.String())
 	}
+}
+
+// stalledResponse models a browser connection whose TCP window never opens:
+// Write blocks until a write deadline passes, then fails like net.Conn does.
+type stalledResponse struct {
+	*httptest.ResponseRecorder
+	mu       sync.Mutex
+	deadline time.Time
+	release  chan struct{}
+}
+
+func (w *stalledResponse) SetWriteDeadline(deadline time.Time) error {
+	w.mu.Lock()
+	w.deadline = deadline
+	w.mu.Unlock()
+	return nil
+}
+
+func (w *stalledResponse) Write([]byte) (int, error) {
+	for {
+		w.mu.Lock()
+		deadline := w.deadline
+		w.mu.Unlock()
+		if !deadline.IsZero() && time.Now().After(deadline) {
+			return 0, os.ErrDeadlineExceeded
+		}
+		select {
+		case <-w.release:
+			return 0, io.ErrClosedPipe
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func TestBugReplay612b(t *testing.T) {
+	response := &stalledResponse{ResponseRecorder: httptest.NewRecorder(), release: make(chan struct{})}
+	defer close(response.release)
+	writer, err := NewWriter(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- writer.WriteEventNoID("mutation", `{"type":"update"}`) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("stalled write reported success")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("#612b: write to a stalled browser connection had no deadline and blocked the writer indefinitely")
+	}
+}
+
+// TestBugReplay670 resumes with a cursor minted by an earlier FleetDB source
+// incarnation. The restored source has only lower cursors, so an unbound
+// resume value replays nothing and the browser is told it is connected.
+func TestBugReplay670(t *testing.T) {
+	handler := NewHandler(HandlerConfig{
+		Hub: NewHub(),
+		GetMutationsSince: func(_, since string) ([]rpc.MutationEvent, error) {
+			if since != "5-0" {
+				t.Fatalf("since = %q, want the browser's old-incarnation cursor 5-0", since)
+			}
+			return nil, nil // Restored log holds 1-0..3-0, all "before" 5-0.
+		},
+		WorkspaceFromCtx: func(context.Context) string { return "ws-replay" },
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	request := httptest.NewRequest("GET", "/events", nil).WithContext(ctx)
+	request.Header.Set("Last-Event-ID", "5-0")
+	response := &cancelOnConnectedWriter{ResponseRecorder: httptest.NewRecorder(), cancel: cancel}
+	handler.ServeHTTP(response, request)
+	if strings.Contains(response.Body.String(), "event: connected\n") {
+		t.Fatalf("#670: resume cursor with no source identity was accepted; restored events 1-0..3-0 are skipped: %s", response.Body.String())
+	}
+}
+
+func TestBugReplay672(t *testing.T) {
+	handler := NewHandler(HandlerConfig{
+		Hub: NewHub(),
+		GetMutationsSince: func(string, string) ([]rpc.MutationEvent, error) {
+			return nil, errors.New(`fleet mutations: 410 cursor_expired: cursor "1-0" is below retention floor`)
+		},
+		WorkspaceFromCtx: func(context.Context) string { return "ws-replay" },
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	request := httptest.NewRequest("GET", "/events", nil).WithContext(ctx)
+	request.Header.Set("Last-Event-ID", "1-0")
+	response := &cancelOnConnectedWriter{ResponseRecorder: httptest.NewRecorder(), cancel: cancel}
+	handler.ServeHTTP(response, request)
+	if !strings.Contains(response.Body.String(), "event: ") {
+		t.Fatalf("#672: expired resume cursor ended the stream with no recovery frame; the browser retries the same cursor: %q", response.Body.String())
+	}
+}
+
+type cancelOnConnectedWriter struct {
+	*httptest.ResponseRecorder
+	cancel context.CancelFunc
+}
+
+func (w *cancelOnConnectedWriter) Write(frame []byte) (int, error) {
+	n, err := w.ResponseRecorder.Write(frame)
+	if strings.Contains(string(frame), "event: connected\n") {
+		w.cancel()
+	}
+	return n, err
 }
