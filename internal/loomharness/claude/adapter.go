@@ -92,6 +92,10 @@ func (a *Adapter) Open(_ context.Context, spec loomharness.OpenSpec) (loomharnes
 		return loomharness.NativeRef{}, fmt.Errorf("claude: config root %s: %w", l.Root, err)
 	}
 	l.Root = root
+	check := NewProcess(a.cfg, ProcessSpec{Launch: l})
+	if err := check.checkRoot(check.env()); err != nil {
+		return loomharness.NativeRef{}, err
+	}
 	ref := loomharness.NativeRef{Root: root, NativeID: SessionID(spec.Key)}
 	s := a.session(ref)
 	s.mu.Lock()

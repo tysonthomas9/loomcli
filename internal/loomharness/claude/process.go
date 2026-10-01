@@ -195,6 +195,9 @@ func (p *Process) launch(ctx context.Context, line []byte) error {
 // start checks the version, then starts the process and its reader.
 func (p *Process) start(ctx context.Context, resume bool) error {
 	env := p.env()
+	if err := p.checkRoot(env); err != nil {
+		return err
+	}
 	ver := exec.CommandContext(ctx, p.cfg.Bin, "--version") //nolint:gosec // G204: the configured claude binary.
 	ver.Env = env
 	out, err := ver.Output()
@@ -414,6 +417,44 @@ func (p *Process) transcriptExists() bool {
 	}
 	m, _ := filepath.Glob(filepath.Join(root, "projects", "*", p.spec.SessionID+".jsonl"))
 	return len(m) > 0
+}
+
+// checkRoot fails unless the config dir the child will use (CLAUDE_CONFIG_DIR
+// in env, else HOME/.claude) resolves to the recorded root, so its transcripts
+// land where discovery and Purge look. It runs at Open and before every launch:
+// an alias retargeted since Open is refused, never followed.
+func (p *Process) checkRoot(env []string) error {
+	root := p.spec.Launch.Root
+	if root == "" {
+		root = sessions.ClaudeConfigDir()
+	}
+	dir, ok := lookup(env, "CLAUDE_CONFIG_DIR")
+	if !ok || dir == "" {
+		home, _ := lookup(env, "HOME")
+		dir = filepath.Join(home, ".claude")
+	}
+	want, err := canonical(root)
+	if err != nil {
+		return fmt.Errorf("claude: recorded root %s: %w", root, err)
+	}
+	got, err := canonical(dir)
+	if err != nil {
+		return fmt.Errorf("claude: config dir %s: %w", dir, err)
+	}
+	if got != want {
+		return fmt.Errorf("claude: config dir %s resolves to %s, not the recorded root %s; refusing", dir, got, want)
+	}
+	return nil
+}
+
+// lookup returns the value of key in env.
+func lookup(env []string, key string) (string, bool) {
+	for _, kv := range env {
+		if k, v, _ := strings.Cut(kv, "="); k == key {
+			return v, true
+		}
+	}
+	return "", false
 }
 
 // env is the base environment without GitHub tokens, with the launch env

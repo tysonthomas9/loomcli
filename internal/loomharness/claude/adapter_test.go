@@ -215,7 +215,7 @@ func TestClaudeReturnsActualNativeRef(t *testing.T) {
 	}
 	user := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", user)
-	inherited, err := a.Open(ctx, loomharness.OpenSpec{Key: "agent-inherited", Dir: t.TempDir()})
+	inherited, err := New(Config{}).Open(ctx, loomharness.OpenSpec{Key: "agent-inherited", Dir: t.TempDir()})
 	if err != nil || inherited.Root != user {
 		t.Fatalf("inherited-login ref = %+v, %v; want the user's root %s", inherited, err, user)
 	}
@@ -396,6 +396,59 @@ func TestClaudeSymlinkedRootOpensCanonical(t *testing.T) {
 	}
 }
 
+// TestClaudeOpenRefusesConfigRootDivergence: Open fails unless the config dir
+// the child will use resolves to the root it records, so Purge never misses
+// a transcript written elsewhere.
+func TestClaudeOpenRefusesConfigRootDivergence(t *testing.T) {
+	ctx := context.Background()
+	root, other, home := t.TempDir(), t.TempDir(), t.TempDir()
+	for name, c := range map[string]struct {
+		env []string
+		l   loomharness.Launch
+	}{
+		"launch config elsewhere":        {[]string{"HOME=" + home}, loomharness.Launch{Root: root, Env: map[string]string{"CLAUDE_CONFIG_DIR": other}}},
+		"inherited config elsewhere":     {[]string{"HOME=" + home, "CLAUDE_CONFIG_DIR=" + other}, loomharness.Launch{Root: root}},
+		"default HOME/.claude elsewhere": {[]string{"HOME=" + home}, loomharness.Launch{Root: root}},
+	} {
+		if _, err := New(Config{Env: c.env}).Open(ctx, loomharness.OpenSpec{Key: "k", Dir: t.TempDir(), Launch: c.l}); err == nil {
+			t.Errorf("%s: Open accepted a config dir that is not the recorded root", name)
+		}
+	}
+	if _, err := New(Config{Env: []string{"HOME=" + home}}).Open(ctx, loomharness.OpenSpec{Key: "k", Dir: t.TempDir(),
+		Launch: loomharness.Launch{Root: filepath.Join(home, ".claude")}}); err != nil {
+		t.Fatalf("default HOME/.claude as the root refused: %v", err)
+	}
+}
+
+// TestClaudeLaunchRefusesRetargetedAlias: a config alias retargeted after Open
+// is refused at launch, never followed.
+func TestClaudeLaunchRefusesRetargetedAlias(t *testing.T) {
+	a, _, f := newAdapter(t)
+	ctx := context.Background()
+	elsewhere := t.TempDir()
+	link := filepath.Join(t.TempDir(), "claude")
+	if err := os.Symlink(f.root, link); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := a.Open(ctx, loomharness.OpenSpec{Key: "agent-alias", Dir: t.TempDir(),
+		Launch: loomharness.Launch{Root: link, Env: map[string]string{"CLAUDE_CONFIG_DIR": link}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Session(ref).Prompt(ctx, loomharness.Input{Key: "k1", Text: "hello"}); err == nil {
+		t.Fatal("a launch through a retargeted alias was not refused")
+	}
+	if got := launches(t, f.dumpPath); len(got) != 0 {
+		t.Fatalf("claude launched %d times through the retargeted alias", len(got))
+	}
+}
+
 func TestClaudePurgeFailsVisiblyAndRetries(t *testing.T) {
 	root := t.TempDir()
 	n := uuid.NewString()
@@ -553,7 +606,8 @@ func TestClaudeSessionsKeyedByRootAndID(t *testing.T) {
 	ctx := context.Background()
 	oldRef, oldSession := open(t, a, f, "agent-rooted")
 	newRoot := t.TempDir()
-	newRef, err := a.Open(ctx, loomharness.OpenSpec{Key: "agent-rooted", Dir: t.TempDir(), Launch: loomharness.Launch{Root: newRoot}})
+	newRef, err := a.Open(ctx, loomharness.OpenSpec{Key: "agent-rooted", Dir: t.TempDir(),
+		Launch: loomharness.Launch{Root: newRoot, Env: map[string]string{"CLAUDE_CONFIG_DIR": newRoot}}})
 	if err != nil {
 		t.Fatal(err)
 	}

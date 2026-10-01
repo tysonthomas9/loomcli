@@ -62,7 +62,7 @@ func fakeClaude() {
 		}
 	}
 	path := filepath.Join(root, "projects", "fake", id+".jsonl")
-	if _, err := os.Stat(path); err == nil && !resume {
+	if _, err := os.Stat(path); (err == nil || os.Getenv("LOOM_FAKE_CLAUDE_IN_USE") == id) && !resume {
 		fmt.Fprintf(os.Stderr, "Error: Session ID %s is already in use.\n", id)
 		os.Exit(1)
 	}
@@ -174,15 +174,6 @@ func launches(t *testing.T, path string) []launchDump {
 	return out
 }
 
-func lookup(env []string, key string) (string, bool) {
-	for _, kv := range env {
-		if k, v, _ := strings.Cut(kv, "="); k == key {
-			return v, true
-		}
-	}
-	return "", false
-}
-
 type fixture struct {
 	root     string // the fake's config root; tests pass it as Launch.Root
 	dumpPath string
@@ -199,6 +190,9 @@ func newFixture(t *testing.T, version string, extra ...string) (*fixture, Config
 		"LOOM_FAKE_CLAUDE=1", "LOOM_FAKE_CLAUDE_VERSION=" + version,
 		"LOOM_FAKE_CLAUDE_DUMP=" + f.dumpPath, "LOOM_FAKE_CLAUDE_ROOT=" + f.root,
 	}, extra...)
+	if _, ok := lookup(extra, "CLAUDE_CONFIG_DIR"); !ok {
+		f.env = append(f.env, "CLAUDE_CONFIG_DIR="+f.root) // the config dir is the recorded root
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -281,18 +275,11 @@ func TestClaudeProcessPromptInterruptRelaunch(t *testing.T) {
 }
 
 func TestClaudeSessionIDInUseResumes(t *testing.T) {
-	f, cfg := newFixture(t, "2.1.285")
 	id := SessionID("agent-in-use")
-	path := filepath.Join(f.root, "projects", "fake", id+".jsonl")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	// Launch.Root does not show the transcript, so the first launch is
-	// --session-id, which the fake refuses as already in use.
-	p := newTestProcess(t, cfg, ProcessSpec{SessionID: id, Launch: loomharness.Launch{Root: t.TempDir()}, Dir: t.TempDir()})
+	// Claude answers --session-id with "already in use" although Loom's root
+	// shows no transcript for it yet.
+	f, cfg := newFixture(t, "2.1.285", "LOOM_FAKE_CLAUDE_IN_USE="+id)
+	p := newTestProcess(t, cfg, ProcessSpec{SessionID: id, Launch: loomharness.Launch{Root: f.root}, Dir: t.TempDir()})
 	defer func() { _ = p.Close(context.Background()) }()
 	if err := p.Prompt(context.Background(), "k1", "hello"); err != nil {
 		t.Fatal(err)
