@@ -13,7 +13,6 @@ setup: >-
   git -C "$repo" config core.sshCommand "sh $AFT_TESTS_DIR/fixtures/fake-github/git-ssh-bridge.sh $remote";
   git -C "$repo" remote add origin git@github.com:owner/repo.git;
   git -C "$repo" push -q origin main;
-  curl -sf -X POST "$AFT_FAKE_GH_BASE/__reset" >/dev/null;
   curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H 'Content-Type: application/json'
   -d "{\"name\":\"e2e-ws-stack\",\"type\":\"empty\",\"repos\":[\"$repo\"]}" >/dev/null
 teardown: >-
@@ -147,8 +146,9 @@ tests:
           git -C "$repo" fetch -q origin "$branch";
           sha="$(git -C "$repo" rev-parse FETCH_HEAD)";
           git -C "$repo" push -q origin FETCH_HEAD:refs/heads/main;
+          number="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["url"].rsplit("/",1)[-1])' "$AFT_WORK_DIR/stack-publish.json")";
           curl -sf -X POST "$AFT_FAKE_GH_BASE/__merge" -H 'Content-Type: application/json'
-          -d "{\"number\":1,\"sha\":\"$sha\"}" > "$AFT_WORK_DIR/stack-merge.json";
+          -d "{\"number\":$number,\"sha\":\"$sha\"}" > "$AFT_WORK_DIR/stack-merge.json";
           grep -q '"state":"closed"' "$AFT_WORK_DIR/stack-merge.json"
         intent: Merge only X into the disposable bare trunk and expose its owned PR merge to landing detection
       - run: >-
@@ -243,6 +243,33 @@ tests:
         intent: Open the abandoned task in the review UI
       - wait: { text: Incomplete capture }
         intent: The review UI warns that the captured task copy is incomplete
+
+  - name: abandoning published dependent Y preserves its task copy
+    intent: A published dependent can be abandoned through its original task-copy source without losing unsafe work
+    steps:
+      - run: >-
+          set -e;
+          repo="$AFT_WORK_DIR/stack-repo";
+          task="$(cat "$AFT_WORK_DIR/stackYId")";
+          task_lower="$(printf '%s' "$task" | tr '[:upper:]' '[:lower:]')";
+          copy="$(git -C "$repo" worktree list --porcelain | awk -v suffix="-$task_lower-a1" '/^worktree / {path=substr($0,10); if (substr(path,length(path)-length(suffix)+1)==suffix) print path}')";
+          test -d "$copy";
+          printf 'private-key-material\n' > "$copy/id_ed25519";
+          printf '%s\n' "$copy" > "$AFT_WORK_DIR/stack-published-y-copy";
+          attempt="$(basename "$copy")";
+          if ! LOOM_WORKSPACE=E2E-WS-STACK LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" abandon "$task" --workspace-id E2E-WS-STACK --repo-name stack-repo --attempt "$attempt" --task-copy "$copy" --source-repo "$repo" --reason 'AFT abandon published dependent' --yes > "$AFT_WORK_DIR/stack-published-y-abandon.txt" 2> "$AFT_WORK_DIR/stack-published-y-abandon.err"; then
+            test -f "$copy/id_ed25519";
+            cat "$AFT_WORK_DIR/stack-published-y-abandon.err" >&2;
+            exit 1;
+          fi;
+          grep -q 'capture complete: false' "$AFT_WORK_DIR/stack-published-y-abandon.txt";
+          test -f "$copy/id_ed25519"
+        intent: Published Y abandons without rejecting its real source repo and keeps the unsafe file
+      - run: >-
+          task="$(cat "$AFT_WORK_DIR/stackYId")";
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-STACK/issues/$task/revisions" > "$AFT_WORK_DIR/stack-published-y-abandoned.json";
+          python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; assert item["outcome"]=="abandoned" and item["incomplete"] is True' "$AFT_WORK_DIR/stack-published-y-abandoned.json"
+        intent: Published Y records an incomplete abandoned revision for review
 
   - name: foreign trunk push reports a diverged published change
     intent: An unrelated provider push replaces trunk after X published, and product inventory reports the divergence
