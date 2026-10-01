@@ -98,33 +98,39 @@ func (s *Service) backfill(ctx context.Context, harness string) error {
 		if a.HarnessSessionID == nil {
 			continue
 		}
-		sess := s.harnesses[harness].Session(loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: *a.HarnessSessionID})
-		s.dropAsks(a.AgentID, true) // the history rebuilds them; loseAsks reports the rest
-		for after := ""; ; {
-			page, err := sess.Messages(ctx, after, 100)
-			if errors.Is(err, loomharness.ErrSessionNotFound) {
-				break
-			}
-			if err != nil {
-				return err
-			}
-			for _, e := range page.Events {
-				if e.Type == loomharness.EventDelta {
-					continue // live only: a subscriber had it, or missed it with the gap
-				}
-				if _, err := s.ingest(ctx, harness, e); err != nil {
-					return err
-				}
-			}
-			if after = page.Next; after == "" {
-				break
-			}
+		s.rebuild(a.AgentID, true) // the replay shows which open asks remain
+		err := s.replay(ctx, harness, a)
+		if err == nil {
+			err = s.loseAsks(ctx, a.AgentID)
 		}
-		if err := s.loseAsks(ctx, a.AgentID); err != nil {
+		s.rebuild(a.AgentID, false) // a failed or partial replay loses no ask
+		if err != nil && !errors.Is(err, loomharness.ErrSessionNotFound) {
 			return err
 		}
 	}
 	return nil
+}
+
+// replay ingests a's whole current native history.
+func (s *Service) replay(ctx context.Context, harness string, a loomstore.Agent) error {
+	sess := s.harnesses[harness].Session(loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: *a.HarnessSessionID})
+	for after := ""; ; {
+		page, err := sess.Messages(ctx, after, 100)
+		if err != nil {
+			return err
+		}
+		for _, e := range page.Events {
+			if e.Type == loomharness.EventDelta {
+				continue // live only: a subscriber had it, or missed it with the gap
+			}
+			if _, err := s.ingest(ctx, harness, e); err != nil {
+				return err
+			}
+		}
+		if after = page.Next; after == "" {
+			return nil
+		}
+	}
 }
 
 // harnessAttention raises Attention harness_unavailable on each live agent

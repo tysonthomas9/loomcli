@@ -2,7 +2,9 @@ package loomagent
 
 import (
 	"context"
+	"errors"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,26 +27,46 @@ func askIDs(t *testing.T, s *Service, agentID string) []string {
 	return out
 }
 
-// pendingOnly serves a native history without the given asks, as OpenCode's
-// history lists only asks still pending.
-type pendingOnly struct {
+// tweaked wraps a harness: its history leaves out ask gone (as OpenCode's
+// lists only asks still pending), or fails with msgErr; a Reply with Always
+// fails with alwaysErr. It counts history reads and records replies.
+type tweaked struct {
 	loomharness.Harness
-	gone string
+	gone              string
+	msgErr, alwaysErr error
+	reads             *atomic.Int32
+	replies           *[]loomharness.Reply
 }
 
-func (p pendingOnly) Session(ref loomharness.NativeRef) loomharness.Session {
-	return pendingSession{p.Harness.Session(ref), p.gone}
+func (w tweaked) Session(ref loomharness.NativeRef) loomharness.Session {
+	return tweakedSession{w.Harness.Session(ref), w}
 }
 
-type pendingSession struct {
+type tweakedSession struct {
 	loomharness.Session
-	gone string
+	w tweaked
 }
 
-func (p pendingSession) Messages(ctx context.Context, after string, limit int) (loomharness.MessagePage, error) {
+func (p tweakedSession) Messages(ctx context.Context, after string, limit int) (loomharness.MessagePage, error) {
+	if p.w.reads != nil {
+		p.w.reads.Add(1)
+	}
+	if p.w.msgErr != nil {
+		return loomharness.MessagePage{}, p.w.msgErr
+	}
 	page, err := p.Session.Messages(ctx, after, limit)
-	page.Events = slices.DeleteFunc(page.Events, func(e loomharness.Event) bool { return e.AskID == p.gone })
+	page.Events = slices.DeleteFunc(page.Events, func(e loomharness.Event) bool { return e.AskID == p.w.gone })
 	return page, err
+}
+
+func (p tweakedSession) Reply(ctx context.Context, askID string, r loomharness.Reply) error {
+	if p.w.replies != nil {
+		*p.w.replies = append(*p.w.replies, r)
+	}
+	if r.Always && p.w.alwaysErr != nil {
+		return p.w.alwaysErr
+	}
+	return p.Session.Reply(ctx, askID, r)
 }
 
 // TestGetOpenAsksIntegration: approval and question asks show in Get with
@@ -84,7 +106,7 @@ func TestGetOpenAsksIntegration(t *testing.T) {
 
 	stop1() // serve restarts; meanwhile beta's approval stopped being pending
 	s2 := e.service(ServiceConfig{})
-	s2.harnesses["opencode"] = pendingOnly{e.h, "b1"}
+	s2.harnesses["opencode"] = tweaked{Harness: e.h, gone: "b1"}
 	stop2 := startFeed(s2, e)
 	defer stop2()
 	eventually(t, "the ask table rebuilt", func() bool {
@@ -259,5 +281,70 @@ func TestHarnessAttentionOnlyAffectedAgents(t *testing.T) {
 	eventually(t, "a1's Attention cleared", func() bool { return s.get(t, "a1").AttentionReason == nil })
 	if r := deref(s.get(t, "a3").AttentionReason); r != AttentionDeliveryUnknown {
 		t.Fatalf("a3's Attention = %s after recovery; want delivery_unknown kept", r)
+	}
+}
+
+// TestFailedBackfillKeepsOpenAsks: a backfill whose history read fails
+// leaves the open asks as they are: Get still lists them, no ask.lost is
+// saved, and Respond still answers them.
+func TestFailedBackfillKeepsOpenAsks(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	stop := startFeed(s, e)
+	a, _ := newLead(t, e, s, "alpha")
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
+	eventually(t, "a1 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) })
+	stop()
+	var reads atomic.Int32
+	s.harnesses["opencode"] = tweaked{Harness: e.h, msgErr: errors.New("history read failed"), reads: &reads}
+	stop = startFeed(s, e)
+	eventually(t, "two failed backfills", func() bool { return reads.Load() >= 2 })
+	stop()
+	if got := askIDs(t, s, a.AgentID); !slices.Equal(got, []string{"a1:approval"}) {
+		t.Fatalf("open asks after a failed backfill = %v", got)
+	}
+	if lost := kinds(rows(t, s, a.AgentID, 0), KindAskLost); len(lost) != 0 {
+		t.Fatalf("a failed backfill saved %d ask.lost", len(lost))
+	}
+	if ag := s.get(t, a.AgentID); ag.State != StateWaiting {
+		t.Fatalf("state %s; want still waiting", ag.State)
+	}
+	s.harnesses["opencode"] = e.h
+	if err := s.Respond(ctx, RespondRequest{AgentID: a.AgentID, AskID: "a1", Decision: "allow_once"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRespondAlwaysNotNarrowed: allow_always reaches the harness as Always;
+// a harness that cannot keep it fails, Respond returns that failure and the
+// ask stays open for another answer.
+func TestRespondAlwaysNotNarrowed(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	stop := startFeed(s, e)
+	a, _ := newLead(t, e, s, "alpha")
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
+	eventually(t, "a1 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) })
+	stop()
+	var replies []loomharness.Reply
+	s.harnesses["opencode"] = tweaked{Harness: e.h, alwaysErr: loomharness.ErrUnavailable, replies: &replies}
+	wantCode(t, s.Respond(ctx, RespondRequest{AgentID: a.AgentID, AskID: "a1", Decision: "allow_always"}), CodeHarnessUnavailable)
+	if len(replies) != 1 || !replies[0].Allow || !replies[0].Always {
+		t.Fatalf("replies = %+v; want one Allow+Always", replies)
+	}
+	if got := askIDs(t, s, a.AgentID); !slices.Equal(got, []string{"a1:approval"}) {
+		t.Fatalf("open asks after a failed reply = %v", got)
+	}
+	if err := s.Respond(ctx, RespondRequest{AgentID: a.AgentID, AskID: "a1", Decision: "allow_once"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(replies) != 2 || replies[1].Always {
+		t.Fatalf("second reply = %+v; want once", replies)
 	}
 }

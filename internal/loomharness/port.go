@@ -97,7 +97,7 @@ type Input struct {
 // Reply answers an ask.
 type Reply struct {
 	Allow  bool
-	Always bool // with Allow: for the rest of the session; an adapter that cannot narrows it to once
+	Always bool // with Allow: for the rest of the session; an adapter that cannot keep it fails Reply (never narrows it)
 	Answer string
 }
 

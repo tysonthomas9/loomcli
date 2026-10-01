@@ -103,11 +103,15 @@ func (s *Service) askEvent(ctx context.Context, a loomstore.Agent, e loomharness
 	if e.ItemKind == "question" {
 		typ = "question"
 	}
-	s.setAsk(a.AgentID, Ask{ID: e.AskID, Type: typ, About: e.Text, TurnID: e.TurnID}, e.Type == loomharness.EventAskOpened)
+	open := e.Type == loomharness.EventAskOpened
+	s.setAsk(a.AgentID, Ask{ID: e.AskID, Type: typ, About: e.Text, TurnID: e.TurnID}, open)
 	s.mu.Lock()
-	replay := s.rebuilding[a.AgentID]
+	seen := s.rebuilding[a.AgentID]
+	if seen != nil {
+		seen[e.AskID] = open
+	}
 	s.mu.Unlock()
-	if replay {
+	if seen != nil {
 		return nil // loseAsks syncs once the history is replayed
 	}
 	return s.syncWaiting(ctx, a)
@@ -152,33 +156,43 @@ func (s *Service) endTurnAsks(ctx context.Context, a loomstore.Agent, turnID str
 	return nil
 }
 
-// dropAsks forgets agentID's open asks. With rebuild, a backfill replays
-// its native history next, and loseAsks ends the rebuild.
-func (s *Service) dropAsks(agentID string, rebuild bool) {
+// rebuild starts (start) or ends a replay of agentID's native history. The
+// open asks stay as they are meanwhile: only a replay that completes, through
+// loseAsks, may find one gone.
+func (s *Service) rebuild(agentID string, start bool) map[string]bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.asks, agentID)
-	s.rebuilding[agentID] = rebuild
+	seen := s.rebuilding[agentID]
+	delete(s.rebuilding, agentID)
+	if start {
+		s.rebuilding[agentID] = map[string]bool{}
+	}
+	return seen
 }
 
-// loseAsks saves ask.lost for every ask a's saved log shows open but its
-// rebuilt table does not: the harness no longer has it (it was answered or
-// cancelled while Loom was down, or its process ended). Then it syncs a's
-// waiting state. An ask is never dropped silently.
+// loseAsks ends a completed replay of agentID's native history: every ask
+// its saved log or table shows open that the history did not is saved as
+// ask.lost (it was answered or cancelled while Loom was down, or its process
+// ended). Then it syncs a's waiting state. An ask is never dropped silently.
 func (s *Service) loseAsks(ctx context.Context, agentID string) error {
 	defer s.lock(agentID)()
-	defer func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		s.rebuilding[agentID] = false
-	}()
+	seen := s.rebuild(agentID, false)
 	a, err := s.live(ctx, agentID)
 	if isCode(err, CodeAgentNotFound) {
 		return nil
 	} else if err != nil {
 		return err
 	}
-	saved, err := s.events.Page(ctx, loomstore.EventQuery{AgentID: agentID, Limit: math.MaxInt32,
+	if err := s.loseOpen(ctx, a, seen); err != nil {
+		return err
+	}
+	return s.syncWaiting(ctx, a)
+}
+
+// loseOpen saves one ask.lost, with its AskID, for each of a's open asks not
+// in keep, then removes it from the table.
+func (s *Service) loseOpen(ctx context.Context, a loomstore.Agent, keep map[string]bool) error {
+	saved, err := s.events.Page(ctx, loomstore.EventQuery{AgentID: a.AgentID, Limit: math.MaxInt32,
 		Kinds: []string{string(loomharness.EventAskOpened), string(loomharness.EventAskResolved), KindAskLost}})
 	if err != nil {
 		return err
@@ -197,18 +211,24 @@ func (s *Service) loseAsks(ctx context.Context, agentID string) error {
 			delete(opened, p.AskID)
 		}
 	}
-	s.mu.Lock()
-	for id := range s.asks[agentID] {
-		delete(opened, id)
+	ref := loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: deref(a.HarnessSessionID)}
+	for _, ask := range s.openAsks(a.AgentID) {
+		if _, ok := opened[ask.ID]; !ok {
+			opened[ask.ID] = nativeRow(a.AgentID, string(loomharness.EventAskOpened), loomharness.Event{
+				Type: loomharness.EventAskOpened, Session: ref, AskID: ask.ID, TurnID: ask.TurnID})
+		}
 	}
-	s.mu.Unlock()
-	for _, r := range opened {
+	for id, r := range opened {
+		if keep[id] {
+			continue
+		}
 		r.Kind, r.EventID = KindAskLost, KindAskLost+strings.TrimPrefix(r.EventID, string(loomharness.EventAskOpened))
 		if _, err := s.events.Append(ctx, r); err != nil {
 			return err
 		}
+		s.setAsk(a.AgentID, Ask{ID: id}, false)
 	}
-	return s.syncWaiting(ctx, a)
+	return nil
 }
 
 // SubscribeRequest follows agents' events (design v2 §4.11). An agent with
