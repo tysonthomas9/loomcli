@@ -3,11 +3,15 @@ package opencode
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -55,6 +59,18 @@ func TestContract(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+
+	// A separate --service instance in the same sandbox, started first: Loom's
+	// plain server must run beside it and leave its registration and config
+	// byte-for-byte unchanged.
+	svcPW := startService(t, bin, sbx)
+	registration := []string{filepath.Join(sbx, "state/opencode/service.json"), filepath.Join(sbx, "config/opencode/service.json")}
+	before := readAll(t, registration)
+	t.Cleanup(func() {
+		if after := readAll(t, registration); !maps.Equal(before, after) {
+			t.Errorf("Loom changed the OpenCode service registration or config:\nbefore %v\nafter  %v", before, after)
+		}
+	})
 	a := New(Config{Bin: bin, Env: contractEnv(sbx), Presets: []loomharness.PresetConfig{{Name: "tester", Persona: "LOOM-PERSONA-MARKER"}}})
 	var owned []loomharness.NativeRef
 	t.Cleanup(func() {
@@ -74,6 +90,27 @@ func TestContract(t *testing.T) {
 	}
 	// The model snapshot fills in after OpenCode's plugins settle.
 	waitFor(t, "fake/m in Models", func() bool { models, err := a.Models(ctx); return err == nil && hasModel(models, "fake/m") })
+	t.Run("Auth", func(t *testing.T) {
+		base, pw := a.endpoint()
+		if pw == svcPW {
+			t.Fatal("Loom's server reuses the service password")
+		}
+		if err := NewClient(base, pw).call(ctx, "GET", "/api/session/active", nil, nil); err != nil {
+			t.Fatalf("right password: %v", err)
+		}
+		if err := NewClient(base, "wrong").call(ctx, "GET", "/api/session/active", nil, nil); !isCode(err, "auth_failed") {
+			t.Fatalf("wrong password = %v; want auth_failed", err)
+		}
+		resp, err := http.Get(base + "/api/session/active")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("no password = %d; want 401", resp.StatusCode)
+		}
+	})
+
 	feed, err := a.Feed(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -239,13 +276,12 @@ func TestContract(t *testing.T) {
 
 	t.Run("RestartResume", func(t *testing.T) {
 		pid := serverPID(a)
+		_, pw := a.endpoint()
 		if err := a.Restart(ctx); err != nil {
 			t.Fatal(err)
 		}
-		// Service mode generates the password once and keeps it in the
-		// service config; the adapter reads it from service.json each boot.
-		if _, pw := a.endpoint(); serverPID(a) == pid || alive(pid) || len(pw) < 32 {
-			t.Fatalf("restart: pid %d -> %d (old alive %v), password length %d", pid, serverPID(a), alive(pid), len(pw))
+		if _, pw2 := a.endpoint(); serverPID(a) == pid || alive(pid) || pw2 == pw || len(pw2) < 40 {
+			t.Fatalf("restart: pid %d -> %d (old alive %v), new per-boot password %v", pid, serverPID(a), alive(pid), pw2 != pw && len(pw2) >= 40)
 		}
 		got, err := s.Resume(ctx, spec.Launch)
 		if err != nil || got != ref {
@@ -264,10 +300,7 @@ func TestContract(t *testing.T) {
 		if st, err := s.Status(ctx); err != nil || st.LastTurnInterrupt {
 			t.Fatalf("Status after a completed turn = %+v, %v; want LastTurnInterrupt false", st, err)
 		}
-		base, _ := a.endpoint()
-		if err := NewClient(base, "wrong").call(ctx, "GET", "/api/session/active", nil, nil); !isCode(err, "auth_failed") {
-			t.Fatalf("wrong password = %v; want auth_failed", err)
-		}
+
 	})
 
 	t.Run("OwnedTree", func(t *testing.T) {
@@ -361,6 +394,38 @@ func TestContract(t *testing.T) {
 		}
 	})
 
+	t.Run("StartFailureAndCancel", func(t *testing.T) {
+		servers := func() []int { return loomServes(t, bin) }
+		before := servers()
+		b := New(Config{Bin: bin, Env: contractEnv(sbx)})
+		t.Cleanup(b.Stop)
+		short, stop := context.WithCancel(ctx)
+		defer stop()
+		go func() { // cancel once the new server process exists, mid-start
+			for len(servers()) == len(before) && short.Err() == nil {
+				time.Sleep(5 * time.Millisecond)
+			}
+			stop()
+		}()
+		if _, err := b.Models(short); !errors.Is(err, context.Canceled) {
+			t.Fatalf("Models with a cancelled start = %v; want context.Canceled", err)
+		}
+		// A data root that is a file makes serve exit during start.
+		notDir := filepath.Join(sbx, "not-a-dir")
+		if err := os.WriteFile(notDir, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		c := New(Config{Bin: bin, Env: append(contractEnv(sbx), "XDG_DATA_HOME="+notDir)})
+		t.Cleanup(c.Stop)
+		_, err := c.Models(ctx)
+		if !errors.Is(err, loomharness.ErrUnavailable) {
+			t.Fatalf("Models with a failed start = %v; want ErrUnavailable", err)
+		}
+		if after := servers(); !slices.Equal(after, before) {
+			t.Fatalf("a cancelled or failed start left servers: before %v, after %v", before, after)
+		}
+	})
+
 	t.Run("PurgeOwnedOnly", func(t *testing.T) {
 		sibling, err := a.Open(ctx, loomharness.OpenSpec{Key: "sibling", Launch: spec.Launch, Dir: repo})
 		if err != nil {
@@ -380,6 +445,77 @@ func TestContract(t *testing.T) {
 			t.Fatalf("repeat Purge: %v", err)
 		}
 	})
+}
+
+// startService runs `opencode serve --service` in the sandbox, as a user's
+// own background service would, and returns its password. The test owns it
+// and stops it at cleanup.
+func startService(t *testing.T, bin, sbx string) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := fmt.Sprint(l.Addr().(*net.TCPAddr).Port)
+	_ = l.Close()
+	cmd := exec.Command(bin, "serve", "--service", "--hostname", "127.0.0.1", "--port", port)
+	cmd.Env = contractEnv(sbx)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+		done := make(chan struct{})
+		go func() { _ = cmd.Wait(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			_ = cmd.Process.Kill()
+			<-done
+		}
+	})
+	var reg struct {
+		PID      int    `json:"pid"`
+		Password string `json:"password"`
+	}
+	waitFor(t, "--service registration", func() bool {
+		b, err := os.ReadFile(filepath.Join(sbx, "state/opencode/service.json"))
+		return err == nil && json.Unmarshal(b, &reg) == nil && reg.PID == cmd.Process.Pid &&
+			answers(context.Background(), "http://127.0.0.1:"+port, reg.Password, reg.PID)
+	})
+	return reg.Password
+}
+
+func readAll(t *testing.T, files []string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		out[f] = string(b)
+	}
+	return out
+}
+
+// loomServes lists running plain `serve` processes of bin (not --service).
+func loomServes(t *testing.T, bin string) []int {
+	t.Helper()
+	out, err := exec.Command("ps", "-axo", "pid=,command=").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pids []int
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.Contains(line, bin+" serve --hostname") && !strings.Contains(line, "--service") {
+			var pid int
+			_, _ = fmt.Sscan(line, &pid)
+			pids = append(pids, pid)
+		}
+	}
+	slices.Sort(pids)
+	return pids
 }
 
 // contractEnv is the sandbox environment: OpenCode's HOME, TMPDIR and XDG

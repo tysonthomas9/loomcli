@@ -21,7 +21,8 @@ import (
 
 // TestMain lets the test binary play `opencode` for the supervisor tests:
 // LOOM_FAKE_OPENCODE=serve answers --version and serves /api/info and
-// /api/model like a service-mode server; =exit fails every serve. serve,
+// /api/model like plain `opencode serve`, checking OPENCODE_SERVER_PASSWORD;
+// =exit fails every serve, and --service is refused. serve,
 // exit-child and hang first start a detached grandchild (=sleep), as
 // OpenCode does for shell commands, and record its pid in children.
 func TestMain(m *testing.M) {
@@ -42,7 +43,7 @@ func fakeOpenCode(mode string) int {
 		time.Sleep(time.Hour)
 		return 0
 	}
-	if mode == "exit" || !slices.Contains(args, "--service") {
+	if mode == "exit" || slices.Contains(args, "--service") {
 		return 1
 	}
 	state := os.Getenv("XDG_STATE_HOME")
@@ -66,10 +67,8 @@ func fakeOpenCode(mode string) int {
 	if err != nil {
 		return 1
 	}
-	pw := fmt.Sprintf("pw-%d", os.Getpid())
-	reg, _ := json.Marshal(map[string]any{"pid": os.Getpid(), "url": "http://" + l.Addr().String(), "password": pw})
-	_ = os.MkdirAll(filepath.Join(state, "opencode"), 0o700)
-	_ = os.WriteFile(filepath.Join(state, "opencode", "service.json"), reg, 0o600)
+	pw := os.Getenv("OPENCODE_SERVER_PASSWORD")
+	_ = os.WriteFile(filepath.Join(state, "passwords"), []byte(pw+"\n"), 0o600)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/info", func(w http.ResponseWriter, r *http.Request) {
 		if _, got, _ := r.BasicAuth(); got != pw {
@@ -138,6 +137,7 @@ func fakeAdapterEnv(t *testing.T, mode, version string, extra []string, presets 
 		"LOOM_FAKE_OPENCODE="+mode,
 		"LOOM_FAKE_OPENCODE_VERSION="+version,
 		"XDG_STATE_HOME="+state,
+		"OPENCODE_SERVER_PASSWORD=inherited",
 		`OPENCODE_CONFIG_CONTENT={"theme":"user","agents":{"mine":{"system":"user agent"}}}`,
 	)})
 	t.Cleanup(a.Stop)
@@ -191,8 +191,10 @@ func TestAdapterLifecycle(t *testing.T) {
 		t.Fatalf("Models = %v, %v", models, err)
 	}
 	pid := serverPID(a)
-	if base, pw := a.endpoint(); !strings.HasPrefix(base, "http://127.0.0.1:") || pw != fmt.Sprintf("pw-%d", pid) {
-		t.Fatalf("endpoint = %s (password from service.json: %v)", base, pw != "")
+	base, pw := a.endpoint()
+	served, _ := os.ReadFile(filepath.Join(state, "passwords"))
+	if !strings.HasPrefix(base, "http://127.0.0.1:") || len(pw) < 40 || string(served) != pw+"\n" {
+		t.Fatalf("endpoint = %s; per-boot password set through OPENCODE_SERVER_PASSWORD: %v", base, string(served) == pw+"\n")
 	}
 
 	b, err := os.ReadFile(filepath.Join(state, "config-content"))
@@ -229,6 +231,9 @@ func TestAdapterLifecycle(t *testing.T) {
 	}
 	if alive(pid) || serverPID(a) == pid {
 		t.Fatalf("Restart left %d running", pid)
+	}
+	if _, pw2 := a.endpoint(); pw2 == pw {
+		t.Fatal("Restart reused the password; want a new one per boot")
 	}
 
 	// Stop signals only the owned process.
