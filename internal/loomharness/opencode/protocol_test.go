@@ -2,10 +2,12 @@ package opencode
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -30,9 +32,10 @@ type store struct {
 	envFail  bool
 	bareRuns int // prompts accepted while the session had no environment
 	patchErr bool
-	agents   map[string]bool // agent ids the service offers
-	agentDir []string        // location[directory] of each agent lookup
-	loading  bool            // the location lists no agents yet
+	agents   map[string]bool     // agent ids the service offers
+	agentDir []string            // location[directory] of each agent lookup
+	loading  bool                // the location lists no agents yet
+	asks     map[string][]string // pending per_/frm_ ask ids, per session
 }
 
 func newStore() *store {
@@ -175,18 +178,72 @@ func fakeServer(t *testing.T, st *store) *Client {
 		st.sessions[r.PathValue("id")]["location"] = map[string]any{"directory": body["directory"]}
 		w.WriteHeader(204)
 	})
-	// The message list pages by index; the cursor is the next index.
+	// The message list pages like OpenCode's: the cursor is base64url JSON
+	// {id, order, direction} of the page's last message, and a cursor on an
+	// unknown message gives an empty page.
 	mux.HandleFunc("GET /api/session/{id}/message", func(w http.ResponseWriter, r *http.Request) {
 		st.mu.Lock()
 		defer st.mu.Unlock()
 		all := st.messages[r.PathValue("id")]
-		from, _ := strconv.Atoi(r.URL.Query().Get("cursor"))
-		to := len(all)
+		order, from := r.URL.Query().Get("order"), 0
+		if order == "" {
+			order = "desc"
+		}
+		if c := r.URL.Query().Get("cursor"); c != "" {
+			var cur struct{ ID, Order string }
+			raw, _ := base64.RawURLEncoding.DecodeString(c)
+			_ = json.Unmarshal(raw, &cur)
+			order, from = cur.Order, -1
+			for i, m := range all {
+				if m["id"] == cur.ID {
+					from = i
+				}
+			}
+			if from < 0 {
+				reply(w, 200, map[string]any{"data": []any{}, "cursor": map[string]string{}})
+				return
+			}
+			if order == "asc" {
+				from++
+			} else {
+				from = len(all) - from
+			}
+		}
+		seq := make([]map[string]any, 0, len(all))
+		for i := range all {
+			if order == "asc" {
+				seq = append(seq, all[i])
+			} else {
+				seq = append(seq, all[len(all)-1-i])
+			}
+		}
+		to := len(seq)
 		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && from+n < to {
 			to = from + n
 		}
-		reply(w, 200, map[string]any{"data": all[from:to], "cursor": map[string]string{"next": strconv.Itoa(to)}})
+		page := seq[from:to]
+		next := ""
+		if len(page) > 0 {
+			raw, _ := json.Marshal(map[string]any{"id": page[len(page)-1]["id"], "order": order, "direction": "next"})
+			next = base64.RawURLEncoding.EncodeToString(raw)
+		}
+		reply(w, 200, map[string]any{"data": page, "cursor": map[string]string{"next": next}})
 	})
+	pending := func(prefix string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			st.mu.Lock()
+			defer st.mu.Unlock()
+			out := []map[string]string{}
+			for _, id := range st.asks[r.PathValue("id")] {
+				if strings.HasPrefix(id, prefix) {
+					out = append(out, map[string]string{"id": id})
+				}
+			}
+			reply(w, 200, map[string]any{"data": out})
+		}
+	}
+	mux.HandleFunc("GET /api/session/{id}/permission", pending("per_"))
+	mux.HandleFunc("GET /api/session/{id}/form", pending("frm_"))
 	mux.HandleFunc("GET /api/event", func(w http.ResponseWriter, r *http.Request) {
 		st.mu.Lock()
 		var lines []string
@@ -298,46 +355,74 @@ func TestProtocolMessagesPagesAndMapsItems(t *testing.T) {
 	ctx := context.Background()
 	st := newStore()
 	c := fakeServer(t, st)
-	ref, _ := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Dir: "/repo"})
+	ref, _ := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Launch: loomharness.Launch{Root: "/root-a"}, Dir: "/repo"})
 	st.messages[ref.NativeID] = []map[string]any{
 		{"id": "msg_u1", "type": "user", "text": "hi", "time": map[string]int64{"created": 1}},
-		{"id": "msg_a1", "type": "assistant", "time": map[string]int64{"created": 2}, "content": []map[string]any{
+		{"id": "msg_a1", "type": "assistant", "finish": "tool-calls", "time": map[string]int64{"created": 2}, "content": []map[string]any{
 			{"type": "reasoning", "text": "think"},
-			{"type": "tool", "id": "call_1", "name": "shell"},
+			{"type": "tool", "id": "call_1", "name": "shell", "state": map[string]string{"status": "completed"}},
 			{"type": "text", "text": "done"},
 		}},
 		{"id": "msg_s1", "type": "synthetic", "text": "The server restarted", "metadata": map[string]string{"notice": "restart"}},
 		{"id": "msg_i1", "type": "idle", "outcome": "interrupted"},
+		{"id": "msg_x1", "type": "instructions"},
+		{"id": "msg_u2", "type": "user", "text": "again"},
+		{"id": "msg_a2", "type": "assistant", "content": []map[string]any{
+			{"type": "tool", "id": "call_2", "state": map[string]string{"status": "running"}},
+			{"type": "text", "text": "stream"},
+		}},
 	}
+	st.asks = map[string][]string{ref.NativeID: {"frm_1", "per_1"}}
 	s := c.Session(ref)
-	p1, err := s.Messages(ctx, "", 2)
-	if err != nil {
-		t.Fatal(err)
+	var pages []loomharness.MessagePage
+	for after := ""; ; {
+		p, err := s.Messages(ctx, after, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pages = append(pages, p)
+		if after = p.Next; after == "" {
+			break
+		}
 	}
-	if p1.Next == "" || len(p1.Events) != 4 {
-		t.Fatalf("page 1 = %+v", p1)
-	}
-	p2, err := s.Messages(ctx, p1.Next, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p3, _ := s.Messages(ctx, p2.Next, 2); len(p3.Events) != 0 || p3.Next != "" {
-		t.Fatalf("page 3 = %+v", p3)
+	if len(pages) != 4 {
+		t.Fatalf("%d pages", len(pages))
 	}
 	var got []string
-	for _, e := range append(p1.Events, p2.Events...) {
-		got = append(got, string(e.Type)+" "+e.ItemKind+" "+e.ItemID+" "+e.InputKey+" "+e.StopReason)
+	for _, p := range pages {
+		for _, e := range p.Events {
+			if e.Session.Root != "/root-a" {
+				t.Errorf("%s: Root %q", e.Type, e.Session.Root)
+			}
+			got = append(got, strings.Join([]string{string(e.Type), e.TurnID, e.ItemKind, e.ItemID, e.InputKey, e.AskID, e.StopReason}, " "))
+		}
 	}
 	want := []string{
-		"message.delivered message msg_u1 msg_u1 ",
-		"item.completed reasoning msg_a1/reasoning/0  ",
-		"item.completed tool msg_a1/tool/call_1  ",
-		"item.completed message msg_a1/text/0  ",
-		"turn.resumed  msg_s1  ",
-		"turn.completed  msg_i1  cancelled",
+		"turn.started msg_u1   msg_u1  ",
+		"message.delivered msg_u1 message msg_u1 msg_u1  ",
+		"item.completed msg_u1 reasoning msg_a1/reasoning/0   ",
+		"item.completed msg_u1 tool msg_a1/tool/call_1   ",
+		"item.completed msg_u1 message msg_a1/text/0   ",
+		"usage msg_u1  msg_a1   ",
+		"turn.resumed msg_u1  msg_s1   ",
+		"turn.completed msg_u1     cancelled",
+		"turn.started msg_u2   msg_u2  ",
+		"message.delivered msg_u2 message msg_u2 msg_u2  ",
+		"ask.opened msg_u2    per_1 ",
+		"ask.opened msg_u2    frm_1 ",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("events:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+
+	// A bare OpenCode cursor (no open turn recorded) reads the open turn back.
+	q, _ := url.ParseQuery(pages[0].Next)
+	p, err := s.Messages(ctx, q.Get("c"), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Events) != 2 || p.Events[0].Type != loomharness.EventTurnResumed || p.Events[0].TurnID != "msg_u1" {
+		t.Fatalf("bare cursor page = %+v", p.Events)
 	}
 }
 

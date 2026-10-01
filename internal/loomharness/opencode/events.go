@@ -47,7 +47,10 @@ func (f *feed) Close() error {
 func (f *feed) run(ctx context.Context, c *Client, body io.ReadCloser) {
 	defer close(f.done)
 	defer close(f.ch)
-	m := newMapper(c.rootOf)
+	m := newMapper(c.rootOf, func(sid, anchor string) (string, string, bool) {
+		id, key, ok, err := c.Session(loomharness.NativeRef{NativeID: sid}).turnOf(ctx, anchor)
+		return id, key, ok && err == nil
+	})
 	for {
 		readSSE(body, func(data []byte) bool {
 			for _, e := range m.process(data) {
@@ -69,10 +72,8 @@ func (f *feed) run(ctx context.Context, c *Client, body io.ReadCloser) {
 				break
 			}
 		}
-		for _, e := range append(m.flush(), loomharness.Event{Type: loomharness.EventFeedGap, Time: time.Now()}) {
-			if !f.send(ctx, e) {
-				return
-			}
+		if !f.send(ctx, loomharness.Event{Type: loomharness.EventFeedGap, Time: time.Now()}) {
+			return
 		}
 	}
 }
@@ -123,27 +124,33 @@ func readSSE(r io.Reader, fn func([]byte) bool) {
 
 // mapper turns native events into port events. It drops durable events it
 // has already passed on (by per-session seq), so a replay never repeats an
-// item, and stamps each session's events with the current execution's id.
+// item, and gives each session's turn events the same ids Messages gives.
+//
+// A turn is what OpenCode's history holds between two idle markers
+// (schema/src/session-message.ts:282-292). History stores no execution
+// start, so a turn's id is the id of its first message that the feed maps:
+// the delivered input (its InputKey), the restart notice, the first
+// assistant step, or the idle marker of an empty turn. Live, turn.started is
+// emitted when a session's first such event arrives while no turn is open,
+// right before it, with the id OpenCode's history gives that turn
+// (Session.turnOf); session.execution.started itself is not mapped. A
+// shutdown interrupt records no idle marker and the resumed execution
+// continues the same turn (session-message.ts:283-285), so it ends nothing.
 type mapper struct {
 	seq  map[string]int64
-	turn map[string]string
+	turn map[string]string // the open turn's id, per session
 	// root gives the Root of a session Loom opened or resumed ("" for any
 	// other session); every event carries it, since dispatch matches Root
 	// plus NativeID.
 	root func(nativeID string) string
-	// OpenCode publishes session.execution.started before the runner
-	// delivers the input that began it (core/src/session/execution.ts:113-116,
-	// runner/llm.ts:88-99), so turn.started is held until the session's next
-	// event and takes its InputKey from an inbox delivery (port contract,
-	// e87989bc8). An input delivered while no turn runs is kept for the next
-	// start instead.
-	pending map[string]loomharness.Event
-	input   map[string]string
+	// lookup finds the turn holding a stored message in the session's
+	// history: its id and InputKey. Nil, or not found, uses the anchor.
+	lookup func(sid, anchor string) (id, key string, ok bool)
+	last   string // the native id of the event mapEvent last mapped
 }
 
-func newMapper(root func(string) string) *mapper {
-	return &mapper{seq: map[string]int64{}, turn: map[string]string{}, root: root,
-		pending: map[string]loomharness.Event{}, input: map[string]string{}}
+func newMapper(root func(string) string, lookup func(string, string) (string, string, bool)) *mapper {
+	return &mapper{seq: map[string]int64{}, turn: map[string]string{}, root: root, lookup: lookup}
 }
 
 // process maps one native event to the port events it releases, in order.
@@ -157,41 +164,55 @@ func (m *mapper) process(raw []byte) []loomharness.Event {
 	}
 	sid := e.Session.NativeID
 	var out []loomharness.Event
-	if start, held := m.pending[sid]; held {
-		delete(m.pending, sid)
+	if _, open := m.turn[sid]; !open && opensTurn(e.Type) {
+		anchor := m.anchor(e)
+		id, key := anchor, ""
 		if e.Type == loomharness.EventMessageDelivered {
-			start.InputKey = e.InputKey
+			key = e.InputKey
 		}
-		out = append(out, start)
+		if m.lookup != nil {
+			if lid, lkey, found := m.lookup(sid, anchor); found {
+				id, key = lid, lkey
+			}
+		}
+		m.turn[sid] = id
+		out = append(out, loomharness.Event{Type: loomharness.EventTurnStarted, Session: e.Session, TurnID: id, InputKey: key, Time: e.Time})
 	}
-	switch e.Type {
-	case loomharness.EventTurnStarted:
-		if key, ok := m.input[sid]; ok {
-			delete(m.input, sid)
-			e.InputKey = key
-			return append(out, e)
-		}
-		m.pending[sid] = e
-		return out
-	case loomharness.EventMessageDelivered:
-		if len(out) == 0 && e.TurnID == "" {
-			m.input[sid] = e.InputKey
-		}
-	case loomharness.EventTurnCompleted:
-		delete(m.input, sid)
+	if opensTurn(e.Type) || e.Type == loomharness.EventAskOpened || e.Type == loomharness.EventAskResolved {
+		e.TurnID = m.turn[sid]
+	}
+	if e.Type == loomharness.EventTurnCompleted {
+		delete(m.turn, sid)
 	}
 	return append(out, e)
 }
 
-// flush releases every held turn.started, without an InputKey.
-func (m *mapper) flush() []loomharness.Event {
-	var out []loomharness.Event
-	for sid, e := range m.pending {
-		out = append(out, e)
-		delete(m.pending, sid)
+// opensTurn: the event types that belong to a turn in OpenCode's history.
+// Asks and subagent starts can happen outside one.
+func opensTurn(t loomharness.EventType) bool {
+	switch t {
+	case loomharness.EventMessageDelivered, loomharness.EventTurnResumed, loomharness.EventItemStarted,
+		loomharness.EventDelta, loomharness.EventItemCompleted, loomharness.EventUsage, loomharness.EventTurnCompleted:
+		return true
 	}
-	return out
+	return false
 }
+
+// anchor is the id of the stored message e belongs to.
+func (m *mapper) anchor(e loomharness.Event) string {
+	switch e.Type {
+	case loomharness.EventMessageDelivered:
+		return e.InputKey
+	case loomharness.EventTurnResumed, loomharness.EventTurnCompleted:
+		return messageID(m.last)
+	}
+	msg, _, _ := strings.Cut(e.ItemID, "/")
+	return msg
+}
+
+// messageID is the id OpenCode gives the message an event creates
+// (SessionMessage.ID.fromEvent, schema/src/session-message.ts:23-29).
+func messageID(eventID string) string { return "msg_" + strings.TrimPrefix(eventID, "evt_") }
 
 type wireEvent struct {
 	ID      string `json:"id"`
@@ -204,6 +225,7 @@ type wireEvent struct {
 	Data struct {
 		SessionID          string `json:"sessionID"`
 		ParentID           string `json:"parentID"`
+		Reason             string `json:"reason"`
 		AssistantMessageID string `json:"assistantMessageID"`
 		Ordinal            int    `json:"ordinal"`
 		ID                 string `json:"id"`
@@ -239,9 +261,7 @@ func (m *mapper) mapEvent(raw []byte) (loomharness.Event, bool) {
 		m.seq[w.Durable.AggregateID] = w.Durable.Seq
 	}
 	sid := w.Data.SessionID
-	if w.Type == "session.execution.started" {
-		m.turn[sid] = w.ID
-	}
+	m.last = w.ID
 	e := loomharness.Event{
 		Session: loomharness.NativeRef{NativeID: sid},
 		TurnID:  m.turn[sid],
@@ -264,8 +284,6 @@ func (m *mapper) fill(e *loomharness.Event, w wireEvent) bool {
 	switch w.Type {
 	case "session.inbox.delivered":
 		e.Type, e.ItemKind, e.ItemID, e.InputKey = loomharness.EventMessageDelivered, "message", d.InboxID, d.InboxID
-	case "session.execution.started":
-		e.Type = loomharness.EventTurnStarted
 	case "session.text.delta", "session.reasoning.delta":
 		e.Type, e.ItemKind, e.ItemID, e.Text = loomharness.EventDelta, kind(part), partItem(d.AssistantMessageID, part, d.Ordinal), d.Delta
 	case "session.text.started", "session.reasoning.started":
@@ -277,10 +295,14 @@ func (m *mapper) fill(e *loomharness.Event, w wireEvent) bool {
 	case "session.tool.success", "session.tool.failed":
 		e.Type, e.ItemKind, e.ItemID = loomharness.EventItemCompleted, "tool", toolItem(d.AssistantMessageID, d.ID)
 	case "session.step.ended":
-		e.Type = loomharness.EventUsage
-	case "session.execution.succeeded", "session.execution.interrupted", "session.execution.failed":
+		e.Type, e.ItemID = loomharness.EventUsage, d.AssistantMessageID
+	case "session.execution.interrupted":
+		if d.Reason == "shutdown" {
+			return false // the turn goes on after the restart
+		}
 		e.Type, e.StopReason = loomharness.EventTurnCompleted, stopReason(lastDot(w.Type))
-		delete(m.turn, sid)
+	case "session.execution.succeeded", "session.execution.failed":
+		e.Type, e.StopReason = loomharness.EventTurnCompleted, stopReason(lastDot(w.Type))
 	case "permission.asked", "form.created":
 		e.Type, e.AskID = loomharness.EventAskOpened, d.ID
 	case "form.replied", "form.cancelled":
@@ -288,7 +310,7 @@ func (m *mapper) fill(e *loomharness.Event, w wireEvent) bool {
 	case "permission.replied":
 		e.Type, e.AskID = loomharness.EventAskResolved, d.RequestID
 	case "session.synthetic":
-		e.Type, e.Text = loomharness.EventTurnResumed, d.Text
+		e.Type, e.ItemID, e.Text = loomharness.EventTurnResumed, messageID(w.ID), d.Text
 		return d.Metadata.Notice == "restart"
 	case "session.created":
 		e.Type, e.Session.NativeID, e.TurnID, e.ItemID = loomharness.EventSubagentStarted, d.ParentID, m.turn[d.ParentID], sid

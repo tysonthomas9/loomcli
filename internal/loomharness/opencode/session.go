@@ -2,6 +2,8 @@ package opencode
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -277,20 +279,131 @@ func (s *Session) HasInput(ctx context.Context, key string) (loomharness.Landed,
 	}
 }
 
-// Messages reads one page of history as events, with OpenCode's own cursor.
+// Messages reads one page of history as the events the live feed gives for
+// it, with the same ids (see mapper): each turn opens with turn.started,
+// TurnID is the id of the turn's first message that maps to an event, and
+// the last page ends with an ask.opened for each pending permission or form.
+//
+// OpenCode history does not hold everything the feed does: resolved or
+// cancelled asks are gone (the permission and form lists return pending
+// ones only), so history never gives ask.resolved or ask.lost; it records
+// no execution start, hence the TurnID rule; and a text or reasoning part
+// still streaming has no end marker, so history gives its item.completed
+// only once a later part exists or its step has ended.
+//
+// The cursor is OpenCode's own plus the open turn ("c=<native>&t=<turn>");
+// a bare OpenCode cursor still works, with the open turn read back.
 func (s *Session) Messages(ctx context.Context, after string, limit int) (loomharness.MessagePage, error) {
-	page, err := s.list(ctx, after, limit)
+	native, turn, known := parseCursor(after)
+	page, err := s.list(ctx, native, limit)
 	if err != nil {
 		return loomharness.MessagePage{}, err
 	}
+	ref := loomharness.NativeRef{Root: s.c.rootOf(s.ref.NativeID), NativeID: s.ref.NativeID}
 	var out loomharness.MessagePage
 	for _, m := range page.Data {
-		out.Events = append(out.Events, m.events(s.ref)...)
+		if !m.opens() {
+			continue
+		}
+		if !known {
+			known = true
+			id, _, found, err := s.turnOf(ctx, m.ID)
+			if err != nil {
+				return loomharness.MessagePage{}, err
+			}
+			if found {
+				turn = id
+			}
+		}
+		if turn == "" {
+			turn = m.ID
+			start := loomharness.Event{Type: loomharness.EventTurnStarted, Session: ref, TurnID: turn, Time: m.created()}
+			if m.Type == "user" {
+				start.InputKey = m.ID
+			}
+			out.Events = append(out.Events, start)
+		}
+		for _, e := range m.events(ref) {
+			e.TurnID = turn
+			out.Events = append(out.Events, e)
+		}
+		if m.Type == "idle" {
+			turn = ""
+		}
 	}
-	if limit > 0 && len(page.Data) == limit {
-		out.Next = page.Cursor.Next
+	if limit > 0 && len(page.Data) == limit && page.Cursor.Next != "" {
+		out.Next = url.Values{"c": {page.Cursor.Next}, "t": {turn}}.Encode()
+		return out, nil
+	}
+	asks, err := s.pendingAsks(ctx)
+	if err != nil {
+		return loomharness.MessagePage{}, err
+	}
+	for _, id := range asks {
+		out.Events = append(out.Events, loomharness.Event{Type: loomharness.EventAskOpened, Session: ref, AskID: id, TurnID: turn})
 	}
 	return out, nil
+}
+
+// parseCursor splits a Messages cursor into OpenCode's cursor and the open
+// turn; known is false for a bare OpenCode cursor.
+func parseCursor(after string) (native, turn string, known bool) {
+	if q, err := url.ParseQuery(after); err == nil && q.Has("c") {
+		return q.Get("c"), q.Get("t"), true
+	}
+	return after, "", after == ""
+}
+
+// pendingAsks lists the session's pending permission and form ids.
+func (s *Session) pendingAsks(ctx context.Context) ([]string, error) {
+	var ids []string
+	for _, kind := range []string{"/permission", "/form"} {
+		var r struct {
+			Data []struct {
+				ID string `json:"id"`
+			} `json:"data"`
+		}
+		if err := s.c.call(ctx, "GET", s.path(kind), nil, &r); err != nil {
+			return nil, fmt.Errorf("list pending asks: %w", err)
+		}
+		for _, a := range r.Data {
+			ids = append(ids, a.ID)
+		}
+	}
+	return ids, nil
+}
+
+// turnOf finds the turn holding stored message anchor: the first message
+// that maps to an event after the newest idle marker before anchor, and its
+// InputKey when that message is a user input. found is false when anchor is
+// itself the turn's first such message, or is not stored.
+func (s *Session) turnOf(ctx context.Context, anchor string) (id, key string, found bool, err error) {
+	c, err := json.Marshal(map[string]string{"id": anchor, "order": "desc", "direction": "next"})
+	if err != nil {
+		return "", "", false, err
+	}
+	cursor := base64.RawURLEncoding.EncodeToString(c)
+	for {
+		page, err := s.list(ctx, cursor, 100)
+		if err != nil {
+			return "", "", false, err
+		}
+		for _, m := range page.Data {
+			if m.Type == "idle" {
+				return id, key, found, nil
+			}
+			if m.opens() {
+				id, key, found = m.ID, "", true
+				if m.Type == "user" {
+					key = m.ID
+				}
+			}
+		}
+		if len(page.Data) < 100 || page.Cursor.Next == "" {
+			return id, key, found, nil
+		}
+		cursor = page.Cursor.Next
+	}
 }
 
 // Status reports whether the session has a running execution and whether
@@ -408,20 +521,61 @@ type messagePage struct {
 
 type message struct {
 	ID   string `json:"id"`
-	Type string `json:"type"` // user | assistant | synthetic | idle
+	Type string `json:"type"` // user | assistant | synthetic | idle | ...
 	Text string `json:"text"`
 	Time struct {
-		Created int64 `json:"created"`
+		Created   json.RawMessage `json:"created"`
+		Completed json.RawMessage `json:"completed"`
 	} `json:"time"`
-	Outcome  string `json:"outcome"`
+	Outcome  string          `json:"outcome"`
+	Finish   string          `json:"finish"` // assistant: set when its step ended
+	Error    json.RawMessage `json:"error"`  // assistant: set when its step failed
 	Metadata struct {
 		Notice string `json:"notice"`
 	} `json:"metadata"`
 	Content []struct {
-		Type string `json:"type"` // text | reasoning | tool
-		ID   string `json:"id"`
-		Text string `json:"text"`
+		Type  string `json:"type"` // text | reasoning | tool
+		ID    string `json:"id"`
+		Text  string `json:"text"`
+		State struct {
+			Status string `json:"status"` // tool: streaming | running | completed | error
+		} `json:"state"`
 	} `json:"content"`
+}
+
+// created reads the message's creation time, stored as epoch ms or an ISO
+// string depending on the message type.
+func (m message) created() time.Time {
+	var ms int64
+	if json.Unmarshal(m.Time.Created, &ms) == nil {
+		return time.UnixMilli(ms)
+	}
+	var t time.Time
+	_ = json.Unmarshal(m.Time.Created, &t)
+	return t
+}
+
+// opens reports whether the live feed maps an event for this message, so
+// that it can be the first message of a turn (see mapper).
+func (m message) opens() bool {
+	switch m.Type {
+	case "user", "idle":
+		return true
+	case "synthetic":
+		return m.Metadata.Notice == "restart"
+	case "assistant":
+		return len(m.Content) > 0 || m.usage()
+	}
+	return false
+}
+
+// usage: the step ended (session.step.ended) rather than failed.
+func (m message) usage() bool {
+	return m.Finish != "" && (len(m.Error) == 0 || string(m.Error) == "null")
+}
+
+func (m message) ended() bool {
+	return m.Finish != "" || (len(m.Time.Completed) > 0 && string(m.Time.Completed) != "null")
 }
 
 func (s *Session) list(ctx context.Context, after string, limit int) (messagePage, error) {
@@ -442,23 +596,23 @@ func (s *Session) list(ctx context.Context, after string, limit int) (messagePag
 }
 
 // events maps one stored message to the events the live feed gives for it,
-// with the same ItemIDs.
+// with the same ids; Messages adds the TurnID.
 func (m message) events(ref loomharness.NativeRef) []loomharness.Event {
-	e := loomharness.Event{Session: ref, ItemID: m.ID, Time: time.UnixMilli(m.Time.Created)}
+	e := loomharness.Event{Session: ref, Time: m.created()}
 	switch m.Type {
 	case "user":
-		e.Type, e.ItemKind, e.InputKey, e.Text = loomharness.EventMessageDelivered, "message", m.ID, m.Text
+		e.Type, e.ItemKind, e.ItemID, e.InputKey, e.Text = loomharness.EventMessageDelivered, "message", m.ID, m.ID, m.Text
 	case "synthetic":
 		if m.Metadata.Notice != "restart" {
 			return nil
 		}
-		e.Type, e.Text = loomharness.EventTurnResumed, m.Text
+		e.Type, e.ItemID, e.Text = loomharness.EventTurnResumed, m.ID, m.Text
 	case "idle":
 		e.Type, e.StopReason = loomharness.EventTurnCompleted, stopReason(m.Outcome)
 	case "assistant":
 		var out []loomharness.Event
 		ord := map[string]int{}
-		for _, c := range m.Content {
+		for i, c := range m.Content {
 			item := e
 			item.Type, item.Text = loomharness.EventItemCompleted, c.Text
 			switch c.Type {
@@ -466,12 +620,23 @@ func (m message) events(ref loomharness.NativeRef) []loomharness.Event {
 				item.ItemKind = kind(c.Type)
 				item.ItemID = partItem(m.ID, c.Type, ord[c.Type])
 				ord[c.Type]++
+				if !m.ended() && i == len(m.Content)-1 {
+					continue // still streaming
+				}
 			case "tool":
+				if c.State.Status != "completed" && c.State.Status != "error" {
+					continue
+				}
 				item.ItemKind, item.ItemID, item.Text = "tool", toolItem(m.ID, c.ID), ""
 			default:
 				continue
 			}
 			out = append(out, item)
+		}
+		if m.usage() {
+			u := e
+			u.Type, u.ItemID = loomharness.EventUsage, m.ID
+			out = append(out, u)
 		}
 		return out
 	default:

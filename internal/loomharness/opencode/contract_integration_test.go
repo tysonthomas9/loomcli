@@ -252,6 +252,39 @@ func TestContract(t *testing.T) {
 		}
 	})
 
+	// 1.6d: everything the live feed gave for this session so far (a
+	// completed turn, an interrupted one, a resolved permission and form)
+	// has the same EventID and ids in a Messages read, except the resolved
+	// asks, which OpenCode history does not keep.
+	t.Run("LiveMatchesMessages", func(t *testing.T) {
+		events.mu.Lock()
+		var live []loomharness.Event
+		for _, e := range events.events {
+			if e.Session.NativeID == ref.NativeID {
+				live = append(live, e)
+			}
+		}
+		events.mu.Unlock()
+		lk, hk := keyed(t, "live", live), keyed(t, "history", allEvents(t, s, 2))
+		for k, v := range lk {
+			hv, ok := hk[k]
+			switch {
+			case !ok && !strings.HasPrefix(k, "ask."):
+				t.Errorf("live only: %s", v)
+			case ok && hv != v:
+				t.Errorf("%s\n  live:    %s\n  history: %s", k, v, hv)
+			}
+		}
+		for k, v := range hk {
+			if _, ok := lk[k]; !ok {
+				t.Errorf("history only: %s", v)
+			}
+		}
+		if len(hk) < 6 {
+			t.Errorf("history has %d saved events", len(hk))
+		}
+	})
+
 	t.Run("SetModelAndMove", func(t *testing.T) {
 		if err := s.SetModel(ctx, "fake/m2"); err != nil {
 			t.Fatal(err)
@@ -488,6 +521,12 @@ func TestServiceModeRunningTurnRecovery(t *testing.T) {
 	}
 	owned = append(owned, ref)
 	s := a.Session(ref)
+	feed, err := a.Feed(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer feed.Close()
+	events := collect(feed)
 
 	for i, c := range []struct {
 		name  string
@@ -528,6 +567,39 @@ func TestServiceModeRunningTurnRecovery(t *testing.T) {
 			}
 			if n != i+1 {
 				t.Fatalf("%d turn.resumed events; want %d", n, i+1)
+			}
+
+			// 1.6d: the live feed, which lost its stream at the crash, and a
+			// Messages read give the turn's events the same EventIDs and
+			// ids; the feed misses only what OpenCode sent while it was down.
+			events.wait(t, "the resumed turn's turn.completed", func(e loomharness.Event) bool {
+				return e.Session == ref && e.Type == loomharness.EventTurnCompleted && e.StopReason == "completed" &&
+					e.Time.After(time.Now().Add(-time.Minute))
+			})
+			events.mu.Lock()
+			var live []loomharness.Event
+			for _, e := range events.events {
+				if e.Session.NativeID == ref.NativeID {
+					live = append(live, e)
+				}
+			}
+			events.mu.Unlock()
+			lk, hk := keyed(t, "live", live), keyed(t, "history", allEvents(t, s, 3))
+			for k, v := range lk {
+				if hv, ok := hk[k]; !ok || hv != v {
+					t.Errorf("%s\n  live:    %s\n  history: %s", k, v, hv)
+				}
+			}
+			// The boot sweep publishes the restart notice before any client
+			// can reconnect, so turn.resumed is history only; the turn's start
+			// and end must be in both.
+			for k, v := range hk {
+				if _, ok := lk[k]; !ok {
+					if strings.HasPrefix(k, "turn.started") || strings.HasPrefix(k, "turn.completed") {
+						t.Errorf("history only: %s", v)
+					}
+					t.Logf("history only (sent while the feed was down): %s", v)
+				}
 			}
 		})
 	}

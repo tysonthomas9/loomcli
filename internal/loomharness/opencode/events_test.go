@@ -18,8 +18,9 @@ func live(typ, data string) string {
 	return fmt.Sprintf(`{"id":"evt_x","type":%q,"created":1,"data":%s}`, typ, data)
 }
 
-// The first stream ends mid-turn (an OpenCode restart); the second replays
-// already-seen durable events, then continues.
+// The first stream ends mid-turn (an OpenCode restart, whose shutdown
+// interrupt ends no turn); the second replays already-seen durable events,
+// then continues the same turn.
 func TestEventsFeedReconnectGapAndNoDuplicateItems(t *testing.T) {
 	st := newStore()
 	st.streams = [][]string{
@@ -31,7 +32,7 @@ func TestEventsFeedReconnectGapAndNoDuplicateItems(t *testing.T) {
 			ev(4, "session.text.ended", `{"sessionID":"ses_a","assistantMessageID":"msg_a1","ordinal":0,"text":"PAST"}`),
 			ev(5, "session.tool.called", `{"sessionID":"ses_a","assistantMessageID":"msg_a1","id":"call_1"}`),
 			ev(6, "permission.asked", `{"sessionID":"ses_a","id":"per_1"}`),
-			ev(7, "session.instructions.updated", `{"sessionID":"ses_a"}`),
+			ev(7, "session.execution.interrupted", `{"sessionID":"ses_a","reason":"shutdown"}`),
 		},
 		{
 			ev(4, "session.text.ended", `{"sessionID":"ses_a","assistantMessageID":"msg_a1","ordinal":0,"text":"PAST"}`),
@@ -71,20 +72,20 @@ func TestEventsFeedReconnectGapAndNoDuplicateItems(t *testing.T) {
 		t.Fatal("Events not closed after Close")
 	}
 	want := []string{
-		"message.delivered ses_a  message msg_in msg_in  ",
-		"turn.started ses_a evt_2   msg_in  ",
-		"item.started ses_a evt_2 message msg_a1/text/0   ",
-		"delta ses_a evt_2 message msg_a1/text/0   ",
-		"item.completed ses_a evt_2 message msg_a1/text/0   ",
-		"item.started ses_a evt_2 tool msg_a1/tool/call_1   ",
-		"ask.opened ses_a evt_2    per_1 ",
+		"turn.started ses_a msg_in   msg_in  ",
+		"message.delivered ses_a msg_in message msg_in msg_in  ",
+		"item.started ses_a msg_in message msg_a1/text/0   ",
+		"delta ses_a msg_in message msg_a1/text/0   ",
+		"item.completed ses_a msg_in message msg_a1/text/0   ",
+		"item.started ses_a msg_in tool msg_a1/tool/call_1   ",
+		"ask.opened ses_a msg_in    per_1 ",
 		"feed.gap       ",
-		"turn.resumed ses_a evt_2     ",
-		"item.completed ses_a evt_2 tool msg_a1/tool/call_1   ",
-		"ask.resolved ses_a evt_2    per_1 ",
-		"harness.subagent.started ses_a evt_2  ses_child   ",
-		"usage ses_a evt_2     ",
-		"turn.completed ses_a evt_2     cancelled",
+		"turn.resumed ses_a msg_in  msg_8   ",
+		"item.completed ses_a msg_in tool msg_a1/tool/call_1   ",
+		"ask.resolved ses_a msg_in    per_1 ",
+		"harness.subagent.started ses_a msg_in  ses_child   ",
+		"usage ses_a msg_in  msg_a1   ",
+		"turn.completed ses_a msg_in     cancelled",
 		"feed.gap       ",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -104,8 +105,8 @@ func TestEventsLiveAndCatchUpItemIDsMatch(t *testing.T) {
 	c := fakeServer(t, st)
 	ref, _ := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Dir: "/repo"})
 	st.messages[ref.NativeID] = []map[string]any{
-		{"id": "msg_a1", "type": "assistant", "content": []map[string]any{
-			{"type": "reasoning", "text": "r"}, {"type": "tool", "id": "call_1"}, {"type": "text", "text": "t"},
+		{"id": "msg_a1", "type": "assistant", "finish": "stop", "content": []map[string]any{
+			{"type": "reasoning", "text": "r"}, {"type": "tool", "id": "call_1", "state": map[string]string{"status": "completed"}}, {"type": "text", "text": "t"},
 		}},
 	}
 	page, err := c.Session(ref).Messages(ctx, "", 0)
@@ -119,8 +120,8 @@ func TestEventsLiveAndCatchUpItemIDsMatch(t *testing.T) {
 		`{"type":"session.text.ended","data":{"sessionID":"s","assistantMessageID":"msg_a1","ordinal":0}}`,
 	} {
 		e, ok := m.mapEvent([]byte(raw))
-		if !ok || e.ItemID != page.Events[i].ItemID || e.ItemKind != page.Events[i].ItemKind {
-			t.Errorf("live %+v vs catch-up %+v", e, page.Events[i])
+		if !ok || e.ItemID != page.Events[i+1].ItemID || e.ItemKind != page.Events[i+1].ItemKind {
+			t.Errorf("live %+v vs catch-up %+v", e, page.Events[i+1])
 		}
 	}
 }
@@ -144,10 +145,11 @@ func TestEventsFormAsks(t *testing.T) {
 
 // TestEventsRootAndTurnInputKey: every feed event carries the Root Loom
 // opened or resumed its session with (dispatch matches Root plus NativeID),
-// and turn.started carries the key of the input that began it, whether
-// OpenCode delivers that input after the execution starts (its runner's
-// order) or before. A start with no delivery has no key, and a start held at
-// a reconnect is released before feed.gap.
+// and turn.started, emitted right before a turn's first mapped event, carries
+// the key of the input that began it, whether OpenCode delivers that input
+// after the execution starts (its runner's order) or before. A turn that
+// begins with no delivery has no key, and an execution start alone emits
+// nothing.
 func TestEventsRootAndTurnInputKey(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -184,7 +186,7 @@ func TestEventsRootAndTurnInputKey(t *testing.T) {
 	}
 	defer f.Close()
 	var got []string
-	for len(got) < 13 {
+	for len(got) < 12 {
 		select {
 		case ev := <-f.Events():
 			got = append(got, fmt.Sprintf("%s %s %s", ev.Type, ev.Session.Root, ev.InputKey))
@@ -196,15 +198,14 @@ func TestEventsRootAndTurnInputKey(t *testing.T) {
 		"turn.started /root-a msg_k1",
 		"message.delivered /root-a msg_k1",
 		"turn.completed /root-a ",
-		"message.delivered /root-a msg_k2",
 		"turn.started /root-a msg_k2",
+		"message.delivered /root-a msg_k2",
 		"turn.completed /root-a ",
 		"turn.started /root-a ",
 		"item.started /root-a ",
 		"turn.completed /root-a ",
 		"turn.started  msg_o",
 		"message.delivered  msg_o",
-		"turn.started /root-a ",
 		"feed.gap  ",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
