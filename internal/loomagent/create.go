@@ -320,17 +320,16 @@ func (s *Service) openSession(ctx context.Context, a loomstore.Agent, cfg Config
 		NativeRoot: ref.Root, NativeID: ref.NativeID})
 }
 
-// loadConfig decodes a's stored Config. Its Rules keep only preset and
-// override rules: deny entries that older rows saved from the bridge (exactly
-// publishDenies) are dropped, so only the current registration adds them.
+// loadConfig decodes a's stored Config. Its saved Rules are kept as saved:
+// rows written before R-G may hold bridge-generated gh/git-push denies, but
+// that shape records no provenance to tell them from a preset's or user's
+// own, so none is dropped. Current Configs store only preset and override
+// rules, and policy adds the bridge denies from the current registration.
 func loadConfig(a loomstore.Agent) (Config, error) {
 	var cfg Config
 	if err := json.Unmarshal([]byte(a.SpecJSON), &cfg); err != nil {
 		return cfg, fmt.Errorf("loomagent: %s spec: %w", a.AgentID, err)
 	}
-	cfg.Rules = slices.DeleteFunc(cfg.Rules, func(r loomharness.PermissionRule) bool {
-		return slices.Contains(publishDenies, r)
-	})
 	return cfg, nil
 }
 
