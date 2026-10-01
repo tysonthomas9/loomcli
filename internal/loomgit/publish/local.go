@@ -204,7 +204,7 @@ func stackResults(ctx context.Context, store *journal.SQLite, workspace string, 
 }
 
 func orderedStackChanges(ctx context.Context, store *journal.SQLite, areaPath, workspace, lead string, changes []string) ([]string, error) {
-	areaRunner, err := gitexec.New(areaPath, gitexec.Options{})
+	areaRunner, err := gitexec.New(areaPath, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +233,7 @@ func orderedStackChanges(ctx context.Context, store *journal.SQLite, areaPath, w
 }
 
 func stackSlug(ctx context.Context, repoPath string) (string, error) {
-	runner, err := gitexec.New(repoPath, gitexec.Options{})
+	runner, err := gitexec.New(repoPath, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
 	if err != nil {
 		return "", err
 	}

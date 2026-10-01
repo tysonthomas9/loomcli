@@ -34,7 +34,7 @@ func TestPushAtomicRejectsOneStaleLeaseWithoutChangingOtherBranch(t *testing.T) 
 	}
 	gitAtomic(t, repo, "commit", "-qam", "next")
 	second := gitAtomic(t, repo, "rev-parse", "HEAD")
-	runner, err := gitexec.New(repo, gitexec.Options{})
+	runner, err := gitexec.New(repo, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Test", Email: "test@example.test"}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -214,7 +214,7 @@ func TestSweepRemovesFullyFrozenCloneAfterCaptureLease(t *testing.T) {
 	go func() {
 		capturedAgain <- agentcapture.WithTaskCopyLease(ctx, journalPath, source, copyPath, func(ctx context.Context) error {
 			recaptured, captureErr := agentcapture.Capture(ctx, copyPath, "W", "A", "T", "task")
-			if captureErr == nil && recaptured.SHA != captured.SHA {
+			if captureErr == nil && recaptured.SHA != "" && recaptured.SHA != captured.SHA {
 				captureErr = copyRunner.UpdateRef(ctx, captured.Ref, captured.SHA, recaptured.SHA)
 			}
 			close(started)
@@ -234,7 +234,7 @@ func TestSweepRemovesFullyFrozenCloneAfterCaptureLease(t *testing.T) {
 	if err := <-capturedAgain; err != nil {
 		t.Fatal(err)
 	}
-	sourceRepo, err := pool.New(store).Admit(ctx, source)
+	sourceRepo, err := pool.New(store, options).Admit(ctx, source)
 	if err != nil {
 		t.Fatal(err)
 	}
