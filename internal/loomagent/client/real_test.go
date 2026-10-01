@@ -72,14 +72,18 @@ func TestRealServeAgentAPI(t *testing.T) {
 	mux := http.NewServeMux()
 	ws := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			next.ServeHTTP(w, r.WithContext(middleware.WithWorkspace(r.Context(), r.PathValue("ws"))))
+			ctx := middleware.WithWorkspace(r.Context(), r.PathValue("ws"))
+			if tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+				ctx = middleware.WithUserIdentity(ctx, middleware.UserIdentity{UserID: tok})
+			}
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 	mux.Handle("GET /api/workspaces/{ws}/events/token", ws(subscription.HandleSSEToken(tokens)))
 	api.Register(mux, ws, tokens.Validate)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	c := newClient(srv, "ws", "")
+	c := newClient(srv, "ws", "alice")
 
 	a, err := c.Create(ctx, "r1", agentsv1.CreateBody{Preset: "pr-review-interactive", Name: "rev", Repo: repo,
 		BaseRef: strings.TrimSpace(string(head)), Overrides: agentsv1.Overrides{Harness: "opencode"}})
