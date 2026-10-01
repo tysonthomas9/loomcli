@@ -432,6 +432,9 @@ func (s *Session) isolate(ctx context.Context) error {
 // environment (the accepted 18:00 UTC exception), and this Prompt is where
 // Loom's own apply again.
 func (s *Session) Prompt(ctx context.Context, in loomharness.Input) error {
+	// Held from the check through the POST, so a quarantine (Reply) cannot
+	// land in between; the POST queues the input and does not wait for it.
+	defer s.c.lockID(s.ref.NativeID)()
 	if err := s.usable(); err != nil {
 		return err
 	}
@@ -653,6 +656,8 @@ func (s *Session) Interrupt(ctx context.Context) (bool, error) {
 // session grant (grant) before allowing this ask once; a question has no
 // Always, so one asked with Always is refused and left open.
 func (s *Session) Reply(ctx context.Context, askID string, r loomharness.Reply) error {
+	// Held through any grant, restore and quarantine (see Prompt).
+	defer s.c.lockID(s.ref.NativeID)()
 	if err := s.usable(); err != nil {
 		return err
 	}

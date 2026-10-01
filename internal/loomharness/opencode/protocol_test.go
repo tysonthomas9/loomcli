@@ -38,6 +38,7 @@ type store struct {
 	delErr   bool                // DELETE /api/session/{id} fails
 	patchLie int                 // the next n session PATCHes commit, then answer 500
 	stops    int                 // POST /interrupt calls
+	lateRuns int                 // prompts accepted after an interrupt
 	stopErr  bool                // POST /interrupt answers 500
 	stopHang bool                // POST /interrupt never answers
 	postErr  bool                // POST /api/session creates the session, then fails
@@ -181,6 +182,9 @@ func fakeServer(t *testing.T, st *store) *Client {
 		}
 		if st.envs[id] == nil {
 			st.bareRuns++
+		}
+		if st.stops > 0 {
+			st.lateRuns++
 		}
 		m := map[string]any{"id": body["id"], "type": "user", "text": body["text"], "time": map[string]int64{"created": 1}}
 		st.messages[id] = append(st.messages[id], m)
@@ -1290,5 +1294,57 @@ func TestProtocolAlwaysGrantRollsBack(t *testing.T) {
 			}
 			refused(t, st, s, "quarantined")
 		})
+	}
+}
+
+// TestProtocolPromptRacesQuarantine (codex, cc46d517a): a Prompt paused
+// after its check and rules PATCH, while a Reply.Always quarantines the
+// session (grant and restore both commit, then answer 500), never sends its
+// turn after the quarantine stopped the session. The Reply waits for the
+// session's lock (lockWaitHook says so) until the Prompt's POST is done.
+func TestProtocolPromptRacesQuarantine(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	rules := []loomharness.PermissionRule{{Action: "bash", Resource: "*", Effect: "ask"}}
+	ref, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-a", Dir: "/repo", Rules: rules})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := c.Session(ref)
+	st.perms["per_1"] = permReq{Session: ref.NativeID, Action: "shell", Resources: []string{"ls"}, Save: []string{"ls *"}}
+	waiting := make(chan struct{}, 1)
+	lockWaitHook = func(string) { waiting <- struct{}{} }
+	defer func() { lockWaitHook = nil }()
+
+	p := pause(c, true, func(r *http.Request) bool { return r.Method == "PATCH" })
+	prompted := make(chan error, 1)
+	go func() { prompted <- s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r1"), Text: "hi"}) }()
+	<-p.paused
+	st.mu.Lock()
+	st.patchLie = 2
+	st.mu.Unlock()
+	replied := make(chan error, 1)
+	go func() { replied <- s.Reply(ctx, "per_1", loomharness.Reply{Allow: true, Always: true}) }()
+	select {
+	case <-waiting: // the Reply waits for the Prompt
+	case <-replied: // it did not: the session is quarantined under the Prompt
+	}
+	close(p.release)
+	promptErr := <-prompted
+	st.mu.Lock()
+	late := st.lateRuns
+	st.mu.Unlock()
+	if late != 0 {
+		t.Fatalf("a turn was sent after the quarantine stopped the session (Prompt = %v)", promptErr)
+	}
+	if promptErr != nil {
+		t.Fatalf("Prompt before the quarantine = %v", promptErr)
+	}
+	if err := <-replied; err == nil || !strings.Contains(err.Error(), "active turn was stopped") {
+		t.Fatalf("Reply = %v; want the session quarantined and stopped", err)
+	}
+	if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r2"), Text: "hi"}); err == nil || !strings.Contains(err.Error(), "quarantined") {
+		t.Fatalf("Prompt after the quarantine = %v; want quarantined", err)
 	}
 }

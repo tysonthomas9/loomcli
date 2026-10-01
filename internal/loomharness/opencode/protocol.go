@@ -41,6 +41,9 @@ type Client struct {
 	ids   map[string]*idLock // native session id -> its lock while Open, Resume or Purge uses it
 }
 
+// lockWaitHook, test only, is told when a caller has to wait for an id's lock.
+var lockWaitHook func(id string)
+
 // idLock serializes Open, Resume and Purge of one native session id; n
 // counts holders and waiters, and the entry is deleted when it drops to 0.
 type idLock struct {
@@ -48,11 +51,13 @@ type idLock struct {
 	n  int
 }
 
-// lockID serializes Open, Resume and Purge of one native session id (per id,
-// not global), so Open's "did not exist before" holds from its GET through
-// any cleanup, and neither a Purge nor a Resume of the same id interleaves
-// with it. It returns the unlock. The entry is counted before its mutex is
-// taken, so it is never deleted while a caller waits on it.
+// lockID serializes Open, Resume, Purge, Prompt and Reply of one native
+// session id (per id, not global), so Open's "did not exist before" holds
+// from its GET through any cleanup, neither a Purge nor a Resume of the same
+// id interleaves with it, and a quarantine (Reply) never lands between
+// Prompt's check and its POST. No holder waits on the session's events. It
+// returns the unlock. The entry is counted before its mutex is taken, so it
+// is never deleted while a caller waits on it.
 func (c *Client) lockID(id string) func() {
 	c.idsMu.Lock()
 	l := c.ids[id]
@@ -61,7 +66,11 @@ func (c *Client) lockID(id string) func() {
 		c.ids[id] = l
 	}
 	l.n++
+	waiting := l.n > 1
 	c.idsMu.Unlock()
+	if waiting && lockWaitHook != nil {
+		lockWaitHook(id)
+	}
 	l.mu.Lock()
 	return func() {
 		l.mu.Unlock()
