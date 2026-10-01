@@ -18,6 +18,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agentprofile"
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 // fakeThread is one thread in the fake codex's store, $CODEX_HOME/threads.json.
@@ -50,7 +51,7 @@ func saveStore(home string, s fakeStore) {
 // fakeThreads serves the thread methods from the store, with codex 0.157.1's
 // error messages. thread/list pages one listed thread at a time; thread/turns/list
 // returns $CODEX_HOME/turns-<id>.json, and a thread without one is not
-// materialized. Deleting t-fail fails.
+// materialized. Deleting fails while $CODEX_HOME/fail-delete exists.
 func fakeThreads(home, method string, raw json.RawMessage) (any, error) {
 	var p struct {
 		ThreadID, Cwd, Name, SearchTerm, Cursor string
@@ -83,7 +84,7 @@ func fakeThreads(home, method string, raw json.RawMessage) (any, error) {
 		}
 		return page, nil
 	case "thread/delete":
-		if p.ThreadID == "t-fail" {
+		if _, err := os.Stat(filepath.Join(home, "fail-delete")); err == nil {
 			return nil, errors.New("disk full")
 		}
 		if !ok {
@@ -241,19 +242,33 @@ func TestCodexPurgeUsesRecordedRoot(t *testing.T) {
 	}
 }
 
-// TestCodexPurgeDeleteFailure: a delete that fails is an error, and the
-// later refs are left for the retry.
+// TestCodexPurgeDeleteFailure: a delete that fails is an error that leaves
+// the recorded refs in place, and the same Purge after a serve restart
+// deletes them.
 func TestCodexPurgeDeleteFailure(t *testing.T) {
 	f := newFixture(t, "codex-cli 0.157.1")
 	a, ctx := newAdapter(t, f), context.Background()
 	root := a.Root("")
-	saveStore(root, fakeStore{Threads: map[string]fakeThread{"t-fail": {}, "t-2": {}}})
-	err := a.Purge(ctx, []loomharness.NativeRef{{Root: root, NativeID: "t-fail"}, {Root: root, NativeID: "t-2"}})
-	if err == nil || !strings.Contains(err.Error(), "disk full") {
+	saveStore(root, fakeStore{Threads: map[string]fakeThread{"t-1": {}, "t-2": {}}})
+	if err := os.WriteFile(filepath.Join(root, "fail-delete"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	refs := []loomharness.NativeRef{{Root: root, NativeID: "t-1"}, {Root: root, NativeID: "t-2"}}
+	if err := a.Purge(ctx, refs); err == nil || !strings.Contains(err.Error(), "disk full") {
 		t.Fatalf("got %v, want the delete failure", err)
 	}
 	if len(loadStore(root).Threads) != 2 {
 		t.Fatal("Purge went on after a failure")
+	}
+	a.Stop()
+	if err := os.Remove(filepath.Join(root, "fail-delete")); err != nil {
+		t.Fatal(err)
+	}
+	if err := newAdapter(t, f).Purge(ctx, refs); err != nil {
+		t.Fatalf("retry after restart: %v", err)
+	}
+	if n := len(loadStore(root).Threads); n != 0 {
+		t.Fatalf("%d threads left after the retry", n)
 	}
 }
 
@@ -297,6 +312,12 @@ func TestCodexAgentProfileEnv(t *testing.T) {
 	l, err := a.LaunchFor(project, "orig") // the original key, after a rename too
 	if err != nil || l.Root != root || l.Env["CODEX_HOME"] != dir {
 		t.Fatalf("present profile: %+v %v", l, err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "sessions"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.Root(filepath.Dir(sessions.CodexSessionsRootFor(project, "orig"))); got != l.Root {
+		t.Fatalf("transcript discovery resolves %s, launch %s", got, l.Root)
 	}
 	ref, err := a.Open(ctx, loomharness.OpenSpec{Key: "renamed", Dir: "/work", Launch: l})
 	if err != nil || ref.Root != root {
