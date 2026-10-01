@@ -216,3 +216,38 @@ func (s *Store) MarkHistoryPurged(ctx context.Context, agentID string, now time.
 		return err
 	})
 }
+
+// AgentState is an agent's state columns (design v2 §5.1).
+type AgentState struct {
+	State                                                         string
+	StateReason, WaitingOn, Outcome, AttentionReason, RunningTurn *string
+	Attempt                                                       int64
+}
+
+// StateOf returns a's state columns.
+func (a Agent) StateOf() AgentState {
+	return AgentState{State: a.State, StateReason: a.StateReason, WaitingOn: a.WaitingOn, Outcome: a.Outcome,
+		AttentionReason: a.AttentionReason, RunningTurn: a.RunningTurnID, Attempt: a.Attempt}
+}
+
+// ErrStateChanged means the agent's state columns no longer equal the expected ones.
+var ErrStateChanged = errors.New("loomstore: agent state changed")
+
+// CompareAndSetState sets agentID's state columns to `to` only if they still
+// equal `from` and the agent is not deleted; otherwise it returns ErrStateChanged.
+func (s *Store) CompareAndSetState(ctx context.Context, agentID string, from, to AgentState) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE agents SET state = ?, state_reason = ?, waiting_on = ?, outcome = ?,
+		attention_reason = ?, running_turn_id = ?, attempt = ?, updated_at = ?
+		WHERE agent_id = ? AND deleted_at IS NULL AND state = ? AND state_reason IS ? AND waiting_on IS ?
+		AND outcome IS ? AND attention_reason IS ? AND running_turn_id IS ? AND attempt = ?`,
+		to.State, to.StateReason, to.WaitingOn, to.Outcome, to.AttentionReason, to.RunningTurn, to.Attempt,
+		Stamp(time.Now()), agentID, from.State, from.StateReason, from.WaitingOn, from.Outcome,
+		from.AttentionReason, from.RunningTurn, from.Attempt)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrStateChanged
+	}
+	return nil
+}
