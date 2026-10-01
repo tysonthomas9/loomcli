@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
@@ -18,6 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 	storepkg "github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 func useExplicitGitIdentity(t *testing.T) {
@@ -228,7 +231,10 @@ func TestPublishRecordedTrunkReplaysIndependentLayer(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := publishRecorded(ctx, fixture.store, cfg, "W", "L", "C", forge, "fixture-token", "owner/repo",
-		func(_ context.Context, task string) (string, error) {
+		func(_ context.Context, workspace, task string) (string, error) {
+			if workspace != "W" {
+				t.Fatalf("flag lookup workspace = %q", workspace)
+			}
 			if task != "T" {
 				t.Fatalf("flag lookup task = %q", task)
 			}
@@ -278,7 +284,7 @@ func TestPublishRecordedTrunkHoldsDependentUntilLanding(t *testing.T) {
 	}}
 	forge := &fakeForge{}
 	_, err := publishRecorded(ctx, fixture.store, cfg, "W", "L", "C", forge, "fixture-token", "owner/repo",
-		func(context.Context, string) (string, error) {
+		func(context.Context, string, string) (string, error) {
 			t.Fatal("flag lookup ran for held change")
 			return "", nil
 		})
@@ -425,17 +431,51 @@ func TestFeatureFlagLabel(t *testing.T) {
 	}
 }
 
-func TestPublishLocalEntryReplaysTrunkLayer(t *testing.T) {
-	useExplicitGitIdentity(t)
+func trunkWorkspaceWithoutActiveSelection(t *testing.T) (fixture, string) {
+	t.Helper()
+	for _, key := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
+		value, present := os.LookupEnv(key)
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if present {
+				_ = os.Setenv(key, value)
+			}
+		})
+	}
 	fixture := newFixture(t)
+	git(t, fixture.repo, "config", "user.name", "Test User")
+	git(t, fixture.repo, "config", "user.email", "test@example.test")
 	ctx := context.Background()
 	configureLocalWorkspace(t, fixture)
+	cli.ResetDefaultIssueBackend()
+	t.Cleanup(cli.ResetDefaultIssueBackend)
+	t.Setenv("LOOM_WORKSPACE", "")
+	if err := bootstrap.MutateStateCache(func(state *bootstrap.StateCache) error {
+		state.LastWorkspace = ""
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	issue, err := cli.DefaultIssueBackend().Create(middleware.WithWorkspace(ctx, "W"), backend.CreateParams{
+		ID: "T", Title: "Trunk task", IssueType: "task", Labels: []string{"feature-flag:new_checkout"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fixture, issue.ID
+}
+
+func TestPublishLocalEntryReplaysTrunkLayer(t *testing.T) {
+	fixture, taskID := trunkWorkspaceWithoutActiveSelection(t)
+	ctx := context.Background()
 	git(t, fixture.repo, "push", "origin", fixture.base+":refs/heads/develop")
 	git(t, fixture.repo, "commit", "--allow-empty", "-qm", "independent layer")
 	predecessor := git(t, fixture.repo, "rev-parse", "HEAD")
 	revision := fixture.revision(t, 1, predecessor, "trunk change", "source")
 	fixture.approve(t, revision)
-	if _, err := fixture.store.DriverChange(ctx, "W", "T", "repo", "C"); err != nil {
+	if _, err := fixture.store.DriverChange(ctx, "W", taskID, "repo", "C"); err != nil {
 		t.Fatal(err)
 	}
 	if err := fixture.store.SaveWorkingAreas(ctx, []journal.WorkingArea{{
@@ -447,7 +487,14 @@ func TestPublishLocalEntryReplaysTrunkLayer(t *testing.T) {
 		t.Fatal(err)
 	}
 	forge := &fakeForge{}
-	useLocalForge(t, forge)
+	previousProvider := localPublishProvider
+	localPublishProvider = func() (Forge, string, string) { return forge, "fixture-token", "owner/repo" }
+	t.Cleanup(func() { localPublishProvider = previousProvider })
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "missing-config"))
+	if _, err := PublishLocal(ctx, "W", "L", "C"); err == nil || !strings.Contains(err.Error(), "git user.name and user.email are required") {
+		t.Fatalf("publish without identity = %v", err)
+	}
+	useExplicitGitIdentity(t)
 	result, err := PublishLocal(ctx, "W", "L", "C")
 	if err != nil || result.Revision.Kind != "derived" || len(forge.prs) != 1 ||
 		forge.prs[0].Base != "develop" || !strings.Contains(forge.prs[0].Body, "new_checkout") {
@@ -455,6 +502,9 @@ func TestPublishLocalEntryReplaysTrunkLayer(t *testing.T) {
 	}
 	if current := git(t, fixture.repo, "rev-parse", "HEAD"); current != revision.HeadSHA {
 		t.Fatalf("working area changed to %s", current)
+	}
+	if identity := git(t, fixture.repo, "show", "-s", "--format=%an <%ae>|%cn <%ce>", result.Revision.HeadSHA); identity != "Test User <test@example.test>|Test User <test@example.test>" {
+		t.Fatalf("published identity = %q", identity)
 	}
 }
 
@@ -573,7 +623,7 @@ func useLocalForge(t *testing.T, forge *fakeForge) {
 	t.Helper()
 	previousProvider, previousFlag := localPublishProvider, localFlagForTask
 	localPublishProvider = func() (Forge, string, string) { return forge, "fixture-token", "owner/repo" }
-	localFlagForTask = func(_ context.Context, task string) (string, error) {
+	localFlagForTask = func(_ context.Context, _, task string) (string, error) {
 		if task != "T" {
 			t.Fatalf("task lookup = %q", task)
 		}

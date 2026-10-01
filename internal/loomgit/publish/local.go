@@ -21,6 +21,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/replay"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 type Result struct {
@@ -90,7 +91,8 @@ func PublishStackLocal(ctx context.Context, workspace, stackID, lead string, cha
 
 var featureFlagName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-func taskFeatureFlag(ctx context.Context, task string) (string, error) {
+func taskFeatureFlag(ctx context.Context, workspace, task string) (string, error) {
+	ctx = middleware.WithWorkspace(ctx, workspace)
 	detail, err := cli.DefaultIssueBackend().Get(ctx, task)
 	if err != nil {
 		return "", fmt.Errorf("load task %s feature flag: %w", task, err)
@@ -272,7 +274,7 @@ func repoNameForStack(ctx context.Context, store *journal.SQLite, workspace, lea
 }
 
 func publishRecorded(ctx context.Context, store *journal.SQLite, cfg *config.LoomConfig, workspace, lead, change string,
-	forge Forge, token, slug string, flagForTask func(context.Context, string) (string, error)) (Result, error) {
+	forge Forge, token, slug string, flagForTask func(context.Context, string, string) (string, error)) (Result, error) {
 	repoName, err := store.RepoForChange(ctx, workspace, change)
 	if err != nil {
 		return Result{}, fmt.Errorf("find repo for change: %w", err)
@@ -298,7 +300,7 @@ func publishRecorded(ctx context.Context, store *journal.SQLite, cfg *config.Loo
 }
 
 func publishRepo(ctx context.Context, store *journal.SQLite, request Request,
-	flagForTask func(context.Context, string) (string, error)) (Result, error) {
+	flagForTask func(context.Context, string, string) (string, error)) (Result, error) {
 	prior, priorExists, err := store.Publication(ctx, request.Workspace, request.Change)
 	if err != nil {
 		return Result{}, err
@@ -338,7 +340,7 @@ func publishRepo(ctx context.Context, store *journal.SQLite, request Request,
 }
 
 func prepareTrunkRequest(ctx context.Context, store *journal.SQLite, request *Request,
-	flagForTask func(context.Context, string) (string, error)) error {
+	flagForTask func(context.Context, string, string) (string, error)) error {
 	predecessor, err := store.DependencyForChange(ctx, request.Workspace, request.Change)
 	if err != nil {
 		return err
@@ -361,7 +363,7 @@ func prepareTrunkRequest(ctx context.Context, store *journal.SQLite, request *Re
 			return err
 		}
 		if task != "" {
-			request.FeatureFlag, err = flagForTask(ctx, task)
+			request.FeatureFlag, err = flagForTask(ctx, request.Workspace, task)
 			if err != nil {
 				return err
 			}

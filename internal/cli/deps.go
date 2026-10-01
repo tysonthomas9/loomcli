@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/usage"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // GitRunner wraps git command execution.
@@ -268,9 +269,12 @@ func (b *fleetDBIssueBackend) withBackend(ctx context.Context, op string, fn fun
 	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
 	defer func() { _ = handle.Close() }()
 
-	ws, err := bootstrap.ResolveActiveWorkspaceKey(ctx, handle.Store.Workspaces())
-	if err != nil {
-		return backend.ErrUnavailable(op, "resolve active fleet-db workspace", err)
+	ws := middleware.WorkspaceFromContext(ctx)
+	if ws == "" {
+		ws, err = bootstrap.ResolveActiveWorkspaceKey(ctx, handle.Store.Workspaces())
+		if err != nil {
+			return backend.ErrUnavailable(op, "resolve active fleet-db workspace", err)
+		}
 	}
 	fb, err := fleet.New(fleet.Config{
 		BaseURL:     handle.URL(),
