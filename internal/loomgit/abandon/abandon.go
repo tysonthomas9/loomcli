@@ -248,7 +248,11 @@ func abandonmentRow(ctx context.Context, store *journal.SQLite, req Request, cha
 		Worktree: req.Worktree, SourceRepo: req.SourceRepo, ClaimActor: holder, RequestedBy: req.RequestedBy,
 		RetentionEligible: complete}
 	if published {
-		if req.SourceRepo == "" || filepath.Clean(req.SourceRepo) != filepath.Clean(publication.Repo) {
+		same, err := sameRepository(ctx, req.SourceRepo, publication.Repo)
+		if err != nil {
+			return row, err
+		}
+		if !same {
 			return row, loomgit.NewError(loomgit.StaleSubject, "published change source repository differs from task copy", nil)
 		}
 		branch, err := refname.ChangeBranch(req.Workspace, change)
@@ -266,6 +270,27 @@ func abandonmentRow(ctx context.Context, store *journal.SQLite, req Request, cha
 		}
 	}
 	return row, nil
+}
+
+// sameRepository reports whether two checkouts share one Git repository. Publish
+// records the workspace checkout, which is a worktree of the task copy's source.
+func sameRepository(ctx context.Context, source, published string) (bool, error) {
+	if source == "" || filepath.Clean(source) == filepath.Clean(published) {
+		return source != "", nil
+	}
+	var dirs [2]string
+	for i, path := range []string{source, published} {
+		runner, err := gitexec.New(path, gitexec.Options{ReadOnly: true})
+		if err != nil {
+			return false, err
+		}
+		out, err := runner.Run(ctx, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		if err != nil {
+			return false, err
+		}
+		dirs[i] = filepath.Clean(strings.TrimSpace(string(out)))
+	}
+	return dirs[0] == dirs[1], nil
 }
 
 func (service *Service) finish(ctx context.Context, store *journal.SQLite, row journal.Abandonment) error {
