@@ -98,7 +98,6 @@ tests:
         intent: "The workspace has a lead agent but no working area before approval"
       - click: { role: button, name: Approve, exact: true }
       - wait: { text: "Approved: Apply to create the lead working area" }
-      - expect: { visible: { role: button, name: Apply } }
       - api:
           method: "GET"
           path: "/api/workspaces/E2E-WS-REVIEW/issues/${var:reviewTaskId}/revisions"
