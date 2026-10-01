@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -21,6 +22,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/agentwire"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/daemonwire"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/metricscmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/observability"
@@ -238,14 +240,35 @@ func runServe(cmd *cobra.Command, args []string) {
 	collectDataFn := buildMonitorCollectDataFn(monitorDefaultWorkspace, issueBackendFn)
 	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler, storeHandle.Store, issueBackendFn, monitorDefaultWorkspace)
 
+	cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle)
+	if api := startAgentAPI(ctx, cfg); api != nil {
+		cfg.AgentAPIRoutes = api.Register
+		defer api.Stop()
+	}
 	webuiErr := make(chan error, 1)
-	go func() {
-		cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle)
-		webuiErr <- webuiapp.StartServer(ctx, cfg)
-	}()
+	go func() { webuiErr <- webuiapp.StartServer(ctx, cfg) }()
 
 	logServerStartup()
 	awaitShutdown(cmd, stop, webuiErr, cancel)
+}
+
+// startAgentAPI starts the Agent API for the serve's workspace beside the v5
+// routes, or returns nil when it can't; serve then runs without it.
+func startAgentAPI(ctx context.Context, cfg webui.ServerConfig) *agentwire.API {
+	if cfg.InitialWorkspaceID == "" {
+		return nil
+	}
+	bin := os.Getenv("LOOM_OPENCODE_BIN")
+	if bin == "" {
+		bin = filepath.Join(bootstrap.LoomDir(), "harness/opencode/2.0.19/opencode")
+	}
+	api, err := agentwire.Start(ctx, agentwire.Config{WorkspaceID: cfg.InitialWorkspaceID,
+		Dir: bootstrap.LoomDir(), OpenCodeBin: bin, Skills: cfg.Store})
+	if err != nil {
+		slog.Warn("Agent API not started", "error", err)
+		return nil
+	}
+	return api
 }
 
 func configureServeLocalRuntimeMode() {
