@@ -42,7 +42,11 @@ func newAdapter(t *testing.T) (*Adapter, loomharness.Feed, *fixture) {
 
 func open(t *testing.T, a *Adapter, f *fixture, key string) (loomharness.NativeRef, loomharness.Session) {
 	t.Helper()
-	ref, err := a.Open(context.Background(), loomharness.OpenSpec{Key: key, Dir: t.TempDir(), Launch: loomharness.Launch{Root: f.root}})
+	spec := loomharness.OpenSpec{Key: key, Dir: t.TempDir(), Launch: loomharness.Launch{Root: f.root}}
+	if err := isolated(a.cfg, ProcessSpec{Launch: spec.Launch, Dir: spec.Dir}); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := a.Open(context.Background(), spec)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -28,7 +28,8 @@ type realRun struct {
 	id     string
 }
 
-// hostEnv is this process's environment without the variables of a Claude
+// hostEnv is this process's environment (whose HOME and CLAUDE_CONFIG_DIR
+// TestMain already points at an owned /tmp home) without the variables of a Claude
 // Code session the test may itself run inside, which would otherwise tie the
 // child to that session. Claude's own auth variables are kept.
 func hostEnv() []string {
@@ -41,7 +42,7 @@ func hostEnv() []string {
 		}
 		out = append(out, kv)
 	}
-	return out
+	return append(out, "DISABLE_AUTOUPDATER=1")
 }
 
 // realBin skips unless LOOM_REAL_CLAUDE=1 and claude is on PATH.
@@ -89,7 +90,7 @@ func startReal(t *testing.T, args ...string) *realRun {
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	l := ownedLaunch(t)
 	r := &realRun{frames: make(chan Frame, 100000), dir: dir, id: SessionID(uuid.NewString())}
-	r.p = NewProcess(Config{Bin: bin, Env: hostEnv(), Args: args, OnFrame: func(f Frame) { r.frames <- f }},
+	r.p = newTestProcess(t, Config{Bin: bin, Env: hostEnv(), Args: args, OnFrame: func(f Frame) { r.frames <- f }},
 		ProcessSpec{SessionID: r.id, Launch: l, Dir: dir, Model: "haiku"})
 	t.Cleanup(func() { _ = r.p.Close(context.Background()) })
 	return r

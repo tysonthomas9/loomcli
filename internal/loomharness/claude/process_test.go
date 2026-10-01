@@ -27,7 +27,10 @@ func TestMain(m *testing.M) {
 		fakeClaude()
 		os.Exit(0)
 	}
-	os.Exit(m.Run())
+	cleanup := ownTestHome()
+	code := m.Run()
+	cleanup()
+	os.Exit(code)
 }
 
 // fakeClaude speaks the stream-json frames the process reads: the user
@@ -215,7 +218,7 @@ func TestClaudeProcessPromptInterruptRelaunch(t *testing.T) {
 	if id != SessionID("agent-1") || id == SessionID("agent-2") {
 		t.Fatal("SessionID must be stable per key")
 	}
-	p := NewProcess(cfg, ProcessSpec{SessionID: id, Launch: loomharness.Launch{Root: f.root}, Dir: t.TempDir(), Model: "haiku"})
+	p := newTestProcess(t, cfg, ProcessSpec{SessionID: id, Launch: loomharness.Launch{Root: f.root}, Dir: t.TempDir(), Model: "haiku"})
 	ctx := context.Background()
 	if ok, err := p.Interrupt(ctx); ok || err != nil {
 		t.Fatalf("interrupt before launch = %v, %v", ok, err)
@@ -278,7 +281,7 @@ func TestClaudeSessionIDInUseResumes(t *testing.T) {
 	}
 	// Launch.Root does not show the transcript, so the first launch is
 	// --session-id, which the fake refuses as already in use.
-	p := NewProcess(cfg, ProcessSpec{SessionID: id, Launch: loomharness.Launch{Root: t.TempDir()}, Dir: t.TempDir()})
+	p := newTestProcess(t, cfg, ProcessSpec{SessionID: id, Launch: loomharness.Launch{Root: t.TempDir()}, Dir: t.TempDir()})
 	defer func() { _ = p.Close(context.Background()) }()
 	if err := p.Prompt(context.Background(), "k1", "hello"); err != nil {
 		t.Fatal(err)
@@ -292,7 +295,7 @@ func TestClaudeSessionIDInUseResumes(t *testing.T) {
 
 func TestClaudeVersionGate(t *testing.T) {
 	f, cfg := newFixture(t, "2.1.200")
-	p := NewProcess(cfg, ProcessSpec{SessionID: SessionID("old"), Launch: loomharness.Launch{Root: f.root}, Dir: t.TempDir()})
+	p := newTestProcess(t, cfg, ProcessSpec{SessionID: SessionID("old"), Launch: loomharness.Launch{Root: f.root}, Dir: t.TempDir()})
 	var tooOld *loomharness.TooOldError
 	if err := p.Prompt(context.Background(), "k", "hi"); !errors.As(err, &tooOld) || !errors.Is(err, loomharness.ErrUnavailable) {
 		t.Fatalf("too-old claude = %v", err)
@@ -302,7 +305,7 @@ func TestClaudeVersionGate(t *testing.T) {
 	}
 
 	f, cfg = newFixture(t, "2.1.999")
-	p = NewProcess(cfg, ProcessSpec{SessionID: SessionID("new"), Launch: loomharness.Launch{Root: f.root}, Dir: t.TempDir()})
+	p = newTestProcess(t, cfg, ProcessSpec{SessionID: SessionID("new"), Launch: loomharness.Launch{Root: f.root}, Dir: t.TempDir()})
 	defer func() { _ = p.Close(context.Background()) }()
 	if err := p.Prompt(context.Background(), "k", "hi"); err != nil {
 		t.Fatal(err)
@@ -358,7 +361,7 @@ func writeProfile(t *testing.T, project, key, version string, files map[string]s
 func launchEnv(t *testing.T, l loomharness.Launch, extra ...string) []string {
 	t.Helper()
 	f, cfg := newFixture(t, "2.1.285", extra...)
-	p := NewProcess(cfg, ProcessSpec{SessionID: SessionID(t.Name()), Launch: l, Dir: t.TempDir()})
+	p := newTestProcess(t, cfg, ProcessSpec{SessionID: SessionID(t.Name()), Launch: l, Dir: t.TempDir()})
 	defer func() { _ = p.Close(context.Background()) }()
 	if err := p.Prompt(context.Background(), "k", "hi"); err != nil {
 		t.Fatal(err)
@@ -497,7 +500,7 @@ func TestClaudeProcessStripsGitHubTokens(t *testing.T) {
 	}
 	extra := append([]string{"CLAUDE_CODE_OAUTH_TOKEN=claude-auth", "ANTHROPIC_API_KEY=user-key"}, seededGitHubTokens...)
 	f, cfg := newFixture(t, "2.1.285", extra...)
-	p := NewProcess(cfg, ProcessSpec{SessionID: SessionID("strip"), Dir: t.TempDir(),
+	p := newTestProcess(t, cfg, ProcessSpec{SessionID: SessionID("strip"), Dir: t.TempDir(),
 		Launch: loomharness.Launch{Root: f.root, Env: map[string]string{"GH_TOKEN": "from-launch"}}})
 	ctx := context.Background()
 	for i := range 2 { // first launch and relaunch
