@@ -32,6 +32,7 @@ type store struct {
 	envFail  bool
 	bareRuns int // prompts accepted while the session had no environment
 	patchErr bool
+	delErr   bool                // DELETE /api/session/{id} fails
 	agents   map[string]bool     // agent ids the service offers
 	agentDir []string            // location[directory] of each agent lookup
 	loading  bool                // the location lists no agents yet
@@ -122,6 +123,10 @@ func fakeServer(t *testing.T, st *store) *Client {
 		defer st.mu.Unlock()
 		id := r.PathValue("id")
 		st.deleted = append(st.deleted, id)
+		if st.delErr {
+			reply(w, 500, map[string]string{"_tag": "UnknownError", "message": "disk full"})
+			return
+		}
 		if _, ok := st.sessions[id]; !ok {
 			missing(w, id)
 			return
@@ -732,5 +737,53 @@ func TestProtocolPromptReappliesRules(t *testing.T) {
 	}
 	if len(st.messages[ref.NativeID]) != n {
 		t.Fatal("the prompt reached OpenCode without Loom's rules")
+	}
+}
+
+// TestProtocolOpenLeavesNothingOnError: when Open fails after creating the
+// session (rules install or environment), it deletes the session and returns
+// the zero ref with the error; when that delete fails too, it returns the
+// session's ref with both errors, for the caller to record and Purge. A
+// failed repeat Open never removes the session an earlier Open made.
+func TestProtocolOpenLeavesNothingOnError(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	c.shellEnv = func() ([]string, error) { return []string{"PATH=/bin"}, nil }
+	exists := func(id string) bool { st.mu.Lock(); defer st.mu.Unlock(); _, ok := st.sessions[id]; return ok }
+	spec := loomharness.OpenSpec{Key: "agent-1", Launch: loomharness.Launch{Root: "/root-a"}, Dir: "/repo"}
+	id := SessionID(spec.Key)
+
+	for name, fail := range map[string]*bool{"install": &st.patchErr, "environment": &st.envFail} {
+		*fail = true
+		ref, err := c.Open(ctx, spec)
+		if err == nil || ref != (loomharness.NativeRef{}) || exists(id) {
+			t.Fatalf("%s: Open = %+v, %v, session left %v; want the zero ref, the error, no session", name, ref, err, exists(id))
+		}
+		if c.rootOf(id) != "" {
+			t.Fatalf("%s: the failed session's Root is still recorded", name)
+		}
+		if err := c.Session(loomharness.NativeRef{NativeID: id}).Prompt(ctx, loomharness.Input{Key: "msg_x", Text: "x"}); !isCode(err, "bad_request") {
+			t.Fatalf("%s: Prompt after a failed Open = %v; want bad_request (no rules)", name, err)
+		}
+
+		st.delErr = true
+		ref, err = c.Open(ctx, spec)
+		if err == nil || !strings.Contains(err.Error(), "disk full") || ref.NativeID != id || ref.Root != "/root-a" || !exists(id) {
+			t.Fatalf("%s: Open with a failed delete = %+v, %v; want the session's ref and both errors", name, ref, err)
+		}
+		st.delErr, *fail = false, false
+		if err := c.Purge(ctx, []loomharness.NativeRef{ref}); err != nil || exists(id) {
+			t.Fatalf("%s: Purge of the returned ref: %v", name, err)
+		}
+	}
+
+	ref, err := c.Open(ctx, spec)
+	if err != nil || ref.NativeID != id {
+		t.Fatalf("Open after the failures = %+v, %v", ref, err)
+	}
+	st.patchErr = true
+	if again, err := c.Open(ctx, spec); err == nil || again != (loomharness.NativeRef{}) || !exists(id) {
+		t.Fatalf("a failed repeat Open = %+v, %v, session kept %v; want the zero ref and the earlier session kept", again, err, exists(id))
 	}
 }

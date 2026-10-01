@@ -42,20 +42,51 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 		body["permissions"] = rules
 	}
 	s := c.Session(ref)
-	err = c.call(ctx, "POST", "/api/session", body, nil)
-	if isCode(err, "input_id_conflict") {
-		err = nil
-	}
-	// A repeat may find the session holding older rules, and b30c4d0 answers
-	// a repeat POST with success and ignores its body, so always install.
-	if err == nil {
-		err = s.install(ctx, rules)
-	}
-	if err != nil {
+	// A repeat Open finds the session an earlier one made; b30c4d0 answers a
+	// repeat POST with success, so only a GET tells whether this Open made it.
+	existed := true
+	if err := c.call(ctx, "GET", s.path(""), nil, nil); errors.Is(err, loomharness.ErrSessionNotFound) {
+		existed = false
+	} else if err != nil {
 		return loomharness.NativeRef{}, err
 	}
-	c.remember(ref)
-	return ref, s.isolate(ctx)
+	if err := c.call(ctx, "POST", "/api/session", body, nil); err != nil {
+		if !isCode(err, "input_id_conflict") {
+			return loomharness.NativeRef{}, err
+		}
+		existed = true
+	}
+	// A repeat may find the session holding older rules, so always install.
+	err = s.install(ctx, rules)
+	if err == nil {
+		err = s.isolate(ctx)
+	}
+	if err == nil {
+		c.remember(ref)
+		return ref, nil
+	}
+	if existed {
+		return loomharness.NativeRef{}, err // not this Open's to remove
+	}
+	return c.discard(ref, err)
+}
+
+// discard deletes a session a failed Open created, so the failure leaves
+// nothing behind (port contract, Open failures). The delete outlives a
+// cancelled ctx. It returns the zero ref with cause, or, when the session
+// could not be removed, its ref with both errors, so the caller records it
+// for Purge (R29).
+func (c *Client) discard(ref loomharness.NativeRef, cause error) (loomharness.NativeRef, error) {
+	c.rulesMu.Lock()
+	delete(c.rules, ref.NativeID)
+	delete(c.roots, ref.NativeID)
+	c.rulesMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := c.Purge(ctx, []loomharness.NativeRef{ref}); err != nil {
+		return ref, errors.Join(cause, fmt.Errorf("opencode: remove the session a failed Open created: %w", err))
+	}
+	return loomharness.NativeRef{}, cause
 }
 
 // hasAgent fails closed unless the running service offers agent for dir.
