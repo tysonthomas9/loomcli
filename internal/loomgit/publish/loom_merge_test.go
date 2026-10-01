@@ -23,6 +23,7 @@ type mergeForgeFake struct {
 	deleted     []string
 	checks      string
 	queued      bool
+	pending     bool
 	retargetErr error
 }
 
@@ -57,16 +58,32 @@ func (forge *mergeForgeFake) FailedLoomChecks(context.Context, string, string, s
 	return []string{"ci-build"}, nil
 }
 
-func (forge *mergeForgeFake) MergeLoomPull(_ context.Context, _, _ string, number int, head string) error {
+func (forge *mergeForgeFake) MergeLoomPull(_ context.Context, _, _ string, number int, head string) (stackpublish.LoomMergeResult, error) {
 	for index := range forge.prs {
 		if forge.prs[index].Number == number && forge.prs[index].HeadSHA == head {
-			forge.prs[index].Merged = true
-			forge.prs[index].State = "closed"
 			forge.merged++
-			return nil
+			if !forge.pending {
+				forge.prs[index].Merged = true
+				forge.prs[index].State = "closed"
+			}
+			result := stackpublish.LoomMergeResult{Status: "pending"}
+			result.Details.UUID, result.Details.ExpectedHeadSHA = "request-1", head
+			return result, nil
 		}
 	}
-	return journal.ErrStale
+	return stackpublish.LoomMergeResult{}, journal.ErrStale
+}
+
+func (forge *mergeForgeFake) LoomMergeStatus(_ context.Context, _, _ string, _ int, uuid string) (stackpublish.LoomMergeResult, error) {
+	if uuid != "request-1" {
+		return stackpublish.LoomMergeResult{}, journal.ErrStale
+	}
+	result := stackpublish.LoomMergeResult{Status: "pending"}
+	if !forge.pending {
+		result.Status = "merged"
+	}
+	result.Details.UUID = uuid
+	return result, nil
 }
 
 func (forge *mergeForgeFake) DeleteLoomBranch(_ context.Context, _, _, branch string) error {
@@ -168,6 +185,74 @@ func TestLoomMergeTerminalReplayDoesNotRearm(t *testing.T) {
 				t.Fatalf("terminal replay = %+v, %v", replayed, err)
 			}
 		})
+	}
+}
+
+func TestLoomMergePendingRequestSurvivesTicksAndRestart(t *testing.T) {
+	for _, mergedAfterDispatch := range []bool{false, true} {
+		name := "pending"
+		if mergedAfterDispatch {
+			name = "merged"
+		}
+		t.Run(name, func(t *testing.T) {
+			item, forge, request := loomMergeFixture(t)
+			forge.pending = true
+			ctx := context.Background()
+			if err := (LoomStackBackend{Store: item.store}).MergeUpTo(ctx, request, "A"); err != nil {
+				t.Fatal(err)
+			}
+			if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+				t.Fatal(err)
+			}
+			merge, err := item.store.LoomMerge(ctx, "W", "feature")
+			if err != nil || merge.Phase != "merging" || merge.ProviderRequestID != "request-1" ||
+				merge.PRNumber != forge.prs[0].Number || merge.DispatchHead != forge.prs[0].HeadSHA {
+				t.Fatalf("dispatch ack = %+v, %v", merge, err)
+			}
+			if mergedAfterDispatch {
+				forge.prs[0].Merged, forge.prs[0].State = true, "closed"
+			}
+			for range 2 {
+				if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+					t.Fatal(err)
+				}
+			}
+			merge, err = item.store.LoomMerge(ctx, "W", "feature")
+			wantPhase := "merging"
+			if mergedAfterDispatch {
+				wantPhase = "landing"
+			}
+			if err != nil || merge.Phase != wantPhase || forge.merged != 1 {
+				t.Fatalf("replayed dispatch = %+v, calls = %d, err = %v", merge, forge.merged, err)
+			}
+		})
+	}
+}
+
+func TestLoomMergeDispatchingRecoveryKeepsExactHead(t *testing.T) {
+	item, forge, request := loomMergeFixture(t)
+	forge.pending = true
+	ctx := context.Background()
+	if err := (LoomStackBackend{Store: item.store}).MergeUpTo(ctx, request, "A"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := item.store.LoomMerge(ctx, "W", "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := before
+	after.Phase, after.PRNumber, after.DispatchHead = "dispatching", forge.prs[0].Number, forge.prs[0].HeadSHA
+	if err := item.store.AdvanceLoomMerge(ctx, before, after); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recovered, err := item.store.LoomMerge(ctx, "W", "feature")
+	if err != nil || recovered.Phase != "merging" || recovered.ProviderRequestID == "" || forge.merged != 1 {
+		t.Fatalf("recovered dispatch = %+v, calls = %d, err = %v", recovered, forge.merged, err)
 	}
 }
 

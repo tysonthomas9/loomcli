@@ -531,15 +531,18 @@ type LoomMergeLayer struct {
 }
 
 type LoomMerge struct {
-	Workspace string           `json:"workspace"`
-	StackID   string           `json:"stack_id"`
-	Target    string           `json:"target"`
-	RequestID string           `json:"request_id"`
-	Layers    []LoomMergeLayer `json:"layers"`
-	Index     int              `json:"index"`
-	Phase     string           `json:"phase"`
-	Reason    string           `json:"reason,omitempty"`
-	Version   int              `json:"-"`
+	Workspace         string           `json:"workspace"`
+	StackID           string           `json:"stack_id"`
+	Target            string           `json:"target"`
+	RequestID         string           `json:"request_id"`
+	Layers            []LoomMergeLayer `json:"layers"`
+	Index             int              `json:"index"`
+	Phase             string           `json:"phase"`
+	Reason            string           `json:"reason,omitempty"`
+	PRNumber          int              `json:"pr_number,omitempty"`
+	DispatchHead      string           `json:"dispatch_head,omitempty"`
+	ProviderRequestID string           `json:"provider_request_id,omitempty"`
+	Version           int              `json:"-"`
 }
 
 func (s *SQLite) ensureLoomMergeSchema(ctx context.Context) error {

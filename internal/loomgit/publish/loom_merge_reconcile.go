@@ -67,7 +67,7 @@ func advanceLoomMerge(ctx context.Context, store *journal.SQLite, forge loomMerg
 	if pr.Number != publication.PRNumber || pr.Head != publication.Branch {
 		return blockLoomMerge(ctx, store, merge, loomgit.Stale, "merge PR identity changed")
 	}
-	if merge.Phase == "ready" || merge.Phase == "merging" {
+	if merge.Phase == "ready" || merge.Phase == "dispatching" || merge.Phase == "merging" {
 		return reconcileLoomDispatch(ctx, store, forge, merge, publication, pr, owner, repo)
 	}
 	if merge.Phase == "landing" {
@@ -96,6 +96,12 @@ func reconcileLoomDispatch(ctx context.Context, store *journal.SQLite, forge loo
 	if pr.State != "open" {
 		return blockLoomMerge(ctx, store, merge, loomgit.MergeBlocked, "merge PR is not open")
 	}
+	if merge.DispatchHead != "" && (merge.DispatchHead != pr.HeadSHA || merge.PRNumber != pr.Number) {
+		return blockLoomMerge(ctx, store, merge, loomgit.Stale, "dispatched merge identity changed")
+	}
+	if merge.ProviderRequestID != "" {
+		return pollLoomMerge(ctx, store, forge, merge, publication, owner, repo)
+	}
 	ready, err := loomMergeHealth(ctx, forge, publication, pr, owner, repo)
 	if err != nil {
 		return blockConfirmedError(ctx, store, merge, err)
@@ -103,12 +109,19 @@ func reconcileLoomDispatch(ctx context.Context, store *journal.SQLite, forge loo
 	if !ready {
 		return nil
 	}
+	return submitLoomMerge(ctx, store, forge, merge, pr, owner, repo)
+}
+
+func submitLoomMerge(ctx context.Context, store *journal.SQLite, forge loomMergeForge,
+	merge journal.LoomMerge, pr stackpublish.PR, owner, repo string) error {
 	queued, err := forge.QueuedPRNumbers(ctx, owner, repo)
 	if err != nil {
 		return err
 	}
 	if merge.Phase == "ready" {
-		if err := setLoomPhase(ctx, store, merge, "merging", merge.Index, ""); err != nil {
+		after := merge
+		after.Phase, after.PRNumber, after.DispatchHead = "dispatching", pr.Number, pr.HeadSHA
+		if err := store.AdvanceLoomMerge(ctx, merge, after); err != nil {
 			return err
 		}
 		merge, err = store.LoomMerge(ctx, merge.Workspace, merge.StackID)
@@ -119,10 +132,42 @@ func reconcileLoomDispatch(ctx context.Context, store *journal.SQLite, forge loo
 	if queued[pr.Number] {
 		return nil
 	}
-	if err := forge.MergeLoomPull(ctx, owner, repo, pr.Number, pr.HeadSHA); err != nil {
+	result, err := forge.MergeLoomPull(ctx, owner, repo, pr.Number, pr.HeadSHA)
+	if err != nil {
 		return blockLoomMerge(ctx, store, merge, loomgit.MergeBlocked, err.Error())
 	}
-	return nil
+	if result.Details.ExpectedHeadSHA != "" && result.Details.ExpectedHeadSHA != pr.HeadSHA {
+		return blockLoomMerge(ctx, store, merge, loomgit.Stale, "provider accepted a different merge head")
+	}
+	if result.Status == "merged" {
+		return setLoomPhase(ctx, store, merge, "landing", merge.Index, "")
+	}
+	if result.Status == "failed" {
+		return nil
+	}
+	after := merge
+	after.Phase, after.ProviderRequestID = "merging", result.Details.UUID
+	return store.AdvanceLoomMerge(ctx, merge, after)
+}
+
+func pollLoomMerge(ctx context.Context, store *journal.SQLite, forge loomMergeForge,
+	merge journal.LoomMerge, publication journal.Publication, owner, repo string) error {
+	result, err := forge.LoomMergeStatus(ctx, owner, repo, publication.PRNumber, merge.ProviderRequestID)
+	if err != nil {
+		return err
+	}
+	if result.Details.ExpectedHeadSHA != "" && result.Details.ExpectedHeadSHA != merge.DispatchHead {
+		return blockLoomMerge(ctx, store, merge, loomgit.Stale, "provider merge head changed")
+	}
+	if result.Details.BypassRules {
+		return blockLoomMerge(ctx, store, merge, loomgit.Protected, "provider merge bypassed repository rules")
+	}
+	if result.Status == "pending" || result.Status == "enqueued" || result.Status == "merged" {
+		return nil
+	}
+	after := merge
+	after.Phase, after.ProviderRequestID = "dispatching", ""
+	return store.AdvanceLoomMerge(ctx, merge, after)
 }
 
 func loomMergeHealth(ctx context.Context, forge loomMergeForge, publication journal.Publication,
@@ -331,6 +376,9 @@ func requireConfirmedHead(ctx context.Context, store *journal.SQLite, merge jour
 func setLoomPhase(ctx context.Context, store *journal.SQLite, before journal.LoomMerge, phase string, index int, reason string) error {
 	after := before
 	after.Phase, after.Index, after.Reason = phase, index, reason
+	if index != before.Index {
+		after.PRNumber, after.DispatchHead, after.ProviderRequestID = 0, "", ""
+	}
 	return store.AdvanceLoomMerge(ctx, before, after)
 }
 

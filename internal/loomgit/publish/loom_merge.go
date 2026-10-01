@@ -21,7 +21,8 @@ type loomMergeForge interface {
 	PRStatuses(context.Context, string, string, string) (map[string]stackpublish.PRStatus, error)
 	QueuedPRNumbers(context.Context, string, string) (map[int]bool, error)
 	FailedLoomChecks(context.Context, string, string, string) ([]string, error)
-	MergeLoomPull(context.Context, string, string, int, string) error
+	MergeLoomPull(context.Context, string, string, int, string) (stackpublish.LoomMergeResult, error)
+	LoomMergeStatus(context.Context, string, string, int, string) (stackpublish.LoomMergeResult, error)
 	DeleteLoomBranch(context.Context, string, string, string) error
 }
 

@@ -9,27 +9,65 @@ import (
 	"sort"
 )
 
-func (g *GitHubForge) MergeLoomPull(ctx context.Context, owner, repo string, number int, head string) error {
+type LoomMergeResult struct {
+	Status  string `json:"status"`
+	Details struct {
+		UUID            string `json:"uuid"`
+		ExpectedHeadSHA string `json:"expected_head_sha"`
+		MergeAction     string `json:"merge_action"`
+		BypassRules     bool   `json:"bypass_rules"`
+	} `json:"details"`
+}
+
+func (g *GitHubForge) MergeLoomPull(ctx context.Context, owner, repo string, number int, head string) (LoomMergeResult, error) {
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge-async", owner, repo, number)
-	status, data, _, err := g.do(ctx, http.MethodPut, path, map[string]string{
-		"merge_method": "squash", "merge_action": "default", "sha": head,
+	status, data, _, err := g.do(ctx, http.MethodPut, path, map[string]any{
+		"merge_method": "squash", "merge_action": "default", "sha": head, "bypass_rules": false,
 	})
 	if err != nil {
-		return err
+		return LoomMergeResult{}, err
 	}
-	if status != http.StatusAccepted && status != http.StatusOK {
-		return g.apiErr("PUT", path, status, data)
+	if status != http.StatusAccepted && status != http.StatusOK && status != http.StatusConflict {
+		return LoomMergeResult{}, g.apiErr("PUT", path, status, data)
 	}
-	var result struct {
-		Status string `json:"status"`
+	result, err := decodeLoomMergeResult(data)
+	if err != nil {
+		return result, err
 	}
+	if status == http.StatusConflict && (result.Details.UUID == "" || result.Details.ExpectedHeadSHA != head ||
+		result.Details.MergeAction != "default" || result.Details.BypassRules) {
+		return LoomMergeResult{}, fmt.Errorf("github existing loom merge differs from requested head or action")
+	}
+	if result.Details.BypassRules {
+		return LoomMergeResult{}, fmt.Errorf("github loom merge bypassed repository rules")
+	}
+	return result, nil
+}
+
+func (g *GitHubForge) LoomMergeStatus(ctx context.Context, owner, repo string, number int, uuid string) (LoomMergeResult, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge-async/%s", owner, repo, number, url.PathEscape(uuid))
+	status, data, _, err := g.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return LoomMergeResult{}, err
+	}
+	if status != http.StatusOK {
+		return LoomMergeResult{}, g.apiErr("GET", path, status, data)
+	}
+	return decodeLoomMergeResult(data)
+}
+
+func decodeLoomMergeResult(data []byte) (LoomMergeResult, error) {
+	var result LoomMergeResult
 	if err := json.Unmarshal(data, &result); err != nil {
-		return fmt.Errorf("github loom merge decode: %w", err)
+		return result, fmt.Errorf("github loom merge decode: %w", err)
 	}
-	if result.Status != "pending" && result.Status != "merged" {
-		return fmt.Errorf("github loom merge returned %q", result.Status)
+	if result.Status != "pending" && result.Status != "merged" && result.Status != "failed" && result.Status != "enqueued" {
+		return result, fmt.Errorf("github loom merge returned %q", result.Status)
 	}
-	return nil
+	if (result.Status == "pending" || result.Status == "enqueued") && result.Details.UUID == "" {
+		return result, fmt.Errorf("github loom merge %s without UUID", result.Status)
+	}
+	return result, nil
 }
 
 func (g *GitHubForge) DeleteLoomBranch(ctx context.Context, owner, repo, branch string) error {
