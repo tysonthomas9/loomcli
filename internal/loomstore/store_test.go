@@ -25,7 +25,7 @@ func openAt(t *testing.T, path string) *Store {
 func ptr(s string) *string { return &s }
 
 func agent(id, mode string) Agent {
-	return Agent{AgentID: id, WorkspaceID: "ws", Name: id, Preset: "lead", PresetVersion: "1",
+	return Agent{AgentID: id, WorkspaceID: "ws", Name: id, ProfileKey: id, Preset: "lead", PresetVersion: "1",
 		Mode: "persistent", InteractionMode: mode, RoleKind: "interactive", SpecJSON: "{}",
 		SpecVersion: 1, OwnerKind: "user", OwnerID: "u", CreatedByKind: "user", CreatedByID: "u",
 		CreateRequestID: "req-" + id, Repo: "/repo", Harness: "opencode", State: "idle"}
@@ -97,33 +97,62 @@ func TestRegistryUniquenessAndImmutableInteractionMode(t *testing.T) {
 	}
 }
 
-func TestRegistryNativeSessionOwnership(t *testing.T) {
+func TestRegistryProfileKeyImmutable(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "loom.db")
 	s := openAt(t, path)
 	a := agent("a1", "interactive")
-	a.HarnessSessionID = ptr("ses_1")
+	a.Name, a.ProfileKey = "lead", "lead"
 	if err := s.InsertAgent(ctx, a); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.InsertAgent(ctx, agent("a2", "interactive")); err != nil {
-		t.Fatal(err)
+	if _, err := s.db.Exec(`INSERT INTO agents (agent_id) VALUES ('a3')`); err == nil {
+		t.Fatal("insert without profile_key accepted")
 	}
-	for _, r := range [][3]string{{"codex", "thr_1", "switch"}, {"codex", "thr_2", "move"}, {"codex", "thr_2", "resume"}} {
-		if err := s.RecordNativeSession(ctx, "a1", r[0], r[1], r[2]); err != nil {
+	if _, err := s.db.Exec(`UPDATE agents SET name = 'renamed' WHERE agent_id = 'a1'`); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if _, err := s.db.Exec(`UPDATE agents SET profile_key = 'other' WHERE agent_id = 'a1'`); err == nil ||
+		!strings.Contains(err.Error(), "immutable") {
+		t.Fatalf("profile_key update err = %v", err)
+	}
+	s.Close()
+	s = openAt(t, path)
+	if got, err := s.GetAgent(ctx, "a1"); err != nil || got.Name != "renamed" || got.ProfileKey != "lead" {
+		t.Fatalf("after rename = name %q profile_key %q, %v", got.Name, got.ProfileKey, err)
+	}
+}
+
+func TestRegistryNativeSessionOwnership(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "loom.db")
+	s := openAt(t, path)
+	for _, id := range []string{"a1", "a2"} {
+		if err := s.InsertAgent(ctx, agent(id, "interactive")); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := s.RecordNativeSession(ctx, "a2", "codex", "thr_1", "switch"); !errors.Is(err, ErrSessionOwned) {
-		t.Fatalf("stealing a session err = %v", err)
+	rec := func(agentID, harness, root, id string) error {
+		return s.RecordNativeSession(ctx, NativeSession{AgentID: agentID, Harness: harness, NativeRoot: root, NativeID: id})
 	}
-	if err := s.RecordNativeSession(ctx, "a1", "codex", "thr_3", "guess"); err == nil {
-		t.Fatal("unknown origin accepted")
+	// Create, switch, Move, and a Resume of an already-owned session (no-op).
+	for _, r := range [][3]string{
+		{"opencode", "/profiles/a1/opencode", "ses_1"},
+		{"codex", "/profiles/a1/codex", "thr_1"},
+		{"codex", "/worktrees/moved/codex", "thr_2"},
+		{"codex", "/worktrees/moved/codex", "thr_2"},
+	} {
+		if err := rec("a1", r[0], r[1], r[2]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := rec("a2", "codex", "/profiles/a1/codex", "thr_1"); !errors.Is(err, ErrSessionOwned) {
+		t.Fatalf("stealing a session err = %v", err)
 	}
 	if _, err := s.db.Exec(`DELETE FROM agent_native_sessions`); err == nil {
 		t.Fatal("ownership rows deleted")
 	}
-	if _, err := s.db.Exec(`UPDATE agent_native_sessions SET agent_id = 'a2'`); err == nil {
+	if _, err := s.db.Exec(`UPDATE agent_native_sessions SET native_root = '/elsewhere'`); err == nil {
 		t.Fatal("ownership rows updated")
 	}
 	s.Close()
@@ -132,15 +161,22 @@ func TestRegistryNativeSessionOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var ids []string
+	var rows []string
 	for _, n := range got {
-		ids = append(ids, n.Harness+"/"+n.SessionID+"/"+n.Origin)
+		if n.AgentID != "a1" || n.RecordedAt == "" {
+			t.Fatalf("row = %+v", n)
+		}
+		rows = append(rows, n.Harness+"|"+n.NativeRoot+"|"+n.NativeID)
 	}
-	if want := "opencode/ses_1/create codex/thr_1/switch codex/thr_2/move"; strings.Join(ids, " ") != want {
-		t.Fatalf("sessions = %v, want %s", ids, want)
+	want := "opencode|/profiles/a1/opencode|ses_1 codex|/profiles/a1/codex|thr_1 codex|/worktrees/moved/codex|thr_2"
+	if strings.Join(rows, " ") != want {
+		t.Fatalf("sessions = %v, want %s (roots must come back exactly as recorded)", rows, want)
 	}
-	if owner, err := s.NativeSessionOwner(ctx, "codex", "thr_2"); err != nil || owner != "a1" {
+	if owner, err := s.NativeSessionOwner(ctx, "codex", "/worktrees/moved/codex", "thr_2"); err != nil || owner != "a1" {
 		t.Fatalf("owner = %q, %v", owner, err)
+	}
+	if _, err := s.NativeSessionOwner(ctx, "codex", "/other/root", "thr_2"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("lookup under another root err = %v", err)
 	}
 }
 

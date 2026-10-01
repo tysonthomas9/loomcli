@@ -7,6 +7,7 @@ CREATE TABLE agents (
   agent_id           TEXT PRIMARY KEY,
   workspace_id       TEXT NOT NULL,
   name               TEXT NOT NULL,
+  profile_key        TEXT NOT NULL,          -- per-agent profile; set at Create, never changed by rename
   preset             TEXT NOT NULL,
   preset_version     TEXT NOT NULL,
   mode               TEXT NOT NULL CHECK (mode IN ('persistent','single_task')),
@@ -64,13 +65,18 @@ BEFORE UPDATE OF interaction_mode ON agents
 WHEN NEW.interaction_mode IS NOT OLD.interaction_mode
 BEGIN SELECT RAISE(ABORT, 'interaction_mode is immutable'); END;
 
-CREATE TABLE agent_native_sessions (
-  harness    TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  agent_id   TEXT NOT NULL REFERENCES agents(agent_id),
-  origin     TEXT NOT NULL CHECK (origin IN ('create','switch','move','resume')),
-  created_at TEXT NOT NULL,
-  PRIMARY KEY (harness, session_id)
+CREATE TRIGGER agents_profile_key_immutable
+BEFORE UPDATE OF profile_key ON agents
+WHEN NEW.profile_key IS NOT OLD.profile_key
+BEGIN SELECT RAISE(ABORT, 'profile_key is immutable'); END;
+
+CREATE TABLE agent_native_sessions (        -- every native session an agent ever owned (R29 purge scope)
+  agent_id    TEXT NOT NULL REFERENCES agents(agent_id),
+  harness     TEXT NOT NULL,
+  native_root TEXT NOT NULL,                -- the root the harness returned at launch; never re-resolved
+  native_id   TEXT NOT NULL,
+  recorded_at TEXT NOT NULL,
+  PRIMARY KEY (harness, native_root, native_id)
 );
 CREATE INDEX agent_native_sessions_agent ON agent_native_sessions(agent_id);
 CREATE TRIGGER agent_native_sessions_no_update BEFORE UPDATE ON agent_native_sessions
