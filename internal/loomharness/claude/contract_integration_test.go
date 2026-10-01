@@ -120,7 +120,15 @@ func authAccepted(t *testing.T, p *Process) {
 	}
 }
 
-func startReal(t *testing.T, args ...string) *realRun {
+// noTools is passed to every real launch except the nested test's: the child
+// carries the user's login token, so it gets no built-in tools and no MCP
+// servers. bashOnly gives the nested test the Bash tool and nothing else.
+var (
+	noTools  = []string{"--tools", "", "--strict-mcp-config"}
+	bashOnly = []string{"--tools", "Bash", "--allowedTools", "Bash", "--strict-mcp-config"}
+)
+
+func startReal(t *testing.T, args []string) *realRun {
 	t.Helper()
 	bin := realBin(t)
 	dir, err := os.MkdirTemp("", "loom-claude-contract-")
@@ -190,7 +198,7 @@ func (r *realRun) pid() int {
 }
 
 func TestContract(t *testing.T) {
-	r := startReal(t)
+	r := startReal(t, noTools)
 	var pid int
 
 	t.Run("Prompt", func(t *testing.T) {
@@ -269,7 +277,7 @@ func TestClaudeNestedLaunchStripsGitHubTokens(t *testing.T) {
 		k, v, _ := strings.Cut(kv, "=")
 		t.Setenv(k, v)
 	}
-	r := startReal(t, "--allowedTools", "Bash")
+	r := startReal(t, bashOnly)
 	for i, name := range []string{"first.presence", "relaunch.presence"} {
 		if i == 1 {
 			if err := r.p.Close(context.Background()); err != nil {
@@ -281,7 +289,7 @@ func TestClaudeNestedLaunchStripsGitHubTokens(t *testing.T) {
 		cmd := `for k in ` + strings.Join(append(slices.Clone(strippedTokens), withheldAuth...), " ") + `; do if printenv "$k" >/dev/null; then echo "$k=present"; else echo "$k=absent"; fi; done > ` + name
 		res, _ := r.prompt(t, "Use the Bash tool to run exactly this command: "+cmd+"\nThen reply DONE.")
 		if res.Subtype != "success" {
-			t.Fatalf("launch %d: %+v", i, res)
+			t.Fatalf("launch %d: the turn ended %s", i, res.Subtype) // never the reply, which follows tool output
 		}
 		r.p.mu.Lock()
 		spawned, args := r.p.cmd.Env, r.p.cmd.Args
@@ -304,9 +312,13 @@ func TestClaudeNestedLaunchStripsGitHubTokens(t *testing.T) {
 				t.Errorf("launch %d: %s reached the nested tool", i, k)
 			}
 		}
-		for _, k := range withheldAuth { // fail closed: the login token must not reach a tool
-			if got, ok := lookup(nested, k); !ok || got != "absent" {
-				t.Errorf("launch %d: %s was not reported absent in the nested tool (%q)", i, k, got)
+		for _, k := range withheldAuth { // fail closed: Claude's credentials must not reach a tool
+			got, ok := lookup(nested, k)
+			if k == "CLAUDE_CODE_OAUTH_TOKEN" && ok && (got == "present" || got == "absent") {
+				t.Logf("launch %d: %s=%s in the nested tool", i, k, got) // presence only, never a value
+			}
+			if !ok || got != "absent" {
+				t.Errorf("launch %d: %s was not reported absent in the nested tool", i, k)
 			}
 		}
 		if got, _ := lookup(spawned, "CLAUDE_CODE_OAUTH_TOKEN"); got == "" || got != r.p.spec.Launch.Env["CLAUDE_CODE_OAUTH_TOKEN"] {

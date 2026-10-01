@@ -505,7 +505,11 @@ func TestClaudeProfileHelpersAfterCutover(t *testing.T) {
 
 var seededGitHubTokens = []string{"GH_TOKEN=gh-secret", "GITHUB_TOKEN=github-secret", "GITHUB_TOKEN_FILE=/secret/file"}
 
-func TestClaudeProcessStripsGitHubTokens(t *testing.T) {
+// strippedLaunches launches the fake claude and relaunches it with GitHub
+// tokens in the host and launch env and Claude's own auth set, and returns
+// both launches' dumps; the host keeps its credentials.
+func strippedLaunches(t *testing.T) []launchDump {
+	t.Helper()
 	for _, kv := range seededGitHubTokens {
 		k, v, _ := strings.Cut(kv, "=")
 		t.Setenv(k, v) // the host keeps its credentials
@@ -528,22 +532,40 @@ func TestClaudeProcessStripsGitHubTokens(t *testing.T) {
 	if len(got) != 2 || !slices.Contains(got[1].Args, "--resume") {
 		t.Fatalf("want a launch and a relaunch, got %d", len(got))
 	}
-	for i, d := range got {
-		for _, env := range [][]string{d.Env, d.Nested} {
-			for _, k := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_TOKEN_FILE"} {
-				if _, ok := lookup(env, k); ok {
-					t.Errorf("launch %d: %s reached claude or its child", i, k)
-				}
-			}
-			for _, kv := range []string{"CLAUDE_CODE_OAUTH_TOKEN=claude-auth", "ANTHROPIC_API_KEY=user-key"} {
-				if !slices.Contains(env, kv) {
-					t.Errorf("launch %d: Claude auth %s was dropped", i, kv)
-				}
-			}
-		}
-	}
 	if os.Getenv("GH_TOKEN") != "gh-secret" || os.Getenv("GITHUB_TOKEN_FILE") != "/secret/file" {
 		t.Fatal("the host lost its GitHub credentials")
+	}
+	return got
+}
+
+// checkStripped fails if env carries a GitHub token or lost Claude's auth.
+func checkStripped(t *testing.T, what string, env []string) {
+	t.Helper()
+	for _, k := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_TOKEN_FILE"} {
+		if _, ok := lookup(env, k); ok {
+			t.Errorf("%s: %s reached it", what, k)
+		}
+	}
+	for _, kv := range []string{"CLAUDE_CODE_OAUTH_TOKEN=claude-auth", "ANTHROPIC_API_KEY=user-key"} {
+		if !slices.Contains(env, kv) {
+			t.Errorf("%s: Claude auth %s was dropped", what, kv)
+		}
+	}
+}
+
+func TestClaudeProcessStripsGitHubTokens(t *testing.T) {
+	for i, d := range strippedLaunches(t) {
+		checkStripped(t, fmt.Sprintf("launch %d claude process", i), d.Env)
+	}
+}
+
+// TestClaudeFakeNestedLaunchStripsGitHubTokens: a subprocess the fake claude
+// runs gets no GitHub token, on first launch and relaunch. The real-Claude
+// proof is TestClaudeNestedLaunchStripsGitHubTokens
+// (contract_integration_test.go).
+func TestClaudeFakeNestedLaunchStripsGitHubTokens(t *testing.T) {
+	for i, d := range strippedLaunches(t) {
+		checkStripped(t, fmt.Sprintf("launch %d nested subprocess", i), d.Nested)
 	}
 }
 
