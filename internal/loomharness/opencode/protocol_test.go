@@ -381,3 +381,12 @@ func TestProtocolPolicyTranslation(t *testing.T) {
 		t.Fatalf("Open with an unmappable rule = %v, sessions %d; want refused before any call", err, len(st.sessions))
 	}
 }
+
+func TestProtocolAuthErrors(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		err := translate(status, []byte(`{"_tag":"UnauthorizedError","message":"Authentication required"}`))
+		if !isCode(err, "auth_failed") || !errors.Is(err, loomharness.ErrUnavailable) {
+			t.Fatalf("%d -> %v; want auth_failed", status, err)
+		}
+	}
+}

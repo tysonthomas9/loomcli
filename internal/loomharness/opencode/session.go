@@ -145,7 +145,9 @@ func (s *Session) Messages(ctx context.Context, after string, limit int) (loomha
 	return out, nil
 }
 
-// Status reports whether the session has a running execution.
+// Status reports whether the session has a running execution and whether
+// its newest finished turn was interrupted. OpenCode has no turn id outside
+// the live feed, so TurnID stays empty.
 func (s *Session) Status(ctx context.Context) (loomharness.Status, error) {
 	var active struct {
 		Data map[string]struct {
@@ -156,7 +158,32 @@ func (s *Session) Status(ctx context.Context) (loomharness.Status, error) {
 		return loomharness.Status{}, err
 	}
 	st, ok := active.Data[s.ref.NativeID]
-	return loomharness.Status{Running: ok && st.Type != "idle"}, nil
+	outcome, err := s.lastOutcome(ctx)
+	if err != nil {
+		return loomharness.Status{}, err
+	}
+	return loomharness.Status{Running: ok && st.Type != "idle", LastTurnInterrupt: outcome == "interrupted"}, nil
+}
+
+// lastOutcome is the outcome of the newest idle message (a finished turn),
+// read newest first; "" when no turn has finished.
+func (s *Session) lastOutcome(ctx context.Context) (string, error) {
+	q := "order=desc&limit=50"
+	for {
+		var page messagePage
+		if err := s.c.call(ctx, "GET", s.path("/message?"+q), nil, &page); err != nil {
+			return "", fmt.Errorf("list messages: %w", err)
+		}
+		for _, m := range page.Data {
+			if m.Type == "idle" {
+				return m.Outcome, nil
+			}
+		}
+		if len(page.Data) < 50 || page.Cursor.Next == "" {
+			return "", nil
+		}
+		q = "limit=50&cursor=" + url.QueryEscape(page.Cursor.Next)
+	}
 }
 
 // Move points the session at dir, which must exist.

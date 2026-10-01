@@ -124,3 +124,20 @@ func TestEventsLiveAndCatchUpItemIDsMatch(t *testing.T) {
 		}
 	}
 }
+
+func TestEventsFormAsks(t *testing.T) {
+	m := mapper{seq: map[string]int64{}, turn: map[string]string{}}
+	for _, c := range []struct {
+		raw  string
+		want loomharness.EventType
+	}{
+		{`{"type":"form.created","data":{"form":{"id":"frm_1","sessionID":"ses_1","title":"q","fields":[]}}}`, loomharness.EventAskOpened},
+		{`{"type":"form.replied","data":{"id":"frm_1","sessionID":"ses_1","answer":{}}}`, loomharness.EventAskResolved},
+		{`{"type":"form.cancelled","data":{"id":"frm_2","sessionID":"ses_1"}}`, loomharness.EventAskResolved},
+	} {
+		e, ok := m.mapEvent([]byte(c.raw))
+		if !ok || e.Type != c.want || e.Session.NativeID != "ses_1" || !strings.HasPrefix(e.AskID, "frm_") {
+			t.Fatalf("%s -> %+v, %v", c.raw, e, ok)
+		}
+	}
+}

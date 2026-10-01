@@ -151,8 +151,8 @@ func TestContract(t *testing.T) {
 		events.wait(t, "cancelled turn", func(e loomharness.Event) bool {
 			return e.Session.NativeID == ref.NativeID && e.Type == loomharness.EventTurnCompleted && e.StopReason == "cancelled"
 		})
-		if st, err := s.Status(ctx); err != nil || st.Running {
-			t.Fatalf("Status after interrupt = %+v, %v", st, err)
+		if st, err := s.Status(ctx); err != nil || st.Running || !st.LastTurnInterrupt || st.TurnID != "" {
+			t.Fatalf("Status after interrupt = %+v, %v; want idle, LastTurnInterrupt, no TurnID", st, err)
 		}
 		if ok, err := s.Interrupt(ctx); err != nil || ok {
 			t.Fatalf("idle Interrupt = %v, %v; want false", ok, err)
@@ -197,9 +197,15 @@ func TestContract(t *testing.T) {
 		if err := a.call(ctx, "POST", sp("/form"), body, &form); err != nil {
 			t.Fatal(err)
 		}
+		events.wait(t, "form ask.opened", func(e loomharness.Event) bool {
+			return e.Type == loomharness.EventAskOpened && e.AskID == form.Data.ID && e.Session.NativeID == ref.NativeID
+		})
 		if err := s.Reply(ctx, form.Data.ID, loomharness.Reply{Answer: "blue"}); err != nil {
 			t.Fatal(err)
 		}
+		events.wait(t, "form ask.resolved", func(e loomharness.Event) bool {
+			return e.Type == loomharness.EventAskResolved && e.AskID == form.Data.ID
+		})
 		var got struct {
 			Data struct {
 				State struct {
@@ -255,6 +261,13 @@ func TestContract(t *testing.T) {
 		events.wait(t, "turn after restart", func(e loomharness.Event) bool {
 			return e.Session.NativeID == ref.NativeID && e.Type == loomharness.EventTurnCompleted && e.StopReason == "completed" && model.requests("after restart") == 1
 		})
+		if st, err := s.Status(ctx); err != nil || st.LastTurnInterrupt {
+			t.Fatalf("Status after a completed turn = %+v, %v; want LastTurnInterrupt false", st, err)
+		}
+		base, _ := a.endpoint()
+		if err := NewClient(base, "wrong").call(ctx, "GET", "/api/session/active", nil, nil); !isCode(err, "auth_failed") {
+			t.Fatalf("wrong password = %v; want auth_failed", err)
+		}
 	})
 
 	t.Run("OwnedTree", func(t *testing.T) {
