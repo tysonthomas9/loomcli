@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -393,8 +394,14 @@ func TestClaudeNoProjectPurgeDelete(t *testing.T) {
 func TestClaudePurgeRefusesSymlinks(t *testing.T) {
 	ctx := context.Background()
 	n := uuid.NewString()
+	// outside is an owned sentinel tree holding the session's transcript;
+	// every case must leave it byte-for-byte as it was.
 	outside := t.TempDir()
 	victim := writeTranscript(t, outside, "-elsewhere", n+".jsonl")
+	if err := os.WriteFile(victim, []byte(`{"sentinel":"`+n+`"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := snapshot(t, outside)
 
 	linkedProject := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(linkedProject, "projects"), 0o755); err != nil {
@@ -431,10 +438,34 @@ func TestClaudePurgeRefusesSymlinks(t *testing.T) {
 		if err := New(Config{}).Purge(ctx, []loomharness.NativeRef{{Root: root, NativeID: n}}); err == nil {
 			t.Errorf("symlinked %s: purge did not refuse", name)
 		}
-		if !exists(victim) {
-			t.Fatalf("symlinked %s: the transcript outside the recorded root was deleted", name)
+		if got := snapshot(t, outside); !maps.Equal(got, want) {
+			t.Fatalf("symlinked %s: the sentinel tree outside the recorded root changed: %v -> %v", name, want, got)
 		}
 	}
+}
+
+// snapshot maps each path under root (relative, not followed) to its type
+// and content.
+func snapshot(t *testing.T, root string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, p)
+		out[rel] = d.Type().String()
+		if d.Type().IsRegular() {
+			b, err := os.ReadFile(p)
+			out[rel] += " " + string(b)
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 // TestClaudeAssistantBlocksKeepTheirIndex: a whole-message assistant frame
