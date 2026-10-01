@@ -159,6 +159,13 @@ linters:
               desc: "Infra packages must not import webui"
             - pkg: github.com/tysonthomas9/loomcli/internal/cli
               desc: "Infra packages must not import cli"
+        loomharness-port:
+          list-mode: lax
+          files:
+            - "**/internal/loomharness/**"
+          deny:
+            - pkg: github.com/tysonthomas9/loomcli/internal/loomagent
+              desc: "loomharness must not import loomagent (design v2 §3.1 rule 7)"
         webui-isolation:
           list-mode: lax
           files:
