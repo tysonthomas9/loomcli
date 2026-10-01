@@ -141,7 +141,7 @@ func seedNativeEntryPublication(t *testing.T, store *journal.SQLite, repo, base,
 
 func entryGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	command := exec.Command("git", args...)
+	command := exec.Command("git", args...) //nolint:norawexec // Temporary real-Git entry fixture, no network.
 	command.Dir = dir
 	output, err := command.CombinedOutput()
 	if err != nil {
