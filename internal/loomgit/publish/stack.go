@@ -17,9 +17,24 @@ import (
 
 type StackRequest struct {
 	Request
-	StackID string
-	Changes []string
-	pusher  mirror.RefPusher
+	StackID        string
+	Changes        []string
+	MergeAuthority MergeAuthority
+	pusher         mirror.RefPusher
+}
+
+type MergeAuthority interface {
+	AuthorizeMerge(context.Context, StackRequest, string) error
+}
+
+func requireMergeAuthority(ctx context.Context, request StackRequest, target string) error {
+	if request.MergeAuthority == nil {
+		return loomgit.NewError(loomgit.MergeNotAuthorized, "merge requires human authorization", nil)
+	}
+	if err := request.MergeAuthority.AuthorizeMerge(ctx, request, target); err != nil {
+		return loomgit.NewError(loomgit.MergeNotAuthorized, "merge authorization denied", err)
+	}
+	return nil
 }
 
 type stackLayer struct {

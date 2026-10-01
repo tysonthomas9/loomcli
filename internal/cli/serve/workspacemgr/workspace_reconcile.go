@@ -29,6 +29,9 @@ func ReconcileJournal(ctx context.Context, s storepkg.Store) error {
 	}); err != nil {
 		return err
 	}
+	if err := publish.ReconcileNativeAt(ctx); err != nil {
+		return err
+	}
 	return abandon.ReconcileLocal(ctx, s.AgentSessions())
 }
 

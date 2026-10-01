@@ -13,7 +13,7 @@ func TestEveryErrorCodeRoundTrips(t *testing.T) {
 		"protected", "repo_selection_required", "lineage_unresolved", "task_copy_create_failed",
 		"base_ref_unresolvable", "stale_subject", "stack_locked", "stack_not_linear",
 		"ref_namespace_conflict", "provider_stack_limit", "diverged", "dependency_abandoned",
-		"merge_not_authorized", "merge_blocked", "mode_mismatch", "integrity_missing",
+		"merge_not_authorized", "merge_blocked", "merge_queue_required", "mode_mismatch", "integrity_missing",
 		"attention_required", "apply_pending", "swap_held", "restack_conflict",
 		"revision_superseded", "hash_mismatch", "capture_failed", "secret_path_refused",
 		"workspace_unsupported",

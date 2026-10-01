@@ -26,6 +26,7 @@ const (
 	DependencyAbandoned   = errcode.DependencyAbandoned
 	MergeNotAuthorized    = errcode.MergeNotAuthorized
 	MergeBlocked          = errcode.MergeBlocked
+	MergeQueueRequired    = errcode.MergeQueueRequired
 	ModeMismatch          = errcode.ModeMismatch
 	IntegrityMissing      = errcode.IntegrityMissing
 	AttentionRequired     = errcode.AttentionRequired

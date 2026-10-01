@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,8 @@ import (
 
 // DefaultGitHubBaseURL is the GitHub REST API root.
 const DefaultGitHubBaseURL = "https://api.github.com"
+
+var ErrMergeQueueRequired = errors.New("merge queue required")
 
 // GitHubForge is a repo-scoped GitHub implementation of Forge over the REST API.
 // The token is used for API calls and is supplied to git push via an env-backed
@@ -100,6 +103,81 @@ func (g *GitHubForge) createNativeStack(ctx context.Context, owner, repo string,
 		return g.apiErr("POST", path, status, data)
 	}
 	return nil
+}
+
+type NativeMergeResult struct {
+	Status  string `json:"status"`
+	Details struct {
+		UUID            string `json:"uuid"`
+		Message         string `json:"message"`
+		ExpectedHeadSHA string `json:"expected_head_sha"`
+		MergeAction     string `json:"merge_action"`
+		BypassRules     bool   `json:"bypass_rules"`
+	} `json:"details"`
+}
+
+func (g *GitHubForge) MergeNativePull(ctx context.Context, owner, repo string, number int, head string) (NativeMergeResult, error) {
+	return g.requestNativeMerge(ctx, owner, repo, number, head)
+}
+
+func (g *GitHubForge) RecoverNativePull(ctx context.Context, owner, repo string, number int, head string) (NativeMergeResult, error) {
+	return g.requestNativeMerge(ctx, owner, repo, number, head)
+}
+
+func (g *GitHubForge) requestNativeMerge(ctx context.Context, owner, repo string, number int, head string) (NativeMergeResult, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge-async", owner, repo, number)
+	status, data, _, err := g.do(ctx, http.MethodPut, path, map[string]any{
+		"merge_action": "default", "sha": head, "bypass_rules": false,
+	})
+	if err != nil {
+		return NativeMergeResult{}, err
+	}
+	if status != http.StatusAccepted && status != http.StatusOK && status != http.StatusConflict {
+		message := strings.ToLower(string(data))
+		if status == http.StatusUnprocessableEntity &&
+			strings.Contains(message, "merge queue") &&
+			(strings.Contains(message, "required") || strings.Contains(message, "must")) {
+			return NativeMergeResult{}, fmt.Errorf("github native merge: %w", ErrMergeQueueRequired)
+		}
+		return NativeMergeResult{}, g.apiErr("PUT", path, status, data)
+	}
+	result, err := decodeNativeMergeResult(data)
+	if err != nil {
+		return NativeMergeResult{}, err
+	}
+	if status == http.StatusConflict && (result.Details.UUID == "" || result.Details.ExpectedHeadSHA != head || result.Details.MergeAction != "default" || result.Details.BypassRules) {
+		return NativeMergeResult{}, fmt.Errorf("github existing async merge differs from requested head or action")
+	}
+	return result, nil
+}
+
+func (g *GitHubForge) NativeMergeStatus(ctx context.Context, owner, repo string, number int, uuid string) (NativeMergeResult, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge-async/%s", owner, repo, number, uuid)
+	status, data, _, err := g.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return NativeMergeResult{}, err
+	}
+	if status != http.StatusOK {
+		return NativeMergeResult{}, g.apiErr("GET", path, status, data)
+	}
+	return decodeNativeMergeResult(data)
+}
+
+func decodeNativeMergeResult(data []byte) (NativeMergeResult, error) {
+	var result NativeMergeResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return result, fmt.Errorf("github native merge decode: %w", err)
+	}
+	switch result.Status {
+	case "pending":
+		if result.Details.UUID == "" {
+			return result, errors.New("github async merge pending without UUID")
+		}
+	case "merged", "enqueued", "failed":
+	default:
+		return result, fmt.Errorf("github native merge returned %q", result.Status)
+	}
+	return result, nil
 }
 
 var _ Forge = (*GitHubForge)(nil)
@@ -203,7 +281,7 @@ func (g *GitHubForge) do(ctx context.Context, method, path string, body any) (in
 	req.Header.Set("Authorization", "Bearer "+g.token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	if strings.Contains(path, "/stacks") {
+	if strings.Contains(path, "/stacks") || strings.Contains(path, "/merge-async") {
 		req.Header.Set("X-GitHub-Api-Version", "2026-03-10")
 	}
 	req.Header.Set("User-Agent", "loom-stack-publisher")

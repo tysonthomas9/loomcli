@@ -119,6 +119,30 @@ func TestStoreContract(t *testing.T) {
 	}
 }
 
+func TestNativeMergeUUIDSchemaUpgrade(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE native_stack_merges (workspace TEXT, stack_id TEXT, target TEXT,
+		changes TEXT, layer_index INTEGER, phase TEXT, head_sha TEXT, reason TEXT)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := journal.OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	if _, err := store.OpenNativeMerges(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSQLiteSurvivesProcessExitAndFencesProcesses(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "journal.db")
 	cmd := exec.Command(os.Args[0], "-test.run=TestJournalChildProcess") //nolint:norawexec // Child process proves journal durability across process exit.

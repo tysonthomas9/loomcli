@@ -25,6 +25,7 @@ const (
 	DependencyAbandoned   Code = "dependency_abandoned"
 	MergeNotAuthorized    Code = "merge_not_authorized"
 	MergeBlocked          Code = "merge_blocked"
+	MergeQueueRequired    Code = "merge_queue_required"
 	ModeMismatch          Code = "mode_mismatch"
 	IntegrityMissing      Code = "integrity_missing"
 	AttentionRequired     Code = "attention_required"
@@ -42,7 +43,7 @@ var All = []Code{
 	ReviewRequired, Conflict, Stale, CaptureIncomplete, UnsavedWork, Protected,
 	RepoSelectionRequired, LineageUnresolved, TaskCopyCreateFailed, BaseRefUnresolvable,
 	StaleSubject, StackLocked, StackNotLinear, RefNamespaceConflict, ProviderStackLimit,
-	Diverged, DependencyAbandoned, MergeNotAuthorized, MergeBlocked, ModeMismatch,
+	Diverged, DependencyAbandoned, MergeNotAuthorized, MergeBlocked, MergeQueueRequired, ModeMismatch,
 	IntegrityMissing, AttentionRequired, ApplyPending, SwapHeld, RestackConflict,
 	RevisionSuperseded, HashMismatch, CaptureFailed, SecretPathRefused, WorkspaceUnsupported,
 }
