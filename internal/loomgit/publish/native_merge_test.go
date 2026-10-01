@@ -21,6 +21,7 @@ type fakeMergeForge struct {
 	recoverErr   error
 	recoverCalls int
 	recoverUUID  string
+	recoverNew   bool
 	resultStatus string
 	statusCalls  int
 }
@@ -48,8 +49,11 @@ func (forge *fakeMergeForge) MergeNativePull(_ context.Context, _, _ string, num
 	return result, nil
 }
 
-func (forge *fakeMergeForge) RecoverNativePull(_ context.Context, _, _ string, _ int, _ string) (stackpublish.NativeMergeResult, error) {
+func (forge *fakeMergeForge) RecoverNativePull(_ context.Context, _, _ string, number int, _ string) (stackpublish.NativeMergeResult, error) {
 	forge.recoverCalls++
+	if forge.recoverNew {
+		forge.submitted = append(forge.submitted, number)
+	}
 	if forge.recoverErr != nil {
 		return stackpublish.NativeMergeResult{}, forge.recoverErr
 	}
@@ -59,6 +63,55 @@ func (forge *fakeMergeForge) RecoverNativePull(_ context.Context, _, _ string, _
 	result := stackpublish.NativeMergeResult{Status: "pending"}
 	result.Details.UUID = forge.recoverUUID
 	return result, nil
+}
+
+func TestNativeMergeDispatchRecoverySkipsResendAfterMerge(t *testing.T) {
+	caseFixture, forge, request := nativeMergeFixture(t)
+	ctx := context.Background()
+	if err := beginNativeMerge(ctx, caseFixture.store, request, "B"); err != nil {
+		t.Fatal(err)
+	}
+	merges, err := caseFixture.store.OpenNativeMerges(ctx)
+	if err != nil || len(merges) != 1 {
+		t.Fatalf("merges=%v err=%v", merges, err)
+	}
+	if err := caseFixture.store.AdvanceNativeMerge(ctx, merges[0], "dispatching", forge.prs[1].HeadSHA, 0); err != nil {
+		t.Fatal(err)
+	}
+	for index := range forge.prs {
+		forge.prs[index].Merged, forge.prs[index].State = true, "closed"
+	}
+	if err := ReconcileNativeMerges(ctx, caseFixture.store, forge); err != nil {
+		t.Fatal(err)
+	}
+	if forge.recoverCalls != 0 || len(forge.submitted) != 0 {
+		t.Fatalf("probes=%d submits=%v", forge.recoverCalls, forge.submitted)
+	}
+}
+
+func TestNativeMergeDispatchRecoveryResendsLostRequest(t *testing.T) {
+	caseFixture, forge, request := nativeMergeFixture(t)
+	ctx := context.Background()
+	if err := beginNativeMerge(ctx, caseFixture.store, request, "A"); err != nil {
+		t.Fatal(err)
+	}
+	merges, err := caseFixture.store.OpenNativeMerges(ctx)
+	if err != nil || len(merges) != 1 {
+		t.Fatalf("merges=%v err=%v", merges, err)
+	}
+	if err := caseFixture.store.AdvanceNativeMerge(ctx, merges[0], "dispatching", forge.prs[0].HeadSHA, 0); err != nil {
+		t.Fatal(err)
+	}
+	forge.recoverUUID, forge.recoverNew = "request-uuid", true
+	if err := ReconcileNativeMerges(ctx, caseFixture.store, forge); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReconcileNativeMerges(ctx, caseFixture.store, forge); err != nil {
+		t.Fatal(err)
+	}
+	if forge.recoverCalls != 1 || len(forge.submitted) != 1 || forge.statusCalls != 1 {
+		t.Fatalf("probes=%d submits=%v polls=%d", forge.recoverCalls, forge.submitted, forge.statusCalls)
+	}
 }
 
 func (forge *fakeMergeForge) NativeMergeStatus(_ context.Context, _, _ string, _ int, uuid string) (stackpublish.NativeMergeResult, error) {

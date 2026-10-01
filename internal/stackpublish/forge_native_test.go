@@ -139,15 +139,17 @@ func TestGitHubForgeNativeAsyncResultAndExistingRequest(t *testing.T) {
 	}
 }
 
-func TestGitHubForgeNativeRecoveryRejectsNewRequest(t *testing.T) {
+func TestGitHubForgeNativeRecoveryAcceptsResentRequest(t *testing.T) {
+	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests++
 		writer.WriteHeader(http.StatusAccepted)
 		_, _ = writer.Write([]byte(`{"status":"pending","details":{"uuid":"new","expected_head_sha":"abc","merge_action":"default"}}`))
 	}))
 	defer server.Close()
-	_, err := NewGitHubForge("fixture", server.Client(), server.URL).RecoverNativePull(context.Background(), "owner", "repo", 11, "abc")
-	if err == nil {
-		t.Fatal("accepted a new request during recovery")
+	result, err := NewGitHubForge("fixture", server.Client(), server.URL).RecoverNativePull(context.Background(), "owner", "repo", 11, "abc")
+	if err != nil || result.Details.UUID != "new" || requests != 1 {
+		t.Fatalf("result=%+v requests=%d err=%v", result, requests, err)
 	}
 }
 

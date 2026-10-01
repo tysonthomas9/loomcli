@@ -221,17 +221,44 @@ func recoverNativeDispatch(ctx context.Context, store nativeMergeStore, forge na
 	if err != nil {
 		return err
 	}
-	if !pr.Merged {
-		result, err := forge.RecoverNativePull(ctx, parts[0], parts[1], publication.PRNumber, merge.Head)
-		if err != nil {
-			return loomgit.NewError(loomgit.AttentionRequired, "native merge submission outcome is unknown", err)
-		}
-		return store.RecordNativeMergeRequest(ctx, merge, result.Details.UUID)
-	}
 	if pr.HeadSHA != merge.Head {
 		return loomgit.NewError(loomgit.Stale, "native merge target head changed", nil)
 	}
-	return store.RecordNativeMergeRequest(ctx, merge, "")
+	if pr.Merged {
+		if err := checkNativeMergedPrefix(ctx, store, forge, merge, parts); err != nil {
+			return err
+		}
+		return store.RecordNativeMergeRequest(ctx, merge, "")
+	}
+	if pr.State != "open" {
+		return loomgit.NewError(loomgit.Stale, "native merge target closed before recovery", nil)
+	}
+	result, err := forge.RecoverNativePull(ctx, parts[0], parts[1], publication.PRNumber, merge.Head)
+	if err != nil {
+		return loomgit.NewError(loomgit.AttentionRequired, "native merge submission outcome is unknown", err)
+	}
+	return store.RecordNativeMergeRequest(ctx, merge, result.Details.UUID)
+}
+
+func checkNativeMergedPrefix(ctx context.Context, store nativeMergeStore, forge nativeMergeForge,
+	merge journal.NativeMerge, parts []string) error {
+	for _, change := range merge.Changes {
+		publication, found, err := store.Publication(ctx, merge.Workspace, change)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return loomgit.NewError(loomgit.MergeBlocked, "native downstack publication is missing", nil)
+		}
+		pr, err := forge.PullByNumber(ctx, parts[0], parts[1], publication.PRNumber)
+		if err != nil {
+			return err
+		}
+		if !pr.Merged || pr.HeadSHA != publication.Head {
+			return loomgit.NewError(loomgit.Stale, "native downstack PR differs after merge", nil)
+		}
+	}
+	return nil
 }
 
 func pollNativeMerge(ctx context.Context, store nativeMergeStore, forge nativeMergeForge,
