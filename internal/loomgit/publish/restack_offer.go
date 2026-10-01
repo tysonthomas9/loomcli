@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/landing"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/pull"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/stacklock"
 )
 
@@ -120,5 +121,29 @@ func publishRestackedOffer(ctx context.Context, store *journal.SQLite, offer jou
 		WorkingArea: area.Path, BaseSHA: area.BaseSHA, RepoName: area.Repo,
 		forge: forge, token: githubtoken.GitHub(ctx), slug: publication.Slug,
 	}, StackID: publication.StackID, Changes: changes})
+	if errors.Is(err, loomgit.NewError(loomgit.ReviewRequired, "", nil)) {
+		return errors.Join(err, recordRestackReviews(ctx, store, offer, publication.StackID, area.Lead, layers))
+	}
 	return err
+}
+
+func recordRestackReviews(ctx context.Context, store *journal.SQLite, offer journal.RestackOffer,
+	stackID, lead string, layers []loomgit.AppliedLayer) error {
+	for _, layer := range layers {
+		revision, err := store.RevisionByHead(ctx, offer.Workspace, layer.Change, layer.NewTip)
+		if err != nil {
+			return err
+		}
+		err = review.RequireVerdict(ctx, store, offer.Workspace, layer.Change, revision.Number, layer.NewTip, "publish", "")
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, loomgit.NewError(loomgit.ReviewRequired, "", nil)) {
+			return err
+		}
+		if err := store.RecordRestackReviewRequired(ctx, offer, stackID, lead, layer.Change, revision.Number); err != nil {
+			return err
+		}
+	}
+	return nil
 }

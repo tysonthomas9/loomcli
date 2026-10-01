@@ -166,6 +166,37 @@ func (s *SQLite) ClearStackAttention(ctx context.Context, workspace, stackID str
 	return err
 }
 
+func (s *SQLite) RecordRestackReviewRequired(ctx context.Context, offer RestackOffer,
+	stackID, lead, change string, revision int) error {
+	if stackID == "" || lead == "" || change == "" || revision < 1 {
+		return errors.New("stack, lead, change and derived revision are required")
+	}
+	payload, err := json.Marshal(map[string]any{"workspace": offer.Workspace, "stack_id": stackID,
+		"lead": lead, "change_id": change, "revision": revision, "status": "review_required",
+		"message": fmt.Sprintf("Review %s revision %d before publishing the restacked stack.", change, revision)})
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `UPDATE stack_backends SET status='review_required',paths='[]'
+		WHERE workspace=? AND stack_id=?`, offer.Workspace, stackID)
+	if err != nil {
+		return err
+	}
+	if updated, err := result.RowsAffected(); err != nil || updated != 1 {
+		return errors.Join(err, ErrStale)
+	}
+	key := fmt.Sprintf("restack-review:%s:%s:%s:%d", offer.Workspace, stackID, change, revision)
+	if err := queueEvent(ctx, tx, key, "git.attention_required", payload); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *SQLite) AdoptStackPublications(ctx context.Context, publications []Publication, heads map[string]string) error {
 	if len(publications) == 0 || len(publications) != len(heads) {
 		return errors.New("native publication heads must cover the stack")

@@ -85,14 +85,17 @@ func TestPublishStackListsAllRevisionsNeedingApproval(t *testing.T) {
 	}
 }
 
-func stackRevision(t *testing.T, fixture fixture, change string, number int, parent string) loomgit.Revision {
+func stackRevision(t *testing.T, fixture fixture, change string, number int, parent string, changedPatch ...bool) loomgit.Revision {
 	t.Helper()
 	git(t, fixture.repo, "reset", "-q", "--hard", parent)
-	path := filepath.Join(fixture.repo, change)
-	if err := os.WriteFile(path, []byte(change+strconv.Itoa(number)), 0600); err != nil {
+	name, content := change, change+strconv.Itoa(number)
+	if len(changedPatch) > 0 && changedPatch[0] {
+		name, content = "file", "source\nbase\n"
+	}
+	if err := os.WriteFile(filepath.Join(fixture.repo, name), []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
-	git(t, fixture.repo, "add", change)
+	git(t, fixture.repo, "add", name)
 	git(t, fixture.repo, "commit", "-qm", change+" layer")
 	head := git(t, fixture.repo, "rev-parse", "HEAD")
 	ctx := context.Background()
@@ -557,11 +560,11 @@ func (f *fakeForge) PullsForCommit(context.Context, string, string, string) ([]s
 	return nil, nil
 }
 
-func landingStackFixture(t *testing.T, conflict bool, backend string) (fixture, *fakeForge, loomgit.Revision) {
+func landingStackFixture(t *testing.T, conflict bool, backend string, changedPatch ...bool) (fixture, *fakeForge, loomgit.Revision) {
 	fixture := newFixture(t)
 	ctx := context.Background()
 	first := stackRevision(t, fixture, "A", 1, fixture.base)
-	second := stackRevision(t, fixture, "B", 1, first.HeadSHA)
+	second := stackRevision(t, fixture, "B", 1, first.HeadSHA, changedPatch...)
 	git(t, fixture.repo, "branch", "-m", "loom/ws/W/interactive/L")
 	if err := fixture.store.SaveWorkingAreas(ctx, []journal.WorkingArea{{Workspace: "W", Lead: "L", Repo: "repo",
 		Path: fixture.repo, Branch: "loom/ws/W/interactive/L", BaseSHA: fixture.base, Mode: "worktree"}}); err != nil {
@@ -576,7 +579,7 @@ func landingStackFixture(t *testing.T, conflict bool, backend string) (fixture, 
 	if err := fixture.store.RecordStackBackend(ctx, "W", "feature-1", backend); err != nil {
 		t.Fatal(err)
 	}
-	merged := squashLandingPredecessor(t, fixture, conflict)
+	merged := squashLandingPredecessor(t, fixture, conflict, changedPatch...)
 	if err := fixture.store.MarkLanded(ctx, "W", "A", "merge_commit"); err != nil {
 		t.Fatal(err)
 	}
@@ -596,7 +599,7 @@ func landingStackFixture(t *testing.T, conflict bool, backend string) (fixture, 
 	return fixture, forge, second
 }
 
-func squashLandingPredecessor(t *testing.T, fixture fixture, conflict bool) string {
+func squashLandingPredecessor(t *testing.T, fixture fixture, conflict bool, changedPatch ...bool) string {
 	t.Helper()
 	trunk := filepath.Join(t.TempDir(), "trunk")
 	git(t, fixture.repo, "worktree", "add", "-q", "--detach", trunk, fixture.base)
@@ -604,6 +607,12 @@ func squashLandingPredecessor(t *testing.T, fixture fixture, conflict bool) stri
 		t.Fatal(err)
 	}
 	git(t, trunk, "add", "A")
+	if len(changedPatch) > 0 && changedPatch[0] {
+		if err := os.WriteFile(filepath.Join(trunk, "file"), []byte("base\ntrunk\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		git(t, trunk, "add", "file")
+	}
 	if conflict {
 		if err := os.WriteFile(filepath.Join(trunk, "B"), []byte("trunk B"), 0600); err != nil {
 			t.Fatal(err)
@@ -692,6 +701,67 @@ func TestLandingReconcilePersistsRestackConflict(t *testing.T) {
 	}
 	if attention != 1 {
 		t.Fatalf("attention events after retry = %d", attention)
+	}
+}
+
+func TestLandingReconcileSignalsChangedPatchForReviewOnce(t *testing.T) {
+	fixture, forge, second := landingStackFixture(t, false, "loom", true)
+	ctx := context.Background()
+	publication, found, err := fixture.store.Publication(ctx, "W", "B")
+	if err != nil || !found {
+		t.Fatal(err)
+	}
+	remoteBefore := git(t, fixture.remote, "rev-parse", "refs/heads/"+publication.Branch)
+	options := landing.Options{Restack: RestackOffer}
+	for range 2 {
+		codeIs(t, landing.RunAtWithOptions(ctx, filepath.Join(config.GetConfigDir(), "loomgit", "store.db"),
+			forge, "", options), loomgit.ReviewRequired)
+	}
+	revisionNumber, err := fixture.store.SourceRevision(ctx, "W", "B")
+	if err != nil || revisionNumber <= second.Number {
+		t.Fatalf("changed-patch revision = %d, %v", revisionNumber, err)
+	}
+	derived, err := fixture.store.GetRevision(ctx, "W", "B", revisionNumber)
+	if err != nil || derived.Operation != "restack" {
+		t.Fatalf("changed-patch derived revision = %+v, %v", derived, err)
+	}
+	codeIs(t, review.RequireVerdict(ctx, fixture.store, "W", "B", revisionNumber,
+		derived.HeadSHA, "publish", ""), loomgit.ReviewRequired)
+	if after := git(t, fixture.remote, "rev-parse", "refs/heads/"+publication.Branch); after != remoteBefore {
+		t.Fatalf("unreviewed B was pushed: %s -> %s", remoteBefore, after)
+	}
+	if forge.prs[1].Base != forge.prs[0].Head {
+		t.Fatalf("unreviewed B PR was retargeted to %s", forge.prs[1].Base)
+	}
+	assertReviewAttention(t, fixture, revisionNumber)
+}
+
+func assertReviewAttention(t *testing.T, fixture fixture, revision int) {
+	t.Helper()
+	ctx := context.Background()
+	state, err := fixture.store.StackState(ctx, "W", "feature-1")
+	if err != nil || state.Status != "review_required" {
+		t.Fatalf("restack review state = %+v, %v", state, err)
+	}
+	events, err := fixture.store.PendingEvents(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, event := range events {
+		if event.Kind != "git.attention_required" {
+			continue
+		}
+		count++
+		payload := string(event.Payload)
+		if !strings.Contains(payload, `"change_id":"B"`) || !strings.Contains(payload, `"lead":"L"`) ||
+			!strings.Contains(payload, `"status":"review_required"`) ||
+			!strings.Contains(payload, `"revision":`+strconv.Itoa(revision)) {
+			t.Fatalf("restack review attention = %s", payload)
+		}
+	}
+	if count != 1 {
+		t.Fatalf("restack review attention events = %d, want one", count)
 	}
 }
 
