@@ -16,6 +16,18 @@ teardown: >-
   curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW" >/dev/null || true
 
 tests:
+  - name: workspace deletion without a current work fingerprint is rejected
+    intent: The deletion guard refuses an unconfirmed workspace removal and leaves its registered repository available
+    steps:
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/delete/preview" > "$AFT_WORK_DIR/review-delete-preview.json";
+          python3 -c 'import json,sys; assert len(json.load(open(sys.argv[1]))["fingerprint"]) == 64' "$AFT_WORK_DIR/review-delete-preview.json";
+          status="$(curl -s -o "$AFT_WORK_DIR/review-delete-denied.json" -w '%{http_code}' -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW")";
+          test "$status" = 409;
+          grep -q 'unsaved_work' "$AFT_WORK_DIR/review-delete-denied.json";
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW" | grep -q 'E2E-WS-REVIEW'
+        intent: Preview is read-only, and a missing confirmation cannot delete the workspace
+
   - name: operator approves a real task revision from the task detail panel
     intent: An agent edits a task repo through a TaskRun, then an operator approves the recorded head SHA in the Revisions section
     steps:
