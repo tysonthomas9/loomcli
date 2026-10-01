@@ -162,7 +162,7 @@ func TestContract(t *testing.T) {
 	t.Run("PermissionReply", func(t *testing.T) {
 		done := make(chan error, 1)
 		go func() {
-			done <- a.call(ctx, "POST", sp("/permission"), map[string]any{"action": "bash", "resources": []string{"echo hi"}}, nil)
+			done <- a.call(ctx, "POST", sp("/permission"), map[string]any{"action": "shell", "resources": []string{"echo hi"}}, nil)
 		}()
 		var askID string
 		waitFor(t, "pending permission", func() bool {
@@ -281,6 +281,70 @@ func TestContract(t *testing.T) {
 		waitFor(t, "restart after crash", func() bool { p := serverPID(a); return p != 0 && p != pid })
 		if n := liveCount(orphans); n != 0 {
 			t.Fatalf("%d processes of the crashed tree survived the restart: %v", n, orphans)
+		}
+	})
+
+	t.Run("PolicyMeaning", func(t *testing.T) {
+		// Loom-vocabulary rules as 1.5a compiles them (loomharness cannot
+		// import loomagent), judged by the pinned OpenCode permission matcher
+		// through POST /permission, which evaluates without a model call.
+		allowAll := []loomharness.PermissionRule{{Action: "read", Resource: "*", Effect: "allow"},
+			{Action: "edit", Resource: "*", Effect: "allow"}, {Action: "bash", Resource: "*", Effect: "allow"}}
+		publishDenies := []loomharness.PermissionRule{{Action: "bash", Resource: "gh *", Effect: "deny"},
+			{Action: "bash", Resource: "git push*", Effect: "deny"}}
+		readOnly := []loomharness.PermissionRule{{Action: "edit", Resource: "*", Effect: "deny"}, {Action: "bash", Resource: "*", Effect: "deny"}}
+		reviewer := []loomharness.PermissionRule{{Action: "*", Resource: "*", Effect: "deny"},
+			{Action: "read", Resource: "*", Effect: "allow"}, {Action: "bash", Resource: "*", Effect: "ask"}}
+		for _, c := range []struct {
+			name  string
+			rules []loomharness.PermissionRule
+			want  map[[2]string]string // {native action, resource} -> effect
+		}{
+			{"lead", slices.Concat(allowAll, publishDenies), map[[2]string]string{
+				{"shell", "gh pr view 1"}: "deny", {"shell", "gh"}: "deny", {"shell", "git push origin main"}: "deny",
+				{"shell", "ls -la"}: "allow", {"shell", "git status"}: "allow", {"edit", "main.go"}: "allow",
+				{"read", "main.go"}: "allow", {"grep", "TODO"}: "allow",
+			}},
+			{"read_only", slices.Concat(allowAll, readOnly, publishDenies), map[[2]string]string{
+				{"shell", "ls -la"}: "deny", {"edit", "main.go"}: "deny", {"read", "main.go"}: "allow", {"glob", "*.go"}: "allow",
+			}},
+			{"reviewer", slices.Concat(reviewer, publishDenies), map[[2]string]string{
+				{"shell", "ls -la"}: "ask", {"shell", "gh pr view 1"}: "deny", {"edit", "main.go"}: "deny",
+				{"read", "main.go"}: "allow", {"webfetch", "https://example.com"}: "deny",
+			}},
+			{"last_match_wins", []loomharness.PermissionRule{{Action: "bash", Resource: "gh *", Effect: "deny"},
+				{Action: "bash", Resource: "*", Effect: "allow"}}, map[[2]string]string{{"shell", "gh pr view 1"}: "allow"}},
+		} {
+			ref, err := a.Open(ctx, loomharness.OpenSpec{Key: "policy-" + c.name, Launch: spec.Launch, Dir: repo, Rules: c.rules})
+			if err != nil {
+				t.Fatal(err)
+			}
+			owned = append(owned, ref)
+			for k, want := range c.want {
+				var r struct {
+					Data struct {
+						ID     string `json:"id"`
+						Effect string `json:"effect"`
+					} `json:"data"`
+				}
+				path := "/api/session/" + ref.NativeID + "/permission"
+				if err := a.call(ctx, "POST", path, map[string]any{"action": k[0], "resources": []string{k[1]}}, &r); err != nil {
+					t.Fatal(err)
+				}
+				if r.Data.Effect == "ask" {
+					_ = a.Session(ref).Reply(ctx, r.Data.ID, loomharness.Reply{})
+				}
+				if r.Data.Effect != want {
+					t.Errorf("%s: %s %q = %s; want %s", c.name, k[0], k[1], r.Data.Effect, want)
+				}
+			}
+		}
+		if _, err := a.Open(ctx, loomharness.OpenSpec{Key: "policy-unmappable", Launch: spec.Launch, Dir: repo,
+			Rules: []loomharness.PermissionRule{{Action: "agent_create", Resource: "*", Effect: "deny"}}}); !isCode(err, "bad_request") {
+			t.Fatalf("unmappable rule Open = %v; want bad_request", err)
+		}
+		if _, err := a.Session(loomharness.NativeRef{NativeID: SessionID("policy-unmappable")}).Resume(ctx, spec.Launch); !isCode(err, "session_missing") {
+			t.Fatalf("unmappable rule created a session: %v", err)
 		}
 	})
 

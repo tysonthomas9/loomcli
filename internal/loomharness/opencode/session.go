@@ -28,9 +28,9 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 		body["model"] = map[string]string{"providerID": provider, "id": model}
 	}
 	if len(spec.Rules) > 0 {
-		rules := make([]map[string]string, len(spec.Rules))
-		for i, r := range spec.Rules {
-			rules[i] = map[string]string{"action": r.Action, "resource": r.Resource, "effect": r.Effect}
+		rules, err := nativeRules(spec.Rules)
+		if err != nil {
+			return loomharness.NativeRef{}, err
 		}
 		body["permissions"] = rules
 	}
@@ -42,6 +42,34 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 		return loomharness.NativeRef{}, err
 	}
 	return ref, nil
+}
+
+// nativeActions maps Loom's permission actions to the actions OpenCode
+// b30c4d0 asserts: packages/core/src/tool/plugin/shell.ts asserts "shell";
+// edit.ts, write.ts and patch.ts assert "edit"; file-access.ts asserts
+// "read" and grep.ts and glob.ts assert "grep" and "glob", which only read.
+var nativeActions = map[string][]string{
+	"*":    {"*"},
+	"read": {"read", "grep", "glob"},
+	"edit": {"edit"},
+	"bash": {"shell"},
+}
+
+// nativeRules renders Loom rules as OpenCode rules, keeping their order
+// (both evaluate last match wins). A rule with no OpenCode action fails the
+// whole Open: it is never dropped or widened.
+func nativeRules(rules []loomharness.PermissionRule) ([]map[string]string, error) {
+	var out []map[string]string
+	for _, r := range rules {
+		actions, ok := nativeActions[r.Action]
+		if !ok {
+			return nil, &Error{Code: "bad_request", Message: fmt.Sprintf("permission action %q has no OpenCode equivalent; refusing to open the session", r.Action)}
+		}
+		for _, a := range actions {
+			out = append(out, map[string]string{"action": a, "resource": r.Resource, "effect": r.Effect})
+		}
+	}
+	return out, nil
 }
 
 // Purge deletes exactly the given recorded sessions; one already gone is fine.
