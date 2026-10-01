@@ -109,6 +109,64 @@ func TestMergeUpToCommandRequiresExactHumanConfirmation(t *testing.T) {
 	}
 }
 
+func TestStackCommandsSelectWorkspaceOutsideWorkspace(t *testing.T) {
+	setupOutsideWorkspaceForPR(t)
+	previousWorkspace, previousPublish, previousPreview := prStackWorkspace, prStackPublish, prMergePreview
+	t.Cleanup(func() {
+		prStackWorkspace, prStackPublish, prMergePreview = previousWorkspace, previousPublish, previousPreview
+	})
+	if err := prStackCmd.Flags().Set("workspace", "selected"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = prStackCmd.Flags().Set("workspace", previousWorkspace) })
+	prStackPublish = func(_ context.Context, workspace, _, _ string, _ []string) ([]publish.Result, error) {
+		if workspace != "SELECTED" {
+			t.Fatalf("publish workspace = %q", workspace)
+		}
+		return nil, nil
+	}
+	prMergePreview = func(_ context.Context, workspace, _, _, _ string) (publish.MergeStackView, error) {
+		if workspace != "SELECTED" {
+			t.Fatalf("merge workspace = %q", workspace)
+		}
+		return publish.MergeStackView{}, nil
+	}
+	if err := runPRStack(prStackCmd, []string{"stack", "lead"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mergeUpToCmd.Flags().Set("status", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := mergeUpToCmd.Flags().Set("workspace", "selected"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = mergeUpToCmd.Flags().Set("status", "false") })
+	if err := runMergeUpTo(mergeUpToCmd, []string{"stack", "lead", "layer"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func setupOutsideWorkspaceForPR(t *testing.T) {
+	t.Helper()
+	workspaceDir := t.TempDir()
+	setupWorkspaceConfig(t, &config.LoomConfig{Workspaces: map[string]config.WorkspaceConfig{
+		"selected": {Path: workspaceDir, ID: "W"},
+	}})
+	t.Setenv("LOOM_WORKSPACE", "")
+	outside := t.TempDir()
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(outside); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previousDir) })
+	if _, err := cli.NewResolver(); err == nil || !strings.Contains(err.Error(), "no active workspace") {
+		t.Fatalf("outside workspace resolver error = %v", err)
+	}
+}
+
 func TestDeliveryModeCommandSetsWorkspaceMode(t *testing.T) {
 	root := t.TempDir()
 	setupWorkspaceConfigInDir(t, root, &config.LoomConfig{

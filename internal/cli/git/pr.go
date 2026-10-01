@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
 )
 
@@ -83,14 +84,9 @@ var mergeUpToCmd = &cobra.Command{
 }
 
 func runMergeUpTo(cmd *cobra.Command, args []string) error {
-	resolver, err := prStackResolver()
+	resolver, err := resolvePRStackWorkspace()
 	if err != nil {
 		return err
-	}
-	if prStackWorkspace != "" {
-		if err := resolver.SetWorkspace(prStackWorkspace); err != nil {
-			return err
-		}
 	}
 	workspace := resolver.Config.Workspaces[resolver.WorkspaceName()]
 	view, err := prMergePreview(cmd.Context(), workspace.ID, args[1], args[0], args[2])
@@ -147,14 +143,9 @@ var prStackCmd = &cobra.Command{
 }
 
 func runPRStack(cmd *cobra.Command, args []string) error {
-	resolver, err := prStackResolver()
+	resolver, err := resolvePRStackWorkspace()
 	if err != nil {
 		return err
-	}
-	if prStackWorkspace != "" {
-		if err := resolver.SetWorkspace(prStackWorkspace); err != nil {
-			return err
-		}
 	}
 	workspace := resolver.Config.Workspaces[resolver.WorkspaceName()]
 	results, err := prStackPublish(cmd.Context(), workspace.ID, args[0], args[1], args[2:])
@@ -172,6 +163,21 @@ func runPRStack(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return nil
+}
+
+func resolvePRStackWorkspace() (*cli.Resolver, error) {
+	if prStackWorkspace == "" {
+		return prStackResolver()
+	}
+	cfg, err := config.LoadConfigCached()
+	if err != nil {
+		return nil, err
+	}
+	resolver := &cli.Resolver{Mode: cli.ModeWorkspace, Config: cfg}
+	if err := resolver.SetWorkspace(prStackWorkspace); err != nil {
+		return nil, err
+	}
+	return resolver, nil
 }
 
 func runPR(cmd *cobra.Command, args []string) error {
