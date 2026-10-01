@@ -3,6 +3,7 @@ package loomagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 
@@ -76,10 +77,32 @@ func (s *Service) Respond(ctx context.Context, req RespondRequest) error {
 	if err != nil || sess == nil {
 		return &Error{Code: CodeHarnessUnavailable, Message: a.Harness + " is not available"}
 	}
-	if err := sess.Reply(ctx, req.AskID, r); err != nil {
+	if err := sess.Reply(ctx, req.AskID, r); errors.Is(err, loomharness.ErrQuarantined) {
+		return errors.Join(harnessErr(err), s.quarantined(ctx, a, ask))
+	} else if err != nil {
 		return harnessErr(err)
 	}
 	s.setAsk(a.AgentID, Ask{ID: req.AskID}, false)
+	return s.syncWaiting(ctx, a)
+}
+
+// quarantined handles a Reply its session refused as quarantined: the ask
+// can no longer be answered, so it is saved as ask.lost (once) and closed,
+// and a shows Attention harness_unavailable, without waiting for the native
+// turn to be confirmed stopped.
+func (s *Service) quarantined(ctx context.Context, a loomstore.Agent, ask Ask) error {
+	ref := loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: deref(a.HarnessSessionID)}
+	row := nativeRow(a.AgentID, KindAskLost, loomharness.Event{Type: loomharness.EventAskLost, Session: ref, AskID: ask.ID, TurnID: ask.TurnID})
+	if _, err := s.events.Append(ctx, row); err != nil {
+		return err
+	}
+	s.setAsk(a.AgentID, ask, false)
+	if a.AttentionReason == nil {
+		var err error
+		if a, err = s.raiseAttention(ctx, a, AttentionHarnessUnavailable); err != nil {
+			return err
+		}
+	}
 	return s.syncWaiting(ctx, a)
 }
 
