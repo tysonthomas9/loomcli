@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"syscall"
 
 	"github.com/google/uuid"
 
@@ -22,7 +23,7 @@ type Adapter struct {
 	cfg Config // Bin, Env and Args shared by every process
 
 	mu       sync.Mutex
-	sessions map[string]*Session // by native id
+	sessions map[loomharness.NativeRef]*Session // by root and native id
 	feeds    map[*feed]struct{}
 }
 
@@ -30,7 +31,7 @@ var _ loomharness.Harness = (*Adapter)(nil)
 
 // New returns an adapter; nothing starts until a session's first Prompt.
 func New(cfg Config) *Adapter {
-	return &Adapter{cfg: cfg, sessions: map[string]*Session{}, feeds: map[*feed]struct{}{}}
+	return &Adapter{cfg: cfg, sessions: map[loomharness.NativeRef]*Session{}, feeds: map[*feed]struct{}{}}
 }
 
 // Name is the harness name.
@@ -43,10 +44,11 @@ func (a *Adapter) Models(context.Context) ([]loomharness.Model, error) {
 }
 
 // Health checks the installed version: refused below the minimum, a warning
-// above the last tested one. It starts no session.
+// above the last tested one. It starts no session. The version child gets
+// the same GitHub-token-free environment as a launch.
 func (a *Adapter) Health(ctx context.Context) (loomharness.Health, error) {
 	cmd := exec.CommandContext(ctx, a.cfg.Bin, "--version") //nolint:gosec // G204: the configured claude binary.
-	cmd.Env = a.cfg.Env
+	cmd.Env = NewProcess(a.cfg, ProcessSpec{}).env()
 	out, err := cmd.Output()
 	if err != nil {
 		return loomharness.Health{Warning: fmt.Sprintf("claude --version: %v", err)}, nil
@@ -95,19 +97,22 @@ func (a *Adapter) Session(ref loomharness.NativeRef) loomharness.Session { retur
 func (a *Adapter) session(ref loomharness.NativeRef) *Session {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if s, ok := a.sessions[ref.NativeID]; ok {
+	if s, ok := a.sessions[ref]; ok {
 		return s
 	}
 	s := &Session{a: a, ref: ref, m: newMapper(ref),
 		spec: ProcessSpec{SessionID: ref.NativeID, Launch: loomharness.Launch{Root: ref.Root}}}
-	a.sessions[ref.NativeID] = s
+	a.sessions[ref] = s
 	return s
 }
 
 // Purge deletes exactly <root>/projects/<project>/<session-id>.jsonl for each
 // recorded ref, under the ref's own recorded root; it never re-resolves a
 // root and never runs `claude project purge`. It stops the session's process
-// first. A ref whose root or id cannot be proven fails; an already deleted
+// first. It deletes only regular files reached through real directories
+// inside the recorded root: a symlinked projects or project directory, or a
+// symlinked transcript, that holds the session is refused, never followed.
+// A ref whose root or id cannot be proven fails; an already deleted
 // transcript is fine, so a failed purge can be retried after a restart.
 func (a *Adapter) Purge(ctx context.Context, owned []loomharness.NativeRef) error {
 	for _, ref := range owned {
@@ -118,21 +123,51 @@ func (a *Adapter) Purge(ctx context.Context, owned []loomharness.NativeRef) erro
 			return fmt.Errorf("claude purge: recorded root %s: cannot prove it exists: %v", ref.Root, err)
 		}
 		a.mu.Lock()
-		s := a.sessions[ref.NativeID]
+		s := a.sessions[ref]
 		a.mu.Unlock()
 		if s != nil {
 			if err := s.Close(ctx); err != nil {
 				return err
 			}
 		}
-		paths, err := filepath.Glob(filepath.Join(ref.Root, "projects", "*", ref.NativeID+".jsonl"))
+		if err := purgeOne(ref); err != nil {
+			return fmt.Errorf("claude purge %s under %s: %w", ref.NativeID, ref.Root, err)
+		}
+	}
+	return nil
+}
+
+// purgeOne removes ref's transcript from every real project directory of its
+// root, refusing any copy reached through a symlink.
+func purgeOne(ref loomharness.NativeRef) error {
+	projects := filepath.Join(ref.Root, "projects")
+	info, err := os.Lstat(projects)
+	switch {
+	case os.IsNotExist(err):
+		return nil
+	case err != nil:
+		return err
+	case !info.IsDir():
+		return fmt.Errorf("%s is not a real directory inside the recorded root; refusing", projects)
+	}
+	entries, err := os.ReadDir(projects)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		path := filepath.Join(projects, e.Name(), ref.NativeID+".jsonl")
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR) {
+			continue
+		}
 		if err != nil {
 			return err
 		}
-		for _, p := range paths {
-			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("claude purge: %w", err)
-			}
+		if e.Type()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("%s is reached through a symlink or is not a regular file; refusing", path)
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
 		}
 	}
 	return nil

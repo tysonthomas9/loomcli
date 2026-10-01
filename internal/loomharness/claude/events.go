@@ -153,18 +153,25 @@ func (m *mapper) stream(f wireFrame, emit func(loomharness.Event)) {
 	}
 }
 
-// assistant maps a whole assistant message block: it completes the open
-// text or thinking block, and starts a tool call that was not streamed.
+// assistant maps an assistant frame: it completes its text and thinking
+// blocks and starts a tool call that was not streamed. With partial messages
+// each frame of the streaming message carries one block, the open one;
+// otherwise the frame is the whole message, so each block's index is its
+// position.
 func (m *mapper) assistant(msg string, blocks []block, emit func(loomharness.Event)) {
-	for _, b := range blocks {
+	for i, b := range blocks {
+		index := i
+		if len(blocks) == 1 && msg == m.msgID {
+			index = m.open
+		}
 		switch b.Type {
 		case "text":
-			emit(loomharness.Event{Type: loomharness.EventItemCompleted, ItemKind: "message", ItemID: partItem(msg, "text", m.open), Text: b.Text})
+			emit(loomharness.Event{Type: loomharness.EventItemCompleted, ItemKind: "message", ItemID: partItem(msg, "text", index), Text: b.Text})
 		case "thinking":
-			emit(loomharness.Event{Type: loomharness.EventItemCompleted, ItemKind: "reasoning", ItemID: partItem(msg, "reasoning", m.open), Text: b.Thinking})
+			emit(loomharness.Event{Type: loomharness.EventItemCompleted, ItemKind: "reasoning", ItemID: partItem(msg, "reasoning", index), Text: b.Thinking})
 		case "tool_use":
 			if _, seen := m.toolMsg[b.ID]; !seen {
-				kind, id := m.item(msg, m.open, b)
+				kind, id := m.item(msg, index, b)
 				emit(loomharness.Event{Type: loomharness.EventItemStarted, ItemKind: kind, ItemID: id})
 			}
 		}

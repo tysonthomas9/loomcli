@@ -383,3 +383,99 @@ func TestClaudeNoProjectPurgeDelete(t *testing.T) {
 		}
 	}
 }
+
+// TestClaudePurgeRefusesSymlinks: a session transcript reached through a
+// symlinked project directory, a symlinked projects directory or a
+// symlinked transcript is refused and left in place, never followed.
+func TestClaudePurgeRefusesSymlinks(t *testing.T) {
+	ctx := context.Background()
+	n := uuid.NewString()
+	outside := t.TempDir()
+	victim := writeTranscript(t, outside, "-elsewhere", n+".jsonl")
+
+	linkedProject := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(linkedProject, "projects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Dir(victim), filepath.Join(linkedProject, "projects", "-wt")); err != nil {
+		t.Fatal(err)
+	}
+	linkedProjects := t.TempDir()
+	if err := os.Symlink(filepath.Join(outside, "projects"), filepath.Join(linkedProjects, "projects")); err != nil {
+		t.Fatal(err)
+	}
+	linkedFile := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(linkedFile, "projects", "-wt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, filepath.Join(linkedFile, "projects", "-wt", n+".jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	for name, root := range map[string]string{"project dir": linkedProject, "projects dir": linkedProjects, "transcript": linkedFile} {
+		if err := New(Config{}).Purge(ctx, []loomharness.NativeRef{{Root: root, NativeID: n}}); err == nil {
+			t.Errorf("symlinked %s: purge did not refuse", name)
+		}
+		if !exists(victim) {
+			t.Fatalf("symlinked %s: the transcript outside the recorded root was deleted", name)
+		}
+	}
+}
+
+// TestClaudeAssistantBlocksKeepTheirIndex: a whole-message assistant frame
+// with several blocks completes each block under its own index.
+func TestClaudeAssistantBlocksKeepTheirIndex(t *testing.T) {
+	m := newMapper(loomharness.NativeRef{NativeID: "s"})
+	got := m.frame([]byte(`{"type":"assistant","message":{"id":"msg_x","content":[` +
+		`{"type":"thinking","thinking":"a"},{"type":"text","text":"b"},{"type":"text","text":"c"}]}}`))
+	var ids []string
+	for _, e := range got {
+		if e.Type == loomharness.EventItemCompleted {
+			ids = append(ids, e.ItemID)
+		}
+	}
+	if want := []string{"msg_x/reasoning/0", "msg_x/text/1", "msg_x/text/2"}; !slices.Equal(ids, want) {
+		t.Fatalf("item ids = %v, want %v", ids, want)
+	}
+}
+
+// TestClaudeSessionsKeyedByRootAndID: the same key opened under a new
+// profile root is a distinct session with its own ref; the old root's
+// session is untouched.
+func TestClaudeSessionsKeyedByRootAndID(t *testing.T) {
+	a, _, f := newAdapter(t)
+	ctx := context.Background()
+	oldRef, oldSession := open(t, a, f, "agent-rooted")
+	newRoot := t.TempDir()
+	newRef, err := a.Open(ctx, loomharness.OpenSpec{Key: "agent-rooted", Dir: t.TempDir(), Launch: loomharness.Launch{Root: newRoot}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newRef.NativeID != oldRef.NativeID || newRef.Root != newRoot {
+		t.Fatalf("new ref = %+v", newRef)
+	}
+	newSession := a.Session(newRef).(*Session)
+	if newSession == oldSession.(*Session) || newSession.ref != newRef || newSession.m.ref != newRef ||
+		oldSession.(*Session).ref != oldRef || newSession.spec.Launch.Root != newRoot {
+		t.Fatal("the new root's session must be its own, with its own ref")
+	}
+}
+
+// TestClaudeHealthStripsGitHubTokens: the version child gets no GitHub token.
+func TestClaudeHealthStripsGitHubTokens(t *testing.T) {
+	dump := filepath.Join(t.TempDir(), "version.env")
+	_, cfg := newFixture(t, "2.1.285", append([]string{"LOOM_FAKE_CLAUDE_VERSION_DUMP=" + dump}, seededGitHubTokens...)...)
+	h, err := New(cfg).Health(context.Background())
+	if err != nil || !h.OK {
+		t.Fatalf("health = %+v, %v", h, err)
+	}
+	raw, err := os.ReadFile(dump)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := strings.Split(string(raw), "\n")
+	for _, k := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_TOKEN_FILE"} {
+		if _, ok := lookup(env, k); ok {
+			t.Errorf("%s reached claude --version", k)
+		}
+	}
+}

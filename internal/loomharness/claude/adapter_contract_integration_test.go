@@ -24,14 +24,14 @@ func TestAdapterContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = feed.Close() }()
-	dir, err := os.MkdirTemp("/tmp", "loom-claude-adapter-")
+	dir, err := os.MkdirTemp("", "loom-claude-adapter-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	l := ownedLaunch(t)
 	ctx := context.Background()
-	if err := isolated(a.cfg, ProcessSpec{Launch: l, Dir: dir}); err != nil {
+	if err := isolated(a.cfg, ProcessSpec{Launch: l, Dir: dir}, l.Root); err != nil {
 		t.Fatal(err)
 	}
 	ref, err := a.Open(ctx, loomharness.OpenSpec{Key: uuid.NewString(), Launch: l, Dir: dir, Model: "haiku"})
@@ -106,7 +106,7 @@ func TestAdapterContract(t *testing.T) {
 		}
 	})
 	t.Run("Move", func(t *testing.T) {
-		moved, err := os.MkdirTemp("/tmp", "loom-claude-moved-")
+		moved, err := os.MkdirTemp("", "loom-claude-moved-")
 		if err != nil {
 			t.Fatal(err)
 		}
