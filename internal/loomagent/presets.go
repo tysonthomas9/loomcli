@@ -124,6 +124,7 @@ type Config struct {
 	MaxRunDuration *int
 	Open           loomharness.PresetConfig
 	Rules          []loomharness.PermissionRule
+	Bridge         BridgeCaps // the host bridge capabilities Rules were compiled with
 }
 
 // Resolve validates req against p and renders the harness config.
@@ -132,7 +133,7 @@ type Config struct {
 func Resolve(p Preset, req CreateRequest, defaultHarness string, models []string) (Config, error) {
 	o := req.Overrides
 	c := Config{Preset: p, Harness: o.Harness, Model: o.Model, Effort: o.Effort,
-		MaxBudgetUSD: o.MaxBudgetUSD, MaxRunDuration: o.MaxRunDuration}
+		MaxBudgetUSD: o.MaxBudgetUSD, MaxRunDuration: o.MaxRunDuration, Bridge: req.Bridge}
 	if c.Harness == "" {
 		c.Harness = defaultHarness
 	}

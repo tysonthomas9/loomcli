@@ -378,3 +378,30 @@ func (s *Store) CompareAndSetSpec(ctx context.Context, agentID string, fromVersi
 	}
 	return nil
 }
+
+// FindCreated returns the agent a Create made in workspaceID: the live agent
+// with externalKey when one is given, else the agent whose Create RequestID
+// is requestID. It returns ErrNotFound when there is none.
+func (s *Store) FindCreated(ctx context.Context, workspaceID, externalKey, requestID string) (Agent, error) {
+	where, arg := "create_request_id = ?", requestID
+	if externalKey != "" {
+		where, arg = "external_key = ? AND deleted_at IS NULL", externalKey
+	}
+	var a Agent
+	err := s.db.QueryRowContext(ctx, "SELECT "+agentCols+" FROM agents WHERE workspace_id = ? AND "+where, //nolint:gosec // G202: constant column list and placeholders only.
+		workspaceID, arg).Scan(a.fields()...)
+	if errors.Is(err, sql.ErrNoRows) {
+		return a, ErrNotFound
+	}
+	return a, err
+}
+
+// SetCreateStep records that Create finished step on agentID, with the
+// columns that step filled; a nil column is kept.
+func (s *Store) SetCreateStep(ctx context.Context, agentID string, step int64, worktreePath, branch, sessionID *string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE agents SET create_step = MAX(create_step, ?),
+		worktree_path = COALESCE(?, worktree_path), branch = COALESCE(?, branch),
+		harness_session_id = COALESCE(?, harness_session_id), updated_at = ? WHERE agent_id = ?`,
+		step, worktreePath, branch, sessionID, Stamp(time.Now()), agentID)
+	return err
+}
