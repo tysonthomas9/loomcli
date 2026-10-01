@@ -1,0 +1,151 @@
+suite: loomgit-stack
+classification: { area: reviews, feature: stacked-landing, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: >-
+  repo="$AFT_WORK_DIR/stack-repo";
+  remote="$AFT_WORK_DIR/stack-origin.git";
+  git init -q --bare "$remote";
+  git -C "$remote" symbolic-ref HEAD refs/heads/main;
+  git init -q -b main "$repo";
+  printf 'base\n' > "$repo/README.md";
+  git -C "$repo" add README.md;
+  git -C "$repo" -c user.name=AFT -c user.email=aft@example.test commit -q -m base;
+  git -C "$repo" config core.sshCommand "sh $AFT_TESTS_DIR/fixtures/fake-github/git-ssh-bridge.sh $remote";
+  git -C "$repo" remote add origin git@github.com:owner/repo.git;
+  git -C "$repo" push -q origin main;
+  curl -sf -X POST "$AFT_FAKE_GH_BASE/__reset" >/dev/null;
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H 'Content-Type: application/json'
+  -d "{\"name\":\"e2e-ws-stack\",\"type\":\"empty\",\"repos\":[\"$repo\"]}" >/dev/null
+teardown: >-
+  AFT_WS=E2E-WS-STACK "$AFT_TESTS_DIR/scripts/close-open-issues.sh";
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-STACK" >/dev/null || true
+
+tests:
+  - name: published X lands and restacks applied dependent Y
+    intent: Two real TaskRuns create local lineage, and a fake-provider merge drives landing and a derived dependent revision
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-STACK/issues
+          body:
+            title: "stack epic $RUN_ID"
+            issue_type: epic
+            priority: 2
+          save:
+            - from: data.id
+              as: stackEpicId
+        intent: Create an epic for the real driver TaskRuns
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-STACK/issues
+          body:
+            title: "stack X $RUN_ID"
+            issue_type: task
+            priority: 2
+            parent: "${var:stackEpicId}"
+            design: STUB_CODEX_PATCH=stack-x.txt
+          save:
+            - from: data.id
+              as: stackXId
+        intent: Create X while it is open so Y can depend on it
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-STACK/issues
+          body:
+            title: "stack Y $RUN_ID"
+            issue_type: task
+            priority: 2
+            parent: "${var:stackEpicId}"
+            design: STUB_CODEX_PATCH=stack-y.txt
+          save:
+            - from: data.id
+              as: stackYId
+        intent: Create Y before X closes
+      - run: >-
+          x="$(cat "$AFT_WORK_DIR/stackXId")";
+          y="$(cat "$AFT_WORK_DIR/stackYId")";
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-STACK/issues/$y/dependencies"
+          -H 'Content-Type: application/json' -d "{\"depends_on_id\":\"$x\",\"dep_type\":\"blocks\"}" >/dev/null;
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-STACK stack init aft-chain --repo stack-repo --base main >/dev/null;
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-STACK stack add "$x" --stack aft-chain >/dev/null;
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-STACK stack add "$y" --stack aft-chain --after "$x" >/dev/null
+        intent: Register both the FleetDB dependency and the product stack lineage before either task is claimed
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-STACK/workflows/epic-runner
+          body:
+            epicId: "${var:stackEpicId}"
+            runner: local-task-runner
+        intent: Start the deterministic workflow that claims X then Y through real TaskRuns
+      - run: >-
+          x="$(cat "$AFT_WORK_DIR/stackXId")";
+          y="$(cat "$AFT_WORK_DIR/stackYId")";
+          for attempt in $(seq 1 45); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-STACK/issues/$x/revisions" > "$AFT_WORK_DIR/stack-x-revisions.json";
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-STACK/issues/$y/revisions" > "$AFT_WORK_DIR/stack-y-revisions.json";
+            if grep -q '"head_sha"' "$AFT_WORK_DIR/stack-x-revisions.json" && grep -q '"head_sha"' "$AFT_WORK_DIR/stack-y-revisions.json"; then exit 0; fi;
+            sleep 2;
+          done;
+          echo 'X and Y did not freeze revisions'; exit 1
+        intent: Wait for both changes to freeze through the TaskRun completion path
+      - open: /ws/E2E-WS-STACK/kanban
+        intent: Mount the stack workspace in the browser
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-STACK/issues/$(cat "$AFT_WORK_DIR/stackXId")"
+        intent: Open X's reviewable revision
+      - wait: { text: Revisions }
+      - click: { role: button, name: Approve, exact: true }
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-STACK/issues/$(cat "$AFT_WORK_DIR/stackYId")"
+        intent: Open Y's reviewable revision
+      - wait: { text: Revisions }
+      - click: { role: button, name: Approve, exact: true }
+      - run: >-
+          api="$AFT_BASE_URL/api/workspaces/E2E-WS-STACK";
+          for name in x y; do
+            read change revision < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["change_id"],item["number"])' "$AFT_WORK_DIR/stack-$name-revisions.json");
+            curl -sf -X POST "$api/git/apply" -H 'Content-Type: application/json' -d "{\"change\":\"$change\",\"revision\":$revision,\"lead\":\"lead\"}" > "$AFT_WORK_DIR/stack-$name-applied.json";
+            grep -q '"success":true' "$AFT_WORK_DIR/stack-$name-applied.json";
+          done;
+          git -C "$AFT_WORK_DIR/stack-repo" rev-parse refs/heads/loom/ws/E2E-WS-STACK/interactive/lead > "$AFT_WORK_DIR/stack-lead-before-merge"
+        intent: Apply both approved layers into the lead area without advancing provider trunk
+      - run: >-
+          api="$AFT_BASE_URL/api/workspaces/E2E-WS-STACK";
+          x="$(cat "$AFT_WORK_DIR/stackXId")";
+          curl -sf "$api/issues/$x/revisions" > "$AFT_WORK_DIR/stack-x-latest.json";
+          read change revision sha < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["change_id"],item["number"],item["head_sha"])' "$AFT_WORK_DIR/stack-x-latest.json");
+          curl -sf -X POST "$api/changes/$change/revisions/$revision/verdict" -H 'Content-Type: application/json'
+          -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" >/dev/null;
+          curl -sf -X POST "$api/agents/lead/git/pr" -H 'Content-Type: application/json' -d "{\"change_id\":\"$change\"}" > "$AFT_WORK_DIR/stack-publish.json";
+          grep -q '"created":true' "$AFT_WORK_DIR/stack-publish.json";
+          printf '%s\n' "$change" > "$AFT_WORK_DIR/stack-x-change"
+        intent: Reapprove the Apply-derived X head and Publish its owned PR through the fake forge
+      - run: >-
+          repo="$AFT_WORK_DIR/stack-repo";
+          change="$(cat "$AFT_WORK_DIR/stack-x-change")";
+          branch="loom/ws/E2E-WS-STACK/change/$change";
+          git -C "$repo" fetch -q origin "$branch";
+          sha="$(git -C "$repo" rev-parse FETCH_HEAD)";
+          git -C "$repo" push -q origin FETCH_HEAD:refs/heads/main;
+          curl -sf -X POST "$AFT_FAKE_GH_BASE/__merge" -H 'Content-Type: application/json'
+          -d "{\"number\":1,\"sha\":\"$sha\"}" > "$AFT_WORK_DIR/stack-merge.json";
+          grep -q '"state":"closed"' "$AFT_WORK_DIR/stack-merge.json"
+        intent: Merge only X into the disposable bare trunk and expose its owned PR merge to landing detection
+      - run: >-
+          y="$(cat "$AFT_WORK_DIR/stackYId")";
+          for attempt in $(seq 1 45); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-STACK/issues/$y/revisions" > "$AFT_WORK_DIR/stack-y-after-merge.json";
+            count="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["data"]))' "$AFT_WORK_DIR/stack-y-after-merge.json")";
+            test "$count" -ge 3 && exit 0;
+            sleep 2;
+          done;
+          echo 'Landing did not derive Y revision'; exit 1
+        intent: Require a later Y revision produced by the product landing and restack path
+      - run: >-
+          repo="$AFT_WORK_DIR/stack-repo";
+          lead="$(git -C "$repo" rev-parse refs/heads/loom/ws/E2E-WS-STACK/interactive/lead)";
+          git -C "$repo" show "$lead:stack-y.txt" >/dev/null;
+          test "$(git --git-dir="$AFT_WORK_DIR/stack-origin.git" rev-parse refs/heads/main)" != "$lead"
+        intent: Confirm the lead area retains Y while provider trunk contains only landed X

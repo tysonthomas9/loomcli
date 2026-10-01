@@ -145,19 +145,68 @@ tests:
           test "$actual" = "$expected"
         intent: "Confirm the approved revision, not trunk, is the lead working area's new head"
 
-  - name: landed stacked change restacks its dependent into a derived revision
-    skip: true
-    intent: "Expected failure on batch 7 top 2d07a4f8: daemon-managed dependents lack Loom Git lineage (P1.23); a driver TaskRun dependent must be staged before X lands"
+  - name: unsaved lead edits hold an approved Apply without moving its ref
+    intent: An operator cannot swap an approved layer over an unsaved edit to the same file
     steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-REVIEW/issues"
+          body:
+            title: "pending epic $RUN_ID"
+            issue_type: "epic"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "pendingEpicId"
+        intent: "Create a separate epic so the second TaskRun cannot reuse the prior run"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-REVIEW/issues"
+          body:
+            title: "pending task $RUN_ID"
+            issue_type: "task"
+            priority: 2
+            parent: "${var:pendingEpicId}"
+            design: "STUB_CODEX_PATCH=review-output.txt"
+          save:
+            - from: "data.id"
+              as: "pendingTaskId"
+        intent: "Create a task whose agent edits the same file as the first approved layer"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-REVIEW/workflows/epic-runner"
+          body:
+            epicId: "${var:pendingEpicId}"
+            runner: "local-task-runner"
+        intent: "Start the real deterministic TaskRun workflow for the conflicting layer"
       - run: >-
-          echo 'Prerequisite: create stacked task changes X and Y through TaskRuns, approve and Apply both through the UI, then POST /api/workspaces/E2E-WS-REVIEW/agents/lead/git/pr for X';
-          exit 1
-        intent: "Require actual stacked publications rather than seeding journal rows or Git refs as substitute evidence"
+          task="$(cat "$AFT_WORK_DIR/pendingTaskId")";
+          for attempt in $(seq 1 45); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/issues/$task/revisions" > "$AFT_WORK_DIR/pending-revisions.json";
+            grep -q '"head_sha"' "$AFT_WORK_DIR/pending-revisions.json" && exit 0;
+            sleep 2;
+          done;
+          echo "TaskRun did not record a pending-case revision"; exit 1
+        intent: "Wait for a second genuine TaskRun revision of the same file"
       - run: >-
-          echo 'Merge X in the fake forge via /__merge and advance the bare remote trunk; restart serve to invoke its landing reconciliation entry point';
-          exit 1
-        intent: "P4.4 must detect the landed owned PR and mark Y restack_available"
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-REVIEW/issues/$(cat "$AFT_WORK_DIR/pendingTaskId")"
+        intent: "Open the second task in the review UI"
+      - wait: { text: Revisions }
+      - click: { role: button, name: Approve, exact: true }
       - run: >-
-          echo 'Read Y revisions and assert a new restack operation derives from its source revision and uses the landed trunk SHA';
-          exit 1
-        intent: "P3.4 must create a real derived revision rather than an independently seeded revision"
+          repo="$AFT_WORK_DIR/review-repo";
+          git -C "$repo" rev-parse refs/heads/loom/ws/E2E-WS-REVIEW/interactive/lead > "$AFT_WORK_DIR/pending-lead-before";
+          lead="$(git -C "$repo" worktree list --porcelain | awk '/^worktree / {path=substr($0,10)} /^branch refs\/heads\/loom\/ws\/E2E-WS-REVIEW\/interactive\/lead$/ {print path}')";
+          test -n "$lead";
+          printf 'unsaved operator edit\n' >> "$lead/review-output.txt";
+          printf '%s\n' "$lead" > "$AFT_WORK_DIR/pending-lead-path"
+        intent: "Leave an unsaved operator edit in the lead working area and record its ref"
+      - run: >-
+          read change revision < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["change_id"], item["number"])' "$AFT_WORK_DIR/pending-revisions.json");
+          status="$(curl -s -o "$AFT_WORK_DIR/pending-apply.json" -w '%{http_code}' -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/git/apply" -H 'Content-Type: application/json' -d "{\"change\":\"$change\",\"revision\":$revision,\"lead\":\"lead\"}")";
+          test "$status" = 409;
+          grep -q 'apply_pending' "$AFT_WORK_DIR/pending-apply.json";
+          test "$(cat "$AFT_WORK_DIR/pending-lead-before")" = "$(git -C "$AFT_WORK_DIR/review-repo" rev-parse refs/heads/loom/ws/E2E-WS-REVIEW/interactive/lead)";
+          grep -q 'unsaved operator edit' "$(cat "$AFT_WORK_DIR/pending-lead-path")/review-output.txt"
+        intent: "Apply reports apply_pending, preserves the dirty file, and leaves the lead ref unchanged"
