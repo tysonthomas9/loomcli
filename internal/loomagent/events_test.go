@@ -228,7 +228,7 @@ func TestOpenCodeEventsNativeIDs(t *testing.T) {
 		{Type: loomharness.EventTurnResumed, Session: ref, TurnID: "T1", ItemID: "resume2"},
 		{Type: loomharness.EventTurnResumed, Session: ref, TurnID: "T1", ItemID: "resume2", Seq: 9}, // resume2 from history
 	} {
-		if err := s.ingest(ctx, "opencode", ev); err != nil {
+		if _, err := s.ingest(ctx, "opencode", ev); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -290,14 +290,14 @@ func TestOpenCodeEventsBackfillRetriesFailedRead(t *testing.T) {
 type closedFeeds struct {
 	loomharness.Harness
 	opened *atomic.Int32
-	gap    bool // each feed sends one feed.gap before it closes
+	first  loomharness.EventType // each feed sends one such event, of no owned session, before it closes
 }
 
 func (c closedFeeds) Feed(context.Context) (loomharness.Feed, error) {
 	c.opened.Add(1)
 	ch := make(chan loomharness.Event, 1)
-	if c.gap {
-		ch <- loomharness.Event{Type: loomharness.EventFeedGap}
+	if c.first != "" {
+		ch <- loomharness.Event{Type: c.first, Session: loomharness.NativeRef{Root: "/x", NativeID: "unowned"}, ItemID: "i"}
 	}
 	close(ch)
 	return closedFeed(ch), nil
@@ -309,23 +309,23 @@ func (f closedFeed) Events() <-chan loomharness.Event { return f }
 func (closedFeed) Close() error                       { return nil }
 
 // TestOpenCodeEventsBackfillBacksOffOnClosedFeed: a feed that keeps closing,
-// with or without a feed.gap first, is reopened (and history backfilled)
+// with nothing, a feed.gap or an unowned session's event first, is reopened (and history backfilled)
 // with a doubling backoff, not at a fixed rate: only a live native event
 // resets it. RunFeed still ends at once on ctx cancel.
 func TestOpenCodeEventsBackfillBacksOffOnClosedFeed(t *testing.T) {
 	retry, retryMax := feedRetry, feedRetryMax
 	feedRetry, feedRetryMax = 10*time.Millisecond, time.Second
 	t.Cleanup(func() { feedRetry, feedRetryMax = retry, retryMax })
-	for _, gap := range []bool{false, true} {
+	for _, first := range []loomharness.EventType{"", loomharness.EventFeedGap, loomharness.EventItemCompleted} {
 		e := newCreateEnv(t)
 		s := e.service(ServiceConfig{})
 		var opened atomic.Int32
-		s.harnesses["opencode"] = closedFeeds{e.h, &opened, gap}
+		s.harnesses["opencode"] = closedFeeds{e.h, &opened, first}
 		stop := startFeed(s, e)
 		time.Sleep(600 * time.Millisecond) // a fixed 10 ms retry would open ~60 times
 		stop()
 		if n := opened.Load(); n < 2 || n > 8 {
-			t.Fatalf("gap %v: the closed feed was opened %d times in 600 ms; want a doubling backoff (2-8)", gap, n)
+			t.Fatalf("first %q: the closed feed was opened %d times in 600 ms; want a doubling backoff (2-8)", first, n)
 		}
 	}
 }

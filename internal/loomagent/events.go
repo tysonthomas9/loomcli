@@ -57,7 +57,8 @@ func (s *Service) RunFeed(ctx context.Context, harness string) {
 
 // readFeed backfills, then ingests h's feed until it ends or a save fails;
 // it always returns an error, and read reports whether it ingested a live
-// native event (a feed.gap is not one).
+// native event of an owned session (a feed.gap or another session's event
+// is not one).
 func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Harness) (read bool, err error) {
 	f, err := h.Feed(ctx)
 	if err != nil {
@@ -68,15 +69,16 @@ func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Ha
 		return false, err
 	}
 	for e := range f.Events() {
+		ok := false
 		if e.Type == loomharness.EventFeedGap {
 			err = s.backfill(ctx, harness)
 		} else {
-			err = s.ingest(ctx, harness, e)
+			ok, err = s.ingest(ctx, harness, e)
 		}
 		if err != nil {
 			return read, err
 		}
-		read = read || e.Type != loomharness.EventFeedGap
+		read = read || ok
 	}
 	return read, errFeedClosed
 }
@@ -102,7 +104,7 @@ func (s *Service) backfill(ctx context.Context, harness string) error {
 				return err
 			}
 			for _, e := range page.Events {
-				if err := s.ingest(ctx, harness, e); err != nil {
+				if _, err := s.ingest(ctx, harness, e); err != nil {
 					return err
 				}
 			}
@@ -116,26 +118,27 @@ func (s *Service) backfill(ctx context.Context, harness string) error {
 
 // ingest saves one native event of an owned session, then applies it. A
 // repeat (live after backfill, or backfill after live) saves nothing new, and
-// HarnessEvent ignores events of a turn that is not running.
-func (s *Service) ingest(ctx context.Context, harness string, e loomharness.Event) error {
+// HarnessEvent ignores events of a turn that is not running. ok reports
+// that e belonged to a live agent's session and was handled.
+func (s *Service) ingest(ctx context.Context, harness string, e loomharness.Event) (ok bool, err error) {
 	id, err := s.store.NativeSessionOwner(ctx, harness, e.Session.Root, e.Session.NativeID)
 	if errors.Is(err, loomstore.ErrNotFound) {
-		return nil // not an agent's session
+		return false, nil // not an agent's session
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	if _, err := s.live(ctx, id); isCode(err, CodeAgentNotFound) {
-		return nil
+		return false, nil
 	} else if err != nil {
-		return err
+		return false, err
 	}
 	if kind, ok := savedKinds[e.Type]; ok {
 		if _, err := s.events.Append(ctx, nativeRow(id, kind, e)); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return s.HarnessEvent(ctx, id, e)
+	return true, s.HarnessEvent(ctx, id, e)
 }
 
 // savedKinds maps the completed native events Phase 1 saves to their Loom
