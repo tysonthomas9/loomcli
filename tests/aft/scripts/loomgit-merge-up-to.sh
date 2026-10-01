@@ -30,11 +30,14 @@ if [[ "$phase" == setup ]]; then
     curl -fsS -X POST "$AFT_FAKE_GH_BASE/__reset" -H 'Content-Type: application/json' -d @- >/dev/null
   curl -fsS -X POST "$AFT_BASE_URL/api/workspaces" -H 'Content-Type: application/json' \
     -d "{\"name\":\"e2e-ws-merge-$backend\",\"type\":\"empty\",\"repos\":[\"$repo\"]}" >/dev/null
+  curl -fsS -X POST "$api/agents" -H 'Content-Type: application/json' \
+    -d '{"name":"lead","role_name":"lead","auto":false,"cross_repo":true,"repos":[],"backend":"codex"}' >/dev/null
   exit 0
 fi
 
 if [[ "$phase" == teardown ]]; then
   AFT_WS="$workspace" "$AFT_TESTS_DIR/scripts/close-open-issues.sh"
+  curl -s -X DELETE "$api/agents/lead" >/dev/null || true
   curl -s -X DELETE "$api" >/dev/null || true
   exit 0
 fi
@@ -114,9 +117,9 @@ for attempt in $(seq 1 90); do
   sleep 2
 done
 printf 'merge status after %s polls: ' "$attempt"
-python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert v["phase"]=="done", v; assert [x["state"] for x in v["layers"][:3]]==["landed"]*3, v' "$case_dir/final.json"
+python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert v["phase"]=="done", v; assert [x["state"] for x in v["layers"][:3]]==["done"]*3, v' "$case_dir/final.json"
 agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$workspace/agents/lead" >/dev/null
-agent-browser --session "$AFT_SESSION" find role tab click --name Git >/dev/null
+agent-browser --session "$AFT_SESSION" find role button click --name Git --exact >/dev/null
 agent-browser --session "$AFT_SESSION" find role button click --name 'Merge stack' >/dev/null
 agent-browser --session "$AFT_SESSION" find label 'Stack ID' fill aft-chain >/dev/null
 agent-browser --session "$AFT_SESSION" find label 'Up to layer' fill "$target" >/dev/null
