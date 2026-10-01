@@ -35,22 +35,24 @@ func (s *Store) AppendEvent(ctx context.Context, e Event) (got Event, err error)
 	return got, err
 }
 
-// AppendEvents appends the events fn adds to agentID, as AppendEvent does,
-// all in one transaction: none is saved unless fn returns nil and the
-// commit succeeds. before is the agent's last seq before them.
-func (s *Store) AppendEvents(ctx context.Context, agentID string, fn func(add func(Event) error) error) (before int64, err error) {
+// AppendEvents appends events to agentID in order, as AppendEvent does, all
+// in one transaction: none is saved unless every one is and the commit
+// succeeds. before is the agent's last seq before them.
+func (s *Store) AppendEvents(ctx context.Context, agentID string, events []Event) (before int64, err error) {
 	err = s.tx(ctx, func(tx *sql.Tx) error {
 		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq), 0) FROM agent_events WHERE agent_id = ?`,
 			agentID).Scan(&before); err != nil {
 			return err
 		}
-		return fn(func(e Event) error {
+		for _, e := range events {
 			if e.AgentID != agentID {
 				return fmt.Errorf("loomstore: event of %s in a batch of %s", e.AgentID, agentID)
 			}
-			_, err := appendEvent(ctx, tx, e)
-			return err
-		})
+			if _, err := appendEvent(ctx, tx, e); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	return before, err
 }

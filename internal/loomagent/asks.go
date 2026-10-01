@@ -3,7 +3,6 @@ package loomagent
 import (
 	"context"
 	"encoding/json"
-	"math"
 	"slices"
 	"strings"
 
@@ -152,34 +151,33 @@ func (s *Service) endTurnAsks(ctx context.Context, a loomstore.Agent, turnID str
 	return nil
 }
 
+// askPage is how many saved ask rows loseOpen reads at a time.
+var askPage = 500
+
 // loseOpen saves one ask.lost, with its AskID, for each of a's open asks not
-// in keep, then removes it from the table.
+// in keep, then removes it from the table: an ask open in its saved log, or
+// open in its table and never saved. A table ask the log shows closed is
+// just removed. The log is read in bounded pages.
 func (s *Service) loseOpen(ctx context.Context, a loomstore.Agent, keep map[string]*Ask) error {
-	saved, err := s.events.Page(ctx, loomstore.EventQuery{AgentID: a.AgentID, Limit: math.MaxInt32,
-		Kinds: []string{string(loomharness.EventAskOpened), string(loomharness.EventAskResolved), KindAskLost}})
+	table := map[string]Ask{}
+	for _, ask := range s.openAsks(a.AgentID) {
+		table[ask.ID] = ask
+	}
+	opened, logged, err := s.savedAsks(ctx, a.AgentID, table)
 	if err != nil {
 		return err
 	}
-	opened := map[string]loomstore.Event{}
-	for _, r := range saved.Events {
-		var p struct {
-			AskID string `json:"askId"`
-		}
-		if json.Unmarshal(r.Payload, &p) != nil || p.AskID == "" {
+	ref := loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: deref(a.HarnessSessionID)}
+	for id, ask := range table {
+		if _, open := opened[id]; open {
 			continue
 		}
-		if r.Kind == string(loomharness.EventAskOpened) {
-			opened[p.AskID] = r
-		} else {
-			delete(opened, p.AskID)
+		if logged[id] {
+			s.setAsk(a.AgentID, ask, false) // answered or lost in the log
+			continue
 		}
-	}
-	ref := loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: deref(a.HarnessSessionID)}
-	for _, ask := range s.openAsks(a.AgentID) {
-		if _, ok := opened[ask.ID]; !ok {
-			opened[ask.ID] = nativeRow(a.AgentID, string(loomharness.EventAskOpened), loomharness.Event{
-				Type: loomharness.EventAskOpened, Session: ref, AskID: ask.ID, TurnID: ask.TurnID})
-		}
+		opened[id] = nativeRow(a.AgentID, string(loomharness.EventAskOpened), loomharness.Event{
+			Type: loomharness.EventAskOpened, Session: ref, AskID: id, TurnID: ask.TurnID})
 	}
 	for id, r := range opened {
 		if keep[id] != nil {
@@ -192,6 +190,41 @@ func (s *Service) loseOpen(ctx context.Context, a loomstore.Agent, keep map[stri
 		s.setAsk(a.AgentID, Ask{ID: id}, false)
 	}
 	return nil
+}
+
+// savedAsks reads agentID's saved ask rows in pages of askPage: opened is
+// each ask whose last row opens it, and logged marks each ask of table that
+// has a row.
+func (s *Service) savedAsks(ctx context.Context, agentID string, table map[string]Ask) (opened map[string]loomstore.Event, logged map[string]bool, err error) {
+	opened, logged = map[string]loomstore.Event{}, map[string]bool{}
+	q := loomstore.EventQuery{AgentID: agentID, Limit: askPage,
+		Kinds: []string{string(loomharness.EventAskOpened), string(loomharness.EventAskResolved), KindAskLost}}
+	for {
+		page, err := s.events.Page(ctx, q)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, r := range page.Events {
+			var p struct {
+				AskID string `json:"askId"`
+			}
+			if json.Unmarshal(r.Payload, &p) != nil || p.AskID == "" {
+				continue
+			}
+			if _, ok := table[p.AskID]; ok {
+				logged[p.AskID] = true
+			}
+			if r.Kind == string(loomharness.EventAskOpened) {
+				opened[p.AskID] = r
+			} else {
+				delete(opened, p.AskID)
+			}
+		}
+		if !page.More {
+			return opened, logged, nil
+		}
+		q.After, q.Snapshot = page.Next, page.SnapshotSeq
+	}
 }
 
 // SubscribeRequest follows agents' events (design v2 §4.11). An agent with

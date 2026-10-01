@@ -32,7 +32,7 @@ func askIDs(t *testing.T, s *Service, agentID string) []string {
 // tweaked wraps a harness: its history leaves out ask gone (as OpenCode's
 // lists only asks still pending), or fails with msgErr (after a first page
 // page1, if set; page2, if set, serves the page after it), and ends with
-// extra; a Reply with Always
+// extra; it waits for block, if set; a Reply with Always
 // fails with alwaysErr. It counts history reads and records replies.
 type tweaked struct {
 	loomharness.Harness
@@ -41,6 +41,7 @@ type tweaked struct {
 	reads             *atomic.Int32
 	page1, extra      []loomharness.Event
 	page2             func() (loomharness.MessagePage, error)
+	block             chan struct{} // a history read waits until it closes
 	replies           *[]loomharness.Reply
 }
 
@@ -56,6 +57,9 @@ type tweakedSession struct {
 func (p tweakedSession) Messages(ctx context.Context, after string, limit int) (loomharness.MessagePage, error) {
 	if p.w.reads != nil {
 		p.w.reads.Add(1)
+	}
+	if p.w.block != nil {
+		<-p.w.block
 	}
 	if p.w.page1 != nil && after == "" {
 		return loomharness.MessagePage{Events: p.w.page1, Next: "p2"}, nil
@@ -92,6 +96,9 @@ func (p tweakedSession) Reply(ctx context.Context, askID string, r loomharness.R
 // ask.lost, leaves Get and refuses Respond.
 func TestGetOpenAsksIntegration(t *testing.T) {
 	ctx := context.Background()
+	page := askPage
+	askPage = 1 // the saved asks are read in many pages
+	t.Cleanup(func() { askPage = page })
 	e := newCreateEnv(t)
 	fh := e.h.Harness.(*fake.Harness)
 	s1 := e.service(ServiceConfig{})
@@ -422,9 +429,10 @@ func TestProbePartialBackfillKeepsOpenAsk(t *testing.T) {
 	}
 }
 
-// TestAppendAllAllOrNothing: a batch whose fn fails saves and publishes
-// none of the events it added; a batch that commits publishes each new
-// event once, in order, and not one it already had.
+// TestAppendAllAllOrNothing: a batch whose write fails after an earlier
+// row of it was written saves and publishes none of it; a batch that
+// commits publishes each new event once, in order, and not one it already
+// had.
 func TestAppendAllAllOrNothing(t *testing.T) {
 	ctx := context.Background()
 	s := newService(t, ServiceConfig{}, svcAgent("a1", "persistent", StateIdle))
@@ -435,27 +443,15 @@ func TestAppendAllAllOrNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row := func(id string) loomstore.Event {
-		return loomstore.Event{AgentID: "a1", EventID: id, Kind: "note", Payload: json.RawMessage(`{}`)}
+	row := func(agent, id string) loomstore.Event {
+		return loomstore.Event{AgentID: agent, EventID: id, Kind: "note", Payload: json.RawMessage(`{}`)}
 	}
-	err = s.events.AppendAll(ctx, "a1", func(add func(loomstore.Event) error) error {
-		if err := add(row("x1")); err != nil {
-			return err
-		}
-		return errors.New("boom")
-	})
+	err = s.events.AppendAll(ctx, "a1", []loomstore.Event{row("a1", "x1"), row("other", "x2")})
 	if err == nil || len(rows(t, s, "a1", 0)) != 1 {
 		t.Fatalf("failed batch: err %v, rows %d; want an error and only the old row", err, len(rows(t, s, "a1", 0)))
 	}
 	quiet(t, sub)
-	if err := s.events.AppendAll(ctx, "a1", func(add func(loomstore.Event) error) error {
-		for _, id := range []string{"old", "y1", "y2"} {
-			if err := add(row(id)); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
+	if err := s.events.AppendAll(ctx, "a1", []loomstore.Event{row("a1", "old"), row("a1", "y1"), row("a1", "y2")}); err != nil {
 		t.Fatal(err)
 	}
 	if got := ids(recv(t, sub, 2)); !slices.Equal(got, []string{"y1", "y2"}) {
@@ -574,8 +570,8 @@ func TestReplayRetryConverges(t *testing.T) {
 			}
 		case "crash+restart":
 			w = good
-			replayCrash = func() { panic("crash") }
-			t.Cleanup(func() { replayCrash = func() {} })
+			appendAllCrash = func() { panic("crash") }
+			t.Cleanup(func() { appendAllCrash = func() {} })
 		}
 		if mode != "clean" {
 			s.harnesses["opencode"] = w
@@ -585,7 +581,7 @@ func TestReplayRetryConverges(t *testing.T) {
 					t.Fatalf("%s: the first replay succeeded", mode)
 				}
 			}()
-			replayCrash = func() {}
+			appendAllCrash = func() {}
 			if n := len(rows(t, s, a.AgentID, 0)) - before; mode != "crash+restart" && n != 0 {
 				t.Fatalf("%s: the failed replay saved %d rows", mode, n)
 			}
@@ -614,5 +610,102 @@ func TestReplayRetryConverges(t *testing.T) {
 		if got := run(mode); !slices.Equal(got.kinds, want.kinds) || !slices.Equal(got.asks, want.asks) || got.state != want.state {
 			t.Fatalf("%s: %+v; want %+v", mode, got, want)
 		}
+	}
+}
+
+// TestReplayReadHoldsNoLock: while alpha's history read is blocked, another
+// agent's events are still saved and published.
+func TestReplayReadHoldsNoLock(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	alpha, _ := newLead(t, e, s, "alpha")
+	beta, _ := newLead(t, e, s, "beta")
+	var reads atomic.Int32
+	block := make(chan struct{})
+	s.harnesses["opencode"] = tweaked{Harness: e.h, reads: &reads, block: block}
+	done := make(chan error, 1)
+	go func() { done <- s.replay(ctx, "opencode", s.get(t, alpha.AgentID)) }()
+	eventually(t, "alpha's history read starts", func() bool { return reads.Load() == 1 })
+	sub, err := s.Subscribe(ctx, SubscribeRequest{AgentIDs: []string{beta.AgentID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := make(chan error, 1)
+	go func() { saved <- s.appendEvent(ctx, beta.AgentID, "note", "n1", nil) }()
+	select {
+	case err := <-saved:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("beta's event waited on alpha's history read")
+	}
+	if got := recv(t, sub, 1); got[0].EventID != "n1" {
+		t.Fatalf("published %s; want n1", got[0].EventID)
+	}
+	close(block)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestReplayOverCapFailsClosed: a history over the replay cap saves and
+// publishes nothing, leaves the asks as they are and shows Attention
+// history_too_large without stopping the other agents' backfill; with room,
+// the next backfill replays it and clears the Attention.
+func TestReplayOverCapFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	stop := startFeed(s, e)
+	a, ref := newLead(t, e, s, "alpha")
+	b, _ := newLead(t, e, s, "beta")
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
+	eventually(t, "a1 opens", func() bool {
+		return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) && s.get(t, a.AgentID).State == StateWaiting
+	})
+	stop()
+	turn := deref(s.get(t, a.AgentID).RunningTurnID)
+	big := strings.Repeat("x", 4096)
+	s.harnesses["opencode"] = tweaked{Harness: e.h, extra: []loomharness.Event{
+		{Type: loomharness.EventItemCompleted, Session: ref, TurnID: turn, ItemID: "big", ItemKind: "message", Text: big},
+		{Type: loomharness.EventAskResolved, Session: ref, TurnID: turn, AskID: "a1"}}}
+	capped := replayCap
+	replayCap = 4096
+	t.Cleanup(func() { replayCap = capped })
+	sub, err := s.Subscribe(ctx, SubscribeRequest{AgentIDs: []string{a.AgentID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := len(rows(t, s, a.AgentID, 0))
+	err = s.replay(ctx, "opencode", s.get(t, a.AgentID))
+	if !errors.Is(err, errHistoryTooLarge) || !strings.Contains(err.Error(), "4096 bytes") {
+		t.Fatalf("replay = %v; want the cap named", err)
+	}
+	if n := len(rows(t, s, a.AgentID, 0)); n != before {
+		t.Fatalf("an over-cap replay saved %d rows", n-before)
+	}
+	quiet(t, sub)
+	if err := s.backfill(ctx, "opencode"); err != nil {
+		t.Fatalf("backfill = %v; want the over-cap agent skipped", err)
+	}
+	if r := deref(s.get(t, a.AgentID).AttentionReason); r != AttentionHistoryTooLarge {
+		t.Fatalf("alpha Attention = %q; want history_too_large", r)
+	}
+	if r := s.get(t, b.AgentID).AttentionReason; r != nil {
+		t.Fatalf("beta Attention = %q", *r)
+	}
+	if got := askIDs(t, s, a.AgentID); !slices.Equal(got, []string{"a1:approval"}) {
+		t.Fatalf("open asks after an over-cap replay = %v", got)
+	}
+	replayCap = capped
+	if err := s.backfill(ctx, "opencode"); err != nil {
+		t.Fatal(err)
+	}
+	if ag := s.get(t, a.AgentID); ag.AttentionReason != nil || len(askIDs(t, s, a.AgentID)) != 0 {
+		t.Fatalf("after a replay with room: Attention %v, asks %v; want cleared, a1 resolved", ag.AttentionReason, askIDs(t, s, a.AgentID))
 	}
 }

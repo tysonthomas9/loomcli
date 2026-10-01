@@ -47,16 +47,21 @@ func (l *EventLog) Append(ctx context.Context, e loomstore.Event) (loomstore.Eve
 	return got, nil
 }
 
-// AppendAll appends the events fn adds to agentID in one transaction and
-// publishes the new ones only after the commit: if fn or the commit fails,
-// nothing is saved or published. fn must not append through l itself.
-func (l *EventLog) AppendAll(ctx context.Context, agentID string, fn func(add func(loomstore.Event) error) error) error {
+// appendAllCrash runs between an AppendAll's commit and its publication;
+// tests crash there.
+var appendAllCrash = func() {}
+
+// AppendAll appends events to agentID in one short transaction and
+// publishes the new ones, in order, only after the commit: if any write or
+// the commit fails, nothing is saved or published.
+func (l *EventLog) AppendAll(ctx context.Context, agentID string, events []loomstore.Event) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	before, err := l.store.AppendEvents(ctx, agentID, fn)
+	before, err := l.store.AppendEvents(ctx, agentID, events)
 	if err != nil {
 		return err
 	}
+	appendAllCrash() // committed, not yet published or applied
 	q := loomstore.EventQuery{AgentID: agentID, After: before}
 	for {
 		p, err := l.store.ListEvents(ctx, q)

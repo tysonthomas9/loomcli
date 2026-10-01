@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"time"
@@ -17,8 +18,16 @@ import (
 // EventTurnCompleted is the saved Loom event for a native turn.completed.
 const EventTurnCompleted = "agent.turn_completed"
 
-// replayCrash runs between a replay's commit and its apply; tests crash there.
-var replayCrash = func() {}
+// replayCap bounds the memory one replay holds: the bytes of the history's
+// rows plus its open asks. A session's saved history is its text, so a
+// long session is a few MiB; 256 MiB is far beyond any real one yet stops a
+// runaway history before it exhausts the process. A history over the cap is
+// not saved at all and its agent shows Attention history_too_large.
+var replayCap = 256 << 20
+
+// AttentionHistoryTooLarge: the agent's native history is over replayCap,
+// so it could not be replayed.
+const AttentionHistoryTooLarge = "history_too_large"
 
 // RunFeed waits feedRetry before it reopens the feed, doubling up to
 // feedRetryMax while reads keep failing; a read that ingested events resets it.
@@ -92,7 +101,8 @@ func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Ha
 }
 
 // backfill replays the native history of every live agent's current session.
-// A session the harness no longer has is left to Reconcile (session_missing).
+// A session the harness no longer has is left to Reconcile (session_missing);
+// one whose history is over replayCap shows Attention and is skipped.
 func (s *Service) backfill(ctx context.Context, harness string) error {
 	agents, _, err := s.store.ListAgents(ctx, loomstore.AgentFilter{WorkspaceID: s.workspaceID, Harness: harness})
 	if err != nil {
@@ -102,47 +112,69 @@ func (s *Service) backfill(ctx context.Context, harness string) error {
 		if a.HarnessSessionID == nil {
 			continue
 		}
-		if err := s.replay(ctx, harness, a); err != nil && !errors.Is(err, loomharness.ErrSessionNotFound) {
+		err := s.replay(ctx, harness, a)
+		if errors.Is(err, errHistoryTooLarge) {
+			slog.Warn("loomagent: native history not replayed", "agent", a.AgentID, "error", err)
+			err = s.flagHistory(ctx, a.AgentID)
+		}
+		if err != nil && !errors.Is(err, loomharness.ErrSessionNotFound) {
 			return err
 		}
 	}
 	return nil
 }
 
-// replay saves a's whole current native history all or nothing: it reads
-// one page at a time into a single store transaction, so a failed read or
-// write saves, publishes and changes nothing. While reading it keeps only
-// the history's net effect (a fold); once committed, the new rows are
-// published and the fold is applied to a under its lock.
+var errHistoryTooLarge = errors.New("loomagent: the native history is over the replay cap")
+
+// flagHistory shows Attention history_too_large on agentID.
+func (s *Service) flagHistory(ctx context.Context, agentID string) error {
+	defer s.lock(agentID)()
+	a, err := s.live(ctx, agentID)
+	if err != nil || a.AttentionReason != nil {
+		return err
+	}
+	_, err = s.raiseAttention(ctx, a, AttentionHistoryTooLarge)
+	return err
+}
+
+// replay saves a's whole current native history all or nothing. It first
+// reads every page, holding no lock or transaction, into memory bounded by
+// replayCap (rows plus the fold); then one short transaction saves them
+// all, so a failed read or write saves, publishes and changes nothing. Only
+// after the commit are the new rows published and the history's net effect
+// (the fold) applied to a under its lock. A crash between the commit and
+// the apply is redone by the next replay: its rows are already saved once,
+// and the fold, read again from the history, is applied as before.
 func (s *Service) replay(ctx context.Context, harness string, a loomstore.Agent) error {
 	ref := loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: *a.HarnessSessionID}
 	sess := s.harnesses[harness].Session(ref)
 	f := fold{running: deref(a.RunningTurnID), asks: map[string]*Ask{}}
-	err := s.events.AppendAll(ctx, a.AgentID, func(add func(loomstore.Event) error) error {
-		for after := ""; ; {
-			page, err := sess.Messages(ctx, after, 100)
-			if err != nil {
-				return err
-			}
-			for _, e := range page.Events {
-				kind, ok := savedKinds[e.Type]
-				if !ok || e.Session != ref {
-					continue // a delta is live only: a subscriber had it, or missed it with the gap
-				}
-				if err := add(nativeRow(a.AgentID, kind, e)); err != nil {
-					return err
-				}
-				f.add(e)
-			}
-			if after = page.Next; after == "" {
-				return nil
-			}
+	var rows []loomstore.Event
+	size := 0
+	for after := ""; ; {
+		page, err := sess.Messages(ctx, after, 100)
+		if err != nil {
+			return err
 		}
-	})
-	if err != nil {
+		for _, e := range page.Events {
+			kind, ok := savedKinds[e.Type]
+			if !ok || e.Session != ref {
+				continue // a delta is live only: a subscriber had it, or missed it with the gap
+			}
+			r := nativeRow(a.AgentID, kind, e)
+			size += len(r.EventID) + len(r.Kind) + len(r.TurnID) + len(r.Payload) + f.add(e)
+			if size > replayCap {
+				return fmt.Errorf("%w of %d bytes", errHistoryTooLarge, replayCap)
+			}
+			rows = append(rows, r)
+		}
+		if after = page.Next; after == "" {
+			break
+		}
+	}
+	if err := s.events.AppendAll(ctx, a.AgentID, rows); err != nil {
 		return err
 	}
-	replayCrash() // committed, not yet applied: the next replay applies it
 	return s.applyFold(ctx, a.AgentID, f)
 }
 
@@ -153,11 +185,11 @@ type fold struct {
 	turn      string // the turn a turn.started named for running's input
 	delivered bool   // running's input was delivered
 	ended     *loomharness.Event
-	asks      map[string]*Ask // the history's asks: open, or nil once closed
+	asks      map[string]*Ask // the history's open asks
 }
 
-// add folds in e.
-func (f *fold) add(e loomharness.Event) {
+// add folds in e and returns the bytes it added to the fold.
+func (f *fold) add(e loomharness.Event) int {
 	switch e.Type {
 	case loomharness.EventMessageDelivered:
 		f.delivered = f.delivered || (f.running != "" && e.InputKey == f.running)
@@ -168,20 +200,24 @@ func (f *fold) add(e loomharness.Event) {
 	case loomharness.EventTurnCompleted:
 		if e.TurnID != "" && (e.TurnID == f.turn || e.TurnID == f.running) {
 			f.ended = &e
+			return len(e.TurnID) + len(e.StopReason)
 		}
 	case loomharness.EventAskOpened:
 		ask := askOf(e)
 		f.asks[e.AskID] = &ask
+		return 2*len(ask.ID) + len(ask.Type) + len(ask.About) + len(ask.TurnID)
 	case loomharness.EventAskResolved, loomharness.EventAskLost:
-		f.asks[e.AskID] = nil
+		delete(f.asks, e.AskID)
 	}
+	return 0
 }
 
-// applyFold applies a committed replay's net effect to agentID: the open
-// asks become the history's, an ask open before that the history no longer
-// has is saved as ask.lost, then the delivery, turn start and turn end are
-// applied as the live events would be (each a no-op once applied); the
-// turn end saves ask.lost for its asks still open.
+// applyFold applies a committed replay's net effect to agentID: a
+// history_too_large Attention clears; the history's open asks are opened;
+// an ask open before that the history no longer has is saved as ask.lost
+// (or just removed if its log shows it answered); then the delivery, turn
+// start and turn end are applied as the live events would be (each a no-op
+// once applied), and the turn end saves ask.lost for its asks still open.
 func (s *Service) applyFold(ctx context.Context, agentID string, f fold) error {
 	defer s.lock(agentID)()
 	a, err := s.live(ctx, agentID)
@@ -190,12 +226,13 @@ func (s *Service) applyFold(ctx context.Context, agentID string, f fold) error {
 	} else if err != nil {
 		return err
 	}
-	for id, ask := range f.asks {
-		if ask != nil {
-			s.setAsk(agentID, *ask, true)
-		} else {
-			s.setAsk(agentID, Ask{ID: id}, false)
+	if deref(a.AttentionReason) == AttentionHistoryTooLarge {
+		if a, err = s.clearAttention(ctx, a); err != nil {
+			return err
 		}
+	}
+	for _, ask := range f.asks {
+		s.setAsk(agentID, *ask, true)
 	}
 	if err := s.loseOpen(ctx, a, f.asks); err != nil {
 		return err
