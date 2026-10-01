@@ -115,6 +115,13 @@ func TestWorkspaceStatusDetachedPRRef(t *testing.T) {
 	}
 }
 
+// refs lists every ref and the commit it points at, so a test can show that
+// branches and history are untouched.
+func refs(t *testing.T, repo string) string {
+	t.Helper()
+	return run(t, repo, "for-each-ref", "--format=%(refname) %(objectname)")
+}
+
 func TestWorkspaceStatusMissingIsAbsent(t *testing.T) {
 	ctx := context.Background()
 	ws, _, repo := portSetup(t)
@@ -122,15 +129,75 @@ func TestWorkspaceStatusMissingIsAbsent(t *testing.T) {
 	if st, err := ws.Status(ctx, s); err != nil || len(st.Uncommitted) != 0 {
 		t.Fatalf("never-made Status = %+v, %v; want absent", st, err)
 	}
-	if _, err := ws.Ensure(ctx, s); err != nil {
+	wc, err := ws.Ensure(ctx, s)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ws.Remove(ctx, s); err != nil {
+	commit(t, wc.Path, "mine.txt", "agent history")
+	other := loomagent.WorkspaceSpec{Key: "agt_n", Repo: repo, BaseRef: "main", Branch: "loom/agent/agt_n"}
+	oc, err := ws.Ensure(ctx, other)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if st, err := ws.Status(ctx, s); err != nil || len(st.Uncommitted) != 0 {
-		t.Fatalf("removed Status = %+v, %v; want absent", st, err)
+	commit(t, oc.Path, "theirs.txt", "other history")
+	write(t, filepath.Join(oc.Path, "wip.txt"), "other agent's work")
+	before := refs(t, repo)
+
+	for i := 0; i < 2; i++ { // the removal, then a retry after it
+		if err := ws.Remove(ctx, s); err != nil {
+			t.Fatalf("Remove %d: %v", i, err)
+		}
+		if st, err := ws.Status(ctx, s); err != nil || len(st.Uncommitted) != 0 {
+			t.Fatalf("removed Status = %+v, %v; want absent", st, err)
+		}
 	}
+	if after := refs(t, repo); after != before {
+		t.Fatalf("refs changed:\n%s\nwant\n%s", after, before)
+	}
+	if b, err := os.ReadFile(filepath.Join(oc.Path, "wip.txt")); err != nil || string(b) != "other agent's work" {
+		t.Fatalf("other agent's worktree touched: %q, %v", b, err)
+	}
+	if st, err := ws.Status(ctx, other); err != nil || !slices.Equal(st.Uncommitted, []string{"wip.txt"}) {
+		t.Fatalf("other Status = %+v, %v", st, err)
+	}
+}
+
+func TestWorkspaceStatusAbsentOnlyWhenMissing(t *testing.T) {
+	ctx := context.Background()
+	ws, w, repo := portSetup(t)
+	s := loomagent.WorkspaceSpec{Key: "agt_p", Repo: repo, BaseRef: "main", Branch: "loom/agent/agt_p"}
+	wc, err := ws.Ensure(ctx, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Dir(wc.Path)
+	if err := os.Chmod(parent, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+	if _, err := os.Lstat(wc.Path); err == nil || os.IsNotExist(err) {
+		t.Skipf("cannot make an unreadable parent here (running as root?): %v", err)
+	}
+	if _, err := ws.Status(ctx, s); err == nil || errors.Is(err, ErrNotOwned) {
+		t.Fatalf("Status on unreadable path = %v; want a stat error, not absent", err)
+	}
+	if err := ws.Remove(ctx, s); err == nil {
+		t.Fatal("Remove on unreadable path = nil; want a stat error")
+	}
+	if err := os.Chmod(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(wc.Path, "base.txt")); err != nil {
+		t.Fatalf("worktree touched: %v", err)
+	}
+
+	plain := loomagent.WorkspaceSpec{Key: "agt_q", Repo: repo, BaseRef: "main", Branch: "loom/agent/agt_q"}
+	ppath, _ := w.Path(Spec(plain))
+	if err := os.MkdirAll(ppath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err = ws.Status(ctx, plain)
+	requireNotOwned(t, err)
 }
 
 func TestWorkspaceStatusRefusesForeign(t *testing.T) {
@@ -165,6 +232,7 @@ func TestWorkspaceRemoveOwned(t *testing.T) {
 		run(t, wc.Path, "add", "agent.txt")
 		run(t, wc.Path, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "done")
 		tip := run(t, wc.Path, "rev-parse", "HEAD")
+		before := refs(t, repo)
 
 		if err := ws.Remove(ctx, s); err != nil {
 			t.Fatal(err)
@@ -183,6 +251,9 @@ func TestWorkspaceRemoveOwned(t *testing.T) {
 		}
 		if err := ws.Remove(ctx, s); err != nil {
 			t.Fatalf("second Remove = %v, want nil", err)
+		}
+		if after := refs(t, repo); after != before {
+			t.Fatalf("refs changed:\n%s\nwant\n%s", after, before)
 		}
 		again, err := ws.Ensure(ctx, loomagent.WorkspaceSpec{Key: s.Key, Repo: repo, Branch: s.Branch})
 		if err != nil || again.HEAD != tip {
@@ -295,10 +366,31 @@ func TestWorkspaceRemoveConfirmedFingerprint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Confirm waives only the dirty-work check, never ownership.
+	wrongBranch := s
+	wrongBranch.Branch, wrongBranch.Confirm = "loom/agent/someone-else", now.Fingerprint
+	requireNotOwned(t, ws.Remove(ctx, wrongBranch))
+	asReviewer := loomagent.WorkspaceSpec{Key: s.Key, Repo: repo, BaseRef: "main", Detached: true, Confirm: now.Fingerprint}
+	requireNotOwned(t, ws.Remove(ctx, asReviewer))
+	sameName := newRepo(t, filepath.Join(t.TempDir(), filepath.Base(repo))) // same <root>/<repo name>/<key> path
+	otherRepo := s
+	otherRepo.Repo, otherRepo.Confirm = sameName, now.Fingerprint
+	requireNotOwned(t, ws.Remove(ctx, otherRepo))
+	if again, err := ws.Status(ctx, s); err != nil || again.Fingerprint != now.Fingerprint {
+		t.Fatalf("foreign confirmed Remove touched the work: %+v, %v", again, err)
+	}
+
+	before := refs(t, repo)
 	confirmed := s
 	confirmed.Confirm = now.Fingerprint
 	if err := ws.Remove(ctx, confirmed); err != nil {
 		t.Fatalf("confirmed Remove = %v", err)
+	}
+	if err := ws.Remove(ctx, confirmed); err != nil {
+		t.Fatalf("retried confirmed Remove = %v", err)
+	}
+	if after := refs(t, repo); after != before {
+		t.Fatalf("refs changed:\n%s\nwant\n%s", after, before)
 	}
 	if _, err := os.Stat(wc.Path); !os.IsNotExist(err) {
 		t.Fatalf("worktree still exists: %v", err)
