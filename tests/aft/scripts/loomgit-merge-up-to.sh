@@ -26,7 +26,7 @@ if [[ "$phase" == setup ]]; then
   git -C "$repo" config core.sshCommand "sh $AFT_TESTS_DIR/fixtures/fake-github/git-ssh-bridge.sh $remote"
   git -C "$repo" remote add origin git@github.com:owner/repo.git
   git -C "$repo" push -q origin main
-  python3 -c 'import json,sys; print(json.dumps({"remote":sys.argv[1],"native_stacks":sys.argv[2]=="native","preserve":sys.argv[2]=="loom"}))' "$remote" "$backend" |
+  python3 -c 'import json,sys; print(json.dumps({"remote":sys.argv[1],"native_stacks":sys.argv[2]=="native","preserve":True}))' "$remote" "$backend" |
     curl -fsS -X POST "$AFT_FAKE_GH_BASE/__reset" -H 'Content-Type: application/json' -d @- >/dev/null
   curl -fsS -X POST "$AFT_BASE_URL/api/workspaces" -H 'Content-Type: application/json' \
     -d "{\"name\":\"e2e-ws-merge-$backend\",\"type\":\"empty\",\"repos\":[\"$repo\"]}" >/dev/null
