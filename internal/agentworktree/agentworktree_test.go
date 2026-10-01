@@ -1,4 +1,4 @@
-package loomgit
+package agentworktree
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/gitrunner"
 )
 
 func run(t *testing.T, dir string, args ...string) string {
@@ -43,7 +45,7 @@ func commit(t *testing.T, dir, name, body string) string {
 func setup(t *testing.T) (*Worktrees, string) {
 	t.Helper()
 	tmp := t.TempDir()
-	w, err := New(filepath.Join(tmp, "worktrees"), TargetLocal)
+	w, err := New(filepath.Join(tmp, "worktrees"), TargetLocal, gitrunner.Exec{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +91,7 @@ func TestEnsureBranchFromRemoteBase(t *testing.T) {
 	repo := filepath.Join(tmp, "repo")
 	run(t, "", "clone", upstream, repo)
 	tip := commit(t, upstream, "new.txt", "upstream advance")
-	w, err := New(filepath.Join(tmp, "worktrees"), TargetLocal)
+	w, err := New(filepath.Join(tmp, "worktrees"), TargetLocal, gitrunner.Exec{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +222,7 @@ func TestWorktreeOwnershipRefusesPlainFolder(t *testing.T) {
 }
 
 func TestEnsureRejectsBadSpecAndTarget(t *testing.T) {
-	if _, err := New(t.TempDir(), Target("remote")); err == nil {
+	if _, err := New(t.TempDir(), Target("remote"), gitrunner.Exec{}); err == nil {
 		t.Fatal("want error for non-local target")
 	}
 	w, repo := setup(t)
