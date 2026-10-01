@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
 )
 
@@ -61,6 +62,10 @@ type ServiceConfig struct {
 	// Purge removes exactly the native sessions a owns (2.1c's R29 hook); nil
 	// until 2.1c wires it. A failure leaves the Delete pending for Reconcile.
 	Purge func(ctx context.Context, a loomstore.Agent, owned []loomstore.NativeSession) error
+	// Harnesses are the wired harness runtimes by name.
+	Harnesses map[string]loomharness.Harness
+	// Launch returns a's opaque launch input on harness; nil launches with none.
+	Launch func(ctx context.Context, a loomstore.Agent, harness string) (loomharness.Launch, error)
 }
 
 // Service is the Agent API service: it owns agent state changes and their
@@ -75,6 +80,8 @@ type Service struct {
 	target      Target
 	interrupt   func(context.Context, loomstore.Agent) error
 	purge       func(context.Context, loomstore.Agent, []loomstore.NativeSession) error
+	harnesses   map[string]loomharness.Harness
+	launch      func(context.Context, loomstore.Agent, string) (loomharness.Launch, error)
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
@@ -84,12 +91,18 @@ type Service struct {
 func New(cfg ServiceConfig) *Service {
 	s := &Service{Bus: NewBus(), store: cfg.Store, events: cfg.Events, workspace: cfg.Workspace,
 		resolveRepo: cfg.ResolveRepo, prepare: cfg.PrepareWorktree, target: cfg.Target,
-		interrupt: cfg.Interrupt, purge: cfg.Purge, locks: map[string]*sync.Mutex{}}
+		interrupt: cfg.Interrupt, purge: cfg.Purge, harnesses: cfg.Harnesses, launch: cfg.Launch,
+		locks: map[string]*sync.Mutex{}}
 	if s.target == "" {
 		s.target = TargetLocal
 	}
 	if s.resolveRepo == nil {
 		s.resolveRepo = func(_ context.Context, _ Target, repo string) (string, error) { return repo, nil }
+	}
+	if s.launch == nil {
+		s.launch = func(context.Context, loomstore.Agent, string) (loomharness.Launch, error) {
+			return loomharness.Launch{}, nil
+		}
 	}
 	if s.prepare == nil {
 		s.prepare = func(context.Context, Target, loomstore.Agent) error { return nil }

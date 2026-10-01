@@ -342,3 +342,39 @@ func (s *Store) Tombstone(ctx context.Context, agentID string, now time.Time) er
 		WHERE agent_id = ?`, Stamp(now), Stamp(now), agentID)
 	return err
 }
+
+// AgentSpec is the agent columns Update changes: the spec, its version, the
+// selected harness and its current native session, and the last applied
+// Update RequestID.
+type AgentSpec struct {
+	Name, SpecJSON, Harness                string
+	Model, HarnessSessionID, LastRequestID *string
+	SpecVersion                            int64
+}
+
+// SpecOf returns a's spec columns.
+func (a Agent) SpecOf() AgentSpec {
+	return AgentSpec{Name: a.Name, SpecJSON: a.SpecJSON, Harness: a.Harness, Model: a.Model,
+		HarnessSessionID: a.HarnessSessionID, LastRequestID: a.LastRequestID, SpecVersion: a.SpecVersion}
+}
+
+// ErrSpecChanged means the agent's spec_version no longer equals the expected one.
+var ErrSpecChanged = errors.New("loomstore: agent spec version changed")
+
+// CompareAndSetSpec sets agentID's spec columns to `to` in one statement, only
+// if its spec_version still equals fromVersion and it is not deleted;
+// otherwise it returns ErrSpecChanged.
+func (s *Store) CompareAndSetSpec(ctx context.Context, agentID string, fromVersion int64, to AgentSpec) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE agents SET name = ?, spec_json = ?, harness = ?, model = ?,
+		harness_session_id = ?, last_request_id = ?, spec_version = ?, updated_at = ?
+		WHERE agent_id = ? AND deleted_at IS NULL AND spec_version = ?`,
+		to.Name, to.SpecJSON, to.Harness, to.Model, to.HarnessSessionID, to.LastRequestID, to.SpecVersion,
+		Stamp(time.Now()), agentID, fromVersion)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrSpecChanged
+	}
+	return nil
+}
