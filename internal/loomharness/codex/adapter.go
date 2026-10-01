@@ -78,8 +78,10 @@ const markerPrefix = "loom:"
 // Open returns the thread for spec.Key in spec.Dir on spec.Launch.Root's
 // app-server: the one this process opened, else the one named for the key,
 // else a new one. The ref names the canonical root the thread lives under.
-// An error returns the zero ref and leaves nothing behind: a new thread that
-// cannot be named is deleted again.
+// On an error it returns the zero ref and leaves nothing behind: a new
+// thread that cannot be named is deleted again. Only when that delete fails
+// too does it return the thread's ref with both errors, so the caller
+// records it and Purges it later (the port's Open failure contract).
 //
 // The launch root alone selects the profile (its server runs with
 // CODEX_HOME set to it); codex profiles carry no secret env.
@@ -122,7 +124,7 @@ func (a *Adapter) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharn
 		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), startTimeout)
 		defer cancel()
 		if derr := a.delete(dctx, ref); derr != nil {
-			return loomharness.NativeRef{}, fmt.Errorf("codex thread/name/set: %w (and deleting the new thread %s failed: %w)", err, ref.NativeID, derr)
+			return ref, fmt.Errorf("codex thread/name/set: %w (and deleting the new thread %s failed: %w)", err, ref.NativeID, derr)
 		}
 		return loomharness.NativeRef{}, fmt.Errorf("codex thread/name/set: %w", err)
 	}

@@ -587,7 +587,8 @@ func TestCodexRefusesOtherServerRequests(t *testing.T) {
 
 // TestCodexOpenLeavesNothingOnError: when the new thread cannot be named,
 // Open deletes it and returns the zero ref with the error; when the delete
-// fails too, both errors are returned, still with the zero ref.
+// fails too, Open returns the thread's real ref with both errors, and a
+// later Purge of that ref removes it.
 func TestCodexOpenLeavesNothingOnError(t *testing.T) {
 	f := newFixture(t, "codex-cli 0.157.1")
 	a, ctx := newAdapter(t, f), context.Background()
@@ -608,12 +609,21 @@ func TestCodexOpenLeavesNothingOnError(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref, err = a.Open(ctx, spec("k1", "/work", ""))
-	if err == nil || !strings.Contains(err.Error(), "disk full") || ref != (loomharness.NativeRef{}) {
-		t.Fatalf("got %+v, %v; want the zero ref and both errors", ref, err)
+	if err == nil || !strings.Contains(err.Error(), "name store unavailable") || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("got %v; want both errors", err)
+	}
+	if _, ok := loadStore(root).Threads[ref.NativeID]; !ok || ref.Root != root {
+		t.Fatalf("got ref %+v; want the real ref of the thread left behind", ref)
 	}
 
 	_ = os.Remove(filepath.Join(root, "fail-name"))
 	_ = os.Remove(filepath.Join(root, "fail-delete"))
+	if err := a.Purge(ctx, []loomharness.NativeRef{ref}); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(loadStore(root).Threads); n != 0 {
+		t.Fatalf("%d threads left after purging the returned ref", n)
+	}
 	if ref, err = a.Open(ctx, spec("k1", "/work", "")); err != nil || ref.NativeID == "" {
 		t.Fatalf("Open after the failures: %+v %v", ref, err)
 	}
