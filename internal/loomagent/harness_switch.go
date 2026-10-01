@@ -90,8 +90,9 @@ func (s *Service) switchTarget(ctx context.Context, a loomstore.Agent, req Updat
 	if !ok {
 		return nil, cfg, "", &Error{Code: CodeHarnessUnavailable, Message: req.Harness + " is not available"}
 	}
-	if err := json.Unmarshal([]byte(a.SpecJSON), &cfg); err != nil {
-		return nil, cfg, "", fmt.Errorf("loomagent: %s spec: %w", a.AgentID, err)
+	cfg, err := loadConfig(a)
+	if err != nil {
+		return nil, cfg, "", err
 	}
 	if len(cfg.Preset.Harnesses) > 0 && !slices.Contains(cfg.Preset.Harnesses, req.Harness) {
 		return nil, cfg, "", invalid(fmt.Sprintf("harness %q not allowed for %s", req.Harness, cfg.Preset.Name), cfg.Preset.Harnesses...)
@@ -142,9 +143,9 @@ func (s *Service) resume(ctx context.Context, a loomstore.Agent) (loomstore.Agen
 	if err != nil || sess == nil {
 		return a, err
 	}
-	var cfg Config
-	if err := json.Unmarshal([]byte(a.SpecJSON), &cfg); err != nil {
-		return a, fmt.Errorf("loomagent: %s spec: %w", a.AgentID, err)
+	cfg, err := loadConfig(a)
+	if err != nil {
+		return a, err
 	}
 	if _, err := s.policy(ctx, cfg); err != nil { // fail before resuming a turn without the bridge
 		return a, err

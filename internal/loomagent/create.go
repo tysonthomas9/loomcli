@@ -234,9 +234,9 @@ func (s *Service) finishCreate(ctx context.Context, agentID string) (loomstore.A
 	if err != nil || a.CreateStep >= stepDone {
 		return a, err
 	}
-	var cfg Config
-	if err := json.Unmarshal([]byte(a.SpecJSON), &cfg); err != nil {
-		return a, fmt.Errorf("loomagent: %s spec: %w", a.AgentID, err)
+	cfg, err := loadConfig(a)
+	if err != nil {
+		return a, err
 	}
 	if a.CreateStep < stepRow {
 		return a, fmt.Errorf("loomagent: %s was not fully inserted; retry its Create", a.AgentID)
@@ -318,6 +318,20 @@ func (s *Service) openSession(ctx context.Context, a loomstore.Agent, cfg Config
 	createCrash("recorded")
 	return ref, s.store.RecordNativeSession(ctx, loomstore.NativeSession{AgentID: a.AgentID, Harness: a.Harness,
 		NativeRoot: ref.Root, NativeID: ref.NativeID})
+}
+
+// loadConfig decodes a's stored Config. Its Rules keep only preset and
+// override rules: deny entries that older rows saved from the bridge (exactly
+// publishDenies) are dropped, so only the current registration adds them.
+func loadConfig(a loomstore.Agent) (Config, error) {
+	var cfg Config
+	if err := json.Unmarshal([]byte(a.SpecJSON), &cfg); err != nil {
+		return cfg, fmt.Errorf("loomagent: %s spec: %w", a.AgentID, err)
+	}
+	cfg.Rules = slices.DeleteFunc(cfg.Rules, func(r loomharness.PermissionRule) bool {
+		return slices.Contains(publishDenies, r)
+	})
+	return cfg, nil
 }
 
 // policy returns cfg's permission rules compiled with the host's current

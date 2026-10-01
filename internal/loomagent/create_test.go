@@ -15,7 +15,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
 )
 
-// openRec records every OpenSpec passed to the wrapped harness.
 // openRec records every OpenSpec passed to the wrapped harness. A non-empty
 // root replaces the root Open returns, as a changed launch root would.
 type openRec struct {
@@ -545,4 +544,54 @@ func hasPublishDenies(rules []loomharness.PermissionRule) bool {
 func isCode(err error, c Code) bool {
 	var e *Error
 	return errors.As(err, &e) && e.Code == c
+}
+
+func TestCreateRecoveryDropsLegacyBridgeDenies(t *testing.T) {
+	ctx := context.Background()
+	both := BridgeCaps{HasGitHubRead: true, HasPublish: true}
+	for _, tc := range []struct {
+		name       string
+		saved      bool       // the legacy row saved the bridge denies in Rules
+		caps       BridgeCaps // the current registration
+		wantDenies bool
+	}{
+		{"saved denies, no caps now", true, BridgeCaps{}, false},
+		{"no saved denies, caps now", false, both, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newCreateEnv(t)
+			run := crashAt(t, "open")
+			if !run(func() { _, _ = e.service(ServiceConfig{}).Create(ctx, leadReq("r1")) }) {
+				t.Fatal("did not crash")
+			}
+			row, err := e.st.FindCreated(ctx, "ws", "", "r1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.saved { // write the spec_json an older build stored
+				cfg := specOf(t, e, row.AgentID)
+				cfg.Rules = slices.Concat(cfg.Rules, publishDenies)
+				b, _ := json.Marshal(cfg)
+				to := row.SpecOf()
+				to.SpecJSON = string(b)
+				if err := e.st.CompareAndSetSpec(ctx, row.AgentID, row.SpecVersion, to); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s := e.service(ServiceConfig{Bridge: func(context.Context, Preset) (BridgeCaps, error) { return tc.caps, nil }})
+			if _, err := s.Create(ctx, leadReq("r1")); err != nil {
+				t.Fatal(err)
+			}
+			got := e.h.specs[0].Rules
+			n := 0
+			for _, r := range got {
+				if slices.Contains(publishDenies, r) {
+					n++
+				}
+			}
+			if want := map[bool]int{true: len(publishDenies), false: 0}[tc.wantDenies]; n != want {
+				t.Fatalf("opened with %d bridge denies, want %d: %+v", n, want, got)
+			}
+		})
+	}
 }

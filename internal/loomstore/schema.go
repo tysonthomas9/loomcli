@@ -122,5 +122,5 @@ CREATE TABLE agent_events (
 CREATE TRIGGER agent_events_no_update BEFORE UPDATE ON agent_events
 BEGIN SELECT RAISE(ABORT, 'agent_events is append-only'); END;
 `, `
-ALTER TABLE agents ADD COLUMN harness_session_root TEXT; -- the current session's NativeRef root; NULL means the oldest recorded root for harness_session_id
+ALTER TABLE agents ADD COLUMN harness_session_root TEXT; -- the current session's NativeRef root; NULL (a legacy row) resolves only when exactly one recorded root has harness_session_id
 `}
