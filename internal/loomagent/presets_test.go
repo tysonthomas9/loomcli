@@ -6,6 +6,7 @@ import (
 	"go/build"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -69,7 +70,7 @@ func TestPresetResolveConvertsToHarnessConfig(t *testing.T) {
 	if c.Harness != "opencode" || c.Model != "m1" || c.Effort != "high" || *c.MaxBudgetUSD != 2.5 || *c.MaxRunDuration != 600 {
 		t.Fatalf("config = %+v", c)
 	}
-	if c.Open.Name != "daemon-worker" || c.Open.Persona == "" || !slices.Equal(c.Rules, allowAll) {
+	if c.Open.Name != "daemon-worker" || c.Open.Persona == "" || !slices.Equal(c.Rules, append(slices.Clone(allowAll), publishDenies...)) {
 		t.Fatalf("open = %+v rules = %v", c.Open, c.Rules)
 	}
 
@@ -124,6 +125,7 @@ func TestPolicyRestrictionsFailClosed(t *testing.T) {
 		loomharness.PermissionRule{Action: "edit", Resource: "*", Effect: "deny"},
 		loomharness.PermissionRule{Action: "bash", Resource: "*", Effect: "deny"},
 		loomharness.PermissionRule{Action: "webfetch", Resource: "*", Effect: "deny"})
+	want = append(want, publishDenies...)
 	if !slices.Equal(c.Rules, want) {
 		t.Fatalf("rules = %v", c.Rules)
 	}
@@ -175,6 +177,51 @@ func TestPresetPackageHasNoCLIImports(t *testing.T) {
 	for _, imp := range pkg.Imports {
 		if strings.Contains(imp, "/internal/cli") {
 			t.Errorf("loomagent imports CLI package %s", imp)
+		}
+	}
+}
+
+// decide evaluates rules last match wins, with * as a wildcard.
+func decide(rules []loomharness.PermissionRule, action, resource string) string {
+	glob := func(pat, s string) bool {
+		re := "^" + strings.ReplaceAll(regexp.QuoteMeta(pat), `\*`, ".*") + "$"
+		return regexp.MustCompile(re).MatchString(s)
+	}
+	effect := "deny"
+	for _, r := range rules {
+		if glob(r.Action, action) && glob(r.Resource, resource) {
+			effect = r.Effect
+		}
+	}
+	return effect
+}
+
+func TestPolicyDeniesGHAndGitPush(t *testing.T) {
+	ps, _ := BuiltinPresets{}.List(context.Background())
+	for _, p := range ps {
+		req := CreateRequest{}
+		if slices.Contains(p.Overridable, "tools") {
+			req.Overrides.AllowedTools = []string{"bash"} // must not re-allow them
+		}
+		for _, h := range []string{"opencode", "codex"} {
+			req.Overrides.Harness = h
+			c, err := Resolve(p, req, "opencode", nil)
+			if h == "codex" && p.Name != "lead" && p.Name != "task" {
+				continue // restricted presets fail closed on codex; tested above
+			}
+			if err != nil {
+				t.Fatalf("%s on %s: %v", p.Name, h, err)
+			}
+			for _, cmd := range []string{"gh pr create", "gh api repos/o/r", "git push", "git push origin main", "git push --force"} {
+				if got := decide(c.Rules, "bash", cmd); got != "deny" {
+					t.Errorf("%s on %s: bash %q = %s, want deny", p.Name, h, cmd, got)
+				}
+			}
+			if p.Name != "pr-review-webhook" && p.Name != "pr-review-interactive" {
+				if got := decide(c.Rules, "bash", "git status"); got != "allow" {
+					t.Errorf("%s: bash git status = %s, want allow", p.Name, got)
+				}
+			}
 		}
 	}
 }

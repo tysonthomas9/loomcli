@@ -37,6 +37,17 @@ var allowAll = []loomharness.PermissionRule{
 	{Action: "bash", Resource: "*", Effect: "allow"},
 }
 
+// publishDenies end every compiled policy (last match wins), so no preset or
+// override re-allows them: agents publish through Loom, not gh or git push.
+// Defense in depth only, not a guarantee: a pattern match on the bash command
+// misses `sh -c`, env or path prefixes (/usr/bin/gh), `git -C dir push`, git
+// aliases, scripts and other tools. They don't trigger the fail-closed check,
+// so a harness that can't enforce rules simply runs without them.
+var publishDenies = []loomharness.PermissionRule{
+	{Action: "bash", Resource: "gh *", Effect: "deny"},
+	{Action: "bash", Resource: "git push*", Effect: "deny"},
+}
+
 var presets = []Preset{
 	{Name: "lead", Version: 1, Mode: "persistent", RoleKind: "interactive", OwnerKind: "user",
 		Persona: "You are a lead agent. You own one feature, work in your worktree and delegate to task agents.",
@@ -145,7 +156,7 @@ func Resolve(p Preset, req CreateRequest, defaultHarness string, models []string
 	if restricts(rules) && !Enforcement[c.Harness].Rules {
 		return Config{}, invalid(fmt.Sprintf("%s cannot enforce the permission rules of %s", c.Harness, p.Name), enforcing()...)
 	}
-	c.Rules = rules
+	c.Rules = slices.Concat(rules, publishDenies)
 	c.Open = loomharness.PresetConfig{Name: p.Name, Persona: persona, Tools: slices.Clone(p.Tools)}
 	return c, nil
 }
