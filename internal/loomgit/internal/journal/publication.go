@@ -17,6 +17,100 @@ type Publication struct {
 	PRURL                                                                        string
 }
 
+type NativeMerge struct {
+	Workspace, StackID, Target, Phase, Head, Reason string
+	Changes                                         []string
+	Index                                           int
+}
+
+func createNativeMergeSchema(db *sql.DB) error {
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS native_stack_merges (
+		workspace TEXT NOT NULL, stack_id TEXT NOT NULL, target TEXT NOT NULL,
+		changes TEXT NOT NULL, layer_index INTEGER NOT NULL DEFAULT 0,
+		phase TEXT NOT NULL, head_sha TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL DEFAULT '',
+		PRIMARY KEY(workspace, stack_id))`)
+	return err
+}
+
+func (s *SQLite) BeginNativeMerge(ctx context.Context, merge NativeMerge) error {
+	encoded, err := json.Marshal(merge.Changes)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT OR IGNORE INTO native_stack_merges
+		(workspace,stack_id,target,changes,phase) VALUES (?,?,?,?, 'ready')`,
+		merge.Workspace, merge.StackID, merge.Target, string(encoded))
+	if err != nil {
+		return err
+	}
+	var target, changes string
+	err = s.db.QueryRowContext(ctx, `SELECT target,changes FROM native_stack_merges
+		WHERE workspace=? AND stack_id=?`, merge.Workspace, merge.StackID).Scan(&target, &changes)
+	if err != nil {
+		return err
+	}
+	if target != merge.Target || changes != string(encoded) {
+		return errors.New("native merge intent differs from recorded request")
+	}
+	return nil
+}
+
+func (s *SQLite) OpenNativeMerges(ctx context.Context) ([]NativeMerge, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace,stack_id,target,changes,layer_index,phase,head_sha
+		FROM native_stack_merges WHERE phase != 'done' AND phase != 'blocked'`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var merges []NativeMerge
+	for rows.Next() {
+		var merge NativeMerge
+		var changes string
+		if err := rows.Scan(&merge.Workspace, &merge.StackID, &merge.Target, &changes, &merge.Index, &merge.Phase, &merge.Head); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(changes), &merge.Changes); err != nil {
+			return nil, err
+		}
+		merges = append(merges, merge)
+	}
+	return merges, rows.Err()
+}
+
+func (s *SQLite) AdvanceNativeMerge(ctx context.Context, merge NativeMerge, phase, head string, index int) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE native_stack_merges SET phase=?,head_sha=?,layer_index=?
+		WHERE workspace=? AND stack_id=? AND phase=? AND layer_index=? AND head_sha=?`,
+		phase, head, index, merge.Workspace, merge.StackID, merge.Phase, merge.Index, merge.Head)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrStale
+	}
+	return nil
+}
+
+func (s *SQLite) BlockNativeMerge(ctx context.Context, merge NativeMerge, reason string) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE native_stack_merges SET phase='blocked',reason=?
+		WHERE workspace=? AND stack_id=? AND phase=? AND layer_index=?`,
+		reason, merge.Workspace, merge.StackID, merge.Phase, merge.Index)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrStale
+	}
+	return nil
+}
+
 func createPublicationSchema(db *sql.DB) error {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS change_publications (
 		workspace TEXT NOT NULL, change_id TEXT NOT NULL, repo TEXT NOT NULL,
@@ -79,7 +173,7 @@ func createStackBackendSchema(db *sql.DB) error {
 			return err
 		}
 	}
-	return nil
+	return createNativeMergeSchema(db)
 }
 
 func (s *SQLite) RecordStackBackend(ctx context.Context, workspace, stackID, backend string) error {

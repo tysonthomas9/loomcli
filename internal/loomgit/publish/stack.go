@@ -17,10 +17,10 @@ import (
 
 type StackRequest struct {
 	Request
-	StackID string
-	Changes []string
+	StackID        string
+	Changes        []string
 	MergeAuthority MergeAuthority
-	pusher  mirror.RefPusher
+	pusher         mirror.RefPusher
 }
 
 type MergeAuthority interface {

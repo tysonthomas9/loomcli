@@ -102,6 +102,29 @@ func (g *GitHubForge) createNativeStack(ctx context.Context, owner, repo string,
 	return nil
 }
 
+func (g *GitHubForge) MergeNativePull(ctx context.Context, owner, repo string, number int, head string) error {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge-async", owner, repo, number)
+	status, data, _, err := g.do(ctx, http.MethodPut, path, map[string]any{
+		"merge_method": "squash", "merge_action": "direct_merge", "sha": head, "bypass_rules": false,
+	})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusAccepted && status != http.StatusOK {
+		return g.apiErr("PUT", path, status, data)
+	}
+	var result struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return fmt.Errorf("github native merge decode: %w", err)
+	}
+	if result.Status != "pending" && result.Status != "merged" {
+		return fmt.Errorf("github native merge returned %q", result.Status)
+	}
+	return nil
+}
+
 var _ Forge = (*GitHubForge)(nil)
 
 // NewGitHubForge builds a forge. A nil client uses a 30s-timeout default; an
@@ -203,7 +226,7 @@ func (g *GitHubForge) do(ctx context.Context, method, path string, body any) (in
 	req.Header.Set("Authorization", "Bearer "+g.token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	if strings.Contains(path, "/stacks") {
+	if strings.Contains(path, "/stacks") || strings.HasSuffix(path, "/merge-async") {
 		req.Header.Set("X-GitHub-Api-Version", "2026-03-10")
 	}
 	req.Header.Set("User-Agent", "loom-stack-publisher")

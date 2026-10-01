@@ -5,10 +5,12 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/githubtoken"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/pull"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/stacklock"
+	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 )
 
 type StackCapabilities struct {
@@ -68,8 +70,32 @@ func (GitHubStackBackend) Restack(context.Context, StackRequest, string) error {
 	return loomgit.NewError(loomgit.AttentionRequired, "native restack must adopt provider heads through landing", nil)
 }
 
-func (GitHubStackBackend) MergeUpTo(context.Context, StackRequest, string) error {
-	return loomgit.NewError(loomgit.MergeNotAuthorized, "native stack merge requires separate authorization", nil)
+func (backend GitHubStackBackend) MergeUpTo(ctx context.Context, request StackRequest, target string) error {
+	if err := requireMergeAuthority(ctx, request, target); err != nil {
+		return err
+	}
+	if request.forge == nil {
+		token := request.token
+		if token == "" {
+			token = githubtoken.GitHub(ctx)
+		}
+		if token == "" {
+			return errors.New("GitHub host credential unavailable")
+		}
+		request.forge = stackpublish.NewConfiguredGitHubForge(token)
+	}
+	forge, ok := request.forge.(nativeMergeForge)
+	if !ok {
+		return errors.New("forge cannot merge native stacks")
+	}
+	store, ok := backend.Store.(nativeMergeStore)
+	if !ok {
+		return errors.New("store cannot journal native merges")
+	}
+	if err := beginNativeMerge(ctx, backend.Store, request, target); err != nil {
+		return err
+	}
+	return ReconcileNativeMerges(ctx, store, forge)
 }
 
 func (backend LoomStackBackend) Capabilities() StackCapabilities { return StackCapabilities{} }

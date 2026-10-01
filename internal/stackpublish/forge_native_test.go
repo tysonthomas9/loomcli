@@ -67,3 +67,29 @@ func TestGitHubForgeNativeStacksDisabled(t *testing.T) {
 		t.Fatalf("disabled capability = %t, %v", enabled, err)
 	}
 }
+
+func TestGitHubForgeNativeAsyncMerge(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPut || request.URL.Path != "/repos/owner/repo/pulls/11/merge-async" {
+			t.Errorf("request = %s %s", request.Method, request.URL)
+			writer.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if request.Header.Get("X-GitHub-Api-Version") != "2026-03-10" {
+			t.Errorf("API version = %q", request.Header.Get("X-GitHub-Api-Version"))
+		}
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if body["merge_action"] != "direct_merge" || body["merge_method"] != "squash" || body["sha"] != "abc" || body["bypass_rules"] != false {
+			t.Errorf("body = %+v", body)
+		}
+		writer.WriteHeader(http.StatusAccepted)
+		_, _ = writer.Write([]byte(`{"status":"pending"}`))
+	}))
+	defer server.Close()
+	if err := NewGitHubForge("fixture", server.Client(), server.URL).MergeNativePull(context.Background(), "owner", "repo", 11, "abc"); err != nil {
+		t.Fatal(err)
+	}
+}
