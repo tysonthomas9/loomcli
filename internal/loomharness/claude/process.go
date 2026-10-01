@@ -424,18 +424,22 @@ func (p *Process) transcriptExists() bool {
 // land where discovery and Purge look. It runs at Open and before every launch:
 // an alias retargeted since Open is refused, never followed.
 func (p *Process) checkRoot(env []string) error {
-	root := p.spec.Launch.Root
-	if root == "" {
-		root = sessions.ClaudeConfigDir()
+	want := p.spec.Launch.Root
+	if want == "" { // nothing recorded: the default root, resolved now
+		var err error
+		if want, err = canonical(sessions.ClaudeConfigDir()); err != nil {
+			return fmt.Errorf("claude: default root: %w", err)
+		}
+	}
+	// The recorded root is canonical; if it no longer is, a symlink has been
+	// put on its path since it was recorded.
+	if c, err := canonical(want); err != nil || c != want {
+		return fmt.Errorf("claude: recorded root %s is no longer a real path (resolves to %q: %v); refusing", want, c, err)
 	}
 	dir, ok := lookup(env, "CLAUDE_CONFIG_DIR")
 	if !ok || dir == "" {
 		home, _ := lookup(env, "HOME")
 		dir = filepath.Join(home, ".claude")
-	}
-	want, err := canonical(root)
-	if err != nil {
-		return fmt.Errorf("claude: recorded root %s: %w", root, err)
 	}
 	got, err := canonical(dir)
 	if err != nil {
@@ -447,10 +451,10 @@ func (p *Process) checkRoot(env []string) error {
 	return nil
 }
 
-// lookup returns the value of key in env.
+// lookup returns the value of key in env; like os/exec, the last entry wins.
 func lookup(env []string, key string) (string, bool) {
-	for _, kv := range env {
-		if k, v, _ := strings.Cut(kv, "="); k == key {
+	for i := len(env) - 1; i >= 0; i-- {
+		if k, v, _ := strings.Cut(env[i], "="); k == key {
 			return v, true
 		}
 	}

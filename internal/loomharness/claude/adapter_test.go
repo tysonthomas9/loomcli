@@ -402,6 +402,7 @@ func TestClaudeSymlinkedRootOpensCanonical(t *testing.T) {
 func TestClaudeOpenRefusesConfigRootDivergence(t *testing.T) {
 	ctx := context.Background()
 	root, other, home := t.TempDir(), t.TempDir(), t.TempDir()
+	rootHome := filepath.Join(t.TempDir(), ".claude") // the default root of the first HOME
 	for name, c := range map[string]struct {
 		env []string
 		l   loomharness.Launch
@@ -409,6 +410,9 @@ func TestClaudeOpenRefusesConfigRootDivergence(t *testing.T) {
 		"launch config elsewhere":        {[]string{"HOME=" + home}, loomharness.Launch{Root: root, Env: map[string]string{"CLAUDE_CONFIG_DIR": other}}},
 		"inherited config elsewhere":     {[]string{"HOME=" + home, "CLAUDE_CONFIG_DIR=" + other}, loomharness.Launch{Root: root}},
 		"default HOME/.claude elsewhere": {[]string{"HOME=" + home}, loomharness.Launch{Root: root}},
+		// os/exec gives the child the last of duplicate entries.
+		"duplicate config, last elsewhere": {[]string{"HOME=" + home, "CLAUDE_CONFIG_DIR=" + root, "CLAUDE_CONFIG_DIR=" + other}, loomharness.Launch{Root: root}},
+		"duplicate HOME, last elsewhere":   {[]string{"HOME=" + filepath.Dir(rootHome), "HOME=" + home}, loomharness.Launch{Root: rootHome}},
 	} {
 		if _, err := New(Config{Env: c.env}).Open(ctx, loomharness.OpenSpec{Key: "k", Dir: t.TempDir(), Launch: c.l}); err == nil {
 			t.Errorf("%s: Open accepted a config dir that is not the recorded root", name)
@@ -446,6 +450,34 @@ func TestClaudeLaunchRefusesRetargetedAlias(t *testing.T) {
 	}
 	if got := launches(t, f.dumpPath); len(got) != 0 {
 		t.Fatalf("claude launched %d times through the retargeted alias", len(got))
+	}
+}
+
+// TestClaudeLaunchRefusesRetargetedRoot: the recorded root itself replaced by
+// a symlink after Open is refused at launch, never followed.
+func TestClaudeLaunchRefusesRetargetedRoot(t *testing.T) {
+	a, _, f := newAdapter(t)
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "root")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := a.Open(ctx, loomharness.OpenSpec{Key: "agent-moved", Dir: t.TempDir(),
+		Launch: loomharness.Launch{Root: root, Env: map[string]string{"CLAUDE_CONFIG_DIR": root}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(root, root+".moved"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), root); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Session(ref).Prompt(ctx, loomharness.Input{Key: "k1", Text: "hello"}); err == nil {
+		t.Fatal("a launch through a recorded root replaced by a symlink was not refused")
+	}
+	if got := launches(t, f.dumpPath); len(got) != 0 {
+		t.Fatalf("claude launched %d times through the retargeted root", len(got))
 	}
 }
 
