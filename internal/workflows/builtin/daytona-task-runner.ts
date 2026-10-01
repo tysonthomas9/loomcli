@@ -64,6 +64,9 @@ export async function run(ctx = {}) {
       logs,
     );
   }
+  if (booleanValue(inputValue(request, "openPullRequest")) || booleanValue(inputValue(request, "stackedPullRequests"))) {
+    return failed("host_publish_required", "Daytona task runs freeze revisions; publish approved layers through the host", taskRunId, request, logs);
+  }
   const flueEvents = [];
   const setupEvents = [];
   const secrets = [];
@@ -146,6 +149,7 @@ export async function run(ctx = {}) {
           runtimeMetadata: stringMetadata({
             task_runner: "daytona-task-runner", daytona_sandbox_id: sandboxId,
             remote_capture_status: "frozen", remote_capture_sha: capture.captureSha,
+            remote_capture_attempt: captureContext.attempt,
             remote_capture_tree_hash: capture.treeHash,
             remote_capture_change_id: capture.changeId, remote_capture_revision: capture.revision,
           }),
@@ -194,17 +198,6 @@ export async function run(ctx = {}) {
       repoUrl, repoDir, baseSha: captureContext.baseSha, sandboxId,
     });
     captureContext.attempt = stringValue(registration.body.attempt);
-    if (delivery.openPullRequest) {
-      const checkout = await setup.shell(
-        "git -C " + shellQuote(repoDir) + " checkout -B " + shellQuote(delivery.branch),
-        { timeout: 30 },
-      );
-      logs.push(commandLog("git checkout task branch", checkout));
-      if (checkout.exitCode !== 0) {
-        return failed("daytona_branch_checkout_failed", textTail(checkout.stdout + checkout.stderr), taskRunId, request, logs, sandboxId, secrets);
-      }
-    }
-
     const leakProbe = await setup.shell(sandboxLeakProbeCommand(), { timeout: 30 });
     const leakedEnvCount = numberValue(leakProbe.stdout.trim(), 0);
     if (leakedEnvCount !== 0) {
@@ -235,8 +228,6 @@ export async function run(ctx = {}) {
       result.runtimeMetadata.remote_capture_reason = result.errorMessage;
       return result;
     }
-    const published = null;
-    const prArtifact = null;
     const transcriptEntries = redactTranscriptEntries(transcriptCollector.entries, secrets);
     const transcriptJSONL = serializeTranscriptJSONL(transcriptEntries);
     const usage = flueUsageToTaskUsage(response && response.usage, { costUnit: "usd" });
@@ -252,7 +243,6 @@ export async function run(ctx = {}) {
       logs: redact(logs.join("\n") + "\n", secrets),
       transcript: transcriptJSONL,
       transcript_entries: transcriptEntries,
-      artifactIds: [prArtifact].filter(Boolean).map((artifact) => artifact.id).filter(Boolean),
       runtimeMetadata: stringMetadata({
         task_runner: "daytona-task-runner",
         runtime_strategy: "flue-daytona-codex",
@@ -277,16 +267,11 @@ export async function run(ctx = {}) {
         daytona_repo_dir: repoDir,
         daytona_repo_head: head.stdout.trim(),
         remote_capture_status: "frozen",
+        remote_capture_attempt: captureContext.attempt,
         remote_capture_sha: capture.captureSha,
         remote_capture_tree_hash: capture.treeHash,
         remote_capture_change_id: capture.changeId,
         remote_capture_revision: capture.revision,
-        github_pr_artifact_id: prArtifact && prArtifact.id,
-        github_pr_url: published && published.pullRequest && published.pullRequest.html_url,
-        github_pr_number: published && published.pullRequest && published.pullRequest.number,
-        github_pr_head: published && delivery.branch,
-        github_pr_base: published && delivery.baseBranch,
-        github_pr_commit: published && published.commitSha,
         daytona_sandbox_env_leak_count: "0",
         response_text: redact(textTail(stringValue(response && response.text), 1000), secrets),
       }),
@@ -893,50 +878,6 @@ async function loadTaskContext(logs) {
     logs.push("warning: task context lookup failed: " + errorMessage(error));
     return { client: client || null, task: null };
   }
-}
-
-async function uploadPullRequestArtifact(client, input, logs) {
-  if (!client || !input.pullRequest) {
-    return null;
-  }
-  const body = JSON.stringify({
-    task_run_id: input.taskRunId,
-    task_id: input.taskId,
-    repo_url: input.repoUrl,
-    base_branch: input.baseBranch,
-    head_branch: input.branch,
-    commit_sha: input.commitSha,
-    pull_request: input.pullRequest,
-  }, null, 2) + "\n";
-  const metadata = stringMetadata({
-    task_run_id: input.taskRunId,
-    task_id: input.taskId,
-    runtime_strategy: "flue-daytona-codex",
-    task_runner: "daytona-task-runner",
-    repo_url: input.repoUrl,
-    base_branch: input.baseBranch,
-    head_branch: input.branch,
-    commit_sha: input.commitSha,
-    pr_url: input.pullRequest.html_url,
-    pr_number: input.pullRequest.number,
-  });
-  const artifact = await client.artifacts.declare({
-    id: "github-pr-" + safeName(input.taskRunId),
-    type: "github_pull_request",
-    taskId: input.taskId,
-    summary: "GitHub pull request for Daytona task run",
-    mimeType: "application/json",
-    metadata,
-  });
-  await artifact.upload(body, { mimeType: "application/json" });
-  await artifact.finalize({
-    summary: "GitHub pull request for Daytona task run",
-    mimeType: "application/json",
-    sizeBytes: Buffer.byteLength(body, "utf8"),
-    metadata,
-  });
-  logs.push("uploaded GitHub PR artifact " + artifact.id);
-  return artifact;
 }
 
 export function cloneCommand(repoUrl, repoDir, branch) {

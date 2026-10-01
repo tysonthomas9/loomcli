@@ -859,6 +859,7 @@ func (e HostBridgeTaskExecutor) finalizeAndFreezePatch(ctx context.Context, req 
 		return result, nil
 	}
 	result.RuntimeMetadata["patch_back_status"] = "frozen"
+	result.RuntimeMetadata["attempt_id"] = taskCopyAttemptID(req.TaskRunID, req.SchedulerAttempt)
 	result.RuntimeMetadata["change_id"] = revision.Change
 	result.RuntimeMetadata["revision"] = strconv.Itoa(revision.Number)
 	result.RuntimeMetadata["revision_head_sha"] = revision.HeadSHA

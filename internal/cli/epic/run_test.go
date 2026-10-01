@@ -2,7 +2,6 @@ package epic
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
@@ -11,18 +10,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
-
-func TestPrepareEpicRunStack_ProjectionErrorStopsRun(t *testing.T) {
-	projectionErr := errors.New("projection failed")
-	called := false
-	_, err := prepareEpicRunStack(true, false, func() (*EpicStackProjection, error) {
-		called = true
-		return nil, projectionErr
-	})
-	if !called || !errors.Is(err, projectionErr) {
-		t.Fatalf("projection = (called %v, err %v), want fatal projection error", called, err)
-	}
-}
 
 // TestRunnerNeedsLocalPreflight pins the R4 gate: the local task runner must be
 // preflighted, and an empty/whitespace runner resolves to local-task-runner
@@ -50,7 +37,7 @@ func TestRunnerNeedsLocalPreflight(t *testing.T) {
 	}
 }
 
-func TestValidateEpicRunFlagsRejectsPRModeBeforeQueue(t *testing.T) {
+func TestValidateEpicRunFlagsAcceptsHostPRMode(t *testing.T) {
 	oldParent, oldConcurrency, oldInterval := runParent, runMaxConcurrency, runIntervalSeconds
 	oldOpenPR, oldStackedPRs := runOpenPR, runStackedPRs
 	t.Cleanup(func() {
@@ -68,9 +55,8 @@ func TestValidateEpicRunFlagsRejectsPRModeBeforeQueue(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runOpenPR, runStackedPRs = tc.openPR, tc.stacked
-			err := validateEpicRunFlags()
-			if err == nil || !strings.Contains(err.Error(), "host_publish_required") || !strings.Contains(err.Error(), "host publisher in P3.3") {
-				t.Fatalf("validateEpicRunFlags() = %v, want P3.3 host publisher error", err)
+			if err := validateEpicRunFlags(); err != nil {
+				t.Fatalf("validateEpicRunFlags() = %v", err)
 			}
 		})
 	}

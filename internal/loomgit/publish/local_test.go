@@ -60,7 +60,7 @@ func TestPublishStackRecordedIncludesLeadOwnedLayer(t *testing.T) {
 		"workspace": {ID: "W", Path: fixture.repo, Repos: []config.RepoConfig{{Name: "repo", Path: fixture.repo}}},
 	}}
 	forge := &fakeForge{}
-	results, err := publishStackRecorded(ctx, fixture.store, cfg, "W", "feature", "L", []string{"C"}, forge, "fixture-token", "owner/repo")
+	results, err := publishStackRecorded(ctx, fixture.store, cfg, "W", "feature", "L", nil, forge, "fixture-token", "owner/repo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,6 +69,53 @@ func TestPublishStackRecordedIncludesLeadOwnedLayer(t *testing.T) {
 	}
 	if len(forge.prs) != 2 || forge.prs[1].Base != forge.prs[0].Head {
 		t.Fatalf("PR chain = %+v", forge.prs)
+	}
+	configureLocalWorkspace(t, fixture)
+	useLocalForge(t, forge)
+	selected, err := PublishLeadChangeLocal(ctx, "W", "L", results[1].Revision.Change)
+	if err != nil || selected.PRURL != results[1].PRURL || !selected.AlreadyExists {
+		t.Fatalf("lead-owned PR = %+v, %v", selected, err)
+	}
+}
+
+func TestPublishStackLocalUsesAppliedOrder(t *testing.T) {
+	fixture := newFixture(t)
+	configureLocalWorkspace(t, fixture)
+	ctx := context.Background()
+	if err := fixture.store.SaveWorkingAreas(ctx, []journal.WorkingArea{{
+		Workspace: "W", Lead: "L", Repo: "repo", Path: fixture.repo, BaseSHA: fixture.base,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	first := stackRevision(t, fixture, "A", 1, fixture.base)
+	second := stackRevision(t, fixture, "B", 1, first.HeadSHA)
+	for _, change := range []string{"A", "B"} {
+		if _, err := fixture.store.DriverChange(ctx, "W", "task-"+change, "repo", change); err != nil {
+			t.Fatal(err)
+		}
+	}
+	forge := &fakeForge{}
+	useLocalForge(t, forge)
+	if _, err := PublishLeadChangeLocal(ctx, "W", "L", "missing"); err == nil || len(forge.prs) != 0 {
+		t.Fatalf("unknown change published PRs: %v, %+v", err, forge.prs)
+	}
+	results, err := PublishStackLocal(ctx, "W", LeadStackID("L"), "L", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 2 || results[0].Revision.HeadSHA != first.HeadSHA || results[1].Revision.HeadSHA != second.HeadSHA {
+		t.Fatalf("published revisions = %+v", results)
+	}
+	if len(forge.prs) != 2 || forge.prs[1].Base != forge.prs[0].Head {
+		t.Fatalf("PR chain = %+v", forge.prs)
+	}
+	selected, err := PublishLeadChangeLocal(ctx, "W", "L", "B")
+	if err != nil || selected.Revision.Change != "B" || !selected.AlreadyExists {
+		t.Fatalf("selected stack PR = %+v, %v", selected, err)
+	}
+	again, err := PublishStackLocal(ctx, "W", LeadStackID("L"), "L", nil)
+	if err != nil || len(again) != 2 || !again[0].AlreadyExists || !again[1].AlreadyExists || len(forge.prs) != 2 {
+		t.Fatalf("repeated stack publication = %+v, %v; PRs=%+v", again, err, forge.prs)
 	}
 }
 

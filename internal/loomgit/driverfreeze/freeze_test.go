@@ -2,6 +2,7 @@ package driverfreeze_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,23 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 )
+
+func TestEpicPRRequestedHonorsDryRun(t *testing.T) {
+	for _, tc := range []struct {
+		payload string
+		want    bool
+	}{
+		{`{"leadName":"L","openPullRequest":true}`, true},
+		{`{"leadName":"L","stackedPullRequests":true}`, true},
+		{`{"leadName":"L","openPullRequest":true,"dryRun":true}`, false},
+		{`{"leadName":"L"}`, false},
+	} {
+		lead, requested := driverfreeze.EpicPRRequested(json.RawMessage(tc.payload))
+		if lead != "L" || requested != tc.want {
+			t.Fatalf("payload %s: lead=%q requested=%t", tc.payload, lead, requested)
+		}
+	}
+}
 
 func TestFreezeFlatDiffAndNextAttempt(t *testing.T) {
 	dir := t.TempDir()

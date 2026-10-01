@@ -1,8 +1,10 @@
 package git
 
 import (
+	"context"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -12,16 +14,22 @@ import (
 // The module is only constructed when ops.GitOps is non-nil. All routes are
 // unconditional within this module.
 type Module struct {
-	agentSvc service.AgentService
-	diffSvc  service.DiffService
+	agentSvc    service.AgentService
+	diffSvc     service.DiffService
+	epicPublish func(context.Context, string, string) error
 }
 
 // NewModule returns a Module that will register routes using the given
 // agent service and diff service.
-func NewModule(agentSvc service.AgentService, diffSvc service.DiffService) *Module {
+func NewModule(agentSvc service.AgentService, diffSvc service.DiffService, epicPublish ...func(context.Context, string, string) error) *Module {
+	publisher := publish.ReconcileEpicLead
+	if len(epicPublish) > 0 && epicPublish[0] != nil {
+		publisher = epicPublish[0]
+	}
 	return &Module{
-		agentSvc: agentSvc,
-		diffSvc:  diffSvc,
+		agentSvc:    agentSvc,
+		diffSvc:     diffSvc,
+		epicPublish: publisher,
 	}
 }
 
@@ -50,6 +58,8 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/changes/{change}/revisions/{r}/diff", HandleRevisionDiff(false))
 	mux.HandleFunc("GET /api/workspaces/{ws}/changes/{change}/revisions/{r}/interdiff", HandleRevisionDiff(true))
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/revisions", handleTaskRevisions)
-	mux.HandleFunc("POST /api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict", handleVerdict)
+	mux.HandleFunc("POST /api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict", func(w http.ResponseWriter, r *http.Request) {
+		handleVerdictWithPublisher(w, r, m.epicPublish)
+	})
 	mux.HandleFunc("PUT /api/workspaces/{ws}/git/following/{lead}", handleFollowing)
 }

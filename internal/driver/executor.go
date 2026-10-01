@@ -347,6 +347,7 @@ func (e *Executor) settleClaimed(ctx context.Context, claimed *domain.DriverRun,
 }
 
 func (e *Executor) finish(ctx context.Context, claimed *domain.DriverRun, result RunResult) (*domain.DriverRun, error) {
+	result = recordEpicPublication(ctx, e.Store, claimed, result)
 	if strings.TrimSpace(result.Summary) == "" {
 		result.Summary = string(result.Status)
 	}

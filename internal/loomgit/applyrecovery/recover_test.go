@@ -81,6 +81,9 @@ func bridgeApprovalFixture(t *testing.T) (context.Context, *journal.SQLite, jour
 	if result.RuntimeMetadata["patch_back_status"] != "frozen" {
 		t.Fatalf("bridge did not freeze revision: %+v", result)
 	}
+	if result.RuntimeMetadata["attempt_id"] != "task-run-a1" {
+		t.Fatalf("bridge did not identify frozen attempt: %+v", result.RuntimeMetadata)
+	}
 	revision, err := journalStore.GetRevision(ctx, "W", result.RuntimeMetadata["change_id"], 1)
 	if err != nil {
 		t.Fatal(err)

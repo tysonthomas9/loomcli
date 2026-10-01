@@ -196,6 +196,17 @@ func PullRepoWorktreeResult(repoPath, currentBranch, sourceBranch, remote string
 
 // CreatePRResult publishes an approved change through the host publisher.
 func CreatePRResult(ctx context.Context, workspace, lead, change string) (*PRResult, error) {
+	mode, err := publish.DeliveryModeLocal(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	if mode == "stack" {
+		result, err := publish.PublishLeadChangeLocal(ctx, workspace, lead, change)
+		if err != nil {
+			return nil, err
+		}
+		return &PRResult{URL: result.PRURL, Created: !result.AlreadyExists, AlreadyExists: result.AlreadyExists}, nil
+	}
 	result, err := publish.PublishLocal(ctx, workspace, lead, change)
 	if err != nil {
 		return nil, err

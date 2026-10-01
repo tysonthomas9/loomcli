@@ -37,12 +37,11 @@ before(async () => {
   mod = await import(pathToFileURL(copy).href);
 });
 
-describe("epic-runner PR-mode gate", () => {
+describe("epic-runner host PR delivery", () => {
   for (const flag of ["openPullRequest", "stackedPullRequests"]) {
-    it(`rejects ${flag} before starting the epic`, async () => {
-      const result = await mod.run({ payload: { epicId: "E-1", [flag]: true } });
-      assert.equal(result.errorClass, "host_publish_required");
-      assert.match(result.summary, /host publisher in P3\.3/);
+    it(`keeps ${flag} out of the child task`, () => {
+      const input = mod.childTaskInput({ [flag]: true }, { driverRunId: "run-1" }, { id: "T-1" }, {});
+      assert.equal(input[flag], undefined);
     });
   }
 });
@@ -70,7 +69,7 @@ describe("epic-runner stacked lineage payload", () => {
       },
     );
 
-    assert.equal(input.openPullRequest, true);
+    assert.equal(input.openPullRequest, undefined);
     assert.equal(input.repoUrl, "https://github.com/acme/widgets.git");
     assert.equal(input.driverRunId, "run-1");
     assert.equal(input.taskId, "T-B");

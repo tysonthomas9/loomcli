@@ -15,6 +15,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -153,6 +155,20 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	if err := m.preflightRunnerForRun(r.Context(), ws, name, payload); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if lead, requested := driverfreeze.EpicPRRequested(payload); requested {
+		var input struct {
+			RepoURL string `json:"repoUrl"`
+		}
+		_ = json.Unmarshal(payload, &input)
+		if name != workflowdefs.BuiltinEpicRunnerWorkflowName || lead == "" {
+			writeError(w, http.StatusBadRequest, "epic PR delivery requires the built-in epic runner and a lead")
+			return
+		}
+		if err := publish.CheckEpicPRDelivery(r.Context(), ws, input.RepoURL); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	run, err := driver.CreateDriverRun(r.Context(), m.store, driver.RunOptions{
 		WorkspaceKey:   ws,
