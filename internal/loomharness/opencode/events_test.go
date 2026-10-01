@@ -220,3 +220,37 @@ func TestEventsRootAndTurnInputKey(t *testing.T) {
 		t.Fatalf("events:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+// TestReadSSE: data fields are parsed as the SSE spec says (the name up to
+// the first colon, one leading space dropped from the value), so multi-line
+// data joins with newlines, "data:" without a space and CRLF line ends work,
+// and comment lines and other fields are ignored.
+func TestReadSSE(t *testing.T) {
+	stream := ": keep-alive comment\n" +
+		"event: message\n" +
+		"data: {\"a\":\n" +
+		"data:1}\n" +
+		"\n" +
+		"id: 7\r\n" +
+		"data:no space\r\n" +
+		"retry: 100\r\n" +
+		"\r\n" +
+		"data:  two spaces\n" +
+		"data: x:y\n" +
+		"\n" +
+		": only a comment\n" +
+		"\n" +
+		"data: unterminated"
+	var got []string
+	readSSE(strings.NewReader(stream), func(b []byte) bool { got = append(got, string(b)); return true })
+	want := []string{"{\"a\":\n1}", "no space", " two spaces\nx:y"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("events %q; want %q", got, want)
+	}
+
+	var first []string
+	readSSE(strings.NewReader("data: 1\n\ndata: 2\n\n"), func(b []byte) bool { first = append(first, string(b)); return false })
+	if len(first) != 1 {
+		t.Fatalf("readSSE went on after fn returned false: %q", first)
+	}
+}

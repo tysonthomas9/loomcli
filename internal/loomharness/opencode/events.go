@@ -108,7 +108,9 @@ func readSSE(r io.Reader, fn func([]byte) bool) {
 	for {
 		line, err := br.ReadString('\n')
 		line = strings.TrimRight(line, "\r\n")
-		if v, ok := strings.CutPrefix(line, "data:"); ok {
+		// A field is its name up to the first colon, then the value with one
+		// leading space removed (the SSE spec); only data fields matter here.
+		if field, v, _ := strings.Cut(line, ":"); field == "data" {
 			data = append(data, strings.TrimPrefix(v, " "))
 		} else if line == "" && len(data) > 0 {
 			if !fn([]byte(strings.Join(data, "\n"))) {
