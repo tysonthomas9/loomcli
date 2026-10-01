@@ -1,0 +1,277 @@
+// Package agentsv1 serves the Agent API over REST (design v2 §9.1). One
+// route module serves every harness; it never talks to a harness itself.
+package agentsv1
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strconv"
+
+	"github.com/tysonthomas9/loomcli/internal/loomagent"
+	"github.com/tysonthomas9/loomcli/internal/loomstore"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
+)
+
+// Handler routes Agent API calls to the workspace's loomagent service.
+type Handler struct {
+	services func(ws string) *loomagent.Service
+	presets  loomagent.Presets
+}
+
+// New returns a Handler. services returns the workspace's Agent API service,
+// or nil when the workspace has none; presets nil uses the built-in presets.
+func New(services func(ws string) *loomagent.Service, presets loomagent.Presets) *Handler {
+	if presets == nil {
+		presets = loomagent.BuiltinPresets{}
+	}
+	return &Handler{services: services, presets: presets}
+}
+
+type route func(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error)
+
+// Register adds every route to the outer mux, each wrapped in the workspace
+// middleware. PATCH must not go through the nested workspace mux.
+func (h *Handler) Register(mux *http.ServeMux, workspace middleware.Middleware) {
+	const p = "/api/workspaces/{ws}/v1/"
+	for pattern, fn := range map[string]route{
+		"POST " + p + "agents":                         h.create,
+		"GET " + p + "agents":                          list,
+		"GET " + p + "agents/{id}":                     get,
+		"PATCH " + p + "agents/{id}":                   update,
+		"DELETE " + p + "agents/{id}":                  del,
+		"POST " + p + "agents/{id}/archive":            archive,
+		"POST " + p + "agents/{id}/unarchive":          unarchive,
+		"POST " + p + "agents/{id}/messages":           send,
+		"DELETE " + p + "agents/{id}/messages/waiting": withdraw,
+		"POST " + p + "agents/{id}/asks/{askId}":       respond,
+		"GET " + p + "agents/{id}/events":              listEvents,
+		"GET " + p + "presets":                         h.listPresets,
+		"GET " + p + "presets/{name}":                  h.getPreset,
+	} {
+		mux.Handle(pattern, workspace(h.serve(fn)))
+	}
+}
+
+func (h *Handler) serve(fn route) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s := h.services(middleware.WorkspaceFromContext(r.Context()))
+		if s == nil {
+			handler.RespondError(w, http.StatusNotFound, "agent API not available in this workspace")
+			return
+		}
+		status, body, err := fn(w, r, s)
+		switch {
+		case err != nil:
+			writeError(w, err)
+		case body == nil:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			handler.WriteJSON(w, status, body)
+		}
+	})
+}
+
+// actor is the caller from the authenticated request, never from the body:
+// the verified signed-in user, else the local user.
+func actor(r *http.Request) loomagent.ActorRef {
+	if _, id, ok := middleware.VerifiedUserActorFromContext(r.Context()); ok {
+		return loomagent.ActorRef{Kind: "user", ID: id}
+	}
+	return loomagent.ActorRef{Kind: "user", ID: "local"}
+}
+
+// envelope reads the JSON body (capped at handler.MaxRequestBody) into dst
+// when there is one, and returns the RequestID from Idempotency-Key.
+func envelope(w http.ResponseWriter, r *http.Request, dst any) (string, error) {
+	if r.ContentLength != 0 {
+		if err := handler.ReadJSON(w, r, dst); err != nil {
+			return "", err
+		}
+	}
+	return r.Header.Get("Idempotency-Key"), nil
+}
+
+func (h *Handler) create(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
+	var req loomagent.CreateRequest
+	id, err := envelope(w, r, &req)
+	if err != nil {
+		return 0, nil, err
+	}
+	req.RequestID, req.Actor = id, actor(r)
+	a, err := s.Create(r.Context(), req)
+	return http.StatusCreated, a, err
+}
+
+func list(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
+	q := r.URL.Query()
+	limit, err := intParam(q.Get("limit"))
+	if err != nil {
+		return 0, nil, err
+	}
+	agents, next, err := s.List(r.Context(), loomstore.AgentFilter{
+		WorkspaceID: middleware.WorkspaceFromContext(r.Context()),
+		OwnerKind:   q.Get("owner_kind"), OwnerID: q.Get("owner_id"), Parent: q.Get("parent"),
+		Root: q.Get("root"), Preset: q.Get("preset"), Mode: q.Get("mode"), Harness: q.Get("harness"),
+		RoleKind: q.Get("role_kind"), State: q.Get("state"), SubjectType: q.Get("subject_type"),
+		SubjectID: q.Get("subject_id"), ExternalKeyPrefix: q.Get("external_key_prefix"), Name: q.Get("name"),
+		IncludeArchived: q.Get("include_archived") == "true", After: q.Get("after"), Limit: int(limit),
+	})
+	if agents == nil {
+		agents = []loomagent.AgentInfo{}
+	}
+	return http.StatusOK, map[string]any{"agents": agents, "next": next}, err
+}
+
+func get(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
+	a, err := s.Get(r.Context(), r.PathValue("id"))
+	return http.StatusOK, a, err
+}
+
+func update(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
+	var req loomagent.UpdateRequest
+	id, err := envelope(w, r, &req)
+	if err != nil {
+		return 0, nil, err
+	}
+	req.RequestID, req.AgentID = id, r.PathValue("id")
+	a, err := s.Update(r.Context(), req)
+	return http.StatusOK, a, err
+}
+
+func del(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
+	q := r.URL.Query()
+	return http.StatusNoContent, nil, s.Delete(r.Context(), loomagent.DeleteRequest{
+		Envelope: loomagent.Envelope{RequestID: r.Header.Get("Idempotency-Key")},
+		AgentID:  r.PathValue("id"), Cascade: q.Get("cascade") == "true", Fingerprint: q.Get("fingerprint"),
+	})
+}
+
+func archive(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
+	return archiving(w, r, s.Archive)
+}
+
+func unarchive(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
+	return archiving(w, r, s.Unarchive)
+}
+
+func archiving(w http.ResponseWriter, r *http.Request, op func(context.Context, loomagent.ArchiveRequest) error) (int, any, error) {
+	var req loomagent.ArchiveRequest
+	id, err := envelope(w, r, &req)
+	if err != nil {
+		return 0, nil, err
+	}
+	req.RequestID, req.AgentID = id, r.PathValue("id")
+	return http.StatusNoContent, nil, op(r.Context(), req)
+}
+
+func send(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
+	var req loomagent.SendRequest
+	id, err := envelope(w, r, &req)
+	if err != nil {
+		return 0, nil, err
+	}
+	req.RequestID, req.AgentID, req.Actor, req.Source = id, r.PathValue("id"), actor(r), "user_chat"
+	res, err := s.Send(r.Context(), req)
+	return http.StatusAccepted, res, err
+}
+
+func withdraw(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
+	res, err := s.Withdraw(r.Context(), loomagent.WithdrawRequest{
+		Envelope: loomagent.Envelope{RequestID: r.Header.Get("Idempotency-Key")},
+		AgentID:  r.PathValue("id"), Actor: actor(r),
+	})
+	return http.StatusOK, res, err
+}
+
+func respond(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
+	var req loomagent.RespondRequest
+	id, err := envelope(w, r, &req)
+	if err != nil {
+		return 0, nil, err
+	}
+	req.RequestID, req.AgentID, req.AskID = id, r.PathValue("id"), r.PathValue("askId")
+	return http.StatusNoContent, nil, s.Respond(r.Context(), req)
+}
+
+func listEvents(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
+	q := r.URL.Query()
+	var n [3]int64
+	for i, k := range []string{"after", "snapshot", "limit"} {
+		v, err := intParam(q.Get(k))
+		if err != nil {
+			return 0, nil, err
+		}
+		n[i] = v
+	}
+	page, err := s.ListEvents(r.Context(), loomstore.EventQuery{AgentID: r.PathValue("id"),
+		After: n[0], Snapshot: n[1], Limit: int(n[2]), Kinds: handler.ParseArrayParam(q, "kind")})
+	return http.StatusOK, page, err
+}
+
+func (h *Handler) listPresets(_ http.ResponseWriter, r *http.Request, _ *loomagent.Service) (int, any, error) {
+	ps, err := h.presets.List(r.Context())
+	return http.StatusOK, map[string]any{"presets": ps}, err
+}
+
+func (h *Handler) getPreset(_ http.ResponseWriter, r *http.Request, _ *loomagent.Service) (int, any, error) {
+	p, err := h.presets.Get(r.Context(), r.PathValue("name"))
+	return http.StatusOK, p, err
+}
+
+func intParam(v string) (int64, error) {
+	if v == "" {
+		return 0, nil
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 {
+		return 0, service.ErrValidation("invalid number: " + v)
+	}
+	return n, nil
+}
+
+// statusOf maps each public code (design v2 §12.1) to its HTTP status.
+var statusOf = map[loomagent.Code]int{
+	loomagent.CodeAgentNotFound:       http.StatusNotFound,
+	loomagent.CodePresetNotFound:      http.StatusNotFound,
+	loomagent.CodeAskNotFound:         http.StatusNotFound,
+	loomagent.CodeAgentNameTaken:      http.StatusConflict,
+	loomagent.CodeAgentArchived:       http.StatusConflict,
+	loomagent.CodeAgentBusy:           http.StatusConflict,
+	loomagent.CodeChildrenLive:        http.StatusConflict,
+	loomagent.CodeSpecVersionMismatch: http.StatusConflict,
+	loomagent.CodeExternalKeyConflict: http.StatusConflict,
+	loomagent.CodeExternalKeyTaken:    http.StatusConflict,
+	loomagent.CodeUnsavedWork:         http.StatusConflict,
+	loomagent.CodeStaleSubject:        http.StatusConflict,
+	loomagent.CodeSubscriberLagged:    http.StatusConflict,
+	loomagent.CodePresetInvalid:       http.StatusBadRequest,
+	loomagent.CodeHarnessUnavailable:  http.StatusServiceUnavailable,
+	loomagent.CodeHarnessError:        http.StatusBadGateway,
+	loomagent.CodeGitFailed:           http.StatusBadGateway,
+	loomagent.CodeHistoryExpired:      http.StatusGone,
+	loomagent.CodeCursorExpired:       http.StatusGone,
+}
+
+// writeError writes a loomagent error as {error, code, allowed, paths,
+// fingerprint}; any other error goes to the shared webui error writer.
+func writeError(w http.ResponseWriter, err error) {
+	var e *loomagent.Error
+	if !errors.As(err, &e) {
+		handler.HandleServiceError(w, err)
+		return
+	}
+	status, ok := statusOf[e.Code]
+	if !ok {
+		status = http.StatusInternalServerError
+	}
+	handler.WriteJSON(w, status, struct {
+		Error       string         `json:"error"`
+		Code        loomagent.Code `json:"code"`
+		Allowed     []string       `json:"allowed,omitempty"`
+		Paths       []string       `json:"paths,omitempty"`
+		Fingerprint string         `json:"fingerprint,omitempty"`
+	}{e.Message, e.Code, e.Allowed, e.Paths, e.Fingerprint})
+}
