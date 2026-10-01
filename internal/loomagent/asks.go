@@ -103,17 +103,20 @@ func (s *Service) askEvent(ctx context.Context, a loomstore.Agent, e loomharness
 	if e.ItemKind == "question" {
 		typ = "question"
 	}
-	open := e.Type == loomharness.EventAskOpened
-	s.setAsk(a.AgentID, Ask{ID: e.AskID, Type: typ, About: e.Text, TurnID: e.TurnID}, open)
+	ask := &Ask{ID: e.AskID, Type: typ, About: e.Text, TurnID: e.TurnID}
+	if e.Type != loomharness.EventAskOpened {
+		ask = nil
+	}
 	s.mu.Lock()
 	seen := s.rebuilding[a.AgentID]
 	if seen != nil {
-		seen[e.AskID] = open
+		seen[e.AskID] = ask // staged: loseAsks applies it once the replay completes
 	}
 	s.mu.Unlock()
 	if seen != nil {
-		return nil // loseAsks syncs once the history is replayed
+		return nil
 	}
+	s.setAsk(a.AgentID, Ask{ID: e.AskID, Type: typ, About: e.Text, TurnID: e.TurnID}, ask != nil)
 	return s.syncWaiting(ctx, a)
 }
 
@@ -156,22 +159,24 @@ func (s *Service) endTurnAsks(ctx context.Context, a loomstore.Agent, turnID str
 	return nil
 }
 
-// rebuild starts (start) or ends a replay of agentID's native history. The
-// open asks stay as they are meanwhile: only a replay that completes, through
-// loseAsks, may find one gone.
-func (s *Service) rebuild(agentID string, start bool) map[string]bool {
+// rebuild starts (start) or ends a replay of agentID's native history and
+// returns the ask changes it staged (nil: closed). The open asks stay as
+// they are meanwhile: only a replay that completes, through loseAsks,
+// applies its changes or may find an ask gone.
+func (s *Service) rebuild(agentID string, start bool) map[string]*Ask {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	seen := s.rebuilding[agentID]
 	delete(s.rebuilding, agentID)
 	if start {
-		s.rebuilding[agentID] = map[string]bool{}
+		s.rebuilding[agentID] = map[string]*Ask{}
 	}
 	return seen
 }
 
-// loseAsks ends a completed replay of agentID's native history: every ask
-// its saved log or table shows open that the history did not is saved as
+// loseAsks ends a completed replay of agentID's native history: it applies
+// the staged ask changes, then every ask its saved log or table shows open
+// that the history did not is saved as
 // ask.lost (it was answered or cancelled while Loom was down, or its process
 // ended). Then it syncs a's waiting state. An ask is never dropped silently.
 func (s *Service) loseAsks(ctx context.Context, agentID string) error {
@@ -183,6 +188,13 @@ func (s *Service) loseAsks(ctx context.Context, agentID string) error {
 	} else if err != nil {
 		return err
 	}
+	for id, ask := range seen {
+		if ask != nil {
+			s.setAsk(agentID, *ask, true)
+		} else {
+			s.setAsk(agentID, Ask{ID: id}, false)
+		}
+	}
 	if err := s.loseOpen(ctx, a, seen); err != nil {
 		return err
 	}
@@ -191,7 +203,7 @@ func (s *Service) loseAsks(ctx context.Context, agentID string) error {
 
 // loseOpen saves one ask.lost, with its AskID, for each of a's open asks not
 // in keep, then removes it from the table.
-func (s *Service) loseOpen(ctx context.Context, a loomstore.Agent, keep map[string]bool) error {
+func (s *Service) loseOpen(ctx context.Context, a loomstore.Agent, keep map[string]*Ask) error {
 	saved, err := s.events.Page(ctx, loomstore.EventQuery{AgentID: a.AgentID, Limit: math.MaxInt32,
 		Kinds: []string{string(loomharness.EventAskOpened), string(loomharness.EventAskResolved), KindAskLost}})
 	if err != nil {
@@ -219,7 +231,7 @@ func (s *Service) loseOpen(ctx context.Context, a loomstore.Agent, keep map[stri
 		}
 	}
 	for id, r := range opened {
-		if keep[id] {
+		if keep[id] != nil {
 			continue
 		}
 		r.Kind, r.EventID = KindAskLost, KindAskLost+strings.TrimPrefix(r.EventID, string(loomharness.EventAskOpened))

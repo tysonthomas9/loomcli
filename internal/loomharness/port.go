@@ -100,7 +100,7 @@ type Reply struct {
 	// Always, with Allow, grants for the rest of this native session only: on
 	// every harness the grant is gone after a Resume or a harness switch, and
 	// it is never broader than the session (no project-wide or persistent
-	// grant, such as OpenCode's "always"). An adapter that cannot honour it
+	// grant, such as OpenCode's "always"). An adapter that cannot honor it
 	// fails Reply with an explicit error, never narrowing it; the ask stays open.
 	Always bool
 	Answer string

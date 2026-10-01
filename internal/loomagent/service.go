@@ -114,7 +114,7 @@ type Service struct {
 	asks  map[string]map[string]Ask // open asks by agent and ask ID, under mu
 	// rebuilding holds, for each agent whose native history a backfill is
 	// replaying, the asks the history shows open so far; under mu
-	rebuilding map[string]map[string]bool
+	rebuilding map[string]map[string]*Ask
 }
 
 // New returns a Service for cfg.
@@ -124,7 +124,7 @@ func New(cfg ServiceConfig) *Service {
 		interrupt: cfg.Interrupt, purge: cfg.Purge, harnesses: cfg.Harnesses, launch: cfg.Launch,
 		workspaceID: cfg.WorkspaceID, presets: cfg.Presets, backend: cfg.DefaultBackend, bridge: cfg.Bridge,
 		inputKey: cfg.InputKey,
-		locks:    map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}, rebuilding: map[string]map[string]bool{}}
+		locks:    map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}, rebuilding: map[string]map[string]*Ask{}}
 	if s.presets == nil {
 		s.presets = BuiltinPresets{}
 	}

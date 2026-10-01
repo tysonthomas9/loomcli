@@ -28,13 +28,15 @@ func askIDs(t *testing.T, s *Service, agentID string) []string {
 }
 
 // tweaked wraps a harness: its history leaves out ask gone (as OpenCode's
-// lists only asks still pending), or fails with msgErr; a Reply with Always
+// lists only asks still pending), or fails with msgErr (after a first page
+// page1, if set); a Reply with Always
 // fails with alwaysErr. It counts history reads and records replies.
 type tweaked struct {
 	loomharness.Harness
 	gone              string
 	msgErr, alwaysErr error
 	reads             *atomic.Int32
+	page1             []loomharness.Event
 	replies           *[]loomharness.Reply
 }
 
@@ -50,6 +52,9 @@ type tweakedSession struct {
 func (p tweakedSession) Messages(ctx context.Context, after string, limit int) (loomharness.MessagePage, error) {
 	if p.w.reads != nil {
 		p.w.reads.Add(1)
+	}
+	if p.w.page1 != nil && after == "" {
+		return loomharness.MessagePage{Events: p.w.page1, Next: "p2"}, nil
 	}
 	if p.w.msgErr != nil {
 		return loomharness.MessagePage{}, p.w.msgErr
@@ -346,5 +351,33 @@ func TestRespondAlwaysNotNarrowed(t *testing.T) {
 	}
 	if len(replies) != 2 || replies[1].Always {
 		t.Fatalf("second reply = %+v; want once", replies)
+	}
+}
+
+// TestProbePartialBackfillKeepsOpenAsk: a replay whose first page resolves
+// open ask a1 and whose second page fails changes no open ask: a1 is still
+// open, with no ask.lost saved.
+func TestProbePartialBackfillKeepsOpenAsk(t *testing.T) {
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	stop := startFeed(s, e)
+	a, ref := newLead(t, e, s, "alpha")
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
+	eventually(t, "a1 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) })
+	stop()
+	turn := deref(s.get(t, a.AgentID).RunningTurnID)
+	var reads atomic.Int32
+	s.harnesses["opencode"] = tweaked{Harness: e.h, msgErr: errors.New("page 2 failed"), reads: &reads,
+		page1: []loomharness.Event{{Type: loomharness.EventAskResolved, Session: ref, TurnID: turn, AskID: "a1"}}}
+	stop = startFeed(s, e)
+	eventually(t, "two partial backfills", func() bool { return reads.Load() >= 4 })
+	stop()
+	if got := askIDs(t, s, a.AgentID); !slices.Equal(got, []string{"a1:approval"}) {
+		t.Fatalf("open asks after a partial backfill = %v", got)
+	}
+	if lost := kinds(rows(t, s, a.AgentID, 0), KindAskLost); len(lost) != 0 {
+		t.Fatalf("a partial backfill saved %d ask.lost", len(lost))
 	}
 }
