@@ -1,0 +1,21 @@
+suite: loomgit-merge-up-to
+classification: { area: reviews, feature: merge-up-to, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: >-
+  bash "$AFT_TESTS_DIR/scripts/loomgit-merge-up-to.sh" teardown native || true;
+  bash "$AFT_TESTS_DIR/scripts/loomgit-merge-up-to.sh" teardown loom || true
+tests:
+  - name: native four-layer stack merges through layer three over HTTP
+    intent: Real TaskRuns and approvals Publish a native stack; an HTTP request merges its prefix and leaves layer four on trunk
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-merge-up-to.sh" setup native
+        intent: Create a disposable repository and workspace through the product API
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-merge-up-to.sh" run native
+        intent: Drive the native stack from real agent tasks through merge and landing
+  - name: Loom four-layer stack merges through layer three from CLI
+    intent: Real TaskRuns and approvals Publish a Loom stack; the CLI merges its prefix and leaves layer four on trunk
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-merge-up-to.sh" setup loom
+        intent: Create a disposable repository and workspace through the product API
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-merge-up-to.sh" run loom
+        intent: Drive the Loom stack from real agent tasks through merge and landing
