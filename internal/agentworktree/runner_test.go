@@ -115,8 +115,8 @@ func TestEnsureThroughWorkspacePortUsesInjectedRunner(t *testing.T) {
 	if err != nil || got.Branch != "loom/agent/agt_p" || got.HEAD != run(t, repo, "rev-parse", "main") {
 		t.Fatalf("Ensure = %+v, %v", got, err)
 	}
-	if !r.ran("worktree add ") {
-		t.Fatalf("worktree add did not use the injected runner: %q", r.calls)
+	if !r.ran("worktree add ") || !r.ran("rev-parse --git-dir") {
+		t.Fatalf("worktree add or branch inspect did not use the injected runner: %q", r.calls)
 	}
 	r.calls = nil
 	if _, err := ws.Ensure(context.Background(), loomagent.WorkspaceSpec{Key: "rev_p", Repo: repo, BaseRef: "main", Detached: true}); err != nil {

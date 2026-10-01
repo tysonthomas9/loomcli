@@ -311,13 +311,29 @@ func syncPRWorktree(ctx context.Context, repoPath, targetPath, checkout, expectH
 // remote/defaultBranch ref when available, falling back to the local branch.
 // Existing worktrees are left untouched.
 func EnsureGitWorktreeFromBranch(repoPath, targetPath, branchName, remoteName, defaultBranch string) error {
-	return EnsureGitWorktreeFromBranchWith(context.Background(), runGit, repoPath, targetPath, branchName, remoteName, defaultBranch)
+	return ensureGitWorktreeFromBranch(context.Background(), runGit, gitbranch.Inspect, gitbranch.Recover,
+		repoPath, targetPath, branchName, remoteName, defaultBranch)
 }
 
-// EnsureGitWorktreeFromBranchWith is EnsureGitWorktreeFromBranch with its
-// worktree and base-ref git commands run through git. Branch inspection and
-// recovery still use gitbranch.
+// EnsureGitWorktreeFromBranchWith is EnsureGitWorktreeFromBranch with every
+// git command, including branch inspection and recovery, run through git.
 func EnsureGitWorktreeFromBranchWith(ctx context.Context, git GitFunc, repoPath, targetPath, branchName, remoteName, defaultBranch string) error {
+	inspect := func(repo, branch string) (gitbranch.Recovery, error) {
+		return gitbranch.InspectWith(ctx, git, repo, branch)
+	}
+	recoverBranch := func(repo, branch, base string, info gitbranch.Recovery) (gitbranch.Recovery, error) {
+		return gitbranch.RecoverWith(ctx, git, repo, branch, base, info)
+	}
+	return ensureGitWorktreeFromBranch(ctx, git, inspect, recoverBranch, repoPath, targetPath, branchName, remoteName, defaultBranch)
+}
+
+func ensureGitWorktreeFromBranch(
+	ctx context.Context,
+	git GitFunc,
+	inspect func(repo, branch string) (gitbranch.Recovery, error),
+	recoverBranch func(repo, branch, base string, info gitbranch.Recovery) (gitbranch.Recovery, error),
+	repoPath, targetPath, branchName, remoteName, defaultBranch string,
+) error {
 	if _, err := os.Stat(filepath.Join(targetPath, ".git")); err == nil {
 		return nil
 	}
@@ -325,12 +341,12 @@ func EnsureGitWorktreeFromBranchWith(ctx context.Context, git GitFunc, repoPath,
 		return fmt.Errorf("creating worktree parent: %w", err)
 	}
 
-	branch, err := gitbranch.Inspect(repoPath, branchName)
+	branch, err := inspect(repoPath, branchName)
 	if err != nil {
 		return err
 	}
 	if branch.State == gitbranch.StateBroken {
-		recovery, err := gitbranch.Recover(repoPath, branchName, defaultBranch, branch)
+		recovery, err := recoverBranch(repoPath, branchName, defaultBranch, branch)
 		if err != nil {
 			return err
 		}
@@ -443,7 +459,7 @@ func RecordPRReviewContext(
 
 // GitFunc runs one git command in dir. Callers that inject their own runner
 // (for example gitrunner.Runner.Run) pass it to the ...With worktree helpers.
-type GitFunc func(ctx context.Context, dir string, args ...string) (string, error)
+type GitFunc = gitbranch.GitFunc
 
 // runGit returns raw output on success and on error.
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
