@@ -80,6 +80,13 @@ type ApplyRevisionRequest struct {
 	RequestID string `json:"request_id,omitempty"`
 }
 
+// NoWorkingAreaError marks an Apply refused only because the lead has no
+// working area for the change repo. Error text is the underlying error's.
+type NoWorkingAreaError struct{ Err error }
+
+func (e *NoWorkingAreaError) Error() string { return e.Err.Error() }
+func (e *NoWorkingAreaError) Unwrap() error { return e.Err }
+
 // AgentWorktree contains resolved worktree info for an agent.
 type AgentWorktree struct {
 	Name          string

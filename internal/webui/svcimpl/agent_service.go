@@ -10,7 +10,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
-	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	webuilog "github.com/tysonthomas9/loomcli/internal/webui/log"
@@ -161,8 +160,8 @@ func (s *agentServiceImpl) GitApply(ctx context.Context, request ops.ApplyRevisi
 		request.RequestID = uuid.NewString()
 	}
 	result, err := s.gitOps.ApplyRevision(ctx, request)
-	var gitErr *loomgit.Error
-	if err == nil || s.store == nil || !errors.As(err, &gitErr) || gitErr.Kind != loomgit.AttentionRequired {
+	var noArea *ops.NoWorkingAreaError
+	if err == nil || s.store == nil || !errors.As(err, &noArea) {
 		return result, err
 	}
 	// The lead has no usable working area: open it the way lead creation does,
@@ -177,6 +176,13 @@ func (s *agentServiceImpl) GitApply(ctx context.Context, request ops.ApplyRevisi
 	}
 	if getErr != nil {
 		return nil, classifyStoreError("load lead agent", getErr)
+	}
+	role, roleErr := s.loadAgentRoleForKind(ctx, agent.WorkspaceKey, agent.RoleName)
+	if roleErr != nil {
+		return nil, roleErr
+	}
+	if domain.ResolveRoleKind(role, agent.RoleName) != domain.RoleKindInteractive {
+		return nil, service.ErrValidation(fmt.Sprintf("agent %q is not a lead", lead))
 	}
 	if ensureErr := ensureLeadWorkingArea(ctx, s, *agent); ensureErr != nil {
 		return nil, ensureErr

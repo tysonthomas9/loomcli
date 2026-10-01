@@ -57,7 +57,7 @@ func TestApplyLocalSelectsRequestedLeadCheckout(t *testing.T) {
 	request.Lead = "missing"
 	_, err = applyLocalWithStore(ctx, request, fixture.store, cfg)
 	var loomError *loomgit.Error
-	if !errors.As(err, &loomError) || loomError.Code() != string(loomgit.AttentionRequired) || !strings.Contains(err.Error(), "working area") {
+	if !errors.As(err, &loomError) || loomError.Code() != string(loomgit.AttentionRequired) || !strings.Contains(err.Error(), "working area") || !errors.Is(err, ErrNoWorkingArea) {
 		t.Fatalf("missing lead error = %v", err)
 	}
 }
@@ -115,11 +115,12 @@ func TestApplyLocalSelectsCloneModeLeadCheckout(t *testing.T) {
 
 func TestWorkingAreaForRepoFailsClosed(t *testing.T) {
 	for _, test := range []struct {
-		name  string
-		areas []journal.WorkingArea
+		name   string
+		areas  []journal.WorkingArea
+		noArea bool
 	}{
-		{name: "missing"},
-		{name: "empty path", areas: []journal.WorkingArea{{Repo: "repo"}}},
+		{name: "missing", noArea: true},
+		{name: "empty path", areas: []journal.WorkingArea{{Repo: "repo"}}, noArea: true},
 		{name: "ambiguous", areas: []journal.WorkingArea{{Repo: "repo", Path: "/first"}, {Repo: "repo", Path: "/second"}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -127,6 +128,9 @@ func TestWorkingAreaForRepoFailsClosed(t *testing.T) {
 			var loomError *loomgit.Error
 			if !errors.As(err, &loomError) || loomError.Code() != string(loomgit.AttentionRequired) {
 				t.Fatalf("selection error = %v, want attention_required", err)
+			}
+			if errors.Is(err, ErrNoWorkingArea) != test.noArea {
+				t.Fatalf("selection error = %v, no working area = %v", err, test.noArea)
 			}
 		})
 	}
