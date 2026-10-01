@@ -730,3 +730,35 @@ func TestLoomMergeNoOpRestackStopsOnMovedHead(t *testing.T) {
 		t.Fatalf("moved no-op head merge = %+v, merged = %d, err = %v", merge, forge.merged, mergeErr)
 	}
 }
+
+func TestLoomMergeSquashRestackAfterSameHeadReapproval(t *testing.T) {
+	item, forge, request := threeLayerMergeFixture(t)
+	ctx := context.Background()
+	reapproveSameHead(t, item, "B", forge.prs[1].HeadSHA)
+	if err := (LoomStackBackend{Store: item.store}).MergeUpTo(ctx, request, "B"); err != nil {
+		t.Fatal(err)
+	}
+	for index, change := range []string{"A", "B"} {
+		if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+			t.Fatal(err)
+		}
+		landed := squashMergeLayer(t, item, change)
+		if err := item.store.MarkLanded(ctx, "W", change, "merge_commit"); err != nil {
+			t.Fatal(err)
+		}
+		next := forge.prs[index+1].HeadSHA
+		restackAfterMerge(t, item, forge, change, []string{"B", "C"}[index], landed)
+		if forge.prs[index+1].HeadSHA == next {
+			t.Fatalf("squash restack kept %s", forge.prs[index+1].Head)
+		}
+		for range 3 {
+			if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	merge, err := item.store.LoomMerge(ctx, "W", "feature")
+	if err != nil || merge.Phase != "done" || forge.merged != 2 || len(forge.deleted) != 2 {
+		t.Fatalf("re-approved squash merge = %+v, merged = %d, deleted = %v, err = %v", merge, forge.merged, forge.deleted, err)
+	}
+}

@@ -391,8 +391,8 @@ func requireConfirmedHead(ctx context.Context, store *journal.SQLite, merge jour
 	if err := review.RequireVerdict(ctx, store, merge.Workspace, original.Change, revision.Number, revision.HeadSHA, "publish", ""); err != nil {
 		return err
 	}
-	for revision.Number != original.Revision {
-		if revision.DerivedFromChange != original.Change || revision.DerivedFromNumber < original.Revision || revision.DerivedFromNumber >= revision.Number {
+	for revision.Number != original.Revision && revision.HeadSHA != original.Head {
+		if revision.DerivedFromChange != original.Change || revision.DerivedFromNumber < 1 || revision.DerivedFromNumber >= revision.Number {
 			return loomgit.NewError(loomgit.Stale, "merge head was not derived from confirmation", nil)
 		}
 		revision, err = store.GetRevision(ctx, merge.Workspace, original.Change, revision.DerivedFromNumber)
