@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func send(sender, req, body string) SlotSend {
@@ -259,5 +260,113 @@ func TestSlotReceiptRaceOneEffect(t *testing.T) {
 	}
 	if receipts != n+1 || handed != len(handedTo) {
 		t.Fatalf("receipts = %d, handed = %d, hand-overs = %v", receipts, handed, handedTo)
+	}
+}
+
+// TestReceiptReopenCancelsExpiryAtomically covers a new background attempt:
+// the Send that reopens a finished agent clears its R29 deadline in the same
+// transaction as its slot and receipt, whichever of it and the sweep commits
+// first, and a Send after the purge stores nothing.
+func TestReceiptReopenCancelsExpiryAtomically(t *testing.T) {
+	ctx := context.Background()
+	s := openAt(t, filepath.Join(t.TempDir(), "loom.db"))
+	now := time.Now()
+	old := Stamp(now.Add(-HistoryRetention - time.Hour))
+	for _, id := range []string{"b_send_first", "b_sweep_first", "b_active"} {
+		a := agent(id, "background")
+		a.Mode, a.State, a.Attempt, a.Outcome, a.FinishedAt = "single_task", "finished", 1, ptr("failed"), ptr(old)
+		if id == "b_active" {
+			a.State, a.FinishedAt = "active", nil
+		}
+		if err := s.InsertAgent(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reopen := func(id, req string) (Receipt, error) {
+		in := send("daemon:d", req, "retry")
+		in.AgentID, in.Hand, in.NativeKey, in.Reopen = id, true, "k-"+req, true
+		r, _, err := s.Send(ctx, in)
+		return r, err
+	}
+
+	// The Send commits first: the agent is active on attempt 2 with no
+	// deadline, and the racing sweep refuses.
+	if _, err := reopen("b_send_first", "r1"); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := s.GetAgent(ctx, "b_send_first")
+	if a.State != "active" || a.Attempt != 2 || a.Outcome != nil || a.FinishedAt != nil {
+		t.Fatalf("reopened agent = state %s attempt %d outcome %v finished_at %v", a.State, a.Attempt, a.Outcome, a.FinishedAt)
+	}
+	if err := s.MarkHistoryPurged(ctx, "b_send_first", now); !errors.Is(err, ErrNotDue) {
+		t.Fatalf("sweep after the new attempt = %v; want ErrNotDue", err)
+	}
+	// A retry of that Send has no effect, even on the attempt.
+	if _, retry, err := s.Send(ctx, func() SlotSend {
+		in := send("daemon:d", "r1", "retry")
+		in.AgentID, in.Reopen = "b_send_first", true
+		return in
+	}()); err != nil || !retry {
+		t.Fatalf("retry = %v, %v", retry, err)
+	}
+	if a, _ := s.GetAgent(ctx, "b_send_first"); a.Attempt != 2 {
+		t.Fatalf("a retry started attempt %d", a.Attempt)
+	}
+
+	// The sweep commits first: the Send fails and stores nothing.
+	if err := s.MarkHistoryPurged(ctx, "b_sweep_first", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reopen("b_sweep_first", "r2"); !errors.Is(err, ErrHistoryPurged) {
+		t.Fatalf("Send after the purge = %v; want ErrHistoryPurged", err)
+	}
+	if _, err := s.GetReceipt(ctx, "b_sweep_first", "r2"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a refused Send left a receipt: %v", err)
+	}
+	if sl, _ := s.Slots(ctx, "b_sweep_first"); len(sl) != 0 {
+		t.Fatalf("a refused Send left a slot: %+v", sl)
+	}
+
+	// Reopen on an agent that is not finished stores nothing.
+	if _, err := reopen("b_active", "r3"); !errors.Is(err, ErrStateChanged) {
+		t.Fatalf("reopen of an active agent = %v; want ErrStateChanged", err)
+	}
+	if _, err := s.GetReceipt(ctx, "b_active", "r3"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a refused Send left a receipt: %v", err)
+	}
+}
+
+// TestReceiptReopenRacesSweep runs the reopening Send and the sweep at once,
+// many times: either the Send wins (no purge) or the sweep does (no receipt).
+func TestReceiptReopenRacesSweep(t *testing.T) {
+	ctx := context.Background()
+	s := openAt(t, filepath.Join(t.TempDir(), "loom.db"))
+	now := time.Now()
+	old := Stamp(now.Add(-HistoryRetention - time.Hour))
+	for i := range 20 {
+		id := fmt.Sprintf("b%d", i)
+		a := agent(id, "background")
+		a.Mode, a.State, a.FinishedAt = "single_task", "finished", ptr(old)
+		if err := s.InsertAgent(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+		var wg sync.WaitGroup
+		var sendErr, sweepErr error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			in := send("daemon:d", "r", "retry")
+			in.AgentID, in.Hand, in.NativeKey, in.Reopen = id, true, "k", true
+			_, _, sendErr = s.Send(ctx, in)
+		}()
+		go func() { defer wg.Done(); sweepErr = s.MarkHistoryPurged(ctx, id, now) }()
+		wg.Wait()
+		_, receiptErr := s.GetReceipt(ctx, id, "r")
+		switch {
+		case sendErr == nil && errors.Is(sweepErr, ErrNotDue) && receiptErr == nil:
+		case errors.Is(sendErr, ErrHistoryPurged) && sweepErr == nil && errors.Is(receiptErr, ErrNotFound):
+		default:
+			t.Fatalf("%s: send=%v sweep=%v receipt=%v", id, sendErr, sweepErr, receiptErr)
+		}
 	}
 }

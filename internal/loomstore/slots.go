@@ -45,6 +45,13 @@ type SlotSend struct {
 	NativeKey string
 	// First marks the slot to be handed over before older waiting slots (an interrupt).
 	First bool
+	// Reopen starts a new attempt of the finished agent: in the same
+	// transaction it moves the agent finished -> active with the next attempt,
+	// clears its outcome, and clears finished_at, which cancels its R29
+	// history deadline. It fails with ErrHistoryPurged if the sweep already
+	// purged the history, or ErrStateChanged if the agent is no longer
+	// finished; then nothing is stored.
+	Reopen bool
 	// Result builds the Send's result JSON, stored as its receipt. replaced
 	// reports that this Send replaced the sender's waiting text.
 	Result func(replaced bool) (string, error)
@@ -77,6 +84,9 @@ func (s *Store) Send(ctx context.Context, in SlotSend) (r Receipt, retry bool, e
 		if cur.State == SlotHanded || (in.Hand && cur.State == SlotWaiting) {
 			return ErrSlotBusy
 		}
+		if err := reopen(ctx, tx, in); err != nil {
+			return err
+		}
 		replaced := cur.State == SlotWaiting
 		now := Stamp(time.Now())
 		state, nativeKey, queuedAt := SlotWaiting, any(nil), any(nil)
@@ -106,6 +116,34 @@ func (s *Store) Send(ctx context.Context, in SlotSend) (r Receipt, retry bool, e
 		return err
 	})
 	return r, retry, err
+}
+
+// ErrHistoryPurged means the agent's history was purged under R29.
+var ErrHistoryPurged = errors.New("loomstore: agent history purged")
+
+// reopen starts the agent's next attempt when in.Reopen is set.
+func reopen(ctx context.Context, tx *sql.Tx, in SlotSend) error {
+	if !in.Reopen {
+		return nil
+	}
+	agentID := in.AgentID
+	res, err := tx.ExecContext(ctx, `UPDATE agents SET state = 'active', attempt = attempt + 1, outcome = NULL,
+		finished_at = NULL, updated_at = ? WHERE agent_id = ? AND state = 'finished' AND deleted_at IS NULL
+		AND history_purged_at IS NULL`, Stamp(time.Now()), agentID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 1 {
+		return nil
+	}
+	var purged sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT history_purged_at FROM agents WHERE agent_id = ?`, agentID).Scan(&purged); err != nil {
+		return err
+	}
+	if purged.Valid {
+		return ErrHistoryPurged
+	}
+	return ErrStateChanged
 }
 
 // nextQueuedAt returns now, or just after the agent's latest queued_at if the
