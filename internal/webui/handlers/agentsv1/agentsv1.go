@@ -95,7 +95,7 @@ func envelope(w http.ResponseWriter, r *http.Request, dst any) (string, error) {
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
-	var body createBody
+	var body CreateBody
 	id, err := envelope(w, r, &body)
 	if err != nil {
 		return 0, nil, err
@@ -120,11 +120,11 @@ func list(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, an
 		SubjectID: q.Get("subject_id"), ExternalKeyPrefix: q.Get("external_key_prefix"), Name: q.Get("name"),
 		IncludeArchived: q.Get("include_archived") == "true", After: q.Get("after"), Limit: int(limit),
 	})
-	out := []agentJSON{}
+	out := []Agent{}
 	for _, a := range agents {
 		out = append(out, agentOut(a))
 	}
-	return http.StatusOK, map[string]any{"agents": out, "next": next}, err
+	return http.StatusOK, AgentList{Agents: out, Next: next}, err
 }
 
 func get(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
@@ -133,7 +133,7 @@ func get(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any
 }
 
 func update(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
-	var body updateBody
+	var body UpdateBody
 	id, err := envelope(w, r, &body)
 	if err != nil {
 		return 0, nil, err
@@ -162,7 +162,7 @@ func unarchive(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (in
 }
 
 func archiving(w http.ResponseWriter, r *http.Request, op func(context.Context, loomagent.ArchiveRequest) error) (int, any, error) {
-	var body archiveBody
+	var body ArchiveBody
 	id, err := envelope(w, r, &body)
 	if err != nil {
 		return 0, nil, err
@@ -172,14 +172,14 @@ func archiving(w http.ResponseWriter, r *http.Request, op func(context.Context, 
 }
 
 func send(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
-	var body sendBody
+	var body SendBody
 	id, err := envelope(w, r, &body)
 	if err != nil {
 		return 0, nil, err
 	}
 	res, err := s.Send(r.Context(), loomagent.SendRequest{Envelope: loomagent.Envelope{RequestID: id},
 		AgentID: r.PathValue("id"), Text: body.Text, Source: "user_chat", Actor: actor(r)})
-	return http.StatusAccepted, sendJSON{res.MessageID, res.State, res.Replaced, res.TurnID}, err
+	return http.StatusAccepted, SendResult{res.MessageID, res.State, res.Replaced, res.TurnID}, err
 }
 
 func withdraw(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
@@ -187,11 +187,11 @@ func withdraw(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int
 		Envelope: loomagent.Envelope{RequestID: r.Header.Get("Idempotency-Key")},
 		AgentID:  r.PathValue("id"), Actor: actor(r),
 	})
-	return http.StatusOK, withdrawJSON{res.Result}, err
+	return http.StatusOK, WithdrawResult{res.Result}, err
 }
 
 func respond(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
-	var body respondBody
+	var body RespondBody
 	id, err := envelope(w, r, &body)
 	if err != nil {
 		return 0, nil, err
@@ -218,11 +218,11 @@ func listEvents(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (i
 
 func (h *Handler) listPresets(_ http.ResponseWriter, r *http.Request, _ *loomagent.Service) (int, any, error) {
 	ps, err := h.presets.List(r.Context())
-	out := []presetJSON{}
+	out := []Preset{}
 	for _, p := range ps {
 		out = append(out, presetOut(p))
 	}
-	return http.StatusOK, map[string]any{"presets": out}, err
+	return http.StatusOK, PresetList{Presets: out}, err
 }
 
 func (h *Handler) getPreset(_ http.ResponseWriter, r *http.Request, _ *loomagent.Service) (int, any, error) {
@@ -276,11 +276,5 @@ func writeError(w http.ResponseWriter, err error) {
 	if !ok {
 		status = http.StatusInternalServerError
 	}
-	handler.WriteJSON(w, status, struct {
-		Error       string         `json:"error"`
-		Code        loomagent.Code `json:"code"`
-		Allowed     []string       `json:"allowed,omitempty"`
-		Paths       []string       `json:"paths,omitempty"`
-		Fingerprint string         `json:"fingerprint,omitempty"`
-	}{e.Message, e.Code, e.Allowed, e.Paths, e.Fingerprint})
+	handler.WriteJSON(w, status, Error{e.Message, e.Code, e.Allowed, e.Paths, e.Fingerprint})
 }

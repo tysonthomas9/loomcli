@@ -289,30 +289,48 @@ func TestAgentWireFormatSnakeCase(t *testing.T) {
 	want(t, "patch with stale expect.spec_version", status, out, 409, "spec_version_mismatch")
 	_, out = call(t, srv, "POST", "ws/v1/agents/b1/messages", "s1", `{"text":"hi"}`)
 	check("send", out)
+	literal(t, "send", out, []string{"message_id", "state", "replaced"}, []string{"messageId", "MessageID"})
 	for _, path := range []string{"ws/v1/agents", "ws/v1/agents/b1", "ws/v1/agents/a1/events", "ws/v1/presets",
 		"ws/v1/presets/lead", "ws/v1/agents/zz"} {
 		_, out := call(t, srv, "GET", path, "", "")
 		check(path, out)
 	}
 	_, out = call(t, srv, "GET", "ws/v1/agents/b1", "", "")
-	for _, k := range []string{"agent_id", "spec_version", "waiting_messages", "open_asks", "compute"} {
-		if _, ok := out[k]; !ok {
-			t.Errorf("get: missing %q", k)
-		}
-	}
-	for _, k := range []string{"harness_session_id", "harness_session_root"} {
-		if _, ok := out[k]; ok {
-			t.Errorf("get returns %q", k)
-		}
-	}
+	literal(t, "get", out, []string{"agent_id", "spec_version", "waiting_messages", "open_asks", "compute"},
+		[]string{"AgentID", "SpecVersion", "WaitingMessages", "OpenAsks", "harness_session_id", "harness_session_root",
+			"HarnessSessionID"})
+	literal(t, "get waiting", out["waiting_messages"].([]any)[0].(map[string]any), []string{"sender", "text", "since"},
+		[]string{"Sender", "Text"})
+	_, out = call(t, srv, "GET", "ws/v1/agents/a1/events", "", "")
+	literal(t, "events", out, []string{"events", "snapshot_seq", "next", "more"}, []string{"Events", "SnapshotSeq"})
+	literal(t, "event", out["events"].([]any)[0].(map[string]any), []string{"agent_id", "seq", "event_id", "kind"},
+		[]string{"AgentID", "Seq", "EventID"})
+	_, out = call(t, srv, "GET", "ws/v1/presets/lead", "", "")
+	literal(t, "preset", out, []string{"name", "role_kind", "external_key_fmt"}, []string{"Name", "RoleKind"})
 	_, out = call(t, srv, "DELETE", "ws/v1/agents/b1/messages/waiting", "w1", "")
 	check("withdraw", out)
+	literal(t, "withdraw", out, []string{"result"}, []string{"Result"})
+}
+
+// literal checks the raw JSON object has every key in present and none in absent.
+func literal(t *testing.T, what string, out map[string]any, present, absent []string) {
+	t.Helper()
+	for _, k := range present {
+		if _, ok := out[k]; !ok {
+			t.Errorf("%s: missing %q", what, k)
+		}
+	}
+	for _, k := range absent {
+		if _, ok := out[k]; ok {
+			t.Errorf("%s: has %q", what, k)
+		}
+	}
 }
 
 // TestAgentCreateBodySnakeCase: every snake_case Create field reaches the
 // CreateRequest.
 func TestAgentCreateBodySnakeCase(t *testing.T) {
-	var b createBody
+	var b CreateBody
 	if err := json.Unmarshal([]byte(`{"preset":"lead@1","name":"n","parent":"p","repo":"r","base_ref":"main",
 		"external_key":"k","first_message":"hi","subject":{"type":"pr","id":"7","version":"abc"},
 		"persona":{"file":"f","text":"x"},"overrides":{"harness":"codex","model":"m","effort":"high",
