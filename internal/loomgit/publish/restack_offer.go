@@ -94,7 +94,7 @@ func publishRestackedOffer(ctx context.Context, store *journal.SQLite, offer jou
 	if err != nil {
 		return fmt.Errorf("find restacked working area: %w", err)
 	}
-	runner, err := gitexec.New(area.Path, gitexec.Options{})
+	runner, err := gitexec.New(area.Path, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
 	if err != nil {
 		return err
 	}

@@ -22,7 +22,7 @@ func adoptNativeRestack(ctx context.Context, store *journal.SQLite, offer journa
 	if err != nil {
 		return err
 	}
-	runner, err := gitexec.New(area.Path, gitexec.Options{})
+	runner, err := gitexec.New(area.Path, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
 	if err != nil {
 		return err
 	}
