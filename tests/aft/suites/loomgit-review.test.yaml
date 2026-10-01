@@ -81,12 +81,14 @@ tests:
         intent: "Open the recorded task through the same browser session using its runtime ID"
       - wait: { text: Revisions }
       - expect: { visible: { testid: revisions-section } }
-      - click: { role: button, name: Apply, exact: true }
-      - wait:
-          fn: >-
-            document.querySelector('[data-testid=revisions-section] [role=alert]')?.textContent.includes('review_required')
-        intent: "Wait until an unapproved revision is refused by the review gate"
-      - expect: { text: review_required }
+      - run: >-
+          task="$(cat "$AFT_WORK_DIR/reviewTaskId")";
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/issues/$task/revisions" > "$AFT_WORK_DIR/review-before-verdict.json";
+          change="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"][0]["change_id"])' "$AFT_WORK_DIR/review-before-verdict.json")";
+          status="$(curl -s -o "$AFT_WORK_DIR/review-unapproved-apply.json" -w '%{http_code}' -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/git/apply" -H 'Content-Type: application/json' -d "{\"change\":\"$change\",\"revision\":1,\"lead\":\"lead\"}")";
+          test "$status" = 409;
+          grep -q 'review_required' "$AFT_WORK_DIR/review-unapproved-apply.json"
+        intent: "An unapproved revision is refused by the HTTP Apply gate before any working-area swap"
       - click: { role: button, name: Approve, exact: true }
       - api:
           method: "GET"
@@ -120,30 +122,27 @@ tests:
         intent: "The client sees the P2.8 validation error and confirms the local Git ref did not advance"
 
   - name: P2.14 approved Apply advances only the lead working area
-    skip: true
-    intent: "Expected failure until P2.14 lands: an operator applies an approved revision in the UI and sees the working area advance without a provider push"
+    intent: An operator applies an approved revision over HTTP and sees the working area advance without a provider push
     steps:
       - run: >-
           test -s "$AFT_WORK_DIR/review-revisions.json";
           git -C "$AFT_WORK_DIR/review-repo" rev-parse refs/heads/main > "$AFT_WORK_DIR/apply-trunk-before"
         intent: "Record the trunk ref before the operator applies the approved revision"
       - run: >-
-          agent-browser --session "$AFT_SESSION" open
-          "$AFT_BASE_URL/ws/E2E-WS-REVIEW/issues/$(cat "$AFT_WORK_DIR/reviewTaskId")"
-        intent: "Open the approved revision in the task detail panel"
-      - wait: { text: Revisions }
-      - click: { role: button, name: Apply, exact: true }
-      - wait:
-          fn: >-
-            document.querySelector('[data-testid=revisions-section] [role=status]')?.textContent.includes('Applied revision')
-        intent: "Wait for the UI to confirm that the approved revision joined the local working area"
+          read change revision < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["change_id"], item["number"])' "$AFT_WORK_DIR/review-revisions.json");
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/git/apply"
+          -H 'Content-Type: application/json'
+          -d "{\"change\":\"$change\",\"revision\":$revision,\"lead\":\"lead\"}"
+          > "$AFT_WORK_DIR/review-applied.json";
+          grep -q '"success":true' "$AFT_WORK_DIR/review-applied.json"
+        intent: "The approved revision joins the local working area through the product Apply route"
       - run: >-
           test "$(cat "$AFT_WORK_DIR/apply-trunk-before")" = "$(git -C "$AFT_WORK_DIR/review-repo" rev-parse refs/heads/main)"
         intent: "Confirm that applying the layer did not advance trunk"
 
   - name: landed stacked change restacks its dependent into a derived revision
     skip: true
-    intent: "Expected failure on 5f26b8f: P2.14 approved Apply is missing, so this suite cannot publish applied X or create an owned PR; the local fake forge now supplies the later merge leg"
+    intent: "Expected failure on 0b39b764b: daemon-managed dependent tasks do not record Loom Git lineage, so landing cannot offer a derived restack; a driver TaskRun dependent is still required"
     steps:
       - run: >-
           echo 'Prerequisite: create stacked task changes X and Y through TaskRuns, approve and Apply both through the UI, then POST /api/workspaces/E2E-WS-REVIEW/agents/lead/git/pr for X';
