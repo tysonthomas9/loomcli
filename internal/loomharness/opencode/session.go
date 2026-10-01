@@ -136,6 +136,66 @@ func (s *Session) Move(ctx context.Context, dir string) error {
 	return s.c.call(ctx, "POST", s.path("/move"), map[string]string{"directory": dir}, nil)
 }
 
+// Interrupt stops the running execution; false means nothing was running.
+func (s *Session) Interrupt(ctx context.Context) (bool, error) {
+	var r struct {
+		Interrupted bool `json:"interrupted"`
+	}
+	err := s.c.call(ctx, "POST", s.path("/interrupt"), nil, &r)
+	return r.Interrupted, err
+}
+
+// Reply answers a permission ask (per_ id) or a question form (frm_ id). A
+// form gets r.Answer in its first field.
+func (s *Session) Reply(ctx context.Context, askID string, r loomharness.Reply) error {
+	id := url.PathEscape(askID)
+	if strings.HasPrefix(askID, "frm_") {
+		var form struct {
+			Data struct {
+				Fields []struct {
+					Key string `json:"key"`
+				} `json:"fields"`
+			} `json:"data"`
+		}
+		if err := s.c.call(ctx, "GET", s.path("/form/"+id), nil, &form); err != nil {
+			return err
+		}
+		if len(form.Data.Fields) == 0 {
+			return &Error{Code: "bad_request", Message: "form " + askID + " has no fields"}
+		}
+		answer := map[string]string{form.Data.Fields[0].Key: r.Answer}
+		return s.c.call(ctx, "POST", s.path("/form/"+id+"/reply"), map[string]any{"answer": answer}, nil)
+	}
+	body := map[string]string{"decision": "reject"}
+	if r.Allow {
+		body["decision"] = "once"
+	}
+	if r.Answer != "" {
+		body["message"] = r.Answer
+	}
+	return s.c.call(ctx, "POST", s.path("/permission/"+id+"/reply"), body, nil)
+}
+
+// SetModel sets the session's "provider/model" from the next turn.
+func (s *Session) SetModel(ctx context.Context, model string) error {
+	provider, id, ok := strings.Cut(model, "/")
+	if !ok {
+		return &Error{Code: "bad_request", Message: "model " + model + " is not provider/model"}
+	}
+	return s.c.call(ctx, "POST", s.path("/model"), map[string]any{"model": map[string]string{"providerID": provider, "id": id}}, nil)
+}
+
+// Unload is a no-op: OpenCode frees idle session memory only on a server
+// restart (design v2 §4.15).
+func (s *Session) Unload(context.Context) error { return nil }
+
+// Close stops the session's active turn. It never deletes the native
+// session, which stays recorded for Purge (R29).
+func (s *Session) Close(ctx context.Context) error {
+	_, err := s.Interrupt(ctx)
+	return err
+}
+
 type messagePage struct {
 	Data   []message `json:"data"`
 	Cursor struct {
