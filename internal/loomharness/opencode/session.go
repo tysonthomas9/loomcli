@@ -61,6 +61,7 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 	}
 	if err == nil {
 		c.remember(ref)
+		c.release(ref.NativeID)
 		return ref, nil
 	}
 	if existed {
@@ -254,7 +255,11 @@ func (s *Session) Resume(ctx context.Context, l loomharness.Launch, rules []loom
 	}
 	ref := loomharness.NativeRef{Root: l.Root, NativeID: s.ref.NativeID}
 	s.c.remember(ref)
-	return ref, s.isolate(ctx)
+	if err := s.isolate(ctx); err != nil {
+		return ref, err
+	}
+	s.c.release(ref.NativeID)
+	return ref, nil
 }
 
 // install replaces the session's permission rules with rules (b30c4d0:
@@ -336,20 +341,64 @@ func (s *Session) grant(ctx context.Context, id string) error {
 		s.c.rulesMu.Lock()
 		s.c.grants[sid] = prev
 		s.c.rulesMu.Unlock()
-		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupWait)
 		defer cancel()
 		if rerr := s.install(rctx, rules); rerr != nil {
-			// Fail closed: with no cached rules Prompt refuses the session
-			// until Open or Resume installs Loom's rules again.
-			s.c.rulesMu.Lock()
-			delete(s.c.rules, sid)
-			delete(s.c.grants, sid)
-			s.c.rulesMu.Unlock()
-			return errors.Join(err, fmt.Errorf("opencode: restore session %s permissions without the grant (no prompts until Open or Resume): %w", sid, rerr))
+			return s.quarantine(rctx, errors.Join(err, fmt.Errorf("opencode: restore session %s permissions without the grant: %w", sid, rerr)))
 		}
 		return err
 	}
 	return nil
+}
+
+// cleanupWait bounds the restore and the stop after a failed grant.
+var cleanupWait = 10 * time.Second
+
+// quarantine fails a session closed after an Always grant whose outcome is
+// unknown (its PATCH may have committed) could not be taken back: OpenCode
+// may still allow the grant's pattern. It drops the session's cached rules
+// and grants and marks it held, so Prompt and Reply refuse it until Open or
+// Resume installs Loom's full rules again (usable, which also covers a Loom
+// restart: no rules are cached then). It then stops the session's active
+// turn, so its asks end (Loom records them lost) and no Deny is applied
+// while the native allow may remain. This guards Loom's own paths only;
+// other clients of the shared service can still use the session.
+func (s *Session) quarantine(ctx context.Context, cause error) error {
+	sid := s.ref.NativeID
+	why := "an Always grant on session " + sid + " is unconfirmed and could not be removed; the native session may still allow its pattern"
+	s.c.rulesMu.Lock()
+	delete(s.c.rules, sid)
+	delete(s.c.grants, sid)
+	s.c.held[sid] = why
+	s.c.rulesMu.Unlock()
+	if _, err := s.Interrupt(ctx); err != nil {
+		return errors.Join(cause, fmt.Errorf("opencode: %s; native stop unconfirmed, tools may still run under the grant; no Loom prompt or reply until Open or Resume: %w", why, err))
+	}
+	return errors.Join(cause, fmt.Errorf("opencode: %s; its active turn was stopped; no Loom prompt or reply until Open or Resume", why))
+}
+
+// usable fails unless Loom installed this session's rules in this process
+// (Open or Resume) and it is not quarantined.
+func (s *Session) usable() error {
+	s.c.rulesMu.Lock()
+	defer s.c.rulesMu.Unlock()
+	sid := s.ref.NativeID
+	if why, ok := s.c.held[sid]; ok {
+		return &Error{Code: "bad_request", Message: "opencode: session quarantined: " + why + "; Open or Resume it to reinstall Loom's rules"}
+	}
+	if _, ok := s.c.rules[sid]; !ok {
+		// R-H: nothing runs under rules Loom did not install in this
+		// process; Open or Resume installs them first.
+		return &Error{Code: "bad_request", Message: fmt.Sprintf("opencode: no permission rules installed for session %s; Open or Resume it first", sid)}
+	}
+	return nil
+}
+
+// release ends a quarantine once Open or Resume reinstalled Loom's rules.
+func (c *Client) release(id string) {
+	c.rulesMu.Lock()
+	defer c.rulesMu.Unlock()
+	delete(c.held, id)
 }
 
 // isolate sets the environment OpenCode gives this session's shell commands,
@@ -383,14 +432,12 @@ func (s *Session) isolate(ctx context.Context) error {
 // environment (the accepted 18:00 UTC exception), and this Prompt is where
 // Loom's own apply again.
 func (s *Session) Prompt(ctx context.Context, in loomharness.Input) error {
-	s.c.rulesMu.Lock()
-	rules, ok := s.c.rules[s.ref.NativeID]
-	s.c.rulesMu.Unlock()
-	if !ok {
-		// R-H: no prompt runs under rules Loom did not install in this
-		// process; Open or Resume installs them first.
-		return &Error{Code: "bad_request", Message: fmt.Sprintf("opencode: no permission rules installed for session %s; Open or Resume it first", s.ref.NativeID)}
+	if err := s.usable(); err != nil {
+		return err
 	}
+	s.c.rulesMu.Lock()
+	rules := s.c.rules[s.ref.NativeID]
+	s.c.rulesMu.Unlock()
 	if err := s.install(ctx, rules); err != nil {
 		return err
 	}
@@ -606,6 +653,9 @@ func (s *Session) Interrupt(ctx context.Context) (bool, error) {
 // session grant (grant) before allowing this ask once; a question has no
 // Always, so one asked with Always is refused and left open.
 func (s *Session) Reply(ctx context.Context, askID string, r loomharness.Reply) error {
+	if err := s.usable(); err != nil {
+		return err
+	}
 	id := url.PathEscape(askID)
 	if strings.HasPrefix(askID, "frm_") {
 		if r.Always {

@@ -34,6 +34,7 @@ type Client struct {
 	rulesMu sync.Mutex
 	rules   map[string][]map[string]string // native session id -> the rules Loom last installed
 	grants  map[string][]map[string]string // native session id -> its "always allow" grants (Reply.Always)
+	held    map[string]string              // native session id -> why it is quarantined (an unconfirmed grant)
 	roots   map[string]string              // native session id -> the Root Loom opened or resumed it with
 
 	idsMu sync.Mutex
@@ -88,7 +89,7 @@ func (c *Client) rootOf(nativeID string) string {
 
 // NewClient returns a client for the server at base with the per-boot password.
 func NewClient(base, password string) *Client {
-	return &Client{base: strings.TrimRight(base, "/"), password: password, http: &http.Client{}, rules: map[string][]map[string]string{}, roots: map[string]string{}, grants: map[string][]map[string]string{}, ids: map[string]*idLock{}}
+	return &Client{base: strings.TrimRight(base, "/"), password: password, http: &http.Client{}, rules: map[string][]map[string]string{}, roots: map[string]string{}, grants: map[string][]map[string]string{}, held: map[string]string{}, ids: map[string]*idLock{}}
 }
 
 func (c *Client) setEndpoint(base, password string) {

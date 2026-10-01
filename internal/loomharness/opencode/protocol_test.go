@@ -37,6 +37,9 @@ type store struct {
 	patchErr bool
 	delErr   bool                // DELETE /api/session/{id} fails
 	patchLie int                 // the next n session PATCHes commit, then answer 500
+	stops    int                 // POST /interrupt calls
+	stopErr  bool                // POST /interrupt answers 500
+	stopHang bool                // POST /interrupt never answers
 	postErr  bool                // POST /api/session creates the session, then fails
 	race     *openRace           // pairs two concurrent session GETs, counts creates
 	perms    map[string]permReq  // pending permission asks by id, readable and answerable
@@ -273,6 +276,20 @@ func fakeServer(t *testing.T, st *store) *Client {
 			reply(w, 200, map[string]any{"data": out})
 		}
 	}
+	mux.HandleFunc("POST /api/session/{id}/interrupt", func(w http.ResponseWriter, r *http.Request) {
+		st.mu.Lock()
+		st.stops++
+		fail, hang := st.stopErr, st.stopHang
+		st.mu.Unlock()
+		switch {
+		case hang:
+			<-r.Context().Done()
+		case fail:
+			reply(w, 500, map[string]string{"_tag": "UnknownError", "message": "stop failed"})
+		default:
+			reply(w, 200, map[string]any{"data": map[string]bool{"interrupted": true}})
+		}
+	})
 	mux.HandleFunc("GET /api/session/{id}/permission", pending("per_"))
 	mux.HandleFunc("GET /api/session/{id}/permission/{rid}", func(w http.ResponseWriter, r *http.Request) {
 		st.mu.Lock()
@@ -1173,56 +1190,105 @@ func TestProtocolReplyAlwaysIsSessionScoped(t *testing.T) {
 	check("after Resume", a.NativeID, "git log", "ask")
 }
 
-// TestProtocolAlwaysGrantRollsBack (codex, 11588cd1e): a grant PATCH that
-// commits and then answers 500 leaves no grant: Reply puts the rules back
-// without it and the ask stays open. When the restore fails as well, the
-// error says so and the session refuses prompts until Resume installs
-// Loom's rules again.
+// TestProtocolAlwaysGrantRollsBack (codex, 11588cd1e and 863aa26b5): a
+// grant PATCH that commits and then answers 500 leaves an unknown outcome.
+// When Reply can put the rules back, the ask stays open and asks again.
+// When it cannot, the session is quarantined: its active turn is stopped
+// (or the error says the stop is unconfirmed), Prompt and Reply refuse it,
+// a failed reinstall keeps it blocked, a fresh client (a Loom restart)
+// refuses it too, and a successful Resume restores normal asking.
 func TestProtocolAlwaysGrantRollsBack(t *testing.T) {
 	ctx := context.Background()
-	st := newStore()
-	c := fakeServer(t, st)
 	rules := []loomharness.PermissionRule{{Action: "bash", Resource: "*", Effect: "ask"}}
-	ref, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-a", Dir: "/repo", Rules: rules})
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := c.Session(ref)
 	always := loomharness.Reply{Allow: true, Always: true}
+	setup := func(t *testing.T) (*store, *Client, *Session) {
+		st := newStore()
+		c := fakeServer(t, st)
+		ref, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-a", Dir: "/repo", Rules: rules})
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.perms["per_1"] = permReq{Session: ref.NativeID, Action: "shell", Resources: []string{"ls"}, Save: []string{"ls *"}}
+		return st, c, c.Session(ref)
+	}
+	refused := func(t *testing.T, st *store, s *Session, want string) {
+		t.Helper()
+		if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "p"), Text: "hi"}); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("Prompt = %v; want an error containing %q", err, want)
+		}
+		if err := s.Reply(ctx, "per_1", loomharness.Reply{}); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("Reply (deny) = %v; want an error containing %q", err, want)
+		}
+		if _, sent := st.replies["per_1"]; sent {
+			t.Fatal("a reply reached the ask of a quarantined session")
+		}
+	}
+	works := func(t *testing.T, st *store, s *Session) {
+		t.Helper()
+		if got := st.effect(s.ref.NativeID, "shell", "ls x"); got != "ask" {
+			t.Fatalf("ls x = %s; want ask", got)
+		}
+		if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "ok"), Text: "hi"}); err != nil {
+			t.Fatalf("Prompt: %v", err)
+		}
+		if err := s.Reply(ctx, "per_1", loomharness.Reply{}); err != nil || st.replies["per_1"] != "reject" {
+			t.Fatalf("Reply (deny) = %v, sent %q", err, st.replies["per_1"])
+		}
+	}
 
-	st.patchLie = 1
-	st.perms["per_1"] = permReq{Session: ref.NativeID, Action: "shell", Resources: []string{"ls"}, Save: []string{"ls *"}}
-	if err := s.Reply(ctx, "per_1", always); err == nil {
-		t.Fatal("Reply succeeded with a failed grant install")
-	}
-	if _, sent := st.replies["per_1"]; sent {
-		t.Fatal("the ask was answered though its grant failed")
-	}
-	if got := st.effect(ref.NativeID, "shell", "ls x"); got != "ask" {
-		t.Fatalf("after a committed-then-failed grant, ls x = %s; want ask", got)
-	}
-	if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r1"), Text: "hi"}); err != nil {
-		t.Fatalf("Prompt after a restored grant: %v", err)
-	}
-	if got := st.effect(ref.NativeID, "shell", "ls x"); got != "ask" {
-		t.Fatalf("after Prompt, ls x = %s; want ask", got)
-	}
+	t.Run("RestoreSucceeds", func(t *testing.T) {
+		st, _, s := setup(t)
+		st.patchLie = 1
+		if err := s.Reply(ctx, "per_1", always); err == nil {
+			t.Fatal("Reply succeeded with a failed grant install")
+		}
+		if _, sent := st.replies["per_1"]; sent || st.stops != 0 {
+			t.Fatalf("answered %v, stops %d; want the ask open and no stop", sent, st.stops)
+		}
+		works(t, st, s)
+	})
 
-	st.patchLie = 2
-	err = s.Reply(ctx, "per_1", always)
-	if err == nil || !strings.Contains(err.Error(), "no prompts until Open or Resume") {
-		t.Fatalf("Reply with a failed restore = %v; want the restore error", err)
-	}
-	if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r2"), Text: "hi"}); !isCode(err, "bad_request") {
-		t.Fatalf("Prompt after a failed restore = %v; want bad_request (fail closed)", err)
-	}
-	if _, err := s.Resume(ctx, loomharness.Launch{}, rules); err != nil {
-		t.Fatal(err)
-	}
-	if got := st.effect(ref.NativeID, "shell", "ls x"); got != "ask" {
-		t.Fatalf("after Resume, ls x = %s; want ask", got)
-	}
-	if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r3"), Text: "hi"}); err != nil {
-		t.Fatalf("Prompt after Resume: %v", err)
+	t.Run("RestoreFails", func(t *testing.T) {
+		st, c, s := setup(t)
+		st.patchLie = 2
+		err := s.Reply(ctx, "per_1", always)
+		if err == nil || !strings.Contains(err.Error(), "Always grant on session") || !strings.Contains(err.Error(), "active turn was stopped") {
+			t.Fatalf("Reply = %v; want the unconfirmed grant and the stop named", err)
+		}
+		if st.stops != 1 {
+			t.Fatalf("%d stops; want the active turn stopped once", st.stops)
+		}
+		refused(t, st, s, "quarantined")
+		if fresh := NewClient(c.base, "pw"); fresh.Session(s.ref).Reply(ctx, "per_1", loomharness.Reply{}) == nil {
+			t.Fatal("a fresh client (a Loom restart) replied on the session")
+		}
+		st.patchErr = true
+		if _, err := s.Resume(ctx, loomharness.Launch{}, rules); err == nil {
+			t.Fatal("Resume succeeded with a failed reinstall")
+		}
+		st.patchErr = false
+		refused(t, st, s, "quarantined")
+		if _, err := s.Resume(ctx, loomharness.Launch{}, rules); err != nil {
+			t.Fatal(err)
+		}
+		works(t, st, s)
+	})
+
+	for name, set := range map[string]func(*store){
+		"StopFails": func(st *store) { st.stopErr = true },
+		"StopHangs": func(st *store) { st.stopHang = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer func(w time.Duration) { cleanupWait = w }(cleanupWait)
+			cleanupWait = 300 * time.Millisecond
+			st, _, s := setup(t)
+			set(st)
+			st.patchLie = 2
+			err := s.Reply(ctx, "per_1", always)
+			if err == nil || !strings.Contains(err.Error(), "native stop unconfirmed") || strings.Contains(err.Error(), "turn was stopped") {
+				t.Fatalf("Reply = %v; want native stop unconfirmed", err)
+			}
+			refused(t, st, s, "quarantined")
+		})
 	}
 }
