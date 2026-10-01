@@ -129,10 +129,7 @@ func (backend LoomStackBackend) Restack(ctx context.Context, request StackReques
 }
 
 func (backend LoomStackBackend) MergeUpTo(ctx context.Context, request StackRequest, target string) error {
-	if err := requireMergeAuthority(ctx, request, target); err != nil {
-		return err
-	}
-	return loomgit.NewError(loomgit.MergeNotAuthorized, "Loom backend has no automatic merge authorization", nil)
+	return beginLoomMerge(ctx, backend.Store, request, target)
 }
 
 type backendRecorder interface {

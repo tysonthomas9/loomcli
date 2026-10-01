@@ -24,7 +24,9 @@ func ReconcileJournal(ctx context.Context, s storepkg.Store) error {
 		Workspace: reconcile.RecoverFunc(func(ctx context.Context) error { return Reconcile(ctx, s) }),
 		Apply:     reconcile.RecoverFunc(func(ctx context.Context) error { return recoverPullThenApply(ctx, applyrecovery.Recover) }),
 		Landing: reconcile.RecoverFunc(func(ctx context.Context) error {
-			return landing.RunOnceWithOptions(ctx, landingOptions())
+			landingErr := landing.RunOnceWithOptions(ctx, landingOptions())
+			mergeErr := publish.ReconcileLoomMerges(ctx)
+			return errors.Join(landingErr, mergeErr)
 		}),
 	}); err != nil {
 		return err
