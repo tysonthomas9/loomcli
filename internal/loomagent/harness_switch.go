@@ -134,8 +134,10 @@ func (s *Service) stopTurn(ctx context.Context, a loomstore.Agent) (loomstore.Ag
 	return s.setState(ctx, a, to)
 }
 
-// resume recovers a's current session before a hand-over. A different
-// returned ref is recorded as another owned session and becomes current;
+// resume recovers a's current session before a hand-over, installing the
+// policy compiled from the current bridge registration; a registration or
+// install failure stops it before anything runs. A different returned ref
+// is recorded as another owned session and becomes current;
 // every earlier ref stays owned. It is safe to repeat; current then returns
 // the resumed session.
 func (s *Service) resume(ctx context.Context, a loomstore.Agent) (loomstore.Agent, error) {
@@ -147,14 +149,15 @@ func (s *Service) resume(ctx context.Context, a loomstore.Agent) (loomstore.Agen
 	if err != nil {
 		return a, err
 	}
-	if _, err := s.policy(ctx, cfg); err != nil { // fail before resuming a turn without the bridge
+	rules, err := s.policy(ctx, cfg)
+	if err != nil {
 		return a, err
 	}
 	l, err := s.launch(ctx, a, a.Harness)
 	if err != nil {
 		return a, err
 	}
-	got, err := sess.Resume(ctx, l)
+	got, err := sess.Resume(ctx, l, rules)
 	if err != nil {
 		return a, harnessErr(err)
 	}

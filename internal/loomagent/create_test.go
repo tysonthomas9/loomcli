@@ -663,3 +663,76 @@ func TestCreateLegacySavedBridgeDeniesKept(t *testing.T) {
 		t.Fatalf("legacy saved denies: opened with %d, want them kept", n)
 	}
 }
+
+func TestHarnessResumeInstallsCurrentPolicy(t *testing.T) {
+	ctx := context.Background()
+	both := BridgeCaps{HasGitHubRead: true, HasPublish: true}
+	caps := BridgeCaps{}
+	hook := func(context.Context, Preset) (BridgeCaps, error) { return caps, nil }
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{Bridge: hook})
+	req := CreateRequest{Envelope: Envelope{RequestID: "r1"}, Preset: "daemon-worker", Name: "w", Repo: "/repo",
+		Overrides: Overrides{Harness: "opencode", ReadOnly: true, DeniedTools: []string{"edit"}}}
+	a, err := s.Create(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := s.get(t, a.AgentID)
+	ref := loomharness.NativeRef{Root: *row.HarnessSessionRoot, NativeID: *row.HarnessSessionID}
+	user := specOf(t, e, a.AgentID).Rules // preset rules plus the stricter user denies
+	if !slices.Contains(user, loomharness.PermissionRule{Action: "edit", Resource: "*", Effect: "deny"}) {
+		t.Fatalf("user deny missing from %+v", user)
+	}
+
+	// A turn is cut off; the dispatcher's next message waits in a slot.
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Delta: "a"}, {Crash: true}, {Delta: "b"}}, ResumeContinues: true})
+	if err := fh.Session(ref).Prompt(ctx, loomharness.Input{Key: "k1", Text: "go"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.st.Send(ctx, loomstore.SlotSend{AgentID: a.AgentID, Sender: "user:local", RequestID: "s1",
+		Body: "next", Source: "user_chat", Result: func(bool) (string, error) { return `{}`, nil }}); err != nil {
+		t.Fatal(err)
+	}
+	_ = fh.Restart(ctx)
+
+	// Install failure: an explicit error, nothing runs, nothing is handed over.
+	caps = both
+	fh.FailInstall(errors.New("permissions not installed"))
+	if _, err := s.resume(ctx, s.get(t, a.AgentID)); !isCode(err, CodeHarnessError) || !strings.Contains(err.Error(), "install permissions") {
+		t.Fatalf("resume with a failed install = %v", err)
+	}
+	if _, turns := fh.Rules(ref); len(turns) != 1 {
+		t.Fatalf("the cut-off turn ran %d times after a failed install", len(turns))
+	}
+	if slots, _ := e.st.Slots(ctx, a.AgentID); len(slots) != 1 || slots[0].State != loomstore.SlotWaiting {
+		t.Fatalf("slots after a failed install = %+v", slots)
+	}
+
+	// Installed: the current policy (bridge denies now registered) replaces
+	// the stale one before the resumed turn runs; the user denies stay.
+	fh.FailInstall(nil)
+	got, err := s.resume(ctx, s.get(t, a.AgentID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := slices.Concat(user, publishDenies)
+	installed, turns := fh.Rules(ref)
+	if !slices.Equal(installed, want) || len(turns) != 2 || !slices.Equal(turns[1], want) {
+		t.Fatalf("installed %+v, runs %+v; want %+v", installed, turns, want)
+	}
+	// Caps removed: the bridge denies go, the user's stay.
+	caps = BridgeCaps{}
+	if _, err := s.resume(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	if installed, _ := fh.Rules(ref); !slices.Equal(installed, user) {
+		t.Fatalf("after caps removal installed %+v, want %+v", installed, user)
+	}
+	// Identity and ownership are unchanged: same session, root and spec version.
+	after := s.get(t, a.AgentID)
+	owned, _ := e.st.NativeSessions(ctx, a.AgentID)
+	if *after.HarnessSessionID != ref.NativeID || *after.HarnessSessionRoot != ref.Root || after.SpecVersion != row.SpecVersion || len(owned) != 1 {
+		t.Fatalf("resume changed identity: %+v, owned %+v", after, owned)
+	}
+}

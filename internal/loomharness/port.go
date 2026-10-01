@@ -27,8 +27,12 @@ type Harness interface {
 
 // Session is one native session, thread or Claude session.
 type Session interface {
-	Resume(ctx context.Context, l Launch) (NativeRef, error) // recover the same native session before hand-over
-	Prompt(ctx context.Context, in Input) error              // only when idle; in.Key is the native key
+	// Resume recovers the same native session before hand-over. It first
+	// installs rules as the session's whole permission policy, replacing what
+	// it had, before any resumed turn or tool can run; if it cannot, it fails
+	// and nothing runs.
+	Resume(ctx context.Context, l Launch, rules []PermissionRule) (NativeRef, error)
+	Prompt(ctx context.Context, in Input) error // only when idle; in.Key is the native key
 	Interrupt(ctx context.Context) (interrupted bool, err error)
 	Reply(ctx context.Context, askID string, r Reply) error
 	HasInput(ctx context.Context, key string) (Landed, error)

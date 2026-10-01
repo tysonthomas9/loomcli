@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strconv"
 	"testing"
 
@@ -153,10 +154,10 @@ func TestFakeCrashRestartResume(t *testing.T) {
 	if err := s.Prompt(ctx, lh.Input{Key: "m2"}); !errors.Is(err, lh.ErrBusy) {
 		t.Fatalf("Prompt before Resume = %v; want ErrBusy", err)
 	}
-	if _, err := s.Resume(ctx, lh.Launch{Root: "/elsewhere"}); !errors.Is(err, lh.ErrSessionNotFound) {
+	if _, err := s.Resume(ctx, lh.Launch{Root: "/elsewhere"}, nil); !errors.Is(err, lh.ErrSessionNotFound) {
 		t.Fatalf("Resume under another root = %v; want ErrSessionNotFound", err)
 	}
-	got, err := s.Resume(ctx, lh.Launch{Root: ref.Root})
+	got, err := s.Resume(ctx, lh.Launch{Root: ref.Root}, nil)
 	if err != nil || got != ref {
 		t.Fatalf("Resume = %v, %v; want %v", got, err, ref)
 	}
@@ -181,7 +182,7 @@ func TestFakeResumeContinuesTurn(t *testing.T) {
 	}
 	_ = h.Restart(ctx)
 	f, _ = h.Feed(ctx)
-	if _, err := s.Resume(ctx, lh.Launch{Root: ref.Root}); err != nil {
+	if _, err := s.Resume(ctx, lh.Launch{Root: ref.Root}, nil); err != nil {
 		t.Fatal(err)
 	}
 	want(t, f, lh.EventTurnResumed, lh.EventDelta, lh.EventTurnCompleted)
@@ -279,7 +280,7 @@ func TestFakeResumeContinuesLosesOpenAsk(t *testing.T) {
 	h.Crash()
 	_ = h.Restart(ctx)
 	f, _ = h.Feed(ctx)
-	if _, err := s.Resume(ctx, lh.Launch{Root: ref.Root}); err != nil {
+	if _, err := s.Resume(ctx, lh.Launch{Root: ref.Root}, nil); err != nil {
 		t.Fatal(err)
 	}
 	want(t, f, lh.EventAskLost, lh.EventTurnResumed, lh.EventDelta, lh.EventTurnCompleted)
@@ -318,11 +319,44 @@ func TestFakeCloseKeepsHistoryUntilResume(t *testing.T) {
 	if page, err := s.Messages(ctx, "", 0); err != nil || len(page.Events) == 0 {
 		t.Fatalf("history after Close = %+v, %v", page, err)
 	}
-	if _, err := s.Resume(ctx, lh.Launch{Root: ref.Root}); err != nil {
+	if _, err := s.Resume(ctx, lh.Launch{Root: ref.Root}, nil); err != nil {
 		t.Fatal(err)
 	}
 	want(t, f, lh.EventAskLost, lh.EventTurnCompleted)
 	if err := s.Prompt(ctx, lh.Input{Key: "m3"}); err != nil {
 		t.Fatalf("Prompt after Resume = %v", err)
+	}
+}
+
+func TestFakeResumeInstallsRulesBeforeTheTurnContinues(t *testing.T) {
+	h := New()
+	old := []lh.PermissionRule{{Action: "bash", Resource: "*", Effect: "allow"}}
+	cur := append(slices.Clone(old), lh.PermissionRule{Action: "bash", Resource: "gh *", Effect: "deny"})
+	ref, s, f := start(t, h, "agt_1", Turn{Steps: []Step{{Delta: "a"}, {Crash: true}, {Delta: "b"}}, ResumeContinues: true})
+	if _, err := h.Open(ctx, lh.OpenSpec{Key: "agt_1", Rules: old}); err != nil { // an Open repeat installs too
+		t.Fatal(err)
+	}
+	_ = s.Prompt(ctx, lh.Input{Key: "m1"})
+	drain(f)
+	_ = h.Restart(ctx)
+
+	h.FailInstall(errors.New("permissions not installed"))
+	if _, err := s.Resume(ctx, lh.Launch{Root: ref.Root}, cur); err == nil {
+		t.Fatal("Resume succeeded without installing its rules")
+	}
+	if installed, turns := h.Rules(ref); !slices.Equal(installed, old) || len(turns) != 1 {
+		t.Fatalf("a failed install changed the session: rules %v, runs %d", installed, len(turns))
+	}
+	if err := s.Prompt(ctx, lh.Input{Key: "m2"}); err == nil {
+		t.Fatal("the session accepted a prompt after a failed Resume")
+	}
+
+	h.FailInstall(nil)
+	if _, err := s.Resume(ctx, lh.Launch{Root: ref.Root}, cur); err != nil {
+		t.Fatal(err)
+	}
+	installed, turns := h.Rules(ref)
+	if !slices.Equal(installed, cur) || len(turns) != 2 || !slices.Equal(turns[0], old) || !slices.Equal(turns[1], cur) {
+		t.Fatalf("installed %v, runs %v; the resumed turn must run under the new rules", installed, turns)
 	}
 }

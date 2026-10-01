@@ -286,7 +286,7 @@ func TestContract(t *testing.T) {
 		if _, pw2 := a.endpoint(); serverPID(a) == pid || alive(pid) || pw2 == pw || len(pw2) < 40 {
 			t.Fatalf("restart: pid %d -> %d (old alive %v), new per-boot password %v", pid, serverPID(a), alive(pid), pw2 != pw && len(pw2) >= 40)
 		}
-		got, err := s.Resume(ctx, spec.Launch)
+		got, err := s.Resume(ctx, spec.Launch, spec.Rules)
 		if err != nil || got != ref {
 			t.Fatalf("Resume = %v, %v; want %v", got, err, ref)
 		}
@@ -347,7 +347,7 @@ func TestContract(t *testing.T) {
 			t.Fatal(err)
 		}
 		waitFor(t, "restart after crash", func() bool { p := serverPID(a); return p != 0 && p != pid })
-		if got, err := s.Resume(ctx, spec.Launch); err != nil || got != ref {
+		if got, err := s.Resume(ctx, spec.Launch, spec.Rules); err != nil || got != ref {
 			t.Fatalf("Resume after crash = %v, %v", got, err)
 		}
 		// R-D evidence: plain serve keeps the session but does not resume the
@@ -428,7 +428,7 @@ func TestContract(t *testing.T) {
 			Rules: []loomharness.PermissionRule{{Action: "agent_create", Resource: "*", Effect: "deny"}}}); !isCode(err, "bad_request") {
 			t.Fatalf("unmappable rule Open = %v; want bad_request", err)
 		}
-		if _, err := a.Session(loomharness.NativeRef{NativeID: SessionID("policy-unmappable")}).Resume(ctx, spec.Launch); !isCode(err, "session_missing") {
+		if _, err := a.Session(loomharness.NativeRef{NativeID: SessionID("policy-unmappable")}).Resume(ctx, spec.Launch, spec.Rules); !isCode(err, "session_missing") {
 			t.Fatalf("unmappable rule created a session: %v", err)
 		}
 	})
@@ -474,10 +474,10 @@ func TestContract(t *testing.T) {
 		if err := a.Purge(ctx, owned); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.Resume(ctx, spec.Launch); !isCode(err, "session_missing") {
+		if _, err := s.Resume(ctx, spec.Launch, spec.Rules); !isCode(err, "session_missing") {
 			t.Fatalf("Resume after Purge = %v; want session_missing", err)
 		}
-		if _, err := a.Session(sibling).Resume(ctx, spec.Launch); err != nil {
+		if _, err := a.Session(sibling).Resume(ctx, spec.Launch, spec.Rules); err != nil {
 			t.Fatalf("sibling after Purge: %v", err)
 		}
 		if err := a.Purge(ctx, owned); err != nil {

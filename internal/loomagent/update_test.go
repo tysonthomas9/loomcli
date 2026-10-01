@@ -356,7 +356,7 @@ type movedSession struct {
 	to loomharness.NativeRef
 }
 
-func (s movedSession) Resume(context.Context, loomharness.Launch) (loomharness.NativeRef, error) {
+func (s movedSession) Resume(context.Context, loomharness.Launch, []loomharness.PermissionRule) (loomharness.NativeRef, error) {
 	return s.to, nil
 }
 

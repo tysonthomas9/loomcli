@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,6 +28,7 @@ type store struct {
 	envs     map[string]map[string]string // in memory only in OpenCode: lost on restart
 	envFail  bool
 	bareRuns int // prompts accepted while the session had no environment
+	patchErr bool
 }
 
 func newStore() *store {
@@ -76,6 +78,24 @@ func fakeServer(t *testing.T, st *store) *Client {
 			return
 		}
 		missing(w, r.PathValue("id"))
+	})
+	mux.HandleFunc("PATCH /api/session/{id}", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		s, ok := st.sessions[r.PathValue("id")]
+		switch {
+		case !ok:
+			missing(w, r.PathValue("id"))
+		case st.patchErr:
+			reply(w, 500, map[string]string{"_tag": "UnknownError", "message": "boom"})
+		default:
+			if p, ok := body["permissions"]; ok {
+				s["permissions"] = p
+			}
+			w.WriteHeader(204)
+		}
 	})
 	mux.HandleFunc("DELETE /api/session/{id}", func(w http.ResponseWriter, r *http.Request) {
 		st.mu.Lock()
@@ -246,11 +266,11 @@ func TestProtocolSessionMethods(t *testing.T) {
 		t.Fatalf("Move to a missing dir = %v", err)
 	}
 
-	if got, err := s.Resume(ctx, loomharness.Launch{Root: "/root"}); err != nil || got != ref {
+	if got, err := s.Resume(ctx, loomharness.Launch{Root: "/root"}, nil); err != nil || got != ref {
 		t.Fatalf("Resume = %+v, %v", got, err)
 	}
 	gone := c.Session(loomharness.NativeRef{NativeID: SessionID("agent-gone")})
-	if _, err := gone.Resume(ctx, loomharness.Launch{}); !errors.Is(err, loomharness.ErrSessionNotFound) {
+	if _, err := gone.Resume(ctx, loomharness.Launch{}, nil); !errors.Is(err, loomharness.ErrSessionNotFound) {
 		t.Fatalf("Resume of a missing session = %v", err)
 	}
 }
@@ -430,7 +450,7 @@ func TestProtocolSessionEnvironment(t *testing.T) {
 	}
 	s := c.Session(ref)
 	restart()
-	if _, err := s.Resume(ctx, loomharness.Launch{}); err != nil || st.envs[ref.NativeID] == nil {
+	if _, err := s.Resume(ctx, loomharness.Launch{}, nil); err != nil || st.envs[ref.NativeID] == nil {
 		t.Fatalf("Resume did not set the session environment: %v", err)
 	}
 	restart()
@@ -455,11 +475,58 @@ func TestProtocolSessionEnvironment(t *testing.T) {
 		if len(st.messages[ref.NativeID]) != n || st.bareRuns != 0 {
 			t.Fatalf("%s: the prompt reached OpenCode without a session environment", name)
 		}
-		if _, err := s.Resume(ctx, loomharness.Launch{}); err == nil {
+		if _, err := s.Resume(ctx, loomharness.Launch{}, nil); err == nil {
 			t.Fatalf("%s: Resume succeeded without a session environment", name)
 		}
 		if _, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-2-" + name, Dir: "/repo"}); err == nil {
 			t.Fatalf("%s: Open succeeded without a session environment", name)
 		}
+	}
+}
+
+func TestProtocolResumeInstallsPermissions(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	perms := func(id string) any {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		b, _ := json.Marshal(st.sessions[id]["permissions"])
+		return string(b)
+	}
+	allow := []loomharness.PermissionRule{{Action: "bash", Resource: "*", Effect: "allow"}}
+	deny := append(slices.Clone(allow), loomharness.PermissionRule{Action: "bash", Resource: "gh *", Effect: "deny"})
+	ref, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Dir: "/repo", Rules: allow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := c.Session(ref)
+	if _, err := s.Resume(ctx, loomharness.Launch{}, deny); err != nil {
+		t.Fatal(err)
+	}
+	if got := perms(ref.NativeID); got != `[{"action":"shell","effect":"allow","resource":"*"},{"action":"shell","effect":"deny","resource":"gh *"}]` {
+		t.Fatalf("Resume installed %s", got)
+	}
+	if _, err := s.Resume(ctx, loomharness.Launch{}, nil); err != nil || perms(ref.NativeID) != `[]` {
+		t.Fatalf("Resume with no rules left %s, %v; want them replaced", perms(ref.NativeID), err)
+	}
+	if _, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Dir: "/repo", Rules: deny}); err != nil ||
+		!strings.Contains(perms(ref.NativeID).(string), `"gh *"`) {
+		t.Fatalf("an Open repeat left %s, %v", perms(ref.NativeID), err)
+	}
+
+	st.patchErr = true
+	n := len(st.messages[ref.NativeID])
+	if _, err := s.Resume(ctx, loomharness.Launch{}, allow); err == nil || !strings.Contains(err.Error(), "install session permissions") {
+		t.Fatalf("Resume with a failed install = %v", err)
+	}
+	if _, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Dir: "/repo", Rules: allow}); err == nil {
+		t.Fatal("an Open repeat succeeded with a failed install")
+	}
+	if !strings.Contains(perms(ref.NativeID).(string), `"gh *"`) || len(st.messages[ref.NativeID]) != n {
+		t.Fatalf("a failed install changed the session: %s", perms(ref.NativeID))
+	}
+	if _, err := s.Resume(ctx, loomharness.Launch{}, []loomharness.PermissionRule{{Action: "webfetch", Resource: "*", Effect: "deny"}}); err == nil {
+		t.Fatal("Resume accepted a rule with no OpenCode action")
 	}
 }
