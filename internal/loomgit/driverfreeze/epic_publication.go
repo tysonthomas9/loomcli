@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -64,12 +65,23 @@ func epicRunChanges(ctx context.Context, journalStore *journal.SQLite, workspace
 		if task.Status != domain.TaskRunCompleted {
 			continue
 		}
-		revisions, err := journalStore.ListTaskRevisions(ctx, workspace, task.TaskID)
+		attempt := strings.TrimSpace(task.RuntimeMetadata["attempt_id"])
+		if attempt == "" {
+			return nil, fmt.Errorf("task run %s has no frozen attempt identity", task.TaskRunID)
+		}
+		revision, err := journalStore.RevisionByRequest(ctx, "driver:"+attempt)
+		if err != nil {
+			return nil, fmt.Errorf("task run %s has no frozen revision: %w", task.TaskRunID, err)
+		}
+		owner, err := journalStore.TaskForChange(ctx, workspace, revision.Change)
 		if err != nil {
 			return nil, err
 		}
-		if len(revisions) > 0 && !slices.Contains(changes, revisions[0].Change) {
-			changes = append(changes, revisions[0].Change)
+		if revision.Workspace != workspace || owner != task.TaskID || !revision.Ready {
+			return nil, fmt.Errorf("task run %s frozen revision belongs to another task or is incomplete", task.TaskRunID)
+		}
+		if !slices.Contains(changes, revision.Change) {
+			changes = append(changes, revision.Change)
 		}
 	}
 	return changes, nil

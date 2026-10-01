@@ -27,12 +27,13 @@ import (
 type epicForge struct{ prs []stackpublish.PR }
 
 type epicRunner struct{}
+type epicTaskRun struct{ id, run string }
 
 func (epicRunner) Run(context.Context, driver.RunRequest) (driver.RunResult, error) {
 	return driver.RunResult{Status: domain.DriverRunCompleted, Summary: "epic drained"}, nil
 }
 
-func finishEpicEntry(t *testing.T) {
+func finishEpicEntry(t *testing.T, tasks []epicTaskRun) *domain.DriverRun {
 	t.Helper()
 	ctx := context.Background()
 	runtime := memstore.New()
@@ -59,17 +60,19 @@ func finishEpicEntry(t *testing.T) {
 		DriverID: registered.Driver.DriverID, EpicID: "E", RunID: "epic-run", Payload: payload}); err != nil {
 		t.Fatal(err)
 	}
-	for _, task := range []string{"T", "T2"} {
+	for _, task := range tasks {
 		if _, err := runtime.TaskRuns().Create(ctx, store.TaskRunCreate{WorkspaceKey: "W",
-			TaskRunID: "run-" + task, DriverRunID: "epic-run", TaskID: task, Status: domain.TaskRunCompleted}); err != nil {
+			TaskRunID: task.run, DriverRunID: "epic-run", TaskID: task.id, Status: domain.TaskRunCompleted,
+			RuntimeMetadata: map[string]string{"attempt_id": task.run + "-a1"}}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	result, err := (&driver.Executor{Store: runtime, WorkspaceKey: "W", RunID: "epic-run", WorkDir: root,
 		NodeID: "node", LeaseID: "lease", Runner: epicRunner{}, HeartbeatInterval: -1}).RunOnce(ctx)
-	if err != nil || result.Final == nil || result.Final.Status != domain.DriverRunCompleted {
+	if err != nil || result.Final == nil {
 		t.Fatalf("epic finish = %+v, %v", result, err)
 	}
+	return result.Final
 }
 
 func (forge *epicForge) ListStackPRs(_ context.Context, _, _, prefix string) ([]stackpublish.PR, error) {
@@ -112,7 +115,7 @@ func freezeSecondEpicTask(t *testing.T, area journal.WorkingArea, base string) l
 		t.Fatal(err)
 	}
 	revision, err := driverfreeze.FreezeAt(context.Background(), filepath.Join(os.Getenv("LOOM_CONFIG_DIR"), "loomgit", "store.db"),
-		driverfreeze.Request{Workspace: "W", Task: "T2", Repo: "repo", Attempt: "epic-task-2",
+		driverfreeze.Request{Workspace: "W", Task: "T2", Repo: "repo", Attempt: "run-T2-a1",
 			Worktree: area.Path, Base: base, Patch: []byte(patch + "\n"), Outcome: "completed",
 			AuthorKind: "agent", AuthorID: "worker"})
 	if err != nil {
@@ -160,7 +163,9 @@ func TestEpicFrozenTasksHTTPApprovalPublishesLinearStack(t *testing.T) {
 	ctx, store, area, base, first := bridgeApprovalFixture(t)
 	second := freezeSecondEpicTask(t, area, base)
 	prepareEpicPublication(t, store, area, base)
-	finishEpicEntry(t)
+	if run := finishEpicEntry(t, []epicTaskRun{{"T", "task-run"}, {"T2", "run-T2"}}); run.Status != domain.DriverRunCompleted {
+		t.Fatalf("epic finish = %+v", run)
+	}
 	reopened, err := journal.OpenSQLite(filepath.Join(os.Getenv("LOOM_CONFIG_DIR"), "loomgit", "store.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -192,5 +197,20 @@ func TestEpicFrozenTasksHTTPApprovalPublishesLinearStack(t *testing.T) {
 	}
 	if len(forge.prs) != 2 || forge.prs[0].Base != "main" || forge.prs[1].Base != forge.prs[0].Head {
 		t.Fatalf("published PR chain = %+v", forge.prs)
+	}
+}
+
+func TestEpicRunCannotReuseEarlierTaskRevision(t *testing.T) {
+	ctx, journalStore, _, _, earlier := bridgeApprovalFixture(t)
+	if !earlier.Ready {
+		t.Fatal("earlier task revision is not ready")
+	}
+	run := finishEpicEntry(t, []epicTaskRun{{"T", "current-run"}})
+	if run.Status != domain.DriverRunNeedsReview || run.ErrorClass != "epic_pr_delivery_failed" {
+		t.Fatalf("stale revision allowed epic delivery: %+v", run)
+	}
+	intents, err := journalStore.PendingEpicPublications(ctx)
+	if err != nil || len(intents) != 0 {
+		t.Fatalf("stale run recorded publication intent: %+v, %v", intents, err)
 	}
 }
