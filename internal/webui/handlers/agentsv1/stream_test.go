@@ -154,6 +154,10 @@ func TestAgentSSETokenAuth(t *testing.T) {
 	if _, status, _ := e.open(t, "agents=a1"); status != http.StatusUnauthorized {
 		t.Fatalf("no token = %d", status)
 	}
+	zz, _ := tokens.Generate("u", "ws")
+	if _, status, code := e.open(t, "agents=zz&token="+zz); status != http.StatusNotFound || code != "agent_not_found" {
+		t.Fatalf("unknown agent with a fresh token = %d %q", status, code)
+	}
 	if _, status, _ := e.open(t, "agents=a1&token=forged.x"); status != http.StatusUnauthorized {
 		t.Fatalf("forged token = %d", status)
 	}
@@ -257,6 +261,8 @@ func TestAgentSSECursorErrors(t *testing.T) {
 	for _, tc := range []struct{ query, code string }{
 		{"agents=p1&after=p1:5", "cursor_expired"},
 		{"agents=zz&after=zz:0", "agent_not_found"},
+		{"agents=zz", "agent_not_found"},
+		{"agents=a1,zz&after=a1:0", "agent_not_found"},
 		{"", ""},
 		{"agents=a1&after=a1", ""},
 		{"agents=a1&after=a1:x", ""},

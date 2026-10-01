@@ -69,6 +69,11 @@ func (h *Handler) subscribe(ctx context.Context, w http.ResponseWriter, r *http.
 		return nil
 	}
 	req, err := subscribeRequest(r)
+	for _, id := range req.AgentIDs {
+		if _, ok := req.Cursors[id]; !ok && err == nil {
+			_, err = s.Get(ctx, id) // Subscribe checks only agents with a cursor
+		}
+	}
 	if err == nil {
 		var sub *loomagent.Subscription
 		if sub, err = s.Subscribe(ctx, req); err == nil {
