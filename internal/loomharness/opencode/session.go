@@ -42,32 +42,16 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 	if len(rules) > 0 {
 		body["permissions"] = rules
 	}
-	// One Open per session id at a time (per id, not global), so "did not
-	// exist before" holds from the GET through any cleanup: otherwise a
-	// concurrent Open for the same key could create the session in between
-	// and this one's cleanup would delete it.
-	mu, _ := c.opening.LoadOrStore(ref.NativeID, new(sync.Mutex))
-	mu.(*sync.Mutex).Lock()
-	defer mu.(*sync.Mutex).Unlock()
+	defer c.lockOpen(ref.NativeID)()
 	s := c.Session(ref)
-	// A repeat Open finds the session an earlier one made; b30c4d0 answers a
-	// repeat POST with success, so only a GET tells whether this Open made it.
-	existed := true
-	if err := c.call(ctx, "GET", s.path(""), nil, nil); errors.Is(err, loomharness.ErrSessionNotFound) {
-		existed = false
-	} else if err != nil {
-		return loomharness.NativeRef{}, err
-	}
-	if err := c.call(ctx, "POST", "/api/session", body, nil); err != nil {
-		if !isCode(err, "input_id_conflict") {
-			if existed {
-				return loomharness.NativeRef{}, err
-			}
-			// The POST may have failed after OpenCode created the session
-			// (a timeout, a 5xx after commit): remove it if it is there.
-			return c.discard(ref, err)
+	existed, err := c.create(ctx, s, body)
+	if err != nil {
+		if existed {
+			return loomharness.NativeRef{}, err
 		}
-		existed = true
+		// The POST may have failed after OpenCode created the session (a
+		// timeout, a 5xx after commit): remove it if it is there.
+		return c.discard(ref, err)
 	}
 	// A repeat may find the session holding older rules, so always install.
 	err = s.install(ctx, rules)
@@ -82,6 +66,33 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 		return loomharness.NativeRef{}, err // not this Open's to remove
 	}
 	return c.discard(ref, err)
+}
+
+// create POSTs the session. existed reports that it was there before this
+// Open: a repeat Open finds the session an earlier one made, and b30c4d0
+// answers a repeat POST with success, so only a GET tells whether this Open
+// made it. A failed GET reports existed, as nothing was created.
+func (c *Client) create(ctx context.Context, s *Session, body map[string]any) (existed bool, err error) {
+	if err := c.call(ctx, "GET", s.path(""), nil, nil); err != nil && !errors.Is(err, loomharness.ErrSessionNotFound) {
+		return true, err
+	} else if err == nil {
+		existed = true
+	}
+	err = c.call(ctx, "POST", "/api/session", body, nil)
+	if isCode(err, "input_id_conflict") {
+		return true, nil
+	}
+	return existed, err
+}
+
+// lockOpen allows one Open per session id at a time (per id, not global),
+// so "did not exist before" holds from the GET through any cleanup:
+// otherwise a concurrent Open for the same key could create the session in
+// between and this one's cleanup would delete it. It returns the unlock.
+func (c *Client) lockOpen(id string) func() {
+	mu, _ := c.opening.LoadOrStore(id, new(sync.Mutex))
+	mu.(*sync.Mutex).Lock()
+	return mu.(*sync.Mutex).Unlock
 }
 
 // discard deletes a session a failed Open created, so the failure leaves
