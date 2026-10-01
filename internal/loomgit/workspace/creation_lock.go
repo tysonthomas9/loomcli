@@ -28,6 +28,7 @@ func openCreationLock(workspace string, nonblocking bool) (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
+	//nolint:gosec // The filename is a hash of the workspace key under the configured Loom directory.
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
