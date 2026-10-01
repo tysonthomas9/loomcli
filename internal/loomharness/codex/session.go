@@ -191,7 +191,8 @@ func (s *Session) turns(ctx context.Context, p protocol.ThreadTurnsListParams) (
 // Reply answers an open ask on this thread with codex's own decision. An
 // approval allowed Always is codex's session-wide grant: acceptForSession
 // (codex's session approval cache) or a permissions grant scoped "session";
-// a command ask that does not offer acceptForSession is accepted once.
+// Always on a command ask that does not offer acceptForSession fails with
+// ErrUnsupported and leaves the ask open.
 // A question gets r.Answer: request_user_input as its first question's
 // answer, an MCP form elicitation as its first required field. With no
 // answer and no Allow, an elicitation is declined.
@@ -227,7 +228,8 @@ func answer(ask Message, r loomharness.Reply) (any, error) {
 	}
 	switch ask.Method {
 	case "item/commandExecution/requestApproval":
-		return protocol.CommandExecutionRequestApprovalResponse{Decision: quote(offered(ask, decision))}, nil
+		d, err := offered(ask, decision)
+		return protocol.CommandExecutionRequestApprovalResponse{Decision: quote(d)}, err
 	case "item/fileChange/requestApproval":
 		return protocol.FileChangeRequestApprovalResponse{Decision: quote(decision)}, nil
 	case "item/permissions/requestApproval":
@@ -284,10 +286,11 @@ func elicitation(ask Message, r loomharness.Reply) (protocol.McpServerElicitatio
 	return accept, fmt.Errorf("codex: elicitation %s (mode %q) cannot be answered with text", askID(ask.ID), p.Mode)
 }
 
-// offered narrows decision to what the command ask lists in its
-// availableDecisions (all, when it lists none): a session grant codex does
-// not offer becomes accept, a decline it does not offer becomes cancel.
-func offered(ask Message, decision string) string {
+// offered checks decision against what the command ask lists in its
+// availableDecisions (all, when it lists none). A session grant codex does
+// not offer is ErrUnsupported, never narrowed; a decline it does not offer
+// becomes cancel.
+func offered(ask Message, decision string) (string, error) {
 	var p struct {
 		AvailableDecisions []json.RawMessage `json:"availableDecisions"`
 	}
@@ -297,13 +300,13 @@ func offered(ask Message, decision string) string {
 	}
 	switch {
 	case has(decision):
-		return decision
+		return decision, nil
 	case decision == "acceptForSession":
-		return "accept"
+		return "", fmt.Errorf("codex: command ask %s does not offer an always-allow (acceptForSession): %w", askID(ask.ID), errors.ErrUnsupported)
 	case decision == "decline" && has("cancel"):
-		return "cancel"
+		return "cancel", nil
 	}
-	return decision
+	return decision, nil
 }
 
 func quote(s string) json.RawMessage {

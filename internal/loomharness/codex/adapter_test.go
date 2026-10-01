@@ -2,7 +2,6 @@ package codex
 
 import (
 	"bufio"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -593,7 +592,8 @@ func TestCodexRefusesOtherServerRequests(t *testing.T) {
 
 // TestCodexReply answers each ask kind through the fake app-server: a
 // question is ItemKind question, an approval approval; Always is codex's
-// session grant where the ask offers one and once where it does not; a
+// session grant where the ask offers one and ErrUnsupported, with the ask
+// still open, where it does not; a
 // question gets the answer; an answered or foreign ask is refused.
 func TestCodexReply(t *testing.T) {
 	f := newFixture(t, "codex-cli 0.157.1")
@@ -617,7 +617,7 @@ func TestCodexReply(t *testing.T) {
 		want                       string // the result codex gets; "" when Reply fails
 	}{
 		{"command always", "item/commandExecution/requestApproval", `{"threadId":"t-1"}`, "approval", always, `{"decision":"acceptForSession"}`},
-		{"command always not offered", "item/commandExecution/requestApproval", `{"threadId":"t-1","availableDecisions":["accept","cancel"]}`, "approval", always, `{"decision":"accept"}`},
+		{"command always not offered", "item/commandExecution/requestApproval", `{"threadId":"t-1","availableDecisions":["accept","cancel"]}`, "approval", always, ""},
 		{"command deny not offered", "item/commandExecution/requestApproval", `{"threadId":"t-1","availableDecisions":["accept","cancel"]}`, "approval", deny, `{"decision":"cancel"}`},
 		{"file once", "item/fileChange/requestApproval", `{"threadId":"t-1"}`, "approval", allow, `{"decision":"accept"}`},
 		{"file always", "item/fileChange/requestApproval", `{"threadId":"t-1"}`, "approval", always, `{"decision":"acceptForSession"}`},
@@ -647,9 +647,12 @@ func TestCodexReply(t *testing.T) {
 			err := s.Reply(ctx, "srv-1", c.r)
 			if c.want == "" {
 				if err == nil {
-					t.Fatal("Reply answered an ask Loom cannot answer")
+					t.Fatal("Reply answered an ask Loom cannot answer as asked")
 				}
-				err = s.Reply(ctx, "srv-1", deny) // the ask stays open: it can still be declined
+				if c.r.Always && !errors.Is(err, errors.ErrUnsupported) {
+					t.Fatalf("Always not offered: %v, want ErrUnsupported", err)
+				}
+				err = s.Reply(ctx, "srv-1", deny) // the ask stays open: it can still be denied
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -657,7 +660,13 @@ func TestCodexReply(t *testing.T) {
 			if err := s.Reply(ctx, "srv-1", c.r); err == nil {
 				t.Fatal("an answered ask was answered again")
 			}
-			want := cmp.Or(c.want, `{"action":"decline"}`)
+			want := c.want
+			if want == "" { // the follow-up denial
+				want = `{"action":"decline"}`
+				if c.r.Always {
+					want = `{"decision":"cancel"}`
+				}
+			}
 			if r := <-got; string(r) != want {
 				t.Fatalf("codex got %s, want %s", r, want)
 			}
