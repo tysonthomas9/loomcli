@@ -12,11 +12,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agentprofile"
-	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
@@ -84,6 +84,14 @@ func fakeClaude() {
 					"capabilities": []string{"interrupt_receipt_v1"}})
 			}
 			n++
+			if strings.Contains(in.Message.Content, "spawn") {
+				// A tool child that leaves Claude's process group, as a
+				// detached shell command would.
+				child := exec.Command("sleep", "300")                  //nolint:norawexec // a real orphan-able child is what the test reaps
+				child.SysProcAttr = &syscall.SysProcAttr{Setsid: true} //nolint:norawexec // see above
+				_ = child.Start()
+				_ = os.WriteFile(os.Getenv("LOOM_FAKE_CLAUDE_CHILD"), []byte(fmt.Sprint(child.Process.Pid)), 0o600)
+			}
 			if strings.Contains(in.Message.Content, "hang") {
 				running = true
 				_ = out.Encode(map[string]any{"type": "stream_event", "event": map[string]any{"type": "ping"}})
@@ -326,8 +334,8 @@ func claudeOnPath(t *testing.T, version string) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	supervisor.ResetHarnessVersionCache()
-	t.Cleanup(supervisor.ResetHarnessVersionCache)
+	agentprofile.ResetVersionCache()
+	t.Cleanup(agentprofile.ResetVersionCache)
 }
 
 // writeProfile provisions and blesses .loom/agent-profiles/<key>/claude.
@@ -443,7 +451,7 @@ func TestClaudeOAuthTokenExport(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(agentprofile.Dir(project, "empty"), "claude", "oauth-token"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LaunchFor(project, "empty"); !errors.Is(err, supervisor.ErrProfileTokenUnreadable) {
+	if _, err := LaunchFor(project, "empty"); !errors.Is(err, agentprofile.ErrTokenUnreadable) {
 		t.Fatalf("empty token file = %v, want ErrProfileTokenUnreadable", err)
 	}
 }
@@ -456,7 +464,7 @@ func TestClaudeLeadInheritedProfileRepair(t *testing.T) {
 	claudeOnPath(t, "2.1.286")
 	project := t.TempDir()
 	writeProfile(t, project, "drift", "2.1.285", map[string]string{"settings.json": "{}"})
-	if _, err := LaunchFor(project, "drift"); !errors.Is(err, supervisor.ErrProfileVersionDrift) {
+	if _, err := LaunchFor(project, "drift"); !errors.Is(err, agentprofile.ErrVersionDrift) {
 		t.Fatalf("drifted profile = %v, want ErrProfileVersionDrift", err)
 	}
 	t.Setenv("CLAUDE_CONFIG_DIR", "/operator/own")
@@ -472,7 +480,7 @@ func TestClaudeProfileHelpersAfterCutover(t *testing.T) {
 	claudeOnPath(t, "2.1.285")
 	project := t.TempDir()
 	writeProfile(t, project, "a", "2.1.285", map[string]string{"settings.json": "{}", "oauth-token": "tok"})
-	dir, assignments, err := supervisor.ProfileHarnessEnv(project, "a", "claude")
+	dir, assignments, err := agentprofile.HarnessEnv(project, "a", "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -532,5 +540,53 @@ func TestClaudeProcessStripsGitHubTokens(t *testing.T) {
 	}
 	if os.Getenv("GH_TOKEN") != "gh-secret" || os.Getenv("GITHUB_TOKEN_FILE") != "/secret/file" {
 		t.Fatal("the host lost its GitHub credentials")
+	}
+}
+
+func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
+
+// TestClaudeCloseReapsOrphanedTools: a tool child that left Claude's process
+// group is stopped by Close even though Claude exits at once on SIGTERM, and
+// when Claude dies on its own.
+func TestClaudeCloseReapsOrphanedTools(t *testing.T) {
+	prev := trackEvery
+	trackEvery = 20 * time.Millisecond
+	t.Cleanup(func() { trackEvery = prev })
+	for _, crash := range []bool{false, true} {
+		pidFile := filepath.Join(t.TempDir(), "child.pid")
+		f, cfg := newFixture(t, "2.1.285", "LOOM_FAKE_CLAUDE_CHILD="+pidFile)
+		p := newTestProcess(t, cfg, ProcessSpec{SessionID: SessionID(fmt.Sprint("orphan", crash)), Launch: loomharness.Launch{Root: f.root}, Dir: t.TempDir()})
+		ctx := context.Background()
+		if err := p.Prompt(ctx, "k1", "spawn"); err != nil {
+			t.Fatal(err)
+		}
+		f.next(t, "result")
+		raw, err := os.ReadFile(pidFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var child int
+		_, _ = fmt.Sscan(string(raw), &child)
+		t.Cleanup(func() { _ = syscall.Kill(child, syscall.SIGKILL) })
+		if child == 0 || !alive(child) {
+			t.Fatalf("no live tool child (%q)", raw)
+		}
+		time.Sleep(100 * time.Millisecond) // let the tracker record it
+		if crash {
+			p.mu.Lock()
+			exited := p.exited
+			p.mu.Unlock()
+			if err := p.Prompt(ctx, "k2", "die"); err != nil {
+				t.Fatal(err)
+			}
+			<-exited
+		} else if err := p.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+		for deadline := time.Now().Add(5 * time.Second); alive(child) && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		}
+		if alive(child) {
+			t.Fatalf("crash=%v: the orphaned tool child %d survived", crash, child)
+		}
 	}
 }

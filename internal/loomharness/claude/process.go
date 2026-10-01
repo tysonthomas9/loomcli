@@ -22,13 +22,18 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
+	"github.com/tysonthomas9/loomcli/internal/agentprofile"
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
+	"github.com/tysonthomas9/loomcli/internal/loomharness/proctree"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
-// stopGrace is how long Close waits after SIGTERM before SIGKILL.
-var stopGrace = 10 * time.Second
+// stopGrace is how long Close waits after SIGTERM before SIGKILL; trackEvery
+// is how often the process's descendants are recorded.
+var (
+	stopGrace  = 10 * time.Second
+	trackEvery = time.Second
+)
 
 // Config configures every process of one Claude harness.
 type Config struct {
@@ -68,7 +73,7 @@ func SessionID(key string) string {
 // and login are inherited unchanged. Root is the same root transcript
 // discovery and doctor resolve (sessions.ClaudeConfigDirFor).
 func LaunchFor(projectDir, profileKey string) (loomharness.Launch, error) {
-	dir, assignments, err := supervisor.ProfileHarnessEnv(projectDir, profileKey, "claude")
+	dir, assignments, err := agentprofile.HarnessEnv(projectDir, profileKey, "claude")
 	if err != nil {
 		return loomharness.Launch{}, fmt.Errorf("claude profile %q: %w", profileKey, err)
 	}
@@ -102,6 +107,7 @@ type Process struct {
 	inited  chan struct{} // closed by system/init
 	first   chan struct{} // closed by the first frame
 	stderr  *tail
+	tree    *proctree.Tree // the running process's recorded descendants
 	caps    []string
 	busy    bool
 	pending map[string]chan controlResponse
@@ -225,17 +231,19 @@ func (p *Process) start(ctx context.Context, resume bool) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("claude: start: %w: %w", loomharness.ErrUnavailable, err)
 	}
+	tree := proctree.New()
 	p.mu.Lock()
-	p.cmd, p.stdin, p.stderr, p.caps, p.warning = cmd, stdin, stderr, nil, vc.Warning()
+	p.cmd, p.stdin, p.stderr, p.caps, p.warning, p.tree = cmd, stdin, stderr, nil, vc.Warning(), tree
 	p.exited, p.inited, p.first = make(chan struct{}), make(chan struct{}), make(chan struct{})
 	exited, inited, first := p.exited, p.inited, p.first
 	p.mu.Unlock()
-	go p.read(cmd, stdout, exited, inited, first)
+	go tree.Track(cmd.Process.Pid, exited, trackEvery)
+	go p.read(cmd, stdout, tree, exited, inited, first)
 	return nil
 }
 
 // read handles every stdout frame, then reaps the process.
-func (p *Process) read(cmd *exec.Cmd, stdout io.Reader, exited, inited, first chan struct{}) {
+func (p *Process) read(cmd *exec.Cmd, stdout io.Reader, tree *proctree.Tree, exited, inited, first chan struct{}) {
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 64*1024), 64*1024*1024)
 	for sc.Scan() {
@@ -267,7 +275,15 @@ func (p *Process) read(cmd *exec.Cmd, stdout io.Reader, exited, inited, first ch
 			p.cfg.OnFrame(Frame{Type: f.Type, Subtype: f.Subtype, Raw: raw})
 		}
 	}
+	// stdout closed: Claude is exiting. Tool processes it started may outlive
+	// it, inside or outside its process group. Record them, signal the group
+	// while the unreaped leader still holds its id (so it cannot be reused),
+	// and reap exactly the recorded tree (SIGTERM, then SIGKILL) before
+	// reporting the exit.
+	tree.Record(cmd.Process.Pid)
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
 	_ = cmd.Wait()
+	tree.Reap(stopGrace)
 	p.mu.Lock()
 	if p.cmd == cmd {
 		p.cmd, p.busy = nil, false
@@ -354,7 +370,9 @@ func (p *Process) Interrupt(ctx context.Context) (bool, error) {
 }
 
 // Close stops this agent's process (SIGTERM, then SIGKILL of its group after
-// stopGrace). Its native session is kept, so the next Prompt resumes it.
+// stopGrace) and, before returning, every recorded descendant still running
+// (proctree), even when Claude itself exits at once. Its native session is
+// kept, so the next Prompt resumes it.
 func (p *Process) Close(context.Context) error {
 	p.launchMu.Lock()
 	defer p.launchMu.Unlock()
@@ -364,12 +382,13 @@ func (p *Process) Close(context.Context) error {
 
 func (p *Process) stop() {
 	p.mu.Lock()
-	cmd, exited := p.cmd, p.exited
+	cmd, exited, tree := p.cmd, p.exited, p.tree
 	p.closing = cmd != nil
 	p.mu.Unlock()
 	if cmd == nil {
 		return
 	}
+	tree.Record(cmd.Process.Pid)
 	_ = cmd.Process.Signal(syscall.SIGTERM)
 	select {
 	case <-exited:
