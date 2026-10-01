@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  applyRevision,
   getTaskRevisions,
   submitRevisionVerdict,
   type ReviewRevision,
@@ -19,6 +20,7 @@ export function RevisionsSection({
   const [busy, setBusy] = useState("");
   const [override, setOverride] = useState("");
   const [reason, setReason] = useState("");
+  const [follow, setFollow] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let active = true;
@@ -49,15 +51,36 @@ export function RevisionsSection({
     verdict: "approve" | "reject" | "override",
     detail = "",
   ) {
-    setBusy(`${revision.change_id}:${revision.number}`);
+    const key = `${revision.change_id}:${revision.number}`;
+    setBusy(key);
     setError("");
     try {
-      await submitRevisionVerdict(workspaceId, revision, verdict, detail);
+      const status = await submitRevisionVerdict(
+        workspaceId,
+        revision,
+        verdict,
+        detail,
+      );
+      if (status) setFollow((prev) => ({ ...prev, [key]: status }));
       setRevisions(await getTaskRevisions(workspaceId, taskId));
       setOverride("");
       setReason("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not record verdict");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function apply(revision: ReviewRevision) {
+    const key = `${revision.change_id}:${revision.number}`;
+    setBusy(key);
+    setError("");
+    try {
+      await applyRevision(workspaceId, revision);
+      setFollow((prev) => ({ ...prev, [key]: "applied" }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not apply revision");
     } finally {
       setBusy("");
     }
@@ -87,6 +110,19 @@ export function RevisionsSection({
                 ? "Incomplete capture"
                 : (revision.verdict ?? "Awaiting review")}
             </div>
+            {follow[key] === "approved_waiting_for_working_area" && (
+              <div className={styles.actions}>
+                <span>Approved: Apply to create the lead working area</span>
+                <button
+                  type="button"
+                  disabled={Boolean(busy)}
+                  onClick={() => void apply(revision)}
+                >
+                  Apply
+                </button>
+              </div>
+            )}
+            {follow[key] === "applied" && <div>Applied</div>}
             <div className={styles.actions}>
               <button
                 type="button"

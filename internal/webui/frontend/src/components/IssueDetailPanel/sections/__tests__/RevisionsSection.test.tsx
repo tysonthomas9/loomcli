@@ -5,11 +5,15 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RevisionsSection } from "../RevisionsSection";
 
-const { getTaskRevisions, submitRevisionVerdict } = vi.hoisted(() => ({
-  getTaskRevisions: vi.fn(),
-  submitRevisionVerdict: vi.fn(),
-}));
+const { applyRevision, getTaskRevisions, submitRevisionVerdict } = vi.hoisted(
+  () => ({
+    applyRevision: vi.fn(),
+    getTaskRevisions: vi.fn(),
+    submitRevisionVerdict: vi.fn(),
+  }),
+);
 vi.mock("@/api/git/revisions", () => ({
+  applyRevision,
   getTaskRevisions,
   submitRevisionVerdict,
 }));
@@ -27,6 +31,26 @@ describe("RevisionsSection", () => {
     vi.clearAllMocks();
     getTaskRevisions.mockResolvedValue([revision]);
     submitRevisionVerdict.mockResolvedValue(undefined);
+    applyRevision.mockResolvedValue(undefined);
+  });
+
+  it("offers Apply when approval waits for the lead working area", async () => {
+    submitRevisionVerdict.mockResolvedValue(
+      "approved_waiting_for_working_area",
+    );
+    render(<RevisionsSection workspaceId="W" taskId="T" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    expect(
+      await screen.findByText(
+        "Approved: Apply to create the lead working area",
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(await screen.findByText("Applied")).toBeInTheDocument();
+    expect(applyRevision).toHaveBeenCalledWith("W", revision);
+    expect(
+      screen.queryByText("Approved: Apply to create the lead working area"),
+    ).not.toBeInTheDocument();
   });
 
   it("records approval for the displayed revision and exact head", async () => {
