@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
+	"github.com/tysonthomas9/loomcli/internal/gitrunner"
 )
 
 // Repo is the local filesystem view of a workspace repository.
@@ -150,6 +151,12 @@ func EnsureGitWorktree(repoPath, targetPath, branchName string) error {
 // targetPath from the latest available remote/defaultBranch ref. Existing
 // worktrees are left untouched.
 func EnsureDetachedGitWorktreeFromBranch(repoPath, targetPath, remoteName, defaultBranch string) error {
+	return EnsureDetachedGitWorktreeFromBranchWith(context.Background(), runGit, repoPath, targetPath, remoteName, defaultBranch)
+}
+
+// EnsureDetachedGitWorktreeFromBranchWith is EnsureDetachedGitWorktreeFromBranch
+// with every git command run through git.
+func EnsureDetachedGitWorktreeFromBranchWith(ctx context.Context, git GitFunc, repoPath, targetPath, remoteName, defaultBranch string) error {
 	if _, err := os.Stat(filepath.Join(targetPath, ".git")); err == nil {
 		return nil
 	}
@@ -157,7 +164,7 @@ func EnsureDetachedGitWorktreeFromBranch(repoPath, targetPath, remoteName, defau
 		return fmt.Errorf("creating worktree parent: %w", err)
 	}
 
-	baseRef, err := resolveFreshBaseRef(repoPath, remoteName, defaultBranch)
+	baseRef, err := resolveFreshBaseRef(ctx, git, repoPath, remoteName, defaultBranch)
 	if err != nil {
 		return err
 	}
@@ -165,7 +172,7 @@ func EnsureDetachedGitWorktreeFromBranch(repoPath, targetPath, remoteName, defau
 	if baseRef != "" {
 		args = append(args, baseRef)
 	}
-	_, err = runGit(context.Background(), repoPath, args...)
+	_, err = git(ctx, repoPath, args...)
 	return err
 }
 
@@ -304,6 +311,13 @@ func syncPRWorktree(ctx context.Context, repoPath, targetPath, checkout, expectH
 // remote/defaultBranch ref when available, falling back to the local branch.
 // Existing worktrees are left untouched.
 func EnsureGitWorktreeFromBranch(repoPath, targetPath, branchName, remoteName, defaultBranch string) error {
+	return EnsureGitWorktreeFromBranchWith(context.Background(), runGit, repoPath, targetPath, branchName, remoteName, defaultBranch)
+}
+
+// EnsureGitWorktreeFromBranchWith is EnsureGitWorktreeFromBranch with its
+// worktree and base-ref git commands run through git. Branch inspection and
+// recovery still use gitbranch.
+func EnsureGitWorktreeFromBranchWith(ctx context.Context, git GitFunc, repoPath, targetPath, branchName, remoteName, defaultBranch string) error {
 	if _, err := os.Stat(filepath.Join(targetPath, ".git")); err == nil {
 		return nil
 	}
@@ -320,33 +334,33 @@ func EnsureGitWorktreeFromBranch(repoPath, targetPath, branchName, remoteName, d
 		if err != nil {
 			return err
 		}
-		return addBranchWorktree(repoPath, targetPath, branchName, recovery.BaseSHA)
+		return addBranchWorktree(ctx, git, repoPath, targetPath, branchName, recovery.BaseSHA)
 	}
 
-	baseRef, err := resolveFreshBaseRef(repoPath, remoteName, defaultBranch)
+	baseRef, err := resolveFreshBaseRef(ctx, git, repoPath, remoteName, defaultBranch)
 	if err != nil {
 		return err
 	}
-	return addBranchWorktree(repoPath, targetPath, branchName, baseRef)
+	return addBranchWorktree(ctx, git, repoPath, targetPath, branchName, baseRef)
 }
 
-func addBranchWorktree(repoPath, targetPath, branchName, baseRef string) error {
+func addBranchWorktree(ctx context.Context, git GitFunc, repoPath, targetPath, branchName, baseRef string) error {
 	args := []string{"worktree", "add", targetPath, "-b", branchName}
 	if baseRef != "" {
 		args = append(args, baseRef)
 	}
-	if out, err := runGit(context.Background(), repoPath, args...); err == nil {
+	if out, err := git(ctx, repoPath, args...); err == nil {
 		return nil
 	} else if !branchAlreadyExists(out, err) {
 		return err
 	}
-	if _, err := runGit(context.Background(), repoPath, "worktree", "add", targetPath, branchName); err != nil {
+	if _, err := git(ctx, repoPath, "worktree", "add", targetPath, branchName); err != nil {
 		return err
 	}
 	return nil
 }
 
-func resolveFreshBaseRef(repoPath, remoteName, defaultBranch string) (string, error) {
+func resolveFreshBaseRef(ctx context.Context, git GitFunc, repoPath, remoteName, defaultBranch string) (string, error) {
 	defaultBranch = strings.TrimSpace(defaultBranch)
 	if defaultBranch == "" {
 		return "", nil
@@ -356,9 +370,9 @@ func resolveFreshBaseRef(repoPath, remoteName, defaultBranch string) (string, er
 		remoteName = "origin"
 	}
 
-	if _, err := runGit(context.Background(), repoPath, "remote", "get-url", remoteName); err == nil {
-		if _, err := runGit(context.Background(), repoPath, "fetch", remoteName, defaultBranch); err != nil {
-			if _, localErr := runGit(context.Background(), repoPath, "rev-parse", "--verify", defaultBranch); localErr == nil {
+	if _, err := git(ctx, repoPath, "remote", "get-url", remoteName); err == nil {
+		if _, err := git(ctx, repoPath, "fetch", remoteName, defaultBranch); err != nil {
+			if _, localErr := git(ctx, repoPath, "rev-parse", "--verify", defaultBranch); localErr == nil {
 				return defaultBranch, nil
 			}
 			return "", fmt.Errorf("fetch base branch %q from %q: %w", defaultBranch, remoteName, err)
@@ -366,10 +380,10 @@ func resolveFreshBaseRef(repoPath, remoteName, defaultBranch string) (string, er
 		return remoteName + "/" + defaultBranch, nil
 	}
 
-	if _, err := runGit(context.Background(), repoPath, "fetch", remoteName, defaultBranch); err == nil {
+	if _, err := git(ctx, repoPath, "fetch", remoteName, defaultBranch); err == nil {
 		return remoteName + "/" + defaultBranch, nil
 	}
-	if _, err := runGit(context.Background(), repoPath, "rev-parse", "--verify", defaultBranch); err != nil {
+	if _, err := git(ctx, repoPath, "rev-parse", "--verify", defaultBranch); err != nil {
 		return "", fmt.Errorf("resolve base branch %q: %w", defaultBranch, err)
 	}
 	return defaultBranch, nil
@@ -427,15 +441,13 @@ func RecordPRReviewContext(
 	return baseSHA, nil
 }
 
+// GitFunc runs one git command in dir. Callers that inject their own runner
+// (for example gitrunner.Runner.Run) pass it to the ...With worktree helpers.
+type GitFunc func(ctx context.Context, dir string, args ...string) (string, error)
+
+// runGit returns raw output on success and on error.
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // G204: fixed git executable; args are controlled by internal worktree callers.
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return string(out), fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return string(out), nil
+	return gitrunner.Output(ctx, dir, args...)
 }
 
 // GitRemoteURL returns the configured URL of the named remote (default "origin")

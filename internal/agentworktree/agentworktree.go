@@ -109,14 +109,14 @@ func (w *Worktrees) Ensure(ctx context.Context, s Spec) (Worktree, error) {
 		return Worktree{}, err
 	}
 	if s.Detached {
-		err = localworkspace.EnsureDetachedGitWorktreeFromBranch(s.Repo, path, "", s.BaseRef)
+		err = localworkspace.EnsureDetachedGitWorktreeFromBranchWith(ctx, w.git.Run, s.Repo, path, "", s.BaseRef)
 	} else {
 		if s.BaseRef == "" {
 			if _, verr := w.git.Run(ctx, s.Repo, "rev-parse", "--verify", "refs/heads/"+s.Branch); verr != nil {
 				return Worktree{}, fmt.Errorf("agentworktree: new branch %q needs BaseRef", s.Branch)
 			}
 		}
-		err = localworkspace.EnsureGitWorktreeFromBranch(s.Repo, path, s.Branch, "", s.BaseRef)
+		err = localworkspace.EnsureGitWorktreeFromBranchWith(ctx, w.git.Run, s.Repo, path, s.Branch, "", s.BaseRef)
 	}
 	if err != nil {
 		return Worktree{}, fmt.Errorf("agentworktree: add worktree %s: %w", path, err)
