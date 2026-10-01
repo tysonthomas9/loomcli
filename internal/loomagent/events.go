@@ -111,26 +111,30 @@ func (s *Service) backfill(ctx context.Context, harness string) error {
 	return nil
 }
 
-// replay ingests a's whole current native history.
+// replay ingests a's whole current native history, in order, once every
+// page has been read: a failed read saves and changes nothing.
 func (s *Service) replay(ctx context.Context, harness string, a loomstore.Agent) error {
 	sess := s.harnesses[harness].Session(loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: *a.HarnessSessionID})
+	var events []loomharness.Event
 	for after := ""; ; {
 		page, err := sess.Messages(ctx, after, 100)
 		if err != nil {
 			return err
 		}
-		for _, e := range page.Events {
-			if e.Type == loomharness.EventDelta {
-				continue // live only: a subscriber had it, or missed it with the gap
-			}
-			if _, err := s.ingest(ctx, harness, e); err != nil {
-				return err
-			}
-		}
+		events = append(events, page.Events...)
 		if after = page.Next; after == "" {
-			return nil
+			break
 		}
 	}
+	for _, e := range events {
+		if e.Type == loomharness.EventDelta {
+			continue // live only: a subscriber had it, or missed it with the gap
+		}
+		if _, err := s.ingest(ctx, harness, e); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // harnessAttention raises Attention harness_unavailable on each live agent

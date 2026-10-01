@@ -143,11 +143,21 @@ func (s *Service) syncWaiting(ctx context.Context, a loomstore.Agent) error {
 	return err
 }
 
-// endTurnAsks saves ask.lost for each ask of a's ended turn still open: a
-// turn that ended cannot take its answer.
+// endTurnAsks saves ask.lost for each ask of a's ended turn still open, in
+// its table or a replay's staged state: a turn that ended cannot take its
+// answer.
 func (s *Service) endTurnAsks(ctx context.Context, a loomstore.Agent, turnID string) error {
 	ref := loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: deref(a.HarnessSessionID)}
-	for _, ask := range s.openAsks(a.AgentID) {
+	asks := s.openAsks(a.AgentID)
+	s.mu.Lock()
+	for id, ask := range s.rebuilding[a.AgentID] {
+		if ask != nil && ask.TurnID == turnID {
+			s.rebuilding[a.AgentID][id] = nil
+			asks = append(asks, *ask)
+		}
+	}
+	s.mu.Unlock()
+	for _, ask := range asks {
 		if ask.TurnID != turnID {
 			continue
 		}
