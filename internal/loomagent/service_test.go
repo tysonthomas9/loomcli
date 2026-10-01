@@ -34,8 +34,6 @@ func svcAgent(id, mode, state string) loomstore.Agent {
 		CreateRequestID: "req-" + id, Repo: "/repo", Harness: "fake", State: state, Attempt: 1}
 }
 
-func sp(s string) *string { return &s }
-
 func (s *Service) get(t *testing.T, id string) loomstore.Agent {
 	t.Helper()
 	a, err := s.store.GetAgent(context.Background(), id)

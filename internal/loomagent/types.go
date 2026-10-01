@@ -31,11 +31,13 @@ const (
 )
 
 // Error is a loomagent error. Allowed lists the accepted values for
-// preset_invalid.
+// preset_invalid; Paths and Fingerprint describe unsaved_work.
 type Error struct {
-	Code    Code
-	Message string
-	Allowed []string
+	Code        Code
+	Message     string
+	Allowed     []string
+	Paths       []string
+	Fingerprint string
 }
 
 func (e *Error) Error() string {

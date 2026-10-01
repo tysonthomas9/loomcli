@@ -56,6 +56,11 @@ type ServiceConfig struct {
 	ResolveRepo     ResolveRepo
 	PrepareWorktree PrepareWorktree
 	Target          Target
+	// Interrupt stops a's running turn; nil when no harness is wired.
+	Interrupt func(ctx context.Context, a loomstore.Agent) error
+	// Purge removes exactly the native sessions a owns (2.1c's R29 hook); nil
+	// until 2.1c wires it. A failure leaves the Delete pending for Reconcile.
+	Purge func(ctx context.Context, a loomstore.Agent, owned []loomstore.NativeSession) error
 }
 
 // Service is the Agent API service: it owns agent state changes and their
@@ -68,6 +73,8 @@ type Service struct {
 	resolveRepo ResolveRepo
 	prepare     PrepareWorktree
 	target      Target
+	interrupt   func(context.Context, loomstore.Agent) error
+	purge       func(context.Context, loomstore.Agent, []loomstore.NativeSession) error
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
@@ -77,7 +84,7 @@ type Service struct {
 func New(cfg ServiceConfig) *Service {
 	s := &Service{Bus: NewBus(), store: cfg.Store, events: cfg.Events, workspace: cfg.Workspace,
 		resolveRepo: cfg.ResolveRepo, prepare: cfg.PrepareWorktree, target: cfg.Target,
-		locks: map[string]*sync.Mutex{}}
+		interrupt: cfg.Interrupt, purge: cfg.Purge, locks: map[string]*sync.Mutex{}}
 	if s.target == "" {
 		s.target = TargetLocal
 	}
