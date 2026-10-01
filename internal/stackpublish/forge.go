@@ -14,6 +14,7 @@ import "context"
 type PR struct {
 	Number         int
 	Head           string // head ref (branch) name
+	HeadSHA        string // head commit SHA
 	Base           string // base ref (branch) name
 	State          string // "open" | "closed"
 	Merged         bool

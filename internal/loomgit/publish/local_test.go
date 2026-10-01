@@ -615,7 +615,7 @@ func TestLandingReconcilePublishesTrunkDependent(t *testing.T) {
 		Dependents: func(context.Context, string, string) ([]landing.Dependent, error) {
 			return []landing.Dependent{{Task: "T", Repo: "repo"}}, nil
 		},
-		Restack: func(ctx context.Context, offer journal.RestackOffer) (int, error) {
+		Restack: func(ctx context.Context, offer journal.RestackOffer, _ landing.Forge) (int, error) {
 			result, err := PublishLocal(ctx, offer.Workspace, "L", offer.Change)
 			return result.Revision.Number, err
 		},

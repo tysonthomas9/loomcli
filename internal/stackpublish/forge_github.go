@@ -130,6 +130,7 @@ type ghPull struct {
 	MergeCommitSHA string  `json:"merge_commit_sha"`
 	Head           struct {
 		Ref string `json:"ref"`
+		SHA string `json:"sha"`
 	} `json:"head"`
 	Base struct {
 		Ref string `json:"ref"`
@@ -138,7 +139,7 @@ type ghPull struct {
 
 func (p ghPull) toPR() PR {
 	return PR{
-		Number: p.Number, Head: p.Head.Ref, Base: p.Base.Ref,
+		Number: p.Number, Head: p.Head.Ref, HeadSHA: p.Head.SHA, Base: p.Base.Ref,
 		State: p.State, Merged: p.MergedAt != nil && *p.MergedAt != "", MergeCommitSHA: p.MergeCommitSHA,
 		Title: p.Title, Body: p.Body, URL: p.HTMLURL,
 	}

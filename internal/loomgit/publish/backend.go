@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
-	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/pull"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/stacklock"
@@ -24,13 +23,6 @@ type StackBackend interface {
 }
 
 type LoomStackBackend struct{ Store Store }
-
-func RestackOffer(ctx context.Context, offer journal.RestackOffer) (int, error) {
-	return pull.RestackOfferWithPublish(ctx, offer, func(ctx context.Context, workspace, lead, change string) error {
-		_, err := PublishLocal(ctx, workspace, lead, change)
-		return err
-	})
-}
 
 type GitHubStackBackend struct{ Store Store }
 
@@ -72,8 +64,8 @@ func (backend GitHubStackBackend) Publish(ctx context.Context, request StackRequ
 	return revisions, err
 }
 
-func (backend GitHubStackBackend) Restack(ctx context.Context, request StackRequest, requestID string) error {
-	return LoomStackBackend(backend).Restack(ctx, request, requestID)
+func (GitHubStackBackend) Restack(context.Context, StackRequest, string) error {
+	return loomgit.NewError(loomgit.AttentionRequired, "native restack must adopt provider heads through landing", nil)
 }
 
 func (GitHubStackBackend) MergeUpTo(context.Context, StackRequest, string) error {

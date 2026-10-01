@@ -53,6 +53,7 @@ type RestackRequest struct {
 	Workspace, Lead, Repo, RequestID, BaseSHA string
 	Order                                     []string
 	RemoveChange                              string
+	Heads                                     map[string]string
 }
 
 type PullResult struct {
@@ -78,45 +79,64 @@ func (s *Service) Restack(ctx context.Context, request RestackRequest) (PullResu
 	}
 	var result PullResult
 	err := s.repo.WithLock(ctx, func(ctx context.Context) error {
-		if err := s.reconcilePullPlans(ctx, request.Workspace, request.Lead, request.Repo); err != nil {
-			return err
-		}
-		old, err := git(ctx, s.runner, "rev-parse", "HEAD")
-		if err != nil {
-			return err
-		}
-		base, err := git(ctx, s.runner, "rev-parse", "--verify", request.BaseSHA+"^{commit}")
-		if err != nil {
-			return err
-		}
-		layers, err := s.appliedLog(ctx, request.Workspace, request.Lead, old)
-		if err != nil {
-			return err
-		}
-		layers, replayBase, err := withoutLayer(layers, request.RemoveChange, base)
-		if err != nil {
-			return err
-		}
-		layers, moved, err := orderLayers(layers, request.Order)
-		if err != nil {
-			return err
-		}
-		cleanup, err := s.prepareRestackScratch(ctx, request.RemoveChange, base)
-		if err != nil {
-			return err
-		}
-		defer cleanup()
-		pullRequest := PullRequest{Workspace: request.Workspace, Lead: request.Lead, Repo: request.Repo,
-			RequestID: request.RequestID, RemoveChange: request.RemoveChange}
-		rebuilt, cursor, paths, err := s.replayPullLayers(ctx, pullRequest, replayBase, layers)
-		result.Paths, result.HeadSHA = paths, cursor
-		if err != nil {
-			return err
-		}
-		setRestackOperations(rebuilt, request.RemoveChange, moved)
-		return s.installRestack(ctx, request, pullRequest, old, base, rebuilt, &result)
+		return s.restackLocked(ctx, request, &result)
 	})
 	return result, err
+}
+
+func (s *Service) restackLocked(ctx context.Context, request RestackRequest, result *PullResult) error {
+	if err := s.reconcilePullPlans(ctx, request.Workspace, request.Lead, request.Repo); err != nil {
+		return err
+	}
+	old, err := git(ctx, s.runner, "rev-parse", "HEAD")
+	if err != nil {
+		return err
+	}
+	base, err := git(ctx, s.runner, "rev-parse", "--verify", request.BaseSHA+"^{commit}")
+	if err != nil {
+		return err
+	}
+	layers, err := s.appliedLog(ctx, request.Workspace, request.Lead, old)
+	if err != nil {
+		return err
+	}
+	layers, replayBase, err := withoutLayer(layers, request.RemoveChange, base)
+	if err != nil {
+		return err
+	}
+	layers, moved, err := orderLayers(layers, request.Order)
+	if err != nil {
+		return err
+	}
+	pullRequest := PullRequest{Workspace: request.Workspace, Lead: request.Lead, Repo: request.Repo,
+		RequestID: request.RequestID, RemoveChange: request.RemoveChange}
+	rebuilt, cleanup, err := s.buildRestack(ctx, request, pullRequest, replayBase, base, layers, result)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	setRestackOperations(rebuilt, request.RemoveChange, moved)
+	return s.installRestack(ctx, request, pullRequest, old, base, rebuilt, result)
+}
+
+func (s *Service) buildRestack(ctx context.Context, request RestackRequest, pullRequest PullRequest,
+	replayBase, base string, layers []loomgit.AppliedLayer, result *PullResult) ([]pulledLayer, func(), error) {
+	if request.Heads != nil {
+		rebuilt, cursor, err := s.adoptRestackLayers(ctx, pullRequest, replayBase, layers, request.Heads)
+		result.HeadSHA = cursor
+		return rebuilt, func() {}, err
+	}
+	cleanup, err := s.prepareRestackScratch(ctx, request.RemoveChange, base)
+	if err != nil {
+		return nil, nil, err
+	}
+	rebuilt, cursor, paths, err := s.replayPullLayers(ctx, pullRequest, replayBase, layers)
+	result.Paths, result.HeadSHA = paths, cursor
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	return rebuilt, cleanup, nil
 }
 
 func withoutLayer(layers []loomgit.AppliedLayer, change, base string) ([]loomgit.AppliedLayer, string, error) {

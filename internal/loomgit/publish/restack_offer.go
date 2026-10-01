@@ -28,13 +28,16 @@ func RestackOffer(ctx context.Context, offer journal.RestackOffer, forge landing
 		return 0, err
 	}
 	if !found || publication.StackID == "" {
-		return pull.RestackOffer(ctx, offer)
+		return pull.RestackOfferWithPublish(ctx, offer, func(ctx context.Context, workspace, lead, change string) error {
+			_, err := PublishLocal(ctx, workspace, lead, change)
+			return err
+		})
 	}
 	if publication.Phase != "done" || publication.Repo == "" {
 		return 0, loomgit.NewError(loomgit.AttentionRequired, "stack publication is incomplete", nil)
 	}
 	backend, err := store.StackBackend(ctx, offer.Workspace, publication.StackID)
-	if err != nil || backend != "loom" {
+	if err != nil || (backend != "loom" && backend != "native") {
 		return 0, loomgit.NewError(loomgit.AttentionRequired, "recorded stack backend cannot restack this offer", err)
 	}
 	publisher, ok := forge.(Forge)
@@ -43,11 +46,14 @@ func RestackOffer(ctx context.Context, offer journal.RestackOffer, forge landing
 	}
 	var revision int
 	err = stacklock.With(ctx, offer.Workspace, publication.StackID, func(lockedCtx context.Context) error {
+		if backend == "native" {
+			return adoptNativeRestack(lockedCtx, store, offer, publication, forge, &revision)
+		}
 		var paths []string
 		var restackErr error
 		revision, paths, restackErr = pull.RestackOfferWithPaths(lockedCtx, offer)
 		if restackErr != nil {
-			return recordRestackError(lockedCtx, store, offer, publication.StackID, paths, restackErr)
+			return recordRestackError(lockedCtx, store, offer, publication.StackID, paths, fmt.Errorf("restack published offer: %w", restackErr))
 		}
 		if err := store.ClearStackAttention(lockedCtx, offer.Workspace, publication.StackID); err != nil {
 			return err

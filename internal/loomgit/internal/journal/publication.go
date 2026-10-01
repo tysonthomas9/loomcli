@@ -166,6 +166,33 @@ func (s *SQLite) ClearStackAttention(ctx context.Context, workspace, stackID str
 	return err
 }
 
+func (s *SQLite) AdoptStackPublications(ctx context.Context, publications []Publication, heads map[string]string) error {
+	if len(publications) == 0 || len(publications) != len(heads) {
+		return errors.New("native publication heads must cover the stack")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, publication := range publications {
+		head := heads[publication.Change]
+		if head == "" {
+			return errors.New("native publication head is missing")
+		}
+		result, err := tx.ExecContext(ctx, `UPDATE change_publications SET head_sha=?,trunk=?
+			WHERE workspace=? AND change_id=? AND head_sha=? AND stack_id=? AND phase='done'`,
+			head, publication.Trunk, publication.Workspace, publication.Change, publication.Head, publication.StackID)
+		if err != nil {
+			return err
+		}
+		if updated, err := result.RowsAffected(); err != nil || updated != 1 {
+			return errors.Join(err, ErrStale)
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *SQLite) Publication(ctx context.Context, workspace, change string) (Publication, bool, error) {
 	var p Publication
 	err := s.db.QueryRowContext(ctx, `SELECT workspace,change_id,repo,branch,trunk,slug,head_sha,feature_flag,phase,pr_number,pr_url,stack_id,prior_sha,drift_sha
